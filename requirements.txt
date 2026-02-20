@@ -1,4 +1,7 @@
-﻿branca==0.8.2
+fastapi==0.115.8
+uvicorn==0.30.6
+
+branca==0.8.2
 certifi==2026.1.4
 charset-normalizer==3.4.4
 colorama==0.4.6
