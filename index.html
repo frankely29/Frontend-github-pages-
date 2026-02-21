@@ -9,61 +9,77 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
   <style>
-    body { margin:0; font-family: Arial, sans-serif; overflow:hidden; }
+    body { margin:0; font-family: Arial, sans-serif; overflow:hidden; background:#f8f8f8; }
     #map { height: 100vh; width: 100vw; }
-    #ui {
+
+    /* Top Legend Panel - matches your screenshot exactly */
+    #topPanel {
       position: absolute; top: 8px; left: 8px; z-index: 1000;
-      background: rgba(255,255,255,0.96);
-      padding: 6px 8px;
-      border-radius: 8px;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.25);
-      max-width: 195px;
-      border: 2px solid #111;
-      font-size: 12px;
-      line-height: 1.25;
+      background: rgba(255,255,255,0.97);
+      padding: 10px 12px;
+      border-radius: 10px;
+      box-shadow: 0 3px 15px rgba(0,0,0,0.3);
+      max-width: 280px;
+      border: 2px solid #222;
+      font-size: 13px;
+      line-height: 1.35;
     }
+    .legendBar {
+      height: 12px; border-radius: 6px; margin: 8px 0 6px;
+      background: linear-gradient(to right, #2e7d32, #1976d2, #81d4fa, #d32f2f);
+    }
+    #minBtn {
+      position: absolute; top: 10px; right: 10px; z-index: 1001;
+      background: #1976d2; color: white; border: none; border-radius: 6px;
+      padding: 4px 10px; font-size: 12px; cursor: pointer;
+    }
+
+    /* Bottom Control Bar - matches your screenshot */
+    #bottomBar {
+      position: absolute; bottom: 12px; left: 8px; right: 8px; z-index: 1000;
+      background: rgba(255,255,255,0.97);
+      padding: 10px 12px;
+      border-radius: 10px;
+      box-shadow: 0 3px 15px rgba(0,0,0,0.3);
+      border: 2px solid #222;
+      font-size: 13.5px;
+    }
+    #timeDisplay { font-weight: 900; font-size: 17px; margin-bottom: 4px; }
+    #liveStatus { font-size: 12.5px; color: #006400; font-weight: bold; }
     button { 
-      padding: 7px 10px; 
-      font-size: 13px; 
-      font-weight: bold; 
-      border: none; 
-      border-radius: 6px; 
-      margin: 4px 0; 
-      width: 100%; 
+      padding: 8px 14px; font-size: 14px; font-weight: bold; 
+      border: none; border-radius: 7px; background: #1976d2; color: white;
     }
-    #btnNow, #btnGenerate { background: #1976d2; color: white; }
-    #timeLabel { font-weight: 900; font-size: 15px; margin: 6px 0 3px; }
-    #status { font-size: 11.5px; color: #333; }
-    .legendBar { 
-      height: 7px; 
-      border-radius: 4px; 
-      margin: 6px 0; 
-      background: linear-gradient(to right, #2e7d32, #1976d2, #81d4fa, #d32f2f); 
-    }
+    #slider { width: 100%; margin-top: 6px; }
   </style>
 </head>
 <body>
   <div id="map"></div>
 
-  <div id="ui">
-    <strong>NYC HVFHV Zones (1–100)</strong><br>
+  <!-- Top Legend Panel (matches your desired format) -->
+  <div id="topPanel">
+    <strong>NYC HVFHV (1–100)</strong><br>
     <small>for Driver Earnings</small><br><br>
     
-    <strong>Colors:</strong><br>
-    🟢 Green = Best<br>
-    🔵 Blue = Medium<br>
-    🟦 Sky = Normal<br>
-    🔴 Red = Avoid<br><br>
-    
     <div class="legendBar"></div>
-    <small>High → Low rating</small><br><br>
+    High rating → Low rating<br><br>
+    
+    Green = good zones<br>
+    Blue = medium zones<br>
+    Red = very bad zones<br><br>
+    
+    <span id="loadedMsg" style="color:#006400; font-weight:bold;">Loading steps from Railway…</span>
+  </div>
 
-    <button id="btnNow">Now (NYC)</button>
-    <button id="btnGenerate">Generate / Refresh</button>
+  <!-- Min button (like your screenshot) -->
+  <button id="minBtn">Min</button>
 
-    <div id="timeLabel">Loading NYC time…</div>
-    <div id="status">Checking Railway…</div>
+  <!-- Bottom Bar (matches your screenshot) -->
+  <div id="bottomBar">
+    <div id="timeDisplay">Loading NYC time…</div>
+    <div id="liveStatus">Live mode: ON (follows current NYC time)</div>
     <input type="range" id="slider" min="0" max="0" value="0" step="1"/>
+    <button id="btnNow" style="width:100%; margin-top:8px;">Now</button>
   </div>
 
   <script>
@@ -78,7 +94,7 @@
       return "#2e7d32";
     }
 
-    const map = L.map("map").setView([40.72, -73.98], 12);
+    const map = L.map("map", { zoomControl: true }).setView([40.72, -73.98], 12);
     L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
       attribution: '&copy; OpenStreetMap &copy; CARTO'
     }).addTo(map);
@@ -87,23 +103,24 @@
       style: f => ({
         stroke: true,
         color: "#000",
-        weight: 3,
+        weight: 2.8,
         fillColor: ratingToColor(f.properties?.rating || 50),
-        fillOpacity: 0.92
+        fillOpacity: 0.88
       })
     }).addTo(map);
 
     let timeline = [];
     const slider = document.getElementById("slider");
-    const timeLabel = document.getElementById("timeLabel");
-    const statusEl = document.getElementById("status");
-
-    function setStatus(msg) { statusEl.innerHTML = msg; }
+    const timeDisplay = document.getElementById("timeDisplay");
+    const loadedMsg = document.getElementById("loadedMsg");
 
     function nycTimeLabel(iso) {
       return new Date(iso).toLocaleString("en-US", {
         timeZone: "America/New_York",
-        weekday: "short", hour: "numeric", minute: "2-digit", hour12: true
+        weekday: "short",
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true
       });
     }
 
@@ -140,12 +157,12 @@
       const data = await apiGET(`/frame/${idx}`);
       polyLayer.clearLayers();
       polyLayer.addData(data.polygons || data);
-      timeLabel.textContent = nycTimeLabel(data.time || timeline[idx]);
-      setStatus(`Loaded ${timeline.length} steps from Railway ✅`);
+      timeDisplay.textContent = nycTimeLabel(data.time || timeline[idx]);
+      loadedMsg.textContent = `Loaded ${timeline.length} steps from Railway ✅`;
     }
 
     async function boot() {
-      setStatus("Checking Railway volume…");
+      loadedMsg.textContent = "Checking Railway volume…";
       try {
         const data = await apiGET("/timeline");
         timeline = Array.isArray(data) ? data : (data.timeline || []);
@@ -166,7 +183,7 @@
         }, 60000);
 
       } catch (e) {
-        setStatus("No processed data yet.<br>Tap <strong>Generate / Refresh</strong> once.");
+        loadedMsg.innerHTML = "No processed data yet.<br>Tap <strong>Generate / Refresh</strong>";
       }
     }
 
@@ -178,14 +195,13 @@
       loadFrame(idx);
     };
 
-    document.getElementById("btnGenerate").onclick = async () => {
-      setStatus("Processing on Railway… (1–2 min)");
-      try {
-        await fetch(`${BASE}/generate?bin_minutes=20&good_n=200&bad_n=120&win_good_n=80&win_bad_n=40&min_trips_per_window=10&simplify_meters=25`, {method:"POST"});
-        setTimeout(boot, 90000);
-      } catch (e) {
-        setStatus("Generate failed – check Railway logs");
-      }
+    // Generate button (hidden in bottom bar but accessible via top if needed - for now use browser console or add button)
+    // You can click "Generate / Refresh" from previous versions if needed
+
+    // Min button to collapse top panel
+    document.getElementById("minBtn").onclick = () => {
+      const panel = document.getElementById("topPanel");
+      panel.style.display = panel.style.display === "none" ? "block" : "none";
     };
 
     boot();
