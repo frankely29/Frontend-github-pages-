@@ -15,32 +15,44 @@
     .panel {
       position: fixed; top: 12px; left: 12px; z-index: 9999;
       background: rgba(255,255,255,0.96);
-      padding: 12px 14px; border: 2px solid #111; border-radius: 12px;
-      font-family: Arial, sans-serif; font-size: 14px; max-width: 440px;
+      padding: 12px 12px; border: 2px solid #111; border-radius: 12px;
+      font-family: Arial, sans-serif; font-size: 14px; max-width: 430px;
       box-shadow: 0 2px 10px rgba(0,0,0,0.25);
     }
-    .row { display: flex; align-items: center; gap: 10px; }
+    .title { font-weight: 900; font-size: 16px; margin-bottom: 10px; }
+    .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
     .bar {
       height: 12px; width: 220px; border: 1px solid #333;
       background: linear-gradient(90deg, #e60000, #ffd700, #00b050);
       border-radius: 6px;
     }
+    .labels { display:flex; justify-content:space-between; width:160px; font-weight:700; color:#333; }
     .small { font-size: 12px; color: #444; line-height: 1.35; margin-top: 10px; }
-
-    .pillRow { display:flex; gap:10px; margin-top:10px; flex-wrap:wrap; }
     .pill {
-      display:flex; align-items:center; gap:8px;
-      background: rgba(255,255,255,0.92);
-      border: 1px solid rgba(0,0,0,0.25);
-      border-radius: 999px;
-      padding: 8px 10px;
-      font-weight: 700;
+      display:inline-flex; align-items:center; gap:10px;
+      padding: 8px 10px; border: 1px solid #bbb; border-radius: 999px;
+      background: rgba(255,255,255,0.95);
+      font-weight: 800;
     }
-    .pill .icon {
-      width:26px;height:26px;border-radius:13px;
-      display:flex;align-items:center;justify-content:center;
-      font-weight:900;
-      background:#fff;
+    .chk { color:#00b050; font-weight: 900; }
+    .xmk { color:#e60000; font-weight: 900; }
+    .dot { color:#7a2cff; font-weight: 900; }
+    .controlRow { display:flex; gap:10px; align-items:center; margin-top: 10px; flex-wrap: wrap; }
+    input[type="number"]{
+      width: 70px; padding: 6px 8px; border:1px solid #bbb; border-radius: 8px;
+      font-size: 14px;
+    }
+    button{
+      padding: 8px 10px; border: 2px solid #111; border-radius: 10px;
+      background: #fff; font-weight: 900;
+    }
+    .statusLine{
+      margin-top: 8px;
+      font-size: 12px;
+      color: #333;
+      background: rgba(0,0,0,0.05);
+      padding: 6px 8px;
+      border-radius: 10px;
     }
 
     .sliderWrap {
@@ -55,42 +67,52 @@
     .timeLabel { font-weight: 900; font-size: 18px; }
   </style>
 </head>
+
 <body>
   <div id="map"></div>
 
   <div class="panel">
-    <div style="font-weight:900; font-size:16px; margin-bottom:10px;">
-      NYC HVFHV Pickup Zones (1–100)
-    </div>
+    <div class="title">NYC HVFHV Pickup Zones (1–100)</div>
 
-    <div class="row" style="margin-bottom:10px;">
+    <div class="row" style="margin-bottom:8px;">
       <div class="bar"></div>
-      <div style="display:flex; justify-content:space-between; width:170px; font-weight:700;">
-        <span>Low</span><span>Mid</span><span>High</span>
-      </div>
+      <div class="labels"><span>Low</span><span>Mid</span><span>High</span></div>
     </div>
 
-    <div class="pillRow">
-      <div class="pill">
-        <div class="icon" style="border:2px solid #00b050; color:#00b050;">✔</div>
-        Very Good (≥ 90)
-      </div>
-      <div class="pill">
-        <div class="icon" style="border:2px solid #e60000; color:#e60000;">✖</div>
-        Very Low (≤ 10)
-      </div>
-      <div class="pill">
-        <div class="icon" style="border:2px solid #8000ff; color:#8000ff;">●</div>
-        Purple Pulse = intensity
-      </div>
+    <div class="small" style="margin-top:6px;">
+      <b>Polygon color = Rating</b> (red → yellow → green).<br>
+      <b>Icons = Extremes only</b> for this time window (so no conflicting signals).<br>
+      <span class="dot">●</span> Purple dot intensity = higher rating in that zone.
     </div>
 
-    <div class="small">
-      • Polygon color is the rating for the selected 20-minute window (Red → Yellow → Green).<br>
-      • Icons only show the extreme zones so the map doesn’t get messy.<br>
-      • Purple pulse is stronger where the zone is more active (visual aid; not a true within-zone heatmap).<br>
-      • Use the timeline slider below.
+    <div class="row" style="margin-top:10px; gap:10px;">
+      <span class="pill"><span class="chk">✓</span> Very Good (Top)</span>
+      <span class="pill"><span class="xmk">✖</span> Very Low (Bottom)</span>
     </div>
+
+    <div class="controlRow">
+      <label class="row" style="gap:8px;">
+        <input id="showIcons" type="checkbox" checked />
+        <span><b>Show icons</b></span>
+      </label>
+
+      <span>Top ✓</span>
+      <input id="topN" type="number" min="0" max="200" value="25" />
+
+      <span>Bottom ✖</span>
+      <input id="botN" type="number" min="0" max="200" value="25" />
+    </div>
+
+    <div class="controlRow">
+      <label class="row" style="gap:8px;">
+        <input id="showDots" type="checkbox" checked />
+        <span><b>Show purple dots</b></span>
+      </label>
+
+      <button id="generateBtn" type="button">Generate on Railway</button>
+    </div>
+
+    <div class="statusLine" id="statusLine">Loading…</div>
   </div>
 
   <div class="sliderWrap">
