@@ -1,7 +1,7 @@
 // =======================
 // TLC Hotspot Map - app.js (NO ICONS)
 // - Loads data from Railway /hotspots (with /download fallback)
-// - Colors polygons by wait time (Green→Yellow→Gray→Red)
+// - Colors polygons by wait time (Green→Yellow→Red)
 // - Clear error messages if anything fails
 // - Slider throttled for iPhone
 // =======================
@@ -22,11 +22,10 @@ function formatTimeLabel(iso){
 // Wait-time color scale:
 // 1-10 minutes: green
 // 10-20 minutes: yellow
-// 20-30 minutes: gray
-// 30+ minutes: red
+// 20+ minutes: red
 function waitTimeToColor(waitMinutes){
   const w = Number(waitMinutes);
-  if (!Number.isFinite(w)) return { fill:"#8f8f8f", op:0.45 };
+  if (!Number.isFinite(w)) return { fill:"#ffcc00", op:0.5 };
 
   if (w < 10){
     return { fill:"#00d66b", op:0.72 };
@@ -34,10 +33,6 @@ function waitTimeToColor(waitMinutes){
 
   if (w < 20){
     return { fill:"#ffcc00", op:0.66 };
-  }
-
-  if (w < 30){
-    return { fill:"#6f6f6f", op:0.58 };
   }
 
   return { fill:"#ff2a2a", op:0.66 };
