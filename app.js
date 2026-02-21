@@ -1,79 +1,43 @@
 // =======================
-// TLC Hotspot Map - app.js
-// FIXES:
-// 1) Always colors polygons from rating (1–100) — ignores JSON color styles
-// 2) No checkmarks / X markers (removed)
-// 3) NYC time labels
-// 4) Phone friendly + throttled slider
-// 5) Reads data from Railway /download
+// TLC Hotspot Map - app.js (Stable Phone Version)
+// - Loads from Railway: /timeline + /frame/{idx}
+// - Avoids 113MB download on phone
+// - NO checkmarks/icons
+// - Color rules:
+//   Green = best
+//   Blue = medium
+//   Sky = normal
+//   Red = avoid
 // =======================
 
-function clamp01(x){ return Math.max(0, Math.min(1, x)); }
+function clamp(n, a, b){ return Math.max(a, Math.min(b, n)); }
 
-function fmtNum(x, nd=0){
-  if (x === null || x === undefined || Number.isNaN(x)) return "n/a";
-  return Number(x).toFixed(nd);
-}
-
-// Force NYC timezone
+// Force NYC timezone labels
 function formatTimeLabel(iso){
   const d = new Date(iso);
   return d.toLocaleString("en-US", {
     timeZone: "America/New_York",
-    weekday:"short",
-    hour:"numeric",
-    minute:"2-digit"
+    weekday: "short",
+    hour: "numeric",
+    minute: "2-digit"
   });
 }
 
-// ---- Rating extraction (robust across versions) ----
-function getRatingFromFeature(f){
-  const p = (f && f.properties) ? f.properties : {};
-  // try common keys
-  const candidates = [
-    p.rating, p.rating_1_100, p.rating_overall_1_100,
-    p.r, p.score, p.score01
-  ];
-
-  for (const v of candidates){
-    if (v === null || v === undefined) continue;
-    const n = Number(v);
-    if (!Number.isFinite(n)) continue;
-
-    // score01 -> convert to 1..100
-    if (n >= 0 && n <= 1) return Math.round(1 + 99 * n);
-
-    // already rating
-    if (n >= 1 && n <= 1000) return Math.round(n);
-  }
-
-  // if we truly have nothing, return 1 (avoid crashing)
-  return 1;
+// Your 4-bucket color rules (by rating 1–100)
+function ratingToBucketColor(r){
+  const x = clamp(Number(r || 0), 1, 100);
+  // tweak thresholds if you want:
+  // 1-25  = red (avoid)
+  // 26-50 = sky (normal)
+  // 51-75 = blue (medium)
+  // 76-100= green (best)
+  if (x <= 25) return { fill:"#d61f1f", stroke:"#a31212" };      // red
+  if (x <= 50) return { fill:"#75c7ff", stroke:"#2f7fb0" };      // sky
+  if (x <= 75) return { fill:"#1d63ff", stroke:"#0f3aa0" };      // blue
+  return { fill:"#18b85a", stroke:"#0e7a3a" };                   // green
 }
 
-// ---- YOUR REQUIRED COLOR RULES ----
-// Green = best
-// Blue = medium
-// Sky blue = normal
-// Red = lowest (avoid)
-function ratingToColor(rating){
-  const r = Math.max(1, Math.min(100, Number(rating)));
-
-  // 1-25 red, 26-50 sky, 51-75 blue, 76-100 green
-  if (r <= 25) return "#d73027";     // red
-  if (r <= 50) return "#7ec8ff";     // sky blue
-  if (r <= 75) return "#1f78ff";     // blue
-  return "#2ecc71";                  // green
-}
-
-// More “detail”: we vary opacity by rating so greens look stronger than weak greens
-function ratingToOpacity(rating){
-  const r = Math.max(1, Math.min(100, Number(rating)));
-  // 0.20 .. 0.70
-  return 0.20 + (r / 100) * 0.50;
-}
-
-function showError(msg){
+function setError(msg){
   const el = document.getElementById("errorLine");
   el.style.display = "block";
   el.textContent = msg;
@@ -85,90 +49,145 @@ function clearError(){
   el.textContent = "";
 }
 
-const map = L.map('map', { zoomControl: true }).setView([40.72, -73.98], 12);
-L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-  attribution: '&copy; OpenStreetMap &copy; CARTO'
+const BASE = (window.RAILWAY_BASE_URL || "").replace(/\/+$/, "");
+if (!BASE) {
+  setError("Missing window.RAILWAY_BASE_URL in index.html");
+  throw new Error("Missing window.RAILWAY_BASE_URL");
+}
+
+// Map init
+const map = L.map("map", { zoomControl: true }).setView([40.72, -73.98], 12);
+L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
+  attribution: "&copy; OpenStreetMap &copy; CARTO"
 }).addTo(map);
 
-// Put polygons under everything (future-proof)
+// Pane so polygons always render cleanly
 map.createPane("polys");
 map.getPane("polys").style.zIndex = 400;
 
 const polyLayer = L.geoJSON(null, {
   pane: "polys",
   style: (feature) => {
-    const rating = getRatingFromFeature(feature);
-    const fillColor = ratingToColor(rating);
-    const fillOpacity = ratingToOpacity(rating);
+    const p = feature?.properties || {};
+    // Prefer rating if present, otherwise fall back to old fillColor if your data already has it
+    const rating = p.rating ?? p.rating_1_100 ?? p.score ?? null;
 
-    // outline slightly darker, constant thickness
-    return {
-      color: "#1b1b1b",
-      weight: 1,
-      fillColor,
-      fillOpacity
-    };
+    if (rating !== null && rating !== undefined) {
+      const c = ratingToBucketColor(rating);
+      return {
+        color: c.stroke,
+        weight: 2,
+        fillColor: c.fill,
+        fillOpacity: 0.45
+      };
+    }
+
+    // Fallback (in case your frame still has "style")
+    if (p.style && p.style.fillColor) {
+      return {
+        color: p.style.color || "#333",
+        weight: p.style.weight || 2,
+        fillColor: p.style.fillColor,
+        fillOpacity: (p.style.fillOpacity ?? 0.45)
+      };
+    }
+
+    return { color:"#333", weight:2, fillColor:"#cccccc", fillOpacity:0.25 };
   },
   onEachFeature: (feature, layer) => {
-    const rating = getRatingFromFeature(feature);
-    const p = feature.properties || {};
-    const zone = p.zone || p.Zone || p.name || p.LocationID || "Zone";
-    const borough = p.borough || p.Borough || "";
+    const p = feature?.properties || {};
+    // If builder gave popup HTML, keep it
+    if (p.popup) layer.bindPopup(p.popup, { maxWidth: 360 });
 
-    // If your JSON already includes popup HTML, use it.
-    // Otherwise create a simple popup.
-    if (p.popup){
-      layer.bindPopup(p.popup, { maxWidth: 360 });
-    } else {
-      const popup = `
-        <div style="font-family:Arial; font-size:13px;">
-          <div style="font-weight:900; font-size:14px;">${zone}</div>
-          <div style="color:#666; margin-bottom:4px;">${borough}</div>
-          <div><b>Rating:</b> ${fmtNum(rating,0)}/100</div>
-        </div>
-      `;
-      layer.bindPopup(popup, { maxWidth: 360 });
+    // Otherwise create a simple popup from rating
+    if (!p.popup) {
+      const rating = p.rating ?? p.rating_1_100 ?? p.score ?? "n/a";
+      layer.bindPopup(`<b>Rating:</b> ${rating}`, { maxWidth: 240 });
     }
   }
 }).addTo(map);
 
 let timeline = [];
-let dataByTime = new Map();
+let frameCache = new Map(); // small cache of recently used frames
 
-function rebuildAtIndex(idx){
-  const key = timeline[idx];
-  const bundle = dataByTime.get(key);
-  if (!bundle) return;
-
-  document.getElementById("timeLabel").textContent = formatTimeLabel(key);
-
-  polyLayer.clearLayers();
-  if (bundle.polygons) polyLayer.addData(bundle.polygons);
+async function fetchJson(url){
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) {
+    const text = await res.text().catch(()=> "");
+    throw new Error(`Load failed (${res.status}). ${text || ""}`.trim());
+  }
+  return res.json();
 }
 
-async function fetchHotspotsFromRailway(){
-  const base = (window.RAILWAY_BASE_URL || "").trim();
-  if (!base) throw new Error("Missing window.RAILWAY_BASE_URL in index.html");
+function setStatus(text){
+  document.getElementById("loadStatus").textContent = text;
+}
 
-  // Railway FastAPI endpoint: /download returns the latest generated hotspots_20min.json
-  const url = `${base.replace(/\/+$/,"")}/download`;
+function clearLayers(){
+  polyLayer.clearLayers();
+}
 
-  const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok){
-    // if /download missing, show a clearer message
-    throw new Error(`Failed to fetch hotspots (${res.status}). On Railway, run /generate then retry.`);
+function normalizePolygons(frame){
+  // Expected from your generator: frame.polygons is a GeoJSON FeatureCollection
+  // But if your frame uses different shape, handle gracefully.
+  if (!frame) return null;
+
+  if (frame.polygons && frame.polygons.type === "FeatureCollection") return frame.polygons;
+  if (frame.polygons && frame.polygons.features) return { type:"FeatureCollection", features: frame.polygons.features };
+
+  // Sometimes the whole frame is a FeatureCollection already
+  if (frame.type === "FeatureCollection" && frame.features) return frame;
+
+  return null;
+}
+
+async function loadFrame(idx){
+  // small cache to reduce repeated network fetch while sliding
+  if (frameCache.has(idx)) return frameCache.get(idx);
+
+  const fr = await fetchJson(`${BASE}/frame/${idx}`);
+  frameCache.set(idx, fr);
+
+  // Keep cache small (phone memory)
+  if (frameCache.size > 8) {
+    const firstKey = frameCache.keys().next().value;
+    frameCache.delete(firstKey);
   }
-  return await res.json();
+
+  return fr;
+}
+
+function rebuildAtIndex(idx){
+  clearLayers();
+
+  const t = timeline[idx];
+  document.getElementById("timeLabel").textContent = t ? formatTimeLabel(t) : "—";
+
+  // Load frame async, show status
+  setStatus("Loading…");
+  clearError();
+
+  loadFrame(idx).then(frame => {
+    const polys = normalizePolygons(frame);
+    if (!polys) {
+      setStatus("Loaded (no polygons)");
+      return;
+    }
+    polyLayer.addData(polys);
+    setStatus("Loaded ✓");
+  }).catch(err => {
+    console.error(err);
+    setStatus("Load failed ✖");
+    setError(err.message);
+  });
 }
 
 async function main(){
+  setStatus("Loading timeline…");
   clearError();
-  document.getElementById("loadStatus").textContent = "Loading from Railway…";
 
-  const payload = await fetchHotspotsFromRailway();
-
-  timeline = payload.timeline || [];
-  dataByTime = new Map((payload.frames || []).map(f => [f.time, f]));
+  const meta = await fetchJson(`${BASE}/timeline`);
+  timeline = meta.timeline || [];
 
   const slider = document.getElementById("slider");
   slider.min = 0;
@@ -176,7 +195,7 @@ async function main(){
   slider.step = 1;
   slider.value = 0;
 
-  // Throttle slider on iPhone
+  // Throttle slider rendering for iPhone
   let pending = null;
   slider.addEventListener("input", () => {
     pending = Number(slider.value);
@@ -187,19 +206,18 @@ async function main(){
     });
   });
 
-  if (timeline.length > 0){
-    rebuildAtIndex(0);
-    document.getElementById("loadStatus").textContent =
-      `Loaded ${timeline.length} time steps from Railway ✅`;
-  } else {
+  if (timeline.length === 0) {
+    setStatus("No timeline (run /generate)");
     document.getElementById("timeLabel").textContent = "No data";
-    document.getElementById("loadStatus").textContent = "Loaded, but timeline is empty.";
+    return;
   }
+
+  // Load first frame
+  rebuildAtIndex(0);
 }
 
 main().catch(err => {
   console.error(err);
-  showError("ERROR: " + err.message);
-  document.getElementById("loadStatus").textContent = "Load failed ❌";
-  document.getElementById("timeLabel").textContent = "Load failed";
+  setStatus("Load failed ✖");
+  setError(err.message);
 });
