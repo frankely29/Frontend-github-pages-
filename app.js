@@ -8,17 +8,37 @@
 
 function clamp(x, a, b){ return Math.max(a, Math.min(b, x)); }
 
+function getNycMinutesOfDay(dateLike){
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    hour12: false,
+    hour: "2-digit",
+    minute: "2-digit"
+  }).formatToParts(new Date(dateLike));
+
+  const hour = Number(parts.find(p => p.type === "hour")?.value ?? 0);
+  const minute = Number(parts.find(p => p.type === "minute")?.value ?? 0);
+  return (hour * 60) + minute;
+}
+
+function minutesDistanceOnClock(a, b){
+  const day = 24 * 60;
+  const diff = Math.abs(a - b);
+  return Math.min(diff, day - diff);
+}
+
 function getTimelineIndexNearestNow(){
   if (!timeline.length) return 0;
 
-  const nowMs = Date.now();
+  const nowNycMinutes = getNycMinutesOfDay(Date.now());
   let bestIdx = 0;
   let bestDiff = Number.POSITIVE_INFINITY;
 
   for (let i = 0; i < timeline.length; i += 1){
-    const t = new Date(timeline[i]).getTime();
-    if (!Number.isFinite(t)) continue;
-    const diff = Math.abs(t - nowMs);
+    const t = new Date(timeline[i]);
+    if (!Number.isFinite(t.getTime())) continue;
+    const frameNycMinutes = getNycMinutesOfDay(t);
+    const diff = minutesDistanceOnClock(frameNycMinutes, nowNycMinutes);
     if (diff < bestDiff){
       bestDiff = diff;
       bestIdx = i;
