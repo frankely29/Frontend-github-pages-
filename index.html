@@ -12,162 +12,82 @@
     html, body { height: 100%; margin: 0; }
     #map { height: 100%; width: 100%; }
 
-    /* ===== ULTRA SMALL PANEL (much smaller) ===== */
-    .panel {
-      position: fixed;
-      top: 8px; left: 8px;
-      z-index: 9999;
-      background: rgba(255,255,255,0.90);
-      padding: 6px 6px;
-      border: 2px solid #111;
-      border-radius: 10px;
-      font-family: Arial, sans-serif;
-      font-size: 10px;
-      width: 205px;          /* hard cap so it stays small */
-      box-shadow: 0 2px 10px rgba(0,0,0,0.25);
+    /* Small, non-blocking panel */
+    #panel{
+      position: fixed; top: 10px; left: 10px; z-index: 9999;
+      background: rgba(255,255,255,0.92);
+      padding: 8px 10px;
+      border: 2px solid #111; border-radius: 10px;
+      font-family: Arial, sans-serif; font-size: 12px;
+      width: 220px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.22);
     }
-
-    .panelHeader {
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:6px;
-      font-weight:900;
-      font-size: 11px;
-      margin-bottom: 5px;
-      line-height: 1.05;
+    #panel.min .body { display:none; }
+    #panel .head { display:flex; justify-content:space-between; align-items:center; gap:10px; }
+    #panel .title { font-weight:900; font-size:13px; }
+    #togglePanel{
+      background:#fff; border:2px solid #111; border-radius:10px;
+      padding:4px 8px; font-weight:900;
     }
-
-    .btnMini {
-      border: 2px solid #111;
-      background: #fff;
-      border-radius: 8px;
-      padding: 2px 6px;
-      font-weight: 900;
-      font-size: 10px;
-    }
-
-    .bar {
-      height: 8px;
-      width: 118px;
+    .bar{
+      height: 10px; width: 100%;
       border: 1px solid #333;
+      background: linear-gradient(90deg, #bdbdbd, #e60000, #ffd700, #00b050);
       border-radius: 6px;
-      background: linear-gradient(90deg, #e60000, #ffd700, #00b050);
-      margin-bottom: 6px;
+      margin: 6px 0;
     }
+    .legendRow{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+    .chip{ display:inline-flex; gap:6px; align-items:center; padding:4px 6px; border:1px solid #999; border-radius:10px; background:#fff; }
+    .dot{ width:10px; height:10px; border-radius:5px; display:inline-block; }
+    .small { font-size: 11px; color:#333; line-height:1.25; margin-top:6px; }
+    #statusLine{ margin-top:6px; font-size:11px; color:#0b7a3a; font-weight:900; }
 
-    .row { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
-
-    .pill {
-      display:inline-flex;
-      align-items:center;
-      gap:5px;
-      padding: 4px 6px;
-      border: 1px solid #bbb;
-      border-radius: 999px;
-      background: rgba(255,255,255,0.95);
-      font-weight: 900;
-      font-size: 10px;
-    }
-
-    .small {
-      font-size: 9px;
-      color: #222;
-      line-height: 1.15;
-      margin-top: 6px;
-    }
-
-    .controlRow {
-      display:flex;
-      gap:6px;
-      align-items:center;
-      margin-top: 6px;
-      flex-wrap: wrap;
-    }
-
-    input[type="number"]{
-      width: 46px;
-      padding: 4px 5px;
-      border:1px solid #bbb;
-      border-radius: 8px;
-      font-size: 11px;
-    }
-
-    button{
-      padding: 5px 7px;
-      border: 2px solid #111;
-      border-radius: 10px;
-      background: #fff;
-      font-weight: 900;
-      font-size: 10px;
-    }
-
-    .statusLine{
-      margin-top: 6px;
-      font-size: 9px;
-      color: #111;
-      background: rgba(0,0,0,0.06);
-      padding: 4px 5px;
-      border-radius: 10px;
-    }
-
-    .collapsed .panelBody { display:none; }
-
-    /* ===== BOTTOM SLIDER ===== */
+    /* Slider */
     .sliderWrap {
-      position: fixed; left: 10px; right: 10px; bottom: 12px; z-index: 9999;
+      position: fixed; left: 10px; right: 10px; bottom: 14px; z-index: 9999;
       background: rgba(255,255,255,0.94);
-      border: 2px solid #111; border-radius: 12px;
+      border: 2px solid #111; border-radius: 10px;
       padding: 10px 12px;
       font-family: Arial, sans-serif;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.25);
+      box-shadow: 0 2px 10px rgba(0,0,0,0.22);
     }
     input[type="range"] { width: 100%; }
     .timeLabel { font-weight: 900; font-size: 18px; }
   </style>
+
+  <script>
+    // ✅ SET THIS ONCE (your Railway domain)
+    // Example:
+    // window.RAILWAY_BASE_URL = "https://web-production-78f67.up.railway.app";
+    window.RAILWAY_BASE_URL = "https://web-production-78f67.up.railway.app";
+  </script>
 </head>
 
 <body>
   <div id="map"></div>
 
-  <div class="panel" id="panel">
-    <div class="panelHeader">
-      <div>NYC HVFHV<br>Zones (1–100)</div>
-      <button class="btnMini" id="miniBtn" type="button">Min</button>
+  <div id="panel" class="">
+    <div class="head">
+      <div class="title">NYC HVFHV (1–100)</div>
+      <button id="togglePanel">Min</button>
     </div>
 
-    <div class="panelBody">
+    <div class="body">
       <div class="bar"></div>
 
-      <div class="row" style="margin-bottom:6px;">
-        <span class="pill"><span style="color:#00b050;">✓</span> Top</span>
-        <span class="pill"><span style="color:#e60000;">✖</span> Bottom</span>
+      <div class="legendRow">
+        <span class="chip"><span class="dot" style="background:#bdbdbd;"></span> Gray = Very Low</span>
+        <span class="chip"><span class="dot" style="background:#e60000;"></span> Red = Avoid</span>
+        <span class="chip"><span class="dot" style="background:#ffd700;"></span> Yellow = Medium</span>
+        <span class="chip"><span class="dot" style="background:#00b050;"></span> Green = Good</span>
       </div>
 
       <div class="small">
-        Green shades = stronger “good”.<br>
-        Red = bad. Gray = neutral.
+        ✓ and × show only “extremes” so you don’t get mixed signals.<br>
+        Use the 20-minute slider below.
       </div>
 
-      <div class="controlRow">
-        <label class="row" style="gap:5px;">
-          <input id="showIcons" type="checkbox" checked />
-          <b>Icons</b>
-        </label>
-      </div>
-
-      <div class="controlRow">
-        <span>Top</span>
-        <input id="topN" type="number" min="0" max="200" value="25" />
-        <span>Bot</span>
-        <input id="botN" type="number" min="0" max="200" value="25" />
-      </div>
-
-      <div class="controlRow">
-        <button id="generateBtn" type="button">Gen</button>
-      </div>
-
-      <div class="statusLine" id="statusLine">Loading…</div>
+      <div id="statusLine">Loading…</div>
     </div>
   </div>
 
