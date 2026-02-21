@@ -1,31 +1,13 @@
 // =======================
 // TLC Hotspot Map - app.js
-// RULES (strict):
-// - Read data from Railway only
-// - Color by rating (1–100) for selected 20-minute window:
-//   Green = Best, Blue = Medium, Sky = Normal, Red = Avoid
-// - Slider uses NYC time and starts closest to current NYC time
-// - No checkmarks / X icons
-// - No heavy perimeter outlines
+// System #2 (Correct):
+// GitHub Pages loads data from Railway ONLY.
+// Colors are computed here from feature.properties.rating (1–100).
 // =======================
 
-function requireRailwayBaseUrl(){
-  const u = window.RAILWAY_BASE_URL;
-  if (!u || typeof u !== "string" || !u.startsWith("http")){
-    throw new Error('Missing window.RAILWAY_BASE_URL in index.html');
-  }
-  return u.replace(/\/+$/, "");
-}
+function clamp(x, a, b){ return Math.max(a, Math.min(b, x)); }
 
-function setStatus(ok, msg){
-  const el = document.getElementById("status");
-  el.textContent = msg;
-  el.className = "statusLine " + (ok ? "statusOk" : "statusBad");
-}
-
-function clamp(n, a, b){ return Math.max(a, Math.min(b, n)); }
-
-function formatNYC(iso){
+function nycLabelFromISO(iso){
   const d = new Date(iso);
   return d.toLocaleString("en-US", {
     timeZone: "America/New_York",
@@ -35,132 +17,141 @@ function formatNYC(iso){
   });
 }
 
-// Convert an ISO timestamp (which is in the "week template") into minutes since that template week start.
-// Your generator uses week_start = Monday 2025-01-06 00:00.
-const WEEK_START_ISO = "2025-01-06T00:00:00";
-const WEEK_START_MS = new Date(WEEK_START_ISO).getTime();
+// Strict mandatory color rules (DISCRETE buckets)
+// Green = Best, Blue = Medium, Sky = Normal, Red = Avoid
+function ratingToFill(rating){
+  const r = Number(rating);
+  if (!Number.isFinite(r)) return "#bdbdbd"; // fallback gray if missing
+  const x = clamp(r, 1, 100);
 
-function minutesSinceWeekStart(iso){
-  const ms = new Date(iso).getTime();
-  return Math.round((ms - WEEK_START_MS) / 60000);
+  // You can adjust these thresholds later, but keep 4 colors as requested.
+  if (x >= 76) return "#18a84a"; // Green
+  if (x >= 51) return "#1f57ff"; // Blue
+  if (x >= 26) return "#64c8ff"; // Sky
+  return "#e53935";              // Red
 }
 
-// Current NYC minutes since Monday 00:00 (0..10079)
-function currentNYCWeekMinute(){
-  const now = new Date();
-  // Get current NYC day/hour/minute using Intl parts (reliable)
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
-    weekday: "short",
-    hour: "numeric",
-    minute: "numeric",
-    hour12: false
-  }).formatToParts(now);
-
-  const p = Object.fromEntries(parts.map(x => [x.type, x.value]));
-  const wd = (p.weekday || "").toLowerCase(); // "mon"
-  const hour = Number(p.hour ?? 0);
-  const minute = Number(p.minute ?? 0);
-
-  const map = { mon:0, tue:1, wed:2, thu:3, fri:4, sat:5, sun:6 };
-  const dow = map[wd.slice(0,3)] ?? 0;
-
-  return dow * 1440 + hour * 60 + minute;
+function setError(msg){
+  const el = document.getElementById("errorLine");
+  el.textContent = msg || "";
 }
 
-// Circular distance on a week (10080 minutes)
-function circDist(a, b){
-  const W = 10080;
-  const d = Math.abs(a - b);
-  return Math.min(d, W - d);
-}
-
-// Strict 4-bucket color mapping from rating 1..100
-function ratingToBucketColor(rating){
-  const r = clamp(Number(rating || 1), 1, 100);
-
-  // Buckets (adjustable, but stable and simple):
-  //  1-25  = Red (Avoid)
-  // 26-50  = Sky (Normal)
-  // 51-75  = Blue (Medium)
-  // 76-100 = Green (Best)
-  if (r <= 25) return "#e53935";   // Red
-  if (r <= 50) return "#79c7ff";   // Sky
-  if (r <= 75) return "#1e5bff";   // Blue
-  return "#22c55e";                // Green
-}
-
-function styleFromFeature(feature){
-  const p = feature && feature.properties ? feature.properties : {};
-  const rating =
-    p.rating ?? p.rating_1_100 ?? p.rating1_100 ??
-    p.rating_overall_1_100 ?? p.r ?? null;
-
-  const fill = ratingToBucketColor(rating);
-  return {
-    stroke: false,          // remove perimeter outline (you asked)
-    weight: 0,
-    fillColor: fill,
-    fillOpacity: 0.55
-  };
-}
-
-// ---------- Leaflet init ----------
 const map = L.map("map", { zoomControl: true }).setView([40.72, -73.98], 12);
 
 L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
   attribution: "&copy; OpenStreetMap &copy; CARTO"
 }).addTo(map);
 
+// Keep polygons under any future markers (even though we removed icons)
+map.createPane("polys");
+map.getPane("polys").style.zIndex = 400;
+
 const polyLayer = L.geoJSON(null, {
-  style: styleFromFeature,
+  pane: "polys",
+  style: (feature) => {
+    const p = feature && feature.properties ? feature.properties : {};
+    const fill = ratingToFill(p.rating);
+
+    // No heavy outlines (you asked to remove perimeter outlines)
+    // Use a very light border only so zones still separable.
+    return {
+      color: "rgba(0,0,0,0.08)", // subtle border
+      weight: 1,
+      fillColor: fill,
+      fillOpacity: 0.55
+    };
+  },
   onEachFeature: (feature, layer) => {
     const p = feature && feature.properties ? feature.properties : {};
-    // If popup exists, keep it. If not, create a minimal one.
-    const rating = p.rating ?? p.rating_1_100 ?? p.rating_overall_1_100 ?? null;
+    const rating = (p.rating !== undefined) ? p.rating : "n/a";
+    const zone = p.zone || p.zone_name || p.name || "Zone";
+    const borough = p.borough || "";
 
-    if (p.popup){
-      layer.bindPopup(p.popup, { maxWidth: 360 });
-    } else {
-      const zone = p.zone ?? p.Zone ?? p.name ?? "Zone";
-      const borough = p.borough ?? p.Borough ?? "";
-      const html = `
-        <div style="font-family:Arial; font-size:13px;">
-          <div style="font-weight:900; font-size:14px;">${zone}</div>
-          ${borough ? `<div style="color:#666; margin-bottom:4px;">${borough}</div>` : ""}
-          <div><b>Rating:</b> ${rating ?? "n/a"} / 100</div>
-        </div>`;
-      layer.bindPopup(html, { maxWidth: 360 });
-    }
+    const popup = `
+      <div style="font-family:Arial; font-size:13px;">
+        <div style="font-weight:900; font-size:14px;">${zone}</div>
+        <div style="color:#666; margin-bottom:6px;">${borough}</div>
+        <div><b>Rating:</b> ${rating}/100</div>
+      </div>
+    `;
+    layer.bindPopup(popup, { maxWidth: 320 });
   }
 }).addTo(map);
 
-// ---------- Data state ----------
 let timeline = [];
-let frames = new Map(); // time -> frame
-let slider = document.getElementById("slider");
+let framesByTime = new Map();
 
 function rebuildAtIndex(idx){
-  const t = timeline[idx];
-  const frame = frames.get(t);
+  const key = timeline[idx];
+  const frame = framesByTime.get(key);
   if (!frame) return;
 
-  document.getElementById("timeLabel").textContent = formatNYC(t);
+  document.getElementById("timeLabel").textContent = nycLabelFromISO(key);
 
   polyLayer.clearLayers();
 
-  // frame.polygons should be a FeatureCollection, or {type,features}
-  if (frame.polygons){
-    polyLayer.addData(frame.polygons);
-  }
+  // Expect frame.polygons = GeoJSON FeatureCollection or array
+  if (frame.polygons) polyLayer.addData(frame.polygons);
 }
 
-// Throttled slider (smooth on iPhone)
-function attachSlider(){
+// Choose slider start based on closest NYC "now"
+function pickClosestIndexToNowNYC(){
+  if (!timeline.length) return 0;
+
+  const now = new Date();
+  const nowMs = now.getTime();
+
+  // timeline entries are ISO strings; we pick the closest absolute time
+  let bestIdx = 0;
+  let bestDiff = Infinity;
+
+  for (let i = 0; i < timeline.length; i++){
+    const tMs = new Date(timeline[i]).getTime();
+    const diff = Math.abs(tMs - nowMs);
+    if (diff < bestDiff){
+      bestDiff = diff;
+      bestIdx = i;
+    }
+  }
+  return bestIdx;
+}
+
+async function fetchRailwayJSON(){
+  const base = (window.RAILWAY_BASE_URL || "").replace(/\/+$/, "");
+  if (!base) throw new Error("Missing window.RAILWAY_BASE_URL in index.html");
+
+  // Primary: /download (your FastAPI endpoint)
+  const url = `${base}/download`;
+
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok){
+    // show server body for debugging (helps when you see 404/400)
+    let body = "";
+    try { body = await res.text(); } catch {}
+    throw new Error(`Railway fetch failed (${res.status}). ${body}`.slice(0, 300));
+  }
+  return await res.json();
+}
+
+async function main(){
+  setError("");
+
+  document.getElementById("tzLabel").textContent = "NYC time";
+
+  const payload = await fetchRailwayJSON();
+
+  timeline = payload.timeline || [];
+  framesByTime = new Map((payload.frames || []).map(f => [f.time, f]));
+
+  const slider = document.getElementById("slider");
   slider.min = 0;
   slider.max = Math.max(0, timeline.length - 1);
   slider.step = 1;
 
+  const startIdx = pickClosestIndexToNowNYC();
+  slider.value = String(startIdx);
+
+  // Smooth slider on iPhone
   let pending = null;
   slider.addEventListener("input", () => {
     pending = Number(slider.value);
@@ -170,124 +161,17 @@ function attachSlider(){
       if (pending !== null) rebuildAtIndex(pending);
     });
   });
+
+  if (timeline.length > 0){
+    rebuildAtIndex(startIdx);
+  } else {
+    document.getElementById("timeLabel").textContent = "No timeline in Railway data";
+    setError("ERROR: No timeline returned. Run /generate on Railway first.");
+  }
 }
 
-// Pick initial slider index closest to current NYC time (week wrap safe)
-function chooseInitialIndex(){
-  if (!timeline.length) return 0;
-
-  const target = currentNYCWeekMinute();
-
-  let bestIdx = 0;
-  let bestD = Infinity;
-
-  for (let i = 0; i < timeline.length; i++){
-    const t = timeline[i];
-    const m = minutesSinceWeekStart(t);
-    const d = circDist(m, target);
-    if (d < bestD){
-      bestD = d;
-      bestIdx = i;
-    }
-  }
-  return bestIdx;
-}
-
-// ---------- Railway fetch ----------
-async function fetchTimeline(){
-  const base = requireRailwayBaseUrl();
-
-  // Try multiple endpoints (because you had different versions earlier)
-  const candidates = [
-    base + "/download",     // current main.py
-  ];
-
-  let lastErr = null;
-
-  for (const url of candidates){
-    try{
-      const res = await fetch(url, { cache: "no-store" });
-      if (!res.ok){
-        // Try to read json error
-        let detail = "";
-        try{
-          const j = await res.json();
-          detail = JSON.stringify(j);
-        } catch {}
-        throw new Error(`HTTP ${res.status} ${detail}`.trim());
-      }
-      return await res.json();
-    } catch (e){
-      lastErr = e;
-    }
-  }
-
-  throw lastErr || new Error("Failed to fetch timeline from Railway");
-}
-
-async function callGenerate(){
-  const base = requireRailwayBaseUrl();
-  // Keep params stable (your working ones)
-  const url = base + "/generate?bin_minutes=20&good_n=200&bad_n=120&win_good_n=80&win_bad_n=40&min_trips_per_window=10&simplify_meters=25";
-  const res = await fetch(url, { method: "POST" });
-  let txt = "";
-  try { txt = JSON.stringify(await res.json()); } catch {}
-  if (!res.ok) throw new Error(`Generate failed: HTTP ${res.status} ${txt}`);
-  return true;
-}
-
-async function loadAll(){
-  setStatus(true, "Loading from Railway…");
-
-  let payload;
-  try{
-    payload = await fetchTimeline();
-  } catch (e){
-    setStatus(false, "Load failed ✖");
-    document.getElementById("timeLabel").textContent = "Load failed";
-    throw e;
-  }
-
-  // Expected payload: { timeline: [...], frames: [{time, polygons, markers?...}, ...] }
-  timeline = Array.isArray(payload.timeline) ? payload.timeline : [];
-  frames = new Map((payload.frames || []).map(f => [f.time, f]));
-
-  if (!timeline.length){
-    setStatus(false, "No timeline (run Generate) ✖");
-    document.getElementById("timeLabel").textContent = "No data";
-    return;
-  }
-
-  attachSlider();
-
-  const initIdx = chooseInitialIndex();
-  slider.value = String(initIdx);
-  rebuildAtIndex(initIdx);
-
-  setStatus(true, `Loaded ${timeline.length} steps ✓`);
-}
-
-// Buttons
-document.getElementById("btnReload").addEventListener("click", () => {
-  loadAll().catch(err => console.error(err));
-});
-
-document.getElementById("btnGenerate").addEventListener("click", async () => {
-  try{
-    setStatus(true, "Generating on Railway…");
-    await callGenerate();
-    await loadAll();
-  } catch (e){
-    console.error(e);
-    setStatus(false, "Generate failed ✖");
-    document.getElementById("timeLabel").textContent = "Generate failed";
-  }
-});
-
-// Boot
-loadAll().catch(err => {
+main().catch(err => {
   console.error(err);
-  const msg = (err && err.message) ? err.message : String(err);
-  setStatus(false, "Load failed ✖");
-  document.getElementById("timeLabel").textContent = "ERROR: " + msg;
+  document.getElementById("timeLabel").textContent = "Load failed";
+  setError("ERROR: " + (err && err.message ? err.message : String(err)));
 });
