@@ -1,395 +1,122 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html>
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>NYC FHV Earnings Map</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>NYC TLC Hotspot Map</title>
+
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <script defer src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
   <style>
-    :root {
-      --green: #2e7d32;
-      --blue: #1976d2;
-      --sky: #81d4fa;
-      --red: #d32f2f;
-    }
-    html, body { margin: 0; height: 100%; font-family: Arial, sans-serif; }
-    body { overflow: hidden; background: #f5f5f5; }
+    html, body { height: 100%; margin: 0; }
     #map { height: 100%; width: 100%; }
 
+    /* Small, non-blocking top-left legend */
     .panel {
-      position: absolute;
-      z-index: 1000;
-      background: rgba(255, 255, 255, 0.96);
-      border: 2px solid #1e1e1e;
-      border-radius: 14px;
-      box-shadow: 0 3px 14px rgba(0, 0, 0, 0.25);
-      color: #111;
-    }
-
-    #topPanel {
-      top: calc(8px + env(safe-area-inset-top));
-      left: 8px;
-      width: min(76vw, 280px);
-      max-height: min(34vh, 280px);
-      overflow: auto;
+      position: fixed; top: 10px; left: 10px; z-index: 9999;
+      background: rgba(255,255,255,0.92);
       padding: 8px 10px;
-      line-height: 1.22;
+      border: 2px solid #111; border-radius: 10px;
+      font-family: Arial, sans-serif; font-size: 12px;
+      max-width: 280px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.18);
+      backdrop-filter: blur(4px);
+    }
+    .panel h3 {
+      margin: 0 0 6px 0;
       font-size: 13px;
+      font-weight: 900;
     }
-
-    #legendGradient {
-      height: 14px;
-      border-radius: 999px;
-      margin: 10px 0 8px;
-      background: linear-gradient(to right, var(--green), var(--blue), var(--sky), var(--red));
-      border: 1px solid rgba(0,0,0,0.25);
+    .bar {
+      height: 10px; width: 100%;
+      border: 1px solid #333;
+      border-radius: 6px;
+      background: linear-gradient(90deg, #e53935 0%, #79c7ff 33%, #1e5bff 66%, #22c55e 100%);
+      margin: 6px 0 6px 0;
     }
-
-    #btnMin {
-      position: absolute;
-      top: 12px;
-      right: 12px;
-      border: 2px solid #1e1e1e;
-      background: #f0f6ff;
-      color: #1976d2;
-      border-radius: 999px;
-      font-weight: 700;
-      font-size: 16px;
-      padding: 6px 14px;
+    .legendRow {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px 10px;
+      margin-top: 4px;
     }
-
-    #bottomBar {
-      left: 8px;
-      right: 8px;
-      bottom: calc(8px + env(safe-area-inset-bottom));
-      padding: 8px 10px;
-      font-size: 13px;
-      max-height: min(22vh, 148px);
-      overflow: auto;
+    .dot {
+      display:inline-block; width:10px; height:10px; border-radius:50%;
+      margin-right: 6px; border:1px solid rgba(0,0,0,0.25);
+      vertical-align: -1px;
     }
+    .muted { color:#444; line-height: 1.25; margin-top: 6px; }
+    .statusLine { margin-top: 6px; font-weight: 700; }
+    .statusOk { color: #0f7a2a; }
+    .statusBad { color: #b42318; }
 
-    #timeWindow { font-weight: 900; font-size: clamp(22px, 6.4vw, 30px); line-height: 1; margin-bottom: 3px; }
-    #nycNow { font-size: 13px; margin-bottom: 4px; }
-    #modeText { color: #145a2f; font-size: 13px; font-weight: 800; margin-bottom: 4px; }
-    #slider { width: 100%; accent-color: #1f86ff; }
-
-    #btnNow {
-      float: right;
-      border: 2px solid #1e1e1e;
-      border-radius: 999px;
-      background: #f0f6ff;
-      color: #1976d2;
+    .btnRow { display:flex; gap:8px; margin-top:8px; }
+    button {
+      font-family: Arial, sans-serif;
       font-weight: 800;
-      font-size: 14px;
-      padding: 4px 10px;
-      margin-top: -4px;
+      font-size: 12px;
+      padding: 8px 10px;
+      border-radius: 10px;
+      border: 2px solid #111;
+      background: #fff;
+      cursor: pointer;
     }
 
-    .small { font-size: 13px; }
-
-    #titleText { font-size: clamp(22px, 6.4vw, 32px); font-weight: 900; line-height: 1; }
-
-    @media (min-width: 900px) {
-      #topPanel { width: min(22vw, 310px); max-height: 32vh; }
-      #bottomBar { max-width: 440px; right: auto; }
+    /* Bottom slider */
+    .sliderWrap {
+      position: fixed; left: 10px; right: 10px; bottom: 14px; z-index: 9999;
+      background: rgba(255,255,255,0.92);
+      border: 2px solid #111; border-radius: 12px;
+      padding: 10px 12px;
+      font-family: Arial, sans-serif;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.18);
+      backdrop-filter: blur(4px);
     }
+    .timeLabel { font-weight: 900; font-size: 16px; }
+    .timeSub { font-size: 12px; color:#444; margin-top: 2px; }
+    input[type="range"] { width: 100%; margin-top: 8px; }
   </style>
 </head>
+
 <body>
-  <div id="map" aria-label="NYC FHV demand map"></div>
+  <div id="map"></div>
 
-  <button id="btnMin" type="button">Min</button>
+  <div class="panel">
+    <h3>NYC HVFHV Zones (1–100)</h3>
+    <div class="bar"></div>
 
-  <section id="topPanel" class="panel">
-    <div id="titleText">NYC HVFHV (1–100)</div>
-    <div class="small" style="margin-top:2px;">For-hire vehicle / Uber driver earnings map</div>
-
-    <div id="legendGradient" aria-hidden="true"></div>
-    <div class="small"><strong>High rating → Low rating</strong></div>
-    <div style="margin-top:6px;" class="small">
-      Green = Best<br />
-      Blue = Medium<br />
-      Sky = Normal<br />
-      Red = Avoid
+    <div class="legendRow">
+      <div><span class="dot" style="background:#22c55e;"></span><b>Green</b> = Best</div>
+      <div><span class="dot" style="background:#1e5bff;"></span><b>Blue</b> = Medium</div>
+      <div><span class="dot" style="background:#79c7ff;"></span><b>Sky</b> = Normal</div>
+      <div><span class="dot" style="background:#e53935;"></span><b>Red</b> = Avoid</div>
     </div>
-    <div style="margin-top:8px;font-weight:800;color:#145a2f" id="loadedMsg">Connecting to Railway…</div>
-  </section>
 
-  <section id="bottomBar" class="panel">
-    <button id="btnNow" type="button">Now</button>
-    <div id="timeWindow">--:--</div>
-    <div id="nycNow">Current NYC time: --</div>
-    <div id="modeText">Live mode: ON (follows current NYC time)</div>
+    <div class="muted">
+      • Colors come from <b>rating (1–100)</b> for the selected <b>20-minute</b> window.<br>
+      • Data is loaded from <b>Railway only</b>.
+    </div>
+
+    <div id="status" class="statusLine">Loading…</div>
+
+    <div class="btnRow">
+      <button id="btnGenerate" type="button">Generate</button>
+      <button id="btnReload" type="button">Reload</button>
+    </div>
+  </div>
+
+  <div class="sliderWrap">
+    <div class="timeLabel" id="timeLabel">Loading…</div>
+    <div class="timeSub" id="timeSub">NYC time</div>
     <input id="slider" type="range" min="0" max="0" step="1" value="0" />
-  </section>
+  </div>
 
+  <!-- IMPORTANT: Set your Railway base URL here (prevents “Missing window.RAILWAY_BASE_URL”) -->
   <script>
-    window.addEventListener("DOMContentLoaded", () => {
-      const BASE_CANDIDATES = [
-        new URLSearchParams(window.location.search).get("api"),
-        window.RAILWAY_API_BASE,
-        localStorage.getItem("railwayBase"),
-        "https://web-production-78f67.up.railway.app",
-        "https://tlc-hotspot-pack-production.up.railway.app",
-        ""
-      ].filter((x, i, arr) => x != null && arr.indexOf(x) === i)
-       .map((x) => String(x).replace(/\/+$/, ""));
-      const BIN_MINUTES = 20;
-      const WEEK_MINUTES = 7 * 24 * 60;
-
-      const topPanel = document.getElementById("topPanel");
-      const btnMin = document.getElementById("btnMin");
-      const btnNow = document.getElementById("btnNow");
-      const loadedMsg = document.getElementById("loadedMsg");
-      const timeWindow = document.getElementById("timeWindow");
-      const nycNow = document.getElementById("nycNow");
-      const modeText = document.getElementById("modeText");
-      const slider = document.getElementById("slider");
-
-      const map = L.map("map", { zoomControl: true, preferCanvas: true }).setView([40.72, -73.98], 11.8);
-      L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
-        attribution: "&copy; OpenStreetMap &copy; CARTO"
-      }).addTo(map);
-
-      function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
-      function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
-
-      function nycParts(date = new Date()) {
-        const fmt = new Intl.DateTimeFormat("en-US", {
-          timeZone: "America/New_York",
-          weekday: "short",
-          hour: "2-digit",
-          minute: "2-digit",
-          hour12: false
-        });
-        const parts = Object.fromEntries(
-          fmt.formatToParts(date).filter(p => p.type !== "literal").map(p => [p.type, p.value])
-        );
-        const dowMap = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 };
-        return {
-          dow: dowMap[parts.weekday] ?? 0,
-          minuteOfDay: (Number(parts.hour) || 0) * 60 + (Number(parts.minute) || 0)
-        };
-      }
-
-      function nycMinuteOfWeek(value) {
-        const p = nycParts(new Date(value));
-        return p.dow * 1440 + p.minuteOfDay;
-      }
-
-      function nycShortLabel(value) {
-        return new Date(value).toLocaleString("en-US", {
-          timeZone: "America/New_York",
-          weekday: "short",
-          hour: "numeric",
-          minute: "2-digit",
-          hour12: true
-        });
-      }
-
-      function ratingToColor(rating) {
-        const r = clamp(Number(rating) || 1, 1, 100);
-        if (r <= 25) return "#d32f2f";  // Red = Avoid
-        if (r <= 50) return "#81d4fa";  // Sky = Normal
-        if (r <= 75) return "#1976d2";  // Blue = Medium
-        return "#2e7d32";               // Green = Best
-      }
-
-      function extractRating(properties) {
-        const p = properties || {};
-        const raw = p.rating ?? p.rating_1_100 ?? p.score ?? p.value;
-        if (raw == null) return 1;
-        const n = Number(raw);
-        if (!Number.isFinite(n)) return 1;
-        if (n > 0 && n <= 1) return Math.round(1 + 99 * n);
-        if (n > 1 && n <= 10) return Math.round(n * 10);
-        return Math.round(n);
-      }
-
-      const zonesLayer = L.geoJSON(null, {
-        style: (feature) => ({
-          stroke: true,
-          color: "#111",
-          weight: 1.8,
-          opacity: 0.95,
-          fillOpacity: 0.78,
-          fillColor: ratingToColor(extractRating(feature?.properties))
-        })
-      }).addTo(map);
-
-      let timeline = [];
-      let liveMode = true;
-      let liveInterval = null;
-
-      let activeBase = BASE_CANDIDATES[0] || "";
-
-      async function baseHasTimeline(base) {
-        try {
-          const res = await fetch(`${base}/timeline`, { cache: "no-store" });
-          if (!res.ok) return false;
-          const data = await res.json();
-          const list = Array.isArray(data) ? data : (data.timeline || []);
-          return Array.isArray(list) && list.length > 0;
-        } catch {
-          return false;
-        }
-      }
-
-      async function prioritizeWorkingBase() {
-        for (const base of BASE_CANDIDATES) {
-          if (await baseHasTimeline(base)) {
-            activeBase = base;
-            if (base) localStorage.setItem("railwayBase", base);
-            return;
-          }
-        }
-      }
-
-      async function apiJson(path) {
-        let lastError = null;
-        for (const base of BASE_CANDIDATES) {
-          try {
-            const res = await fetch(`${base}${path}`, { cache: "no-store" });
-            if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
-            activeBase = base;
-            if (base) localStorage.setItem("railwayBase", base);
-            return res.json();
-          } catch (error) {
-            lastError = error;
-          }
-        }
-        throw lastError || new Error("No Railway API base responded.");
-      }
-
-      function closestTimelineIndexByNYCMinute() {
-        if (!timeline.length) return 0;
-        const now = nycParts();
-        const nowMin = now.dow * 1440 + now.minuteOfDay;
-        let bestIdx = 0;
-        let bestDiff = Infinity;
-        for (let i = 0; i < timeline.length; i++) {
-          const itemMin = nycMinuteOfWeek(timeline[i]);
-          const direct = Math.abs(itemMin - nowMin);
-          const wrap = WEEK_MINUTES - direct;
-          const diff = Math.min(direct, wrap);
-          if (diff < bestDiff) {
-            bestDiff = diff;
-            bestIdx = i;
-          }
-        }
-        return bestIdx;
-      }
-
-      function addMinutesISO(iso, min) {
-        return new Date(new Date(iso).getTime() + min * 60000).toISOString();
-      }
-
-      function updateClockText() {
-        const nowLabel = new Date().toLocaleString("en-US", {
-          timeZone: "America/New_York",
-          weekday: "short",
-          hour: "numeric",
-          minute: "2-digit",
-          second: "2-digit",
-          hour12: true
-        });
-        nycNow.textContent = `Current NYC time: ${nowLabel}`;
-      }
-
-      async function loadFrame(index) {
-        const idx = clamp(Number(index) || 0, 0, Math.max(0, timeline.length - 1));
-        const frame = await apiJson(`/frame/${idx}`);
-        zonesLayer.clearLayers();
-        zonesLayer.addData(frame.polygons || frame);
-
-        const start = frame.time || timeline[idx];
-        const end = addMinutesISO(start, BIN_MINUTES);
-        const endTrim = nycShortLabel(end).replace(/^[A-Za-z]{3}\s/, "");
-        timeWindow.textContent = `${nycShortLabel(start)} – ${endTrim}`;
-        slider.value = String(idx);
-        const source = activeBase ? ` ${activeBase}` : "";
-        loadedMsg.textContent = `Loaded ${timeline.length} steps from Railway${source} ✅`;
-      }
-
-      function setLiveMode(on) {
-        liveMode = on;
-        modeText.textContent = on
-          ? "Live mode: ON (follows current NYC time)"
-          : "Live mode: OFF (manual slider)";
-      }
-
-      async function syncNow() {
-        if (!timeline.length) return;
-        const idx = closestTimelineIndexByNYCMinute();
-        await loadFrame(idx);
-      }
-
-      async function initTimeline() {
-        loadedMsg.textContent = "Reading timeline from Railway…";
-        await prioritizeWorkingBase();
-        for (let attempt = 0; attempt < 8; attempt++) {
-          try {
-            const data = await apiJson("/timeline");
-            const list = Array.isArray(data) ? data : (data.timeline || []);
-            timeline = list.filter(Boolean).sort((a, b) => new Date(a) - new Date(b));
-            if (!timeline.length) throw new Error("Railway timeline is empty");
-            slider.max = String(timeline.length - 1);
-            slider.min = "0";
-            slider.step = "1";
-            return;
-          } catch (err) {
-            loadedMsg.textContent = `Waiting for Railway timeline… (${attempt + 1}/8)`;
-            await sleep(700);
-          }
-        }
-        throw new Error("Unable to load timeline from Railway.");
-      }
-
-      slider.addEventListener("input", async () => {
-        setLiveMode(false);
-        await loadFrame(Number(slider.value));
-      });
-
-      btnNow.addEventListener("click", async () => {
-        setLiveMode(true);
-        await syncNow();
-      });
-
-      btnMin.addEventListener("click", () => {
-        const hidden = topPanel.dataset.minimized === "1";
-        if (hidden) {
-          topPanel.style.display = "block";
-          topPanel.dataset.minimized = "0";
-          btnMin.textContent = "Min";
-        } else {
-          topPanel.style.display = "none";
-          topPanel.dataset.minimized = "1";
-          btnMin.textContent = "Show";
-        }
-      });
-
-      (async () => {
-        updateClockText();
-        setInterval(updateClockText, 1000);
-        try {
-          await initTimeline();
-          await syncNow(); // strict NYC closest-window initialization
-
-          if (liveInterval) clearInterval(liveInterval);
-          liveInterval = setInterval(async () => {
-            updateClockText();
-            if (liveMode && document.visibilityState === "visible") {
-              await syncNow();
-            }
-          }, 30000);
-        } catch (error) {
-          loadedMsg.textContent = "Railway data unavailable. Check Railway scripts and endpoint.";
-          modeText.textContent = "Live mode: OFF (Railway unavailable)";
-          console.error(error);
-        }
-      })();
-    });
+    window.RAILWAY_BASE_URL = "https://web-production-78f67.up.railway.app";
   </script>
+
+  <script src="./app.js"></script>
 </body>
 </html>
