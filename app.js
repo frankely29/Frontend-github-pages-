@@ -81,21 +81,40 @@ function formatTimeLabel(iso){
   });
 }
 
+function lerp(a, b, t){ return a + ((b - a) * t); }
+
+function rgbToHex(r, g, b){
+  const toHex = (n) => Math.round(clamp(n, 0, 255)).toString(16).padStart(2, "0");
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
 // Rating color scale (1..100):
-// Green = good, Blue = medium, Red = very bad
+// Green (good) -> Blue (medium) -> Red (very bad)
 function ratingToColor(rating){
   const r = Number(rating);
   if (!Number.isFinite(r)) return { fill:"#3b82f6", op:0.5 };
 
-  if (r >= 67){
-    return { fill:"#00d66b", op:0.72 };
+  const t = clamp((r - 1) / 99, 0, 1);
+
+  // low ratings: red -> blue, high ratings: blue -> green
+  let rgb;
+  if (t <= 0.5){
+    const k = t / 0.5;
+    rgb = {
+      r: lerp(229, 59, k),
+      g: lerp(57, 130, k),
+      b: lerp(53, 246, k)
+    };
+  } else {
+    const k = (t - 0.5) / 0.5;
+    rgb = {
+      r: lerp(59, 0, k),
+      g: lerp(130, 214, k),
+      b: lerp(246, 107, k)
+    };
   }
 
-  if (r >= 34){
-    return { fill:"#3b82f6", op:0.68 };
-  }
-
-  return { fill:"#e53935", op:0.66 };
+  return { fill: rgbToHex(rgb.r, rgb.g, rgb.b), op: 0.68 };
 }
 
 function getFeatureRating(properties){
@@ -139,13 +158,14 @@ function formatEstimatedWait(waitMins){
 
 function buildPolygonStyle(feature){
   const p = feature?.properties || {};
+  const backendFill = p?.style?.fillColor;
   const rating = getFeatureRating(p);
   const { fill, op } = ratingToColor(rating);
 
   return {
     color: "#1b1b1b",
     weight: 2,
-    fillColor: fill,
+    fillColor: backendFill || fill,
     fillOpacity: op
   };
 }
