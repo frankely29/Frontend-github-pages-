@@ -12,82 +12,51 @@
     html, body { height: 100%; margin: 0; }
     #map { height: 100%; width: 100%; }
 
-    /* Small, non-blocking panel */
-    #panel{
+    /* smaller top panel */
+    .panel {
       position: fixed; top: 10px; left: 10px; z-index: 9999;
       background: rgba(255,255,255,0.92);
       padding: 8px 10px;
       border: 2px solid #111; border-radius: 10px;
       font-family: Arial, sans-serif; font-size: 12px;
-      width: 220px;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.22);
+      width: 230px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.25);
     }
-    #panel.min .body { display:none; }
-    #panel .head { display:flex; justify-content:space-between; align-items:center; gap:10px; }
-    #panel .title { font-weight:900; font-size:13px; }
-    #togglePanel{
-      background:#fff; border:2px solid #111; border-radius:10px;
-      padding:4px 8px; font-weight:900;
-    }
-    .bar{
+    .title { font-weight: 900; font-size: 13px; margin-bottom: 6px; }
+    .bar {
       height: 10px; width: 100%;
       border: 1px solid #333;
-      background: linear-gradient(90deg, #bdbdbd, #e60000, #ffd700, #00b050);
+      background: linear-gradient(90deg, #e60000, #ffd700, #00b050);
       border-radius: 6px;
-      margin: 6px 0;
     }
-    .legendRow{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
-    .chip{ display:inline-flex; gap:6px; align-items:center; padding:4px 6px; border:1px solid #999; border-radius:10px; background:#fff; }
-    .dot{ width:10px; height:10px; border-radius:5px; display:inline-block; }
-    .small { font-size: 11px; color:#333; line-height:1.25; margin-top:6px; }
-    #statusLine{ margin-top:6px; font-size:11px; color:#0b7a3a; font-weight:900; }
+    .legendRow { display:flex; justify-content:space-between; margin-top: 4px; }
+    .tiny { font-size: 11px; color:#333; margin-top: 6px; line-height: 1.25; }
 
-    /* Slider */
     .sliderWrap {
       position: fixed; left: 10px; right: 10px; bottom: 14px; z-index: 9999;
-      background: rgba(255,255,255,0.94);
+      background: rgba(255,255,255,0.92);
       border: 2px solid #111; border-radius: 10px;
       padding: 10px 12px;
       font-family: Arial, sans-serif;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.22);
+      box-shadow: 0 2px 10px rgba(0,0,0,0.25);
     }
     input[type="range"] { width: 100%; }
-    .timeLabel { font-weight: 900; font-size: 18px; }
+    .timeLabel { font-weight: 900; font-size: 16px; }
   </style>
-
-  <script>
-    // ✅ SET THIS ONCE (your Railway domain)
-    // Example:
-    // window.RAILWAY_BASE_URL = "https://web-production-78f67.up.railway.app";
-    window.RAILWAY_BASE_URL = "https://web-production-78f67.up.railway.app";
-  </script>
 </head>
-
 <body>
   <div id="map"></div>
 
-  <div id="panel" class="">
-    <div class="head">
-      <div class="title">NYC HVFHV (1–100)</div>
-      <button id="togglePanel">Min</button>
+  <div class="panel">
+    <div class="title">NYC HVFHV (1–100)</div>
+    <div class="bar"></div>
+    <div class="legendRow">
+      <span>Low</span><span>Mid</span><span>High</span>
     </div>
-
-    <div class="body">
-      <div class="bar"></div>
-
-      <div class="legendRow">
-        <span class="chip"><span class="dot" style="background:#bdbdbd;"></span> Gray = Very Low</span>
-        <span class="chip"><span class="dot" style="background:#e60000;"></span> Red = Avoid</span>
-        <span class="chip"><span class="dot" style="background:#ffd700;"></span> Yellow = Medium</span>
-        <span class="chip"><span class="dot" style="background:#00b050;"></span> Green = Good</span>
-      </div>
-
-      <div class="small">
-        ✓ and × show only “extremes” so you don’t get mixed signals.<br>
-        Use the 20-minute slider below.
-      </div>
-
-      <div id="statusLine">Loading…</div>
+    <div class="tiny">
+      • Polygon color = rating (red→yellow→green)<br>
+      • ✓ / × show only extremes (top/bottom)<br>
+      • Data loads from Railway (not GitHub)
     </div>
   </div>
 
@@ -95,6 +64,11 @@
     <div class="timeLabel" id="timeLabel">Loading…</div>
     <input id="slider" type="range" min="0" max="0" step="1" value="0" />
   </div>
+
+  <script>
+    // ✅ SET THIS to your Railway domain
+    window.RAILWAY_BASE_URL = "https://web-production-78f67.up.railway.app";
+  </script>
 
   <script src="./app.js"></script>
 </body>
