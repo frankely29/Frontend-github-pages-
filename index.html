@@ -12,52 +12,110 @@
     html, body { height: 100%; margin: 0; }
     #map { height: 100%; width: 100%; }
 
+    /* ===== SMALL TOP PANEL (about 3x smaller) ===== */
     .panel {
-      position: fixed; top: 12px; left: 12px; z-index: 9999;
-      background: rgba(255,255,255,0.96);
-      padding: 12px 12px; border: 2px solid #111; border-radius: 12px;
-      font-family: Arial, sans-serif; font-size: 14px; max-width: 430px;
+      position: fixed;
+      top: 10px; left: 10px;
+      z-index: 9999;
+      background: rgba(255,255,255,0.92);
+      padding: 8px 8px;
+      border: 2px solid #111;
+      border-radius: 10px;
+      font-family: Arial, sans-serif;
+      font-size: 11px;
+      max-width: 260px;
       box-shadow: 0 2px 10px rgba(0,0,0,0.25);
     }
-    .title { font-weight: 900; font-size: 16px; margin-bottom: 10px; }
-    .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-    .bar {
-      height: 12px; width: 220px; border: 1px solid #333;
-      background: linear-gradient(90deg, #e60000, #ffd700, #00b050);
-      border-radius: 6px;
-    }
-    .labels { display:flex; justify-content:space-between; width:160px; font-weight:700; color:#333; }
-    .small { font-size: 12px; color: #444; line-height: 1.35; margin-top: 10px; }
-    .pill {
-      display:inline-flex; align-items:center; gap:10px;
-      padding: 8px 10px; border: 1px solid #bbb; border-radius: 999px;
-      background: rgba(255,255,255,0.95);
-      font-weight: 800;
-    }
-    .chk { color:#00b050; font-weight: 900; }
-    .xmk { color:#e60000; font-weight: 900; }
-    .dot { color:#7a2cff; font-weight: 900; }
-    .controlRow { display:flex; gap:10px; align-items:center; margin-top: 10px; flex-wrap: wrap; }
-    input[type="number"]{
-      width: 70px; padding: 6px 8px; border:1px solid #bbb; border-radius: 8px;
-      font-size: 14px;
-    }
-    button{
-      padding: 8px 10px; border: 2px solid #111; border-radius: 10px;
-      background: #fff; font-weight: 900;
-    }
-    .statusLine{
-      margin-top: 8px;
+
+    .panelHeader {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+      font-weight:900;
       font-size: 12px;
-      color: #333;
-      background: rgba(0,0,0,0.05);
+      margin-bottom: 6px;
+    }
+
+    .btnMini {
+      border: 2px solid #111;
+      background: #fff;
+      border-radius: 8px;
+      padding: 4px 8px;
+      font-weight: 900;
+      font-size: 11px;
+    }
+
+    .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+    .bar {
+      height: 10px;
+      width: 140px;
+      border: 1px solid #333;
+      border-radius: 6px;
+      background: linear-gradient(90deg, #e60000, #ffd700, #00b050);
+    }
+
+    .pill {
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
       padding: 6px 8px;
+      border: 1px solid #bbb;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.95);
+      font-weight: 900;
+      font-size: 11px;
+    }
+
+    .small {
+      font-size: 10px;
+      color: #333;
+      line-height: 1.25;
+      margin-top: 6px;
+    }
+
+    .controlRow {
+      display:flex;
+      gap:8px;
+      align-items:center;
+      margin-top: 6px;
+      flex-wrap: wrap;
+    }
+
+    input[type="number"]{
+      width: 60px;
+      padding: 5px 6px;
+      border:1px solid #bbb;
+      border-radius: 8px;
+      font-size: 12px;
+    }
+
+    button{
+      padding: 6px 8px;
+      border: 2px solid #111;
+      border-radius: 10px;
+      background: #fff;
+      font-weight: 900;
+      font-size: 11px;
+    }
+
+    .statusLine{
+      margin-top: 6px;
+      font-size: 10px;
+      color: #111;
+      background: rgba(0,0,0,0.06);
+      padding: 5px 6px;
       border-radius: 10px;
     }
 
+    /* Collapsed view */
+    .collapsed .panelBody { display:none; }
+
+    /* ===== BOTTOM SLIDER ===== */
     .sliderWrap {
-      position: fixed; left: 12px; right: 12px; bottom: 16px; z-index: 9999;
-      background: rgba(255,255,255,0.96);
+      position: fixed; left: 10px; right: 10px; bottom: 12px; z-index: 9999;
+      background: rgba(255,255,255,0.94);
       border: 2px solid #111; border-radius: 12px;
       padding: 10px 12px;
       font-family: Arial, sans-serif;
@@ -71,48 +129,50 @@
 <body>
   <div id="map"></div>
 
-  <div class="panel">
-    <div class="title">NYC HVFHV Pickup Zones (1–100)</div>
-
-    <div class="row" style="margin-bottom:8px;">
-      <div class="bar"></div>
-      <div class="labels"><span>Low</span><span>Mid</span><span>High</span></div>
+  <div class="panel" id="panel">
+    <div class="panelHeader">
+      <div>NYC HVFHV Zones (1–100)</div>
+      <button class="btnMini" id="miniBtn" type="button">Minimize</button>
     </div>
 
-    <div class="small" style="margin-top:6px;">
-      <b>Polygon color = Rating</b> (red → yellow → green).<br>
-      <b>Icons = Extremes only</b> for this time window (so no conflicting signals).<br>
-      <span class="dot">●</span> Purple dot intensity = higher rating in that zone.
+    <div class="panelBody">
+      <div class="row" style="margin-bottom:6px;">
+        <div class="bar"></div>
+        <div style="display:flex; gap:10px; font-weight:900;">
+          <span>Low</span><span>Mid</span><span>High</span>
+        </div>
+      </div>
+
+      <div class="row" style="gap:8px;">
+        <span class="pill"><span style="color:#00b050;">✓</span> Top (Good)</span>
+        <span class="pill"><span style="color:#e60000;">✖</span> Bottom (Bad)</span>
+      </div>
+
+      <div class="small">
+        • Map colors show only signals (no mixed colors).<br>
+        • Good zones = green. Bad zones = red. Other zones = neutral.<br>
+        • Use the 20-min slider below.
+      </div>
+
+      <div class="controlRow">
+        <label class="row" style="gap:6px;">
+          <input id="showIcons" type="checkbox" checked />
+          <b>Icons</b>
+        </label>
+
+        <span>Top ✓</span>
+        <input id="topN" type="number" min="0" max="200" value="25" />
+
+        <span>Bottom ✖</span>
+        <input id="botN" type="number" min="0" max="200" value="25" />
+      </div>
+
+      <div class="controlRow">
+        <button id="generateBtn" type="button">Generate</button>
+      </div>
+
+      <div class="statusLine" id="statusLine">Loading…</div>
     </div>
-
-    <div class="row" style="margin-top:10px; gap:10px;">
-      <span class="pill"><span class="chk">✓</span> Very Good (Top)</span>
-      <span class="pill"><span class="xmk">✖</span> Very Low (Bottom)</span>
-    </div>
-
-    <div class="controlRow">
-      <label class="row" style="gap:8px;">
-        <input id="showIcons" type="checkbox" checked />
-        <span><b>Show icons</b></span>
-      </label>
-
-      <span>Top ✓</span>
-      <input id="topN" type="number" min="0" max="200" value="25" />
-
-      <span>Bottom ✖</span>
-      <input id="botN" type="number" min="0" max="200" value="25" />
-    </div>
-
-    <div class="controlRow">
-      <label class="row" style="gap:8px;">
-        <input id="showDots" type="checkbox" checked />
-        <span><b>Show purple dots</b></span>
-      </label>
-
-      <button id="generateBtn" type="button">Generate on Railway</button>
-    </div>
-
-    <div class="statusLine" id="statusLine">Loading…</div>
   </div>
 
   <div class="sliderWrap">
