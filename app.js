@@ -1,24 +1,22 @@
 // =======================
-// app.js (STRICT RULES)
-// - Railway ONLY
-// - 4 discrete colors by rating(1-100):
-//   Green Best, Blue Medium, Sky Normal, Red Avoid
-// - NYC time label
-// - Slider starts at closest time window to "NOW" in NYC (week wrap)
-// - No icons, no checkmarks, no X
-// - No polygon outline (stroke disabled)
-// - If /timeline not ready -> auto-call /generate once -> retry
-// - Frames load from /frame/{idx}
+// STRICT NYC FHV MAP (FINAL STABLE BUILD)
+// Railway only
+// Auto-generate if timeline not ready
+// Proper retry handling
+// Strict rating buckets
+// NYC closest time-of-week slider init
 // =======================
 
-function clamp(n, a, b) { return Math.max(a, Math.min(b, n)); }
+function clamp(n, a, b){ return Math.max(a, Math.min(b, n)); }
 
-function setStatus(msg) {
+function setStatus(msg){
   const el = document.getElementById("statusText");
   if (el) el.textContent = msg;
 }
 
-function nycTimeLabel(iso) {
+function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
+
+function nycTimeLabel(iso){
   const d = new Date(iso);
   return d.toLocaleString("en-US", {
     timeZone: "America/New_York",
@@ -28,7 +26,7 @@ function nycTimeLabel(iso) {
   });
 }
 
-function getNYCParts(date = new Date()) {
+function getNYCParts(date = new Date()){
   const fmt = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/New_York",
     weekday: "short",
@@ -39,389 +37,210 @@ function getNYCParts(date = new Date()) {
 
   const parts = Object.fromEntries(
     fmt.formatToParts(date)
-      .filter((p) => p.type !== "literal")
-      .map((p) => [p.type, p.value])
+      .filter(p => p.type !== "literal")
+      .map(p => [p.type, p.value])
   );
 
-  // Monday=0 ... Sunday=6
-  const dowMap = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 };
+  const dowMap = { Mon:0, Tue:1, Wed:2, Thu:3, Fri:4, Sat:5, Sun:6 };
 
   return {
     dow: dowMap[parts.weekday] ?? 0,
-    minuteOfDay: (Number(parts.hour) || 0) * 60 + (Number(parts.minute) || 0)
+    minuteOfDay: (Number(parts.hour) || 0)*60 + (Number(parts.minute) || 0)
   };
 }
 
-function timelineMinuteOfWeekNYC(iso) {
-  const d = new Date(iso);
-  const parts = getNYCParts(d);
-  return parts.dow * 1440 + parts.minuteOfDay;
+function timelineMinuteOfWeekNYC(iso){
+  const p = getNYCParts(new Date(iso));
+  return p.dow*1440 + p.minuteOfDay;
 }
 
-function addMinutesISO(iso, minutes) {
-  const d = new Date(iso);
-  return new Date(d.getTime() + minutes * 60 * 1000).toISOString();
+function addMinutesISO(iso, minutes){
+  return new Date(new Date(iso).getTime() + minutes*60000).toISOString();
 }
 
-// ✅ STRICT bucket colors: (your rules)
-function ratingToColor(rating1to100) {
-  const r = clamp(Number(rating1to100 || 0), 1, 100);
-
-  // Red = Avoid
-  if (r <= 25) return "#d32f2f";
-  // Sky = Normal
-  if (r <= 50) return "#81d4fa";
-  // Blue = Medium
-  if (r <= 75) return "#1976d2";
-  // Green = Best
-  return "#2e7d32";
+// ===== STRICT COLOR BUCKETS =====
+function ratingToColor(r){
+  r = clamp(Number(r||0),1,100);
+  if(r<=25) return "#d32f2f";     // Red Avoid
+  if(r<=50) return "#81d4fa";     // Sky Normal
+  if(r<=75) return "#1976d2";     // Blue Medium
+  return "#2e7d32";               // Green Best
 }
 
-function getRailwayBase() {
+// Normalize rating to 1–100
+function getRating1to100(p){
+  let v = p?.rating ?? p?.score ?? p?.value ?? null;
+  if(v==null) return null;
+  v = Number(v);
+  if(!Number.isFinite(v) || v<=0) return null;
+
+  if(v<=1) return Math.round(1+99*v);  // 0–1
+  if(v<=10) return Math.round(v*10);   // 1–10
+  return clamp(Math.round(v),1,100);   // already 1–100
+}
+
+function getRailwayBase(){
   const base = window.RAILWAY_BASE_URL;
-  if (!base || !String(base).trim()) return null;
-  return String(base).replace(/\/+$/, "");
+  if(!base) return null;
+  return base.replace(/\/+$/,"");
 }
 
 const BASE = getRailwayBase();
 const BIN_MINUTES = 20;
 
-// ✅ SINGLE SOURCE OF TRUTH: extract + normalize rating into 1–100
-// Fixes "everything red" if backend sends 0–1 or 1–10 values.
-function getRating1to100(props) {
-  const p = props || {};
+// ===== MAP =====
+const map = L.map("map").setView([40.72,-73.98],12);
 
-  // Try common fields (backend variations)
-  let v =
-    p.rating ??
-    p.rating_1_100 ??
-    p.score01 ??
-    p.rating01 ??
-    p.score ??
-    p.value ??
-    null;
-
-  if (v === null || v === undefined) return null;
-
-  v = Number(v);
-  if (!Number.isFinite(v)) return null;
-
-  // treat <=0 as missing -> neutral gray
-  if (v <= 0) return null;
-
-  // 0–1 -> 1–100
-  if (v > 0 && v <= 1) return clamp(Math.round(1 + 99 * v), 1, 100);
-
-  // 1–10 -> 10–100
-  if (v > 1 && v <= 10) return clamp(Math.round(v * 10), 1, 100);
-
-  // already 1–100 (or higher) -> clamp
-  return clamp(Math.round(v), 1, 100);
-}
-
-// ---------- Map ----------
-const map = L.map("map", { zoomControl: true }).setView([40.72, -73.98], 12);
-
-L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
-  attribution: "&copy; OpenStreetMap &copy; CARTO"
-}).addTo(map);
+L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png").addTo(map);
 
 map.createPane("polys");
 map.getPane("polys").style.zIndex = 400;
 
-const polyLayer = L.geoJSON(null, {
-  pane: "polys",
-  style: (feature) => {
-    const rating = getRating1to100(feature?.properties);
-
-    // ✅ IMPORTANT: NO OUTLINE
-    if (rating !== null) {
-      return {
-        stroke: false,
-        fillColor: ratingToColor(rating),
-        fillOpacity: 0.72
-      };
+const polyLayer = L.geoJSON(null,{
+  pane:"polys",
+  style:(f)=>{
+    const r = getRating1to100(f?.properties);
+    if(r!=null){
+      return { stroke:false, fillColor:ratingToColor(r), fillOpacity:0.72 };
     }
-
-    // Missing rating -> neutral gray (NOT red)
-    return {
-      stroke: false,
-      fillColor: "#e0e0e0",
-      fillOpacity: 0.20
-    };
-  },
-  onEachFeature: (feature, layer) => {
-    const p = feature?.properties || {};
-    const rating = getRating1to100(p);
-
-    const zone = p.zone || p.name || p.LocationID || "Zone";
-    const borough = p.borough || p.Borough || "";
-
-    const popup = `
-      <div style="font-family:Arial; font-size:13px;">
-        <div style="font-weight:900; font-size:14px;">${zone}</div>
-        ${borough ? `<div style="color:#666; margin-bottom:6px;">${borough}</div>` : ""}
-        <div><b>Rating:</b> ${rating ?? "n/a"} / 100</div>
-      </div>
-    `;
-    layer.bindPopup(popup, { maxWidth: 360 });
+    return { stroke:false, fillColor:"#e0e0e0", fillOpacity:0.2 };
   }
 }).addTo(map);
 
-// ---------- UI ----------
+// ===== UI =====
 const slider = document.getElementById("slider");
 const timeLabel = document.getElementById("timeLabel");
 const btnNow = document.getElementById("btnNow");
 const btnGenerate = document.getElementById("btnGenerate");
 
 let timeline = [];
-let _autoGeneratedThisBoot = false;
 
-// ---------- Railway-only API ----------
-async function apiGET(path) {
-  const url = `${BASE}${path}`;
-  return await fetch(url, { cache: "no-store", headers: { "accept": "application/json" } });
+// ===== API =====
+async function apiGET(path){
+  return fetch(`${BASE}${path}`,{cache:"no-store"});
 }
 
-async function apiPOST(path) {
-  const url = `${BASE}${path}`;
-  return await fetch(url, {
-    method: "POST",
-    headers: { "accept": "application/json" },
-    body: ""
-  });
+async function apiPOST(path){
+  return fetch(`${BASE}${path}`,{method:"POST"});
 }
 
-function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
-}
+// ===== GENERATE + WAIT UNTIL READY =====
+async function ensureTimelineReady(){
 
-function sortTimeline() {
-  timeline.sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
-}
+  // Try timeline first
+  let res = await apiGET("/timeline");
 
-function setSliderBounds() {
-  slider.min = 0;
-  slider.max = Math.max(0, timeline.length - 1);
-  slider.step = 1;
-}
-
-// ✅ NYC closest window (week wrap handling)
-function pickIndexClosestToNow() {
-  if (!timeline.length) return 0;
-
-  const nycNow = getNYCParts();
-  const nowMinuteOfWeek = nycNow.dow * 1440 + nycNow.minuteOfDay;
-  const weekMinutes = 7 * 24 * 60;
-
-  let bestIdx = 0;
-  let bestDiff = Infinity;
-
-  for (let i = 0; i < timeline.length; i++) {
-    const tMinuteOfWeek = timelineMinuteOfWeekNYC(timeline[i]);
-    const directDiff = Math.abs(tMinuteOfWeek - nowMinuteOfWeek);
-    const wrapDiff = weekMinutes - directDiff;
-    const diff = Math.min(directDiff, wrapDiff);
-
-    if (diff < bestDiff) {
-      bestDiff = diff;
-      bestIdx = i;
-    }
-  }
-  return bestIdx;
-}
-
-// ---- Generate + timeline readiness handling ----
-async function generateOnRailway() {
-  // keep your params; still Railway-only
-  const path = "/generate?bin_minutes=20&good_n=200&bad_n=120&win_good_n=80&win_bad_n=40&min_trips_per_window=10&simplify_meters=25";
-  const gen = await apiPOST(path);
-
-  if (!gen.ok) {
-    const txt = await gen.text().catch(() => "");
-    throw new Error(`Generate failed (${gen.status}) ${txt}`);
-  }
-}
-
-// If backend needs a moment after generate, we retry a few times.
-async function fetchTimelineWithRetries(maxTries = 10) {
-  let lastErr = null;
-
-  for (let t = 1; t <= maxTries; t++) {
-    try {
-      const res = await apiGET("/timeline");
-      const text = await res.text().catch(() => "");
-
-      if (res.ok) {
-        let data = null;
-        try { data = JSON.parse(text); } catch { data = text; }
-
-        timeline = Array.isArray(data) ? data : (data?.timeline || []);
-        sortTimeline();
-        return;
-      }
-
-      // parse error JSON if possible
-      let j = null;
-      try { j = JSON.parse(text); } catch {}
-
-      const msg = String(j?.error || text || "").toLowerCase();
-
-      // timeline not ready -> throw special
-      if (msg.includes("timeline not ready")) {
-        lastErr = new Error("timeline not ready");
-      } else {
-        lastErr = new Error(`Failed /timeline (${res.status}) ${text}`);
-      }
-    } catch (e) {
-      lastErr = e;
-    }
-
-    // small backoff
-    await sleep(400 + t * 150);
-  }
-
-  throw lastErr || new Error("Failed to load timeline");
-}
-
-async function loadTimeline() {
-  try {
-    await fetchTimelineWithRetries(2);
+  if(res.ok){
+    const data = await res.json();
+    timeline = Array.isArray(data)?data:(data.timeline||[]);
     return;
-  } catch (e) {
-    // If timeline not ready -> auto-generate ONCE, then retry timeline.
-    const msg = String(e?.message || e).toLowerCase();
-    if (!_autoGeneratedThisBoot && msg.includes("timeline not ready")) {
-      _autoGeneratedThisBoot = true;
+  }
 
-      setStatus("Generating… (first run)");
-      await generateOnRailway();
+  // If not ready -> generate
+  setStatus("Generating…");
+  await apiPOST("/generate?bin_minutes=20");
 
-      setStatus("Loading…");
-      await fetchTimelineWithRetries(12);
+  // Retry timeline up to 15 times
+  for(let i=0;i<15;i++){
+    await sleep(800);
+    res = await apiGET("/timeline");
+    if(res.ok){
+      const data = await res.json();
+      timeline = Array.isArray(data)?data:(data.timeline||[]);
       return;
     }
-
-    throw e;
   }
+
+  throw new Error("Timeline failed after generate");
 }
 
-async function loadFrame(i) {
-  // ✅ STRICT: Railway endpoint format /frame/{idx}
-  const res = await apiGET(`/frame/${encodeURIComponent(i)}`);
-  if (!res.ok) {
-    const txt = await res.text().catch(() => "");
-    throw new Error(`Failed /frame/${i} (${res.status}). ${txt}`);
-  }
-  return await res.json();
+// ===== FRAME LOAD =====
+async function loadFrame(i){
+  const res = await apiGET(`/frame/${i}`);
+  if(!res.ok) throw new Error("Frame failed");
+  return res.json();
 }
 
-function renderFrame(frame) {
-  const t = frame?.time;
+// ===== SLIDER INIT =====
+function setSliderBounds(){
+  slider.min=0;
+  slider.max=Math.max(0,timeline.length-1);
+  slider.step=1;
+}
 
-  if (t) {
-    const endISO = addMinutesISO(t, BIN_MINUTES);
-    const startNY = nycTimeLabel(t);
-    const endNY = nycTimeLabel(endISO).replace(/^[A-Za-z]{3}\s/, "");
-    timeLabel.textContent = `${startNY} – ${endNY} (NYC)`;
-  } else {
-    timeLabel.textContent = "Unknown time (NYC)";
+function pickIndexClosestToNow(){
+  const now = getNYCParts();
+  const nowM = now.dow*1440+now.minuteOfDay;
+  const week=10080;
+  let best=0;
+  let bestDiff=Infinity;
+
+  for(let i=0;i<timeline.length;i++){
+    const tM = timelineMinuteOfWeekNYC(timeline[i]);
+    const diff = Math.min(
+      Math.abs(tM-nowM),
+      week-Math.abs(tM-nowM)
+    );
+    if(diff<bestDiff){ bestDiff=diff; best=i; }
+  }
+  return best;
+}
+
+// ===== RENDER =====
+function render(frame){
+  const t=frame?.time;
+  if(t){
+    const end=addMinutesISO(t,BIN_MINUTES);
+    timeLabel.textContent=
+      nycTimeLabel(t)+" – "+
+      nycTimeLabel(end).replace(/^[A-Za-z]{3}\s/,"")+" (NYC)";
   }
 
   polyLayer.clearLayers();
-
-  // accept typical keys, but still Railway-only
-  const geo = frame?.polygons || frame?.geojson || frame?.data || frame || null;
-  if (geo && (geo.type || geo.features)) polyLayer.addData(geo);
+  if(frame?.polygons) polyLayer.addData(frame.polygons);
 }
 
-async function goToIndex(i) {
-  const idx = clamp(Number(i || 0), 0, timeline.length - 1);
-  slider.value = String(idx);
-
-  const frame = await loadFrame(idx);
-  renderFrame(frame);
-}
-
-// Throttle slider input
-let pending = null;
-
-slider.addEventListener("input", () => {
-  pending = Number(slider.value);
-  if (slider._raf) return;
-
-  slider._raf = requestAnimationFrame(async () => {
-    slider._raf = null;
-    try {
-      await goToIndex(pending);
-      setStatus(`Loaded ${timeline.length} steps`);
-    } catch (e) {
-      console.error(e);
-      setStatus("Load failed (frame)");
-      timeLabel.textContent = "Load failed";
-    }
-  });
-});
-
-btnNow?.addEventListener("click", async () => {
-  try {
-    const idx = pickIndexClosestToNow();
-    await goToIndex(idx);
-    setStatus(`Loaded ${timeline.length} steps`);
-  } catch (e) {
-    console.error(e);
-    setStatus("Load failed (Now)");
-  }
-});
-
-btnGenerate?.addEventListener("click", async () => {
-  if (!BASE) {
-    alert("Missing window.RAILWAY_BASE_URL in index.html");
+// ===== MAIN BOOT =====
+async function boot(){
+  if(!BASE){
+    setStatus("Missing Railway URL");
     return;
   }
 
-  try {
-    setStatus("Generating…");
-    await generateOnRailway();
-
-    // After generate, reload timeline and go to NOW
-    await boot();
-  } catch (e) {
-    console.error(e);
-    setStatus("Generate failed");
-    alert(String(e.message || e));
-  }
-});
-
-async function boot() {
-  if (!BASE) {
-    setStatus("Load failed");
-    timeLabel.textContent = "ERROR: Missing Railway base URL";
-    return;
-  }
-
-  try {
+  try{
     setStatus("Loading…");
-    await loadTimeline();
+    await ensureTimelineReady();
 
-    if (!timeline.length) {
-      setStatus("No timeline");
-      timeLabel.textContent = "No timeline data";
+    if(!timeline.length){
+      setStatus("No timeline data");
       return;
     }
 
     setSliderBounds();
 
-    // ✅ start slider at closest NYC window
     const idx = pickIndexClosestToNow();
-    await goToIndex(idx);
+    const frame = await loadFrame(idx);
+    slider.value=idx;
+    render(frame);
 
-    setStatus(`Loaded ${timeline.length} steps`);
-  } catch (e) {
+    setStatus(`Loaded ${timeline.length} windows`);
+  }
+  catch(e){
     console.error(e);
     setStatus("Load failed (timeline)");
-    timeLabel.textContent = "Load failed";
   }
 }
+
+slider.addEventListener("input", async ()=>{
+  try{
+    const frame = await loadFrame(slider.value);
+    render(frame);
+  }catch(e){
+    setStatus("Load failed");
+  }
+});
+
+btnNow?.addEventListener("click", boot);
+btnGenerate?.addEventListener("click", boot);
 
 boot();
