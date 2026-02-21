@@ -1,6 +1,6 @@
 // =======================
 // TLC Hotspot Map - app.js (NO ICONS)
-// - Loads data from Railway /download (not GitHub)
+// - Loads data from Railway /hotspots (with /download fallback)
 // - Colors polygons by rating 1–100 (Gray→Red→Yellow→Green)
 // - Clear error messages if anything fails
 // - Slider throttled for iPhone
@@ -156,11 +156,17 @@ async function fetchHotspots(){
     throw new Error(`Railway not reachable (GET / failed: ${ping.status})`);
   }
 
-  // load the big json from Railway
-  const res = await fetch(`${RAILWAY_BASE_URL}/download?ts=${Date.now()}`, { cache:"no-store" });
+  // load the hotspot json from Railway
+  let res = await fetch(`${RAILWAY_BASE_URL}/hotspots?ts=${Date.now()}`, { cache:"no-store" });
+
+  // backward-compatible fallback if a deployment still exposes /download
+  if (!res.ok && res.status === 404){
+    res = await fetch(`${RAILWAY_BASE_URL}/download?ts=${Date.now()}`, { cache:"no-store" });
+  }
+
   if (!res.ok){
     const txt = await res.text().catch(()=> "");
-    throw new Error(`Download failed (${res.status}). ${txt.slice(0,120)}`);
+    throw new Error(`Hotspot download failed (${res.status}). ${txt.slice(0,120)}`);
   }
 
   const payload = await res.json();
