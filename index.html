@@ -9,34 +9,35 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
   <style>
-    body { margin:0; font-family: Arial, sans-serif; }
+    body { margin:0; font-family: Arial, sans-serif; overflow:hidden; }
     #map { height: 100vh; width: 100vw; }
     #ui {
-      position: absolute; top: 10px; left: 10px; z-index: 1000;
-      background: rgba(255,255,255,0.94);
-      padding: 10px 12px;
-      border-radius: 10px;
-      box-shadow: 0 3px 15px rgba(0,0,0,0.25);
-      max-width: 260px;
+      position: absolute; top: 8px; left: 8px; z-index: 1000;
+      background: rgba(255,255,255,0.96);
+      padding: 8px 10px;
+      border-radius: 9px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.25);
+      max-width: 230px;
       border: 2px solid #111;
-      font-size: 13.5px;
+      font-size: 12.5px;
+      line-height: 1.3;
     }
     button { 
-      padding: 9px 12px; 
-      font-size: 14px; 
+      padding: 8px 10px; 
+      font-size: 13px; 
       font-weight: bold; 
       border: none; 
-      border-radius: 7px; 
-      margin: 6px 3px 6px 0; 
+      border-radius: 6px; 
+      margin: 4px 2px 4px 0; 
       width: 48%; 
     }
     #btnNow, #btnGenerate { background: #1976d2; color: white; }
-    #timeLabel { font-weight: 900; font-size: 16.5px; margin: 8px 0 3px; }
-    #status { font-size: 12.5px; color: #333; line-height: 1.35; }
+    #timeLabel { font-weight: 900; font-size: 15.5px; margin: 6px 0 2px; }
+    #status { font-size: 12px; color: #333; }
     .legendBar { 
-      height: 10px; 
-      border-radius: 5px; 
-      margin: 8px 0; 
+      height: 8px; 
+      border-radius: 4px; 
+      margin: 6px 0; 
       background: linear-gradient(to right, #2e7d32, #1976d2, #81d4fa, #d32f2f); 
     }
   </style>
@@ -45,22 +46,23 @@
   <div id="map"></div>
 
   <div id="ui">
-    <strong>NYC HVFHV Zones (1–100) for Driver Earnings</strong><br><br>
+    <strong>NYC HVFHV Zones (1–100)</strong><br>
+    <small>for Driver Earnings</small><br><br>
     
-    <strong>Colors (Demand-Based Rating):</strong><br>
-    🟢 Green = Best (High Demand/Earnings)<br>
+    <strong>Colors (Demand-Based):</strong><br>
+    🟢 Green = Best<br>
     🔵 Blue = Medium<br>
     🟦 Sky = Normal<br>
-    🔴 Red = Avoid (Low Demand)<br><br>
+    🔴 Red = Avoid<br><br>
     
     <div class="legendBar"></div>
-    <small>High rating → Low rating</small><br><br>
+    <small>High → Low rating</small><br><br>
 
     <button id="btnNow">Now (NYC)</button>
     <button id="btnGenerate">Generate / Refresh</button>
 
     <div id="timeLabel">Loading NYC time…</div>
-    <div id="status">Checking Railway volume…</div>
+    <div id="status">Checking Railway…</div>
     <input type="range" id="slider" min="0" max="0" value="0" step="1"/>
   </div>
 
@@ -84,10 +86,10 @@
     const polyLayer = L.geoJSON(null, {
       style: f => ({
         stroke: true,
-        color: "#111",
-        weight: 2.2,
+        color: "#000",
+        weight: 2.5,
         fillColor: ratingToColor(f.properties?.rating || 50),
-        fillOpacity: 0.82
+        fillOpacity: 0.85
       })
     }).addTo(map);
 
@@ -164,7 +166,7 @@
         }, 60000);
 
       } catch (e) {
-        setStatus("No processed data yet.<br>Click <strong>Generate / Refresh</strong> once to build from your PARQUET files in Railway volume.");
+        setStatus("No processed data yet.<br>Tap <strong>Generate / Refresh</strong> once.");
       }
     }
 
@@ -177,7 +179,7 @@
     };
 
     document.getElementById("btnGenerate").onclick = async () => {
-      setStatus("Processing on Railway… (1–2 min)<br>After it finishes the map will auto-load.");
+      setStatus("Processing on Railway… (1–2 min)");
       try {
         await fetch(`${BASE}/generate?bin_minutes=20&good_n=200&bad_n=120&win_good_n=80&win_bad_n=40&min_trips_per_window=10&simplify_meters=25`, {method:"POST"});
         setTimeout(boot, 90000);
