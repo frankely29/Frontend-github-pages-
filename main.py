@@ -1,24 +1,23 @@
 from fastapi import FastAPI, UploadFile, File
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pathlib import Path
-import os
+import shutil
 import traceback
-import gzip
 
 from build_hotspots import build_hotspots_json
 
 app = FastAPI()
 
-# Persistent Railway Volume should be mounted here:
-DATA_DIR = Path(os.getenv("DATA_DIR", "/data"))
-OUT_JSON = Path(os.getenv("OUT_JSON", "/data/hotspots_20min.json"))
-OUT_GZ = Path(str(OUT_JSON) + ".gz")
+# IMPORTANT: persist everything on the Railway Volume
+# You mounted the volume to /data, so we use it.
+DATA_DIR = Path("/data")
+OUT_PATH = DATA_DIR / "hotspots_20min.json"
 
 # Allow GitHub Pages to fetch from Railway
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # ok for your use case; can lock down later
+    allow_origins=["*"],  # you can tighten later to your github domain
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -26,14 +25,10 @@ app.add_middleware(
 
 @app.get("/")
 def root():
-    return status()
-
-@app.get("/status")
-def status():
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     parquets = sorted([p.name for p in DATA_DIR.glob("*.parquet")])
-    has_output = OUT_JSON.exists()
-    out_mb = round(OUT_JSON.stat().st_size / 1024 / 1024, 2) if has_output else 0
+    has_output = OUT_PATH.exists()
+    out_mb = round(OUT_PATH.stat().st_size / 1024 / 1024, 2) if has_output else 0
     return {
         "status": "ok",
         "data_dir": str(DATA_DIR),
@@ -42,18 +37,26 @@ def status():
         "output_mb": out_mb,
     }
 
+@app.get("/health")
+def health():
+    return {"ok": True}
+
 @app.post("/upload")
 async def upload(file: UploadFile = File(...)):
+    """
+    Stream upload to disk (does NOT load 500MB into RAM).
+    """
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     out_path = DATA_DIR / file.filename
-    content = await file.read()
-    out_path.write_bytes(content)
-    return {"saved": str(out_path), "size_mb": round(len(content) / 1024 / 1024, 2)}
 
-def _gzip_file(src: Path, dst: Path) -> None:
-    with src.open("rb") as f_in:
-        with gzip.open(dst, "wb", compresslevel=6) as f_out:
-            f_out.writelines(f_in)
+    try:
+        with out_path.open("wb") as f:
+            shutil.copyfileobj(file.file, f)
+
+        size_mb = round(out_path.stat().st_size / 1024 / 1024, 2)
+        return {"saved": str(out_path), "size_mb": size_mb}
+    except Exception as e:
+        return JSONResponse({"error": str(e), "trace": traceback.format_exc()}, status_code=500)
 
 @app.post("/generate")
 def generate(
@@ -65,6 +68,9 @@ def generate(
     min_trips_per_window: int = 10,
     simplify_meters: float = 25.0
 ):
+    """
+    Generates /data/hotspots_20min.json (persisted on the Railway volume).
+    """
     try:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         parquets = list(DATA_DIR.glob("*.parquet"))
@@ -74,10 +80,9 @@ def generate(
                 status_code=400
             )
 
-        # Build hotspots JSON
         build_hotspots_json(
             parquet_files=parquets,
-            out_path=OUT_JSON,
+            out_path=OUT_PATH,
             bin_minutes=bin_minutes,
             good_n=good_n,
             bad_n=bad_n,
@@ -87,50 +92,22 @@ def generate(
             simplify_meters=simplify_meters,
         )
 
-        # Create gz version (for phone-friendly download)
-        _gzip_file(OUT_JSON, OUT_GZ)
-
-        return {
-            "ok": True,
-            "output": str(OUT_JSON),
-            "gzip": str(OUT_GZ),
-            "size_mb": round(OUT_JSON.stat().st_size / 1024 / 1024, 2),
-        }
-
+        return {"ok": True, "output": str(OUT_PATH), "size_mb": round(OUT_PATH.stat().st_size / 1024 / 1024, 2)}
     except Exception as e:
-        return JSONResponse(
-            {"error": str(e), "trace": traceback.format_exc()},
-            status_code=500
-        )
+        return JSONResponse({"error": str(e), "trace": traceback.format_exc()}, status_code=500)
 
 @app.get("/hotspots")
 def hotspots():
     """
-    Returns hotspots JSON gzip-compressed (faster on phone).
-    Browser fetch() will transparently decompress it.
+    This is what GitHub Pages should fetch:
+    https://YOUR-RAILWAY-URL/hotspots
     """
-    if not OUT_JSON.exists():
-        return JSONResponse(
-            {"error": "hotspots_20min.json not generated yet. Call /generate first."},
-            status_code=404
-        )
+    if not OUT_PATH.exists():
+        return JSONResponse({"error": "hotspots_20min.json not generated yet. Call /generate first."}, status_code=404)
+    return FileResponse(str(OUT_PATH), media_type="application/json", filename="hotspots_20min.json")
 
-    # Prefer gzip if available
-    if OUT_GZ.exists():
-        data = OUT_GZ.read_bytes()
-        return Response(
-            content=data,
-            media_type="application/json",
-            headers={
-                "Content-Encoding": "gzip",
-                "Cache-Control": "no-store",
-            },
-        )
-
-    # Fallback (not gz)
-    data = OUT_JSON.read_bytes()
-    return Response(
-        content=data,
-        media_type="application/json",
-        headers={"Cache-Control": "no-store"},
-    )
+@app.get("/download")
+def download():
+    if not OUT_PATH.exists():
+        return JSONResponse({"error": "hotspots_20min.json not generated yet. Call /generate first."}, status_code=404)
+    return FileResponse(str(OUT_PATH), media_type="application/json", filename="hotspots_20min.json")
