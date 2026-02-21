@@ -1,31 +1,14 @@
 // =======================
-// TLC Hotspot Map - app.js (Phone-friendly)
-// Polygons = rating (red→yellow→green)
-// Icons = extremes only (Top ✓ / Bottom ✖ per time window)
-// Purple dots = intensity indicator (higher rating = more purple)
-// Data loads from Railway: GET {RAILWAY_BASE}/hotspots
+// TLC Hotspot Map - app.js (Clear signals, no confusion)
+// - Neutral zones are gray
+// - Only Top N zones are GREEN (good)
+// - Only Bottom N zones are RED (bad)
+// - No purple dots
+// - Data loads from Railway: GET {RAILWAY_BASE}/hotspots
+// - iPhone smooth slider (throttled)
 // =======================
 
 function clamp01(x){ return Math.max(0, Math.min(1, x)); }
-function lerp(a,b,t){ return a + (b-a)*t; }
-
-function scoreToColorHex(score01){
-  const s = clamp01(score01);
-  let r,g,b;
-  if (s <= 0.5){
-    const t = s/0.5;
-    r = Math.round(lerp(230,255,t));
-    g = Math.round(lerp(0,215,t));
-    b = 0;
-  } else {
-    const t = (s-0.5)/0.5;
-    r = Math.round(lerp(255,0,t));
-    g = Math.round(lerp(215,176,t));
-    b = Math.round(lerp(0,80,t));
-  }
-  const toHex = (n)=>n.toString(16).padStart(2,'0');
-  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
-}
 
 function fmtMoney(x){
   if (x === null || x === undefined || Number.isNaN(x)) return "n/a";
@@ -47,7 +30,7 @@ function getApiBase(){
   const u = new URL(location.href);
   const qp = u.searchParams.get("api");
   if (qp) return qp.replace(/\/+$/,"");
-  // Default (SET THIS to your Railway domain)
+  // Default (your current Railway domain)
   return "https://web-production-78f67.up.railway.app";
 }
 
@@ -63,27 +46,25 @@ L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
 map.createPane("polys");
 map.getPane("polys").style.zIndex = 400;
 
-map.createPane("dots");
-map.getPane("dots").style.zIndex = 520;
-
 map.createPane("icons");
 map.getPane("icons").style.zIndex = 650;
 
 // Layers
 const polyLayer = L.geoJSON(null, {
   pane: "polys",
-  style: (f) => (f && f.properties && f.properties.style) ? f.properties.style : {color:"#444", weight:1, fillOpacity:0.55},
+  style: () => ({
+    color: "#2f2f2f",
+    weight: 1,
+    fillColor: "#bdbdbd",   // neutral gray
+    fillOpacity: 0.30
+  }),
   onEachFeature: (feature, layer) => {
     const p = feature.properties || {};
     if (p.popup) layer.bindPopup(p.popup, { maxWidth: 360 });
   }
 }).addTo(map);
 
-const dotLayer = L.layerGroup().addTo(map);
 const iconLayer = L.layerGroup().addTo(map);
-
-let timeline = [];
-let framesByTime = new Map();
 
 // UI elements
 const timeLabelEl = document.getElementById("timeLabel");
@@ -92,8 +73,17 @@ const statusEl = document.getElementById("statusLine");
 const showIconsEl = document.getElementById("showIcons");
 const topNEl = document.getElementById("topN");
 const botNEl = document.getElementById("botN");
-const showDotsEl = document.getElementById("showDots");
 const generateBtn = document.getElementById("generateBtn");
+
+// Minimize panel
+const panelEl = document.getElementById("panel");
+const miniBtn = document.getElementById("miniBtn");
+if (miniBtn && panelEl){
+  miniBtn.addEventListener("click", () => {
+    panelEl.classList.toggle("collapsed");
+    miniBtn.textContent = panelEl.classList.contains("collapsed") ? "Open" : "Minimize";
+  });
+}
 
 function makeBadgeIcon(type){
   // type: "TOP" or "BOTTOM"
@@ -103,12 +93,12 @@ function makeBadgeIcon(type){
 
   const html = `
     <div style="
-      width:28px;height:28px;border-radius:14px;
+      width:26px;height:26px;border-radius:13px;
       background:#fff;
       border:3px solid ${stroke};
       display:flex;align-items:center;justify-content:center;
       font-weight:900;
-      font-size:18px;
+      font-size:16px;
       color:#111;
       box-shadow:0 1px 6px rgba(0,0,0,0.25);
     ">${symbol}</div>
@@ -116,17 +106,39 @@ function makeBadgeIcon(type){
   return L.divIcon({
     html,
     className: "",
-    iconSize: [28,28],
-    iconAnchor: [14,14]
+    iconSize: [26,26],
+    iconAnchor: [13,13]
   });
 }
 
+const topIcon = makeBadgeIcon("TOP");
+const botIcon = makeBadgeIcon("BOTTOM");
+
+let timeline = [];
+let framesByTime = new Map();
+
 function clearAll(){
   polyLayer.clearLayers();
-  dotLayer.clearLayers();
   iconLayer.clearLayers();
 }
 
+// Some backends store center as [lng,lat] by mistake.
+// This normalizes to [lat,lng].
+function normalizeLatLng(c){
+  if (!c || !Array.isArray(c) || c.length !== 2) return null;
+  const a = Number(c[0]);
+  const b = Number(c[1]);
+  if (Number.isNaN(a) || Number.isNaN(b)) return null;
+
+  // If first value looks like longitude (abs > 90) then swap
+  if (Math.abs(a) > 90 && Math.abs(b) <= 90) return [b, a];
+  return [a, b];
+}
+
+// Apply clear signal styling:
+// - Neutral = gray
+// - Top N = green
+// - Bottom N = red
 function rebuildAtIndex(idx){
   const key = timeline[idx];
   const frame = framesByTime.get(key);
@@ -135,97 +147,91 @@ function rebuildAtIndex(idx){
   timeLabelEl.textContent = formatTimeLabel(key);
   clearAll();
 
-  // 1) Polygons (rating color)
-  if (frame.polygons) polyLayer.addData(frame.polygons);
-
-  // Collect “zone items” from polygons to compute extremes per window
-  const zoneItems = [];
-  try {
-    const feats = (frame.polygons && frame.polygons.features) ? frame.polygons.features : [];
-    for (const f of feats){
-      const p = f.properties || {};
-      // rating can be inside popup only, but in our generator it exists as p.rating or can be derived:
-      // We support either p.rating OR p.style.fillColor -> convert to approx not needed.
-      const rating = (p.rating !== undefined) ? Number(p.rating) : null;
-      const center = p.center || null; // if generator provides
-      zoneItems.push({ feature: f, props: p, rating, center });
-    }
-  } catch(e){}
-
-  // 2) Purple “intensity” dots (one per polygon/zone)
-  const showDots = !!(showDotsEl && showDotsEl.checked);
-  if (showDots){
-    const feats = (frame.polygons && frame.polygons.features) ? frame.polygons.features : [];
-    for (const f of feats){
-      const p = f.properties || {};
-      const rating = (p.rating !== undefined) ? Number(p.rating) : null;
-      const c = p.center; // [lat,lng] preferred
-      if (!c || !Array.isArray(c) || c.length !== 2) continue;
-      if (rating === null || Number.isNaN(rating)) continue;
-
-      const t = clamp01((rating - 1) / 99); // 0..1
-      const radius = 6 + Math.round(12 * t);
-      const opacity = 0.10 + 0.35 * t;
-
-      const circle = L.circleMarker([c[0], c[1]], {
-        pane: "dots",
-        radius,
-        color: "transparent",
-        weight: 0,
-        fillColor: "#7a2cff", // purple
-        fillOpacity: opacity
-      });
-
-      circle.addTo(dotLayer);
-    }
-  }
-
-  // 3) Extremes-only icons (Top ✓, Bottom ✖) per current window
-  const showIcons = !!(showIconsEl && showIconsEl.checked);
-  if (!showIcons) return;
-
-  // Don’t spam icons when zoomed out
-  if (map.getZoom() < 12) return;
-
-  const topN = Math.max(0, Number(topNEl?.value || 25));
-  const botN = Math.max(0, Number(botNEl?.value || 25));
-
-  // We need sortable items with rating + center
-  const items = [];
   const feats = (frame.polygons && frame.polygons.features) ? frame.polygons.features : [];
+  if (!feats.length) return;
+
+  const items = [];
   for (const f of feats){
     const p = f.properties || {};
     const rating = (p.rating !== undefined) ? Number(p.rating) : null;
-    const c = p.center;
-    if (!c || !Array.isArray(c) || c.length !== 2) continue;
+    const c = normalizeLatLng(p.center);
     if (rating === null || Number.isNaN(rating)) continue;
-    items.push({ p, rating, c });
+    items.push({ feature: f, props: p, rating, center: c });
   }
 
-  // Sort high→low and low→high
+  // Decide extremes
+  const topN = Math.max(0, Number(topNEl?.value || 25));
+  const botN = Math.max(0, Number(botNEl?.value || 25));
+
   const hi = [...items].sort((a,b)=>b.rating - a.rating).slice(0, topN);
   const lo = [...items].sort((a,b)=>a.rating - b.rating).slice(0, botN);
 
-  const topIcon = makeBadgeIcon("TOP");
-  const botIcon = makeBadgeIcon("BOTTOM");
+  const topSet = new Set(hi.map(x => x.props.LocationID || x.props.location_id || x.props.zone_id || x.props.zone || JSON.stringify(x.center)));
+  const botSet = new Set(lo.map(x => x.props.LocationID || x.props.location_id || x.props.zone_id || x.props.zone || JSON.stringify(x.center)));
+
+  // Rebuild polygons with new style based on signal
+  const styled = {
+    type: "FeatureCollection",
+    features: feats.map(f => {
+      const p = f.properties || {};
+      const rating = (p.rating !== undefined) ? Number(p.rating) : null;
+
+      const keyId = (p.LocationID || p.location_id || p.zone_id || p.zone || JSON.stringify(normalizeLatLng(p.center)));
+      let fillColor = "#bdbdbd"; // neutral
+      let fillOpacity = 0.30;
+      let borderColor = "#2f2f2f";
+      let weight = 1;
+
+      if (topSet.has(keyId)){
+        fillColor = "#00b050";   // green (good)
+        fillOpacity = 0.38;
+        borderColor = "#008a40";
+        weight = 2;
+      } else if (botSet.has(keyId)){
+        fillColor = "#e60000";   // red (bad)
+        fillOpacity = 0.35;
+        borderColor = "#b00000";
+        weight = 2;
+      }
+
+      // Keep existing popup, just adjust style
+      const newProps = Object.assign({}, p, {
+        style: {
+          color: borderColor,
+          weight: weight,
+          fillColor: fillColor,
+          fillOpacity: fillOpacity
+        }
+      });
+
+      return { ...f, properties: newProps };
+    })
+  };
+
+  polyLayer.addData(styled);
+
+  // Icons (optional)
+  const showIcons = !!(showIconsEl && showIconsEl.checked);
+  if (!showIcons) return;
+
+  // If zoomed out, icons become clutter
+  if (map.getZoom() < 12) return;
 
   function bindPopupFor(item, type){
-    const p = item.p || {};
+    const p = item.props || {};
     const zone = p.zone || p.Zone || p.name || "Zone";
     const borough = p.borough || p.Borough || "Unknown";
     const pickups = (p.pickups !== undefined) ? p.pickups : "n/a";
     const avgPay = p.avg_driver_pay;
     const avgTips = p.avg_tips;
-
     const rating = item.rating;
-    const color = scoreToColorHex((rating - 1) / 99);
 
     const label = (type === "TOP") ? "Very Good (Top)" : "Very Low (Bottom)";
     return `
       <div style="font-family:Arial; font-size:13px;">
         <div style="font-weight:900; font-size:14px;">${zone}</div>
         <div style="color:#666; margin-bottom:4px;">${borough} — <b>${label}</b></div>
-        <div><b>Rating:</b> <span style="font-weight:900; color:${color};">${rating}/100</span></div>
+        <div><b>Rating:</b> <span style="font-weight:900;">${rating}/100</span></div>
         <hr style="margin:6px 0;">
         <div><b>Pickups:</b> ${pickups}</div>
         <div><b>Avg driver pay:</b> ${fmtMoney(avgPay)}</div>
@@ -235,29 +241,31 @@ function rebuildAtIndex(idx){
   }
 
   for (const it of hi){
-    const m = L.marker([it.c[0], it.c[1]], { icon: topIcon, pane: "icons" });
+    if (!it.center) continue;
+    const m = L.marker([it.center[0], it.center[1]], { icon: topIcon, pane: "icons" });
     m.bindPopup(bindPopupFor(it, "TOP"), { maxWidth: 360 });
     m.addTo(iconLayer);
   }
 
   for (const it of lo){
-    const m = L.marker([it.c[0], it.c[1]], { icon: botIcon, pane: "icons" });
+    if (!it.center) continue;
+    const m = L.marker([it.center[0], it.center[1]], { icon: botIcon, pane: "icons" });
     m.bindPopup(bindPopupFor(it, "BOTTOM"), { maxWidth: 360 });
     m.addTo(iconLayer);
   }
 }
 
 async function loadHotspots(){
-  statusEl.textContent = `Loading data from Railway: ${RAILWAY_BASE}`;
-
+  statusEl.textContent = `Loading from Railway…`;
   const url = `${RAILWAY_BASE}/hotspots`;
   const res = await fetch(url, { cache: "no-store" });
   if (!res.ok){
-    throw new Error(`Failed to fetch hotspots (${res.status}). Make sure Railway has /hotspots and you ran /generate.`);
+    let txt = "";
+    try { txt = await res.text(); } catch(e){}
+    throw new Error(`Failed to fetch hotspots (${res.status}). ${txt}`);
   }
 
   const payload = await res.json();
-
   timeline = payload.timeline || [];
   framesByTime = new Map((payload.frames || []).map(f => [f.time, f]));
 
@@ -266,7 +274,7 @@ async function loadHotspots(){
   sliderEl.step = 1;
   sliderEl.value = 0;
 
-  // Throttled slider (smooth on iPhone)
+  // Throttle slider for iPhone
   let pending = null;
   sliderEl.addEventListener("input", () => {
     pending = Number(sliderEl.value);
@@ -280,30 +288,28 @@ async function loadHotspots(){
   // Rebuild when toggles change
   function refresh(){ rebuildAtIndex(Number(sliderEl.value)); }
   showIconsEl?.addEventListener("change", refresh);
-  showDotsEl?.addEventListener("change", refresh);
   topNEl?.addEventListener("change", refresh);
   botNEl?.addEventListener("change", refresh);
   map.on("zoomend", refresh);
 
   if (timeline.length > 0){
-    statusEl.textContent = `Loaded ${timeline.length} time steps from Railway ✅`;
+    statusEl.textContent = `Loaded ✅ (${timeline.length} time steps)`;
     rebuildAtIndex(0);
   } else {
-    statusEl.textContent = `Loaded but no frames found in payload.`;
+    statusEl.textContent = `Loaded but no frames found.`;
     timeLabelEl.textContent = "No data";
   }
 }
 
 async function runGenerate(){
-  // Optional button: triggers Railway generation
   try{
     generateBtn.disabled = true;
-    statusEl.textContent = "Generating on Railway… (this can take a bit)";
+    statusEl.textContent = "Generating on Railway…";
     const genUrl = `${RAILWAY_BASE}/generate?bin_minutes=20&good_n=200&bad_n=120&win_good_n=80&win_bad_n=40&min_trips_per_window=10&simplify_meters=25`;
     const res = await fetch(genUrl, { method: "POST" });
     const j = await res.json();
     if (!res.ok) throw new Error(j.error || `Generate failed (${res.status})`);
-    statusEl.textContent = `Generate OK ✅ (${j.size_mb} MB). Reloading data…`;
+    statusEl.textContent = `Generate OK ✅ (${j.size_mb} MB). Reloading…`;
     await loadHotspots();
   } catch(e){
     statusEl.textContent = "ERROR: " + (e?.message || String(e));
