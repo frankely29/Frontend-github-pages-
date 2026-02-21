@@ -13,100 +13,83 @@
     #map { height: 100%; width: 100%; }
 
     .panel {
-      position: fixed; top: 12px; left: 12px; right: 12px;
-      z-index: 9999;
+      position: fixed; top: 12px; left: 12px; z-index: 9999;
       background: rgba(255,255,255,0.96);
-      padding: 10px 12px;
-      border: 2px solid #111;
-      border-radius: 12px;
-      font-family: Arial, sans-serif;
-      font-size: 14px;
-      max-width: 520px;
+      padding: 12px 14px; border: 2px solid #111; border-radius: 12px;
+      font-family: Arial, sans-serif; font-size: 14px; max-width: 440px;
       box-shadow: 0 2px 10px rgba(0,0,0,0.25);
     }
-    .title { font-weight: 900; font-size: 16px; margin-bottom: 8px; }
-    .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .row { display: flex; align-items: center; gap: 10px; }
     .bar {
       height: 12px; width: 220px; border: 1px solid #333;
       background: linear-gradient(90deg, #e60000, #ffd700, #00b050);
       border-radius: 6px;
     }
-    .small { font-size: 12px; color: #333; line-height: 1.35; margin-top: 8px; }
+    .small { font-size: 12px; color: #444; line-height: 1.35; margin-top: 10px; }
+
+    .pillRow { display:flex; gap:10px; margin-top:10px; flex-wrap:wrap; }
     .pill {
-      display: inline-flex; align-items:center; gap:8px;
-      padding: 6px 10px;
-      border: 1px solid #bbb;
+      display:flex; align-items:center; gap:8px;
+      background: rgba(255,255,255,0.92);
+      border: 1px solid rgba(0,0,0,0.25);
       border-radius: 999px;
-      background: rgba(255,255,255,0.9);
+      padding: 8px 10px;
       font-weight: 700;
     }
+    .pill .icon {
+      width:26px;height:26px;border-radius:13px;
+      display:flex;align-items:center;justify-content:center;
+      font-weight:900;
+      background:#fff;
+    }
+
     .sliderWrap {
-      position: fixed; left: 12px; right: 12px; bottom: 16px;
-      z-index: 9999;
+      position: fixed; left: 12px; right: 12px; bottom: 16px; z-index: 9999;
       background: rgba(255,255,255,0.96);
-      border: 2px solid #111;
-      border-radius: 12px;
+      border: 2px solid #111; border-radius: 12px;
       padding: 10px 12px;
       font-family: Arial, sans-serif;
       box-shadow: 0 2px 10px rgba(0,0,0,0.25);
-      max-width: 700px;
-      margin: 0 auto;
     }
     input[type="range"] { width: 100%; }
     .timeLabel { font-weight: 900; font-size: 18px; }
-
-    .controls {
-      display:flex; gap:10px; align-items:center; flex-wrap:wrap;
-      margin-top: 8px;
-    }
-    .controls label { font-size: 12px; color:#222; font-weight:700; }
-    .controls input[type="number"]{
-      width: 70px;
-      padding: 4px 6px;
-      border-radius: 8px;
-      border: 1px solid #bbb;
-      font-weight: 700;
-    }
-    .hint { font-size: 12px; color:#444; margin-top: 6px; }
   </style>
 </head>
-
 <body>
   <div id="map"></div>
 
   <div class="panel">
-    <div class="title">NYC HVFHV Pickup Zones (1–100)</div>
+    <div style="font-weight:900; font-size:16px; margin-bottom:10px;">
+      NYC HVFHV Pickup Zones (1–100)
+    </div>
 
-    <div class="row" style="margin-bottom:8px;">
+    <div class="row" style="margin-bottom:10px;">
       <div class="bar"></div>
-      <div style="display:flex; justify-content:space-between; width:170px; font-weight:800;">
+      <div style="display:flex; justify-content:space-between; width:170px; font-weight:700;">
         <span>Low</span><span>Mid</span><span>High</span>
       </div>
     </div>
 
-    <div class="row" style="gap:12px; margin-bottom:6px;">
-      <div class="pill"><span style="color:#00b050; font-weight:900; font-size:18px;">✔</span> Very Good (Top)</div>
-      <div class="pill"><span style="color:#e60000; font-weight:900; font-size:18px;">✖</span> Very Low (Bottom)</div>
+    <div class="pillRow">
+      <div class="pill">
+        <div class="icon" style="border:2px solid #00b050; color:#00b050;">✔</div>
+        Very Good (≥ 90)
+      </div>
+      <div class="pill">
+        <div class="icon" style="border:2px solid #e60000; color:#e60000;">✖</div>
+        Very Low (≤ 10)
+      </div>
+      <div class="pill">
+        <div class="icon" style="border:2px solid #8000ff; color:#8000ff;">●</div>
+        Purple Pulse = intensity
+      </div>
     </div>
 
     <div class="small">
-      • <b>Polygon color = Rating</b> (red → yellow → green).<br>
-      • Icons show only <b>extremes</b> so you don’t get conflicting signals.<br>
-      • Use the 20-minute timeline below.
-    </div>
-
-    <div class="controls">
-      <label><input id="toggleIcons" type="checkbox" checked /> Show icons</label>
-      <label>Top ✔:
-        <input id="topN" type="number" min="0" max="300" value="40" />
-      </label>
-      <label>Bottom ✖:
-        <input id="bottomN" type="number" min="0" max="300" value="40" />
-      </label>
-    </div>
-
-    <div class="hint">
-      Tip: If icons overlap, lower Top/Bottom counts (ex: 25 / 25).
+      • Polygon color is the rating for the selected 20-minute window (Red → Yellow → Green).<br>
+      • Icons only show the extreme zones so the map doesn’t get messy.<br>
+      • Purple pulse is stronger where the zone is more active (visual aid; not a true within-zone heatmap).<br>
+      • Use the timeline slider below.
     </div>
   </div>
 
@@ -114,11 +97,6 @@
     <div class="timeLabel" id="timeLabel">Loading…</div>
     <input id="slider" type="range" min="0" max="0" step="1" value="0" />
   </div>
-
-  <!-- IMPORTANT: Set your Railway domain here -->
-  <script>
-    window.API_BASE = "https://web-production-78f67.up.railway.app";
-  </script>
 
   <script src="./app.js"></script>
 </body>
