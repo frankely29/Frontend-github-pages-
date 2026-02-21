@@ -1,71 +1,58 @@
 from fastapi import FastAPI, UploadFile, File
-from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
 from pathlib import Path
+import os
+import shutil
 import traceback
 
 from build_hotspots import build_hotspots_json
 
-app = FastAPI(title="TLC Hotspot Builder API")
+app = FastAPI()
 
-# CORS so your GitHub Pages site can fetch from Railway
+# Persist EVERYTHING on the Railway Volume:
+# You mounted the volume at /data, so use it.
+DATA_DIR = Path(os.getenv("DATA_DIR", "/data")).resolve()
+OUT_PATH = DATA_DIR / "hotspots_20min.json"
+
+# Allow GitHub Pages to fetch from Railway
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # you can lock this down later to your github.io domain
+    allow_origins=["*"],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Railway Volume should be mounted to /data
-DATA_DIR = Path("/data")
-DATA_DIR.mkdir(parents=True, exist_ok=True)
-
-# Store output on the same persistent volume
-OUT_PATH = DATA_DIR / "hotspots_20min.json"
-
-
 @app.get("/")
 def root():
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
     parquets = sorted([p.name for p in DATA_DIR.glob("*.parquet")])
+    has_output = OUT_PATH.exists()
     return {
         "status": "ok",
         "data_dir": str(DATA_DIR),
         "parquets": parquets,
-        "has_output": OUT_PATH.exists(),
-        "output_mb": round(OUT_PATH.stat().st_size / 1024 / 1024, 2) if OUT_PATH.exists() else 0,
+        "has_output": has_output,
+        "output_mb": round(OUT_PATH.stat().st_size / 1024 / 1024, 2) if has_output else 0
     }
-
-
-@app.get("/status")
-def status():
-    parquets = sorted([p.name for p in DATA_DIR.glob("*.parquet")])
-    return {
-        "status": "ok",
-        "data_dir": str(DATA_DIR),
-        "parquets": parquets,
-        "has_output": OUT_PATH.exists(),
-        "output_mb": round(OUT_PATH.stat().st_size / 1024 / 1024, 2) if OUT_PATH.exists() else 0,
-    }
-
 
 @app.post("/upload")
 async def upload(file: UploadFile = File(...)):
     """
-    Upload parquet(s) to the persistent /data volume.
+    Upload parquet files to the persistent /data volume.
+    This streams to disk (won't try to hold 500MB in RAM).
     """
-    try:
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        out_path = DATA_DIR / file.filename
-        content = await file.read()
-        out_path.write_bytes(content)
-        return {"saved": str(out_path), "size_mb": round(len(content) / 1024 / 1024, 2)}
-    except Exception as e:
-        return JSONResponse(
-            {"error": str(e), "trace": traceback.format_exc()},
-            status_code=500,
-        )
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    out_path = DATA_DIR / file.filename
 
+    with out_path.open("wb") as f:
+        shutil.copyfileobj(file.file, f)
+
+    return {
+        "saved": str(out_path),
+        "size_mb": round(out_path.stat().st_size / 1024 / 1024, 2)
+    }
 
 @app.post("/generate")
 def generate(
@@ -75,10 +62,10 @@ def generate(
     win_good_n: int = 80,
     win_bad_n: int = 40,
     min_trips_per_window: int = 10,
-    simplify_meters: float = 25.0,
+    simplify_meters: float = 25.0
 ):
     """
-    Build /data/hotspots_20min.json from the uploaded parquets.
+    Generates /data/hotspots_20min.json (persistent on the Railway volume).
     """
     try:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -86,7 +73,7 @@ def generate(
         if not parquets:
             return JSONResponse(
                 {"error": "No .parquet files found in /data. Upload first via /upload."},
-                status_code=400,
+                status_code=400
             )
 
         build_hotspots_json(
@@ -103,45 +90,35 @@ def generate(
 
         return {
             "ok": True,
-            "output": str(OUT_PATH.name),
-            "size_mb": round(OUT_PATH.stat().st_size / 1024 / 1024, 2),
+            "output": str(OUT_PATH),
+            "size_mb": round(OUT_PATH.stat().st_size / 1024 / 1024, 2)
         }
     except Exception as e:
         return JSONResponse(
             {"error": str(e), "trace": traceback.format_exc()},
-            status_code=500,
+            status_code=500
         )
 
-
-@app.get("/hotspots")
-def hotspots():
+@app.get("/hotspots_20min.json")
+def hotspots_json():
     """
-    Returns the generated JSON directly (for GitHub Pages fetch).
+    Serve the generated JSON to GitHub Pages.
     """
     if not OUT_PATH.exists():
         return JSONResponse(
-            {"error": "hotspots_20min.json not generated yet. Call POST /generate first."},
-            status_code=404,
+            {"error": "hotspots_20min.json not generated yet. Call /generate first."},
+            status_code=404
         )
-    return FileResponse(
-        str(OUT_PATH),
-        media_type="application/json",
-        filename="hotspots_20min.json",
-    )
-
+    return FileResponse(str(OUT_PATH), media_type="application/json", filename="hotspots_20min.json")
 
 @app.get("/download")
 def download():
     """
-    Same as /hotspots, kept for backwards compatibility.
+    Same as /hotspots_20min.json (kept for backwards compatibility).
     """
     if not OUT_PATH.exists():
         return JSONResponse(
-            {"error": "hotspots_20min.json not generated yet. Call POST /generate first."},
-            status_code=404,
+            {"error": "hotspots_20min.json not generated yet. Call /generate first."},
+            status_code=404
         )
-    return FileResponse(
-        str(OUT_PATH),
-        media_type="application/json",
-        filename="hotspots_20min.json",
-    )
+    return FileResponse(str(OUT_PATH), media_type="application/json", filename="hotspots_20min.json")
