@@ -12,18 +12,18 @@
     html, body { height: 100%; margin: 0; }
     #map { height: 100%; width: 100%; }
 
-    /* ===== SMALL TOP PANEL (about 3x smaller) ===== */
+    /* ===== ULTRA SMALL PANEL (much smaller) ===== */
     .panel {
       position: fixed;
-      top: 10px; left: 10px;
+      top: 8px; left: 8px;
       z-index: 9999;
-      background: rgba(255,255,255,0.92);
-      padding: 8px 8px;
+      background: rgba(255,255,255,0.90);
+      padding: 6px 6px;
       border: 2px solid #111;
       border-radius: 10px;
       font-family: Arial, sans-serif;
-      font-size: 11px;
-      max-width: 260px;
+      font-size: 10px;
+      width: 205px;          /* hard cap so it stays small */
       box-shadow: 0 2px 10px rgba(0,0,0,0.25);
     }
 
@@ -31,85 +31,86 @@
       display:flex;
       align-items:center;
       justify-content:space-between;
-      gap:8px;
+      gap:6px;
       font-weight:900;
-      font-size: 12px;
-      margin-bottom: 6px;
+      font-size: 11px;
+      margin-bottom: 5px;
+      line-height: 1.05;
     }
 
     .btnMini {
       border: 2px solid #111;
       background: #fff;
       border-radius: 8px;
-      padding: 4px 8px;
+      padding: 2px 6px;
       font-weight: 900;
-      font-size: 11px;
+      font-size: 10px;
     }
 
-    .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-
     .bar {
-      height: 10px;
-      width: 140px;
+      height: 8px;
+      width: 118px;
       border: 1px solid #333;
       border-radius: 6px;
       background: linear-gradient(90deg, #e60000, #ffd700, #00b050);
+      margin-bottom: 6px;
     }
+
+    .row { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
 
     .pill {
       display:inline-flex;
       align-items:center;
-      gap:6px;
-      padding: 6px 8px;
+      gap:5px;
+      padding: 4px 6px;
       border: 1px solid #bbb;
       border-radius: 999px;
       background: rgba(255,255,255,0.95);
       font-weight: 900;
-      font-size: 11px;
+      font-size: 10px;
     }
 
     .small {
-      font-size: 10px;
-      color: #333;
-      line-height: 1.25;
+      font-size: 9px;
+      color: #222;
+      line-height: 1.15;
       margin-top: 6px;
     }
 
     .controlRow {
       display:flex;
-      gap:8px;
+      gap:6px;
       align-items:center;
       margin-top: 6px;
       flex-wrap: wrap;
     }
 
     input[type="number"]{
-      width: 60px;
-      padding: 5px 6px;
+      width: 46px;
+      padding: 4px 5px;
       border:1px solid #bbb;
       border-radius: 8px;
-      font-size: 12px;
+      font-size: 11px;
     }
 
     button{
-      padding: 6px 8px;
+      padding: 5px 7px;
       border: 2px solid #111;
       border-radius: 10px;
       background: #fff;
       font-weight: 900;
-      font-size: 11px;
+      font-size: 10px;
     }
 
     .statusLine{
       margin-top: 6px;
-      font-size: 10px;
+      font-size: 9px;
       color: #111;
       background: rgba(0,0,0,0.06);
-      padding: 5px 6px;
+      padding: 4px 5px;
       border-radius: 10px;
     }
 
-    /* Collapsed view */
     .collapsed .panelBody { display:none; }
 
     /* ===== BOTTOM SLIDER ===== */
@@ -131,44 +132,39 @@
 
   <div class="panel" id="panel">
     <div class="panelHeader">
-      <div>NYC HVFHV Zones (1–100)</div>
-      <button class="btnMini" id="miniBtn" type="button">Minimize</button>
+      <div>NYC HVFHV<br>Zones (1–100)</div>
+      <button class="btnMini" id="miniBtn" type="button">Min</button>
     </div>
 
     <div class="panelBody">
-      <div class="row" style="margin-bottom:6px;">
-        <div class="bar"></div>
-        <div style="display:flex; gap:10px; font-weight:900;">
-          <span>Low</span><span>Mid</span><span>High</span>
-        </div>
-      </div>
+      <div class="bar"></div>
 
-      <div class="row" style="gap:8px;">
-        <span class="pill"><span style="color:#00b050;">✓</span> Top (Good)</span>
-        <span class="pill"><span style="color:#e60000;">✖</span> Bottom (Bad)</span>
+      <div class="row" style="margin-bottom:6px;">
+        <span class="pill"><span style="color:#00b050;">✓</span> Top</span>
+        <span class="pill"><span style="color:#e60000;">✖</span> Bottom</span>
       </div>
 
       <div class="small">
-        • Map colors show only signals (no mixed colors).<br>
-        • Good zones = green. Bad zones = red. Other zones = neutral.<br>
-        • Use the 20-min slider below.
+        Green shades = stronger “good”.<br>
+        Red = bad. Gray = neutral.
       </div>
 
       <div class="controlRow">
-        <label class="row" style="gap:6px;">
+        <label class="row" style="gap:5px;">
           <input id="showIcons" type="checkbox" checked />
           <b>Icons</b>
         </label>
+      </div>
 
-        <span>Top ✓</span>
+      <div class="controlRow">
+        <span>Top</span>
         <input id="topN" type="number" min="0" max="200" value="25" />
-
-        <span>Bottom ✖</span>
+        <span>Bot</span>
         <input id="botN" type="number" min="0" max="200" value="25" />
       </div>
 
       <div class="controlRow">
-        <button id="generateBtn" type="button">Generate</button>
+        <button id="generateBtn" type="button">Gen</button>
       </div>
 
       <div class="statusLine" id="statusLine">Loading…</div>
