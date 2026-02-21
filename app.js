@@ -1,13 +1,13 @@
 // =======================
-// app.js (STRICT RULES)
-// - Railway ONLY
-// - Colors from rating (1–100) in 20-minute window
+// NYC FHV HOTSPOT MAP (STRICT RULES)
+// - Railway ONLY (no local data)
+// - Colors from rating(1–100) for selected 20-minute window
 //   Green Best, Blue Medium, Sky Normal, Red Avoid
-// - Slider shows NYC time and starts at closest NYC time-of-week (week wrap)
+// - Bottom slider uses NYC time zone + starts at closest NYC time-of-week (week wrap)
 // - No icons, no checkmarks, no X
 // - No polygon outline (stroke disabled)
-// - If /timeline not ready -> POST /generate once -> retry /timeline
-// - Frames load from /frame/{idx}
+// - Calls Railway /timeline, if not ready -> POST /generate -> POLL /timeline until ready
+// - Loads frames from /frame/{idx}
 // =======================
 
 function clamp(n, a, b) { return Math.max(a, Math.min(b, n)); }
@@ -53,8 +53,8 @@ function getNYCParts(date = new Date()) {
 }
 
 function timelineMinuteOfWeekNYC(iso) {
-  const parts = getNYCParts(new Date(iso));
-  return parts.dow * 1440 + parts.minuteOfDay;
+  const p = getNYCParts(new Date(iso));
+  return p.dow * 1440 + p.minuteOfDay;
 }
 
 function addMinutesISO(iso, minutes) {
@@ -62,7 +62,7 @@ function addMinutesISO(iso, minutes) {
   return new Date(d.getTime() + minutes * 60 * 1000).toISOString();
 }
 
-// ✅ STRICT bucket colors (your rules)
+// ===== STRICT COLOR BUCKETS (MANDATORY) =====
 function ratingToColor(rating1to100) {
   const r = clamp(Number(rating1to100 || 0), 1, 100);
 
@@ -81,7 +81,7 @@ function getRailwayBase() {
 const BASE = getRailwayBase();
 const BIN_MINUTES = 20;
 
-// ✅ Normalize rating to strict 1–100 (handles 0–1 and 1–10 too)
+// Normalize rating to strict 1–100 (handles 0–1 and 1–10 safely)
 function getRating1to100(props) {
   const p = props || {};
   let v =
@@ -125,22 +125,6 @@ const polyLayer = L.geoJSON(null, {
 
     // Missing rating -> neutral gray (NOT red)
     return { stroke: false, fillColor: "#e0e0e0", fillOpacity: 0.20 };
-  },
-  onEachFeature: (feature, layer) => {
-    const p = feature?.properties || {};
-    const rating = getRating1to100(p);
-
-    const zone = p.zone || p.name || p.LocationID || "Zone";
-    const borough = p.borough || p.Borough || "";
-
-    layer.bindPopup(
-      `<div style="font-family:Arial; font-size:13px;">
-        <div style="font-weight:900; font-size:14px;">${zone}</div>
-        ${borough ? `<div style="color:#666; margin-bottom:6px;">${borough}</div>` : ""}
-        <div><b>Rating:</b> ${rating ?? "n/a"} / 100</div>
-      </div>`,
-      { maxWidth: 360 }
-    );
   }
 }).addTo(map);
 
@@ -151,15 +135,17 @@ const btnNow = document.getElementById("btnNow");
 const btnGenerate = document.getElementById("btnGenerate");
 
 let timeline = [];
-let _generatedThisBoot = false;
 
 // ---------- Railway-only API ----------
 async function apiGET(path) {
-  return fetch(`${BASE}${path}`, { cache: "no-store", headers: { accept: "application/json" } });
+  return fetch(`${BASE}${path}`, {
+    cache: "no-store",
+    headers: { accept: "application/json" }
+  });
 }
 
 async function apiPOST(path) {
-  // IMPORTANT: Railway /generate requires POST (your 405 confirms it)
+  // IMPORTANT: your backend returns 405 on GET, so /generate requires POST
   return fetch(`${BASE}${path}`, {
     method: "POST",
     cache: "no-store",
@@ -183,7 +169,7 @@ function setSliderBounds() {
   slider.step = 1;
 }
 
-// ✅ closest NYC time-of-week (week wrap)
+// ✅ closest NYC minute-of-week with week wrap handling
 function pickIndexClosestToNow() {
   if (!timeline.length) return 0;
 
@@ -208,58 +194,88 @@ function pickIndexClosestToNow() {
   return bestIdx;
 }
 
-// ---------- Timeline + Generate ----------
+// ---------- Timeline handling ----------
+
+// Poll /timeline until it becomes ready (longer wait for async backends)
+async function pollTimelineUntilReady(maxSeconds = 120) {
+  const start = Date.now();
+  let attempt = 0;
+
+  while ((Date.now() - start) / 1000 < maxSeconds) {
+    attempt++;
+
+    const res = await apiGET("/timeline");
+    const data = await readJsonOrText(res);
+
+    if (res.ok) {
+      const t = Array.isArray(data) ? data : (data.timeline || []);
+      timeline = t.filter(Boolean);
+      sortTimeline();
+      return true;
+    }
+
+    const msg = String((data && data.error) ? data.error : data).toLowerCase();
+
+    // If still not ready, keep waiting
+    if (msg.includes("timeline not ready")) {
+      const elapsed = Math.floor((Date.now() - start) / 1000);
+      setStatus(`Generating… waiting for timeline (${elapsed}s)`);
+      // gentle backoff
+      await sleep(700 + Math.min(2000, attempt * 120));
+      continue;
+    }
+
+    // Some other error (404/500/etc)
+    throw new Error(`Timeline error (${res.status}): ${typeof data === "string" ? data : JSON.stringify(data)}`);
+  }
+
+  return false; // timed out
+}
+
 async function generateOnRailway() {
-  // Keep your original generate params (still Railway-only)
+  // Your params (still Railway-only)
   const genPath =
     "/generate?bin_minutes=20&good_n=200&bad_n=120&win_good_n=80&win_bad_n=40&min_trips_per_window=10&simplify_meters=25";
 
   const res = await apiPOST(genPath);
+  const data = await readJsonOrText(res);
+
   if (!res.ok) {
-    const data = await readJsonOrText(res);
     throw new Error(`Generate failed (${res.status}): ${typeof data === "string" ? data : JSON.stringify(data)}`);
   }
+
+  // even if it returns "ok", backend might still be building in background
+  return data;
 }
 
-async function loadTimelineWithAutoGenerate() {
-  // Try timeline first
-  const res = await apiGET("/timeline");
-
-  if (res.ok) {
-    const data = await res.json();
+async function loadTimelineAuto() {
+  // 1) try timeline quickly
+  const first = await apiGET("/timeline");
+  if (first.ok) {
+    const data = await first.json();
     timeline = Array.isArray(data) ? data : (data.timeline || []);
     sortTimeline();
     return;
   }
 
-  // Not OK -> read message
-  const data = await readJsonOrText(res);
-  const msg = String((data && data.error) ? data.error : data).toLowerCase();
+  const firstData = await readJsonOrText(first);
+  const msg = String((firstData && firstData.error) ? firstData.error : firstData).toLowerCase();
 
-  // If timeline not ready -> generate ONCE then retry timeline several times
-  if (!_generatedThisBoot && msg.includes("timeline not ready")) {
-    _generatedThisBoot = true;
-
-    setStatus("Generating… (first time)");
+  // 2) if not ready -> POST generate
+  if (msg.includes("timeline not ready")) {
+    setStatus("Generating…");
     await generateOnRailway();
 
-    setStatus("Loading…");
-    for (let i = 0; i < 15; i++) {
-      await sleep(900);
-
-      const res2 = await apiGET("/timeline");
-      if (res2.ok) {
-        const data2 = await res2.json();
-        timeline = Array.isArray(data2) ? data2 : (data2.timeline || []);
-        sortTimeline();
-        return;
-      }
+    // 3) poll timeline for up to 120 seconds
+    const ok = await pollTimelineUntilReady(120);
+    if (!ok) {
+      throw new Error("Timeline never became ready after generate (backend is not producing timeline).");
     }
-
-    throw new Error("Timeline still not ready after generate");
+    return;
   }
 
-  throw new Error(`Failed /timeline (${res.status}): ${typeof data === "string" ? data : JSON.stringify(data)}`);
+  // 4) unexpected error
+  throw new Error(`Failed /timeline (${first.status}): ${typeof firstData === "string" ? firstData : JSON.stringify(firstData)}`);
 }
 
 // ---------- Frames ----------
@@ -298,9 +314,8 @@ async function goToIndex(i) {
   renderFrame(frame);
 }
 
-// Throttle slider events
+// Throttle slider
 let pending = null;
-
 slider.addEventListener("input", () => {
   pending = Number(slider.value);
   if (slider._raf) return;
@@ -337,8 +352,14 @@ btnGenerate?.addEventListener("click", async () => {
   try {
     setStatus("Generating…");
     await generateOnRailway();
-    _generatedThisBoot = true;
-    await boot();
+
+    const ok = await pollTimelineUntilReady(120);
+    if (!ok) throw new Error("Timeline never became ready after generate.");
+
+    setSliderBounds();
+    const idx = pickIndexClosestToNow();
+    await goToIndex(idx);
+    setStatus(`Loaded ${timeline.length} steps`);
   } catch (e) {
     console.error(e);
     setStatus("Generate failed");
@@ -355,7 +376,7 @@ async function boot() {
 
   try {
     setStatus("Loading…");
-    await loadTimelineWithAutoGenerate();
+    await loadTimelineAuto();
 
     if (!timeline.length) {
       setStatus("No timeline");
@@ -364,10 +385,8 @@ async function boot() {
     }
 
     setSliderBounds();
-
     const idx = pickIndexClosestToNow();
     await goToIndex(idx);
-
     setStatus(`Loaded ${timeline.length} steps`);
   } catch (e) {
     console.error(e);
