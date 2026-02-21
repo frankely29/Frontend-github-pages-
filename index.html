@@ -12,63 +12,144 @@
     html, body { height: 100%; margin: 0; }
     #map { height: 100%; width: 100%; }
 
-    /* smaller top panel */
-    .panel {
+    /* Compact panel (phone-first) */
+    #panel{
       position: fixed; top: 10px; left: 10px; z-index: 9999;
-      background: rgba(255,255,255,0.92);
-      padding: 8px 10px;
+      background: rgba(255,255,255,0.94);
       border: 2px solid #111; border-radius: 10px;
-      font-family: Arial, sans-serif; font-size: 12px;
-      width: 230px;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.25);
+      font-family: Arial, sans-serif;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.22);
+      padding: 8px 10px;
+      width: 240px;
     }
-    .title { font-weight: 900; font-size: 13px; margin-bottom: 6px; }
-    .bar {
+    #panel.min .body { display: none; }
+    #panel .topbar{
+      display:flex; align-items:center; justify-content:space-between;
+      gap: 8px;
+      font-weight: 900;
+      font-size: 14px;
+    }
+    #btnMin{
+      font-weight: 900;
+      border: 2px solid #111;
+      background: #fff;
+      border-radius: 10px;
+      padding: 4px 8px;
+    }
+    .bar{
       height: 10px; width: 100%;
       border: 1px solid #333;
-      background: linear-gradient(90deg, #e60000, #ffd700, #00b050);
-      border-radius: 6px;
+      border-radius: 8px;
+      background: linear-gradient(90deg, #d9d9d9, #ffd700, #00b050);
+      margin: 6px 0 4px;
     }
-    .legendRow { display:flex; justify-content:space-between; margin-top: 4px; }
-    .tiny { font-size: 11px; color:#333; margin-top: 6px; line-height: 1.25; }
+    .tiny{
+      font-size: 11px;
+      color: #333;
+      line-height: 1.25;
+    }
+    .row{
+      display:flex;
+      align-items:center;
+      gap: 8px;
+      margin-top: 6px;
+      flex-wrap: wrap;
+    }
+    .pill{
+      display:flex; align-items:center; gap:6px;
+      border: 1px solid #999;
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      background: rgba(255,255,255,0.8);
+    }
+    .pill .dot{
+      width:10px;height:10px;border-radius:5px;
+    }
+    .dot.gray{ background:#bdbdbd; }
+    .dot.red{ background:#b02020; }
+    .dot.yellow{ background:#ffd700; }
+    .dot.green{ background:#1f8f3a; }
 
-    .sliderWrap {
-      position: fixed; left: 10px; right: 10px; bottom: 14px; z-index: 9999;
-      background: rgba(255,255,255,0.92);
+    input[type="number"]{
+      width: 56px;
+      padding: 4px 6px;
+      border-radius: 8px;
+      border: 1px solid #999;
+      font-weight: 700;
+    }
+    label{ font-size:12px; font-weight:700; }
+
+    #btnGenerate{
+      margin-top: 6px;
+      font-weight: 900;
+      border: 2px solid #111;
+      background: #fff;
+      border-radius: 10px;
+      padding: 6px 10px;
+      width: 100%;
+    }
+
+    /* Bottom slider */
+    .sliderWrap{
+      position: fixed; left: 10px; right: 10px; bottom: 12px; z-index: 9999;
+      background: rgba(255,255,255,0.94);
       border: 2px solid #111; border-radius: 10px;
       padding: 10px 12px;
       font-family: Arial, sans-serif;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.25);
+      box-shadow: 0 2px 10px rgba(0,0,0,0.22);
     }
-    input[type="range"] { width: 100%; }
-    .timeLabel { font-weight: 900; font-size: 16px; }
+    input[type="range"]{ width: 100%; }
+    .timeLabel{ font-weight: 900; font-size: 18px; }
+    .statusLine{ margin-top: 4px; font-size: 12px; color:#333; }
   </style>
+
+  <script>
+    // IMPORTANT: set your Railway base here (your data lives there, not on GitHub)
+    window.RAILWAY_BASE = "https://web-production-78f67.up.railway.app";
+  </script>
 </head>
+
 <body>
   <div id="map"></div>
 
-  <div class="panel">
-    <div class="title">NYC HVFHV (1–100)</div>
-    <div class="bar"></div>
-    <div class="legendRow">
-      <span>Low</span><span>Mid</span><span>High</span>
+  <div id="panel">
+    <div class="topbar">
+      <div>NYC HVFHV (1–100)</div>
+      <button id="btnMin">Min</button>
     </div>
-    <div class="tiny">
-      • Polygon color = rating (red→yellow→green)<br>
-      • ✓ / × show only extremes (top/bottom)<br>
-      • Data loads from Railway (not GitHub)
+
+    <div class="body">
+      <div class="bar"></div>
+
+      <div class="row">
+        <div class="pill"><span class="dot gray"></span> Gray = Very Low</div>
+        <div class="pill"><span class="dot yellow"></span> Yellow = Medium</div>
+        <div class="pill"><span class="dot green"></span> Green = Good</div>
+        <div class="pill"><span class="dot red"></span> Red = Avoid</div>
+      </div>
+
+      <div class="tiny" style="margin-top:6px;">
+        Polygons show only clear signals:<br>
+        Top zones = green shades, Bottom = red shades, Others = gray.<br>
+        Icons appear only for extremes (Top/Bottom).
+      </div>
+
+      <div class="row">
+        <label><input id="showIcons" type="checkbox" checked /> Icons</label>
+        <label>Top</label><input id="topN" type="number" min="1" max="200" value="25" />
+        <label>Bot</label><input id="botN" type="number" min="1" max="200" value="25" />
+      </div>
+
+      <button id="btnGenerate">Generate on Railway</button>
     </div>
   </div>
 
   <div class="sliderWrap">
     <div class="timeLabel" id="timeLabel">Loading…</div>
     <input id="slider" type="range" min="0" max="0" step="1" value="0" />
+    <div class="statusLine" id="statusLine">—</div>
   </div>
-
-  <script>
-    // ✅ SET THIS to your Railway domain
-    window.RAILWAY_BASE_URL = "https://web-production-78f67.up.railway.app";
-  </script>
 
   <script src="./app.js"></script>
 </body>
