@@ -12,10 +12,11 @@
     html, body { height: 100%; margin: 0; }
     #map { height: 100%; width: 100%; }
 
-    /* Small top-left legend */
+    /* Small, non-blocking legend */
     .panel {
       position: fixed;
-      top: 10px; left: 10px;
+      top: 10px;
+      left: 10px;
       z-index: 9999;
       background: rgba(255,255,255,0.92);
       padding: 8px 10px;
@@ -24,115 +25,135 @@
       font-family: Arial, sans-serif;
       font-size: 12px;
       max-width: 260px;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.25);
+      box-shadow: 0 2px 10px rgba(0,0,0,0.18);
       backdrop-filter: blur(2px);
     }
-    .panel h1{
-      font-size: 13px;
+
+    .panel h1 {
       margin: 0 0 6px 0;
+      font-size: 13px;
       font-weight: 900;
     }
-    .row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-    .pill {
-      display:inline-flex;
-      align-items:center;
-      gap:6px;
-      padding: 4px 8px;
-      border: 1px solid #999;
-      border-radius: 999px;
-      background: rgba(255,255,255,0.85);
-      font-weight: 700;
-      white-space: nowrap;
-    }
-    .dot { width:10px; height:10px; border-radius:50%; display:inline-block; }
-    .small { margin-top:6px; color:#333; line-height:1.25; }
 
-    .btn {
-      appearance: none;
-      border: 2px solid #111;
-      background: #fff;
-      border-radius: 10px;
-      padding: 6px 10px;
-      font-weight: 900;
-      cursor: pointer;
+    .bar {
+      height: 10px;
+      width: 100%;
+      border: 1px solid #333;
+      border-radius: 6px;
+      margin: 6px 0 6px 0;
+      background: linear-gradient(90deg,
+        #e53935 0%,
+        #81d4fa 33%,
+        #1e88e5 66%,
+        #43a047 100%
+      );
+    }
+
+    .legendRow {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 6px 10px;
+      align-items: center;
+      margin-top: 4px;
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      display: inline-block;
+      border: 1px solid rgba(0,0,0,0.25);
+    }
+
+    .small {
+      margin-top: 6px;
+      color: #333;
+      line-height: 1.25;
+      font-size: 11px;
+    }
+
+    .statusLine {
+      margin-top: 6px;
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    .btnRow {
+      display: flex;
+      gap: 8px;
+      margin-top: 8px;
+      align-items: center;
+    }
+
+    button {
       font-size: 12px;
-    }
-
-    .topbar {
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:8px;
-      margin-bottom:6px;
+      font-weight: 800;
+      padding: 6px 10px;
+      border: 2px solid #111;
+      border-radius: 10px;
+      background: #fff;
     }
 
     /* Bottom slider */
     .sliderWrap {
       position: fixed;
-      left: 10px; right: 10px; bottom: 12px;
+      left: 10px;
+      right: 10px;
+      bottom: 12px;
       z-index: 9999;
       background: rgba(255,255,255,0.92);
       border: 2px solid #111;
-      border-radius: 12px;
-      padding: 10px 12px;
+      border-radius: 10px;
+      padding: 10px 10px;
       font-family: Arial, sans-serif;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.25);
+      box-shadow: 0 2px 10px rgba(0,0,0,0.18);
       backdrop-filter: blur(2px);
     }
+
     input[type="range"] { width: 100%; }
     .timeLabel { font-weight: 900; font-size: 16px; }
-
-    .statusLine{
-      margin-top:6px;
-      font-size: 12px;
-      font-weight: 900;
-    }
-    .ok { color:#0a7a2f; }
-    .bad { color:#b00020; }
-
-    .hidden { display:none; }
+    .subLabel { margin-top: 2px; color:#444; font-size: 11px; }
   </style>
+
+  <script>
+    // ✅ IMPORTANT: Set your Railway base URL here (NO trailing slash)
+    // Example: https://web-production-78f67.up.railway.app
+    window.RAILWAY_BASE_URL = "https://web-production-78f67.up.railway.app";
+  </script>
 </head>
+
 <body>
   <div id="map"></div>
 
-  <!-- IMPORTANT: SET YOUR RAILWAY URL HERE -->
-  <script>
-    window.RAILWAY_BASE_URL = "https://web-production-78f67.up.railway.app";
-  </script>
+  <div class="panel">
+    <h1>NYC HVFHV Zones (1–100)</h1>
 
-  <div class="panel" id="panel">
-    <div class="topbar">
-      <h1 style="margin:0;">NYC HVFHV Zones (1–100)</h1>
-      <button class="btn" id="toggleBtn" type="button">Min</button>
+    <div class="bar" title="Red → Sky → Blue → Green"></div>
+
+    <div class="legendRow">
+      <span class="dot" style="background:#43a047;"></span><span><b>Green</b> = Best</span>
+      <span class="dot" style="background:#1e88e5;"></span><span><b>Blue</b> = Medium</span>
+      <span class="dot" style="background:#81d4fa;"></span><span><b>Sky</b> = Normal</span>
+      <span class="dot" style="background:#e53935;"></span><span><b>Red</b> = Avoid</span>
     </div>
 
-    <div id="panelBody">
-      <div class="row">
-        <span class="pill"><span class="dot" style="background:#1db954;"></span>Green = Best</span>
-        <span class="pill"><span class="dot" style="background:#1f6feb;"></span>Blue = Medium</span>
-        <span class="pill"><span class="dot" style="background:#7dd3fc;"></span>Sky = Normal</span>
-        <span class="pill"><span class="dot" style="background:#ef4444;"></span>Red = Avoid</span>
-      </div>
-
-      <div class="small">
-        • Colors are based on <b>rating (1–100)</b> per 20-minute window.<br>
-        • Data loads from <b>Railway</b> (not GitHub).<br>
-        • Use the timeline slider below.
-      </div>
-
-      <div class="row" style="margin-top:8px;">
-        <button class="btn" id="genBtn" type="button">Generate</button>
-      </div>
-
-      <div class="statusLine" id="statusLine">Loading…</div>
+    <div class="small">
+      • Colors come from <b>rating (1–100)</b> for the selected 20-minute window.<br>
+      • No checkmarks / X icons (removed).
     </div>
+
+    <div class="btnRow">
+      <button id="btnGenerate" type="button">Generate on Railway</button>
+      <button id="btnReload" type="button">Reload</button>
+    </div>
+
+    <div class="statusLine" id="statusText">Loading…</div>
   </div>
 
   <div class="sliderWrap">
     <div class="timeLabel" id="timeLabel">Loading…</div>
+    <div class="subLabel" id="subLabel">NYC time</div>
     <input id="slider" type="range" min="0" max="0" step="1" value="0" />
-    <div id="errText" class="bad" style="margin-top:6px;"></div>
   </div>
 
   <script src="./app.js"></script>
