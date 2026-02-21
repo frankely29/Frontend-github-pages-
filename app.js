@@ -1,30 +1,96 @@
 // =======================
 // TLC Hotspot Map - app.js (Frontend)
-// Reads ONLY Railway JSON: /hotspots_20min.json
-// Colors are provided by backend via feature.properties.style
-// Slider time label forced to NYC time
+// STRICT: reads Railway only
+// Uses: GET /timeline + GET /frame/{idx}
+// Slider initializes to closest NYC current time window (week wrap)
 // =======================
 
-function formatTimeLabelNYC(iso){
+const BASE = (window.RAILWAY_BASE_URL || "").replace(/\/$/, "");
+if (!BASE) {
+  throw new Error("Missing RAILWAY_BASE_URL in index.html");
+}
+
+function formatTimeLabelNYC(iso) {
   const d = new Date(iso);
   return d.toLocaleString("en-US", {
     timeZone: "America/New_York",
     weekday: "short",
     hour: "numeric",
-    minute: "2-digit"
+    minute: "2-digit",
   });
 }
 
-// Railway URL is set in index.html
-const BASE = (window.RAILWAY_BASE_URL || "").replace(/\/$/, "");
+// Convert a frame ISO string to "minute-of-week" in NYC local time
+// Monday 00:00 = 0 ... Sunday 23:59 = 10079
+function minuteOfWeekNYC(iso) {
+  const d = new Date(iso);
+  // weekday as short, hour/min in NYC:
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(d);
 
-const map = L.map('map', { zoomControl: true }).setView([40.72, -73.98], 12);
+  const wk = parts.find(p => p.type === "weekday")?.value || "Mon";
+  const hh = parseInt(parts.find(p => p.type === "hour")?.value || "0", 10);
+  const mm = parseInt(parts.find(p => p.type === "minute")?.value || "0", 10);
 
-L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-  attribution: '&copy; OpenStreetMap &copy; CARTO'
+  // Map weekday to Monday=0..Sunday=6
+  const map = { Mon:0, Tue:1, Wed:2, Thu:3, Fri:4, Sat:5, Sun:6 };
+  const dow = map[wk] ?? 0;
+
+  return dow * 1440 + hh * 60 + mm;
+}
+
+function nowMinuteOfWeekNYC() {
+  // Use current time but interpret in NYC timezone via Intl
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(now);
+
+  const wk = parts.find(p => p.type === "weekday")?.value || "Mon";
+  const hh = parseInt(parts.find(p => p.type === "hour")?.value || "0", 10);
+  const mm = parseInt(parts.find(p => p.type === "minute")?.value || "0", 10);
+
+  const map = { Mon:0, Tue:1, Wed:2, Thu:3, Fri:4, Sat:5, Sun:6 };
+  const dow = map[wk] ?? 0;
+
+  return dow * 1440 + hh * 60 + mm;
+}
+
+// Closest index with week wrap:
+// distance = min(|a-b|, 10080-|a-b|)
+function closestIndexByMinuteOfWeek(timeline) {
+  const nowMow = nowMinuteOfWeekNYC();
+  let bestIdx = 0;
+  let bestDist = Infinity;
+
+  for (let i = 0; i < timeline.length; i++) {
+    const m = minuteOfWeekNYC(timeline[i]);
+    const diff = Math.abs(m - nowMow);
+    const dist = Math.min(diff, 10080 - diff);
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestIdx = i;
+    }
+  }
+  return bestIdx;
+}
+
+// Map
+const map = L.map("map", { zoomControl: true }).setView([40.72, -73.98], 12);
+
+L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
+  attribution: "&copy; OpenStreetMap &copy; CARTO",
 }).addTo(map);
 
-// Ensure polygons render cleanly
 map.createPane("polys");
 map.getPane("polys").style.zIndex = 400;
 
@@ -32,75 +98,112 @@ const polyLayer = L.geoJSON(null, {
   pane: "polys",
   style: (f) => {
     const st = f && f.properties && f.properties.style;
-    return st || { color:"#999", weight:0, fillColor:"#999", fillOpacity:0.0 };
+    return st || { color: "#999", weight: 0, fillColor: "#999", fillOpacity: 0.0 };
   },
   onEachFeature: (feature, layer) => {
     const p = feature.properties || {};
-    const rating = p.rating;
-    const pickups = p.pickups;
-    const pay = p.avg_driver_pay;
-    const tips = p.avg_tips;
-
     const popup = `
       <div style="font-family:Arial; font-size:13px;">
         <div style="font-weight:900; font-size:14px;">Zone ${p.LocationID}</div>
-        <div><b>Rating:</b> ${rating}/100</div>
+        <div><b>Rating:</b> ${p.rating}/100</div>
         <hr style="margin:6px 0;">
-        <div><b>Pickups:</b> ${pickups}</div>
-        <div><b>Avg driver pay:</b> ${pay == null ? "n/a" : "$" + pay.toFixed(2)}</div>
-        <div><b>Avg tips:</b> ${tips == null ? "n/a" : "$" + tips.toFixed(2)}</div>
+        <div><b>Pickups:</b> ${p.pickups}</div>
+        <div><b>Avg driver pay:</b> ${p.avg_driver_pay == null ? "n/a" : "$" + Number(p.avg_driver_pay).toFixed(2)}</div>
+        <div><b>Avg tips:</b> ${p.avg_tips == null ? "n/a" : "$" + Number(p.avg_tips).toFixed(2)}</div>
       </div>
     `;
     layer.bindPopup(popup, { maxWidth: 320 });
-  }
+  },
 }).addTo(map);
 
+// State
 let timeline = [];
-let framesByTime = new Map();
+const frameCache = new Map(); // idx -> frame
+let activeFetch = null;
 
-function renderIndex(idx){
-  const key = timeline[idx];
-  const frame = framesByTime.get(key);
-  if (!frame) return;
+async function fetchJSON(url, opts = {}) {
+  const res = await fetch(url, { cache: "no-store", ...opts });
+  if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
+  return res.json();
+}
 
+async function loadTimeline() {
+  const data = await fetchJSON(`${BASE}/timeline`);
+  timeline = data.timeline || [];
+  return timeline;
+}
+
+async function loadFrame(idx) {
+  if (frameCache.has(idx)) return frameCache.get(idx);
+
+  // Abort previous in-flight request (prevents race when sliding fast)
+  if (activeFetch) activeFetch.abort();
+  activeFetch = new AbortController();
+
+  const frame = await fetchJSON(`${BASE}/frame/${idx}`, { signal: activeFetch.signal });
+  frameCache.set(idx, frame);
+
+  // keep cache from growing forever
+  if (frameCache.size > 80) {
+    const firstKey = frameCache.keys().next().value;
+    frameCache.delete(firstKey);
+  }
+
+  return frame;
+}
+
+function renderFrame(frame) {
+  const key = frame.time;
   document.getElementById("timeLabel").textContent = formatTimeLabelNYC(key);
 
   polyLayer.clearLayers();
   if (frame.polygons) polyLayer.addData(frame.polygons);
 }
 
-async function main(){
-  if (!BASE) throw new Error("Missing RAILWAY_BASE_URL in index.html");
+async function renderIndex(idx) {
+  const frame = await loadFrame(idx);
+  renderFrame(frame);
+}
 
-  const url = `${BASE}/hotspots_20min.json`;
-  const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) throw new Error(`Failed to load hotspots JSON from Railway: ${res.status}`);
-
-  const payload = await res.json();
-  timeline = payload.timeline || [];
-  framesByTime = new Map((payload.frames || []).map(f => [f.time, f]));
-
+async function main() {
   const slider = document.getElementById("slider");
+
+  await loadTimeline();
+
   slider.min = 0;
   slider.max = Math.max(0, timeline.length - 1);
   slider.step = 1;
-  slider.value = 0;
+
+  // ✅ initialize to closest NYC current time window (week wrap)
+  const startIdx = timeline.length ? closestIndexByMinuteOfWeek(timeline) : 0;
+  slider.value = String(startIdx);
 
   let pending = null;
   slider.addEventListener("input", () => {
     pending = Number(slider.value);
     if (slider._raf) return;
-    slider._raf = requestAnimationFrame(() => {
+
+    slider._raf = requestAnimationFrame(async () => {
       slider._raf = null;
-      if (pending !== null) renderIndex(pending);
+      if (pending !== null) {
+        try {
+          await renderIndex(pending);
+        } catch (e) {
+          console.error(e);
+          document.getElementById("timeLabel").textContent = "ERROR: " + e.message;
+        }
+      }
     });
   });
 
-  if (timeline.length > 0) renderIndex(0);
-  else document.getElementById("timeLabel").textContent = "No frames in hotspots JSON";
+  if (timeline.length > 0) {
+    await renderIndex(startIdx);
+  } else {
+    document.getElementById("timeLabel").textContent = "No timeline available. Run /generate on Railway.";
+  }
 }
 
-main().catch(err => {
+main().catch((err) => {
   console.error(err);
   document.getElementById("timeLabel").textContent = "ERROR: " + err.message;
 });
