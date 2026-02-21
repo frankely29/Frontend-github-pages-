@@ -1,303 +1,139 @@
 // =======================
-// TLC Hotspot Map - app.js (NO ICONS)
-// - Loads data from Railway /hotspots (with /download fallback)
-// - Colors polygons with 4 bands (Green best, Blue medium, Sky blue normal, Red avoid)
-// - Clear error messages if anything fails
-// - Slider throttled for iPhone
+// TLC Hotspot Map - app.js
+// FIXES:
+// 1) Always colors polygons from rating (1–100) — ignores JSON color styles
+// 2) No checkmarks / X markers (removed)
+// 3) NYC time labels
+// 4) Phone friendly + throttled slider
+// 5) Reads data from Railway /download
 // =======================
 
-function clamp(x, a, b){ return Math.max(a, Math.min(b, x)); }
+function clamp01(x){ return Math.max(0, Math.min(1, x)); }
 
-const NYC_WEEKDAY_INDEX = {
-  Sun: 0,
-  Mon: 1,
-  Tue: 2,
-  Wed: 3,
-  Thu: 4,
-  Fri: 5,
-  Sat: 6
-};
-
-function getNycWeekMinute(dateLike){
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
-    weekday: "short",
-    hour12: false,
-    hour: "2-digit",
-    minute: "2-digit"
-  }).formatToParts(new Date(dateLike));
-
-  const weekday = parts.find(p => p.type === "weekday")?.value;
-  const hour = Number(parts.find(p => p.type === "hour")?.value ?? 0);
-  const minute = Number(parts.find(p => p.type === "minute")?.value ?? 0);
-  const dayIndex = NYC_WEEKDAY_INDEX[weekday] ?? 0;
-
-  return (dayIndex * 24 * 60) + (hour * 60) + minute;
+function fmtNum(x, nd=0){
+  if (x === null || x === undefined || Number.isNaN(x)) return "n/a";
+  return Number(x).toFixed(nd);
 }
 
-function getTimelineIndexNearestNow(){
-  if (!timeline.length) return 0;
-
-  const week = 7 * 24 * 60;
-  const nowNycWeekMinute = getNycWeekMinute(Date.now());
-  let bestIdx = 0;
-  let bestDiff = Number.POSITIVE_INFINITY;
-
-  for (let i = 0; i < timeline.length; i += 1){
-    const t = new Date(timeline[i]);
-    if (!Number.isFinite(t.getTime())) continue;
-    const frameNycWeekMinute = getNycWeekMinute(t);
-    const diff = Math.abs(frameNycWeekMinute - nowNycWeekMinute);
-    const wrappedDiff = Math.min(diff, week - diff);
-    if (wrappedDiff < bestDiff){
-      bestDiff = wrappedDiff;
-      bestIdx = i;
-    }
-  }
-
-  return bestIdx;
-}
-
-function updateCurrentTimeLabel(){
-  const currentTimeLabel = document.getElementById("currentTimeLabel");
-  if (!currentTimeLabel) return;
-  currentTimeLabel.textContent = `Current NYC time: ${new Date().toLocaleString("en-US", {
-    timeZone: "America/New_York",
-    weekday: "short",
-    hour: "numeric",
-    minute: "2-digit",
-    second: "2-digit"
-  })}`;
-}
-
-// Force NYC timezone labels
+// Force NYC timezone
 function formatTimeLabel(iso){
   const d = new Date(iso);
   return d.toLocaleString("en-US", {
     timeZone: "America/New_York",
-    weekday: "short",
-    hour: "numeric",
-    minute: "2-digit"
+    weekday:"short",
+    hour:"numeric",
+    minute:"2-digit"
   });
 }
 
-function lerp(a, b, t){ return a + ((b - a) * t); }
+// ---- Rating extraction (robust across versions) ----
+function getRatingFromFeature(f){
+  const p = (f && f.properties) ? f.properties : {};
+  // try common keys
+  const candidates = [
+    p.rating, p.rating_1_100, p.rating_overall_1_100,
+    p.r, p.score, p.score01
+  ];
 
-function rgbToHex(r, g, b){
-  const toHex = (n) => Math.round(clamp(n, 0, 255)).toString(16).padStart(2, "0");
-  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+  for (const v of candidates){
+    if (v === null || v === undefined) continue;
+    const n = Number(v);
+    if (!Number.isFinite(n)) continue;
+
+    // score01 -> convert to 1..100
+    if (n >= 0 && n <= 1) return Math.round(1 + 99 * n);
+
+    // already rating
+    if (n >= 1 && n <= 1000) return Math.round(n);
+  }
+
+  // if we truly have nothing, return 1 (avoid crashing)
+  return 1;
 }
 
-function quantile(sortedValues, q){
-  if (!sortedValues.length) return null;
-  const pos = (sortedValues.length - 1) * q;
-  const low = Math.floor(pos);
-  const high = Math.ceil(pos);
-  if (low === high) return sortedValues[low];
-  const t = pos - low;
-  return lerp(sortedValues[low], sortedValues[high], t);
-}
-
-// Rating color scale (1..100):
-// Green (best) -> Blue (medium) -> Sky blue (normal) -> Red (avoid)
+// ---- YOUR REQUIRED COLOR RULES ----
+// Green = best
+// Blue = medium
+// Sky blue = normal
+// Red = lowest (avoid)
 function ratingToColor(rating){
-  const r = Number(rating);
-  if (!Number.isFinite(r)) return { fill:"#38bdf8", op:0.5 };
+  const r = Math.max(1, Math.min(100, Number(rating)));
 
-  if (r >= 75) return { fill: "#00d66b", op: 0.68 }; // best trip request
-  if (r >= 50) return { fill: "#2563eb", op: 0.68 }; // medium trip request
-  if (r >= 25) return { fill: "#38bdf8", op: 0.68 }; // normal trip request
-  return { fill: "#e53935", op: 0.68 }; // lowest trip request (avoid)
+  // 1-25 red, 26-50 sky, 51-75 blue, 76-100 green
+  if (r <= 25) return "#d73027";     // red
+  if (r <= 50) return "#7ec8ff";     // sky blue
+  if (r <= 75) return "#1f78ff";     // blue
+  return "#2ecc71";                  // green
 }
 
-function ratingToColorWithBands(rating, bands){
-  const r = Number(rating);
-  if (!Number.isFinite(r)) return { fill: "#38bdf8", op: 0.5 };
-
-  if (!bands) return ratingToColor(r);
-
-  if (r >= bands.bestMin) return { fill: "#00d66b", op: 0.68 }; // best trip request
-  if (r >= bands.mediumMin) return { fill: "#2563eb", op: 0.68 }; // medium trip request
-  if (r >= bands.normalMin) return { fill: "#38bdf8", op: 0.68 }; // normal trip request
-  return { fill: "#e53935", op: 0.68 }; // lowest trip request (avoid)
+// More “detail”: we vary opacity by rating so greens look stronger than weak greens
+function ratingToOpacity(rating){
+  const r = Math.max(1, Math.min(100, Number(rating)));
+  // 0.20 .. 0.70
+  return 0.20 + (r / 100) * 0.50;
 }
 
-function bandToColor(band){
-  if (band === "best") return { fill: "#00d66b", op: 0.68 };
-  if (band === "medium") return { fill: "#2563eb", op: 0.68 };
-  if (band === "normal") return { fill: "#38bdf8", op: 0.68 };
-  if (band === "low") return { fill: "#e53935", op: 0.68 };
-  return null;
+function showError(msg){
+  const el = document.getElementById("errorLine");
+  el.style.display = "block";
+  el.textContent = msg;
 }
 
-
-function getFeatureRating(properties){
-  const p = properties || {};
-
-  const directRating = p.rating ?? p.rating_1_100 ?? p.rating_overall_1_100;
-  if (directRating !== null && directRating !== undefined && Number.isFinite(Number(directRating))){
-    return Number(directRating);
-  }
-
-  const score01 = p.score01 ?? p.score_01;
-  if (score01 !== null && score01 !== undefined && Number.isFinite(Number(score01))){
-    return clamp(Number(score01) * 100, 1, 100);
-  }
-
-  // Extra backend compatibility: some payloads expose raw score fields
-  // as 0..1 or 0..10 scales instead of a direct 1..100 rating.
-  const rawScore = p.score ?? p.zone_score ?? p.hotspot_score;
-  if (rawScore !== null && rawScore !== undefined && Number.isFinite(Number(rawScore))){
-    const s = Number(rawScore);
-    if (s <= 1) return clamp(s * 100, 1, 100);
-    if (s <= 10) return clamp(s * 10, 1, 100);
-    return clamp(s, 1, 100);
-  }
-
-  return null;
+function clearError(){
+  const el = document.getElementById("errorLine");
+  el.style.display = "none";
+  el.textContent = "";
 }
-
-function getBundleFeatures(bundle){
-  const polygons = bundle?.polygons;
-
-  // Standard shape: { polygons: { type:"FeatureCollection", features:[...] } }
-  if (Array.isArray(polygons?.features)) return polygons.features;
-
-  // Backward-compatible shape: { polygons:[Feature, ...] }
-  if (Array.isArray(polygons)) return polygons;
-
-  // Fallback if backend changed key name.
-  if (Array.isArray(bundle?.features)) return bundle.features;
-
-  return [];
-}
-
-function applyFrameBands(features){
-  if (!Array.isArray(features) || features.length < 4) return;
-
-  const rated = [];
-  for (const feature of features){
-    const rating = getFeatureRating(feature?.properties || {});
-    if (Number.isFinite(rating)) rated.push({ feature, rating });
-  }
-
-  if (rated.length < 4) return;
-
-  rated.sort((a, b) => a.rating - b.rating);
-  const denom = Math.max(1, rated.length - 1);
-
-  for (let i = 0; i < rated.length; i += 1){
-    const q = i / denom;
-    const p = rated[i].feature.properties || {};
-
-    if (q < 0.25) p.__uiBand = "low";
-    else if (q < 0.50) p.__uiBand = "normal";
-    else if (q < 0.75) p.__uiBand = "medium";
-    else p.__uiBand = "best";
-
-    rated[i].feature.properties = p;
-  }
-}
-
-
-function buildPolygonStyle(feature){
-  const p = feature?.properties || {};
-
-  const bandColor = bandToColor(p.__uiBand);
-  const { fill, op } = bandColor || ratingToColorWithBands(getFeatureRating(p), currentBands);
-
-  return {
-    color: "#1b1b1b",
-    weight: 2,
-    // Always use the frontend rating palette so map colors match the legend.
-    fillColor: fill,
-    fillOpacity: op
-  };
-}
-
-function computeBandsForBundle(bundle){
-  const features = getBundleFeatures(bundle);
-  const ratings = [];
-
-  for (const feature of features){
-    const rating = getFeatureRating(feature?.properties || {});
-    if (Number.isFinite(rating)) ratings.push(rating);
-  }
-
-  if (ratings.length < 4) return null;
-  ratings.sort((a, b) => a - b);
-
-  const q1 = quantile(ratings, 0.25);
-  const q2 = quantile(ratings, 0.50);
-  const q3 = quantile(ratings, 0.75);
-
-  if (![q1, q2, q3].every(Number.isFinite)) return null;
-
-  return {
-    bestMin: q3,
-    mediumMin: q2,
-    normalMin: q1
-  };
-}
-
-const RAILWAY_BASE_URL = (window.RAILWAY_BASE_URL || "").replace(/\/+$/,"");
 
 const map = L.map('map', { zoomControl: true }).setView([40.72, -73.98], 12);
 L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
   attribution: '&copy; OpenStreetMap &copy; CARTO'
 }).addTo(map);
 
-// keep polygons clean and readable
+// Put polygons under everything (future-proof)
 map.createPane("polys");
 map.getPane("polys").style.zIndex = 400;
 
 const polyLayer = L.geoJSON(null, {
   pane: "polys",
-  style: buildPolygonStyle,
+  style: (feature) => {
+    const rating = getRatingFromFeature(feature);
+    const fillColor = ratingToColor(rating);
+    const fillOpacity = ratingToOpacity(rating);
+
+    // outline slightly darker, constant thickness
+    return {
+      color: "#1b1b1b",
+      weight: 1,
+      fillColor,
+      fillOpacity
+    };
+  },
   onEachFeature: (feature, layer) => {
-    const p = feature?.properties || {};
+    const rating = getRatingFromFeature(feature);
+    const p = feature.properties || {};
+    const zone = p.zone || p.Zone || p.name || p.LocationID || "Zone";
+    const borough = p.borough || p.Borough || "";
 
-    // Re-apply style per layer so backend-provided style hints can't override app colors.
-    if (layer && typeof layer.setStyle === "function"){
-      layer.setStyle(buildPolygonStyle(feature));
-    }
-
+    // If your JSON already includes popup HTML, use it.
+    // Otherwise create a simple popup.
     if (p.popup){
       layer.bindPopup(p.popup, { maxWidth: 360 });
     } else {
-      // safe fallback popup
-      const rating = p.rating ?? "n/a";
-      const pickups = p.pickups ?? "n/a";
-      layer.bindPopup(
-        `<div style="font-family:Arial;font-size:13px;">
-          <div style="font-weight:900;">${p.zone || "Zone"}</div>
-          <div><b>Rating:</b> ${rating}/100</div>
-          <div><b>Pickups:</b> ${pickups}</div>
-        </div>`,
-        { maxWidth: 320 }
-      );
+      const popup = `
+        <div style="font-family:Arial; font-size:13px;">
+          <div style="font-weight:900; font-size:14px;">${zone}</div>
+          <div style="color:#666; margin-bottom:4px;">${borough}</div>
+          <div><b>Rating:</b> ${fmtNum(rating,0)}/100</div>
+        </div>
+      `;
+      layer.bindPopup(popup, { maxWidth: 360 });
     }
-
   }
 }).addTo(map);
 
 let timeline = [];
 let dataByTime = new Map();
-let payloadMeta = {};
-let liveTimer = null;
-let isLiveMode = true;
-let currentBands = null;
-
-function setStatus(ok, msg){
-  const el = document.getElementById("statusLine");
-  if (!el) return;
-  el.textContent = msg;
-  el.classList.toggle("bad", !ok);
-}
-
-function clearMap(){
-  polyLayer.clearLayers();
-}
 
 function rebuildAtIndex(idx){
   const key = timeline[idx];
@@ -306,106 +142,43 @@ function rebuildAtIndex(idx){
 
   document.getElementById("timeLabel").textContent = formatTimeLabel(key);
 
-  clearMap();
-  currentBands = computeBandsForBundle(bundle);
-  applyFrameBands(getBundleFeatures(bundle));
-
-  if (bundle.polygons){
-    polyLayer.addData(bundle.polygons);
-
-    // Hard override style after load so payload-side style hints
-    // can never drift away from the legend color rules.
-    polyLayer.eachLayer((layer) => {
-      const feature = layer?.feature;
-      if (feature && typeof layer.setStyle === "function"){
-        layer.setStyle(buildPolygonStyle(feature));
-      }
-    });
-  }
+  polyLayer.clearLayers();
+  if (bundle.polygons) polyLayer.addData(bundle.polygons);
 }
 
-function setLiveBadge(){
-  const badge = document.getElementById("liveBadge");
-  if (!badge) return;
-  badge.textContent = isLiveMode ? "Live mode: ON (follows current NYC time)" : "Live mode: OFF (manual slider)";
-  badge.classList.toggle("paused", !isLiveMode);
-}
+async function fetchHotspotsFromRailway(){
+  const base = (window.RAILWAY_BASE_URL || "").trim();
+  if (!base) throw new Error("Missing window.RAILWAY_BASE_URL in index.html");
 
-function syncToCurrentTime(){
-  if (!timeline.length) return;
-  const slider = document.getElementById("slider");
-  const idx = getTimelineIndexNearestNow();
-  slider.value = idx;
-  rebuildAtIndex(idx);
-}
+  // Railway FastAPI endpoint: /download returns the latest generated hotspots_20min.json
+  const url = `${base.replace(/\/+$/,"")}/download`;
 
-function startLiveMode(){
-  if (liveTimer) clearInterval(liveTimer);
-  isLiveMode = true;
-  setLiveBadge();
-  syncToCurrentTime();
-  liveTimer = setInterval(syncToCurrentTime, 1000 * 30);
-}
-
-function stopLiveMode(){
-  isLiveMode = false;
-  setLiveBadge();
-  if (liveTimer){
-    clearInterval(liveTimer);
-    liveTimer = null;
-  }
-}
-
-async function fetchHotspots(){
-  if (!RAILWAY_BASE_URL){
-    throw new Error("Missing window.RAILWAY_BASE_URL (set it in index.html)");
-  }
-
-  // quick ping so you know Railway is reachable
-  const ping = await fetch(`${RAILWAY_BASE_URL}/?ts=${Date.now()}`, { cache:"no-store" });
-  if (!ping.ok){
-    throw new Error(`Railway not reachable (GET / failed: ${ping.status})`);
-  }
-
-  // load the hotspot json from Railway
-  let res = await fetch(`${RAILWAY_BASE_URL}/hotspots?ts=${Date.now()}`, { cache:"no-store" });
-
-  // backward-compatible fallback if a deployment still exposes /download
-  if (!res.ok && res.status === 404){
-    res = await fetch(`${RAILWAY_BASE_URL}/download?ts=${Date.now()}`, { cache:"no-store" });
-  }
-
+  const res = await fetch(url, { cache: "no-store" });
   if (!res.ok){
-    const txt = await res.text().catch(()=> "");
-    throw new Error(`Hotspot download failed (${res.status}). ${txt.slice(0,120)}`);
+    // if /download missing, show a clearer message
+    throw new Error(`Failed to fetch hotspots (${res.status}). On Railway, run /generate then retry.`);
   }
+  return await res.json();
+}
 
-  const payload = await res.json();
+async function main(){
+  clearError();
+  document.getElementById("loadStatus").textContent = "Loading from Railway…";
 
-  // Expect: { timeline: [...], frames: [{time, polygons, ...}, ...] }
+  const payload = await fetchHotspotsFromRailway();
+
   timeline = payload.timeline || [];
   dataByTime = new Map((payload.frames || []).map(f => [f.time, f]));
-  payloadMeta = payload.meta || {};
 
-  if (!timeline.length || !dataByTime.size){
-    throw new Error("Data format missing timeline/frames (JSON shape changed).");
-  }
-
-  setStatus(true, `Loaded ${timeline.length} steps from Railway ✅`);
-}
-
-function setupSlider(){
   const slider = document.getElementById("slider");
-  const nowBtn = document.getElementById("nowBtn");
-
   slider.min = 0;
   slider.max = Math.max(0, timeline.length - 1);
   slider.step = 1;
+  slider.value = 0;
 
-  // iPhone smoothness
+  // Throttle slider on iPhone
   let pending = null;
   slider.addEventListener("input", () => {
-    stopLiveMode();
     pending = Number(slider.value);
     if (slider._raf) return;
     slider._raf = requestAnimationFrame(() => {
@@ -414,39 +187,19 @@ function setupSlider(){
     });
   });
 
-  nowBtn.addEventListener("click", startLiveMode);
-
-  startLiveMode();
-}
-
-function setupPanel(){
-  const panel = document.getElementById("panel");
-  const body = document.getElementById("panelBody");
-  const btn = document.getElementById("minBtn");
-
-  btn.addEventListener("click", () => {
-    const minimized = body.classList.toggle("hidden");
-    btn.textContent = minimized ? "Max" : "Min";
-    panel.style.width = minimized ? "auto" : "230px";
-  });
-}
-
-async function main(){
-  setupPanel();
-
-  try{
-    setStatus(true, "Loading…");
-    await fetchHotspots();
-  } catch (e){
-    console.error(e);
-    setStatus(false, "ERROR: " + e.message);
-    document.getElementById("timeLabel").textContent = "Load failed";
-    return;
+  if (timeline.length > 0){
+    rebuildAtIndex(0);
+    document.getElementById("loadStatus").textContent =
+      `Loaded ${timeline.length} time steps from Railway ✅`;
+  } else {
+    document.getElementById("timeLabel").textContent = "No data";
+    document.getElementById("loadStatus").textContent = "Loaded, but timeline is empty.";
   }
-
-  setupSlider();
-  updateCurrentTimeLabel();
-  setInterval(updateCurrentTimeLabel, 1000 * 30);
 }
 
-main();
+main().catch(err => {
+  console.error(err);
+  showError("ERROR: " + err.message);
+  document.getElementById("loadStatus").textContent = "Load failed ❌";
+  document.getElementById("timeLabel").textContent = "Load failed";
+});
