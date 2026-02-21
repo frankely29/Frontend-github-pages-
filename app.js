@@ -88,6 +88,16 @@ function rgbToHex(r, g, b){
   return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
 }
 
+function quantile(sortedValues, q){
+  if (!sortedValues.length) return null;
+  const pos = (sortedValues.length - 1) * q;
+  const low = Math.floor(pos);
+  const high = Math.ceil(pos);
+  if (low === high) return sortedValues[low];
+  const t = pos - low;
+  return lerp(sortedValues[low], sortedValues[high], t);
+}
+
 // Rating color scale (1..100):
 // Green (best) -> Blue (medium) -> Sky blue (normal) -> Red (avoid)
 function ratingToColor(rating){
@@ -97,6 +107,18 @@ function ratingToColor(rating){
   if (r >= 75) return { fill: "#00d66b", op: 0.68 }; // best trip request
   if (r >= 50) return { fill: "#2563eb", op: 0.68 }; // medium trip request
   if (r >= 25) return { fill: "#38bdf8", op: 0.68 }; // normal trip request
+  return { fill: "#e53935", op: 0.68 }; // lowest trip request (avoid)
+}
+
+function ratingToColorWithBands(rating, bands){
+  const r = Number(rating);
+  if (!Number.isFinite(r)) return { fill: "#38bdf8", op: 0.5 };
+
+  if (!bands) return ratingToColor(r);
+
+  if (r >= bands.bestMin) return { fill: "#00d66b", op: 0.68 }; // best trip request
+  if (r >= bands.mediumMin) return { fill: "#2563eb", op: 0.68 }; // medium trip request
+  if (r >= bands.normalMin) return { fill: "#38bdf8", op: 0.68 }; // normal trip request
   return { fill: "#e53935", op: 0.68 }; // lowest trip request (avoid)
 }
 
@@ -129,7 +151,7 @@ function getFeatureRating(properties){
 function buildPolygonStyle(feature){
   const p = feature?.properties || {};
   const rating = getFeatureRating(p);
-  const { fill, op } = ratingToColor(rating);
+  const { fill, op } = ratingToColorWithBands(rating, currentBands);
 
   return {
     color: "#1b1b1b",
@@ -137,6 +159,31 @@ function buildPolygonStyle(feature){
     // Always use the frontend rating palette so map colors match the legend.
     fillColor: fill,
     fillOpacity: op
+  };
+}
+
+function computeBandsForBundle(bundle){
+  const features = bundle?.polygons?.features || [];
+  const ratings = [];
+
+  for (const feature of features){
+    const rating = getFeatureRating(feature?.properties || {});
+    if (Number.isFinite(rating)) ratings.push(rating);
+  }
+
+  if (ratings.length < 4) return null;
+  ratings.sort((a, b) => a - b);
+
+  const q1 = quantile(ratings, 0.25);
+  const q2 = quantile(ratings, 0.50);
+  const q3 = quantile(ratings, 0.75);
+
+  if (![q1, q2, q3].every(Number.isFinite)) return null;
+
+  return {
+    bestMin: q3,
+    mediumMin: q2,
+    normalMin: q1
   };
 }
 
@@ -186,6 +233,7 @@ let dataByTime = new Map();
 let payloadMeta = {};
 let liveTimer = null;
 let isLiveMode = true;
+let currentBands = null;
 
 function setStatus(ok, msg){
   const el = document.getElementById("statusLine");
@@ -206,6 +254,7 @@ function rebuildAtIndex(idx){
   document.getElementById("timeLabel").textContent = formatTimeLabel(key);
 
   clearMap();
+  currentBands = computeBandsForBundle(bundle);
 
   if (bundle.polygons){
     polyLayer.addData(bundle.polygons);
