@@ -124,6 +124,8 @@ const polyLayer = L.geoJSON(null, {
 
 let timeline = [];
 let dataByTime = new Map();
+let liveTimer = null;
+let isLiveMode = true;
 
 function setStatus(ok, msg){
   const el = document.getElementById("statusLine");
@@ -147,6 +149,38 @@ function rebuildAtIndex(idx){
 
   if (bundle.polygons){
     polyLayer.addData(bundle.polygons);
+  }
+}
+
+function setLiveBadge(){
+  const badge = document.getElementById("liveBadge");
+  if (!badge) return;
+  badge.textContent = isLiveMode ? "Live mode: ON (follows current NYC time)" : "Live mode: OFF (manual slider)";
+  badge.classList.toggle("paused", !isLiveMode);
+}
+
+function syncToCurrentTime(){
+  if (!timeline.length) return;
+  const slider = document.getElementById("slider");
+  const idx = getTimelineIndexNearestNow();
+  slider.value = idx;
+  rebuildAtIndex(idx);
+}
+
+function startLiveMode(){
+  if (liveTimer) clearInterval(liveTimer);
+  isLiveMode = true;
+  setLiveBadge();
+  syncToCurrentTime();
+  liveTimer = setInterval(syncToCurrentTime, 1000 * 30);
+}
+
+function stopLiveMode(){
+  isLiveMode = false;
+  setLiveBadge();
+  if (liveTimer){
+    clearInterval(liveTimer);
+    liveTimer = null;
   }
 }
 
@@ -189,16 +223,16 @@ async function fetchHotspots(){
 
 function setupSlider(){
   const slider = document.getElementById("slider");
-  const startIndex = getTimelineIndexNearestNow();
+  const nowBtn = document.getElementById("nowBtn");
 
   slider.min = 0;
   slider.max = Math.max(0, timeline.length - 1);
   slider.step = 1;
-  slider.value = startIndex;
 
   // iPhone smoothness
   let pending = null;
   slider.addEventListener("input", () => {
+    stopLiveMode();
     pending = Number(slider.value);
     if (slider._raf) return;
     slider._raf = requestAnimationFrame(() => {
@@ -206,6 +240,10 @@ function setupSlider(){
       if (pending !== null) rebuildAtIndex(pending);
     });
   });
+
+  nowBtn.addEventListener("click", startLiveMode);
+
+  startLiveMode();
 }
 
 function setupPanel(){
@@ -236,9 +274,6 @@ async function main(){
   setupSlider();
   updateCurrentTimeLabel();
   setInterval(updateCurrentTimeLabel, 1000 * 30);
-
-  // show frame nearest current NYC time
-  rebuildAtIndex(getTimelineIndexNearestNow());
 }
 
 main();

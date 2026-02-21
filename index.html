@@ -76,6 +76,24 @@
     input[type="range"] { width: 100%; }
     .timeLabel { font-weight: 900; font-size: 18px; }
     .currentTimeLabel { margin-top: 4px; font-size: 12px; color: #222; }
+    .timeRow { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+    .nowBtn {
+      border: 2px solid #111;
+      background: #fff;
+      border-radius: 10px;
+      padding: 4px 10px;
+      font-weight: 900;
+      font-size: 12px;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .liveBadge {
+      margin-top: 4px;
+      font-size: 12px;
+      color: #155724;
+      font-weight: 700;
+    }
+    .liveBadge.paused { color: #8a1f11; }
   </style>
 
   <script>
@@ -110,8 +128,12 @@
   </div>
 
   <div class="sliderWrap">
-    <div class="timeLabel" id="timeLabel">Loading…</div>
+    <div class="timeRow">
+      <div class="timeLabel" id="timeLabel">Loading…</div>
+      <button id="nowBtn" class="nowBtn">Now</button>
+    </div>
     <div class="currentTimeLabel" id="currentTimeLabel">Current NYC time: --</div>
+    <div class="liveBadge" id="liveBadge">Live mode: ON</div>
     <input id="slider" type="range" min="0" max="0" step="1" value="0" />
   </div>
 
