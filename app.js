@@ -1,15 +1,18 @@
 // =======================
 // TLC Hotspot Map - app.js (GitHub Pages)
-// Loads hotspots JSON from Railway (NOT GitHub)
-// - Colors: rating gradient (red -> yellow -> green) ONLY
-// - Icons: extremes ONLY (✔ top, ✖ bottom) so no confusion
-// - Phone-friendly slider + panes (markers above polygons)
+// - Fetches data from Railway (/hotspots)
+// - Phone-friendly
+// - Clear meaning:
+//    * Polygon color = rating (Red->Yellow->Green)
+//    * Icons only for extreme zones (✅ very good, ✖ very low)
+//    * Purple pulse dot = "activity intensity" (higher rating => stronger purple)
+// - NYC timezone labels
 // =======================
 
 function clamp01(x){ return Math.max(0, Math.min(1, x)); }
 function lerp(a,b,t){ return a + (b-a)*t; }
 
-function scoreToColorHex01(score01){
+function scoreToColorHex(score01){
   const s = clamp01(score01);
   let r,g,b;
   if (s <= 0.5){
@@ -27,24 +30,12 @@ function scoreToColorHex01(score01){
   return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
 }
 
-// rating 1..100 -> color
-function ratingToColor(r){
-  const rr = Math.max(1, Math.min(100, Number(r || 1)));
-  const s = (rr - 1) / 99; // 0..1
-  return scoreToColorHex01(s);
-}
-
 function fmtMoney(x){
   if (x === null || x === undefined || Number.isNaN(x)) return "n/a";
   return `$${Number(x).toFixed(2)}`;
 }
 
-function fmtNum(x, nd=2){
-  if (x === null || x === undefined || Number.isNaN(x)) return "n/a";
-  return Number(x).toFixed(nd);
-}
-
-// Force NYC timezone for labels
+// Force NYC timezone so labels match NYC time
 function formatTimeLabel(iso){
   const d = new Date(iso);
   return d.toLocaleString("en-US", {
@@ -55,21 +46,29 @@ function formatTimeLabel(iso){
   });
 }
 
-// ---- Railway base (set in index.html) ----
-const API_BASE = (window.API_BASE || "").replace(/\/+$/,""); // trim trailing /
-if (!API_BASE){
-  console.warn("API_BASE missing. Set window.API_BASE in index.html");
+// --- Choose Railway base URL ---
+// You can override by adding: ?api=https://yourapp.up.railway.app
+function getApiBase(){
+  const u = new URL(window.location.href);
+  const qp = u.searchParams.get("api");
+  if (qp) return qp.replace(/\/+$/,"");
+  // default (your current Railway)
+  return "https://web-production-78f67.up.railway.app";
 }
 
-// Map
+const API_BASE = getApiBase();
+
 const map = L.map('map', { zoomControl: true }).setView([40.72, -73.98], 12);
 L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
   attribution: '&copy; OpenStreetMap &copy; CARTO'
 }).addTo(map);
 
-// Panes
+// Panes so polygons never cover icons
 map.createPane("polys");
 map.getPane("polys").style.zIndex = 400;
+
+map.createPane("pulses");
+map.getPane("pulses").style.zIndex = 520;
 
 map.createPane("markers");
 map.getPane("markers").style.zIndex = 650;
@@ -78,192 +77,142 @@ map.getPane("markers").style.zIndex = 650;
 const polyLayer = L.geoJSON(null, {
   pane: "polys",
   style: (f) => {
-    const p = (f && f.properties) ? f.properties : {};
-    // We IGNORE server-provided style to prevent “everything red” confusion.
-    // We compute style purely from rating (1..100).
-    const rating = p.rating ?? p.rating_1_100 ?? p.r ?? 1;
+    const p = f?.properties || {};
+
+    // Prefer server-provided style if present
+    if (p.style) return p.style;
+
+    // Otherwise compute from rating/score
+    let rating = p.rating ?? p.rating_1_100;
+    let score01 = p.score01;
+    if (rating !== undefined && rating !== null) score01 = (Number(rating) - 1) / 99;
+
+    const fill = scoreToColorHex(score01 ?? 0);
     return {
-      color: "#222222",      // neutral border so color = rating only
-      weight: 2,
-      fillColor: ratingToColor(rating),
-      fillOpacity: 0.55
+      color: "#222", weight: 1,
+      fillColor: fill, fillOpacity: 0.55
     };
   },
   onEachFeature: (feature, layer) => {
     const p = feature.properties || {};
-    // If server provided popup HTML, keep it
     if (p.popup) layer.bindPopup(p.popup, { maxWidth: 360 });
   }
 }).addTo(map);
 
-const markerLayer = L.layerGroup().addTo(map);
+const pulseLayer = L.layerGroup([], { pane: "pulses" }).addTo(map);
+const markerLayer = L.layerGroup([], { pane: "markers" }).addTo(map);
 
 let timeline = [];
-let frames = [];          // array of frames aligned to timeline
-let showIcons = true;     // toggle
-let topN = 40;            // how many ✔ to show
-let bottomN = 40;         // how many ✖ to show
+let dataByTime = new Map();
 
-function setStatus(msg){
-  document.getElementById("timeLabel").textContent = msg;
-}
-
-function iconDiv(html){
-  return L.divIcon({ html, className:"", iconSize:[18,18], iconAnchor:[9,9] });
-}
-
-function buildIcon(tag){
-  if (tag === "TOP"){
-    return iconDiv('<div style="font-weight:900; color:#00b050; font-size:18px; line-height:18px;">✔</div>');
-  }
-  return iconDiv('<div style="font-weight:900; color:#e60000; font-size:18px; line-height:18px;">✖</div>');
-}
-
-function getFeatureRating(feature){
-  const p = feature.properties || {};
-  const r = p.rating ?? p.rating_1_100 ?? p.r;
-  return Number(r || 1);
-}
-
-function getFeatureCentroidLatLng(feature){
-  // crude centroid for polygons in GeoJSON coordinates (lon,lat)
-  // good enough for markers (fast, no heavy geo libs in browser)
-  try{
-    const geom = feature.geometry;
-    if (!geom) return null;
-
-    let coords = null;
-    if (geom.type === "Polygon"){
-      coords = geom.coordinates?.[0];
-    } else if (geom.type === "MultiPolygon"){
-      coords = geom.coordinates?.[0]?.[0];
-    }
-    if (!coords || coords.length < 3) return null;
-
-    let minLat=999, maxLat=-999, minLng=999, maxLng=-999;
-    for (const [lng, lat] of coords){
-      if (lat < minLat) minLat = lat;
-      if (lat > maxLat) maxLat = lat;
-      if (lng < minLng) minLng = lng;
-      if (lng > maxLng) maxLng = lng;
-    }
-    return L.latLng((minLat+maxLat)/2, (minLng+maxLng)/2);
-  }catch(e){
-    return null;
-  }
+function makeIcon(html){
+  return L.divIcon({
+    html,
+    className: "",
+    iconSize: [26,26],
+    iconAnchor: [13,13]
+  });
 }
 
 function rebuildAtIndex(idx){
-  const frame = frames[idx];
   const key = timeline[idx];
-  if (!frame || !key) return;
+  const bundle = dataByTime.get(key);
+  if (!bundle) return;
 
-  setStatus(formatTimeLabel(key));
+  document.getElementById("timeLabel").textContent = formatTimeLabel(key);
 
   polyLayer.clearLayers();
+  pulseLayer.clearLayers();
   markerLayer.clearLayers();
 
-  const fc = frame.polygons;
-  if (!fc || !fc.features || fc.features.length === 0){
-    return;
+  if (bundle.polygons) polyLayer.addData(bundle.polygons);
+
+  // Markers: only extremes to avoid confusion + overlap
+  // ✅ if rating >= 90, ✖ if rating <= 10
+  const markers = (bundle.markers || []);
+  for (const m of markers){
+    const rating = Number(m.rating ?? 0);
+
+    let show = false;
+    let icon = null;
+
+    if (rating >= 90){
+      show = true;
+      icon = makeIcon(
+        `<div style="
+          width:26px;height:26px;border-radius:13px;
+          background:rgba(255,255,255,0.92);
+          border:2px solid #00b050;
+          display:flex;align-items:center;justify-content:center;
+          font-weight:900;color:#00b050;font-size:16px;
+        ">✔</div>`
+      );
+    } else if (rating <= 10){
+      show = true;
+      icon = makeIcon(
+        `<div style="
+          width:26px;height:26px;border-radius:13px;
+          background:rgba(255,255,255,0.92);
+          border:2px solid #e60000;
+          display:flex;align-items:center;justify-content:center;
+          font-weight:900;color:#e60000;font-size:16px;
+        ">✖</div>`
+      );
+    }
+
+    if (!show) continue;
+
+    const marker = L.marker([m.lat, m.lng], { icon, pane: "markers" });
+
+    const popup = `
+      <div style="font-family:Arial; font-size:13px;">
+        <div style="font-weight:900; font-size:14px;">${m.zone}</div>
+        <div style="color:#666; margin-bottom:4px;">${m.borough}</div>
+        <div><b>Rating:</b> <span style="font-weight:900;">${rating}/100</span></div>
+        <hr style="margin:6px 0;">
+        <div><b>Pickups:</b> ${m.pickups}</div>
+        <div><b>Avg driver pay:</b> ${fmtMoney(m.avg_driver_pay)}</div>
+        <div><b>Avg tips:</b> ${fmtMoney(m.avg_tips)}</div>
+      </div>
+    `;
+    marker.bindPopup(popup, { maxWidth: 360 });
+    marker.addTo(markerLayer);
   }
 
-  polyLayer.addData(fc);
+  // Purple pulse dots (gives “inside zone intensity” feel without true intra-zone heatmap)
+  // stronger rating => stronger purple/size
+  for (const m of markers){
+    const rating = Number(m.rating ?? 0);
+    const t = clamp01((rating - 1) / 99);
+    const radius = 6 + 16 * t;
+    const opacity = 0.15 + 0.35 * t;
 
-  if (!showIcons) return;
-
-  // Create extremes based on rating of polygons on THIS time window
-  const feats = fc.features.slice();
-  feats.sort((a,b)=>getFeatureRating(b)-getFeatureRating(a));
-
-  const tops = feats.slice(0, Math.min(topN, feats.length));
-  const bottoms = feats.slice(Math.max(0, feats.length - bottomN));
-
-  // Avoid duplicates if small
-  const bottomSet = new Set(bottoms.map(f => f.properties?.LocationID ?? f.properties?.location_id ?? JSON.stringify(f.geometry)));
-  const topFiltered = tops.filter(f => !bottomSet.has(f.properties?.LocationID ?? f.properties?.location_id ?? JSON.stringify(f.geometry)));
-
-  // Add TOP ✔
-  for (const f of topFiltered){
-    const ll = getFeatureCentroidLatLng(f);
-    if (!ll) continue;
-    const r = getFeatureRating(f);
-    const p = f.properties || {};
-    const zoneName = p.zone || p.Zone || p.name || `Zone ${p.LocationID ?? ""}`;
-    const borough = p.borough || p.Borough || "NYC";
-
-    const m = L.marker(ll, { icon: buildIcon("TOP"), pane:"markers" });
-    m.bindPopup(`
-      <div style="font-family:Arial; font-size:13px;">
-        <div style="font-weight:900; font-size:14px;">${zoneName}</div>
-        <div style="color:#666; margin-bottom:4px;">${borough} — <b>VERY GOOD (TOP)</b></div>
-        <div><b>Rating:</b> <span style="font-weight:900; color:#00b050;">${Math.round(r)}/100</span></div>
-      </div>
-    `, { maxWidth: 360 });
-    m.addTo(markerLayer);
-  }
-
-  // Add BOTTOM ✖
-  for (const f of bottoms){
-    const ll = getFeatureCentroidLatLng(f);
-    if (!ll) continue;
-    const r = getFeatureRating(f);
-    const p = f.properties || {};
-    const zoneName = p.zone || p.Zone || p.name || `Zone ${p.LocationID ?? ""}`;
-    const borough = p.borough || p.Borough || "NYC";
-
-    const m = L.marker(ll, { icon: buildIcon("BOTTOM"), pane:"markers" });
-    m.bindPopup(`
-      <div style="font-family:Arial; font-size:13px;">
-        <div style="font-weight:900; font-size:14px;">${zoneName}</div>
-        <div style="color:#666; margin-bottom:4px;">${borough} — <b>VERY LOW (BOTTOM)</b></div>
-        <div><b>Rating:</b> <span style="font-weight:900; color:#e60000;">${Math.round(r)}/100</span></div>
-      </div>
-    `, { maxWidth: 360 });
-    m.addTo(markerLayer);
+    L.circleMarker([m.lat, m.lng], {
+      pane: "pulses",
+      radius,
+      color: "rgba(128, 0, 255, 0.0)",
+      fillColor: "rgba(128, 0, 255, 1.0)",
+      fillOpacity: opacity,
+      weight: 0
+    }).addTo(pulseLayer);
   }
 }
 
 async function loadHotspots(){
-  // Always fetch from Railway; GitHub cannot store 113MB
-  const url = `${API_BASE}/hotspots_20min.json?ts=${Date.now()}`;
-  const res = await fetch(url, { cache:"no-store" });
+  // Always load from Railway. (This is why GitHub file-size limits don't matter.)
+  const url = `${API_BASE}/hotspots`;
+  const res = await fetch(url, { cache: "no-store" });
   if (!res.ok){
-    const txt = await res.text().catch(()=> "");
-    throw new Error(`Failed to fetch hotspots (${res.status}). ${txt || "Did you run /generate on Railway?"}`);
+    throw new Error(`Load failed (${res.status}). ${await res.text()}`);
   }
   return await res.json();
 }
 
 async function main(){
-  // UI controls
-  const iconsToggle = document.getElementById("toggleIcons");
-  const topInput = document.getElementById("topN");
-  const botInput = document.getElementById("bottomN");
-
-  iconsToggle.addEventListener("change", ()=>{
-    showIcons = !!iconsToggle.checked;
-    rebuildAtIndex(Number(document.getElementById("slider").value));
-  });
-
-  topInput.addEventListener("change", ()=>{
-    topN = Math.max(0, Math.min(300, Number(topInput.value || 40)));
-    rebuildAtIndex(Number(document.getElementById("slider").value));
-  });
-
-  botInput.addEventListener("change", ()=>{
-    bottomN = Math.max(0, Math.min(300, Number(botInput.value || 40)));
-    rebuildAtIndex(Number(document.getElementById("slider").value));
-  });
-
-  setStatus("Loading…");
   const payload = await loadHotspots();
 
   timeline = payload.timeline || [];
-  frames = (payload.frames || []).map(f => ({
-    time: f.time,
-    polygons: f.polygons
-  }));
+  dataByTime = new Map((payload.frames || []).map(f => [f.time, f]));
 
   const slider = document.getElementById("slider");
   slider.min = 0;
@@ -271,7 +220,7 @@ async function main(){
   slider.step = 1;
   slider.value = 0;
 
-  // Throttled slider for iPhone smoothness
+  // Throttle slider for iPhone smoothness
   let pending = null;
   slider.addEventListener("input", () => {
     pending = Number(slider.value);
@@ -285,11 +234,11 @@ async function main(){
   if (timeline.length > 0){
     rebuildAtIndex(0);
   } else {
-    setStatus("No data in hotspots_20min.json");
+    document.getElementById("timeLabel").textContent = "No frames in hotspots JSON.";
   }
 }
 
 main().catch(err => {
   console.error(err);
-  setStatus("ERROR: " + err.message);
+  document.getElementById("timeLabel").textContent = "ERROR: " + err.message;
 });
