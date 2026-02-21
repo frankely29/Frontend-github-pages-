@@ -2,209 +2,339 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>NYC HVFHV Zones for Driver Earnings</title>
-
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>NYC FHV Earnings Map</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-
+  <script defer src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <style>
-    body { margin:0; font-family: Arial, sans-serif; overflow:hidden; background:#f8f8f8; }
-    #map { height: 100vh; width: 100vw; }
+    :root {
+      --green: #2e7d32;
+      --blue: #1976d2;
+      --sky: #81d4fa;
+      --red: #d32f2f;
+    }
+    html, body { margin: 0; height: 100%; font-family: Arial, sans-serif; }
+    body { overflow: hidden; background: #f5f5f5; }
+    #map { height: 100%; width: 100%; }
 
-    /* Top Legend Panel - matches your screenshot exactly */
+    .panel {
+      position: absolute;
+      z-index: 1000;
+      background: rgba(255, 255, 255, 0.96);
+      border: 2px solid #1e1e1e;
+      border-radius: 14px;
+      box-shadow: 0 3px 14px rgba(0, 0, 0, 0.25);
+      color: #111;
+    }
+
     #topPanel {
-      position: absolute; top: 8px; left: 8px; z-index: 1000;
-      background: rgba(255,255,255,0.97);
-      padding: 10px 12px;
-      border-radius: 10px;
-      box-shadow: 0 3px 15px rgba(0,0,0,0.3);
-      max-width: 280px;
-      border: 2px solid #222;
-      font-size: 13px;
-      line-height: 1.35;
-    }
-    .legendBar {
-      height: 12px; border-radius: 6px; margin: 8px 0 6px;
-      background: linear-gradient(to right, #2e7d32, #1976d2, #81d4fa, #d32f2f);
-    }
-    #minBtn {
-      position: absolute; top: 10px; right: 10px; z-index: 1001;
-      background: #1976d2; color: white; border: none; border-radius: 6px;
-      padding: 4px 10px; font-size: 12px; cursor: pointer;
+      top: calc(8px + env(safe-area-inset-top));
+      left: 8px;
+      width: min(86vw, 340px);
+      padding: 14px;
+      line-height: 1.3;
+      font-size: 16px;
     }
 
-    /* Bottom Control Bar - matches your screenshot */
+    #legendGradient {
+      height: 14px;
+      border-radius: 999px;
+      margin: 10px 0 8px;
+      background: linear-gradient(to right, var(--green), var(--blue), var(--sky), var(--red));
+      border: 1px solid rgba(0,0,0,0.25);
+    }
+
+    #btnMin {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      border: 2px solid #1e1e1e;
+      background: #f0f6ff;
+      color: #1976d2;
+      border-radius: 999px;
+      font-weight: 700;
+      font-size: 16px;
+      padding: 6px 14px;
+    }
+
     #bottomBar {
-      position: absolute; bottom: 12px; left: 8px; right: 8px; z-index: 1000;
-      background: rgba(255,255,255,0.97);
-      padding: 10px 12px;
-      border-radius: 10px;
-      box-shadow: 0 3px 15px rgba(0,0,0,0.3);
-      border: 2px solid #222;
-      font-size: 13.5px;
+      left: 8px;
+      right: 8px;
+      bottom: calc(8px + env(safe-area-inset-bottom));
+      padding: 14px;
+      font-size: 18px;
     }
-    #timeDisplay { font-weight: 900; font-size: 17px; margin-bottom: 4px; }
-    #liveStatus { font-size: 12.5px; color: #006400; font-weight: bold; }
-    button { 
-      padding: 8px 14px; font-size: 14px; font-weight: bold; 
-      border: none; border-radius: 7px; background: #1976d2; color: white;
+
+    #timeWindow { font-weight: 900; font-size: 40px; line-height: 1.05; margin-bottom: 6px; }
+    #nycNow { font-size: 16px; margin-bottom: 6px; }
+    #modeText { color: #145a2f; font-size: 17px; font-weight: 800; margin-bottom: 8px; }
+    #slider { width: 100%; accent-color: #1f86ff; }
+
+    #btnNow {
+      float: right;
+      border: 2px solid #1e1e1e;
+      border-radius: 999px;
+      background: #f0f6ff;
+      color: #1976d2;
+      font-weight: 800;
+      font-size: 16px;
+      padding: 6px 14px;
+      margin-top: -4px;
     }
-    #slider { width: 100%; margin-top: 6px; }
+
+    .small { font-size: 14px; }
   </style>
 </head>
 <body>
-  <div id="map"></div>
+  <div id="map" aria-label="NYC FHV demand map"></div>
 
-  <!-- Top Legend Panel (matches your desired format) -->
-  <div id="topPanel">
-    <strong>NYC HVFHV (1–100)</strong><br>
-    <small>for Driver Earnings</small><br><br>
-    
-    <div class="legendBar"></div>
-    High rating → Low rating<br><br>
-    
-    Green = good zones<br>
-    Blue = medium zones<br>
-    Red = very bad zones<br><br>
-    
-    <span id="loadedMsg" style="color:#006400; font-weight:bold;">Loading steps from Railway…</span>
-  </div>
+  <button id="btnMin" type="button">Min</button>
 
-  <!-- Min button (like your screenshot) -->
-  <button id="minBtn">Min</button>
+  <section id="topPanel" class="panel">
+    <div style="font-size:36px;font-weight:900;line-height:1;">NYC HVFHV (1–100)</div>
+    <div class="small" style="margin-top:2px;">For-hire vehicle / Uber driver earnings map</div>
 
-  <!-- Bottom Bar (matches your screenshot) -->
-  <div id="bottomBar">
-    <div id="timeDisplay">Loading NYC time…</div>
-    <div id="liveStatus">Live mode: ON (follows current NYC time)</div>
-    <input type="range" id="slider" min="0" max="0" value="0" step="1"/>
-    <button id="btnNow" style="width:100%; margin-top:8px;">Now</button>
-  </div>
+    <div id="legendGradient" aria-hidden="true"></div>
+    <div class="small"><strong>High rating → Low rating</strong></div>
+    <div style="margin-top:6px;" class="small">
+      Green = Best<br />
+      Blue = Medium<br />
+      Sky = Normal<br />
+      Red = Avoid
+    </div>
+    <div style="margin-top:8px;font-weight:800;color:#145a2f" id="loadedMsg">Connecting to Railway…</div>
+  </section>
+
+  <section id="bottomBar" class="panel">
+    <button id="btnNow" type="button">Now</button>
+    <div id="timeWindow">--:--</div>
+    <div id="nycNow">Current NYC time: --</div>
+    <div id="modeText">Live mode: ON (follows current NYC time)</div>
+    <input id="slider" type="range" min="0" max="0" step="1" value="0" />
+  </section>
 
   <script>
-    const BASE = "https://web-production-78f67.up.railway.app".replace(/\/+$/, "");
-    const BIN_MINUTES = 20;
+    window.addEventListener("DOMContentLoaded", () => {
+      const BASE = "https://web-production-78f67.up.railway.app".replace(/\/+$/, "");
+      const BIN_MINUTES = 20;
+      const WEEK_MINUTES = 7 * 24 * 60;
 
-    function ratingToColor(r) {
-      r = Math.max(1, Math.min(100, Number(r) || 1));
-      if (r <= 25) return "#d32f2f";
-      if (r <= 50) return "#81d4fa";
-      if (r <= 75) return "#1976d2";
-      return "#2e7d32";
-    }
+      const topPanel = document.getElementById("topPanel");
+      const btnMin = document.getElementById("btnMin");
+      const btnNow = document.getElementById("btnNow");
+      const loadedMsg = document.getElementById("loadedMsg");
+      const timeWindow = document.getElementById("timeWindow");
+      const nycNow = document.getElementById("nycNow");
+      const modeText = document.getElementById("modeText");
+      const slider = document.getElementById("slider");
 
-    const map = L.map("map", { zoomControl: true }).setView([40.72, -73.98], 12);
-    L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
-      attribution: '&copy; OpenStreetMap &copy; CARTO'
-    }).addTo(map);
+      const map = L.map("map", { zoomControl: true, preferCanvas: true }).setView([40.72, -73.98], 11.8);
+      L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
+        attribution: "&copy; OpenStreetMap &copy; CARTO"
+      }).addTo(map);
 
-    const polyLayer = L.geoJSON(null, {
-      style: f => ({
-        stroke: true,
-        color: "#000",
-        weight: 2.8,
-        fillColor: ratingToColor(f.properties?.rating || 50),
-        fillOpacity: 0.88
-      })
-    }).addTo(map);
+      function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
+      function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
-    let timeline = [];
-    const slider = document.getElementById("slider");
-    const timeDisplay = document.getElementById("timeDisplay");
-    const loadedMsg = document.getElementById("loadedMsg");
-
-    function nycTimeLabel(iso) {
-      return new Date(iso).toLocaleString("en-US", {
-        timeZone: "America/New_York",
-        weekday: "short",
-        hour: "numeric",
-        minute: "2-digit",
-        hour12: true
-      });
-    }
-
-    function getNYCMinuteOfWeek(iso) {
-      const d = new Date(iso);
-      const f = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short", hour: "numeric", minute: "numeric" });
-      const p = f.formatToParts(d);
-      const dowMap = { Mon:0, Tue:1, Wed:2, Thu:3, Fri:4, Sat:5, Sun:6 };
-      const dow = dowMap[p.find(x=>x.type==="weekday").value] ?? 0;
-      const h = +p.find(x=>x.type==="hour").value;
-      const m = +p.find(x=>x.type==="minute").value;
-      return dow * 1440 + h * 60 + m;
-    }
-
-    function pickClosestIndex() {
-      if (!timeline.length) return 0;
-      const nowM = getNYCMinuteOfWeek(new Date());
-      const week = 7 * 1440;
-      let best = 0, bestD = Infinity;
-      for (let i = 0; i < timeline.length; i++) {
-        const d = Math.min(Math.abs(getNYCMinuteOfWeek(timeline[i]) - nowM), week - Math.abs(getNYCMinuteOfWeek(timeline[i]) - nowM));
-        if (d < bestD) { bestD = d; best = i; }
+      function nycParts(date = new Date()) {
+        const fmt = new Intl.DateTimeFormat("en-US", {
+          timeZone: "America/New_York",
+          weekday: "short",
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false
+        });
+        const parts = Object.fromEntries(
+          fmt.formatToParts(date).filter(p => p.type !== "literal").map(p => [p.type, p.value])
+        );
+        const dowMap = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 };
+        return {
+          dow: dowMap[parts.weekday] ?? 0,
+          minuteOfDay: (Number(parts.hour) || 0) * 60 + (Number(parts.minute) || 0)
+        };
       }
-      return best;
-    }
 
-    async function apiGET(path) {
-      const r = await fetch(`${BASE}${path}`, {cache:"no-store"});
-      if (!r.ok) throw new Error(await r.text());
-      return r.json();
-    }
+      function nycMinuteOfWeek(value) {
+        const p = nycParts(new Date(value));
+        return p.dow * 1440 + p.minuteOfDay;
+      }
 
-    async function loadFrame(idx) {
-      const data = await apiGET(`/frame/${idx}`);
-      polyLayer.clearLayers();
-      polyLayer.addData(data.polygons || data);
-      timeDisplay.textContent = nycTimeLabel(data.time || timeline[idx]);
-      loadedMsg.textContent = `Loaded ${timeline.length} steps from Railway ✅`;
-    }
+      function nycShortLabel(value) {
+        return new Date(value).toLocaleString("en-US", {
+          timeZone: "America/New_York",
+          weekday: "short",
+          hour: "numeric",
+          minute: "2-digit",
+          hour12: true
+        });
+      }
 
-    async function boot() {
-      loadedMsg.textContent = "Checking Railway volume…";
-      try {
-        const data = await apiGET("/timeline");
-        timeline = Array.isArray(data) ? data : (data.timeline || []);
-        
-        if (timeline.length === 0) throw new Error("empty");
+      function ratingToColor(rating) {
+        const r = clamp(Number(rating) || 1, 1, 100);
+        if (r <= 25) return "#d32f2f";  // Red = Avoid
+        if (r <= 50) return "#81d4fa";  // Sky = Normal
+        if (r <= 75) return "#1976d2";  // Blue = Medium
+        return "#2e7d32";               // Green = Best
+      }
 
-        slider.max = timeline.length - 1;
-        const startIdx = pickClosestIndex();
-        slider.value = startIdx;
-        await loadFrame(startIdx);
+      function extractRating(properties) {
+        const p = properties || {};
+        const raw = p.rating ?? p.rating_1_100 ?? p.score ?? p.value;
+        if (raw == null) return 1;
+        const n = Number(raw);
+        if (!Number.isFinite(n)) return 1;
+        if (n > 0 && n <= 1) return Math.round(1 + 99 * n);
+        if (n > 1 && n <= 10) return Math.round(n * 10);
+        return Math.round(n);
+      }
 
-        setInterval(() => {
-          if (document.visibilityState === "visible") {
-            const idx = pickClosestIndex();
-            slider.value = idx;
-            loadFrame(idx);
+      const zonesLayer = L.geoJSON(null, {
+        style: (feature) => ({
+          stroke: true,
+          color: "#111",
+          weight: 1.8,
+          opacity: 0.95,
+          fillOpacity: 0.78,
+          fillColor: ratingToColor(extractRating(feature?.properties))
+        })
+      }).addTo(map);
+
+      let timeline = [];
+      let liveMode = true;
+      let liveInterval = null;
+
+      async function apiJson(path) {
+        const res = await fetch(`${BASE}${path}`, { cache: "no-store" });
+        if (!res.ok) throw new Error(await res.text());
+        return res.json();
+      }
+
+      function closestTimelineIndexByNYCMinute() {
+        if (!timeline.length) return 0;
+        const now = nycParts();
+        const nowMin = now.dow * 1440 + now.minuteOfDay;
+        let bestIdx = 0;
+        let bestDiff = Infinity;
+        for (let i = 0; i < timeline.length; i++) {
+          const itemMin = nycMinuteOfWeek(timeline[i]);
+          const direct = Math.abs(itemMin - nowMin);
+          const wrap = WEEK_MINUTES - direct;
+          const diff = Math.min(direct, wrap);
+          if (diff < bestDiff) {
+            bestDiff = diff;
+            bestIdx = i;
           }
-        }, 60000);
-
-      } catch (e) {
-        loadedMsg.innerHTML = "No processed data yet.<br>Tap <strong>Generate / Refresh</strong>";
+        }
+        return bestIdx;
       }
-    }
 
-    slider.addEventListener("input", () => loadFrame(+slider.value));
-    
-    document.getElementById("btnNow").onclick = () => {
-      const idx = pickClosestIndex();
-      slider.value = idx;
-      loadFrame(idx);
-    };
+      function addMinutesISO(iso, min) {
+        return new Date(new Date(iso).getTime() + min * 60000).toISOString();
+      }
 
-    // Generate button (hidden in bottom bar but accessible via top if needed - for now use browser console or add button)
-    // You can click "Generate / Refresh" from previous versions if needed
+      function updateClockText() {
+        const nowLabel = new Date().toLocaleString("en-US", {
+          timeZone: "America/New_York",
+          weekday: "short",
+          hour: "numeric",
+          minute: "2-digit",
+          second: "2-digit",
+          hour12: true
+        });
+        nycNow.textContent = `Current NYC time: ${nowLabel}`;
+      }
 
-    // Min button to collapse top panel
-    document.getElementById("minBtn").onclick = () => {
-      const panel = document.getElementById("topPanel");
-      panel.style.display = panel.style.display === "none" ? "block" : "none";
-    };
+      async function loadFrame(index) {
+        const idx = clamp(Number(index) || 0, 0, Math.max(0, timeline.length - 1));
+        const frame = await apiJson(`/frame/${idx}`);
+        zonesLayer.clearLayers();
+        zonesLayer.addData(frame.polygons || frame);
 
-    boot();
+        const start = frame.time || timeline[idx];
+        const end = addMinutesISO(start, BIN_MINUTES);
+        const endTrim = nycShortLabel(end).replace(/^[A-Za-z]{3}\s/, "");
+        timeWindow.textContent = `${nycShortLabel(start)} – ${endTrim}`;
+        slider.value = String(idx);
+        loadedMsg.textContent = `Loaded ${timeline.length} steps from Railway ✅`;
+      }
+
+      function setLiveMode(on) {
+        liveMode = on;
+        modeText.textContent = on
+          ? "Live mode: ON (follows current NYC time)"
+          : "Live mode: OFF (manual slider)";
+      }
+
+      async function syncNow() {
+        if (!timeline.length) return;
+        const idx = closestTimelineIndexByNYCMinute();
+        await loadFrame(idx);
+      }
+
+      async function initTimeline() {
+        loadedMsg.textContent = "Reading timeline from Railway…";
+        for (let attempt = 0; attempt < 8; attempt++) {
+          try {
+            const data = await apiJson("/timeline");
+            const list = Array.isArray(data) ? data : (data.timeline || []);
+            timeline = list.filter(Boolean).sort((a, b) => new Date(a) - new Date(b));
+            if (!timeline.length) throw new Error("Railway timeline is empty");
+            slider.max = String(timeline.length - 1);
+            slider.min = "0";
+            slider.step = "1";
+            return;
+          } catch (err) {
+            loadedMsg.textContent = `Waiting for Railway timeline… (${attempt + 1}/8)`;
+            await sleep(700);
+          }
+        }
+        throw new Error("Unable to load timeline from Railway.");
+      }
+
+      slider.addEventListener("input", async () => {
+        setLiveMode(false);
+        await loadFrame(Number(slider.value));
+      });
+
+      btnNow.addEventListener("click", async () => {
+        setLiveMode(true);
+        await syncNow();
+      });
+
+      btnMin.addEventListener("click", () => {
+        const hidden = topPanel.dataset.minimized === "1";
+        if (hidden) {
+          topPanel.style.display = "block";
+          topPanel.dataset.minimized = "0";
+          btnMin.textContent = "Min";
+        } else {
+          topPanel.style.display = "none";
+          topPanel.dataset.minimized = "1";
+          btnMin.textContent = "Show";
+        }
+      });
+
+      (async () => {
+        updateClockText();
+        setInterval(updateClockText, 1000);
+        try {
+          await initTimeline();
+          await syncNow(); // strict NYC closest-window initialization
+
+          if (liveInterval) clearInterval(liveInterval);
+          liveInterval = setInterval(async () => {
+            updateClockText();
+            if (liveMode && document.visibilityState === "visible") {
+              await syncNow();
+            }
+          }, 30000);
+        } catch (error) {
+          loadedMsg.textContent = "Railway data unavailable. Check Railway scripts and endpoint.";
+          modeText.textContent = "Live mode: OFF (Railway unavailable)";
+          console.error(error);
+        }
+      })();
+    });
   </script>
 </body>
 </html>
