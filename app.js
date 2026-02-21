@@ -1,23 +1,15 @@
 // =======================
 // TLC Hotspot Map - app.js (GitHub Pages)
-// - Loads data from Railway (NOT from GitHub)
-// - Polygons are ONLY rating gradient (red→yellow→green)
-// - Markers are ONLY extremes (very good / very bad) to avoid confusion
-// - Purple outline = selected zone highlight
-// - Marker toggle in legend
-// - NYC timezone label
-// - Slider throttled for iPhone
+// Loads hotspots JSON from Railway (NOT GitHub)
+// - Colors: rating gradient (red -> yellow -> green) ONLY
+// - Icons: extremes ONLY (✔ top, ✖ bottom) so no confusion
+// - Phone-friendly slider + panes (markers above polygons)
 // =======================
-
-// IMPORTANT: Put your Railway domain here
-const API_BASE = "https://web-production-78f67.up.railway.app"; // <- keep this updated if Railway domain changes
-const HOTSPOTS_URL = `${API_BASE}/hotspots`;
 
 function clamp01(x){ return Math.max(0, Math.min(1, x)); }
 function lerp(a,b,t){ return a + (b-a)*t; }
 
-// red -> yellow -> green
-function scoreToColorHex(score01){
+function scoreToColorHex01(score01){
   const s = clamp01(score01);
   let r,g,b;
   if (s <= 0.5){
@@ -35,6 +27,13 @@ function scoreToColorHex(score01){
   return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
 }
 
+// rating 1..100 -> color
+function ratingToColor(r){
+  const rr = Math.max(1, Math.min(100, Number(r || 1)));
+  const s = (rr - 1) / 99; // 0..1
+  return scoreToColorHex01(s);
+}
+
 function fmtMoney(x){
   if (x === null || x === undefined || Number.isNaN(x)) return "n/a";
   return `$${Number(x).toFixed(2)}`;
@@ -45,7 +44,7 @@ function fmtNum(x, nd=2){
   return Number(x).toFixed(nd);
 }
 
-// Force NYC timezone so labels match NYC
+// Force NYC timezone for labels
 function formatTimeLabel(iso){
   const d = new Date(iso);
   return d.toLocaleString("en-US", {
@@ -56,189 +55,221 @@ function formatTimeLabel(iso){
   });
 }
 
+// ---- Railway base (set in index.html) ----
+const API_BASE = (window.API_BASE || "").replace(/\/+$/,""); // trim trailing /
+if (!API_BASE){
+  console.warn("API_BASE missing. Set window.API_BASE in index.html");
+}
+
+// Map
 const map = L.map('map', { zoomControl: true }).setView([40.72, -73.98], 12);
 L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
   attribution: '&copy; OpenStreetMap &copy; CARTO'
 }).addTo(map);
 
-// Panes: polygons below markers, selection above polygons
-map.createPane("polys");     map.getPane("polys").style.zIndex = 400;
-map.createPane("selection"); map.getPane("selection").style.zIndex = 520;
-map.createPane("markers");   map.getPane("markers").style.zIndex = 650;
+// Panes
+map.createPane("polys");
+map.getPane("polys").style.zIndex = 400;
+
+map.createPane("markers");
+map.getPane("markers").style.zIndex = 650;
 
 // Layers
 const polyLayer = L.geoJSON(null, {
   pane: "polys",
-  style: (f) => f?.properties?.style || {color:"#444", weight:1, fillOpacity:0.55},
+  style: (f) => {
+    const p = (f && f.properties) ? f.properties : {};
+    // We IGNORE server-provided style to prevent “everything red” confusion.
+    // We compute style purely from rating (1..100).
+    const rating = p.rating ?? p.rating_1_100 ?? p.r ?? 1;
+    return {
+      color: "#222222",      // neutral border so color = rating only
+      weight: 2,
+      fillColor: ratingToColor(rating),
+      fillOpacity: 0.55
+    };
+  },
   onEachFeature: (feature, layer) => {
     const p = feature.properties || {};
+    // If server provided popup HTML, keep it
     if (p.popup) layer.bindPopup(p.popup, { maxWidth: 360 });
-
-    layer.on("click", () => {
-      highlightZone(feature);
-    });
   }
-}).addTo(map);
-
-const selectionLayer = L.geoJSON(null, {
-  pane: "selection",
-  style: () => ({
-    color: "#7b2cff",   // purple selection outline
-    weight: 5,
-    fillOpacity: 0.0
-  })
 }).addTo(map);
 
 const markerLayer = L.layerGroup().addTo(map);
 
 let timeline = [];
-let dataByTime = new Map();
-let markersEnabled = true;
+let frames = [];          // array of frames aligned to timeline
+let showIcons = true;     // toggle
+let topN = 40;            // how many ✔ to show
+let bottomN = 40;         // how many ✖ to show
 
-// Keep a quick lookup for the currently displayed polygons by LocationID
-let currentPolysById = new Map();
-
-function getLocationIdFromFeature(f){
-  const p = f?.properties || {};
-  // accept a few possible keys depending on generator
-  return p.LocationID ?? p.location_id ?? p.locationId ?? p.zone_id ?? p.zoneId ?? null;
+function setStatus(msg){
+  document.getElementById("timeLabel").textContent = msg;
 }
 
-// highlight selected polygon with purple outline
-function highlightZone(feature){
-  selectionLayer.clearLayers();
-  if (!feature) return;
-
-  // For multi-polygons, still ok
-  selectionLayer.addData(feature);
-
-  // bring selection to top
-  try { selectionLayer.bringToFront(); } catch(e) {}
+function iconDiv(html){
+  return L.divIcon({ html, className:"", iconSize:[18,18], iconAnchor:[9,9] });
 }
 
-function buildMarkerIcon(type){
-  // type: "GOOD" or "BAD"
-  const html = (type === "GOOD")
-    ? '<div style="font-weight:900; color:#00b050; font-size:18px; line-height:18px;">✔</div>'
-    : '<div style="font-weight:900; color:#e60000; font-size:18px; line-height:18px;">✖</div>';
-
-  return L.divIcon({
-    html,
-    className: "",
-    iconSize: [18,18],
-    iconAnchor: [9,9]
-  });
+function buildIcon(tag){
+  if (tag === "TOP"){
+    return iconDiv('<div style="font-weight:900; color:#00b050; font-size:18px; line-height:18px;">✔</div>');
+  }
+  return iconDiv('<div style="font-weight:900; color:#e60000; font-size:18px; line-height:18px;">✖</div>');
 }
 
-// Decide GOOD/BAD based on rating only (keeps meaning consistent)
-function markerTypeFromRating(rating){
-  const r = Number(rating);
-  if (!Number.isFinite(r)) return null;
-  if (r >= 70) return "GOOD";
-  if (r <= 30) return "BAD";
-  return null; // don't show "middle" markers
+function getFeatureRating(feature){
+  const p = feature.properties || {};
+  const r = p.rating ?? p.rating_1_100 ?? p.r;
+  return Number(r || 1);
+}
+
+function getFeatureCentroidLatLng(feature){
+  // crude centroid for polygons in GeoJSON coordinates (lon,lat)
+  // good enough for markers (fast, no heavy geo libs in browser)
+  try{
+    const geom = feature.geometry;
+    if (!geom) return null;
+
+    let coords = null;
+    if (geom.type === "Polygon"){
+      coords = geom.coordinates?.[0];
+    } else if (geom.type === "MultiPolygon"){
+      coords = geom.coordinates?.[0]?.[0];
+    }
+    if (!coords || coords.length < 3) return null;
+
+    let minLat=999, maxLat=-999, minLng=999, maxLng=-999;
+    for (const [lng, lat] of coords){
+      if (lat < minLat) minLat = lat;
+      if (lat > maxLat) maxLat = lat;
+      if (lng < minLng) minLng = lng;
+      if (lng > maxLng) maxLng = lng;
+    }
+    return L.latLng((minLat+maxLat)/2, (minLng+maxLng)/2);
+  }catch(e){
+    return null;
+  }
 }
 
 function rebuildAtIndex(idx){
+  const frame = frames[idx];
   const key = timeline[idx];
-  const bundle = dataByTime.get(key);
-  if (!bundle) return;
+  if (!frame || !key) return;
 
-  document.getElementById("timeLabel").textContent = formatTimeLabel(key);
+  setStatus(formatTimeLabel(key));
 
   polyLayer.clearLayers();
-  selectionLayer.clearLayers();
   markerLayer.clearLayers();
-  currentPolysById = new Map();
 
-  // Polygons for this time window
-  if (bundle.polygons){
-    polyLayer.addData(bundle.polygons);
-
-    // Build lookup for selection-by-id (if needed later)
-    try {
-      const feats = bundle.polygons.features || [];
-      for (const f of feats){
-        const id = getLocationIdFromFeature(f);
-        if (id !== null) currentPolysById.set(String(id), f);
-      }
-    } catch(e){}
+  const fc = frame.polygons;
+  if (!fc || !fc.features || fc.features.length === 0){
+    return;
   }
 
-  // Markers (extremes only) — optional toggle
-  if (markersEnabled){
-    for (const m of (bundle.markers || [])){
-      const type = markerTypeFromRating(m.rating);
-      if (!type) continue;
+  polyLayer.addData(fc);
 
-      const icon = buildMarkerIcon(type);
-      const marker = L.marker([m.lat, m.lng], { icon, pane: "markers" });
+  if (!showIcons) return;
 
-      const popup = `
-        <div style="font-family:Arial; font-size:13px;">
-          <div style="font-weight:900; font-size:14px;">${m.zone}</div>
-          <div style="color:#666; margin-bottom:4px;">${m.borough || "Unknown"}</div>
-          <div><b>Rating:</b> <span style="font-weight:900; color:${m.color || "#111"};">${m.rating}/100</span></div>
-          <hr style="margin:6px 0;">
-          <div><b>Pickups:</b> ${m.pickups ?? "n/a"}</div>
-          <div><b>Avg driver pay:</b> ${fmtMoney(m.avg_driver_pay)}</div>
-          <div><b>Avg tips:</b> ${fmtMoney(m.avg_tips)}</div>
-        </div>
-      `;
+  // Create extremes based on rating of polygons on THIS time window
+  const feats = fc.features.slice();
+  feats.sort((a,b)=>getFeatureRating(b)-getFeatureRating(a));
 
-      marker.bindPopup(popup, { maxWidth: 360 });
+  const tops = feats.slice(0, Math.min(topN, feats.length));
+  const bottoms = feats.slice(Math.max(0, feats.length - bottomN));
 
-      // When marker clicked, try highlight corresponding polygon (if LocationID exists)
-      marker.on("click", () => {
-        if (m.LocationID !== undefined && m.LocationID !== null){
-          const f = currentPolysById.get(String(m.LocationID));
-          if (f) highlightZone(f);
-        }
-      });
+  // Avoid duplicates if small
+  const bottomSet = new Set(bottoms.map(f => f.properties?.LocationID ?? f.properties?.location_id ?? JSON.stringify(f.geometry)));
+  const topFiltered = tops.filter(f => !bottomSet.has(f.properties?.LocationID ?? f.properties?.location_id ?? JSON.stringify(f.geometry)));
 
-      marker.addTo(markerLayer);
-    }
+  // Add TOP ✔
+  for (const f of topFiltered){
+    const ll = getFeatureCentroidLatLng(f);
+    if (!ll) continue;
+    const r = getFeatureRating(f);
+    const p = f.properties || {};
+    const zoneName = p.zone || p.Zone || p.name || `Zone ${p.LocationID ?? ""}`;
+    const borough = p.borough || p.Borough || "NYC";
+
+    const m = L.marker(ll, { icon: buildIcon("TOP"), pane:"markers" });
+    m.bindPopup(`
+      <div style="font-family:Arial; font-size:13px;">
+        <div style="font-weight:900; font-size:14px;">${zoneName}</div>
+        <div style="color:#666; margin-bottom:4px;">${borough} — <b>VERY GOOD (TOP)</b></div>
+        <div><b>Rating:</b> <span style="font-weight:900; color:#00b050;">${Math.round(r)}/100</span></div>
+      </div>
+    `, { maxWidth: 360 });
+    m.addTo(markerLayer);
   }
 
-  // Ensure markers are always on top
-  try { markerLayer.bringToFront(); } catch(e){}
+  // Add BOTTOM ✖
+  for (const f of bottoms){
+    const ll = getFeatureCentroidLatLng(f);
+    if (!ll) continue;
+    const r = getFeatureRating(f);
+    const p = f.properties || {};
+    const zoneName = p.zone || p.Zone || p.name || `Zone ${p.LocationID ?? ""}`;
+    const borough = p.borough || p.Borough || "NYC";
+
+    const m = L.marker(ll, { icon: buildIcon("BOTTOM"), pane:"markers" });
+    m.bindPopup(`
+      <div style="font-family:Arial; font-size:13px;">
+        <div style="font-weight:900; font-size:14px;">${zoneName}</div>
+        <div style="color:#666; margin-bottom:4px;">${borough} — <b>VERY LOW (BOTTOM)</b></div>
+        <div><b>Rating:</b> <span style="font-weight:900; color:#e60000;">${Math.round(r)}/100</span></div>
+      </div>
+    `, { maxWidth: 360 });
+    m.addTo(markerLayer);
+  }
 }
 
-function setLegendStatus(text){
-  const el = document.getElementById("legendStatus");
-  if (el) el.textContent = text;
+async function loadHotspots(){
+  // Always fetch from Railway; GitHub cannot store 113MB
+  const url = `${API_BASE}/hotspots_20min.json?ts=${Date.now()}`;
+  const res = await fetch(url, { cache:"no-store" });
+  if (!res.ok){
+    const txt = await res.text().catch(()=> "");
+    throw new Error(`Failed to fetch hotspots (${res.status}). ${txt || "Did you run /generate on Railway?"}`);
+  }
+  return await res.json();
 }
 
 async function main(){
-  setLegendStatus("Loading data from Railway...");
+  // UI controls
+  const iconsToggle = document.getElementById("toggleIcons");
+  const topInput = document.getElementById("topN");
+  const botInput = document.getElementById("bottomN");
 
-  // Pull hotspots JSON from Railway (CORS enabled in main.py)
-  const res = await fetch(HOTSPOTS_URL, { cache: "no-store" });
-  if (!res.ok){
-    const msg = await res.text().catch(()=> "");
-    throw new Error(`Failed to fetch hotspots (${res.status}). ${msg}`.slice(0, 200));
-  }
+  iconsToggle.addEventListener("change", ()=>{
+    showIcons = !!iconsToggle.checked;
+    rebuildAtIndex(Number(document.getElementById("slider").value));
+  });
 
-  const payload = await res.json();
+  topInput.addEventListener("change", ()=>{
+    topN = Math.max(0, Math.min(300, Number(topInput.value || 40)));
+    rebuildAtIndex(Number(document.getElementById("slider").value));
+  });
+
+  botInput.addEventListener("change", ()=>{
+    bottomN = Math.max(0, Math.min(300, Number(botInput.value || 40)));
+    rebuildAtIndex(Number(document.getElementById("slider").value));
+  });
+
+  setStatus("Loading…");
+  const payload = await loadHotspots();
 
   timeline = payload.timeline || [];
-  dataByTime = new Map((payload.frames || []).map(f => [f.time, f]));
+  frames = (payload.frames || []).map(f => ({
+    time: f.time,
+    polygons: f.polygons
+  }));
 
   const slider = document.getElementById("slider");
   slider.min = 0;
   slider.max = Math.max(0, timeline.length - 1);
   slider.step = 1;
   slider.value = 0;
-
-  // Marker toggle
-  const toggle = document.getElementById("toggleMarkers");
-  if (toggle){
-    toggle.checked = true;
-    toggle.addEventListener("change", () => {
-      markersEnabled = !!toggle.checked;
-      rebuildAtIndex(Number(slider.value));
-    });
-  }
 
   // Throttled slider for iPhone smoothness
   let pending = null;
@@ -253,15 +284,12 @@ async function main(){
 
   if (timeline.length > 0){
     rebuildAtIndex(0);
-    setLegendStatus("Loaded ✅");
   } else {
-    document.getElementById("timeLabel").textContent = "No data in hotspots response";
-    setLegendStatus("No frames found");
+    setStatus("No data in hotspots_20min.json");
   }
 }
 
 main().catch(err => {
   console.error(err);
-  document.getElementById("timeLabel").textContent = "ERROR: " + err.message;
-  setLegendStatus("ERROR");
+  setStatus("ERROR: " + err.message);
 });
