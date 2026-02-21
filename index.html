@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>NYC TLC Hotspot Map</title>
 
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -12,93 +12,93 @@
     html, body { height: 100%; margin: 0; }
     #map { height: 100%; width: 100%; }
 
-    /* SMALL panel (not blocking) */
+    /* Small legend box */
     .panel {
       position: fixed;
       top: 10px;
       left: 10px;
       z-index: 9999;
       background: rgba(255,255,255,0.92);
-      border: 2px solid #111;
-      border-radius: 10px;
       padding: 8px 10px;
-      font-family: Arial, sans-serif;
-      width: 230px;
-      max-width: 68vw;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.22);
-    }
-
-    .titleRow { display:flex; align-items:center; justify-content:space-between; gap:8px; }
-    .title { font-weight: 900; font-size: 13px; }
-
-    .btn {
       border: 2px solid #111;
-      background: #fff;
       border-radius: 10px;
-      padding: 3px 8px;
-      font-weight: 900;
+      font-family: Arial, sans-serif;
       font-size: 12px;
-      cursor: pointer;
+      width: 240px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.20);
     }
-
-    .row { display:flex; align-items:center; gap:8px; margin-top:6px; flex-wrap:wrap; }
+    .panel h1 {
+      margin: 0 0 6px 0;
+      font-size: 13px;
+      font-weight: 900;
+    }
     .bar {
       height: 10px;
-      width: 140px;
+      width: 100%;
       border: 1px solid #333;
       border-radius: 6px;
-      background: linear-gradient(90deg, #00d66b, #2563eb, #38bdf8, #e53935);
+      overflow: hidden;
+      background: linear-gradient(90deg,
+        #d73027 0%,
+        #d73027 24%,
+        #7ec8ff 25%,
+        #7ec8ff 49%,
+        #1f78ff 50%,
+        #1f78ff 74%,
+        #2ecc71 75%,
+        #2ecc71 100%
+      );
+      margin-bottom: 6px;
     }
-    .small { font-size: 11px; color:#222; line-height: 1.25; }
-
+    .row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: #222;
+      margin-bottom: 6px;
+    }
+    .small {
+      font-size: 11px;
+      color: #333;
+      line-height: 1.25;
+    }
     .statusLine {
       margin-top: 6px;
       font-size: 11px;
-      font-weight: 900;
-      color: #155724;
+      color: #0a7a2a;
+      font-weight: 700;
     }
-    .statusLine.bad { color:#8a1f11; }
+    .errLine {
+      margin-top: 6px;
+      font-size: 11px;
+      color: #b00020;
+      font-weight: 700;
+    }
 
-    .hidden { display:none; }
-
-    /* Slider */
+    /* Bottom slider */
     .sliderWrap {
       position: fixed;
-      left: 10px; right: 10px; bottom: 14px;
+      left: 10px;
+      right: 10px;
+      bottom: 12px;
       z-index: 9999;
       background: rgba(255,255,255,0.92);
       border: 2px solid #111;
-      border-radius: 10px;
+      border-radius: 12px;
       padding: 10px 12px;
       font-family: Arial, sans-serif;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.22);
+      box-shadow: 0 2px 10px rgba(0,0,0,0.20);
+    }
+    .timeLabel {
+      font-weight: 900;
+      font-size: 18px;
+      margin-bottom: 6px;
     }
     input[type="range"] { width: 100%; }
-    .timeLabel { font-weight: 900; font-size: 18px; }
-    .currentTimeLabel { margin-top: 4px; font-size: 12px; color: #222; }
-    .timeRow { display:flex; align-items:center; justify-content:space-between; gap:10px; }
-    .nowBtn {
-      border: 2px solid #111;
-      background: #fff;
-      border-radius: 10px;
-      padding: 4px 10px;
-      font-weight: 900;
-      font-size: 12px;
-      cursor: pointer;
-      flex-shrink: 0;
-    }
-    .liveBadge {
-      margin-top: 4px;
-      font-size: 12px;
-      color: #155724;
-      font-weight: 700;
-    }
-    .liveBadge.paused { color: #8a1f11; }
-
   </style>
 
   <script>
-    // ✅ REQUIRED: set your Railway base URL here (no trailing slash)
+    // ✅ SET THIS ONCE. If Railway domain changes, update it here only.
     window.RAILWAY_BASE_URL = "https://web-production-78f67.up.railway.app";
   </script>
 </head>
@@ -106,37 +106,27 @@
 <body>
   <div id="map"></div>
 
-  <div class="panel" id="panel">
-    <div class="titleRow">
-      <div class="title">NYC HVFHV (1–100)</div>
-      <button class="btn" id="minBtn">Min</button>
+  <div class="panel">
+    <h1>NYC HVFHV Zones (1–100)</h1>
+    <div class="bar"></div>
+    <div class="row">
+      <span>Red = Avoid</span>
+      <span>Sky = Normal</span>
+      <span>Blue = Medium</span>
+      <span>Green = Best</span>
     </div>
-
-    <div id="panelBody">
-      <div class="row">
-        <div class="bar"></div>
-        <div class="small"><b>High rating → Low rating</b></div>
-      </div>
-
-      <div class="small" style="margin-top:6px;">
-        Green = best trip request zones<br/>
-        Blue = medium trip request zones<br/>
-        Sky blue = normal trip request zones<br/>
-        Red = lowest trip request zones (avoid)
-      </div>
-
-      <div class="statusLine" id="statusLine">Loading…</div>
+    <div class="small">
+      • Colors are calculated from the <b>rating</b> (1–100).<br>
+      • This page loads data from <b>Railway</b> (not GitHub).<br>
+      • Slide the 20-minute timeline below.
     </div>
+    <div id="loadStatus" class="statusLine">Loading…</div>
   </div>
 
   <div class="sliderWrap">
-    <div class="timeRow">
-      <div class="timeLabel" id="timeLabel">Loading…</div>
-      <button id="nowBtn" class="nowBtn">Now</button>
-    </div>
-    <div class="currentTimeLabel" id="currentTimeLabel">Current NYC time: --</div>
-    <div class="liveBadge" id="liveBadge">Live mode: ON</div>
+    <div class="timeLabel" id="timeLabel">Loading…</div>
     <input id="slider" type="range" min="0" max="0" step="1" value="0" />
+    <div id="errorLine" class="errLine" style="display:none;"></div>
   </div>
 
   <script src="./app.js"></script>
