@@ -12,100 +12,73 @@
     html, body { height: 100%; margin: 0; }
     #map { height: 100%; width: 100%; }
 
-    /* Compact panel */
+    /* SMALL panel (not blocking) */
     .panel {
       position: fixed;
       top: 10px;
       left: 10px;
       z-index: 9999;
-      background: rgba(255,255,255,0.93);
+      background: rgba(255,255,255,0.92);
       border: 2px solid #111;
       border-radius: 10px;
       padding: 8px 10px;
       font-family: Arial, sans-serif;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.25);
-      width: 260px;      /* small */
-      max-width: 70vw;   /* phone safe */
-    }
-
-    .panel.minimized {
-      width: auto;
-      padding: 6px 8px;
+      width: 230px;
+      max-width: 68vw;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.22);
     }
 
     .titleRow { display:flex; align-items:center; justify-content:space-between; gap:8px; }
-    .title { font-weight:900; font-size:13px; line-height:1.1; }
+    .title { font-weight: 900; font-size: 13px; }
 
     .btn {
       border: 2px solid #111;
       background: #fff;
       border-radius: 10px;
-      padding: 4px 8px;
-      font-weight: 800;
-      cursor: pointer;
+      padding: 3px 8px;
+      font-weight: 900;
       font-size: 12px;
+      cursor: pointer;
     }
 
-    .row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:6px; }
+    .row { display:flex; align-items:center; gap:8px; margin-top:6px; flex-wrap:wrap; }
     .bar {
-      height: 10px; width: 150px;
+      height: 10px;
+      width: 140px;
       border: 1px solid #333;
       border-radius: 6px;
       background: linear-gradient(90deg, #9b9b9b, #d60000, #ffd700, #00b050);
     }
+    .small { font-size: 11px; color:#222; line-height: 1.25; }
 
-    .legendTiny { font-size: 11px; color:#222; line-height:1.2; }
-    .pill {
-      display:inline-flex; align-items:center; gap:6px;
-      border:1px solid rgba(0,0,0,0.25);
-      padding:4px 6px;
-      border-radius: 999px;
-      background: rgba(255,255,255,0.8);
-      font-weight: 800;
+    .statusLine {
+      margin-top: 6px;
       font-size: 11px;
-    }
-    .dot { width:10px; height:10px; border-radius:50%; display:inline-block; }
-    .dot.gray { background:#9b9b9b; }
-    .dot.red { background:#d60000; }
-    .dot.yellow { background:#ffd700; }
-    .dot.green { background:#00b050; }
-
-    .controls label { font-size: 11px; font-weight: 800; }
-    .controls input[type="number"]{
-      width: 56px; padding:4px 6px; border-radius:8px; border:1px solid rgba(0,0,0,0.35);
-      font-weight: 800;
-    }
-    .controls input[type="checkbox"]{ transform: scale(1.1); }
-
-    .statusLine{
-      margin-top:6px;
-      font-size: 11px;
-      color:#155724;
-      font-weight: 800;
+      font-weight: 900;
+      color: #155724;
     }
     .statusLine.bad { color:#8a1f11; }
+
+    .hidden { display:none; }
 
     /* Slider */
     .sliderWrap {
       position: fixed;
       left: 10px; right: 10px; bottom: 14px;
       z-index: 9999;
-      background: rgba(255,255,255,0.93);
+      background: rgba(255,255,255,0.92);
       border: 2px solid #111;
       border-radius: 10px;
       padding: 10px 12px;
       font-family: Arial, sans-serif;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.25);
+      box-shadow: 0 2px 10px rgba(0,0,0,0.22);
     }
     input[type="range"] { width: 100%; }
     .timeLabel { font-weight: 900; font-size: 18px; }
-
-    .hidden { display:none; }
   </style>
 
   <script>
-    // ✅ REQUIRED: set this to YOUR Railway domain (no trailing slash)
-    // Example you already have:
+    // ✅ REQUIRED: set your Railway base URL here (no trailing slash)
     window.RAILWAY_BASE_URL = "https://web-production-78f67.up.railway.app";
   </script>
 </head>
@@ -122,25 +95,14 @@
     <div id="panelBody">
       <div class="row">
         <div class="bar"></div>
-        <div class="legendTiny"><b>Low</b> → <b>High</b></div>
+        <div class="small"><b>Low → High</b></div>
       </div>
 
-      <div class="row">
-        <span class="pill"><span class="dot gray"></span>Gray = Very Low</span>
-        <span class="pill"><span class="dot red"></span>Red = Avoid</span>
-        <span class="pill"><span class="dot yellow"></span>Yellow = Medium</span>
-        <span class="pill"><span class="dot green"></span>Green = Good</span>
-      </div>
-
-      <div class="legendTiny" style="margin-top:6px;">
-        Polygons show <b>rating</b> (Gray→Red→Yellow→Green).<br>
-        Icons show only <b>extremes</b> (✅ top / ❌ bottom) so signals don’t conflict.
-      </div>
-
-      <div class="row controls" style="margin-top:8px;">
-        <label><input type="checkbox" id="iconsToggle" checked> Icons</label>
-        <label>Top <input type="number" id="topN" min="0" max="200" value="25"></label>
-        <label>Bot <input type="number" id="botN" min="0" max="200" value="25"></label>
+      <div class="small" style="margin-top:6px;">
+        Gray = Very Low<br/>
+        Red = Avoid<br/>
+        Yellow = Medium<br/>
+        Green = Good
       </div>
 
       <div class="statusLine" id="statusLine">Loading…</div>
