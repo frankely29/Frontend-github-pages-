@@ -1,7 +1,7 @@
 // =======================
 // TLC Hotspot Map - app.js (NO ICONS)
 // - Loads data from Railway /hotspots (with /download fallback)
-// - Colors polygons by rating 1–100 (Red→Gray→Yellow→Green)
+// - Colors polygons by wait time (Green→Yellow→Gray→Red)
 // - Clear error messages if anything fails
 // - Slider throttled for iPhone
 // =======================
@@ -19,35 +19,28 @@ function formatTimeLabel(iso){
   });
 }
 
-// Requested meaning for highlighted zones:
-// - Red: very low calls / long waits
-// - Gray: low activity (better than red)
-// - Yellow: good
-// - Green: best / busy
-// rating 1..100
-function ratingToColor(rating){
-  const r = Number(rating);
-  if (!Number.isFinite(r)) return { fill:"#9b9b9b", op:0.28 };
+// Wait-time color scale:
+// 1-10 minutes: green
+// 10-20 minutes: yellow
+// 20-30 minutes: gray
+// 30+ minutes: red
+function waitTimeToColor(waitMinutes){
+  const w = Number(waitMinutes);
+  if (!Number.isFinite(w)) return { fill:"#9b9b9b", op:0.28 };
 
-  const v = clamp(r, 1, 100);
-
-  // 1..20 = red (worst)
-  if (v <= 20){
-    return { fill:"#d60000", op:0.24 };
+  if (w < 10){
+    return { fill:"#00b050", op:0.50 };
   }
 
-  // 21..40 = gray (still low, but better than red)
-  if (v <= 40){
-    return { fill:"#9b9b9b", op:0.28 };
-  }
-
-  // 41..70 = yellow (good)
-  if (v <= 70){
+  if (w < 20){
     return { fill:"#ffd700", op:0.38 };
   }
 
-  // 71..100 = green (best / busy)
-  return { fill:"#00b050", op:0.50 };
+  if (w < 30){
+    return { fill:"#9b9b9b", op:0.28 };
+  }
+
+  return { fill:"#d60000", op:0.24 };
 }
 
 const RAILWAY_BASE_URL = (window.RAILWAY_BASE_URL || "").replace(/\/+$/,"");
@@ -66,20 +59,16 @@ const polyLayer = L.geoJSON(null, {
   style: (feature) => {
     const p = feature?.properties || {};
 
-    // Prefer rating fields if present:
-    const rating =
-      p.rating ?? p.rating_1_100 ?? p.rating1_100 ?? p.r ??
-      // fallback to builder style if rating missing
-      null;
+    const waitMinutes = p.wait_minutes ?? p.wait_time_minutes ?? p.wait_time ?? p.wait ?? null;
 
-    const { fill, op } = ratingToColor(rating);
+    const { fill, op } = waitTimeToColor(waitMinutes);
 
-    // If builder provided fillColor, use it ONLY if rating missing
-    const finalFill = (rating === null || rating === undefined)
+    // If builder provided fillColor, use it ONLY if wait-time fields are missing
+    const finalFill = (waitMinutes === null || waitMinutes === undefined)
       ? (p.style?.fillColor || fill)
       : fill;
 
-    const finalOp = (rating === null || rating === undefined)
+    const finalOp = (waitMinutes === null || waitMinutes === undefined)
       ? (p.style?.fillOpacity ?? op)
       : op;
 
@@ -96,12 +85,12 @@ const polyLayer = L.geoJSON(null, {
       layer.bindPopup(p.popup, { maxWidth: 360 });
     } else {
       // safe fallback popup
-      const rating = p.rating ?? p.rating_1_100 ?? "n/a";
+      const waitMinutes = p.wait_minutes ?? p.wait_time_minutes ?? p.wait_time ?? p.wait ?? "n/a";
       const pickups = p.pickups ?? "n/a";
       layer.bindPopup(
         `<div style="font-family:Arial;font-size:13px;">
           <div style="font-weight:900;">Zone</div>
-          <div><b>Rating:</b> ${rating}/100</div>
+          <div><b>Wait time:</b> ${waitMinutes} min</div>
           <div><b>Pickups:</b> ${pickups}</div>
         </div>`,
         { maxWidth: 320 }
