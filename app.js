@@ -113,6 +113,16 @@ function getFeatureRating(properties){
     return clamp(Number(score01) * 100, 1, 100);
   }
 
+  // Extra backend compatibility: some payloads expose raw score fields
+  // as 0..1 or 0..10 scales instead of a direct 1..100 rating.
+  const rawScore = p.score ?? p.zone_score ?? p.hotspot_score;
+  if (rawScore !== null && rawScore !== undefined && Number.isFinite(Number(rawScore))){
+    const s = Number(rawScore);
+    if (s <= 1) return clamp(s * 100, 1, 100);
+    if (s <= 10) return clamp(s * 10, 1, 100);
+    return clamp(s, 1, 100);
+  }
+
   return null;
 }
 
@@ -199,6 +209,15 @@ function rebuildAtIndex(idx){
 
   if (bundle.polygons){
     polyLayer.addData(bundle.polygons);
+
+    // Hard override style after load so payload-side style hints
+    // can never drift away from the legend color rules.
+    polyLayer.eachLayer((layer) => {
+      const feature = layer?.feature;
+      if (feature && typeof layer.setStyle === "function"){
+        layer.setStyle(buildPolygonStyle(feature));
+      }
+    });
   }
 }
 
