@@ -148,7 +148,7 @@ function labelHTML(props, zoom) {
   const zoneText = zoom < 13 ? shortenLabel(name, LABEL_MAX_CHARS_MID) : name;
 
   const borough = (props.borough || "").trim();
-  const showBorough = zoom >= 15 && borough;
+  const showBorough = zoom >= BOROUGH_ZOOM_SHOW && borough;
 
   return `
     <div class="zn">${escapeHtml(zoneText)}</div>
@@ -226,7 +226,6 @@ function updateRecommendation(frame) {
   const DIST_PENALTY_PER_MILE = 2.0;
 
   let best = null;
-
   for (const f of feats) {
     const props = f.properties || {};
     const geom = f.geometry;
@@ -380,33 +379,17 @@ slider.addEventListener("input", () => {
   sliderDebounce = setTimeout(() => loadFrame(idx).catch(console.error), 80);
 });
 
-// ---------- Live location arrow + auto-center ----------
+// ---------- Auto-center (SINGLE button inside slider) ----------
 let autoCenter = true;
 let gpsFirstFixDone = false;
 
-let navMarker = null;
-let lastPos = null;
-let lastHeadingDeg = 0;
-let lastMoveTs = 0;
-
-// Button INSIDE slider box
 const autoCenterBtnEl = document.getElementById("btnAutoCenter");
-
 function syncAutoCenterBtn() {
   if (!autoCenterBtnEl) return;
   autoCenterBtnEl.textContent = autoCenter ? "Auto-center ON" : "Auto-center OFF";
   autoCenterBtnEl.classList.toggle("off", !autoCenter);
 }
-
-// IMPORTANT: When user interacts with map, stop auto-center (so you can explore)
-function disableAutoCenterOnUserPan() {
-  if (!autoCenter) return;
-  autoCenter = false;
-  syncAutoCenterBtn();
-}
-
-map.on("dragstart", disableAutoCenterOnUserPan);
-map.on("zoomstart", disableAutoCenterOnUserPan);
+syncAutoCenterBtn();
 
 if (autoCenterBtnEl) {
   autoCenterBtnEl.addEventListener("click", () => {
@@ -414,8 +397,29 @@ if (autoCenterBtnEl) {
     syncAutoCenterBtn();
     if (autoCenter && userLatLng) map.panTo(userLatLng, { animate: true });
   });
-  syncAutoCenterBtn(); // initialize text/state
 }
+
+// If user drags/zooms, stop auto-center so you can explore
+function disableAutoCenterOnUserPan() {
+  if (!autoCenter) return;
+  autoCenter = false;
+  syncAutoCenterBtn();
+}
+map.on("dragstart", disableAutoCenterOnUserPan);
+map.on("zoomstart", disableAutoCenterOnUserPan);
+
+// ---------- HARD cleanup: remove any old Leaflet control button still present ----------
+function removeOldAutoCenterControls() {
+  // old code used class "autoCenterBtn" on a leaflet control button
+  document.querySelectorAll(".autoCenterBtn").forEach((el) => el.remove());
+}
+removeOldAutoCenterControls();
+
+// ---------- Live location arrow ----------
+let navMarker = null;
+let lastPos = null;
+let lastHeadingDeg = 0;
+let lastMoveTs = 0;
 
 function makeNavIcon() {
   return L.divIcon({
@@ -500,7 +504,6 @@ function startLocationWatch() {
       setNavRotation(lastHeadingDeg);
       setNavVisual(isMoving);
 
-      // one-time zoom to you on first fix
       if (!gpsFirstFixDone) {
         gpsFirstFixDone = true;
         const targetZoom = Math.max(map.getZoom(), 14);
