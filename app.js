@@ -15,15 +15,13 @@ const LABEL_MAX_CHARS_MID = 14;   // shorten zone names at mid zoom
 // z15+: + red (everything)
 function shouldShowLabel(bucket, zoom) {
   if (zoom < LABEL_ZOOM_MIN) return false;
-
   const b = (bucket || "").trim();
 
-  if (zoom >= 15) return true; // all
+  if (zoom >= 15) return true;
   if (zoom === 14) return b !== "red";
   if (zoom === 13) return b === "green" || b === "purple" || b === "blue" || b === "sky";
   if (zoom === 12) return b === "green" || b === "purple" || b === "blue";
   if (zoom === 11) return b === "green" || b === "purple";
-  // zoom === 10
   return b === "green";
 }
 
@@ -125,7 +123,6 @@ function shortenLabel(text, maxChars) {
   return t.slice(0, maxChars - 1) + "…";
 }
 function zoomClass(zoom) {
-  // Clamp to classes defined in CSS: z10..z15
   const z = Math.max(10, Math.min(15, Math.round(zoom)));
   return `z${z}`;
 }
@@ -136,7 +133,6 @@ function labelHTML(props, zoom) {
   const bucket = (props.bucket || "").trim();
   if (!shouldShowLabel(bucket, Math.round(zoom))) return "";
 
-  // Shorten at lower zooms
   const zoneText = zoom < 13 ? shortenLabel(name, LABEL_MAX_CHARS_MID) : name;
 
   const borough = (props.borough || "").trim();
@@ -173,6 +169,7 @@ L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
 let myPosMarker = null;
 let myAccCircle = null;
 let watchId = null;
+let didAutoCenter = false;
 
 const locBtn = L.control({ position: "topright" });
 locBtn.onAdd = function () {
@@ -181,18 +178,22 @@ locBtn.onAdd = function () {
   btn.title = "Show my location";
   btn.innerHTML = "📍";
   L.DomEvent.disableClickPropagation(btn);
-  L.DomEvent.on(btn, "click", () => startLiveLocation());
+  L.DomEvent.on(btn, "click", () => startLiveLocation(true));
   return btn;
 };
 locBtn.addTo(map);
 
-function startLiveLocation() {
+function ensureMarkerStyles() {
+  // no-op helper in case we want to tweak later
+}
+
+function startLiveLocation(centerNow) {
   if (!navigator.geolocation) {
     alert("Geolocation not supported on this device/browser.");
     return;
   }
 
-  // If already watching, don't start another watcher
+  // already watching
   if (watchId != null) return;
 
   watchId = navigator.geolocation.watchPosition(
@@ -219,8 +220,7 @@ function startLiveLocation() {
           fillOpacity: 0.12,
         }).addTo(map);
 
-        // Center the first time only
-        map.setView(ll, Math.max(map.getZoom(), 14));
+        ensureMarkerStyles();
       } else {
         myPosMarker.setLatLng(ll);
         if (myAccCircle) {
@@ -228,20 +228,28 @@ function startLiveLocation() {
           myAccCircle.setRadius(acc);
         }
       }
+
+      // Auto-center only once (or if user tapped button)
+      if (centerNow || !didAutoCenter) {
+        didAutoCenter = true;
+        map.setView(ll, Math.max(map.getZoom(), 14));
+      }
     },
     (err) => {
       console.error(err);
       alert("Location error: " + (err.message || "Permission denied or GPS unavailable."));
-      // allow retry
-      watchId = null;
+      watchId = null; // allow retry
     },
     {
       enableHighAccuracy: true,
       maximumAge: 5000,
-      timeout: 10000,
+      timeout: 12000,
     }
   );
 }
+
+// AUTO-START location on load (will prompt permission)
+setTimeout(() => startLiveLocation(false), 400);
 
 let geoLayer = null;
 let timeline = [];
