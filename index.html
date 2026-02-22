@@ -20,58 +20,57 @@
 
   <style>
     html, body { height: 100%; margin: 0; }
-    #map { height: 100vh; width: 100vw; }
+
+    /* Map wrapper we rotate (IMPORTANT: rotate wrapper, NOT Leaflet panes) */
+    #mapWrap {
+      height: 100vh;
+      width: 100vw;
+      position: relative;
+      overflow: hidden;
+      transform-origin: 50% 50%;
+      transform: rotate(0deg);
+      transition: transform 120ms linear;
+    }
+    #map { height: 100%; width: 100%; }
 
     /* Legend box (top-left) */
     .legend {
       position: absolute;
       top: 10px;
       left: 10px;
-      z-index: 1000;
+      z-index: 2000;
       background: rgba(255,255,255,0.92);
       padding: 8px 8px 7px 8px;
-      border-radius: 12px;
+      border-radius: 10px;
       box-shadow: 0 6px 18px rgba(0,0,0,0.15);
       font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
       max-width: 240px;
     }
-    .legendHeader{
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:10px;
-      margin-bottom:6px;
+    .legendHeader {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 6px;
     }
     .legend h3 {
       margin: 0;
       font-size: 14px;
       font-weight: 900;
     }
-    .legendToggleBtn{
-      border: none;
-      background: rgba(0,0,0,0.06);
-      border-radius: 10px;
-      padding: 6px 10px;
-      font-weight: 950;
-      font-size: 13px;
-      cursor: pointer;
-    }
-    .legendToggleBtn:active{ transform: scale(0.98); }
-    .legendBody{ display:block; }
-    .legend.minimized .legendBody{ display:none; }
-
-    .legend .recommendLine{
-      margin: 0 0 6px 0;
-      font-size: 11px;
+    .legend button {
+      border: 1px solid rgba(0,0,0,0.15);
+      background: rgba(255,255,255,0.85);
+      border-radius: 8px;
       font-weight: 900;
-      opacity: 0.92;
-      line-height: 1.15;
+      padding: 2px 8px;
+      cursor: pointer;
     }
     .legend .row {
       display: flex;
       align-items: center;
       gap: 8px;
-      margin: 5px 0;
+      margin: 4px 0;
       font-size: 13px;
       font-weight: 800;
     }
@@ -83,20 +82,22 @@
       flex: 0 0 14px;
     }
     .legend .sub {
-      margin-top: 7px;
-      font-size: 11px;
+      margin-top: 6px;
+      font-size: 12px;
       opacity: 0.85;
-      line-height: 1.25;
-      font-weight: 700;
+      line-height: 1.2;
+      font-weight: 650;
     }
+    .legend.minimized .rows,
+    .legend.minimized .sub { display: none; }
 
-    /* Bottom slider bar (contains toggles) */
+    /* Slider / controls bottom */
     .sliderWrap {
       position: absolute;
       left: 10px;
       right: 10px;
       bottom: 10px;
-      z-index: 1000;
+      z-index: 2000;
       background: rgba(255,255,255,0.92);
       border-radius: 14px;
       box-shadow: 0 6px 18px rgba(0,0,0,0.15);
@@ -105,7 +106,7 @@
     }
     .timeLabel {
       font-size: 18px;
-      font-weight: 950;
+      font-weight: 900;
       margin: 0 0 6px 0;
     }
     input[type="range"] {
@@ -113,30 +114,35 @@
       height: 22px;
       margin: 0;
     }
-
-    .bottomControls{
-      display:flex;
-      gap:10px;
-      align-items:center;
-      justify-content:flex-start;
+    .btnRow {
+      display: flex;
+      gap: 8px;
       margin-top: 8px;
       flex-wrap: wrap;
     }
-    .toggleBtn{
-      border:none;
-      border-radius: 999px;
-      padding: 10px 12px;
-      box-shadow: 0 6px 18px rgba(0,0,0,0.18);
-      font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
-      font-weight: 950;
-      font-size: 13px;
+    .btnRow button {
+      border: 1px solid rgba(0,0,0,0.18);
+      background: rgba(255,255,255,0.9);
+      padding: 6px 10px;
+      border-radius: 10px;
+      font-weight: 900;
       cursor: pointer;
-      background: rgba(255,255,255,0.95);
+      font-size: 12px;
     }
-    .toggleBtn:active { transform: scale(0.98); }
-    .toggleBtn.on { outline: 2px solid rgba(0,160,255,0.45); }
+    .btnRow button.on {
+      outline: 2px solid rgba(0,0,0,0.25);
+    }
 
-    /* Zone labels */
+    /* Recommendation line */
+    #recommendLine {
+      margin-top: 6px;
+      font-size: 12px;
+      font-weight: 800;
+      opacity: 0.85;
+      line-height: 1.2;
+    }
+
+    /* ZONE LABELS */
     .zone-label {
       background: transparent;
       border: none;
@@ -154,118 +160,89 @@
       padding: 2px 8px;
       margin: 1px 0;
       white-space: nowrap;
-      max-width: 210px;
+      max-width: 220px;
       overflow: hidden;
       text-overflow: ellipsis;
       box-shadow: 0 2px 6px rgba(0,0,0,0.08);
     }
-    .zone-label .zn { font-weight: 950; }
-    .zone-label .br { font-weight: 900; opacity: 0.7; padding: 1px 6px; border-radius: 10px; }
+    .zone-label .zn { font-weight: 900; }
+    .zone-label .br {
+      font-weight: 800;
+      opacity: 0.55;      /* smaller + less intrusive */
+      padding: 1px 6px;
+      border-radius: 10px;
+    }
+    .zone-label.z10 .zn { font-size: 9px; }
+    .zone-label.z11 .zn { font-size: 10px; }
+    .zone-label.z12 .zn { font-size: 11px; }
+    .zone-label.z13 .zn { font-size: 12px; }
+    .zone-label.z14 .zn { font-size: 13px; }
+    .zone-label.z15 .zn { font-size: 14px; }
 
-    .zone-label.z10 .zn { font-size: 10px; }
-    .zone-label.z11 .zn { font-size: 11px; }
-    .zone-label.z12 .zn { font-size: 12px; }
-    .zone-label.z13 .zn { font-size: 13px; }
-    .zone-label.z14 .zn { font-size: 14px; }
-    .zone-label.z15 .zn { font-size: 15px; }
+    /* Borough line extremely small */
+    .zone-label.z15 .br { font-size: 7px; }
+    .zone-label.z14 .br { font-size: 0px; padding:0; border:0; }
+    .zone-label.z13 .br { font-size: 0px; padding:0; border:0; }
+    .zone-label.z12 .br { font-size: 0px; padding:0; border:0; }
+    .zone-label.z11 .br { font-size: 0px; padding:0; border:0; }
+    .zone-label.z10 .br { font-size: 0px; padding:0; border:0; }
 
-    /* borough line basically hidden unless very zoomed */
-    .zone-label.z10 .br,
-    .zone-label.z11 .br,
-    .zone-label.z12 .br,
-    .zone-label.z13 .br,
-    .zone-label.z14 .br { font-size: 0px; padding: 0; border: 0; }
-    .zone-label.z15 .br { font-size: 4px; }
-
-    /* Live location arrow marker */
+    /* NAV arrow (divIcon) */
     .navArrowWrap{
-      width: 30px;
-      height: 30px;
-      position: relative;
+      width:30px;height:30px;
+      display:flex;align-items:center;justify-content:center;
       transform-origin: 50% 50%;
-      will-change: transform, filter, box-shadow;
     }
     .navArrow{
-      position: absolute;
-      left: 50%;
-      top: 50%;
-      width: 0;
-      height: 0;
-      transform: translate(-50%, -55%);
-      border-left: 9px solid transparent;
-      border-right: 9px solid transparent;
-      border-bottom: 18px solid #111;
-      filter: drop-shadow(0 2px 2px rgba(0,0,0,0.35));
+      width:0;height:0;
+      border-left:8px solid transparent;
+      border-right:8px solid transparent;
+      border-bottom:16px solid #111;
+      filter: drop-shadow(0 0 2px rgba(255,255,255,0.9));
     }
-    .navMoving .navArrow{
-      filter:
-        drop-shadow(0 2px 2px rgba(0,0,0,0.35))
-        drop-shadow(0 0 6px rgba(0,160,255,0.95))
-        drop-shadow(0 0 12px rgba(0,160,255,0.75));
-    }
-    @keyframes pulseRing {
-      0%   { transform: translate(-50%, -50%) scale(0.8); opacity: 0.75; }
-      70%  { transform: translate(-50%, -50%) scale(1.25); opacity: 0.05; }
-      100% { transform: translate(-50%, -50%) scale(1.25); opacity: 0.0; }
-    }
-    .navPulse::after{
-      content:"";
-      position:absolute;
-      left:50%;
-      top:50%;
-      width: 26px;
-      height: 26px;
-      border-radius: 999px;
-      border: 2px solid rgba(0,160,255,0.9);
-      transform: translate(-50%, -50%);
-      animation: pulseRing 1.5s ease-out infinite;
-      pointer-events:none;
-    }
-
-    @media (max-width: 420px) {
-      .legend { max-width: 220px; }
-      .legend .row { font-size: 12px; }
-      .legend .sub { font-size: 10px; }
-      .timeLabel { font-size: 16px; }
-      .zone-label .zn, .zone-label .br { max-width: 170px; }
+    .navMoving { filter: drop-shadow(0 0 8px rgba(0,170,255,0.9)); }
+    .navPulse { animation: pulse 1.4s infinite; }
+    @keyframes pulse {
+      0% { transform: scale(1); opacity: 0.95; }
+      50% { transform: scale(1.15); opacity: 0.75; }
+      100% { transform: scale(1); opacity: 0.95; }
     }
   </style>
 </head>
 
 <body>
-  <div id="map"></div>
+  <!-- WRAPPER rotates -->
+  <div id="mapWrap">
+    <div id="map"></div>
 
-  <div id="legend" class="legend" aria-label="Demand legend">
-    <div class="legendHeader">
-      <h3>Demand Colors</h3>
-      <button id="legendToggle" class="legendToggleBtn" type="button">–</button>
-    </div>
+    <div id="legend" class="legend" aria-label="Demand legend">
+      <div class="legendHeader">
+        <h3>Demand</h3>
+        <button id="legendToggle" type="button">–</button>
+      </div>
 
-    <div class="legendBody">
-      <div id="recommendLine" class="recommendLine">Recommended: …</div>
-
-      <div class="row"><span class="swatch" style="background:#00b050"></span> Green = Highest</div>
-      <div class="row"><span class="swatch" style="background:#8000ff"></span> Purple = High</div>
-      <div class="row"><span class="swatch" style="background:#0066ff"></span> Blue = Medium</div>
-      <div class="row"><span class="swatch" style="background:#66ccff"></span> Sky = Normal</div>
-      <div class="row"><span class="swatch" style="background:#ffd400"></span> Yellow = Below Normal</div>
-      <div class="row"><span class="swatch" style="background:#e60000"></span> Red = Very Low / Avoid</div>
+      <div class="rows">
+        <div class="row"><span class="swatch" style="background:#00b050"></span> Green = Highest</div>
+        <div class="row"><span class="swatch" style="background:#8000ff"></span> Purple = High</div>
+        <div class="row"><span class="swatch" style="background:#0066ff"></span> Blue = Medium</div>
+        <div class="row"><span class="swatch" style="background:#66ccff"></span> Sky = Normal</div>
+        <div class="row"><span class="swatch" style="background:#ffd400"></span> Yellow = Below Normal</div>
+        <div class="row"><span class="swatch" style="background:#e60000"></span> Red = Very Low / Avoid</div>
+      </div>
 
       <div class="sub">
-        Colors come from rating (1–100) for the selected 20-minute window.<br/>
-        Time label is NYC time.
+        Colors come from rating (1–100) for the selected 20-minute window.
+        <div id="recommendLine">Recommended: …</div>
       </div>
     </div>
-  </div>
 
-  <div class="sliderWrap">
-    <div id="timeLabel" class="timeLabel">Loading…</div>
-    <input id="slider" type="range" min="0" max="0" value="0" step="1" />
-
-    <!-- NEW: Toggles INSIDE bottom box -->
-    <div class="bottomControls">
-      <button id="btnCenter" class="toggleBtn on" type="button">Recenter: ON</button>
-      <button id="btnRotate" class="toggleBtn on" type="button">Rotate: ON</button>
+    <div class="sliderWrap">
+      <div id="timeLabel" class="timeLabel">Loading…</div>
+      <input id="slider" type="range" min="0" max="0" value="0" step="1" />
+      <div class="btnRow">
+        <button id="btnCenter" type="button">Recenter: ON</button>
+        <button id="btnRotate" type="button">Rotate: ON</button>
+      </div>
     </div>
   </div>
 
