@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1" />
   <title>NYC TLC Hotspot Map</title>
 
   <!-- Leaflet -->
@@ -18,179 +18,142 @@
     crossorigin=""
   ></script>
 
+  <!-- Turf (polylabel / geometry helpers) -->
+  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+
   <style>
     html, body { height: 100%; margin: 0; }
-    #map { height: 100vh; width: 100vw; }
+    #map { height: 100%; width: 100%; }
 
-    /* Legend box (top-left) */
-    .legend {
-      position: absolute;
-      top: 12px;
-      left: 12px;
-      z-index: 1000;
-      background: rgba(255,255,255,0.92);
-      padding: 12px 12px 10px 12px;
-      border-radius: 12px;
-      box-shadow: 0 6px 18px rgba(0,0,0,0.15);
-      font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
-      max-width: 320px;
-    }
-    .legend h3 {
-      margin: 0 0 8px 0;
-      font-size: 16px;
-      font-weight: 800;
-    }
-    .legend .row {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin: 6px 0;
-      font-size: 15px;
-      font-weight: 700;
-    }
-    .legend .swatch {
-      width: 18px;
-      height: 18px;
-      border-radius: 4px;
-      border: 1px solid rgba(0,0,0,0.15);
-      flex: 0 0 18px;
-    }
-    .legend .sub {
-      margin-top: 10px;
-      font-size: 13px;
-      opacity: 0.85;
-      line-height: 1.25;
-      font-weight: 600;
-    }
-
-    /* Bottom slider bar */
-    .sliderWrap {
-      position: absolute;
-      left: 12px;
-      right: 12px;
+    /* Bottom bar */
+    #bottomBar {
+      position: fixed;
+      left: 10px;
+      right: 10px;
       bottom: 12px;
-      z-index: 1000;
-      background: rgba(255,255,255,0.92);
-      border-radius: 16px;
-      box-shadow: 0 6px 18px rgba(0,0,0,0.15);
-      padding: 12px 14px 14px 14px;
+      z-index: 9999;
+      background: rgba(255,255,255,0.85);
+      border-radius: 18px;
+      padding: 12px 14px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.15);
       font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
+      backdrop-filter: blur(8px);
     }
-    .timeLabel {
-      font-size: 26px;
+    #timeLabel {
       font-weight: 900;
-      margin: 0 0 8px 0;
+      font-size: 32px;
+      margin-bottom: 8px;
+      letter-spacing: -0.5px;
     }
-    input[type="range"] {
+    #slider {
       width: 100%;
-      height: 28px;
-      margin: 0;
+      accent-color: #2b7cff;
     }
 
-    /* =========================================================
-       ZONE LABELS (tooltips)
-       - Your app.js sets className: `zone-label zXX`
-       - .zn = zone name
-       - .br = borough line (we make it SMALLER + scales with zoom)
-       ========================================================= */
+    /* Legend (top-left) */
+    #legend {
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      z-index: 9999;
+      width: 310px;
+      max-width: calc(100vw - 20px);
+      background: rgba(255,255,255,0.85);
+      border-radius: 12px;
+      padding: 12px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+      font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
+      backdrop-filter: blur(8px);
+    }
+    #legend h3 {
+      margin: 0 0 10px 0;
+      font-size: 22px;
+      letter-spacing: -0.2px;
+    }
+    .leg-row { display:flex; align-items:center; gap:10px; margin: 7px 0; }
+    .swatch { width:22px; height:22px; border-radius:4px; border:1px solid rgba(0,0,0,0.15); }
+    .leg-text { font-size: 20px; font-weight: 800; }
+    .leg-foot {
+      margin-top: 10px;
+      font-size: 16px;
+      line-height: 1.2;
+      opacity: 0.9;
+    }
+
+    /* ===== Zone label bubbles (decluttered markers) ===== */
     .zone-label {
-      background: transparent;
-      border: none;
-      box-shadow: none;
-      color: #111;
-      text-align: center;
-      pointer-events: none;
-    }
-
-    /* Base pill styling for BOTH lines */
-    .zone-label .zn,
-    .zone-label .br {
-      display: inline-block;
-      background: rgba(255,255,255,0.86);
-      border: 1px solid rgba(0,0,0,0.18);
+      background: rgba(255,255,255,0.88);
       border-radius: 999px;
-      padding: 2px 8px;
-      margin: 1px 0;
+      padding: 3px 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.12);
+      border: 1px solid rgba(0,0,0,0.10);
+      font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
       white-space: nowrap;
-      max-width: 220px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+      pointer-events: none; /* important: no blocking taps */
     }
-
-    /* Zone name = stronger */
     .zone-label .zn {
       font-weight: 900;
-      letter-spacing: 0.1px;
+      line-height: 1.05;
     }
-
-    /* Borough line = ALWAYS smaller + lighter */
     .zone-label .br {
-      font-weight: 800;
-      opacity: 0.75;
-      padding: 1px 7px;      /* slightly tighter */
-      border-radius: 10px;    /* less “pill” feeling */
+      font-weight: 700;
+      opacity: 0.70;
+      margin-top: 1px;
+      line-height: 1.0;
     }
 
-    /* ---------- Zoom scaling for zone name (zn) ---------- */
-    .zone-label.z10 .zn { font-size: 9px;  }
-    .zone-label.z11 .zn { font-size: 10px; }
-    .zone-label.z12 .zn { font-size: 11px; }
-    .zone-label.z13 .zn { font-size: 12px; }
-    .zone-label.z14 .zn { font-size: 13px; }
-    .zone-label.z15 .zn { font-size: 14px; }
+    /* Zoom scaling */
+    .zone-label.z9  .zn { font-size: 10px; }
+    .zone-label.z9  .br { font-size: 7px; }
 
-    /* ---------- Zoom scaling for borough line (br) ----------
-       IMPORTANT: This is what fixes your complaint.
-       Much smaller at medium/zoomed-out, grows a bit when zoomed in.
-    */
-    .zone-label.z10 .br { font-size: 0px;  padding: 0; border: 0; } /* borough never shown at z10 anyway */
-    .zone-label.z11 .br { font-size: 0px;  padding: 0; border: 0; }
-    .zone-label.z12 .br { font-size: 0px;  padding: 0; border: 0; }
+    .zone-label.z10 .zn { font-size: 11px; }
+    .zone-label.z10 .br { font-size: 7.5px; }
 
-    /* Borough starts showing at zoom >= 13 (your app.js), so start tiny */
-    .zone-label.z13 .br { font-size: 8px;  }
-    .zone-label.z14 .br { font-size: 9px;  }
-    .zone-label.z15 .br { font-size: 10px; }
+    .zone-label.z11 .zn { font-size: 12px; }
+    .zone-label.z11 .br { font-size: 8px; }
 
-    /* Make labels less “thick” on phones */
-    @media (max-width: 420px) {
-      .legend { max-width: 280px; }
-      .legend .row { font-size: 14px; }
-      .timeLabel { font-size: 22px; }
+    .zone-label.z12 .zn { font-size: 13px; }
+    .zone-label.z12 .br { font-size: 8.5px; }
 
-      .zone-label .zn, .zone-label .br { max-width: 180px; }
-      .zone-label.z13 .br { font-size: 7px; }
-      .zone-label.z14 .br { font-size: 8px; }
-      .zone-label.z15 .br { font-size: 9px; }
-    }
+    .zone-label.z13 .zn { font-size: 14px; }
+    .zone-label.z13 .br { font-size: 9px; }
+
+    .zone-label.z14 .zn { font-size: 15px; }
+    .zone-label.z14 .br { font-size: 10px; }
+
+    /* Optional: slightly tint by bucket */
+    .bucket-green  { border-color: rgba(0,176,80,0.35); }
+    .bucket-purple { border-color: rgba(128,0,255,0.35); }
+    .bucket-blue   { border-color: rgba(0,102,255,0.30); }
+    .bucket-sky    { border-color: rgba(102,204,255,0.25); }
+    .bucket-yellow { border-color: rgba(255,212,0,0.30); }
+    .bucket-red    { border-color: rgba(230,0,0,0.25); }
   </style>
 </head>
 
 <body>
   <div id="map"></div>
 
-  <div class="legend" aria-label="Demand legend">
+  <div id="legend">
     <h3>Demand Colors</h3>
-    <div class="row"><span class="swatch" style="background:#00b050"></span> Green = Highest</div>
-    <div class="row"><span class="swatch" style="background:#8000ff"></span> Purple = High</div>
-    <div class="row"><span class="swatch" style="background:#0066ff"></span> Blue = Medium</div>
-    <div class="row"><span class="swatch" style="background:#66ccff"></span> Sky = Normal</div>
-    <div class="row"><span class="swatch" style="background:#ffd400"></span> Yellow = Below Normal</div>
-    <div class="row"><span class="swatch" style="background:#e60000"></span> Red = Very Low / Avoid</div>
+    <div class="leg-row"><div class="swatch" style="background:#00b050"></div><div class="leg-text">Green = Highest</div></div>
+    <div class="leg-row"><div class="swatch" style="background:#8000ff"></div><div class="leg-text">Purple = High</div></div>
+    <div class="leg-row"><div class="swatch" style="background:#0066ff"></div><div class="leg-text">Blue = Medium</div></div>
+    <div class="leg-row"><div class="swatch" style="background:#66ccff"></div><div class="leg-text">Sky = Normal</div></div>
+    <div class="leg-row"><div class="swatch" style="background:#ffd400"></div><div class="leg-text">Yellow = Below Normal</div></div>
+    <div class="leg-row"><div class="swatch" style="background:#e60000"></div><div class="leg-text">Red = Very Low / Avoid</div></div>
 
-    <div class="sub">
+    <div class="leg-foot">
       Colors come from rating (1–100) for the selected 20-minute window.<br/>
       Time label is NYC time.
     </div>
   </div>
 
-  <div class="sliderWrap">
-    <div id="timeLabel" class="timeLabel">Loading…</div>
+  <div id="bottomBar">
+    <div id="timeLabel">Loading…</div>
     <input id="slider" type="range" min="0" max="0" value="0" step="1" />
   </div>
 
-  <!-- Your frontend logic -->
   <script src="./app.js"></script>
 </body>
 </html>
