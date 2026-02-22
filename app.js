@@ -4,6 +4,26 @@ const BIN_MINUTES = 20;
 // Refresh current frame every 5 minutes
 const REFRESH_MS = 5 * 60 * 1000;
 
+// -------------------- RESET (optional) --------------------
+// If you ever get “stuck” with bad saved settings, open:
+// https://YOUR_GITHUB_PAGE/?reset=1
+// It clears saved toggles once.
+(function maybeResetPrefs() {
+  try {
+    const sp = new URLSearchParams(location.search);
+    if (sp.get("reset") === "1") {
+      localStorage.removeItem("tlc_recenter_user_set");
+      localStorage.removeItem("tlc_rotate_user_set");
+      localStorage.removeItem("tlc_recenter_on");
+      localStorage.removeItem("tlc_rotate_on");
+      sp.delete("reset");
+      const qs = sp.toString();
+      const newUrl = location.pathname + (qs ? `?${qs}` : "") + location.hash;
+      location.replace(newUrl);
+    }
+  } catch {}
+})();
+
 // ---------- Legend minimize ----------
 const legendEl = document.getElementById("legend");
 const legendToggleBtn = document.getElementById("legendToggle");
@@ -384,28 +404,29 @@ slider.addEventListener("input", () => {
 const btnCenter = document.getElementById("btnCenter");
 const btnRotate = document.getElementById("btnRotate");
 
-// ✅ Persist toggle state across refresh
+// IMPORTANT FIX:
+// - Default ON always
+// - Only save to localStorage when YOU press the buttons
+// - Auto-disable recenter while exploring does NOT get saved
+const LS_CENTER_USERSET = "tlc_recenter_user_set";
+const LS_ROTATE_USERSET = "tlc_rotate_user_set";
 const LS_CENTER = "tlc_recenter_on";
 const LS_ROTATE = "tlc_rotate_on";
-function lsGetBool(key, fallback) {
-  try {
-    const v = localStorage.getItem(key);
-    if (v === null) return fallback;
-    return v === "1";
-  } catch { return fallback; }
-}
-function lsSetBool(key, val) {
-  try { localStorage.setItem(key, val ? "1" : "0"); } catch {}
-}
 
-let recenterOn = lsGetBool(LS_CENTER, true);
-let rotateOn   = lsGetBool(LS_ROTATE, true);
+function lsGet(key) { try { return localStorage.getItem(key); } catch { return null; } }
+function lsSet(key, val) { try { localStorage.setItem(key, val); } catch {} }
+
+let recenterOn = true;
+let rotateOn = true;
+
+// If user has explicitly set prefs before, honor them. Otherwise default ON.
+if (lsGet(LS_CENTER_USERSET) === "1") recenterOn = lsGet(LS_CENTER) === "1";
+if (lsGet(LS_ROTATE_USERSET) === "1") rotateOn = lsGet(LS_ROTATE) === "1";
 
 function setBtnState(btn, on) {
   if (!btn) return;
   btn.classList.toggle("on", !!on);
 }
-
 function syncToggleUI() {
   if (btnCenter) {
     btnCenter.textContent = recenterOn ? "Recenter: ON" : "Recenter: OFF";
@@ -421,7 +442,8 @@ syncToggleUI();
 if (btnCenter) {
   btnCenter.addEventListener("click", () => {
     recenterOn = !recenterOn;
-    lsSetBool(LS_CENTER, recenterOn);
+    lsSet(LS_CENTER_USERSET, "1");
+    lsSet(LS_CENTER, recenterOn ? "1" : "0");
     syncToggleUI();
     if (recenterOn && userLatLng) map.panTo(userLatLng, { animate: true });
   });
@@ -430,7 +452,8 @@ if (btnCenter) {
 if (btnRotate) {
   btnRotate.addEventListener("click", async () => {
     rotateOn = !rotateOn;
-    lsSetBool(LS_ROTATE, rotateOn);
+    lsSet(LS_ROTATE_USERSET, "1");
+    lsSet(LS_ROTATE, rotateOn ? "1" : "0");
     syncToggleUI();
 
     if (rotateOn) {
@@ -438,29 +461,30 @@ if (btnRotate) {
       applySynchronizedRotation();
     } else {
       resetMapRotation();
-      // when rotate is off, arrow still points to movement/compass:
+      // with rotate off: arrow shows heading instead
       setNavRotation(lastHeadingDeg);
     }
   });
 }
 
-// If user drags/zooms the map, automatically stop recentering (so you can explore)
+// If user drags/zooms map, stop recentering so you can explore.
+// DO NOT persist this change.
 function disableRecenterBecauseUserIsExploring() {
   if (!recenterOn) return;
   recenterOn = false;
-  lsSetBool(LS_CENTER, recenterOn);
   syncToggleUI();
 }
 map.on("dragstart", disableRecenterBecauseUserIsExploring);
 map.on("zoomstart", disableRecenterBecauseUserIsExploring);
 
 // ---------- Map rotation (rotate panes only, NOT the UI boxes) ----------
+// IMPORTANT FIX: do NOT rotate markerPane, otherwise your arrow marker rotates with the map and breaks sync.
 function panesToRotate() {
   return [
     map.getPane("tilePane"),
     map.getPane("overlayPane"),
     map.getPane("shadowPane"),
-    map.getPane("markerPane"),
+    // map.getPane("markerPane"),   // ❌ exclude
     map.getPane("tooltipPane"),
     map.getPane("popupPane"),
   ].filter(Boolean);
@@ -473,17 +497,12 @@ function applyMapRotationDegrees(headingDeg) {
   for (const p of panesToRotate()) {
     p.style.transformOrigin = "50% 50%";
     p.style.transition = "transform 140ms linear";
-
-    // ✅ iOS Safari prefers webkitTransform sometimes
     p.style.transform = `rotate(${rot}deg) translateZ(0)`;
     p.style.webkitTransform = `rotate(${rot}deg) translateZ(0)`;
     p.style.backfaceVisibility = "hidden";
     p.style.webkitBackfaceVisibility = "hidden";
     p.style.willChange = "transform";
   }
-
-  // Leaflet sometimes needs this after transforms
-  setTimeout(() => map.invalidateSize(true), 50);
 }
 
 function resetMapRotation() {
@@ -495,15 +514,7 @@ function resetMapRotation() {
   }
 }
 
-// ✅ One function to keep arrow + map in sync
-function applySynchronizedRotation() {
-  // arrow always matches lastHeadingDeg
-  setNavRotation(lastHeadingDeg);
-  // map rotates only if rotateOn
-  applyMapRotationDegrees(lastHeadingDeg);
-}
-
-// ---------- Live location arrow marker ----------
+// ---------- Live location arrow ----------
 let navMarker = null;
 let gpsFirstFixDone = false;
 
@@ -514,14 +525,14 @@ let lastMoveTs = 0;
 // Compass fallback (device orientation)
 let compassHeadingDeg = null;
 
-// iOS Safari requires permission sometimes
+// iOS Safari sometimes requires permission
 async function requestCompassPermissionIfNeeded() {
   try {
     if (typeof DeviceOrientationEvent === "undefined") return;
     if (typeof DeviceOrientationEvent.requestPermission !== "function") return;
     const res = await DeviceOrientationEvent.requestPermission();
     return res;
-  } catch { /* ignore */ }
+  } catch {}
 }
 
 function makeNavIcon() {
@@ -540,13 +551,26 @@ function setNavVisual(isMoving) {
   el.classList.toggle("navPulse", !isMoving);
 }
 
+// Arrow rotation behavior:
+// - Rotate ON (map rotates): arrow stays UP (0deg) so it’s a clean “nav arrow”
+// - Rotate OFF (north-up map): arrow rotates to heading
 function setNavRotation(deg) {
   const el = document.getElementById("navWrap");
   if (!el) return;
-  el.style.transform = `rotate(${deg}deg)`;
+
+  if (rotateOn) {
+    el.style.transform = `rotate(0deg)`;
+  } else {
+    el.style.transform = `rotate(${deg}deg)`;
+  }
 }
 
-// compute bearing from movement
+// Keep arrow + map synchronized
+function applySynchronizedRotation() {
+  setNavRotation(lastHeadingDeg);
+  if (rotateOn) applyMapRotationDegrees(lastHeadingDeg);
+}
+
 function computeBearingDeg(from, to) {
   const toRad = (x) => (x * Math.PI) / 180;
   const toDeg = (x) => (x * 180) / Math.PI;
@@ -563,7 +587,7 @@ function computeBearingDeg(from, to) {
   return brng;
 }
 
-// Compass listener (used when GPS heading is missing)
+// Compass listener
 function startCompass() {
   const handler = (e) => {
     if (typeof e.webkitCompassHeading === "number" && Number.isFinite(e.webkitCompassHeading)) {
@@ -597,7 +621,7 @@ function startLocationWatch() {
     (pos) => {
       const lat = pos.coords.latitude;
       const lng = pos.coords.longitude;
-      const gpsHeading = pos.coords.heading; // often null on iOS unless moving
+      const gpsHeading = pos.coords.heading;
       const ts = pos.timestamp || Date.now();
 
       userLatLng = { lat, lng };
@@ -626,11 +650,10 @@ function startLocationWatch() {
 
       lastPos = { lat, lng, ts };
 
-      // ✅ ALWAYS keep arrow+map based on the same lastHeadingDeg
       applySynchronizedRotation();
       setNavVisual(isMoving);
 
-      // one-time zoom to you on first fix
+      // Zoom to you on first fix
       if (!gpsFirstFixDone) {
         gpsFirstFixDone = true;
         const targetZoom = Math.max(map.getZoom(), 14);
@@ -652,14 +675,13 @@ function startLocationWatch() {
     }
   );
 
-  // keep pulse if truly stationary
+  // stationary pulse + compass heading updates
   setInterval(() => {
     const now = Date.now();
     const recentlyMoved = lastMoveTs && (now - lastMoveTs) < 5000;
     setNavVisual(!!recentlyMoved);
 
-    // if not moving, still rotate to compass heading (if available)
-    if (!recentlyMoved && rotateOn && typeof compassHeadingDeg === "number") {
+    if (!recentlyMoved && typeof compassHeadingDeg === "number") {
       lastHeadingDeg = compassHeadingDeg;
       applySynchronizedRotation();
     }
@@ -683,11 +705,5 @@ loadTimeline().catch((err) => {
   timeLabel.textContent = `Error loading timeline: ${err.message}`;
 });
 
-// Start compass ASAP (permission will be requested on Rotate button tap if needed)
 startCompass();
-
-// If rotate is ON at boot, request permission only when user taps rotate button later.
-// But we can still apply any existing compassHeadingDeg if browser provides without permission.
-applySynchronizedRotation();
-
 startLocationWatch();
