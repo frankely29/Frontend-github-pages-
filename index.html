@@ -22,9 +22,7 @@
     html, body { height: 100%; margin: 0; }
     #map { height: 100vh; width: 100vw; }
 
-    /* =========================================================
-       Legend box (top-left) + minimize button
-       ========================================================= */
+    /* Legend */
     .legend {
       position: absolute;
       top: 10px;
@@ -44,11 +42,7 @@
       gap:10px;
       margin-bottom:6px;
     }
-    .legend h3 {
-      margin: 0;
-      font-size: 14px;
-      font-weight: 900;
-    }
+    .legend h3 { margin: 0; font-size: 14px; font-weight: 900; }
     .legendToggleBtn{
       border: none;
       background: rgba(0,0,0,0.06);
@@ -59,7 +53,6 @@
       cursor: pointer;
     }
     .legendToggleBtn:active{ transform: scale(0.98); }
-
     .legendBody{ display:block; }
     .legend.minimized .legendBody{ display:none; }
 
@@ -93,10 +86,7 @@
       font-weight: 700;
     }
 
-    /* =========================================================
-       Bottom slider bar (small)
-       - position: relative so we can overlay a tiny button
-       ========================================================= */
+    /* Bottom slider bar */
     .sliderWrap {
       position: absolute;
       left: 10px;
@@ -108,24 +98,12 @@
       box-shadow: 0 6px 18px rgba(0,0,0,0.15);
       padding: 8px 10px 10px 10px;
       font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
-      position: absolute;
     }
-    /* make sliderWrap relative without changing layout */
-    .sliderWrap { position: absolute; }
     .sliderWrapInner { position: relative; }
+    .timeLabel { font-size: 18px; font-weight: 950; margin: 0 0 6px 0; }
+    input[type="range"] { width: 100%; height: 22px; margin: 0; }
 
-    .timeLabel {
-      font-size: 18px;
-      font-weight: 950;
-      margin: 0 0 6px 0;
-    }
-    input[type="range"] {
-      width: 100%;
-      height: 22px;
-      margin: 0;
-    }
-
-    /* Tiny Auto-center button INSIDE slider box (overlay, no height increase) */
+    /* Tiny Auto-center button INSIDE slider box */
     .miniAutoCenterBtn{
       position: absolute;
       right: 10px;
@@ -143,14 +121,9 @@
       user-select: none;
     }
     .miniAutoCenterBtn:active{ transform: scale(0.98); }
-    .miniAutoCenterBtn.off{
-      opacity: 0.7;
-      box-shadow: 0 3px 10px rgba(0,0,0,0.12);
-    }
+    .miniAutoCenterBtn.off{ opacity: 0.7; }
 
-    /* =========================================================
-       ZONE LABELS (tooltips)
-       ========================================================= */
+    /* Zone labels */
     .zone-label {
       background: transparent;
       border: none;
@@ -199,9 +172,7 @@
       .miniAutoCenterBtn{ font-size: 10px; padding: 6px 8px; }
     }
 
-    /* =========================================================
-       Live location arrow marker
-       ========================================================= */
+    /* Live location arrow marker */
     .navArrowWrap{
       width: 30px;
       height: 30px;
@@ -278,8 +249,6 @@
     <div class="sliderWrapInner">
       <div id="timeLabel" class="timeLabel">Loading…</div>
       <input id="slider" type="range" min="0" max="0" value="0" step="1" />
-
-      <!-- Tiny overlay button: does NOT add height -->
       <button id="btnAutoCenter" class="miniAutoCenterBtn" type="button">Auto-center ON</button>
     </div>
   </div>
