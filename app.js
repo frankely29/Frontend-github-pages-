@@ -1,42 +1,42 @@
-// app.js (FULL) — NYC TLC Hotspot Map Frontend
-// - Loads timeline + frames from Railway
-// - Demand-priority zone labels by zoom (green shows first, then purple, etc.)
-// - Optional live location (blue arrow + accuracy circle)
-
 const RAILWAY_BASE = "https://web-production-78f67.up.railway.app";
 const BIN_MINUTES = 20;
 
 // ---------------------- LIVE LOCATION ----------------------
-const ENABLE_LIVE_LOCATION = true;      // turn off if you ever want: false
-const AUTO_CENTER_ON_FIRST_FIX = true;  // center map once when GPS first locks
+const ENABLE_LIVE_LOCATION = true;
 
+let autoCenterEnabled = true;
 let gpsWatchId = null;
 let gpsFirstFixDone = false;
+
 let myPosMarker = null;
 let myAccCircle = null;
 
+// Used for bearing + motion detection
+let lastFix = null; // {lat,lng,ts,speedMps,headingDeg}
+const MOVING_SPEED_MPS = 1.1;      // ~2.5 mph (tweak if you want)
+const STATIONARY_SPEED_MPS = 0.6;  // below this = stationary
+
 // ---------------------- LABEL RULES ----------------------
-// Below zoom 10: no labels
-// z10: green only
-// z11: green + purple
+const LABEL_ZOOM_MIN = 10;
+const BOROUGH_ZOOM_SHOW = 14;
+const LABEL_MAX_CHARS_MID = 14;
+
+// z10: green
+// z11: + purple
 // z12: + blue
 // z13: + sky
 // z14: + yellow
-// z15+: + red (everything)
-const LABEL_ZOOM_MIN = 10;
-const BOROUGH_ZOOM_SHOW = 14;     // borough line only when zoomed in enough
-const LABEL_MAX_CHARS_MID = 14;   // shorten zone names at lower zooms
-
+// z15+: + red
 function shouldShowLabel(bucket, zoom) {
   if (zoom < LABEL_ZOOM_MIN) return false;
 
   const b = (bucket || "").trim();
-  if (zoom >= 15) return true; // all
+  if (zoom >= 15) return true;
   if (zoom === 14) return b !== "red";
   if (zoom === 13) return b === "green" || b === "purple" || b === "blue" || b === "sky";
   if (zoom === 12) return b === "green" || b === "purple" || b === "blue";
   if (zoom === 11) return b === "green" || b === "purple";
-  return b === "green"; // zoom === 10
+  return b === "green";
 }
 
 // ---------------------- TIME HELPERS ----------------------
@@ -49,8 +49,8 @@ function parseIsoNoTz(iso) {
 function dowMon0FromIso(iso) {
   const { Y, M, D, h, m, s } = parseIsoNoTz(iso);
   const dt = new Date(Date.UTC(Y, M - 1, D, h, m, s));
-  const dowSun0 = dt.getUTCDay(); // 0=Sun..6=Sat
-  return dowSun0 === 0 ? 6 : dowSun0 - 1; // Mon=0..Sun=6
+  const dowSun0 = dt.getUTCDay();
+  return dowSun0 === 0 ? 6 : dowSun0 - 1;
 }
 function minuteOfWeekFromIso(iso) {
   const { h, m } = parseIsoNoTz(iso);
@@ -137,7 +137,6 @@ function shortenLabel(text, maxChars) {
   return t.slice(0, maxChars - 1) + "…";
 }
 function zoomClass(zoom) {
-  // Clamp to z10..z15 (your CSS should define these)
   const z = Math.max(10, Math.min(15, Math.round(zoom)));
   return `z${z}`;
 }
@@ -171,8 +170,8 @@ function escapeHtml(s) {
 // ---------------------- LEAFLET MAP ----------------------
 const slider = document.getElementById("slider");
 const timeLabel = document.getElementById("timeLabel");
+const autoCenterBtn = document.getElementById("autoCenterBtn");
 
-// Start view (NYC)
 const map = L.map("map", { zoomControl: true }).setView([40.7128, -74.0060], 11);
 
 L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
@@ -284,7 +283,53 @@ slider.addEventListener("input", () => {
   sliderDebounce = setTimeout(() => loadFrame(idx).catch(console.error), 80);
 });
 
-// ---------------------- LIVE LOCATION (BLUE ARROW) ----------------------
+// ---------------------- AUTO-CENTER BUTTON ----------------------
+function updateAutoCenterUI() {
+  if (!autoCenterBtn) return;
+  autoCenterBtn.textContent = `Auto-center: ${autoCenterEnabled ? "ON" : "OFF"}`;
+  autoCenterBtn.classList.toggle("on", autoCenterEnabled);
+  autoCenterBtn.classList.toggle("off", !autoCenterEnabled);
+}
+if (autoCenterBtn) {
+  autoCenterBtn.addEventListener("click", () => {
+    autoCenterEnabled = !autoCenterEnabled;
+    updateAutoCenterUI();
+  });
+  updateAutoCenterUI();
+}
+
+// ---------------------- BEARING / HEADING HELPERS ----------------------
+function toRad(d) { return (d * Math.PI) / 180; }
+function toDeg(r) { return (r * 180) / Math.PI; }
+
+// Bearing from A->B (degrees, 0=N, 90=E)
+function bearingDeg(lat1, lon1, lat2, lon2) {
+  const φ1 = toRad(lat1);
+  const φ2 = toRad(lat2);
+  const Δλ = toRad(lon2 - lon1);
+  const y = Math.sin(Δλ) * Math.cos(φ2);
+  const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+  let θ = toDeg(Math.atan2(y, x));
+  θ = (θ + 360) % 360;
+  return θ;
+}
+
+function buildArrowHTML(heading, moving) {
+  const cls = moving ? "my-loc moving" : "my-loc stationary";
+  // Rotate the whole container so SVG rotates too
+  return `
+    <div class="${cls}" style="transform: rotate(${Math.round(heading)}deg);">
+      <svg viewBox="0 0 24 24" width="34" height="34" aria-hidden="true">
+        <path d="M12 2 L21 22 L12 17 L3 22 Z"
+          fill="#0066ff"
+          stroke="#ffffff"
+          stroke-width="1.7"/>
+      </svg>
+    </div>
+  `;
+}
+
+// ---------------------- LIVE LOCATION ----------------------
 function startLiveLocation() {
   if (!ENABLE_LIVE_LOCATION) return;
 
@@ -293,51 +338,81 @@ function startLiveLocation() {
     return;
   }
 
-  if (gpsWatchId != null) return; // already running
+  if (gpsWatchId != null) return;
 
   gpsWatchId = navigator.geolocation.watchPosition(
     (pos) => {
       const lat = pos.coords.latitude;
       const lng = pos.coords.longitude;
       const acc = pos.coords.accuracy || 0;
+
+      // Speed and heading can be null on iOS sometimes
+      const speed = (pos.coords.speed == null ? null : Number(pos.coords.speed)); // m/s
+      const heading = (pos.coords.heading == null ? null : Number(pos.coords.heading)); // degrees
+
+      const nowTs = Date.now();
       const ll = [lat, lng];
 
-      // Solid blue arrow with white outline (very visible on any color)
-      const arrowIcon = L.divIcon({
-        className: "",
-        html: `
-          <div style="width:28px;height:28px;">
-            <svg viewBox="0 0 24 24" width="28" height="28">
-              <path d="M12 2 L22 22 L12 17 L2 22 Z"
-                fill="#0066ff"
-                stroke="#ffffff"
-                stroke-width="1.6"/>
-            </svg>
-          </div>
-        `,
-        iconSize: [28, 28],
-        iconAnchor: [14, 14],
+      // Determine movement
+      // If speed is null, infer "moving" by distance over time from lastFix
+      let inferredSpeed = speed;
+      let inferredHeading = heading;
+
+      if (lastFix) {
+        const dt = Math.max(1, (nowTs - lastFix.ts) / 1000);
+
+        // If heading not provided, compute bearing from last point
+        if (inferredHeading == null) {
+          inferredHeading = bearingDeg(lastFix.lat, lastFix.lng, lat, lng);
+        }
+
+        // If speed not provided, infer using rough distance (Leaflet has distanceTo)
+        if (inferredSpeed == null) {
+          const p1 = L.latLng(lastFix.lat, lastFix.lng);
+          const p2 = L.latLng(lat, lng);
+          const meters = p1.distanceTo(p2);
+          inferredSpeed = meters / dt;
+        }
+      } else {
+        // First fix: if no heading, default north
+        if (inferredHeading == null) inferredHeading = 0;
+        if (inferredSpeed == null) inferredSpeed = 0;
+      }
+
+      const moving = (inferredSpeed >= MOVING_SPEED_MPS);
+      const stationary = (inferredSpeed <= STATIONARY_SPEED_MPS);
+
+      // For in-between speeds, treat as moving (no pulse)
+      const isMovingForStyle = moving && !stationary;
+
+      // Build icon HTML
+      const icon = L.divIcon({
+        className: "", // IMPORTANT: prevents Leaflet default marker styling
+        html: buildArrowHTML(inferredHeading ?? 0, isMovingForStyle),
+        iconSize: [34, 34],
+        iconAnchor: [17, 17],
       });
 
       if (!myPosMarker) {
         myPosMarker = L.marker(ll, {
-          icon: arrowIcon,
+          icon,
           interactive: false,
-          zIndexOffset: 9999,
+          keyboard: false,
+          zIndexOffset: 999999,
         }).addTo(map);
       } else {
         myPosMarker.setLatLng(ll);
+        myPosMarker.setIcon(icon); // update rotation + glow/pulse
       }
 
-      // Accuracy circle (light)
       if (!myAccCircle) {
         myAccCircle = L.circle(ll, {
           radius: Math.max(10, acc),
           weight: 1,
           color: "#0066ff",
-          opacity: 0.35,
+          opacity: 0.25,
           fillColor: "#0066ff",
-          fillOpacity: 0.08,
+          fillOpacity: 0.06,
           interactive: false,
         }).addTo(map);
       } else {
@@ -345,17 +420,22 @@ function startLiveLocation() {
         myAccCircle.setRadius(Math.max(10, acc));
       }
 
-      if (!gpsFirstFixDone && AUTO_CENTER_ON_FIRST_FIX) {
+      // Auto-center behavior
+      if (!gpsFirstFixDone) {
         gpsFirstFixDone = true;
-        map.setView(ll, map.getZoom(), { animate: true });
+        if (autoCenterEnabled) map.setView(ll, map.getZoom(), { animate: true });
+      } else {
+        if (autoCenterEnabled) map.panTo(ll, { animate: true });
       }
+
+      lastFix = { lat, lng, ts: nowTs, speedMps: inferredSpeed, headingDeg: inferredHeading };
     },
     (err) => {
       console.warn("Geolocation error:", err);
     },
     {
       enableHighAccuracy: true,
-      maximumAge: 5000,
+      maximumAge: 3000,
       timeout: 15000,
     }
   );
