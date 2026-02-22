@@ -384,49 +384,72 @@ slider.addEventListener("input", () => {
 const btnCenter = document.getElementById("btnCenter");
 const btnRotate = document.getElementById("btnRotate");
 
-let recenterOn = true;
-let rotateOn = true;
+// ✅ Persist toggle state across refresh
+const LS_CENTER = "tlc_recenter_on";
+const LS_ROTATE = "tlc_rotate_on";
+function lsGetBool(key, fallback) {
+  try {
+    const v = localStorage.getItem(key);
+    if (v === null) return fallback;
+    return v === "1";
+  } catch { return fallback; }
+}
+function lsSetBool(key, val) {
+  try { localStorage.setItem(key, val ? "1" : "0"); } catch {}
+}
+
+let recenterOn = lsGetBool(LS_CENTER, true);
+let rotateOn   = lsGetBool(LS_ROTATE, true);
 
 function setBtnState(btn, on) {
   if (!btn) return;
   btn.classList.toggle("on", !!on);
 }
 
+function syncToggleUI() {
+  if (btnCenter) {
+    btnCenter.textContent = recenterOn ? "Recenter: ON" : "Recenter: OFF";
+    setBtnState(btnCenter, recenterOn);
+  }
+  if (btnRotate) {
+    btnRotate.textContent = rotateOn ? "Rotate: ON" : "Rotate: OFF";
+    setBtnState(btnRotate, rotateOn);
+  }
+}
+syncToggleUI();
+
 if (btnCenter) {
   btnCenter.addEventListener("click", () => {
     recenterOn = !recenterOn;
-    btnCenter.textContent = recenterOn ? "Recenter: ON" : "Recenter: OFF";
-    setBtnState(btnCenter, recenterOn);
+    lsSetBool(LS_CENTER, recenterOn);
+    syncToggleUI();
     if (recenterOn && userLatLng) map.panTo(userLatLng, { animate: true });
   });
-  setBtnState(btnCenter, recenterOn);
 }
 
 if (btnRotate) {
   btnRotate.addEventListener("click", async () => {
     rotateOn = !rotateOn;
-    btnRotate.textContent = rotateOn ? "Rotate: ON" : "Rotate: OFF";
-    setBtnState(btnRotate, rotateOn);
+    lsSetBool(LS_ROTATE, rotateOn);
+    syncToggleUI();
 
     if (rotateOn) {
-      // On iPhone Safari, compass can require permission (we request on first user tap)
       await requestCompassPermissionIfNeeded();
-      applyMapRotationDegrees(lastHeadingDeg);
+      applySynchronizedRotation();
     } else {
       resetMapRotation();
+      // when rotate is off, arrow still points to movement/compass:
+      setNavRotation(lastHeadingDeg);
     }
   });
-  setBtnState(btnRotate, rotateOn);
 }
 
 // If user drags/zooms the map, automatically stop recentering (so you can explore)
 function disableRecenterBecauseUserIsExploring() {
   if (!recenterOn) return;
   recenterOn = false;
-  if (btnCenter) {
-    btnCenter.textContent = "Recenter: OFF";
-    setBtnState(btnCenter, false);
-  }
+  lsSetBool(LS_CENTER, recenterOn);
+  syncToggleUI();
 }
 map.on("dragstart", disableRecenterBecauseUserIsExploring);
 map.on("zoomstart", disableRecenterBecauseUserIsExploring);
@@ -446,21 +469,41 @@ function panesToRotate() {
 function applyMapRotationDegrees(headingDeg) {
   if (!rotateOn) return;
   const rot = -headingDeg; // heading-up
+
   for (const p of panesToRotate()) {
     p.style.transformOrigin = "50% 50%";
     p.style.transition = "transform 140ms linear";
-    p.style.transform = `rotate(${rot}deg)`;
+
+    // ✅ iOS Safari prefers webkitTransform sometimes
+    p.style.transform = `rotate(${rot}deg) translateZ(0)`;
+    p.style.webkitTransform = `rotate(${rot}deg) translateZ(0)`;
+    p.style.backfaceVisibility = "hidden";
+    p.style.webkitBackfaceVisibility = "hidden";
+    p.style.willChange = "transform";
   }
+
+  // Leaflet sometimes needs this after transforms
+  setTimeout(() => map.invalidateSize(true), 50);
 }
 
 function resetMapRotation() {
   for (const p of panesToRotate()) {
     p.style.transition = "";
     p.style.transform = "";
+    p.style.webkitTransform = "";
+    p.style.willChange = "";
   }
 }
 
-// ---------- Live location arrow ----------
+// ✅ One function to keep arrow + map in sync
+function applySynchronizedRotation() {
+  // arrow always matches lastHeadingDeg
+  setNavRotation(lastHeadingDeg);
+  // map rotates only if rotateOn
+  applyMapRotationDegrees(lastHeadingDeg);
+}
+
+// ---------- Live location arrow marker ----------
 let navMarker = null;
 let gpsFirstFixDone = false;
 
@@ -475,13 +518,10 @@ let compassHeadingDeg = null;
 async function requestCompassPermissionIfNeeded() {
   try {
     if (typeof DeviceOrientationEvent === "undefined") return;
-    if (typeof DeviceOrientationEvent.requestPermission !== "function") return; // not iOS permission model
+    if (typeof DeviceOrientationEvent.requestPermission !== "function") return;
     const res = await DeviceOrientationEvent.requestPermission();
-    // res is "granted" or "denied"
     return res;
-  } catch {
-    // ignore
-  }
+  } catch { /* ignore */ }
 }
 
 function makeNavIcon() {
@@ -506,6 +546,7 @@ function setNavRotation(deg) {
   el.style.transform = `rotate(${deg}deg)`;
 }
 
+// compute bearing from movement
 function computeBearingDeg(from, to) {
   const toRad = (x) => (x * Math.PI) / 180;
   const toDeg = (x) => (x * 180) / Math.PI;
@@ -524,14 +565,11 @@ function computeBearingDeg(from, to) {
 
 // Compass listener (used when GPS heading is missing)
 function startCompass() {
-  // "deviceorientationabsolute" supported on some browsers; otherwise use "deviceorientation"
   const handler = (e) => {
-    // iOS Safari: e.webkitCompassHeading (0..360, 0=N)
     if (typeof e.webkitCompassHeading === "number" && Number.isFinite(e.webkitCompassHeading)) {
       compassHeadingDeg = e.webkitCompassHeading;
       return;
     }
-    // Some browsers: alpha is compass-like (but can be relative). Still better than nothing.
     if (typeof e.alpha === "number" && Number.isFinite(e.alpha)) {
       compassHeadingDeg = (360 - e.alpha) % 360;
       return;
@@ -575,28 +613,22 @@ function startLocationWatch() {
         isMoving = mph >= 2.0;
         if (isMoving) lastMoveTs = ts;
 
-        // Prefer GPS heading when moving AND it exists
         if (isMoving && typeof gpsHeading === "number" && Number.isFinite(gpsHeading)) {
           lastHeadingDeg = gpsHeading;
         } else if (dMi > 0.01) {
-          // Driving direction from movement
           lastHeadingDeg = computeBearingDeg({ lat: lastPos.lat, lng: lastPos.lng }, userLatLng);
         } else if (typeof compassHeadingDeg === "number") {
-          // Standing still: face direction
           lastHeadingDeg = compassHeadingDeg;
         }
       } else {
-        // First point: if compass exists, use it for facing
         if (typeof compassHeadingDeg === "number") lastHeadingDeg = compassHeadingDeg;
       }
 
       lastPos = { lat, lng, ts };
 
-      setNavRotation(lastHeadingDeg);
+      // ✅ ALWAYS keep arrow+map based on the same lastHeadingDeg
+      applySynchronizedRotation();
       setNavVisual(isMoving);
-
-      // Rotate the MAP layers
-      applyMapRotationDegrees(lastHeadingDeg);
 
       // one-time zoom to you on first fix
       if (!gpsFirstFixDone) {
@@ -626,11 +658,10 @@ function startLocationWatch() {
     const recentlyMoved = lastMoveTs && (now - lastMoveTs) < 5000;
     setNavVisual(!!recentlyMoved);
 
-    // if not moving, still rotate map to compass heading (if available)
+    // if not moving, still rotate to compass heading (if available)
     if (!recentlyMoved && rotateOn && typeof compassHeadingDeg === "number") {
       lastHeadingDeg = compassHeadingDeg;
-      setNavRotation(lastHeadingDeg);
-      applyMapRotationDegrees(lastHeadingDeg);
+      applySynchronizedRotation();
     }
   }, 1200);
 }
@@ -655,7 +686,8 @@ loadTimeline().catch((err) => {
 // Start compass ASAP (permission will be requested on Rotate button tap if needed)
 startCompass();
 
-// On iPhone Safari, compass permission may be needed.
-// We request it when user taps Rotate button ON (already coded).
+// If rotate is ON at boot, request permission only when user taps rotate button later.
+// But we can still apply any existing compassHeadingDeg if browser provides without permission.
+applySynchronizedRotation();
 
 startLocationWatch();
