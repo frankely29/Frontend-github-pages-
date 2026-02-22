@@ -5,18 +5,14 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <title>NYC TLC Hotspot Map</title>
 
-  <link
-    rel="stylesheet"
-    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-    integrity="sha256-o9N1j7kGStpYg9v+1oE0pS2mFQfM9vE1m2H1j6p1q3s="
-    crossorigin=""
-  />
+  <!-- ✅ Leaflet CSS (NO integrity so Safari won't block it) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 
   <style>
-    html, body { height: 100%; margin: 0; }
-    #map { height: 100%; width: 100%; }
+    html, body { height: 100%; margin: 0; padding: 0; }
+    #map { height: 100vh; width: 100vw; }
 
-    /* ✅ Smaller legend (about half) */
+    /* Smaller legend */
     .legend {
       position: absolute;
       top: 10px;
@@ -78,7 +74,7 @@
     }
     #slider { width: 100%; }
 
-    /* ✅ Flat label look (like your example) */
+    /* Flat label look */
     .zone-label-flat {
       pointer-events: none;
       background: transparent !important;
@@ -87,14 +83,10 @@
       padding: 0 !important;
       margin: 0 !important;
       white-space: nowrap;
-      transform: translateZ(0);
     }
-
-    /* main text */
     .zone-label-flat .zn {
       font-weight: 800;
       color: rgba(25,25,25,0.88);
-      /* white halo like GIS maps */
       text-shadow:
         -2px -2px 0 rgba(255,255,255,0.95),
          2px -2px 0 rgba(255,255,255,0.95),
@@ -102,8 +94,6 @@
          2px  2px 0 rgba(255,255,255,0.95),
          0px  0px 6px rgba(255,255,255,0.95);
     }
-
-    /* Zoom-based font sizes (smaller when zoomed out) */
     .z7  .zn { font-size: 11px; }
     .z8  .zn { font-size: 12px; }
     .z9  .zn { font-size: 13px; }
@@ -112,7 +102,6 @@
     .z12 .zn { font-size: 16px; }
     .z13 .zn { font-size: 17px; }
     .z14 .zn { font-size: 18px; }
-
   </style>
 </head>
 
@@ -140,16 +129,11 @@
     <input id="slider" type="range" min="0" max="0" value="0" step="1"/>
   </div>
 
-  <script
-    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-    crossorigin=""
-  ></script>
+  <!-- ✅ Leaflet JS (NO integrity) -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-  <!-- Turf for point-in-polygon checks -->
+  <!-- Turf + Polylabel -->
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
-
-  <!-- Polylabel (better interior point than centroid) -->
   <script src="https://unpkg.com/polylabel@1.1.0/polylabel.js"></script>
 
   <script src="./app.js"></script>
