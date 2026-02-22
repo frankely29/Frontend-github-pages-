@@ -5,222 +5,111 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>NYC FHV Hotspot Map</title>
 
-  <!-- Leaflet -->
-  <link
-    rel="stylesheet"
-    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
-    crossorigin=""
-  />
+  <!-- Leaflet (no integrity attrs = fewer Safari/CDN issues) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 
   <style>
-    html, body {
-      height: 100%;
-      margin: 0;
-      background: #0b0f16;
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-    }
+    html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+    #map { height: 100vh; width: 100vw; }
 
-    /* Layout */
-    #map {
-      height: 100vh;
-      width: 100vw;
-    }
-
-    /* Top-left legend box */
-    .legend {
+    /* Legend */
+    #legendBox{
       position: absolute;
       top: 12px;
       left: 12px;
       z-index: 1000;
-      background: rgba(10, 14, 22, 0.86);
-      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(255,255,255,0.92);
+      border: 1px solid rgba(0,0,0,0.12);
       border-radius: 10px;
       padding: 10px 12px;
-      color: #e9eefc;
-      backdrop-filter: blur(6px);
-      -webkit-backdrop-filter: blur(6px);
-      max-width: 280px;
+      max-width: 270px;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.12);
     }
+    #legendTitle { font-weight: 800; font-size: 14px; margin-bottom: 6px; }
+    .legendRow { display:flex; align-items:center; gap:8px; font-size: 12px; margin: 4px 0; }
+    .swatch { width: 14px; height: 14px; border-radius: 4px; border: 1px solid rgba(0,0,0,0.15); }
 
-    .legend h3 {
-      margin: 0 0 6px 0;
-      font-size: 14px;
-      font-weight: 800;
-      letter-spacing: 0.2px;
-    }
+    /* Colors (match your buckets) */
+    .c-green  { background:#1fd655; }
+    .c-purple { background:#8a5cff; }
+    .c-blue   { background:#1e6bff; }
+    .c-sky    { background:#41c7ff; }
+    .c-yellow { background:#ffcc33; }
+    .c-red    { background:#ff3b30; }
 
-    .legend .sub {
-      font-size: 12px;
-      opacity: 0.85;
-      margin-bottom: 8px;
-      line-height: 1.25;
-    }
-
-    .legend .row {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 12px;
-      margin: 4px 0;
-    }
-
-    .swatch {
-      width: 14px;
-      height: 14px;
-      border-radius: 4px;
-      border: 1px solid rgba(255,255,255,0.18);
-      flex: 0 0 auto;
-    }
-
-    /* You can tweak these to match your buckets exactly */
-    .c-green  { background: #1fd655; }
-    .c-purple { background: #8a5cff; }
-    .c-blue   { background: #1e6bff; }
-    .c-sky    { background: #41c7ff; }
-    .c-yellow { background: #ffcc33; }
-    .c-red    { background: #ff3b30; }
-
-    .legend .note {
-      margin-top: 8px;
-      font-size: 11px;
-      opacity: 0.8;
-    }
-
-    /* Bottom bar (slider + time) */
-    .bottom {
-      position: absolute;
-      left: 12px;
-      right: 12px;
-      bottom: 12px;
-      z-index: 1000;
-
-      background: rgba(10, 14, 22, 0.86);
-      border: 1px solid rgba(255,255,255,0.12);
+    /* Bottom bar */
+    #bottomBar{
+      position:absolute;
+      left:12px;
+      right:12px;
+      bottom:12px;
+      z-index:1000;
+      background: rgba(255,255,255,0.92);
+      border: 1px solid rgba(0,0,0,0.12);
       border-radius: 12px;
       padding: 10px 12px;
-
-      backdrop-filter: blur(6px);
-      -webkit-backdrop-filter: blur(6px);
-      color: #e9eefc;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.12);
     }
+    #timeRow{ display:flex; justify-content:space-between; align-items:baseline; gap:10px; margin-bottom:8px; }
+    #timeLabel{ font-weight:900; font-size:14px; }
+    #tzHint{ font-size:11px; opacity:0.75; }
+    #slider{ width:100%; }
 
-    .timeRow {
-      display: flex;
-      align-items: baseline;
-      justify-content: space-between;
-      gap: 10px;
-      margin-bottom: 8px;
-    }
-
-    .timeRow .left {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-    }
-
-    #timeLabel {
-      font-weight: 900;
-      font-size: 14px;
-      letter-spacing: 0.2px;
-    }
-
-    .tzHint {
-      font-size: 11px;
-      opacity: 0.78;
-    }
-
-    #slider {
-      width: 100%;
-      accent-color: #41c7ff;
-    }
-
-    /* Zone labels (tooltips) */
-    .zone-label {
+    /* Labels (tooltips) */
+    .zone-label{
       background: transparent !important;
       border: none !important;
       box-shadow: none !important;
-      color: #ffffff;
-      text-align: center;
+      color: #111;
+      text-align:center;
       font-weight: 900;
-      text-shadow: 0 1px 2px rgba(0,0,0,0.7);
-      pointer-events: none;
+      text-shadow: 0 1px 2px rgba(255,255,255,0.9);
+      pointer-events:none;
       line-height: 1.05;
       padding: 0;
       margin: 0;
     }
+    .zone-label .zn{ display:block; white-space:nowrap; }
+    .zone-label .br{ display:block; font-weight:800; opacity:0.85; margin-top:1px; white-space:nowrap; }
 
-    .zone-label .zn {
-      display: block;
-      white-space: nowrap;
-    }
-
-    .zone-label .br {
-      display: block;
-      font-weight: 800;
-      opacity: 0.85;
-      margin-top: 1px;
-      white-space: nowrap;
-    }
-
-    /* Zoom font scaling classes referenced by app.js zoomClass() */
+    /* Zoom classes used by app.js zoomClass() */
     .zone-label.z10 { font-size: 7px; }
     .zone-label.z11 { font-size: 8px; }
     .zone-label.z12 { font-size: 9px; }
     .zone-label.z13 { font-size: 11px; }
     .zone-label.z14 { font-size: 13px; }
     .zone-label.z15 { font-size: 15px; }
-
-    /* Mobile touch comfort */
-    .leaflet-control-zoom a {
-      width: 34px !important;
-      height: 34px !important;
-      line-height: 34px !important;
-    }
   </style>
 </head>
 
 <body>
   <div id="map"></div>
 
-  <!-- Legend -->
-  <div class="legend" role="region" aria-label="Legend">
-    <h3>NYC FHV Hotspots</h3>
-    <div class="sub">
-      Colors are data-driven from the selected <b>20-minute</b> window.
-      <br/>Goal: maximize earnings (busy + pay).
-    </div>
-
-    <div class="row"><span class="swatch c-green"></span> Green = Highest</div>
-    <div class="row"><span class="swatch c-purple"></span> Purple = High</div>
-    <div class="row"><span class="swatch c-blue"></span> Blue = Medium</div>
-    <div class="row"><span class="swatch c-sky"></span> Sky = Normal</div>
-    <div class="row"><span class="swatch c-yellow"></span> Yellow = Below Normal</div>
-    <div class="row"><span class="swatch c-red"></span> Red = Very Low / Avoid</div>
-
-    <div class="note">Source: TLC FHV trip data processed on Railway.</div>
+  <div id="legendBox">
+    <div id="legendTitle">NYC FHV Hotspots</div>
+    <div class="legendRow"><span class="swatch c-green"></span>Green = Highest</div>
+    <div class="legendRow"><span class="swatch c-purple"></span>Purple = High</div>
+    <div class="legendRow"><span class="swatch c-blue"></span>Blue = Medium</div>
+    <div class="legendRow"><span class="swatch c-sky"></span>Sky = Normal</div>
+    <div class="legendRow"><span class="swatch c-yellow"></span>Yellow = Below Normal</div>
+    <div class="legendRow"><span class="swatch c-red"></span>Red = Very Low / Avoid</div>
   </div>
 
-  <!-- Bottom slider -->
-  <div class="bottom" role="region" aria-label="Time controls">
-    <div class="timeRow">
-      <div class="left">
+  <div id="bottomBar">
+    <div id="timeRow">
+      <div>
         <div id="timeLabel">Loading…</div>
-        <div class="tzHint">NYC time (America/New_York)</div>
+        <div id="tzHint">NYC time (America/New_York)</div>
       </div>
-      <div class="tzHint">Window: 20 min</div>
+      <div id="tzHint">Window: 20 min</div>
     </div>
     <input id="slider" type="range" min="0" max="0" step="1" value="0" />
   </div>
 
-  <!-- Leaflet -->
-  <script
-    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-    crossorigin=""
-  ></script>
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-  <!-- Your app.js (cache-bust: change v= number when updating app.js) -->
-  <script src="app.js?v=40"></script>
+  <!-- Your app.js -->
+  <script src="app.js"></script>
 </body>
 </html>
