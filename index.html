@@ -88,32 +88,32 @@
 
     .zone-label .br {
       font-weight: 600;
-      opacity: 0.5; /* lighter borough */
+      opacity: 0.45;
       line-height: 1.05;
     }
 
-    /* ---------- EXTREME REDUCTION WHEN ZOOMED OUT ---------- */
+    /* ---------- ZOOM SCALING ---------- */
 
     /* Very zoomed out */
     .zone-label.z10 .zn { font-size: 8px; }
-    .zone-label.z10 .br { font-size: 5px; }
+    .zone-label.z10 .br { font-size: 4px; }
 
     .zone-label.z11 .zn { font-size: 9px; }
-    .zone-label.z11 .br { font-size: 6px; }
+    .zone-label.z11 .br { font-size: 5px; }
 
-    /* Medium zoom */
+    /* Medium zoom — CUT IN HALF AGAIN */
     .zone-label.z12 .zn { font-size: 10px; }
-    .zone-label.z12 .br { font-size: 7px; }
+    .zone-label.z12 .br { font-size: 4px; }
 
     .zone-label.z13 .zn { font-size: 11px; }
-    .zone-label.z13 .br { font-size: 8px; }
+    .zone-label.z13 .br { font-size: 5px; }
 
     /* Close zoom */
     .zone-label.z14 .zn { font-size: 13px; }
-    .zone-label.z14 .br { font-size: 10px; }
+    .zone-label.z14 .br { font-size: 8px; }
 
     .zone-label.z15 .zn { font-size: 15px; }
-    .zone-label.z15 .br { font-size: 12px; }
+    .zone-label.z15 .br { font-size: 11px; }
   </style>
 </head>
 
@@ -121,7 +121,6 @@
 
   <div id="map"></div>
 
-  <!-- ---------- LEGEND ---------- -->
   <div class="legend">
     <div class="title">Demand Colors</div>
 
@@ -138,14 +137,13 @@
     </div>
   </div>
 
-  <!-- ---------- TIME SLIDER ---------- -->
   <div class="bottom">
     <div class="time-label" id="timeLabel">Loading…</div>
     <input id="slider" type="range" min="0" max="0" step="1" value="0" />
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="app.js?v=21"></script>
+  <script src="app.js?v=23"></script>
 
 </body>
 </html>
