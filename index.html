@@ -60,12 +60,8 @@
     }
     .legendToggleBtn:active{ transform: scale(0.98); }
 
-    .legendBody{
-      display:block;
-    }
-    .legend.minimized .legendBody{
-      display:none;
-    }
+    .legendBody{ display:block; }
+    .legend.minimized .legendBody{ display:none; }
 
     .legend .recommendLine{
       margin: 0 0 6px 0;
@@ -99,6 +95,7 @@
 
     /* =========================================================
        Bottom slider bar (small)
+       - position: relative so we can overlay a tiny button
        ========================================================= */
     .sliderWrap {
       position: absolute;
@@ -111,7 +108,12 @@
       box-shadow: 0 6px 18px rgba(0,0,0,0.15);
       padding: 8px 10px 10px 10px;
       font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
+      position: absolute;
     }
+    /* make sliderWrap relative without changing layout */
+    .sliderWrap { position: absolute; }
+    .sliderWrapInner { position: relative; }
+
     .timeLabel {
       font-size: 18px;
       font-weight: 950;
@@ -121,6 +123,29 @@
       width: 100%;
       height: 22px;
       margin: 0;
+    }
+
+    /* Tiny Auto-center button INSIDE slider box (overlay, no height increase) */
+    .miniAutoCenterBtn{
+      position: absolute;
+      right: 10px;
+      bottom: 8px;
+      border: none;
+      border-radius: 999px;
+      padding: 6px 9px;
+      font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
+      font-weight: 950;
+      font-size: 11px;
+      cursor: pointer;
+      background: rgba(255,255,255,0.96);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.16);
+      line-height: 1;
+      user-select: none;
+    }
+    .miniAutoCenterBtn:active{ transform: scale(0.98); }
+    .miniAutoCenterBtn.off{
+      opacity: 0.7;
+      box-shadow: 0 3px 10px rgba(0,0,0,0.12);
     }
 
     /* =========================================================
@@ -134,7 +159,6 @@
       text-align: center;
       pointer-events: none;
     }
-
     .zone-label .zn,
     .zone-label .br {
       display: inline-block;
@@ -149,18 +173,8 @@
       text-overflow: ellipsis;
       box-shadow: 0 2px 6px rgba(0,0,0,0.08);
     }
-
-    .zone-label .zn {
-      font-weight: 950;
-      letter-spacing: 0.1px;
-    }
-
-    .zone-label .br {
-      font-weight: 900;
-      opacity: 0.7;
-      padding: 1px 6px;
-      border-radius: 10px;
-    }
+    .zone-label .zn { font-weight: 950; letter-spacing: 0.1px; }
+    .zone-label .br { font-weight: 900; opacity: 0.7; padding: 1px 6px; border-radius: 10px; }
 
     .zone-label.z10 .zn { font-size: 10px; }
     .zone-label.z11 .zn { font-size: 11px; }
@@ -182,6 +196,7 @@
       .legend .sub { font-size: 10px; }
       .timeLabel { font-size: 16px; }
       .zone-label .zn, .zone-label .br { max-width: 170px; }
+      .miniAutoCenterBtn{ font-size: 10px; padding: 6px 8px; }
     }
 
     /* =========================================================
@@ -230,20 +245,6 @@
       animation: pulseRing 1.5s ease-out infinite;
       pointer-events:none;
     }
-
-    /* Buttons */
-    .autoCenterBtn{
-      background: rgba(255,255,255,0.92);
-      border: none;
-      border-radius: 999px;
-      box-shadow: 0 6px 18px rgba(0,0,0,0.18);
-      padding: 10px 12px;
-      font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
-      font-weight: 900;
-      font-size: 13px;
-      cursor: pointer;
-    }
-    .autoCenterBtn:active { transform: scale(0.98); }
   </style>
 </head>
 
@@ -274,8 +275,13 @@
   </div>
 
   <div class="sliderWrap">
-    <div id="timeLabel" class="timeLabel">Loading…</div>
-    <input id="slider" type="range" min="0" max="0" value="0" step="1" />
+    <div class="sliderWrapInner">
+      <div id="timeLabel" class="timeLabel">Loading…</div>
+      <input id="slider" type="range" min="0" max="0" value="0" step="1" />
+
+      <!-- Tiny overlay button: does NOT add height -->
+      <button id="btnAutoCenter" class="miniAutoCenterBtn" type="button">Auto-center ON</button>
+    </div>
   </div>
 
   <script src="./app.js"></script>
