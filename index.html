@@ -70,7 +70,7 @@
 
     input[type="range"] { width: 100%; }
 
-    /* ---------- ZONE LABEL TOOLTIP ---------- */
+    /* ---------- LABEL TOOLTIP ---------- */
     .zone-label {
       background: rgba(255,255,255,0.82);
       border: 0;
@@ -88,7 +88,6 @@
 
     .zone-label .br {
       font-weight: 600;
-      opacity: 0.45;
       line-height: 1.05;
     }
 
@@ -96,24 +95,25 @@
 
     /* Very zoomed out */
     .zone-label.z10 .zn { font-size: 8px; }
-    .zone-label.z10 .br { font-size: 4px; }
+    .zone-label.z10 .br { font-size: 3px; opacity: 0.35; }
 
     .zone-label.z11 .zn { font-size: 9px; }
-    .zone-label.z11 .br { font-size: 5px; }
+    .zone-label.z11 .br { font-size: 4px; opacity: 0.35; }
 
-    /* Medium zoom — CUT IN HALF AGAIN */
+    /* Medium zoom (AGGRESSIVELY REDUCED) */
     .zone-label.z12 .zn { font-size: 10px; }
-    .zone-label.z12 .br { font-size: 4px; }
+    .zone-label.z12 .br { font-size: 4px; opacity: 0.4; }
 
     .zone-label.z13 .zn { font-size: 11px; }
-    .zone-label.z13 .br { font-size: 5px; }
+    .zone-label.z13 .br { font-size: 5px; opacity: 0.45; }
 
     /* Close zoom */
     .zone-label.z14 .zn { font-size: 13px; }
-    .zone-label.z14 .br { font-size: 8px; }
+    .zone-label.z14 .br { font-size: 8px; opacity: 0.6; }
 
     .zone-label.z15 .zn { font-size: 15px; }
-    .zone-label.z15 .br { font-size: 11px; }
+    .zone-label.z15 .br { font-size: 11px; opacity: 0.75; }
+
   </style>
 </head>
 
@@ -143,7 +143,7 @@
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="app.js?v=23"></script>
+  <script src="app.js?v=24"></script>
 
 </body>
 </html>
