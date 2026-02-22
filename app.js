@@ -7,7 +7,7 @@ const slider = document.getElementById("slider");
 const timeLabel = document.getElementById("timeLabel");
 const recommendEl = document.getElementById("recommendLine");
 
-const mapWrap = document.getElementById("mapWrap");
+const mapRot = document.getElementById("mapRot");
 const btnCenter = document.getElementById("btnCenter");
 const btnRotate = document.getElementById("btnRotate");
 
@@ -17,6 +17,60 @@ if (legendEl && legendToggleBtn) {
   legendToggleBtn.addEventListener("click", () => {
     const minimized = legendEl.classList.toggle("minimized");
     legendToggleBtn.textContent = minimized ? "+" : "–";
+  });
+}
+
+// ---------- Persisted toggles ----------
+const LS_CENTER = "tlc_recenter_on";
+const LS_ROTATE = "tlc_rotate_on";
+
+function lsGetBool(key, fallback) {
+  try {
+    const v = localStorage.getItem(key);
+    if (v === null) return fallback;
+    return v === "1";
+  } catch {
+    return fallback;
+  }
+}
+function lsSetBool(key, val) {
+  try { localStorage.setItem(key, val ? "1" : "0"); } catch {}
+}
+
+// Start ON by default, BUT persist across refresh
+let recenterOn = lsGetBool(LS_CENTER, true);
+let rotateOn   = lsGetBool(LS_ROTATE, true);
+
+function setBtnState(btn, on) {
+  if (!btn) return;
+  btn.classList.toggle("on", !!on);
+}
+function syncButtons() {
+  if (btnCenter) {
+    btnCenter.textContent = recenterOn ? "Recenter: ON" : "Recenter: OFF";
+    setBtnState(btnCenter, recenterOn);
+  }
+  if (btnRotate) {
+    btnRotate.textContent = rotateOn ? "Rotate: ON" : "Rotate: OFF";
+    setBtnState(btnRotate, rotateOn);
+  }
+}
+syncButtons();
+
+if (btnCenter) {
+  btnCenter.addEventListener("click", () => {
+    recenterOn = !recenterOn;
+    lsSetBool(LS_CENTER, recenterOn);
+    syncButtons();
+    if (recenterOn && userLatLng) stableRecenter(userLatLng, true);
+  });
+}
+if (btnRotate) {
+  btnRotate.addEventListener("click", () => {
+    rotateOn = !rotateOn;
+    lsSetBool(LS_ROTATE, rotateOn);
+    syncButtons();
+    applySynchronizedRotation();
   });
 }
 
@@ -42,79 +96,59 @@ let lastPos = null; // {lat,lng,ts}
 let lastHeadingDeg = 0;
 let lastMoveTs = 0;
 
-// toggles
-let recenterOn = true; // start ON
-let rotateOn = true;   // start ON
-
-function setBtnState(btn, on) {
-  if (!btn) return;
-  btn.classList.toggle("on", !!on);
-}
-
-function syncRecenterButtonUI() {
-  if (!btnCenter) return;
-  btnCenter.textContent = recenterOn ? "Recenter: ON" : "Recenter: OFF";
-  setBtnState(btnCenter, recenterOn);
-}
-
-function syncRotateButtonUI() {
-  if (!btnRotate) return;
-  btnRotate.textContent = rotateOn ? "Rotate: ON" : "Rotate: OFF";
-  setBtnState(btnRotate, rotateOn);
-}
-
-if (btnCenter) {
-  syncRecenterButtonUI();
-  btnCenter.addEventListener("click", () => {
-    recenterOn = !recenterOn;
-    syncRecenterButtonUI();
-    if (recenterOn && userLatLng) stableRecenter(userLatLng, true);
-  });
-}
-
-if (btnRotate) {
-  syncRotateButtonUI();
-  btnRotate.addEventListener("click", () => {
-    rotateOn = !rotateOn;
-    syncRotateButtonUI();
-    if (!rotateOn) setWrapperRotation(0);
-    else setWrapperRotation(-lastHeadingDeg);
-    // also update arrow rotation mode immediately
-    applyArrowRotation();
-  });
-}
-
-// When user explores map, disable recenter (so it stops pulling you back)
+// If user explores map, disable recenter (keeps exploration usable)
 function disableRecenterBecauseUserIsExploring() {
   if (!recenterOn) return;
   recenterOn = false;
-  syncRecenterButtonUI();
+  lsSetBool(LS_CENTER, recenterOn);
+  syncButtons();
 }
 map.on("dragstart", disableRecenterBecauseUserIsExploring);
 map.on("zoomstart", disableRecenterBecauseUserIsExploring);
 
-// ---------- Rotation: WRAPPER ONLY (safe) ----------
-function setWrapperRotation(deg) {
-  if (!mapWrap) return;
-  mapWrap.style.transform = `rotate(${deg}deg)`;
+// ---------- Rotation (Safari/Tesla safe): rotate mapRot only ----------
+function setMapRot(deg) {
+  if (!mapRot) return;
+  // GPU hint + webkit transform for iOS Safari
+  const t = `translateZ(0) rotate(${deg}deg)`;
+  mapRot.style.transform = t;
+  mapRot.style.webkitTransform = t;
 }
 
-// Arrow rotation logic:
-// - rotateOn=true (heading-up map): wrapper rotates -heading, arrow should stay UP (0deg)
-// - rotateOn=false (north-up map): wrapper 0deg, arrow rotates to heading
+// Arrow rotation rules:
+// - rotateOn=true (heading-up map): mapRot rotates -heading, arrow stays UP (0)
+// - rotateOn=false (north-up map): mapRot 0, arrow rotates to heading
 function applyArrowRotation() {
   const el = document.getElementById("navWrap");
   if (!el) return;
-
   const arrowDeg = rotateOn ? 0 : lastHeadingDeg;
   el.style.transform = `rotate(${arrowDeg}deg)`;
 }
 
+function applySynchronizedRotation() {
+  if (rotateOn) setMapRot(-lastHeadingDeg);
+  else setMapRot(0);
+  applyArrowRotation();
+
+  // Leaflet can need a refresh after transforms on mobile
+  setTimeout(() => map.invalidateSize(true), 50);
+}
+
+// ---------- Nav visuals ----------
 function setNavVisual(isMoving) {
   const el = document.getElementById("navWrap");
   if (!el) return;
   el.classList.toggle("navMoving", !!isMoving);
   el.classList.toggle("navPulse", !isMoving);
+}
+
+function makeNavIcon() {
+  return L.divIcon({
+    className: "",
+    html: `<div id="navWrap" class="navArrowWrap navPulse"><div class="navArrow"></div></div>`,
+    iconSize: [30, 30],
+    iconAnchor: [15, 15],
+  });
 }
 
 // ---------- Utils ----------
@@ -177,15 +211,11 @@ function cyclicDiff(a, b, mod) {
   const d = Math.abs(a - b);
   return Math.min(d, mod - d);
 }
-function pickClosestIndex(minutesOfWeekArr, target) {
-  let bestIdx = 0;
-  let bestDiff = Infinity;
-  for (let i = 0; i < minutesOfWeekArr.length; i++) {
-    const diff = cyclicDiff(minutesOfWeekArr[i], target, 7 * 1440);
-    if (diff < bestDiff) {
-      bestDiff = diff;
-      bestIdx = i;
-    }
+function pickClosestIndex(arr, target) {
+  let bestIdx = 0, bestDiff = Infinity;
+  for (let i = 0; i < arr.length; i++) {
+    const diff = cyclicDiff(arr[i], target, 7 * 1440);
+    if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
   }
   return bestIdx;
 }
@@ -193,30 +223,23 @@ function pickClosestIndex(minutesOfWeekArr, target) {
 function haversineMiles(a, b) {
   const R = 3958.7613;
   const toRad = (x) => (x * Math.PI) / 180;
-
   const dLat = toRad(b.lat - a.lat);
   const dLng = toRad(b.lng - a.lng);
   const lat1 = toRad(a.lat);
   const lat2 = toRad(b.lat);
-
   const s1 = Math.sin(dLat / 2);
   const s2 = Math.sin(dLng / 2);
-  const h = s1 * s1 + Math.cos(lat1) * Math.cos(lat2) * s2 * s2;
-
+  const h = s1*s1 + Math.cos(lat1)*Math.cos(lat2)*s2*s2;
   return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
 }
-
 function computeBearingDeg(from, to) {
   const toRad = (x) => (x * Math.PI) / 180;
   const toDeg = (x) => (x * 180) / Math.PI;
-
   const lat1 = toRad(from.lat);
   const lat2 = toRad(to.lat);
   const dLng = toRad(to.lng - from.lng);
-
   const y = Math.sin(dLng) * Math.cos(lat2);
   const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
-
   let brng = toDeg(Math.atan2(y, x));
   brng = (brng + 360) % 360;
   return brng;
@@ -240,8 +263,7 @@ function shouldShowLabel(bucket, zoom) {
 function shortenLabel(text, maxChars) {
   const t = (text || "").trim();
   if (!t) return "";
-  if (t.length <= maxChars) return t;
-  return t.slice(0, maxChars - 1) + "…";
+  return t.length <= maxChars ? t : (t.slice(0, maxChars - 1) + "…");
 }
 function zoomClass(zoom) {
   const z = Math.max(10, Math.min(15, Math.round(zoom)));
@@ -275,20 +297,12 @@ function labelHTML(props, zoom) {
 
 // ---------- Popup ----------
 function prettyBucket(b) {
-  const m = {
-    green: "Highest",
-    purple: "High",
-    blue: "Medium",
-    sky: "Normal",
-    yellow: "Below Normal",
-    red: "Very Low / Avoid",
-  };
+  const m = { green:"Highest", purple:"High", blue:"Medium", sky:"Normal", yellow:"Below Normal", red:"Very Low / Avoid" };
   return m[b] || (b ?? "");
 }
 function buildPopupHTML(props) {
   const zoneName = (props.zone_name || "").trim();
   const borough = (props.borough || "").trim();
-
   const rating = props.rating ?? "";
   const bucket = props.bucket ?? "";
   const pickups = props.pickups ?? "";
@@ -309,54 +323,35 @@ function buildPopupHTML(props) {
 function geometryCenter(geom) {
   let pts = [];
   if (!geom) return null;
-
   if (geom.type === "Polygon") pts = geom.coordinates?.[0] || [];
   else if (geom.type === "MultiPolygon") {
     const polys = geom.coordinates || [];
     for (const p of polys) pts.push(...(p?.[0] || []));
   } else return null;
-
   if (!pts.length) return null;
-
   let sumLng = 0, sumLat = 0;
-  for (const [lng, lat] of pts) {
-    sumLng += lng;
-    sumLat += lat;
-  }
+  for (const [lng, lat] of pts) { sumLng += lng; sumLat += lat; }
   return { lat: sumLat / pts.length, lng: sumLng / pts.length };
 }
-
 function updateRecommendation(frame) {
   if (!recommendEl) return;
-
-  if (!userLatLng) {
-    recommendEl.textContent = "Recommended: enable location to get suggestions";
-    return;
-  }
+  if (!userLatLng) { recommendEl.textContent = "Recommended: enable location to get suggestions"; return; }
 
   const feats = frame?.polygons?.features || [];
-  if (!feats.length) {
-    recommendEl.textContent = "Recommended: …";
-    return;
-  }
+  if (!feats.length) { recommendEl.textContent = "Recommended: …"; return; }
 
   const DIST_PENALTY_PER_MILE = 2.0;
   let best = null;
 
   for (const f of feats) {
     const props = f.properties || {};
-    const geom = f.geometry;
-
+    const center = geometryCenter(f.geometry);
     const rating = Number(props.rating ?? NaN);
-    if (!Number.isFinite(rating)) continue;
-
-    const center = geometryCenter(geom);
-    if (!center) continue;
+    if (!center || !Number.isFinite(rating)) continue;
 
     const dMi = haversineMiles(userLatLng, center);
     const bucket = (props.bucket || "").trim();
     const hardAvoid = bucket === "red";
-
     const score = rating - dMi * DIST_PENALTY_PER_MILE - (hardAvoid ? 12 : 0);
 
     if (!best || score > best.score) {
@@ -370,11 +365,7 @@ function updateRecommendation(frame) {
     }
   }
 
-  if (!best) {
-    recommendEl.textContent = "Recommended: not enough data near you";
-    return;
-  }
-
+  if (!best) { recommendEl.textContent = "Recommended: not enough data near you"; return; }
   const distTxt = best.dMi >= 10 ? `${best.dMi.toFixed(0)} mi` : `${best.dMi.toFixed(1)} mi`;
   const bTxt = best.borough ? ` (${best.borough})` : "";
   recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Rating ${best.rating} — ${distTxt}`;
@@ -385,10 +376,7 @@ function renderFrame(frame) {
   currentFrame = frame;
   timeLabel.textContent = formatNYCLabel(frame.time);
 
-  if (geoLayer) {
-    geoLayer.remove();
-    geoLayer = null;
-  }
+  if (geoLayer) { geoLayer.remove(); geoLayer = null; }
 
   const zoomNow = map.getZoom();
   const zClass = zoomClass(zoomNow);
@@ -428,7 +416,6 @@ async function loadFrame(idx) {
   const frame = await fetchJSON(`${RAILWAY_BASE}/frame/${idx}`);
   renderFrame(frame);
 }
-
 async function loadTimeline() {
   const t = await fetchJSON(`${RAILWAY_BASE}/timeline`);
   timeline = Array.isArray(t) ? t : (t.timeline || []);
@@ -448,9 +435,7 @@ async function loadTimeline() {
 }
 
 // Re-render on zoom (no network)
-map.on("zoomend", () => {
-  if (currentFrame) renderFrame(currentFrame);
-});
+map.on("zoomend", () => { if (currentFrame) renderFrame(currentFrame); });
 
 // Debounced slider
 let sliderDebounce = null;
@@ -467,7 +452,6 @@ const RECENTER_MAX_DRIFT_MILES = 0.18;
 
 function stableRecenter(latlng, force = false) {
   if (!recenterOn || !latlng) return;
-
   const now = Date.now();
   if (!force && (now - lastRecenterAt) < RECENTER_MIN_INTERVAL_MS) return;
 
@@ -476,35 +460,20 @@ function stableRecenter(latlng, force = false) {
 
   if (!force && drift < 0.03) return;
 
-  if (drift > RECENTER_MAX_DRIFT_MILES) {
-    map.setView(latlng, map.getZoom(), { animate: false });
-  } else {
-    map.panTo(latlng, { animate: true });
-  }
+  if (drift > RECENTER_MAX_DRIFT_MILES) map.setView(latlng, map.getZoom(), { animate: false });
+  else map.panTo(latlng, { animate: true });
+
   lastRecenterAt = now;
 }
 
-// ---------- Nav marker ----------
-function makeNavIcon() {
-  return L.divIcon({
-    className: "",
-    html: `<div id="navWrap" class="navArrowWrap navPulse"><div class="navArrow"></div></div>`,
-    iconSize: [30, 30],
-    iconAnchor: [15, 15],
-  });
-}
-
+// ---------- Location watch ----------
 function startLocationWatch() {
   if (!("geolocation" in navigator)) {
     if (recommendEl) recommendEl.textContent = "Recommended: location not supported";
     return;
   }
 
-  navMarker = L.marker([40.7128, -74.0060], {
-    icon: makeNavIcon(),
-    interactive: false,
-    zIndexOffset: 9999,
-  }).addTo(map);
+  navMarker = L.marker([40.7128, -74.0060], { icon: makeNavIcon(), interactive: false, zIndexOffset: 9999 }).addTo(map);
 
   navigator.geolocation.watchPosition(
     (pos) => {
@@ -524,21 +493,13 @@ function startLocationWatch() {
 
         isMoving = mph >= 2.0;
 
-        if (dMi > 0.01) {
-          lastHeadingDeg = computeBearingDeg({ lat: lastPos.lat, lng: lastPos.lng }, userLatLng);
-        }
+        if (dMi > 0.01) lastHeadingDeg = computeBearingDeg({ lat: lastPos.lat, lng: lastPos.lng }, userLatLng);
         if (isMoving) lastMoveTs = ts;
       }
-
       lastPos = { lat, lng, ts };
 
-      // ✅ SYNCHRONOUS rotation (single source of truth = lastHeadingDeg)
-      if (rotateOn) {
-        setWrapperRotation(-lastHeadingDeg); // heading-up map
-      } else {
-        setWrapperRotation(0);               // north-up map
-      }
-      applyArrowRotation();
+      // ✅ Single source of truth rotation (heading)
+      applySynchronizedRotation();
       setNavVisual(isMoving);
 
       if (!gpsFirstFixDone) {
@@ -554,14 +515,9 @@ function startLocationWatch() {
       console.warn("Geolocation error:", err);
       if (recommendEl) recommendEl.textContent = "Recommended: location blocked (enable it)";
     },
-    {
-      enableHighAccuracy: true,
-      maximumAge: 1000,
-      timeout: 15000,
-    }
+    { enableHighAccuracy: true, maximumAge: 1000, timeout: 15000 }
   );
 
-  // keep pulse state stable
   setInterval(() => {
     const now = Date.now();
     const recentlyMoved = lastMoveTs && (now - lastMoveTs) < 5000;
@@ -585,5 +541,8 @@ loadTimeline().catch((err) => {
   console.error(err);
   timeLabel.textContent = `Error loading timeline: ${err.message}`;
 });
+
+// Apply persisted rotation state immediately (before GPS moves)
+applySynchronizedRotation();
 
 startLocationWatch();
