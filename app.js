@@ -104,7 +104,7 @@ const timeLabel = document.getElementById("timeLabel");
 const map = L.map("map", { zoomControl: true }).setView([40.7128, -74.0060], 11);
 
 L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
-  attribution: '&copy; OpenStreetMap &copy; CARTO',
+  attribution: "&copy; OpenStreetMap &copy; CARTO",
   maxZoom: 19,
 }).addTo(map);
 
@@ -112,15 +112,25 @@ let geoLayer = null;
 let timeline = [];
 let minutesOfWeek = [];
 
+// Popup: shows Zone Name + Borough + accurate timeframe label
 function buildPopupHTML(props) {
+  const zid = props.LocationID ?? "";
+  const zoneName = (props.zone_name || "").trim();
+  const borough = (props.borough || "").trim();
+
   const rating = props.rating ?? "";
   const bucket = props.bucket ?? "";
   const pickups = props.pickups ?? "";
   const pay = props.avg_driver_pay == null ? "n/a" : props.avg_driver_pay.toFixed(2);
 
+  const title = zoneName ? zoneName : `Zone ${zid}`;
+  const sub = borough ? borough : "";
+
   return `
     <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; font-size:13px;">
-      <div style="font-weight:800; margin-bottom:4px;">Zone ${props.LocationID}</div>
+      <div style="font-weight:800; margin-bottom:2px;">${title}</div>
+      ${sub ? `<div style="opacity:0.8; margin-bottom:6px;">${sub}</div>` : `<div style="margin-bottom:6px;"></div>`}
+      <div><b>LocationID:</b> ${zid}</div>
       <div><b>Rating:</b> ${rating} (${prettyBucket(bucket)})</div>
       <div><b>Pickups (last ${BIN_MINUTES} min):</b> ${pickups}</div>
       <div><b>Avg Driver Pay:</b> $${pay}</div>
@@ -149,7 +159,7 @@ async function loadFrame(idx) {
       };
     },
     onEachFeature: (feature, layer) => {
-      layer.bindPopup(buildPopupHTML(feature.properties || {}), { maxWidth: 280 });
+      layer.bindPopup(buildPopupHTML(feature.properties || {}), { maxWidth: 300 });
     },
   }).addTo(map);
 }
@@ -165,6 +175,7 @@ async function loadTimeline() {
   slider.max = String(timeline.length - 1);
   slider.step = "1";
 
+  // Init to closest NYC current time window (with week wrap handling)
   const nowMinWeek = getNowNYCMinuteOfWeekRounded();
   const idx = pickClosestIndex(minutesOfWeek, nowMinWeek);
   slider.value = String(idx);
