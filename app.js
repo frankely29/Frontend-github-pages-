@@ -1,12 +1,18 @@
 const RAILWAY_BASE = "https://web-production-78f67.up.railway.app";
 const BIN_MINUTES = 20;
 
-// Refresh (data/frame) every 5 minutes
+// Refresh current frame every 5 minutes
 const REFRESH_MS = 5 * 60 * 1000;
 
-// Map rotation behavior
-const MAP_ROTATE_ENABLED_DEFAULT = true;
-const MAP_ROTATE_SMOOTH = true; // smoother rotation
+// ---------- Legend minimize ----------
+const legendEl = document.getElementById("legend");
+const legendToggleBtn = document.getElementById("legendToggle");
+if (legendEl && legendToggleBtn) {
+  legendToggleBtn.addEventListener("click", () => {
+    const minimized = legendEl.classList.toggle("minimized");
+    legendToggleBtn.textContent = minimized ? "+" : "–";
+  });
+}
 
 /** LABEL VISIBILITY (mobile-friendly, demand-priority)
  * z10: green only
@@ -142,7 +148,7 @@ function labelHTML(props, zoom) {
   const zoneText = zoom < 13 ? shortenLabel(name, LABEL_MAX_CHARS_MID) : name;
 
   const borough = (props.borough || "").trim();
-  const showBorough = zoom >= BOROUGH_ZOOM_SHOW && borough;
+  const showBorough = zoom >= 15 && borough; // CSS also hides it for z<15
 
   return `
     <div class="zn">${escapeHtml(zoneText)}</div>
@@ -232,7 +238,6 @@ function updateRecommendation(frame) {
     if (!center) continue;
 
     const dMi = haversineMiles(userLatLng, center);
-
     const bucket = (props.bucket || "").trim();
     const hardAvoid = bucket === "red";
 
@@ -375,15 +380,24 @@ slider.addEventListener("input", () => {
   sliderDebounce = setTimeout(() => loadFrame(idx).catch(console.error), 80);
 });
 
-// ---------- Live location arrow + auto-center + map rotation ----------
+// ---------- Live location arrow + auto-center ----------
 let autoCenter = true;
 let gpsFirstFixDone = false;
-let mapRotateEnabled = MAP_ROTATE_ENABLED_DEFAULT;
 
 let navMarker = null;
-let lastPos = null; // {lat,lng,ts}
+let lastPos = null;
 let lastHeadingDeg = 0;
 let lastMoveTs = 0;
+
+// IMPORTANT: When user interacts with map, stop auto-center
+function disableAutoCenterOnUserPan() {
+  autoCenter = false;
+  if (autoCenterBtnEl) autoCenterBtnEl.textContent = "Auto-center: OFF";
+}
+
+// Leaflet events for user navigation
+map.on("dragstart", disableAutoCenterOnUserPan);
+map.on("zoomstart", disableAutoCenterOnUserPan);
 
 function makeNavIcon() {
   return L.divIcon({
@@ -407,21 +421,6 @@ function setNavRotation(deg) {
   el.style.transform = `rotate(${deg}deg)`;
 }
 
-function applyMapRotation(deg) {
-  if (!mapRotateEnabled) return;
-  const container = map.getContainer();
-  if (!container) return;
-
-  // We rotate the whole map container. This is "simple rotation".
-  // NOTE: some labels/popups rotate too (usually desired for navigation).
-  const rot = `rotate(${-deg}deg)`; // negative so heading-up
-  if (MAP_ROTATE_SMOOTH) {
-    container.style.transition = "transform 120ms linear";
-  }
-  container.style.transformOrigin = "50% 50%";
-  container.style.transform = rot;
-}
-
 function computeBearingDeg(from, to) {
   const toRad = (x) => (x * Math.PI) / 180;
   const toDeg = (x) => (x * 180) / Math.PI;
@@ -438,18 +437,16 @@ function computeBearingDeg(from, to) {
   return brng;
 }
 
-function addControls() {
-  // Auto-center button
+// UI: Auto-center button
+let autoCenterBtnEl = null;
+function addAutoCenterControl() {
   const ctrl = L.control({ position: "bottomright" });
   ctrl.onAdd = function () {
-    const wrap = L.DomUtil.create("div");
-    wrap.style.display = "flex";
-    wrap.style.flexDirection = "column";
-    wrap.style.gap = "8px";
-
-    const btn = L.DomUtil.create("button", "autoCenterBtn", wrap);
+    const btn = L.DomUtil.create("button", "autoCenterBtn");
+    autoCenterBtnEl = btn;
     btn.type = "button";
     btn.textContent = "Auto-center: ON";
+
     L.DomEvent.disableClickPropagation(btn);
     L.DomEvent.on(btn, "click", () => {
       autoCenter = !autoCenter;
@@ -457,25 +454,7 @@ function addControls() {
       if (autoCenter && userLatLng) map.panTo(userLatLng, { animate: true });
     });
 
-    // Rotate toggle
-    const rotBtn = L.DomUtil.create("button", "autoCenterBtn", wrap);
-    rotBtn.type = "button";
-    rotBtn.textContent = "Rotate: ON";
-    L.DomEvent.disableClickPropagation(rotBtn);
-    L.DomEvent.on(rotBtn, "click", () => {
-      mapRotateEnabled = !mapRotateEnabled;
-      rotBtn.textContent = mapRotateEnabled ? "Rotate: ON" : "Rotate: OFF";
-      if (!mapRotateEnabled) {
-        // reset rotation
-        const c = map.getContainer();
-        c.style.transform = "";
-        c.style.transition = "";
-      } else {
-        applyMapRotation(lastHeadingDeg);
-      }
-    });
-
-    return wrap;
+    return btn;
   };
   ctrl.addTo(map);
 }
@@ -492,13 +471,13 @@ function startLocationWatch() {
     zIndexOffset: 9999,
   }).addTo(map);
 
-  addControls();
+  addAutoCenterControl();
 
   navigator.geolocation.watchPosition(
     (pos) => {
       const lat = pos.coords.latitude;
       const lng = pos.coords.longitude;
-      const heading = pos.coords.heading; // may be null on iOS Safari
+      const heading = pos.coords.heading;
       const ts = pos.timestamp || Date.now();
 
       userLatLng = { lat, lng };
@@ -510,6 +489,7 @@ function startLocationWatch() {
         const dMi = haversineMiles({ lat: lastPos.lat, lng: lastPos.lng }, userLatLng);
         const dtSec = Math.max(1, (ts - lastPos.ts) / 1000);
         const mph = (dMi / dtSec) * 3600;
+
         isMoving = mph >= 2.0;
 
         if (typeof heading === "number" && Number.isFinite(heading)) {
@@ -526,15 +506,13 @@ function startLocationWatch() {
       setNavRotation(lastHeadingDeg);
       setNavVisual(isMoving);
 
-      // Rotate map in direction of travel (heading-up)
-      applyMapRotation(lastHeadingDeg);
-
       // one-time zoom to you on first fix
       if (!gpsFirstFixDone) {
         gpsFirstFixDone = true;
         const targetZoom = Math.max(map.getZoom(), 14);
         map.setView(userLatLng, targetZoom, { animate: true });
       } else {
+        // Only pan if autoCenter is ON (and user didn't disable by exploring)
         if (autoCenter) map.panTo(userLatLng, { animate: true });
       }
 
@@ -551,7 +529,6 @@ function startLocationWatch() {
     }
   );
 
-  // keep pulse if truly stationary
   setInterval(() => {
     const now = Date.now();
     const recentlyMoved = lastMoveTs && (now - lastMoveTs) < 5000;
