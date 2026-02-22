@@ -58,25 +58,14 @@
 <body>
   <div id="map"></div>
 
-  <!-- TOP LEFT LEGEND (NO COUNTS) -->
   <div class="legend" id="legend">
     <div class="title">Demand Colors</div>
 
-    <div class="row">
-      <div class="left"><span class="swatch" style="background:#00b050;"></span>Green = Best</div>
-    </div>
-    <div class="row">
-      <div class="left"><span class="swatch" style="background:#0066ff;"></span>Blue = Medium</div>
-    </div>
-    <div class="row">
-      <div class="left"><span class="swatch" style="background:#66ccff;"></span>Sky = Normal</div>
-    </div>
-    <div class="row">
-      <div class="left"><span class="swatch" style="background:#ffd400;"></span>Yellow = Below Normal</div>
-    </div>
-    <div class="row">
-      <div class="left"><span class="swatch" style="background:#e60000;"></span>Red = Avoid</div>
-    </div>
+    <div class="row"><div class="left"><span class="swatch" style="background:#00b050;"></span>Green = Best</div></div>
+    <div class="row"><div class="left"><span class="swatch" style="background:#0066ff;"></span>Blue = Medium</div></div>
+    <div class="row"><div class="left"><span class="swatch" style="background:#66ccff;"></span>Sky = Normal</div></div>
+    <div class="row"><div class="left"><span class="swatch" style="background:#ffd400;"></span>Yellow = Below Normal</div></div>
+    <div class="row"><div class="left"><span class="swatch" style="background:#e60000;"></span>Red = Avoid</div></div>
 
     <div class="sub">
       Colors come from rating (1–100) for the selected 20-minute window.<br/>
@@ -84,7 +73,6 @@
     </div>
   </div>
 
-  <!-- BOTTOM SLIDER -->
   <div class="bottom">
     <div class="time-label" id="timeLabel">Loading…</div>
     <input id="slider" type="range" min="0" max="0" step="1" value="0" />
@@ -96,6 +84,7 @@
     crossorigin=""
   ></script>
 
-  <script src="app.js"></script>
+  <!-- cache-buster so iPhone actually loads the new JS -->
+  <script src="app.js?v=9"></script>
 </body>
 </html>
