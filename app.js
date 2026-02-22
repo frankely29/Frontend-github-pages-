@@ -1,10 +1,16 @@
 const RAILWAY_BASE = "https://web-production-78f67.up.railway.app";
 const BIN_MINUTES = 20;
-
-// Refresh current frame every 5 minutes
 const REFRESH_MS = 5 * 60 * 1000;
 
-// ---------- Legend minimize ----------
+// ---------- DOM ----------
+const slider = document.getElementById("slider");
+const timeLabel = document.getElementById("timeLabel");
+const recommendEl = document.getElementById("recommendLine");
+
+const mapWrap = document.getElementById("mapWrap");
+const btnCenter = document.getElementById("btnCenter");
+const btnRotate = document.getElementById("btnRotate");
+
 const legendEl = document.getElementById("legend");
 const legendToggleBtn = document.getElementById("legendToggle");
 if (legendEl && legendToggleBtn) {
@@ -14,30 +20,112 @@ if (legendEl && legendToggleBtn) {
   });
 }
 
-/** LABEL VISIBILITY (mobile-friendly, demand-priority)
- * z10: green only
- * z11: green + purple
- * z12: + blue
- * z13: + sky
- * z14: + yellow
- * z15+: + red (everything)
- */
-const LABEL_ZOOM_MIN = 10;
-const BOROUGH_ZOOM_SHOW = 15;
-const LABEL_MAX_CHARS_MID = 14;
+// ---------- Leaflet ----------
+const map = L.map("map", { zoomControl: true }).setView([40.7128, -74.0060], 11);
 
-function shouldShowLabel(bucket, zoom) {
-  if (zoom < LABEL_ZOOM_MIN) return false;
-  const b = (bucket || "").trim();
-  if (zoom >= 15) return true;
-  if (zoom === 14) return b !== "red";
-  if (zoom === 13) return b === "green" || b === "purple" || b === "blue" || b === "sky";
-  if (zoom === 12) return b === "green" || b === "purple" || b === "blue";
-  if (zoom === 11) return b === "green" || b === "purple";
-  return b === "green";
+L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
+  attribution: "&copy; OpenStreetMap &copy; CARTO",
+  maxZoom: 19,
+}).addTo(map);
+
+// ---------- State ----------
+let geoLayer = null;
+let timeline = [];
+let minutesOfWeek = [];
+let currentFrame = null;
+
+let userLatLng = null;
+let navMarker = null;
+let gpsFirstFixDone = false;
+
+let lastPos = null; // {lat,lng,ts}
+let lastHeadingDeg = 0;
+let lastMoveTs = 0;
+
+// toggles
+let recenterOn = true; // start ON
+let rotateOn = true;   // start ON
+
+function setBtnState(btn, on) {
+  if (!btn) return;
+  btn.classList.toggle("on", !!on);
 }
 
-// ---------- Time helpers ----------
+function syncRecenterButtonUI() {
+  if (!btnCenter) return;
+  btnCenter.textContent = recenterOn ? "Recenter: ON" : "Recenter: OFF";
+  setBtnState(btnCenter, recenterOn);
+}
+
+function syncRotateButtonUI() {
+  if (!btnRotate) return;
+  btnRotate.textContent = rotateOn ? "Rotate: ON" : "Rotate: OFF";
+  setBtnState(btnRotate, rotateOn);
+}
+
+if (btnCenter) {
+  syncRecenterButtonUI();
+  btnCenter.addEventListener("click", () => {
+    recenterOn = !recenterOn;
+    syncRecenterButtonUI();
+    if (recenterOn && userLatLng) stableRecenter(userLatLng, true);
+  });
+}
+
+if (btnRotate) {
+  syncRotateButtonUI();
+  btnRotate.addEventListener("click", () => {
+    rotateOn = !rotateOn;
+    syncRotateButtonUI();
+    if (!rotateOn) setWrapperRotation(0);
+    else setWrapperRotation(-lastHeadingDeg);
+    // also update arrow rotation mode immediately
+    applyArrowRotation();
+  });
+}
+
+// When user explores map, disable recenter (so it stops pulling you back)
+function disableRecenterBecauseUserIsExploring() {
+  if (!recenterOn) return;
+  recenterOn = false;
+  syncRecenterButtonUI();
+}
+map.on("dragstart", disableRecenterBecauseUserIsExploring);
+map.on("zoomstart", disableRecenterBecauseUserIsExploring);
+
+// ---------- Rotation: WRAPPER ONLY (safe) ----------
+function setWrapperRotation(deg) {
+  if (!mapWrap) return;
+  mapWrap.style.transform = `rotate(${deg}deg)`;
+}
+
+// Arrow rotation logic:
+// - rotateOn=true (heading-up map): wrapper rotates -heading, arrow should stay UP (0deg)
+// - rotateOn=false (north-up map): wrapper 0deg, arrow rotates to heading
+function applyArrowRotation() {
+  const el = document.getElementById("navWrap");
+  if (!el) return;
+
+  const arrowDeg = rotateOn ? 0 : lastHeadingDeg;
+  el.style.transform = `rotate(${arrowDeg}deg)`;
+}
+
+function setNavVisual(isMoving) {
+  const el = document.getElementById("navWrap");
+  if (!el) return;
+  el.classList.toggle("navMoving", !!isMoving);
+  el.classList.toggle("navPulse", !isMoving);
+}
+
+// ---------- Utils ----------
+async function fetchJSON(url) {
+  const res = await fetch(url, { cache: "no-store", mode: "cors" });
+  const text = await res.text();
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText} @ ${url} :: ${text.slice(0, 200)}`);
+  try { return JSON.parse(text); }
+  catch { throw new Error(`Invalid JSON @ ${url} :: ${text.slice(0, 200)}`); }
+}
+
 function parseIsoNoTz(iso) {
   const [d, t] = iso.split("T");
   const [Y, M, D] = d.split("-").map(Number);
@@ -58,7 +146,7 @@ function minuteOfWeekFromIso(iso) {
 function formatNYCLabel(iso) {
   const { h, m } = parseIsoNoTz(iso);
   const dow_m = dowMon0FromIso(iso);
-  const names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const names = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
   const hr12 = ((h + 11) % 12) + 1;
   const ampm = h >= 12 ? "PM" : "AM";
   const mm = String(m).padStart(2, "0");
@@ -73,14 +161,14 @@ function getNowNYCMinuteOfWeekRounded() {
     hour12: false,
   }).formatToParts(new Date());
 
-  const map = {};
-  for (const p of parts) map[p.type] = p.value;
+  const mapv = {};
+  for (const p of parts) mapv[p.type] = p.value;
 
   const dowMap = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 };
-  const dow_m = dowMap[map.weekday] ?? 0;
+  const dow_m = dowMap[mapv.weekday] ?? 0;
 
-  const hour = Number(map.hour);
-  const minute = Number(map.minute);
+  const hour = Number(mapv.hour);
+  const minute = Number(mapv.minute);
 
   const total = dow_m * 1440 + hour * 60 + minute;
   return Math.floor(total / BIN_MINUTES) * BIN_MINUTES;
@@ -102,32 +190,53 @@ function pickClosestIndex(minutesOfWeekArr, target) {
   return bestIdx;
 }
 
-// ---------- Network ----------
-async function fetchJSON(url) {
-  const res = await fetch(url, { cache: "no-store", mode: "cors" });
-  const text = await res.text();
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText} @ ${url} :: ${text.slice(0, 200)}`);
-  try {
-    return JSON.parse(text);
-  } catch {
-    throw new Error(`Invalid JSON @ ${url} :: ${text.slice(0, 200)}`);
-  }
+function haversineMiles(a, b) {
+  const R = 3958.7613;
+  const toRad = (x) => (x * Math.PI) / 180;
+
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+
+  const s1 = Math.sin(dLat / 2);
+  const s2 = Math.sin(dLng / 2);
+  const h = s1 * s1 + Math.cos(lat1) * Math.cos(lat2) * s2 * s2;
+
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
-// ---------- Bucket label ----------
-function prettyBucket(b) {
-  const m = {
-    green: "Highest",
-    purple: "High",
-    blue: "Medium",
-    sky: "Normal",
-    yellow: "Below Normal",
-    red: "Very Low / Avoid",
-  };
-  return m[b] || (b ?? "");
+function computeBearingDeg(from, to) {
+  const toRad = (x) => (x * Math.PI) / 180;
+  const toDeg = (x) => (x * 180) / Math.PI;
+
+  const lat1 = toRad(from.lat);
+  const lat2 = toRad(to.lat);
+  const dLng = toRad(to.lng - from.lng);
+
+  const y = Math.sin(dLng) * Math.cos(lat2);
+  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+
+  let brng = toDeg(Math.atan2(y, x));
+  brng = (brng + 360) % 360;
+  return brng;
 }
 
-// ---------- Label helpers ----------
+// ---------- Labels ----------
+const LABEL_ZOOM_MIN = 10;
+const BOROUGH_ZOOM_SHOW = 15;
+const LABEL_MAX_CHARS_MID = 14;
+
+function shouldShowLabel(bucket, zoom) {
+  if (zoom < LABEL_ZOOM_MIN) return false;
+  const b = (bucket || "").trim();
+  if (zoom >= 15) return true;
+  if (zoom === 14) return b !== "red";
+  if (zoom === 13) return b === "green" || b === "purple" || b === "blue" || b === "sky";
+  if (zoom === 12) return b === "green" || b === "purple" || b === "blue";
+  if (zoom === 11) return b === "green" || b === "purple";
+  return b === "green";
+}
 function shortenLabel(text, maxChars) {
   const t = (text || "").trim();
   if (!t) return "";
@@ -137,6 +246,14 @@ function shortenLabel(text, maxChars) {
 function zoomClass(zoom) {
   const z = Math.max(10, Math.min(15, Math.round(zoom)));
   return `z${z}`;
+}
+function escapeHtml(s) {
+  return String(s)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 function labelHTML(props, zoom) {
   const name = (props.zone_name || "").trim();
@@ -155,50 +272,49 @@ function labelHTML(props, zoom) {
     ${showBorough ? `<div class="br">${escapeHtml(borough)}</div>` : ""}
   `;
 }
-function escapeHtml(s) {
-  return String(s)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
+
+// ---------- Popup ----------
+function prettyBucket(b) {
+  const m = {
+    green: "Highest",
+    purple: "High",
+    blue: "Medium",
+    sky: "Normal",
+    yellow: "Below Normal",
+    red: "Very Low / Avoid",
+  };
+  return m[b] || (b ?? "");
+}
+function buildPopupHTML(props) {
+  const zoneName = (props.zone_name || "").trim();
+  const borough = (props.borough || "").trim();
+
+  const rating = props.rating ?? "";
+  const bucket = props.bucket ?? "";
+  const pickups = props.pickups ?? "";
+  const pay = props.avg_driver_pay == null ? "n/a" : props.avg_driver_pay.toFixed(2);
+
+  return `
+    <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; font-size:13px;">
+      <div style="font-weight:800; margin-bottom:2px;">${escapeHtml(zoneName || `Zone ${props.LocationID ?? ""}`)}</div>
+      ${borough ? `<div style="opacity:0.8; margin-bottom:6px;">${escapeHtml(borough)}</div>` : `<div style="margin-bottom:6px;"></div>`}
+      <div><b>Rating:</b> ${rating} (${prettyBucket(bucket)})</div>
+      <div><b>Pickups (last ${BIN_MINUTES} min):</b> ${pickups}</div>
+      <div><b>Avg Driver Pay:</b> $${pay}</div>
+    </div>
+  `;
 }
 
-// ---------- Recommendation helpers ----------
-const recommendEl = document.getElementById("recommendLine");
-let userLatLng = null;
-
-function haversineMiles(a, b) {
-  const R = 3958.7613;
-  const toRad = (x) => (x * Math.PI) / 180;
-
-  const dLat = toRad(b.lat - a.lat);
-  const dLng = toRad(b.lng - a.lng);
-  const lat1 = toRad(a.lat);
-  const lat2 = toRad(b.lat);
-
-  const s1 = Math.sin(dLat / 2);
-  const s2 = Math.sin(dLng / 2);
-  const h = s1 * s1 + Math.cos(lat1) * Math.cos(lat2) * s2 * s2;
-
-  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
-}
-
+// ---------- Recommendation ----------
 function geometryCenter(geom) {
   let pts = [];
   if (!geom) return null;
 
-  if (geom.type === "Polygon") {
-    pts = geom.coordinates?.[0] || [];
-  } else if (geom.type === "MultiPolygon") {
+  if (geom.type === "Polygon") pts = geom.coordinates?.[0] || [];
+  else if (geom.type === "MultiPolygon") {
     const polys = geom.coordinates || [];
-    for (const p of polys) {
-      const ring = p?.[0] || [];
-      pts.push(...ring);
-    }
-  } else {
-    return null;
-  }
+    for (const p of polys) pts.push(...(p?.[0] || []));
+  } else return null;
 
   if (!pts.length) return null;
 
@@ -217,6 +333,7 @@ function updateRecommendation(frame) {
     recommendEl.textContent = "Recommended: enable location to get suggestions";
     return;
   }
+
   const feats = frame?.polygons?.features || [];
   if (!feats.length) {
     recommendEl.textContent = "Recommended: …";
@@ -224,7 +341,6 @@ function updateRecommendation(frame) {
   }
 
   const DIST_PENALTY_PER_MILE = 2.0;
-
   let best = null;
 
   for (const f of feats) {
@@ -255,7 +371,7 @@ function updateRecommendation(frame) {
   }
 
   if (!best) {
-    recommendEl.textContent = "Recommended: not enough data for your area";
+    recommendEl.textContent = "Recommended: not enough data near you";
     return;
   }
 
@@ -264,43 +380,7 @@ function updateRecommendation(frame) {
   recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Rating ${best.rating} — ${distTxt}`;
 }
 
-// ---------- Leaflet map ----------
-const slider = document.getElementById("slider");
-const timeLabel = document.getElementById("timeLabel");
-
-const map = L.map("map", { zoomControl: true }).setView([40.7128, -74.0060], 11);
-
-L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
-  attribution: "&copy; OpenStreetMap &copy; CARTO",
-  maxZoom: 19,
-}).addTo(map);
-
-let geoLayer = null;
-let timeline = [];
-let minutesOfWeek = [];
-let currentFrame = null;
-
-// Popup
-function buildPopupHTML(props) {
-  const zoneName = (props.zone_name || "").trim();
-  const borough = (props.borough || "").trim();
-
-  const rating = props.rating ?? "";
-  const bucket = props.bucket ?? "";
-  const pickups = props.pickups ?? "";
-  const pay = props.avg_driver_pay == null ? "n/a" : props.avg_driver_pay.toFixed(2);
-
-  return `
-    <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; font-size:13px;">
-      <div style="font-weight:800; margin-bottom:2px;">${escapeHtml(zoneName || `Zone ${props.LocationID ?? ""}`)}</div>
-      ${borough ? `<div style="opacity:0.8; margin-bottom:6px;">${escapeHtml(borough)}</div>` : `<div style="margin-bottom:6px;"></div>`}
-      <div><b>Rating:</b> ${rating} (${prettyBucket(bucket)})</div>
-      <div><b>Pickups (last ${BIN_MINUTES} min):</b> ${pickups}</div>
-      <div><b>Avg Driver Pay:</b> $${pay}</div>
-    </div>
-  `;
-}
-
+// ---------- Render ----------
 function renderFrame(frame) {
   currentFrame = frame;
   timeLabel.textContent = formatNYCLabel(frame.time);
@@ -380,92 +460,10 @@ slider.addEventListener("input", () => {
   sliderDebounce = setTimeout(() => loadFrame(idx).catch(console.error), 80);
 });
 
-// ---------- Bottom toggles ----------
-const btnCenter = document.getElementById("btnCenter");
-const btnRotate = document.getElementById("btnRotate");
-
-// Start recenter ON by default (user can turn OFF)
-let recenterOn = true;
-let rotateOn = true;
-
-function setBtnState(btn, on) {
-  if (!btn) return;
-  btn.classList.toggle("on", !!on);
-}
-
-function syncRecenterButtonUI() {
-  if (!btnCenter) return;
-  btnCenter.textContent = recenterOn ? "Recenter: ON" : "Recenter: OFF";
-  setBtnState(btnCenter, recenterOn);
-}
-
-function syncRotateButtonUI() {
-  if (!btnRotate) return;
-  btnRotate.textContent = rotateOn ? "Rotate: ON" : "Rotate: OFF";
-  setBtnState(btnRotate, rotateOn);
-}
-
-if (btnCenter) {
-  syncRecenterButtonUI();
-  btnCenter.addEventListener("click", () => {
-    recenterOn = !recenterOn;
-    syncRecenterButtonUI();
-    if (recenterOn && userLatLng) stableRecenter(userLatLng, true);
-  });
-}
-
-if (btnRotate) {
-  syncRotateButtonUI();
-  btnRotate.addEventListener("click", () => {
-    rotateOn = !rotateOn;
-    syncRotateButtonUI();
-    if (!rotateOn) resetMapRotation();
-    else applyMapRotationDegrees(lastHeadingDeg);
-  });
-}
-
-// If user drags/zooms map, stop recenter (so you can explore)
-function disableRecenterBecauseUserIsExploring() {
-  if (!recenterOn) return;
-  recenterOn = false;
-  syncRecenterButtonUI();
-}
-map.on("dragstart", disableRecenterBecauseUserIsExploring);
-map.on("zoomstart", disableRecenterBecauseUserIsExploring);
-
-// ---------- Map rotation (Tesla-safe: uses driving direction only) ----------
-function panesToRotate() {
-  return [
-    map.getPane("tilePane"),
-    map.getPane("overlayPane"),
-    map.getPane("shadowPane"),
-    map.getPane("markerPane"),
-    map.getPane("tooltipPane"),
-    map.getPane("popupPane"),
-  ].filter(Boolean);
-}
-
-function applyMapRotationDegrees(headingDeg) {
-  if (!rotateOn) return;
-  const rot = -headingDeg; // heading-up
-  for (const p of panesToRotate()) {
-    p.style.transformOrigin = "50% 50%";
-    p.style.transition = "transform 140ms linear";
-    p.style.transform = `rotate(${rot}deg)`;
-  }
-}
-
-function resetMapRotation() {
-  for (const p of panesToRotate()) {
-    p.style.transition = "";
-    p.style.transform = "";
-  }
-}
-
-// ---------- Stable recenter logic ----------
+// ---------- Recenter ----------
 let lastRecenterAt = 0;
-const RECENTER_MIN_INTERVAL_MS = 900;       // don’t spam panTo
-const RECENTER_MAX_DRIFT_MILES = 0.18;      // if drift big, do hard setView (reliable)
+const RECENTER_MIN_INTERVAL_MS = 900;
+const RECENTER_MAX_DRIFT_MILES = 0.18;
 
 function stableRecenter(latlng, force = false) {
   if (!recenterOn || !latlng) return;
@@ -476,25 +474,17 @@ function stableRecenter(latlng, force = false) {
   const center = map.getCenter();
   const drift = haversineMiles({ lat: center.lat, lng: center.lng }, { lat: latlng.lat, lng: latlng.lng });
 
-  if (!force && drift < 0.03) return; // already close enough
+  if (!force && drift < 0.03) return;
 
   if (drift > RECENTER_MAX_DRIFT_MILES) {
     map.setView(latlng, map.getZoom(), { animate: false });
   } else {
     map.panTo(latlng, { animate: true });
   }
-
   lastRecenterAt = now;
 }
 
-// ---------- Live location arrow marker ----------
-let navMarker = null;
-let gpsFirstFixDone = false;
-
-let lastPos = null; // {lat,lng,ts}
-let lastHeadingDeg = 0;
-let lastMoveTs = 0;
-
+// ---------- Nav marker ----------
 function makeNavIcon() {
   return L.divIcon({
     className: "",
@@ -502,35 +492,6 @@ function makeNavIcon() {
     iconSize: [30, 30],
     iconAnchor: [15, 15],
   });
-}
-
-function setNavVisual(isMoving) {
-  const el = document.getElementById("navWrap");
-  if (!el) return;
-  el.classList.toggle("navMoving", !!isMoving);
-  el.classList.toggle("navPulse", !isMoving);
-}
-
-function setNavRotation(deg) {
-  const el = document.getElementById("navWrap");
-  if (!el) return;
-  el.style.transform = `rotate(${deg}deg)`;
-}
-
-function computeBearingDeg(from, to) {
-  const toRad = (x) => (x * Math.PI) / 180;
-  const toDeg = (x) => (x * 180) / Math.PI;
-
-  const lat1 = toRad(from.lat);
-  const lat2 = toRad(to.lat);
-  const dLng = toRad(to.lng - from.lng);
-
-  const y = Math.sin(dLng) * Math.cos(lat2);
-  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
-
-  let brng = toDeg(Math.atan2(y, x));
-  brng = (brng + 360) % 360;
-  return brng;
 }
 
 function startLocationWatch() {
@@ -552,7 +513,7 @@ function startLocationWatch() {
       const ts = pos.timestamp || Date.now();
 
       userLatLng = { lat, lng };
-      if (navMarker) navMarker.setLatLng(userLatLng);
+      navMarker.setLatLng(userLatLng);
 
       let isMoving = false;
 
@@ -561,28 +522,28 @@ function startLocationWatch() {
         const dtSec = Math.max(1, (ts - lastPos.ts) / 1000);
         const mph = (dMi / dtSec) * 3600;
 
-        // driving direction from movement only (Tesla-safe)
         isMoving = mph >= 2.0;
 
         if (dMi > 0.01) {
           lastHeadingDeg = computeBearingDeg({ lat: lastPos.lat, lng: lastPos.lng }, userLatLng);
         }
-
         if (isMoving) lastMoveTs = ts;
       }
 
       lastPos = { lat, lng, ts };
 
-      // Rotate arrow + rotate map layers
-      setNavRotation(lastHeadingDeg);
+      // ✅ SYNCHRONOUS rotation (single source of truth = lastHeadingDeg)
+      if (rotateOn) {
+        setWrapperRotation(-lastHeadingDeg); // heading-up map
+      } else {
+        setWrapperRotation(0);               // north-up map
+      }
+      applyArrowRotation();
       setNavVisual(isMoving);
-      applyMapRotationDegrees(lastHeadingDeg);
 
-      // First fix: zoom in to you
       if (!gpsFirstFixDone) {
         gpsFirstFixDone = true;
-        const targetZoom = Math.max(map.getZoom(), 14);
-        map.setView(userLatLng, targetZoom, { animate: true });
+        map.setView(userLatLng, Math.max(map.getZoom(), 14), { animate: true });
       } else {
         stableRecenter(userLatLng, false);
       }
@@ -600,7 +561,7 @@ function startLocationWatch() {
     }
   );
 
-  // Keep pulse state stable
+  // keep pulse state stable
   setInterval(() => {
     const now = Date.now();
     const recentlyMoved = lastMoveTs && (now - lastMoveTs) < 5000;
@@ -608,7 +569,7 @@ function startLocationWatch() {
   }, 1200);
 }
 
-// ---------- Auto-refresh every 5 minutes ----------
+// ---------- Auto-refresh ----------
 async function refreshCurrentFrame() {
   try {
     const idx = Number(slider.value || "0");
@@ -619,7 +580,7 @@ async function refreshCurrentFrame() {
 }
 setInterval(refreshCurrentFrame, REFRESH_MS);
 
-// Boot
+// ---------- Boot ----------
 loadTimeline().catch((err) => {
   console.error(err);
   timeLabel.textContent = `Error loading timeline: ${err.message}`;
