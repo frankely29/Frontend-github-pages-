@@ -2,8 +2,8 @@ const RAILWAY_BASE = "https://web-production-78f67.up.railway.app";
 const BIN_MINUTES = 20;
 
 // Label rules (adjust if you want)
-const LABEL_ZOOM_ALL = 10;      // show ALL labels at zoom >= 10
-const LABEL_ZOOM_TOP = 11;      // show ONLY green/purple at zoom 11-12
+const LABEL_ZOOM_ALL = 12;      // show ALL labels at zoom >= 10
+const LABEL_ZOOM_TOP = 14;      // show ONLY green/purple at zoom 11-12
 const LABEL_MAX_CHARS_MID = 16; // shorten labels at mid zoom
 
 // ---------- Time helpers ----------
