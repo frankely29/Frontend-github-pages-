@@ -1,10 +1,11 @@
 const RAILWAY_BASE = "https://web-production-78f67.up.railway.app";
 const BIN_MINUTES = 20;
 
-// Label rules (balanced: not crowded, not too zoomed-in)
-const LABEL_ZOOM_TOP = 10;      // show ONLY green/purple at zoom 10–11
-const LABEL_ZOOM_ALL = 12;      // show ALL labels at zoom >= 12
-const LABEL_MAX_CHARS_MID = 14; // shorten labels at mid zoom (optional)
+// LABEL VISIBILITY (balanced for mobile)
+const LABEL_ZOOM_TOP = 10;        // start showing labels (green/purple only)
+const LABEL_ZOOM_ALL = 12;        // show all zone labels
+const BOROUGH_ZOOM_SHOW = 13;     // show borough line starting zoom >= 13
+const LABEL_MAX_CHARS_MID = 14;   // shorten zone names at mid zoom
 
 // ---------- Time helpers ----------
 function parseIsoNoTz(iso) {
@@ -13,20 +14,17 @@ function parseIsoNoTz(iso) {
   const [h, m, s] = t.split(":").map(Number);
   return { Y, M, D, h, m, s };
 }
-
 function dowMon0FromIso(iso) {
   const { Y, M, D, h, m, s } = parseIsoNoTz(iso);
   const dt = new Date(Date.UTC(Y, M - 1, D, h, m, s));
   const dowSun0 = dt.getUTCDay();
-  return dowSun0 === 0 ? 6 : dowSun0 - 1; // Mon=0..Sun=6
+  return dowSun0 === 0 ? 6 : dowSun0 - 1;
 }
-
 function minuteOfWeekFromIso(iso) {
   const { h, m } = parseIsoNoTz(iso);
   const dow_m = dowMon0FromIso(iso);
   return dow_m * 1440 + (h * 60 + m);
 }
-
 function formatNYCLabel(iso) {
   const { h, m } = parseIsoNoTz(iso);
   const dow_m = dowMon0FromIso(iso);
@@ -36,7 +34,6 @@ function formatNYCLabel(iso) {
   const mm = String(m).padStart(2, "0");
   return `${names[dow_m]} ${hr12}:${mm} ${ampm}`;
 }
-
 function getNowNYCMinuteOfWeekRounded() {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/New_York",
@@ -58,12 +55,10 @@ function getNowNYCMinuteOfWeekRounded() {
   const total = dow_m * 1440 + hour * 60 + minute;
   return Math.floor(total / BIN_MINUTES) * BIN_MINUTES;
 }
-
 function cyclicDiff(a, b, mod) {
   const d = Math.abs(a - b);
   return Math.min(d, mod - d);
 }
-
 function pickClosestIndex(minutesOfWeekArr, target) {
   let bestIdx = 0;
   let bestDiff = Infinity;
@@ -102,21 +97,47 @@ function prettyBucket(b) {
   return m[b] || (b ?? "");
 }
 
-// ---------- Label formatting ----------
+// ---------- Label logic ----------
 function shortenLabel(text, maxChars) {
   const t = (text || "").trim();
   if (!t) return "";
   if (t.length <= maxChars) return t;
   return t.slice(0, maxChars - 1) + "…";
 }
-
 function shouldShowLabel(bucket, zoom) {
-  if (zoom < LABEL_ZOOM_TOP) return false; // zoomed out: no labels
-  if (zoom < LABEL_ZOOM_ALL) {
-    // mid zoom: best zones only
-    return bucket === "green" || bucket === "purple";
-  }
-  return true; // zoomed in: all labels
+  if (zoom < LABEL_ZOOM_TOP) return false;
+  if (zoom < LABEL_ZOOM_ALL) return bucket === "green" || bucket === "purple";
+  return true;
+}
+function zoomClass(zoom) {
+  // Clamp to classes we defined in CSS
+  const z = Math.max(10, Math.min(15, Math.round(zoom)));
+  return `z${z}`;
+}
+function labelHTML(props, zoom) {
+  const name = (props.zone_name || "").trim();
+  if (!name) return "";
+
+  const bucket = (props.bucket || "").trim();
+  if (!shouldShowLabel(bucket, zoom)) return "";
+
+  const zoneText = zoom < LABEL_ZOOM_ALL ? shortenLabel(name, LABEL_MAX_CHARS_MID) : name;
+
+  const borough = (props.borough || "").trim();
+  const showBorough = zoom >= BOROUGH_ZOOM_SHOW && borough;
+
+  return `
+    <div class="zn">${escapeHtml(zoneText)}</div>
+    ${showBorough ? `<div class="br">${escapeHtml(borough)}</div>` : ""}
+  `;
+}
+function escapeHtml(s) {
+  return String(s)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
 // ---------- Leaflet map ----------
@@ -137,7 +158,6 @@ let currentFrame = null;
 
 // Popup
 function buildPopupHTML(props) {
-  const zid = props.LocationID ?? "";
   const zoneName = (props.zone_name || "").trim();
   const borough = (props.borough || "").trim();
 
@@ -146,13 +166,10 @@ function buildPopupHTML(props) {
   const pickups = props.pickups ?? "";
   const pay = props.avg_driver_pay == null ? "n/a" : props.avg_driver_pay.toFixed(2);
 
-  const title = zoneName ? zoneName : `Zone ${zid}`;
-  const sub = borough ? borough : "";
-
   return `
     <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; font-size:13px;">
-      <div style="font-weight:800; margin-bottom:2px;">${title}</div>
-      ${sub ? `<div style="opacity:0.8; margin-bottom:6px;">${sub}</div>` : `<div style="margin-bottom:6px;"></div>`}
+      <div style="font-weight:800; margin-bottom:2px;">${escapeHtml(zoneName || `Zone ${props.LocationID ?? ""}`)}</div>
+      ${borough ? `<div style="opacity:0.8; margin-bottom:6px;">${escapeHtml(borough)}</div>` : `<div style="margin-bottom:6px;"></div>`}
       <div><b>Rating:</b> ${rating} (${prettyBucket(bucket)})</div>
       <div><b>Pickups (last ${BIN_MINUTES} min):</b> ${pickups}</div>
       <div><b>Avg Driver Pay:</b> $${pay}</div>
@@ -170,6 +187,7 @@ function renderFrame(frame) {
   }
 
   const zoomNow = map.getZoom();
+  const zClass = zoomClass(zoomNow);
 
   geoLayer = L.geoJSON(frame.polygons, {
     style: (feature) => {
@@ -186,20 +204,14 @@ function renderFrame(frame) {
       const props = feature.properties || {};
       layer.bindPopup(buildPopupHTML(props), { maxWidth: 300 });
 
-      const bucket = (props.bucket || "").trim();
-      if (!shouldShowLabel(bucket, zoomNow)) return;
+      const html = labelHTML(props, zoomNow);
+      if (!html) return;
 
-      const name = (props.zone_name || "").trim();
-      if (!name) return;
-
-      const labelText =
-        zoomNow < LABEL_ZOOM_ALL ? shortenLabel(name, LABEL_MAX_CHARS_MID) : name;
-
-      layer.bindTooltip(labelText, {
+      layer.bindTooltip(html, {
         permanent: true,
         direction: "center",
-        className: "zone-label",
-        opacity: 0.9,
+        className: `zone-label ${zClass}`,
+        opacity: 0.92,
         interactive: false,
       });
     },
