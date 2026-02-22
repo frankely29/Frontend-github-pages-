@@ -5,8 +5,7 @@ const RAILWAY_BASE = "https://web-production-78f67.up.railway.app";
 const BIN_MINUTES = 20;
 
 // =========================
-// ISO helpers (backend timestamps are "YYYY-MM-DDTHH:MM:SS" with no TZ)
-// We treat them as "NYC local label buckets" for display.
+// Helpers
 // =========================
 function parseIsoNoTz(iso) {
   const [d, t] = iso.split("T");
@@ -15,11 +14,10 @@ function parseIsoNoTz(iso) {
   return { Y, M, D, h, m, s };
 }
 
-// Convert ISO string to "Mon=0..Sun=6" using UTC date math (works consistently for day label)
 function dowMon0FromIso(iso) {
   const { Y, M, D, h, m, s } = parseIsoNoTz(iso);
   const dt = new Date(Date.UTC(Y, M - 1, D, h, m, s));
-  const dowSun0 = dt.getUTCDay(); // 0=Sun..6=Sat
+  const dowSun0 = dt.getUTCDay(); // 0..6
   return dowSun0 === 0 ? 6 : dowSun0 - 1; // Mon=0..Sun=6
 }
 
@@ -39,7 +37,6 @@ function formatNYCLabel(iso) {
   return `${names[dow_m]} ${hr12}:${mm} ${ampm}`;
 }
 
-// Get current NYC minute-of-week rounded DOWN to BIN_MINUTES
 function getNowNYCMinuteOfWeekRounded() {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/New_York",
@@ -81,14 +78,30 @@ function pickClosestIndex(minutesOfWeekArr, target) {
 }
 
 async function fetchJSON(url) {
-  const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText} for ${url}`);
-  return await res.json();
+  const res = await fetch(url, {
+    cache: "no-store",
+    mode: "cors",
+  });
+
+  const text = await res.text();
+  if (!res.ok) {
+    // show body for debugging (often JSON error)
+    throw new Error(`${res.status} ${res.statusText} @ ${url} :: ${text.slice(0, 200)}`);
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(`Invalid JSON @ ${url} :: ${text.slice(0, 200)}`);
+  }
 }
 
 // =========================
-// Leaflet map
+// UI + Map
 // =========================
+const slider = document.getElementById("slider");
+const timeLabel = document.getElementById("timeLabel");
+
 const map = L.map("map", { zoomControl: true }).setView([40.7128, -74.0060], 11);
 
 L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
@@ -97,19 +110,10 @@ L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
 }).addTo(map);
 
 let geoLayer = null;
-
-// UI
-const slider = document.getElementById("slider");
-const timeLabel = document.getElementById("timeLabel");
-
-// Timeline data
 let timeline = [];
 let minutesOfWeek = [];
 
-// =========================
-// Popup content (DATA-ACCURATE timeframe label)
-// Each frame is a 20-minute window, so pickups are for "last 20 min" (selected window).
-// =========================
+// Popup (adds correct timeframe label)
 function buildPopupHTML(props) {
   const rating = props.rating ?? "";
   const bucket = props.bucket ?? "";
@@ -129,10 +133,8 @@ function buildPopupHTML(props) {
 async function loadFrame(idx) {
   const frame = await fetchJSON(`${RAILWAY_BASE}/frame/${idx}`);
 
-  // Bottom label
   timeLabel.textContent = formatNYCLabel(frame.time);
 
-  // Redraw polygons
   if (geoLayer) {
     geoLayer.remove();
     geoLayer = null;
@@ -151,14 +153,16 @@ async function loadFrame(idx) {
     },
     onEachFeature: (feature, layer) => {
       layer.bindPopup(buildPopupHTML(feature.properties || {}), { maxWidth: 280 });
-    }
+    },
   }).addTo(map);
 }
 
 async function loadTimeline() {
   const t = await fetchJSON(`${RAILWAY_BASE}/timeline`);
-  timeline = t.timeline || [];
-  if (!timeline.length) throw new Error("Timeline empty.");
+
+  // Accept either {timeline:[...]} OR just [...] (defensive)
+  timeline = Array.isArray(t) ? t : (t.timeline || []);
+  if (!timeline.length) throw new Error("Timeline empty (no frames). Run /generate once.");
 
   minutesOfWeek = timeline.map(minuteOfWeekFromIso);
 
@@ -166,7 +170,6 @@ async function loadTimeline() {
   slider.max = String(timeline.length - 1);
   slider.step = "1";
 
-  // Start slider on closest NYC "now" window (with week wrap handling)
   const nowMinWeek = getNowNYCMinuteOfWeekRounded();
   const idx = pickClosestIndex(minutesOfWeek, nowMinWeek);
   slider.value = String(idx);
@@ -174,7 +177,7 @@ async function loadTimeline() {
   await loadFrame(idx);
 }
 
-// Debounced slider to avoid hammering backend
+// Debounced slider
 let sliderDebounce = null;
 slider.addEventListener("input", () => {
   const idx = Number(slider.value);
@@ -185,5 +188,5 @@ slider.addEventListener("input", () => {
 // Boot
 loadTimeline().catch((err) => {
   console.error(err);
-  timeLabel.textContent = "Error loading timeline. Check Railway /timeline.";
+  timeLabel.textContent = `Error loading timeline: ${err.message}`;
 });
