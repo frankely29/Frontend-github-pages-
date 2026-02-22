@@ -2,144 +2,155 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <title>NYC TLC Hotspot Map</title>
 
-  <!-- Leaflet -->
   <link
     rel="stylesheet"
     href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    integrity="sha256-o9N1j7kGStpYg9v+1oE0pS2mFQfM9vE1m2H1j6p1q3s="
     crossorigin=""
   />
-  <script
-    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-    crossorigin=""
-  ></script>
-
-  <!-- Turf -->
-  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
 
   <style>
     html, body { height: 100%; margin: 0; }
     #map { height: 100%; width: 100%; }
 
-    /* Bottom bar */
-    #bottomBar {
-      position: fixed;
-      left: 10px;
-      right: 10px;
-      bottom: 12px;
-      z-index: 9999;
-      background: rgba(255,255,255,0.85);
-      border-radius: 18px;
-      padding: 12px 14px;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.15);
-      font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
-      backdrop-filter: blur(8px);
-    }
-    #timeLabel {
-      font-weight: 900;
-      font-size: 32px;
-      margin-bottom: 8px;
-      letter-spacing: -0.5px;
-    }
-    #slider {
-      width: 100%;
-      accent-color: #2b7cff;
-    }
-
-    /* ✅ Smaller legend (about half visual size) */
-    #legend {
-      position: fixed;
+    /* ✅ Smaller legend (about half) */
+    .legend {
+      position: absolute;
       top: 10px;
       left: 10px;
-      z-index: 9999;
-      width: 210px;                 /* smaller */
-      max-width: calc(100vw - 20px);
-      background: rgba(255,255,255,0.80);
-      border-radius: 10px;
-      padding: 8px 9px;             /* smaller */
-      box-shadow: 0 8px 22px rgba(0,0,0,0.12);
-      font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
-      backdrop-filter: blur(8px);
+      z-index: 1000;
+      background: rgba(255,255,255,0.82);
+      backdrop-filter: blur(6px);
+      border-radius: 12px;
+      padding: 10px 10px;
+      max-width: 220px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
     }
-    #legend h3 {
+    .legend h3 {
       margin: 0 0 6px 0;
-      font-size: 16px;              /* smaller */
-      letter-spacing: -0.2px;
-      font-weight: 900;
+      font-size: 18px;
+      line-height: 1.1;
     }
-    .leg-row { display:flex; align-items:center; gap:8px; margin: 5px 0; }
-    .swatch {
-      width: 14px; height: 14px;    /* smaller */
-      border-radius: 3px;
-      border: 1px solid rgba(0,0,0,0.15);
+    .legend .row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 5px 0;
+      font-weight: 700;
+      font-size: 16px;
+    }
+    .legend .swatch {
+      width: 20px; height: 20px; border-radius: 4px;
+      border: 2px solid rgba(0,0,0,0.15);
       flex: 0 0 auto;
     }
-    .leg-text { font-size: 13px; font-weight: 800; }
-    .leg-foot {
-      margin-top: 6px;
-      font-size: 11px;              /* smaller */
-      line-height: 1.2;
+    .legend .note {
+      margin-top: 8px;
+      font-size: 14px;
+      line-height: 1.25;
+      font-weight: 600;
       opacity: 0.9;
     }
 
-    /* Zone label bubbles */
-    .zone-label {
-      background: rgba(255,255,255,0.88);
-      border-radius: 999px;
-      padding: 3px 8px;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.12);
-      border: 1px solid rgba(0,0,0,0.10);
-      font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
-      white-space: nowrap;
-      pointer-events: none;
+    /* Bottom bar */
+    .bottomBar {
+      position: absolute;
+      left: 10px;
+      right: 10px;
+      bottom: 12px;
+      z-index: 1000;
+      background: rgba(255,255,255,0.80);
+      backdrop-filter: blur(8px);
+      border-radius: 18px;
+      padding: 14px 14px 12px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
     }
-    .zone-label .zn { font-weight: 900; line-height: 1.05; }
-    .zone-label .br { font-weight: 700; opacity: 0.70; margin-top: 1px; line-height: 1.0; }
+    #timeLabel {
+      font-size: 38px;
+      font-weight: 900;
+      letter-spacing: -0.5px;
+      margin-bottom: 10px;
+    }
+    #slider { width: 100%; }
 
-    /* Zoom scaling */
-    .zone-label.z8  .zn { font-size: 10px; } .zone-label.z8  .br { font-size: 7px; }
-    .zone-label.z9  .zn { font-size: 11px; } .zone-label.z9  .br { font-size: 7.5px; }
-    .zone-label.z10 .zn { font-size: 12px; } .zone-label.z10 .br { font-size: 8px; }
-    .zone-label.z11 .zn { font-size: 13px; } .zone-label.z11 .br { font-size: 8.5px; }
-    .zone-label.z12 .zn { font-size: 14px; } .zone-label.z12 .br { font-size: 9px; }
-    .zone-label.z13 .zn { font-size: 15px; } .zone-label.z13 .br { font-size: 10px; }
-    .zone-label.z14 .zn { font-size: 16px; } .zone-label.z14 .br { font-size: 11px; }
+    /* ✅ Flat label look (like your example) */
+    .zone-label-flat {
+      pointer-events: none;
+      background: transparent !important;
+      border: none !important;
+      box-shadow: none !important;
+      padding: 0 !important;
+      margin: 0 !important;
+      white-space: nowrap;
+      transform: translateZ(0);
+    }
 
-    /* Bucket tint */
-    .bucket-green  { border-color: rgba(0,176,80,0.40); }
-    .bucket-purple { border-color: rgba(128,0,255,0.40); }
-    .bucket-blue   { border-color: rgba(0,102,255,0.35); }
-    .bucket-sky    { border-color: rgba(102,204,255,0.28); }
-    .bucket-yellow { border-color: rgba(255,212,0,0.33); }
-    .bucket-red    { border-color: rgba(230,0,0,0.28); }
+    /* main text */
+    .zone-label-flat .zn {
+      font-weight: 800;
+      color: rgba(25,25,25,0.88);
+      /* white halo like GIS maps */
+      text-shadow:
+        -2px -2px 0 rgba(255,255,255,0.95),
+         2px -2px 0 rgba(255,255,255,0.95),
+        -2px  2px 0 rgba(255,255,255,0.95),
+         2px  2px 0 rgba(255,255,255,0.95),
+         0px  0px 6px rgba(255,255,255,0.95);
+    }
+
+    /* Zoom-based font sizes (smaller when zoomed out) */
+    .z7  .zn { font-size: 11px; }
+    .z8  .zn { font-size: 12px; }
+    .z9  .zn { font-size: 13px; }
+    .z10 .zn { font-size: 14px; }
+    .z11 .zn { font-size: 15px; }
+    .z12 .zn { font-size: 16px; }
+    .z13 .zn { font-size: 17px; }
+    .z14 .zn { font-size: 18px; }
+
   </style>
 </head>
 
 <body>
   <div id="map"></div>
 
-  <div id="legend">
+  <div class="legend">
     <h3>Demand Colors</h3>
-    <div class="leg-row"><div class="swatch" style="background:#00b050"></div><div class="leg-text">Green = Highest</div></div>
-    <div class="leg-row"><div class="swatch" style="background:#8000ff"></div><div class="leg-text">Purple = High</div></div>
-    <div class="leg-row"><div class="swatch" style="background:#0066ff"></div><div class="leg-text">Blue = Medium</div></div>
-    <div class="leg-row"><div class="swatch" style="background:#66ccff"></div><div class="leg-text">Sky = Normal</div></div>
-    <div class="leg-row"><div class="swatch" style="background:#ffd400"></div><div class="leg-text">Yellow = Below Normal</div></div>
-    <div class="leg-row"><div class="swatch" style="background:#e60000"></div><div class="leg-text">Red = Very Low / Avoid</div></div>
 
-    <div class="leg-foot">
-      Rating (1–100) for selected 20-min window.<br/>Time is NYC.
+    <div class="row"><span class="swatch" style="background:#00b050"></span> Green = Highest</div>
+    <div class="row"><span class="swatch" style="background:#8000ff"></span> Purple = High</div>
+    <div class="row"><span class="swatch" style="background:#0066ff"></span> Blue = Medium</div>
+    <div class="row"><span class="swatch" style="background:#66ccff"></span> Sky = Normal</div>
+    <div class="row"><span class="swatch" style="background:#ffd400"></span> Yellow = Below Normal</div>
+    <div class="row"><span class="swatch" style="background:#e60000"></span> Red = Very Low / Avoid</div>
+
+    <div class="note">
+      Rating (1–100) for the selected 20-min window.<br/>
+      Time is NYC.
     </div>
   </div>
 
-  <div id="bottomBar">
+  <div class="bottomBar">
     <div id="timeLabel">Loading…</div>
-    <input id="slider" type="range" min="0" max="0" value="0" step="1" />
+    <input id="slider" type="range" min="0" max="0" value="0" step="1"/>
   </div>
+
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+
+  <!-- Turf for point-in-polygon checks -->
+  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+
+  <!-- Polylabel (better interior point than centroid) -->
+  <script src="https://unpkg.com/polylabel@1.1.0/polylabel.js"></script>
 
   <script src="./app.js"></script>
 </body>
