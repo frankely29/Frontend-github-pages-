@@ -22,52 +22,59 @@
     html, body { height: 100%; margin: 0; }
     #map { height: 100vh; width: 100vw; }
 
-    /* =========================
-       Legend box (TOP-LEFT) - 30% smaller
-       ========================= */
+    /* =========================================================
+       Legend box (top-left) - ~30% smaller
+       ========================================================= */
     .legend {
       position: absolute;
       top: 10px;
       left: 10px;
       z-index: 1000;
       background: rgba(255,255,255,0.92);
-      padding: 8px 8px 7px 8px;        /* smaller */
-      border-radius: 10px;
-      box-shadow: 0 6px 18px rgba(0,0,0,0.12);
+      padding: 8px 8px 7px 8px;          /* smaller */
+      border-radius: 12px;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.15);
       font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
-      max-width: 230px;                /* smaller */
+      max-width: 240px;                   /* smaller */
     }
     .legend h3 {
       margin: 0 0 6px 0;
-      font-size: 13px;                 /* smaller */
+      font-size: 14px;                    /* smaller */
       font-weight: 900;
+    }
+    .legend .recommendLine{
+      margin: 0 0 6px 0;
+      font-size: 11px;                    /* small */
+      font-weight: 900;
+      opacity: 0.92;
+      line-height: 1.15;
     }
     .legend .row {
       display: flex;
       align-items: center;
       gap: 8px;
-      margin: 4px 0;
-      font-size: 12px;                 /* smaller */
+      margin: 5px 0;
+      font-size: 13px;                    /* smaller */
       font-weight: 800;
     }
     .legend .swatch {
-      width: 14px;                     /* smaller */
+      width: 14px;                        /* smaller */
       height: 14px;
       border-radius: 4px;
       border: 1px solid rgba(0,0,0,0.15);
       flex: 0 0 14px;
     }
     .legend .sub {
-      margin-top: 6px;
-      font-size: 11px;                 /* smaller */
+      margin-top: 7px;
+      font-size: 11px;                    /* smaller */
       opacity: 0.85;
-      line-height: 1.2;
-      font-weight: 600;
+      line-height: 1.25;
+      font-weight: 700;
     }
 
-    /* =========================
+    /* =========================================================
        Bottom slider bar - ~3x smaller
-       ========================= */
+       ========================================================= */
     .sliderWrap {
       position: absolute;
       left: 10px;
@@ -76,45 +83,24 @@
       z-index: 1000;
       background: rgba(255,255,255,0.92);
       border-radius: 14px;
-      box-shadow: 0 6px 18px rgba(0,0,0,0.12);
-      padding: 8px 10px 10px 10px;     /* much smaller */
+      box-shadow: 0 6px 18px rgba(0,0,0,0.15);
+      padding: 8px 10px 10px 10px;        /* smaller */
       font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
     }
     .timeLabel {
-      font-size: 16px;                 /* much smaller */
-      font-weight: 900;
+      font-size: 18px;                    /* much smaller */
+      font-weight: 950;
       margin: 0 0 6px 0;
-      line-height: 1.05;
     }
     input[type="range"] {
       width: 100%;
-      height: 18px;                    /* smaller */
+      height: 22px;                       /* smaller */
       margin: 0;
     }
 
-    /* Auto-center toggle button */
-    .autoCenterBtn {
-      position: absolute;
-      right: 10px;
-      bottom: 78px; /* sits above the slider */
-      z-index: 1100;
-      background: rgba(255,255,255,0.92);
-      border: 1px solid rgba(0,0,0,0.15);
-      border-radius: 999px;
-      padding: 8px 10px;
-      font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
-      font-weight: 900;
-      font-size: 12px;
-      box-shadow: 0 6px 18px rgba(0,0,0,0.12);
-      user-select: none;
-      -webkit-tap-highlight-color: transparent;
-    }
-    .autoCenterBtn.on { color: #0a7a2a; }
-    .autoCenterBtn.off { color: #9b1c1c; }
-
-    /* =========================
+    /* =========================================================
        ZONE LABELS (tooltips)
-       ========================= */
+       ========================================================= */
     .zone-label {
       background: transparent;
       border: none;
@@ -123,6 +109,7 @@
       text-align: center;
       pointer-events: none;
     }
+
     .zone-label .zn,
     .zone-label .br {
       display: inline-block;
@@ -132,65 +119,113 @@
       padding: 2px 8px;
       margin: 1px 0;
       white-space: nowrap;
-      max-width: 220px;
+      max-width: 210px;
       overflow: hidden;
       text-overflow: ellipsis;
       box-shadow: 0 2px 6px rgba(0,0,0,0.08);
     }
-    .zone-label .zn { font-weight: 900; }
+
+    .zone-label .zn {
+      font-weight: 950;
+      letter-spacing: 0.1px;
+    }
+
+    /* Borough line: VERY small to avoid blocking */
     .zone-label .br {
-      font-weight: 800;
-      opacity: 0.75;
-      padding: 1px 7px;
+      font-weight: 900;
+      opacity: 0.7;
+      padding: 1px 6px;
       border-radius: 10px;
     }
 
-    .zone-label.z10 .zn { font-size: 9px;  }
-    .zone-label.z11 .zn { font-size: 10px; }
-    .zone-label.z12 .zn { font-size: 11px; }
-    .zone-label.z13 .zn { font-size: 12px; }
-    .zone-label.z14 .zn { font-size: 13px; }
-    .zone-label.z15 .zn { font-size: 14px; }
+    /* Zoom scaling for zone name (zn) */
+    .zone-label.z10 .zn { font-size: 10px; }
+    .zone-label.z11 .zn { font-size: 11px; }
+    .zone-label.z12 .zn { font-size: 12px; }
+    .zone-label.z13 .zn { font-size: 13px; }
+    .zone-label.z14 .zn { font-size: 14px; }
+    .zone-label.z15 .zn { font-size: 15px; }
 
-    /* Borough line kept small */
+    /* Borough shows only when zoomed in a lot (and tiny) */
     .zone-label.z10 .br,
     .zone-label.z11 .br,
-    .zone-label.z12 .br { font-size: 0px; padding: 0; border: 0; }
-
-    .zone-label.z13 .br { font-size: 7px; }
-    .zone-label.z14 .br { font-size: 8px; }
-    .zone-label.z15 .br { font-size: 9px; }
+    .zone-label.z12 .br,
+    .zone-label.z13 .br,
+    .zone-label.z14 .br { font-size: 0px; padding: 0; border: 0; }
+    .zone-label.z15 .br { font-size: 4px; } /* ~3x smaller than before */
 
     @media (max-width: 420px) {
-      .legend { max-width: 210px; }
-      .autoCenterBtn { bottom: 74px; }
-      .zone-label .zn, .zone-label .br { max-width: 180px; }
+      .legend { max-width: 220px; }
+      .legend .row { font-size: 12px; }
+      .legend .sub { font-size: 10px; }
+      .timeLabel { font-size: 16px; }
+      .zone-label .zn, .zone-label .br { max-width: 170px; }
     }
 
-    /* =========================
-       LIVE LOCATION ARROW STYLES
-       ========================= */
-    .my-loc {
-      width: 34px;
-      height: 34px;
+    /* =========================================================
+       Live location arrow marker (NO default marker)
+       ========================================================= */
+    .navArrowWrap{
+      width: 30px;
+      height: 30px;
+      position: relative;
       transform-origin: 50% 50%;
-      filter: drop-shadow(0 4px 10px rgba(0,0,0,0.35));
+      will-change: transform, filter, box-shadow;
+    }
+    .navArrow{
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 0;
+      height: 0;
+      transform: translate(-50%, -55%);
+      border-left: 9px solid transparent;
+      border-right: 9px solid transparent;
+      border-bottom: 18px solid #111; /* solid, visible */
+      filter: drop-shadow(0 2px 2px rgba(0,0,0,0.35));
     }
 
-    /* glow when moving */
-    .my-loc.moving {
-      filter: drop-shadow(0 0 10px rgba(0,102,255,0.95)) drop-shadow(0 4px 10px rgba(0,0,0,0.35));
+    /* Moving = glow */
+    .navMoving .navArrow{
+      filter:
+        drop-shadow(0 2px 2px rgba(0,0,0,0.35))
+        drop-shadow(0 0 6px rgba(0,160,255,0.95))
+        drop-shadow(0 0 12px rgba(0,160,255,0.75));
     }
 
-    /* pulse when stationary */
-    .my-loc.stationary {
-      animation: pulseLoc 1.25s ease-in-out infinite;
+    /* Stationary = pulse */
+    @keyframes pulseRing {
+      0%   { transform: translate(-50%, -50%) scale(0.8); opacity: 0.75; }
+      70%  { transform: translate(-50%, -50%) scale(1.25); opacity: 0.05; }
+      100% { transform: translate(-50%, -50%) scale(1.25); opacity: 0.0; }
     }
-    @keyframes pulseLoc {
-      0%   { transform: scale(1);   }
-      50%  { transform: scale(1.18);}
-      100% { transform: scale(1);   }
+    .navPulse::after{
+      content:"";
+      position:absolute;
+      left:50%;
+      top:50%;
+      width: 26px;
+      height: 26px;
+      border-radius: 999px;
+      border: 2px solid rgba(0,160,255,0.9);
+      transform: translate(-50%, -50%);
+      animation: pulseRing 1.5s ease-out infinite;
+      pointer-events:none;
     }
+
+    /* Auto-center button */
+    .autoCenterBtn{
+      background: rgba(255,255,255,0.92);
+      border: none;
+      border-radius: 999px;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.18);
+      padding: 10px 12px;
+      font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
+      font-weight: 900;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    .autoCenterBtn:active { transform: scale(0.98); }
   </style>
 </head>
 
@@ -199,6 +234,9 @@
 
   <div class="legend" aria-label="Demand legend">
     <h3>Demand Colors</h3>
+
+    <div id="recommendLine" class="recommendLine">Recommended: …</div>
+
     <div class="row"><span class="swatch" style="background:#00b050"></span> Green = Highest</div>
     <div class="row"><span class="swatch" style="background:#8000ff"></span> Purple = High</div>
     <div class="row"><span class="swatch" style="background:#0066ff"></span> Blue = Medium</div>
@@ -211,8 +249,6 @@
       Time label is NYC time.
     </div>
   </div>
-
-  <div id="autoCenterBtn" class="autoCenterBtn on">Auto-center: ON</div>
 
   <div class="sliderWrap">
     <div id="timeLabel" class="timeLabel">Loading…</div>
