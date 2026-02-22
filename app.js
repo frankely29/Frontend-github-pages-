@@ -40,7 +40,6 @@ function getNowNYCMinuteOfWeekRounded() {
 
   const dowMap = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 };
   const dow_m = dowMap[map.weekday] ?? 0;
-
   const hour = Number(map.hour);
   const minute = Number(map.minute);
 
@@ -59,7 +58,6 @@ function pickClosestIndex(minutesOfWeekArr, target) {
     if (diff < bestDiff) {
       bestDiff = diff;
       bestIdx = i;
-      bestDiff = diff;
     }
   }
   return bestIdx;
@@ -72,14 +70,9 @@ function setSummary(el, summary) {
   }
   const order = ["green", "blue", "sky", "yellow", "red"];
   const labels = { green: "Green", blue: "Blue", sky: "Sky", yellow: "Yellow", red: "Red" };
-
-  const eta = summary.eta || {};
-  el.innerHTML = order.map((k) => {
-    const n = summary[k] ?? 0;
-    const med = eta[k]?.median;
-    const etaText = (med == null) ? "n/a" : `~${med}m`;
-    return `<span class="pill">${labels[k]}: ${n} (${etaText})</span>`;
-  }).join("");
+  el.innerHTML = order
+    .map((k) => `<span class="pill">${labels[k]}: ${summary[k] ?? 0}</span>`)
+    .join("");
 }
 
 async function fetchJSON(url) {
@@ -108,7 +101,6 @@ function buildPopupHTML(props) {
   const bucket = props.bucket ?? "";
   const pickups = props.pickups ?? "";
   const pay = props.avg_driver_pay == null ? "n/a" : props.avg_driver_pay.toFixed(2);
-  const eta = props.eta_minutes ?? "n/a";
 
   return `
     <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; font-size:13px;">
@@ -116,8 +108,6 @@ function buildPopupHTML(props) {
       <div><b>Rating:</b> ${rating} (${bucket})</div>
       <div><b>Pickups:</b> ${pickups}</div>
       <div><b>Avg Driver Pay:</b> $${pay}</div>
-      <div><b>ETA (activity):</b> ~${eta} min</div>
-      <div style="opacity:0.75; margin-top:6px;">ETA is based on pickup frequency in this zone/time window.</div>
     </div>
   `;
 }
