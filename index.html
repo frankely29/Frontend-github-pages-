@@ -18,7 +18,7 @@
     crossorigin=""
   ></script>
 
-  <!-- Turf (polylabel / geometry helpers) -->
+  <!-- Turf -->
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
 
   <style>
@@ -50,37 +50,43 @@
       accent-color: #2b7cff;
     }
 
-    /* Legend (top-left) */
+    /* ✅ Smaller legend (about half visual size) */
     #legend {
       position: fixed;
       top: 10px;
       left: 10px;
       z-index: 9999;
-      width: 310px;
+      width: 210px;                 /* smaller */
       max-width: calc(100vw - 20px);
-      background: rgba(255,255,255,0.85);
-      border-radius: 12px;
-      padding: 12px;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+      background: rgba(255,255,255,0.80);
+      border-radius: 10px;
+      padding: 8px 9px;             /* smaller */
+      box-shadow: 0 8px 22px rgba(0,0,0,0.12);
       font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
       backdrop-filter: blur(8px);
     }
     #legend h3 {
-      margin: 0 0 10px 0;
-      font-size: 22px;
+      margin: 0 0 6px 0;
+      font-size: 16px;              /* smaller */
       letter-spacing: -0.2px;
+      font-weight: 900;
     }
-    .leg-row { display:flex; align-items:center; gap:10px; margin: 7px 0; }
-    .swatch { width:22px; height:22px; border-radius:4px; border:1px solid rgba(0,0,0,0.15); }
-    .leg-text { font-size: 20px; font-weight: 800; }
+    .leg-row { display:flex; align-items:center; gap:8px; margin: 5px 0; }
+    .swatch {
+      width: 14px; height: 14px;    /* smaller */
+      border-radius: 3px;
+      border: 1px solid rgba(0,0,0,0.15);
+      flex: 0 0 auto;
+    }
+    .leg-text { font-size: 13px; font-weight: 800; }
     .leg-foot {
-      margin-top: 10px;
-      font-size: 16px;
+      margin-top: 6px;
+      font-size: 11px;              /* smaller */
       line-height: 1.2;
       opacity: 0.9;
     }
 
-    /* ===== Zone label bubbles (decluttered markers) ===== */
+    /* Zone label bubbles */
     .zone-label {
       background: rgba(255,255,255,0.88);
       border-radius: 999px;
@@ -89,45 +95,27 @@
       border: 1px solid rgba(0,0,0,0.10);
       font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
       white-space: nowrap;
-      pointer-events: none; /* important: no blocking taps */
+      pointer-events: none;
     }
-    .zone-label .zn {
-      font-weight: 900;
-      line-height: 1.05;
-    }
-    .zone-label .br {
-      font-weight: 700;
-      opacity: 0.70;
-      margin-top: 1px;
-      line-height: 1.0;
-    }
+    .zone-label .zn { font-weight: 900; line-height: 1.05; }
+    .zone-label .br { font-weight: 700; opacity: 0.70; margin-top: 1px; line-height: 1.0; }
 
     /* Zoom scaling */
-    .zone-label.z9  .zn { font-size: 10px; }
-    .zone-label.z9  .br { font-size: 7px; }
+    .zone-label.z8  .zn { font-size: 10px; } .zone-label.z8  .br { font-size: 7px; }
+    .zone-label.z9  .zn { font-size: 11px; } .zone-label.z9  .br { font-size: 7.5px; }
+    .zone-label.z10 .zn { font-size: 12px; } .zone-label.z10 .br { font-size: 8px; }
+    .zone-label.z11 .zn { font-size: 13px; } .zone-label.z11 .br { font-size: 8.5px; }
+    .zone-label.z12 .zn { font-size: 14px; } .zone-label.z12 .br { font-size: 9px; }
+    .zone-label.z13 .zn { font-size: 15px; } .zone-label.z13 .br { font-size: 10px; }
+    .zone-label.z14 .zn { font-size: 16px; } .zone-label.z14 .br { font-size: 11px; }
 
-    .zone-label.z10 .zn { font-size: 11px; }
-    .zone-label.z10 .br { font-size: 7.5px; }
-
-    .zone-label.z11 .zn { font-size: 12px; }
-    .zone-label.z11 .br { font-size: 8px; }
-
-    .zone-label.z12 .zn { font-size: 13px; }
-    .zone-label.z12 .br { font-size: 8.5px; }
-
-    .zone-label.z13 .zn { font-size: 14px; }
-    .zone-label.z13 .br { font-size: 9px; }
-
-    .zone-label.z14 .zn { font-size: 15px; }
-    .zone-label.z14 .br { font-size: 10px; }
-
-    /* Optional: slightly tint by bucket */
-    .bucket-green  { border-color: rgba(0,176,80,0.35); }
-    .bucket-purple { border-color: rgba(128,0,255,0.35); }
-    .bucket-blue   { border-color: rgba(0,102,255,0.30); }
-    .bucket-sky    { border-color: rgba(102,204,255,0.25); }
-    .bucket-yellow { border-color: rgba(255,212,0,0.30); }
-    .bucket-red    { border-color: rgba(230,0,0,0.25); }
+    /* Bucket tint */
+    .bucket-green  { border-color: rgba(0,176,80,0.40); }
+    .bucket-purple { border-color: rgba(128,0,255,0.40); }
+    .bucket-blue   { border-color: rgba(0,102,255,0.35); }
+    .bucket-sky    { border-color: rgba(102,204,255,0.28); }
+    .bucket-yellow { border-color: rgba(255,212,0,0.33); }
+    .bucket-red    { border-color: rgba(230,0,0,0.28); }
   </style>
 </head>
 
@@ -144,8 +132,7 @@
     <div class="leg-row"><div class="swatch" style="background:#e60000"></div><div class="leg-text">Red = Very Low / Avoid</div></div>
 
     <div class="leg-foot">
-      Colors come from rating (1–100) for the selected 20-minute window.<br/>
-      Time label is NYC time.
+      Rating (1–100) for selected 20-min window.<br/>Time is NYC.
     </div>
   </div>
 
