@@ -380,7 +380,7 @@ slider.addEventListener("input", () => {
   sliderDebounce = setTimeout(() => loadFrame(idx).catch(console.error), 80);
 });
 
-// ---------- Bottom toggles (INSIDE slider box) ----------
+// ---------- Bottom toggles ----------
 const btnCenter = document.getElementById("btnCenter");
 const btnRotate = document.getElementById("btnRotate");
 
@@ -397,29 +397,23 @@ if (btnCenter) {
     recenterOn = !recenterOn;
     btnCenter.textContent = recenterOn ? "Recenter: ON" : "Recenter: OFF";
     setBtnState(btnCenter, recenterOn);
-    if (recenterOn && userLatLng) map.panTo(userLatLng, { animate: true });
+    if (recenterOn && userLatLng) stableRecenter(userLatLng, true);
   });
   setBtnState(btnCenter, recenterOn);
 }
 
 if (btnRotate) {
-  btnRotate.addEventListener("click", async () => {
+  btnRotate.addEventListener("click", () => {
     rotateOn = !rotateOn;
     btnRotate.textContent = rotateOn ? "Rotate: ON" : "Rotate: OFF";
     setBtnState(btnRotate, rotateOn);
-
-    if (rotateOn) {
-      // On iPhone Safari, compass can require permission (we request on first user tap)
-      await requestCompassPermissionIfNeeded();
-      applyMapRotationDegrees(lastHeadingDeg);
-    } else {
-      resetMapRotation();
-    }
+    if (!rotateOn) resetMapRotation();
+    else applyMapRotationDegrees(lastHeadingDeg);
   });
   setBtnState(btnRotate, rotateOn);
 }
 
-// If user drags/zooms the map, automatically stop recentering (so you can explore)
+// If user drags/zooms map, stop recenter (so you can explore)
 function disableRecenterBecauseUserIsExploring() {
   if (!recenterOn) return;
   recenterOn = false;
@@ -431,7 +425,7 @@ function disableRecenterBecauseUserIsExploring() {
 map.on("dragstart", disableRecenterBecauseUserIsExploring);
 map.on("zoomstart", disableRecenterBecauseUserIsExploring);
 
-// ---------- Map rotation (rotate panes only, NOT the UI boxes) ----------
+// ---------- Map rotation (Tesla-safe: uses driving direction only) ----------
 function panesToRotate() {
   return [
     map.getPane("tilePane"),
@@ -460,29 +454,40 @@ function resetMapRotation() {
   }
 }
 
-// ---------- Live location arrow ----------
+// ---------- Stable recenter logic ----------
+let lastRecenterAt = 0;
+const RECENTER_MIN_INTERVAL_MS = 900;       // don’t spam panTo
+const RECENTER_MAX_DRIFT_MILES = 0.18;      // if you're this far from center, recenter even if updates are weird
+
+function stableRecenter(latlng, force = false) {
+  if (!recenterOn || !latlng) return;
+
+  const now = Date.now();
+  if (!force && (now - lastRecenterAt) < RECENTER_MIN_INTERVAL_MS) return;
+
+  // If map is already near you, don't fight with smooth animation
+  const center = map.getCenter();
+  const drift = haversineMiles({ lat: center.lat, lng: center.lng }, { lat: latlng.lat, lng: latlng.lng });
+
+  if (!force && drift < 0.03) return; // already close enough
+
+  // If drift is big, do a hard setView (more reliable across browsers)
+  if (drift > RECENTER_MAX_DRIFT_MILES) {
+    map.setView(latlng, map.getZoom(), { animate: false });
+  } else {
+    map.panTo(latlng, { animate: true });
+  }
+
+  lastRecenterAt = now;
+}
+
+// ---------- Live location arrow marker ----------
 let navMarker = null;
 let gpsFirstFixDone = false;
 
 let lastPos = null; // {lat,lng,ts}
 let lastHeadingDeg = 0;
 let lastMoveTs = 0;
-
-// Compass fallback (device orientation)
-let compassHeadingDeg = null;
-
-// iOS Safari requires permission sometimes
-async function requestCompassPermissionIfNeeded() {
-  try {
-    if (typeof DeviceOrientationEvent === "undefined") return;
-    if (typeof DeviceOrientationEvent.requestPermission !== "function") return; // not iOS permission model
-    const res = await DeviceOrientationEvent.requestPermission();
-    // res is "granted" or "denied"
-    return res;
-  } catch {
-    // ignore
-  }
-}
 
 function makeNavIcon() {
   return L.divIcon({
@@ -522,27 +527,6 @@ function computeBearingDeg(from, to) {
   return brng;
 }
 
-// Compass listener (used when GPS heading is missing)
-function startCompass() {
-  // "deviceorientationabsolute" supported on some browsers; otherwise use "deviceorientation"
-  const handler = (e) => {
-    // iOS Safari: e.webkitCompassHeading (0..360, 0=N)
-    if (typeof e.webkitCompassHeading === "number" && Number.isFinite(e.webkitCompassHeading)) {
-      compassHeadingDeg = e.webkitCompassHeading;
-      return;
-    }
-    // Some browsers: alpha is compass-like (but can be relative). Still better than nothing.
-    if (typeof e.alpha === "number" && Number.isFinite(e.alpha)) {
-      compassHeadingDeg = (360 - e.alpha) % 360;
-      return;
-    }
-  };
-
-  window.addEventListener("deviceorientationabsolute", handler, true);
-  window.addEventListener("deviceorientation", handler, true);
-}
-
-// ---------- Geolocation watch ----------
 function startLocationWatch() {
   if (!("geolocation" in navigator)) {
     if (recommendEl) recommendEl.textContent = "Recommended: location not supported";
@@ -559,7 +543,6 @@ function startLocationWatch() {
     (pos) => {
       const lat = pos.coords.latitude;
       const lng = pos.coords.longitude;
-      const gpsHeading = pos.coords.heading; // often null on iOS unless moving
       const ts = pos.timestamp || Date.now();
 
       userLatLng = { lat, lng };
@@ -572,39 +555,30 @@ function startLocationWatch() {
         const dtSec = Math.max(1, (ts - lastPos.ts) / 1000);
         const mph = (dMi / dtSec) * 3600;
 
+        // Tesla-safe: driving direction from movement only
         isMoving = mph >= 2.0;
-        if (isMoving) lastMoveTs = ts;
 
-        // Prefer GPS heading when moving AND it exists
-        if (isMoving && typeof gpsHeading === "number" && Number.isFinite(gpsHeading)) {
-          lastHeadingDeg = gpsHeading;
-        } else if (dMi > 0.01) {
-          // Driving direction from movement
+        if (dMi > 0.01) {
           lastHeadingDeg = computeBearingDeg({ lat: lastPos.lat, lng: lastPos.lng }, userLatLng);
-        } else if (typeof compassHeadingDeg === "number") {
-          // Standing still: face direction
-          lastHeadingDeg = compassHeadingDeg;
         }
-      } else {
-        // First point: if compass exists, use it for facing
-        if (typeof compassHeadingDeg === "number") lastHeadingDeg = compassHeadingDeg;
+
+        if (isMoving) lastMoveTs = ts;
       }
 
       lastPos = { lat, lng, ts };
 
+      // Rotate arrow + rotate map layers (works on Tesla if location updates come in)
       setNavRotation(lastHeadingDeg);
       setNavVisual(isMoving);
-
-      // Rotate the MAP layers
       applyMapRotationDegrees(lastHeadingDeg);
 
-      // one-time zoom to you on first fix
+      // First fix: zoom in to you
       if (!gpsFirstFixDone) {
         gpsFirstFixDone = true;
         const targetZoom = Math.max(map.getZoom(), 14);
         map.setView(userLatLng, targetZoom, { animate: true });
       } else {
-        if (recenterOn) map.panTo(userLatLng, { animate: true });
+        stableRecenter(userLatLng, false);
       }
 
       if (currentFrame) updateRecommendation(currentFrame);
@@ -620,18 +594,11 @@ function startLocationWatch() {
     }
   );
 
-  // keep pulse if truly stationary
+  // Keep pulse state stable
   setInterval(() => {
     const now = Date.now();
     const recentlyMoved = lastMoveTs && (now - lastMoveTs) < 5000;
     setNavVisual(!!recentlyMoved);
-
-    // if not moving, still rotate map to compass heading (if available)
-    if (!recentlyMoved && rotateOn && typeof compassHeadingDeg === "number") {
-      lastHeadingDeg = compassHeadingDeg;
-      setNavRotation(lastHeadingDeg);
-      applyMapRotationDegrees(lastHeadingDeg);
-    }
   }, 1200);
 }
 
@@ -651,11 +618,5 @@ loadTimeline().catch((err) => {
   console.error(err);
   timeLabel.textContent = `Error loading timeline: ${err.message}`;
 });
-
-// Start compass ASAP (permission will be requested on Rotate button tap if needed)
-startCompass();
-
-// On iPhone Safari, compass permission may be needed.
-// We request it when user taps Rotate button ON (already coded).
 
 startLocationWatch();
