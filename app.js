@@ -1,30 +1,18 @@
 const RAILWAY_BASE = "https://web-production-78f67.up.railway.app";
 const BIN_MINUTES = 20;
 
-// -------- Label rules (less crowded, priority-based) --------
-// Show fewer labels when zoomed out, more as you zoom in.
-const Z_SHOW_TOP = 10;     // show green + purple at >=10
-const Z_SHOW_MED = 11;     // add blue at >=11
-const Z_SHOW_ALL = 12;     // add sky + yellow + red at >=12
+/**
+ * LABEL STRATEGY (to reduce crowding)
+ * - Zoomed out: only show Highest/High (green/purple)
+ * - Mid zoom: add Medium (blue), then Normal (sky)
+ * - Zoomed in: show all (including yellow/red)
+ * - Hard cap number of labels at low zoom to avoid clutter
+ */
 
-// Collision spacing (px). Larger when zoomed out.
-function collisionRadiusPx(zoom) {
-  if (zoom <= 10) return 55;
-  if (zoom === 11) return 45;
-  if (zoom === 12) return 36;
-  if (zoom === 13) return 28;
-  return 22;
-}
+// When to start showing labels at all
+const LABEL_ZOOM_MIN = 10;
 
-// Shorten names at low zoom
-function maxCharsForZoom(zoom) {
-  if (zoom <= 10) return 12;
-  if (zoom === 11) return 16;
-  if (zoom === 12) return 22;
-  return 40;
-}
-
-// Bucket priority (higher drawn/kept first)
+// Bucket priority (higher first)
 const BUCKET_PRIORITY = {
   green: 6,
   purple: 5,
@@ -34,32 +22,33 @@ const BUCKET_PRIORITY = {
   red: 1,
 };
 
-function shouldShowBucket(bucket, zoom) {
-  if (zoom < Z_SHOW_TOP) return false;
-  if (zoom < Z_SHOW_MED) return bucket === "green" || bucket === "purple";
-  if (zoom < Z_SHOW_ALL) return bucket === "green" || bucket === "purple" || bucket === "blue";
-  return true;
+// Which buckets allowed per zoom
+function allowedBucketsForZoom(z) {
+  if (z < 10) return new Set(); // none
+  if (z < 12) return new Set(["green", "purple"]);                 // zoomed out
+  if (z < 13) return new Set(["green", "purple", "blue"]);         // mid
+  if (z < 14) return new Set(["green", "purple", "blue", "sky"]);  // closer
+  return new Set(["green", "purple", "blue", "sky", "yellow", "red"]); // zoomed in
 }
 
-function shortenLabel(text, maxChars) {
-  const t = (text || "").trim();
-  if (!t) return "";
-  if (t.length <= maxChars) return t;
-  return t.slice(0, maxChars - 1) + "…";
+// Max labels allowed per zoom (hard cap to avoid overlap)
+function maxLabelsForZoom(z) {
+  if (z < 10) return 0;
+  if (z < 12) return 22;   // very zoomed out: only show a few top zones
+  if (z < 13) return 40;
+  if (z < 14) return 65;
+  return 120;              // still capped to avoid chaos
 }
 
-function escapeHtml(s) {
-  return String(s)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
+// Borough line (second line) only when zoomed in enough
+const BOROUGH_LINE_ZOOM = 14;
 
-function zoomClass(zoom) {
-  const z = Math.max(7, Math.min(14, Math.round(zoom)));
-  return `z${z}`;
+// Shorten long names when not fully zoomed in
+function maxCharsForZoom(z) {
+  if (z < 12) return 12;
+  if (z < 13) return 14;
+  if (z < 14) return 18;
+  return 40;
 }
 
 // ---------- Time helpers ----------
@@ -152,86 +141,79 @@ function prettyBucket(b) {
   return m[b] || (b ?? "");
 }
 
-// ---------- Popup ----------
-function buildPopupHTML(props) {
-  const zoneName = (props.zone_name || "").trim();
-  const borough = (props.borough || "").trim();
-
-  const rating = props.rating ?? "";
-  const bucket = props.bucket ?? "";
-  const pickups = props.pickups ?? "";
-  const pay = props.avg_driver_pay == null ? "n/a" : props.avg_driver_pay.toFixed(2);
-
-  return `
-    <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; font-size:13px;">
-      <div style="font-weight:800; margin-bottom:2px;">${escapeHtml(zoneName || `Zone ${props.LocationID ?? ""}`)}</div>
-      ${borough ? `<div style="opacity:0.8; margin-bottom:6px;">${escapeHtml(borough)}</div>` : `<div style="margin-bottom:6px;"></div>`}
-      <div><b>Rating:</b> ${rating} (${prettyBucket(bucket)})</div>
-      <div><b>Pickups (last ${BIN_MINUTES} min):</b> ${pickups}</div>
-      <div><b>Avg Driver Pay:</b> $${pay}</div>
-    </div>
-  `;
+// ---------- Text helpers ----------
+function escapeHtml(s) {
+  return String(s)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+function shortenLabel(text, maxChars) {
+  const t = (text || "").trim();
+  if (!t) return "";
+  if (t.length <= maxChars) return t;
+  return t.slice(0, maxChars - 1) + "…";
 }
 
-// ---------- Label point inside polygon (polylabel) ----------
-function isPolylabelReady() {
-  return typeof polylabel === "function";
-}
+// ---------- Label placement (inside polygon) ----------
+/**
+ * Uses polylabel to find a point inside the polygon (best interior label point).
+ * Works with Polygon and MultiPolygon GeoJSON.
+ * Returns [lat, lng] or null.
+ */
+function labelPointInside(geometry) {
+  try {
+    if (!geometry) return null;
 
-// Convert GeoJSON Polygon/MultiPolygon -> polylabel format
-function toPolylabelPolygon(geometry) {
-  // polylabel expects: [ [ [x,y], ...ring ] , [holeRing], ...]
-  // We'll use lng/lat as x/y (works fine for NYC scale).
-  if (!geometry) return null;
-
-  const type = geometry.type;
-  const coords = geometry.coordinates;
-
-  if (type === "Polygon") {
-    return coords; // already [ring, hole, ...]
-  }
-  if (type === "MultiPolygon") {
-    // pick the largest polygon by outer ring length (cheap + decent)
-    let best = null;
-    let bestLen = -1;
-    for (const poly of coords) {
-      const outer = poly?.[0];
-      const len = outer ? outer.length : 0;
-      if (len > bestLen) { bestLen = len; best = poly; }
-    }
-    return best;
-  }
-  return null;
-}
-
-function computeInsidePointLatLng(feature) {
-  const geom = feature?.geometry;
-  const poly = toPolylabelPolygon(geom);
-  if (!poly) return null;
-
-  // polylabel wants [ [x,y], ...]
-  // GeoJSON is [lng,lat]
-  if (isPolylabelReady()) {
-    try {
-      const p = polylabel(poly, 0.0005); // precision tuned for NYC
-      if (Array.isArray(p) && p.length === 2) {
-        const lng = p[0], lat = p[1];
-        if (Number.isFinite(lat) && Number.isFinite(lng)) return L.latLng(lat, lng);
+    // helper: pick the biggest polygon from multipolygon (by outer ring bbox area)
+    function polyBBoxArea(ring) {
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const [x, y] of ring) {
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
       }
-    } catch (e) {
-      // fallthrough
+      return (maxX - minX) * (maxY - minY);
     }
-  }
 
-  // fallback: Turf pointOnFeature (also inside, but less optimal)
-  if (window.turf && typeof turf.pointOnFeature === "function") {
-    try {
-      const pt = turf.pointOnFeature(feature);
-      const [lng, lat] = pt?.geometry?.coordinates || [];
-      if (Number.isFinite(lat) && Number.isFinite(lng)) return L.latLng(lat, lng);
-    } catch (e) {}
-  }
+    if (geometry.type === "Polygon") {
+      // polylabel expects: [ [ [x,y]...outer ], [hole]... ]
+      const p = polylabel(geometry.coordinates, 1.0); // returns [x,y] = [lng,lat]
+      return [p[1], p[0]];
+    }
 
+    if (geometry.type === "MultiPolygon") {
+      let best = null;
+      let bestArea = -1;
+
+      for (const poly of geometry.coordinates) {
+        const outer = poly?.[0];
+        if (!outer || outer.length < 3) continue;
+        const a = polyBBoxArea(outer);
+        if (a > bestArea) {
+          bestArea = a;
+          best = poly;
+        }
+      }
+
+      if (best) {
+        const p = polylabel(best, 1.0);
+        return [p[1], p[0]];
+      }
+    }
+
+    // Fallback: turf pointOnFeature
+    if (typeof turf !== "undefined") {
+      const pt = turf.pointOnFeature({ type: "Feature", geometry, properties: {} });
+      const [lng, lat] = pt.geometry.coordinates;
+      return [lat, lng];
+    }
+  } catch (e) {
+    // ignore and fall back
+  }
   return null;
 }
 
@@ -247,56 +229,56 @@ L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
 }).addTo(map);
 
 let geoLayer = null;
+let labelLayer = L.layerGroup().addTo(map);
 let timeline = [];
 let minutesOfWeek = [];
 let currentFrame = null;
+
+// Popup
+function buildPopupHTML(props) {
+  const zoneName = (props.zone_name || "").trim();
+  const borough = (props.borough || "").trim();
+
+  const rating = props.rating ?? "";
+  const bucket = props.bucket ?? "";
+  const pickups = props.pickups ?? "";
+  const pay = props.avg_driver_pay == null ? "n/a" : props.avg_driver_pay.toFixed(2);
+
+  return `
+    <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; font-size:13px;">
+      <div style="font-weight:900; margin-bottom:2px;">${escapeHtml(zoneName || `Zone ${props.LocationID ?? ""}`)}</div>
+      ${borough ? `<div style="opacity:0.8; margin-bottom:6px;">${escapeHtml(borough)}</div>` : `<div style="margin-bottom:6px;"></div>`}
+      <div><b>Rating:</b> ${rating} (${prettyBucket(bucket)})</div>
+      <div><b>Pickups (last ${BIN_MINUTES} min):</b> ${pickups}</div>
+      <div><b>Avg Driver Pay:</b> $${pay}</div>
+    </div>
+  `;
+}
+
+function zoomClass(zoom) {
+  const z = Math.max(7, Math.min(14, Math.round(zoom)));
+  return `z${z}`;
+}
 
 function renderFrame(frame) {
   currentFrame = frame;
   timeLabel.textContent = formatNYCLabel(frame.time);
 
+  // clear old layers
   if (geoLayer) {
     geoLayer.remove();
     geoLayer = null;
   }
+  labelLayer.clearLayers();
 
   const zoomNow = map.getZoom();
+  const allowed = allowedBucketsForZoom(zoomNow);
+  const maxLabels = maxLabelsForZoom(zoomNow);
   const zClass = zoomClass(zoomNow);
+  const maxChars = maxCharsForZoom(zoomNow);
 
-  // 1) Build list of features, compute label points, sort by priority
-  const features = (frame.polygons?.features || []).map((f) => {
-    if (!f.properties) f.properties = {};
-    // cache label point on the feature itself (so zoom rerender is fast)
-    if (!f.properties._label_latlng) {
-      const ll = computeInsidePointLatLng(f);
-      f.properties._label_latlng = ll ? { lat: ll.lat, lng: ll.lng } : null;
-    }
-    return f;
-  });
-
-  features.sort((a, b) => {
-    const pa = BUCKET_PRIORITY[(a.properties?.bucket || "").trim()] || 0;
-    const pb = BUCKET_PRIORITY[(b.properties?.bucket || "").trim()] || 0;
-    // Higher priority first
-    if (pb !== pa) return pb - pa;
-    // Then higher rating first
-    return (b.properties?.rating || 0) - (a.properties?.rating || 0);
-  });
-
-  // 2) Collision tracking in screen pixels
-  const placedPts = [];
-  const R = collisionRadiusPx(zoomNow);
-  function collides(pt) {
-    for (const p of placedPts) {
-      const dx = pt.x - p.x;
-      const dy = pt.y - p.y;
-      if ((dx * dx + dy * dy) < (R * R)) return true;
-    }
-    return false;
-  }
-
-  // 3) Create GeoJSON layer and tooltips
-  geoLayer = L.geoJSON({ type: "FeatureCollection", features }, {
+  // Build geo polygons
+  geoLayer = L.geoJSON(frame.polygons, {
     style: (feature) => {
       const st = feature?.properties?.style || {};
       return {
@@ -310,56 +292,58 @@ function renderFrame(frame) {
     onEachFeature: (feature, layer) => {
       const props = feature.properties || {};
       layer.bindPopup(buildPopupHTML(props), { maxWidth: 300 });
-
-      const bucket = (props.bucket || "").trim();
-      if (!shouldShowBucket(bucket, zoomNow)) return;
-
-      const rawName = (props.zone_name || "").trim();
-      if (!rawName) return;
-
-      const llObj = props._label_latlng;
-      if (!llObj) return;
-
-      const labelLatLng = L.latLng(llObj.lat, llObj.lng);
-
-      // collision check using current zoom
-      const pt = map.latLngToContainerPoint(labelLatLng);
-      if (collides(pt)) return;
-      placedPts.push(pt);
-
-      const labelText = shortenLabel(rawName, maxCharsForZoom(zoomNow));
-      const borough = (props.borough || "").trim();
-
-      // simple 2-line, like your example (no pill bubbles)
-      const html = `
-        <div class="zn">${escapeHtml(labelText)}</div>
-        ${zoomNow >= 12 && borough ? `<div class="br">${escapeHtml(borough)}</div>` : ""}
-      `;
-
-      // Create an invisible marker at label point and attach a permanent tooltip
-      const m = L.marker(labelLatLng, { opacity: 0, interactive: false });
-      m.bindTooltip(html, {
-        permanent: true,
-        direction: "center",
-        className: `zone-label-flat ${zClass}`,
-        opacity: 0.95,
-        interactive: false,
-      });
-      m.addTo(map);
-
-      // Keep reference so we can remove markers when rerendering
-      layer._labelMarker = m;
     },
   }).addTo(map);
 
-  // When geoLayer is removed, also remove label markers we created
-  geoLayer.eachLayer((layer) => {
-    if (layer._labelMarker) {
-      layer.on("remove", () => {
-        try { map.removeLayer(layer._labelMarker); } catch {}
-      });
-    }
-  });
+  // Pick which zones get labels (priority + cap)
+  const feats = (frame.polygons?.features || []).slice();
+
+  const labelCandidates = feats
+    .map((f) => {
+      const p = f.properties || {};
+      const bucket = (p.bucket || "").trim();
+      const pri = BUCKET_PRIORITY[bucket] ?? 0;
+      const rating = Number(p.rating ?? 0);
+      const pickups = Number(p.pickups ?? 0);
+      return { f, pri, rating, pickups, bucket };
+    })
+    .filter((x) => x.pri > 0 && allowed.has(x.bucket))
+    .sort((a, b) => {
+      // strongest first: bucket priority, then rating, then pickups
+      if (b.pri !== a.pri) return b.pri - a.pri;
+      if (b.rating !== a.rating) return b.rating - a.rating;
+      return b.pickups - a.pickups;
+    })
+    .slice(0, maxLabels);
+
+  // Create label markers at interior points (inside polygon)
+  for (const item of labelCandidates) {
+    const props = item.f.properties || {};
+    const name = (props.zone_name || "").trim();
+    if (!name) continue;
+
+    const pt = labelPointInside(item.f.geometry);
+    if (!pt) continue;
+
+    const zoneText = shortenLabel(name, maxChars);
+    const borough = (props.borough || "").trim();
+    const showBorough = zoomNow >= BOROUGH_LINE_ZOOM && borough;
+
+    const html = `
+      <div class="zone-label-flat ${zClass}">
+        <div class="zn">${escapeHtml(zoneText)}</div>
+        ${showBorough ? `<div class="br">${escapeHtml(borough)}</div>` : ""}
+      </div>
+    `;
+
+    const icon = L.divIcon({
+      className: "", // we style inside HTML
+      html,
+      iconSize: null,
+    });
+
+    L.marker(pt, { icon, interactive: false }).addTo(labelLayer);
+  }
 }
 
 async function loadFrame(idx) {
@@ -385,7 +369,7 @@ async function loadTimeline() {
   await loadFrame(idx);
 }
 
-// Re-render on zoom (no network)
+// Re-render labels on zoom (no network)
 map.on("zoomend", () => {
   if (currentFrame) renderFrame(currentFrame);
 });
