@@ -267,11 +267,8 @@ function updateRecommendation(frame) {
 const slider = document.getElementById("slider");
 const timeLabel = document.getElementById("timeLabel");
 
-// IMPORTANT CHANGES:
-// - Start zoomed OUT a bit more: 10 (was 11)
-// - Move zoom control to TOP-RIGHT
-const map = L.map("map", { zoomControl: false }).setView([40.7128, -74.0060], 10);
-L.control.zoom({ position: "topright" }).addTo(map);
+// Start MORE zoomed out: 9
+const map = L.map("map", { zoomControl: true }).setView([40.7128, -74.0060], 9);
 
 L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
   attribution: "&copy; OpenStreetMap &copy; CARTO",
@@ -404,7 +401,6 @@ function syncCenterButton() {
 syncCenterButton();
 
 if (btnCenter) {
-  // prevent map drag/zoom starting from button touches
   btnCenter.addEventListener("pointerdown", (e) => e.stopPropagation());
   btnCenter.addEventListener("touchstart", (e) => e.stopPropagation(), { passive: true });
 
@@ -423,9 +419,7 @@ if (btnCenter) {
 
 // If user explores the map, turn auto-center OFF
 function disableAutoCenterBecauseUserIsExploring() {
-  // Ignore the events caused by OUR OWN map moves (GPS setView/panTo)
   if (Date.now() < suppressAutoDisableUntil) return;
-
   if (!autoCenter) return;
   autoCenter = false;
   syncCenterButton();
@@ -496,7 +490,7 @@ function startLocationWatch() {
     (pos) => {
       const lat = pos.coords.latitude;
       const lng = pos.coords.longitude;
-      const heading = pos.coords.heading; // may be null unless moving
+      const heading = pos.coords.heading;
       const ts = pos.timestamp || Date.now();
 
       userLatLng = { lat, lng };
@@ -525,7 +519,6 @@ function startLocationWatch() {
       setNavRotation(lastHeadingDeg);
       setNavVisual(isMoving);
 
-      // one-time zoom to you on first fix (DON'T accidentally disable auto-center)
       if (!gpsFirstFixDone) {
         gpsFirstFixDone = true;
         const targetZoom = Math.max(map.getZoom(), 14);
@@ -549,10 +542,9 @@ function startLocationWatch() {
     }
   );
 
-  // pulse/glow state
   setInterval(() => {
     const now = Date.now();
-    const recentlyMoved = lastMoveTs && now - lastMoveTs < 5000;
+    const recentlyMoved = lastMoveTs && (now - lastMoveTs) < 5000;
     setNavVisual(!!recentlyMoved);
   }, 1200);
 }
