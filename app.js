@@ -379,11 +379,13 @@ slider.addEventListener("input", () => {
   sliderDebounce = setTimeout(() => loadFrame(idx).catch(console.error), 80);
 });
 
-// ---------- Auto-center (SINGLE button inside slider) ----------
+// ---------- Auto-center (always ON by default after every refresh) ----------
 let autoCenter = true;
 let gpsFirstFixDone = false;
+let isProgrammaticMove = false;   // ← NEW: prevents GPS from turning auto-center OFF
 
 const autoCenterBtnEl = document.getElementById("btnAutoCenter");
+
 function syncAutoCenterBtn() {
   if (!autoCenterBtnEl) return;
   autoCenterBtnEl.textContent = autoCenter ? "Auto-center ON" : "Auto-center OFF";
@@ -399,18 +401,29 @@ if (autoCenterBtnEl) {
   });
 }
 
-// If user drags/zooms, stop auto-center so you can explore
+// Only turn OFF when the USER drags or zooms manually (GPS never counts)
 function disableAutoCenterOnUserPan() {
   if (!autoCenter) return;
+  if (isProgrammaticMove) return;   // ← KEY FIX
   autoCenter = false;
   syncAutoCenterBtn();
 }
 map.on("dragstart", disableAutoCenterOnUserPan);
 map.on("zoomstart", disableAutoCenterOnUserPan);
 
+// Helper so GPS moves never turn auto-center off
+function moveMapSafely(latLng, zoom) {
+  isProgrammaticMove = true;
+  if (zoom !== undefined) {
+    map.setView(latLng, zoom, { animate: true });
+  } else {
+    map.panTo(latLng, { animate: true });
+  }
+  setTimeout(() => { isProgrammaticMove = false; }, 1000);
+}
+
 // ---------- HARD cleanup: remove any old Leaflet control button still present ----------
 function removeOldAutoCenterControls() {
-  // old code used class "autoCenterBtn" on a leaflet control button
   document.querySelectorAll(".autoCenterBtn").forEach((el) => el.remove());
 }
 removeOldAutoCenterControls();
@@ -504,12 +517,13 @@ function startLocationWatch() {
       setNavRotation(lastHeadingDeg);
       setNavVisual(isMoving);
 
+      // UPDATED: use safe move so auto-center stays ON
       if (!gpsFirstFixDone) {
         gpsFirstFixDone = true;
         const targetZoom = Math.max(map.getZoom(), 14);
-        map.setView(userLatLng, targetZoom, { animate: true });
-      } else {
-        if (autoCenter) map.panTo(userLatLng, { animate: true });
+        moveMapSafely(userLatLng, targetZoom);
+      } else if (autoCenter) {
+        moveMapSafely(userLatLng);
       }
 
       if (currentFrame) updateRecommendation(currentFrame);
