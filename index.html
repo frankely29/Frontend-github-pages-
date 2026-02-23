@@ -22,7 +22,9 @@
     html, body { height: 100%; margin: 0; }
     #map { height: 100vh; width: 100vw; }
 
-    /* Legend box (top-left) */
+    /* =========================
+       Legend box (top-left)
+       ========================= */
     .legend {
       position: absolute;
       top: 10px;
@@ -90,7 +92,10 @@
       font-weight: 700;
     }
 
-    /* Bottom slider bar (small) */
+    /* =========================
+       Bottom slider bar
+       (Auto-center button INSIDE, not overlapping)
+       ========================= */
     .sliderWrap {
       position: absolute;
       left: 10px;
@@ -104,8 +109,7 @@
       font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
     }
 
-    /* Row: time on left, auto-center on right */
-    .sliderTopRow{
+    .sliderHeader{
       display:flex;
       align-items:center;
       justify-content:space-between;
@@ -117,25 +121,29 @@
       font-size: 18px;
       font-weight: 950;
       margin: 0;
-      line-height: 1.1;
+      line-height: 1.05;
     }
 
-    /* Auto-center button (small, inside box, NOT overlapping slider) */
-    .autoCenterInlineBtn{
+    /* Small button, same row as time label */
+    .autoCenterBtnInline{
       border: none;
       border-radius: 999px;
-      padding: 7px 10px;
+      padding: 6px 10px;
       font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
       font-weight: 950;
       font-size: 12px;
       cursor: pointer;
       background: rgba(255,255,255,0.95);
-      box-shadow: 0 6px 18px rgba(0,0,0,0.14);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.18);
       white-space: nowrap;
-      user-select: none;
+      flex: 0 0 auto;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
     }
-    .autoCenterInlineBtn:active { transform: scale(0.98); }
-    .autoCenterInlineBtn.on { outline: 2px solid rgba(0,160,255,0.45); }
+    .autoCenterBtnInline.on {
+      outline: 2px solid rgba(0,160,255,0.45);
+    }
+    .autoCenterBtnInline:active { transform: scale(0.98); }
 
     input[type="range"] {
       width: 100%;
@@ -143,7 +151,9 @@
       margin: 0;
     }
 
-    /* Zone labels */
+    /* =========================
+       ZONE LABELS (tooltips)
+       ========================= */
     .zone-label {
       background: transparent;
       border: none;
@@ -152,6 +162,7 @@
       text-align: center;
       pointer-events: none;
     }
+
     .zone-label .zn,
     .zone-label .br {
       display: inline-block;
@@ -166,6 +177,7 @@
       text-overflow: ellipsis;
       box-shadow: 0 2px 6px rgba(0,0,0,0.08);
     }
+
     .zone-label .zn { font-weight: 950; letter-spacing: 0.1px; }
     .zone-label .br { font-weight: 900; opacity: 0.7; padding: 1px 6px; border-radius: 10px; }
 
@@ -187,12 +199,16 @@
       .legend { max-width: 220px; }
       .legend .row { font-size: 12px; }
       .legend .sub { font-size: 10px; }
+
       .timeLabel { font-size: 16px; }
+      .autoCenterBtnInline { padding: 5px 8px; font-size: 11px; }
+
       .zone-label .zn, .zone-label .br { max-width: 170px; }
-      .autoCenterInlineBtn{ font-size: 11px; padding: 6px 9px; }
     }
 
-    /* Live location arrow marker */
+    /* =========================
+       Live location arrow marker
+       ========================= */
     .navArrowWrap{
       width: 30px;
       height: 30px;
@@ -266,15 +282,14 @@
   </div>
 
   <div class="sliderWrap">
-    <div class="sliderTopRow">
+    <div class="sliderHeader">
       <div id="timeLabel" class="timeLabel">Loading…</div>
-      <button id="autoCenterBtn" class="autoCenterInlineBtn on" type="button">Auto-center: ON</button>
+      <button id="btnCenter" class="autoCenterBtnInline on" type="button">Auto-center: ON</button>
     </div>
-
     <input id="slider" type="range" min="0" max="0" value="0" step="1" />
   </div>
 
-  <!-- Cache-buster so GitHub Pages doesn’t keep old JS -->
-  <script src="./app.js?v=20260222"></script>
+  <!-- IMPORTANT: bump ?v= number anytime you update app.js so Tesla/iPhone reload it -->
+  <script src="./app.js?v=1"></script>
 </body>
 </html>
