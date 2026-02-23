@@ -1,197 +1,288 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>NYC TLC FHV Hotspot Map</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>NYC TLC Hotspot Map</title>
 
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- Leaflet -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
 
-<style>
-html, body { height:100%; margin:0; }
-#map { height:100vh; width:100vw; }
+  <style>
+    html, body { height: 100%; margin: 0; }
+    #map { height: 100vh; width: 100vw; }
 
-/* =============================
-   TOP LEFT LEGEND
-============================= */
-.legend{
-  position:absolute; top:10px; left:10px; z-index:1000;
-  background:rgba(255,255,255,0.94);
-  padding:8px 10px;
-  border-radius:12px;
-  box-shadow:0 6px 18px rgba(0,0,0,0.15);
-  font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;
-  max-width:240px;
-}
-.legendHeader{ display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; }
-.legend h3{ margin:0; font-size:14px; font-weight:900; }
-.legendToggleBtn{
-  border:none; background:rgba(0,0,0,0.06);
-  border-radius:10px; padding:5px 9px; font-weight:900; cursor:pointer;
-}
-.legendBody{ display:block; }
-.legend.minimized .legendBody{ display:none; }
-.recommendLine{ font-size:11px; font-weight:900; margin-bottom:6px; }
+    /* =========================================================
+       Legend box (top-left) -- ~50% smaller
+       ========================================================= */
+    .legend {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      z-index: 1000;
+      background: rgba(255,255,255,0.92);
+      padding: 5px 6px 5px 6px;
+      border-radius: 10px;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.15);
+      font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
+      max-width: 170px;
+    }
+    .legendHeader{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+      margin-bottom:4px;
+    }
+    .legend h3 {
+      margin: 0;
+      font-size: 12px;
+      font-weight: 950;
+    }
+    .legendToggleBtn{
+      border: none;
+      background: rgba(0,0,0,0.06);
+      border-radius: 10px;
+      padding: 4px 8px;
+      font-weight: 950;
+      font-size: 12px;
+      cursor: pointer;
+      line-height: 1;
+    }
+    .legendToggleBtn:active{ transform: scale(0.98); }
 
-.row{ display:flex; align-items:center; gap:6px; margin:4px 0; font-size:13px; font-weight:800; }
-.swatch{ width:14px; height:14px; border-radius:4px; border:1px solid rgba(0,0,0,0.15); }
-.sub{ font-size:10px; margin-top:6px; opacity:0.85; }
+    .legendBody{ display:block; }
+    .legend.minimized .legendBody{ display:none; }
 
-/* =============================
-   BOTTOM SLIDER (smaller + lower)
-============================= */
-.sliderWrap{
-  position:absolute;
-  left:10px; right:10px;
-  bottom:6px;              /* moved DOWN a little */
-  z-index:1000;
-  background:rgba(255,255,255,0.94);
-  border-radius:14px;
-  padding:6px 10px 8px 10px; /* smaller */
-  box-shadow:0 6px 18px rgba(0,0,0,0.15);
-  font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;
-}
+    .legend .recommendLine{
+      margin: 0 0 5px 0;
+      font-size: 9px;
+      font-weight: 950;
+      opacity: 0.92;
+      line-height: 1.15;
+    }
+    .legend .row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin: 4px 0;
+      font-size: 10px;
+      font-weight: 900;
+    }
+    .legend .swatch {
+      width: 10px;
+      height: 10px;
+      border-radius: 3px;
+      border: 1px solid rgba(0,0,0,0.15);
+      flex: 0 0 10px;
+    }
+    .legend .sub {
+      margin-top: 6px;
+      font-size: 9px;
+      opacity: 0.85;
+      line-height: 1.2;
+      font-weight: 800;
+    }
 
-.timeRow{
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-  margin-bottom:4px; /* smaller */
-}
+    /* =========================================================
+       Bottom slider bar (moved DOWN a bit more)
+       ========================================================= */
+    .sliderWrap {
+      position: absolute;
+      left: 8px;
+      right: 8px;
 
-.timeLabel{
-  font-size:16px;   /* smaller */
-  font-weight:950;
-}
+      /* closer to the bottom, but still safe on iPhone */
+      bottom: calc(env(safe-area-inset-bottom) + 2px);
 
-/* Auto-center button */
-#btnCenter{
-  border:none;
-  border-radius:999px;
-  padding:5px 9px;       /* smaller */
-  font-size:11px;        /* smaller */
-  font-weight:950;
-  background:rgba(255,255,255,0.98);
-  box-shadow:0 4px 10px rgba(0,0,0,0.12);
-  cursor:pointer;
-  line-height:1;
-}
-#btnCenter.on{ outline:2px solid rgba(0,160,255,0.35); }
+      z-index: 1000;
+      background: rgba(255,255,255,0.92);
+      border-radius: 14px;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.15);
+      padding: 7px 9px 9px 9px;
+      font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
+    }
 
-input[type=range]{
-  width:100%;
-  height:18px;  /* smaller */
-}
+    .sliderTopRow{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      margin-bottom: 6px;
+    }
+    .timeLabel {
+      font-size: 16px;
+      font-weight: 950;
+      margin: 0;
+      line-height: 1.1;
+    }
 
-/* =============================
-   ZONE LABELS
-============================= */
-.zone-label{ background:transparent; border:none; box-shadow:none; pointer-events:none; text-align:center; }
-.zone-label .zn, .zone-label .br{
-  display:inline-block;
-  background:rgba(255,255,255,0.88);
-  border:1px solid rgba(0,0,0,0.2);
-  border-radius:999px;
-  padding:2px 8px;
-  margin:1px 0;
-  white-space:nowrap;
-  font-weight:900;
-}
-.zone-label .br{ font-size:4px; opacity:0.7; }
+    /* Auto-center button INSIDE slider box, above slider (won't block dragging) */
+    .centerBtn{
+      border: none;
+      border-radius: 999px;
+      padding: 7px 10px;
+      font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
+      font-weight: 950;
+      font-size: 12px;
+      cursor: pointer;
+      background: rgba(255,255,255,0.95);
+      box-shadow: 0 6px 18px rgba(0,0,0,0.18);
+      white-space: nowrap;
+    }
+    .centerBtn:active { transform: scale(0.98); }
+    .centerBtn.on { outline: 2px solid rgba(0,160,255,0.45); }
 
-/* =============================
-   LIVE LOCATION ARROW
-============================= */
-.navArrowWrap{
-  width:32px; height:32px;
-  position:relative;
-  transform-origin:50% 50%;
-  will-change:transform;
-}
-.navArrow{
-  position:absolute; left:50%; top:50%;
-  width:0; height:0;
-  transform:translate(-50%, -60%);
-  border-left:6px solid transparent;
-  border-right:6px solid transparent;
-  border-bottom:24px solid #111;
-  filter:drop-shadow(0 2px 3px rgba(0,0,0,0.4));
-}
-.navMoving .navArrow{
-  filter:
-    drop-shadow(0 2px 3px rgba(0,0,0,0.4))
-    drop-shadow(0 0 8px rgba(0,160,255,1))
-    drop-shadow(0 0 14px rgba(0,160,255,0.8));
-}
-@keyframes pulseRing{
-  0%{ transform:translate(-50%,-50%) scale(0.8); opacity:0.8; }
-  70%{ transform:translate(-50%,-50%) scale(1.3); opacity:0.1; }
-  100%{ transform:translate(-50%,-50%) scale(1.3); opacity:0; }
-}
-.navPulse::after{
-  content:"";
-  position:absolute; left:50%; top:50%;
-  width:26px; height:26px;
-  border-radius:999px;
-  border:2px solid rgba(0,160,255,0.9);
-  transform:translate(-50%,-50%);
-  animation:pulseRing 1.6s ease-out infinite;
-}
+    input[type="range"] {
+      width: 100%;
+      height: 22px;
+      margin: 0;
+    }
 
-/* =============================
-   MOVE LEAFLET ZOOM CONTROLS TOP-RIGHT
-   (Leaflet already supports this via JS option,
-    but this CSS helps force placement visually)
-============================= */
-.leaflet-top.leaflet-left { display:none; } /* hide default if it appears there */
-.leaflet-top.leaflet-right { display:block; } /* ensure right side shows */
+    /* =========================================================
+       Zone labels
+       ========================================================= */
+    .zone-label {
+      background: transparent;
+      border: none;
+      box-shadow: none;
+      color: #111;
+      text-align: center;
+      pointer-events: none;
+    }
 
-/* Mobile tweaks */
-@media (max-width:420px){
-  .legend{ max-width:210px; }
-  .timeLabel{ font-size:15px; }
-  #btnCenter{ font-size:10px; padding:5px 8px; }
-}
-</style>
+    .zone-label .zn,
+    .zone-label .br {
+      display: inline-block;
+      background: rgba(255,255,255,0.86);
+      border: 1px solid rgba(0,0,0,0.18);
+      border-radius: 999px;
+      padding: 2px 8px;
+      margin: 1px 0;
+      white-space: nowrap;
+      max-width: 210px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+    }
+
+    .zone-label .zn { font-weight: 950; }
+    .zone-label .br { font-weight: 900; opacity: 0.7; padding: 1px 6px; border-radius: 10px; }
+
+    .zone-label.z10 .zn { font-size: 10px; }
+    .zone-label.z11 .zn { font-size: 11px; }
+    .zone-label.z12 .zn { font-size: 12px; }
+    .zone-label.z13 .zn { font-size: 13px; }
+    .zone-label.z14 .zn { font-size: 14px; }
+    .zone-label.z15 .zn { font-size: 15px; }
+
+    .zone-label.z10 .br,
+    .zone-label.z11 .br,
+    .zone-label.z12 .br,
+    .zone-label.z13 .br,
+    .zone-label.z14 .br { font-size: 0px; padding: 0; border: 0; }
+    .zone-label.z15 .br { font-size: 4px; }
+
+    /* =========================================================
+       Live location arrow marker (more pointy)
+       ========================================================= */
+    .navArrowWrap{
+      width: 30px;
+      height: 30px;
+      position: relative;
+      transform-origin: 50% 50%;
+      will-change: transform, filter, box-shadow;
+    }
+    .navArrow{
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 0;
+      height: 0;
+      transform: translate(-50%, -62%);
+
+      /* MORE POINTY */
+      border-left: 7px solid transparent;
+      border-right: 7px solid transparent;
+      border-bottom: 22px solid #111;
+
+      filter: drop-shadow(0 2px 2px rgba(0,0,0,0.35));
+    }
+    .navMoving .navArrow{
+      filter:
+        drop-shadow(0 2px 2px rgba(0,0,0,0.35))
+        drop-shadow(0 0 6px rgba(0,160,255,0.95))
+        drop-shadow(0 0 12px rgba(0,160,255,0.75));
+    }
+    @keyframes pulseRing {
+      0%   { transform: translate(-50%, -50%) scale(0.8); opacity: 0.75; }
+      70%  { transform: translate(-50%, -50%) scale(1.25); opacity: 0.05; }
+      100% { transform: translate(-50%, -50%) scale(1.25); opacity: 0.0; }
+    }
+    .navPulse::after{
+      content:"";
+      position:absolute;
+      left:50%;
+      top:50%;
+      width: 26px;
+      height: 26px;
+      border-radius: 999px;
+      border: 2px solid rgba(0,160,255,0.9);
+      transform: translate(-50%, -50%);
+      animation: pulseRing 1.5s ease-out infinite;
+      pointer-events:none;
+    }
+
+    @media (max-width: 420px) {
+      .zone-label .zn, .zone-label .br { max-width: 170px; }
+    }
+  </style>
 </head>
 
 <body>
-<div id="map"></div>
+  <div id="map"></div>
 
-<!-- LEGEND -->
-<div id="legend" class="legend">
-  <div class="legendHeader">
-    <h3>Demand Colors</h3>
-    <button id="legendToggle" class="legendToggleBtn">–</button>
-  </div>
+  <div id="legend" class="legend" aria-label="Demand legend">
+    <div class="legendHeader">
+      <h3>Demand Colors</h3>
+      <button id="legendToggle" class="legendToggleBtn" type="button">–</button>
+    </div>
 
-  <div class="legendBody">
-    <div id="recommendLine" class="recommendLine">Recommended: …</div>
+    <div class="legendBody">
+      <div id="recommendLine" class="recommendLine">Recommended: …</div>
 
-    <div class="row"><span class="swatch" style="background:#00b050"></span> Green = Highest</div>
-    <div class="row"><span class="swatch" style="background:#8000ff"></span> Purple = High</div>
-    <div class="row"><span class="swatch" style="background:#0066ff"></span> Blue = Medium</div>
-    <div class="row"><span class="swatch" style="background:#66ccff"></span> Sky = Normal</div>
-    <div class="row"><span class="swatch" style="background:#ffd400"></span> Yellow = Below Normal</div>
-    <div class="row"><span class="swatch" style="background:#e60000"></span> Red = Very Low / Avoid</div>
+      <div class="row"><span class="swatch" style="background:#00b050"></span> Green = Highest</div>
+      <div class="row"><span class="swatch" style="background:#8000ff"></span> Purple = High</div>
+      <div class="row"><span class="swatch" style="background:#0066ff"></span> Blue = Medium</div>
+      <div class="row"><span class="swatch" style="background:#66ccff"></span> Sky = Normal</div>
+      <div class="row"><span class="swatch" style="background:#ffd400"></span> Yellow = Below Normal</div>
+      <div class="row"><span class="swatch" style="background:#e60000"></span> Red = Very Low / Avoid</div>
 
-    <div class="sub">
-      Colors based on 20-minute demand window.<br>
-      Time shown in NYC timezone.
+      <div class="sub">
+        Colors based on 20-minute demand window.<br/>
+        Time shown in NYC timezone.
+      </div>
     </div>
   </div>
-</div>
 
-<!-- SLIDER -->
-<div class="sliderWrap">
-  <div class="timeRow">
-    <div id="timeLabel" class="timeLabel">Loading…</div>
-    <button id="btnCenter" class="on">Auto-center: ON</button>
+  <div class="sliderWrap">
+    <div class="sliderTopRow">
+      <div id="timeLabel" class="timeLabel">Loading…</div>
+      <button id="btnCenter" class="centerBtn on" type="button">Auto-center: ON</button>
+    </div>
+    <input id="slider" type="range" min="0" max="0" value="0" step="1" />
   </div>
-  <input id="slider" type="range" min="0" max="0" value="0" step="1"/>
-</div>
 
-<script src="app.js"></script>
+  <script src="./app.js"></script>
 </body>
 </html>
