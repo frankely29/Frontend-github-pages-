@@ -379,8 +379,8 @@ slider.addEventListener("input", () => {
   sliderDebounce = setTimeout(() => loadFrame(idx).catch(console.error), 80);
 });
 
-// ---------- Live location arrow + auto-center (INLINE button) ----------
-let autoCenter = true;              // DEFAULT ON
+// ---------- Live location arrow + auto-center (INLINE button only) ----------
+let autoCenter = true; // DEFAULT ON
 let gpsFirstFixDone = false;
 
 let navMarker = null;
@@ -396,18 +396,16 @@ function syncAutoCenterBtn() {
   autoCenterBtn.classList.toggle("on", !!autoCenter);
 }
 
-// IMPORTANT: When user interacts with map, stop auto-center (so you can explore)
+// If user drags/zooms to explore, stop auto-center
 function disableAutoCenterOnUserPan() {
   if (!autoCenter) return;
   autoCenter = false;
   syncAutoCenterBtn();
 }
-
-// Leaflet events for user navigation
 map.on("dragstart", disableAutoCenterOnUserPan);
 map.on("zoomstart", disableAutoCenterOnUserPan);
 
-// Button click toggles
+// Manual toggle
 if (autoCenterBtn) {
   autoCenterBtn.addEventListener("click", () => {
     autoCenter = !autoCenter;
@@ -425,20 +423,17 @@ function makeNavIcon() {
     iconAnchor: [15, 15],
   });
 }
-
 function setNavVisual(isMoving) {
   const el = document.getElementById("navWrap");
   if (!el) return;
   el.classList.toggle("navMoving", !!isMoving);
   el.classList.toggle("navPulse", !isMoving);
 }
-
 function setNavRotation(deg) {
   const el = document.getElementById("navWrap");
   if (!el) return;
   el.style.transform = `rotate(${deg}deg)`;
 }
-
 function computeBearingDeg(from, to) {
   const toRad = (x) => (x * Math.PI) / 180;
   const toDeg = (x) => (x * 180) / Math.PI;
@@ -500,7 +495,6 @@ function startLocationWatch() {
       setNavRotation(lastHeadingDeg);
       setNavVisual(isMoving);
 
-      // one-time zoom to you on first fix
       if (!gpsFirstFixDone) {
         gpsFirstFixDone = true;
         const targetZoom = Math.max(map.getZoom(), 14);
