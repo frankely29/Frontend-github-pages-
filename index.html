@@ -22,7 +22,9 @@
     html, body { height: 100%; margin: 0; }
     #map { height: 100vh; width: 100vw; }
 
-    /* Legend box (top-left) + minimize button */
+    /* =========================================================
+       Legend box (top-left) + minimize button
+       ========================================================= */
     .legend {
       position: absolute;
       top: 10px;
@@ -42,7 +44,11 @@
       gap:10px;
       margin-bottom:6px;
     }
-    .legend h3 { margin: 0; font-size: 14px; font-weight: 900; }
+    .legend h3 {
+      margin: 0;
+      font-size: 14px;
+      font-weight: 900;
+    }
     .legendToggleBtn{
       border: none;
       background: rgba(0,0,0,0.06);
@@ -87,7 +93,9 @@
       font-weight: 700;
     }
 
-    /* Bottom slider bar (small) */
+    /* =========================================================
+       Bottom slider bar (small) + tiny buttons INSIDE it
+       ========================================================= */
     .sliderWrap {
       position: absolute;
       left: 10px;
@@ -97,7 +105,7 @@
       background: rgba(255,255,255,0.92);
       border-radius: 14px;
       box-shadow: 0 6px 18px rgba(0,0,0,0.15);
-      padding: 8px 10px 10px 10px;
+      padding: 8px 10px 8px 10px;
       font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
     }
     .timeLabel {
@@ -110,31 +118,31 @@
       height: 22px;
       margin: 0;
     }
-
-    /* Controls row INSIDE the slider box (doesn't increase height much) */
-    .ctrlRow{
+    .bottomRow {
       display:flex;
       gap:8px;
+      justify-content:flex-end;
       align-items:center;
-      justify-content:flex-start;
       margin-top: 6px;
-      flex-wrap: wrap;
     }
     .miniBtn{
-      border: none;
+      border:none;
       border-radius: 999px;
-      padding: 7px 10px;
+      padding: 6px 10px;
       font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
       font-weight: 950;
       font-size: 12px;
       cursor: pointer;
-      background: rgba(255,255,255,0.95);
-      box-shadow: 0 6px 18px rgba(0,0,0,0.14);
+      background: rgba(0,0,0,0.06);
     }
-    .miniBtn:active{ transform: scale(0.98); }
-    .miniBtn.on{ outline: 2px solid rgba(0,160,255,0.40); }
+    .miniBtn.on{
+      background: rgba(0,160,255,0.16);
+      outline: 2px solid rgba(0,160,255,0.28);
+    }
 
-    /* Zone labels */
+    /* =========================================================
+       ZONE LABELS (tooltips)
+       ========================================================= */
     .zone-label {
       background: transparent;
       border: none;
@@ -143,6 +151,7 @@
       text-align: center;
       pointer-events: none;
     }
+
     .zone-label .zn,
     .zone-label .br {
       display: inline-block;
@@ -157,7 +166,8 @@
       text-overflow: ellipsis;
       box-shadow: 0 2px 6px rgba(0,0,0,0.08);
     }
-    .zone-label .zn { font-weight: 950; }
+
+    .zone-label .zn { font-weight: 950; letter-spacing: 0.1px; }
     .zone-label .br { font-weight: 900; opacity: 0.7; padding: 1px 6px; border-radius: 10px; }
 
     .zone-label.z10 .zn { font-size: 10px; }
@@ -182,13 +192,15 @@
       .zone-label .zn, .zone-label .br { max-width: 170px; }
     }
 
-    /* Live location arrow marker */
+    /* =========================================================
+       Live location arrow marker (rotates)
+       ========================================================= */
     .navArrowWrap{
       width: 30px;
       height: 30px;
       position: relative;
       transform-origin: 50% 50%;
-      will-change: transform, filter, box-shadow;
+      will-change: transform, filter;
     }
     .navArrow{
       position: absolute;
@@ -259,10 +271,9 @@
     <div id="timeLabel" class="timeLabel">Loading…</div>
     <input id="slider" type="range" min="0" max="0" value="0" step="1" />
 
-    <!-- Auto-center + Compass/Rotate (small, inside the same box) -->
-    <div class="ctrlRow">
-      <button id="btnAutoCenter" class="miniBtn on" type="button">Auto-center: ON</button>
-      <button id="btnCompass" class="miniBtn" type="button">Compass: OFF</button>
+    <div class="bottomRow">
+      <button id="btnAutoCenter" class="miniBtn" type="button">Auto-center: …</button>
+      <button id="btnCompass" class="miniBtn" type="button">Compass: …</button>
     </div>
   </div>
 
