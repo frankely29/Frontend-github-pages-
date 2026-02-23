@@ -224,8 +224,8 @@ function updateRecommendation(frame) {
   }
 
   const DIST_PENALTY_PER_MILE = 2.0;
-
   let best = null;
+
   for (const f of feats) {
     const props = f.properties || {};
     const geom = f.geometry;
@@ -379,59 +379,43 @@ slider.addEventListener("input", () => {
   sliderDebounce = setTimeout(() => loadFrame(idx).catch(console.error), 80);
 });
 
-// ---------- Auto-center (ALWAYS starts ON after refresh - fixed version) ----------
-let autoCenter = true;
+// ---------- Live location arrow + auto-center (INLINE button) ----------
+let autoCenter = true;              // DEFAULT ON
 let gpsFirstFixDone = false;
-let isProgrammaticMove = false;
-let disableListenersAttached = false;   // ← NEW: listeners added only after first GPS fix
 
-const autoCenterBtnEl = document.getElementById("btnAutoCenter");
-
-function syncAutoCenterBtn() {
-  if (!autoCenterBtnEl) return;
-  autoCenterBtnEl.textContent = autoCenter ? "Auto-center ON" : "Auto-center OFF";
-  autoCenterBtnEl.classList.toggle("off", !autoCenter);
-}
-syncAutoCenterBtn();   // ← called immediately so button shows ON right away
-
-if (autoCenterBtnEl) {
-  autoCenterBtnEl.addEventListener("click", () => {
-    autoCenter = !autoCenter;
-    syncAutoCenterBtn();
-    if (autoCenter && userLatLng) map.panTo(userLatLng, { animate: true });
-  });
-}
-
-// Disable function (only active after first GPS fix)
-function disableAutoCenterOnUserPan() {
-  if (!autoCenter) return;
-  if (isProgrammaticMove) return;
-  autoCenter = false;
-  syncAutoCenterBtn();
-}
-
-// Helper for safe map movement
-function moveMapSafely(latLng, zoom) {
-  isProgrammaticMove = true;
-  if (zoom !== undefined) {
-    map.setView(latLng, zoom, { animate: true });
-  } else {
-    map.panTo(latLng, { animate: true });
-  }
-  setTimeout(() => { isProgrammaticMove = false; }, 1200);
-}
-
-// ---------- HARD cleanup ----------
-function removeOldAutoCenterControls() {
-  document.querySelectorAll(".autoCenterBtn").forEach((el) => el.remove());
-}
-removeOldAutoCenterControls();
-
-// ---------- Live location arrow ----------
 let navMarker = null;
 let lastPos = null;
 let lastHeadingDeg = 0;
 let lastMoveTs = 0;
+
+const autoCenterBtn = document.getElementById("autoCenterBtn");
+
+function syncAutoCenterBtn() {
+  if (!autoCenterBtn) return;
+  autoCenterBtn.textContent = autoCenter ? "Auto-center: ON" : "Auto-center: OFF";
+  autoCenterBtn.classList.toggle("on", !!autoCenter);
+}
+
+// IMPORTANT: When user interacts with map, stop auto-center (so you can explore)
+function disableAutoCenterOnUserPan() {
+  if (!autoCenter) return;
+  autoCenter = false;
+  syncAutoCenterBtn();
+}
+
+// Leaflet events for user navigation
+map.on("dragstart", disableAutoCenterOnUserPan);
+map.on("zoomstart", disableAutoCenterOnUserPan);
+
+// Button click toggles
+if (autoCenterBtn) {
+  autoCenterBtn.addEventListener("click", () => {
+    autoCenter = !autoCenter;
+    syncAutoCenterBtn();
+    if (autoCenter && userLatLng) map.panTo(userLatLng, { animate: true });
+  });
+  syncAutoCenterBtn();
+}
 
 function makeNavIcon() {
   return L.divIcon({
@@ -516,19 +500,13 @@ function startLocationWatch() {
       setNavRotation(lastHeadingDeg);
       setNavVisual(isMoving);
 
-      // FIRST GPS FIX → attach disable listeners here so initial map setup never turns it OFF
+      // one-time zoom to you on first fix
       if (!gpsFirstFixDone) {
         gpsFirstFixDone = true;
         const targetZoom = Math.max(map.getZoom(), 14);
-        moveMapSafely(userLatLng, targetZoom);
-
-        if (!disableListenersAttached) {
-          map.on("dragstart", disableAutoCenterOnUserPan);
-          map.on("zoomstart", disableAutoCenterOnUserPan);
-          disableListenersAttached = true;
-        }
-      } else if (autoCenter) {
-        moveMapSafely(userLatLng);
+        map.setView(userLatLng, targetZoom, { animate: true });
+      } else {
+        if (autoCenter) map.panTo(userLatLng, { animate: true });
       }
 
       if (currentFrame) updateRecommendation(currentFrame);
@@ -569,6 +547,3 @@ loadTimeline().catch((err) => {
 });
 
 startLocationWatch();
-
-// Final safety sync (in case of any race condition)
-setTimeout(syncAutoCenterBtn, 1500);
