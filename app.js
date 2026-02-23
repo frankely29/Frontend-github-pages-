@@ -267,11 +267,8 @@ function updateRecommendation(frame) {
 const slider = document.getElementById("slider");
 const timeLabel = document.getElementById("timeLabel");
 
-// ✅ Start a bit more zoomed out
-const map = L.map("map", { zoomControl: false }).setView([40.7128, -74.0060], 10);
-
-// ✅ Put zoom controls top-right
-L.control.zoom({ position: "topright" }).addTo(map);
+// Start MORE zoomed out: 9
+const map = L.map("map", { zoomControl: true }).setView([40.7128, -74.0060], 9);
 
 L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
   attribution: "&copy; OpenStreetMap &copy; CARTO",
@@ -522,12 +519,9 @@ function startLocationWatch() {
       setNavRotation(lastHeadingDeg);
       setNavVisual(isMoving);
 
-      // ✅ First fix: zoom out more (like your 2nd screenshot)
       if (!gpsFirstFixDone) {
         gpsFirstFixDone = true;
-
-        // Aim for a wider view, not 14
-        const targetZoom = 11; // tweak: 10 (more zoomed out) or 12 (closer)
+        const targetZoom = Math.max(map.getZoom(), 14);
         suppressAutoDisableFor(1200, () => map.setView(userLatLng, targetZoom, { animate: true }));
       } else {
         if (autoCenter) {
