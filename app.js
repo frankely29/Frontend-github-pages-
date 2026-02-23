@@ -267,7 +267,11 @@ function updateRecommendation(frame) {
 const slider = document.getElementById("slider");
 const timeLabel = document.getElementById("timeLabel");
 
-const map = L.map("map", { zoomControl: true }).setView([40.7128, -74.0060], 11);
+// IMPORTANT CHANGES:
+// - Start zoomed OUT a bit more: 10 (was 11)
+// - Move zoom control to TOP-RIGHT
+const map = L.map("map", { zoomControl: false }).setView([40.7128, -74.0060], 10);
+L.control.zoom({ position: "topright" }).addTo(map);
 
 L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
   attribution: "&copy; OpenStreetMap &copy; CARTO",
@@ -400,6 +404,7 @@ function syncCenterButton() {
 syncCenterButton();
 
 if (btnCenter) {
+  // prevent map drag/zoom starting from button touches
   btnCenter.addEventListener("pointerdown", (e) => e.stopPropagation());
   btnCenter.addEventListener("touchstart", (e) => e.stopPropagation(), { passive: true });
 
@@ -428,69 +433,8 @@ function disableAutoCenterBecauseUserIsExploring() {
 map.on("dragstart", disableAutoCenterBecauseUserIsExploring);
 map.on("zoomstart", disableAutoCenterBecauseUserIsExploring);
 
-/* =========================================================
-   Compass/gyro heading (direction you're FACING)
-   - iOS Safari may require permission (must be triggered by user gesture)
-   ========================================================= */
-let compassHeadingDeg = null;
-let compassEnabled = false;
-
-function normalizeDeg(d) {
-  let x = d % 360;
-  if (x < 0) x += 360;
-  return x;
-}
-
-function onOrientation(e) {
-  // iOS Safari: e.webkitCompassHeading is best (0..360 where 0 = North)
-  if (typeof e.webkitCompassHeading === "number" && Number.isFinite(e.webkitCompassHeading)) {
-    compassHeadingDeg = normalizeDeg(e.webkitCompassHeading);
-    return;
-  }
-
-  // Generic browsers: alpha can be used (but may be relative). Still useful as fallback.
-  if (typeof e.alpha === "number" && Number.isFinite(e.alpha)) {
-    // Many browsers: alpha is degrees clockwise from North-ish
-    // Some report opposite; if it feels reversed, flip here: (360 - e.alpha)
-    compassHeadingDeg = normalizeDeg(360 - e.alpha);
-  }
-}
-
-async function enableCompassIfPossible() {
-  if (compassEnabled) return true;
-  if (typeof window.DeviceOrientationEvent === "undefined") return false;
-
-  try {
-    // iOS permission model
-    if (typeof DeviceOrientationEvent.requestPermission === "function") {
-      const res = await DeviceOrientationEvent.requestPermission();
-      if (res !== "granted") return false;
-    }
-
-    window.addEventListener("deviceorientationabsolute", onOrientation, true);
-    window.addEventListener("deviceorientation", onOrientation, true);
-    compassEnabled = true;
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-// iOS requires user gesture, so enable on first tap anywhere
-window.addEventListener(
-  "pointerdown",
-  () => {
-    enableCompassIfPossible().catch(() => {});
-  },
-  { once: true }
-);
-
 /* =========================
    Live location arrow + auto-center
-   - Heading priority:
-     1) Compass (where you are facing)
-     2) GPS heading (when moving)
-     3) Movement bearing (computed from coords)
    ========================= */
 let gpsFirstFixDone = false;
 let navMarker = null;
@@ -552,41 +496,31 @@ function startLocationWatch() {
     (pos) => {
       const lat = pos.coords.latitude;
       const lng = pos.coords.longitude;
-      const gpsHeading = pos.coords.heading; // often null unless moving
+      const heading = pos.coords.heading; // may be null unless moving
       const ts = pos.timestamp || Date.now();
 
       userLatLng = { lat, lng };
       if (navMarker) navMarker.setLatLng(userLatLng);
 
       let isMoving = false;
-      let movementBearing = null;
 
       if (lastPos) {
         const dMi = haversineMiles({ lat: lastPos.lat, lng: lastPos.lng }, userLatLng);
         const dtSec = Math.max(1, (ts - lastPos.ts) / 1000);
         const mph = (dMi / dtSec) * 3600;
+
         isMoving = mph >= 2.0;
 
-        if (dMi > 0.01) {
-          movementBearing = computeBearingDeg({ lat: lastPos.lat, lng: lastPos.lng }, userLatLng);
+        if (typeof heading === "number" && Number.isFinite(heading)) {
+          lastHeadingDeg = heading;
+        } else if (dMi > 0.01) {
+          lastHeadingDeg = computeBearingDeg({ lat: lastPos.lat, lng: lastPos.lng }, userLatLng);
         }
 
         if (isMoving) lastMoveTs = ts;
       }
 
       lastPos = { lat, lng, ts };
-
-      // Heading priority:
-      // 1) Compass (facing direction) if available (even if stopped)
-      // 2) GPS heading if moving and provided
-      // 3) Computed movement bearing
-      if (typeof compassHeadingDeg === "number" && Number.isFinite(compassHeadingDeg)) {
-        lastHeadingDeg = compassHeadingDeg;
-      } else if (isMoving && typeof gpsHeading === "number" && Number.isFinite(gpsHeading)) {
-        lastHeadingDeg = gpsHeading;
-      } else if (typeof movementBearing === "number" && Number.isFinite(movementBearing)) {
-        lastHeadingDeg = movementBearing;
-      }
 
       setNavRotation(lastHeadingDeg);
       setNavVisual(isMoving);
@@ -615,18 +549,12 @@ function startLocationWatch() {
     }
   );
 
-  // Keep pulse/glow accurate even when GPS is slow
+  // pulse/glow state
   setInterval(() => {
     const now = Date.now();
-    const recentlyMoved = lastMoveTs && (now - lastMoveTs) < 5000;
+    const recentlyMoved = lastMoveTs && now - lastMoveTs < 5000;
     setNavVisual(!!recentlyMoved);
-
-    // If we have compass, keep arrow updated smoothly even when stationary
-    if (!recentlyMoved && typeof compassHeadingDeg === "number" && Number.isFinite(compassHeadingDeg)) {
-      lastHeadingDeg = compassHeadingDeg;
-      setNavRotation(lastHeadingDeg);
-    }
-  }, 400);
+  }, 1200);
 }
 
 // ---------- Auto-refresh every 5 minutes ----------
