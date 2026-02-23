@@ -6,11 +6,6 @@ const REFRESH_MS = 5 * 60 * 1000;
 
 // Persisted settings
 const LS_AUTOCENTER = "tlc_autocenter";
-const LS_COMPASS = "tlc_compass";
-
-// Tesla browser is often older Chromium; compass events may be missing/blocked.
-const UA = navigator.userAgent || "";
-const IS_TESLA = /Tesla/i.test(UA);
 
 // ---------- Legend minimize ----------
 const legendEl = document.getElementById("legend");
@@ -225,7 +220,6 @@ function updateRecommendation(frame) {
     recommendEl.textContent = "Recommended: enable location to get suggestions";
     return;
   }
-
   const feats = frame?.polygons?.features || [];
   if (!feats.length) {
     recommendEl.textContent = "Recommended: …";
@@ -237,13 +231,11 @@ function updateRecommendation(frame) {
 
   for (const f of feats) {
     const props = f.properties || {};
-    const geom = f.geometry;
+    const center = geometryCenter(f.geometry);
+    if (!center) continue;
 
     const rating = Number(props.rating ?? NaN);
     if (!Number.isFinite(rating)) continue;
-
-    const center = geometryCenter(geom);
-    if (!center) continue;
 
     const dMi = haversineMiles(userLatLng, center);
     const bucket = (props.bucket || "").trim();
@@ -388,139 +380,50 @@ slider.addEventListener("input", () => {
   sliderDebounce = setTimeout(() => loadFrame(idx).catch(console.error), 80);
 });
 
-// ---------- Auto-refresh every 5 minutes ----------
-async function refreshCurrentFrame() {
-  try {
-    const idx = Number(slider.value || "0");
-    await loadFrame(idx);
-  } catch (e) {
-    console.warn("Auto-refresh failed:", e);
-  }
-}
-setInterval(refreshCurrentFrame, REFRESH_MS);
+// ---------- Live location arrow + auto-center (INSIDE slider box) ----------
+let gpsFirstFixDone = false;
 
-// =========================================================
-// LIVE LOCATION ARROW (rotates) + Auto-center toggle
-// - Map is NOT rotated (prevents disappearing tiles on Tesla).
-// =========================================================
+let navMarker = null;
+let lastPos = null;
+let lastHeadingDeg = 0;
+let lastMoveTs = 0;
 
+// ✅ single source of truth for autoCenter + UI
 const btnAutoCenter = document.getElementById("btnAutoCenter");
-const btnCompass = document.getElementById("btnCompass");
 
-// Defaults:
-// - Auto-center ON by default
-// - Compass ON by default on iPhone, OFF by default on Tesla
-let autoCenter = (localStorage.getItem(LS_AUTOCENTER) ?? "1") === "1";
-let compassOn = (localStorage.getItem(LS_COMPASS) ?? (IS_TESLA ? "0" : "1")) === "1";
+// Default ON if no value saved yet
+const saved = localStorage.getItem(LS_AUTOCENTER);
+let autoCenter = saved === null ? true : (saved === "1");
 
-function paintBtn(btn, on, textOn, textOff) {
-  if (!btn) return;
-  btn.classList.toggle("on", !!on);
-  btn.textContent = on ? textOn : textOff;
-}
-
-function saveAutoCenter() {
+function setAutoCenter(next) {
+  autoCenter = !!next;
   localStorage.setItem(LS_AUTOCENTER, autoCenter ? "1" : "0");
-}
-function saveCompass() {
-  localStorage.setItem(LS_COMPASS, compassOn ? "1" : "0");
+  updateAutoCenterUI();
 }
 
-paintBtn(btnAutoCenter, autoCenter, "Auto-center: ON", "Auto-center: OFF");
-paintBtn(btnCompass, compassOn, "Compass: ON", "Compass: OFF");
+function updateAutoCenterUI() {
+  if (!btnAutoCenter) return;
+  btnAutoCenter.classList.toggle("on", autoCenter);
+  btnAutoCenter.textContent = autoCenter ? "Auto-center: ON" : "Auto-center: OFF";
+}
+
+// Initialize UI immediately (fixes “shows OFF but works”)
+updateAutoCenterUI();
 
 if (btnAutoCenter) {
   btnAutoCenter.addEventListener("click", () => {
-    autoCenter = !autoCenter;
-    saveAutoCenter();
-    paintBtn(btnAutoCenter, autoCenter, "Auto-center: ON", "Auto-center: OFF");
+    setAutoCenter(!autoCenter);
     if (autoCenter && userLatLng) map.panTo(userLatLng, { animate: true });
   });
 }
 
-let compassListenerAdded = false;
-
-// iOS Safari: requestPermission must be called from a user gesture
-async function requestCompassPermissionIfNeeded() {
-  try {
-    if (typeof DeviceOrientationEvent === "undefined") return true;
-    if (typeof DeviceOrientationEvent.requestPermission !== "function") return true; // not iOS permission model
-    const res = await DeviceOrientationEvent.requestPermission();
-    return res === "granted";
-  } catch {
-    return false;
-  }
-}
-
-function startCompassListener() {
-  if (compassListenerAdded) return;
-  compassListenerAdded = true;
-
-  const handler = (e) => {
-    // iOS Safari
-    if (typeof e.webkitCompassHeading === "number" && Number.isFinite(e.webkitCompassHeading)) {
-      compassHeadingDeg = e.webkitCompassHeading;
-      return;
-    }
-    // Fallback (many browsers)
-    if (typeof e.alpha === "number" && Number.isFinite(e.alpha)) {
-      // alpha can be relative; still useful as a “facing” hint
-      compassHeadingDeg = (360 - e.alpha) % 360;
-      return;
-    }
-  };
-
-  window.addEventListener("deviceorientationabsolute", handler, true);
-  window.addEventListener("deviceorientation", handler, true);
-}
-
-if (btnCompass) {
-  btnCompass.addEventListener("click", async () => {
-    compassOn = !compassOn;
-    saveCompass();
-    paintBtn(btnCompass, compassOn, "Compass: ON", "Compass: OFF");
-
-    if (compassOn) {
-      const ok = await requestCompassPermissionIfNeeded();
-      if (!ok) {
-        compassOn = false;
-        saveCompass();
-        paintBtn(btnCompass, compassOn, "Compass: ON", "Compass: OFF");
-        alert("Compass permission not granted. Compass stays OFF.");
-        return;
-      }
-      startCompassListener();
-    }
-  });
-}
-
-// Stop auto-center when user explores map
+// IMPORTANT: when user explores map, turn auto-center OFF and update UI
 function disableAutoCenterOnUserPan() {
   if (!autoCenter) return;
-  autoCenter = false;
-  saveAutoCenter();
-  paintBtn(btnAutoCenter, autoCenter, "Auto-center: ON", "Auto-center: OFF");
+  setAutoCenter(false);
 }
 map.on("dragstart", disableAutoCenterOnUserPan);
 map.on("zoomstart", disableAutoCenterOnUserPan);
-
-// Arrow marker
-let navMarker = null;
-let gpsFirstFixDone = false;
-
-let lastPos = null; // {lat,lng,ts}
-let lastHeadingDeg = 0;
-let lastMoveTs = 0;
-
-let compassHeadingDeg = null;
-
-// Simple smoothing to reduce jitter
-let smoothedHeading = 0;
-function smoothAngle(prev, next, alpha) {
-  // shortest-path interpolation around 360
-  const diff = ((((next - prev) % 360) + 540) % 360) - 180;
-  return (prev + diff * alpha + 360) % 360;
-}
 
 function makeNavIcon() {
   return L.divIcon({
@@ -572,22 +475,17 @@ function startLocationWatch() {
     zIndexOffset: 9999,
   }).addTo(map);
 
-  // If compass is ON at load, add listener (permission may still be required on iOS,
-  // but it will simply not produce values until granted).
-  if (compassOn) startCompassListener();
-
   navigator.geolocation.watchPosition(
     (pos) => {
       const lat = pos.coords.latitude;
       const lng = pos.coords.longitude;
-      const gpsHeading = pos.coords.heading; // often null unless moving
+      const heading = pos.coords.heading;
       const ts = pos.timestamp || Date.now();
 
       userLatLng = { lat, lng };
       if (navMarker) navMarker.setLatLng(userLatLng);
 
       let isMoving = false;
-      let computedHeading = null;
 
       if (lastPos) {
         const dMi = haversineMiles({ lat: lastPos.lat, lng: lastPos.lng }, userLatLng);
@@ -595,37 +493,28 @@ function startLocationWatch() {
         const mph = (dMi / dtSec) * 3600;
 
         isMoving = mph >= 2.0;
-        if (isMoving) lastMoveTs = ts;
 
-        // Prefer GPS heading when moving and available
-        if (isMoving && typeof gpsHeading === "number" && Number.isFinite(gpsHeading)) {
-          computedHeading = gpsHeading;
+        if (typeof heading === "number" && Number.isFinite(heading)) {
+          lastHeadingDeg = heading;
         } else if (dMi > 0.01) {
-          computedHeading = computeBearingDeg({ lat: lastPos.lat, lng: lastPos.lng }, userLatLng);
-        } else if (compassOn && typeof compassHeadingDeg === "number") {
-          computedHeading = compassHeadingDeg;
+          lastHeadingDeg = computeBearingDeg({ lat: lastPos.lat, lng: lastPos.lng }, userLatLng);
         }
-      } else {
-        // First point: compass if available
-        if (compassOn && typeof compassHeadingDeg === "number") computedHeading = compassHeadingDeg;
+
+        if (isMoving) lastMoveTs = ts;
       }
 
       lastPos = { lat, lng, ts };
 
-      if (typeof computedHeading === "number" && Number.isFinite(computedHeading)) {
-        lastHeadingDeg = computedHeading;
-      }
-
-      // Smooth the arrow rotation (less jitter)
-      smoothedHeading = smoothAngle(smoothedHeading, lastHeadingDeg, 0.25);
-      setNavRotation(smoothedHeading);
+      setNavRotation(lastHeadingDeg);
       setNavVisual(isMoving);
 
-      // One-time zoom to you
       if (!gpsFirstFixDone) {
         gpsFirstFixDone = true;
         const targetZoom = Math.max(map.getZoom(), 14);
         map.setView(userLatLng, targetZoom, { animate: true });
+
+        // ✅ IMPORTANT: force UI sync after first GPS fix (prevents “looks OFF but works”)
+        updateAutoCenterUI();
       } else {
         if (autoCenter) map.panTo(userLatLng, { animate: true });
       }
@@ -643,20 +532,23 @@ function startLocationWatch() {
     }
   );
 
-  // Stationary pulse + stationary compass refresh for arrow
   setInterval(() => {
     const now = Date.now();
     const recentlyMoved = lastMoveTs && (now - lastMoveTs) < 5000;
     setNavVisual(!!recentlyMoved);
-
-    // If stationary and compass is ON, keep arrow synced to compass
-    if (!recentlyMoved && compassOn && typeof compassHeadingDeg === "number") {
-      lastHeadingDeg = compassHeadingDeg;
-      smoothedHeading = smoothAngle(smoothedHeading, lastHeadingDeg, 0.20);
-      setNavRotation(smoothedHeading);
-    }
   }, 1200);
 }
+
+// ---------- Auto-refresh every 5 minutes ----------
+async function refreshCurrentFrame() {
+  try {
+    const idx = Number(slider.value || "0");
+    await loadFrame(idx);
+  } catch (e) {
+    console.warn("Auto-refresh failed:", e);
+  }
+}
+setInterval(refreshCurrentFrame, REFRESH_MS);
 
 // Boot
 loadTimeline().catch((err) => {
