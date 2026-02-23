@@ -22,9 +22,7 @@
     html, body { height: 100%; margin: 0; }
     #map { height: 100vh; width: 100vw; }
 
-    /* =========================
-       Legend box (top-left)
-       ========================= */
+    /* Legend box (top-left) */
     .legend {
       position: absolute;
       top: 10px;
@@ -92,11 +90,7 @@
       font-weight: 700;
     }
 
-    /* =========================
-       Bottom slider bar (small)
-       + Auto-center button INSIDE it
-       WITHOUT increasing box size
-       ========================= */
+    /* Bottom slider bar (small) */
     .sliderWrap {
       position: absolute;
       left: 10px;
@@ -116,7 +110,7 @@
       align-items:center;
       justify-content:space-between;
       gap:10px;
-      margin-bottom: 6px; /* keeps button above blue slider */
+      margin-bottom: 6px;
     }
 
     .timeLabel {
@@ -126,7 +120,7 @@
       line-height: 1.1;
     }
 
-    /* Auto-center button (small) */
+    /* Auto-center button (small, inside box, NOT overlapping slider) */
     .autoCenterInlineBtn{
       border: none;
       border-radius: 999px;
@@ -149,9 +143,7 @@
       margin: 0;
     }
 
-    /* =========================
-       Zone labels (tooltips)
-       ========================= */
+    /* Zone labels */
     .zone-label {
       background: transparent;
       border: none;
@@ -200,9 +192,7 @@
       .autoCenterInlineBtn{ font-size: 11px; padding: 6px 9px; }
     }
 
-    /* =========================
-       Live location arrow marker
-       ========================= */
+    /* Live location arrow marker */
     .navArrowWrap{
       width: 30px;
       height: 30px;
@@ -284,6 +274,7 @@
     <input id="slider" type="range" min="0" max="0" value="0" step="1" />
   </div>
 
-  <script src="./app.js"></script>
+  <!-- Cache-buster so GitHub Pages doesn’t keep old JS -->
+  <script src="./app.js?v=20260222"></script>
 </body>
 </html>
