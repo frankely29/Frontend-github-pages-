@@ -4,6 +4,9 @@ const BIN_MINUTES = 20;
 // Refresh current frame every 5 minutes
 const REFRESH_MS = 5 * 60 * 1000;
 
+// More zoomed out so you can see more boroughs at once
+const AUTO_CENTER_ZOOM = 10;
+
 // ---------- Legend minimize ----------
 const legendEl = document.getElementById("legend");
 const legendToggleBtn = document.getElementById("legendToggle");
@@ -169,7 +172,7 @@ const recommendEl = document.getElementById("recommendLine");
 const navBtn = document.getElementById("navBtn");
 
 let userLatLng = null;
-let recommendedDest = null; // {lat,lng,name,borough,rating,distMi}
+let recommendedDest = null;
 
 function setNavDisabled(disabled) {
   if (!navBtn) return;
@@ -186,7 +189,6 @@ function setNavDestination(dest) {
     return;
   }
 
-  // Universal (Tesla + iPhone): Google Maps directions
   const { lat, lng } = recommendedDest;
   navBtn.href = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
     `${lat},${lng}`
@@ -237,14 +239,6 @@ function geometryCenter(geom) {
   return { lat: sumLat / pts.length, lng: sumLng / pts.length };
 }
 
-/**
- * NEW RULE:
- * Recommendation must be at least BLUE or higher:
- *   blue/purple/green only
- * If multiple options, choose “whatever is closer” but still good:
- *   score = rating - distance_penalty
- * Increase penalty so closeness matters more.
- */
 function updateRecommendation(frame) {
   if (!recommendEl) return;
 
@@ -261,10 +255,7 @@ function updateRecommendation(frame) {
     return;
   }
 
-  // Only accept BLUE or higher
   const allowed = new Set(["blue", "purple", "green"]);
-
-  // Make “closer wins” more strongly once the zone is decent
   const DIST_PENALTY_PER_MILE = 4.0;
 
   let best = null;
@@ -283,7 +274,6 @@ function updateRecommendation(frame) {
     if (!center) continue;
 
     const dMi = haversineMiles(userLatLng, center);
-
     const score = rating - dMi * DIST_PENALTY_PER_MILE;
 
     if (!best || score > best.score) {
@@ -323,7 +313,8 @@ function updateRecommendation(frame) {
 const slider = document.getElementById("slider");
 const timeLabel = document.getElementById("timeLabel");
 
-const map = L.map("map", { zoomControl: true }).setView([40.7128, -74.0060], 11);
+// INITIAL MAP VIEW: more zoomed out to see more boroughs
+const map = L.map("map", { zoomControl: true }).setView([40.7128, -74.0060], 10);
 
 L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
   attribution: "&copy; OpenStreetMap &copy; CARTO",
@@ -436,7 +427,7 @@ slider.addEventListener("input", () => {
 });
 
 /* =========================================================
-   Auto-center button (inside bottom bar) - stable logic
+   Auto-center button - stable logic
    ========================================================= */
 const btnCenter = document.getElementById("btnCenter");
 let autoCenter = true;
@@ -466,7 +457,7 @@ if (btnCenter) {
     syncCenterButton();
 
     if (autoCenter && userLatLng) {
-      suppressAutoDisableFor(800, () => map.panTo(userLatLng, { animate: true }));
+      suppressAutoDisableFor(900, () => map.setView(userLatLng, AUTO_CENTER_ZOOM, { animate: true }));
     }
   });
 }
@@ -574,8 +565,7 @@ function startLocationWatch() {
 
       if (!gpsFirstFixDone) {
         gpsFirstFixDone = true;
-        const targetZoom = Math.max(map.getZoom(), 14);
-        suppressAutoDisableFor(1200, () => map.setView(userLatLng, targetZoom, { animate: true }));
+        suppressAutoDisableFor(1200, () => map.setView(userLatLng, AUTO_CENTER_ZOOM, { animate: true }));
       } else {
         if (autoCenter) {
           suppressAutoDisableFor(700, () => map.panTo(userLatLng, { animate: true }));
