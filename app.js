@@ -265,14 +265,11 @@ function updateRecommendation(frame) {
 }
 
 // ---------- Leaflet map ----------
+// IMPORTANT CHANGE: initial zoom from 11 -> 10 (≈ 2× wider view)
 const slider = document.getElementById("slider");
 const timeLabel = document.getElementById("timeLabel");
 
-/**
- * IMPORTANT: lower zoom = wider view.
- * You asked for about "double" the initial view (wider), so we start at zoom 8 (wider than 10).
- */
-const map = L.map("map", { zoomControl: true }).setView([40.7128, -74.006], 8);
+const map = L.map("map", { zoomControl: true }).setView([40.7128, -74.0060], 10);
 
 L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
   attribution: "&copy; OpenStreetMap &copy; CARTO",
@@ -355,7 +352,7 @@ async function loadFrame(idx) {
 
 async function loadTimeline() {
   const t = await fetchJSON(`${RAILWAY_BASE}/timeline`);
-  timeline = Array.isArray(t) ? t : t.timeline || [];
+  timeline = Array.isArray(t) ? t : (t.timeline || []);
   if (!timeline.length) throw new Error("Timeline empty. Run /generate once on Railway.");
 
   minutesOfWeek = timeline.map(minuteOfWeekFromIso);
@@ -473,7 +470,9 @@ function computeBearingDeg(from, to) {
   const dLng = toRad(to.lng - from.lng);
 
   const y = Math.sin(dLng) * Math.cos(lat2);
-  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+  const x =
+    Math.cos(lat1) * Math.sin(lat2) -
+    Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
 
   let brng = toDeg(Math.atan2(y, x));
   brng = (brng + 360) % 360;
@@ -486,7 +485,7 @@ function startLocationWatch() {
     return;
   }
 
-  navMarker = L.marker([40.7128, -74.006], {
+  navMarker = L.marker([40.7128, -74.0060], {
     icon: makeNavIcon(),
     interactive: false,
     zIndexOffset: 9999,
@@ -514,7 +513,10 @@ function startLocationWatch() {
         if (typeof heading === "number" && Number.isFinite(heading)) {
           lastHeadingDeg = heading;
         } else if (dMi > 0.01) {
-          lastHeadingDeg = computeBearingDeg({ lat: lastPos.lat, lng: lastPos.lng }, userLatLng);
+          lastHeadingDeg = computeBearingDeg(
+            { lat: lastPos.lat, lng: lastPos.lng },
+            userLatLng
+          );
         }
 
         if (isMoving) lastMoveTs = ts;
@@ -525,11 +527,10 @@ function startLocationWatch() {
       setNavRotation(lastHeadingDeg);
       setNavVisual(isMoving);
 
-      // one-time zoom to you on first fix (keep it WIDER than before)
+      // one-time zoom to you on first fix (KEEP wide view: 10)
       if (!gpsFirstFixDone) {
         gpsFirstFixDone = true;
-        // was 13+; now 11+ so you keep a wider view
-        const targetZoom = Math.max(map.getZoom(), 11);
+        const targetZoom = Math.max(map.getZoom(), 10);
         suppressAutoDisableFor(1200, () => map.setView(userLatLng, targetZoom, { animate: true }));
       } else {
         if (autoCenter) {
@@ -552,7 +553,7 @@ function startLocationWatch() {
 
   setInterval(() => {
     const now = Date.now();
-    const recentlyMoved = lastMoveTs && now - lastMoveTs < 5000;
+    const recentlyMoved = lastMoveTs && (now - lastMoveTs) < 5000;
     setNavVisual(!!recentlyMoved);
   }, 1200);
 }
