@@ -202,7 +202,8 @@ function geometryCenter(geom) {
 
   if (!pts.length) return null;
 
-  let sumLng = 0, sumLat = 0;
+  let sumLng = 0,
+    sumLat = 0;
   for (const [lng, lat] of pts) {
     sumLng += lng;
     sumLat += lat;
@@ -267,8 +268,8 @@ function updateRecommendation(frame) {
 const slider = document.getElementById("slider");
 const timeLabel = document.getElementById("timeLabel");
 
-// Start MORE zoomed out: 9
-const map = L.map("map", { zoomControl: true }).setView([40.7128, -74.0060], 9);
+// ✅ START MORE ZOOMED OUT (wider view)
+const map = L.map("map", { zoomControl: true }).setView([40.7128, -74.0060], 10);
 
 L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
   attribution: "&copy; OpenStreetMap &copy; CARTO",
@@ -292,8 +293,14 @@ function buildPopupHTML(props) {
 
   return `
     <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; font-size:13px;">
-      <div style="font-weight:800; margin-bottom:2px;">${escapeHtml(zoneName || `Zone ${props.LocationID ?? ""}`)}</div>
-      ${borough ? `<div style="opacity:0.8; margin-bottom:6px;">${escapeHtml(borough)}</div>` : `<div style="margin-bottom:6px;"></div>`}
+      <div style="font-weight:800; margin-bottom:2px;">${escapeHtml(
+        zoneName || `Zone ${props.LocationID ?? ""}`
+      )}</div>
+      ${
+        borough
+          ? `<div style="opacity:0.8; margin-bottom:6px;">${escapeHtml(borough)}</div>`
+          : `<div style="margin-bottom:6px;"></div>`
+      }
       <div><b>Rating:</b> ${rating} (${prettyBucket(bucket)})</div>
       <div><b>Pickups (last ${BIN_MINUTES} min):</b> ${pickups}</div>
       <div><b>Avg Driver Pay:</b> $${pay}</div>
@@ -351,7 +358,7 @@ async function loadFrame(idx) {
 
 async function loadTimeline() {
   const t = await fetchJSON(`${RAILWAY_BASE}/timeline`);
-  timeline = Array.isArray(t) ? t : (t.timeline || []);
+  timeline = Array.isArray(t) ? t : t.timeline || [];
   if (!timeline.length) throw new Error("Timeline empty. Run /generate once on Railway.");
 
   minutesOfWeek = timeline.map(minuteOfWeekFromIso);
@@ -419,7 +426,9 @@ if (btnCenter) {
 
 // If user explores the map, turn auto-center OFF
 function disableAutoCenterBecauseUserIsExploring() {
+  // Ignore the events caused by OUR OWN map moves (GPS setView/panTo)
   if (Date.now() < suppressAutoDisableUntil) return;
+
   if (!autoCenter) return;
   autoCenter = false;
   syncCenterButton();
@@ -519,9 +528,10 @@ function startLocationWatch() {
       setNavRotation(lastHeadingDeg);
       setNavVisual(isMoving);
 
+      // ✅ one-time zoom to you on first fix (less zoom-in than before)
       if (!gpsFirstFixDone) {
         gpsFirstFixDone = true;
-        const targetZoom = Math.max(map.getZoom(), 14);
+        const targetZoom = Math.max(map.getZoom(), 13); // was 14
         suppressAutoDisableFor(1200, () => map.setView(userLatLng, targetZoom, { animate: true }));
       } else {
         if (autoCenter) {
@@ -544,7 +554,7 @@ function startLocationWatch() {
 
   setInterval(() => {
     const now = Date.now();
-    const recentlyMoved = lastMoveTs && (now - lastMoveTs) < 5000;
+    const recentlyMoved = lastMoveTs && now - lastMoveTs < 5000;
     setNavVisual(!!recentlyMoved);
   }, 1200);
 }
