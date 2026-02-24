@@ -265,11 +265,11 @@ function updateRecommendation(frame) {
 }
 
 // ---------- Leaflet map ----------
-// IMPORTANT CHANGE: initial zoom from 11 -> 10 (≈ 2× wider view)
+// CHANGE: initial zoom 10 -> 11 (closer view)
 const slider = document.getElementById("slider");
 const timeLabel = document.getElementById("timeLabel");
 
-const map = L.map("map", { zoomControl: true }).setView([40.7128, -74.0060], 10);
+const map = L.map("map", { zoomControl: true }).setView([40.7128, -74.0060], 11);
 
 L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
   attribution: "&copy; OpenStreetMap &copy; CARTO",
@@ -527,10 +527,10 @@ function startLocationWatch() {
       setNavRotation(lastHeadingDeg);
       setNavVisual(isMoving);
 
-      // one-time zoom to you on first fix (KEEP wide view: 10)
+      // one-time zoom to you on first fix (DON'T disable auto-center)
       if (!gpsFirstFixDone) {
         gpsFirstFixDone = true;
-        const targetZoom = Math.max(map.getZoom(), 10);
+        const targetZoom = Math.max(map.getZoom(), 14);
         suppressAutoDisableFor(1200, () => map.setView(userLatLng, targetZoom, { animate: true }));
       } else {
         if (autoCenter) {
