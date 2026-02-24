@@ -4,9 +4,6 @@ const BIN_MINUTES = 20;
 // Refresh current frame every 5 minutes
 const REFRESH_MS = 5 * 60 * 1000;
 
-// More zoomed out so you can see more boroughs at once
-const AUTO_CENTER_ZOOM = 12;
-
 // ---------- Legend minimize ----------
 const legendEl = document.getElementById("legend");
 const legendToggleBtn = document.getElementById("legendToggle");
@@ -141,12 +138,143 @@ function zoomClass(zoom) {
   const z = Math.max(10, Math.min(15, Math.round(zoom)));
   return `z${z}`;
 }
+
+function escapeHtml(s) {
+  return String(s)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+/* =========================================================
+   Staten Island Mode (local-only recolor)
+   - Does NOT change pickups/pay.
+   - Only changes color/bucket for Staten Island zones (relative within SI).
+   ========================================================= */
+const btnStaten = document.getElementById("btnStaten");
+const modeNote = document.getElementById("modeNote");
+
+const LS_KEY_STATEN = "staten_mode_enabled";
+let statenMode = (localStorage.getItem(LS_KEY_STATEN) || "0") === "1";
+
+function isStatenIslandFeature(props) {
+  const b = (props?.borough || "").toString().toLowerCase();
+  return b.includes("staten"); // "Staten Island"
+}
+
+function colorFromLocalRating(r) {
+  const x = Math.max(1, Math.min(100, Math.round(r)));
+  if (x >= 90) return { bucket: "green", color: "#00b050" };
+  if (x >= 80) return { bucket: "purple", color: "#8000ff" };
+  if (x >= 65) return { bucket: "blue", color: "#0066ff" };
+  if (x >= 45) return { bucket: "sky", color: "#66ccff" };
+  if (x >= 25) return { bucket: "yellow", color: "#ffd400" };
+  return { bucket: "red", color: "#e60000" };
+}
+
+function applyStatenLocalView(frame) {
+  // returns the same frame object but with SI features annotated:
+  // props.si_local_rating, props.si_local_bucket, props.si_local_color
+  const feats = frame?.polygons?.features || [];
+  if (!feats.length) return frame;
+
+  const si = [];
+  for (const f of feats) {
+    const props = f.properties || {};
+    if (!isStatenIslandFeature(props)) continue;
+    const r = Number(props.rating ?? NaN);
+    if (!Number.isFinite(r)) continue;
+    si.push(r);
+  }
+
+  if (si.length < 3) {
+    // too little to build a meaningful local scale
+    return frame;
+  }
+
+  // Build percentile mapping using sorted ratings
+  const sorted = si.slice().sort((a, b) => a - b);
+  const n = sorted.length;
+
+  function percentileOfRating(r) {
+    // index of last <= r
+    let lo = 0, hi = n - 1, ans = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (sorted[mid] <= r) { ans = mid; lo = mid + 1; }
+      else hi = mid - 1;
+    }
+    if (n <= 1) return 0;
+    const p = Math.max(0, Math.min(1, ans / (n - 1)));
+    return p;
+  }
+
+  for (const f of feats) {
+    const props = f.properties || {};
+    if (!isStatenIslandFeature(props)) {
+      props.si_local_rating = null;
+      props.si_local_bucket = null;
+      props.si_local_color = null;
+      continue;
+    }
+    const r = Number(props.rating ?? NaN);
+    if (!Number.isFinite(r)) continue;
+
+    const p = percentileOfRating(r);            // 0..1 within Staten Island
+    const localRating = 1 + 99 * p;             // 1..100 scale
+    const { bucket, color } = colorFromLocalRating(localRating);
+
+    props.si_local_rating = Math.round(localRating);
+    props.si_local_bucket = bucket;
+    props.si_local_color = color;
+  }
+
+  return frame;
+}
+
+function syncStatenUI() {
+  if (btnStaten) {
+    btnStaten.textContent = statenMode ? "Staten Mode: ON" : "Staten Mode: OFF";
+    btnStaten.classList.toggle("on", !!statenMode);
+  }
+  if (modeNote) {
+    modeNote.innerHTML = statenMode
+      ? `Staten Mode is <b>ON</b>: Staten Island colors are <b>relative within Staten Island</b> only.<br/>Other boroughs remain NYC-wide.`
+      : `Colors come from rating (1–100) for the selected 20-minute window.<br/>Time label is NYC time.`;
+  }
+}
+syncStatenUI();
+
+if (btnStaten) {
+  btnStaten.addEventListener("click", (e) => {
+    e.preventDefault();
+    statenMode = !statenMode;
+    localStorage.setItem(LS_KEY_STATEN, statenMode ? "1" : "0");
+    syncStatenUI();
+    // re-render current frame with new mode
+    if (currentFrame) renderFrame(currentFrame);
+  });
+}
+
+function effectiveBucket(props) {
+  if (statenMode && isStatenIslandFeature(props) && props.si_local_bucket) return props.si_local_bucket;
+  return (props.bucket || "").trim();
+}
+
+function effectiveColor(props) {
+  if (statenMode && isStatenIslandFeature(props) && props.si_local_color) return props.si_local_color;
+  const st = props?.style || {};
+  return st.fillColor || st.color || "#000";
+}
+
 function labelHTML(props, zoom) {
   const name = (props.zone_name || "").trim();
   if (!name) return "";
 
-  const bucket = (props.bucket || "").trim();
-  if (!shouldShowLabel(bucket, Math.round(zoom))) return "";
+  const b = effectiveBucket(props);
+  if (!shouldShowLabel(b, Math.round(zoom))) return "";
 
   const zoneText = zoom < 13 ? shortenLabel(name, LABEL_MAX_CHARS_MID) : name;
 
@@ -158,16 +286,10 @@ function labelHTML(props, zoom) {
     ${showBorough ? `<div class="br">${escapeHtml(borough)}</div>` : ""}
   `;
 }
-function escapeHtml(s) {
-  return String(s)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
 
-// ---------- Recommendation + Navigation ----------
+/* =========================================================
+   Recommendation + Navigation
+   ========================================================= */
 const recommendEl = document.getElementById("recommendLine");
 const navBtn = document.getElementById("navBtn");
 
@@ -193,7 +315,6 @@ function setNavDestination(dest) {
   navBtn.href = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
     `${lat},${lng}`
   )}&travelmode=driving`;
-
   setNavDisabled(false);
 }
 
@@ -239,6 +360,7 @@ function geometryCenter(geom) {
   return { lat: sumLat / pts.length, lng: sumLng / pts.length };
 }
 
+// Blue+ rule: we’ll apply to the effective bucket (SI-local when Staten Mode is ON for SI features)
 function updateRecommendation(frame) {
   if (!recommendEl) return;
 
@@ -264,10 +386,14 @@ function updateRecommendation(frame) {
     const props = f.properties || {};
     const geom = f.geometry;
 
-    const bucket = (props.bucket || "").trim();
-    if (!allowed.has(bucket)) continue;
+    const b = effectiveBucket(props);
+    if (!allowed.has(b)) continue;
 
-    const rating = Number(props.rating ?? NaN);
+    // Use effective rating for SI-local if available, otherwise NYC rating
+    const rating = (statenMode && isStatenIslandFeature(props) && Number.isFinite(Number(props.si_local_rating)))
+      ? Number(props.si_local_rating)
+      : Number(props.rating ?? NaN);
+
     if (!Number.isFinite(rating)) continue;
 
     const center = geometryCenter(geom);
@@ -285,6 +411,8 @@ function updateRecommendation(frame) {
         lng: center.lng,
         name: (props.zone_name || "").trim() || `Zone ${props.LocationID ?? ""}`,
         borough: (props.borough || "").trim(),
+        isSI: isStatenIslandFeature(props),
+        usedLocal: (statenMode && isStatenIslandFeature(props) && Number.isFinite(Number(props.si_local_rating))),
       };
     }
   }
@@ -297,7 +425,8 @@ function updateRecommendation(frame) {
 
   const distTxt = best.dMi >= 10 ? `${best.dMi.toFixed(0)} mi` : `${best.dMi.toFixed(1)} mi`;
   const bTxt = best.borough ? ` (${best.borough})` : "";
-  recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Rating ${best.rating} — ${distTxt}`;
+  const modeTag = best.usedLocal ? " (SI-local)" : "";
+  recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Rating ${best.rating}${modeTag} — ${distTxt}`;
 
   setNavDestination({
     lat: best.lat,
@@ -313,8 +442,7 @@ function updateRecommendation(frame) {
 const slider = document.getElementById("slider");
 const timeLabel = document.getElementById("timeLabel");
 
-// INITIAL MAP VIEW: more zoomed out to see more boroughs
-const map = L.map("map", { zoomControl: true }).setView([40.7128, -74.0060], 12);
+const map = L.map("map", { zoomControl: true }).setView([40.7128, -74.0060], 11);
 
 L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
   attribution: "&copy; OpenStreetMap &copy; CARTO",
@@ -336,20 +464,29 @@ function buildPopupHTML(props) {
   const pickups = props.pickups ?? "";
   const pay = props.avg_driver_pay == null ? "n/a" : props.avg_driver_pay.toFixed(2);
 
+  let extra = "";
+  if (statenMode && isStatenIslandFeature(props) && Number.isFinite(Number(props.si_local_rating))) {
+    extra = `<div style="margin-top:6px;"><b>Staten Local Rating:</b> ${props.si_local_rating} (${prettyBucket(props.si_local_bucket)})</div>`;
+  }
+
   return `
     <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; font-size:13px;">
       <div style="font-weight:800; margin-bottom:2px;">${escapeHtml(zoneName || `Zone ${props.LocationID ?? ""}`)}</div>
       ${borough ? `<div style="opacity:0.8; margin-bottom:6px;">${escapeHtml(borough)}</div>` : `<div style="margin-bottom:6px;"></div>`}
-      <div><b>Rating:</b> ${rating} (${prettyBucket(bucket)})</div>
-      <div><b>Pickups (last ${BIN_MINUTES} min):</b> ${pickups}</div>
+      <div><b>NYC Rating:</b> ${rating} (${prettyBucket(bucket)})</div>
+      ${extra}
+      <div style="margin-top:6px;"><b>Pickups (last ${BIN_MINUTES} min):</b> ${pickups}</div>
       <div><b>Avg Driver Pay:</b> $${pay}</div>
     </div>
   `;
 }
 
 function renderFrame(frame) {
+  // Annotate SI local ratings if needed
   currentFrame = frame;
-  timeLabel.textContent = formatNYCLabel(frame.time);
+  if (statenMode) applyStatenLocalView(currentFrame);
+
+  timeLabel.textContent = formatNYCLabel(currentFrame.time);
 
   if (geoLayer) {
     geoLayer.remove();
@@ -359,20 +496,23 @@ function renderFrame(frame) {
   const zoomNow = map.getZoom();
   const zClass = zoomClass(zoomNow);
 
-  geoLayer = L.geoJSON(frame.polygons, {
+  geoLayer = L.geoJSON(currentFrame.polygons, {
     style: (feature) => {
-      const st = feature?.properties?.style || {};
+      const props = feature?.properties || {};
+      const st = props.style || {};
+      const fill = effectiveColor(props);
+
       return {
-        color: st.color || st.fillColor || "#000",
+        color: fill,
         weight: st.weight ?? 0,
         opacity: st.opacity ?? 0,
-        fillColor: st.fillColor || st.color || "#000",
+        fillColor: fill,
         fillOpacity: st.fillOpacity ?? 0.82,
       };
     },
     onEachFeature: (feature, layer) => {
       const props = feature.properties || {};
-      layer.bindPopup(buildPopupHTML(props), { maxWidth: 300 });
+      layer.bindPopup(buildPopupHTML(props), { maxWidth: 320 });
 
       const html = labelHTML(props, zoomNow);
       if (!html) return;
@@ -387,7 +527,7 @@ function renderFrame(frame) {
     },
   }).addTo(map);
 
-  updateRecommendation(frame);
+  updateRecommendation(currentFrame);
 }
 
 async function loadFrame(idx) {
@@ -427,7 +567,7 @@ slider.addEventListener("input", () => {
 });
 
 /* =========================================================
-   Auto-center button - stable logic
+   Auto-center button (inside bottom bar) - stable logic
    ========================================================= */
 const btnCenter = document.getElementById("btnCenter");
 let autoCenter = true;
@@ -457,7 +597,7 @@ if (btnCenter) {
     syncCenterButton();
 
     if (autoCenter && userLatLng) {
-      suppressAutoDisableFor(900, () => map.setView(userLatLng, AUTO_CENTER_ZOOM, { animate: true }));
+      suppressAutoDisableFor(800, () => map.panTo(userLatLng, { animate: true }));
     }
   });
 }
@@ -565,7 +705,8 @@ function startLocationWatch() {
 
       if (!gpsFirstFixDone) {
         gpsFirstFixDone = true;
-        suppressAutoDisableFor(1200, () => map.setView(userLatLng, AUTO_CENTER_ZOOM, { animate: true }));
+        const targetZoom = Math.max(map.getZoom(), 14);
+        suppressAutoDisableFor(1200, () => map.setView(userLatLng, targetZoom, { animate: true }));
       } else {
         if (autoCenter) {
           suppressAutoDisableFor(700, () => map.panTo(userLatLng, { animate: true }));
