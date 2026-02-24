@@ -268,8 +268,11 @@ function updateRecommendation(frame) {
 const slider = document.getElementById("slider");
 const timeLabel = document.getElementById("timeLabel");
 
-// ✅ START MORE ZOOMED OUT (wider view)
-const map = L.map("map", { zoomControl: true }).setView([40.7128, -74.0060], 10);
+/**
+ * IMPORTANT: lower zoom = wider view.
+ * You asked for about "double" the initial view (wider), so we start at zoom 8 (wider than 10).
+ */
+const map = L.map("map", { zoomControl: true }).setView([40.7128, -74.006], 8);
 
 L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
   attribution: "&copy; OpenStreetMap &copy; CARTO",
@@ -293,14 +296,8 @@ function buildPopupHTML(props) {
 
   return `
     <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; font-size:13px;">
-      <div style="font-weight:800; margin-bottom:2px;">${escapeHtml(
-        zoneName || `Zone ${props.LocationID ?? ""}`
-      )}</div>
-      ${
-        borough
-          ? `<div style="opacity:0.8; margin-bottom:6px;">${escapeHtml(borough)}</div>`
-          : `<div style="margin-bottom:6px;"></div>`
-      }
+      <div style="font-weight:800; margin-bottom:2px;">${escapeHtml(zoneName || `Zone ${props.LocationID ?? ""}`)}</div>
+      ${borough ? `<div style="opacity:0.8; margin-bottom:6px;">${escapeHtml(borough)}</div>` : `<div style="margin-bottom:6px;"></div>`}
       <div><b>Rating:</b> ${rating} (${prettyBucket(bucket)})</div>
       <div><b>Pickups (last ${BIN_MINUTES} min):</b> ${pickups}</div>
       <div><b>Avg Driver Pay:</b> $${pay}</div>
@@ -489,7 +486,7 @@ function startLocationWatch() {
     return;
   }
 
-  navMarker = L.marker([40.7128, -74.0060], {
+  navMarker = L.marker([40.7128, -74.006], {
     icon: makeNavIcon(),
     interactive: false,
     zIndexOffset: 9999,
@@ -528,10 +525,11 @@ function startLocationWatch() {
       setNavRotation(lastHeadingDeg);
       setNavVisual(isMoving);
 
-      // ✅ one-time zoom to you on first fix (less zoom-in than before)
+      // one-time zoom to you on first fix (keep it WIDER than before)
       if (!gpsFirstFixDone) {
         gpsFirstFixDone = true;
-        const targetZoom = Math.max(map.getZoom(), 13); // was 14
+        // was 13+; now 11+ so you keep a wider view
+        const targetZoom = Math.max(map.getZoom(), 11);
         suppressAutoDisableFor(1200, () => map.setView(userLatLng, targetZoom, { animate: true }));
       } else {
         if (autoCenter) {
