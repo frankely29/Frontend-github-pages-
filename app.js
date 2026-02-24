@@ -14,14 +14,7 @@ if (legendEl && legendToggleBtn) {
   });
 }
 
-/** LABEL VISIBILITY (mobile-friendly, demand-priority)
- * z10: green only
- * z11: green + purple
- * z12: + blue
- * z13: + sky
- * z14: + yellow
- * z15+: + red (everything)
- */
+/** LABEL VISIBILITY (mobile-friendly, demand-priority) */
 const LABEL_ZOOM_MIN = 10;
 const BOROUGH_ZOOM_SHOW = 15;
 const LABEL_MAX_CHARS_MID = 14;
@@ -138,7 +131,6 @@ function zoomClass(zoom) {
   const z = Math.max(10, Math.min(15, Math.round(zoom)));
   return `z${z}`;
 }
-
 function escapeHtml(s) {
   return String(s)
     .replaceAll("&", "&amp;")
@@ -149,19 +141,17 @@ function escapeHtml(s) {
 }
 
 /* =========================================================
-   Staten Island Mode (local-only recolor)
-   - Does NOT change pickups/pay.
-   - Only changes color/bucket for Staten Island zones (relative within SI).
+   Staten Island Mode (toggle anywhere)
    ========================================================= */
-const btnStaten = document.getElementById("btnStaten");
+const btnStatenIsland = document.getElementById("btnStatenIsland");
 const modeNote = document.getElementById("modeNote");
 
-const LS_KEY_STATEN = "staten_mode_enabled";
-let statenMode = (localStorage.getItem(LS_KEY_STATEN) || "0") === "1";
+const LS_KEY_STATEN = "staten_island_mode_enabled";
+let statenIslandMode = (localStorage.getItem(LS_KEY_STATEN) || "0") === "1";
 
 function isStatenIslandFeature(props) {
   const b = (props?.borough || "").toString().toLowerCase();
-  return b.includes("staten"); // "Staten Island"
+  return b.includes("staten");
 }
 
 function colorFromLocalRating(r) {
@@ -175,31 +165,23 @@ function colorFromLocalRating(r) {
 }
 
 function applyStatenLocalView(frame) {
-  // returns the same frame object but with SI features annotated:
-  // props.si_local_rating, props.si_local_bucket, props.si_local_color
   const feats = frame?.polygons?.features || [];
   if (!feats.length) return frame;
 
-  const si = [];
+  const siRatings = [];
   for (const f of feats) {
     const props = f.properties || {};
     if (!isStatenIslandFeature(props)) continue;
     const r = Number(props.rating ?? NaN);
     if (!Number.isFinite(r)) continue;
-    si.push(r);
+    siRatings.push(r);
   }
+  if (siRatings.length < 3) return frame;
 
-  if (si.length < 3) {
-    // too little to build a meaningful local scale
-    return frame;
-  }
-
-  // Build percentile mapping using sorted ratings
-  const sorted = si.slice().sort((a, b) => a - b);
+  const sorted = siRatings.slice().sort((a, b) => a - b);
   const n = sorted.length;
 
   function percentileOfRating(r) {
-    // index of last <= r
     let lo = 0, hi = n - 1, ans = -1;
     while (lo <= hi) {
       const mid = (lo + hi) >> 1;
@@ -207,8 +189,7 @@ function applyStatenLocalView(frame) {
       else hi = mid - 1;
     }
     if (n <= 1) return 0;
-    const p = Math.max(0, Math.min(1, ans / (n - 1)));
-    return p;
+    return Math.max(0, Math.min(1, ans / (n - 1)));
   }
 
   for (const f of feats) {
@@ -222,10 +203,10 @@ function applyStatenLocalView(frame) {
     const r = Number(props.rating ?? NaN);
     if (!Number.isFinite(r)) continue;
 
-    const p = percentileOfRating(r);            // 0..1 within Staten Island
-    const localRating = 1 + 99 * p;             // 1..100 scale
-    const { bucket, color } = colorFromLocalRating(localRating);
+    const p = percentileOfRating(r);
+    const localRating = 1 + 99 * p;
 
+    const { bucket, color } = colorFromLocalRating(localRating);
     props.si_local_rating = Math.round(localRating);
     props.si_local_bucket = bucket;
     props.si_local_color = color;
@@ -234,37 +215,40 @@ function applyStatenLocalView(frame) {
   return frame;
 }
 
-function syncStatenUI() {
-  if (btnStaten) {
-    btnStaten.textContent = statenMode ? "Staten Mode: ON" : "Staten Mode: OFF";
-    btnStaten.classList.toggle("on", !!statenMode);
+function syncStatenIslandUI() {
+  if (btnStatenIsland) {
+    btnStatenIsland.textContent = statenIslandMode ? "Staten Island Mode: ON" : "Staten Island Mode: OFF";
+    btnStatenIsland.classList.toggle("on", !!statenIslandMode);
   }
   if (modeNote) {
-    modeNote.innerHTML = statenMode
-      ? `Staten Mode is <b>ON</b>: Staten Island colors are <b>relative within Staten Island</b> only.<br/>Other boroughs remain NYC-wide.`
+    modeNote.innerHTML = statenIslandMode
+      ? `Staten Island Mode is <b>ON</b>: Staten Island colors are <b>relative within Staten Island</b> only.<br/>Other boroughs remain NYC-wide.`
       : `Colors come from rating (1–100) for the selected 20-minute window.<br/>Time label is NYC time.`;
   }
 }
-syncStatenUI();
+syncStatenIslandUI();
 
-if (btnStaten) {
-  btnStaten.addEventListener("click", (e) => {
+// Harden touch/click so it always toggles (iPhone + Tesla)
+if (btnStatenIsland) {
+  btnStatenIsland.addEventListener("pointerdown", (e) => e.stopPropagation());
+  btnStatenIsland.addEventListener("touchstart", (e) => e.stopPropagation(), { passive: true });
+
+  btnStatenIsland.addEventListener("click", (e) => {
     e.preventDefault();
-    statenMode = !statenMode;
-    localStorage.setItem(LS_KEY_STATEN, statenMode ? "1" : "0");
-    syncStatenUI();
-    // re-render current frame with new mode
-    if (currentFrame) renderFrame(currentFrame);
+    e.stopPropagation();
+    statenIslandMode = !statenIslandMode;
+    localStorage.setItem(LS_KEY_STATEN, statenIslandMode ? "1" : "0");
+    syncStatenIslandUI();
+    if (currentFrame) renderFrame(currentFrame); // re-render regardless of your location
   });
 }
 
 function effectiveBucket(props) {
-  if (statenMode && isStatenIslandFeature(props) && props.si_local_bucket) return props.si_local_bucket;
+  if (statenIslandMode && isStatenIslandFeature(props) && props.si_local_bucket) return props.si_local_bucket;
   return (props.bucket || "").trim();
 }
-
 function effectiveColor(props) {
-  if (statenMode && isStatenIslandFeature(props) && props.si_local_color) return props.si_local_color;
+  if (statenIslandMode && isStatenIslandFeature(props) && props.si_local_color) return props.si_local_color;
   const st = props?.style || {};
   return st.fillColor || st.color || "#000";
 }
@@ -300,7 +284,6 @@ function setNavDisabled(disabled) {
   if (!navBtn) return;
   navBtn.classList.toggle("disabled", !!disabled);
 }
-
 function setNavDestination(dest) {
   recommendedDest = dest || null;
   if (!navBtn) return;
@@ -315,6 +298,7 @@ function setNavDestination(dest) {
   navBtn.href = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
     `${lat},${lng}`
   )}&travelmode=driving`;
+
   setNavDisabled(false);
 }
 
@@ -360,7 +344,7 @@ function geometryCenter(geom) {
   return { lat: sumLat / pts.length, lng: sumLng / pts.length };
 }
 
-// Blue+ rule: we’ll apply to the effective bucket (SI-local when Staten Mode is ON for SI features)
+// Blue+ rule on effective bucket
 function updateRecommendation(frame) {
   if (!recommendEl) return;
 
@@ -389,8 +373,7 @@ function updateRecommendation(frame) {
     const b = effectiveBucket(props);
     if (!allowed.has(b)) continue;
 
-    // Use effective rating for SI-local if available, otherwise NYC rating
-    const rating = (statenMode && isStatenIslandFeature(props) && Number.isFinite(Number(props.si_local_rating)))
+    const rating = (statenIslandMode && isStatenIslandFeature(props) && Number.isFinite(Number(props.si_local_rating)))
       ? Number(props.si_local_rating)
       : Number(props.rating ?? NaN);
 
@@ -411,8 +394,7 @@ function updateRecommendation(frame) {
         lng: center.lng,
         name: (props.zone_name || "").trim() || `Zone ${props.LocationID ?? ""}`,
         borough: (props.borough || "").trim(),
-        isSI: isStatenIslandFeature(props),
-        usedLocal: (statenMode && isStatenIslandFeature(props) && Number.isFinite(Number(props.si_local_rating))),
+        usedLocal: (statenIslandMode && isStatenIslandFeature(props) && Number.isFinite(Number(props.si_local_rating))),
       };
     }
   }
@@ -454,7 +436,6 @@ let timeline = [];
 let minutesOfWeek = [];
 let currentFrame = null;
 
-// Popup
 function buildPopupHTML(props) {
   const zoneName = (props.zone_name || "").trim();
   const borough = (props.borough || "").trim();
@@ -465,7 +446,7 @@ function buildPopupHTML(props) {
   const pay = props.avg_driver_pay == null ? "n/a" : props.avg_driver_pay.toFixed(2);
 
   let extra = "";
-  if (statenMode && isStatenIslandFeature(props) && Number.isFinite(Number(props.si_local_rating))) {
+  if (statenIslandMode && isStatenIslandFeature(props) && Number.isFinite(Number(props.si_local_rating))) {
     extra = `<div style="margin-top:6px;"><b>Staten Local Rating:</b> ${props.si_local_rating} (${prettyBucket(props.si_local_bucket)})</div>`;
   }
 
@@ -482,9 +463,8 @@ function buildPopupHTML(props) {
 }
 
 function renderFrame(frame) {
-  // Annotate SI local ratings if needed
   currentFrame = frame;
-  if (statenMode) applyStatenLocalView(currentFrame);
+  if (statenIslandMode) applyStatenLocalView(currentFrame);
 
   timeLabel.textContent = formatNYCLabel(currentFrame.time);
 
@@ -553,12 +533,10 @@ async function loadTimeline() {
   await loadFrame(idx);
 }
 
-// Re-render on zoom (no network)
 map.on("zoomend", () => {
   if (currentFrame) renderFrame(currentFrame);
 });
 
-// Debounced slider
 let sliderDebounce = null;
 slider.addEventListener("input", () => {
   const idx = Number(slider.value);
