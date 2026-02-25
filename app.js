@@ -1,39 +1,45 @@
-/* =========================================================
-   NYC TLC Hotspot Map — app.js
-   KEEP ALL EXISTING FEATURES EXACTLY + Friends Presence
-   - Legend minimize
-   - Zoom-based label visibility
-   - NYC-time slider/timeline
-   - Staten Island Mode (SI-local percentile recolor, persisted)
-   - Blue+ closer-weighted recommendations + Navigate link
-   - Stable Auto-center logic (suppression during programmatic pan/zoom)
-   - Live GPS arrow rotation from heading/bearing
-   - 5-minute auto-refresh
-   - Friends: username saved, sign-in/out, auto sign-out after 30 min inactive,
-              show other users realtime, YOUR name bubble does NOT rotate
-   ========================================================= */
-
 const RAILWAY_BASE = "https://web-production-78f67.up.railway.app";
 const BIN_MINUTES = 20;
 
 // Refresh current frame every 5 minutes
 const REFRESH_MS = 5 * 60 * 1000;
 
-// ---------- Friends / Presence settings ----------
-const PRESENCE_POLL_MS = 4000;         // how often we fetch other users
-const PRESENCE_PUSH_MS = 3500;         // how often we POST our own location
-const INACTIVE_SIGNOUT_MS = 30 * 60 * 1000; // 30 minutes
+// Friends / presence
+const PRESENCE_POLL_MS = 5000;
+const PRESENCE_PUSH_MS = 8000;
+const INACTIVE_SIGNOUT_MINUTES = 30;
 
-// LocalStorage keys
-const LS_KEY_USERNAME = "friends_username";
-const LS_KEY_SIGNED_IN = "friends_signed_in"; // "1" or "0"
-const LS_KEY_SESSION = "friends_session_token"; // stable per device unless cleared
+/* =========================================================
+   Auth (Option A)
+   - Username saved forever
+   - Signed-in flag saved; after Sign Out it stays signed out even on refresh
+   ========================================================= */
+const LS_USER = "fhv_username";
+const LS_SIGNED = "fhv_signed_in";
+const LS_CLIENT = "fhv_client_id";
 
-// NOTE: Backend endpoints expected (won't break map if missing):
-// POST  /presence/signin   {username, session_token}
-// POST  /presence/signout  {username, session_token}
-// POST  /presence/update   {username, session_token, lat, lng, heading, ts}
-// GET   /presence/list     -> {users:[{username,lat,lng,heading,updated_at_ms}]}  (any similar shape accepted)
+function getOrCreateClientId() {
+  let id = localStorage.getItem(LS_CLIENT);
+  if (!id) {
+    id = (crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`);
+    localStorage.setItem(LS_CLIENT, id);
+  }
+  return id;
+}
+const CLIENT_ID = getOrCreateClientId();
+
+function getSavedUsername() {
+  return (localStorage.getItem(LS_USER) || "").trim();
+}
+function setSavedUsername(u) {
+  localStorage.setItem(LS_USER, (u || "").trim());
+}
+function isSignedIn() {
+  return (localStorage.getItem(LS_SIGNED) || "0") === "1";
+}
+function setSignedIn(v) {
+  localStorage.setItem(LS_SIGNED, v ? "1" : "0");
+}
 
 // ---------- Legend minimize ----------
 const legendEl = document.getElementById("legend");
@@ -127,8 +133,8 @@ function pickClosestIndex(minutesOfWeekArr, target) {
 }
 
 // ---------- Network ----------
-async function fetchJSON(url, opts = {}) {
-  const res = await fetch(url, { cache: "no-store", mode: "cors", ...opts });
+async function fetchJSON(url) {
+  const res = await fetch(url, { cache: "no-store", mode: "cors" });
   const text = await res.text();
   if (!res.ok) throw new Error(`${res.status} ${res.statusText} @ ${url} :: ${text.slice(0, 200)}`);
   try {
@@ -137,14 +143,21 @@ async function fetchJSON(url, opts = {}) {
     throw new Error(`Invalid JSON @ ${url} :: ${text.slice(0, 200)}`);
   }
 }
-
-// POST helper (friends)
-async function postJSON(url, bodyObj) {
-  return fetchJSON(url, {
+async function postJSON(url, body) {
+  const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(bodyObj || {}),
+    body: JSON.stringify(body || {}),
+    mode: "cors",
+    cache: "no-store",
   });
+  const text = await res.text();
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText} @ ${url} :: ${text.slice(0, 200)}`);
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { ok: true };
+  }
 }
 
 // ---------- Bucket label ----------
@@ -181,7 +194,7 @@ function escapeHtml(s) {
 }
 
 /* =========================================================
-   Staten Island Mode (toggle anywhere)  — EXACT BEHAVIOR
+   Staten Island Mode (toggle anywhere)
    ========================================================= */
 const btnStatenIsland = document.getElementById("btnStatenIsland");
 const modeNote = document.getElementById("modeNote");
@@ -225,10 +238,8 @@ function applyStatenLocalView(frame) {
     let lo = 0, hi = n - 1, ans = -1;
     while (lo <= hi) {
       const mid = (lo + hi) >> 1;
-      if (sorted[mid] <= r) {
-        ans = mid;
-        lo = mid + 1;
-      } else hi = mid - 1;
+      if (sorted[mid] <= r) { ans = mid; lo = mid + 1; }
+      else hi = mid - 1;
     }
     if (n <= 1) return 0;
     return Math.max(0, Math.min(1, ans / (n - 1)));
@@ -280,7 +291,7 @@ if (btnStatenIsland) {
     statenIslandMode = !statenIslandMode;
     localStorage.setItem(LS_KEY_STATEN, statenIslandMode ? "1" : "0");
     syncStatenIslandUI();
-    if (currentFrame) renderFrame(currentFrame); // re-render regardless of your location
+    if (currentFrame) renderFrame(currentFrame);
   });
 }
 
@@ -313,7 +324,7 @@ function labelHTML(props, zoom) {
 }
 
 /* =========================================================
-   Recommendation + Navigation  — EXACT BEHAVIOR
+   Recommendation + Navigation
    ========================================================= */
 const recommendEl = document.getElementById("recommendLine");
 const navBtn = document.getElementById("navBtn");
@@ -377,8 +388,7 @@ function geometryCenter(geom) {
 
   if (!pts.length) return null;
 
-  let sumLng = 0,
-    sumLat = 0;
+  let sumLng = 0, sumLat = 0;
   for (const [lng, lat] of pts) {
     sumLng += lng;
     sumLat += lat;
@@ -386,7 +396,6 @@ function geometryCenter(geom) {
   return { lat: sumLat / pts.length, lng: sumLng / pts.length };
 }
 
-// Blue+ rule on effective bucket
 function updateRecommendation(frame) {
   if (!recommendEl) return;
 
@@ -415,10 +424,9 @@ function updateRecommendation(frame) {
     const b = effectiveBucket(props);
     if (!allowed.has(b)) continue;
 
-    const rating =
-      statenIslandMode && isStatenIslandFeature(props) && Number.isFinite(Number(props.si_local_rating))
-        ? Number(props.si_local_rating)
-        : Number(props.rating ?? NaN);
+    const rating = (statenIslandMode && isStatenIslandFeature(props) && Number.isFinite(Number(props.si_local_rating)))
+      ? Number(props.si_local_rating)
+      : Number(props.rating ?? NaN);
 
     if (!Number.isFinite(rating)) continue;
 
@@ -437,7 +445,7 @@ function updateRecommendation(frame) {
         lng: center.lng,
         name: (props.zone_name || "").trim() || `Zone ${props.LocationID ?? ""}`,
         borough: (props.borough || "").trim(),
-        usedLocal: statenIslandMode && isStatenIslandFeature(props) && Number.isFinite(Number(props.si_local_rating)),
+        usedLocal: (statenIslandMode && isStatenIslandFeature(props) && Number.isFinite(Number(props.si_local_rating))),
       };
     }
   }
@@ -463,13 +471,13 @@ function updateRecommendation(frame) {
   });
 }
 
-/* =========================================================
-   Leaflet map  — EXACT BEHAVIOR
-   ========================================================= */
+// ---------- Leaflet map ----------
 const slider = document.getElementById("slider");
 const timeLabel = document.getElementById("timeLabel");
+const lockedOverlay = document.getElementById("lockedOverlay");
 
-const map = L.map("map", { zoomControl: true }).setView([40.7128, -74.0060], 11);
+// DO NOT REVERT: start zoomed OUT to see more boroughs
+const map = L.map("map", { zoomControl: true }).setView([40.7128, -74.0060], 10);
 
 L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
   attribution: "&copy; OpenStreetMap &copy; CARTO",
@@ -480,6 +488,7 @@ let geoLayer = null;
 let timeline = [];
 let minutesOfWeek = [];
 let currentFrame = null;
+let timelineLoaded = false;
 
 function buildPopupHTML(props) {
   const zoneName = (props.zone_name || "").trim();
@@ -492,21 +501,13 @@ function buildPopupHTML(props) {
 
   let extra = "";
   if (statenIslandMode && isStatenIslandFeature(props) && Number.isFinite(Number(props.si_local_rating))) {
-    extra = `<div style="margin-top:6px;"><b>Staten Local Rating:</b> ${props.si_local_rating} (${prettyBucket(
-      props.si_local_bucket
-    )})</div>`;
+    extra = `<div style="margin-top:6px;"><b>Staten Local Rating:</b> ${props.si_local_rating} (${prettyBucket(props.si_local_bucket)})</div>`;
   }
 
   return `
     <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; font-size:13px;">
-      <div style="font-weight:800; margin-bottom:2px;">${escapeHtml(
-        zoneName || `Zone ${props.LocationID ?? ""}`
-      )}</div>
-      ${
-        borough
-          ? `<div style="opacity:0.8; margin-bottom:6px;">${escapeHtml(borough)}</div>`
-          : `<div style="margin-bottom:6px;"></div>`
-      }
+      <div style="font-weight:800; margin-bottom:2px;">${escapeHtml(zoneName || `Zone ${props.LocationID ?? ""}`)}</div>
+      ${borough ? `<div style="opacity:0.8; margin-bottom:6px;">${escapeHtml(borough)}</div>` : `<div style="margin-bottom:6px;"></div>`}
       <div><b>NYC Rating:</b> ${rating} (${prettyBucket(bucket)})</div>
       ${extra}
       <div style="margin-top:6px;"><b>Pickups (last ${BIN_MINUTES} min):</b> ${pickups}</div>
@@ -570,7 +571,7 @@ async function loadFrame(idx) {
 
 async function loadTimeline() {
   const t = await fetchJSON(`${RAILWAY_BASE}/timeline`);
-  timeline = Array.isArray(t) ? t : t.timeline || [];
+  timeline = Array.isArray(t) ? t : (t.timeline || []);
   if (!timeline.length) throw new Error("Timeline empty. Run /generate once on Railway.");
 
   minutesOfWeek = timeline.map(minuteOfWeekFromIso);
@@ -583,6 +584,7 @@ async function loadTimeline() {
   const idx = pickClosestIndex(minutesOfWeek, nowMinWeek);
   slider.value = String(idx);
 
+  timelineLoaded = true;
   await loadFrame(idx);
 }
 
@@ -592,7 +594,7 @@ map.on("zoomend", () => {
 
 let sliderDebounce = null;
 slider.addEventListener("input", () => {
-  if (!isSignedIn()) return; // signed out => no access
+  if (!signedIn) return;
   const idx = Number(slider.value);
   if (sliderDebounce) clearTimeout(sliderDebounce);
   sliderDebounce = setTimeout(() => loadFrame(idx).catch(console.error), 80);
@@ -602,6 +604,7 @@ slider.addEventListener("input", () => {
    Auto-center button (inside bottom bar) - stable logic
    ========================================================= */
 const btnCenter = document.getElementById("btnCenter");
+const btnRecenter = document.getElementById("btnRecenter");
 let autoCenter = true;
 
 let suppressAutoDisableUntil = 0;
@@ -634,6 +637,16 @@ if (btnCenter) {
   });
 }
 
+if (btnRecenter) {
+  btnRecenter.addEventListener("pointerdown", (e) => e.stopPropagation());
+  btnRecenter.addEventListener("touchstart", (e) => e.stopPropagation(), { passive: true });
+  btnRecenter.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (userLatLng) suppressAutoDisableFor(900, () => map.setView(userLatLng, Math.max(map.getZoom(), 12), { animate: true }));
+  });
+}
+
 function disableAutoCenterBecauseUserIsExploring() {
   if (Date.now() < suppressAutoDisableUntil) return;
   if (!autoCenter) return;
@@ -643,335 +656,54 @@ function disableAutoCenterBecauseUserIsExploring() {
 map.on("dragstart", disableAutoCenterBecauseUserIsExploring);
 map.on("zoomstart", disableAutoCenterBecauseUserIsExploring);
 
-/* =========================================================
-   Friends UI + State (NO DUPLICATE BUTTONS)
-   ========================================================= */
-let presenceBtn = null;
-let presenceStatusEl = null;
+/* =========================
+   Live location arrow + auto-center
+   ========================= */
+let gpsFirstFixDone = false;
+let navMarker = null;
+let geoWatchId = null;
+let lastPos = null;
+let lastHeadingDeg = 0;
+let lastMoveTs = 0;
 
-function ensureSessionToken() {
-  let tok = localStorage.getItem(LS_KEY_SESSION);
-  if (!tok) {
-    tok = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
-    localStorage.setItem(LS_KEY_SESSION, tok);
-  }
-  return tok;
-}
+let signedIn = isSignedIn();
+let username = getSavedUsername();
 
-function getUsername() {
-  return (localStorage.getItem(LS_KEY_USERNAME) || "").trim();
-}
-
-function isSignedIn() {
-  return (localStorage.getItem(LS_KEY_SIGNED_IN) || "0") === "1" && !!getUsername();
-}
-
-function setSignedInFlag(v) {
-  localStorage.setItem(LS_KEY_SIGNED_IN, v ? "1" : "0");
-}
-
-function updatePresenceUI() {
-  // Create once, never duplicates
-  if (!legendEl) return;
-
-  // Put the auth row inside .legendBody (under nav row)
-  const body = legendEl.querySelector(".legendBody");
-  if (!body) return;
-
-  // remove any accidental duplicates from older code
-  const dupes = body.querySelectorAll("#presenceRow");
-  if (dupes.length > 1) {
-    for (let i = 1; i < dupes.length; i++) dupes[i].remove();
-  }
-
-  let row = body.querySelector("#presenceRow");
-  if (!row) {
-    row = document.createElement("div");
-    row.id = "presenceRow";
-    row.className = "navRow";
-    row.style.marginTop = "2px";
-    row.style.marginBottom = "6px";
-    row.style.gap = "8px";
-
-    // insert AFTER the existing navRow if present, else at top
-    const navRow = body.querySelector(".navRow");
-    if (navRow && navRow.parentElement === body) {
-      navRow.insertAdjacentElement("afterend", row);
-    } else {
-      body.insertAdjacentElement("afterbegin", row);
-    }
-  }
-
-  // button
-  presenceBtn = row.querySelector("#btnPresenceAuth");
-  if (!presenceBtn) {
-    presenceBtn = document.createElement("button");
-    presenceBtn.id = "btnPresenceAuth";
-    presenceBtn.type = "button";
-    // reuse your existing CSS button class if present
-    presenceBtn.className = "modeBtn";
-    presenceBtn.textContent = "Sign in";
-    presenceBtn.addEventListener("pointerdown", (e) => e.stopPropagation());
-    presenceBtn.addEventListener("touchstart", (e) => e.stopPropagation(), { passive: true });
-    presenceBtn.addEventListener("click", async (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-
-      if (isSignedIn()) {
-        await signOutFlow("manual");
-      } else {
-        await signInFlow();
-      }
-    });
-    row.appendChild(presenceBtn);
-  }
-
-  // status
-  presenceStatusEl = row.querySelector("#presenceStatus");
-  if (!presenceStatusEl) {
-    presenceStatusEl = document.createElement("div");
-    presenceStatusEl.id = "presenceStatus";
-    presenceStatusEl.style.fontFamily = "system-ui,-apple-system,Segoe UI,Roboto,Arial";
-    presenceStatusEl.style.fontSize = "10px";
-    presenceStatusEl.style.fontWeight = "800";
-    presenceStatusEl.style.opacity = "0.85";
-    presenceStatusEl.style.alignSelf = "center";
-    presenceStatusEl.style.whiteSpace = "nowrap";
-    row.appendChild(presenceStatusEl);
-  }
-
-  if (isSignedIn()) {
-    const u = getUsername();
-    presenceBtn.textContent = "Sign out";
-    presenceBtn.classList.add("on");
-    presenceStatusEl.textContent = `Online: ${u}`;
-  } else {
-    presenceBtn.textContent = "Sign in";
-    presenceBtn.classList.remove("on");
-    presenceStatusEl.textContent = "Offline";
-  }
-}
-
-updatePresenceUI();
-
-/* =========================================================
-   Friends markers (other users) + YOUR marker (with name)
-   IMPORTANT FIXES:
-   - Name bubble does NOT rotate with arrow
-   - No duplicates
-   ========================================================= */
-let friendsLayer = L.layerGroup().addTo(map);
-let friendsByName = new Map(); // username -> marker
-
-function makePersonIcon(username, isSelf) {
-  // We keep your existing arrow CSS classes for the arrow itself.
-  // Rotation will be applied ONLY to the arrow wrapper (.navArrowWrap), not the name bubble.
-  const safeName = escapeHtml(username || "");
-  const nameHtml = safeName
-    ? `<div class="navNameBubble" style="
-        position:absolute; left: 34px; top: 50%;
-        transform: translateY(-50%);
-        background: rgba(255,255,255,0.86);
-        border: 1px solid rgba(0,0,0,0.18);
-        border-radius: 999px;
-        padding: 3px 10px;
-        font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
-        font-weight: 950;
-        font-size: 12px;
-        color: #111;
-        box-shadow: 0 2px 6px rgba(0,0,0,0.08);
-        white-space: nowrap;
-        pointer-events:none;
-      ">${safeName}</div>`
-    : "";
-
-  // A small ring under self makes it easy to spot without changing your CSS file:
-  const ring = isSelf
-    ? `<div style="
-         position:absolute; left: 50%; top: 50%;
-         width: 36px; height: 36px; border-radius: 999px;
-         border: 2px solid rgba(0,160,255,0.55);
-         transform: translate(-50%,-50%);
-         pointer-events:none;
-       "></div>`
-    : "";
-
-  const html = `
-    <div class="personWrap" style="position:relative; width: 180px; height: 42px; pointer-events:none;">
-      ${ring}
-      <div class="navArrowWrap navPulse" style="position:absolute; left:15px; top:21px; transform: translate(-50%,-50%);">
-        <div class="navArrow"></div>
-      </div>
-      ${nameHtml}
-    </div>
-  `;
-
+function makeNavIcon(name, isFriend) {
+  const safeName = escapeHtml((name || "").trim() || "User");
   return L.divIcon({
     className: "",
-    html,
-    iconSize: [180, 42],
-    iconAnchor: [15, 21],
+    html: `
+      <div class="navArrowWrap ${isFriend ? "" : "navPulse"}">
+        <div class="navArrow ${isFriend ? "friendArrow" : ""}"></div>
+        <div class="navName">${safeName}</div>
+      </div>
+    `,
+    iconSize: [30, 30],
+    iconAnchor: [15, 15],
   });
+}
+
+function setMarkerName(marker, name) {
+  const el = marker?.getElement?.();
+  const n = el?.querySelector?.(".navName");
+  if (n) n.textContent = (name || "").trim();
+}
+
+function setArrowRotation(marker, deg) {
+  const el = marker?.getElement?.();
+  const a = el?.querySelector?.(".navArrow");
+  if (!a) return;
+  a.style.transform = `translate(-50%, -55%) rotate(${deg}deg)`;
 }
 
 function setMarkerMoving(marker, isMoving) {
   const el = marker?.getElement?.();
-  if (!el) return;
-  const wrap = el.querySelector(".navArrowWrap");
+  const wrap = el?.querySelector?.(".navArrowWrap");
   if (!wrap) return;
   wrap.classList.toggle("navMoving", !!isMoving);
   wrap.classList.toggle("navPulse", !isMoving);
 }
-
-function setMarkerRotation(marker, deg) {
-  const el = marker?.getElement?.();
-  if (!el) return;
-  const wrap = el.querySelector(".navArrowWrap");
-  if (!wrap) return;
-  wrap.style.transform = `translate(-50%,-50%) rotate(${deg}deg)`;
-}
-
-/* =========================================================
-   Sign-in/out behavior (map access control)
-   - Sign out => lose access to demand polygons (no timeline/frames)
-   - Refresh does NOT auto sign-in unless LS_KEY_SIGNED_IN == "1"
-   - Username is saved, so next sign-in is one tap (no retype)
-   - Auto sign-out after 30 minutes inactive
-   ========================================================= */
-let timelineLoadedOnce = false;
-let geoWatchId = null;
-let startedLocationOnce = false;
-
-let lastActiveMs = Date.now();
-function bumpActivity() {
-  lastActiveMs = Date.now();
-}
-
-map.on("click", bumpActivity);
-map.on("dragstart", bumpActivity);
-map.on("zoomstart", bumpActivity);
-
-async function signInFlow() {
-  // If username exists, don’t force retype.
-  let username = getUsername();
-  if (!username) {
-    username = (prompt("Enter a username to be visible to friends:", "") || "").trim();
-    if (!username) return;
-    // keep it simple and safe
-    username = username.replace(/\s+/g, "_").slice(0, 24);
-    localStorage.setItem(LS_KEY_USERNAME, username);
-  }
-
-  // You only become “signed in” when you explicitly sign in (not by refresh)
-  setSignedInFlag(true);
-  bumpActivity();
-  updatePresenceUI();
-
-  // Tell backend (best effort)
-  try {
-    await postJSON(`${RAILWAY_BASE}/presence/signin`, {
-      username,
-      session_token: ensureSessionToken(),
-    });
-  } catch (e) {
-    // Backend may not have it yet — do not break the map
-    console.warn("presence/signin failed:", e?.message || e);
-  }
-
-  enableMapAccess();
-  startPresenceLoops();
-}
-
-async function signOutFlow(reason = "manual") {
-  const username = getUsername();
-  setSignedInFlag(false);
-  updatePresenceUI();
-
-  // Stop sharing and hide everyone immediately
-  stopPresenceLoops();
-  clearFriends();
-  stopLocationWatch();
-
-  // Remove access to demand polygons
-  disableMapAccess();
-
-  // Tell backend (best effort)
-  try {
-    await postJSON(`${RAILWAY_BASE}/presence/signout`, {
-      username,
-      session_token: ensureSessionToken(),
-      reason,
-    });
-  } catch (e) {
-    console.warn("presence/signout failed:", e?.message || e);
-  }
-}
-
-function disableMapAccess() {
-  // clear geo layer
-  if (geoLayer) {
-    geoLayer.remove();
-    geoLayer = null;
-  }
-  currentFrame = null;
-
-  // disable slider interaction
-  if (slider) slider.disabled = true;
-
-  // disable nav
-  setNavDestination(null);
-
-  // show message
-  if (timeLabel) timeLabel.textContent = "Signed out — tap Sign in to use the map";
-  if (recommendEl) recommendEl.textContent = "Recommended: sign in to get suggestions";
-}
-
-function enableMapAccess() {
-  if (slider) slider.disabled = false;
-
-  // Load timeline/frames only when signed in
-  if (!timelineLoadedOnce) {
-    loadTimeline()
-      .then(() => {
-        timelineLoadedOnce = true;
-      })
-      .catch((err) => {
-        console.error(err);
-        timeLabel.textContent = `Error loading timeline: ${err.message}`;
-      });
-  } else {
-    // re-render if we still have currentFrame cached elsewhere (we clear it on signout)
-    // so simply reload current slider index
-    const idx = Number(slider.value || "0");
-    loadFrame(idx).catch((e) => console.warn(e));
-  }
-
-  // Start GPS only when signed in
-  if (!startedLocationOnce) startLocationWatch();
-  startedLocationOnce = true;
-}
-
-function maybeAutoSignout() {
-  if (!isSignedIn()) return;
-  const idle = Date.now() - lastActiveMs;
-  if (idle >= INACTIVE_SIGNOUT_MS) {
-    signOutFlow("inactive_30min").catch(console.warn);
-  }
-}
-
-// check inactivity
-setInterval(maybeAutoSignout, 30 * 1000);
-
-/* =========================================================
-   Live location arrow + auto-center (SIGNED-IN ONLY)
-   - uses same movement logic
-   - your name bubble stays readable (NOT rotating)
-   ========================================================= */
-let gpsFirstFixDone = false;
-let navMarker = null;
-let lastPos = null;
-let lastHeadingDeg = 0;
-let lastMoveTs = 0;
 
 function computeBearingDeg(from, to) {
   const toRad = (x) => (x * Math.PI) / 180;
@@ -990,50 +722,46 @@ function computeBearingDeg(from, to) {
 }
 
 function stopLocationWatch() {
-  if (geoWatchId != null && navigator.geolocation && navigator.geolocation.clearWatch) {
-    try {
-      navigator.geolocation.clearWatch(geoWatchId);
-    } catch {}
+  if (geoWatchId != null && navigator.geolocation?.clearWatch) {
+    try { navigator.geolocation.clearWatch(geoWatchId); } catch {}
   }
   geoWatchId = null;
-
-  if (navMarker) {
-    navMarker.remove();
-    navMarker = null;
-  }
-
-  userLatLng = null;
-  lastPos = null;
   gpsFirstFixDone = false;
+  lastPos = null;
   lastHeadingDeg = 0;
   lastMoveTs = 0;
+  userLatLng = null;
+
+  if (navMarker) {
+    try { navMarker.remove(); } catch {}
+  }
+  navMarker = null;
 }
 
 function startLocationWatch() {
+  if (!signedIn) return;
+
   if (!("geolocation" in navigator)) {
     if (recommendEl) recommendEl.textContent = "Recommended: location not supported";
     return;
   }
-  if (!isSignedIn()) return;
 
-  // Create your marker once
-  const uname = getUsername() || "You";
-  navMarker = L.marker([40.7128, -74.0060], {
-    icon: makePersonIcon(uname, true),
-    interactive: false,
-    zIndexOffset: 9999,
-  }).addTo(map);
+  if (!navMarker) {
+    navMarker = L.marker([40.7128, -74.0060], {
+      icon: makeNavIcon(username || "Me", false),
+      interactive: false,
+      zIndexOffset: 9999,
+    }).addTo(map);
+  } else {
+    navMarker.setIcon(makeNavIcon(username || "Me", false));
+  }
 
   geoWatchId = navigator.geolocation.watchPosition(
     (pos) => {
-      if (!isSignedIn()) return; // if user signed out while watch is still running
-
       const lat = pos.coords.latitude;
       const lng = pos.coords.longitude;
       const heading = pos.coords.heading;
       const ts = pos.timestamp || Date.now();
-
-      bumpActivity();
 
       userLatLng = { lat, lng };
       if (navMarker) navMarker.setLatLng(userLatLng);
@@ -1058,14 +786,13 @@ function startLocationWatch() {
 
       lastPos = { lat, lng, ts };
 
-      if (navMarker) {
-        setMarkerRotation(navMarker, lastHeadingDeg);
-        setMarkerMoving(navMarker, isMoving);
-      }
+      setArrowRotation(navMarker, lastHeadingDeg);
+      setMarkerMoving(navMarker, isMoving);
+      setMarkerName(navMarker, username || "Me");
 
       if (!gpsFirstFixDone) {
         gpsFirstFixDone = true;
-        const targetZoom = Math.max(map.getZoom(), 14);
+        const targetZoom = Math.max(map.getZoom(), 12);
         suppressAutoDisableFor(1200, () => map.setView(userLatLng, targetZoom, { animate: true }));
       } else {
         if (autoCenter) {
@@ -1089,28 +816,109 @@ function startLocationWatch() {
 
   setInterval(() => {
     const now = Date.now();
-    const recentlyMoved = lastMoveTs && now - lastMoveTs < 5000;
+    const recentlyMoved = lastMoveTs && (now - lastMoveTs) < 5000;
     if (navMarker) setMarkerMoving(navMarker, !!recentlyMoved);
   }, 1200);
 }
 
 /* =========================================================
-   Friends presence loops (poll + push)
+   Friends (presence)
    ========================================================= */
 let presencePollTimer = null;
 let presencePushTimer = null;
+const friendMarkers = new Map(); // client_id -> L.marker
 
 function clearFriends() {
-  for (const [, m] of friendsByName) {
-    try {
-      m.remove();
-    } catch {}
+  for (const m of friendMarkers.values()) {
+    try { m.remove(); } catch {}
   }
-  friendsByName.clear();
+  friendMarkers.clear();
+}
+
+async function presenceUpsert() {
+  if (!signedIn) return;
+  const payload = {
+    client_id: CLIENT_ID,
+    username: username || "",
+    lat: userLatLng?.lat ?? null,
+    lng: userLatLng?.lng ?? null,
+    heading: Number.isFinite(lastHeadingDeg) ? lastHeadingDeg : null,
+  };
   try {
-    friendsLayer.clearLayers();
-  } catch {}
-  friendsLayer = L.layerGroup().addTo(map);
+    await postJSON(`${RAILWAY_BASE}/presence/upsert`, payload);
+  } catch (e) {
+    console.warn("presenceUpsert failed:", e?.message || e);
+  }
+}
+
+function upsertFriendMarker(u) {
+  const id = u.client_id;
+  if (!id || id === CLIENT_ID) return; // IMPORTANT: never draw yourself as a friend
+  if (!Number.isFinite(Number(u.lat)) || !Number.isFinite(Number(u.lng))) return;
+
+  const lat = Number(u.lat);
+  const lng = Number(u.lng);
+  const heading = Number.isFinite(Number(u.heading)) ? Number(u.heading) : 0;
+  const name = (u.username || "Friend").toString();
+
+  let m = friendMarkers.get(id);
+  if (!m) {
+    m = L.marker([lat, lng], {
+      icon: makeNavIcon(name, true),
+      interactive: false,
+      zIndexOffset: 9000,
+    }).addTo(map);
+    friendMarkers.set(id, m);
+  } else {
+    m.setLatLng([lat, lng]);
+    setMarkerName(m, name);
+  }
+
+  setArrowRotation(m, heading);
+}
+
+async function pollFriends() {
+  if (!signedIn) return;
+  try {
+    const resp = await fetchJSON(`${RAILWAY_BASE}/presence/list?max_age_min=${INACTIVE_SIGNOUT_MINUTES}`);
+    const users = Array.isArray(resp) ? resp : (resp.users || []);
+
+    const seen = new Set();
+    for (const u of users) {
+      if (!u || !u.client_id) continue;
+      if (u.client_id === CLIENT_ID) continue;
+      seen.add(u.client_id);
+      upsertFriendMarker(u);
+    }
+
+    for (const id of Array.from(friendMarkers.keys())) {
+      if (!seen.has(id)) {
+        try { friendMarkers.get(id)?.remove(); } catch {}
+        friendMarkers.delete(id);
+      }
+    }
+  } catch (e) {
+    console.warn("pollFriends failed:", e?.message || e);
+  }
+}
+
+async function presenceSignOut() {
+  try {
+    await postJSON(`${RAILWAY_BASE}/presence/signout`, { client_id: CLIENT_ID });
+  } catch (e) {
+    console.warn("presenceSignOut failed:", e?.message || e);
+  }
+}
+
+function startPresenceLoops() {
+  if (presencePollTimer) clearInterval(presencePollTimer);
+  if (presencePushTimer) clearInterval(presencePushTimer);
+
+  presencePollTimer = setInterval(pollFriends, PRESENCE_POLL_MS);
+  presencePushTimer = setInterval(presenceUpsert, PRESENCE_PUSH_MS);
+
+  pollFriends();
+  presenceUpsert();
 }
 
 function stopPresenceLoops() {
@@ -1118,130 +926,92 @@ function stopPresenceLoops() {
   if (presencePushTimer) clearInterval(presencePushTimer);
   presencePollTimer = null;
   presencePushTimer = null;
-}
-
-function startPresenceLoops() {
-  stopPresenceLoops();
-  if (!isSignedIn()) return;
-
-  // Poll other users
-  presencePollTimer = setInterval(() => {
-    fetchAndRenderFriends().catch((e) => console.warn("presence/list failed:", e?.message || e));
-  }, PRESENCE_POLL_MS);
-
-  // Push our location (best effort)
-  presencePushTimer = setInterval(() => {
-    pushMyPresence().catch((e) => console.warn("presence/update failed:", e?.message || e));
-  }, PRESENCE_PUSH_MS);
-
-  // Run once immediately
-  fetchAndRenderFriends().catch(() => {});
-  pushMyPresence().catch(() => {});
-}
-
-function normalizePresenceList(payload) {
-  // Accept a bunch of shapes safely:
-  // {users:[...]} OR [...] OR {data:[...]}
-  const arr =
-    (payload && Array.isArray(payload.users) && payload.users) ||
-    (payload && Array.isArray(payload.data) && payload.data) ||
-    (Array.isArray(payload) ? payload : []);
-  return arr
-    .map((u) => {
-      const username = (u.username || u.name || u.user || "").toString().trim();
-      const lat = Number(u.lat ?? u.latitude ?? NaN);
-      const lng = Number(u.lng ?? u.lon ?? u.longitude ?? NaN);
-      const heading = Number(u.heading ?? u.bearing ?? NaN);
-      const updated = Number(u.updated_at_ms ?? u.updated_at ?? u.ts ?? NaN);
-      if (!username || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-      return { username, lat, lng, heading: Number.isFinite(heading) ? heading : null, updated_at_ms: updated };
-    })
-    .filter(Boolean);
-}
-
-async function fetchAndRenderFriends() {
-  if (!isSignedIn()) return;
-
-  const username = getUsername();
-  const session_token = ensureSessionToken();
-
-  let payload;
-  try {
-    payload = await fetchJSON(`${RAILWAY_BASE}/presence/list?u=${encodeURIComponent(username)}&t=${encodeURIComponent(session_token)}`);
-  } catch (e) {
-    // If backend doesn’t have it yet, do nothing (map must still work)
-    return;
-  }
-
-  const list = normalizePresenceList(payload);
-  const now = Date.now();
-
-  // remove stale markers > 10 minutes (backend should do this too)
-  const alive = new Set();
-  for (const u of list) {
-    if (!u.username) continue;
-    if (u.username === username) continue;
-
-    // if timestamp exists and it's too old, skip
-    if (Number.isFinite(u.updated_at_ms) && now - u.updated_at_ms > 10 * 60 * 1000) continue;
-
-    alive.add(u.username);
-
-    let m = friendsByName.get(u.username);
-    if (!m) {
-      m = L.marker([u.lat, u.lng], {
-        icon: makePersonIcon(u.username, false),
-        interactive: false,
-        zIndexOffset: 9000,
-      });
-      m.addTo(friendsLayer);
-      friendsByName.set(u.username, m);
-    } else {
-      m.setLatLng([u.lat, u.lng]);
-    }
-
-    if (u.heading != null) setMarkerRotation(m, u.heading);
-    setMarkerMoving(m, true);
-  }
-
-  // delete friends no longer present
-  for (const [name, m] of friendsByName.entries()) {
-    if (!alive.has(name)) {
-      try {
-        m.remove();
-      } catch {}
-      friendsByName.delete(name);
-    }
-  }
-}
-
-async function pushMyPresence() {
-  if (!isSignedIn()) return;
-  if (!userLatLng) return;
-
-  const username = getUsername();
-  const session_token = ensureSessionToken();
-
-  // best-effort: don't block anything if missing backend
-  try {
-    await postJSON(`${RAILWAY_BASE}/presence/update`, {
-      username,
-      session_token,
-      lat: userLatLng.lat,
-      lng: userLatLng.lng,
-      heading: lastHeadingDeg,
-      ts: Date.now(),
-    });
-  } catch {
-    // ignore
-  }
+  clearFriends();
 }
 
 /* =========================================================
-   Auto-refresh every 5 minutes — EXACT BEHAVIOR
+   Auth UI (single Sign in/Sign out button)
+   ========================================================= */
+const btnAuth = document.getElementById("btnAuth");
+
+function setLocked(isLocked) {
+  if (lockedOverlay) lockedOverlay.classList.toggle("show", !!isLocked);
+
+  if (slider) slider.disabled = !!isLocked;
+  if (btnCenter) btnCenter.disabled = !!isLocked;
+  if (btnRecenter) btnRecenter.disabled = !!isLocked;
+  if (btnStatenIsland) btnStatenIsland.disabled = !!isLocked;
+
+  setNavDisabled(!!isLocked || !recommendedDest);
+}
+
+function syncAuthButton() {
+  if (!btnAuth) return;
+  btnAuth.textContent = signedIn ? "Sign out" : "Sign in";
+  btnAuth.classList.toggle("on", !!signedIn);
+}
+
+async function doSignIn() {
+  let u = getSavedUsername();
+  if (!u) {
+    u = (prompt("Enter a username (shown on the map):") || "").trim();
+    if (!u) return;
+    setSavedUsername(u);
+  }
+
+  username = u;
+  signedIn = true;
+  setSignedIn(true);
+  syncAuthButton();
+
+  setLocked(false);
+  if (recommendEl) recommendEl.textContent = "Recommended: …";
+  if (!timelineLoaded) {
+    timeLabel.textContent = "Loading…";
+    await loadTimeline();
+  }
+
+  startLocationWatch();
+  startPresenceLoops();
+}
+
+async function doSignOut() {
+  signedIn = false;
+  setSignedIn(false);
+  syncAuthButton();
+
+  stopPresenceLoops();
+  stopLocationWatch();
+  await presenceSignOut();
+
+  if (geoLayer) {
+    try { geoLayer.remove(); } catch {}
+    geoLayer = null;
+  }
+  currentFrame = null;
+  setNavDestination(null);
+
+  if (timeLabel) timeLabel.textContent = "Signed out";
+  if (recommendEl) recommendEl.textContent = "Sign in to use the map";
+
+  setLocked(true);
+}
+
+if (btnAuth) {
+  btnAuth.addEventListener("pointerdown", (e) => e.stopPropagation());
+  btnAuth.addEventListener("touchstart", (e) => e.stopPropagation(), { passive: true });
+  btnAuth.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    (signedIn ? doSignOut() : doSignIn()).catch(console.error);
+  });
+}
+
+/* =========================================================
+   Auto-refresh every 5 minutes
    ========================================================= */
 async function refreshCurrentFrame() {
-  if (!isSignedIn()) return;
+  if (!signedIn || !timelineLoaded) return;
   try {
     const idx = Number(slider.value || "0");
     await loadFrame(idx);
@@ -1251,30 +1021,20 @@ async function refreshCurrentFrame() {
 }
 setInterval(refreshCurrentFrame, REFRESH_MS);
 
-/* =========================================================
-   Boot (IMPORTANT):
-   - DO NOT auto-sign-in on refresh.
-   - Username may be saved, but user must be signed in flag == "1"
-   ========================================================= */
-function boot() {
-  // Always build UI (and de-dup)
-  updatePresenceUI();
+// Boot
+setNavDestination(null);
+syncAuthButton();
 
-  // Always start with nav disabled until we have a frame + location
-  setNavDestination(null);
-
-  // If they are signed in, enable access and start loops
-  if (isSignedIn()) {
-    enableMapAccess();
-    startPresenceLoops();
-    startLocationWatch();
-    startedLocationOnce = true;
-    timelineLoadedOnce = false; // force loadTimeline path
-    // enableMapAccess() will load timeline
-  } else {
-    // Signed out: no access to frames
-    disableMapAccess();
-  }
+if (signedIn) {
+  setLocked(false);
+  loadTimeline().catch((err) => {
+    console.error(err);
+    timeLabel.textContent = `Error loading timeline: ${err.message}`;
+  });
+  startLocationWatch();
+  startPresenceLoops();
+} else {
+  setLocked(true);
+  if (timeLabel) timeLabel.textContent = "Signed out";
+  if (recommendEl) recommendEl.textContent = "Sign in to use the map";
 }
-
-boot();
