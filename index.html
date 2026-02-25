@@ -22,38 +22,44 @@
     html, body { height: 100%; margin: 0; }
     #map { height: 100vh; width: 100vw; }
 
-    /* Legend box */
+    /* =========================================================
+       DO NOT REVERT:
+       Make legend ~2x smaller for visibility.
+       ========================================================= */
     .legend {
       position: absolute;
-      top: 10px;
-      left: 10px;
+      top: 8px;
+      left: 8px;
       z-index: 1000;
       background: rgba(255,255,255,0.92);
-      padding: 8px 8px 7px 8px;
-      border-radius: 12px;
-      box-shadow: 0 6px 18px rgba(0,0,0,0.15);
+      padding: 6px 6px 6px 6px;          /* smaller */
+      border-radius: 10px;               /* smaller */
+      box-shadow: 0 5px 14px rgba(0,0,0,0.14);
       font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
-      max-width: 240px;
+      max-width: 170px;                  /* smaller */
+      transform: scale(0.86);            /* ~2x smaller feel */
+      transform-origin: top left;
     }
+
     .legendHeader{
       display:flex;
       align-items:center;
       justify-content:space-between;
-      gap:10px;
-      margin-bottom:6px;
+      gap:8px;
+      margin-bottom:4px;
     }
     .legend h3 {
       margin: 0;
-      font-size: 14px;
+      font-size: 12px;                   /* smaller */
       font-weight: 900;
     }
     .legendToggleBtn{
       border: none;
       background: rgba(0,0,0,0.06);
       border-radius: 10px;
-      padding: 6px 10px;
+      padding: 4px 8px;                  /* smaller */
       font-weight: 950;
-      font-size: 13px;
+      font-size: 12px;                   /* smaller */
       cursor: pointer;
     }
     .legendToggleBtn:active{ transform: scale(0.98); }
@@ -62,7 +68,7 @@
 
     .legend .recommendLine{
       margin: 0 0 6px 0;
-      font-size: 11px;
+      font-size: 10px;                   /* smaller */
       font-weight: 900;
       opacity: 0.92;
       line-height: 1.15;
@@ -80,10 +86,10 @@
       text-decoration:none;
       border:none;
       border-radius: 999px;
-      padding: 7px 10px;
+      padding: 6px 9px;                  /* smaller */
       font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
       font-weight: 950;
-      font-size: 12px;
+      font-size: 11px;                   /* smaller */
       cursor: pointer;
       background: rgba(0,160,255,0.12);
       color: #0b2a3a;
@@ -93,71 +99,102 @@
       opacity: 0.45;
       pointer-events: none;
     }
-    .signOutBtn{
+
+    .modeBtn{
+      border:none;
+      border-radius: 999px;
+      padding: 6px 9px;                  /* smaller */
+      font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
+      font-weight: 950;
+      font-size: 11px;                   /* smaller */
+      cursor: pointer;
       background: rgba(0,0,0,0.06);
       color: #111;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
     }
+    .modeBtn:active{ transform: scale(0.98); }
+    .modeBtn.on { outline: 2px solid rgba(0,160,255,0.45); }
+
+    /* NEW: Sign out button style (same family as mode button) */
+    .signOutBtn{
+      border:none;
+      border-radius: 999px;
+      padding: 6px 9px;
+      font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
+      font-weight: 950;
+      font-size: 11px;
+      cursor: pointer;
+      background: rgba(255,0,0,0.10);
+      color: #3a0b0b;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+    }
+    .signOutBtn:active{ transform: scale(0.98); }
 
     .legend .row {
       display: flex;
       align-items: center;
-      gap: 8px;
-      margin: 5px 0;
-      font-size: 13px;
+      gap: 7px;
+      margin: 4px 0;
+      font-size: 11px;                   /* smaller */
       font-weight: 800;
     }
     .legend .swatch {
-      width: 14px;
-      height: 14px;
+      width: 12px;                       /* smaller */
+      height: 12px;                      /* smaller */
       border-radius: 4px;
       border: 1px solid rgba(0,0,0,0.15);
-      flex: 0 0 14px;
+      flex: 0 0 12px;
     }
     .legend .sub {
-      margin-top: 7px;
-      font-size: 11px;
+      margin-top: 6px;
+      font-size: 10px;                   /* smaller */
       opacity: 0.85;
-      line-height: 1.25;
+      line-height: 1.2;
       font-weight: 700;
     }
 
-    /* Bottom slider */
+    /* =========================================================
+       DO NOT REVERT:
+       Bottom slider box moved DOWN + ~2x thinner.
+       ========================================================= */
     .sliderWrap {
       position: absolute;
       left: 10px;
       right: 10px;
-      bottom: 10px;
+      bottom: 2px;                       /* lower */
       z-index: 1000;
       background: rgba(255,255,255,0.92);
       border-radius: 14px;
       box-shadow: 0 6px 18px rgba(0,0,0,0.15);
-      padding: 8px 10px 10px 10px;
+      padding: 6px 10px 6px 10px;        /* thinner */
       font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
     }
     .timeLabel {
-      font-size: 18px;
+      font-size: 16px;                   /* smaller */
       font-weight: 950;
-      margin: 0 0 6px 0;
+      margin: 0 0 4px 0;
     }
     input[type="range"] {
       width: 100%;
-      height: 22px;
+      height: 18px;                      /* thinner */
       margin: 0;
     }
 
-    /* Small auto-center button */
+    /* Small button in bottom box */
     .centerBtnInBar{
-      margin-top: 8px;
+      margin-top: 6px;                   /* tighter */
       display:flex;
       justify-content:flex-end;
     }
     .toggleBtnSmall{
       border:none;
       border-radius: 999px;
-      padding: 7px 10px;
+      padding: 6px 9px;                  /* smaller */
       font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
       font-weight: 950;
-      font-size: 12px;
+      font-size: 11px;                   /* smaller */
       cursor: pointer;
       background: rgba(255,255,255,0.95);
       box-shadow: 0 6px 18px rgba(0,0,0,0.18);
@@ -165,9 +202,17 @@
     .toggleBtnSmall.on { outline: 2px solid rgba(0,160,255,0.45); }
     .toggleBtnSmall:active { transform: scale(0.98); }
 
-    /* Zone labels */
-    .zone-label { background: transparent; border: none; box-shadow: none; color: #111; text-align: center; pointer-events: none; }
-    .zone-label .zn, .zone-label .br {
+    /* ZONE LABELS (tooltips) - unchanged */
+    .zone-label {
+      background: transparent;
+      border: none;
+      box-shadow: none;
+      color: #111;
+      text-align: center;
+      pointer-events: none;
+    }
+    .zone-label .zn,
+    .zone-label .br {
       display: inline-block;
       background: rgba(255,255,255,0.86);
       border: 1px solid rgba(0,0,0,0.18);
@@ -180,158 +225,150 @@
       text-overflow: ellipsis;
       box-shadow: 0 2px 6px rgba(0,0,0,0.08);
     }
-    .zone-label .zn { font-weight: 950; }
+    .zone-label .zn { font-weight: 950; letter-spacing: 0.1px; }
     .zone-label .br { font-weight: 900; opacity: 0.7; padding: 1px 6px; border-radius: 10px; }
+
     .zone-label.z10 .zn { font-size: 10px; }
     .zone-label.z11 .zn { font-size: 11px; }
     .zone-label.z12 .zn { font-size: 12px; }
     .zone-label.z13 .zn { font-size: 13px; }
     .zone-label.z14 .zn { font-size: 14px; }
     .zone-label.z15 .zn { font-size: 15px; }
-    .zone-label.z10 .br, .zone-label.z11 .br, .zone-label.z12 .br, .zone-label.z13 .br, .zone-label.z14 .br { font-size: 0px; padding: 0; border: 0; }
+
+    .zone-label.z10 .br,
+    .zone-label.z11 .br,
+    .zone-label.z12 .br,
+    .zone-label.z13 .br,
+    .zone-label.z14 .br { font-size: 0px; padding: 0; border: 0; }
     .zone-label.z15 .br { font-size: 4px; }
 
-    /* Presence marker (arrow + label) */
-    .userWrap{
+    /* Live location arrow marker (YOU + OTHERS share same base arrow) */
+    .navArrowWrap{
+      width: 30px;
+      height: 30px;
       position: relative;
-      width: 34px;
-      height: 34px;
       transform-origin: 50% 50%;
-      will-change: transform, filter;
+      will-change: transform, filter, box-shadow;
     }
-
-    /* Make arrow more directional (pointier) */
-    .userArrow{
-      position:absolute;
-      left:50%;
-      top:50%;
-      width:0;height:0;
-      transform: translate(-50%, -58%);
-      border-left: 7px solid transparent;
-      border-right: 7px solid transparent;
-      border-bottom: 20px solid #111;
+    .navArrow{
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 0;
+      height: 0;
+      transform: translate(-50%, -55%);
+      border-left: 9px solid transparent;
+      border-right: 9px solid transparent;
+      border-bottom: 18px solid #111;
       filter: drop-shadow(0 2px 2px rgba(0,0,0,0.35));
     }
-    /* Add a small “stem” to make direction clearer */
-    .userStem{
-      position:absolute;
-      left:50%;
-      top:50%;
-      width: 6px;
-      height: 10px;
-      background:#111;
-      transform: translate(-50%, 6px);
-      border-radius: 3px;
-      filter: drop-shadow(0 2px 2px rgba(0,0,0,0.25));
-    }
-
-    .userNameTag{
-      position:absolute;
-      left:50%;
-      top:100%;
-      transform: translate(-50%, 6px);
-      background: rgba(255,255,255,0.92);
-      border: 1px solid rgba(0,0,0,0.18);
-      border-radius: 999px;
-      padding: 2px 7px;
-      font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
-      font-weight: 950;
-      font-size: 11px;
-      white-space: nowrap;
-      max-width: 120px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.14);
-      pointer-events: none;
-      color: #111;
-    }
-
-    .userMoving .userArrow,
-    .userMoving .userStem{
+    .navMoving .navArrow{
       filter:
         drop-shadow(0 2px 2px rgba(0,0,0,0.35))
         drop-shadow(0 0 6px rgba(0,160,255,0.95))
         drop-shadow(0 0 12px rgba(0,160,255,0.75));
     }
-
-    @keyframes userPulseRing {
+    @keyframes pulseRing {
       0%   { transform: translate(-50%, -50%) scale(0.8); opacity: 0.75; }
       70%  { transform: translate(-50%, -50%) scale(1.25); opacity: 0.05; }
       100% { transform: translate(-50%, -50%) scale(1.25); opacity: 0.0; }
     }
-    .userPulse::after{
+    .navPulse::after{
       content:"";
       position:absolute;
       left:50%;
       top:50%;
-      width: 28px;
-      height: 28px;
+      width: 26px;
+      height: 26px;
       border-radius: 999px;
       border: 2px solid rgba(0,160,255,0.9);
       transform: translate(-50%, -50%);
-      animation: userPulseRing 1.5s ease-out infinite;
+      animation: pulseRing 1.5s ease-out infinite;
       pointer-events:none;
     }
 
-    /* Username modal */
+    /* NEW: other users label bubble (next to their arrow) */
+    .userLabel {
+      position: absolute;
+      left: 50%;
+      top: 100%;
+      transform: translate(-50%, 6px);
+      white-space: nowrap;
+      font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
+      font-weight: 950;
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.92);
+      border: 1px solid rgba(0,0,0,0.18);
+      box-shadow: 0 2px 6px rgba(0,0,0,0.12);
+      color: #111;
+      pointer-events: none;
+      max-width: 160px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* NEW: Username modal */
     .modalBackdrop{
       position: fixed;
       inset: 0;
+      z-index: 2000;
       background: rgba(0,0,0,0.35);
-      z-index: 5000;
       display: none;
       align-items: center;
       justify-content: center;
-      padding: 16px;
-    }
-    .modalBackdrop.show{ display:flex; }
-
-    .modalCard{
-      width: min(420px, 100%);
-      background: rgba(255,255,255,0.97);
-      border-radius: 14px;
-      box-shadow: 0 10px 35px rgba(0,0,0,0.25);
-      padding: 14px 14px 12px 14px;
+      padding: 18px;
       font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
     }
+    .modalBackdrop.show{ display: flex; }
+    .modalCard{
+      width: min(420px, 100%);
+      background: rgba(255,255,255,0.96);
+      border-radius: 16px;
+      box-shadow: 0 18px 60px rgba(0,0,0,0.25);
+      padding: 14px 14px 12px 14px;
+    }
     .modalTitle{
-      font-size: 16px;
+      margin: 0 0 6px 0;
       font-weight: 950;
-      margin: 0 0 8px 0;
+      font-size: 16px;
     }
     .modalSub{
-      font-size: 12px;
-      opacity: 0.85;
       margin: 0 0 10px 0;
-      line-height: 1.25;
       font-weight: 700;
+      opacity: 0.78;
+      font-size: 13px;
+      line-height: 1.25;
     }
-    .modalRow{ display:flex; gap:8px; align-items:center; }
+    .modalRow{ display:flex; gap:10px; }
     .modalInput{
-      flex:1;
-      border: 1px solid rgba(0,0,0,0.2);
+      flex: 1;
+      border: 1px solid rgba(0,0,0,0.18);
       border-radius: 12px;
       padding: 10px 12px;
       font-size: 14px;
       font-weight: 800;
       outline: none;
+      background: #fff;
     }
     .modalBtn{
-      border:none;
+      border: none;
       border-radius: 12px;
       padding: 10px 12px;
-      font-weight: 950;
       font-size: 14px;
+      font-weight: 950;
       cursor: pointer;
-      background: rgba(0,160,255,0.16);
+      background: rgba(0,160,255,0.15);
       color: #0b2a3a;
     }
-    .modalErr{
-      margin-top: 10px;
+    .modalBtn:active{ transform: scale(0.98); }
+    .modalHint{
+      margin: 10px 0 0 0;
       font-size: 12px;
-      font-weight: 800;
-      color: #b00020;
-      min-height: 16px;
+      font-weight: 700;
+      opacity: 0.75;
+      line-height: 1.25;
     }
   </style>
 </head>
@@ -350,7 +387,8 @@
 
       <div class="navRow">
         <a id="navBtn" class="navBtn disabled" href="#" target="_blank" rel="noopener">Navigate</a>
-        <button id="signOutBtn" class="navBtn signOutBtn" type="button">Sign out</button>
+        <button id="btnStatenIsland" class="modeBtn" type="button">Staten Island Mode: OFF</button>
+        <button id="btnSignOut" class="signOutBtn" type="button">Sign out</button>
       </div>
 
       <div class="row"><span class="swatch" style="background:#00b050"></span> Green = Highest</div>
@@ -360,7 +398,7 @@
       <div class="row"><span class="swatch" style="background:#ffd400"></span> Yellow = Below Normal</div>
       <div class="row"><span class="swatch" style="background:#e60000"></span> Red = Very Low / Avoid</div>
 
-      <div class="sub">
+      <div id="modeNote" class="sub" style="margin-top:7px;">
         Colors come from rating (1–100) for the selected 20-minute window.<br/>
         Time label is NYC time.
       </div>
@@ -370,22 +408,21 @@
   <div class="sliderWrap">
     <div id="timeLabel" class="timeLabel">Loading…</div>
     <input id="slider" type="range" min="0" max="0" value="0" step="1" />
-
     <div class="centerBtnInBar">
       <button id="btnCenter" class="toggleBtnSmall on" type="button">Auto-center: ON</button>
     </div>
   </div>
 
-  <!-- Username modal -->
+  <!-- NEW: Username modal -->
   <div id="nameModal" class="modalBackdrop" aria-hidden="true">
-    <div class="modalCard" role="dialog" aria-modal="true" aria-label="Enter username">
-      <div class="modalTitle">Enter a username</div>
-      <div class="modalSub">This name will show next to your arrow. It’s saved on this device.</div>
+    <div class="modalCard" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <div id="modalTitle" class="modalTitle">Enter a username</div>
+      <p class="modalSub">This name shows next to your arrow so friends can recognize you. Saved on this device.</p>
       <div class="modalRow">
-        <input id="nameInput" class="modalInput" placeholder="2–20 chars (letters/numbers)" maxlength="20" />
-        <button id="nameGo" class="modalBtn" type="button">Start</button>
+        <input id="nameInput" class="modalInput" type="text" maxlength="24" placeholder="e.g. Frank" />
+        <button id="nameSave" class="modalBtn" type="button">Continue</button>
       </div>
-      <div id="nameErr" class="modalErr"></div>
+      <p class="modalHint">Privacy: if you’re inactive for 30 minutes (or tab is background), you’ll auto sign out.</p>
     </div>
   </div>
 
