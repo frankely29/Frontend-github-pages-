@@ -4,6 +4,14 @@ const BIN_MINUTES = 20;
 // Refresh current frame every 5 minutes
 const REFRESH_MS = 5 * 60 * 1000;
 
+// WebSocket endpoint
+const WS_BASE = RAILWAY_BASE.replace("https://", "wss://").replace("http://", "ws://");
+const WS_URL = `${WS_BASE}/ws`;
+
+const PRESENCE_PING_MS = 15000;     // keepalive ping
+const SEND_LOC_MS = 2500;           // send location updates
+const USERNAME_KEY = "tlc_hotspot_username";
+
 // ---------- Legend minimize ----------
 const legendEl = document.getElementById("legend");
 const legendToggleBtn = document.getElementById("legendToggle");
@@ -167,11 +175,6 @@ function escapeHtml(s) {
 // ---------- Recommendation + Navigation ----------
 const recommendEl = document.getElementById("recommendLine");
 const navBtn = document.getElementById("navBtn");
-const modeNoteEl = document.getElementById("modeNote");
-
-// Staten Island mode toggle (works anywhere)
-const btnStatenIsland = document.getElementById("btnStatenIsland");
-let statenIslandMode = false;
 
 let userLatLng = null;
 let recommendedDest = null; // {lat,lng,name,borough,rating,distMi}
@@ -180,7 +183,6 @@ function setNavDisabled(disabled) {
   if (!navBtn) return;
   navBtn.classList.toggle("disabled", !!disabled);
 }
-
 function setNavDestination(dest) {
   recommendedDest = dest || null;
   if (!navBtn) return;
@@ -198,35 +200,6 @@ function setNavDestination(dest) {
 
   setNavDisabled(false);
 }
-
-function syncStatenButton() {
-  if (!btnStatenIsland) return;
-  btnStatenIsland.textContent = `Staten Island Mode: ${statenIslandMode ? "ON" : "OFF"}`;
-  btnStatenIsland.classList.toggle("on", !!statenIslandMode);
-
-  if (modeNoteEl) {
-    if (statenIslandMode) {
-      modeNoteEl.innerHTML =
-        `Staten Island Mode is ON: recommendations compare Staten Island zones only (still real data).<br/>Time label is NYC time.`;
-    } else {
-      modeNoteEl.innerHTML =
-        `Colors come from rating (1–100) for the selected 20-minute window.<br/>Time label is NYC time.`;
-    }
-  }
-}
-
-if (btnStatenIsland) {
-  btnStatenIsland.addEventListener("pointerdown", (e) => e.stopPropagation());
-  btnStatenIsland.addEventListener("click", (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    statenIslandMode = !statenIslandMode;
-    syncStatenButton();
-
-    if (currentFrame) updateRecommendation(currentFrame);
-  });
-}
-syncStatenButton();
 
 function haversineMiles(a, b) {
   const R = 3958.7613;
@@ -271,10 +244,9 @@ function geometryCenter(geom) {
 }
 
 /**
- * Recommendation logic:
- * - Normal mode: ONLY Blue/Purple/Green (blue+). Closer matters.
- * - Staten Island mode: ONLY Staten Island zones, allow ANY bucket
- *   (because SI is often low demand). Still uses real rating values.
+ * Recommendation must be BLUE or higher:
+ * blue/purple/green only
+ * Closer should matter a lot.
  */
 function updateRecommendation(frame) {
   if (!recommendEl) return;
@@ -292,12 +264,8 @@ function updateRecommendation(frame) {
     return;
   }
 
-  const allowedBluePlus = new Set(["blue", "purple", "green"]);
-
-  // Distance penalty:
-  // Normal mode: stronger (closer wins among good zones)
-  // Staten mode: slightly weaker (SI is sparse; don't over-penalize distance)
-  const DIST_PENALTY_PER_MILE = statenIslandMode ? 2.5 : 4.0;
+  const allowed = new Set(["blue", "purple", "green"]);
+  const DIST_PENALTY_PER_MILE = 4.0;
 
   let best = null;
 
@@ -305,26 +273,16 @@ function updateRecommendation(frame) {
     const props = f.properties || {};
     const geom = f.geometry;
 
+    const bucket = (props.bucket || "").trim();
+    if (!allowed.has(bucket)) continue;
+
     const rating = Number(props.rating ?? NaN);
     if (!Number.isFinite(rating)) continue;
-
-    const borough = (props.borough || "").trim();
-    const bucket = (props.bucket || "").trim();
-
-    if (statenIslandMode) {
-      // Staten Island zones only
-      if (borough !== "Staten Island") continue;
-      // allow all buckets so you can compare within SI
-    } else {
-      // Normal mode: require blue+
-      if (!allowedBluePlus.has(bucket)) continue;
-    }
 
     const center = geometryCenter(geom);
     if (!center) continue;
 
     const dMi = haversineMiles(userLatLng, center);
-
     const score = rating - dMi * DIST_PENALTY_PER_MILE;
 
     if (!best || score > best.score) {
@@ -335,18 +293,13 @@ function updateRecommendation(frame) {
         lat: center.lat,
         lng: center.lng,
         name: (props.zone_name || "").trim() || `Zone ${props.LocationID ?? ""}`,
-        borough,
-        bucket,
+        borough: (props.borough || "").trim(),
       };
     }
   }
 
   if (!best) {
-    if (statenIslandMode) {
-      recommendEl.textContent = "Recommended: no Staten Island data in this frame";
-    } else {
-      recommendEl.textContent = "Recommended: no Blue+ zone nearby right now";
-    }
+    recommendEl.textContent = "Recommended: no Blue+ zone nearby right now";
     setNavDestination(null);
     return;
   }
@@ -369,8 +322,8 @@ function updateRecommendation(frame) {
 const slider = document.getElementById("slider");
 const timeLabel = document.getElementById("timeLabel");
 
-// DO NOT REVERT: default zoom OUT to see more boroughs
-const map = L.map("map", { zoomControl: true }).setView([40.7128, -74.0060], 10);
+// Keep your current default view
+const map = L.map("map", { zoomControl: true }).setView([40.7128, -74.0060], 11);
 
 L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
   attribution: "&copy; OpenStreetMap &copy; CARTO",
@@ -483,7 +436,7 @@ slider.addEventListener("input", () => {
 });
 
 /* =========================================================
-   Auto-center button (inside bottom bar) - stable logic
+   Auto-center button - stable logic
    ========================================================= */
 const btnCenter = document.getElementById("btnCenter");
 let autoCenter = true;
@@ -527,36 +480,242 @@ function disableAutoCenterBecauseUserIsExploring() {
 map.on("dragstart", disableAutoCenterBecauseUserIsExploring);
 map.on("zoomstart", disableAutoCenterBecauseUserIsExploring);
 
-/* =========================
-   Live location arrow + auto-center
-   ========================= */
-let gpsFirstFixDone = false;
-let navMarker = null;
-let lastPos = null;
-let lastHeadingDeg = 0;
-let lastMoveTs = 0;
+/* =========================================================
+   Username modal (saved once)
+   ========================================================= */
+const nameModal = document.getElementById("nameModal");
+const nameInput = document.getElementById("nameInput");
+const nameGo = document.getElementById("nameGo");
+const nameErr = document.getElementById("nameErr");
 
-function makeNavIcon() {
+let myName = null;
+
+function showNameModal(errText = "") {
+  if (!nameModal) return;
+  nameModal.classList.add("show");
+  nameModal.setAttribute("aria-hidden", "false");
+  if (nameErr) nameErr.textContent = errText || "";
+  if (nameInput) {
+    nameInput.value = "";
+    setTimeout(() => nameInput.focus(), 50);
+  }
+}
+
+function hideNameModal() {
+  if (!nameModal) return;
+  nameModal.classList.remove("show");
+  nameModal.setAttribute("aria-hidden", "true");
+  if (nameErr) nameErr.textContent = "";
+}
+
+function validUsername(s) {
+  const t = (s || "").trim();
+  if (t.length < 2 || t.length > 20) return false;
+  // allow letters numbers underscore dash space
+  if (!/^[a-zA-Z0-9 _-]+$/.test(t)) return false;
+  return true;
+}
+
+/* =========================================================
+   Presence: WebSocket realtime users
+   ========================================================= */
+let ws = null;
+let wsOpen = false;
+let pingTimer = null;
+
+const otherMarkers = new Map(); // name -> L.marker
+let myMarker = null;
+
+function makeUserIcon(name, moving) {
+  const safeName = escapeHtml(name || "");
+  const wrapClass = `userWrap ${moving ? "userMoving" : ""} ${moving ? "" : "userPulse"}`;
   return L.divIcon({
     className: "",
-    html: `<div id="navWrap" class="navArrowWrap navPulse"><div class="navArrow"></div></div>`,
-    iconSize: [30, 30],
-    iconAnchor: [15, 15],
+    html: `
+      <div class="${wrapClass}">
+        <div class="userArrow"></div>
+        <div class="userStem"></div>
+        <div class="userNameTag">${safeName}</div>
+      </div>
+    `,
+    iconSize: [34, 46],
+    iconAnchor: [17, 17],
   });
 }
 
-function setNavVisual(isMoving) {
-  const el = document.getElementById("navWrap");
+function rotateMarker(marker, deg) {
+  // rotate the inner wrap only
+  const el = marker?.getElement?.();
   if (!el) return;
-  el.classList.toggle("navMoving", !!isMoving);
-  el.classList.toggle("navPulse", !isMoving);
+  const wrap = el.querySelector(".userWrap");
+  if (!wrap) return;
+  wrap.style.transform = `rotate(${deg || 0}deg)`;
 }
 
-function setNavRotation(deg) {
-  const el = document.getElementById("navWrap");
-  if (!el) return;
-  el.style.transform = `rotate(${deg}deg)`;
+function upsertUserMarker(u) {
+  const name = u.name;
+  if (!name) return;
+
+  const lat = u.lat, lng = u.lng;
+  if (typeof lat !== "number" || typeof lng !== "number") return;
+
+  const heading = (typeof u.heading === "number" && Number.isFinite(u.heading)) ? u.heading : 0;
+  const moving = !!u.moving;
+
+  // My marker
+  if (name === myName) {
+    if (!myMarker) {
+      myMarker = L.marker([lat, lng], {
+        icon: makeUserIcon(name, moving),
+        interactive: false,
+        zIndexOffset: 10000,
+      }).addTo(map);
+    } else {
+      myMarker.setLatLng([lat, lng]);
+      myMarker.setIcon(makeUserIcon(name, moving));
+    }
+    rotateMarker(myMarker, heading);
+    return;
+  }
+
+  // Other markers
+  let m = otherMarkers.get(name);
+  if (!m) {
+    m = L.marker([lat, lng], {
+      icon: makeUserIcon(name, moving),
+      interactive: false,
+      zIndexOffset: 9000,
+    }).addTo(map);
+    otherMarkers.set(name, m);
+  } else {
+    m.setLatLng([lat, lng]);
+    m.setIcon(makeUserIcon(name, moving));
+  }
+  rotateMarker(m, heading);
 }
+
+function removeMissingUsers(namesSet) {
+  for (const [name, marker] of otherMarkers.entries()) {
+    if (!namesSet.has(name)) {
+      try { marker.remove(); } catch {}
+      otherMarkers.delete(name);
+    }
+  }
+  // If I'm missing (server removed me), also remove my marker
+  if (myMarker && myName && !namesSet.has(myName)) {
+    try { myMarker.remove(); } catch {}
+    myMarker = null;
+  }
+}
+
+function connectWS() {
+  if (!myName) return;
+
+  if (ws) {
+    try { ws.close(); } catch {}
+    ws = null;
+  }
+
+  const url = `${WS_URL}?name=${encodeURIComponent(myName)}`;
+  ws = new WebSocket(url);
+
+  ws.onopen = () => {
+    wsOpen = true;
+    // Start ping
+    if (pingTimer) clearInterval(pingTimer);
+    pingTimer = setInterval(() => {
+      try {
+        if (wsOpen) ws.send(JSON.stringify({ type: "ping" }));
+      } catch {}
+    }, PRESENCE_PING_MS);
+  };
+
+  ws.onmessage = (ev) => {
+    let msg = null;
+    try { msg = JSON.parse(ev.data); } catch { return; }
+
+    if (msg.type === "error") {
+      // Username taken or invalid
+      const err = msg.error || "Error";
+      try { ws.close(); } catch {}
+      wsOpen = false;
+      localStorage.removeItem(USERNAME_KEY);
+      myName = null;
+      showNameModal(err);
+      return;
+    }
+
+    if (msg.type === "users") {
+      const arr = Array.isArray(msg.users) ? msg.users : [];
+      const namesSet = new Set();
+      for (const u of arr) {
+        if (!u || !u.name) continue;
+        namesSet.add(u.name);
+        upsertUserMarker({
+          name: u.name,
+          lat: u.lat,
+          lng: u.lng,
+          heading: u.heading,
+          moving: u.moving
+        });
+      }
+      removeMissingUsers(namesSet);
+      return;
+    }
+  };
+
+  ws.onclose = () => {
+    wsOpen = false;
+    if (pingTimer) clearInterval(pingTimer);
+    pingTimer = null;
+  };
+
+  ws.onerror = () => {
+    // ignore; onclose will handle state
+  };
+}
+
+function wsSend(obj) {
+  try {
+    if (wsOpen && ws && ws.readyState === 1) ws.send(JSON.stringify(obj));
+  } catch {}
+}
+
+/* =========================================================
+   Sign out button
+   ========================================================= */
+const signOutBtn = document.getElementById("signOutBtn");
+if (signOutBtn) {
+  signOutBtn.addEventListener("click", () => {
+    // Tell server
+    wsSend({ type: "signout" });
+
+    // Local cleanup
+    localStorage.removeItem(USERNAME_KEY);
+    myName = null;
+
+    // Remove markers
+    if (myMarker) { try { myMarker.remove(); } catch {} myMarker = null; }
+    for (const m of otherMarkers.values()) { try { m.remove(); } catch {} }
+    otherMarkers.clear();
+
+    // Close WS
+    try { if (ws) ws.close(); } catch {}
+    ws = null;
+    wsOpen = false;
+
+    // Show modal again
+    showNameModal("");
+  });
+}
+
+/* =========================================================
+   Location watch: send to server + keep local auto-center
+   ========================================================= */
+let gpsFirstFixDone = false;
+let lastPos = null;
+let lastHeadingDeg = 0;
+let lastMoveTs = 0;
 
 function computeBearingDeg(from, to) {
   const toRad = (x) => (x * Math.PI) / 180;
@@ -580,21 +739,17 @@ function startLocationWatch() {
     return;
   }
 
-  navMarker = L.marker([40.7128, -74.0060], {
-    icon: makeNavIcon(),
-    interactive: false,
-    zIndexOffset: 9999,
-  }).addTo(map);
+  // Throttle sending
+  let lastSentTs = 0;
 
   navigator.geolocation.watchPosition(
     (pos) => {
       const lat = pos.coords.latitude;
       const lng = pos.coords.longitude;
-      const heading = pos.coords.heading;
+      const heading = pos.coords.heading; // may be null/NaN on iOS unless moving
       const ts = pos.timestamp || Date.now();
 
       userLatLng = { lat, lng };
-      if (navMarker) navMarker.setLatLng(userLatLng);
 
       let isMoving = false;
 
@@ -616,23 +771,29 @@ function startLocationWatch() {
 
       lastPos = { lat, lng, ts };
 
-      setNavRotation(lastHeadingDeg);
-      setNavVisual(isMoving);
-
+      // One-time zoom to you on first fix
       if (!gpsFirstFixDone) {
         gpsFirstFixDone = true;
-
-        // DO NOT REVERT: GPS first fix zoom more zoomed out (borough visibility)
-        const targetZoom = Math.max(map.getZoom(), 12);
-
+        const targetZoom = Math.max(map.getZoom(), 14);
         suppressAutoDisableFor(1200, () => map.setView(userLatLng, targetZoom, { animate: true }));
       } else {
-        if (autoCenter) {
-          suppressAutoDisableFor(700, () => map.panTo(userLatLng, { animate: true }));
-        }
+        if (autoCenter) suppressAutoDisableFor(700, () => map.panTo(userLatLng, { animate: true }));
       }
 
       if (currentFrame) updateRecommendation(currentFrame);
+
+      // Send to server (throttled)
+      const now = Date.now();
+      if (now - lastSentTs > SEND_LOC_MS) {
+        lastSentTs = now;
+        wsSend({
+          type: "loc",
+          lat,
+          lng,
+          heading: lastHeadingDeg,
+          moving: isMoving
+        });
+      }
     },
     (err) => {
       console.warn("Geolocation error:", err);
@@ -646,11 +807,22 @@ function startLocationWatch() {
     }
   );
 
+  // Keep pulse/visual state based on movement, and send occasional keepalive loc if stationary
   setInterval(() => {
     const now = Date.now();
     const recentlyMoved = lastMoveTs && (now - lastMoveTs) < 5000;
-    setNavVisual(!!recentlyMoved);
-  }, 1200);
+
+    // If we have a fix but we haven't sent in a while, send a keepalive location
+    if (userLatLng && wsOpen) {
+      wsSend({
+        type: "loc",
+        lat: userLatLng.lat,
+        lng: userLatLng.lng,
+        heading: lastHeadingDeg,
+        moving: !!recentlyMoved
+      });
+    }
+  }, 8000);
 }
 
 // ---------- Auto-refresh every 5 minutes ----------
@@ -664,10 +836,42 @@ async function refreshCurrentFrame() {
 }
 setInterval(refreshCurrentFrame, REFRESH_MS);
 
-// Boot
+// ---------- Boot ----------
 setNavDestination(null);
 loadTimeline().catch((err) => {
   console.error(err);
   timeLabel.textContent = `Error loading timeline: ${err.message}`;
 });
+
+// Username flow: load saved, else ask once
+(function initUsername() {
+  const saved = (localStorage.getItem(USERNAME_KEY) || "").trim();
+  if (saved && validUsername(saved)) {
+    myName = saved;
+    connectWS();
+    hideNameModal();
+  } else {
+    showNameModal("");
+  }
+
+  function tryStart() {
+    const candidate = (nameInput?.value || "").trim();
+    if (!validUsername(candidate)) {
+      if (nameErr) nameErr.textContent = "Use 2–20 chars: letters, numbers, space, _ or -";
+      return;
+    }
+    myName = candidate;
+    localStorage.setItem(USERNAME_KEY, myName);
+    hideNameModal();
+    connectWS();
+  }
+
+  if (nameGo) nameGo.addEventListener("click", tryStart);
+  if (nameInput) {
+    nameInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") tryStart();
+    });
+  }
+})();
+
 startLocationWatch();
