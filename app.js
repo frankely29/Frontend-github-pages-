@@ -140,7 +140,7 @@ function escapeHtml(s) {
     .replaceAll("'", "&#039;");
 }
 
-// ---------- Formatting helpers (NEW) ----------
+// ---------- Formatting helpers ----------
 function fmtNum(n, digits = 2) {
   const x = Number(n);
   if (!Number.isFinite(x)) return "n/a";
@@ -245,7 +245,6 @@ function syncStatenIslandUI() {
 }
 syncStatenIslandUI();
 
-// Harden touch/click so it always toggles (iPhone + Tesla)
 if (btnStatenIsland) {
   btnStatenIsland.addEventListener("pointerdown", (e) => e.stopPropagation());
   btnStatenIsland.addEventListener("touchstart", (e) => e.stopPropagation(), { passive: true });
@@ -256,7 +255,7 @@ if (btnStatenIsland) {
     statenIslandMode = !statenIslandMode;
     localStorage.setItem(LS_KEY_STATEN, statenIslandMode ? "1" : "0");
     syncStatenIslandUI();
-    if (currentFrame) renderFrame(currentFrame); // re-render regardless of your location
+    if (currentFrame) renderFrame(currentFrame);
   });
 }
 
@@ -326,7 +325,7 @@ function haversineMiles(a, b) {
   const dLat = toRad(b.lat - a.lat);
   const dLng = toRad(b.lng - a.lng);
   const lat1 = toRad(a.lat);
-  const lat2 = toRad(b.lat);
+  const lat2 = toRad(a.lat);
 
   const s1 = Math.sin(dLat / 2);
   const s2 = Math.sin(dLng / 2);
@@ -361,7 +360,6 @@ function geometryCenter(geom) {
   return { lat: sumLat / pts.length, lng: sumLng / pts.length };
 }
 
-// Blue+ rule on effective bucket
 function updateRecommendation(frame) {
   if (!recommendEl) return;
 
@@ -402,15 +400,15 @@ function updateRecommendation(frame) {
     const dMi = haversineMiles(userLatLng, center);
     const score = rating - dMi * DIST_PENALTY_PER_MILE;
 
-    // NEW: grab E/H if present so we can display it
-    const eh = Number(props.earnings_per_hour ?? NaN);
+    // Backend now uses earnings_per_hour = pay_per_clock_hour
+    const clockHr = Number(props.earnings_per_hour ?? NaN);
 
     if (!best || score > best.score) {
       best = {
         score,
         dMi,
         rating,
-        earnings_per_hour: eh,
+        clockHr,
         lat: center.lat,
         lng: center.lng,
         name: (props.zone_name || "").trim() || `Zone ${props.LocationID ?? ""}`,
@@ -429,9 +427,9 @@ function updateRecommendation(frame) {
   const distTxt = best.dMi >= 10 ? `${best.dMi.toFixed(0)} mi` : `${best.dMi.toFixed(1)} mi`;
   const bTxt = best.borough ? ` (${best.borough})` : "";
   const modeTag = best.usedLocal ? " (SI-local)" : "";
-  const ehTxt = Number.isFinite(best.earnings_per_hour) ? ` — E/H ${fmtMoney(best.earnings_per_hour, 2)}` : "";
+  const clockTxt = Number.isFinite(best.clockHr) ? ` — Clock $/hr ${fmtMoney(best.clockHr, 2)}` : "";
 
-  recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Rating ${best.rating}${modeTag}${ehTxt} — ${distTxt}`;
+  recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Rating ${best.rating}${modeTag}${clockTxt} — ${distTxt}`;
 
   setNavDestination({
     lat: best.lat,
@@ -470,9 +468,13 @@ function buildPopupHTML(props) {
   const pay = Number(props.avg_driver_pay ?? NaN);
   const miles = Number(props.avg_trip_miles ?? NaN);
   const timeSec = Number(props.avg_trip_time_sec ?? NaN);
-  const earnHr = Number(props.earnings_per_hour ?? NaN);
 
-  // NEW: derived “sanity check” numbers
+  // Backend:
+  // - earnings_per_hour = pay_per_clock_hour (reality-based wall clock)
+  // - active_trip_earnings_per_hour = engaged-time only (can be inflated)
+  const clockHr = Number(props.earnings_per_hour ?? NaN);
+  const activeHr = Number(props.active_trip_earnings_per_hour ?? NaN);
+
   const dollarsPerMile = (Number.isFinite(pay) && Number.isFinite(miles) && miles > 0) ? (pay / miles) : NaN;
   const dollarsPerMin = (Number.isFinite(pay) && Number.isFinite(timeSec) && timeSec > 0) ? (pay / (timeSec / 60)) : NaN;
 
@@ -491,8 +493,10 @@ function buildPopupHTML(props) {
       <div style="margin-top:8px;"><b>Pickups (last ${BIN_MINUTES} min):</b> ${pickups}</div>
       <div><b>Avg Driver Pay:</b> ${fmtMoney(pay, 2)}</div>
 
-      <div style="margin-top:8px;"><b>Earnings / Hour:</b> ${Number.isFinite(earnHr) ? fmtMoney(earnHr, 2) : "n/a"}</div>
-      <div><b>Avg Trip Miles:</b> ${Number.isFinite(miles) ? fmtNum(miles, 2) : "n/a"}</div>
+      <div style="margin-top:8px;"><b>Zone $/hr (clock):</b> ${Number.isFinite(clockHr) ? fmtMoney(clockHr, 2) : "n/a"}</div>
+      <div><b>Active-trip $/hr:</b> ${Number.isFinite(activeHr) ? fmtMoney(activeHr, 2) : "n/a"}</div>
+
+      <div style="margin-top:8px;"><b>Avg Trip Miles:</b> ${Number.isFinite(miles) ? fmtNum(miles, 2) : "n/a"}</div>
       <div><b>Avg Trip Time:</b> ${fmtMinutesFromSeconds(timeSec)}</div>
 
       <div style="margin-top:8px;"><b>$/Mile:</b> ${Number.isFinite(dollarsPerMile) ? fmtMoney(dollarsPerMile, 2) : "n/a"}</div>
