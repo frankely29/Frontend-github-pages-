@@ -140,6 +140,23 @@ function escapeHtml(s) {
     .replaceAll("'", "&#039;");
 }
 
+// ---------- Formatting helpers (NEW) ----------
+function fmtNum(n, digits = 2) {
+  const x = Number(n);
+  if (!Number.isFinite(x)) return "n/a";
+  return x.toFixed(digits);
+}
+function fmtMoney(n, digits = 2) {
+  const x = Number(n);
+  if (!Number.isFinite(x)) return "n/a";
+  return `$${x.toFixed(digits)}`;
+}
+function fmtMinutesFromSeconds(sec) {
+  const x = Number(sec);
+  if (!Number.isFinite(x) || x <= 0) return "n/a";
+  return `${(x / 60).toFixed(1)} min`;
+}
+
 /* =========================================================
    Staten Island Mode (toggle anywhere)
    ========================================================= */
@@ -385,11 +402,15 @@ function updateRecommendation(frame) {
     const dMi = haversineMiles(userLatLng, center);
     const score = rating - dMi * DIST_PENALTY_PER_MILE;
 
+    // NEW: grab E/H if present so we can display it
+    const eh = Number(props.earnings_per_hour ?? NaN);
+
     if (!best || score > best.score) {
       best = {
         score,
         dMi,
         rating,
+        earnings_per_hour: eh,
         lat: center.lat,
         lng: center.lng,
         name: (props.zone_name || "").trim() || `Zone ${props.LocationID ?? ""}`,
@@ -408,7 +429,9 @@ function updateRecommendation(frame) {
   const distTxt = best.dMi >= 10 ? `${best.dMi.toFixed(0)} mi` : `${best.dMi.toFixed(1)} mi`;
   const bTxt = best.borough ? ` (${best.borough})` : "";
   const modeTag = best.usedLocal ? " (SI-local)" : "";
-  recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Rating ${best.rating}${modeTag} — ${distTxt}`;
+  const ehTxt = Number.isFinite(best.earnings_per_hour) ? ` — E/H ${fmtMoney(best.earnings_per_hour, 2)}` : "";
+
+  recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Rating ${best.rating}${modeTag}${ehTxt} — ${distTxt}`;
 
   setNavDestination({
     lat: best.lat,
@@ -443,7 +466,15 @@ function buildPopupHTML(props) {
   const rating = props.rating ?? "";
   const bucket = props.bucket ?? "";
   const pickups = props.pickups ?? "";
-  const pay = props.avg_driver_pay == null ? "n/a" : props.avg_driver_pay.toFixed(2);
+
+  const pay = Number(props.avg_driver_pay ?? NaN);
+  const miles = Number(props.avg_trip_miles ?? NaN);
+  const timeSec = Number(props.avg_trip_time_sec ?? NaN);
+  const earnHr = Number(props.earnings_per_hour ?? NaN);
+
+  // NEW: derived “sanity check” numbers
+  const dollarsPerMile = (Number.isFinite(pay) && Number.isFinite(miles) && miles > 0) ? (pay / miles) : NaN;
+  const dollarsPerMin = (Number.isFinite(pay) && Number.isFinite(timeSec) && timeSec > 0) ? (pay / (timeSec / 60)) : NaN;
 
   let extra = "";
   if (statenIslandMode && isStatenIslandFeature(props) && Number.isFinite(Number(props.si_local_rating))) {
@@ -456,8 +487,16 @@ function buildPopupHTML(props) {
       ${borough ? `<div style="opacity:0.8; margin-bottom:6px;">${escapeHtml(borough)}</div>` : `<div style="margin-bottom:6px;"></div>`}
       <div><b>NYC Rating:</b> ${rating} (${prettyBucket(bucket)})</div>
       ${extra}
-      <div style="margin-top:6px;"><b>Pickups (last ${BIN_MINUTES} min):</b> ${pickups}</div>
-      <div><b>Avg Driver Pay:</b> $${pay}</div>
+
+      <div style="margin-top:8px;"><b>Pickups (last ${BIN_MINUTES} min):</b> ${pickups}</div>
+      <div><b>Avg Driver Pay:</b> ${fmtMoney(pay, 2)}</div>
+
+      <div style="margin-top:8px;"><b>Earnings / Hour:</b> ${Number.isFinite(earnHr) ? fmtMoney(earnHr, 2) : "n/a"}</div>
+      <div><b>Avg Trip Miles:</b> ${Number.isFinite(miles) ? fmtNum(miles, 2) : "n/a"}</div>
+      <div><b>Avg Trip Time:</b> ${fmtMinutesFromSeconds(timeSec)}</div>
+
+      <div style="margin-top:8px;"><b>$/Mile:</b> ${Number.isFinite(dollarsPerMile) ? fmtMoney(dollarsPerMile, 2) : "n/a"}</div>
+      <div><b>$/Minute:</b> ${Number.isFinite(dollarsPerMin) ? fmtMoney(dollarsPerMin, 2) : "n/a"}</div>
     </div>
   `;
 }
@@ -492,7 +531,7 @@ function renderFrame(frame) {
     },
     onEachFeature: (feature, layer) => {
       const props = feature.properties || {};
-      layer.bindPopup(buildPopupHTML(props), { maxWidth: 320 });
+      layer.bindPopup(buildPopupHTML(props), { maxWidth: 340 });
 
       const html = labelHTML(props, zoomNow);
       if (!html) return;
