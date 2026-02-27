@@ -5,7 +5,7 @@ const BIN_MINUTES = 20;
 const REFRESH_MS = 5 * 60 * 1000;
 
 // NEW: auto-center closer when following
-const AUTO_CENTER_MIN_ZOOM = 15; // was effectively 13 before
+const AUTO_CENTER_MIN_ZOOM = 13; // was effectively 15 before
 
 // ---------- Legend minimize ----------
 const legendEl = document.getElementById("legend");
