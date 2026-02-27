@@ -1,16 +1,11 @@
 const RAILWAY_BASE = "https://web-production-78f67.up.railway.app";
 const BIN_MINUTES = 20;
 
-// Auto-refresh current frame (no page reload)
-const REFRESH_MS = 60 * 1000;
-const TIMELINE_REFRESH_MS = 10 * 60 * 1000;
+// Refresh current frame every 5 minutes (no page reload needed)
+const REFRESH_MS = 5 * 60 * 1000;
 
-// MORE ZOOMED OUT (lower = zoomed out)
-const AUTO_FOLLOW_ZOOM = 13;
-
-// Grey zones treatment
-const GREY_IS_WORSE_THAN_RED = true;
-const GREY_MARKER_STYLE = "poop"; // "poop" | "x"
+// When auto-center is ON and you're moving, keep at least this zoom
+const AUTO_CENTER_MIN_ZOOM_MOVING = 15;
 
 // ---------- Legend minimize ----------
 const legendEl = document.getElementById("legend");
@@ -22,6 +17,7 @@ if (legendEl && legendToggleBtn) {
   });
 }
 
+/** LABEL VISIBILITY (mobile-friendly, demand-priority) */
 const LABEL_ZOOM_MIN = 10;
 const BOROUGH_ZOOM_SHOW = 15;
 const LABEL_MAX_CHARS_MID = 14;
@@ -29,7 +25,6 @@ const LABEL_MAX_CHARS_MID = 14;
 function shouldShowLabel(bucket, zoom) {
   if (zoom < LABEL_ZOOM_MIN) return false;
   const b = (bucket || "").trim();
-  if (b === "nodata") return false;
   if (zoom >= 15) return true;
   if (zoom === 14) return b !== "red";
   if (zoom === 13) return b === "green" || b === "purple" || b === "blue" || b === "sky";
@@ -115,6 +110,7 @@ async function fetchJSON(url) {
   }
 }
 
+// ---------- Bucket label ----------
 function prettyBucket(b) {
   const m = {
     green: "Highest",
@@ -123,11 +119,11 @@ function prettyBucket(b) {
     sky: "Normal",
     yellow: "Below Normal",
     red: "Very Low / Avoid",
-    nodata: "Worst / Avoid",
   };
   return m[b] || (b ?? "");
 }
 
+// ---------- Label helpers ----------
 function shortenLabel(text, maxChars) {
   const t = (text || "").trim();
   if (!t) return "";
@@ -147,6 +143,139 @@ function escapeHtml(s) {
     .replaceAll("'", "&#039;");
 }
 
+/* =========================================================
+   Staten Island Mode (toggle anywhere)
+   ========================================================= */
+const btnStatenIsland = document.getElementById("btnStatenIsland");
+const modeNote = document.getElementById("modeNote");
+
+const LS_KEY_STATEN = "staten_island_mode_enabled";
+let statenIslandMode = (localStorage.getItem(LS_KEY_STATEN) || "0") === "1";
+
+function isStatenIslandFeature(props) {
+  const b = (props?.borough || "").toString().toLowerCase();
+  return b.includes("staten");
+}
+
+function colorFromLocalRating(r) {
+  const x = Math.max(1, Math.min(100, Math.round(r)));
+  if (x >= 90) return { bucket: "green", color: "#00b050" };
+  if (x >= 80) return { bucket: "purple", color: "#8000ff" };
+  if (x >= 65) return { bucket: "blue", color: "#0066ff" };
+  if (x >= 45) return { bucket: "sky", color: "#66ccff" };
+  if (x >= 25) return { bucket: "yellow", color: "#ffd400" };
+  return { bucket: "red", color: "#e60000" };
+}
+
+function applyStatenLocalView(frame) {
+  const feats = frame?.polygons?.features || [];
+  if (!feats.length) return frame;
+
+  const siRatings = [];
+  for (const f of feats) {
+    const props = f.properties || {};
+    if (!isStatenIslandFeature(props)) continue;
+    const r = Number(props.rating ?? NaN);
+    if (!Number.isFinite(r)) continue;
+    siRatings.push(r);
+  }
+  if (siRatings.length < 3) return frame;
+
+  const sorted = siRatings.slice().sort((a, b) => a - b);
+  const n = sorted.length;
+
+  function percentileOfRating(r) {
+    let lo = 0, hi = n - 1, ans = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (sorted[mid] <= r) { ans = mid; lo = mid + 1; }
+      else hi = mid - 1;
+    }
+    if (n <= 1) return 0;
+    return Math.max(0, Math.min(1, ans / (n - 1)));
+  }
+
+  for (const f of feats) {
+    const props = f.properties || {};
+    if (!isStatenIslandFeature(props)) {
+      props.si_local_rating = null;
+      props.si_local_bucket = null;
+      props.si_local_color = null;
+      continue;
+    }
+    const r = Number(props.rating ?? NaN);
+    if (!Number.isFinite(r)) continue;
+
+    const p = percentileOfRating(r);
+    const localRating = 1 + 99 * p;
+
+    const { bucket, color } = colorFromLocalRating(localRating);
+    props.si_local_rating = Math.round(localRating);
+    props.si_local_bucket = bucket;
+    props.si_local_color = color;
+  }
+
+  return frame;
+}
+
+function syncStatenIslandUI() {
+  if (btnStatenIsland) {
+    btnStatenIsland.textContent = statenIslandMode ? "Staten Island Mode: ON" : "Staten Island Mode: OFF";
+    btnStatenIsland.classList.toggle("on", !!statenIslandMode);
+  }
+  if (modeNote) {
+    modeNote.innerHTML = statenIslandMode
+      ? `Staten Island Mode is <b>ON</b>: Staten Island colors are <b>relative within Staten Island</b> only.<br/>Other boroughs remain NYC-wide.`
+      : `Colors come from rating (1–100) for the selected 20-minute window.<br/>Time label is NYC time.`;
+  }
+}
+syncStatenIslandUI();
+
+if (btnStatenIsland) {
+  btnStatenIsland.addEventListener("pointerdown", (e) => e.stopPropagation());
+  btnStatenIsland.addEventListener("touchstart", (e) => e.stopPropagation(), { passive: true });
+
+  btnStatenIsland.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    statenIslandMode = !statenIslandMode;
+    localStorage.setItem(LS_KEY_STATEN, statenIslandMode ? "1" : "0");
+    syncStatenIslandUI();
+    if (currentFrame) renderFrame(currentFrame);
+  });
+}
+
+function effectiveBucket(props) {
+  if (statenIslandMode && isStatenIslandFeature(props) && props.si_local_bucket) return props.si_local_bucket;
+  return (props.bucket || "").trim();
+}
+function effectiveColor(props) {
+  if (statenIslandMode && isStatenIslandFeature(props) && props.si_local_color) return props.si_local_color;
+  const st = props?.style || {};
+  return st.fillColor || st.color || "#000";
+}
+
+function labelHTML(props, zoom) {
+  const name = (props.zone_name || "").trim();
+  if (!name) return "";
+
+  const b = effectiveBucket(props);
+  if (!shouldShowLabel(b, Math.round(zoom))) return "";
+
+  const zoneText = zoom < 13 ? shortenLabel(name, LABEL_MAX_CHARS_MID) : name;
+
+  const borough = (props.borough || "").trim();
+  const showBorough = zoom >= BOROUGH_ZOOM_SHOW && borough;
+
+  return `
+    <div class="zn">${escapeHtml(zoneText)}</div>
+    ${showBorough ? `<div class="br">${escapeHtml(borough)}</div>` : ""}
+  `;
+}
+
+/* =========================================================
+   Recommendation + Navigation
+   ========================================================= */
 const recommendEl = document.getElementById("recommendLine");
 const navBtn = document.getElementById("navBtn");
 
@@ -217,97 +346,79 @@ function geometryCenter(geom) {
   return { lat: sumLat / pts.length, lng: sumLng / pts.length };
 }
 
-function isGreyWorstZone(props) {
-  if (!GREY_IS_WORSE_THAN_RED) return false;
-  if (!props) return false;
-  if (props.low_sample === true) return true;
-  const b = (props.bucket || "").trim();
-  if (b === "nodata") return true;
-  if (props.rating == null) return true;
-  return false;
-}
+// Blue+ rule on effective bucket
+function updateRecommendation(frame) {
+  if (!recommendEl) return;
 
-function effectiveBucket(props) {
-  if (isGreyWorstZone(props)) return "nodata";
-  return (props.bucket || "").trim();
-}
-function effectiveColor(props) {
-  if (isGreyWorstZone(props)) return "#bdbdbd";
-  const st = props?.style || {};
-  return st.fillColor || st.color || "#000";
-}
-
-function labelHTML(props, zoom) {
-  const name = (props.zone_name || "").trim();
-  if (!name) return "";
-
-  const b = effectiveBucket(props);
-  if (!shouldShowLabel(b, Math.round(zoom))) return "";
-
-  const zoneText = zoom < 13 ? shortenLabel(name, LABEL_MAX_CHARS_MID) : name;
-
-  const borough = (props.borough || "").trim();
-  const showBorough = zoom >= BOROUGH_ZOOM_SHOW && borough;
-
-  return `
-    <div class="zn">${escapeHtml(zoneText)}</div>
-    ${showBorough ? `<div class="br">${escapeHtml(borough)}</div>` : ""}
-  `;
-}
-
-function buildPopupHTML(props) {
-  const zoneName = (props.zone_name || "").trim();
-  const borough = (props.borough || "").trim();
-
-  if (isGreyWorstZone(props)) {
-    return `
-      <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; font-size:13px;">
-        <div style="font-weight:900; margin-bottom:2px;">${escapeHtml(zoneName || `Zone ${props.LocationID ?? ""}`)}</div>
-        ${borough ? `<div style="opacity:0.8; margin-bottom:6px;">${escapeHtml(borough)}</div>` : `<div style="margin-bottom:6px;"></div>`}
-        <div><b>Status:</b> WORST / AVOID</div>
-        <div style="margin-top:6px;"><b>Pickups (last ${BIN_MINUTES} min):</b> ${props.pickups ?? 0}</div>
-      </div>
-    `;
+  if (!userLatLng) {
+    recommendEl.textContent = "Recommended: enable location to get suggestions";
+    setNavDestination(null);
+    return;
   }
 
-  const rating = props.rating ?? "";
-  const bucket = props.bucket ?? "";
-  const pickups = props.pickups ?? "";
-  const pay = props.avg_driver_pay == null ? "n/a" : Number(props.avg_driver_pay).toFixed(2);
+  const feats = frame?.polygons?.features || [];
+  if (!feats.length) {
+    recommendEl.textContent = "Recommended: …";
+    setNavDestination(null);
+    return;
+  }
 
-  return `
-    <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; font-size:13px;">
-      <div style="font-weight:800; margin-bottom:2px;">${escapeHtml(zoneName || `Zone ${props.LocationID ?? ""}`)}</div>
-      ${borough ? `<div style="opacity:0.8; margin-bottom:6px;">${escapeHtml(borough)}</div>` : `<div style="margin-bottom:6px;"></div>`}
-      <div><b>NYC Rating:</b> ${rating} (${prettyBucket(bucket)})</div>
-      <div style="margin-top:6px;"><b>Pickups (last ${BIN_MINUTES} min):</b> ${pickups}</div>
-      <div><b>Avg Driver Pay:</b> $${pay}</div>
-    </div>
-  `;
-}
+  const allowed = new Set(["blue", "purple", "green"]);
+  const DIST_PENALTY_PER_MILE = 4.0;
 
-function makeWorstIcon() {
-  const content = (GREY_MARKER_STYLE === "poop") ? "💩" : "✕";
-  const size = 34;
-  const fontSize = (GREY_MARKER_STYLE === "poop") ? 24 : 22;
+  let best = null;
 
-  return L.divIcon({
-    className: "",
-    html: `
-      <div style="
-        width:${size}px;height:${size}px;border-radius:999px;
-        background: rgba(255,255,255,0.85);
-        border: 2px solid rgba(0,0,0,0.20);
-        display:flex;align-items:center;justify-content:center;
-        font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
-        font-weight: 1000;
-        font-size: ${fontSize}px;
-        color: rgba(0,0,0,0.65);
-        box-shadow: 0 2px 10px rgba(0,0,0,0.12);
-      ">${content}</div>
-    `,
-    iconSize: [size, size],
-    iconAnchor: [size / 2, size / 2],
+  for (const f of feats) {
+    const props = f.properties || {};
+    const geom = f.geometry;
+
+    const b = effectiveBucket(props);
+    if (!allowed.has(b)) continue;
+
+    const rating = (statenIslandMode && isStatenIslandFeature(props) && Number.isFinite(Number(props.si_local_rating)))
+      ? Number(props.si_local_rating)
+      : Number(props.rating ?? NaN);
+
+    if (!Number.isFinite(rating)) continue;
+
+    const center = geometryCenter(geom);
+    if (!center) continue;
+
+    const dMi = haversineMiles(userLatLng, center);
+    const score = rating - dMi * DIST_PENALTY_PER_MILE;
+
+    if (!best || score > best.score) {
+      best = {
+        score,
+        dMi,
+        rating,
+        lat: center.lat,
+        lng: center.lng,
+        name: (props.zone_name || "").trim() || `Zone ${props.LocationID ?? ""}`,
+        borough: (props.borough || "").trim(),
+        usedLocal: (statenIslandMode && isStatenIslandFeature(props) && Number.isFinite(Number(props.si_local_rating))),
+      };
+    }
+  }
+
+  if (!best) {
+    recommendEl.textContent = "Recommended: no Blue+ zone nearby right now";
+    setNavDestination(null);
+    return;
+  }
+
+  const distTxt = best.dMi >= 10 ? `${best.dMi.toFixed(0)} mi` : `${best.dMi.toFixed(1)} mi`;
+  const bTxt = best.borough ? ` (${best.borough})` : "";
+  const modeTag = best.usedLocal ? " (SI-local)" : "";
+  recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Rating ${best.rating}${modeTag} — ${distTxt}`;
+
+  setNavDestination({
+    lat: best.lat,
+    lng: best.lng,
+    name: best.name,
+    borough: best.borough,
+    rating: best.rating,
+    distMi: best.dMi,
   });
 }
 
@@ -322,22 +433,45 @@ L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
   maxZoom: 19,
 }).addTo(map);
 
-// Panes so arrow is ALWAYS on top
-map.createPane("worstPane");
-map.getPane("worstPane").style.zIndex = 1600;
-
+// IMPORTANT: Create a dedicated pane ABOVE tooltips/labels so your arrow is never covered.
 map.createPane("navPane");
-map.getPane("navPane").style.zIndex = 2000;
+map.getPane("navPane").style.zIndex = 1200;         // higher than tooltipPane (typically ~650)
+map.getPane("navPane").style.pointerEvents = "none";
 
 let geoLayer = null;
-let worstLayer = L.layerGroup([], { pane: "worstPane" }).addTo(map);
-
 let timeline = [];
 let minutesOfWeek = [];
 let currentFrame = null;
 
+function buildPopupHTML(props) {
+  const zoneName = (props.zone_name || "").trim();
+  const borough = (props.borough || "").trim();
+
+  const rating = props.rating ?? "";
+  const bucket = props.bucket ?? "";
+  const pickups = props.pickups ?? "";
+  const pay = props.avg_driver_pay == null ? "n/a" : Number(props.avg_driver_pay).toFixed(2);
+
+  let extra = "";
+  if (statenIslandMode && isStatenIslandFeature(props) && Number.isFinite(Number(props.si_local_rating))) {
+    extra = `<div style="margin-top:6px;"><b>Staten Local Rating:</b> ${props.si_local_rating} (${prettyBucket(props.si_local_bucket)})</div>`;
+  }
+
+  return `
+    <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; font-size:13px;">
+      <div style="font-weight:800; margin-bottom:2px;">${escapeHtml(zoneName || `Zone ${props.LocationID ?? ""}`)}</div>
+      ${borough ? `<div style="opacity:0.8; margin-bottom:6px;">${escapeHtml(borough)}</div>` : `<div style="margin-bottom:6px;"></div>`}
+      <div><b>NYC Rating:</b> ${rating} (${prettyBucket(bucket)})</div>
+      ${extra}
+      <div style="margin-top:6px;"><b>Pickups (last ${BIN_MINUTES} min):</b> ${pickups}</div>
+      <div><b>Avg Driver Pay:</b> $${pay}</div>
+    </div>
+  `;
+}
+
 function renderFrame(frame) {
   currentFrame = frame;
+  if (statenIslandMode) applyStatenLocalView(currentFrame);
 
   timeLabel.textContent = formatNYCLabel(currentFrame.time);
 
@@ -345,7 +479,6 @@ function renderFrame(frame) {
     geoLayer.remove();
     geoLayer = null;
   }
-  worstLayer.clearLayers();
 
   const zoomNow = map.getZoom();
   const zClass = zoomClass(zoomNow);
@@ -355,14 +488,13 @@ function renderFrame(frame) {
       const props = feature?.properties || {};
       const st = props.style || {};
       const fill = effectiveColor(props);
-      const b = effectiveBucket(props);
 
       return {
         color: fill,
         weight: st.weight ?? 0,
         opacity: st.opacity ?? 0,
         fillColor: fill,
-        fillOpacity: (b === "nodata") ? 0.45 : (st.fillOpacity ?? 0.82),
+        fillOpacity: st.fillOpacity ?? 0.82,
       };
     },
     onEachFeature: (feature, layer) => {
@@ -370,31 +502,19 @@ function renderFrame(frame) {
       layer.bindPopup(buildPopupHTML(props), { maxWidth: 320 });
 
       const html = labelHTML(props, zoomNow);
-      if (html) {
-        layer.bindTooltip(html, {
-          permanent: true,
-          direction: "center",
-          className: `zone-label ${zClass}`,
-          opacity: 0.92,
-          interactive: false,
-        });
-      }
+      if (!html) return;
 
-      if (isGreyWorstZone(props)) {
-        const center = geometryCenter(feature.geometry);
-        if (center) {
-          worstLayer.addLayer(
-            L.marker([center.lat, center.lng], {
-              icon: makeWorstIcon(),
-              interactive: false,
-              zIndexOffset: 700,
-              pane: "worstPane",
-            })
-          );
-        }
-      }
+      layer.bindTooltip(html, {
+        permanent: true,
+        direction: "center",
+        className: `zone-label ${zClass}`,
+        opacity: 0.92,
+        interactive: false,
+      });
     },
   }).addTo(map);
+
+  updateRecommendation(currentFrame);
 }
 
 async function loadFrame(idx) {
@@ -432,7 +552,7 @@ slider.addEventListener("input", () => {
 });
 
 /* =========================================================
-   Auto-center button
+   Auto-center button (inside bottom bar) - stable logic
    ========================================================= */
 const btnCenter = document.getElementById("btnCenter");
 let autoCenter = true;
@@ -442,6 +562,7 @@ function suppressAutoDisableFor(ms, fn) {
   suppressAutoDisableUntil = Date.now() + ms;
   fn();
 }
+
 function syncCenterButton() {
   if (!btnCenter) return;
   btnCenter.textContent = autoCenter ? "Auto-center: ON" : "Auto-center: OFF";
@@ -461,9 +582,7 @@ if (btnCenter) {
     syncCenterButton();
 
     if (autoCenter && userLatLng) {
-      suppressAutoDisableFor(800, () =>
-        map.setView(userLatLng, Math.max(map.getZoom(), AUTO_FOLLOW_ZOOM), { animate: true })
-      );
+      suppressAutoDisableFor(800, () => map.panTo(userLatLng, { animate: true }));
     }
   });
 }
@@ -478,7 +597,7 @@ map.on("dragstart", disableAutoCenterBecauseUserIsExploring);
 map.on("zoomstart", disableAutoCenterBecauseUserIsExploring);
 
 /* =========================
-   Live location arrow + auto-center
+   Live location arrow + follow
    ========================= */
 let gpsFirstFixDone = false;
 let navMarker = null;
@@ -501,11 +620,13 @@ function setNavVisual(isMoving) {
   el.classList.toggle("navMoving", !!isMoving);
   el.classList.toggle("navPulse", !isMoving);
 }
+
 function setNavRotation(deg) {
   const el = document.getElementById("navWrap");
   if (!el) return;
   el.style.transform = `rotate(${deg}deg)`;
 }
+
 function computeBearingDeg(from, to) {
   const toRad = (x) => (x * Math.PI) / 180;
   const toDeg = (x) => (x * 180) / Math.PI;
@@ -531,8 +652,8 @@ function startLocationWatch() {
   navMarker = L.marker([40.7128, -74.0060], {
     icon: makeNavIcon(),
     interactive: false,
-    zIndexOffset: 999999,
-    pane: "navPane",
+    zIndexOffset: 999999,     // extra safety
+    pane: "navPane",          // ALWAYS above labels
   }).addTo(map);
 
   navigator.geolocation.watchPosition(
@@ -546,11 +667,12 @@ function startLocationWatch() {
       if (navMarker) navMarker.setLatLng(userLatLng);
 
       let isMoving = false;
+      let mph = 0;
 
       if (lastPos) {
         const dMi = haversineMiles({ lat: lastPos.lat, lng: lastPos.lng }, userLatLng);
         const dtSec = Math.max(1, (ts - lastPos.ts) / 1000);
-        const mph = (dMi / dtSec) * 3600;
+        mph = (dMi / dtSec) * 3600;
 
         isMoving = mph >= 2.0;
 
@@ -568,12 +690,21 @@ function startLocationWatch() {
       setNavRotation(lastHeadingDeg);
       setNavVisual(isMoving);
 
+      // follow behavior
       if (!gpsFirstFixDone) {
         gpsFirstFixDone = true;
-        suppressAutoDisableFor(1200, () => map.setView(userLatLng, AUTO_FOLLOW_ZOOM, { animate: true }));
+        const targetZoom = Math.max(map.getZoom(), 14);
+        suppressAutoDisableFor(1200, () => map.setView(userLatLng, targetZoom, { animate: true }));
       } else if (autoCenter) {
-        suppressAutoDisableFor(700, () => map.panTo(userLatLng, { animate: true }));
+        // If you're moving, keep a slightly closer zoom (but don't force zoom-out).
+        if (isMoving && map.getZoom() < AUTO_CENTER_MIN_ZOOM_MOVING) {
+          suppressAutoDisableFor(700, () => map.setView(userLatLng, AUTO_CENTER_MIN_ZOOM_MOVING, { animate: true }));
+        } else {
+          suppressAutoDisableFor(700, () => map.panTo(userLatLng, { animate: true }));
+        }
       }
+
+      if (currentFrame) updateRecommendation(currentFrame);
     },
     (err) => {
       console.warn("Geolocation error:", err);
@@ -595,7 +726,7 @@ function startLocationWatch() {
 }
 
 /* =========================================================
-   Auto-refresh without page reload
+   Auto-refresh (NO page reload)
    ========================================================= */
 async function refreshCurrentFrame() {
   try {
@@ -605,30 +736,17 @@ async function refreshCurrentFrame() {
     console.warn("Auto-refresh failed:", e);
   }
 }
-
-async function refreshTimelineSometimes() {
-  try {
-    const t = await fetchJSON(`${RAILWAY_BASE}/timeline`);
-    const newTimeline = Array.isArray(t) ? t : (t.timeline || []);
-    if (!Array.isArray(newTimeline) || !newTimeline.length) return;
-
-    if (newTimeline.length !== timeline.length) {
-      timeline = newTimeline;
-      minutesOfWeek = timeline.map(minuteOfWeekFromIso);
-      slider.max = String(timeline.length - 1);
-      const idx = Math.min(Number(slider.value || "0"), timeline.length - 1);
-      slider.value = String(idx);
-      await loadFrame(idx);
-    }
-  } catch {
-    // silent
-  }
-}
-
 setInterval(refreshCurrentFrame, REFRESH_MS);
-setInterval(refreshTimelineSometimes, TIMELINE_REFRESH_MS);
+
+// Also refresh when you come back to the tab/app (so it updates without you reloading)
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") {
+    refreshCurrentFrame().catch(() => {});
+  }
+});
 
 // Boot
+setNavDestination(null);
 loadTimeline().catch((err) => {
   console.error(err);
   timeLabel.textContent = `Error loading timeline: ${err.message}`;
