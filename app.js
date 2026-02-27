@@ -2,11 +2,18 @@ const RAILWAY_BASE = "https://web-production-78f67.up.railway.app";
 const BIN_MINUTES = 20;
 
 // Auto-refresh current frame (no page reload)
-const REFRESH_MS = 60 * 1000;          // <- change this (ex: 30*1000, 2*60*1000, etc)
+const REFRESH_MS = 60 * 1000;          // refresh same slider index
 const TIMELINE_REFRESH_MS = 10 * 60 * 1000;
 
 // Auto-follow zoom (more zoomed-in when you start / re-enable)
 const AUTO_FOLLOW_ZOOM = 15;
+
+// ===== Grey meaning behavior =====
+// If true: grey zones are treated as WORSE THAN RED and get a big marker.
+const GREY_IS_WORSE_THAN_RED = true;
+
+// Choose marker style for grey zones:
+const GREY_MARKER_STYLE = "poop"; // "poop" | "x"
 
 // ---------- Legend minimize ----------
 const legendEl = document.getElementById("legend");
@@ -26,7 +33,7 @@ const LABEL_MAX_CHARS_MID = 14;
 function shouldShowLabel(bucket, zoom) {
   if (zoom < LABEL_ZOOM_MIN) return false;
   const b = (bucket || "").trim();
-  if (b === "nodata") return false; // hide labels for nodata zones (keeps map cleaner)
+  if (b === "nodata") return false; // keep labels off for grey zones
   if (zoom >= 15) return true;
   if (zoom === 14) return b !== "red";
   if (zoom === 13) return b === "green" || b === "purple" || b === "blue" || b === "sky";
@@ -121,7 +128,7 @@ function prettyBucket(b) {
     sky: "Normal",
     yellow: "Below Normal",
     red: "Very Low / Avoid",
-    nodata: "No Data (low pickups)",
+    nodata: "Worst / Avoid",
   };
   return m[b] || (b ?? "");
 }
@@ -147,7 +154,7 @@ function escapeHtml(s) {
 }
 
 /* =========================================================
-   Staten Island Mode (toggle anywhere)
+   Staten Island Mode
    ========================================================= */
 const btnStatenIsland = document.getElementById("btnStatenIsland");
 const modeNote = document.getElementById("modeNote");
@@ -248,11 +255,29 @@ if (btnStatenIsland) {
   });
 }
 
+function isGreyWorstZone(props) {
+  // Your backend marks these as nodata + rating=null + low_sample=true
+  if (!GREY_IS_WORSE_THAN_RED) return false;
+  if (!props) return false;
+  if (props.low_sample === true) return true;
+  const b = (props.bucket || "").trim();
+  if (b === "nodata") return true;
+  if (props.rating == null) return true;
+  return false;
+}
+
 function effectiveBucket(props) {
+  // If grey should be worst, keep it as nodata (not colored buckets)
+  if (isGreyWorstZone(props)) return "nodata";
+
   if (statenIslandMode && isStatenIslandFeature(props) && props.si_local_bucket) return props.si_local_bucket;
   return (props.bucket || "").trim();
 }
+
 function effectiveColor(props) {
+  // Force WORST grey color
+  if (isGreyWorstZone(props)) return "#bdbdbd";
+
   if (statenIslandMode && isStatenIslandFeature(props) && props.si_local_color) return props.si_local_color;
   const st = props?.style || {};
   return st.fillColor || st.color || "#000";
@@ -349,7 +374,6 @@ function geometryCenter(geom) {
   return { lat: sumLat / pts.length, lng: sumLng / pts.length };
 }
 
-// Blue+ rule on effective bucket
 function updateRecommendation(frame) {
   if (!recommendEl) return;
 
@@ -374,6 +398,9 @@ function updateRecommendation(frame) {
   for (const f of feats) {
     const props = f.properties || {};
     const geom = f.geometry;
+
+    // skip WORST grey zones from recommendations
+    if (isGreyWorstZone(props)) continue;
 
     const b = effectiveBucket(props);
     if (!allowed.has(b)) continue;
@@ -429,26 +456,24 @@ function updateRecommendation(frame) {
 const slider = document.getElementById("slider");
 const timeLabel = document.getElementById("timeLabel");
 
-// Create map
 const map = L.map("map", { zoomControl: true }).setView([40.7128, -74.0060], 10);
 
-// Base tiles
 L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
   attribution: "&copy; OpenStreetMap &copy; CARTO",
   maxZoom: 19,
 }).addTo(map);
 
-// IMPORTANT: make a pane ABOVE tooltips so your arrow is NEVER covered by borough/zone labels
+// Pane above tooltips/popups so arrow is NEVER covered
 map.createPane("navPane");
-map.getPane("navPane").style.zIndex = 2000; // higher than tooltipPane(650) and popupPane(700)
+map.getPane("navPane").style.zIndex = 2000;
 
 let geoLayer = null;
 let timeline = [];
 let minutesOfWeek = [];
 let currentFrame = null;
 
-// X markers layer for low-sample zones
-let xLayer = L.layerGroup().addTo(map);
+// markers for worst grey zones
+let worstLayer = L.layerGroup().addTo(map);
 
 function buildPopupHTML(props) {
   const zoneName = (props.zone_name || "").trim();
@@ -456,26 +481,18 @@ function buildPopupHTML(props) {
 
   const bucket = (props.bucket ?? "").toString();
   const pickups = props.pickups ?? 0;
-  const minTrips = props.min_trips_per_window ?? null;
-
   const rating = props.rating ?? null;
   const pay = props.avg_driver_pay == null ? null : Number(props.avg_driver_pay);
 
-  let extra = "";
-  if (statenIslandMode && isStatenIslandFeature(props) && Number.isFinite(Number(props.si_local_rating))) {
-    extra = `<div style="margin-top:6px;"><b>Staten Local Rating:</b> ${props.si_local_rating} (${prettyBucket(props.si_local_bucket)})</div>`;
-  }
-
-  // For nodata/low-sample zones, tell the truth: not enough trips to score
-  if (bucket === "nodata" || props.low_sample === true || rating == null) {
-    const needTxt = Number.isFinite(Number(minTrips)) ? `Need ≥ ${minTrips} trips in this ${BIN_MINUTES}m window.` : "";
+  // If you treat grey as WORSE than red, say that in popup:
+  if (isGreyWorstZone(props)) {
     return `
       <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; font-size:13px;">
-        <div style="font-weight:800; margin-bottom:2px;">${escapeHtml(zoneName || `Zone ${props.LocationID ?? ""}`)}</div>
+        <div style="font-weight:900; margin-bottom:2px;">${escapeHtml(zoneName || `Zone ${props.LocationID ?? ""}`)}</div>
         ${borough ? `<div style="opacity:0.8; margin-bottom:6px;">${escapeHtml(borough)}</div>` : `<div style="margin-bottom:6px;"></div>`}
-        <div><b>Status:</b> No Data / Low Sample</div>
+        <div><b>Status:</b> WORST / AVOID</div>
         <div style="margin-top:6px;"><b>Pickups (last ${BIN_MINUTES} min):</b> ${pickups}</div>
-        ${needTxt ? `<div style="margin-top:4px; opacity:0.9;">${escapeHtml(needTxt)}</div>` : ""}
+        <div style="margin-top:6px; opacity:0.92;">(Grey zones are treated worse than red.)</div>
       </div>
     `;
   }
@@ -485,32 +502,35 @@ function buildPopupHTML(props) {
     <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; font-size:13px;">
       <div style="font-weight:800; margin-bottom:2px;">${escapeHtml(zoneName || `Zone ${props.LocationID ?? ""}`)}</div>
       ${borough ? `<div style="opacity:0.8; margin-bottom:6px;">${escapeHtml(borough)}</div>` : `<div style="margin-bottom:6px;"></div>`}
-      <div><b>NYC Rating:</b> ${rating} (${prettyBucket(props.bucket)})</div>
-      ${extra}
+      <div><b>NYC Rating:</b> ${rating} (${prettyBucket(bucket)})</div>
       <div style="margin-top:6px;"><b>Pickups (last ${BIN_MINUTES} min):</b> ${pickups}</div>
       <div><b>Avg Driver Pay:</b> $${payTxt}</div>
     </div>
   `;
 }
 
-function makeXIcon() {
+function makeWorstIcon() {
+  const content = (GREY_MARKER_STYLE === "poop") ? "💩" : "✕";
+  const size = (GREY_MARKER_STYLE === "poop") ? 34 : 34;
+  const fontSize = (GREY_MARKER_STYLE === "poop") ? 24 : 22;
+
   return L.divIcon({
     className: "",
     html: `
       <div style="
-        width:34px;height:34px;border-radius:999px;
+        width:${size}px;height:${size}px;border-radius:999px;
         background: rgba(255,255,255,0.85);
         border: 2px solid rgba(0,0,0,0.20);
         display:flex;align-items:center;justify-content:center;
         font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
         font-weight: 1000;
-        font-size: 22px;
+        font-size: ${fontSize}px;
         color: rgba(0,0,0,0.65);
         box-shadow: 0 2px 10px rgba(0,0,0,0.12);
-      ">✕</div>
+      ">${content}</div>
     `,
-    iconSize: [34, 34],
-    iconAnchor: [17, 17],
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
   });
 }
 
@@ -525,8 +545,7 @@ function renderFrame(frame) {
     geoLayer = null;
   }
 
-  // clear X markers
-  xLayer.clearLayers();
+  worstLayer.clearLayers();
 
   const zoomNow = map.getZoom();
   const zClass = zoomClass(zoomNow);
@@ -560,15 +579,15 @@ function renderFrame(frame) {
         });
       }
 
-      // Add an X marker for low-sample/nodata zones
-      if (props.low_sample === true || (props.bucket || "").trim() === "nodata" || props.rating == null) {
+      // Big 💩 or X on "worse than red" grey zones
+      if (isGreyWorstZone(props)) {
         const center = geometryCenter(feature.geometry);
         if (center) {
-          xLayer.addLayer(
+          worstLayer.addLayer(
             L.marker([center.lat, center.lng], {
-              icon: makeXIcon(),
+              icon: makeWorstIcon(),
               interactive: false,
-              zIndexOffset: 500, // above polygons
+              zIndexOffset: 700,
             })
           );
         }
@@ -614,7 +633,7 @@ slider.addEventListener("input", () => {
 });
 
 /* =========================================================
-   Auto-center button - stable logic
+   Auto-center button
    ========================================================= */
 const btnCenter = document.getElementById("btnCenter");
 let autoCenter = true;
@@ -644,7 +663,9 @@ if (btnCenter) {
     syncCenterButton();
 
     if (autoCenter && userLatLng) {
-      suppressAutoDisableFor(800, () => map.setView(userLatLng, Math.max(map.getZoom(), AUTO_FOLLOW_ZOOM), { animate: true }));
+      suppressAutoDisableFor(800, () =>
+        map.setView(userLatLng, Math.max(map.getZoom(), AUTO_FOLLOW_ZOOM), { animate: true })
+      );
     }
   });
 }
@@ -668,6 +689,7 @@ let lastHeadingDeg = 0;
 let lastMoveTs = 0;
 
 function makeNavIcon() {
+  // Triangle is already pointed; if you want MORE pointed, we do CSS in index.html
   return L.divIcon({
     className: "",
     html: `<div id="navWrap" class="navArrowWrap navPulse"><div class="navArrow"></div></div>`,
@@ -715,7 +737,7 @@ function startLocationWatch() {
     icon: makeNavIcon(),
     interactive: false,
     zIndexOffset: 999999,
-    pane: "navPane", // <- forces above labels
+    pane: "navPane",
   }).addTo(map);
 
   navigator.geolocation.watchPosition(
@@ -754,10 +776,8 @@ function startLocationWatch() {
       if (!gpsFirstFixDone) {
         gpsFirstFixDone = true;
         suppressAutoDisableFor(1200, () => map.setView(userLatLng, AUTO_FOLLOW_ZOOM, { animate: true }));
-      } else {
-        if (autoCenter) {
-          suppressAutoDisableFor(700, () => map.panTo(userLatLng, { animate: true }));
-        }
+      } else if (autoCenter) {
+        suppressAutoDisableFor(700, () => map.panTo(userLatLng, { animate: true }));
       }
 
       if (currentFrame) updateRecommendation(currentFrame);
@@ -795,7 +815,6 @@ async function refreshCurrentFrame() {
 
 async function refreshTimelineSometimes() {
   try {
-    // keeps things in sync if you re-generate on backend
     const t = await fetchJSON(`${RAILWAY_BASE}/timeline`);
     const newTimeline = Array.isArray(t) ? t : (t.timeline || []);
     if (!Array.isArray(newTimeline) || !newTimeline.length) return;
@@ -804,12 +823,11 @@ async function refreshTimelineSometimes() {
       timeline = newTimeline;
       minutesOfWeek = timeline.map(minuteOfWeekFromIso);
       slider.max = String(timeline.length - 1);
-      // keep current slider index if possible
       const idx = Math.min(Number(slider.value || "0"), timeline.length - 1);
       slider.value = String(idx);
       await loadFrame(idx);
     }
-  } catch (e) {
+  } catch {
     // silent
   }
 }
