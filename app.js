@@ -4,9 +4,8 @@ const BIN_MINUTES = 20;
 // Refresh current frame every 5 minutes
 const REFRESH_MS = 5 * 60 * 1000;
 
-// FOLLOW behavior (NEW)
-const FOLLOW_ZOOM = 14;        // tighter than before (13). Try 15 if you want closer.
-const FOLLOW_PAN_ONLY = false; // false = keep zoom locked while auto-center ON
+// NEW: auto-center closer when following
+const AUTO_CENTER_MIN_ZOOM = 15; // was effectively 13 before
 
 // ---------- Legend minimize ----------
 const legendEl = document.getElementById("legend");
@@ -227,11 +226,12 @@ function syncStatenIslandUI() {
   if (modeNote) {
     modeNote.innerHTML = statenIslandMode
       ? `Staten Island Mode is <b>ON</b>: Staten Island colors are <b>relative within Staten Island</b> only.<br/>Other boroughs remain NYC-wide.`
-      : `Colors come from rating (1–100) for the selected ${BIN_MINUTES}-minute window.<br/>Time label is NYC time.`;
+      : `Colors come from rating (1–100) for the selected 20-minute window.<br/>Time label is NYC time.`;
   }
 }
 syncStatenIslandUI();
 
+// Harden touch/click so it always toggles (iPhone + Tesla)
 if (btnStatenIsland) {
   btnStatenIsland.addEventListener("pointerdown", (e) => e.stopPropagation());
   btnStatenIsland.addEventListener("touchstart", (e) => e.stopPropagation(), { passive: true });
@@ -242,7 +242,7 @@ if (btnStatenIsland) {
     statenIslandMode = !statenIslandMode;
     localStorage.setItem(LS_KEY_STATEN, statenIslandMode ? "1" : "0");
     syncStatenIslandUI();
-    if (currentFrame) renderFrame(currentFrame);
+    if (currentFrame) renderFrame(currentFrame); // re-render regardless of your location
   });
 }
 
@@ -347,6 +347,7 @@ function geometryCenter(geom) {
   return { lat: sumLat / pts.length, lng: sumLng / pts.length };
 }
 
+// Blue+ rule on effective bucket
 function updateRecommendation(frame) {
   if (!recommendEl) return;
 
@@ -433,6 +434,12 @@ L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
   maxZoom: 19,
 }).addTo(map);
 
+// NEW: panes so the nav arrow is always above labels/tooltips
+const labelsPane = map.createPane("labelsPane");
+labelsPane.style.zIndex = 450; // above polygons, below marker
+const navPane = map.createPane("navPane");
+navPane.style.zIndex = 1000; // always on top
+
 let geoLayer = null;
 let timeline = [];
 let minutesOfWeek = [];
@@ -505,14 +512,12 @@ function renderFrame(frame) {
         className: `zone-label ${zClass}`,
         opacity: 0.92,
         interactive: false,
+        pane: "labelsPane", // NEW: keep labels under nav arrow
       });
     },
   }).addTo(map);
 
   updateRecommendation(currentFrame);
-
-  // NEW: always re-raise nav marker above layers
-  if (navMarker) navMarker.setZIndexOffset(999999);
 }
 
 async function loadFrame(idx) {
@@ -580,10 +585,8 @@ if (btnCenter) {
     syncCenterButton();
 
     if (autoCenter && userLatLng) {
-      suppressAutoDisableFor(800, () => {
-        if (FOLLOW_PAN_ONLY) map.panTo(userLatLng, { animate: true });
-        else map.setView(userLatLng, FOLLOW_ZOOM, { animate: true });
-      });
+      const z = Math.max(map.getZoom(), AUTO_CENTER_MIN_ZOOM);
+      suppressAutoDisableFor(900, () => map.setView(userLatLng, z, { animate: true }));
     }
   });
 }
@@ -653,7 +656,8 @@ function startLocationWatch() {
   navMarker = L.marker([40.7128, -74.0060], {
     icon: makeNavIcon(),
     interactive: false,
-    zIndexOffset: 999999, // higher (NEW)
+    zIndexOffset: 2000000,
+    pane: "navPane", // NEW: always above labels
   }).addTo(map);
 
   navigator.geolocation.watchPosition(
@@ -664,10 +668,7 @@ function startLocationWatch() {
       const ts = pos.timestamp || Date.now();
 
       userLatLng = { lat, lng };
-      if (navMarker) {
-        navMarker.setLatLng(userLatLng);
-        navMarker.setZIndexOffset(999999);
-      }
+      if (navMarker) navMarker.setLatLng(userLatLng);
 
       let isMoving = false;
 
@@ -692,15 +693,19 @@ function startLocationWatch() {
       setNavRotation(lastHeadingDeg);
       setNavVisual(isMoving);
 
-      // FOLLOW logic (NEW)
+      // NEW: better follow behavior + closer zoom
+      const desiredZoom = Math.max(map.getZoom(), AUTO_CENTER_MIN_ZOOM);
+
       if (!gpsFirstFixDone) {
         gpsFirstFixDone = true;
-        suppressAutoDisableFor(1200, () => map.setView(userLatLng, FOLLOW_ZOOM, { animate: true }));
+        suppressAutoDisableFor(1200, () => map.setView(userLatLng, desiredZoom, { animate: true }));
       } else if (autoCenter) {
-        suppressAutoDisableFor(650, () => {
-          if (FOLLOW_PAN_ONLY) map.panTo(userLatLng, { animate: true });
-          else map.setView(userLatLng, FOLLOW_ZOOM, { animate: true });
-        });
+        // If user is zoomed out, bring them back in; otherwise just pan smoothly.
+        if (map.getZoom() < AUTO_CENTER_MIN_ZOOM) {
+          suppressAutoDisableFor(900, () => map.setView(userLatLng, desiredZoom, { animate: true }));
+        } else {
+          suppressAutoDisableFor(700, () => map.panTo(userLatLng, { animate: true }));
+        }
       }
 
       if (currentFrame) updateRecommendation(currentFrame);
@@ -721,7 +726,6 @@ function startLocationWatch() {
     const now = Date.now();
     const recentlyMoved = lastMoveTs && (now - lastMoveTs) < 5000;
     setNavVisual(!!recentlyMoved);
-    if (navMarker) navMarker.setZIndexOffset(999999);
   }, 1200);
 }
 
