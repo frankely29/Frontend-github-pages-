@@ -219,17 +219,14 @@
     .zone-label.z14 .br { font-size: 0px; padding: 0; border: 0; }
     .zone-label.z15 .br { font-size: 4px; }
 
-    /* ---------- You arrow: force on top of EVERYTHING ---------- */
-    .leaflet-marker-pane { z-index: 800 !important; }
-    .leaflet-tooltip-pane { z-index: 650 !important; }
-    .leaflet-overlay-pane { z-index: 400 !important; }
-
+    /* ---------- Live location arrow marker (MORE POINTED, NO TAIL) ---------- */
     .navArrowWrap{
       width: 30px;
       height: 30px;
       position: relative;
       transform-origin: 50% 50%;
       will-change: transform, filter, box-shadow;
+      pointer-events: none;
     }
     .navArrow{
       position: absolute;
@@ -237,17 +234,18 @@
       top: 50%;
       width: 0;
       height: 0;
-      transform: translate(-50%, -55%);
-      border-left: 9px solid transparent;
-      border-right: 9px solid transparent;
-      border-bottom: 18px solid #111;
+      transform: translate(-50%, -60%);
+      /* more pointed: narrower base + taller height */
+      border-left: 6px solid transparent;
+      border-right: 6px solid transparent;
+      border-bottom: 22px solid #111;
       filter: drop-shadow(0 2px 2px rgba(0,0,0,0.35));
     }
     .navMoving .navArrow{
       filter:
         drop-shadow(0 2px 2px rgba(0,0,0,0.35))
-        drop-shadow(0 0 6px rgba(0,160,255,0.95))
-        drop-shadow(0 0 12px rgba(0,160,255,0.75));
+        drop-shadow(0 0 7px rgba(0,160,255,0.98))
+        drop-shadow(0 0 14px rgba(0,160,255,0.75));
     }
     @keyframes pulseRing {
       0%   { transform: translate(-50%, -50%) scale(0.8); opacity: 0.75; }
