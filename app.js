@@ -4,6 +4,9 @@ const BIN_MINUTES = 20;
 // Refresh current frame every 5 minutes
 const REFRESH_MS = 5 * 60 * 1000;
 
+// NEW: auto-center closer when following
+const AUTO_CENTER_MIN_ZOOM = 15; // was effectively 13 before
+
 // ---------- Legend minimize ----------
 const legendEl = document.getElementById("legend");
 const legendToggleBtn = document.getElementById("legendToggle");
@@ -431,6 +434,12 @@ L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
   maxZoom: 19,
 }).addTo(map);
 
+// NEW: panes so the nav arrow is always above labels/tooltips
+const labelsPane = map.createPane("labelsPane");
+labelsPane.style.zIndex = 450; // above polygons, below marker
+const navPane = map.createPane("navPane");
+navPane.style.zIndex = 1000; // always on top
+
 let geoLayer = null;
 let timeline = [];
 let minutesOfWeek = [];
@@ -503,6 +512,7 @@ function renderFrame(frame) {
         className: `zone-label ${zClass}`,
         opacity: 0.92,
         interactive: false,
+        pane: "labelsPane", // NEW: keep labels under nav arrow
       });
     },
   }).addTo(map);
@@ -575,7 +585,8 @@ if (btnCenter) {
     syncCenterButton();
 
     if (autoCenter && userLatLng) {
-      suppressAutoDisableFor(800, () => map.panTo(userLatLng, { animate: true }));
+      const z = Math.max(map.getZoom(), AUTO_CENTER_MIN_ZOOM);
+      suppressAutoDisableFor(900, () => map.setView(userLatLng, z, { animate: true }));
     }
   });
 }
@@ -645,7 +656,8 @@ function startLocationWatch() {
   navMarker = L.marker([40.7128, -74.0060], {
     icon: makeNavIcon(),
     interactive: false,
-    zIndexOffset: 9999,
+    zIndexOffset: 2000000,
+    pane: "navPane", // NEW: always above labels
   }).addTo(map);
 
   navigator.geolocation.watchPosition(
@@ -681,12 +693,17 @@ function startLocationWatch() {
       setNavRotation(lastHeadingDeg);
       setNavVisual(isMoving);
 
+      // NEW: better follow behavior + closer zoom
+      const desiredZoom = Math.max(map.getZoom(), AUTO_CENTER_MIN_ZOOM);
+
       if (!gpsFirstFixDone) {
         gpsFirstFixDone = true;
-        const targetZoom = Math.max(map.getZoom(), 13);
-        suppressAutoDisableFor(1200, () => map.setView(userLatLng, targetZoom, { animate: true }));
-      } else {
-        if (autoCenter) {
+        suppressAutoDisableFor(1200, () => map.setView(userLatLng, desiredZoom, { animate: true }));
+      } else if (autoCenter) {
+        // If user is zoomed out, bring them back in; otherwise just pan smoothly.
+        if (map.getZoom() < AUTO_CENTER_MIN_ZOOM) {
+          suppressAutoDisableFor(900, () => map.setView(userLatLng, desiredZoom, { animate: true }));
+        } else {
           suppressAutoDisableFor(700, () => map.panTo(userLatLng, { animate: true }));
         }
       }
