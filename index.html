@@ -2,21 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-
-  <!--
-    Mobile viewport:
-    - initial-scale=1 for predictable zoom
-    - viewport-fit=cover so iPhone safe-area insets work (notch / home bar)
-  -->
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-
   <title>NYC TLC Hotspot Map</title>
 
-  <!-- =====================================================
-       Leaflet (mapping library)
-       - CSS must load before map renders
-       - JS provides L.map, L.geoJSON, L.marker, etc
-       ===================================================== -->
+  <!-- Leaflet -->
   <link
     rel="stylesheet"
     href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
@@ -30,22 +19,15 @@
   ></script>
 
   <style>
-    /* =====================================================
-       Base layout: full-screen map on phone + desktop
-       ===================================================== */
     html, body { height: 100%; margin: 0; padding: 0; }
     #map { height: 100vh; width: 100vw; }
 
-    /* =====================================================
-       Legend (small + minimize)
-       - top-left overlay
-       - scaled down so it doesn’t cover map on phone
-       ===================================================== */
+    /* ---------- Legend (small + minimize) ---------- */
     .legend {
       position: absolute;
       top: calc(8px + env(safe-area-inset-top));
       left: 8px;
-      z-index: 1000; /* above map overlays */
+      z-index: 1000;
       background: rgba(255,255,255,0.92);
       padding: 6px;
       border-radius: 10px;
@@ -55,8 +37,6 @@
       transform: scale(0.86);
       transform-origin: top left;
     }
-
-    /* Legend header row: title + minimize button */
     .legendHeader{
       display:flex;
       align-items:center;
@@ -69,8 +49,6 @@
       font-size: 12px;
       font-weight: 900;
     }
-
-    /* Minimize button */
     .legendToggleBtn{
       border: none;
       background: rgba(0,0,0,0.06);
@@ -81,12 +59,9 @@
       cursor: pointer;
     }
     .legendToggleBtn:active{ transform: scale(0.98); }
-
-    /* Legend body hide/show when minimized */
     .legendBody{ display:block; }
     .legend.minimized .legendBody{ display:none; }
 
-    /* “Recommended” line (Blue+ weighted suggestion) */
     .legend .recommendLine{
       margin: 0 0 6px 0;
       font-size: 10px;
@@ -95,7 +70,6 @@
       line-height: 1.15;
     }
 
-    /* Buttons row: Navigate + Staten Island Mode */
     .navRow{
       display:flex;
       gap:8px;
@@ -104,7 +78,6 @@
       flex-wrap: wrap;
     }
 
-    /* Navigate button (Google Maps directions link) */
     .navBtn{
       display:inline-block;
       text-decoration:none;
@@ -119,14 +92,11 @@
       color: #0b2a3a;
     }
     .navBtn:active{ transform: scale(0.98); }
-
-    /* Disabled Navigate button (no target set yet) */
     .navBtn.disabled{
       opacity: 0.45;
       pointer-events: none;
     }
 
-    /* Mode button (Staten Island Mode toggle) */
     .modeBtn{
       border:none;
       border-radius: 999px;
@@ -143,7 +113,6 @@
     .modeBtn:active{ transform: scale(0.98); }
     .modeBtn.on { outline: 2px solid rgba(0,160,255,0.45); }
 
-    /* Legend color rows */
     .legend .row {
       display: flex;
       align-items: center;
@@ -159,8 +128,6 @@
       border: 1px solid rgba(0,0,0,0.15);
       flex: 0 0 12px;
     }
-
-    /* Legend small explanation text */
     .legend .sub {
       margin-top: 6px;
       font-size: 10px;
@@ -169,11 +136,7 @@
       font-weight: 700;
     }
 
-    /* =====================================================
-       Bottom slider bar (ALWAYS visible, safe-area aware)
-       - shows NYC time for selected 20-minute window
-       - slider controls current timeline frame index
-       ===================================================== */
+    /* ---------- Bottom slider (thin + ALWAYS visible with safe-area) ---------- */
     .sliderWrap {
       position: absolute;
       left: 10px;
@@ -197,7 +160,6 @@
       margin: 0;
     }
 
-    /* Auto-center toggle button row */
     .centerBtnInBar{
       margin-top: 6px;
       display:flex;
@@ -217,16 +179,14 @@
     .toggleBtnSmall.on { outline: 2px solid rgba(0,160,255,0.45); }
     .toggleBtnSmall:active { transform: scale(0.98); }
 
-    /* =====================================================
-       Zone labels (tooltips placed in center of each polygon)
-       ===================================================== */
+    /* ---------- Zone labels ---------- */
     .zone-label {
       background: transparent;
       border: none;
       box-shadow: none;
       color: #111;
       text-align: center;
-      pointer-events: none; /* labels should not block taps */
+      pointer-events: none;
     }
     .zone-label .zn,
     .zone-label .br {
@@ -245,7 +205,6 @@
     .zone-label .zn { font-weight: 950; letter-spacing: 0.1px; }
     .zone-label .br { font-weight: 900; opacity: 0.7; padding: 1px 6px; border-radius: 10px; }
 
-    /* Label scaling by zoom level (z10..z15 classes) */
     .zone-label.z10 .zn { font-size: 10px; }
     .zone-label.z11 .zn { font-size: 11px; }
     .zone-label.z12 .zn { font-size: 12px; }
@@ -253,7 +212,6 @@
     .zone-label.z14 .zn { font-size: 14px; }
     .zone-label.z15 .zn { font-size: 15px; }
 
-    /* Hide borough line until zoom 15 */
     .zone-label.z10 .br,
     .zone-label.z11 .br,
     .zone-label.z12 .br,
@@ -261,44 +219,74 @@
     .zone-label.z14 .br { font-size: 0px; padding: 0; border: 0; }
     .zone-label.z15 .br { font-size: 4px; }
 
-    /* =====================================================
-       Z-index control:
-       Goal: Your location arrow ALWAYS on top, never hidden
-       ===================================================== */
+    /* ---------- You arrow: force on top of EVERYTHING ---------- */
     .leaflet-marker-pane { z-index: 800 !important; }
     .leaflet-tooltip-pane { z-index: 650 !important; }
     .leaflet-overlay-pane { z-index: 400 !important; }
 
-    /* =====================================================
-       Navigation arrow (you marker)
-       - triangle points in direction of movement / heading
-       - pulse when stationary; glow when moving
-       ===================================================== */
+    /* =========================================================
+       GPS ARROW (UPDATED: more pointed “direction” look)
+       - Longer, narrower triangle (reads as a forward pointer)
+       - Inner highlight wedge helps your eyes see the “front”
+       - Rotation still handled by app.js via transform on #navWrap
+       ========================================================= */
     .navArrowWrap{
-      width: 30px;
-      height: 30px;
+      width: 34px;
+      height: 34px;
       position: relative;
       transform-origin: 50% 50%;
       will-change: transform, filter, box-shadow;
     }
+
+    /* Main arrow body (tall + narrow) */
     .navArrow{
       position: absolute;
       left: 50%;
       top: 50%;
       width: 0;
       height: 0;
-      transform: translate(-50%, -55%);
-      border-left: 9px solid transparent;
-      border-right: 9px solid transparent;
-      border-bottom: 18px solid #111;
+      transform: translate(-50%, -62%);
+      border-left: 6px solid transparent;
+      border-right: 6px solid transparent;
+      border-bottom: 26px solid #111; /* longer = more “pointed forward” */
       filter: drop-shadow(0 2px 2px rgba(0,0,0,0.35));
     }
+
+    /* Inner “nose” highlight to emphasize direction */
+    .navArrow::after{
+      content:"";
+      position:absolute;
+      left: 50%;
+      top: 7px;
+      width: 0;
+      height: 0;
+      transform: translateX(-50%);
+      border-left: 3px solid transparent;
+      border-right: 3px solid transparent;
+      border-bottom: 14px solid rgba(255,255,255,0.25);
+    }
+
+    /* Slight base cap to look less like a perfect triangle */
+    .navArrow::before{
+      content:"";
+      position:absolute;
+      left: 50%;
+      top: 23px;
+      width: 10px;
+      height: 6px;
+      transform: translateX(-50%);
+      border-radius: 999px;
+      background: rgba(0,0,0,0.25);
+      filter: blur(0.2px);
+    }
+
     .navMoving .navArrow{
       filter:
         drop-shadow(0 2px 2px rgba(0,0,0,0.35))
         drop-shadow(0 0 6px rgba(0,160,255,0.95))
         drop-shadow(0 0 12px rgba(0,160,255,0.75));
     }
+
     @keyframes pulseRing {
       0%   { transform: translate(-50%, -50%) scale(0.8); opacity: 0.75; }
       70%  { transform: translate(-50%, -50%) scale(1.25); opacity: 0.05; }
@@ -309,8 +297,8 @@
       position:absolute;
       left:50%;
       top:50%;
-      width: 26px;
-      height: 26px;
+      width: 28px;
+      height: 28px;
       border-radius: 999px;
       border: 2px solid rgba(0,160,255,0.9);
       transform: translate(-50%, -50%);
@@ -321,12 +309,8 @@
 </head>
 
 <body>
-  <!-- Leaflet map container -->
   <div id="map"></div>
 
-  <!-- =====================================================
-       Legend UI (minimizable)
-       ===================================================== -->
   <div id="legend" class="legend" aria-label="Demand legend">
     <div class="legendHeader">
       <h3>Demand Colors</h3>
@@ -334,18 +318,13 @@
     </div>
 
     <div class="legendBody">
-      <!-- Filled by app.js using updateRecommendation() -->
       <div id="recommendLine" class="recommendLine">Recommended: …</div>
 
       <div class="navRow">
-        <!-- Navigate link is enabled only after recommendation has a destination -->
         <a id="navBtn" class="navBtn disabled" href="#" target="_blank" rel="noopener">Navigate</a>
-
-        <!-- Staten Island Mode toggle (persists via localStorage) -->
         <button id="btnStatenIsland" class="modeBtn" type="button">Staten Island Mode: OFF</button>
       </div>
 
-      <!-- Color legend mapping -->
       <div class="row"><span class="swatch" style="background:#00b050"></span> Green = Highest</div>
       <div class="row"><span class="swatch" style="background:#8000ff"></span> Purple = High</div>
       <div class="row"><span class="swatch" style="background:#0066ff"></span> Blue = Medium</div>
@@ -360,22 +339,14 @@
     </div>
   </div>
 
-  <!-- =====================================================
-       Bottom timeline slider
-       ===================================================== -->
   <div class="sliderWrap">
     <div id="timeLabel" class="timeLabel">Loading…</div>
-
-    <!-- Slider controls frame index (0..timeline.length-1) -->
     <input id="slider" type="range" min="0" max="0" value="0" step="1" />
-
     <div class="centerBtnInBar">
-      <!-- Auto-center toggle for following your location -->
       <button id="btnCenter" class="toggleBtnSmall on" type="button">Auto-center: ON</button>
     </div>
   </div>
 
-  <!-- Your map logic -->
   <script src="./app.js"></script>
 </body>
 </html>
