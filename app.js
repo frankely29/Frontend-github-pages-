@@ -1,9 +1,12 @@
 /* =========================================================
-   NYC TLC Hotspot Map (Frontend)
-   - Keeps 20-minute bins (no backend overload)
-   - Auto-updates on iPhone Safari without manual refresh:
-       1) Every 60s: if NYC is now in a new 20-min bin -> auto move slider + load new frame
-       2) Every 5 min: refresh current frame (keeps data fresh + prevents Safari staleness)
+   NYC TLC Hotspot Map (Frontend) - SIMPLE + STABLE
+   ---------------------------------------------------------
+   GOALS:
+   1) Keep your original map zoom behavior (NO forced zoom-in changes)
+   2) Keep Auto-center stable: ON follows you, OFF lets you explore
+   3) Keep page updating in Safari without manual refresh:
+      - every 60s: if NYC moved to a new 20-min bin -> move slider + load frame
+      - every 5 min: refresh the current frame (same index)
    ========================================================= */
 
 const RAILWAY_BASE = "https://web-production-78f67.up.railway.app";
@@ -12,10 +15,7 @@ const BIN_MINUTES = 20;
 // Refresh current frame every 5 minutes (re-fetch same slider idx)
 const REFRESH_MS = 5 * 60 * 1000;
 
-// Auto-follow closer zoom when following
-const AUTO_CENTER_MIN_ZOOM = 15;
-
-// How often we check NYC time to auto-advance the slider/frame (cheap)
+// NYC clock tick: check if the correct 20-min window changed
 const NYC_CLOCK_TICK_MS = 60 * 1000;
 
 // If user recently touched slider, don't auto-advance for a bit
@@ -81,7 +81,7 @@ function formatNYCLabel(iso) {
   return `${names[dow_m]} ${hr12}:${mm} ${ampm}`;
 }
 
-// Get "NYC minute-of-week", rounded DOWN to the current BIN_MINUTES bucket
+// Get NYC minute-of-week rounded DOWN to current BIN_MINUTES bucket
 function getNowNYCMinuteOfWeekRounded() {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/New_York",
@@ -110,7 +110,7 @@ function cyclicDiff(a, b, mod) {
   return Math.min(d, mod - d);
 }
 
-// Pick the closest frame index to the NYC target minute-of-week
+// Pick the closest frame index to a target minute-of-week
 function pickClosestIndex(minutesOfWeekArr, target) {
   let bestIdx = 0;
   let bestDiff = Infinity;
@@ -454,7 +454,7 @@ function updateRecommendation(frame) {
 }
 
 /* =========================================================
-   Leaflet map
+   Leaflet map setup
    ========================================================= */
 const slider = document.getElementById("slider");
 const timeLabel = document.getElementById("timeLabel");
@@ -478,7 +478,7 @@ let timeline = [];
 let minutesOfWeek = [];
 let currentFrame = null;
 
-// Track when user last touched slider so we don't fight them
+// Track user slider touches so we don't fight them
 let lastUserSliderTs = 0;
 
 function buildPopupHTML(props) {
@@ -588,16 +588,16 @@ map.on("zoomend", () => {
 // Slider manual control (debounced)
 let sliderDebounce = null;
 slider.addEventListener("input", () => {
-  lastUserSliderTs = Date.now(); // user is actively exploring time
+  lastUserSliderTs = Date.now();
   const idx = Number(slider.value);
   if (sliderDebounce) clearTimeout(sliderDebounce);
   sliderDebounce = setTimeout(() => loadFrame(idx).catch(console.error), 80);
 });
 
 /* =========================================================
-   Auto-center button (stable logic)
-   - ON: map follows your GPS arrow
-   - OFF: you can explore freely without it snapping back
+   Auto-center button (stable)
+   - ON: follows your GPS arrow
+   - OFF: you can explore freely
    ========================================================= */
 const btnCenter = document.getElementById("btnCenter");
 let autoCenter = true;
@@ -626,9 +626,9 @@ if (btnCenter) {
     autoCenter = !autoCenter;
     syncCenterButton();
 
+    // IMPORTANT: no forced zoom changes here. If you want closer, you manually zoom.
     if (autoCenter && userLatLng) {
-      const z = Math.max(map.getZoom(), AUTO_CENTER_MIN_ZOOM);
-      suppressAutoDisableFor(900, () => map.setView(userLatLng, z, { animate: true }));
+      suppressAutoDisableFor(800, () => map.panTo(userLatLng, { animate: true }));
     }
   });
 }
@@ -643,7 +643,9 @@ map.on("dragstart", disableAutoCenterBecauseUserIsExploring);
 map.on("zoomstart", disableAutoCenterBecauseUserIsExploring);
 
 /* =========================================================
-   Live location arrow + follow behavior
+   Live location arrow + follow behavior (ORIGINAL ZOOM LOGIC)
+   - First fix: zoom to at least 13 (like your old version)
+   - After that: only pan when Auto-center is ON
    ========================================================= */
 let gpsFirstFixDone = false;
 let navMarker = null;
@@ -652,7 +654,6 @@ let lastHeadingDeg = 0;
 let lastMoveTs = 0;
 
 function makeNavIcon() {
-  // NOTE: your pointed arrow styling is in index.html CSS (.navArrow)
   return L.divIcon({
     className: "",
     html: `<div id="navWrap" class="navArrowWrap navPulse"><div class="navArrow"></div></div>`,
@@ -696,7 +697,6 @@ function startLocationWatch() {
     return;
   }
 
-  // Create marker on a top pane + huge zIndex so it never goes under labels
   navMarker = L.marker([40.7128, -74.0060], {
     icon: makeNavIcon(),
     interactive: false,
@@ -723,7 +723,6 @@ function startLocationWatch() {
 
         isMoving = mph >= 2.0;
 
-        // Use device heading if available; otherwise compute from movement
         if (typeof heading === "number" && Number.isFinite(heading)) {
           lastHeadingDeg = heading;
         } else if (dMi > 0.01) {
@@ -738,17 +737,12 @@ function startLocationWatch() {
       setNavRotation(lastHeadingDeg);
       setNavVisual(isMoving);
 
-      const desiredZoom = Math.max(map.getZoom(), AUTO_CENTER_MIN_ZOOM);
-
-      // First fix: jump to you
       if (!gpsFirstFixDone) {
         gpsFirstFixDone = true;
-        suppressAutoDisableFor(1200, () => map.setView(userLatLng, desiredZoom, { animate: true }));
-      } else if (autoCenter) {
-        // Keep following you (pan), and bring zoom back if you are too zoomed out
-        if (map.getZoom() < AUTO_CENTER_MIN_ZOOM) {
-          suppressAutoDisableFor(900, () => map.setView(userLatLng, desiredZoom, { animate: true }));
-        } else {
+        const targetZoom = Math.max(map.getZoom(), 13); // ORIGINAL behavior
+        suppressAutoDisableFor(1200, () => map.setView(userLatLng, targetZoom, { animate: true }));
+      } else {
+        if (autoCenter) {
           suppressAutoDisableFor(700, () => map.panTo(userLatLng, { animate: true }));
         }
       }
@@ -767,7 +761,6 @@ function startLocationWatch() {
     }
   );
 
-  // Keep moving pulse accurate even if Safari pauses heading updates
   setInterval(() => {
     const now = Date.now();
     const recentlyMoved = lastMoveTs && (now - lastMoveTs) < 5000;
@@ -776,11 +769,10 @@ function startLocationWatch() {
 }
 
 /* =========================================================
-   AUTO-UPDATE (the main thing you asked for)
-   - Keeps map alive on Safari without manual refresh
+   AUTO-UPDATE (no manual refresh needed)
    ========================================================= */
 
-// Refresh current slider frame every 5 minutes (re-fetches colors/tooltips)
+// Every 5 minutes: refresh the current frame (same slider index)
 async function refreshCurrentFrame() {
   try {
     const idx = Number(slider.value || "0");
@@ -791,21 +783,18 @@ async function refreshCurrentFrame() {
 }
 setInterval(refreshCurrentFrame, REFRESH_MS);
 
-// Every minute: if NYC moved into a NEW 20-min bucket, auto-advance slider + load new frame
+// Every minute: if NYC moved into a NEW 20-min bucket, move slider + load that frame
 async function tickNYCClockAndAdvanceIfNeeded() {
   try {
-    // Don't fight the user if they just touched slider
     if (Date.now() - lastUserSliderTs < USER_SLIDER_GRACE_MS) return;
-
     if (!timeline.length || !minutesOfWeek.length) return;
 
     const nowMinWeek = getNowNYCMinuteOfWeekRounded();
     const bestIdx = pickClosestIndex(minutesOfWeek, nowMinWeek);
 
     const curIdx = Number(slider.value || "0");
-    if (bestIdx === curIdx) return; // still same 20-min slot
+    if (bestIdx === curIdx) return;
 
-    // Move slider to "now" and load that frame
     slider.value = String(bestIdx);
     await loadFrame(bestIdx);
   } catch (e) {
