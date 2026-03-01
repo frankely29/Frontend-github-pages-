@@ -8,23 +8,10 @@
       - every 60s: if NYC moved to a new 20-min bin -> move slider + load frame
       - every 5 min: refresh the current frame (same index)
 
-   =========================================================
-   MANHATTAN MODE (NEW) — DEFAULT behavior, do not change unless you know why
-   ---------------------------------------------------------
-   Problem: Manhattan has high demand but can be over-saturated with drivers.
-   Your backend rating = demand-heavy. That can overrate Manhattan.
-
-   Solution (data-driven, Manhattan-only):
-   - When Manhattan Mode is ON, we compute a Manhattan-only adjusted rating
-     from the CURRENT frame’s data:
-       * Pay percentile (primary signal) + Pickup percentile (secondary)
-       * Optional small global penalty applied ONLY to Manhattan
-   - Brooklyn/Queens/Bronx/Staten Island Mode remain unchanged.
-
-   WARNING:
-   - This does NOT increase Railway load. It only changes frontend coloring.
-   - It does NOT change your backend frames; it only recalculates Manhattan
-     presentation and recommendation weighting on the fly.
+   MANHATTAN MODE UPDATE (ONLY CHANGE):
+   - Manhattan Mode now applies ONLY to Midtown + Lower Manhattan
+   - Uptown Manhattan stays NYC-wide (unchanged)
+   - This is done using centroid latitude cutoff (data-driven from geometry)
    ========================================================= */
 
 const RAILWAY_BASE = "https://web-production-78f67.up.railway.app";
@@ -40,23 +27,19 @@ const NYC_CLOCK_TICK_MS = 60 * 1000;
 const USER_SLIDER_GRACE_MS = 25 * 1000;
 
 /* =========================================================
-   MANHATTAN MODE — DEFAULT SETTINGS (SAFE TO EDIT)
+   MANHATTAN MODE REGION CONTROL (DEFAULT - SAFE TO EDIT)
    ---------------------------------------------------------
-   These only affect Manhattan when Manhattan Mode is ON.
+   Manhattan Mode should ONLY affect Midtown + Lower Manhattan.
+   We exclude Uptown by using a centroid latitude cutoff.
+
+   DEFAULT behavior:
+   - Apply Manhattan Mode ONLY if:
+       borough includes "manhattan"
+       AND centroid.lat <= MANHATTAN_CORE_MAX_LAT
    ========================================================= */
-const LS_KEY_MANHATTAN = "manhattan_mode_enabled";
 
-// Manhattan adjusted rating uses percentiles inside Manhattan ONLY:
-// score = (PAY_WEIGHT * payPercentile) + (VOL_WEIGHT * pickupPercentile)
-const MANHATTAN_PAY_WEIGHT = 0.65;   // higher = favor higher pay zones in Manhattan more
-const MANHATTAN_VOL_WEIGHT = 0.35;   // lower = de-emphasize pure demand (saturation risk proxy)
-
-// Optional penalty to gently push Manhattan down overall when mode is ON.
-// Example 0.90 = 10% penalty, 0.85 = 15% penalty.
-const MANHATTAN_GLOBAL_PENALTY = 0.90;
-
-// Minimum Manhattan zones in frame needed to compute percentiles reliably
-const MANHATTAN_MIN_ZONES = 6;
+// ~96th St-ish cutoff (excludes Harlem/Inwood/Wash Heights)
+const MANHATTAN_CORE_MAX_LAT = 40.795;
 
 /* =========================================================
    Legend minimize
@@ -226,89 +209,6 @@ function isStatenIslandFeature(props) {
   return b.includes("staten");
 }
 
-/* =========================================================
-   Manhattan Mode (pay-weight Manhattan-only recolor)
-   DEFAULT behavior, do not change unless you know why.
-   ---------------------------------------------------------
-   We create the button dynamically if it doesn't exist in HTML,
-   so you do NOT need to edit index.html.
-   ========================================================= */
-let manhattanMode = (localStorage.getItem(LS_KEY_MANHATTAN) || "0") === "1";
-
-function isManhattanFeature(props) {
-  const b = (props?.borough || "").toString().toLowerCase();
-  return b.includes("manhattan");
-}
-
-function ensureManhattanButton() {
-  // If you already added a button in HTML with id="btnManhattan", we reuse it.
-  let btn = document.getElementById("btnManhattan");
-  if (btn) return btn;
-
-  // Otherwise, create it and place it near the other mode buttons (best-effort).
-  btn = document.createElement("button");
-  btn.id = "btnManhattan";
-  btn.type = "button";
-  btn.className = "navBtn"; // uses your existing styles (safe even if class differs)
-  btn.style.marginLeft = "6px";
-  btn.style.padding = "6px 10px";
-  btn.style.borderRadius = "10px";
-  btn.style.border = "1px solid rgba(0,0,0,0.2)";
-  btn.style.background = "rgba(255,255,255,0.95)";
-  btn.style.fontWeight = "700";
-  btn.style.fontSize = "12px";
-
-  // Try to insert into the same row as other legend buttons
-  const navRow =
-    document.getElementById("navRow") ||
-    (legendEl ? legendEl.querySelector(".navRow") : null) ||
-    (legendEl ? legendEl : null);
-
-  if (navRow) {
-    // Insert after Staten Island button if present, otherwise append
-    if (btnStatenIsland && btnStatenIsland.parentElement === navRow) {
-      btnStatenIsland.insertAdjacentElement("afterend", btn);
-    } else {
-      navRow.appendChild(btn);
-    }
-  } else {
-    // Last resort: add to body (won't break app)
-    document.body.appendChild(btn);
-  }
-
-  return btn;
-}
-
-const btnManhattan = ensureManhattanButton();
-
-function syncManhattanUI() {
-  if (!btnManhattan) return;
-  btnManhattan.textContent = manhattanMode ? "Manhattan Mode: ON" : "Manhattan Mode: OFF";
-  btnManhattan.classList.toggle("on", !!manhattanMode);
-}
-
-syncManhattanUI();
-
-if (btnManhattan) {
-  btnManhattan.addEventListener("pointerdown", (e) => e.stopPropagation());
-  btnManhattan.addEventListener("touchstart", (e) => e.stopPropagation(), { passive: true });
-
-  btnManhattan.addEventListener("click", (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-
-    manhattanMode = !manhattanMode;
-    localStorage.setItem(LS_KEY_MANHATTAN, manhattanMode ? "1" : "0");
-    syncManhattanUI();
-
-    // Re-render immediately to recolor Manhattan without changing slider/backend
-    if (currentFrame) renderFrame(currentFrame);
-  });
-}
-
-/* =========================================================
-   Shared rating->color helper (same thresholds as backend)
-   ========================================================= */
 function colorFromLocalRating(r) {
   const x = Math.max(1, Math.min(100, Math.round(r)));
   if (x >= 90) return { bucket: "green", color: "#00b050" };
@@ -370,114 +270,12 @@ function applyStatenLocalView(frame) {
   return frame;
 }
 
-/* =========================================================
-   Manhattan Mode — compute Manhattan-only adjusted rating per frame
-   DEFAULT behavior, do not change unless you know why.
-   ---------------------------------------------------------
-   Uses CURRENT frame data only:
-     - pickups percentile within Manhattan
-     - avg_driver_pay percentile within Manhattan
-   Then:
-     score = PAY_WEIGHT*payP + VOL_WEIGHT*volP
-     rating = 1 + 99*score
-     then apply optional GLOBAL_PENALTY
-   ========================================================= */
-function applyManhattanLocalView(frame) {
-  const feats = frame?.polygons?.features || [];
-  if (!feats.length) return frame;
-
-  // Collect Manhattan pickups and pay (only where data is valid)
-  const mPickups = [];
-  const mPay = [];
-
-  for (const f of feats) {
-    const props = f.properties || {};
-    if (!isManhattanFeature(props)) continue;
-
-    const pu = Number(props.pickups ?? NaN);
-    const pay = Number(props.avg_driver_pay ?? NaN);
-
-    if (Number.isFinite(pu)) mPickups.push(pu);
-    if (Number.isFinite(pay)) mPay.push(pay);
-  }
-
-  // If too few Manhattan zones in this frame, skip (prevents noisy flips)
-  if (mPickups.length < MANHATTAN_MIN_ZONES || mPay.length < MANHATTAN_MIN_ZONES) {
-    for (const f of feats) {
-      const props = f.properties || {};
-      props.mh_local_rating = null;
-      props.mh_local_bucket = null;
-      props.mh_local_color = null;
-    }
-    return frame;
-  }
-
-  // Sort for percentile rank
-  const pickSorted = mPickups.slice().sort((a, b) => a - b);
-  const paySorted = mPay.slice().sort((a, b) => a - b);
-
-  function percentileFromSorted(sorted, v) {
-    // percent based on <= v index
-    const n = sorted.length;
-    if (n <= 1) return 0;
-    let lo = 0, hi = n - 1, ans = -1;
-    while (lo <= hi) {
-      const mid = (lo + hi) >> 1;
-      if (sorted[mid] <= v) { ans = mid; lo = mid + 1; }
-      else hi = mid - 1;
-    }
-    return Math.max(0, Math.min(1, ans / (n - 1)));
-  }
-
-  for (const f of feats) {
-    const props = f.properties || {};
-
-    if (!isManhattanFeature(props)) {
-      props.mh_local_rating = null;
-      props.mh_local_bucket = null;
-      props.mh_local_color = null;
-      continue;
-    }
-
-    const pu = Number(props.pickups ?? NaN);
-    const pay = Number(props.avg_driver_pay ?? NaN);
-
-    // If missing data, skip (keep null so it falls back to NYC)
-    if (!Number.isFinite(pu) || !Number.isFinite(pay)) {
-      props.mh_local_rating = null;
-      props.mh_local_bucket = null;
-      props.mh_local_color = null;
-      continue;
-    }
-
-    const volP = percentileFromSorted(pickSorted, pu);
-    const payP = percentileFromSorted(paySorted, pay);
-
-    // Data-driven Manhattan score: pay-weighted
-    let score = MANHATTAN_PAY_WEIGHT * payP + MANHATTAN_VOL_WEIGHT * volP;
-    score = Math.max(0, Math.min(1, score));
-
-    // Convert to 1..100 and apply optional global penalty
-    let localRating = 1 + 99 * score;
-    localRating = localRating * MANHATTAN_GLOBAL_PENALTY;
-    localRating = Math.max(1, Math.min(100, localRating));
-
-    const { bucket, color } = colorFromLocalRating(localRating);
-    props.mh_local_rating = Math.round(localRating);
-    props.mh_local_bucket = bucket;
-    props.mh_local_color = color;
-  }
-
-  return frame;
-}
-
 function syncStatenIslandUI() {
   if (btnStatenIsland) {
     btnStatenIsland.textContent = statenIslandMode ? "Staten Island Mode: ON" : "Staten Island Mode: OFF";
     btnStatenIsland.classList.toggle("on", !!statenIslandMode);
   }
   if (modeNote) {
-    // Keep your original note text; Manhattan mode doesn't overwrite it.
     modeNote.innerHTML = statenIslandMode
       ? `Staten Island Mode is <b>ON</b>: Staten Island colors are <b>relative within Staten Island</b> only.<br/>Other boroughs remain NYC-wide.`
       : `Colors come from rating (1–100) for the selected 20-minute window.<br/>Time label is NYC time.`;
@@ -500,40 +298,226 @@ if (btnStatenIsland) {
 }
 
 /* =========================================================
-   Effective bucket/color/rating selection
-   DEFAULT behavior, do not change unless you know why.
+   Manhattan Mode (Midtown + Lower ONLY) — FRONTEND-ONLY
    ---------------------------------------------------------
-   Precedence:
-   1) Staten Island Mode for Staten Island zones
-   2) Manhattan Mode for Manhattan zones
-   3) Backend NYC rating
+   IMPORTANT:
+   - This uses geometry centroid latitude cutoff.
+   - Uptown Manhattan stays NYC-wide.
+   - This is "mode like Staten Island" but for driver saturation.
    ========================================================= */
-function effectiveBucket(props) {
+const btnManhattan = document.getElementById("btnManhattan"); // requires index.html button id="btnManhattan"
+const LS_KEY_MH = "manhattan_mode_enabled";
+let manhattanMode = (localStorage.getItem(LS_KEY_MH) || "0") === "1";
+
+function isManhattanFeature(props) {
+  const b = (props?.borough || "").toString().toLowerCase();
+  return b.includes("manhattan");
+}
+
+/* =========================================================
+   FIX: Accurate polygon centroid (area-weighted)
+   ========================================================= */
+
+// Centroid of a linear ring (expects [[lng,lat],...], ideally closed)
+function ringCentroidArea(ring) {
+  if (!Array.isArray(ring) || ring.length < 3) return null;
+
+  // Ensure closed ring for math stability
+  const pts = ring.slice();
+  const first = pts[0];
+  const last = pts[pts.length - 1];
+  if (first && last && (first[0] !== last[0] || first[1] !== last[1])) {
+    pts.push([first[0], first[1]]);
+  }
+
+  let A = 0;
+  let Cx = 0;
+  let Cy = 0;
+
+  for (let i = 0; i < pts.length - 1; i++) {
+    const [x0, y0] = pts[i];
+    const [x1, y1] = pts[i + 1];
+    const cross = x0 * y1 - x1 * y0;
+    A += cross;
+    Cx += (x0 + x1) * cross;
+    Cy += (y0 + y1) * cross;
+  }
+
+  // A is 2*signedArea
+  if (Math.abs(A) < 1e-12) return null;
+
+  const inv = 1 / (3 * A);
+  return { lng: Cx * inv, lat: Cy * inv, area2: A };
+}
+
+// Centroid of Polygon with holes
+function polygonCentroid(geom) {
+  const rings = geom?.coordinates;
+  if (!Array.isArray(rings) || rings.length === 0) return null;
+
+  const outer = ringCentroidArea(rings[0]);
+  if (!outer) return null;
+
+  let sumArea2 = outer.area2;
+  let sumLng = outer.lng * outer.area2;
+  let sumLat = outer.lat * outer.area2;
+
+  for (let i = 1; i < rings.length; i++) {
+    const hole = ringCentroidArea(rings[i]);
+    if (!hole) continue;
+    sumArea2 += hole.area2;
+    sumLng += hole.lng * hole.area2;
+    sumLat += hole.lat * hole.area2;
+  }
+
+  if (Math.abs(sumArea2) < 1e-12) return { lat: outer.lat, lng: outer.lng };
+  return { lat: sumLat / sumArea2, lng: sumLng / sumArea2 };
+}
+
+// Centroid of MultiPolygon
+function multiPolygonCentroid(geom) {
+  const polys = geom?.coordinates;
+  if (!Array.isArray(polys) || polys.length === 0) return null;
+
+  let sumArea2 = 0;
+  let sumLat = 0;
+  let sumLng = 0;
+
+  for (const poly of polys) {
+    const c = polygonCentroid({ type: "Polygon", coordinates: poly });
+    if (!c) continue;
+
+    const outer = ringCentroidArea(poly?.[0] || []);
+    const w = outer ? outer.area2 : 1;
+
+    sumArea2 += w;
+    sumLat += c.lat * w;
+    sumLng += c.lng * w;
+  }
+
+  if (Math.abs(sumArea2) < 1e-12) return null;
+  return { lat: sumLat / sumArea2, lng: sumLng / sumArea2 };
+}
+
+function geometryCenter(geom) {
+  if (!geom) return null;
+  if (geom.type === "Polygon") return polygonCentroid(geom);
+  if (geom.type === "MultiPolygon") return multiPolygonCentroid(geom);
+  return null;
+}
+
+// TRUE only for Midtown + Lower Manhattan (not Uptown)
+function isCoreManhattan(props, geom) {
+  if (!isManhattanFeature(props)) return false;
+  const c = geometryCenter(geom);
+  if (!c || !Number.isFinite(c.lat)) return false;
+  return c.lat <= MANHATTAN_CORE_MAX_LAT;
+}
+
+// Manhattan-local bucket/color from Manhattan-local rating
+function applyManhattanLocalView(frame) {
+  const feats = frame?.polygons?.features || [];
+  if (!feats.length) return frame;
+
+  // Collect ONLY Core Manhattan ratings
+  const mhRatings = [];
+  for (const f of feats) {
+    const props = f.properties || {};
+    if (!isCoreManhattan(props, f.geometry)) continue; // <-- key change
+    const r = Number(props.rating ?? NaN);
+    if (!Number.isFinite(r)) continue;
+    mhRatings.push(r);
+  }
+  if (mhRatings.length < 3) return frame;
+
+  const sorted = mhRatings.slice().sort((a, b) => a - b);
+  const n = sorted.length;
+
+  function percentileOfRating(r) {
+    let lo = 0, hi = n - 1, ans = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (sorted[mid] <= r) { ans = mid; lo = mid + 1; }
+      else hi = mid - 1;
+    }
+    if (n <= 1) return 0;
+    return Math.max(0, Math.min(1, ans / (n - 1)));
+  }
+
+  for (const f of feats) {
+    const props = f.properties || {};
+
+    // Uptown Manhattan (and all non-Core areas) stay NYC-wide (unchanged)
+    if (!isCoreManhattan(props, f.geometry)) {
+      props.mh_local_rating = null;
+      props.mh_local_bucket = null;
+      props.mh_local_color = null;
+      continue;
+    }
+
+    const r = Number(props.rating ?? NaN);
+    if (!Number.isFinite(r)) continue;
+
+    const p = percentileOfRating(r);
+    const localRating = 1 + 99 * p;
+
+    const { bucket, color } = colorFromLocalRating(localRating);
+    props.mh_local_rating = Math.round(localRating);
+    props.mh_local_bucket = bucket;
+    props.mh_local_color = color;
+  }
+
+  return frame;
+}
+
+function syncManhattanUI() {
+  if (!btnManhattan) return;
+  btnManhattan.textContent = manhattanMode ? "Manhattan Mode: ON" : "Manhattan Mode: OFF";
+  btnManhattan.classList.toggle("on", !!manhattanMode);
+}
+
+syncManhattanUI();
+
+if (btnManhattan) {
+  btnManhattan.addEventListener("pointerdown", (e) => e.stopPropagation());
+  btnManhattan.addEventListener("touchstart", (e) => e.stopPropagation(), { passive: true });
+
+  btnManhattan.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    manhattanMode = !manhattanMode;
+    localStorage.setItem(LS_KEY_MH, manhattanMode ? "1" : "0");
+    syncManhattanUI();
+    if (currentFrame) renderFrame(currentFrame);
+  });
+}
+
+/* =========================================================
+   Effective bucket/color selection
+   ---------------------------------------------------------
+   Priority:
+   1) Staten Island Mode (SI-local) if active and SI
+   2) Manhattan Mode (MH-local) if active and CORE Manhattan
+   3) Default NYC-wide
+   ========================================================= */
+function effectiveBucket(props, geom) {
   if (statenIslandMode && isStatenIslandFeature(props) && props.si_local_bucket) return props.si_local_bucket;
-  if (manhattanMode && isManhattanFeature(props) && props.mh_local_bucket) return props.mh_local_bucket;
+  if (manhattanMode && props && props.mh_local_bucket) return props.mh_local_bucket;
   return (props.bucket || "").trim();
 }
-function effectiveColor(props) {
+function effectiveColor(props, geom) {
   if (statenIslandMode && isStatenIslandFeature(props) && props.si_local_color) return props.si_local_color;
-  if (manhattanMode && isManhattanFeature(props) && props.mh_local_color) return props.mh_local_color;
+  if (manhattanMode && props && props.mh_local_color) return props.mh_local_color;
   const st = props?.style || {};
   return st.fillColor || st.color || "#000";
-}
-function effectiveRating(props) {
-  if (statenIslandMode && isStatenIslandFeature(props) && Number.isFinite(Number(props.si_local_rating))) {
-    return Number(props.si_local_rating);
-  }
-  if (manhattanMode && isManhattanFeature(props) && Number.isFinite(Number(props.mh_local_rating))) {
-    return Number(props.mh_local_rating);
-  }
-  return Number(props.rating ?? NaN);
 }
 
 function labelHTML(props, zoom) {
   const name = (props.zone_name || "").trim();
   if (!name) return "";
 
-  const b = effectiveBucket(props);
+  // For label filtering we don't have geom here; use props bucket which is OK for label visibility.
+  const b = (props.bucket || "").trim();
   if (!shouldShowLabel(b, Math.round(zoom))) return "";
 
   const zoneText = zoom < 13 ? shortenLabel(name, LABEL_MAX_CHARS_MID) : name;
@@ -594,108 +578,6 @@ function haversineMiles(a, b) {
   return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
-/* =========================================================
-   FIX: Accurate polygon centroid (area-weighted)
-   ---------------------------------------------------------
-   Your old geometryCenter() averaged points, which can be far
-   from the real zone center. That breaks distance -> breaks
-   recommendations.
-   ========================================================= */
-
-// Centroid of a linear ring (expects [[lng,lat],...], ideally closed)
-function ringCentroidArea(ring) {
-  if (!Array.isArray(ring) || ring.length < 3) return null;
-
-  // Ensure closed ring for math stability
-  const pts = ring.slice();
-  const first = pts[0];
-  const last = pts[pts.length - 1];
-  if (first && last && (first[0] !== last[0] || first[1] !== last[1])) {
-    pts.push([first[0], first[1]]);
-  }
-
-  let A = 0;
-  let Cx = 0;
-  let Cy = 0;
-
-  for (let i = 0; i < pts.length - 1; i++) {
-    const [x0, y0] = pts[i];
-    const [x1, y1] = pts[i + 1];
-    const cross = x0 * y1 - x1 * y0;
-    A += cross;
-    Cx += (x0 + x1) * cross;
-    Cy += (y0 + y1) * cross;
-  }
-
-  // A is 2*signedArea
-  if (Math.abs(A) < 1e-12) return null;
-
-  const inv = 1 / (3 * A);
-  return { lng: Cx * inv, lat: Cy * inv, area2: A };
-}
-
-// Centroid of Polygon with holes: outer ring minus hole influence (approx)
-function polygonCentroid(geom) {
-  const rings = geom?.coordinates;
-  if (!Array.isArray(rings) || rings.length === 0) return null;
-
-  // Outer ring centroid
-  const outer = ringCentroidArea(rings[0]);
-  if (!outer) return null;
-
-  // Subtract holes (if any)
-  let sumArea2 = outer.area2;
-  let sumLng = outer.lng * outer.area2;
-  let sumLat = outer.lat * outer.area2;
-
-  for (let i = 1; i < rings.length; i++) {
-    const hole = ringCentroidArea(rings[i]);
-    if (!hole) continue;
-    // Hole ring orientation may be opposite; use its area2 as computed
-    sumArea2 += hole.area2;
-    sumLng += hole.lng * hole.area2;
-    sumLat += hole.lat * hole.area2;
-  }
-
-  if (Math.abs(sumArea2) < 1e-12) return { lat: outer.lat, lng: outer.lng };
-  return { lat: sumLat / sumArea2, lng: sumLng / sumArea2 };
-}
-
-// Centroid of MultiPolygon: area-weighted average of polygon centroids
-function multiPolygonCentroid(geom) {
-  const polys = geom?.coordinates;
-  if (!Array.isArray(polys) || polys.length === 0) return null;
-
-  let sumArea2 = 0;
-  let sumLat = 0;
-  let sumLng = 0;
-
-  for (const poly of polys) {
-    // poly is [ring1, ring2...]
-    const c = polygonCentroid({ type: "Polygon", coordinates: poly });
-    if (!c) continue;
-
-    // Approx weight: use outer ring area2
-    const outer = ringCentroidArea(poly?.[0] || []);
-    const w = outer ? outer.area2 : 1;
-
-    sumArea2 += w;
-    sumLat += c.lat * w;
-    sumLng += c.lng * w;
-  }
-
-  if (Math.abs(sumArea2) < 1e-12) return null;
-  return { lat: sumLat / sumArea2, lng: sumLng / sumArea2 };
-}
-
-// Replacement for your old geometryCenter()
-function geometryCenter(geom) {
-  if (!geom) return null;
-  if (geom.type === "Polygon") return polygonCentroid(geom);
-  if (geom.type === "MultiPolygon") return multiPolygonCentroid(geom);
-  return null;
-}
-
 function updateRecommendation(frame) {
   if (!recommendEl) return;
 
@@ -721,12 +603,17 @@ function updateRecommendation(frame) {
     const props = f.properties || {};
     const geom = f.geometry;
 
-    const b = effectiveBucket(props);
+    const b = effectiveBucket(props, geom);
     if (!allowed.has(b)) continue;
 
-    // IMPORTANT: recommendation uses the effective rating
-    // (SI-local when SI mode, Manhattan-local when Manhattan mode)
-    const rating = effectiveRating(props);
+    // Use Manhattan-local rating ONLY if manhattanMode and core Manhattan
+    const rating =
+      (statenIslandMode && isStatenIslandFeature(props) && Number.isFinite(Number(props.si_local_rating)))
+        ? Number(props.si_local_rating)
+        : (manhattanMode && Number.isFinite(Number(props.mh_local_rating)))
+          ? Number(props.mh_local_rating)
+          : Number(props.rating ?? NaN);
+
     if (!Number.isFinite(rating)) continue;
 
     const center = geometryCenter(geom);
@@ -744,8 +631,6 @@ function updateRecommendation(frame) {
         lng: center.lng,
         name: (props.zone_name || "").trim() || `Zone ${props.LocationID ?? ""}`,
         borough: (props.borough || "").trim(),
-        usedSI: (statenIslandMode && isStatenIslandFeature(props) && Number.isFinite(Number(props.si_local_rating))),
-        usedMH: (manhattanMode && isManhattanFeature(props) && Number.isFinite(Number(props.mh_local_rating))),
       };
     }
   }
@@ -758,8 +643,7 @@ function updateRecommendation(frame) {
 
   const distTxt = best.dMi >= 10 ? `${best.dMi.toFixed(0)} mi` : `${best.dMi.toFixed(1)} mi`;
   const bTxt = best.borough ? ` (${best.borough})` : "";
-  const modeTag = best.usedSI ? " (SI-local)" : (best.usedMH ? " (Manhattan-adjusted)" : "");
-  recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Rating ${best.rating}${modeTag} — ${distTxt}`;
+  recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Rating ${best.rating} — ${distTxt}`;
 
   setNavDestination({
     lat: best.lat,
@@ -803,26 +687,24 @@ function buildPopupHTML(props) {
   const zoneName = (props.zone_name || "").trim();
   const borough = (props.borough || "").trim();
 
-  const nycRating = props.rating ?? "";
-  const nycBucket = props.bucket ?? "";
+  const rating = props.rating ?? "";
+  const bucket = props.bucket ?? "";
   const pickups = props.pickups ?? "";
   const pay = props.avg_driver_pay == null ? "n/a" : props.avg_driver_pay.toFixed(2);
 
   let extra = "";
-
   if (statenIslandMode && isStatenIslandFeature(props) && Number.isFinite(Number(props.si_local_rating))) {
-    extra += `<div style="margin-top:6px;"><b>Staten Local Rating:</b> ${props.si_local_rating} (${prettyBucket(props.si_local_bucket)})</div>`;
+    extra = `<div style="margin-top:6px;"><b>Staten Local Rating:</b> ${props.si_local_rating} (${prettyBucket(props.si_local_bucket)})</div>`;
   }
-
-  if (manhattanMode && isManhattanFeature(props) && Number.isFinite(Number(props.mh_local_rating))) {
-    extra += `<div style="margin-top:6px;"><b>Manhattan Adjusted:</b> ${props.mh_local_rating} (${prettyBucket(props.mh_local_bucket)})</div>`;
+  if (manhattanMode && Number.isFinite(Number(props.mh_local_rating))) {
+    extra += `<div style="margin-top:6px;"><b>Manhattan Local Rating:</b> ${props.mh_local_rating} (${prettyBucket(props.mh_local_bucket)})</div>`;
   }
 
   return `
     <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; font-size:13px;">
       <div style="font-weight:800; margin-bottom:2px;">${escapeHtml(zoneName || `Zone ${props.LocationID ?? ""}`)}</div>
       ${borough ? `<div style="opacity:0.8; margin-bottom:6px;">${escapeHtml(borough)}</div>` : `<div style="margin-bottom:6px;"></div>`}
-      <div><b>NYC Rating:</b> ${nycRating} (${prettyBucket(nycBucket)})</div>
+      <div><b>NYC Rating:</b> ${rating} (${prettyBucket(bucket)})</div>
       ${extra}
       <div style="margin-top:6px;"><b>Pickups (last ${BIN_MINUTES} min):</b> ${pickups}</div>
       <div><b>Avg Driver Pay:</b> $${pay}</div>
@@ -833,9 +715,9 @@ function buildPopupHTML(props) {
 function renderFrame(frame) {
   currentFrame = frame;
 
-  // Apply local transforms (do NOT change backend data; only adds extra fields)
+  // Apply local modes
   if (statenIslandMode) applyStatenLocalView(currentFrame);
-  if (manhattanMode) applyManhattanLocalView(currentFrame);
+  if (manhattanMode) applyManhattanLocalView(currentFrame); // <-- key change
 
   timeLabel.textContent = formatNYCLabel(currentFrame.time);
 
@@ -851,7 +733,7 @@ function renderFrame(frame) {
     style: (feature) => {
       const props = feature?.properties || {};
       const st = props.style || {};
-      const fill = effectiveColor(props);
+      const fill = effectiveColor(props, feature.geometry);
 
       return {
         color: fill,
