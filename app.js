@@ -7,6 +7,24 @@
    3) Keep page updating in Safari without manual refresh:
       - every 60s: if NYC moved to a new 20-min bin -> move slider + load frame
       - every 5 min: refresh the current frame (same index)
+
+   =========================================================
+   MANHATTAN MODE (NEW) — DEFAULT behavior, do not change unless you know why
+   ---------------------------------------------------------
+   Problem: Manhattan has high demand but can be over-saturated with drivers.
+   Your backend rating = demand-heavy. That can overrate Manhattan.
+
+   Solution (data-driven, Manhattan-only):
+   - When Manhattan Mode is ON, we compute a Manhattan-only adjusted rating
+     from the CURRENT frame’s data:
+       * Pay percentile (primary signal) + Pickup percentile (secondary)
+       * Optional small global penalty applied ONLY to Manhattan
+   - Brooklyn/Queens/Bronx/Staten Island Mode remain unchanged.
+
+   WARNING:
+   - This does NOT increase Railway load. It only changes frontend coloring.
+   - It does NOT change your backend frames; it only recalculates Manhattan
+     presentation and recommendation weighting on the fly.
    ========================================================= */
 
 const RAILWAY_BASE = "https://web-production-78f67.up.railway.app";
@@ -20,6 +38,25 @@ const NYC_CLOCK_TICK_MS = 60 * 1000;
 
 // If user recently touched slider, don't auto-advance for a bit
 const USER_SLIDER_GRACE_MS = 25 * 1000;
+
+/* =========================================================
+   MANHATTAN MODE — DEFAULT SETTINGS (SAFE TO EDIT)
+   ---------------------------------------------------------
+   These only affect Manhattan when Manhattan Mode is ON.
+   ========================================================= */
+const LS_KEY_MANHATTAN = "manhattan_mode_enabled";
+
+// Manhattan adjusted rating uses percentiles inside Manhattan ONLY:
+// score = (PAY_WEIGHT * payPercentile) + (VOL_WEIGHT * pickupPercentile)
+const MANHATTAN_PAY_WEIGHT = 0.65;   // higher = favor higher pay zones in Manhattan more
+const MANHATTAN_VOL_WEIGHT = 0.35;   // lower = de-emphasize pure demand (saturation risk proxy)
+
+// Optional penalty to gently push Manhattan down overall when mode is ON.
+// Example 0.90 = 10% penalty, 0.85 = 15% penalty.
+const MANHATTAN_GLOBAL_PENALTY = 0.90;
+
+// Minimum Manhattan zones in frame needed to compute percentiles reliably
+const MANHATTAN_MIN_ZONES = 6;
 
 /* =========================================================
    Legend minimize
@@ -189,6 +226,89 @@ function isStatenIslandFeature(props) {
   return b.includes("staten");
 }
 
+/* =========================================================
+   Manhattan Mode (pay-weight Manhattan-only recolor)
+   DEFAULT behavior, do not change unless you know why.
+   ---------------------------------------------------------
+   We create the button dynamically if it doesn't exist in HTML,
+   so you do NOT need to edit index.html.
+   ========================================================= */
+let manhattanMode = (localStorage.getItem(LS_KEY_MANHATTAN) || "0") === "1";
+
+function isManhattanFeature(props) {
+  const b = (props?.borough || "").toString().toLowerCase();
+  return b.includes("manhattan");
+}
+
+function ensureManhattanButton() {
+  // If you already added a button in HTML with id="btnManhattan", we reuse it.
+  let btn = document.getElementById("btnManhattan");
+  if (btn) return btn;
+
+  // Otherwise, create it and place it near the other mode buttons (best-effort).
+  btn = document.createElement("button");
+  btn.id = "btnManhattan";
+  btn.type = "button";
+  btn.className = "navBtn"; // uses your existing styles (safe even if class differs)
+  btn.style.marginLeft = "6px";
+  btn.style.padding = "6px 10px";
+  btn.style.borderRadius = "10px";
+  btn.style.border = "1px solid rgba(0,0,0,0.2)";
+  btn.style.background = "rgba(255,255,255,0.95)";
+  btn.style.fontWeight = "700";
+  btn.style.fontSize = "12px";
+
+  // Try to insert into the same row as other legend buttons
+  const navRow =
+    document.getElementById("navRow") ||
+    (legendEl ? legendEl.querySelector(".navRow") : null) ||
+    (legendEl ? legendEl : null);
+
+  if (navRow) {
+    // Insert after Staten Island button if present, otherwise append
+    if (btnStatenIsland && btnStatenIsland.parentElement === navRow) {
+      btnStatenIsland.insertAdjacentElement("afterend", btn);
+    } else {
+      navRow.appendChild(btn);
+    }
+  } else {
+    // Last resort: add to body (won't break app)
+    document.body.appendChild(btn);
+  }
+
+  return btn;
+}
+
+const btnManhattan = ensureManhattanButton();
+
+function syncManhattanUI() {
+  if (!btnManhattan) return;
+  btnManhattan.textContent = manhattanMode ? "Manhattan Mode: ON" : "Manhattan Mode: OFF";
+  btnManhattan.classList.toggle("on", !!manhattanMode);
+}
+
+syncManhattanUI();
+
+if (btnManhattan) {
+  btnManhattan.addEventListener("pointerdown", (e) => e.stopPropagation());
+  btnManhattan.addEventListener("touchstart", (e) => e.stopPropagation(), { passive: true });
+
+  btnManhattan.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    manhattanMode = !manhattanMode;
+    localStorage.setItem(LS_KEY_MANHATTAN, manhattanMode ? "1" : "0");
+    syncManhattanUI();
+
+    // Re-render immediately to recolor Manhattan without changing slider/backend
+    if (currentFrame) renderFrame(currentFrame);
+  });
+}
+
+/* =========================================================
+   Shared rating->color helper (same thresholds as backend)
+   ========================================================= */
 function colorFromLocalRating(r) {
   const x = Math.max(1, Math.min(100, Math.round(r)));
   if (x >= 90) return { bucket: "green", color: "#00b050" };
@@ -250,12 +370,114 @@ function applyStatenLocalView(frame) {
   return frame;
 }
 
+/* =========================================================
+   Manhattan Mode — compute Manhattan-only adjusted rating per frame
+   DEFAULT behavior, do not change unless you know why.
+   ---------------------------------------------------------
+   Uses CURRENT frame data only:
+     - pickups percentile within Manhattan
+     - avg_driver_pay percentile within Manhattan
+   Then:
+     score = PAY_WEIGHT*payP + VOL_WEIGHT*volP
+     rating = 1 + 99*score
+     then apply optional GLOBAL_PENALTY
+   ========================================================= */
+function applyManhattanLocalView(frame) {
+  const feats = frame?.polygons?.features || [];
+  if (!feats.length) return frame;
+
+  // Collect Manhattan pickups and pay (only where data is valid)
+  const mPickups = [];
+  const mPay = [];
+
+  for (const f of feats) {
+    const props = f.properties || {};
+    if (!isManhattanFeature(props)) continue;
+
+    const pu = Number(props.pickups ?? NaN);
+    const pay = Number(props.avg_driver_pay ?? NaN);
+
+    if (Number.isFinite(pu)) mPickups.push(pu);
+    if (Number.isFinite(pay)) mPay.push(pay);
+  }
+
+  // If too few Manhattan zones in this frame, skip (prevents noisy flips)
+  if (mPickups.length < MANHATTAN_MIN_ZONES || mPay.length < MANHATTAN_MIN_ZONES) {
+    for (const f of feats) {
+      const props = f.properties || {};
+      props.mh_local_rating = null;
+      props.mh_local_bucket = null;
+      props.mh_local_color = null;
+    }
+    return frame;
+  }
+
+  // Sort for percentile rank
+  const pickSorted = mPickups.slice().sort((a, b) => a - b);
+  const paySorted = mPay.slice().sort((a, b) => a - b);
+
+  function percentileFromSorted(sorted, v) {
+    // percent based on <= v index
+    const n = sorted.length;
+    if (n <= 1) return 0;
+    let lo = 0, hi = n - 1, ans = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (sorted[mid] <= v) { ans = mid; lo = mid + 1; }
+      else hi = mid - 1;
+    }
+    return Math.max(0, Math.min(1, ans / (n - 1)));
+  }
+
+  for (const f of feats) {
+    const props = f.properties || {};
+
+    if (!isManhattanFeature(props)) {
+      props.mh_local_rating = null;
+      props.mh_local_bucket = null;
+      props.mh_local_color = null;
+      continue;
+    }
+
+    const pu = Number(props.pickups ?? NaN);
+    const pay = Number(props.avg_driver_pay ?? NaN);
+
+    // If missing data, skip (keep null so it falls back to NYC)
+    if (!Number.isFinite(pu) || !Number.isFinite(pay)) {
+      props.mh_local_rating = null;
+      props.mh_local_bucket = null;
+      props.mh_local_color = null;
+      continue;
+    }
+
+    const volP = percentileFromSorted(pickSorted, pu);
+    const payP = percentileFromSorted(paySorted, pay);
+
+    // Data-driven Manhattan score: pay-weighted
+    let score = MANHATTAN_PAY_WEIGHT * payP + MANHATTAN_VOL_WEIGHT * volP;
+    score = Math.max(0, Math.min(1, score));
+
+    // Convert to 1..100 and apply optional global penalty
+    let localRating = 1 + 99 * score;
+    localRating = localRating * MANHATTAN_GLOBAL_PENALTY;
+    localRating = Math.max(1, Math.min(100, localRating));
+
+    const { bucket, color } = colorFromLocalRating(localRating);
+    props.mh_local_rating = Math.round(localRating);
+    props.mh_local_bucket = bucket;
+    props.mh_local_color = color;
+  }
+
+  return frame;
+}
+
 function syncStatenIslandUI() {
   if (btnStatenIsland) {
     btnStatenIsland.textContent = statenIslandMode ? "Staten Island Mode: ON" : "Staten Island Mode: OFF";
     btnStatenIsland.classList.toggle("on", !!statenIslandMode);
   }
   if (modeNote) {
+    // Keep your original note text; Manhattan mode doesn't overwrite it.
     modeNote.innerHTML = statenIslandMode
       ? `Staten Island Mode is <b>ON</b>: Staten Island colors are <b>relative within Staten Island</b> only.<br/>Other boroughs remain NYC-wide.`
       : `Colors come from rating (1–100) for the selected 20-minute window.<br/>Time label is NYC time.`;
@@ -277,14 +499,34 @@ if (btnStatenIsland) {
   });
 }
 
+/* =========================================================
+   Effective bucket/color/rating selection
+   DEFAULT behavior, do not change unless you know why.
+   ---------------------------------------------------------
+   Precedence:
+   1) Staten Island Mode for Staten Island zones
+   2) Manhattan Mode for Manhattan zones
+   3) Backend NYC rating
+   ========================================================= */
 function effectiveBucket(props) {
   if (statenIslandMode && isStatenIslandFeature(props) && props.si_local_bucket) return props.si_local_bucket;
+  if (manhattanMode && isManhattanFeature(props) && props.mh_local_bucket) return props.mh_local_bucket;
   return (props.bucket || "").trim();
 }
 function effectiveColor(props) {
   if (statenIslandMode && isStatenIslandFeature(props) && props.si_local_color) return props.si_local_color;
+  if (manhattanMode && isManhattanFeature(props) && props.mh_local_color) return props.mh_local_color;
   const st = props?.style || {};
   return st.fillColor || st.color || "#000";
+}
+function effectiveRating(props) {
+  if (statenIslandMode && isStatenIslandFeature(props) && Number.isFinite(Number(props.si_local_rating))) {
+    return Number(props.si_local_rating);
+  }
+  if (manhattanMode && isManhattanFeature(props) && Number.isFinite(Number(props.mh_local_rating))) {
+    return Number(props.mh_local_rating);
+  }
+  return Number(props.rating ?? NaN);
 }
 
 function labelHTML(props, zoom) {
@@ -482,10 +724,9 @@ function updateRecommendation(frame) {
     const b = effectiveBucket(props);
     if (!allowed.has(b)) continue;
 
-    const rating = (statenIslandMode && isStatenIslandFeature(props) && Number.isFinite(Number(props.si_local_rating)))
-      ? Number(props.si_local_rating)
-      : Number(props.rating ?? NaN);
-
+    // IMPORTANT: recommendation uses the effective rating
+    // (SI-local when SI mode, Manhattan-local when Manhattan mode)
+    const rating = effectiveRating(props);
     if (!Number.isFinite(rating)) continue;
 
     const center = geometryCenter(geom);
@@ -503,7 +744,8 @@ function updateRecommendation(frame) {
         lng: center.lng,
         name: (props.zone_name || "").trim() || `Zone ${props.LocationID ?? ""}`,
         borough: (props.borough || "").trim(),
-        usedLocal: (statenIslandMode && isStatenIslandFeature(props) && Number.isFinite(Number(props.si_local_rating))),
+        usedSI: (statenIslandMode && isStatenIslandFeature(props) && Number.isFinite(Number(props.si_local_rating))),
+        usedMH: (manhattanMode && isManhattanFeature(props) && Number.isFinite(Number(props.mh_local_rating))),
       };
     }
   }
@@ -516,7 +758,7 @@ function updateRecommendation(frame) {
 
   const distTxt = best.dMi >= 10 ? `${best.dMi.toFixed(0)} mi` : `${best.dMi.toFixed(1)} mi`;
   const bTxt = best.borough ? ` (${best.borough})` : "";
-  const modeTag = best.usedLocal ? " (SI-local)" : "";
+  const modeTag = best.usedSI ? " (SI-local)" : (best.usedMH ? " (Manhattan-adjusted)" : "");
   recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Rating ${best.rating}${modeTag} — ${distTxt}`;
 
   setNavDestination({
@@ -561,21 +803,26 @@ function buildPopupHTML(props) {
   const zoneName = (props.zone_name || "").trim();
   const borough = (props.borough || "").trim();
 
-  const rating = props.rating ?? "";
-  const bucket = props.bucket ?? "";
+  const nycRating = props.rating ?? "";
+  const nycBucket = props.bucket ?? "";
   const pickups = props.pickups ?? "";
   const pay = props.avg_driver_pay == null ? "n/a" : props.avg_driver_pay.toFixed(2);
 
   let extra = "";
+
   if (statenIslandMode && isStatenIslandFeature(props) && Number.isFinite(Number(props.si_local_rating))) {
-    extra = `<div style="margin-top:6px;"><b>Staten Local Rating:</b> ${props.si_local_rating} (${prettyBucket(props.si_local_bucket)})</div>`;
+    extra += `<div style="margin-top:6px;"><b>Staten Local Rating:</b> ${props.si_local_rating} (${prettyBucket(props.si_local_bucket)})</div>`;
+  }
+
+  if (manhattanMode && isManhattanFeature(props) && Number.isFinite(Number(props.mh_local_rating))) {
+    extra += `<div style="margin-top:6px;"><b>Manhattan Adjusted:</b> ${props.mh_local_rating} (${prettyBucket(props.mh_local_bucket)})</div>`;
   }
 
   return `
     <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; font-size:13px;">
       <div style="font-weight:800; margin-bottom:2px;">${escapeHtml(zoneName || `Zone ${props.LocationID ?? ""}`)}</div>
       ${borough ? `<div style="opacity:0.8; margin-bottom:6px;">${escapeHtml(borough)}</div>` : `<div style="margin-bottom:6px;"></div>`}
-      <div><b>NYC Rating:</b> ${rating} (${prettyBucket(bucket)})</div>
+      <div><b>NYC Rating:</b> ${nycRating} (${prettyBucket(nycBucket)})</div>
       ${extra}
       <div style="margin-top:6px;"><b>Pickups (last ${BIN_MINUTES} min):</b> ${pickups}</div>
       <div><b>Avg Driver Pay:</b> $${pay}</div>
@@ -585,7 +832,10 @@ function buildPopupHTML(props) {
 
 function renderFrame(frame) {
   currentFrame = frame;
+
+  // Apply local transforms (do NOT change backend data; only adds extra fields)
   if (statenIslandMode) applyStatenLocalView(currentFrame);
+  if (manhattanMode) applyManhattanLocalView(currentFrame);
 
   timeLabel.textContent = formatNYCLabel(currentFrame.time);
 
