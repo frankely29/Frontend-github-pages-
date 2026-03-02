@@ -766,7 +766,7 @@ function buildPopupHTML(props, geom) {
       <div><b>NYC Rating:</b> ${nycRating} (${prettyBucket(nycBucket)})</div>
       ${extra}
       <div style="margin-top:6px;"><b>Pickups (last ${BIN_MINUTES} min):</b> ${pickups}</div>
-      <div><b>Avg Driver Pay:</b> $${pay}</div>
+      <div><b>Avg Pay per Trip (last 20 min):</b> $${pay}</div>
     </div>
   `;
 }
