@@ -1,11 +1,5 @@
 /* =========================================================
    NYC TLC Hotspot Map (Frontend) - SIMPLE + STABLE
-   ---------------------------------------------------------
-   Includes:
-   - Staten Island Mode (local percentile recolor)
-   - Manhattan Mode (core Manhattan only, pay-weighted)
-   - Weather badge + night/day theme + rain/snow canvas FX (Open-Meteo)
-   - NEW: Radio buttons (Hot 97 + Alofoke FM) inside bottom box
    ========================================================= */
 
 const RAILWAY_BASE = "https://web-production-78f67.up.railway.app";
@@ -16,7 +10,7 @@ const NYC_CLOCK_TICK_MS = 60 * 1000;
 const USER_SLIDER_GRACE_MS = 25 * 1000;
 
 /* =========================================================
-   MANHATTAN MODE — SETTINGS (SAFE TO EDIT)
+   MANHATTAN MODE — DEFAULT SETTINGS (SAFE TO EDIT)
    ========================================================= */
 const LS_KEY_MANHATTAN = "manhattan_mode_enabled";
 
@@ -129,7 +123,7 @@ function pickClosestIndex(minutesOfWeekArr, target) {
 }
 
 /* =========================================================
-   Network helper (generic JSON)
+   Network helper
    ========================================================= */
 async function fetchJSON(url) {
   const res = await fetch(url, { cache: "no-store", mode: "cors" });
@@ -180,7 +174,7 @@ function escapeHtml(s) {
 }
 
 /* =========================================================
-   Staten Island Mode
+   Staten Island Mode (local percentile recolor)
    ========================================================= */
 const btnStatenIsland = document.getElementById("btnStatenIsland");
 const modeNote = document.getElementById("modeNote");
@@ -204,7 +198,7 @@ function isManhattanFeature(props) {
 }
 
 /* =========================================================
-   Accurate polygon centroid (area-weighted)
+   FIX: Accurate polygon centroid (area-weighted)
    ========================================================= */
 function ringCentroidArea(ring) {
   if (!Array.isArray(ring) || ring.length < 3) return null;
@@ -296,7 +290,7 @@ function isCoreManhattan(props, geom) {
 }
 
 /* =========================================================
-   Manhattan button (create dynamically if missing)
+   Manhattan button (create dynamically)
    ========================================================= */
 function ensureManhattanButton() {
   let btn = document.getElementById("btnManhattan");
@@ -305,7 +299,7 @@ function ensureManhattanButton() {
   btn = document.createElement("button");
   btn.id = "btnManhattan";
   btn.type = "button";
-  btn.className = "navBtn"; // re-use existing styles
+  btn.className = "navBtn";
   btn.style.marginLeft = "6px";
   btn.style.padding = "6px 10px";
   btn.style.borderRadius = "10px";
@@ -983,7 +977,7 @@ function startLocationWatch() {
 
       if (currentFrame) updateRecommendation(currentFrame);
 
-      // refresh weather soon once we have real user location
+      // Weather refresh soon when we have real location (your existing)
       scheduleWeatherUpdateSoon();
     },
     (err) => {
@@ -1046,16 +1040,15 @@ document.addEventListener("visibilitychange", () => {
 });
 
 /* =========================================================
-   WEATHER BADGE + FX (Open-Meteo, no key)
-   - Drives: badge text + rain/snow particles + night theme
+   WEATHER BADGE + FX (your existing)
    ========================================================= */
 const weatherBadge = document.getElementById("weatherBadge");
 const wxCanvas = document.getElementById("wxCanvas");
 const wxCtx = wxCanvas ? wxCanvas.getContext("2d") : null;
 
 let wxState = {
-  kind: "none", // "none" | "rain" | "snow"
-  intensity: 0, // 0..1
+  kind: "none",
+  intensity: 0,
   isNight: false,
   tempF: null,
   label: "Weather…",
@@ -1095,17 +1088,14 @@ function wxDescribe(code) {
   if (c >= 95 && c <= 99) return { text: "Storm", icon: "⛈️", kind: "rain", intensity: 0.95 };
   return { text: "Weather", icon: "⛅", kind: "none", intensity: 0 };
 }
-
 function fFromC(c) {
   if (!Number.isFinite(c)) return null;
   return (c * 9) / 5 + 32;
 }
-
 function setBodyTheme({ isNight, isSunny }) {
   document.body.classList.toggle("night", !!isNight);
   document.body.classList.toggle("sunny", !!isSunny && !isNight);
 }
-
 function setWeatherBadge(icon, text) {
   if (!weatherBadge) return;
   const iconEl = weatherBadge.querySelector(".wxIcon");
@@ -1114,13 +1104,11 @@ function setWeatherBadge(icon, text) {
   if (txtEl) txtEl.textContent = text;
   weatherBadge.title = text;
 }
-
 function getWeatherLatLng() {
   const lat = userLatLng?.lat ?? 40.7128;
   const lng = userLatLng?.lng ?? -74.0060;
   return { lat, lng };
 }
-
 function scheduleWeatherUpdateSoon() {
   if (wxNextUpdateTimer) return;
   wxNextUpdateTimer = setTimeout(() => {
@@ -1128,7 +1116,6 @@ function scheduleWeatherUpdateSoon() {
     updateWeatherNow().catch(() => {});
   }, 2500);
 }
-
 async function updateWeatherNow() {
   const { lat, lng } = getWeatherLatLng();
 
@@ -1168,15 +1155,10 @@ async function updateWeatherNow() {
     setWeatherBadge("⛅", "Weather unavailable");
   }
 }
-
-// Update every 10 minutes
 setInterval(() => {
   updateWeatherNow().catch(() => {});
 }, 10 * 60 * 1000);
 
-/* =========================================================
-   Canvas particle system (rain/snow)
-   ========================================================= */
 function updateWxParticlesForState() {
   if (!wxCanvas || !wxCtx) return;
 
@@ -1195,11 +1177,8 @@ function updateWxParticlesForState() {
   );
 
   wxParticles = [];
-  for (let i = 0; i < count; i++) {
-    wxParticles.push(makeParticle(kind));
-  }
+  for (let i = 0; i < count; i++) wxParticles.push(makeParticle(kind));
 }
-
 function makeParticle(kind) {
   const w = window.innerWidth;
   const h = window.innerHeight;
@@ -1228,7 +1207,6 @@ function makeParticle(kind) {
     drift: Math.random() * Math.PI * 2,
   };
 }
-
 function stepParticles() {
   if (!wxCanvas || !wxCtx) return;
 
@@ -1285,7 +1263,6 @@ function stepParticles() {
     wxCtx.globalAlpha = 1;
   }
 }
-
 function ensureWxAnimationRunning() {
   if (!wxCanvas || !wxCtx) return;
 
@@ -1309,177 +1286,158 @@ function ensureWxAnimationRunning() {
 }
 
 /* =========================================================
-   NEW: RADIO BUTTONS (Hot 97 + Alofoke FM)
-   ---------------------------------------------------------
-   IMPORTANT:
-   - This requires your index.html to include:
-     #btnHot97, #btnAlofoke, #radioStatus
-   - We DO NOT hardcode streams (they change).
-   - We resolve streams using Radio Browser directory API.
+   NEW: RADIO (manual play only)
+   - La Mega 97.9: direct stream
+   - HOT 97: opens popup with iHeart embed
    ========================================================= */
 const btnHot97 = document.getElementById("btnHot97");
-const btnAlofoke = document.getElementById("btnAlofoke");
+const btnMega979 = document.getElementById("btnMega979");
 const radioStatusEl = document.getElementById("radioStatus");
 
-// one shared player so only one station plays
-const radioAudio = new Audio();
-radioAudio.preload = "none";
-radioAudio.crossOrigin = "anonymous"; // best-effort
+const radioModal = document.getElementById("radioModal");
+const radioFrame = document.getElementById("radioFrame");
+const radioModalClose = document.getElementById("radioModalClose");
+const radioModalTitle = document.getElementById("radioModalTitle");
 
-let radioNow = null; // "hot97" | "alofoke" | null
+const HOT97_IFRAME_URL = "https://www.iheart.com/live/hot-97-2285/?embed=true"; // iHeart embed  [oai_citation:1‡new.hot97.com](https://new.hot97.com/listen-live?utm_source=chatgpt.com)
+const MEGA979_STREAM_URL = "https://liveaudio.lamusica.com/NY_WSKQ_icy";       // LaMusica stream 
 
-function setRadioStatus(text) {
-  if (radioStatusEl) radioStatusEl.textContent = text;
+// La Mega audio element (NO autoplay — only on click)
+const megaAudio = new Audio();
+megaAudio.src = MEGA979_STREAM_URL;
+megaAudio.preload = "none";
+megaAudio.crossOrigin = "anonymous";
+
+let megaPlaying = false;
+
+function setRadioStatus(txt) {
+  if (radioStatusEl) radioStatusEl.textContent = txt;
 }
 
-function setRadioUI() {
-  if (btnHot97) btnHot97.classList.toggle("on", radioNow === "hot97");
-  if (btnAlofoke) btnAlofoke.classList.toggle("on", radioNow === "alofoke");
-
-  if (btnHot97) btnHot97.textContent = (radioNow === "hot97") ? "⏸ Hot 97" : "▶︎ Hot 97";
-  if (btnAlofoke) btnAlofoke.textContent = (radioNow === "alofoke") ? "⏸ Alofoke FM" : "▶︎ Alofoke FM";
+function setBtnState(btn, on) {
+  if (!btn) return;
+  btn.classList.toggle("on", !!on);
+  // keep label simple but clear
+  const base = btn === btnMega979 ? "La Mega 97.9" : "HOT 97";
+  btn.textContent = (on ? "⏸ " : "▶ ") + base;
 }
 
-async function fetchJSONNoStore(url) {
-  const res = await fetch(url, { cache: "no-store", mode: "cors" });
-  const text = await res.text();
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText} @ ${url} :: ${text.slice(0, 200)}`);
+async function toggleMega() {
+  // If Hot97 modal is open, close it (so only one “source” is active)
+  closeHot97Modal();
+
   try {
-    return JSON.parse(text);
-  } catch {
-    throw new Error(`Invalid JSON @ ${url} :: ${text.slice(0, 200)}`);
-  }
-}
-
-async function resolveRadioBrowserStream({ name, countrycode }) {
-  const base = "https://stations.radioss.app/json/stations/search";
-  const qs = new URLSearchParams();
-  qs.set("name", name);
-  qs.set("limit", "25");
-  qs.set("hidebroken", "true");
-  if (countrycode) qs.set("countrycode", countrycode);
-
-  const url = `${base}?${qs.toString()}`;
-  const arr = await fetchJSONNoStore(url);
-
-  if (!Array.isArray(arr) || arr.length === 0) return null;
-
-  const scored = arr
-    .map((s) => {
-      const codec = (s.codec || "").toLowerCase();
-      const br = Number(s.bitrate || 0);
-      const u = (s.url_resolved || s.url || "").trim();
-      if (!u) return null;
-
-      let score = 0;
-      if (codec.includes("mp3")) score += 40;
-      if (codec.includes("aac")) score += 30;
-      if (codec.includes("ogg")) score += 10;
-      score += Math.min(30, br / 10);
-
-      const nm = (s.name || "").toLowerCase();
-      const want = name.toLowerCase();
-      if (nm.includes(want)) score += 10;
-
-      return { url: u, name: s.name || name, codec: s.codec || "", bitrate: br, score };
-    })
-    .filter(Boolean)
-    .sort((a, b) => b.score - a.score);
-
-  return scored[0] || null;
-}
-
-async function playStation(which) {
-  try {
-    // toggle off
-    if (radioNow === which) {
-      radioAudio.pause();
-      radioAudio.src = "";
-      radioNow = null;
+    if (megaPlaying) {
+      megaAudio.pause();
+      megaPlaying = false;
+      setBtnState(btnMega979, false);
       setRadioStatus("Radio: off");
-      setRadioUI();
       return;
     }
 
-    // stop current
-    radioAudio.pause();
-    radioAudio.src = "";
+    // Start playback (user gesture = allowed)
+    await megaAudio.play();
+    megaPlaying = true;
 
-    radioNow = which;
-    setRadioUI();
-    setRadioStatus("Radio: loading…");
-
-    let resolved = null;
-
-    if (which === "hot97") {
-      resolved = await resolveRadioBrowserStream({ name: "Hot 97", countrycode: "US" });
-    } else if (which === "alofoke") {
-      resolved = await resolveRadioBrowserStream({ name: "Alofoke", countrycode: "DO" });
-      if (!resolved) resolved = await resolveRadioBrowserStream({ name: "Alofoke FM", countrycode: "DO" });
-    }
-
-    if (!resolved || !resolved.url) {
-      radioNow = null;
-      setRadioUI();
-      setRadioStatus("Radio: stream not found");
-      return;
-    }
-
-    radioAudio.src = resolved.url;
-    radioAudio.volume = 0.9;
-
-    // must be called on user gesture in iOS Safari (your button click is fine)
-    await radioAudio.play();
-
-    const meta =
-      `${resolved.name}` +
-      (resolved.codec ? ` (${resolved.codec}` : "") +
-      (resolved.bitrate ? ` ${resolved.bitrate}kbps` : "") +
-      (resolved.codec ? ")" : "");
-
-    setRadioStatus(`Playing: ${meta}`);
-    setRadioUI();
+    setBtnState(btnMega979, true);
+    setBtnState(btnHot97, false);
+    setRadioStatus("Radio: La Mega 97.9 playing");
   } catch (e) {
-    console.warn("Radio play failed:", e);
-    setRadioStatus("Radio: failed to play (try again)");
-    radioNow = null;
-    setRadioUI();
+    // Common reasons: browser blocks, stream temporarily down, network
+    console.warn("La Mega play failed:", e);
+    megaPlaying = false;
+    setBtnState(btnMega979, false);
+    setRadioStatus("Radio: La Mega failed to play");
+    alert("La Mega 97.9 could not start. If you’re on iPhone, make sure the Ring/Silent switch and volume are up, and try again.");
   }
 }
 
-radioAudio.addEventListener("ended", () => {
-  radioNow = null;
-  setRadioUI();
-  setRadioStatus("Radio: ended");
-});
-radioAudio.addEventListener("error", () => {
-  radioNow = null;
-  setRadioUI();
-  setRadioStatus("Radio: error");
-});
+function openHot97Modal() {
+  // Stop La Mega if playing
+  if (megaPlaying) {
+    megaAudio.pause();
+    megaPlaying = false;
+    setBtnState(btnMega979, false);
+  }
+
+  if (!radioModal || !radioFrame) return;
+
+  radioModalTitle.textContent = "HOT 97";
+  radioFrame.src = HOT97_IFRAME_URL; // loads player; user presses play inside
+  radioModal.classList.add("open");
+  radioModal.setAttribute("aria-hidden", "false");
+
+  setBtnState(btnHot97, true);
+  setBtnState(btnMega979, false);
+  setRadioStatus("Radio: HOT 97 (press play in popup)");
+}
+
+function closeHot97Modal() {
+  if (!radioModal || !radioFrame) return;
+  if (!radioModal.classList.contains("open")) return;
+
+  radioModal.classList.remove("open");
+  radioModal.setAttribute("aria-hidden", "true");
+  // unload iframe so it stops audio
+  radioFrame.src = "about:blank";
+
+  setBtnState(btnHot97, false);
+  if (!megaPlaying) setRadioStatus("Radio: off");
+}
+
+if (btnMega979) {
+  btnMega979.addEventListener("pointerdown", (e) => e.stopPropagation());
+  btnMega979.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    toggleMega();
+  });
+}
 
 if (btnHot97) {
   btnHot97.addEventListener("pointerdown", (e) => e.stopPropagation());
-  btnHot97.addEventListener("touchstart", (e) => e.stopPropagation(), { passive: true });
   btnHot97.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
-    playStation("hot97");
+
+    // toggle modal
+    if (radioModal && radioModal.classList.contains("open")) {
+      closeHot97Modal();
+      setRadioStatus("Radio: off");
+    } else {
+      openHot97Modal();
+    }
   });
 }
 
-if (btnAlofoke) {
-  btnAlofoke.addEventListener("pointerdown", (e) => e.stopPropagation());
-  btnAlofoke.addEventListener("touchstart", (e) => e.stopPropagation(), { passive: true });
-  btnAlofoke.addEventListener("click", (e) => {
+if (radioModalClose) {
+  radioModalClose.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
-    playStation("alofoke");
+    closeHot97Modal();
   });
 }
 
-setRadioUI();
-setRadioStatus("Radio: off");
+// clicking the dark overlay closes modal (but not the card)
+if (radioModal) {
+  radioModal.addEventListener("click", (e) => {
+    const card = radioModal.querySelector(".radioModalCard");
+    if (card && card.contains(e.target)) return;
+    closeHot97Modal();
+  });
+}
+
+// if audio ends/errors
+megaAudio.addEventListener("ended", () => {
+  megaPlaying = false;
+  setBtnState(btnMega979, false);
+  setRadioStatus("Radio: off");
+});
+megaAudio.addEventListener("error", () => {
+  megaPlaying = false;
+  setBtnState(btnMega979, false);
+  setRadioStatus("Radio: La Mega stream error");
+});
 
 /* =========================================================
    Boot
