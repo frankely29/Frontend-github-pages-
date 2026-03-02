@@ -701,13 +701,11 @@ function setSliderBubbleTextAndPos() {
   const label = iso ? formatNYCLabel(iso) : "…";
   sliderBubble.textContent = label;
 
-  // Position bubble above thumb based on % across track
   const min = Number(slider.min || 0);
   const max = Number(slider.max || 1);
   const pct = max > min ? (idx - min) / (max - min) : 0;
   const trackPx = slider.getBoundingClientRect().width;
 
-  // clamp so it never goes off screen
   const x = pct * trackPx;
   const pad = 18;
   const clampedX = Math.max(pad, Math.min(trackPx - pad, x));
@@ -844,7 +842,6 @@ async function loadTimeline() {
   const idx = pickClosestIndex(minutesOfWeek, nowMinWeek);
   slider.value = String(idx);
 
-  // update bubble position/text once timeline exists
   bubbleUpdateNow();
 
   await loadFrame(idx);
@@ -856,14 +853,12 @@ map.on("zoomend", () => {
 
 let sliderDebounce = null;
 
-// RESTORED: show precise popup while interacting
 slider.addEventListener("pointerdown", bubbleUpdateNow);
 slider.addEventListener("touchstart", bubbleUpdateNow, { passive: true });
 
 slider.addEventListener("input", () => {
   lastUserSliderTs = Date.now();
 
-  // precision popup update (no impact on data)
   bubbleUpdateNow();
 
   const idx = Number(slider.value);
@@ -871,7 +866,6 @@ slider.addEventListener("input", () => {
   sliderDebounce = setTimeout(() => loadFrame(idx).catch(console.error), 80);
 });
 
-// keep bubble positioned correctly if phone rotates/resizes
 window.addEventListener("resize", () => {
   if (timeline.length) setSliderBubbleTextAndPos();
 });
@@ -1071,7 +1065,6 @@ async function tickNYCClockAndAdvanceIfNeeded() {
 
     slider.value = String(bestIdx);
 
-    // keep bubble accurate when auto-advancing
     bubbleUpdateNow();
 
     await loadFrame(bestIdx);
@@ -1086,7 +1079,6 @@ document.addEventListener("visibilitychange", () => {
     refreshCurrentFrame().catch(() => {});
     tickNYCClockAndAdvanceIfNeeded().catch(() => {});
     updateWeatherNow().catch(() => {});
-    // fix bubble after returning
     if (timeline.length) bubbleUpdateNow();
   }
 });
@@ -1349,7 +1341,7 @@ const radioFrame = document.getElementById("radioFrame");
 const radioModalClose = document.getElementById("radioModalClose");
 const radioModalTitle = document.getElementById("radioModalTitle");
 
-/* ✅ ONLY CHANGE: Hot 97.1 direct stream link + NO popup behavior */
+/* ✅ ONLY CHANGE: Hot 97.1 direct stream link + AbortError-safe playback */
 const HOT97_STREAM_URL = "https://26313.live.streamtheworld.com/WQHTFMAAC.aac";
 const MEGA979_STREAM_URL = "https://liveaudio.lamusica.com/NY_WSKQ_icy";
 
@@ -1378,7 +1370,6 @@ function setBtnState(btn, on) {
 
 /* keep these functions for compatibility; they now just ensure modal stays closed */
 function closeHot97Modal() {
-  // If your HTML still has the modal, keep it closed (no popup use)
   if (radioModal && radioModal.classList.contains("open")) {
     radioModal.classList.remove("open");
     radioModal.setAttribute("aria-hidden", "true");
@@ -1386,12 +1377,10 @@ function closeHot97Modal() {
   if (radioFrame) radioFrame.src = "about:blank";
 }
 function openHot97Modal() {
-  // Disabled on purpose (Hot 97 is now direct audio like La Mega)
   closeHot97Modal();
 }
 
 async function toggleMega() {
-  // stop Hot 97 if it’s playing
   try {
     if (hot97Playing) {
       hot97Audio.pause();
@@ -1426,7 +1415,6 @@ async function toggleMega() {
 
 /* ✅ Hot 97 now behaves EXACTLY like La Mega: one-click play/pause (no popup) */
 async function toggleHot97() {
-  // stop La Mega if it’s playing
   try {
     if (megaPlaying) {
       megaAudio.pause();
@@ -1435,26 +1423,40 @@ async function toggleHot97() {
     }
   } catch {}
 
-  closeHot97Modal(); // ensure no popup is used
+  closeHot97Modal();
+
+  if (hot97Playing) {
+    try { hot97Audio.pause(); } catch {}
+    hot97Playing = false;
+    setBtnState(btnHot97, false);
+    setRadioStatus("Radio: off");
+    return;
+  }
 
   try {
-    if (hot97Playing) {
-      hot97Audio.pause();
-      hot97Playing = false;
-      setBtnState(btnHot97, false);
-      setRadioStatus("Radio: off");
-      return;
-    }
-
     // Safari-friendly: set src right before play
     hot97Audio.src = HOT97_STREAM_URL;
-    await hot97Audio.play();
+    hot97Audio.volume = 1;
+
+    const p = hot97Audio.play();
+    if (p && typeof p.then === "function") await p;
 
     hot97Playing = true;
     setBtnState(btnHot97, true);
     setBtnState(btnMega979, false);
     setRadioStatus("Radio: HOT 97.1 playing");
   } catch (e) {
+    const errName = e && e.name ? String(e.name) : "";
+
+    // ✅ Ignore AbortError (common on iPhone Safari due to interruptions)
+    if (errName === "AbortError") {
+      console.warn("Hot 97 aborted (Safari interruption):", e);
+      hot97Playing = false;
+      setBtnState(btnHot97, false);
+      setRadioStatus("Radio: HOT 97.1 stopped");
+      return;
+    }
+
     console.warn("Hot 97 play failed:", e);
     hot97Playing = false;
     setBtnState(btnHot97, false);
