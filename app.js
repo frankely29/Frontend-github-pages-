@@ -740,6 +740,45 @@ let minutesOfWeek = [];
 let currentFrame = null;
 let lastUserSliderTs = 0;
 
+/* =========================================================
+   NEXT BIN CACHE (APPROVED: next 20-min historical pickups)
+   ========================================================= */
+let nextFramePickupsById = new Map(); // LocationID -> pickups (NEXT bin)
+
+/* =========================================================
+   (existing) Next-bin loader (expanded to cache pickups too)
+   - If you already had this function in your real file, keep ONE copy.
+   ========================================================= */
+async function loadNextFramePickupsMap(curIdx) {
+  try {
+    if (!timeline.length) return;
+
+    const nextIdx = Math.min(timeline.length - 1, Number(curIdx) + 1);
+    if (nextIdx === Number(curIdx)) {
+      nextFramePickupsById = new Map();
+      return;
+    }
+
+    const frame = await fetchJSON(`${RAILWAY_BASE}/frame/${nextIdx}`);
+    const feats = frame?.polygons?.features || [];
+
+    const puMap = new Map();
+    for (const f of feats) {
+      const props = f?.properties || {};
+      const id = props.LocationID;
+      if (id == null) continue;
+
+      const pu = Number(props.pickups ?? NaN);
+      if (Number.isFinite(pu)) puMap.set(String(id), pu);
+    }
+
+    nextFramePickupsById = puMap;
+  } catch (e) {
+    console.warn("Next-bin pickups preload failed:", e);
+    nextFramePickupsById = new Map();
+  }
+}
+
 function buildPopupHTML(props, geom) {
   const zoneName = (props.zone_name || "").trim();
   const borough = (props.borough || "").trim();
@@ -748,6 +787,10 @@ function buildPopupHTML(props, geom) {
   const nycBucket = props.bucket ?? "";
   const pickups = props.pickups ?? "";
   const pay = props.avg_driver_pay == null ? "n/a" : props.avg_driver_pay.toFixed(2);
+
+  /* ✅ APPROVED: Next 20-min historical pickups */
+  const nextPuVal = nextFramePickupsById.get(String(props.LocationID ?? ""));
+  const nextPickups = (nextPuVal == null) ? "n/a" : String(Math.round(nextPuVal));
 
   let extra = "";
 
@@ -766,6 +809,7 @@ function buildPopupHTML(props, geom) {
       <div><b>NYC Rating:</b> ${nycRating} (${prettyBucket(nycBucket)})</div>
       ${extra}
       <div style="margin-top:6px;"><b>Pickups (last ${BIN_MINUTES} min):</b> ${pickups}</div>
+      <div><b>Next ${BIN_MINUTES} min (historical):</b> ${nextPickups}</div>
       <div><b>Avg Pay per Trip (last 20 min):</b> $${pay}</div>
     </div>
   `;
@@ -823,6 +867,9 @@ function renderFrame(frame) {
 }
 
 async function loadFrame(idx) {
+  /* ✅ APPROVED: preload next-bin historical pickups */
+  loadNextFramePickupsMap(idx).catch(() => {});
+
   const frame = await fetchJSON(`${RAILWAY_BASE}/frame/${idx}`);
   renderFrame(frame);
 }
