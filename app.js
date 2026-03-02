@@ -1349,7 +1349,7 @@ const radioFrame = document.getElementById("radioFrame");
 const radioModalClose = document.getElementById("radioModalClose");
 const radioModalTitle = document.getElementById("radioModalTitle");
 
-const HOT97_IFRAME_URL = "https://www.iheart.com/live/hot-97-2285/?embed=true";
+const HOT97_IFRAME_URL = "https://26313.live.streamtheworld.com/WQHTFMAAC.aac";
 const MEGA979_STREAM_URL = "https://liveaudio.lamusica.com/NY_WSKQ_icy";
 
 const megaAudio = new Audio();
