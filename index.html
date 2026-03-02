@@ -23,19 +23,17 @@
     #map { height: 100vh; width: 100vw; }
 
     /* =========================================================
-       WEATHER FX OVERLAY (NEW)
-       - Canvas sits above map + labels, below UI panels
+       WEATHER FX OVERLAY
        ========================================================= */
     #wxCanvas{
       position: absolute;
       inset: 0;
-      z-index: 700; /* above overlays (400/650) but below legend/slider (1000) */
+      z-index: 700;
       pointer-events: none;
     }
 
     /* =========================================================
-       NIGHT THEME (NEW)
-       - We darken the map tiles only (NOT the UI)
+       NIGHT THEME
        ========================================================= */
     body.night .leaflet-tile-pane{
       filter: brightness(0.65) contrast(1.08) saturate(0.85);
@@ -159,7 +157,7 @@
     }
 
     /* =========================================================
-       Bottom slider (keep your layout) + Weather badge (NEW)
+       Bottom slider + Weather badge
        ========================================================= */
     .sliderWrap {
       position: absolute;
@@ -173,11 +171,6 @@
       padding: 6px 10px;
       font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
     }
-    .timeLabel {
-      font-size: 16px;
-      font-weight: 950;
-      margin: 0 0 4px 0;
-    }
 
     .sliderTopRow{
       display:flex;
@@ -185,6 +178,12 @@
       justify-content:space-between;
       gap:10px;
       margin-bottom: 4px;
+    }
+
+    .timeLabel {
+      font-size: 16px;
+      font-weight: 950;
+      margin: 0;
     }
 
     .weatherBadge{
@@ -214,15 +213,13 @@
 
     /* =========================================================
        NEW: Radio row inside bottom box
-       - Two play buttons + a small status line
        ========================================================= */
     .radioRow{
-      margin-top: 6px;
       display:flex;
       align-items:center;
-      justify-content:space-between;
-      gap:10px;
-      flex-wrap: wrap;
+      gap:8px;
+      margin-top: 6px;
+      justify-content: space-between;
     }
     .radioBtns{
       display:flex;
@@ -247,13 +244,14 @@
     .radioBtn.on { outline: 2px solid rgba(0,160,255,0.45); }
 
     .radioStatus{
-      font-size: 11px;
+      font-size: 10px;
       font-weight: 900;
-      opacity: 0.75;
+      opacity: 0.8;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      max-width: 48vw;
+      max-width: 38vw;
+      text-align: right;
     }
 
     .centerBtnInBar{
@@ -312,15 +310,17 @@
     .zone-label.z11 .br,
     .zone-label.z12 .br,
     .zone-label.z13 .br,
-    .zone-label.z14 { font-size: 0px; padding: 0; border: 0; }
+    .zone-label.z14 .br { font-size: 0px; padding: 0; border: 0; }
     .zone-label.z15 .br { font-size: 03px; }
 
-    /* ---------- You arrow layering ---------- */
+    /* ---------- You arrow: force on top of EVERYTHING ---------- */
     .leaflet-marker-pane { z-index: 800 !important; }
     .leaflet-tooltip-pane { z-index: 650 !important; }
     .leaflet-overlay-pane { z-index: 400 !important; }
 
-    /* GPS ARROW (your current) */
+    /* =========================================================
+       GPS ARROW
+       ========================================================= */
     .navArrowWrap{
       width: 34px;
       height: 34px;
@@ -389,13 +389,77 @@
       animation: pulseRing 1.5s ease-out infinite;
       pointer-events:none;
     }
+
+    /* =========================================================
+       NEW: Hot97 popup modal (inside your page)
+       ========================================================= */
+    .radioModal{
+      position: fixed;
+      inset: 0;
+      z-index: 1200;
+      display: none;
+      align-items: flex-end;
+      justify-content: center;
+      background: rgba(0,0,0,0.35);
+      padding: 10px;
+      padding-bottom: calc(10px + env(safe-area-inset-bottom));
+    }
+    .radioModal.open{ display:flex; }
+
+    .radioModalCard{
+      width: min(740px, 96vw);
+      height: min(360px, 55vh);
+      background: rgba(255,255,255,0.98);
+      border-radius: 16px;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.25);
+      overflow: hidden;
+      border: 1px solid rgba(0,0,0,0.12);
+      display:flex;
+      flex-direction: column;
+    }
+    .radioModalHead{
+      display:flex;
+      align-items:center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 10px 12px;
+      font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
+      border-bottom: 1px solid rgba(0,0,0,0.08);
+    }
+    .radioModalTitle{
+      font-weight: 950;
+      font-size: 13px;
+      overflow:hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .radioCloseBtn{
+      border:none;
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-weight: 950;
+      font-size: 12px;
+      cursor: pointer;
+      background: rgba(0,0,0,0.06);
+    }
+    .radioCloseBtn:active{ transform: scale(0.98); }
+
+    .radioModalBody{
+      flex:1;
+    }
+    .radioFrame{
+      width: 100%;
+      height: 100%;
+      border: 0;
+      background: #fff;
+    }
   </style>
 </head>
 
 <body>
   <div id="map"></div>
 
-  <!-- weather canvas overlay -->
+  <!-- Weather canvas overlay -->
   <canvas id="wxCanvas"></canvas>
 
   <div id="legend" class="legend" aria-label="Demand legend">
@@ -427,7 +491,6 @@
   </div>
 
   <div class="sliderWrap">
-    <!-- time + weather -->
     <div class="sliderTopRow">
       <div id="timeLabel" class="timeLabel">Loading…</div>
       <div id="weatherBadge" class="weatherBadge" title="Local weather">
@@ -438,17 +501,30 @@
 
     <input id="slider" type="range" min="0" max="0" value="0" step="1" />
 
-    <!-- NEW: radio buttons inside bottom box -->
+    <!-- NEW: radio buttons row (manual play only) -->
     <div class="radioRow">
       <div class="radioBtns">
-        <button id="btnHot97" class="radioBtn" type="button">▶︎ Hot 97</button>
-        <button id="btnAlofoke" class="radioBtn" type="button">▶︎ Alofoke FM</button>
+        <button id="btnHot97" class="radioBtn" type="button">▶ HOT 97</button>
+        <button id="btnMega979" class="radioBtn" type="button">▶ La Mega 97.9</button>
       </div>
       <div id="radioStatus" class="radioStatus">Radio: off</div>
     </div>
 
     <div class="centerBtnInBar">
       <button id="btnCenter" class="toggleBtnSmall on" type="button">Auto-center: ON</button>
+    </div>
+  </div>
+
+  <!-- NEW: Hot97 popup modal -->
+  <div id="radioModal" class="radioModal" aria-hidden="true">
+    <div class="radioModalCard" role="dialog" aria-modal="true" aria-label="Radio player">
+      <div class="radioModalHead">
+        <div id="radioModalTitle" class="radioModalTitle">HOT 97</div>
+        <button id="radioModalClose" class="radioCloseBtn" type="button">Close</button>
+      </div>
+      <div class="radioModalBody">
+        <iframe id="radioFrame" class="radioFrame" allow="autoplay" referrerpolicy="no-referrer"></iframe>
+      </div>
     </div>
   </div>
 
