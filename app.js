@@ -1349,7 +1349,8 @@ const radioFrame = document.getElementById("radioFrame");
 const radioModalClose = document.getElementById("radioModalClose");
 const radioModalTitle = document.getElementById("radioModalTitle");
 
-const HOT97_IFRAME_URL = "https://26313.live.streamtheworld.com/WQHTFMAAC.aac";
+/* ✅ ONLY CHANGE: Hot 97.1 direct stream link + NO popup behavior */
+const HOT97_STREAM_URL = "https://26313.live.streamtheworld.com/WQHTFMAAC.aac";
 const MEGA979_STREAM_URL = "https://liveaudio.lamusica.com/NY_WSKQ_icy";
 
 const megaAudio = new Audio();
@@ -1357,7 +1358,13 @@ megaAudio.src = MEGA979_STREAM_URL;
 megaAudio.preload = "none";
 megaAudio.crossOrigin = "anonymous";
 
+const hot97Audio = new Audio();
+hot97Audio.src = HOT97_STREAM_URL;
+hot97Audio.preload = "none";
+hot97Audio.crossOrigin = "anonymous";
+
 let megaPlaying = false;
+let hot97Playing = false;
 
 function setRadioStatus(txt) {
   if (radioStatusEl) radioStatusEl.textContent = txt;
@@ -1365,12 +1372,33 @@ function setRadioStatus(txt) {
 function setBtnState(btn, on) {
   if (!btn) return;
   btn.classList.toggle("on", !!on);
-  const base = btn === btnMega979 ? "La Mega 97.9" : "HOT 97";
+  const base = btn === btnMega979 ? "La Mega 97.9" : "HOT 97.1";
   btn.textContent = (on ? "⏸ " : "▶ ") + base;
 }
 
-async function toggleMega() {
+/* keep these functions for compatibility; they now just ensure modal stays closed */
+function closeHot97Modal() {
+  // If your HTML still has the modal, keep it closed (no popup use)
+  if (radioModal && radioModal.classList.contains("open")) {
+    radioModal.classList.remove("open");
+    radioModal.setAttribute("aria-hidden", "true");
+  }
+  if (radioFrame) radioFrame.src = "about:blank";
+}
+function openHot97Modal() {
+  // Disabled on purpose (Hot 97 is now direct audio like La Mega)
   closeHot97Modal();
+}
+
+async function toggleMega() {
+  // stop Hot 97 if it’s playing
+  try {
+    if (hot97Playing) {
+      hot97Audio.pause();
+      hot97Playing = false;
+      setBtnState(btnHot97, false);
+    }
+  } catch {}
 
   try {
     if (megaPlaying) {
@@ -1396,35 +1424,43 @@ async function toggleMega() {
   }
 }
 
-function openHot97Modal() {
-  if (megaPlaying) {
-    megaAudio.pause();
-    megaPlaying = false;
+/* ✅ Hot 97 now behaves EXACTLY like La Mega: one-click play/pause (no popup) */
+async function toggleHot97() {
+  // stop La Mega if it’s playing
+  try {
+    if (megaPlaying) {
+      megaAudio.pause();
+      megaPlaying = false;
+      setBtnState(btnMega979, false);
+    }
+  } catch {}
+
+  closeHot97Modal(); // ensure no popup is used
+
+  try {
+    if (hot97Playing) {
+      hot97Audio.pause();
+      hot97Playing = false;
+      setBtnState(btnHot97, false);
+      setRadioStatus("Radio: off");
+      return;
+    }
+
+    // Safari-friendly: set src right before play
+    hot97Audio.src = HOT97_STREAM_URL;
+    await hot97Audio.play();
+
+    hot97Playing = true;
+    setBtnState(btnHot97, true);
     setBtnState(btnMega979, false);
+    setRadioStatus("Radio: HOT 97.1 playing");
+  } catch (e) {
+    console.warn("Hot 97 play failed:", e);
+    hot97Playing = false;
+    setBtnState(btnHot97, false);
+    setRadioStatus("Radio: HOT 97.1 failed to play");
+    alert("HOT 97.1 could not start. Turn volume up and try again.");
   }
-
-  if (!radioModal || !radioFrame) return;
-
-  radioModalTitle.textContent = "HOT 97";
-  radioFrame.src = HOT97_IFRAME_URL;
-  radioModal.classList.add("open");
-  radioModal.setAttribute("aria-hidden", "false");
-
-  setBtnState(btnHot97, true);
-  setBtnState(btnMega979, false);
-  setRadioStatus("Radio: HOT 97 (press play in popup)");
-}
-
-function closeHot97Modal() {
-  if (!radioModal || !radioFrame) return;
-  if (!radioModal.classList.contains("open")) return;
-
-  radioModal.classList.remove("open");
-  radioModal.setAttribute("aria-hidden", "true");
-  radioFrame.src = "about:blank";
-
-  setBtnState(btnHot97, false);
-  if (!megaPlaying) setRadioStatus("Radio: off");
 }
 
 if (btnMega979) {
@@ -1441,15 +1477,11 @@ if (btnHot97) {
   btnHot97.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
-    if (radioModal && radioModal.classList.contains("open")) {
-      closeHot97Modal();
-      setRadioStatus("Radio: off");
-    } else {
-      openHot97Modal();
-    }
+    toggleHot97();
   });
 }
 
+// Keep modal close handler (modal is unused now, but safe to keep)
 if (radioModalClose) {
   radioModalClose.addEventListener("click", (e) => {
     e.preventDefault();
@@ -1457,7 +1489,6 @@ if (radioModalClose) {
     closeHot97Modal();
   });
 }
-
 if (radioModal) {
   radioModal.addEventListener("click", (e) => {
     const card = radioModal.querySelector(".radioModalCard");
@@ -1475,6 +1506,17 @@ megaAudio.addEventListener("error", () => {
   megaPlaying = false;
   setBtnState(btnMega979, false);
   setRadioStatus("Radio: La Mega stream error");
+});
+
+hot97Audio.addEventListener("ended", () => {
+  hot97Playing = false;
+  setBtnState(btnHot97, false);
+  setRadioStatus("Radio: off");
+});
+hot97Audio.addEventListener("error", () => {
+  hot97Playing = false;
+  setBtnState(btnHot97, false);
+  setRadioStatus("Radio: HOT 97.1 stream error");
 });
 
 /* =========================================================
