@@ -14,15 +14,11 @@ const USER_SLIDER_GRACE_MS = 25 * 1000;
    ========================================================= */
 const LS_KEY_MANHATTAN = "manhattan_mode_enabled";
 
-// your current values
 const MANHATTAN_PAY_WEIGHT = 0.55;
 const MANHATTAN_VOL_WEIGHT = 0.45;
 const MANHATTAN_GLOBAL_PENALTY = 0.98;
 
-// you said you set 40
 const MANHATTAN_MIN_ZONES = 40;
-
-// Uptown exclusion
 const MANHATTAN_CORE_MAX_LAT = 40.795;
 
 /* =========================================================
@@ -413,9 +409,6 @@ function applyStatenLocalView(frame) {
   return frame;
 }
 
-/* =========================================================
-   Manhattan Mode — local view (core Manhattan only)
-   ========================================================= */
 function applyManhattanLocalView(frame) {
   const feats = frame?.polygons?.features || [];
   if (!feats.length) return frame;
@@ -559,7 +552,7 @@ function labelHTML(props, zoom) {
   const zoneText = zoom < 13 ? shortenLabel(name, LABEL_MAX_CHARS_MID) : name;
 
   const borough = (props.borough || "").trim();
-  const showBorough = zoom >= BOROUGH_ZOOM_SHOW && borough;
+  const showBorough = zoom >= 15 && borough;
 
   return `
     <div class="zn">${escapeHtml(zoneText)}</div>
@@ -677,14 +670,7 @@ function updateRecommendation(frame) {
   const modeTag = best.usedSI ? " (SI-local)" : (best.usedMH ? " (Manhattan-adjusted)" : "");
   recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Rating ${best.rating}${modeTag} — ${distTxt}`;
 
-  setNavDestination({
-    lat: best.lat,
-    lng: best.lng,
-    name: best.name,
-    borough: best.borough,
-    rating: best.rating,
-    distMi: best.dMi,
-  });
+  setNavDestination({ lat: best.lat, lng: best.lng });
 }
 
 /* =========================================================
@@ -693,6 +679,50 @@ function updateRecommendation(frame) {
 const slider = document.getElementById("slider");
 const timeLabel = document.getElementById("timeLabel");
 
+/* =========================================================
+   PRECISION SLIDER POPUP (RESTORED)
+   - shows exact time while dragging, does NOT change slider logic
+   ========================================================= */
+const sliderBubble = document.getElementById("sliderBubble");
+let bubbleHideTimer = null;
+
+function showSliderBubble() {
+  if (!sliderBubble) return;
+  sliderBubble.classList.add("show");
+  if (bubbleHideTimer) clearTimeout(bubbleHideTimer);
+  bubbleHideTimer = setTimeout(() => sliderBubble.classList.remove("show"), 900);
+}
+
+function setSliderBubbleTextAndPos() {
+  if (!sliderBubble || !slider || !timeline.length) return;
+
+  const idx = Math.max(0, Math.min(timeline.length - 1, Number(slider.value || 0)));
+  const iso = timeline[idx];
+  const label = iso ? formatNYCLabel(iso) : "…";
+  sliderBubble.textContent = label;
+
+  // Position bubble above thumb based on % across track
+  const min = Number(slider.min || 0);
+  const max = Number(slider.max || 1);
+  const pct = max > min ? (idx - min) / (max - min) : 0;
+  const trackPx = slider.getBoundingClientRect().width;
+
+  // clamp so it never goes off screen
+  const x = pct * trackPx;
+  const pad = 18;
+  const clampedX = Math.max(pad, Math.min(trackPx - pad, x));
+
+  sliderBubble.style.left = `${clampedX}px`;
+}
+
+function bubbleUpdateNow() {
+  setSliderBubbleTextAndPos();
+  showSliderBubble();
+}
+
+/* =========================================================
+   Map
+   ========================================================= */
 const map = L.map("map", { zoomControl: true }).setView([40.7128, -74.0060], 10);
 
 L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
@@ -814,6 +844,9 @@ async function loadTimeline() {
   const idx = pickClosestIndex(minutesOfWeek, nowMinWeek);
   slider.value = String(idx);
 
+  // update bubble position/text once timeline exists
+  bubbleUpdateNow();
+
   await loadFrame(idx);
 }
 
@@ -822,11 +855,25 @@ map.on("zoomend", () => {
 });
 
 let sliderDebounce = null;
+
+// RESTORED: show precise popup while interacting
+slider.addEventListener("pointerdown", bubbleUpdateNow);
+slider.addEventListener("touchstart", bubbleUpdateNow, { passive: true });
+
 slider.addEventListener("input", () => {
   lastUserSliderTs = Date.now();
+
+  // precision popup update (no impact on data)
+  bubbleUpdateNow();
+
   const idx = Number(slider.value);
   if (sliderDebounce) clearTimeout(sliderDebounce);
   sliderDebounce = setTimeout(() => loadFrame(idx).catch(console.error), 80);
+});
+
+// keep bubble positioned correctly if phone rotates/resizes
+window.addEventListener("resize", () => {
+  if (timeline.length) setSliderBubbleTextAndPos();
 });
 
 /* =========================================================
@@ -977,7 +1024,6 @@ function startLocationWatch() {
 
       if (currentFrame) updateRecommendation(currentFrame);
 
-      // Weather refresh soon when we have real location (your existing)
       scheduleWeatherUpdateSoon();
     },
     (err) => {
@@ -1024,6 +1070,10 @@ async function tickNYCClockAndAdvanceIfNeeded() {
     if (bestIdx === curIdx) return;
 
     slider.value = String(bestIdx);
+
+    // keep bubble accurate when auto-advancing
+    bubbleUpdateNow();
+
     await loadFrame(bestIdx);
   } catch (e) {
     console.warn("NYC clock tick failed:", e);
@@ -1036,11 +1086,13 @@ document.addEventListener("visibilitychange", () => {
     refreshCurrentFrame().catch(() => {});
     tickNYCClockAndAdvanceIfNeeded().catch(() => {});
     updateWeatherNow().catch(() => {});
+    // fix bubble after returning
+    if (timeline.length) bubbleUpdateNow();
   }
 });
 
 /* =========================================================
-   WEATHER BADGE + FX (your existing)
+   WEATHER BADGE + FX (unchanged)
    ========================================================= */
 const weatherBadge = document.getElementById("weatherBadge");
 const wxCanvas = document.getElementById("wxCanvas");
@@ -1286,9 +1338,7 @@ function ensureWxAnimationRunning() {
 }
 
 /* =========================================================
-   NEW: RADIO (manual play only)
-   - La Mega 97.9: direct stream
-   - HOT 97: opens popup with iHeart embed
+   RADIO (kept simple; manual play)
    ========================================================= */
 const btnHot97 = document.getElementById("btnHot97");
 const btnMega979 = document.getElementById("btnMega979");
@@ -1299,10 +1349,9 @@ const radioFrame = document.getElementById("radioFrame");
 const radioModalClose = document.getElementById("radioModalClose");
 const radioModalTitle = document.getElementById("radioModalTitle");
 
-const HOT97_IFRAME_URL = "https://www.iheart.com/live/hot-97-2285/?embed=true"; // iHeart embed  [oai_citation:1‡new.hot97.com](https://new.hot97.com/listen-live?utm_source=chatgpt.com)
-const MEGA979_STREAM_URL = "https://liveaudio.lamusica.com/NY_WSKQ_icy";       // LaMusica stream 
+const HOT97_IFRAME_URL = "https://www.iheart.com/live/hot-97-2285/?embed=true";
+const MEGA979_STREAM_URL = "https://liveaudio.lamusica.com/NY_WSKQ_icy";
 
-// La Mega audio element (NO autoplay — only on click)
 const megaAudio = new Audio();
 megaAudio.src = MEGA979_STREAM_URL;
 megaAudio.preload = "none";
@@ -1313,17 +1362,14 @@ let megaPlaying = false;
 function setRadioStatus(txt) {
   if (radioStatusEl) radioStatusEl.textContent = txt;
 }
-
 function setBtnState(btn, on) {
   if (!btn) return;
   btn.classList.toggle("on", !!on);
-  // keep label simple but clear
   const base = btn === btnMega979 ? "La Mega 97.9" : "HOT 97";
   btn.textContent = (on ? "⏸ " : "▶ ") + base;
 }
 
 async function toggleMega() {
-  // If Hot97 modal is open, close it (so only one “source” is active)
   closeHot97Modal();
 
   try {
@@ -1335,7 +1381,6 @@ async function toggleMega() {
       return;
     }
 
-    // Start playback (user gesture = allowed)
     await megaAudio.play();
     megaPlaying = true;
 
@@ -1343,17 +1388,15 @@ async function toggleMega() {
     setBtnState(btnHot97, false);
     setRadioStatus("Radio: La Mega 97.9 playing");
   } catch (e) {
-    // Common reasons: browser blocks, stream temporarily down, network
     console.warn("La Mega play failed:", e);
     megaPlaying = false;
     setBtnState(btnMega979, false);
     setRadioStatus("Radio: La Mega failed to play");
-    alert("La Mega 97.9 could not start. If you’re on iPhone, make sure the Ring/Silent switch and volume are up, and try again.");
+    alert("La Mega 97.9 could not start. Turn volume up and try again.");
   }
 }
 
 function openHot97Modal() {
-  // Stop La Mega if playing
   if (megaPlaying) {
     megaAudio.pause();
     megaPlaying = false;
@@ -1363,7 +1406,7 @@ function openHot97Modal() {
   if (!radioModal || !radioFrame) return;
 
   radioModalTitle.textContent = "HOT 97";
-  radioFrame.src = HOT97_IFRAME_URL; // loads player; user presses play inside
+  radioFrame.src = HOT97_IFRAME_URL;
   radioModal.classList.add("open");
   radioModal.setAttribute("aria-hidden", "false");
 
@@ -1378,7 +1421,6 @@ function closeHot97Modal() {
 
   radioModal.classList.remove("open");
   radioModal.setAttribute("aria-hidden", "true");
-  // unload iframe so it stops audio
   radioFrame.src = "about:blank";
 
   setBtnState(btnHot97, false);
@@ -1399,8 +1441,6 @@ if (btnHot97) {
   btnHot97.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
-
-    // toggle modal
     if (radioModal && radioModal.classList.contains("open")) {
       closeHot97Modal();
       setRadioStatus("Radio: off");
@@ -1418,7 +1458,6 @@ if (radioModalClose) {
   });
 }
 
-// clicking the dark overlay closes modal (but not the card)
 if (radioModal) {
   radioModal.addEventListener("click", (e) => {
     const card = radioModal.querySelector(".radioModalCard");
@@ -1427,7 +1466,6 @@ if (radioModal) {
   });
 }
 
-// if audio ends/errors
 megaAudio.addEventListener("ended", () => {
   megaPlaying = false;
   setBtnState(btnMega979, false);
@@ -1450,6 +1488,4 @@ loadTimeline().catch((err) => {
 });
 
 startLocationWatch();
-
-// first weather update immediately (NYC fallback if no GPS yet)
 updateWeatherNow().catch(() => {});
