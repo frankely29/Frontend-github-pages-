@@ -10,6 +10,16 @@ const NYC_CLOCK_TICK_MS = 60 * 1000;
 const USER_SLIDER_GRACE_MS = 25 * 1000;
 
 /* =========================================================
+   COMMUNITY SETTINGS (cheap polling)
+   ========================================================= */
+const PRESENCE_PUSH_MS = 8 * 1000;     // send my location
+const PRESENCE_PULL_MS = 10 * 1000;    // fetch all drivers
+const PRESENCE_STALE_SEC = 70;         // hide if older than this
+
+const LS_TOKEN = "community_token_v1";
+const LS_EMAIL = "community_email_v1";
+
+/* =========================================================
    MANHATTAN MODE — DEFAULT SETTINGS (SAFE TO EDIT)
    ========================================================= */
 const LS_KEY_MANHATTAN = "manhattan_mode_enabled";
@@ -119,10 +129,10 @@ function pickClosestIndex(minutesOfWeekArr, target) {
 }
 
 /* =========================================================
-   Network helper
+   Network helper (+ auth support)
    ========================================================= */
-async function fetchJSON(url) {
-  const res = await fetch(url, { cache: "no-store", mode: "cors" });
+async function fetchJSON(url, opts = {}) {
+  const res = await fetch(url, { cache: "no-store", mode: "cors", ...opts });
   const text = await res.text();
   if (!res.ok) throw new Error(`${res.status} ${res.statusText} @ ${url} :: ${text.slice(0, 200)}`);
   try {
@@ -130,6 +140,20 @@ async function fetchJSON(url) {
   } catch {
     throw new Error(`Invalid JSON @ ${url} :: ${text.slice(0, 200)}`);
   }
+}
+async function postJSON(path, body, token) {
+  const headers = { "Content-Type": "application/json" };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  return fetchJSON(`${RAILWAY_BASE}${path}`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body || {}),
+  });
+}
+async function getJSONAuth(path, token) {
+  const headers = {};
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  return fetchJSON(`${RAILWAY_BASE}${path}`, { headers });
 }
 
 /* =========================================================
@@ -680,8 +704,7 @@ const slider = document.getElementById("slider");
 const timeLabel = document.getElementById("timeLabel");
 
 /* =========================================================
-   PRECISION SLIDER POPUP (RESTORED)
-   - shows exact time while dragging, does NOT change slider logic
+   PRECISION SLIDER POPUP
    ========================================================= */
 const sliderBubble = document.getElementById("sliderBubble");
 let bubbleHideTimer = null;
@@ -734,6 +757,9 @@ labelsPane.style.zIndex = 450;
 const navPane = map.createPane("navPane");
 navPane.style.zIndex = 1000;
 
+const communityPane = map.createPane("communityPane");
+communityPane.style.zIndex = 980;
+
 let geoLayer = null;
 let timeline = [];
 let minutesOfWeek = [];
@@ -741,17 +767,11 @@ let currentFrame = null;
 let lastUserSliderTs = 0;
 
 /* =========================================================
-   NEXT BIN CACHE (APPROVED: next 20-min historical pickups)
+   NEXT BIN CACHE
    ========================================================= */
-let nextFramePickupsById = new Map(); // LocationID -> pickups (NEXT bin)
+let nextFramePickupsById = new Map();
+let nextFramePayById = new Map();
 
-/* ✅ ADDED (ONLY): next 20-min historical avg pay per trip */
-let nextFramePayById = new Map();     // LocationID -> avg_driver_pay (NEXT bin)
-
-/* =========================================================
-   (existing) Next-bin loader (expanded to cache pickups too)
-   - If you already had this function in your real file, keep ONE copy.
-   ========================================================= */
 async function loadNextFramePickupsMap(curIdx) {
   try {
     if (!timeline.length) return;
@@ -759,7 +779,7 @@ async function loadNextFramePickupsMap(curIdx) {
     const nextIdx = Math.min(timeline.length - 1, Number(curIdx) + 1);
     if (nextIdx === Number(curIdx)) {
       nextFramePickupsById = new Map();
-      nextFramePayById = new Map(); // ✅ ADDED
+      nextFramePayById = new Map();
       return;
     }
 
@@ -767,7 +787,7 @@ async function loadNextFramePickupsMap(curIdx) {
     const feats = frame?.polygons?.features || [];
 
     const puMap = new Map();
-    const payMap = new Map(); // ✅ ADDED
+    const payMap = new Map();
 
     for (const f of feats) {
       const props = f?.properties || {};
@@ -777,17 +797,16 @@ async function loadNextFramePickupsMap(curIdx) {
       const pu = Number(props.pickups ?? NaN);
       if (Number.isFinite(pu)) puMap.set(String(id), pu);
 
-      // ✅ ADDED: cache next-bin avg_driver_pay
       const pay = Number(props.avg_driver_pay ?? NaN);
       if (Number.isFinite(pay)) payMap.set(String(id), pay);
     }
 
     nextFramePickupsById = puMap;
-    nextFramePayById = payMap; // ✅ ADDED
+    nextFramePayById = payMap;
   } catch (e) {
     console.warn("Next-bin pickups preload failed:", e);
     nextFramePickupsById = new Map();
-    nextFramePayById = new Map(); // ✅ ADDED
+    nextFramePayById = new Map();
   }
 }
 
@@ -800,11 +819,9 @@ function buildPopupHTML(props, geom) {
   const pickups = props.pickups ?? "";
   const pay = props.avg_driver_pay == null ? "n/a" : props.avg_driver_pay.toFixed(2);
 
-  /* ✅ APPROVED: Next 20-min historical pickups */
   const nextPuVal = nextFramePickupsById.get(String(props.LocationID ?? ""));
   const nextPickups = (nextPuVal == null) ? "n/a" : String(Math.round(nextPuVal));
 
-  /* ✅ ADDED (ONLY): Next 20-min historical avg pay per trip */
   const nextPayVal = nextFramePayById.get(String(props.LocationID ?? ""));
   const nextPay = (nextPayVal == null) ? "n/a" : Number(nextPayVal).toFixed(2);
 
@@ -884,9 +901,7 @@ function renderFrame(frame) {
 }
 
 async function loadFrame(idx) {
-  /* ✅ APPROVED: preload next-bin historical pickups */
   loadNextFramePickupsMap(idx).catch(() => {});
-
   const frame = await fetchJSON(`${RAILWAY_BASE}/frame/${idx}`);
   renderFrame(frame);
 }
@@ -922,7 +937,6 @@ slider.addEventListener("touchstart", bubbleUpdateNow, { passive: true });
 
 slider.addEventListener("input", () => {
   lastUserSliderTs = Date.now();
-
   bubbleUpdateNow();
 
   const idx = Number(slider.value);
@@ -1083,6 +1097,9 @@ function startLocationWatch() {
       if (currentFrame) updateRecommendation(currentFrame);
 
       scheduleWeatherUpdateSoon();
+
+      // community push (auth only)
+      communityMaybePushPresence(ts, heading);
     },
     (err) => {
       console.warn("Geolocation error:", err);
@@ -1405,7 +1422,6 @@ const radioFrame = document.getElementById("radioFrame");
 const radioModalClose = document.getElementById("radioModalClose");
 const radioModalTitle = document.getElementById("radioModalTitle");
 
-/* ✅ ONLY CHANGE: Hot 97.1 direct stream link + AbortError-safe playback */
 const HOT97_STREAM_URL = "https://26313.live.streamtheworld.com/WQHTFMAAC.aac";
 const MEGA979_STREAM_URL = "https://liveaudio.lamusica.com/NY_WSKQ_icy";
 
@@ -1432,7 +1448,6 @@ function setBtnState(btn, on) {
   btn.textContent = (on ? "⏸ " : "▶ ") + base;
 }
 
-/* keep these functions for compatibility; they now just ensure modal stays closed */
 function closeHot97Modal() {
   if (radioModal && radioModal.classList.contains("open")) {
     radioModal.classList.remove("open");
@@ -1440,9 +1455,7 @@ function closeHot97Modal() {
   }
   if (radioFrame) radioFrame.src = "about:blank";
 }
-function openHot97Modal() {
-  closeHot97Modal();
-}
+function openHot97Modal() { closeHot97Modal(); }
 
 async function toggleMega() {
   try {
@@ -1477,7 +1490,6 @@ async function toggleMega() {
   }
 }
 
-/* ✅ Hot 97 now behaves EXACTLY like La Mega: one-click play/pause (no popup) */
 async function toggleHot97() {
   try {
     if (megaPlaying) {
@@ -1498,7 +1510,6 @@ async function toggleHot97() {
   }
 
   try {
-    // Safari-friendly: set src right before play
     hot97Audio.src = HOT97_STREAM_URL;
     hot97Audio.volume = 1;
 
@@ -1511,8 +1522,6 @@ async function toggleHot97() {
     setRadioStatus("Radio: HOT 97.1 playing");
   } catch (e) {
     const errName = e && e.name ? String(e.name) : "";
-
-    // ✅ Ignore AbortError (common on iPhone Safari due to interruptions)
     if (errName === "AbortError") {
       console.warn("Hot 97 aborted (Safari interruption):", e);
       hot97Playing = false;
@@ -1547,7 +1556,6 @@ if (btnHot97) {
   });
 }
 
-// Keep modal close handler (modal is unused now, but safe to keep)
 if (radioModalClose) {
   radioModalClose.addEventListener("click", (e) => {
     e.preventDefault();
@@ -1586,6 +1594,358 @@ hot97Audio.addEventListener("error", () => {
 });
 
 /* =========================================================
+   COMMUNITY (AUTH + PRESENCE + POLICE + PICKUP)
+   ========================================================= */
+const lockedOverlay = document.getElementById("lockedOverlay");
+const authEmail = document.getElementById("authEmail");
+const authPass = document.getElementById("authPass");
+const btnLogin = document.getElementById("btnLogin");
+const btnSignup = document.getElementById("btnSignup");
+const authStatus = document.getElementById("authStatus");
+const btnAuth = document.getElementById("btnAuth");
+
+const btnPolice = document.getElementById("btnPolice");
+const btnPickup = document.getElementById("btnPickup");
+const communityNote = document.getElementById("communityNote");
+
+let communityToken = localStorage.getItem(LS_TOKEN) || "";
+let me = null;
+
+// other drivers markers
+const otherMarkers = new Map(); // user_id -> marker
+
+function setAuthUI(signedIn, note) {
+  if (btnAuth) btnAuth.textContent = signedIn ? "Sign out" : "Sign in";
+  if (communityNote) {
+    communityNote.textContent = signedIn
+      ? "Community: live drivers are visible. Police reports + pickups are shared."
+      : "Community: sign in to see other drivers + report police + log pickups.";
+  }
+
+  const showLock = !signedIn;
+  if (lockedOverlay) {
+    lockedOverlay.classList.toggle("show", showLock);
+    lockedOverlay.setAttribute("aria-hidden", showLock ? "false" : "true");
+  }
+
+  // buttons still exist, but are useful only if signed in
+  if (btnPolice) btnPolice.classList.toggle("disabled", !signedIn);
+  if (btnPickup) btnPickup.classList.toggle("disabled", !signedIn);
+
+  if (authStatus) authStatus.textContent = note || (signedIn ? "Status: signed in" : "Status: signed out");
+}
+
+function clearAuth() {
+  communityToken = "";
+  me = null;
+  localStorage.removeItem(LS_TOKEN);
+  setAuthUI(false, "Status: signed out");
+  clearOtherDrivers();
+}
+
+function authHeaderOK() {
+  return communityToken && communityToken.length > 10;
+}
+
+async function loadMe() {
+  if (!authHeaderOK()) return null;
+  try {
+    const data = await getJSONAuth("/me", communityToken);
+    me = data || null;
+    return me;
+  } catch (e) {
+    console.warn("/me failed:", e);
+    clearAuth();
+    return null;
+  }
+}
+
+async function doLogin(email, password) {
+  const body = { email, password };
+  const data = await postJSON("/auth/login", body, null);
+  const token = data?.token || data?.access_token || "";
+  if (!token) throw new Error("Login success but token missing.");
+  communityToken = token;
+  localStorage.setItem(LS_TOKEN, token);
+  localStorage.setItem(LS_EMAIL, email);
+  await loadMe();
+  setAuthUI(true, `Status: signed in as ${me?.display_name || me?.email || email}`);
+}
+
+async function doSignup(email, password) {
+  const display_name = (email || "").split("@")[0] || "Driver";
+  const body = { email, password, display_name };
+  const data = await postJSON("/auth/signup", body, null);
+  const token = data?.token || data?.access_token || "";
+  if (!token) throw new Error("Signup success but token missing.");
+  communityToken = token;
+  localStorage.setItem(LS_TOKEN, token);
+  localStorage.setItem(LS_EMAIL, email);
+  await loadMe();
+  setAuthUI(true, `Status: account created • signed in as ${me?.display_name || me?.email || email}`);
+}
+
+function safeEmail() {
+  return (authEmail && authEmail.value ? authEmail.value.trim() : (localStorage.getItem(LS_EMAIL) || "").trim());
+}
+function safePass() {
+  return (authPass && authPass.value ? authPass.value : "");
+}
+
+if (authEmail) authEmail.value = localStorage.getItem(LS_EMAIL) || "";
+
+if (btnLogin) {
+  btnLogin.addEventListener("click", async () => {
+    try {
+      const email = safeEmail();
+      const password = safePass();
+      if (!email || !password) throw new Error("Enter email + password.");
+      setAuthUI(false, "Signing in…");
+      await doLogin(email, password);
+    } catch (e) {
+      setAuthUI(false, `Sign in failed: ${e.message || e}`);
+    }
+  });
+}
+if (btnSignup) {
+  btnSignup.addEventListener("click", async () => {
+    try {
+      const email = safeEmail();
+      const password = safePass();
+      if (!email || !password) throw new Error("Enter email + password.");
+      setAuthUI(false, "Creating account…");
+      await doSignup(email, password);
+    } catch (e) {
+      setAuthUI(false, `Create account failed: ${e.message || e}`);
+    }
+  });
+}
+
+if (btnAuth) {
+  btnAuth.addEventListener("pointerdown", (e) => e.stopPropagation());
+  btnAuth.addEventListener("click", async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (authHeaderOK()) {
+      // sign out
+      clearAuth();
+    } else {
+      // show overlay
+      setAuthUI(false, "Status: signed out");
+    }
+  });
+}
+
+function makeDriverIcon(name) {
+  const safe = (name || "Driver").trim() || "Driver";
+  const html = `
+    <div class="drvWrap">
+      <div class="drvDot"></div>
+      <div class="drvName">${escapeHtml(safe)}</div>
+    </div>
+  `;
+  return L.divIcon({
+    className: "",
+    html,
+    iconSize: [10, 10],
+    iconAnchor: [5, 5],
+  });
+}
+
+function clearOtherDrivers() {
+  for (const m of otherMarkers.values()) {
+    try { m.remove(); } catch {}
+  }
+  otherMarkers.clear();
+}
+
+function upsertDriverMarker(userId, name, lat, lng) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+  if (!userId) return;
+
+  const existing = otherMarkers.get(userId);
+  if (existing) {
+    existing.setLatLng([lat, lng]);
+    return;
+  }
+
+  const mk = L.marker([lat, lng], {
+    icon: makeDriverIcon(name || `Driver ${userId}`),
+    interactive: false,
+    pane: "communityPane",
+    zIndexOffset: 1500000,
+  }).addTo(map);
+
+  otherMarkers.set(userId, mk);
+}
+
+async function pullPresenceAll() {
+  if (!authHeaderOK()) return;
+
+  try {
+    const list = await getJSONAuth("/presence/all", communityToken);
+    const now = Date.now() / 1000;
+
+    // expected list array; if wrapped, try .items
+    const items = Array.isArray(list) ? list : (list?.items || []);
+    const seen = new Set();
+
+    for (const it of items) {
+      const uid = String(it.user_id ?? it.userId ?? it.id ?? "");
+      if (!uid) continue;
+
+      // hide self
+      if (me && (String(me.id) === uid)) continue;
+
+      const lat = Number(it.lat ?? it.latitude ?? NaN);
+      const lng = Number(it.lng ?? it.longitude ?? NaN);
+
+      // staleness check
+      const updated = Number(it.updated_at_unix ?? it.ts_unix ?? it.updated_at ?? NaN);
+      if (Number.isFinite(updated)) {
+        if ((now - updated) > PRESENCE_STALE_SEC) continue;
+      }
+
+      const name = it.display_name || it.name || it.email || "Driver";
+      upsertDriverMarker(uid, name, lat, lng);
+      seen.add(uid);
+    }
+
+    // remove markers not in latest response
+    for (const uid of Array.from(otherMarkers.keys())) {
+      if (!seen.has(uid)) {
+        const mk = otherMarkers.get(uid);
+        try { mk.remove(); } catch {}
+        otherMarkers.delete(uid);
+      }
+    }
+  } catch (e) {
+    console.warn("presence/all failed:", e);
+  }
+}
+
+let lastPresencePushMs = 0;
+async function communityMaybePushPresence(tsMsOrUnix, heading) {
+  if (!authHeaderOK()) return;
+  if (!userLatLng) return;
+
+  const nowMs = Date.now();
+  if ((nowMs - lastPresencePushMs) < PRESENCE_PUSH_MS) return;
+  lastPresencePushMs = nowMs;
+
+  try {
+    const ts_unix = Math.floor((tsMsOrUnix ? Number(tsMsOrUnix) : Date.now()) / 1000);
+    await postJSON("/presence/update", {
+      lat: userLatLng.lat,
+      lng: userLatLng.lng,
+      heading: (typeof heading === "number" && Number.isFinite(heading)) ? heading : null,
+      ts_unix,
+    }, communityToken);
+  } catch (e) {
+    console.warn("presence/update failed:", e);
+  }
+}
+
+function nearestZoneToUser(frame, latlng) {
+  const feats = frame?.polygons?.features || [];
+  if (!feats.length || !latlng) return null;
+
+  let best = null;
+  for (const f of feats) {
+    const props = f?.properties || {};
+    const c = geometryCenter(f.geometry);
+    if (!c) continue;
+    const d = haversineMiles(latlng, c);
+    if (!best || d < best.d) {
+      best = {
+        d,
+        location_id: props.LocationID ?? null,
+        zone_name: (props.zone_name || "").trim() || null,
+        borough: (props.borough || "").trim() || null,
+      };
+    }
+  }
+  // if somehow super far, still return (NYC-wide)
+  return best;
+}
+
+async function sendPoliceReport() {
+  if (!authHeaderOK()) {
+    setAuthUI(false, "Sign in to report police.");
+    return;
+  }
+  if (!userLatLng) {
+    alert("Enable location first.");
+    return;
+  }
+
+  try {
+    const ts_unix = Math.floor(Date.now() / 1000);
+    await postJSON("/events/police", {
+      lat: userLatLng.lat,
+      lng: userLatLng.lng,
+      ts_unix,
+    }, communityToken);
+
+    alert("Police report sent to community ✅");
+  } catch (e) {
+    alert(`Police report failed: ${e.message || e}`);
+  }
+}
+
+async function sendPickupLog() {
+  if (!authHeaderOK()) {
+    setAuthUI(false, "Sign in to log pickups.");
+    return;
+  }
+  if (!userLatLng) {
+    alert("Enable location first.");
+    return;
+  }
+  try {
+    const ts_unix = Math.floor(Date.now() / 1000);
+    const near = nearestZoneToUser(currentFrame, userLatLng);
+
+    await postJSON("/events/pickup", {
+      lat: userLatLng.lat,
+      lng: userLatLng.lng,
+      ts_unix,
+      frame_time: currentFrame?.time || null,
+      location_id: near?.location_id ?? null,
+      zone_name: near?.zone_name ?? null,
+      borough: near?.borough ?? null,
+    }, communityToken);
+
+    const label = near?.zone_name ? `${near.zone_name}${near.borough ? ` (${near.borough})` : ""}` : "your location";
+    alert(`Pickup logged ✅ (${label})`);
+  } catch (e) {
+    alert(`Pickup log failed: ${e.message || e}`);
+  }
+}
+
+if (btnPolice) {
+  btnPolice.addEventListener("pointerdown", (e) => e.stopPropagation());
+  btnPolice.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    sendPoliceReport();
+  });
+}
+if (btnPickup) {
+  btnPickup.addEventListener("pointerdown", (e) => e.stopPropagation());
+  btnPickup.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    sendPickupLog();
+  });
+}
+
+/* poll presence */
+setInterval(() => {
+  pullPresenceAll().catch(() => {});
+}, PRESENCE_PULL_MS);
+
+/* =========================================================
    Boot
    ========================================================= */
 setNavDestination(null);
@@ -1594,6 +1954,22 @@ loadTimeline().catch((err) => {
   console.error(err);
   timeLabel.textContent = `Error loading timeline: ${err.message}`;
 });
+
+/* auth boot */
+(async () => {
+  if (authHeaderOK()) {
+    setAuthUI(true, "Checking session…");
+    await loadMe();
+    if (authHeaderOK()) {
+      setAuthUI(true, `Status: signed in as ${me?.display_name || me?.email || "Driver"}`);
+      pullPresenceAll().catch(() => {});
+    } else {
+      setAuthUI(false, "Status: signed out");
+    }
+  } else {
+    setAuthUI(false, "Status: signed out");
+  }
+})();
 
 startLocationWatch();
 updateWeatherNow().catch(() => {});
