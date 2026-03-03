@@ -14,10 +14,11 @@ const USER_SLIDER_GRACE_MS = 25 * 1000;
    ========================================================= */
 const PRESENCE_PUSH_MS = 8 * 1000;     // send my location
 const PRESENCE_PULL_MS = 10 * 1000;    // fetch all drivers
-const PRESENCE_STALE_SEC = 300;        // FIX: 70 was too low; use 5 min
+const PRESENCE_STALE_SEC = 70;         // hide if older than this
 
 const LS_TOKEN = "community_token_v1";
 const LS_EMAIL = "community_email_v1";
+const LS_NAME  = "community_name_v1";  // ✅ NEW: display name saved locally
 
 /* =========================================================
    MANHATTAN MODE — DEFAULT SETTINGS (SAFE TO EDIT)
@@ -1188,7 +1189,7 @@ let wxNextUpdateTimer = null;
 function wxResizeCanvas() {
   if (!wxCanvas) return;
   const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
-  wxCanvas.width = Math.floor(window.innerWidth * window.innerHeight * 0 + window.innerWidth * dpr); // keep your original behavior
+  wxCanvas.width = Math.floor(window.innerWidth * dpr);
   wxCanvas.height = Math.floor(window.innerHeight * dpr);
   wxCanvas.style.width = `${window.innerWidth}px`;
   wxCanvas.style.height = `${window.innerHeight}px`;
@@ -1611,6 +1612,9 @@ const communityNote = document.getElementById("communityNote");
 let communityToken = localStorage.getItem(LS_TOKEN) || "";
 let me = null;
 
+// ✅ local display name (chosen by user)
+let myDisplayName = (localStorage.getItem(LS_NAME) || "").trim();
+
 // other drivers markers
 const otherMarkers = new Map(); // user_id -> marker
 
@@ -1628,7 +1632,6 @@ function setAuthUI(signedIn, note) {
     lockedOverlay.setAttribute("aria-hidden", showLock ? "false" : "true");
   }
 
-  // buttons still exist, but are useful only if signed in
   if (btnPolice) btnPolice.classList.toggle("disabled", !signedIn);
   if (btnPickup) btnPickup.classList.toggle("disabled", !signedIn);
 
@@ -1660,6 +1663,19 @@ async function loadMe() {
   }
 }
 
+function promptForUsernameIfMissing() {
+  if (myDisplayName && myDisplayName.length >= 2) return myDisplayName;
+
+  const suggested = ((safeEmail() || "").split("@")[0] || "Driver").slice(0, 18);
+  const name = prompt("Choose a username (this will show on the map, NOT your email):", suggested);
+  const cleaned = String(name || "").trim().slice(0, 18);
+
+  myDisplayName = cleaned.length >= 2 ? cleaned : suggested;
+  localStorage.setItem(LS_NAME, myDisplayName);
+  return myDisplayName;
+}
+
+// ✅ Signup: your backend signup does NOT return token, so we auto-login after creating account
 async function doLogin(email, password) {
   const body = { email, password };
   const data = await postJSON("/auth/login", body, null);
@@ -1668,17 +1684,25 @@ async function doLogin(email, password) {
   communityToken = token;
   localStorage.setItem(LS_TOKEN, token);
   localStorage.setItem(LS_EMAIL, email);
+
+  // ensure username exists locally
+  promptForUsernameIfMissing();
+
   await loadMe();
-  setAuthUI(true, `Status: signed in as ${me?.display_name || me?.email || email}`);
+  setAuthUI(true, `Status: signed in as ${myDisplayName || (me?.email || email)}`);
 }
 
 async function doSignup(email, password) {
-  // FIX: your backend /auth/signup DOES NOT return a token.
-  // So: create account, then login.
-  const body = { email, password };
-  await postJSON("/auth/signup", body, null);
+  // ask username now (stored locally)
+  promptForUsernameIfMissing();
+
+  // backend accepts {email,password,bootstrap_token}; we keep it minimal for compatibility
+  await postJSON("/auth/signup", { email, password }, null);
+
+  // then login to get token
   await doLogin(email, password);
-  setAuthUI(true, `Status: account created • signed in as ${me?.display_name || me?.email || email}`);
+
+  setAuthUI(true, `Status: account created • signed in as ${myDisplayName}`);
 }
 
 function safeEmail() {
@@ -1723,29 +1747,50 @@ if (btnAuth) {
     e.preventDefault();
     e.stopPropagation();
     if (authHeaderOK()) {
-      // sign out
       clearAuth();
     } else {
-      // show overlay
       setAuthUI(false, "Status: signed out");
     }
   });
 }
 
-function makeDriverIcon(name) {
-  const safe = (name || "Driver").trim() || "Driver";
+/* -------------------------
+   ✅ COMMUNITY ARROW ICONS
+   - NEVER show email
+   - Show username label
+   - Use arrow style like your nav arrow
+------------------------- */
+
+function sanitizePublicName(raw, uid) {
+  const s = String(raw || "").trim();
+  if (!s) return `Driver ${uid}`;
+
+  // If backend gives an email, DO NOT show it
+  if (s.includes("@")) return `Driver ${uid}`;
+
+  // Otherwise show short name
+  const short = s.length > 14 ? (s.slice(0, 14) + "…") : s;
+  return short;
+}
+
+// create arrow icon for other drivers (heading rotates arrow)
+function makeOtherDriverArrowIcon(publicName, headingDeg) {
+  const label = String(publicName || "Driver").trim() || "Driver";
+  const rot = (typeof headingDeg === "number" && Number.isFinite(headingDeg)) ? headingDeg : 0;
+
+  // IMPORTANT: we reuse your .navArrow CSS so it matches your arrow style
   const html = `
-    <div class="drvWrap">
-      <div class="drvDot"></div>
-      <div class="drvName">${escapeHtml(safe)}</div>
+    <div class="drvArrowWrap" style="transform: rotate(${rot}deg);">
+      <div class="navArrow"></div>
+      <div class="drvArrowLabel">${escapeHtml(label)}</div>
     </div>
   `;
-  // FIX: bigger iconSize so label isn't clipped (Leaflet clips divIcon by iconSize)
+
   return L.divIcon({
     className: "",
     html,
-    iconSize: [180, 32],
-    iconAnchor: [10, 10],
+    iconSize: [34, 34],
+    iconAnchor: [17, 17],
   });
 }
 
@@ -1756,18 +1801,21 @@ function clearOtherDrivers() {
   otherMarkers.clear();
 }
 
-function upsertDriverMarker(userId, name, lat, lng) {
+function upsertDriverMarker(userId, publicName, lat, lng, headingDeg) {
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
   if (!userId) return;
+
+  const h = (typeof headingDeg === "number" && Number.isFinite(headingDeg)) ? headingDeg : 0;
 
   const existing = otherMarkers.get(userId);
   if (existing) {
     existing.setLatLng([lat, lng]);
+    existing.setIcon(makeOtherDriverArrowIcon(publicName, h));
     return;
   }
 
   const mk = L.marker([lat, lng], {
-    icon: makeDriverIcon(name || `Driver ${userId}`),
+    icon: makeOtherDriverArrowIcon(publicName, h),
     interactive: false,
     pane: "communityPane",
     zIndexOffset: 1500000,
@@ -1777,11 +1825,10 @@ function upsertDriverMarker(userId, name, lat, lng) {
 }
 
 function isSelfPresenceItem(it) {
-  // FIX: backend /me has no id, so use email match
-  const myEmail = (me?.email || localStorage.getItem(LS_EMAIL) || "").trim().toLowerCase();
+  // /me doesn’t return id in your backend, so we hide self by matching email
   const itEmail = String(it?.email || "").trim().toLowerCase();
-  if (myEmail && itEmail && myEmail === itEmail) return true;
-  return false;
+  const myEmail = String(me?.email || safeEmail() || "").trim().toLowerCase();
+  return !!(itEmail && myEmail && itEmail === myEmail);
 }
 
 async function pullPresenceAll() {
@@ -1789,9 +1836,8 @@ async function pullPresenceAll() {
 
   try {
     const list = await getJSONAuth("/presence/all", communityToken);
-    const nowUnix = Math.floor(Date.now() / 1000);
+    const now = Date.now() / 1000;
 
-    // expected list array; if wrapped, try .items
     const items = Array.isArray(list) ? list : (list?.items || []);
     const seen = new Set();
 
@@ -1799,20 +1845,24 @@ async function pullPresenceAll() {
       const uid = String(it.user_id ?? it.userId ?? it.id ?? "");
       if (!uid) continue;
 
-      // FIX: hide self by email
-      if (isSelfPresenceItem(it)) continue;
+      // hide self
+      if (me && isSelfPresenceItem(it)) continue;
 
       const lat = Number(it.lat ?? it.latitude ?? NaN);
       const lng = Number(it.lng ?? it.longitude ?? NaN);
 
-      // staleness check (server sends updated_at in seconds)
       const updated = Number(it.updated_at_unix ?? it.ts_unix ?? it.updated_at ?? NaN);
       if (Number.isFinite(updated)) {
-        if ((nowUnix - updated) > PRESENCE_STALE_SEC) continue;
+        if ((now - updated) > PRESENCE_STALE_SEC) continue;
       }
 
-      const name = it.display_name || it.name || it.email || "Driver";
-      upsertDriverMarker(uid, name, lat, lng);
+      // NEVER show email. Use username if backend ever provides one, else Driver {id}
+      const rawName = it.display_name || it.name || it.username || it.public_name || it.email || "";
+      const publicName = sanitizePublicName(rawName, uid);
+
+      const heading = (it.heading == null) ? null : Number(it.heading);
+
+      upsertDriverMarker(uid, publicName, lat, lng, heading);
       seen.add(uid);
     }
 
@@ -1840,11 +1890,14 @@ async function communityMaybePushPresence(tsMsOrUnix, heading) {
 
   try {
     const ts_unix = Math.floor((tsMsOrUnix ? Number(tsMsOrUnix) : Date.now()) / 1000);
+
+    // NOTE: backend ignores extra fields; we still send public_name for future backend upgrade
     await postJSON("/presence/update", {
       lat: userLatLng.lat,
       lng: userLatLng.lng,
       heading: (typeof heading === "number" && Number.isFinite(heading)) ? heading : null,
       ts_unix,
+      public_name: myDisplayName || null, // ✅ not used by backend yet; safe
     }, communityToken);
   } catch (e) {
     console.warn("presence/update failed:", e);
@@ -1870,7 +1923,6 @@ function nearestZoneToUser(frame, latlng) {
       };
     }
   }
-  // if somehow super far, still return (NYC-wide)
   return best;
 }
 
@@ -1965,8 +2017,16 @@ loadTimeline().catch((err) => {
   if (authHeaderOK()) {
     setAuthUI(true, "Checking session…");
     await loadMe();
+
+    // Ensure we have a local username
+    if (!myDisplayName) {
+      const suggested = ((safeEmail() || "").split("@")[0] || "Driver").slice(0, 18);
+      myDisplayName = (localStorage.getItem(LS_NAME) || suggested).trim();
+      localStorage.setItem(LS_NAME, myDisplayName);
+    }
+
     if (authHeaderOK()) {
-      setAuthUI(true, `Status: signed in as ${me?.display_name || me?.email || "Driver"}`);
+      setAuthUI(true, `Status: signed in as ${myDisplayName || me?.email || "Driver"}`);
       pullPresenceAll().catch(() => {});
     } else {
       setAuthUI(false, "Status: signed out");
