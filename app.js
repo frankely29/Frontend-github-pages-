@@ -12,9 +12,9 @@ const USER_SLIDER_GRACE_MS = 25 * 1000;
 /* =========================================================
    COMMUNITY SETTINGS (cheap polling)
    ========================================================= */
-const PRESENCE_PUSH_MS = 8 * 1000;     // send my location (signed-in only)
-const PRESENCE_PULL_MS = 10 * 1000;    // fetch all drivers (PUBLIC)
-const PRESENCE_STALE_SEC = 70;         // hide if older than this
+const PRESENCE_PUSH_MS = 8 * 1000;     // send my location
+const PRESENCE_PULL_MS = 10 * 1000;    // fetch all drivers
+const PRESENCE_STALE_SEC = 300;        // FIX: 70 was too low; use 5 min
 
 const LS_TOKEN = "community_token_v1";
 const LS_EMAIL = "community_email_v1";
@@ -622,7 +622,7 @@ function haversineMiles(a, b) {
   const dLat = toRad(b.lat - a.lat);
   const dLng = toRad(b.lng - a.lng);
   const lat1 = toRad(a.lat);
-  const lat2 = toRad(a.lat + (b.lat - a.lat));
+  const lat2 = toRad(b.lat);
 
   const s1 = Math.sin(dLat / 2);
   const s2 = Math.sin(dLng / 2);
@@ -994,7 +994,7 @@ map.on("dragstart", disableAutoCenterBecauseUserIsExploring);
 map.on("zoomstart", disableAutoCenterBecauseUserIsExploring);
 
 /* =========================================================
-   Live location arrow + follow behavior (SELF)
+   Live location arrow + follow behavior
    ========================================================= */
 let gpsFirstFixDone = false;
 let navMarker = null;
@@ -1002,24 +1002,23 @@ let lastPos = null;
 let lastHeadingDeg = 0;
 let lastMoveTs = 0;
 
-function makeNavIconSelf() {
-  // IMPORTANT: NO IDs here. Classes only.
+function makeNavIcon() {
   return L.divIcon({
     className: "",
-    html: `<div class="navArrowWrap navPulse"><div class="navArrow"></div></div>`,
+    html: `<div id="navWrap" class="navArrowWrap navPulse"><div class="navArrow"></div></div>`,
     iconSize: [30, 30],
     iconAnchor: [15, 15],
   });
 }
 
 function setNavVisual(isMoving) {
-  const el = navMarker && navMarker.getElement() ? navMarker.getElement().querySelector(".navArrowWrap") : null;
+  const el = document.getElementById("navWrap");
   if (!el) return;
   el.classList.toggle("navMoving", !!isMoving);
   el.classList.toggle("navPulse", !isMoving);
 }
 function setNavRotation(deg) {
-  const el = navMarker && navMarker.getElement() ? navMarker.getElement().querySelector(".navArrowWrap") : null;
+  const el = document.getElementById("navWrap");
   if (!el) return;
   el.style.transform = `rotate(${deg}deg)`;
 }
@@ -1046,7 +1045,7 @@ function startLocationWatch() {
   }
 
   navMarker = L.marker([40.7128, -74.0060], {
-    icon: makeNavIconSelf(),
+    icon: makeNavIcon(),
     interactive: false,
     zIndexOffset: 2000000,
     pane: "navPane",
@@ -1099,7 +1098,7 @@ function startLocationWatch() {
 
       scheduleWeatherUpdateSoon();
 
-      // community push (SIGNED-IN ONLY)
+      // community push (auth only)
       communityMaybePushPresence(ts, heading);
     },
     (err) => {
@@ -1189,7 +1188,7 @@ let wxNextUpdateTimer = null;
 function wxResizeCanvas() {
   if (!wxCanvas) return;
   const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
-  wxCanvas.width = Math.floor(window.innerWidth * dpr);
+  wxCanvas.width = Math.floor(window.innerWidth * window.innerHeight * 0 + window.innerWidth * dpr); // keep your original behavior
   wxCanvas.height = Math.floor(window.innerHeight * dpr);
   wxCanvas.style.width = `${window.innerWidth}px`;
   wxCanvas.style.height = `${window.innerHeight}px`;
@@ -1609,9 +1608,6 @@ const btnPolice = document.getElementById("btnPolice");
 const btnPickup = document.getElementById("btnPickup");
 const communityNote = document.getElementById("communityNote");
 
-// your "Name" button in the UI
-const btnName = document.getElementById("btnName");
-
 let communityToken = localStorage.getItem(LS_TOKEN) || "";
 let me = null;
 
@@ -1621,10 +1617,9 @@ const otherMarkers = new Map(); // user_id -> marker
 function setAuthUI(signedIn, note) {
   if (btnAuth) btnAuth.textContent = signedIn ? "Sign out" : "Sign in";
   if (communityNote) {
-    // IMPORTANT: public can see others; sign-in needed to broadcast + report
     communityNote.textContent = signedIn
-      ? "Community: you are broadcasting. Police reports + pickups are shared."
-      : "Community: you can view live drivers. Sign in to broadcast + report police + log pickups.";
+      ? "Community: live drivers are visible. Police reports + pickups are shared."
+      : "Community: sign in to see other drivers + report police + log pickups.";
   }
 
   const showLock = !signedIn;
@@ -1633,9 +1628,9 @@ function setAuthUI(signedIn, note) {
     lockedOverlay.setAttribute("aria-hidden", showLock ? "false" : "true");
   }
 
+  // buttons still exist, but are useful only if signed in
   if (btnPolice) btnPolice.classList.toggle("disabled", !signedIn);
   if (btnPickup) btnPickup.classList.toggle("disabled", !signedIn);
-  if (btnName) btnName.classList.toggle("disabled", !signedIn);
 
   if (authStatus) authStatus.textContent = note || (signedIn ? "Status: signed in" : "Status: signed out");
 }
@@ -1645,7 +1640,7 @@ function clearAuth() {
   me = null;
   localStorage.removeItem(LS_TOKEN);
   setAuthUI(false, "Status: signed out");
-  // NOTE: DO NOT clear other drivers anymore — signed-out should still see them.
+  clearOtherDrivers();
 }
 
 function authHeaderOK() {
@@ -1678,39 +1673,12 @@ async function doLogin(email, password) {
 }
 
 async function doSignup(email, password) {
-  // ask for public name at signup
-  const desired = prompt("Choose a public name (shown on the map).", (email || "").split("@")[0] || "Driver");
-  const display_name = (desired || "").trim();
-
-  const body = { email, password, display_name };
-  const data = await postJSON("/auth/signup", body, null);
-  const token = data?.token || data?.access_token || "";
-  if (!token) throw new Error("Signup success but token missing.");
-  communityToken = token;
-  localStorage.setItem(LS_TOKEN, token);
-  localStorage.setItem(LS_EMAIL, email);
-  await loadMe();
+  // FIX: your backend /auth/signup DOES NOT return a token.
+  // So: create account, then login.
+  const body = { email, password };
+  await postJSON("/auth/signup", body, null);
+  await doLogin(email, password);
   setAuthUI(true, `Status: account created • signed in as ${me?.display_name || me?.email || email}`);
-}
-
-async function setMyDisplayName() {
-  if (!authHeaderOK()) {
-    setAuthUI(false, "Sign in to set a name.");
-    return;
-  }
-  const cur = me?.display_name || (me?.email ? me.email.split("@")[0] : "Driver");
-  const desired = prompt("Set your public name (shown on the map).", cur || "Driver");
-  if (desired == null) return; // cancelled
-  const name = String(desired).trim();
-  if (!name) return;
-
-  try {
-    await postJSON("/user/display_name", { display_name: name }, communityToken);
-    await loadMe();
-    setAuthUI(true, `Status: signed in as ${me?.display_name || "Driver"}`);
-  } catch (e) {
-    alert(`Name update failed: ${e.message || e}`);
-  }
 }
 
 function safeEmail() {
@@ -1755,85 +1723,75 @@ if (btnAuth) {
     e.preventDefault();
     e.stopPropagation();
     if (authHeaderOK()) {
+      // sign out
       clearAuth();
     } else {
+      // show overlay
       setAuthUI(false, "Status: signed out");
     }
   });
 }
 
-if (btnName) {
-  btnName.addEventListener("pointerdown", (e) => e.stopPropagation());
-  btnName.addEventListener("click", (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setMyDisplayName();
-  });
-}
-
-/* ===== FIXED ICONS: other drivers are ARROWS + NAMES (NO IDS) ===== */
-function makeOtherDriverArrowIcon(name) {
+function makeDriverIcon(name) {
   const safe = (name || "Driver").trim() || "Driver";
-  // IMPORTANT: no id="" in here. classes only.
   const html = `
-    <div class="othWrap">
-      <div class="othArrowWrap">
-        <div class="navArrow"></div>
-      </div>
-      <div class="othName">${escapeHtml(safe)}</div>
+    <div class="drvWrap">
+      <div class="drvDot"></div>
+      <div class="drvName">${escapeHtml(safe)}</div>
     </div>
   `;
+  // FIX: bigger iconSize so label isn't clipped (Leaflet clips divIcon by iconSize)
   return L.divIcon({
-    className: "othDriverIcon",
+    className: "",
     html,
-    iconSize: [80, 30],
-    iconAnchor: [15, 15],
+    iconSize: [180, 32],
+    iconAnchor: [10, 10],
   });
 }
 
-function setOtherRotation(marker, deg) {
-  const el = marker && marker.getElement ? marker.getElement() : null;
-  if (!el) return;
-  const wrap = el.querySelector(".othArrowWrap");
-  if (!wrap) return;
-  wrap.style.transform = `rotate(${deg}deg)`;
+function clearOtherDrivers() {
+  for (const m of otherMarkers.values()) {
+    try { m.remove(); } catch {}
+  }
+  otherMarkers.clear();
 }
 
-function upsertDriverMarker(userId, name, lat, lng, heading) {
+function upsertDriverMarker(userId, name, lat, lng) {
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
   if (!userId) return;
 
-  const key = String(userId);
-
-  const existing = otherMarkers.get(key);
+  const existing = otherMarkers.get(userId);
   if (existing) {
     existing.setLatLng([lat, lng]);
-    if (typeof heading === "number" && Number.isFinite(heading)) {
-      setOtherRotation(existing, heading);
-    }
     return;
   }
 
   const mk = L.marker([lat, lng], {
-    icon: makeOtherDriverArrowIcon(name || `Driver ${key}`),
+    icon: makeDriverIcon(name || `Driver ${userId}`),
     interactive: false,
     pane: "communityPane",
     zIndexOffset: 1500000,
   }).addTo(map);
 
-  otherMarkers.set(key, mk);
+  otherMarkers.set(userId, mk);
+}
 
-  if (typeof heading === "number" && Number.isFinite(heading)) {
-    setTimeout(() => setOtherRotation(mk, heading), 30);
-  }
+function isSelfPresenceItem(it) {
+  // FIX: backend /me has no id, so use email match
+  const myEmail = (me?.email || localStorage.getItem(LS_EMAIL) || "").trim().toLowerCase();
+  const itEmail = String(it?.email || "").trim().toLowerCase();
+  if (myEmail && itEmail && myEmail === itEmail) return true;
+  return false;
 }
 
 async function pullPresenceAll() {
-  // ✅ PUBLIC: always pull, even signed out
-  try {
-    const list = await fetchJSON(`${RAILWAY_BASE}/presence/all`);
-    const now = Date.now() / 1000;
+  if (!authHeaderOK()) return;
 
+  try {
+    const list = await getJSONAuth("/presence/all", communityToken);
+    const nowUnix = Math.floor(Date.now() / 1000);
+
+    // expected list array; if wrapped, try .items
     const items = Array.isArray(list) ? list : (list?.items || []);
     const seen = new Set();
 
@@ -1841,23 +1799,24 @@ async function pullPresenceAll() {
       const uid = String(it.user_id ?? it.userId ?? it.id ?? "");
       if (!uid) continue;
 
-      // hide self if we know our id
-      if (me && String(me.id) === uid) continue;
+      // FIX: hide self by email
+      if (isSelfPresenceItem(it)) continue;
 
       const lat = Number(it.lat ?? it.latitude ?? NaN);
       const lng = Number(it.lng ?? it.longitude ?? NaN);
-      const heading = (typeof it.heading === "number" && Number.isFinite(it.heading)) ? it.heading : null;
 
+      // staleness check (server sends updated_at in seconds)
       const updated = Number(it.updated_at_unix ?? it.ts_unix ?? it.updated_at ?? NaN);
       if (Number.isFinite(updated)) {
-        if ((now - updated) > PRESENCE_STALE_SEC) continue;
+        if ((nowUnix - updated) > PRESENCE_STALE_SEC) continue;
       }
 
-      const name = it.display_name || it.name || "Driver";
-      upsertDriverMarker(uid, name, lat, lng, heading);
+      const name = it.display_name || it.name || it.email || "Driver";
+      upsertDriverMarker(uid, name, lat, lng);
       seen.add(uid);
     }
 
+    // remove markers not in latest response
     for (const uid of Array.from(otherMarkers.keys())) {
       if (!seen.has(uid)) {
         const mk = otherMarkers.get(uid);
@@ -1872,7 +1831,6 @@ async function pullPresenceAll() {
 
 let lastPresencePushMs = 0;
 async function communityMaybePushPresence(tsMsOrUnix, heading) {
-  // ✅ signed-in only for broadcasting your location
   if (!authHeaderOK()) return;
   if (!userLatLng) return;
 
@@ -1881,11 +1839,12 @@ async function communityMaybePushPresence(tsMsOrUnix, heading) {
   lastPresencePushMs = nowMs;
 
   try {
+    const ts_unix = Math.floor((tsMsOrUnix ? Number(tsMsOrUnix) : Date.now()) / 1000);
     await postJSON("/presence/update", {
       lat: userLatLng.lat,
       lng: userLatLng.lng,
       heading: (typeof heading === "number" && Number.isFinite(heading)) ? heading : null,
-      accuracy: null,
+      ts_unix,
     }, communityToken);
   } catch (e) {
     console.warn("presence/update failed:", e);
@@ -1911,6 +1870,7 @@ function nearestZoneToUser(frame, latlng) {
       };
     }
   }
+  // if somehow super far, still return (NYC-wide)
   return best;
 }
 
@@ -1925,10 +1885,11 @@ async function sendPoliceReport() {
   }
 
   try {
+    const ts_unix = Math.floor(Date.now() / 1000);
     await postJSON("/events/police", {
       lat: userLatLng.lat,
       lng: userLatLng.lng,
-      note: "",
+      ts_unix,
     }, communityToken);
 
     alert("Police report sent to community ✅");
@@ -1947,12 +1908,17 @@ async function sendPickupLog() {
     return;
   }
   try {
+    const ts_unix = Math.floor(Date.now() / 1000);
     const near = nearestZoneToUser(currentFrame, userLatLng);
 
     await postJSON("/events/pickup", {
       lat: userLatLng.lat,
       lng: userLatLng.lng,
-      zone_id: near?.location_id ?? null,
+      ts_unix,
+      frame_time: currentFrame?.time || null,
+      location_id: near?.location_id ?? null,
+      zone_name: near?.zone_name ?? null,
+      borough: near?.borough ?? null,
     }, communityToken);
 
     const label = near?.zone_name ? `${near.zone_name}${near.borough ? ` (${near.borough})` : ""}` : "your location";
@@ -1979,7 +1945,7 @@ if (btnPickup) {
   });
 }
 
-/* poll presence (PUBLIC) */
+/* poll presence */
 setInterval(() => {
   pullPresenceAll().catch(() => {});
 }, PRESENCE_PULL_MS);
@@ -2001,14 +1967,13 @@ loadTimeline().catch((err) => {
     await loadMe();
     if (authHeaderOK()) {
       setAuthUI(true, `Status: signed in as ${me?.display_name || me?.email || "Driver"}`);
+      pullPresenceAll().catch(() => {});
     } else {
       setAuthUI(false, "Status: signed out");
     }
   } else {
     setAuthUI(false, "Status: signed out");
   }
-  // ✅ always show other drivers regardless of sign-in
-  pullPresenceAll().catch(() => {});
 })();
 
 startLocationWatch();
