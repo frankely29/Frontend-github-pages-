@@ -1,7 +1,5 @@
 /* =========================================================
    NYC TLC Hotspot Map (Frontend) - SIMPLE + STABLE
-   + Community arrows (like your GPS arrow)
-   + Username (no emails shown on map)
    ========================================================= */
 
 const RAILWAY_BASE = "https://web-production-78f67.up.railway.app";
@@ -15,12 +13,12 @@ const USER_SLIDER_GRACE_MS = 25 * 1000;
    COMMUNITY SETTINGS (cheap polling)
    ========================================================= */
 const PRESENCE_PUSH_MS = 8 * 1000;     // send my location
-const PRESENCE_PULL_MS = 10 * 1000;    // fetch all drivers
-const PRESENCE_STALE_SEC = 70;         // hide if older than this
+const PRESENCE_PULL_MS = 8 * 1000;     // fetch all drivers (slightly faster)
+const PRESENCE_STALE_SEC = 180;        // ✅ was 70 (too aggressive on phones)
 
 const LS_TOKEN = "community_token_v1";
 const LS_EMAIL = "community_email_v1";
-const LS_NAME  = "community_name_v1";  // ✅ public username shown on map (NOT email)
+const LS_NAME  = "community_public_name_v1"; // ✅ NEW (public display name)
 
 /* =========================================================
    MANHATTAN MODE — DEFAULT SETTINGS (SAFE TO EDIT)
@@ -998,7 +996,6 @@ map.on("zoomstart", disableAutoCenterBecauseUserIsExploring);
 
 /* =========================================================
    Live location arrow + follow behavior
-   + ✅ show YOUR username next to YOUR arrow
    ========================================================= */
 let gpsFirstFixDone = false;
 let navMarker = null;
@@ -1006,45 +1003,12 @@ let lastPos = null;
 let lastHeadingDeg = 0;
 let lastMoveTs = 0;
 
-function getMyPublicName() {
-  const n = (localStorage.getItem(LS_NAME) || "").trim();
-  if (n && !n.includes("@")) return n.slice(0, 18);
-  return "Me";
-}
-
-function makeMyNavIcon(name, headingDeg) {
-  const safeName = (name || "Me").trim() || "Me";
-  const rot = (typeof headingDeg === "number" && Number.isFinite(headingDeg)) ? headingDeg : 0;
-
-  // ✅ Uses your existing classes: navArrowWrap + navArrow
-  // Arrow rotates, label does not.
+function makeNavIcon() {
   return L.divIcon({
     className: "",
-    html: `
-      <div style="position:relative; width:44px; height:44px;">
-        <div id="navWrap" class="navArrowWrap navPulse"
-             style="position:absolute; left:7px; top:7px; transform: rotate(${rot}deg);">
-          <div class="navArrow"></div>
-        </div>
-
-        <div style="
-          position:absolute;
-          left:40px;
-          top:12px;
-          padding:2px 6px;
-          border-radius:10px;
-          background: rgba(255,255,255,0.92);
-          border: 1px solid rgba(0,0,0,0.15);
-          font: 800 12px/1 system-ui,-apple-system,Segoe UI,Roboto,Arial;
-          white-space:nowrap;
-          pointer-events:none;
-        ">
-          ${escapeHtml(safeName)}
-        </div>
-      </div>
-    `,
-    iconSize: [44, 44],
-    iconAnchor: [22, 22],
+    html: `<div id="navWrap" class="navArrowWrap navPulse"><div class="navArrow"></div></div>`,
+    iconSize: [30, 30],
+    iconAnchor: [15, 15],
   });
 }
 
@@ -1054,7 +1018,11 @@ function setNavVisual(isMoving) {
   el.classList.toggle("navMoving", !!isMoving);
   el.classList.toggle("navPulse", !isMoving);
 }
-
+function setNavRotation(deg) {
+  const el = document.getElementById("navWrap");
+  if (!el) return;
+  el.style.transform = `rotate(${deg}deg)`;
+}
 function computeBearingDeg(from, to) {
   const toRad = (x) => (x * Math.PI) / 180;
   const toDeg = (x) => (x * 180) / Math.PI;
@@ -1070,135 +1038,6 @@ function computeBearingDeg(from, to) {
   brng = (brng + 360) % 360;
   return brng;
 }
-
-function startLocationWatch() {
-  if (!("geolocation" in navigator)) {
-    if (recommendEl) recommendEl.textContent = "Recommended: location not supported";
-    return;
-  }
-
-  const myName = getMyPublicName();
-
-  navMarker = L.marker([40.7128, -74.0060], {
-    icon: makeMyNavIcon(myName, 0),
-    interactive: false,
-    zIndexOffset: 2000000,
-    pane: "navPane",
-  }).addTo(map);
-
-  navigator.geolocation.watchPosition(
-    (pos) => {
-      const lat = pos.coords.latitude;
-      const lng = pos.coords.longitude;
-      const heading = pos.coords.heading;
-      const ts = pos.timestamp || Date.now();
-
-      userLatLng = { lat, lng };
-      if (navMarker) navMarker.setLatLng(userLatLng);
-
-      let isMoving = false;
-
-      if (lastPos) {
-        const dMi = haversineMiles({ lat: lastPos.lat, lng: lastPos.lng }, userLatLng);
-        const dtSec = Math.max(1, (ts - lastPos.ts) / 1000);
-        const mph = (dMi / dtSec) * 3600;
-
-        isMoving = mph >= 2.0;
-
-        if (typeof heading === "number" && Number.isFinite(heading)) {
-          lastHeadingDeg = heading;
-        } else if (dMi > 0.01) {
-          lastHeadingDeg = computeBearingDeg({ lat: lastPos.lat, lng: lastPos.lng }, userLatLng);
-        }
-
-        if (isMoving) lastMoveTs = ts;
-      }
-
-      lastPos = { lat, lng, ts };
-
-      // ✅ update my icon rotation + label
-      if (navMarker) navMarker.setIcon(makeMyNavIcon(getMyPublicName(), lastHeadingDeg));
-      setNavVisual(isMoving);
-
-      if (!gpsFirstFixDone) {
-        gpsFirstFixDone = true;
-        const targetZoom = Math.max(map.getZoom(), 12.5);
-        suppressAutoDisableFor(1200, () => map.setView(userLatLng, targetZoom, { animate: true }));
-      } else {
-        if (autoCenter) {
-          suppressAutoDisableFor(700, () => map.panTo(userLatLng, { animate: true }));
-        }
-      }
-
-      if (currentFrame) updateRecommendation(currentFrame);
-
-      scheduleWeatherUpdateSoon();
-
-      // community push (auth only)
-      communityMaybePushPresence(ts, heading);
-    },
-    (err) => {
-      console.warn("Geolocation error:", err);
-      if (recommendEl) recommendEl.textContent = "Recommended: location blocked (enable it)";
-      setNavDestination(null);
-    },
-    {
-      enableHighAccuracy: true,
-      maximumAge: 1000,
-      timeout: 15000,
-    }
-  );
-
-  setInterval(() => {
-    const now = Date.now();
-    const recentlyMoved = lastMoveTs && (now - lastMoveTs) < 5000;
-    setNavVisual(!!recentlyMoved);
-  }, 1200);
-}
-
-/* =========================================================
-   AUTO-UPDATE
-   ========================================================= */
-async function refreshCurrentFrame() {
-  try {
-    const idx = Number(slider.value || "0");
-    await loadFrame(idx);
-  } catch (e) {
-    console.warn("Auto-refresh failed:", e);
-  }
-}
-setInterval(refreshCurrentFrame, REFRESH_MS);
-
-async function tickNYCClockAndAdvanceIfNeeded() {
-  try {
-    if (Date.now() - lastUserSliderTs < USER_SLIDER_GRACE_MS) return;
-    if (!timeline.length || !minutesOfWeek.length) return;
-
-    const nowMinWeek = getNowNYCMinuteOfWeekRounded();
-    const bestIdx = pickClosestIndex(minutesOfWeek, nowMinWeek);
-
-    const curIdx = Number(slider.value || "0");
-    if (bestIdx === curIdx) return;
-
-    slider.value = String(bestIdx);
-
-    bubbleUpdateNow();
-
-    await loadFrame(bestIdx);
-  } catch (e) {
-    console.warn("NYC clock tick failed:", e);
-  }
-}
-setInterval(tickNYCClockAndAdvanceIfNeeded, NYC_CLOCK_TICK_MS);
-
-document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") {
-    refreshCurrentFrame().catch(() => {});
-    tickNYCClockAndAdvanceIfNeeded().catch(() => {});
-    updateWeatherNow().catch(() => {});
-    if (timeline.length) bubbleUpdateNow();
-  }
-});
 
 /* =========================================================
    WEATHER BADGE + FX (unchanged)
@@ -1631,9 +1470,6 @@ hot97Audio.addEventListener("error", () => {
 
 /* =========================================================
    COMMUNITY (AUTH + PRESENCE + POLICE + PICKUP)
-   - ✅ username prompt (public name)
-   - ✅ no emails displayed on map
-   - ✅ other users shown as arrow + name label (like you)
    ========================================================= */
 const lockedOverlay = document.getElementById("lockedOverlay");
 const authEmail = document.getElementById("authEmail");
@@ -1653,6 +1489,46 @@ let me = null;
 // other drivers markers
 const otherMarkers = new Map(); // user_id -> marker
 
+function getMyPublicName() {
+  const v = (localStorage.getItem(LS_NAME) || "").trim();
+  return v || "Driver";
+}
+
+function chooseUsername(forcePrompt = false) {
+  const existing = (localStorage.getItem(LS_NAME) || "").trim();
+  if (existing && !forcePrompt) return existing;
+
+  let name = prompt("Choose a public driver name (email will NOT be shown):", existing || "Driver");
+  name = (name || "").trim();
+
+  // sanitize
+  if (name.includes("@")) name = name.split("@")[0];
+  name = name.replace(/[^a-zA-Z0-9 _.-]/g, "").trim();
+  if (!name) name = "Driver";
+  if (name.length > 18) name = name.slice(0, 18);
+
+  localStorage.setItem(LS_NAME, name);
+  return name;
+}
+
+function sanitizePublicName(raw, uid) {
+  let name = (raw || "").toString().trim();
+
+  // If backend returns email, hide it.
+  if (name.includes("@")) {
+    name = "";
+  }
+
+  // fallback
+  if (!name) name = `Driver ${uid}`;
+
+  // keep it short + safe
+  name = name.replace(/[^a-zA-Z0-9 _.-]/g, "").trim();
+  if (!name) name = `Driver ${uid}`;
+  if (name.length > 18) name = name.slice(0, 18);
+  return name;
+}
+
 function setAuthUI(signedIn, note) {
   if (btnAuth) btnAuth.textContent = signedIn ? "Sign out" : "Sign in";
   if (communityNote) {
@@ -1667,17 +1543,11 @@ function setAuthUI(signedIn, note) {
     lockedOverlay.setAttribute("aria-hidden", showLock ? "false" : "true");
   }
 
+  // buttons still exist, but are useful only if signed in
   if (btnPolice) btnPolice.classList.toggle("disabled", !signedIn);
   if (btnPickup) btnPickup.classList.toggle("disabled", !signedIn);
 
   if (authStatus) authStatus.textContent = note || (signedIn ? "Status: signed in" : "Status: signed out");
-}
-
-function clearOtherDrivers() {
-  for (const m of otherMarkers.values()) {
-    try { m.remove(); } catch {}
-  }
-  otherMarkers.clear();
 }
 
 function clearAuth() {
@@ -1690,29 +1560,6 @@ function clearAuth() {
 
 function authHeaderOK() {
   return communityToken && communityToken.length > 10;
-}
-
-function safeEmail() {
-  return (authEmail && authEmail.value ? authEmail.value.trim() : (localStorage.getItem(LS_EMAIL) || "").trim());
-}
-function safePass() {
-  return (authPass && authPass.value ? authPass.value : "");
-}
-
-/* ✅ public username selection (NOT email) */
-function chooseUsername(forcePrompt = false) {
-  const current = (localStorage.getItem(LS_NAME) || "").trim();
-  const email = safeEmail();
-  const suggested = ((email || "").split("@")[0] || "Driver").slice(0, 18);
-
-  if (!forcePrompt && current.length >= 2 && !current.includes("@")) return current;
-
-  const name = prompt("Choose a username to show on the map (email will NOT be shown):", current || suggested);
-  const cleaned = String(name || "").trim().slice(0, 18);
-
-  const finalName = (cleaned.length >= 2 && !cleaned.includes("@")) ? cleaned : (current && !current.includes("@") ? current : suggested);
-  localStorage.setItem(LS_NAME, finalName);
-  return finalName;
 }
 
 async function loadMe() {
@@ -1736,24 +1583,66 @@ async function doLogin(email, password) {
   communityToken = token;
   localStorage.setItem(LS_TOKEN, token);
   localStorage.setItem(LS_EMAIL, email);
-
   await loadMe();
-
-  const pub = (localStorage.getItem(LS_NAME) || "").trim();
-  setAuthUI(true, `Status: signed in as ${pub || "Driver"}`);
+  const publicName = getMyPublicName();
+  setAuthUI(true, `Status: signed in as ${publicName}`);
 }
 
-/* ✅ your backend /auth/signup does NOT return a token.
-   So: signup -> then login automatically. */
 async function doSignup(email, password) {
+  // ✅ backend signup expects: email, password, bootstrap_token (optional)
   const body = { email, password };
   const data = await postJSON("/auth/signup", body, null);
-  if (!data?.ok) throw new Error("Signup failed.");
-  await doLogin(email, password);
-  setAuthUI(true, "Status: account created • signed in");
+
+  // signup does NOT return token in your backend; so we login right after create
+  if (data?.ok) {
+    await doLogin(email, password);
+    return;
+  }
+
+  // fallback if server ever returns token
+  const token = data?.token || data?.access_token || "";
+  if (!token) throw new Error("Signup success but token missing.");
+  communityToken = token;
+  localStorage.setItem(LS_TOKEN, token);
+  localStorage.setItem(LS_EMAIL, email);
+  await loadMe();
+  const publicName = getMyPublicName();
+  setAuthUI(true, `Status: account created • signed in as ${publicName}`);
+}
+
+function safeEmail() {
+  return (authEmail && authEmail.value ? authEmail.value.trim() : (localStorage.getItem(LS_EMAIL) || "").trim());
+}
+function safePass() {
+  return (authPass && authPass.value ? authPass.value : "");
 }
 
 if (authEmail) authEmail.value = localStorage.getItem(LS_EMAIL) || "";
+
+/* ✅ Add "Name" button next to Sign in/Sign out (no HTML change needed) */
+(function ensureNameBtn(){
+  if (!btnAuth) return;
+
+  let btn = document.getElementById("btnName");
+  if (btn) return;
+
+  btn = document.createElement("button");
+  btn.id = "btnName";
+  btn.type = "button";
+  btn.className = "navBtn";
+  btn.textContent = "Name";
+  btn.style.marginLeft = "6px";
+
+  btnAuth.insertAdjacentElement("afterend", btn);
+
+  btn.addEventListener("pointerdown", (e) => e.stopPropagation());
+  btn.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const nm = chooseUsername(true);
+    if (authStatus) authStatus.textContent = `Name set to: ${nm}`;
+  });
+})();
 
 if (btnLogin) {
   btnLogin.addEventListener("click", async () => {
@@ -1762,16 +1651,19 @@ if (btnLogin) {
       const password = safePass();
       if (!email || !password) throw new Error("Enter email + password.");
 
-      chooseUsername(true);
+      // ✅ pick public name before sign-in
+      chooseUsername(false);
 
       setAuthUI(false, "Signing in…");
       await doLogin(email, password);
+
+      // ✅ immediate pull so you see others right away
+      pullPresenceAll().catch(() => {});
     } catch (e) {
       setAuthUI(false, `Sign in failed: ${e.message || e}`);
     }
   });
 }
-
 if (btnSignup) {
   btnSignup.addEventListener("click", async () => {
     try {
@@ -1779,10 +1671,14 @@ if (btnSignup) {
       const password = safePass();
       if (!email || !password) throw new Error("Enter email + password.");
 
+      // ✅ pick public name before sign-up
       chooseUsername(true);
 
       setAuthUI(false, "Creating account…");
       await doSignup(email, password);
+
+      // ✅ immediate pull
+      pullPresenceAll().catch(() => {});
     } catch (e) {
       setAuthUI(false, `Create account failed: ${e.message || e}`);
     }
@@ -1795,82 +1691,80 @@ if (btnAuth) {
     e.preventDefault();
     e.stopPropagation();
     if (authHeaderOK()) {
+      // sign out
       clearAuth();
     } else {
+      // show overlay
       setAuthUI(false, "Status: signed out");
     }
   });
 }
 
-/* =========================================================
-   ✅ Other drivers: arrow + name label (NO email)
-   NOTE: backend currently returns email only for others.
-   We NEVER show it. We display "Driver <id>" unless backend
-   later adds display_name.
-   ========================================================= */
-function sanitizePublicName(raw, uid) {
-  const s = String(raw || "").trim();
-  if (!s) return `Driver ${uid}`;
-  if (s.includes("@")) return `Driver ${uid}`; // never show email
-  return s.length > 16 ? (s.slice(0, 16) + "…") : s;
+function clearOtherDrivers() {
+  for (const m of otherMarkers.values()) {
+    try { m.remove(); } catch {}
+  }
+  otherMarkers.clear();
 }
 
-function makeOtherDriverArrowIcon(publicName, headingDeg) {
-  const name = String(publicName || "Driver").trim() || "Driver";
-  const rot = (typeof headingDeg === "number" && Number.isFinite(headingDeg)) ? headingDeg : 0;
+/* =========================================================
+   ✅ Other drivers: ARROW + NAME (NO EMAIL)
+   - Uses a divIcon arrow (not the email bubble)
+   - Rotates by heading when available
+   ========================================================= */
+function makeDriverArrowIcon(name) {
+  const safe = (name || "Driver").trim() || "Driver";
 
+  // no IDs here (multiple markers)
   const html = `
-    <div style="position:relative; width:44px; height:44px;">
-      <div class="navArrowWrap navPulse" style="position:absolute; left:7px; top:7px; transform: rotate(${rot}deg);">
-        <div class="navArrow"></div>
-      </div>
-
-      <div style="
-        position:absolute;
-        left:40px;
-        top:12px;
-        padding:2px 6px;
-        border-radius:10px;
-        background: rgba(255,255,255,0.92);
-        border: 1px solid rgba(0,0,0,0.15);
-        font: 700 12px/1 system-ui,-apple-system,Segoe UI,Roboto,Arial;
-        white-space:nowrap;
-        pointer-events:none;
-      ">
-        ${escapeHtml(name)}
-      </div>
+    <div class="drvArrowWrap">
+      <div class="navArrow"></div>
     </div>
+    <div class="drvNameTag">${escapeHtml(safe)}</div>
   `;
 
   return L.divIcon({
-    className: "",
+    className: "drvArrowIcon",
     html,
-    iconSize: [44, 44],
-    iconAnchor: [22, 22],
+    iconSize: [40, 40],
+    iconAnchor: [20, 20],
   });
 }
 
-function upsertDriverMarker(userId, publicName, lat, lng, headingDeg) {
+function setDriverMarkerRotation(marker, deg) {
+  try {
+    const el = marker.getElement();
+    if (!el) return;
+    const wrap = el.querySelector(".drvArrowWrap");
+    if (!wrap) return;
+    wrap.style.transform = `rotate(${deg}deg)`;
+  } catch {}
+}
+
+function upsertDriverMarker(userId, name, lat, lng, headingDeg) {
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
   if (!userId) return;
 
-  const uid = String(userId);
-
-  const existing = otherMarkers.get(uid);
+  const existing = otherMarkers.get(userId);
   if (existing) {
     existing.setLatLng([lat, lng]);
-    existing.setIcon(makeOtherDriverArrowIcon(publicName, headingDeg));
+    if (Number.isFinite(headingDeg)) setDriverMarkerRotation(existing, headingDeg);
     return;
   }
 
   const mk = L.marker([lat, lng], {
-    icon: makeOtherDriverArrowIcon(publicName, headingDeg),
+    icon: makeDriverArrowIcon(name || `Driver ${userId}`),
     interactive: false,
     pane: "communityPane",
     zIndexOffset: 1500000,
   }).addTo(map);
 
-  otherMarkers.set(uid, mk);
+  // initial rotation
+  if (Number.isFinite(headingDeg)) {
+    setTimeout(() => setDriverMarkerRotation(mk, headingDeg), 50);
+  }
+
+  otherMarkers.set(userId, mk);
 }
 
 async function pullPresenceAll() {
@@ -1883,11 +1777,16 @@ async function pullPresenceAll() {
     const items = Array.isArray(list) ? list : (list?.items || []);
     const seen = new Set();
 
+    // small debug (lets you confirm backend is returning drivers)
+    if (authStatus && authHeaderOK()) {
+      authStatus.textContent = `Presence: ${items.length} drivers • ${new Date().toLocaleTimeString()}`;
+    }
+
     for (const it of items) {
       const uid = String(it.user_id ?? it.userId ?? it.id ?? "");
       if (!uid) continue;
 
-      // hide self (if /me has id; if not, still safe)
+      // hide self ONLY if we actually know our id
       if (me && me.id != null && String(me.id) === uid) continue;
 
       const lat = Number(it.lat ?? it.latitude ?? NaN);
@@ -1901,7 +1800,7 @@ async function pullPresenceAll() {
       const heading = Number(it.heading ?? NaN);
       const headingDeg = Number.isFinite(heading) ? heading : 0;
 
-      // Backend currently returns email only -> we mask it.
+      // NEVER show email
       const rawName = it.display_name || it.name || it.username || it.email || "";
       const name = sanitizePublicName(rawName, uid);
 
@@ -1978,7 +1877,6 @@ async function sendPoliceReport() {
     await postJSON("/events/police", {
       lat: userLatLng.lat,
       lng: userLatLng.lng,
-      note: "",
     }, communityToken);
 
     alert("Police report sent to community ✅");
@@ -2046,12 +1944,14 @@ loadTimeline().catch((err) => {
 
 /* auth boot */
 (async () => {
+  // ensure a public name exists (no email)
+  chooseUsername(false);
+
   if (authHeaderOK()) {
     setAuthUI(true, "Checking session…");
     await loadMe();
     if (authHeaderOK()) {
-      const pub = (localStorage.getItem(LS_NAME) || "").trim();
-      setAuthUI(true, `Status: signed in as ${pub || "Driver"}`);
+      setAuthUI(true, `Status: signed in as ${getMyPublicName()}`);
       pullPresenceAll().catch(() => {});
     } else {
       setAuthUI(false, "Status: signed out");
@@ -2060,6 +1960,135 @@ loadTimeline().catch((err) => {
     setAuthUI(false, "Status: signed out");
   }
 })();
+
+/* =========================================================
+   startLocationWatch (unchanged behavior, plus community push)
+   ========================================================= */
+function startLocationWatch() {
+  if (!("geolocation" in navigator)) {
+    if (recommendEl) recommendEl.textContent = "Recommended: location not supported";
+    return;
+  }
+
+  navMarker = L.marker([40.7128, -74.0060], {
+    icon: makeNavIcon(),
+    interactive: false,
+    zIndexOffset: 2000000,
+    pane: "navPane",
+  }).addTo(map);
+
+  navigator.geolocation.watchPosition(
+    (pos) => {
+      const lat = pos.coords.latitude;
+      const lng = pos.coords.longitude;
+      const heading = pos.coords.heading;
+      const ts = pos.timestamp || Date.now();
+
+      userLatLng = { lat, lng };
+      if (navMarker) navMarker.setLatLng(userLatLng);
+
+      let isMoving = false;
+
+      if (lastPos) {
+        const dMi = haversineMiles({ lat: lastPos.lat, lng: lastPos.lng }, userLatLng);
+        const dtSec = Math.max(1, (ts - lastPos.ts) / 1000);
+        const mph = (dMi / dtSec) * 3600;
+
+        isMoving = mph >= 2.0;
+
+        if (typeof heading === "number" && Number.isFinite(heading)) {
+          lastHeadingDeg = heading;
+        } else if (dMi > 0.01) {
+          lastHeadingDeg = computeBearingDeg({ lat: lastPos.lat, lng: lastPos.lng }, userLatLng);
+        }
+
+        if (isMoving) lastMoveTs = ts;
+      }
+
+      lastPos = { lat, lng, ts };
+
+      setNavRotation(lastHeadingDeg);
+      setNavVisual(isMoving);
+
+      if (!gpsFirstFixDone) {
+        gpsFirstFixDone = true;
+        const targetZoom = Math.max(map.getZoom(), 12.5);
+        suppressAutoDisableFor(1200, () => map.setView(userLatLng, targetZoom, { animate: true }));
+      } else {
+        if (autoCenter) {
+          suppressAutoDisableFor(700, () => map.panTo(userLatLng, { animate: true }));
+        }
+      }
+
+      if (currentFrame) updateRecommendation(currentFrame);
+
+      scheduleWeatherUpdateSoon();
+
+      // community push
+      communityMaybePushPresence(ts, heading);
+    },
+    (err) => {
+      console.warn("Geolocation error:", err);
+      if (recommendEl) recommendEl.textContent = "Recommended: location blocked (enable it)";
+      setNavDestination(null);
+    },
+    {
+      enableHighAccuracy: true,
+      maximumAge: 1000,
+      timeout: 15000,
+    }
+  );
+
+  setInterval(() => {
+    const now = Date.now();
+    const recentlyMoved = lastMoveTs && (now - lastMoveTs) < 5000;
+    setNavVisual(!!recentlyMoved);
+  }, 1200);
+}
+
+/* =========================================================
+   AUTO-UPDATE
+   ========================================================= */
+async function refreshCurrentFrame() {
+  try {
+    const idx = Number(slider.value || "0");
+    await loadFrame(idx);
+  } catch (e) {
+    console.warn("Auto-refresh failed:", e);
+  }
+}
+setInterval(refreshCurrentFrame, REFRESH_MS);
+
+async function tickNYCClockAndAdvanceIfNeeded() {
+  try {
+    if (Date.now() - lastUserSliderTs < USER_SLIDER_GRACE_MS) return;
+    if (!timeline.length || !minutesOfWeek.length) return;
+
+    const nowMinWeek = getNowNYCMinuteOfWeekRounded();
+    const bestIdx = pickClosestIndex(minutesOfWeek, nowMinWeek);
+
+    const curIdx = Number(slider.value || "0");
+    if (bestIdx === curIdx) return;
+
+    slider.value = String(bestIdx);
+
+    bubbleUpdateNow();
+
+    await loadFrame(bestIdx);
+  } catch (e) {
+    console.warn("NYC clock tick failed:", e);
+  }
+}
+setInterval(tickNYCClockAndAdvanceIfNeeded, NYC_CLOCK_TICK_MS);
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") {
+    refreshCurrentFrame().catch(() => {});
+    tickNYCClockAndAdvanceIfNeeded().catch(() => {});
+    updateWeatherNow().catch(() => {});
+    if (timeline.length) bubbleUpdateNow();
+  }
+});
 
 startLocationWatch();
 updateWeatherNow().catch(() => {});
