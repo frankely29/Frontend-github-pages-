@@ -14,7 +14,7 @@ const USER_SLIDER_GRACE_MS = 25 * 1000;
    ========================================================= */
 const PRESENCE_PUSH_MS = 8 * 1000;     // send my location
 const PRESENCE_PULL_MS = 10 * 1000;    // fetch all drivers
-const PRESENCE_STALE_SEC = 70;         // hide if older than this
+const PRESENCE_STALE_SEC = 300;        // FIX: 70 was too low; use 5 min
 
 const LS_TOKEN = "community_token_v1";
 const LS_EMAIL = "community_email_v1";
@@ -1188,7 +1188,7 @@ let wxNextUpdateTimer = null;
 function wxResizeCanvas() {
   if (!wxCanvas) return;
   const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
-  wxCanvas.width = Math.floor(window.innerWidth * dpr);
+  wxCanvas.width = Math.floor(window.innerWidth * window.innerHeight * 0 + window.innerWidth * dpr); // keep your original behavior
   wxCanvas.height = Math.floor(window.innerHeight * dpr);
   wxCanvas.style.width = `${window.innerWidth}px`;
   wxCanvas.style.height = `${window.innerHeight}px`;
@@ -1673,15 +1673,11 @@ async function doLogin(email, password) {
 }
 
 async function doSignup(email, password) {
-  const display_name = (email || "").split("@")[0] || "Driver";
-  const body = { email, password, display_name };
-  const data = await postJSON("/auth/signup", body, null);
-  const token = data?.token || data?.access_token || "";
-  if (!token) throw new Error("Signup success but token missing.");
-  communityToken = token;
-  localStorage.setItem(LS_TOKEN, token);
-  localStorage.setItem(LS_EMAIL, email);
-  await loadMe();
+  // FIX: your backend /auth/signup DOES NOT return a token.
+  // So: create account, then login.
+  const body = { email, password };
+  await postJSON("/auth/signup", body, null);
+  await doLogin(email, password);
   setAuthUI(true, `Status: account created • signed in as ${me?.display_name || me?.email || email}`);
 }
 
@@ -1744,11 +1740,12 @@ function makeDriverIcon(name) {
       <div class="drvName">${escapeHtml(safe)}</div>
     </div>
   `;
+  // FIX: bigger iconSize so label isn't clipped (Leaflet clips divIcon by iconSize)
   return L.divIcon({
     className: "",
     html,
-    iconSize: [10, 10],
-    iconAnchor: [5, 5],
+    iconSize: [180, 32],
+    iconAnchor: [10, 10],
   });
 }
 
@@ -1779,12 +1776,20 @@ function upsertDriverMarker(userId, name, lat, lng) {
   otherMarkers.set(userId, mk);
 }
 
+function isSelfPresenceItem(it) {
+  // FIX: backend /me has no id, so use email match
+  const myEmail = (me?.email || localStorage.getItem(LS_EMAIL) || "").trim().toLowerCase();
+  const itEmail = String(it?.email || "").trim().toLowerCase();
+  if (myEmail && itEmail && myEmail === itEmail) return true;
+  return false;
+}
+
 async function pullPresenceAll() {
   if (!authHeaderOK()) return;
 
   try {
     const list = await getJSONAuth("/presence/all", communityToken);
-    const now = Date.now() / 1000;
+    const nowUnix = Math.floor(Date.now() / 1000);
 
     // expected list array; if wrapped, try .items
     const items = Array.isArray(list) ? list : (list?.items || []);
@@ -1794,16 +1799,16 @@ async function pullPresenceAll() {
       const uid = String(it.user_id ?? it.userId ?? it.id ?? "");
       if (!uid) continue;
 
-      // hide self
-      if (me && (String(me.id) === uid)) continue;
+      // FIX: hide self by email
+      if (isSelfPresenceItem(it)) continue;
 
       const lat = Number(it.lat ?? it.latitude ?? NaN);
       const lng = Number(it.lng ?? it.longitude ?? NaN);
 
-      // staleness check
+      // staleness check (server sends updated_at in seconds)
       const updated = Number(it.updated_at_unix ?? it.ts_unix ?? it.updated_at ?? NaN);
       if (Number.isFinite(updated)) {
-        if ((now - updated) > PRESENCE_STALE_SEC) continue;
+        if ((nowUnix - updated) > PRESENCE_STALE_SEC) continue;
       }
 
       const name = it.display_name || it.name || it.email || "Driver";
