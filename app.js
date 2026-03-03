@@ -1936,6 +1936,8 @@ async function communityMaybePushPresence(tsMsOrUnix, heading) {
       lng: userLatLng.lng,
       heading: (typeof heading === "number" && Number.isFinite(heading)) ? heading : null,
       accuracy: null,
+      name: getUserName(),
+      ghost_mode: (localStorage.getItem(LS_GHOST)==='1'),
     }, communityToken);
   } catch (e) {
     console.warn("presence/update failed:", e);
