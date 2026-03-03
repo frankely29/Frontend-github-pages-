@@ -12,13 +12,12 @@ const USER_SLIDER_GRACE_MS = 25 * 1000;
 /* =========================================================
    COMMUNITY SETTINGS (cheap polling)
    ========================================================= */
-const PRESENCE_PUSH_MS = 8 * 1000;     // send my location
-const PRESENCE_PULL_MS = 8 * 1000;     // fetch all drivers (slightly faster)
-const PRESENCE_STALE_SEC = 180;        // ✅ was 70 (too aggressive on phones)
+const PRESENCE_PUSH_MS = 8 * 1000;     // send my location (signed-in only)
+const PRESENCE_PULL_MS = 10 * 1000;    // fetch all drivers (PUBLIC)
+const PRESENCE_STALE_SEC = 70;         // hide if older than this
 
 const LS_TOKEN = "community_token_v1";
 const LS_EMAIL = "community_email_v1";
-const LS_NAME  = "community_public_name_v1"; // ✅ NEW (public display name)
 
 /* =========================================================
    MANHATTAN MODE — DEFAULT SETTINGS (SAFE TO EDIT)
@@ -623,7 +622,7 @@ function haversineMiles(a, b) {
   const dLat = toRad(b.lat - a.lat);
   const dLng = toRad(b.lng - a.lng);
   const lat1 = toRad(a.lat);
-  const lat2 = toRad(b.lat);
+  const lat2 = toRad(a.lat + (b.lat - a.lat));
 
   const s1 = Math.sin(dLat / 2);
   const s2 = Math.sin(dLng / 2);
@@ -995,7 +994,7 @@ map.on("dragstart", disableAutoCenterBecauseUserIsExploring);
 map.on("zoomstart", disableAutoCenterBecauseUserIsExploring);
 
 /* =========================================================
-   Live location arrow + follow behavior
+   Live location arrow + follow behavior (SELF)
    ========================================================= */
 let gpsFirstFixDone = false;
 let navMarker = null;
@@ -1003,23 +1002,24 @@ let lastPos = null;
 let lastHeadingDeg = 0;
 let lastMoveTs = 0;
 
-function makeNavIcon() {
+function makeNavIconSelf() {
+  // IMPORTANT: NO IDs here. Classes only.
   return L.divIcon({
     className: "",
-    html: `<div id="navWrap" class="navArrowWrap navPulse"><div class="navArrow"></div></div>`,
+    html: `<div class="navArrowWrap navPulse"><div class="navArrow"></div></div>`,
     iconSize: [30, 30],
     iconAnchor: [15, 15],
   });
 }
 
 function setNavVisual(isMoving) {
-  const el = document.getElementById("navWrap");
+  const el = navMarker && navMarker.getElement() ? navMarker.getElement().querySelector(".navArrowWrap") : null;
   if (!el) return;
   el.classList.toggle("navMoving", !!isMoving);
   el.classList.toggle("navPulse", !isMoving);
 }
 function setNavRotation(deg) {
-  const el = document.getElementById("navWrap");
+  const el = navMarker && navMarker.getElement() ? navMarker.getElement().querySelector(".navArrowWrap") : null;
   if (!el) return;
   el.style.transform = `rotate(${deg}deg)`;
 }
@@ -1038,6 +1038,132 @@ function computeBearingDeg(from, to) {
   brng = (brng + 360) % 360;
   return brng;
 }
+
+function startLocationWatch() {
+  if (!("geolocation" in navigator)) {
+    if (recommendEl) recommendEl.textContent = "Recommended: location not supported";
+    return;
+  }
+
+  navMarker = L.marker([40.7128, -74.0060], {
+    icon: makeNavIconSelf(),
+    interactive: false,
+    zIndexOffset: 2000000,
+    pane: "navPane",
+  }).addTo(map);
+
+  navigator.geolocation.watchPosition(
+    (pos) => {
+      const lat = pos.coords.latitude;
+      const lng = pos.coords.longitude;
+      const heading = pos.coords.heading;
+      const ts = pos.timestamp || Date.now();
+
+      userLatLng = { lat, lng };
+      if (navMarker) navMarker.setLatLng(userLatLng);
+
+      let isMoving = false;
+
+      if (lastPos) {
+        const dMi = haversineMiles({ lat: lastPos.lat, lng: lastPos.lng }, userLatLng);
+        const dtSec = Math.max(1, (ts - lastPos.ts) / 1000);
+        const mph = (dMi / dtSec) * 3600;
+
+        isMoving = mph >= 2.0;
+
+        if (typeof heading === "number" && Number.isFinite(heading)) {
+          lastHeadingDeg = heading;
+        } else if (dMi > 0.01) {
+          lastHeadingDeg = computeBearingDeg({ lat: lastPos.lat, lng: lastPos.lng }, userLatLng);
+        }
+
+        if (isMoving) lastMoveTs = ts;
+      }
+
+      lastPos = { lat, lng, ts };
+
+      setNavRotation(lastHeadingDeg);
+      setNavVisual(isMoving);
+
+      if (!gpsFirstFixDone) {
+        gpsFirstFixDone = true;
+        const targetZoom = Math.max(map.getZoom(), 12.5);
+        suppressAutoDisableFor(1200, () => map.setView(userLatLng, targetZoom, { animate: true }));
+      } else {
+        if (autoCenter) {
+          suppressAutoDisableFor(700, () => map.panTo(userLatLng, { animate: true }));
+        }
+      }
+
+      if (currentFrame) updateRecommendation(currentFrame);
+
+      scheduleWeatherUpdateSoon();
+
+      // community push (SIGNED-IN ONLY)
+      communityMaybePushPresence(ts, heading);
+    },
+    (err) => {
+      console.warn("Geolocation error:", err);
+      if (recommendEl) recommendEl.textContent = "Recommended: location blocked (enable it)";
+      setNavDestination(null);
+    },
+    {
+      enableHighAccuracy: true,
+      maximumAge: 1000,
+      timeout: 15000,
+    }
+  );
+
+  setInterval(() => {
+    const now = Date.now();
+    const recentlyMoved = lastMoveTs && (now - lastMoveTs) < 5000;
+    setNavVisual(!!recentlyMoved);
+  }, 1200);
+}
+
+/* =========================================================
+   AUTO-UPDATE
+   ========================================================= */
+async function refreshCurrentFrame() {
+  try {
+    const idx = Number(slider.value || "0");
+    await loadFrame(idx);
+  } catch (e) {
+    console.warn("Auto-refresh failed:", e);
+  }
+}
+setInterval(refreshCurrentFrame, REFRESH_MS);
+
+async function tickNYCClockAndAdvanceIfNeeded() {
+  try {
+    if (Date.now() - lastUserSliderTs < USER_SLIDER_GRACE_MS) return;
+    if (!timeline.length || !minutesOfWeek.length) return;
+
+    const nowMinWeek = getNowNYCMinuteOfWeekRounded();
+    const bestIdx = pickClosestIndex(minutesOfWeek, nowMinWeek);
+
+    const curIdx = Number(slider.value || "0");
+    if (bestIdx === curIdx) return;
+
+    slider.value = String(bestIdx);
+
+    bubbleUpdateNow();
+
+    await loadFrame(bestIdx);
+  } catch (e) {
+    console.warn("NYC clock tick failed:", e);
+  }
+}
+setInterval(tickNYCClockAndAdvanceIfNeeded, NYC_CLOCK_TICK_MS);
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") {
+    refreshCurrentFrame().catch(() => {});
+    tickNYCClockAndAdvanceIfNeeded().catch(() => {});
+    updateWeatherNow().catch(() => {});
+    if (timeline.length) bubbleUpdateNow();
+  }
+});
 
 /* =========================================================
    WEATHER BADGE + FX (unchanged)
@@ -1483,58 +1609,22 @@ const btnPolice = document.getElementById("btnPolice");
 const btnPickup = document.getElementById("btnPickup");
 const communityNote = document.getElementById("communityNote");
 
+// your "Name" button in the UI
+const btnName = document.getElementById("btnName");
+
 let communityToken = localStorage.getItem(LS_TOKEN) || "";
 let me = null;
 
 // other drivers markers
 const otherMarkers = new Map(); // user_id -> marker
 
-function getMyPublicName() {
-  const v = (localStorage.getItem(LS_NAME) || "").trim();
-  return v || "Driver";
-}
-
-function chooseUsername(forcePrompt = false) {
-  const existing = (localStorage.getItem(LS_NAME) || "").trim();
-  if (existing && !forcePrompt) return existing;
-
-  let name = prompt("Choose a public driver name (email will NOT be shown):", existing || "Driver");
-  name = (name || "").trim();
-
-  // sanitize
-  if (name.includes("@")) name = name.split("@")[0];
-  name = name.replace(/[^a-zA-Z0-9 _.-]/g, "").trim();
-  if (!name) name = "Driver";
-  if (name.length > 18) name = name.slice(0, 18);
-
-  localStorage.setItem(LS_NAME, name);
-  return name;
-}
-
-function sanitizePublicName(raw, uid) {
-  let name = (raw || "").toString().trim();
-
-  // If backend returns email, hide it.
-  if (name.includes("@")) {
-    name = "";
-  }
-
-  // fallback
-  if (!name) name = `Driver ${uid}`;
-
-  // keep it short + safe
-  name = name.replace(/[^a-zA-Z0-9 _.-]/g, "").trim();
-  if (!name) name = `Driver ${uid}`;
-  if (name.length > 18) name = name.slice(0, 18);
-  return name;
-}
-
 function setAuthUI(signedIn, note) {
   if (btnAuth) btnAuth.textContent = signedIn ? "Sign out" : "Sign in";
   if (communityNote) {
+    // IMPORTANT: public can see others; sign-in needed to broadcast + report
     communityNote.textContent = signedIn
-      ? "Community: live drivers are visible. Police reports + pickups are shared."
-      : "Community: sign in to see other drivers + report police + log pickups.";
+      ? "Community: you are broadcasting. Police reports + pickups are shared."
+      : "Community: you can view live drivers. Sign in to broadcast + report police + log pickups.";
   }
 
   const showLock = !signedIn;
@@ -1543,9 +1633,9 @@ function setAuthUI(signedIn, note) {
     lockedOverlay.setAttribute("aria-hidden", showLock ? "false" : "true");
   }
 
-  // buttons still exist, but are useful only if signed in
   if (btnPolice) btnPolice.classList.toggle("disabled", !signedIn);
   if (btnPickup) btnPickup.classList.toggle("disabled", !signedIn);
+  if (btnName) btnName.classList.toggle("disabled", !signedIn);
 
   if (authStatus) authStatus.textContent = note || (signedIn ? "Status: signed in" : "Status: signed out");
 }
@@ -1555,7 +1645,7 @@ function clearAuth() {
   me = null;
   localStorage.removeItem(LS_TOKEN);
   setAuthUI(false, "Status: signed out");
-  clearOtherDrivers();
+  // NOTE: DO NOT clear other drivers anymore — signed-out should still see them.
 }
 
 function authHeaderOK() {
@@ -1584,30 +1674,43 @@ async function doLogin(email, password) {
   localStorage.setItem(LS_TOKEN, token);
   localStorage.setItem(LS_EMAIL, email);
   await loadMe();
-  const publicName = getMyPublicName();
-  setAuthUI(true, `Status: signed in as ${publicName}`);
+  setAuthUI(true, `Status: signed in as ${me?.display_name || me?.email || email}`);
 }
 
 async function doSignup(email, password) {
-  // ✅ backend signup expects: email, password, bootstrap_token (optional)
-  const body = { email, password };
+  // ask for public name at signup
+  const desired = prompt("Choose a public name (shown on the map).", (email || "").split("@")[0] || "Driver");
+  const display_name = (desired || "").trim();
+
+  const body = { email, password, display_name };
   const data = await postJSON("/auth/signup", body, null);
-
-  // signup does NOT return token in your backend; so we login right after create
-  if (data?.ok) {
-    await doLogin(email, password);
-    return;
-  }
-
-  // fallback if server ever returns token
   const token = data?.token || data?.access_token || "";
   if (!token) throw new Error("Signup success but token missing.");
   communityToken = token;
   localStorage.setItem(LS_TOKEN, token);
   localStorage.setItem(LS_EMAIL, email);
   await loadMe();
-  const publicName = getMyPublicName();
-  setAuthUI(true, `Status: account created • signed in as ${publicName}`);
+  setAuthUI(true, `Status: account created • signed in as ${me?.display_name || me?.email || email}`);
+}
+
+async function setMyDisplayName() {
+  if (!authHeaderOK()) {
+    setAuthUI(false, "Sign in to set a name.");
+    return;
+  }
+  const cur = me?.display_name || (me?.email ? me.email.split("@")[0] : "Driver");
+  const desired = prompt("Set your public name (shown on the map).", cur || "Driver");
+  if (desired == null) return; // cancelled
+  const name = String(desired).trim();
+  if (!name) return;
+
+  try {
+    await postJSON("/user/display_name", { display_name: name }, communityToken);
+    await loadMe();
+    setAuthUI(true, `Status: signed in as ${me?.display_name || "Driver"}`);
+  } catch (e) {
+    alert(`Name update failed: ${e.message || e}`);
+  }
 }
 
 function safeEmail() {
@@ -1619,46 +1722,14 @@ function safePass() {
 
 if (authEmail) authEmail.value = localStorage.getItem(LS_EMAIL) || "";
 
-/* ✅ Add "Name" button next to Sign in/Sign out (no HTML change needed) */
-(function ensureNameBtn(){
-  if (!btnAuth) return;
-
-  let btn = document.getElementById("btnName");
-  if (btn) return;
-
-  btn = document.createElement("button");
-  btn.id = "btnName";
-  btn.type = "button";
-  btn.className = "navBtn";
-  btn.textContent = "Name";
-  btn.style.marginLeft = "6px";
-
-  btnAuth.insertAdjacentElement("afterend", btn);
-
-  btn.addEventListener("pointerdown", (e) => e.stopPropagation());
-  btn.addEventListener("click", (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const nm = chooseUsername(true);
-    if (authStatus) authStatus.textContent = `Name set to: ${nm}`;
-  });
-})();
-
 if (btnLogin) {
   btnLogin.addEventListener("click", async () => {
     try {
       const email = safeEmail();
       const password = safePass();
       if (!email || !password) throw new Error("Enter email + password.");
-
-      // ✅ pick public name before sign-in
-      chooseUsername(false);
-
       setAuthUI(false, "Signing in…");
       await doLogin(email, password);
-
-      // ✅ immediate pull so you see others right away
-      pullPresenceAll().catch(() => {});
     } catch (e) {
       setAuthUI(false, `Sign in failed: ${e.message || e}`);
     }
@@ -1670,15 +1741,8 @@ if (btnSignup) {
       const email = safeEmail();
       const password = safePass();
       if (!email || !password) throw new Error("Enter email + password.");
-
-      // ✅ pick public name before sign-up
-      chooseUsername(true);
-
       setAuthUI(false, "Creating account…");
       await doSignup(email, password);
-
-      // ✅ immediate pull
-      pullPresenceAll().catch(() => {});
     } catch (e) {
       setAuthUI(false, `Create account failed: ${e.message || e}`);
     }
@@ -1691,120 +1755,106 @@ if (btnAuth) {
     e.preventDefault();
     e.stopPropagation();
     if (authHeaderOK()) {
-      // sign out
       clearAuth();
     } else {
-      // show overlay
       setAuthUI(false, "Status: signed out");
     }
   });
 }
 
-function clearOtherDrivers() {
-  for (const m of otherMarkers.values()) {
-    try { m.remove(); } catch {}
-  }
-  otherMarkers.clear();
-}
-
-/* =========================================================
-   ✅ Other drivers: ARROW + NAME (NO EMAIL)
-   - Uses a divIcon arrow (not the email bubble)
-   - Rotates by heading when available
-   ========================================================= */
-function makeDriverArrowIcon(name) {
-  const safe = (name || "Driver").trim() || "Driver";
-
-  // no IDs here (multiple markers)
-  const html = `
-    <div class="drvArrowWrap">
-      <div class="navArrow"></div>
-    </div>
-    <div class="drvNameTag">${escapeHtml(safe)}</div>
-  `;
-
-  return L.divIcon({
-    className: "drvArrowIcon",
-    html,
-    iconSize: [40, 40],
-    iconAnchor: [20, 20],
+if (btnName) {
+  btnName.addEventListener("pointerdown", (e) => e.stopPropagation());
+  btnName.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setMyDisplayName();
   });
 }
 
-function setDriverMarkerRotation(marker, deg) {
-  try {
-    const el = marker.getElement();
-    if (!el) return;
-    const wrap = el.querySelector(".drvArrowWrap");
-    if (!wrap) return;
-    wrap.style.transform = `rotate(${deg}deg)`;
-  } catch {}
+/* ===== FIXED ICONS: other drivers are ARROWS + NAMES (NO IDS) ===== */
+function makeOtherDriverArrowIcon(name) {
+  const safe = (name || "Driver").trim() || "Driver";
+  // IMPORTANT: no id="" in here. classes only.
+  const html = `
+    <div class="othWrap">
+      <div class="othArrowWrap">
+        <div class="navArrow"></div>
+      </div>
+      <div class="othName">${escapeHtml(safe)}</div>
+    </div>
+  `;
+  return L.divIcon({
+    className: "othDriverIcon",
+    html,
+    iconSize: [80, 30],
+    iconAnchor: [15, 15],
+  });
 }
 
-function upsertDriverMarker(userId, name, lat, lng, headingDeg) {
+function setOtherRotation(marker, deg) {
+  const el = marker && marker.getElement ? marker.getElement() : null;
+  if (!el) return;
+  const wrap = el.querySelector(".othArrowWrap");
+  if (!wrap) return;
+  wrap.style.transform = `rotate(${deg}deg)`;
+}
+
+function upsertDriverMarker(userId, name, lat, lng, heading) {
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
   if (!userId) return;
 
-  const existing = otherMarkers.get(userId);
+  const key = String(userId);
+
+  const existing = otherMarkers.get(key);
   if (existing) {
     existing.setLatLng([lat, lng]);
-    if (Number.isFinite(headingDeg)) setDriverMarkerRotation(existing, headingDeg);
+    if (typeof heading === "number" && Number.isFinite(heading)) {
+      setOtherRotation(existing, heading);
+    }
     return;
   }
 
   const mk = L.marker([lat, lng], {
-    icon: makeDriverArrowIcon(name || `Driver ${userId}`),
+    icon: makeOtherDriverArrowIcon(name || `Driver ${key}`),
     interactive: false,
     pane: "communityPane",
     zIndexOffset: 1500000,
   }).addTo(map);
 
-  // initial rotation
-  if (Number.isFinite(headingDeg)) {
-    setTimeout(() => setDriverMarkerRotation(mk, headingDeg), 50);
-  }
+  otherMarkers.set(key, mk);
 
-  otherMarkers.set(userId, mk);
+  if (typeof heading === "number" && Number.isFinite(heading)) {
+    setTimeout(() => setOtherRotation(mk, heading), 30);
+  }
 }
 
 async function pullPresenceAll() {
-  if (!authHeaderOK()) return;
-
+  // ✅ PUBLIC: always pull, even signed out
   try {
-    const list = await getJSONAuth("/presence/all", communityToken);
+    const list = await fetchJSON(`${RAILWAY_BASE}/presence/all`);
     const now = Date.now() / 1000;
 
     const items = Array.isArray(list) ? list : (list?.items || []);
     const seen = new Set();
 
-    // small debug (lets you confirm backend is returning drivers)
-    if (authStatus && authHeaderOK()) {
-      authStatus.textContent = `Presence: ${items.length} drivers • ${new Date().toLocaleTimeString()}`;
-    }
-
     for (const it of items) {
       const uid = String(it.user_id ?? it.userId ?? it.id ?? "");
       if (!uid) continue;
 
-      // hide self ONLY if we actually know our id
-      if (me && me.id != null && String(me.id) === uid) continue;
+      // hide self if we know our id
+      if (me && String(me.id) === uid) continue;
 
       const lat = Number(it.lat ?? it.latitude ?? NaN);
       const lng = Number(it.lng ?? it.longitude ?? NaN);
+      const heading = (typeof it.heading === "number" && Number.isFinite(it.heading)) ? it.heading : null;
 
       const updated = Number(it.updated_at_unix ?? it.ts_unix ?? it.updated_at ?? NaN);
       if (Number.isFinite(updated)) {
         if ((now - updated) > PRESENCE_STALE_SEC) continue;
       }
 
-      const heading = Number(it.heading ?? NaN);
-      const headingDeg = Number.isFinite(heading) ? heading : 0;
-
-      // NEVER show email
-      const rawName = it.display_name || it.name || it.username || it.email || "";
-      const name = sanitizePublicName(rawName, uid);
-
-      upsertDriverMarker(uid, name, lat, lng, headingDeg);
+      const name = it.display_name || it.name || "Driver";
+      upsertDriverMarker(uid, name, lat, lng, heading);
       seen.add(uid);
     }
 
@@ -1822,6 +1872,7 @@ async function pullPresenceAll() {
 
 let lastPresencePushMs = 0;
 async function communityMaybePushPresence(tsMsOrUnix, heading) {
+  // ✅ signed-in only for broadcasting your location
   if (!authHeaderOK()) return;
   if (!userLatLng) return;
 
@@ -1877,6 +1928,7 @@ async function sendPoliceReport() {
     await postJSON("/events/police", {
       lat: userLatLng.lat,
       lng: userLatLng.lng,
+      note: "",
     }, communityToken);
 
     alert("Police report sent to community ✅");
@@ -1927,7 +1979,7 @@ if (btnPickup) {
   });
 }
 
-/* poll presence */
+/* poll presence (PUBLIC) */
 setInterval(() => {
   pullPresenceAll().catch(() => {});
 }, PRESENCE_PULL_MS);
@@ -1944,151 +1996,20 @@ loadTimeline().catch((err) => {
 
 /* auth boot */
 (async () => {
-  // ensure a public name exists (no email)
-  chooseUsername(false);
-
   if (authHeaderOK()) {
     setAuthUI(true, "Checking session…");
     await loadMe();
     if (authHeaderOK()) {
-      setAuthUI(true, `Status: signed in as ${getMyPublicName()}`);
-      pullPresenceAll().catch(() => {});
+      setAuthUI(true, `Status: signed in as ${me?.display_name || me?.email || "Driver"}`);
     } else {
       setAuthUI(false, "Status: signed out");
     }
   } else {
     setAuthUI(false, "Status: signed out");
   }
+  // ✅ always show other drivers regardless of sign-in
+  pullPresenceAll().catch(() => {});
 })();
-
-/* =========================================================
-   startLocationWatch (unchanged behavior, plus community push)
-   ========================================================= */
-function startLocationWatch() {
-  if (!("geolocation" in navigator)) {
-    if (recommendEl) recommendEl.textContent = "Recommended: location not supported";
-    return;
-  }
-
-  navMarker = L.marker([40.7128, -74.0060], {
-    icon: makeNavIcon(),
-    interactive: false,
-    zIndexOffset: 2000000,
-    pane: "navPane",
-  }).addTo(map);
-
-  navigator.geolocation.watchPosition(
-    (pos) => {
-      const lat = pos.coords.latitude;
-      const lng = pos.coords.longitude;
-      const heading = pos.coords.heading;
-      const ts = pos.timestamp || Date.now();
-
-      userLatLng = { lat, lng };
-      if (navMarker) navMarker.setLatLng(userLatLng);
-
-      let isMoving = false;
-
-      if (lastPos) {
-        const dMi = haversineMiles({ lat: lastPos.lat, lng: lastPos.lng }, userLatLng);
-        const dtSec = Math.max(1, (ts - lastPos.ts) / 1000);
-        const mph = (dMi / dtSec) * 3600;
-
-        isMoving = mph >= 2.0;
-
-        if (typeof heading === "number" && Number.isFinite(heading)) {
-          lastHeadingDeg = heading;
-        } else if (dMi > 0.01) {
-          lastHeadingDeg = computeBearingDeg({ lat: lastPos.lat, lng: lastPos.lng }, userLatLng);
-        }
-
-        if (isMoving) lastMoveTs = ts;
-      }
-
-      lastPos = { lat, lng, ts };
-
-      setNavRotation(lastHeadingDeg);
-      setNavVisual(isMoving);
-
-      if (!gpsFirstFixDone) {
-        gpsFirstFixDone = true;
-        const targetZoom = Math.max(map.getZoom(), 12.5);
-        suppressAutoDisableFor(1200, () => map.setView(userLatLng, targetZoom, { animate: true }));
-      } else {
-        if (autoCenter) {
-          suppressAutoDisableFor(700, () => map.panTo(userLatLng, { animate: true }));
-        }
-      }
-
-      if (currentFrame) updateRecommendation(currentFrame);
-
-      scheduleWeatherUpdateSoon();
-
-      // community push
-      communityMaybePushPresence(ts, heading);
-    },
-    (err) => {
-      console.warn("Geolocation error:", err);
-      if (recommendEl) recommendEl.textContent = "Recommended: location blocked (enable it)";
-      setNavDestination(null);
-    },
-    {
-      enableHighAccuracy: true,
-      maximumAge: 1000,
-      timeout: 15000,
-    }
-  );
-
-  setInterval(() => {
-    const now = Date.now();
-    const recentlyMoved = lastMoveTs && (now - lastMoveTs) < 5000;
-    setNavVisual(!!recentlyMoved);
-  }, 1200);
-}
-
-/* =========================================================
-   AUTO-UPDATE
-   ========================================================= */
-async function refreshCurrentFrame() {
-  try {
-    const idx = Number(slider.value || "0");
-    await loadFrame(idx);
-  } catch (e) {
-    console.warn("Auto-refresh failed:", e);
-  }
-}
-setInterval(refreshCurrentFrame, REFRESH_MS);
-
-async function tickNYCClockAndAdvanceIfNeeded() {
-  try {
-    if (Date.now() - lastUserSliderTs < USER_SLIDER_GRACE_MS) return;
-    if (!timeline.length || !minutesOfWeek.length) return;
-
-    const nowMinWeek = getNowNYCMinuteOfWeekRounded();
-    const bestIdx = pickClosestIndex(minutesOfWeek, nowMinWeek);
-
-    const curIdx = Number(slider.value || "0");
-    if (bestIdx === curIdx) return;
-
-    slider.value = String(bestIdx);
-
-    bubbleUpdateNow();
-
-    await loadFrame(bestIdx);
-  } catch (e) {
-    console.warn("NYC clock tick failed:", e);
-  }
-}
-setInterval(tickNYCClockAndAdvanceIfNeeded, NYC_CLOCK_TICK_MS);
-
-document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") {
-    refreshCurrentFrame().catch(() => {});
-    tickNYCClockAndAdvanceIfNeeded().catch(() => {});
-    updateWeatherNow().catch(() => {});
-    if (timeline.length) bubbleUpdateNow();
-  }
-});
 
 startLocationWatch();
 updateWeatherNow().catch(() => {});
