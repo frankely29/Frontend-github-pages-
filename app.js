@@ -745,6 +745,9 @@ let lastUserSliderTs = 0;
    ========================================================= */
 let nextFramePickupsById = new Map(); // LocationID -> pickups (NEXT bin)
 
+/* ✅ ADDED (ONLY): next 20-min historical avg pay per trip */
+let nextFramePayById = new Map();     // LocationID -> avg_driver_pay (NEXT bin)
+
 /* =========================================================
    (existing) Next-bin loader (expanded to cache pickups too)
    - If you already had this function in your real file, keep ONE copy.
@@ -756,6 +759,7 @@ async function loadNextFramePickupsMap(curIdx) {
     const nextIdx = Math.min(timeline.length - 1, Number(curIdx) + 1);
     if (nextIdx === Number(curIdx)) {
       nextFramePickupsById = new Map();
+      nextFramePayById = new Map(); // ✅ ADDED
       return;
     }
 
@@ -763,6 +767,8 @@ async function loadNextFramePickupsMap(curIdx) {
     const feats = frame?.polygons?.features || [];
 
     const puMap = new Map();
+    const payMap = new Map(); // ✅ ADDED
+
     for (const f of feats) {
       const props = f?.properties || {};
       const id = props.LocationID;
@@ -770,12 +776,18 @@ async function loadNextFramePickupsMap(curIdx) {
 
       const pu = Number(props.pickups ?? NaN);
       if (Number.isFinite(pu)) puMap.set(String(id), pu);
+
+      // ✅ ADDED: cache next-bin avg_driver_pay
+      const pay = Number(props.avg_driver_pay ?? NaN);
+      if (Number.isFinite(pay)) payMap.set(String(id), pay);
     }
 
     nextFramePickupsById = puMap;
+    nextFramePayById = payMap; // ✅ ADDED
   } catch (e) {
     console.warn("Next-bin pickups preload failed:", e);
     nextFramePickupsById = new Map();
+    nextFramePayById = new Map(); // ✅ ADDED
   }
 }
 
@@ -791,6 +803,10 @@ function buildPopupHTML(props, geom) {
   /* ✅ APPROVED: Next 20-min historical pickups */
   const nextPuVal = nextFramePickupsById.get(String(props.LocationID ?? ""));
   const nextPickups = (nextPuVal == null) ? "n/a" : String(Math.round(nextPuVal));
+
+  /* ✅ ADDED (ONLY): Next 20-min historical avg pay per trip */
+  const nextPayVal = nextFramePayById.get(String(props.LocationID ?? ""));
+  const nextPay = (nextPayVal == null) ? "n/a" : Number(nextPayVal).toFixed(2);
 
   let extra = "";
 
@@ -810,6 +826,7 @@ function buildPopupHTML(props, geom) {
       ${extra}
       <div style="margin-top:6px;"><b>Pickups (last ${BIN_MINUTES} min):</b> ${pickups}</div>
       <div><b>Next ${BIN_MINUTES} min (historical):</b> ${nextPickups}</div>
+      <div><b>Avg Pay per Trip (next ${BIN_MINUTES} min historical):</b> $${nextPay}</div>
       <div><b>Avg Pay per Trip (last 20 min):</b> $${pay}</div>
     </div>
   `;
