@@ -1647,9 +1647,9 @@ const COLLISION_PIXEL_OFFSETS = [
   [-13, -13],
 ];
 
-const SELF_COLLISION_THRESHOLD_PX = 34;
-const SELF_COLLISION_OFFSET_PX = 28;
-const SELF_LABEL_SIDE = "left";
+const SELF_COLLISION_THRESHOLD_PX = 44;
+const SELF_COLLISION_OFFSET_PX = 64;
+const SELF_LABEL_SIDE = "right";
 
 function sideFromOffsetX(dx, fallback = "right") {
   if (dx > 0) return "right";
@@ -1974,8 +1974,9 @@ async function pullPresenceAll() {
         if (selfPt) {
           const distPx = basePoint.distanceTo(selfPt);
           if (distPx < SELF_COLLISION_THRESHOLD_PX) {
-            const stableRight = stableUidParity(drv.uid) === 0;
-            const offX = stableRight ? SELF_COLLISION_OFFSET_PX : -SELF_COLLISION_OFFSET_PX;
+            const offX = (SELF_LABEL_SIDE === "right")
+              ? -SELF_COLLISION_OFFSET_PX
+              : SELF_COLLISION_OFFSET_PX;
             const adjustedPoint = L.point(basePoint.x + offX, basePoint.y);
             const adjustedLatLng = map.layerPointToLatLng(adjustedPoint);
             displayLat = adjustedLatLng.lat;
