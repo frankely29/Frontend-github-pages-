@@ -1829,19 +1829,20 @@ if (btnGhostMode) {
   });
 }
 
-function makeDriverIcon(name) {
+function makeDriverIcon(name, headingDeg) {
   const safe = (name || "Driver").trim() || "Driver";
+  const rot = Number.isFinite(headingDeg) ? headingDeg : 0;
   const html = `
-    <div class="drvWrap">
-      <div class="drvDot"></div>
-      <div class="drvName">${escapeHtml(safe)}</div>
+    <div class="otherDrvWrap">
+      <div class="otherArrowWrap" style="transform: rotate(${rot}deg)"><div class="otherArrow"></div></div>
+      <div class="otherDrvName">${escapeHtml(safe)}</div>
     </div>
   `;
   return L.divIcon({
     className: "",
     html,
-    iconSize: [10, 10],
-    iconAnchor: [5, 5],
+    iconSize: [220, 40],
+    iconAnchor: [110, 20],
   });
 }
 
@@ -1852,18 +1853,19 @@ function clearOtherDrivers() {
   otherMarkers.clear();
 }
 
-function upsertDriverMarker(userId, name, lat, lng) {
+function upsertDriverMarker(userId, name, lat, lng, heading) {
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
   if (!userId) return;
 
   const existing = otherMarkers.get(userId);
   if (existing) {
     existing.setLatLng([lat, lng]);
+    existing.setIcon(makeDriverIcon(name || `Driver ${userId}`, heading));
     return;
   }
 
   const mk = L.marker([lat, lng], {
-    icon: makeDriverIcon(name || `Driver ${userId}`),
+    icon: makeDriverIcon(name || `Driver ${userId}`, heading),
     interactive: false,
     pane: "communityPane",
     zIndexOffset: 1500000,
@@ -1900,7 +1902,8 @@ async function pullPresenceAll() {
       }
 
       const name = it.display_name || it.name || it.email || "Driver";
-      upsertDriverMarker(uid, name, lat, lng);
+      const heading = Number(it.heading ?? it.bearing ?? NaN);
+      upsertDriverMarker(uid, name, lat, lng, heading);
       seen.add(uid);
     }
 
