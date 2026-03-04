@@ -21,8 +21,6 @@ const PRESENCE_STALE_SEC = 70;         // hide if older than this
 const LS_TOKEN = "community_token_v1";
 const LS_EMAIL = "community_email_v1";
 const LS_NAME  = "community_name_v1";  // ✅ public username shown on map (NOT email)
-const LS_AVATAR = "community_avatar_v1";
-const LS_GHOST = "community_ghost_mode_v1";
 
 /* =========================================================
    MANHATTAN MODE — DEFAULT SETTINGS (SAFE TO EDIT)
@@ -196,13 +194,6 @@ function escapeHtml(s) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
-}
-
-function normalizeAvatarUrl(raw) {
-  const v = String(raw || "").trim();
-  if (!v) return "";
-  if (!/^https?:\/\//i.test(v)) return "";
-  return v.slice(0, 500);
 }
 
 /* =========================================================
@@ -1024,7 +1015,6 @@ function getMyPublicName() {
 function makeMyNavIcon(name, headingDeg) {
   const safeName = (name || "Me").trim() || "Me";
   const rot = (typeof headingDeg === "number" && Number.isFinite(headingDeg)) ? headingDeg : 0;
-  const avatar = safeAvatar();
 
   // ✅ Uses your existing classes: navArrowWrap + navArrow
   // Arrow rotates, label does not.
@@ -1036,7 +1026,6 @@ function makeMyNavIcon(name, headingDeg) {
              style="position:absolute; left:7px; top:7px; transform: rotate(${rot}deg);">
           <div class="navArrow"></div>
         </div>
-        ${avatar ? `<img src="${escapeHtml(avatar)}" alt="" style="position:absolute;left:0;top:0;width:14px;height:14px;border-radius:50%;border:1px solid rgba(0,0,0,0.35);object-fit:cover;background:#fff;"/>` : ""}
 
         <div style="
           position:absolute;
@@ -1649,7 +1638,6 @@ hot97Audio.addEventListener("error", () => {
 const lockedOverlay = document.getElementById("lockedOverlay");
 const authEmail = document.getElementById("authEmail");
 const authPass = document.getElementById("authPass");
-const authAvatar = document.getElementById("authAvatar");
 const btnLogin = document.getElementById("btnLogin");
 const btnSignup = document.getElementById("btnSignup");
 const authStatus = document.getElementById("authStatus");
@@ -1658,9 +1646,6 @@ const btnAuth = document.getElementById("btnAuth");
 const btnPolice = document.getElementById("btnPolice");
 const btnPickup = document.getElementById("btnPickup");
 const communityNote = document.getElementById("communityNote");
-const chatFeed = document.getElementById("chatFeed");
-const chatInput = document.getElementById("chatInput");
-const btnChatSend = document.getElementById("btnChatSend");
 
 let communityToken = localStorage.getItem(LS_TOKEN) || "";
 let me = null;
@@ -1701,7 +1686,6 @@ function clearAuth() {
   localStorage.removeItem(LS_TOKEN);
   setAuthUI(false, "Status: signed out");
   clearOtherDrivers();
-  if (chatFeed) chatFeed.innerHTML = '<div class="chatMsg">Chat: sign in to load messages.</div>';
 }
 
 function authHeaderOK() {
@@ -1713,10 +1697,6 @@ function safeEmail() {
 }
 function safePass() {
   return (authPass && authPass.value ? authPass.value : "");
-}
-function safeAvatar() {
-  const fromInput = authAvatar && authAvatar.value ? authAvatar.value : localStorage.getItem(LS_AVATAR);
-  return normalizeAvatarUrl(fromInput);
 }
 
 /* ✅ public username selection (NOT email) */
@@ -1761,10 +1741,6 @@ async function doLogin(email, password) {
 
   const pub = (localStorage.getItem(LS_NAME) || "").trim();
   setAuthUI(true, `Status: signed in as ${pub || "Driver"}`);
-
-  if (safeAvatar()) {
-    await postJSON("/profile", { avatar_url: safeAvatar() }, communityToken).catch(() => {});
-  }
 }
 
 /* ✅ your backend /auth/signup does NOT return a token.
@@ -1778,7 +1754,6 @@ async function doSignup(email, password) {
 }
 
 if (authEmail) authEmail.value = localStorage.getItem(LS_EMAIL) || "";
-if (authAvatar) authAvatar.value = localStorage.getItem(LS_AVATAR) || "";
 
 if (btnLogin) {
   btnLogin.addEventListener("click", async () => {
@@ -1786,7 +1761,6 @@ if (btnLogin) {
       const email = safeEmail();
       const password = safePass();
       if (!email || !password) throw new Error("Enter email + password.");
-      if (safeAvatar()) localStorage.setItem(LS_AVATAR, safeAvatar());
 
       chooseUsername(true);
 
@@ -1804,7 +1778,6 @@ if (btnSignup) {
       const email = safeEmail();
       const password = safePass();
       if (!email || !password) throw new Error("Enter email + password.");
-      if (safeAvatar()) localStorage.setItem(LS_AVATAR, safeAvatar());
 
       chooseUsername(true);
 
@@ -1842,17 +1815,15 @@ function sanitizePublicName(raw, uid) {
   return s.length > 16 ? (s.slice(0, 16) + "…") : s;
 }
 
-function makeOtherDriverArrowIcon(publicName, headingDeg, avatarUrl) {
+function makeOtherDriverArrowIcon(publicName, headingDeg) {
   const name = String(publicName || "Driver").trim() || "Driver";
   const rot = (typeof headingDeg === "number" && Number.isFinite(headingDeg)) ? headingDeg : 0;
-  const avatar = normalizeAvatarUrl(avatarUrl);
 
   const html = `
     <div style="position:relative; width:44px; height:44px;">
       <div class="navArrowWrap navPulse" style="position:absolute; left:7px; top:7px; transform: rotate(${rot}deg);">
         <div class="navArrow"></div>
       </div>
-      ${avatar ? `<img src="${escapeHtml(avatar)}" alt="" style="position:absolute;left:0;top:0;width:14px;height:14px;border-radius:50%;border:1px solid rgba(0,0,0,0.35);object-fit:cover;background:#fff;"/>` : ""}
 
       <div style="
         position:absolute;
@@ -1879,7 +1850,7 @@ function makeOtherDriverArrowIcon(publicName, headingDeg, avatarUrl) {
   });
 }
 
-function upsertDriverMarker(userId, publicName, lat, lng, headingDeg, avatarUrl) {
+function upsertDriverMarker(userId, publicName, lat, lng, headingDeg) {
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
   if (!userId) return;
 
@@ -1888,12 +1859,12 @@ function upsertDriverMarker(userId, publicName, lat, lng, headingDeg, avatarUrl)
   const existing = otherMarkers.get(uid);
   if (existing) {
     existing.setLatLng([lat, lng]);
-    existing.setIcon(makeOtherDriverArrowIcon(publicName, headingDeg, avatarUrl));
+    existing.setIcon(makeOtherDriverArrowIcon(publicName, headingDeg));
     return;
   }
 
   const mk = L.marker([lat, lng], {
-    icon: makeOtherDriverArrowIcon(publicName, headingDeg, avatarUrl),
+    icon: makeOtherDriverArrowIcon(publicName, headingDeg),
     interactive: false,
     pane: "communityPane",
     zIndexOffset: 1500000,
@@ -1933,9 +1904,8 @@ async function pullPresenceAll() {
       // Backend currently returns email only -> we mask it.
       const rawName = it.display_name || it.name || it.username || it.email || "";
       const name = sanitizePublicName(rawName, uid);
-      const avatar = normalizeAvatarUrl(it.avatar_url || it.avatar || "");
 
-      upsertDriverMarker(uid, name, lat, lng, headingDeg, avatar);
+      upsertDriverMarker(uid, name, lat, lng, headingDeg);
       seen.add(uid);
     }
 
@@ -1966,9 +1936,6 @@ async function communityMaybePushPresence(tsMsOrUnix, heading) {
       lng: userLatLng.lng,
       heading: (typeof heading === "number" && Number.isFinite(heading)) ? heading : null,
       accuracy: null,
-      name: getUserName(),
-      avatar_url: safeAvatar() || null,
-      ghost_mode: (localStorage.getItem(LS_GHOST)==='1'),
     }, communityToken);
   } catch (e) {
     console.warn("presence/update failed:", e);
@@ -2067,61 +2034,6 @@ setInterval(() => {
   pullPresenceAll().catch(() => {});
 }, PRESENCE_PULL_MS);
 
-function renderChatMessages(rows) {
-  if (!chatFeed) return;
-  if (!Array.isArray(rows) || !rows.length) {
-    chatFeed.innerHTML = '<div class="chatMsg">No chat messages yet.</div>';
-    return;
-  }
-  chatFeed.innerHTML = rows.map((it) => {
-    const uid = String(it.user_id ?? it.userId ?? it.id ?? "");
-    const rawName = it.display_name || it.name || it.username || it.email || "";
-    const name = sanitizePublicName(rawName, uid || "?");
-    const txt = String(it.message || it.text || "").trim().slice(0, 300);
-    return `<div class="chatMsg"><b>${escapeHtml(name)}:</b> ${escapeHtml(txt)}</div>`;
-  }).join("");
-  chatFeed.scrollTop = chatFeed.scrollHeight;
-}
-
-async function pullChatMessages() {
-  if (!authHeaderOK()) return;
-  try {
-    const data = await getJSONAuth("/chat/messages?limit=60", communityToken);
-    const rows = Array.isArray(data) ? data : (data?.items || []);
-    renderChatMessages(rows);
-  } catch {
-    if (chatFeed) chatFeed.innerHTML = '<div class="chatMsg">Chat unavailable right now.</div>';
-  }
-}
-
-async function sendChatMessage() {
-  if (!authHeaderOK()) return;
-  const msg = String(chatInput?.value || "").trim();
-  if (!msg) return;
-  await postJSON("/chat/send", { message: msg }, communityToken);
-  if (chatInput) chatInput.value = "";
-  await pullChatMessages();
-}
-
-if (btnChatSend) {
-  btnChatSend.addEventListener("click", (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    sendChatMessage().catch((err) => alert(`Chat failed: ${err.message || err}`));
-  });
-}
-if (chatInput) {
-  chatInput.addEventListener("keydown", (e) => {
-    if (e.key !== "Enter") return;
-    e.preventDefault();
-    sendChatMessage().catch((err) => alert(`Chat failed: ${err.message || err}`));
-  });
-}
-
-setInterval(() => {
-  pullChatMessages().catch(() => {});
-}, 7000);
-
 /* =========================================================
    Boot
    ========================================================= */
@@ -2141,7 +2053,6 @@ loadTimeline().catch((err) => {
       const pub = (localStorage.getItem(LS_NAME) || "").trim();
       setAuthUI(true, `Status: signed in as ${pub || "Driver"}`);
       pullPresenceAll().catch(() => {});
-      pullChatMessages().catch(() => {});
     } else {
       setAuthUI(false, "Status: signed out");
     }
