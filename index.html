@@ -103,13 +103,6 @@
       opacity: 0.85;
       line-height: 1.2;
     }
-    .tinyHelp{
-      margin-top: 6px;
-      font-size: 10px;
-      font-weight: 800;
-      opacity: 0.7;
-      line-height: 1.2;
-    }
 
     /* =========================================================
        WEATHER FX OVERLAY
@@ -638,43 +631,6 @@
       border: 0;
       background: #fff;
     }
-
-    .chatBox{
-      margin-top: 8px;
-      background: rgba(255,255,255,0.78);
-      border: 1px solid rgba(0,0,0,0.1);
-      border-radius: 10px;
-      padding: 6px;
-    }
-    .chatFeed{
-      max-height: 140px;
-      overflow: auto;
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      font-size: 11px;
-      margin-bottom: 6px;
-    }
-    .chatMsg{
-      padding: 4px 6px;
-      border-radius: 8px;
-      background: rgba(0,0,0,0.04);
-      line-height: 1.25;
-    }
-    .chatMsg b{ font-size: 10px; }
-    .chatInputRow{
-      display: flex;
-      gap: 6px;
-    }
-    .chatInputRow input{
-      flex: 1;
-      min-width: 0;
-      border: 1px solid rgba(0,0,0,0.2);
-      border-radius: 8px;
-      padding: 7px 8px;
-      font-size: 12px;
-      font-weight: 700;
-    }
   </style>
 </head>
 
@@ -695,10 +651,6 @@
           <label for="authPass">Password</label>
           <input id="authPass" type="password" placeholder="password" autocomplete="current-password" />
         </div>
-        <div class="row">
-          <label for="authAvatar">Profile photo URL (optional)</label>
-          <input id="authAvatar" type="url" placeholder="https://..." autocomplete="url" />
-        </div>
 
         <div class="lockedActions">
           <button id="btnLogin" class="primaryBtn" type="button">Sign in</button>
@@ -706,7 +658,6 @@
         </div>
 
         <div id="authStatus" class="authStatus">Status: signed out</div>
-        <div class="tinyHelp">Tip: your name + profile photo can be shown next to your live arrow.</div>
       </div>
     </div>
   </div>
@@ -744,16 +695,6 @@
 
       <div id="communityNote" class="sub" style="margin-top:7px;">
         Community: sign in to see other drivers + report police + log pickups.
-      </div>
-
-      <div class="chatBox" aria-label="Community chat">
-        <div id="chatFeed" class="chatFeed">
-          <div class="chatMsg">Chat: sign in to load messages.</div>
-        </div>
-        <div class="chatInputRow">
-          <input id="chatInput" type="text" maxlength="300" placeholder="Type a message..." />
-          <button id="btnChatSend" class="modeBtn" type="button">Send</button>
-        </div>
       </div>
     </div>
   </div>
