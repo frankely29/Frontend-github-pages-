@@ -1647,14 +1647,27 @@ const COLLISION_PIXEL_OFFSETS = [
   [-13, -13],
 ];
 
-const SELF_COLLISION_THRESHOLD_PX = 30;
-const SELF_COLLISION_OFFSET_PX = 26;
+const SELF_COLLISION_THRESHOLD_PX = 34;
+const SELF_COLLISION_OFFSET_PX = 28;
 const SELF_LABEL_SIDE = "left";
 
 function sideFromOffsetX(dx, fallback = "right") {
   if (dx > 0) return "right";
   if (dx < 0) return "left";
   return fallback;
+}
+
+function stableUidParity(uid) {
+  const uidStr = String(uid || "");
+  const uidNum = Number.parseInt(uidStr, 10);
+  if (Number.isFinite(uidNum)) return Math.abs(uidNum) % 2;
+
+  let hash = 0;
+  for (let i = 0; i < uidStr.length; i++) {
+    hash = ((hash << 5) - hash) + uidStr.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash) % 2;
 }
 
 function syncGhostUI() {
@@ -1961,10 +1974,7 @@ async function pullPresenceAll() {
         if (selfPt) {
           const distPx = basePoint.distanceTo(selfPt);
           if (distPx < SELF_COLLISION_THRESHOLD_PX) {
-            const uidNum = Number.parseInt(drv.uid, 10);
-            const stableRight = Number.isFinite(uidNum)
-              ? (uidNum % 2 === 0)
-              : (drv.uid.charCodeAt(0) % 2 === 0);
+            const stableRight = stableUidParity(drv.uid) === 0;
             const offX = stableRight ? SELF_COLLISION_OFFSET_PX : -SELF_COLLISION_OFFSET_PX;
             const adjustedPoint = L.point(basePoint.x + offX, basePoint.y);
             const adjustedLatLng = map.layerPointToLatLng(adjustedPoint);
