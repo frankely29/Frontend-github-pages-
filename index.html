@@ -584,23 +584,32 @@
     }
 
     /* =========================================================
-       Other drivers markers (simple)
+       Other drivers markers (arrow + name)
        ========================================================= */
-    .drvWrap{
+    .otherDrvWrap{
       display:flex;
       align-items:center;
       gap:6px;
       transform: translate(-50%, -50%);
       pointer-events: none;
     }
-    .drvDot{
-      width: 12px;
-      height: 12px;
-      border-radius: 999px;
-      background: rgba(0,160,255,0.9);
-      box-shadow: 0 0 0 2px rgba(255,255,255,0.9), 0 6px 16px rgba(0,0,0,0.20);
+    .otherArrowWrap{
+      width: 18px;
+      height: 18px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      transform-origin: 50% 50%;
     }
-    .drvName{
+    .otherArrow{
+      width: 0;
+      height: 0;
+      border-left: 6px solid transparent;
+      border-right: 6px solid transparent;
+      border-bottom: 14px solid rgba(0,160,255,0.95);
+      filter: drop-shadow(0 1px 1px rgba(0,0,0,0.35));
+    }
+    .otherDrvName{
       font-size: 11px;
       font-weight: 950;
       padding: 3px 7px;
