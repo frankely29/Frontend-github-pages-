@@ -608,6 +608,22 @@
       justify-content:center;
       transform-origin: 50% 50%;
     }
+    .otherPulse{
+      position: relative;
+    }
+    .otherPulse::after{
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 24px;
+      height: 24px;
+      border-radius: 999px;
+      border: 2px solid rgba(0,0,0,0.85);
+      transform: translate(-50%, -50%);
+      animation: pulseRing 1.5s ease-out infinite;
+      pointer-events: none;
+    }
     .otherArrow{
       width: 0;
       height: 0;

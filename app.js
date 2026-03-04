@@ -1875,7 +1875,7 @@ function makeDriverIcon(name, headingDeg, labelSide = "right", labelDx = 0, labe
   const labelTranslateY = Number.isFinite(labelDy) ? labelDy : -8;
   const html = `
     <div class="otherDrvWrap">
-      <div class="otherArrowWrap" style="transform:rotate(${rot}deg)">
+      <div class="otherArrowWrap otherPulse" style="transform:rotate(${rot}deg)">
         <div class="otherArrow"></div>
       </div>
       <div class="otherDrvName" style="transform:translate(${labelTranslateX}px, ${labelTranslateY}px);">
