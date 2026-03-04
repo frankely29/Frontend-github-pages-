@@ -1,5 +1,7 @@
 /* =========================================================
    NYC TLC Hotspot Map (Frontend) - SIMPLE + STABLE
+   + Community arrows (like your GPS arrow)
+   + Username (no emails shown on map)
    ========================================================= */
 
 const RAILWAY_BASE = "https://web-production-78f67.up.railway.app";
@@ -8,6 +10,17 @@ const BIN_MINUTES = 20;
 const REFRESH_MS = 5 * 60 * 1000;
 const NYC_CLOCK_TICK_MS = 60 * 1000;
 const USER_SLIDER_GRACE_MS = 25 * 1000;
+
+/* =========================================================
+   COMMUNITY SETTINGS (cheap polling)
+   ========================================================= */
+const PRESENCE_PUSH_MS = 8 * 1000;     // send my location
+const PRESENCE_PULL_MS = 10 * 1000;    // fetch all drivers
+const PRESENCE_STALE_SEC = 70;         // hide if older than this
+
+const LS_TOKEN = "community_token_v1";
+const LS_EMAIL = "community_email_v1";
+const LS_NAME  = "community_name_v1";  // ✅ public username shown on map (NOT email)
 
 /* =========================================================
    MANHATTAN MODE — DEFAULT SETTINGS (SAFE TO EDIT)
@@ -119,10 +132,10 @@ function pickClosestIndex(minutesOfWeekArr, target) {
 }
 
 /* =========================================================
-   Network helper
+   Network helper (+ auth support)
    ========================================================= */
-async function fetchJSON(url) {
-  const res = await fetch(url, { cache: "no-store", mode: "cors" });
+async function fetchJSON(url, opts = {}) {
+  const res = await fetch(url, { cache: "no-store", mode: "cors", ...opts });
   const text = await res.text();
   if (!res.ok) throw new Error(`${res.status} ${res.statusText} @ ${url} :: ${text.slice(0, 200)}`);
   try {
@@ -130,6 +143,20 @@ async function fetchJSON(url) {
   } catch {
     throw new Error(`Invalid JSON @ ${url} :: ${text.slice(0, 200)}`);
   }
+}
+async function postJSON(path, body, token) {
+  const headers = { "Content-Type": "application/json" };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  return fetchJSON(`${RAILWAY_BASE}${path}`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body || {}),
+  });
+}
+async function getJSONAuth(path, token) {
+  const headers = {};
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  return fetchJSON(`${RAILWAY_BASE}${path}`, { headers });
 }
 
 /* =========================================================
@@ -680,8 +707,7 @@ const slider = document.getElementById("slider");
 const timeLabel = document.getElementById("timeLabel");
 
 /* =========================================================
-   PRECISION SLIDER POPUP (RESTORED)
-   - shows exact time while dragging, does NOT change slider logic
+   PRECISION SLIDER POPUP
    ========================================================= */
 const sliderBubble = document.getElementById("sliderBubble");
 let bubbleHideTimer = null;
@@ -721,7 +747,7 @@ function bubbleUpdateNow() {
 /* =========================================================
    Map
    ========================================================= */
-const map = L.map("map", { zoomControl: true }).setView([40.7128, -74.0060], 10);
+const map = L.map("map", { zoomControl: true }).setView([40.7128, -74.0060], 8);
 
 L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
   attribution: "&copy; OpenStreetMap &copy; CARTO",
@@ -734,11 +760,58 @@ labelsPane.style.zIndex = 450;
 const navPane = map.createPane("navPane");
 navPane.style.zIndex = 1000;
 
+const communityPane = map.createPane("communityPane");
+communityPane.style.zIndex = 980;
+
 let geoLayer = null;
 let timeline = [];
 let minutesOfWeek = [];
 let currentFrame = null;
 let lastUserSliderTs = 0;
+
+/* =========================================================
+   NEXT BIN CACHE
+   ========================================================= */
+let nextFramePickupsById = new Map();
+let nextFramePayById = new Map();
+
+async function loadNextFramePickupsMap(curIdx) {
+  try {
+    if (!timeline.length) return;
+
+    const nextIdx = Math.min(timeline.length - 1, Number(curIdx) + 1);
+    if (nextIdx === Number(curIdx)) {
+      nextFramePickupsById = new Map();
+      nextFramePayById = new Map();
+      return;
+    }
+
+    const frame = await fetchJSON(`${RAILWAY_BASE}/frame/${nextIdx}`);
+    const feats = frame?.polygons?.features || [];
+
+    const puMap = new Map();
+    const payMap = new Map();
+
+    for (const f of feats) {
+      const props = f?.properties || {};
+      const id = props.LocationID;
+      if (id == null) continue;
+
+      const pu = Number(props.pickups ?? NaN);
+      if (Number.isFinite(pu)) puMap.set(String(id), pu);
+
+      const pay = Number(props.avg_driver_pay ?? NaN);
+      if (Number.isFinite(pay)) payMap.set(String(id), pay);
+    }
+
+    nextFramePickupsById = puMap;
+    nextFramePayById = payMap;
+  } catch (e) {
+    console.warn("Next-bin pickups preload failed:", e);
+    nextFramePickupsById = new Map();
+    nextFramePayById = new Map();
+  }
+}
 
 function buildPopupHTML(props, geom) {
   const zoneName = (props.zone_name || "").trim();
@@ -748,6 +821,12 @@ function buildPopupHTML(props, geom) {
   const nycBucket = props.bucket ?? "";
   const pickups = props.pickups ?? "";
   const pay = props.avg_driver_pay == null ? "n/a" : props.avg_driver_pay.toFixed(2);
+
+  const nextPuVal = nextFramePickupsById.get(String(props.LocationID ?? ""));
+  const nextPickups = (nextPuVal == null) ? "n/a" : String(Math.round(nextPuVal));
+
+  const nextPayVal = nextFramePayById.get(String(props.LocationID ?? ""));
+  const nextPay = (nextPayVal == null) ? "n/a" : Number(nextPayVal).toFixed(2);
 
   let extra = "";
 
@@ -766,7 +845,9 @@ function buildPopupHTML(props, geom) {
       <div><b>NYC Rating:</b> ${nycRating} (${prettyBucket(nycBucket)})</div>
       ${extra}
       <div style="margin-top:6px;"><b>Pickups (last ${BIN_MINUTES} min):</b> ${pickups}</div>
-      <div><b>Avg Driver Pay:</b> $${pay}</div>
+      <div><b>Next ${BIN_MINUTES} min (historical):</b> ${nextPickups}</div>
+      <div><b>Avg Pay per Trip (next ${BIN_MINUTES} min historical):</b> $${nextPay}</div>
+      <div><b>Avg Pay per Trip (last 20 min):</b> $${pay}</div>
     </div>
   `;
 }
@@ -823,6 +904,7 @@ function renderFrame(frame) {
 }
 
 async function loadFrame(idx) {
+  loadNextFramePickupsMap(idx).catch(() => {});
   const frame = await fetchJSON(`${RAILWAY_BASE}/frame/${idx}`);
   renderFrame(frame);
 }
@@ -858,7 +940,6 @@ slider.addEventListener("touchstart", bubbleUpdateNow, { passive: true });
 
 slider.addEventListener("input", () => {
   lastUserSliderTs = Date.now();
-
   bubbleUpdateNow();
 
   const idx = Number(slider.value);
@@ -917,6 +998,7 @@ map.on("zoomstart", disableAutoCenterBecauseUserIsExploring);
 
 /* =========================================================
    Live location arrow + follow behavior
+   + ✅ show YOUR username next to YOUR arrow
    ========================================================= */
 let gpsFirstFixDone = false;
 let navMarker = null;
@@ -924,12 +1006,45 @@ let lastPos = null;
 let lastHeadingDeg = 0;
 let lastMoveTs = 0;
 
-function makeNavIcon() {
+function getMyPublicName() {
+  const n = (localStorage.getItem(LS_NAME) || "").trim();
+  if (n && !n.includes("@")) return n.slice(0, 18);
+  return "Me";
+}
+
+function makeMyNavIcon(name, headingDeg) {
+  const safeName = (name || "Me").trim() || "Me";
+  const rot = (typeof headingDeg === "number" && Number.isFinite(headingDeg)) ? headingDeg : 0;
+
+  // ✅ Uses your existing classes: navArrowWrap + navArrow
+  // Arrow rotates, label does not.
   return L.divIcon({
     className: "",
-    html: `<div id="navWrap" class="navArrowWrap navPulse"><div class="navArrow"></div></div>`,
-    iconSize: [30, 30],
-    iconAnchor: [15, 15],
+    html: `
+      <div style="position:relative; width:44px; height:44px;">
+        <div id="navWrap" class="navArrowWrap navPulse"
+             style="position:absolute; left:7px; top:7px; transform: rotate(${rot}deg);">
+          <div class="navArrow"></div>
+        </div>
+
+        <div style="
+          position:absolute;
+          left:40px;
+          top:12px;
+          padding:2px 6px;
+          border-radius:10px;
+          background: rgba(255,255,255,0.92);
+          border: 1px solid rgba(0,0,0,0.15);
+          font: 800 12px/1 system-ui,-apple-system,Segoe UI,Roboto,Arial;
+          white-space:nowrap;
+          pointer-events:none;
+        ">
+          ${escapeHtml(safeName)}
+        </div>
+      </div>
+    `,
+    iconSize: [44, 44],
+    iconAnchor: [22, 22],
   });
 }
 
@@ -939,11 +1054,7 @@ function setNavVisual(isMoving) {
   el.classList.toggle("navMoving", !!isMoving);
   el.classList.toggle("navPulse", !isMoving);
 }
-function setNavRotation(deg) {
-  const el = document.getElementById("navWrap");
-  if (!el) return;
-  el.style.transform = `rotate(${deg}deg)`;
-}
+
 function computeBearingDeg(from, to) {
   const toRad = (x) => (x * Math.PI) / 180;
   const toDeg = (x) => (x * 180) / Math.PI;
@@ -966,8 +1077,10 @@ function startLocationWatch() {
     return;
   }
 
+  const myName = getMyPublicName();
+
   navMarker = L.marker([40.7128, -74.0060], {
-    icon: makeNavIcon(),
+    icon: makeMyNavIcon(myName, 0),
     interactive: false,
     zIndexOffset: 2000000,
     pane: "navPane",
@@ -1003,12 +1116,13 @@ function startLocationWatch() {
 
       lastPos = { lat, lng, ts };
 
-      setNavRotation(lastHeadingDeg);
+      // ✅ update my icon rotation + label
+      if (navMarker) navMarker.setIcon(makeMyNavIcon(getMyPublicName(), lastHeadingDeg));
       setNavVisual(isMoving);
 
       if (!gpsFirstFixDone) {
         gpsFirstFixDone = true;
-        const targetZoom = Math.max(map.getZoom(), 13);
+        const targetZoom = Math.max(map.getZoom(), 12.5);
         suppressAutoDisableFor(1200, () => map.setView(userLatLng, targetZoom, { animate: true }));
       } else {
         if (autoCenter) {
@@ -1019,6 +1133,9 @@ function startLocationWatch() {
       if (currentFrame) updateRecommendation(currentFrame);
 
       scheduleWeatherUpdateSoon();
+
+      // community push (auth only)
+      communityMaybePushPresence(ts, heading);
     },
     (err) => {
       console.warn("Geolocation error:", err);
@@ -1341,7 +1458,6 @@ const radioFrame = document.getElementById("radioFrame");
 const radioModalClose = document.getElementById("radioModalClose");
 const radioModalTitle = document.getElementById("radioModalTitle");
 
-/* ✅ ONLY CHANGE: Hot 97.1 direct stream link + AbortError-safe playback */
 const HOT97_STREAM_URL = "https://26313.live.streamtheworld.com/WQHTFMAAC.aac";
 const MEGA979_STREAM_URL = "https://liveaudio.lamusica.com/NY_WSKQ_icy";
 
@@ -1368,7 +1484,6 @@ function setBtnState(btn, on) {
   btn.textContent = (on ? "⏸ " : "▶ ") + base;
 }
 
-/* keep these functions for compatibility; they now just ensure modal stays closed */
 function closeHot97Modal() {
   if (radioModal && radioModal.classList.contains("open")) {
     radioModal.classList.remove("open");
@@ -1376,9 +1491,7 @@ function closeHot97Modal() {
   }
   if (radioFrame) radioFrame.src = "about:blank";
 }
-function openHot97Modal() {
-  closeHot97Modal();
-}
+function openHot97Modal() { closeHot97Modal(); }
 
 async function toggleMega() {
   try {
@@ -1413,7 +1526,6 @@ async function toggleMega() {
   }
 }
 
-/* ✅ Hot 97 now behaves EXACTLY like La Mega: one-click play/pause (no popup) */
 async function toggleHot97() {
   try {
     if (megaPlaying) {
@@ -1434,7 +1546,6 @@ async function toggleHot97() {
   }
 
   try {
-    // Safari-friendly: set src right before play
     hot97Audio.src = HOT97_STREAM_URL;
     hot97Audio.volume = 1;
 
@@ -1447,8 +1558,6 @@ async function toggleHot97() {
     setRadioStatus("Radio: HOT 97.1 playing");
   } catch (e) {
     const errName = e && e.name ? String(e.name) : "";
-
-    // ✅ Ignore AbortError (common on iPhone Safari due to interruptions)
     if (errName === "AbortError") {
       console.warn("Hot 97 aborted (Safari interruption):", e);
       hot97Playing = false;
@@ -1483,7 +1592,6 @@ if (btnHot97) {
   });
 }
 
-// Keep modal close handler (modal is unused now, but safe to keep)
 if (radioModalClose) {
   radioModalClose.addEventListener("click", (e) => {
     e.preventDefault();
@@ -1522,6 +1630,411 @@ hot97Audio.addEventListener("error", () => {
 });
 
 /* =========================================================
+   COMMUNITY (AUTH + PRESENCE + POLICE + PICKUP)
+   - ✅ username prompt (public name)
+   - ✅ no emails displayed on map
+   - ✅ other users shown as arrow + name label (like you)
+   ========================================================= */
+const lockedOverlay = document.getElementById("lockedOverlay");
+const authEmail = document.getElementById("authEmail");
+const authPass = document.getElementById("authPass");
+const btnLogin = document.getElementById("btnLogin");
+const btnSignup = document.getElementById("btnSignup");
+const authStatus = document.getElementById("authStatus");
+const btnAuth = document.getElementById("btnAuth");
+
+const btnPolice = document.getElementById("btnPolice");
+const btnPickup = document.getElementById("btnPickup");
+const communityNote = document.getElementById("communityNote");
+
+let communityToken = localStorage.getItem(LS_TOKEN) || "";
+let me = null;
+
+// other drivers markers
+const otherMarkers = new Map(); // user_id -> marker
+
+function setAuthUI(signedIn, note) {
+  if (btnAuth) btnAuth.textContent = signedIn ? "Sign out" : "Sign in";
+  if (communityNote) {
+    communityNote.textContent = signedIn
+      ? "Community: live drivers are visible. Police reports + pickups are shared."
+      : "Community: sign in to see other drivers + report police + log pickups.";
+  }
+
+  const showLock = !signedIn;
+  if (lockedOverlay) {
+    lockedOverlay.classList.toggle("show", showLock);
+    lockedOverlay.setAttribute("aria-hidden", showLock ? "false" : "true");
+  }
+
+  if (btnPolice) btnPolice.classList.toggle("disabled", !signedIn);
+  if (btnPickup) btnPickup.classList.toggle("disabled", !signedIn);
+
+  if (authStatus) authStatus.textContent = note || (signedIn ? "Status: signed in" : "Status: signed out");
+}
+
+function clearOtherDrivers() {
+  for (const m of otherMarkers.values()) {
+    try { m.remove(); } catch {}
+  }
+  otherMarkers.clear();
+}
+
+function clearAuth() {
+  communityToken = "";
+  me = null;
+  localStorage.removeItem(LS_TOKEN);
+  setAuthUI(false, "Status: signed out");
+  clearOtherDrivers();
+}
+
+function authHeaderOK() {
+  return communityToken && communityToken.length > 10;
+}
+
+function safeEmail() {
+  return (authEmail && authEmail.value ? authEmail.value.trim() : (localStorage.getItem(LS_EMAIL) || "").trim());
+}
+function safePass() {
+  return (authPass && authPass.value ? authPass.value : "");
+}
+
+/* ✅ public username selection (NOT email) */
+function chooseUsername(forcePrompt = false) {
+  const current = (localStorage.getItem(LS_NAME) || "").trim();
+  const email = safeEmail();
+  const suggested = ((email || "").split("@")[0] || "Driver").slice(0, 18);
+
+  if (!forcePrompt && current.length >= 2 && !current.includes("@")) return current;
+
+  const name = prompt("Choose a username to show on the map (email will NOT be shown):", current || suggested);
+  const cleaned = String(name || "").trim().slice(0, 18);
+
+  const finalName = (cleaned.length >= 2 && !cleaned.includes("@")) ? cleaned : (current && !current.includes("@") ? current : suggested);
+  localStorage.setItem(LS_NAME, finalName);
+  return finalName;
+}
+
+async function loadMe() {
+  if (!authHeaderOK()) return null;
+  try {
+    const data = await getJSONAuth("/me", communityToken);
+    me = data || null;
+    return me;
+  } catch (e) {
+    console.warn("/me failed:", e);
+    clearAuth();
+    return null;
+  }
+}
+
+async function doLogin(email, password) {
+  const body = { email, password };
+  const data = await postJSON("/auth/login", body, null);
+  const token = data?.token || data?.access_token || "";
+  if (!token) throw new Error("Login success but token missing.");
+  communityToken = token;
+  localStorage.setItem(LS_TOKEN, token);
+  localStorage.setItem(LS_EMAIL, email);
+
+  await loadMe();
+
+  const pub = (localStorage.getItem(LS_NAME) || "").trim();
+  setAuthUI(true, `Status: signed in as ${pub || "Driver"}`);
+}
+
+/* ✅ your backend /auth/signup does NOT return a token.
+   So: signup -> then login automatically. */
+async function doSignup(email, password) {
+  const body = { email, password };
+  const data = await postJSON("/auth/signup", body, null);
+  if (!data?.ok) throw new Error("Signup failed.");
+  await doLogin(email, password);
+  setAuthUI(true, "Status: account created • signed in");
+}
+
+if (authEmail) authEmail.value = localStorage.getItem(LS_EMAIL) || "";
+
+if (btnLogin) {
+  btnLogin.addEventListener("click", async () => {
+    try {
+      const email = safeEmail();
+      const password = safePass();
+      if (!email || !password) throw new Error("Enter email + password.");
+
+      chooseUsername(true);
+
+      setAuthUI(false, "Signing in…");
+      await doLogin(email, password);
+    } catch (e) {
+      setAuthUI(false, `Sign in failed: ${e.message || e}`);
+    }
+  });
+}
+
+if (btnSignup) {
+  btnSignup.addEventListener("click", async () => {
+    try {
+      const email = safeEmail();
+      const password = safePass();
+      if (!email || !password) throw new Error("Enter email + password.");
+
+      chooseUsername(true);
+
+      setAuthUI(false, "Creating account…");
+      await doSignup(email, password);
+    } catch (e) {
+      setAuthUI(false, `Create account failed: ${e.message || e}`);
+    }
+  });
+}
+
+if (btnAuth) {
+  btnAuth.addEventListener("pointerdown", (e) => e.stopPropagation());
+  btnAuth.addEventListener("click", async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (authHeaderOK()) {
+      clearAuth();
+    } else {
+      setAuthUI(false, "Status: signed out");
+    }
+  });
+}
+
+/* =========================================================
+   ✅ Other drivers: arrow + name label (NO email)
+   NOTE: backend currently returns email only for others.
+   We NEVER show it. We display "Driver <id>" unless backend
+   later adds display_name.
+   ========================================================= */
+function sanitizePublicName(raw, uid) {
+  const s = String(raw || "").trim();
+  if (!s) return `Driver ${uid}`;
+  if (s.includes("@")) return `Driver ${uid}`; // never show email
+  return s.length > 16 ? (s.slice(0, 16) + "…") : s;
+}
+
+function makeOtherDriverArrowIcon(publicName, headingDeg) {
+  const name = String(publicName || "Driver").trim() || "Driver";
+  const rot = (typeof headingDeg === "number" && Number.isFinite(headingDeg)) ? headingDeg : 0;
+
+  const html = `
+    <div style="position:relative; width:44px; height:44px;">
+      <div class="navArrowWrap navPulse" style="position:absolute; left:7px; top:7px; transform: rotate(${rot}deg);">
+        <div class="navArrow"></div>
+      </div>
+
+      <div style="
+        position:absolute;
+        left:40px;
+        top:12px;
+        padding:2px 6px;
+        border-radius:10px;
+        background: rgba(255,255,255,0.92);
+        border: 1px solid rgba(0,0,0,0.15);
+        font: 700 12px/1 system-ui,-apple-system,Segoe UI,Roboto,Arial;
+        white-space:nowrap;
+        pointer-events:none;
+      ">
+        ${escapeHtml(name)}
+      </div>
+    </div>
+  `;
+
+  return L.divIcon({
+    className: "",
+    html,
+    iconSize: [44, 44],
+    iconAnchor: [22, 22],
+  });
+}
+
+function upsertDriverMarker(userId, publicName, lat, lng, headingDeg) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+  if (!userId) return;
+
+  const uid = String(userId);
+
+  const existing = otherMarkers.get(uid);
+  if (existing) {
+    existing.setLatLng([lat, lng]);
+    existing.setIcon(makeOtherDriverArrowIcon(publicName, headingDeg));
+    return;
+  }
+
+  const mk = L.marker([lat, lng], {
+    icon: makeOtherDriverArrowIcon(publicName, headingDeg),
+    interactive: false,
+    pane: "communityPane",
+    zIndexOffset: 1500000,
+  }).addTo(map);
+
+  otherMarkers.set(uid, mk);
+}
+
+async function pullPresenceAll() {
+  if (!authHeaderOK()) return;
+
+  try {
+    const list = await getJSONAuth("/presence/all", communityToken);
+    const now = Date.now() / 1000;
+
+    const items = Array.isArray(list) ? list : (list?.items || []);
+    const seen = new Set();
+
+    for (const it of items) {
+      const uid = String(it.user_id ?? it.userId ?? it.id ?? "");
+      if (!uid) continue;
+
+      // hide self (if /me has id; if not, still safe)
+      if (me && me.id != null && String(me.id) === uid) continue;
+
+      const lat = Number(it.lat ?? it.latitude ?? NaN);
+      const lng = Number(it.lng ?? it.longitude ?? NaN);
+
+      const updated = Number(it.updated_at_unix ?? it.ts_unix ?? it.updated_at ?? NaN);
+      if (Number.isFinite(updated)) {
+        if ((now - updated) > PRESENCE_STALE_SEC) continue;
+      }
+
+      const heading = Number(it.heading ?? NaN);
+      const headingDeg = Number.isFinite(heading) ? heading : 0;
+
+      // Backend currently returns email only -> we mask it.
+      const rawName = it.display_name || it.name || it.username || it.email || "";
+      const name = sanitizePublicName(rawName, uid);
+
+      upsertDriverMarker(uid, name, lat, lng, headingDeg);
+      seen.add(uid);
+    }
+
+    for (const uid of Array.from(otherMarkers.keys())) {
+      if (!seen.has(uid)) {
+        const mk = otherMarkers.get(uid);
+        try { mk.remove(); } catch {}
+        otherMarkers.delete(uid);
+      }
+    }
+  } catch (e) {
+    console.warn("presence/all failed:", e);
+  }
+}
+
+let lastPresencePushMs = 0;
+async function communityMaybePushPresence(tsMsOrUnix, heading) {
+  if (!authHeaderOK()) return;
+  if (!userLatLng) return;
+
+  const nowMs = Date.now();
+  if ((nowMs - lastPresencePushMs) < PRESENCE_PUSH_MS) return;
+  lastPresencePushMs = nowMs;
+
+  try {
+    await postJSON("/presence/update", {
+      lat: userLatLng.lat,
+      lng: userLatLng.lng,
+      heading: (typeof heading === "number" && Number.isFinite(heading)) ? heading : null,
+      accuracy: null,
+    }, communityToken);
+  } catch (e) {
+    console.warn("presence/update failed:", e);
+  }
+}
+
+function nearestZoneToUser(frame, latlng) {
+  const feats = frame?.polygons?.features || [];
+  if (!feats.length || !latlng) return null;
+
+  let best = null;
+  for (const f of feats) {
+    const props = f?.properties || {};
+    const c = geometryCenter(f.geometry);
+    if (!c) continue;
+    const d = haversineMiles(latlng, c);
+    if (!best || d < best.d) {
+      best = {
+        d,
+        location_id: props.LocationID ?? null,
+        zone_name: (props.zone_name || "").trim() || null,
+        borough: (props.borough || "").trim() || null,
+      };
+    }
+  }
+  return best;
+}
+
+async function sendPoliceReport() {
+  if (!authHeaderOK()) {
+    setAuthUI(false, "Sign in to report police.");
+    return;
+  }
+  if (!userLatLng) {
+    alert("Enable location first.");
+    return;
+  }
+
+  try {
+    await postJSON("/events/police", {
+      lat: userLatLng.lat,
+      lng: userLatLng.lng,
+      note: "",
+    }, communityToken);
+
+    alert("Police report sent to community ✅");
+  } catch (e) {
+    alert(`Police report failed: ${e.message || e}`);
+  }
+}
+
+async function sendPickupLog() {
+  if (!authHeaderOK()) {
+    setAuthUI(false, "Sign in to log pickups.");
+    return;
+  }
+  if (!userLatLng) {
+    alert("Enable location first.");
+    return;
+  }
+  try {
+    const near = nearestZoneToUser(currentFrame, userLatLng);
+
+    await postJSON("/events/pickup", {
+      lat: userLatLng.lat,
+      lng: userLatLng.lng,
+      zone_id: near?.location_id ?? null,
+    }, communityToken);
+
+    const label = near?.zone_name ? `${near.zone_name}${near.borough ? ` (${near.borough})` : ""}` : "your location";
+    alert(`Pickup logged ✅ (${label})`);
+  } catch (e) {
+    alert(`Pickup log failed: ${e.message || e}`);
+  }
+}
+
+if (btnPolice) {
+  btnPolice.addEventListener("pointerdown", (e) => e.stopPropagation());
+  btnPolice.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    sendPoliceReport();
+  });
+}
+if (btnPickup) {
+  btnPickup.addEventListener("pointerdown", (e) => e.stopPropagation());
+  btnPickup.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    sendPickupLog();
+  });
+}
+
+/* poll presence */
+setInterval(() => {
+  pullPresenceAll().catch(() => {});
+}, PRESENCE_PULL_MS);
+
+/* =========================================================
    Boot
    ========================================================= */
 setNavDestination(null);
@@ -1530,6 +2043,23 @@ loadTimeline().catch((err) => {
   console.error(err);
   timeLabel.textContent = `Error loading timeline: ${err.message}`;
 });
+
+/* auth boot */
+(async () => {
+  if (authHeaderOK()) {
+    setAuthUI(true, "Checking session…");
+    await loadMe();
+    if (authHeaderOK()) {
+      const pub = (localStorage.getItem(LS_NAME) || "").trim();
+      setAuthUI(true, `Status: signed in as ${pub || "Driver"}`);
+      pullPresenceAll().catch(() => {});
+    } else {
+      setAuthUI(false, "Status: signed out");
+    }
+  } else {
+    setAuthUI(false, "Status: signed out");
+  }
+})();
 
 startLocationWatch();
 updateWeatherNow().catch(() => {});
