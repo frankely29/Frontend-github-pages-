@@ -1870,13 +1870,13 @@ if (btnGhostMode) {
 function makeDriverIcon(name, headingDeg, labelSide = "right", labelDx = 0, labelDy = 0) {
   const safe = (name || "Driver").trim() || "Driver";
   const rot = Number.isFinite(headingDeg) ? headingDeg : 0;
-  const dx = Number.isFinite(labelDx) ? labelDx : 0;
-  const dy = Number.isFinite(labelDy) ? labelDy : 0;
+  const labelTranslateX = Number.isFinite(labelDx) ? labelDx : 0;
+  const labelTranslateY = Number.isFinite(labelDy) ? labelDy : 0;
   const labelClass = labelSide === "left" ? "labelLeft" : "labelRight";
   const html = `
     <div class="otherDrvWrap ${labelClass}">
       <div class="otherArrowWrap" style="transform: rotate(${rot}deg)"><div class="otherArrow"></div></div>
-      <div class="otherDrvName" style="transform: translate(${dx}px, ${dy}px);">${escapeHtml(safe)}</div>
+      <div class="otherDrvName" style="transform: translate(${labelTranslateX}px, ${labelTranslateY}px);">${escapeHtml(safe)}</div>
     </div>
   `;
   return L.divIcon({
@@ -2014,6 +2014,7 @@ async function pullPresenceAll() {
           labelSide = sideFromOffsetX(labelDx, labelSide);
         }
 
+        // Keep marker pinned to the true reported coordinates; shift labels only.
         upsertDriverMarker(drv.uid, drv.name, drv.lat, drv.lng, drv.heading, labelSide, labelDx, labelDy);
       }
     }
