@@ -1637,14 +1637,14 @@ let lastGpsAccuracyM = null;
 const otherMarkers = new Map(); // user_id -> marker
 
 const LABEL_OFFSETS = [
-  [40, 0],
-  [-40, 0],
-  [0, 28],
-  [0, -28],
-  [30, 18],
-  [-30, 18],
-  [30, -18],
-  [-30, -18],
+  [44, 0],
+  [-44, 0],
+  [0, 30],
+  [0, -30],
+  [34, 20],
+  [-34, 20],
+  [34, -20],
+  [-34, -20],
 ];
 
 const SELF_COLLISION_THRESHOLD_PX = 44;
