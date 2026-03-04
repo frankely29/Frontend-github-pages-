@@ -721,7 +721,7 @@ function bubbleUpdateNow() {
 /* =========================================================
    Map
    ========================================================= */
-const map = L.map("map", { zoomControl: true }).setView([40.7128, -74.0060], 8);
+const map = L.map("map", { zoomControl: true }).setView([40.7128, -74.0060], 10);
 
 L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
   attribution: "&copy; OpenStreetMap &copy; CARTO",
@@ -740,57 +740,6 @@ let minutesOfWeek = [];
 let currentFrame = null;
 let lastUserSliderTs = 0;
 
-/* =========================================================
-   NEXT BIN CACHE (APPROVED: next 20-min historical pickups)
-   ========================================================= */
-let nextFramePickupsById = new Map(); // LocationID -> pickups (NEXT bin)
-
-/* ✅ ADDED (ONLY): next 20-min historical avg pay per trip */
-let nextFramePayById = new Map();     // LocationID -> avg_driver_pay (NEXT bin)
-
-/* =========================================================
-   (existing) Next-bin loader (expanded to cache pickups too)
-   - If you already had this function in your real file, keep ONE copy.
-   ========================================================= */
-async function loadNextFramePickupsMap(curIdx) {
-  try {
-    if (!timeline.length) return;
-
-    const nextIdx = Math.min(timeline.length - 1, Number(curIdx) + 1);
-    if (nextIdx === Number(curIdx)) {
-      nextFramePickupsById = new Map();
-      nextFramePayById = new Map(); // ✅ ADDED
-      return;
-    }
-
-    const frame = await fetchJSON(`${RAILWAY_BASE}/frame/${nextIdx}`);
-    const feats = frame?.polygons?.features || [];
-
-    const puMap = new Map();
-    const payMap = new Map(); // ✅ ADDED
-
-    for (const f of feats) {
-      const props = f?.properties || {};
-      const id = props.LocationID;
-      if (id == null) continue;
-
-      const pu = Number(props.pickups ?? NaN);
-      if (Number.isFinite(pu)) puMap.set(String(id), pu);
-
-      // ✅ ADDED: cache next-bin avg_driver_pay
-      const pay = Number(props.avg_driver_pay ?? NaN);
-      if (Number.isFinite(pay)) payMap.set(String(id), pay);
-    }
-
-    nextFramePickupsById = puMap;
-    nextFramePayById = payMap; // ✅ ADDED
-  } catch (e) {
-    console.warn("Next-bin pickups preload failed:", e);
-    nextFramePickupsById = new Map();
-    nextFramePayById = new Map(); // ✅ ADDED
-  }
-}
-
 function buildPopupHTML(props, geom) {
   const zoneName = (props.zone_name || "").trim();
   const borough = (props.borough || "").trim();
@@ -799,14 +748,6 @@ function buildPopupHTML(props, geom) {
   const nycBucket = props.bucket ?? "";
   const pickups = props.pickups ?? "";
   const pay = props.avg_driver_pay == null ? "n/a" : props.avg_driver_pay.toFixed(2);
-
-  /* ✅ APPROVED: Next 20-min historical pickups */
-  const nextPuVal = nextFramePickupsById.get(String(props.LocationID ?? ""));
-  const nextPickups = (nextPuVal == null) ? "n/a" : String(Math.round(nextPuVal));
-
-  /* ✅ ADDED (ONLY): Next 20-min historical avg pay per trip */
-  const nextPayVal = nextFramePayById.get(String(props.LocationID ?? ""));
-  const nextPay = (nextPayVal == null) ? "n/a" : Number(nextPayVal).toFixed(2);
 
   let extra = "";
 
@@ -825,9 +766,7 @@ function buildPopupHTML(props, geom) {
       <div><b>NYC Rating:</b> ${nycRating} (${prettyBucket(nycBucket)})</div>
       ${extra}
       <div style="margin-top:6px;"><b>Pickups (last ${BIN_MINUTES} min):</b> ${pickups}</div>
-      <div><b>Next ${BIN_MINUTES} min (historical):</b> ${nextPickups}</div>
-      <div><b>Avg Pay per Trip (next ${BIN_MINUTES} min historical):</b> $${nextPay}</div>
-      <div><b>Avg Pay per Trip (last 20 min):</b> $${pay}</div>
+      <div><b>Avg Driver Pay:</b> $${pay}</div>
     </div>
   `;
 }
@@ -884,9 +823,6 @@ function renderFrame(frame) {
 }
 
 async function loadFrame(idx) {
-  /* ✅ APPROVED: preload next-bin historical pickups */
-  loadNextFramePickupsMap(idx).catch(() => {});
-
   const frame = await fetchJSON(`${RAILWAY_BASE}/frame/${idx}`);
   renderFrame(frame);
 }
@@ -1072,7 +1008,7 @@ function startLocationWatch() {
 
       if (!gpsFirstFixDone) {
         gpsFirstFixDone = true;
-        const targetZoom = Math.max(map.getZoom(), 12.5);
+        const targetZoom = Math.max(map.getZoom(), 13);
         suppressAutoDisableFor(1200, () => map.setView(userLatLng, targetZoom, { animate: true }));
       } else {
         if (autoCenter) {
