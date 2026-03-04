@@ -1870,20 +1870,24 @@ if (btnGhostMode) {
 function makeDriverIcon(name, headingDeg, labelSide = "right", labelDx = 0, labelDy = 0) {
   const safe = (name || "Driver").trim() || "Driver";
   const rot = Number.isFinite(headingDeg) ? headingDeg : 0;
-  const labelTranslateX = Number.isFinite(labelDx) ? labelDx : 0;
-  const labelTranslateY = Number.isFinite(labelDy) ? labelDy : 0;
-  const labelClass = labelSide === "left" ? "labelLeft" : "labelRight";
+  const defaultLabelX = labelSide === "left" ? -28 : 28;
+  const labelTranslateX = Number.isFinite(labelDx) ? labelDx : defaultLabelX;
+  const labelTranslateY = Number.isFinite(labelDy) ? labelDy : -8;
   const html = `
-    <div class="otherDrvWrap ${labelClass}">
-      <div class="otherArrowWrap" style="transform: rotate(${rot}deg)"><div class="otherArrow"></div></div>
-      <div class="otherDrvName" style="transform: translate(${labelTranslateX}px, ${labelTranslateY}px);">${escapeHtml(safe)}</div>
+    <div class="otherDrvWrap">
+      <div class="otherArrowWrap" style="transform:rotate(${rot}deg)">
+        <div class="otherArrow"></div>
+      </div>
+      <div class="otherDrvName" style="transform:translate(${labelTranslateX}px, ${labelTranslateY}px);">
+        ${escapeHtml(safe)}
+      </div>
     </div>
   `;
   return L.divIcon({
     className: "",
     html,
-    iconSize: [220, 40],
-    iconAnchor: [110, 20],
+    iconSize: [40, 40],
+    iconAnchor: [20, 20],
   });
 }
 
