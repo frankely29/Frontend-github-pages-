@@ -927,8 +927,14 @@ async function loadTimeline() {
   await loadFrame(idx);
 }
 
+let presenceZoomDebounce = null;
 map.on("zoomend", () => {
   if (currentFrame) renderFrame(currentFrame);
+
+  if (presenceZoomDebounce) clearTimeout(presenceZoomDebounce);
+  presenceZoomDebounce = setTimeout(() => {
+    pullPresenceAll().catch(() => {});
+  }, 120);
 });
 
 let sliderDebounce = null;
@@ -1646,6 +1652,9 @@ const COLLISION_PIXEL_OFFSETS = [
   [-13, -13],
 ];
 
+const SELF_COLLISION_PX = 34;
+const SELF_COLLISION_OFFSET_X = 28;
+
 function syncGhostUI() {
   const ghostOn = !!me?.ghost_mode;
   if (btnGhostMode) {
@@ -1924,6 +1933,8 @@ async function pullPresenceAll() {
       seen.add(uid);
     }
 
+    const selfPt = userLatLng ? map.latLngToLayerPoint([userLatLng.lat, userLatLng.lng]) : null;
+
     const collisionGroups = new Map();
     for (const drv of visibleDrivers) {
       const key = `${drv.lat.toFixed(6)},${drv.lng.toFixed(6)}`;
@@ -1940,12 +1951,27 @@ async function pullPresenceAll() {
 
         let displayLat = drv.lat;
         let displayLng = drv.lng;
+        const basePoint = map.latLngToLayerPoint([drv.lat, drv.lng]);
+        let displayPoint = basePoint;
 
         if (group.length > 1) {
-          const basePoint = map.latLngToLayerPoint([drv.lat, drv.lng]);
           const [offX, offY] = COLLISION_PIXEL_OFFSETS[idx % COLLISION_PIXEL_OFFSETS.length];
-          const adjustedPoint = L.point(basePoint.x + offX, basePoint.y + offY);
-          const adjustedLatLng = map.layerPointToLatLng(adjustedPoint);
+          displayPoint = L.point(basePoint.x + offX, basePoint.y + offY);
+        }
+
+        if (selfPt) {
+          const distPx = selfPt.distanceTo(basePoint);
+          if (distPx < SELF_COLLISION_PX) {
+            const uidNum = Number.parseInt(drv.uid, 10);
+            const hash = drv.uid.split("").reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
+            const isEven = Number.isFinite(uidNum) ? (uidNum % 2 === 0) : (hash % 2 === 0);
+            const dx = isEven ? SELF_COLLISION_OFFSET_X : -SELF_COLLISION_OFFSET_X;
+            displayPoint = L.point(displayPoint.x + dx, displayPoint.y);
+          }
+        }
+
+        if (displayPoint !== basePoint) {
+          const adjustedLatLng = map.layerPointToLatLng(displayPoint);
           displayLat = adjustedLatLng.lat;
           displayLng = adjustedLatLng.lng;
         }
