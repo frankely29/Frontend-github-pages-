@@ -929,6 +929,7 @@ async function loadTimeline() {
 
 map.on("zoomend", () => {
   if (currentFrame) renderFrame(currentFrame);
+  if (authHeaderOK()) pullPresenceAll().catch(() => {});
 });
 
 let sliderDebounce = null;
@@ -1646,6 +1647,16 @@ const COLLISION_PIXEL_OFFSETS = [
   [-13, -13],
 ];
 
+const SELF_COLLISION_THRESHOLD_PX = 30;
+const SELF_COLLISION_OFFSET_PX = 26;
+const SELF_LABEL_SIDE = "left";
+
+function sideFromOffsetX(dx, fallback = "right") {
+  if (dx > 0) return "right";
+  if (dx < 0) return "left";
+  return fallback;
+}
+
 function syncGhostUI() {
   const ghostOn = !!me?.ghost_mode;
   if (btnGhostMode) {
@@ -1924,6 +1935,10 @@ async function pullPresenceAll() {
       seen.add(uid);
     }
 
+    const selfPt = userLatLng
+      ? map.latLngToLayerPoint([userLatLng.lat, userLatLng.lng])
+      : null;
+
     const collisionGroups = new Map();
     for (const drv of visibleDrivers) {
       const key = `${drv.lat.toFixed(6)},${drv.lng.toFixed(6)}`;
@@ -1936,18 +1951,39 @@ async function pullPresenceAll() {
 
       for (let idx = 0; idx < group.length; idx++) {
         const drv = group[idx];
-        const labelSide = (idx % 2 === 0) ? "right" : "left";
+        let labelSide = (idx % 2 === 0) ? "right" : "left";
 
         let displayLat = drv.lat;
         let displayLng = drv.lng;
 
+        const basePoint = map.latLngToLayerPoint([drv.lat, drv.lng]);
+
+        if (selfPt) {
+          const distPx = basePoint.distanceTo(selfPt);
+          if (distPx < SELF_COLLISION_THRESHOLD_PX) {
+            const uidNum = Number.parseInt(drv.uid, 10);
+            const stableRight = Number.isFinite(uidNum)
+              ? (uidNum % 2 === 0)
+              : (drv.uid.charCodeAt(0) % 2 === 0);
+            const offX = stableRight ? SELF_COLLISION_OFFSET_PX : -SELF_COLLISION_OFFSET_PX;
+            const adjustedPoint = L.point(basePoint.x + offX, basePoint.y);
+            const adjustedLatLng = map.layerPointToLatLng(adjustedPoint);
+            displayLat = adjustedLatLng.lat;
+            displayLng = adjustedLatLng.lng;
+            labelSide = sideFromOffsetX(offX, SELF_LABEL_SIDE === "left" ? "right" : "left");
+
+            upsertDriverMarker(drv.uid, drv.name, displayLat, displayLng, drv.heading, labelSide);
+            continue;
+          }
+        }
+
         if (group.length > 1) {
-          const basePoint = map.latLngToLayerPoint([drv.lat, drv.lng]);
           const [offX, offY] = COLLISION_PIXEL_OFFSETS[idx % COLLISION_PIXEL_OFFSETS.length];
           const adjustedPoint = L.point(basePoint.x + offX, basePoint.y + offY);
           const adjustedLatLng = map.layerPointToLatLng(adjustedPoint);
           displayLat = adjustedLatLng.lat;
           displayLng = adjustedLatLng.lng;
+          labelSide = sideFromOffsetX(offX, labelSide);
         }
 
         upsertDriverMarker(drv.uid, drv.name, displayLat, displayLng, drv.heading, labelSide);
