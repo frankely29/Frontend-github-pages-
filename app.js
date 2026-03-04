@@ -1952,15 +1952,40 @@ async function pullPresenceAll() {
       ? map.latLngToLayerPoint([userLatLng.lat, userLatLng.lng])
       : null;
 
-    const collisionGroups = new Map();
-    for (const drv of visibleDrivers) {
-      const key = `${drv.lat.toFixed(6)},${drv.lng.toFixed(6)}`;
-      if (!collisionGroups.has(key)) collisionGroups.set(key, []);
-      collisionGroups.get(key).push(drv);
+    const driversWithPoints = visibleDrivers.map((drv) => ({
+      ...drv,
+      basePoint: map.latLngToLayerPoint([drv.lat, drv.lng]),
+    }));
+
+    const COLLISION_PX = 28;
+    const clustered = new Set();
+    const collisionClusters = [];
+
+    for (let i = 0; i < driversWithPoints.length; i++) {
+      const start = driversWithPoints[i];
+      if (clustered.has(start.uid)) continue;
+
+      const cluster = [];
+      const queue = [start];
+      clustered.add(start.uid);
+
+      while (queue.length) {
+        const current = queue.pop();
+        cluster.push(current);
+
+        for (const candidate of driversWithPoints) {
+          if (clustered.has(candidate.uid)) continue;
+          if (current.basePoint.distanceTo(candidate.basePoint) > COLLISION_PX) continue;
+          clustered.add(candidate.uid);
+          queue.push(candidate);
+        }
+      }
+
+      cluster.sort((a, b) => a.uid.localeCompare(b.uid));
+      collisionClusters.push(cluster);
     }
 
-    for (const group of collisionGroups.values()) {
-      group.sort((a, b) => a.uid.localeCompare(b.uid));
+    for (const group of collisionClusters) {
 
       for (let idx = 0; idx < group.length; idx++) {
         const drv = group[idx];
@@ -1969,7 +1994,7 @@ async function pullPresenceAll() {
         let displayLat = drv.lat;
         let displayLng = drv.lng;
 
-        const basePoint = map.latLngToLayerPoint([drv.lat, drv.lng]);
+        const basePoint = drv.basePoint;
 
         if (selfPt) {
           const distPx = basePoint.distanceTo(selfPt);
