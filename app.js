@@ -18,6 +18,7 @@ const PRESENCE_STALE_SEC = 70;         // hide if older than this
 
 const LS_TOKEN = "community_token_v1";
 const LS_EMAIL = "community_email_v1";
+const LS_DISPLAY_NAME = "community_display_name_v1";
 
 /* =========================================================
    MANHATTAN MODE — DEFAULT SETTINGS (SAFE TO EDIT)
@@ -1003,12 +1004,26 @@ let lastHeadingDeg = 0;
 let lastMoveTs = 0;
 
 function makeNavIcon() {
+  const myName = authHeaderOK() ? (me?.display_name || "") : "";
   return L.divIcon({
     className: "",
-    html: `<div id="navWrap" class="navArrowWrap navPulse"><div class="navArrow"></div></div>`,
+    html: `
+      <div id="navWrap" class="navArrowWrap navPulse">
+        <div id="navArrowRot" class="navArrowRot"><div class="navArrow"></div></div>
+        <div id="navMeName" class="meName" style="display:${myName ? "block" : "none"}">${escapeHtml(myName)}</div>
+      </div>
+    `,
     iconSize: [30, 30],
     iconAnchor: [15, 15],
   });
+}
+
+function refreshNavNameLabel() {
+  const el = document.getElementById("navMeName");
+  if (!el) return;
+  const myName = authHeaderOK() ? (me?.display_name || "") : "";
+  el.textContent = myName;
+  el.style.display = myName ? "block" : "none";
 }
 
 function setNavVisual(isMoving) {
@@ -1018,7 +1033,7 @@ function setNavVisual(isMoving) {
   el.classList.toggle("navPulse", !isMoving);
 }
 function setNavRotation(deg) {
-  const el = document.getElementById("navWrap");
+  const el = document.getElementById("navArrowRot");
   if (!el) return;
   el.style.transform = `rotate(${deg}deg)`;
 }
@@ -1599,10 +1614,13 @@ hot97Audio.addEventListener("error", () => {
 const lockedOverlay = document.getElementById("lockedOverlay");
 const authEmail = document.getElementById("authEmail");
 const authPass = document.getElementById("authPass");
+const authName = document.getElementById("authName");
+const authGhost = document.getElementById("authGhost");
 const btnLogin = document.getElementById("btnLogin");
 const btnSignup = document.getElementById("btnSignup");
 const authStatus = document.getElementById("authStatus");
 const btnAuth = document.getElementById("btnAuth");
+const btnGhostMode = document.getElementById("btnGhostMode");
 
 const btnPolice = document.getElementById("btnPolice");
 const btnPickup = document.getElementById("btnPickup");
@@ -1613,6 +1631,16 @@ let me = null;
 
 // other drivers markers
 const otherMarkers = new Map(); // user_id -> marker
+
+function syncGhostUI() {
+  const ghostOn = !!me?.ghost_mode;
+  if (btnGhostMode) {
+    btnGhostMode.textContent = ghostOn ? "Ghost Mode: ON" : "Ghost Mode: OFF";
+    btnGhostMode.classList.toggle("on", ghostOn);
+    btnGhostMode.classList.toggle("disabled", !authHeaderOK());
+  }
+  if (authGhost) authGhost.checked = ghostOn;
+}
 
 function setAuthUI(signedIn, note) {
   if (btnAuth) btnAuth.textContent = signedIn ? "Sign out" : "Sign in";
@@ -1631,8 +1659,11 @@ function setAuthUI(signedIn, note) {
   // buttons still exist, but are useful only if signed in
   if (btnPolice) btnPolice.classList.toggle("disabled", !signedIn);
   if (btnPickup) btnPickup.classList.toggle("disabled", !signedIn);
+  if (btnGhostMode) btnGhostMode.classList.toggle("disabled", !signedIn);
 
   if (authStatus) authStatus.textContent = note || (signedIn ? "Status: signed in" : "Status: signed out");
+  syncGhostUI();
+  refreshNavNameLabel();
 }
 
 function clearAuth() {
@@ -1652,6 +1683,9 @@ async function loadMe() {
   try {
     const data = await getJSONAuth("/me", communityToken);
     me = data || null;
+    if (me?.display_name) localStorage.setItem(LS_DISPLAY_NAME, me.display_name);
+    syncGhostUI();
+    refreshNavNameLabel();
     return me;
   } catch (e) {
     console.warn("/me failed:", e);
@@ -1660,7 +1694,42 @@ async function loadMe() {
   }
 }
 
-async function doLogin(email, password) {
+function safeName() {
+  return (authName && authName.value ? authName.value.trim() : "");
+}
+
+async function updateMeProfile(updates) {
+  if (!authHeaderOK()) return;
+  await postJSON("/me/update", updates, communityToken);
+  await loadMe();
+}
+
+async function applyPostAuthPreferences({ email, forceGhostSync, desiredGhostMode }) {
+  if (!authHeaderOK()) return;
+
+  const updates = {};
+  const typedName = safeName();
+  if (typedName && typedName !== (me?.display_name || "")) {
+    updates.display_name = typedName;
+  }
+  if (forceGhostSync) {
+    updates.ghost_mode = !!desiredGhostMode;
+  }
+
+  if (Object.keys(updates).length) {
+    await updateMeProfile(updates);
+  }
+
+  if (typedName) {
+    localStorage.setItem(LS_DISPLAY_NAME, typedName);
+  } else if (me?.display_name) {
+    localStorage.setItem(LS_DISPLAY_NAME, me.display_name);
+  } else if (email) {
+    localStorage.setItem(LS_DISPLAY_NAME, (email.split("@")[0] || "Driver"));
+  }
+}
+
+async function doLogin(email, password, desiredGhostMode) {
   const body = { email, password };
   const data = await postJSON("/auth/login", body, null);
   const token = data?.token || data?.access_token || "";
@@ -1669,11 +1738,12 @@ async function doLogin(email, password) {
   localStorage.setItem(LS_TOKEN, token);
   localStorage.setItem(LS_EMAIL, email);
   await loadMe();
+  await applyPostAuthPreferences({ email, forceGhostSync: true, desiredGhostMode });
   setAuthUI(true, `Status: signed in as ${me?.display_name || me?.email || email}`);
 }
 
-async function doSignup(email, password) {
-  const display_name = (email || "").split("@")[0] || "Driver";
+async function doSignup(email, password, desiredGhostMode) {
+  const display_name = safeName() || (email || "").split("@")[0] || "Driver";
   const body = { email, password, display_name };
   const data = await postJSON("/auth/signup", body, null);
   const token = data?.token || data?.access_token || "";
@@ -1682,6 +1752,7 @@ async function doSignup(email, password) {
   localStorage.setItem(LS_TOKEN, token);
   localStorage.setItem(LS_EMAIL, email);
   await loadMe();
+  await applyPostAuthPreferences({ email, forceGhostSync: true, desiredGhostMode });
   setAuthUI(true, `Status: account created • signed in as ${me?.display_name || me?.email || email}`);
 }
 
@@ -1693,15 +1764,17 @@ function safePass() {
 }
 
 if (authEmail) authEmail.value = localStorage.getItem(LS_EMAIL) || "";
+if (authName) authName.value = localStorage.getItem(LS_DISPLAY_NAME) || "";
 
 if (btnLogin) {
   btnLogin.addEventListener("click", async () => {
     try {
       const email = safeEmail();
       const password = safePass();
+      const desiredGhostMode = !!(authGhost && authGhost.checked);
       if (!email || !password) throw new Error("Enter email + password.");
       setAuthUI(false, "Signing in…");
-      await doLogin(email, password);
+      await doLogin(email, password, desiredGhostMode);
     } catch (e) {
       setAuthUI(false, `Sign in failed: ${e.message || e}`);
     }
@@ -1712,9 +1785,10 @@ if (btnSignup) {
     try {
       const email = safeEmail();
       const password = safePass();
+      const desiredGhostMode = !!(authGhost && authGhost.checked);
       if (!email || !password) throw new Error("Enter email + password.");
       setAuthUI(false, "Creating account…");
-      await doSignup(email, password);
+      await doSignup(email, password, desiredGhostMode);
     } catch (e) {
       setAuthUI(false, `Create account failed: ${e.message || e}`);
     }
@@ -1732,6 +1806,25 @@ if (btnAuth) {
     } else {
       // show overlay
       setAuthUI(false, "Status: signed out");
+    }
+  });
+}
+
+if (btnGhostMode) {
+  btnGhostMode.addEventListener("pointerdown", (e) => e.stopPropagation());
+  btnGhostMode.addEventListener("click", async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!authHeaderOK()) {
+      setAuthUI(false, "Sign in to toggle Ghost Mode.");
+      return;
+    }
+    try {
+      const nextGhost = !Boolean(me?.ghost_mode);
+      await updateMeProfile({ ghost_mode: nextGhost });
+      setAuthUI(true, `Status: signed in as ${me?.display_name || me?.email || "Driver"}`);
+    } catch (err) {
+      setAuthUI(true, `Ghost mode update failed: ${err.message || err}`);
     }
   });
 }
