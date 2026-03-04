@@ -1071,9 +1071,11 @@ function startLocationWatch() {
       const lat = pos.coords.latitude;
       const lng = pos.coords.longitude;
       const heading = pos.coords.heading;
+      const accuracy = pos.coords.accuracy;
       const ts = pos.timestamp || Date.now();
 
       userLatLng = { lat, lng };
+      lastGpsAccuracyM = (typeof accuracy === "number" && Number.isFinite(accuracy)) ? accuracy : null;
       if (navMarker) navMarker.setLatLng(userLatLng);
 
       let isMoving = false;
@@ -1114,7 +1116,7 @@ function startLocationWatch() {
       scheduleWeatherUpdateSoon();
 
       // community push (auth only)
-      communityMaybePushPresence(ts, heading);
+      communityMaybePushPresence(ts, heading, lastGpsAccuracyM);
     },
     (err) => {
       console.warn("Geolocation error:", err);
@@ -1628,9 +1630,21 @@ const communityNote = document.getElementById("communityNote");
 
 let communityToken = localStorage.getItem(LS_TOKEN) || "";
 let me = null;
+let lastGpsAccuracyM = null;
 
 // other drivers markers
 const otherMarkers = new Map(); // user_id -> marker
+
+const COLLISION_PIXEL_OFFSETS = [
+  [18, 0],
+  [-18, 0],
+  [0, 18],
+  [0, -18],
+  [13, 13],
+  [-13, 13],
+  [13, -13],
+  [-13, -13],
+];
 
 function syncGhostUI() {
   const ghostOn = !!me?.ghost_mode;
@@ -1829,11 +1843,12 @@ if (btnGhostMode) {
   });
 }
 
-function makeDriverIcon(name, headingDeg) {
+function makeDriverIcon(name, headingDeg, labelSide = "right") {
   const safe = (name || "Driver").trim() || "Driver";
   const rot = Number.isFinite(headingDeg) ? headingDeg : 0;
+  const labelClass = labelSide === "left" ? "labelLeft" : "labelRight";
   const html = `
-    <div class="otherDrvWrap">
+    <div class="otherDrvWrap ${labelClass}">
       <div class="otherArrowWrap" style="transform: rotate(${rot}deg)"><div class="otherArrow"></div></div>
       <div class="otherDrvName">${escapeHtml(safe)}</div>
     </div>
@@ -1853,19 +1868,19 @@ function clearOtherDrivers() {
   otherMarkers.clear();
 }
 
-function upsertDriverMarker(userId, name, lat, lng, heading) {
+function upsertDriverMarker(userId, name, lat, lng, heading, labelSide) {
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
   if (!userId) return;
 
   const existing = otherMarkers.get(userId);
   if (existing) {
     existing.setLatLng([lat, lng]);
-    existing.setIcon(makeDriverIcon(name || `Driver ${userId}`, heading));
+    existing.setIcon(makeDriverIcon(name || `Driver ${userId}`, heading, labelSide));
     return;
   }
 
   const mk = L.marker([lat, lng], {
-    icon: makeDriverIcon(name || `Driver ${userId}`, heading),
+    icon: makeDriverIcon(name || `Driver ${userId}`, heading, labelSide),
     interactive: false,
     pane: "communityPane",
     zIndexOffset: 1500000,
@@ -1884,6 +1899,7 @@ async function pullPresenceAll() {
     // expected list array; if wrapped, try .items
     const items = Array.isArray(list) ? list : (list?.items || []);
     const seen = new Set();
+    const visibleDrivers = [];
 
     for (const it of items) {
       const uid = String(it.user_id ?? it.userId ?? it.id ?? "");
@@ -1894,6 +1910,7 @@ async function pullPresenceAll() {
 
       const lat = Number(it.lat ?? it.latitude ?? NaN);
       const lng = Number(it.lng ?? it.longitude ?? NaN);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
 
       // staleness check
       const updated = Number(it.updated_at_unix ?? it.ts_unix ?? it.updated_at ?? NaN);
@@ -1903,8 +1920,38 @@ async function pullPresenceAll() {
 
       const name = it.display_name || it.name || it.email || "Driver";
       const heading = Number(it.heading ?? it.bearing ?? NaN);
-      upsertDriverMarker(uid, name, lat, lng, heading);
+      visibleDrivers.push({ uid, name, heading, lat, lng });
       seen.add(uid);
+    }
+
+    const collisionGroups = new Map();
+    for (const drv of visibleDrivers) {
+      const key = `${drv.lat.toFixed(6)},${drv.lng.toFixed(6)}`;
+      if (!collisionGroups.has(key)) collisionGroups.set(key, []);
+      collisionGroups.get(key).push(drv);
+    }
+
+    for (const group of collisionGroups.values()) {
+      group.sort((a, b) => a.uid.localeCompare(b.uid));
+
+      for (let idx = 0; idx < group.length; idx++) {
+        const drv = group[idx];
+        const labelSide = (idx % 2 === 0) ? "right" : "left";
+
+        let displayLat = drv.lat;
+        let displayLng = drv.lng;
+
+        if (group.length > 1) {
+          const basePoint = map.latLngToLayerPoint([drv.lat, drv.lng]);
+          const [offX, offY] = COLLISION_PIXEL_OFFSETS[idx % COLLISION_PIXEL_OFFSETS.length];
+          const adjustedPoint = L.point(basePoint.x + offX, basePoint.y + offY);
+          const adjustedLatLng = map.layerPointToLatLng(adjustedPoint);
+          displayLat = adjustedLatLng.lat;
+          displayLng = adjustedLatLng.lng;
+        }
+
+        upsertDriverMarker(drv.uid, drv.name, displayLat, displayLng, drv.heading, labelSide);
+      }
     }
 
     // remove markers not in latest response
@@ -1921,7 +1968,7 @@ async function pullPresenceAll() {
 }
 
 let lastPresencePushMs = 0;
-async function communityMaybePushPresence(tsMsOrUnix, heading) {
+async function communityMaybePushPresence(tsMsOrUnix, heading, accuracy) {
   if (!authHeaderOK()) return;
   if (!userLatLng) return;
 
@@ -1935,6 +1982,7 @@ async function communityMaybePushPresence(tsMsOrUnix, heading) {
       lat: userLatLng.lat,
       lng: userLatLng.lng,
       heading: (typeof heading === "number" && Number.isFinite(heading)) ? heading : null,
+      accuracy: (typeof accuracy === "number" && Number.isFinite(accuracy)) ? accuracy : null,
       ts_unix,
     }, communityToken);
   } catch (e) {
