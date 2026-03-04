@@ -1636,15 +1636,15 @@ let lastGpsAccuracyM = null;
 // other drivers markers
 const otherMarkers = new Map(); // user_id -> marker
 
-const COLLISION_PIXEL_OFFSETS = [
-  [18, 0],
-  [-18, 0],
-  [0, 18],
-  [0, -18],
-  [13, 13],
-  [-13, 13],
-  [13, -13],
-  [-13, -13],
+const LABEL_OFFSETS = [
+  [40, 0],
+  [-40, 0],
+  [0, 28],
+  [0, -28],
+  [30, 18],
+  [-30, 18],
+  [30, -18],
+  [-30, -18],
 ];
 
 const SELF_COLLISION_THRESHOLD_PX = 44;
@@ -1867,14 +1867,16 @@ if (btnGhostMode) {
   });
 }
 
-function makeDriverIcon(name, headingDeg, labelSide = "right") {
+function makeDriverIcon(name, headingDeg, labelSide = "right", labelDx = 0, labelDy = 0) {
   const safe = (name || "Driver").trim() || "Driver";
   const rot = Number.isFinite(headingDeg) ? headingDeg : 0;
+  const dx = Number.isFinite(labelDx) ? labelDx : 0;
+  const dy = Number.isFinite(labelDy) ? labelDy : 0;
   const labelClass = labelSide === "left" ? "labelLeft" : "labelRight";
   const html = `
     <div class="otherDrvWrap ${labelClass}">
       <div class="otherArrowWrap" style="transform: rotate(${rot}deg)"><div class="otherArrow"></div></div>
-      <div class="otherDrvName">${escapeHtml(safe)}</div>
+      <div class="otherDrvName" style="transform: translate(${dx}px, ${dy}px);">${escapeHtml(safe)}</div>
     </div>
   `;
   return L.divIcon({
@@ -1892,19 +1894,19 @@ function clearOtherDrivers() {
   otherMarkers.clear();
 }
 
-function upsertDriverMarker(userId, name, lat, lng, heading, labelSide) {
+function upsertDriverMarker(userId, name, lat, lng, heading, labelSide, labelDx = 0, labelDy = 0) {
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
   if (!userId) return;
 
   const existing = otherMarkers.get(userId);
   if (existing) {
     existing.setLatLng([lat, lng]);
-    existing.setIcon(makeDriverIcon(name || `Driver ${userId}`, heading, labelSide));
+    existing.setIcon(makeDriverIcon(name || `Driver ${userId}`, heading, labelSide, labelDx, labelDy));
     return;
   }
 
   const mk = L.marker([lat, lng], {
-    icon: makeDriverIcon(name || `Driver ${userId}`, heading, labelSide),
+    icon: makeDriverIcon(name || `Driver ${userId}`, heading, labelSide, labelDx, labelDy),
     interactive: false,
     pane: "communityPane",
     zIndexOffset: 1500000,
@@ -1991,38 +1993,28 @@ async function pullPresenceAll() {
         const drv = group[idx];
         let labelSide = (idx % 2 === 0) ? "right" : "left";
 
-        let displayLat = drv.lat;
-        let displayLng = drv.lng;
+        let labelDx = 0;
+        let labelDy = 0;
 
         const basePoint = drv.basePoint;
 
         if (selfPt) {
           const distPx = basePoint.distanceTo(selfPt);
           if (distPx < SELF_COLLISION_THRESHOLD_PX) {
-            const offX = (SELF_LABEL_SIDE === "right")
+            labelDx = (SELF_LABEL_SIDE === "right")
               ? -SELF_COLLISION_OFFSET_PX
               : SELF_COLLISION_OFFSET_PX;
-            const adjustedPoint = L.point(basePoint.x + offX, basePoint.y);
-            const adjustedLatLng = map.layerPointToLatLng(adjustedPoint);
-            displayLat = adjustedLatLng.lat;
-            displayLng = adjustedLatLng.lng;
-            labelSide = sideFromOffsetX(offX, SELF_LABEL_SIDE === "left" ? "right" : "left");
-
-            upsertDriverMarker(drv.uid, drv.name, displayLat, displayLng, drv.heading, labelSide);
-            continue;
+            labelDy = 0;
+            labelSide = sideFromOffsetX(labelDx, SELF_LABEL_SIDE === "left" ? "right" : "left");
           }
         }
 
-        if (group.length > 1) {
-          const [offX, offY] = COLLISION_PIXEL_OFFSETS[idx % COLLISION_PIXEL_OFFSETS.length];
-          const adjustedPoint = L.point(basePoint.x + offX, basePoint.y + offY);
-          const adjustedLatLng = map.layerPointToLatLng(adjustedPoint);
-          displayLat = adjustedLatLng.lat;
-          displayLng = adjustedLatLng.lng;
-          labelSide = sideFromOffsetX(offX, labelSide);
+        if (group.length > 1 && labelDx === 0 && labelDy === 0) {
+          [labelDx, labelDy] = LABEL_OFFSETS[idx % LABEL_OFFSETS.length];
+          labelSide = sideFromOffsetX(labelDx, labelSide);
         }
 
-        upsertDriverMarker(drv.uid, drv.name, displayLat, displayLng, drv.heading, labelSide);
+        upsertDriverMarker(drv.uid, drv.name, drv.lat, drv.lng, drv.heading, labelSide, labelDx, labelDy);
       }
     }
 
