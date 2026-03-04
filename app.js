@@ -1,5 +1,7 @@
 /* =========================================================
    NYC TLC Hotspot Map (Frontend) - SIMPLE + STABLE
+   + Community arrows (like your GPS arrow)
+   + Username (no emails shown on map)
    ========================================================= */
 
 const RAILWAY_BASE = "https://web-production-78f67.up.railway.app";
@@ -18,6 +20,7 @@ const PRESENCE_STALE_SEC = 70;         // hide if older than this
 
 const LS_TOKEN = "community_token_v1";
 const LS_EMAIL = "community_email_v1";
+const LS_NAME  = "community_name_v1";  // ✅ public username shown on map (NOT email)
 
 /* =========================================================
    MANHATTAN MODE — DEFAULT SETTINGS (SAFE TO EDIT)
@@ -995,6 +998,7 @@ map.on("zoomstart", disableAutoCenterBecauseUserIsExploring);
 
 /* =========================================================
    Live location arrow + follow behavior
+   + ✅ show YOUR username next to YOUR arrow
    ========================================================= */
 let gpsFirstFixDone = false;
 let navMarker = null;
@@ -1002,12 +1006,45 @@ let lastPos = null;
 let lastHeadingDeg = 0;
 let lastMoveTs = 0;
 
-function makeNavIcon() {
+function getMyPublicName() {
+  const n = (localStorage.getItem(LS_NAME) || "").trim();
+  if (n && !n.includes("@")) return n.slice(0, 18);
+  return "Me";
+}
+
+function makeMyNavIcon(name, headingDeg) {
+  const safeName = (name || "Me").trim() || "Me";
+  const rot = (typeof headingDeg === "number" && Number.isFinite(headingDeg)) ? headingDeg : 0;
+
+  // ✅ Uses your existing classes: navArrowWrap + navArrow
+  // Arrow rotates, label does not.
   return L.divIcon({
     className: "",
-    html: `<div id="navWrap" class="navArrowWrap navPulse"><div class="navArrow"></div></div>`,
-    iconSize: [30, 30],
-    iconAnchor: [15, 15],
+    html: `
+      <div style="position:relative; width:44px; height:44px;">
+        <div id="navWrap" class="navArrowWrap navPulse"
+             style="position:absolute; left:7px; top:7px; transform: rotate(${rot}deg);">
+          <div class="navArrow"></div>
+        </div>
+
+        <div style="
+          position:absolute;
+          left:40px;
+          top:12px;
+          padding:2px 6px;
+          border-radius:10px;
+          background: rgba(255,255,255,0.92);
+          border: 1px solid rgba(0,0,0,0.15);
+          font: 800 12px/1 system-ui,-apple-system,Segoe UI,Roboto,Arial;
+          white-space:nowrap;
+          pointer-events:none;
+        ">
+          ${escapeHtml(safeName)}
+        </div>
+      </div>
+    `,
+    iconSize: [44, 44],
+    iconAnchor: [22, 22],
   });
 }
 
@@ -1017,11 +1054,7 @@ function setNavVisual(isMoving) {
   el.classList.toggle("navMoving", !!isMoving);
   el.classList.toggle("navPulse", !isMoving);
 }
-function setNavRotation(deg) {
-  const el = document.getElementById("navWrap");
-  if (!el) return;
-  el.style.transform = `rotate(${deg}deg)`;
-}
+
 function computeBearingDeg(from, to) {
   const toRad = (x) => (x * Math.PI) / 180;
   const toDeg = (x) => (x * 180) / Math.PI;
@@ -1044,8 +1077,10 @@ function startLocationWatch() {
     return;
   }
 
+  const myName = getMyPublicName();
+
   navMarker = L.marker([40.7128, -74.0060], {
-    icon: makeNavIcon(),
+    icon: makeMyNavIcon(myName, 0),
     interactive: false,
     zIndexOffset: 2000000,
     pane: "navPane",
@@ -1081,7 +1116,8 @@ function startLocationWatch() {
 
       lastPos = { lat, lng, ts };
 
-      setNavRotation(lastHeadingDeg);
+      // ✅ update my icon rotation + label
+      if (navMarker) navMarker.setIcon(makeMyNavIcon(getMyPublicName(), lastHeadingDeg));
       setNavVisual(isMoving);
 
       if (!gpsFirstFixDone) {
@@ -1595,6 +1631,9 @@ hot97Audio.addEventListener("error", () => {
 
 /* =========================================================
    COMMUNITY (AUTH + PRESENCE + POLICE + PICKUP)
+   - ✅ username prompt (public name)
+   - ✅ no emails displayed on map
+   - ✅ other users shown as arrow + name label (like you)
    ========================================================= */
 const lockedOverlay = document.getElementById("lockedOverlay");
 const authEmail = document.getElementById("authEmail");
@@ -1628,11 +1667,17 @@ function setAuthUI(signedIn, note) {
     lockedOverlay.setAttribute("aria-hidden", showLock ? "false" : "true");
   }
 
-  // buttons still exist, but are useful only if signed in
   if (btnPolice) btnPolice.classList.toggle("disabled", !signedIn);
   if (btnPickup) btnPickup.classList.toggle("disabled", !signedIn);
 
   if (authStatus) authStatus.textContent = note || (signedIn ? "Status: signed in" : "Status: signed out");
+}
+
+function clearOtherDrivers() {
+  for (const m of otherMarkers.values()) {
+    try { m.remove(); } catch {}
+  }
+  otherMarkers.clear();
 }
 
 function clearAuth() {
@@ -1645,6 +1690,29 @@ function clearAuth() {
 
 function authHeaderOK() {
   return communityToken && communityToken.length > 10;
+}
+
+function safeEmail() {
+  return (authEmail && authEmail.value ? authEmail.value.trim() : (localStorage.getItem(LS_EMAIL) || "").trim());
+}
+function safePass() {
+  return (authPass && authPass.value ? authPass.value : "");
+}
+
+/* ✅ public username selection (NOT email) */
+function chooseUsername(forcePrompt = false) {
+  const current = (localStorage.getItem(LS_NAME) || "").trim();
+  const email = safeEmail();
+  const suggested = ((email || "").split("@")[0] || "Driver").slice(0, 18);
+
+  if (!forcePrompt && current.length >= 2 && !current.includes("@")) return current;
+
+  const name = prompt("Choose a username to show on the map (email will NOT be shown):", current || suggested);
+  const cleaned = String(name || "").trim().slice(0, 18);
+
+  const finalName = (cleaned.length >= 2 && !cleaned.includes("@")) ? cleaned : (current && !current.includes("@") ? current : suggested);
+  localStorage.setItem(LS_NAME, finalName);
+  return finalName;
 }
 
 async function loadMe() {
@@ -1668,28 +1736,21 @@ async function doLogin(email, password) {
   communityToken = token;
   localStorage.setItem(LS_TOKEN, token);
   localStorage.setItem(LS_EMAIL, email);
+
   await loadMe();
-  setAuthUI(true, `Status: signed in as ${me?.display_name || me?.email || email}`);
+
+  const pub = (localStorage.getItem(LS_NAME) || "").trim();
+  setAuthUI(true, `Status: signed in as ${pub || "Driver"}`);
 }
 
+/* ✅ your backend /auth/signup does NOT return a token.
+   So: signup -> then login automatically. */
 async function doSignup(email, password) {
-  const display_name = (email || "").split("@")[0] || "Driver";
-  const body = { email, password, display_name };
+  const body = { email, password };
   const data = await postJSON("/auth/signup", body, null);
-  const token = data?.token || data?.access_token || "";
-  if (!token) throw new Error("Signup success but token missing.");
-  communityToken = token;
-  localStorage.setItem(LS_TOKEN, token);
-  localStorage.setItem(LS_EMAIL, email);
-  await loadMe();
-  setAuthUI(true, `Status: account created • signed in as ${me?.display_name || me?.email || email}`);
-}
-
-function safeEmail() {
-  return (authEmail && authEmail.value ? authEmail.value.trim() : (localStorage.getItem(LS_EMAIL) || "").trim());
-}
-function safePass() {
-  return (authPass && authPass.value ? authPass.value : "");
+  if (!data?.ok) throw new Error("Signup failed.");
+  await doLogin(email, password);
+  setAuthUI(true, "Status: account created • signed in");
 }
 
 if (authEmail) authEmail.value = localStorage.getItem(LS_EMAIL) || "";
@@ -1700,6 +1761,9 @@ if (btnLogin) {
       const email = safeEmail();
       const password = safePass();
       if (!email || !password) throw new Error("Enter email + password.");
+
+      chooseUsername(true);
+
       setAuthUI(false, "Signing in…");
       await doLogin(email, password);
     } catch (e) {
@@ -1707,12 +1771,16 @@ if (btnLogin) {
     }
   });
 }
+
 if (btnSignup) {
   btnSignup.addEventListener("click", async () => {
     try {
       const email = safeEmail();
       const password = safePass();
       if (!email || !password) throw new Error("Enter email + password.");
+
+      chooseUsername(true);
+
       setAuthUI(false, "Creating account…");
       await doSignup(email, password);
     } catch (e) {
@@ -1727,56 +1795,82 @@ if (btnAuth) {
     e.preventDefault();
     e.stopPropagation();
     if (authHeaderOK()) {
-      // sign out
       clearAuth();
     } else {
-      // show overlay
       setAuthUI(false, "Status: signed out");
     }
   });
 }
 
-function makeDriverIcon(name) {
-  const safe = (name || "Driver").trim() || "Driver";
+/* =========================================================
+   ✅ Other drivers: arrow + name label (NO email)
+   NOTE: backend currently returns email only for others.
+   We NEVER show it. We display "Driver <id>" unless backend
+   later adds display_name.
+   ========================================================= */
+function sanitizePublicName(raw, uid) {
+  const s = String(raw || "").trim();
+  if (!s) return `Driver ${uid}`;
+  if (s.includes("@")) return `Driver ${uid}`; // never show email
+  return s.length > 16 ? (s.slice(0, 16) + "…") : s;
+}
+
+function makeOtherDriverArrowIcon(publicName, headingDeg) {
+  const name = String(publicName || "Driver").trim() || "Driver";
+  const rot = (typeof headingDeg === "number" && Number.isFinite(headingDeg)) ? headingDeg : 0;
+
   const html = `
-    <div class="drvWrap">
-      <div class="drvDot"></div>
-      <div class="drvName">${escapeHtml(safe)}</div>
+    <div style="position:relative; width:44px; height:44px;">
+      <div class="navArrowWrap navPulse" style="position:absolute; left:7px; top:7px; transform: rotate(${rot}deg);">
+        <div class="navArrow"></div>
+      </div>
+
+      <div style="
+        position:absolute;
+        left:40px;
+        top:12px;
+        padding:2px 6px;
+        border-radius:10px;
+        background: rgba(255,255,255,0.92);
+        border: 1px solid rgba(0,0,0,0.15);
+        font: 700 12px/1 system-ui,-apple-system,Segoe UI,Roboto,Arial;
+        white-space:nowrap;
+        pointer-events:none;
+      ">
+        ${escapeHtml(name)}
+      </div>
     </div>
   `;
+
   return L.divIcon({
     className: "",
     html,
-    iconSize: [10, 10],
-    iconAnchor: [5, 5],
+    iconSize: [44, 44],
+    iconAnchor: [22, 22],
   });
 }
 
-function clearOtherDrivers() {
-  for (const m of otherMarkers.values()) {
-    try { m.remove(); } catch {}
-  }
-  otherMarkers.clear();
-}
-
-function upsertDriverMarker(userId, name, lat, lng) {
+function upsertDriverMarker(userId, publicName, lat, lng, headingDeg) {
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
   if (!userId) return;
 
-  const existing = otherMarkers.get(userId);
+  const uid = String(userId);
+
+  const existing = otherMarkers.get(uid);
   if (existing) {
     existing.setLatLng([lat, lng]);
+    existing.setIcon(makeOtherDriverArrowIcon(publicName, headingDeg));
     return;
   }
 
   const mk = L.marker([lat, lng], {
-    icon: makeDriverIcon(name || `Driver ${userId}`),
+    icon: makeOtherDriverArrowIcon(publicName, headingDeg),
     interactive: false,
     pane: "communityPane",
     zIndexOffset: 1500000,
   }).addTo(map);
 
-  otherMarkers.set(userId, mk);
+  otherMarkers.set(uid, mk);
 }
 
 async function pullPresenceAll() {
@@ -1786,7 +1880,6 @@ async function pullPresenceAll() {
     const list = await getJSONAuth("/presence/all", communityToken);
     const now = Date.now() / 1000;
 
-    // expected list array; if wrapped, try .items
     const items = Array.isArray(list) ? list : (list?.items || []);
     const seen = new Set();
 
@@ -1794,24 +1887,28 @@ async function pullPresenceAll() {
       const uid = String(it.user_id ?? it.userId ?? it.id ?? "");
       if (!uid) continue;
 
-      // hide self
-      if (me && (String(me.id) === uid)) continue;
+      // hide self (if /me has id; if not, still safe)
+      if (me && me.id != null && String(me.id) === uid) continue;
 
       const lat = Number(it.lat ?? it.latitude ?? NaN);
       const lng = Number(it.lng ?? it.longitude ?? NaN);
 
-      // staleness check
       const updated = Number(it.updated_at_unix ?? it.ts_unix ?? it.updated_at ?? NaN);
       if (Number.isFinite(updated)) {
         if ((now - updated) > PRESENCE_STALE_SEC) continue;
       }
 
-      const name = it.display_name || it.name || it.email || "Driver";
-      upsertDriverMarker(uid, name, lat, lng);
+      const heading = Number(it.heading ?? NaN);
+      const headingDeg = Number.isFinite(heading) ? heading : 0;
+
+      // Backend currently returns email only -> we mask it.
+      const rawName = it.display_name || it.name || it.username || it.email || "";
+      const name = sanitizePublicName(rawName, uid);
+
+      upsertDriverMarker(uid, name, lat, lng, headingDeg);
       seen.add(uid);
     }
 
-    // remove markers not in latest response
     for (const uid of Array.from(otherMarkers.keys())) {
       if (!seen.has(uid)) {
         const mk = otherMarkers.get(uid);
@@ -1834,12 +1931,11 @@ async function communityMaybePushPresence(tsMsOrUnix, heading) {
   lastPresencePushMs = nowMs;
 
   try {
-    const ts_unix = Math.floor((tsMsOrUnix ? Number(tsMsOrUnix) : Date.now()) / 1000);
     await postJSON("/presence/update", {
       lat: userLatLng.lat,
       lng: userLatLng.lng,
       heading: (typeof heading === "number" && Number.isFinite(heading)) ? heading : null,
-      ts_unix,
+      accuracy: null,
     }, communityToken);
   } catch (e) {
     console.warn("presence/update failed:", e);
@@ -1865,7 +1961,6 @@ function nearestZoneToUser(frame, latlng) {
       };
     }
   }
-  // if somehow super far, still return (NYC-wide)
   return best;
 }
 
@@ -1880,11 +1975,10 @@ async function sendPoliceReport() {
   }
 
   try {
-    const ts_unix = Math.floor(Date.now() / 1000);
     await postJSON("/events/police", {
       lat: userLatLng.lat,
       lng: userLatLng.lng,
-      ts_unix,
+      note: "",
     }, communityToken);
 
     alert("Police report sent to community ✅");
@@ -1903,17 +1997,12 @@ async function sendPickupLog() {
     return;
   }
   try {
-    const ts_unix = Math.floor(Date.now() / 1000);
     const near = nearestZoneToUser(currentFrame, userLatLng);
 
     await postJSON("/events/pickup", {
       lat: userLatLng.lat,
       lng: userLatLng.lng,
-      ts_unix,
-      frame_time: currentFrame?.time || null,
-      location_id: near?.location_id ?? null,
-      zone_name: near?.zone_name ?? null,
-      borough: near?.borough ?? null,
+      zone_id: near?.location_id ?? null,
     }, communityToken);
 
     const label = near?.zone_name ? `${near.zone_name}${near.borough ? ` (${near.borough})` : ""}` : "your location";
@@ -1961,7 +2050,8 @@ loadTimeline().catch((err) => {
     setAuthUI(true, "Checking session…");
     await loadMe();
     if (authHeaderOK()) {
-      setAuthUI(true, `Status: signed in as ${me?.display_name || me?.email || "Driver"}`);
+      const pub = (localStorage.getItem(LS_NAME) || "").trim();
+      setAuthUI(true, `Status: signed in as ${pub || "Driver"}`);
       pullPresenceAll().catch(() => {});
     } else {
       setAuthUI(false, "Status: signed out");
