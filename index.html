@@ -587,16 +587,22 @@
        Other drivers markers (arrow + name)
        ========================================================= */
     .otherDrvWrap{
+      position: relative;
+      width: 40px;
+      height: 40px;
       display:flex;
       align-items:center;
+      justify-content:center;
       gap:6px;
+      overflow: visible;
       pointer-events: none;
     }
-    .otherDrvWrap.labelLeft{ flex-direction: row-reverse; }
-    .otherDrvWrap.labelRight{ flex-direction: row; }
     .otherArrowWrap{
-      width: 18px;
-      height: 18px;
+      width: 40px;
+      height: 40px;
+      position: absolute;
+      left: 0;
+      top: 0;
       display:flex;
       align-items:center;
       justify-content:center;
@@ -611,6 +617,9 @@
       filter: drop-shadow(0 1px 1px rgba(0,0,0,0.35));
     }
     .otherDrvName{
+      position: absolute;
+      left: 20px;
+      top: 20px;
       display: inline-block;
       font-size: 11px;
       font-weight: 950;
