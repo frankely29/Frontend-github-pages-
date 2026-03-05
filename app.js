@@ -393,7 +393,7 @@ if (btnManhattan) {
     manhattanMode = !manhattanMode;
     localStorage.setItem(LS_KEY_MANHATTAN, manhattanMode ? "1" : "0");
     syncManhattanUI();
-    if (currentFrame) renderFrame(currentFrame);
+    if (currentFrame) renderFrame(currentFrame).catch(console.error);
   });
 }
 
@@ -566,7 +566,7 @@ if (btnStatenIsland) {
     statenIslandMode = !statenIslandMode;
     localStorage.setItem(LS_KEY_STATEN, statenIslandMode ? "1" : "0");
     syncStatenIslandUI();
-    if (currentFrame) renderFrame(currentFrame);
+    if (currentFrame) renderFrame(currentFrame).catch(console.error);
   });
 }
 
@@ -781,11 +781,46 @@ const map = new maplibregl.Map({
 });
 map.addControl(new maplibregl.NavigationControl(), "top-right");
 
+const MAP_READY_TIMEOUT_MS = 10_000;
+let mapReadySettled = false;
+let mapLoadSeen = false;
 let mapReadyResolve;
-const mapReady = new Promise((resolve) => { mapReadyResolve = resolve; });
-map.on("load", () => {
-  ensureMapDataLayers();
+let mapReadyReject;
+let mapInitError = null;
+
+const mapReadyPromise = new Promise((resolve, reject) => {
+  mapReadyResolve = resolve;
+  mapReadyReject = reject;
+});
+
+function settleMapReadyOk() {
+  if (mapReadySettled) return;
+  mapReadySettled = true;
   mapReadyResolve();
+}
+
+function settleMapReadyErr(err) {
+  if (mapReadySettled) return;
+  mapReadySettled = true;
+  mapInitError = err;
+  mapReadyReject(err);
+}
+
+const mapReadyTimer = setTimeout(() => {
+  settleMapReadyErr(new Error(`Map did not finish initializing within ${Math.round(MAP_READY_TIMEOUT_MS / 1000)}s.`));
+}, MAP_READY_TIMEOUT_MS);
+
+map.on("load", () => {
+  mapLoadSeen = true;
+  clearTimeout(mapReadyTimer);
+  settleMapReadyOk();
+});
+
+map.on("error", (e) => {
+  if (mapLoadSeen) return;
+  const reason = e?.error?.message || e?.message || "Unknown map initialization error.";
+  clearTimeout(mapReadyTimer);
+  settleMapReadyErr(new Error(reason));
 });
 
 let timeline = [];
@@ -794,6 +829,7 @@ let currentFrame = null;
 let lastUserSliderTs = 0;
 let boroughLabelAnchors = null;
 let zonePopup = null;
+let mapInteractionHandlersBound = false;
 
 function clamp(v, min, max) {
   return Math.max(min, Math.min(max, v));
@@ -880,6 +916,10 @@ function boroughAnchorsToGeoJSON(anchors) {
 }
 
 function ensureMapDataLayers() {
+  if (!map || !map.isStyleLoaded()) {
+    throw new Error("Map style is not ready.");
+  }
+
   if (!map.getSource(ZONE_SOURCE_ID)) {
     map.addSource(ZONE_SOURCE_ID, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
   }
@@ -963,21 +1003,31 @@ function ensureMapDataLayers() {
     });
   }
 
-  map.on("click", ZONE_FILL_LAYER_ID, (e) => {
-    const feature = e.features?.[0];
-    if (!feature) return;
-    if (zonePopup) zonePopup.remove();
-    zonePopup = new maplibregl.Popup({ maxWidth: "320px" })
-      .setLngLat(e.lngLat)
-      .setHTML(buildPopupHTML(feature.properties || {}, feature.geometry))
-      .addTo(map);
-  });
+  if (!mapInteractionHandlersBound) {
+    mapInteractionHandlersBound = true;
 
-  map.on("mouseenter", ZONE_FILL_LAYER_ID, () => { map.getCanvas().style.cursor = "pointer"; });
-  map.on("mouseleave", ZONE_FILL_LAYER_ID, () => { map.getCanvas().style.cursor = ""; });
+    map.on("click", ZONE_FILL_LAYER_ID, (e) => {
+      const feature = e.features?.[0];
+      if (!feature) return;
+      if (zonePopup) zonePopup.remove();
+      zonePopup = new maplibregl.Popup({ maxWidth: "320px" })
+        .setLngLat(e.lngLat)
+        .setHTML(buildPopupHTML(feature.properties || {}, feature.geometry))
+        .addTo(map);
+    });
+
+    map.on("mouseenter", ZONE_FILL_LAYER_ID, () => { map.getCanvas().style.cursor = "pointer"; });
+    map.on("mouseleave", ZONE_FILL_LAYER_ID, () => { map.getCanvas().style.cursor = ""; });
+  }
 }
 
 function updateMapFrameSources(frame) {
+  if (!map || !map.isStyleLoaded()) {
+    throw new Error("Map style is not ready for frame rendering.");
+  }
+
+  ensureMapDataLayers();
+
   const styled = frameToStyledGeoJSON(frame);
   const zoneSource = map.getSource(ZONE_SOURCE_ID);
   if (zoneSource) zoneSource.setData(styled);
@@ -1072,23 +1122,31 @@ function buildPopupHTML(props, geom) {
   `;
 }
 
-function renderFrame(frame) {
+async function renderFrame(frame) {
   currentFrame = frame;
 
   if (statenIslandMode) applyStatenLocalView(currentFrame);
   if (manhattanMode) applyManhattanLocalView(currentFrame);
 
   timeLabel.textContent = formatNYCLabel(currentFrame.time);
-  updateMapFrameSources(currentFrame);
+  try {
+    await mapReadyPromise;
+    updateMapFrameSources(currentFrame);
+  } catch (err) {
+    if (mapInitError) {
+      timeLabel.textContent = `Error initializing map: ${mapInitError.message}`;
+    } else {
+      timeLabel.textContent = `Error rendering map data: ${err.message || err}`;
+    }
+  }
 
   updateRecommendation(currentFrame);
 }
 
 async function loadFrame(idx) {
-  await mapReady;
   loadNextFramePickupsMap(idx).catch(() => {});
   const frame = await fetchJSON(`${RAILWAY_BASE}/frame/${idx}`);
-  renderFrame(frame);
+  await renderFrame(frame);
 }
 
 async function loadTimeline() {
@@ -1108,7 +1166,10 @@ async function loadTimeline() {
 
   bubbleUpdateNow();
 
-  await loadFrame(idx);
+  loadFrame(idx).catch((err) => {
+    console.error(err);
+    timeLabel.textContent = `Error rendering map data: ${err.message || err}`;
+  });
 }
 
 map.on("zoomend", () => {
@@ -2337,6 +2398,13 @@ setNavDestination(null);
 loadTimeline().catch((err) => {
   console.error(err);
   timeLabel.textContent = `Error loading timeline: ${err.message}`;
+});
+
+mapReadyPromise.catch((err) => {
+  console.error("Map initialization failed:", err);
+  if (!timeline.length) {
+    timeLabel.textContent = `Error initializing map: ${err.message || err}`;
+  }
 });
 
 /* auth boot */
