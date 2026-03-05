@@ -844,6 +844,8 @@ if (mapContainerEl) {
 }
 
 const MAP_READY_TIMEOUT_MS = 10_000;
+const STYLE_READY_POLL_MS = 75;
+const STYLE_READY_TIMEOUT_MS = 7_000;
 let mapReadySettled = false;
 let mapLoadSeen = false;
 let mapReadyResolve;
@@ -854,6 +856,34 @@ const mapReadyPromise = new Promise((resolve, reject) => {
   mapReadyResolve = resolve;
   mapReadyReject = reject;
 });
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForStyleReady(timeoutMs = STYLE_READY_TIMEOUT_MS) {
+  if (!map) {
+    throw new Error("Map instance is not available");
+  }
+
+  if (map.isStyleLoaded()) {
+    console.log("DEBUG style gate: ready");
+    return;
+  }
+
+  console.log("DEBUG style gate: waiting");
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    await sleep(STYLE_READY_POLL_MS);
+    if (map.isStyleLoaded()) {
+      console.log("DEBUG style gate: ready");
+      return;
+    }
+  }
+
+  console.error("DEBUG style gate: timeout");
+  throw new Error("Map style is not ready");
+}
 
 function settleMapReadyOk() {
   if (mapReadySettled) return;
@@ -876,13 +906,17 @@ map.on("load", () => {
   mapLoadSeen = true;
   clearTimeout(mapReadyTimer);
   scheduleMapResizeSequence("map-load");
-  ensureDebugHardcodedPolygon();
+  ensureDebugHardcodedPolygon().catch((err) => {
+    console.error("ensureDebugHardcodedPolygon failed on load", err);
+  });
   settleMapReadyOk();
 });
 
 map.on("style.load", () => {
   scheduleMapResizeSequence("style-load");
-  ensureDebugHardcodedPolygon();
+  ensureDebugHardcodedPolygon().catch((err) => {
+    console.error("ensureDebugHardcodedPolygon failed on style.load", err);
+  });
 });
 
 map.on("error", (e) => {
@@ -1034,10 +1068,8 @@ function boroughAnchorsToGeoJSON(anchors) {
   };
 }
 
-function ensureMapDataLayers() {
-  if (!map || !map.isStyleLoaded()) {
-    throw new Error("Map style is not ready.");
-  }
+async function ensureMapDataLayers() {
+  await waitForStyleReady();
 
   if (!map.getSource(ZONE_SOURCE_ID)) {
     try {
@@ -1115,51 +1147,67 @@ function validateStyledFeatureCollection(styled) {
   return null;
 }
 
-function ensureDebugHardcodedPolygon() {
-  if (!map || !map.isStyleLoaded()) return;
+async function ensureDebugHardcodedPolygon() {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      await waitForStyleReady();
+      console.log("DEBUG map: style gate passed for hardcoded polygon");
 
-  if (!map.getSource(DEBUG_SOURCE_ID)) {
-    console.log("DEBUG map: adding hardcoded source");
-    map.addSource(DEBUG_SOURCE_ID, {
-      type: "geojson",
-      data: DEBUG_HARDCODED_POLYGON,
-    });
-    console.log("DEBUG map: hardcoded source added");
-  }
+      if (!map.getSource(DEBUG_SOURCE_ID)) {
+        console.log("DEBUG map: adding hardcoded source");
+        map.addSource(DEBUG_SOURCE_ID, {
+          type: "geojson",
+          data: DEBUG_HARDCODED_POLYGON,
+        });
+        console.log("DEBUG map: hardcoded source added");
+      }
 
-  if (!map.getLayer(DEBUG_FILL_LAYER_ID)) {
-    map.addLayer({
-      id: DEBUG_FILL_LAYER_ID,
-      type: "fill",
-      source: DEBUG_SOURCE_ID,
-      paint: {
-        "fill-color": "#ff00aa",
-        "fill-opacity": 0.35,
-      },
-    });
-    console.log("DEBUG map: hardcoded fill layer added");
-  }
+      if (!map.getLayer(DEBUG_FILL_LAYER_ID)) {
+        map.addLayer({
+          id: DEBUG_FILL_LAYER_ID,
+          type: "fill",
+          source: DEBUG_SOURCE_ID,
+          paint: {
+            "fill-color": "#ff00aa",
+            "fill-opacity": 0.35,
+          },
+        });
+        console.log("DEBUG map: hardcoded fill layer added");
+      }
 
-  if (!map.getLayer(DEBUG_LINE_LAYER_ID)) {
-    map.addLayer({
-      id: DEBUG_LINE_LAYER_ID,
-      type: "line",
-      source: DEBUG_SOURCE_ID,
-      paint: {
-        "line-color": "#ffffff",
-        "line-width": 2,
-      },
-    });
-    console.log("DEBUG map: hardcoded line layer added");
+      if (!map.getLayer(DEBUG_LINE_LAYER_ID)) {
+        map.addLayer({
+          id: DEBUG_LINE_LAYER_ID,
+          type: "line",
+          source: DEBUG_SOURCE_ID,
+          paint: {
+            "line-color": "#ffffff",
+            "line-width": 2,
+          },
+        });
+        console.log("DEBUG map: hardcoded line layer added");
+      }
+
+      return;
+    } catch (err) {
+      const msg = err?.message || "";
+      if (attempt === 0 && /style is not ready/i.test(msg)) {
+        console.warn("DEBUG style gate: retrying source/layer add");
+        await sleep(150);
+        continue;
+      }
+      throw err;
+    }
   }
 }
 
-function getGeoJSONSourceWithRecovery(sourceId, sourceName) {
+async function getGeoJSONSourceWithRecovery(sourceId, sourceName) {
+  await waitForStyleReady();
   let source = map.getSource(sourceId);
   if (source && typeof source.setData === "function") return source;
 
   console.error(`${sourceName} source missing or invalid before setData.`);
-  ensureMapDataLayers();
+  await ensureMapDataLayers();
 
   source = map.getSource(sourceId);
   if (!source || typeof source.setData !== "function") {
@@ -1168,13 +1216,11 @@ function getGeoJSONSourceWithRecovery(sourceId, sourceName) {
   return source;
 }
 
-function updateMapFrameSources(frame) {
-  if (!map || !map.isStyleLoaded()) {
-    throw new Error("Map style is not ready for frame rendering.");
-  }
+async function updateMapFrameSources(frame) {
+  await waitForStyleReady();
 
   try {
-    ensureMapDataLayers();
+    await ensureMapDataLayers();
     console.log("DEBUG render: ensureMapDataLayers ok");
 
     const styled = frameToStyledGeoJSON(frame);
@@ -1188,7 +1234,7 @@ function updateMapFrameSources(frame) {
 
     let zoneSource;
     try {
-      zoneSource = getGeoJSONSourceWithRecovery(ZONE_SOURCE_ID, "zones");
+      zoneSource = await getGeoJSONSourceWithRecovery(ZONE_SOURCE_ID, "zones");
       console.log("DEBUG render: zones source found");
     } catch (err) {
       console.error("DEBUG render failed at zones source found", err);
@@ -1303,8 +1349,9 @@ async function renderFrame(frame) {
   timeLabel.textContent = formatNYCLabel(currentFrame.time);
   try {
     await mapReadyPromise;
-    ensureMapDataLayers();
-    updateMapFrameSources(currentFrame);
+    await waitForStyleReady();
+    await ensureMapDataLayers();
+    await updateMapFrameSources(currentFrame);
     if (!renderFrame._firstVisibleRenderDone) {
       renderFrame._firstVisibleRenderDone = true;
       forceFirstVisibleMapRender();
