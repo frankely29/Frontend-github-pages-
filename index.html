@@ -617,32 +617,39 @@
       background: transparent;
       border: none;
       box-shadow: none;
-      color: rgba(21,34,47,0.92);
-      text-align: center;
       pointer-events: none;
+      text-align: center;
+    }
+    .zone-label .zn-wrap {
+      display: inline-block;
+      width: 0;
+      height: 0;
+      overflow: visible;
     }
     .zone-label .zn {
       display: inline-block;
-      background: rgba(255,255,255,0.36);
-      border: none;
-      border-radius: 2px;
-      padding: 0 2px;
       margin: 0;
-      white-space: nowrap;
-      max-width: 180px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      box-shadow: none;
+      padding: 0;
+      max-width: 98px;
+      white-space: normal;
+      word-break: keep-all;
+      overflow-wrap: break-word;
+      text-align: center;
+      line-height: 1.1;
       font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
-      font-size: 11px;
-      font-weight: 650;
-      letter-spacing: 0.1px;
-      line-height: 1.2;
+      font-size: 9px;
+      font-weight: 600;
+      letter-spacing: 0.15px;
+      text-transform: uppercase;
+      color: rgba(25,40,54,0.72);
+      background: transparent;
+      border: none;
+      border-radius: 0;
+      box-shadow: none;
       text-shadow:
-        0 1px 0 rgba(255,255,255,0.72),
-        0 -1px 0 rgba(255,255,255,0.5),
-        1px 0 0 rgba(255,255,255,0.5),
-        -1px 0 0 rgba(255,255,255,0.5);
+        0 0 1px rgba(255,255,255,0.85),
+        0 0 2px rgba(255,255,255,0.55);
+      transform-origin: 50% 50%;
     }
 
     .borough-label {

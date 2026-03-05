@@ -845,6 +845,118 @@ function renderBoroughLabels() {
 function buildZoneLabelAnchors(features) {
   const anchors = [];
 
+  function collectOuterRings(geom) {
+    if (!geom) return [];
+    if (geom.type === "Polygon") return [geom.coordinates?.[0] || []];
+    if (geom.type === "MultiPolygon") {
+      return (geom.coordinates || []).map((poly) => poly?.[0] || []);
+    }
+    return [];
+  }
+
+  function dominantAngleFromGeometry(geom) {
+    const rings = collectOuterRings(geom);
+    if (!rings.length) return 0;
+
+    let bestRing = null;
+    let bestArea = -1;
+    for (const ring of rings) {
+      const outer = ringCentroidArea(ring);
+      const area = outer ? Math.abs(outer.area2) : 0;
+      if (area > bestArea) {
+        bestArea = area;
+        bestRing = ring;
+      }
+    }
+    if (!bestRing || bestRing.length < 2) return 0;
+
+    let sumX = 0;
+    let sumY = 0;
+    for (let i = 0; i < bestRing.length - 1; i++) {
+      const [x0, y0] = bestRing[i];
+      const [x1, y1] = bestRing[i + 1];
+      const dx = x1 - x0;
+      const dy = y1 - y0;
+      const len = Math.hypot(dx, dy);
+      if (!Number.isFinite(len) || len < 1e-9) continue;
+
+      const theta2 = 2 * Math.atan2(dy, dx);
+      sumX += Math.cos(theta2) * len;
+      sumY += Math.sin(theta2) * len;
+    }
+
+    if (Math.abs(sumX) < 1e-9 && Math.abs(sumY) < 1e-9) return 0;
+    let angle = (Math.atan2(sumY, sumX) * 180) / Math.PI / 2;
+    if (angle > 90) angle -= 180;
+    if (angle < -90) angle += 180;
+    if (angle > 70) angle = 70;
+    if (angle < -70) angle = -70;
+    return Math.round(angle);
+  }
+
+  function boundsFromGeometry(geom) {
+    const rings = collectOuterRings(geom);
+    let minLng = Infinity;
+    let maxLng = -Infinity;
+    let minLat = Infinity;
+    let maxLat = -Infinity;
+
+    for (const ring of rings) {
+      for (const pt of ring || []) {
+        if (!Array.isArray(pt) || pt.length < 2) continue;
+        const lng = Number(pt[0]);
+        const lat = Number(pt[1]);
+        if (!Number.isFinite(lng) || !Number.isFinite(lat)) continue;
+        if (lng < minLng) minLng = lng;
+        if (lng > maxLng) maxLng = lng;
+        if (lat < minLat) minLat = lat;
+        if (lat > maxLat) maxLat = lat;
+      }
+    }
+
+    if (!Number.isFinite(minLng) || !Number.isFinite(maxLng) || !Number.isFinite(minLat) || !Number.isFinite(maxLat)) {
+      return null;
+    }
+    return {
+      width: Math.max(0, maxLng - minLng),
+      height: Math.max(0, maxLat - minLat),
+    };
+  }
+
+  function wrapZoneLabelText(zoneName, geom) {
+    const bounds = boundsFromGeometry(geom);
+    const ratio = bounds && bounds.height > 1e-9 ? bounds.width / bounds.height : 1;
+    const maxChars = Math.max(10, Math.min(18, Math.round(12 + Math.min(1.4, Math.max(0, ratio)) * 3)));
+
+    const words = zoneName
+      .split(/(\s+|\/)/)
+      .map((w) => w.trim())
+      .filter(Boolean);
+
+    if (words.length < 2 || zoneName.length <= maxChars) {
+      return { text: zoneName, maxChars };
+    }
+
+    let line1 = "";
+    let line2 = "";
+    for (const token of words) {
+      const candidate = line1 ? `${line1} ${token}` : token;
+      if (candidate.length <= maxChars || !line1) {
+        line1 = candidate;
+      } else {
+        line2 = line2 ? `${line2} ${token}` : token;
+      }
+    }
+
+    if (!line2) return { text: line1, maxChars };
+
+    if (line2.length > maxChars) {
+      line2 = `${line2.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
+    }
+
+    return { text: `${line1}\n${line2}`.trim(), maxChars };
+  }
+
   for (const f of features || []) {
     const props = f?.properties || {};
     const zoneName = (props.zone_name || "").trim();
@@ -857,6 +969,8 @@ function buildZoneLabelAnchors(features) {
       lat: center.lat,
       lng: center.lng,
       zoneName,
+      wrappedText: wrapZoneLabelText(zoneName, f.geometry).text,
+      angle: dominantAngleFromGeometry(f.geometry),
       id: props.LocationID ?? null,
     });
   }
@@ -876,12 +990,13 @@ function renderZoneLabels(features) {
 
   const anchors = buildZoneLabelAnchors(features);
   for (const z of anchors) {
+    const labelHtml = escapeHtml(z.wrappedText || z.zoneName).replaceAll("\n", "<br>");
     L.marker([z.lat, z.lng], {
       pane: "labelsPane",
       interactive: false,
       icon: L.divIcon({
         className: "zone-label",
-        html: `<div class="zn">${escapeHtml(z.zoneName)}</div>`,
+        html: `<div class="zn-wrap"><div class="zn" style="transform:rotate(${z.angle || 0}deg);">${labelHtml}</div></div>`,
       }),
     }).addTo(zoneLabelsLayer);
   }
