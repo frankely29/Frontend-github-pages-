@@ -805,7 +805,7 @@ const baseStyle = {
 
 const map = new maplibregl.Map({
   container: "map",
-  style: baseStyle,
+  style: "https://demotiles.maplibre.org/style.json",
   center: [-74.0060, 40.7128],
   zoom: 8,
 });
