@@ -1,6 +1,8 @@
 // BOOT_SIGNATURE: railway-frontend-v1
 /* =========================================================
-   NYC TLC Hotspot Map (Frontend) - SIMPLE + STABLE
+   NYC TLC Hotspot Map (Frontend) - SIMPLE + STABLE (MapLibre)
+   Restored: Staten Island Mode, Manhattan Mode, Ghost Mode,
+   Self GPS/nav arrow + auto-center, presence, slider, weather, radio.
    ========================================================= */
 
 const RAILWAY_BASE = "https://web-production-78f67.up.railway.app";
@@ -14,6 +16,7 @@ let map; // global MapLibre instance
 let pendingFrame = null;
 let mapReady = false;
 let didFitToZonesOnce = false;
+
 const debugOnce = {
   frame: false,
   mapCenter: false,
@@ -22,15 +25,17 @@ const debugOnce = {
   zonesSetData: false,
 };
 
-function dbg(id, text) { const el = document.getElementById(id); if (el) el.textContent = String(text || ""); }
-
+function dbg(id, text) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = String(text || "");
+}
 
 /* =========================================================
    COMMUNITY SETTINGS (cheap polling)
    ========================================================= */
-const PRESENCE_PUSH_MS = 8 * 1000;     // send my location
-const PRESENCE_PULL_MS = 10 * 1000;    // fetch all drivers
-const PRESENCE_STALE_SEC = 70;         // hide if older than this
+const PRESENCE_PUSH_MS = 8 * 1000; // send my location
+const PRESENCE_PULL_MS = 10 * 1000; // fetch all drivers
+const PRESENCE_STALE_SEC = 70; // hide if older than this
 
 const LS_TOKEN = "community_token_v1";
 const LS_EMAIL = "community_email_v1";
@@ -348,7 +353,7 @@ function ensureManhattanButton() {
   const navRow =
     document.getElementById("navRow") ||
     (legendEl ? legendEl.querySelector(".navRow") : null) ||
-    (legendEl ? legendEl : null);
+    legendEl;
 
   if (navRow) {
     if (btnStatenIsland && btnStatenIsland.parentElement === navRow) {
@@ -417,11 +422,15 @@ function applyStatenLocalView(frame) {
   const n = sorted.length;
 
   function percentileOfRating(r) {
-    let lo = 0, hi = n - 1, ans = -1;
+    let lo = 0,
+      hi = n - 1,
+      ans = -1;
     while (lo <= hi) {
       const mid = (lo + hi) >> 1;
-      if (sorted[mid] <= r) { ans = mid; lo = mid + 1; }
-      else hi = mid - 1;
+      if (sorted[mid] <= r) {
+        ans = mid;
+        lo = mid + 1;
+      } else hi = mid - 1;
     }
     if (n <= 1) return 0;
     return Math.max(0, Math.min(1, ans / (n - 1)));
@@ -484,11 +493,15 @@ function applyManhattanLocalView(frame) {
   function percentileFromSorted(sorted, v) {
     const n = sorted.length;
     if (n <= 1) return 0;
-    let lo = 0, hi = n - 1, ans = -1;
+    let lo = 0,
+      hi = n - 1,
+      ans = -1;
     while (lo <= hi) {
       const mid = (lo + hi) >> 1;
-      if (sorted[mid] <= v) { ans = mid; lo = mid + 1; }
-      else hi = mid - 1;
+      if (sorted[mid] <= v) {
+        ans = mid;
+        lo = mid + 1;
+      } else hi = mid - 1;
     }
     return Math.max(0, Math.min(1, ans / (n - 1)));
   }
@@ -601,6 +614,9 @@ function labelHTML(props, zoom) {
   `;
 }
 
+/* =========================================================
+   Map projection helpers (for collisions, etc.)
+   ========================================================= */
 function projectToPoint(lng, lat) {
   if (!map) return { x: 0, y: 0 };
   const p = map.project([lng, lat]);
@@ -610,75 +626,6 @@ function pointDistance(p1, p2) {
   const dx = p1.x - p2.x;
   const dy = p1.y - p2.y;
   return Math.sqrt(dx * dx + dy * dy);
-}
-
-function refreshZoneLabels() {
-  if (!map || !currentFrame) return;
-
-  const active = new Set();
-  const zoomNow = map.getZoom();
-  const zClass = zoomClass(zoomNow);
-
-  for (const feature of (currentFrame.polygons?.features || [])) {
-    const props = feature?.properties || {};
-    const locId = String(props.LocationID ?? "");
-    if (!locId) continue;
-
-    const html = labelHTML(props, zoomNow);
-    const center = geometryCenter(feature.geometry);
-    active.add(locId);
-
-    let marker = zoneLabelMarkers.get(locId);
-
-    if (!html || !center) {
-      if (marker) {
-        marker.remove();
-        zoneLabelMarkers.delete(locId);
-      }
-      continue;
-    }
-
-    if (!marker) {
-      const el = document.createElement("div");
-      el.className = `zone-label ${zClass}`;
-      el.style.opacity = "0.92";
-      el.innerHTML = html;
-      marker = new maplibregl.Marker({ element: el, anchor: "center", offset: [0, 0] })
-        .setLngLat([center.lng, center.lat])
-        .addTo(map);
-      marker.getElement().style.zIndex = "650";
-      zoneLabelMarkers.set(locId, marker);
-    } else {
-      const el = marker.getElement();
-      el.className = `zone-label ${zClass}`;
-      el.innerHTML = html;
-      marker.setLngLat([center.lng, center.lat]);
-    }
-  }
-
-  for (const [locId, marker] of Array.from(zoneLabelMarkers.entries())) {
-    if (!active.has(locId)) {
-      marker.remove();
-      zoneLabelMarkers.delete(locId);
-    }
-  }
-
-  updateZoneLabelVisibility();
-}
-
-function updateZoneLabelVisibility() {
-  if (!map) return;
-  const zoomNow = map.getZoom();
-  const zClass = zoomClass(zoomNow);
-
-  for (const marker of zoneLabelMarkers.values()) {
-    const el = marker.getElement();
-    el.classList.remove("z10", "z11", "z12", "z13", "z14", "z15");
-    el.classList.add(zClass);
-    const show = !!el.querySelector(".zn");
-    el.style.opacity = show ? "0.92" : "0";
-    el.style.display = show ? "block" : "none";
-  }
 }
 
 /* =========================================================
@@ -774,8 +721,8 @@ function updateRecommendation(frame) {
         lng: center.lng,
         name: (props.zone_name || "").trim() || `Zone ${props.LocationID ?? ""}`,
         borough: (props.borough || "").trim(),
-        usedSI: (statenIslandMode && isStatenIslandFeature(props) && Number.isFinite(Number(props.si_local_rating))),
-        usedMH: (manhattanMode && isCoreManhattan(props, geom) && Number.isFinite(Number(props.mh_local_rating))),
+        usedSI: statenIslandMode && isStatenIslandFeature(props) && Number.isFinite(Number(props.si_local_rating)),
+        usedMH: manhattanMode && isCoreManhattan(props, geom) && Number.isFinite(Number(props.mh_local_rating)),
       };
     }
   }
@@ -788,14 +735,14 @@ function updateRecommendation(frame) {
 
   const distTxt = best.dMi >= 10 ? `${best.dMi.toFixed(0)} mi` : `${best.dMi.toFixed(1)} mi`;
   const bTxt = best.borough ? ` (${best.borough})` : "";
-  const modeTag = best.usedSI ? " (SI-local)" : (best.usedMH ? " (Manhattan-adjusted)" : "");
+  const modeTag = best.usedSI ? " (SI-local)" : best.usedMH ? " (Manhattan-adjusted)" : "";
   recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Rating ${best.rating}${modeTag} — ${distTxt}`;
 
   setNavDestination({ lat: best.lat, lng: best.lng });
 }
 
 /* =========================================================
-   Map setup
+   Map setup + UI nodes
    ========================================================= */
 const slider = document.getElementById("slider");
 const timeLabel = document.getElementById("timeLabel");
@@ -803,9 +750,8 @@ const debugToggle = document.getElementById("debugToggle");
 const debugPanel = document.getElementById("debugPanel");
 const dbgReloadFrame = document.getElementById("dbgReloadFrame");
 
-
 /* =========================================================
-   PRECISION SLIDER POPUP
+   Precision Slider Popup
    ========================================================= */
 const sliderBubble = document.getElementById("sliderBubble");
 let bubbleHideTimer = null;
@@ -843,7 +789,6 @@ function bubbleUpdateNow() {
 }
 
 const debugEnabled = new URLSearchParams(window.location.search).get("debug") === "1";
-
 if (debugToggle && debugPanel) {
   if (debugEnabled) {
     debugToggle.hidden = false;
@@ -851,13 +796,11 @@ if (debugToggle && debugPanel) {
     debugToggle.hidden = true;
     debugPanel.hidden = true;
   }
-
   debugToggle.addEventListener("click", () => {
     if (!debugEnabled) return;
     debugPanel.hidden = !debugPanel.hidden;
   });
 }
-
 if (dbgReloadFrame) {
   dbgReloadFrame.addEventListener("click", () => {
     const idx = Number(slider?.value || "0");
@@ -866,43 +809,45 @@ if (dbgReloadFrame) {
 }
 
 /* =========================================================
-   Map
+   MapLibre init
    ========================================================= */
 const zoneLabelMarkers = new Map();
 let zonePopup = null;
 
 function initMap() {
   map = new maplibregl.Map({
-    container: 'map',
+    container: "map",
     style: {
       version: 8,
       sources: {
-        'carto-raster': {
-          type: 'raster',
+        "carto-raster": {
+          type: "raster",
           tiles: [
-            'https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
-            'https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
-            'https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png'
+            "https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+            "https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+            "https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
           ],
-          tileSize: 256
-        }
+          tileSize: 256,
+        },
       },
-      layers: [{
-        id: 'carto-base',
-        type: 'raster',
-        source: 'carto-raster',
-        paint: { 'raster-opacity': 1 }
-      }],
-      glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
-      sprite: ''
+      layers: [
+        {
+          id: "carto-base",
+          type: "raster",
+          source: "carto-raster",
+          paint: { "raster-opacity": 1 },
+        },
+      ],
+      glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
+      sprite: "",
     },
     center: [-73.98, 40.73],
     zoom: 10.5,
-    attributionControl: { position: 'bottom-right' },
-    localIdeographFontFamily: 'sans-serif'
+    attributionControl: { position: "bottom-right" },
+    localIdeographFontFamily: "sans-serif",
   });
 
-  map.on('load', () => {
+  map.on("load", () => {
     mapReady = true;
     map.resize();
 
@@ -914,10 +859,23 @@ function initMap() {
       debugOnce.mapCenter = true;
     }
 
-    map.on('zoomend', updateZoneLabelVisibility);
+    // Restore “user exploring disables auto-center” behavior
+    map.on("dragstart", disableAutoCenterBecauseUserIsExploring);
+    map.on("zoomstart", disableAutoCenterBecauseUserIsExploring);
 
-    const loading = document.getElementById('mapLoading');
-    if (loading) loading.style.display = 'none';
+    // Re-evaluate labels + presence layout on map changes
+    map.on("moveend", () => {
+      refreshZoneLabels();
+      if (authHeaderOK()) pullPresenceAll().catch(() => {});
+    });
+    map.on("zoomend", () => {
+      updateZoneLabelVisibility();
+      refreshZoneLabels();
+      if (authHeaderOK()) pullPresenceAll().catch(() => {});
+    });
+
+    const loading = document.getElementById("mapLoading");
+    if (loading) loading.style.display = "none";
 
     map.triggerRepaint();
     setTimeout(() => map.triggerRepaint(), 150);
@@ -930,8 +888,8 @@ function initMap() {
     }
   });
 
-  map.on('style.load', () => map.triggerRepaint());
-  map.on('error', e => console.error('MapLibre error:', e));
+  map.on("style.load", () => map.triggerRepaint());
+  map.on("error", (e) => console.error("MapLibre error:", e));
 }
 
 async function waitForStyleReady(timeoutMs = 5000) {
@@ -994,14 +952,88 @@ async function ensureZonesSourceAndLayers() {
 
   return true;
 }
+
+/* =========================================================
+   Zone labels as MapLibre markers (legacy behavior)
+   ========================================================= */
+function refreshZoneLabels() {
+  if (!map || !currentFrame) return;
+
+  const active = new Set();
+  const zoomNow = map.getZoom();
+  const zClass = zoomClass(zoomNow);
+
+  for (const feature of currentFrame.polygons?.features || []) {
+    const props = feature?.properties || {};
+    const locId = String(props.LocationID ?? "");
+    if (!locId) continue;
+
+    const html = labelHTML(props, zoomNow);
+    const center = geometryCenter(feature.geometry);
+    active.add(locId);
+
+    let marker = zoneLabelMarkers.get(locId);
+
+    if (!html || !center) {
+      if (marker) {
+        marker.remove();
+        zoneLabelMarkers.delete(locId);
+      }
+      continue;
+    }
+
+    if (!marker) {
+      const el = document.createElement("div");
+      el.className = `zone-label ${zClass}`;
+      el.style.opacity = "0.92";
+      el.innerHTML = html;
+      marker = new maplibregl.Marker({ element: el, anchor: "center", offset: [0, 0] })
+        .setLngLat([center.lng, center.lat])
+        .addTo(map);
+      marker.getElement().style.zIndex = "650";
+      zoneLabelMarkers.set(locId, marker);
+    } else {
+      const el = marker.getElement();
+      el.className = `zone-label ${zClass}`;
+      el.innerHTML = html;
+      marker.setLngLat([center.lng, center.lat]);
+    }
+  }
+
+  for (const [locId, marker] of Array.from(zoneLabelMarkers.entries())) {
+    if (!active.has(locId)) {
+      marker.remove();
+      zoneLabelMarkers.delete(locId);
+    }
+  }
+
+  updateZoneLabelVisibility();
+}
+
+function updateZoneLabelVisibility() {
+  if (!map) return;
+  const zoomNow = map.getZoom();
+  const zClass = zoomClass(zoomNow);
+
+  for (const marker of zoneLabelMarkers.values()) {
+    const el = marker.getElement();
+    el.classList.remove("z10", "z11", "z12", "z13", "z14", "z15");
+    el.classList.add(zClass);
+    const show = !!el.querySelector(".zn");
+    el.style.opacity = show ? "0.92" : "0";
+    el.style.display = show ? "block" : "none";
+  }
+}
+
+/* =========================================================
+   Timeline / frames
+   ========================================================= */
 let timeline = [];
 let minutesOfWeek = [];
 let currentFrame = null;
 let lastUserSliderTs = 0;
 
-/* =========================================================
-   NEXT BIN CACHE
-   ========================================================= */
+/* NEXT BIN CACHE */
 let nextFramePickupsById = new Map();
 let nextFramePayById = new Map();
 
@@ -1053,19 +1085,23 @@ function buildPopupHTML(props, geom) {
   const pay = props.avg_driver_pay == null ? "n/a" : props.avg_driver_pay.toFixed(2);
 
   const nextPuVal = nextFramePickupsById.get(String(props.LocationID ?? ""));
-  const nextPickups = (nextPuVal == null) ? "n/a" : String(Math.round(nextPuVal));
+  const nextPickups = nextPuVal == null ? "n/a" : String(Math.round(nextPuVal));
 
   const nextPayVal = nextFramePayById.get(String(props.LocationID ?? ""));
-  const nextPay = (nextPayVal == null) ? "n/a" : Number(nextPayVal).toFixed(2);
+  const nextPay = nextPayVal == null ? "n/a" : Number(nextPayVal).toFixed(2);
 
   let extra = "";
 
   if (statenIslandMode && isStatenIslandFeature(props) && Number.isFinite(Number(props.si_local_rating))) {
-    extra += `<div style="margin-top:6px;"><b>Staten Local Rating:</b> ${props.si_local_rating} (${prettyBucket(props.si_local_bucket)})</div>`;
+    extra += `<div style="margin-top:6px;"><b>Staten Local Rating:</b> ${props.si_local_rating} (${prettyBucket(
+      props.si_local_bucket
+    )})</div>`;
   }
 
   if (manhattanMode && isCoreManhattan(props, geom) && Number.isFinite(Number(props.mh_local_rating))) {
-    extra += `<div style="margin-top:6px;"><b>Manhattan Adjusted:</b> ${props.mh_local_rating} (${prettyBucket(props.mh_local_bucket)})</div>`;
+    extra += `<div style="margin-top:6px;"><b>Manhattan Adjusted:</b> ${props.mh_local_rating} (${prettyBucket(
+      props.mh_local_bucket
+    )})</div>`;
   }
 
   return `
@@ -1082,12 +1118,6 @@ function buildPopupHTML(props, geom) {
   `;
 }
 
-function getEffectiveColorForMap(feature) {
-  const props = feature?.properties || {};
-  const style = props?.style || {};
-  return props.effectiveColor || style.fillColor || style.color || "#66aaff";
-}
-
 function getFeatureCollectionBounds(fc) {
   if (!fc || !Array.isArray(fc.features) || fc.features.length === 0) return null;
 
@@ -1098,11 +1128,7 @@ function getFeatureCollectionBounds(fc) {
 
   const visitCoordinates = (coords) => {
     if (!Array.isArray(coords)) return;
-    if (
-      coords.length >= 2 &&
-      Number.isFinite(coords[0]) &&
-      Number.isFinite(coords[1])
-    ) {
+    if (coords.length >= 2 && Number.isFinite(coords[0]) && Number.isFinite(coords[1])) {
       const lng = coords[0];
       const lat = coords[1];
       if (lng < minLng) minLng = lng;
@@ -1135,15 +1161,20 @@ async function renderFrame(frame) {
   }
 
   currentFrame = frame;
+
+  // apply modes to mutate props (same as old)
   if (statenIslandMode) applyStatenLocalView(frame);
   if (manhattanMode) applyManhattanLocalView(frame);
 
   const fc = frame.polygons || { type: "FeatureCollection", features: [] };
-  fc.features.forEach((f) => {
+
+  // IMPORTANT FIX: always recompute effectiveColor each render
+  // so Staten/Manhattan toggles actually update zone colors.
+  for (const f of fc.features) {
     const props = f.properties || {};
-    const legacyModeColor = effectiveColor(props, f.geometry);
-    props.effectiveColor = props.effectiveColor || legacyModeColor || getEffectiveColorForMap(f);
-  });
+    const col = effectiveColor(props, f.geometry) || (props?.style?.fillColor || props?.style?.color) || "#66aaff";
+    props.effectiveColor = col;
+  }
 
   if (!debugOnce.frame) {
     console.log("DEBUG frame", { time: frame?.time, featureCount: fc.features.length });
@@ -1151,42 +1182,33 @@ async function renderFrame(frame) {
   }
 
   map.getSource("zones").setData(fc);
-  dbg("dbgSetData", `OK features=${fc.features.length}`);
-  dbg("dbgLayers", `source=${Boolean(map.getSource("zones"))} fill=${Boolean(map.getLayer("zones-fill"))} line=${Boolean(map.getLayer("zones-line"))}`);
-  console.log("DEBUG zones: setData done");
-  console.log("DEBUG zones: feature count", fc.features.length);
-  console.log("DEBUG zones: source exists", Boolean(map.getSource("zones")));
-  console.log("DEBUG zones: zones-fill exists", Boolean(map.getLayer("zones-fill")));
-  console.log("DEBUG zones: zones-line exists", Boolean(map.getLayer("zones-line")));
+
+  if (debugEnabled) {
+    dbg("dbgSetData", `OK features=${fc.features.length}`);
+    dbg(
+      "dbgLayers",
+      `source=${Boolean(map.getSource("zones"))} fill=${Boolean(map.getLayer("zones-fill"))} line=${Boolean(
+        map.getLayer("zones-line")
+      )}`
+    );
+  }
 
   const bounds = getFeatureCollectionBounds(fc);
-  if (bounds) {
-    dbg("dbgBounds", `${bounds.minLng},${bounds.minLat},${bounds.maxLng},${bounds.maxLat}`);
-  } else {
-    dbg("dbgBounds", "invalid");
+  if (debugEnabled) {
+    dbg("dbgBounds", bounds ? `${bounds.minLng},${bounds.minLat},${bounds.maxLng},${bounds.maxLat}` : "invalid");
   }
 
-  if (fc.features.length <= 0) {
-    console.log("DEBUG zones: feature count is 0 (nothing to render)");
-  } else if (!didFitToZonesOnce) {
-    if (bounds) {
-      map.fitBounds(
-        [[bounds.minLng, bounds.minLat], [bounds.maxLng, bounds.maxLat]],
-        { padding: 40, duration: 0 }
-      );
-      didFitToZonesOnce = true;
-    } else {
-      console.log("DEBUG zones: feature count is 0 (nothing to render)");
-    }
+  if (fc.features.length > 0 && !didFitToZonesOnce && bounds) {
+    map.fitBounds(
+      [
+        [bounds.minLng, bounds.minLat],
+        [bounds.maxLng, bounds.maxLat],
+      ],
+      { padding: 40, duration: 0 }
+    );
+    didFitToZonesOnce = true;
   }
-  dbg("dbgFit", didFitToZonesOnce);
-
-  if (!debugOnce.zonesSetData) {
-    debugOnce.zonesSetData = true;
-  }
-
-  map.resize();
-  map.triggerRepaint();
+  if (debugEnabled) dbg("dbgFit", didFitToZonesOnce);
 
   timeLabel.textContent = formatNYCLabel(currentFrame.time);
   refreshZoneLabels();
@@ -1196,51 +1218,45 @@ async function renderFrame(frame) {
 async function loadFrame(idx) {
   const frameUrl = `${RAILWAY_BASE}/frame/${idx}`;
   loadNextFramePickupsMap(idx).catch(() => {});
-  try {
-    const frame = await fetchJSON(frameUrl);
+  const frame = await fetchJSON(frameUrl);
+
+  if (debugEnabled) {
     dbg("dbgFrame", `OK ${frameUrl}`);
     dbg("dbgFrameKeys", Object.keys(frame || {}).join(", "));
     dbg("dbgPolyCount", frame?.polygons?.features?.length ?? 0);
-    await renderFrame(frame);
-  } catch (e) {
-    dbg("dbgFrame", `FAIL ${e?.message || e}`);
-    throw e;
   }
+
+  await renderFrame(frame);
 }
 
 async function loadTimeline() {
   const timelineUrl = `${RAILWAY_BASE}/timeline`;
-  try {
-    const t = await fetchJSON(timelineUrl);
-    timeline = Array.isArray(t) ? t : (t.timeline || []);
-    dbg("dbgTimeline", `OK ${timelineUrl} count=${timeline.length}`);
-    if (!timeline.length) throw new Error("Timeline empty. Run /generate once on Railway.");
+  const t = await fetchJSON(timelineUrl);
+  timeline = Array.isArray(t) ? t : t.timeline || [];
+  if (!timeline.length) throw new Error("Timeline empty. Run /generate once on Railway.");
 
-    minutesOfWeek = timeline.map(minuteOfWeekFromIso);
+  if (debugEnabled) dbg("dbgTimeline", `OK ${timelineUrl} count=${timeline.length}`);
 
-    slider.min = "0";
-    slider.max = String(timeline.length - 1);
-    slider.step = "1";
+  minutesOfWeek = timeline.map(minuteOfWeekFromIso);
 
-    const nowMinWeek = getNowNYCMinuteOfWeekRounded();
-    const idx = pickClosestIndex(minutesOfWeek, nowMinWeek);
-    slider.value = String(idx);
+  slider.min = "0";
+  slider.max = String(timeline.length - 1);
+  slider.step = "1";
 
-    bubbleUpdateNow();
+  const nowMinWeek = getNowNYCMinuteOfWeekRounded();
+  const idx = pickClosestIndex(minutesOfWeek, nowMinWeek);
+  slider.value = String(idx);
 
-    await loadFrame(idx);
-  } catch (e) {
-    dbg("dbgTimeline", `FAIL ${e?.message || e}`);
-    throw e;
-  }
+  bubbleUpdateNow();
+  await loadFrame(idx);
 }
 
 let sliderDebounce = null;
 
-slider.addEventListener("pointerdown", bubbleUpdateNow);
-slider.addEventListener("touchstart", bubbleUpdateNow, { passive: true });
+slider?.addEventListener("pointerdown", bubbleUpdateNow);
+slider?.addEventListener("touchstart", bubbleUpdateNow, { passive: true });
 
-slider.addEventListener("input", () => {
+slider?.addEventListener("input", () => {
   lastUserSliderTs = Date.now();
   bubbleUpdateNow();
 
@@ -1283,7 +1299,7 @@ if (btnCenter) {
     autoCenter = !autoCenter;
     syncCenterButton();
 
-    if (autoCenter && userLatLng) {
+    if (autoCenter && userLatLng && map) {
       suppressAutoDisableFor(800, () => map.flyTo({ center: [userLatLng.lng, userLatLng.lat], duration: 500 }));
     }
   });
@@ -1295,6 +1311,7 @@ function disableAutoCenterBecauseUserIsExploring() {
   autoCenter = false;
   syncCenterButton();
 }
+
 /* =========================================================
    Live location arrow + follow behavior
    ========================================================= */
@@ -1305,7 +1322,7 @@ let lastHeadingDeg = 0;
 let lastMoveTs = 0;
 
 function makeNavIcon() {
-  const myName = authHeaderOK() ? (me?.display_name || "") : "";
+  const myName = authHeaderOK() ? me?.display_name || "" : "";
   const el = document.createElement("div");
   el.innerHTML = `
     <div id="navWrap" class="navArrowWrap navPulse">
@@ -1319,7 +1336,7 @@ function makeNavIcon() {
 function refreshNavNameLabel() {
   const el = document.getElementById("navMeName");
   if (!el) return;
-  const myName = authHeaderOK() ? (me?.display_name || "") : "";
+  const myName = authHeaderOK() ? me?.display_name || "" : "";
   el.textContent = myName;
   el.style.display = myName ? "block" : "none";
 }
@@ -1356,15 +1373,18 @@ function startLocationWatch() {
     if (recommendEl) recommendEl.textContent = "Recommended: location not supported";
     return;
   }
+  if (!map) return;
 
-  navMarker = new maplibregl.Marker({
-    element: makeNavIcon(),
-    anchor: "center",
-    offset: [0, 0],
-  })
-    .setLngLat([-74.0060, 40.7128])
-    .addTo(map);
-  navMarker.getElement().style.zIndex = "2000";
+  if (!navMarker) {
+    navMarker = new maplibregl.Marker({
+      element: makeNavIcon(),
+      anchor: "center",
+      offset: [0, 0],
+    })
+      .setLngLat([-74.006, 40.7128])
+      .addTo(map);
+    navMarker.getElement().style.zIndex = "2000";
+  }
 
   navigator.geolocation.watchPosition(
     (pos) => {
@@ -1375,11 +1395,12 @@ function startLocationWatch() {
       const ts = pos.timestamp || Date.now();
 
       userLatLng = { lat, lng };
-      lastGpsAccuracyM = (typeof accuracy === "number" && Number.isFinite(accuracy)) ? accuracy : null;
-      if (navMarker) navMarker.setLngLat([userLatLng.lng, userLatLng.lat]);
+      lastGpsAccuracyM = typeof accuracy === "number" && Number.isFinite(accuracy) ? accuracy : null;
+
+      if (navMarker) navMarker.setLngLat([lng, lat]);
 
       if (!debugOnce.selfMarker) {
-        console.log("DEBUG self marker lngLat", { lng: userLatLng.lng, lat: userLatLng.lat });
+        console.log("DEBUG self marker lngLat", { lng, lat });
         debugOnce.selfMarker = true;
       }
 
@@ -1409,10 +1430,12 @@ function startLocationWatch() {
       if (!gpsFirstFixDone) {
         gpsFirstFixDone = true;
         const targetZoom = Math.max(map.getZoom(), 12.5);
-        suppressAutoDisableFor(1200, () => map.flyTo({ center: [userLatLng.lng, userLatLng.lat], zoom: targetZoom, duration: 700 }));
+        suppressAutoDisableFor(1200, () =>
+          map.flyTo({ center: [lng, lat], zoom: targetZoom, duration: 700 })
+        );
       } else {
         if (autoCenter) {
-          suppressAutoDisableFor(700, () => map.flyTo({ center: [userLatLng.lng, userLatLng.lat], duration: 500 }));
+          suppressAutoDisableFor(700, () => map.flyTo({ center: [lng, lat], duration: 500 }));
         }
       }
 
@@ -1437,7 +1460,7 @@ function startLocationWatch() {
 
   setInterval(() => {
     const now = Date.now();
-    const recentlyMoved = lastMoveTs && (now - lastMoveTs) < 5000;
+    const recentlyMoved = lastMoveTs && now - lastMoveTs < 5000;
     setNavVisual(!!recentlyMoved);
   }, 1200);
 }
@@ -1487,7 +1510,7 @@ document.addEventListener("visibilitychange", () => {
 });
 
 /* =========================================================
-   WEATHER BADGE + FX (unchanged)
+   WEATHER BADGE + FX (unchanged from old)
    ========================================================= */
 const weatherBadge = document.getElementById("weatherBadge");
 const wxCanvas = document.getElementById("wxCanvas");
@@ -1525,11 +1548,11 @@ function wxDescribe(code) {
   if (c >= 1 && c <= 3) return { text: "Cloudy", icon: "⛅", kind: "none", intensity: 0 };
   if (c === 45 || c === 48) return { text: "Fog", icon: "🌫️", kind: "none", intensity: 0 };
   if ((c >= 51 && c <= 57) || (c >= 61 && c <= 67) || (c >= 80 && c <= 82)) {
-    const intensity = (c >= 65 || c >= 81) ? 0.85 : (c >= 63 ? 0.65 : 0.45);
+    const intensity = c >= 65 || c >= 81 ? 0.85 : c >= 63 ? 0.65 : 0.45;
     return { text: "Rain", icon: "🌧️", kind: "rain", intensity };
   }
   if ((c >= 71 && c <= 77) || (c >= 85 && c <= 86)) {
-    const intensity = (c >= 75 || c >= 86) ? 0.85 : 0.6;
+    const intensity = c >= 75 || c >= 86 ? 0.85 : 0.6;
     return { text: "Snow", icon: "❄️", kind: "snow", intensity };
   }
   if (c >= 95 && c <= 99) return { text: "Storm", icon: "⛈️", kind: "rain", intensity: 0.95 };
@@ -1553,7 +1576,7 @@ function setWeatherBadge(icon, text) {
 }
 function getWeatherLatLng() {
   const lat = userLatLng?.lat ?? 40.7128;
-  const lng = userLatLng?.lng ?? -74.0060;
+  const lng = userLatLng?.lng ?? -74.006;
   return { lat, lng };
 }
 function scheduleWeatherUpdateSoon() {
@@ -1618,10 +1641,7 @@ function updateWxParticlesForState() {
   }
 
   const base = Math.floor((window.innerWidth * window.innerHeight) / 45000);
-  const count = Math.max(
-    40,
-    Math.min(240, Math.floor(base * (kind === "rain" ? 2.4 : 1.6) * (0.6 + intensity)))
-  );
+  const count = Math.max(40, Math.min(240, Math.floor(base * (kind === "rain" ? 2.4 : 1.6) * (0.6 + intensity))));
 
   wxParticles = [];
   for (let i = 0; i < count; i++) wxParticles.push(makeParticle(kind));
@@ -1713,7 +1733,7 @@ function stepParticles() {
 function ensureWxAnimationRunning() {
   if (!wxCanvas || !wxCtx) return;
 
-  const shouldRun = (wxState.kind !== "none" && wxState.intensity > 0);
+  const shouldRun = wxState.kind !== "none" && wxState.intensity > 0;
   if (!shouldRun) {
     wxAnimRunning = false;
     wxCtx.clearRect(0, 0, window.innerWidth, window.innerHeight);
@@ -1733,7 +1753,7 @@ function ensureWxAnimationRunning() {
 }
 
 /* =========================================================
-   RADIO (kept simple; manual play)
+   RADIO (unchanged)
    ========================================================= */
 const btnHot97 = document.getElementById("btnHot97");
 const btnMega979 = document.getElementById("btnMega979");
@@ -1777,7 +1797,9 @@ function closeHot97Modal() {
   }
   if (radioFrame) radioFrame.src = "about:blank";
 }
-function openHot97Modal() { closeHot97Modal(); }
+function openHot97Modal() {
+  closeHot97Modal();
+}
 
 async function toggleMega() {
   try {
@@ -1824,7 +1846,9 @@ async function toggleHot97() {
   closeHot97Modal();
 
   if (hot97Playing) {
-    try { hot97Audio.pause(); } catch {}
+    try {
+      hot97Audio.pause();
+    } catch {}
     hot97Playing = false;
     setBtnState(btnHot97, false);
     setRadioStatus("Radio: off");
@@ -1868,7 +1892,6 @@ if (btnMega979) {
     toggleMega();
   });
 }
-
 if (btnHot97) {
   btnHot97.addEventListener("pointerdown", (e) => e.stopPropagation());
   btnHot97.addEventListener("click", (e) => {
@@ -1877,7 +1900,6 @@ if (btnHot97) {
     toggleHot97();
   });
 }
-
 if (radioModalClose) {
   radioModalClose.addEventListener("click", (e) => {
     e.preventDefault();
@@ -1892,7 +1914,6 @@ if (radioModal) {
     closeHot97Modal();
   });
 }
-
 megaAudio.addEventListener("ended", () => {
   megaPlaying = false;
   setBtnState(btnMega979, false);
@@ -1903,7 +1924,6 @@ megaAudio.addEventListener("error", () => {
   setBtnState(btnMega979, false);
   setRadioStatus("Radio: La Mega stream error");
 });
-
 hot97Audio.addEventListener("ended", () => {
   hot97Playing = false;
   setBtnState(btnHot97, false);
@@ -1916,7 +1936,7 @@ hot97Audio.addEventListener("error", () => {
 });
 
 /* =========================================================
-   COMMUNITY (AUTH + PRESENCE + POLICE + PICKUP)
+   COMMUNITY (AUTH + PRESENCE + POLICE + PICKUP) (restored)
    ========================================================= */
 const lockedOverlay = document.getElementById("lockedOverlay");
 const authEmail = document.getElementById("authEmail");
@@ -1961,19 +1981,6 @@ function sideFromOffsetX(dx, fallback = "right") {
   return fallback;
 }
 
-function stableUidParity(uid) {
-  const uidStr = String(uid || "");
-  const uidNum = Number.parseInt(uidStr, 10);
-  if (Number.isFinite(uidNum)) return Math.abs(uidNum) % 2;
-
-  let hash = 0;
-  for (let i = 0; i < uidStr.length; i++) {
-    hash = ((hash << 5) - hash) + uidStr.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash) % 2;
-}
-
 function syncGhostUI() {
   const ghostOn = !!me?.ghost_mode;
   if (btnGhostMode) {
@@ -1998,7 +2005,6 @@ function setAuthUI(signedIn, note) {
     lockedOverlay.setAttribute("aria-hidden", showLock ? "false" : "true");
   }
 
-  // buttons still exist, but are useful only if signed in
   if (btnPolice) btnPolice.classList.toggle("disabled", !signedIn);
   if (btnPickup) btnPickup.classList.toggle("disabled", !signedIn);
   if (btnGhostMode) btnGhostMode.classList.toggle("disabled", !signedIn);
@@ -2037,7 +2043,7 @@ async function loadMe() {
 }
 
 function safeName() {
-  return (authName && authName.value ? authName.value.trim() : "");
+  return authName && authName.value ? authName.value.trim() : "";
 }
 
 async function updateMeProfile(updates) {
@@ -2067,7 +2073,7 @@ async function applyPostAuthPreferences({ email, forceGhostSync, desiredGhostMod
   } else if (me?.display_name) {
     localStorage.setItem(LS_DISPLAY_NAME, me.display_name);
   } else if (email) {
-    localStorage.setItem(LS_DISPLAY_NAME, (email.split("@")[0] || "Driver"));
+    localStorage.setItem(LS_DISPLAY_NAME, email.split("@")[0] || "Driver");
   }
 }
 
@@ -2099,10 +2105,12 @@ async function doSignup(email, password, desiredGhostMode) {
 }
 
 function safeEmail() {
-  return (authEmail && authEmail.value ? authEmail.value.trim() : (localStorage.getItem(LS_EMAIL) || "").trim());
+  return authEmail && authEmail.value
+    ? authEmail.value.trim()
+    : (localStorage.getItem(LS_EMAIL) || "").trim();
 }
 function safePass() {
-  return (authPass && authPass.value ? authPass.value : "");
+  return authPass && authPass.value ? authPass.value : "";
 }
 
 if (authEmail) authEmail.value = localStorage.getItem(LS_EMAIL) || "";
@@ -2143,10 +2151,8 @@ if (btnAuth) {
     e.preventDefault();
     e.stopPropagation();
     if (authHeaderOK()) {
-      // sign out
       clearAuth();
     } else {
-      // show overlay
       setAuthUI(false, "Status: signed out");
     }
   });
@@ -2171,6 +2177,7 @@ if (btnGhostMode) {
   });
 }
 
+// other drivers marker HTML
 function makeDriverIcon(name, headingDeg, labelSide = "right", labelDx = 0, labelDy = 0) {
   const safe = (name || "Driver").trim() || "Driver";
   const rot = Number.isFinite(headingDeg) ? headingDeg : 0;
@@ -2193,7 +2200,9 @@ function makeDriverIcon(name, headingDeg, labelSide = "right", labelDx = 0, labe
 
 function clearOtherDrivers() {
   for (const m of otherMarkers.values()) {
-    try { m.remove(); } catch {}
+    try {
+      m.remove();
+    } catch {}
   }
   otherMarkers.clear();
 }
@@ -2205,10 +2214,6 @@ function upsertDriverMarker(userId, name, lat, lng, heading, labelSide, labelDx 
   const existing = otherMarkers.get(userId);
   if (existing) {
     existing.setLngLat([lng, lat]);
-    if (!debugOnce.otherMarker) {
-      console.log("DEBUG other marker lngLat", { lng, lat });
-      debugOnce.otherMarker = true;
-    }
     const el = existing.getElement();
     const newEl = makeDriverIcon(name || `Driver ${userId}`, heading, labelSide, labelDx, labelDy);
     el.innerHTML = newEl.innerHTML;
@@ -2216,14 +2221,7 @@ function upsertDriverMarker(userId, name, lat, lng, heading, labelSide, labelDx 
   }
 
   const el = makeDriverIcon(name || `Driver ${userId}`, heading, labelSide, labelDx, labelDy);
-  const mk = new maplibregl.Marker({ element: el, anchor: "center" })
-    .setLngLat([lng, lat])
-    .addTo(map);
-
-  if (!debugOnce.otherMarker) {
-    console.log("DEBUG other marker lngLat", { lng, lat });
-    debugOnce.otherMarker = true;
-  }
+  const mk = new maplibregl.Marker({ element: el, anchor: "center" }).setLngLat([lng, lat]).addTo(map);
 
   otherMarkers.set(userId, mk);
 }
@@ -2235,8 +2233,7 @@ async function pullPresenceAll() {
     const list = await getJSONAuth("/presence/all", communityToken);
     const now = Date.now() / 1000;
 
-    // expected list array; if wrapped, try .items
-    const items = Array.isArray(list) ? list : (list?.items || []);
+    const items = Array.isArray(list) ? list : list?.items || [];
     const seen = new Set();
     const visibleDrivers = [];
 
@@ -2244,17 +2241,15 @@ async function pullPresenceAll() {
       const uid = String(it.user_id ?? it.userId ?? it.id ?? "");
       if (!uid) continue;
 
-      // hide self
-      if (me && (String(me.id) === uid)) continue;
+      if (me && String(me.id) === uid) continue;
 
       const lat = Number(it.lat ?? it.latitude ?? NaN);
       const lng = Number(it.lng ?? it.longitude ?? NaN);
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
 
-      // staleness check
       const updated = Number(it.updated_at_unix ?? it.ts_unix ?? it.updated_at ?? NaN);
       if (Number.isFinite(updated)) {
-        if ((now - updated) > PRESENCE_STALE_SEC) continue;
+        if (now - updated > PRESENCE_STALE_SEC) continue;
       }
 
       const name = it.display_name || it.name || it.email || "Driver";
@@ -2263,9 +2258,7 @@ async function pullPresenceAll() {
       seen.add(uid);
     }
 
-    const selfPt = userLatLng
-      ? projectToPoint(userLatLng.lng, userLatLng.lat)
-      : null;
+    const selfPt = userLatLng ? projectToPoint(userLatLng.lng, userLatLng.lat) : null;
 
     const driversWithPoints = visibleDrivers.map((drv) => ({
       ...drv,
@@ -2301,10 +2294,9 @@ async function pullPresenceAll() {
     }
 
     for (const group of collisionClusters) {
-
       for (let idx = 0; idx < group.length; idx++) {
         const drv = group[idx];
-        let labelSide = (idx % 2 === 0) ? "right" : "left";
+        let labelSide = idx % 2 === 0 ? "right" : "left";
 
         let labelDx = 0;
         let labelDy = 0;
@@ -2314,9 +2306,7 @@ async function pullPresenceAll() {
         if (selfPt) {
           const distPx = pointDistance(basePoint, selfPt);
           if (distPx < SELF_COLLISION_THRESHOLD_PX) {
-            labelDx = (SELF_LABEL_SIDE === "right")
-              ? -SELF_COLLISION_OFFSET_PX
-              : SELF_COLLISION_OFFSET_PX;
+            labelDx = SELF_LABEL_SIDE === "right" ? -SELF_COLLISION_OFFSET_PX : SELF_COLLISION_OFFSET_PX;
             labelDy = 0;
             labelSide = sideFromOffsetX(labelDx, SELF_LABEL_SIDE === "left" ? "right" : "left");
           }
@@ -2327,16 +2317,16 @@ async function pullPresenceAll() {
           labelSide = sideFromOffsetX(labelDx, labelSide);
         }
 
-        // Keep marker pinned to the true reported coordinates; shift labels only.
         upsertDriverMarker(drv.uid, drv.name, drv.lat, drv.lng, drv.heading, labelSide, labelDx, labelDy);
       }
     }
 
-    // remove markers not in latest response
     for (const uid of Array.from(otherMarkers.keys())) {
       if (!seen.has(uid)) {
         const mk = otherMarkers.get(uid);
-        try { mk.remove(); } catch {}
+        try {
+          mk.remove();
+        } catch {}
         otherMarkers.delete(uid);
       }
     }
@@ -2351,18 +2341,22 @@ async function communityMaybePushPresence(tsMsOrUnix, heading, accuracy) {
   if (!userLatLng) return;
 
   const nowMs = Date.now();
-  if ((nowMs - lastPresencePushMs) < PRESENCE_PUSH_MS) return;
+  if (nowMs - lastPresencePushMs < PRESENCE_PUSH_MS) return;
   lastPresencePushMs = nowMs;
 
   try {
     const ts_unix = Math.floor((tsMsOrUnix ? Number(tsMsOrUnix) : Date.now()) / 1000);
-    await postJSON("/presence/update", {
-      lat: userLatLng.lat,
-      lng: userLatLng.lng,
-      heading: (typeof heading === "number" && Number.isFinite(heading)) ? heading : null,
-      accuracy: (typeof accuracy === "number" && Number.isFinite(accuracy)) ? accuracy : null,
-      ts_unix,
-    }, communityToken);
+    await postJSON(
+      "/presence/update",
+      {
+        lat: userLatLng.lat,
+        lng: userLatLng.lng,
+        heading: typeof heading === "number" && Number.isFinite(heading) ? heading : null,
+        accuracy: typeof accuracy === "number" && Number.isFinite(accuracy) ? accuracy : null,
+        ts_unix,
+      },
+      communityToken
+    );
   } catch (e) {
     console.warn("presence/update failed:", e);
   }
@@ -2387,7 +2381,6 @@ function nearestZoneToUser(frame, latlng) {
       };
     }
   }
-  // if somehow super far, still return (NYC-wide)
   return best;
 }
 
@@ -2403,12 +2396,7 @@ async function sendPoliceReport() {
 
   try {
     const ts_unix = Math.floor(Date.now() / 1000);
-    await postJSON("/events/police", {
-      lat: userLatLng.lat,
-      lng: userLatLng.lng,
-      ts_unix,
-    }, communityToken);
-
+    await postJSON("/events/police", { lat: userLatLng.lat, lng: userLatLng.lng, ts_unix }, communityToken);
     alert("Police report sent to community ✅");
   } catch (e) {
     alert(`Police report failed: ${e.message || e}`);
@@ -2424,19 +2412,24 @@ async function sendPickupLog() {
     alert("Enable location first.");
     return;
   }
+
   try {
     const ts_unix = Math.floor(Date.now() / 1000);
     const near = nearestZoneToUser(currentFrame, userLatLng);
 
-    await postJSON("/events/pickup", {
-      lat: userLatLng.lat,
-      lng: userLatLng.lng,
-      ts_unix,
-      frame_time: currentFrame?.time || null,
-      location_id: near?.location_id ?? null,
-      zone_name: near?.zone_name ?? null,
-      borough: near?.borough ?? null,
-    }, communityToken);
+    await postJSON(
+      "/events/pickup",
+      {
+        lat: userLatLng.lat,
+        lng: userLatLng.lng,
+        ts_unix,
+        frame_time: currentFrame?.time || null,
+        location_id: near?.location_id ?? null,
+        zone_name: near?.zone_name ?? null,
+        borough: near?.borough ?? null,
+      },
+      communityToken
+    );
 
     const label = near?.zone_name ? `${near.zone_name}${near.borough ? ` (${near.borough})` : ""}` : "your location";
     alert(`Pickup logged ✅ (${label})`);
@@ -2473,21 +2466,21 @@ setInterval(() => {
 setNavDestination(null);
 
 (async () => {
-  dbg("dbgBaseUrl", RAILWAY_BASE || "(relative)");
-
-  try {
-    await fetchJSON(`${RAILWAY_BASE}/status`);
-    dbg("dbgStatus", "OK");
-  } catch (e) {
-    dbg("dbgStatus", `FAIL ${e?.message || e}`);
+  if (debugEnabled) {
+    dbg("dbgBaseUrl", RAILWAY_BASE || "(relative)");
+    try {
+      await fetchJSON(`${RAILWAY_BASE}/status`);
+      dbg("dbgStatus", "OK");
+    } catch (e) {
+      dbg("dbgStatus", `FAIL ${e?.message || e}`);
+    }
   }
 
   const loading = document.getElementById("mapLoading");
   if (loading) loading.style.display = "flex";
-
   setTimeout(() => {
-    const loading = document.getElementById("mapLoading");
-    if (loading) loading.style.display = "none";
+    const l = document.getElementById("mapLoading");
+    if (l) l.style.display = "none";
   }, 7000);
 
   initMap();
@@ -2506,6 +2499,10 @@ setNavDestination(null);
     setAuthUI(false, "Status: signed out");
   }
 
+  // Start GPS AFTER map exists
   startLocationWatch();
   updateWeatherNow().catch(() => {});
-})();
+})().catch((err) => {
+  console.error(err);
+  if (timeLabel) timeLabel.textContent = `Error: ${err?.message || err}`;
+});
