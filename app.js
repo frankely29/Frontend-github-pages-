@@ -1109,7 +1109,7 @@ async function ensureMapDataLayers() {
 
   if (!map.getLayer(ZONE_FILL_LAYER_ID)) {
     try {
-      // FIXED: use demand_color (respects local modes + backend colors) instead of effectiveColor
+      // FIXED: use demand_color (exactly matches old Leaflet effectiveColor logic + local modes + backend data)
       map.addLayer({
         id: ZONE_FILL_LAYER_ID,
         type: "fill",
