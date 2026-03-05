@@ -835,17 +835,33 @@ let zonePopup = null;
 function initMap() {
   map = new maplibregl.Map({
     container: "map",
-    style: "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json", // proven reliable on iOS Safari 2026
+    style: "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json",
     center: [-73.98, 40.73],
     zoom: 10.5,
     attributionControl: { position: "bottom-right" },
-    localIdeographFontFamily: "sans-serif", // CRITICAL: fixes Safari glyph loading bug
+    localIdeographFontFamily: "sans-serif",
   });
 
   map.on("load", () => {
     mapReady = true;
     map.resize();
 
+    // === RELIABLE RASTER BASE MAP (always loads on iOS Safari) ===
+    map.addSource("osm-base", {
+      type: "raster",
+      tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+      tileSize: 256,
+      attribution: "&copy; OpenStreetMap contributors",
+    });
+
+    map.addLayer({
+      id: "osm-base-layer",
+      type: "raster",
+      source: "osm-base",
+      paint: { "raster-opacity": 1 },
+    });
+
+    // === ZONES VECTOR LAYERS (colored demand polygons) ===
     map.addSource("zones", {
       type: "geojson",
       data: { type: "FeatureCollection", features: [] },
@@ -874,14 +890,13 @@ function initMap() {
 
     map.on("zoomend", updateZoneLabelVisibility);
 
-    // Hide overlay + force multiple repaints for Safari
     const loading = document.getElementById("mapLoading");
     if (loading) loading.style.display = "none";
 
+    // Extra Safari repaints
     map.triggerRepaint();
     setTimeout(() => map.triggerRepaint(), 150);
     setTimeout(() => map.triggerRepaint(), 400);
-    setTimeout(() => map.triggerRepaint(), 800);
 
     if (pendingFrame) {
       renderFrame(pendingFrame);
@@ -889,11 +904,7 @@ function initMap() {
     }
   });
 
-  // Extra safety for glyph/tile loading on iOS
-  map.on("style.load", () => {
-    console.log("✅ Style loaded — forcing final repaint");
-    map.triggerRepaint();
-  });
+  map.on("style.load", () => map.triggerRepaint());
 
   map.on("error", (e) => console.error("MapLibre error:", e));
 }
