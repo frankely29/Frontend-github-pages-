@@ -37,73 +37,29 @@ const MANHATTAN_CORE_MAX_LAT = 40.795;
    ========================================================= */
 const legendEl = document.getElementById("legend");
 const legendToggleBtn = document.getElementById("legendToggle");
-const legendLauncherBtn = document.getElementById("legendLauncher");
-const utilityDrawerEl = document.getElementById("utilityDrawer");
-const utilityToggleBtn = document.getElementById("utilityToggle");
-const utilityLauncherBtn = document.getElementById("utilityLauncher");
-
-function setLegendDrawerOpen(open) {
-  if (!legendEl) return;
-  legendEl.classList.toggle("closed", !open);
-  legendEl.classList.remove("minimized");
-  legendEl.setAttribute("aria-hidden", open ? "false" : "true");
-  if (legendToggleBtn) {
-    legendToggleBtn.textContent = open ? "✕" : "☰";
-    legendToggleBtn.setAttribute("aria-label", open ? "Close drawer" : "Open drawer");
-  }
-}
-
-if (legendEl) {
-  setLegendDrawerOpen(!legendEl.classList.contains("closed"));
-}
-
-if (legendToggleBtn) {
+if (legendEl && legendToggleBtn) {
   legendToggleBtn.addEventListener("click", () => {
-    const open = legendEl ? legendEl.classList.contains("closed") : false;
-    setLegendDrawerOpen(open);
+    const minimized = legendEl.classList.toggle("minimized");
+    legendToggleBtn.textContent = minimized ? "+" : "–";
   });
 }
 
-if (legendLauncherBtn) {
-  legendLauncherBtn.addEventListener("click", () => {
-    const isOpen = legendEl ? !legendEl.classList.contains("closed") : false;
-    setLegendDrawerOpen(!isOpen);
-  });
-}
+/* =========================================================
+   Label visibility rules (mobile-friendly)
+   ========================================================= */
+const LABEL_ZOOM_MIN = 10;
+const BOROUGH_ZOOM_SHOW = 15;
+const LABEL_MAX_CHARS_MID = 14;
 
-function setRightDrawerOpen(open) {
-  if (!utilityDrawerEl) return;
-  utilityDrawerEl.classList.toggle("closed", !open);
-  utilityDrawerEl.setAttribute("aria-hidden", open ? "false" : "true");
-  if (utilityToggleBtn) {
-    utilityToggleBtn.textContent = open ? "✕" : "☰";
-    utilityToggleBtn.setAttribute("aria-label", open ? "Close drawer" : "Open drawer");
-  }
-}
-
-if (utilityDrawerEl) {
-  setRightDrawerOpen(!utilityDrawerEl.classList.contains("closed"));
-}
-
-if (utilityToggleBtn) {
-  utilityToggleBtn.addEventListener("click", () => {
-    const open = utilityDrawerEl ? utilityDrawerEl.classList.contains("closed") : false;
-    setRightDrawerOpen(open);
-  });
-}
-
-if (utilityLauncherBtn) {
-  utilityLauncherBtn.addEventListener("click", () => {
-    const isOpen = utilityDrawerEl ? !utilityDrawerEl.classList.contains("closed") : false;
-    setRightDrawerOpen(!isOpen);
-  });
-}
-
-if (legendEl) {
-  legendEl.addEventListener("transitionend", () => scheduleMapResizeSequence("legend-transition"));
-}
-if (utilityDrawerEl) {
-  utilityDrawerEl.addEventListener("transitionend", () => scheduleMapResizeSequence("utility-transition"));
+function shouldShowLabel(bucket, zoom) {
+  if (zoom < LABEL_ZOOM_MIN) return false;
+  const b = (bucket || "").trim();
+  if (zoom >= 15) return true;
+  if (zoom === 14) return b !== "red";
+  if (zoom === 13) return b === "green" || b === "purple" || b === "blue" || b === "sky";
+  if (zoom === 12) return b === "green" || b === "purple" || b === "blue";
+  if (zoom === 11) return b === "green" || b === "purple";
+  return b === "green";
 }
 
 /* =========================================================
@@ -219,18 +175,6 @@ function prettyBucket(b) {
 /* =========================================================
    Label helpers
    ========================================================= */
-function escapeHtml(s) {
-  return String(s)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
-const LABEL_ZOOM_MIN = 10;
-const LABEL_MAX_CHARS_MID = 8;
-
 function shortenLabel(text, maxChars) {
   const t = (text || "").trim();
   if (!t) return "";
@@ -241,32 +185,13 @@ function zoomClass(zoom) {
   const z = Math.max(10, Math.min(15, Math.round(zoom)));
   return `z${z}`;
 }
-function shouldShowLabel(bucket, zoom) {
-  if (zoom < LABEL_ZOOM_MIN) return false;
-  const b = (bucket || "").trim();
-  if (zoom >= 15) return true;
-  if (zoom === 14) return b !== "red";
-  if (zoom === 13) return b === "green" || b === "purple" || b === "blue" || b === "sky";
-  if (zoom === 12) return b === "green" || b === "purple" || b === "blue";
-  if (zoom === 11) return b === "green" || b === "purple";
-  return b === "green";
-}
-function labelHTML(props, zoom) {
-  const name = (props.zone_name || "").trim();
-  if (!name) return "";
-
-  const b = effectiveBucket(props, null);
-  if (!shouldShowLabel(b, Math.round(zoom))) return "";
-
-  const zoneText = zoom < 13 ? shortenLabel(name, LABEL_MAX_CHARS_MID) : name;
-
-  const borough = (props.borough || "").trim();
-  const showBorough = zoom >= 15 && borough;
-
-  return `
-    <div class="zn">${escapeHtml(zoneText)}</div>
-    ${showBorough ? `<div class="br">${escapeHtml(borough)}</div>` : ""}
-  `;
+function escapeHtml(s) {
+  return String(s)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
 /* =========================================================
@@ -441,8 +366,7 @@ if (btnManhattan) {
     manhattanMode = !manhattanMode;
     localStorage.setItem(LS_KEY_MANHATTAN, manhattanMode ? "1" : "0");
     syncManhattanUI();
-    if (currentFrame) renderFrame(currentFrame).catch(console.error);
-    if (currentFrame) updateMapFrameSources(currentFrame.polygons).catch(() => {});
+    if (currentFrame) renderFrame(currentFrame);
   });
 }
 
@@ -615,8 +539,7 @@ if (btnStatenIsland) {
     statenIslandMode = !statenIslandMode;
     localStorage.setItem(LS_KEY_STATEN, statenIslandMode ? "1" : "0");
     syncStatenIslandUI();
-    if (currentFrame) renderFrame(currentFrame).catch(console.error);
-    if (currentFrame) updateMapFrameSources(currentFrame.polygons).catch(() => {});
+    if (currentFrame) renderFrame(currentFrame);
   });
 }
 
@@ -642,6 +565,24 @@ function effectiveRating(props, geom) {
     return Number(props.mh_local_rating);
   }
   return Number(props.rating ?? NaN);
+}
+
+function labelHTML(props, zoom) {
+  const name = (props.zone_name || "").trim();
+  if (!name) return "";
+
+  const b = effectiveBucket(props, null);
+  if (!shouldShowLabel(b, Math.round(zoom))) return "";
+
+  const zoneText = zoom < 13 ? shortenLabel(name, LABEL_MAX_CHARS_MID) : name;
+
+  const borough = (props.borough || "").trim();
+  const showBorough = zoom >= 15 && borough;
+
+  return `
+    <div class="zn">${escapeHtml(zoneText)}</div>
+    ${showBorough ? `<div class="br">${escapeHtml(borough)}</div>` : ""}
+  `;
 }
 
 /* =========================================================
@@ -758,7 +699,7 @@ function updateRecommendation(frame) {
 }
 
 /* =========================================================
-   Map (MapLibre)
+   Leaflet map setup
    ========================================================= */
 const slider = document.getElementById("slider");
 const timeLabel = document.getElementById("timeLabel");
@@ -801,591 +742,30 @@ function bubbleUpdateNow() {
   showSliderBubble();
 }
 
-const ZONE_SOURCE_ID = "zones-source";
-const ZONE_FILL_LAYER_ID = "zones-fill";
-const ZONE_LINE_LAYER_ID = "zones-line";
-const ZONE_LABEL_LAYER_ID = "zones-label";
-const BOROUGH_SOURCE_ID = "borough-label-source";
-const BOROUGH_LABEL_LAYER_ID = "borough-label-layer";
-const DEBUG_SOURCE_ID = "debug-hardcoded-source";
-const DEBUG_FILL_LAYER_ID = "debug-hardcoded-fill";
-const DEBUG_LINE_LAYER_ID = "debug-hardcoded-line";
+/* =========================================================
+   Map
+   ========================================================= */
+const map = L.map("map", { zoomControl: true }).setView([40.7128, -74.0060], 8);
 
-const DEBUG_HARDCODED_POLYGON = {
-  type: "FeatureCollection",
-  features: [
-    {
-      type: "Feature",
-      properties: {},
-      geometry: {
-        type: "Polygon",
-        coordinates: [[
-          [-74.02, 40.70],
-          [-73.98, 40.70],
-          [-73.98, 40.73],
-          [-74.02, 40.73],
-          [-74.02, 40.70],
-        ]],
-      },
-    },
-  ],
-};
+L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
+  attribution: "&copy; OpenStreetMap &copy; CARTO",
+  maxZoom: 19,
+}).addTo(map);
 
-const baseStyle = {
-  version: 8,
-  glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
-  sources: {
-    cartoLight: {
-      type: "raster",
-      tiles: ["https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png", "https://b.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png", "https://c.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png"],
-      tileSize: 256,
-      attribution: "&copy; OpenStreetMap &copy; CARTO",
-      maxzoom: 19,
-    },
-  },
-  layers: [{ id: "basemap", type: "raster", source: "cartoLight" }],
-};
+const labelsPane = map.createPane("labelsPane");
+labelsPane.style.zIndex = 450;
 
-// FIXED: using local baseStyle (Carto Light) instead of broken demotiles
-const map = new maplibregl.Map({
-  container: "map",
-  style: baseStyle,
-  center: [-74.0060, 40.7128],
-  zoom: 8,
-});
-console.log("DEBUG map center lngLat", [-74.0060, 40.7128]);
-map.addControl(new maplibregl.NavigationControl(), "top-right");
+const navPane = map.createPane("navPane");
+navPane.style.zIndex = 1000;
 
-const mapContainerEl = document.getElementById("map");
+const communityPane = map.createPane("communityPane");
+communityPane.style.zIndex = 980;
 
-function forceMapResize(label = "") {
-  if (!map) return;
-  try {
-    map.resize();
-  } catch (err) {
-    console.warn(`map.resize failed${label ? ` (${label})` : ""}:`, err);
-  }
-}
-
-function scheduleMapResizeSequence(label = "") {
-  forceMapResize(label || "immediate");
-  requestAnimationFrame(() => forceMapResize(label ? `${label}:raf` : "raf"));
-  setTimeout(() => forceMapResize(label ? `${label}:t150` : "t150"), 150);
-}
-
-function forceFirstVisibleMapRender() {
-  scheduleMapResizeSequence("first-render");
-  try {
-    const center = map.getCenter();
-    const zoom = map.getZoom();
-    map.jumpTo({ center, zoom, bearing: map.getBearing(), pitch: map.getPitch() });
-  } catch (err) {
-    console.warn("Unable to force first visible map render:", err);
-  }
-}
-
-if (mapContainerEl) {
-  mapContainerEl.style.backgroundColor = "#dbe8f4";
-}
-
-const MAP_READY_TIMEOUT_MS = 10_000;
-const STYLE_READY_POLL_MS = 75;
-const STYLE_READY_TIMEOUT_MS = 7_000;
-let mapReadySettled = false;
-let mapLoadSeen = false;
-let mapReadyResolve;
-let mapReadyReject;
-let mapInitError = null;
-
-const mapReadyPromise = new Promise((resolve, reject) => {
-  mapReadyResolve = resolve;
-  mapReadyReject = reject;
-});
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function waitForStyleReady(timeoutMs = STYLE_READY_TIMEOUT_MS) {
-  if (!map) {
-    throw new Error("Map instance is not available");
-  }
-
-  if (map.isStyleLoaded()) {
-    console.log("DEBUG style gate: ready");
-    return;
-  }
-
-  console.log("DEBUG style gate: waiting");
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < timeoutMs) {
-    await sleep(STYLE_READY_POLL_MS);
-    if (map.isStyleLoaded()) {
-      console.log("DEBUG style gate: ready");
-      return;
-    }
-  }
-
-  console.error("DEBUG style gate: timeout");
-  throw new Error("Map style is not ready");
-}
-
-function settleMapReadyOk() {
-  if (mapReadySettled) return;
-  mapReadySettled = true;
-  mapReadyResolve();
-}
-
-function settleMapReadyErr(err) {
-  if (mapReadySettled) return;
-  mapReadySettled = true;
-  mapInitError = err;
-  mapReadyReject(err);
-}
-
-const mapReadyTimer = setTimeout(() => {
-  settleMapReadyErr(new Error(`Map did not finish initializing within ${Math.round(MAP_READY_TIMEOUT_MS / 1000)}s.`));
-}, MAP_READY_TIMEOUT_MS);
-
-map.on("load", () => {
-  mapLoadSeen = true;
-  clearTimeout(mapReadyTimer);
-  scheduleMapResizeSequence("map-load");
-  ensureDebugHardcodedPolygon().catch((err) => {
-    console.error("ensureDebugHardcodedPolygon failed on load", err);
-  });
-  settleMapReadyOk();
-});
-
-map.on("style.load", () => {
-  scheduleMapResizeSequence("style-load");
-  ensureDebugHardcodedPolygon().catch((err) => {
-    console.error("ensureDebugHardcodedPolygon failed on style.load", err);
-  });
-});
-
-map.on("error", (e) => {
-  const reason = e?.error?.message || e?.message || "Unknown map initialization error.";
-  console.error("MapLibre runtime error:", reason, e);
-
-  if (!mapLoadSeen) {
-    clearTimeout(mapReadyTimer);
-    settleMapReadyErr(new Error(reason));
-  }
-
-  if (timeLabel && /style|source|tile|sprite|glyph/i.test(reason)) {
-    timeLabel.textContent = "Map style failed to load";
-  }
-});
-
+let geoLayer = null;
 let timeline = [];
 let minutesOfWeek = [];
 let currentFrame = null;
 let lastUserSliderTs = 0;
-let boroughLabelAnchors = null;
-let zonePopup = null;
-let mapInteractionHandlersBound = false;
-
-function clamp(v, min, max) {
-  return Math.max(min, Math.min(max, v));
-}
-
-function geometryWeight(geom) {
-  if (!geom) return 0;
-  if (geom.type === "Polygon") {
-    const outer = ringCentroidArea(geom.coordinates?.[0] || []);
-    return outer ? Math.abs(outer.area2) : 1;
-  }
-  if (geom.type === "MultiPolygon") {
-    let total = 0;
-    for (const poly of geom.coordinates || []) {
-      const outer = ringCentroidArea(poly?.[0] || []);
-      total += outer ? Math.abs(outer.area2) : 0;
-    }
-    return total || 1;
-  }
-  return 1;
-}
-
-function buildBoroughLabelAnchors(features) {
-  const byBorough = new Map();
-  for (const f of features || []) {
-    const props = f?.properties || {};
-    const borough = (props.borough || "").trim();
-    if (!borough) continue;
-    const center = geometryCenter(f.geometry);
-    if (!center) continue;
-    const w = geometryWeight(f.geometry);
-    const prev = byBorough.get(borough) || { lat: 0, lng: 0, w: 0 };
-    prev.lat += center.lat * w;
-    prev.lng += center.lng * w;
-    prev.w += w;
-    byBorough.set(borough, prev);
-  }
-
-  const anchors = [];
-  for (const [borough, acc] of byBorough.entries()) {
-    if (!acc.w) continue;
-    anchors.push({ borough, lat: acc.lat / acc.w, lng: acc.lng / acc.w });
-  }
-  return anchors;
-}
-
-function enrichFeatureForMap(feature) {
-  const props = feature?.properties || {};
-  const geom = feature?.geometry;
-  const weight = geometryWeight(geom);
-  const pickups = Number(props.pickups ?? NaN);
-  const rating = Number(props.rating ?? NaN);
-
-  const priority = (Number.isFinite(rating) ? rating * 100 : 0)
-    + (Number.isFinite(pickups) ? pickups : 0)
-    + Math.min(6000, Math.sqrt(Math.max(1, weight)) * 35);
-
-  const style = props?.style || {};
-  const derivedEffectiveColor =
-    (typeof props.effectiveColor === "string" && props.effectiveColor.trim())
-    || (typeof style.fillColor === "string" && style.fillColor.trim())
-    || (typeof style.color === "string" && style.color.trim())
-    || "#66aaff";
-
-  return {
-    ...feature,
-    properties: {
-      ...props,
-      effectiveColor: derivedEffectiveColor,
-      demand_color: effectiveColor(props, geom),
-      zone_label_priority: Number.isFinite(priority) ? priority : 0,
-      zone_label_name: (props.zone_name || "").trim() || `Zone ${props.LocationID ?? ""}`,
-    },
-  };
-}
-
-function hasValidGeometry(geometry) {
-  return Boolean(
-    geometry
-    && typeof geometry === "object"
-    && typeof geometry.type === "string"
-    && geometry.coordinates !== undefined,
-  );
-}
-
-function frameToStyledGeoJSON(rawFrameGeoJSON) {
-  const src = rawFrameGeoJSON;
-  if (!src || src.type !== "FeatureCollection" || !Array.isArray(src.features)) {
-    console.error("frameToStyledGeoJSON invalid output: frame polygons must be a GeoJSON FeatureCollection.", rawFrameGeoJSON);
-    return { type: "FeatureCollection", features: [] };
-  }
-
-  let usedStyleFillColorFallback = false;
-
-  const features = src.features
-    .filter((feature) => {
-      if (!hasValidGeometry(feature?.geometry)) {
-        console.error("frameToStyledGeoJSON invalid output: feature missing valid geometry.", feature);
-        return false;
-      }
-      return true;
-    })
-    .map((feature) => {
-      const enriched = enrichFeatureForMap(feature);
-      const style = enriched.properties?.style || {};
-      const effectiveColorValue =
-        typeof enriched.properties?.effectiveColor === "string" && enriched.properties.effectiveColor.trim()
-          ? enriched.properties.effectiveColor
-          : (typeof style.fillColor === "string" && style.fillColor.trim()
-            ? style.fillColor
-            : (typeof style.color === "string" && style.color.trim()
-              ? style.color
-              : "#66aaff"));
-
-      if (
-        !(typeof enriched.properties?.effectiveColor === "string" && enriched.properties.effectiveColor.trim())
-        && (typeof style.fillColor === "string" && style.fillColor.trim())
-      ) {
-        usedStyleFillColorFallback = true;
-      }
-
-      return {
-        ...enriched,
-        properties: {
-          ...enriched.properties,
-          effectiveColor: effectiveColorValue,
-          demand_color: enriched.properties?.demand_color || effectiveColorValue,
-          zone_label_name: (enriched.properties?.zone_label_name || "").trim() || `Zone ${enriched.properties?.LocationID ?? ""}`,
-          zone_label_priority: Number.isFinite(Number(enriched.properties?.zone_label_priority))
-            ? Number(enriched.properties.zone_label_priority)
-            : 0,
-        },
-      };
-    });
-
-  if (usedStyleFillColorFallback) {
-    console.log("DEBUG frame color source: style.fillColor fallback applied");
-  }
-
-  return { type: "FeatureCollection", features };
-}
-
-function boroughAnchorsToGeoJSON(anchors) {
-  return {
-    type: "FeatureCollection",
-    features: (anchors || []).map((b) => ({
-      type: "Feature",
-      properties: { borough: b.borough },
-      geometry: { type: "Point", coordinates: [b.lng, b.lat] },
-    })),
-  };
-}
-
-async function ensureMapDataLayers() {
-  await waitForStyleReady();
-
-  if (!map.getSource(ZONE_SOURCE_ID)) {
-    try {
-      map.addSource(ZONE_SOURCE_ID, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
-    } catch (err) {
-      console.error("layer creation failed: zones source add failed.", err);
-      throw err;
-    }
-  }
-
-  if (!map.getLayer(ZONE_FILL_LAYER_ID)) {
-    try {
-      // FIXED: use demand_color (exactly matches old Leaflet effectiveColor logic + local modes + backend data)
-      map.addLayer({
-        id: ZONE_FILL_LAYER_ID,
-        type: "fill",
-        source: ZONE_SOURCE_ID,
-        paint: {
-          "fill-color": ["coalesce", ["get", "demand_color"], "#66ccff"],
-          "fill-opacity": 0.82,
-        },
-      });
-    } catch (err) {
-      console.error("layer creation failed: zones fill layer add failed.", err);
-      throw err;
-    }
-  }
-
-  if (!map.getLayer(ZONE_LINE_LAYER_ID)) {
-    try {
-      map.addLayer({
-        id: ZONE_LINE_LAYER_ID,
-        type: "line",
-        source: ZONE_SOURCE_ID,
-        paint: {
-          "line-color": "#ffffff",
-          "line-width": 1,
-        },
-      });
-    } catch (err) {
-      console.error("layer creation failed: zones line layer add failed.", err);
-      throw err;
-    }
-  }
-
-  // FIXED: zone labels now match old Leaflet exactly (shouldShowLabel + zoom + bucket + shorten + borough)
-  if (!map.getLayer(ZONE_LABEL_LAYER_ID)) {
-    map.addLayer({
-      id: ZONE_LABEL_LAYER_ID,
-      type: "symbol",
-      source: ZONE_SOURCE_ID,
-      minzoom: LABEL_ZOOM_MIN,
-      layout: {
-        "text-field": ["get", "zone_label_name"],
-        "text-size": ["step", ["zoom"], 8, 10, 9, 11, 10, 12, 11, 13, 12, 14, 13, 15],
-        "text-anchor": "center",
-        "text-font": ["Open Sans Bold"],
-        "text-max-width": LABEL_MAX_CHARS_MID,
-      },
-      paint: {
-        "text-color": "#111",
-        "text-halo-color": "#ffffff",
-        "text-halo-width": 2,
-        "text-halo-blur": 1,
-      },
-    });
-  }
-
-  if (!mapInteractionHandlersBound) {
-    mapInteractionHandlersBound = true;
-
-    map.on("click", ZONE_FILL_LAYER_ID, (e) => {
-      const feature = e.features?.[0];
-      if (!feature) return;
-      if (zonePopup) zonePopup.remove();
-      zonePopup = new maplibregl.Popup({ maxWidth: "320px" })
-        .setLngLat(e.lngLat)
-        .setHTML(buildPopupHTML(feature.properties || {}, feature.geometry))
-        .addTo(map);
-    });
-
-    map.on("mouseenter", ZONE_FILL_LAYER_ID, () => { map.getCanvas().style.cursor = "pointer"; });
-    map.on("mouseleave", ZONE_FILL_LAYER_ID, () => { map.getCanvas().style.cursor = ""; });
-  }
-}
-
-function validateStyledFeatureCollection(styled) {
-  if (!styled || styled.type !== "FeatureCollection") {
-    return "frameToStyledGeoJSON invalid output: not a FeatureCollection";
-  }
-  if (!Array.isArray(styled.features)) {
-    return "frameToStyledGeoJSON invalid output: features is not an array";
-  }
-  for (const feature of styled.features) {
-    if (!hasValidGeometry(feature?.geometry)) {
-      return "frameToStyledGeoJSON invalid output: feature is missing geometry";
-    }
-  }
-  return null;
-}
-
-async function ensureDebugHardcodedPolygon() {
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      await waitForStyleReady();
-      console.log("DEBUG map: style gate passed for hardcoded polygon");
-
-      if (!map.getSource(DEBUG_SOURCE_ID)) {
-        console.log("DEBUG map: adding hardcoded source");
-        map.addSource(DEBUG_SOURCE_ID, {
-          type: "geojson",
-          data: DEBUG_HARDCODED_POLYGON,
-        });
-        console.log("DEBUG map: hardcoded source added");
-      }
-
-      if (!map.getLayer(DEBUG_FILL_LAYER_ID)) {
-        map.addLayer({
-          id: DEBUG_FILL_LAYER_ID,
-          type: "fill",
-          source: DEBUG_SOURCE_ID,
-          paint: {
-            "fill-color": "#ff00aa",
-            "fill-opacity": 0.35,
-          },
-        });
-        console.log("DEBUG map: hardcoded fill layer added");
-      }
-
-      if (!map.getLayer(DEBUG_LINE_LAYER_ID)) {
-        map.addLayer({
-          id: DEBUG_LINE_LAYER_ID,
-          type: "line",
-          source: DEBUG_SOURCE_ID,
-          paint: {
-            "line-color": "#ffffff",
-            "line-width": 2,
-          },
-        });
-        console.log("DEBUG map: hardcoded line layer added");
-      }
-
-      return;
-    } catch (err) {
-      const msg = err?.message || "";
-      if (attempt === 0 && /style is not ready/i.test(msg)) {
-        console.warn("DEBUG style gate: retrying source/layer add");
-        await sleep(150);
-        continue;
-      }
-      throw err;
-    }
-  }
-}
-
-async function getGeoJSONSourceWithRecovery(sourceId, sourceName) {
-  await waitForStyleReady();
-  let source = map.getSource(sourceId);
-  if (source && typeof source.setData === "function") return source;
-
-  console.error(`${sourceName} source missing or invalid before setData.`);
-  await ensureMapDataLayers();
-
-  source = map.getSource(sourceId);
-  if (!source || typeof source.setData !== "function") {
-    throw new Error(`${sourceName} source missing`);
-  }
-  return source;
-}
-
-function isFeatureCollection(value) {
-  return Boolean(
-    value
-    && typeof value === "object"
-    && value.type === "FeatureCollection"
-    && Array.isArray(value.features),
-  );
-}
-
-function normalizeFrameResponsePayload(framePayload) {
-  const payload = framePayload && typeof framePayload === "object" ? framePayload : {};
-
-  if ("error" in payload || "detail" in payload) {
-    console.error("Backend /frame returned error payload", payload);
-    throw new Error("Backend /frame returned error payload");
-  }
-
-  if (isFeatureCollection(payload.polygons)) {
-    console.log("DEBUG frame shape: using wrapper.polygons");
-    console.log(`DEBUG frame shape: feature count = ${payload.polygons.features.length}`);
-    return payload.polygons;
-  }
-
-  console.error("Unsupported /frame response shape", payload);
-  throw new Error("Unsupported /frame response shape");
-}
-
-async function updateMapFrameSources(rawFrameGeoJSON) {
-  await waitForStyleReady();
-  let renderStage = "ensureMapDataLayers";
-
-  try {
-    await ensureMapDataLayers();
-    console.log("DEBUG render: ensureMapDataLayers ok");
-
-    renderStage = "frameToStyledGeoJSON";
-    const styled = frameToStyledGeoJSON(rawFrameGeoJSON);
-    renderStage = "validate styled GeoJSON";
-    const styledValidationError = validateStyledFeatureCollection(styled);
-    if (styledValidationError) {
-      console.error("DEBUG render failed at styled GeoJSON valid", styledValidationError);
-      console.error(styledValidationError, { rawFrameGeoJSON, styled });
-      throw new Error(styledValidationError);
-    }
-    console.log("DEBUG render: styled GeoJSON valid");
-
-    let zoneSource;
-    try {
-      renderStage = "get zones source";
-      zoneSource = await getGeoJSONSourceWithRecovery(ZONE_SOURCE_ID, "zones");
-      console.log("DEBUG render: zones source found");
-    } catch (err) {
-      console.error("DEBUG render failed at zones source found", err);
-      console.error("zones source missing", err);
-      throw err;
-    }
-
-    try {
-      renderStage = "setData";
-      zoneSource.setData(styled);
-      console.log("DEBUG render: setData ok");
-    } catch (err) {
-      console.error("DEBUG render failed at setData", err);
-      console.error("setData failed", err);
-      throw err;
-    }
-    renderStage = "render complete";
-    console.log("DEBUG render: simplified layers active");
-  } catch (err) {
-    const errMessage = err?.message || String(err);
-    console.error(`DEBUG render failed at stage: ${renderStage}`);
-    console.error(`DEBUG render exact error: ${errMessage}`);
-    console.error("updateMapFrameSources failed", err);
-    throw err;
-  }
-}
 
 /* =========================================================
    NEXT BIN CACHE
@@ -1404,9 +784,8 @@ async function loadNextFramePickupsMap(curIdx) {
       return;
     }
 
-    const framePayload = await fetchJSON(`${RAILWAY_BASE}/frame/${nextIdx}`);
-    const rawFrameGeoJSON = normalizeFrameResponsePayload(framePayload);
-    const feats = rawFrameGeoJSON?.features || [];
+    const frame = await fetchJSON(`${RAILWAY_BASE}/frame/${nextIdx}`);
+    const feats = frame?.polygons?.features || [];
 
     const puMap = new Map();
     const payMap = new Map();
@@ -1471,7 +850,7 @@ function buildPopupHTML(props, geom) {
   `;
 }
 
-async function renderFrame(frame) {
+function renderFrame(frame) {
   currentFrame = frame;
 
   if (statenIslandMode) applyStatenLocalView(currentFrame);
@@ -1479,15 +858,45 @@ async function renderFrame(frame) {
 
   timeLabel.textContent = formatNYCLabel(currentFrame.time);
 
-  try {
-    await mapReadyPromise;
-    await waitForStyleReady();
-    await ensureMapDataLayers();
-    await updateMapFrameSources(currentFrame.polygons);
-  } catch (err) {
-    console.error("Render failed:", err);
-    timeLabel.textContent = `Render error: ${err.message.slice(0, 80)}`;
+  if (geoLayer) {
+    geoLayer.remove();
+    geoLayer = null;
   }
+
+  const zoomNow = map.getZoom();
+  const zClass = zoomClass(zoomNow);
+
+  geoLayer = L.geoJSON(currentFrame.polygons, {
+    style: (feature) => {
+      const props = feature?.properties || {};
+      const st = props.style || {};
+      const fill = effectiveColor(props, feature.geometry);
+
+      return {
+        color: fill,
+        weight: st.weight ?? 0,
+        opacity: st.opacity ?? 0,
+        fillColor: fill,
+        fillOpacity: st.fillOpacity ?? 0.82,
+      };
+    },
+    onEachFeature: (feature, layer) => {
+      const props = feature.properties || {};
+      layer.bindPopup(buildPopupHTML(props, feature.geometry), { maxWidth: 320 });
+
+      const html = labelHTML(props, zoomNow);
+      if (!html) return;
+
+      layer.bindTooltip(html, {
+        permanent: true,
+        direction: "center",
+        className: `zone-label ${zClass}`,
+        opacity: 0.92,
+        interactive: false,
+        pane: "labelsPane",
+      });
+    },
+  }).addTo(map);
 
   updateRecommendation(currentFrame);
 }
@@ -1515,16 +924,12 @@ async function loadTimeline() {
 
   bubbleUpdateNow();
 
-  loadFrame(idx).catch((err) => {
-    console.error(err);
-    timeLabel.textContent = "Error rendering map";
-  });
+  await loadFrame(idx);
 }
 
 map.on("zoomend", () => {
+  if (currentFrame) renderFrame(currentFrame);
   if (authHeaderOK()) pullPresenceAll().catch(() => {});
-  // re-apply labels on zoom (matches old Leaflet behavior)
-  if (currentFrame) updateMapFrameSources(currentFrame.polygons).catch(() => {});
 });
 
 let sliderDebounce = null;
@@ -1543,11 +948,6 @@ slider.addEventListener("input", () => {
 
 window.addEventListener("resize", () => {
   if (timeline.length) setSliderBubbleTextAndPos();
-  scheduleMapResizeSequence("window-resize");
-});
-
-window.addEventListener("orientationchange", () => {
-  scheduleMapResizeSequence("orientation-change");
 });
 
 /* =========================================================
@@ -1581,7 +981,7 @@ if (btnCenter) {
     syncCenterButton();
 
     if (autoCenter && userLatLng) {
-      suppressAutoDisableFor(800, () => map.easeTo({ center: [userLatLng.lng, userLatLng.lat], duration: 800 }));
+      suppressAutoDisableFor(800, () => map.panTo(userLatLng, { animate: true }));
     }
   });
 }
@@ -1592,7 +992,7 @@ function disableAutoCenterBecauseUserIsExploring() {
   autoCenter = false;
   syncCenterButton();
 }
-map.on("movestart", disableAutoCenterBecauseUserIsExploring);
+map.on("dragstart", disableAutoCenterBecauseUserIsExploring);
 map.on("zoomstart", disableAutoCenterBecauseUserIsExploring);
 
 /* =========================================================
@@ -1604,16 +1004,19 @@ let lastPos = null;
 let lastHeadingDeg = 0;
 let lastMoveTs = 0;
 
-function makeNavIconElement() {
+function makeNavIcon() {
   const myName = authHeaderOK() ? (me?.display_name || "") : "";
-  const wrap = document.createElement("div");
-  wrap.id = "navWrap";
-  wrap.className = "navArrowWrap navPulse";
-  wrap.innerHTML = `
-    <div id="navArrowRot" class="navArrowRot"><div class="navArrow"></div></div>
-    <div id="navMeName" class="meName" style="display:${myName ? "block" : "none"}">${escapeHtml(myName)}</div>
-  `;
-  return wrap;
+  return L.divIcon({
+    className: "",
+    html: `
+      <div id="navWrap" class="navArrowWrap navPulse">
+        <div id="navArrowRot" class="navArrowRot"><div class="navArrow"></div></div>
+        <div id="navMeName" class="meName" style="display:${myName ? "block" : "none"}">${escapeHtml(myName)}</div>
+      </div>
+    `,
+    iconSize: [30, 30],
+    iconAnchor: [15, 15],
+  });
 }
 
 function refreshNavNameLabel() {
@@ -1657,9 +1060,12 @@ function startLocationWatch() {
     return;
   }
 
-  navMarker = new maplibregl.Marker({ element: makeNavIconElement(), anchor: "center" })
-    .setLngLat([-74.0060, 40.7128])
-    .addTo(map);
+  navMarker = L.marker([40.7128, -74.0060], {
+    icon: makeNavIcon(),
+    interactive: false,
+    zIndexOffset: 2000000,
+    pane: "navPane",
+  }).addTo(map);
 
   navigator.geolocation.watchPosition(
     (pos) => {
@@ -1671,11 +1077,7 @@ function startLocationWatch() {
 
       userLatLng = { lat, lng };
       lastGpsAccuracyM = (typeof accuracy === "number" && Number.isFinite(accuracy)) ? accuracy : null;
-      if (navMarker) {
-        const selfLngLat = [userLatLng.lng, userLatLng.lat];
-        navMarker.setLngLat(selfLngLat);
-        console.log("DEBUG self marker lngLat", selfLngLat);
-      }
+      if (navMarker) navMarker.setLatLng(userLatLng);
 
       let isMoving = false;
 
@@ -1703,10 +1105,10 @@ function startLocationWatch() {
       if (!gpsFirstFixDone) {
         gpsFirstFixDone = true;
         const targetZoom = Math.max(map.getZoom(), 12.5);
-        suppressAutoDisableFor(1200, () => map.easeTo({ center: [userLatLng.lng, userLatLng.lat], zoom: targetZoom, duration: 1200 }));
+        suppressAutoDisableFor(1200, () => map.setView(userLatLng, targetZoom, { animate: true }));
       } else {
         if (autoCenter) {
-          suppressAutoDisableFor(700, () => map.easeTo({ center: [userLatLng.lng, userLatLng.lat], duration: 700 }));
+          suppressAutoDisableFor(700, () => map.panTo(userLatLng, { animate: true }));
         }
       }
 
@@ -2465,23 +1867,28 @@ if (btnGhostMode) {
   });
 }
 
-function makeDriverIconElement(name, headingDeg, labelSide = "right", labelDx = 0, labelDy = 0) {
+function makeDriverIcon(name, headingDeg, labelSide = "right", labelDx = 0, labelDy = 0) {
   const safe = (name || "Driver").trim() || "Driver";
   const rot = Number.isFinite(headingDeg) ? headingDeg : 0;
   const defaultLabelX = labelSide === "left" ? -28 : 28;
   const labelTranslateX = Number.isFinite(labelDx) ? labelDx : defaultLabelX;
   const labelTranslateY = Number.isFinite(labelDy) ? labelDy : -8;
-  const wrap = document.createElement("div");
-  wrap.className = "otherDrvWrap";
-  wrap.innerHTML = `
-    <div class="otherArrowWrap otherPulse" style="transform:rotate(${rot}deg)">
-      <div class="otherArrow"></div>
-    </div>
-    <div class="otherDrvName" style="transform:translate(${labelTranslateX}px, ${labelTranslateY}px);">
-      ${escapeHtml(safe)}
+  const html = `
+    <div class="otherDrvWrap">
+      <div class="otherArrowWrap otherPulse" style="transform:rotate(${rot}deg)">
+        <div class="otherArrow"></div>
+      </div>
+      <div class="otherDrvName" style="transform:translate(${labelTranslateX}px, ${labelTranslateY}px);">
+        ${escapeHtml(safe)}
+      </div>
     </div>
   `;
-  return wrap;
+  return L.divIcon({
+    className: "",
+    html,
+    iconSize: [40, 40],
+    iconAnchor: [20, 20],
+  });
 }
 
 function clearOtherDrivers() {
@@ -2497,19 +1904,17 @@ function upsertDriverMarker(userId, name, lat, lng, heading, labelSide, labelDx 
 
   const existing = otherMarkers.get(userId);
   if (existing) {
-    existing.remove();
-    otherMarkers.delete(userId);
+    existing.setLatLng([lat, lng]);
+    existing.setIcon(makeDriverIcon(name || `Driver ${userId}`, heading, labelSide, labelDx, labelDy));
+    return;
   }
 
-  const otherLngLat = [lng, lat];
-  console.log("DEBUG other marker lngLat", { userId, lngLat: otherLngLat });
-
-  const mk = new maplibregl.Marker({
-    element: makeDriverIconElement(name || `Driver ${userId}`, heading, labelSide, labelDx, labelDy),
-    anchor: "center",
-  })
-    .setLngLat(otherLngLat)
-    .addTo(map);
+  const mk = L.marker([lat, lng], {
+    icon: makeDriverIcon(name || `Driver ${userId}`, heading, labelSide, labelDx, labelDy),
+    interactive: false,
+    pane: "communityPane",
+    zIndexOffset: 1500000,
+  }).addTo(map);
 
   otherMarkers.set(userId, mk);
 }
@@ -2550,12 +1955,12 @@ async function pullPresenceAll() {
     }
 
     const selfPt = userLatLng
-      ? map.project([userLatLng.lng, userLatLng.lat])
+      ? map.latLngToLayerPoint([userLatLng.lat, userLatLng.lng])
       : null;
 
     const driversWithPoints = visibleDrivers.map((drv) => ({
       ...drv,
-      basePoint: map.project([drv.lng, drv.lat]),
+      basePoint: map.latLngToLayerPoint([drv.lat, drv.lng]),
     }));
 
     const COLLISION_PX = 28;
@@ -2576,7 +1981,7 @@ async function pullPresenceAll() {
 
         for (const candidate of driversWithPoints) {
           if (clustered.has(candidate.uid)) continue;
-          if (Math.hypot(current.basePoint.x - candidate.basePoint.x, current.basePoint.y - candidate.basePoint.y) > COLLISION_PX) continue;
+          if (current.basePoint.distanceTo(candidate.basePoint) > COLLISION_PX) continue;
           clustered.add(candidate.uid);
           queue.push(candidate);
         }
@@ -2598,7 +2003,7 @@ async function pullPresenceAll() {
         const basePoint = drv.basePoint;
 
         if (selfPt) {
-          const distPx = Math.hypot(basePoint.x - selfPt.x, basePoint.y - selfPt.y);
+          const distPx = basePoint.distanceTo(selfPt);
           if (distPx < SELF_COLLISION_THRESHOLD_PX) {
             labelDx = (SELF_LABEL_SIDE === "right")
               ? -SELF_COLLISION_OFFSET_PX
@@ -2762,17 +2167,6 @@ loadTimeline().catch((err) => {
   console.error(err);
   timeLabel.textContent = `Error loading timeline: ${err.message}`;
 });
-
-mapReadyPromise
-  .then(() => {
-    scheduleMapResizeSequence("map-ready");
-  })
-  .catch((err) => {
-    console.error("Map initialization failed:", err);
-    if (!timeline.length) {
-      timeLabel.textContent = `Error initializing map: ${err.message || err}`;
-    }
-  });
 
 /* auth boot */
 (async () => {
