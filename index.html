@@ -144,20 +144,58 @@
       filter: brightness(1.03) saturate(1.08);
     }
 
-    /* ---------- Legend (small + minimize) ---------- */
+    /* ---------- Legend drawer (phase 2) ---------- */
+    .legendLauncher{
+      position: absolute;
+      top: calc(10px + env(safe-area-inset-top));
+      left: 8px;
+      z-index: 1001;
+      border: none;
+      border-radius: 12px;
+      padding: 10px 11px;
+      font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
+      font-size: 12px;
+      font-weight: 950;
+      line-height: 1;
+      color: #0b2a3a;
+      background: rgba(255,255,255,0.95);
+      box-shadow: 0 6px 18px rgba(0,0,0,0.16);
+      border: 1px solid rgba(0,0,0,0.12);
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+      transition: opacity 180ms ease, transform 180ms ease;
+    }
+    .legendLauncher:active{ transform: scale(0.98); }
+
     .legend {
       position: absolute;
       top: calc(8px + env(safe-area-inset-top));
       left: 8px;
       z-index: 1000;
       background: rgba(255,255,255,0.92);
-      padding: 5px 6px;
-      border-radius: 10px;
-      box-shadow: 0 5px 14px rgba(0,0,0,0.14);
+      padding: 7px 8px;
+      border-radius: 12px;
+      box-shadow: 0 10px 24px rgba(0,0,0,0.17);
       font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
       max-width: 220px;
-      transform: scale(0.86);
-      transform-origin: top left;
+      transform: translateX(0);
+      opacity: 1;
+      transition: transform 220ms ease, opacity 220ms ease;
+      will-change: transform, opacity;
+    }
+    .legend.closed{
+      transform: translateX(calc(-100% - 16px));
+      opacity: 0;
+      pointer-events: none;
+    }
+    .legend.closed + .legendLauncher{
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .legend:not(.closed) + .legendLauncher{
+      opacity: 0;
+      pointer-events: none;
     }
     .legendHeader{
       display:flex;
@@ -778,10 +816,10 @@
     </div>
   </div>
 
-  <div id="legend" class="legend" aria-label="Demand legend">
+  <div id="legend" class="legend closed" aria-label="Demand legend" aria-hidden="true">
     <div class="legendHeader">
       <h3>Demand Colors</h3>
-      <button id="legendToggle" class="legendToggleBtn" type="button">–</button>
+      <button id="legendToggle" class="legendToggleBtn" type="button" aria-label="Close drawer">✕</button>
     </div>
 
     <div class="legendBody">
@@ -815,6 +853,7 @@
       </div>
     </div>
   </div>
+  <button id="legendLauncher" class="legendLauncher" type="button" aria-label="Open demand controls">☰</button>
 
   <div class="sliderWrap">
     <div class="sliderTopRow">
