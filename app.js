@@ -997,10 +997,18 @@ function enrichFeatureForMap(feature) {
     + (Number.isFinite(pickups) ? pickups : 0)
     + Math.min(6000, Math.sqrt(Math.max(1, weight)) * 35);
 
+  const style = props?.style || {};
+  const derivedEffectiveColor =
+    (typeof props.effectiveColor === "string" && props.effectiveColor.trim())
+    || (typeof style.fillColor === "string" && style.fillColor.trim())
+    || (typeof style.color === "string" && style.color.trim())
+    || "#66aaff";
+
   return {
     ...feature,
     properties: {
       ...props,
+      effectiveColor: derivedEffectiveColor,
       demand_color: effectiveColor(props, geom),
       zone_label_priority: Number.isFinite(priority) ? priority : 0,
       zone_label_name: (props.zone_name || "").trim() || `Zone ${props.LocationID ?? ""}`,
@@ -1024,6 +1032,8 @@ function frameToStyledGeoJSON(rawFrameGeoJSON) {
     return { type: "FeatureCollection", features: [] };
   }
 
+  let usedStyleFillColorFallback = false;
+
   const features = src.features
     .filter((feature) => {
       if (!hasValidGeometry(feature?.geometry)) {
@@ -1034,12 +1044,23 @@ function frameToStyledGeoJSON(rawFrameGeoJSON) {
     })
     .map((feature) => {
       const enriched = enrichFeatureForMap(feature);
+      const style = enriched.properties?.style || {};
       const effectiveColorValue =
         typeof enriched.properties?.effectiveColor === "string" && enriched.properties.effectiveColor.trim()
           ? enriched.properties.effectiveColor
-          : (typeof enriched.properties?.demand_color === "string" && enriched.properties.demand_color.trim()
-            ? enriched.properties.demand_color
-            : "#66aaff");
+          : (typeof style.fillColor === "string" && style.fillColor.trim()
+            ? style.fillColor
+            : (typeof style.color === "string" && style.color.trim()
+              ? style.color
+              : "#66aaff"));
+
+      if (
+        !(typeof enriched.properties?.effectiveColor === "string" && enriched.properties.effectiveColor.trim())
+        && (typeof style.fillColor === "string" && style.fillColor.trim())
+      ) {
+        usedStyleFillColorFallback = true;
+      }
+
       return {
         ...enriched,
         properties: {
@@ -1053,6 +1074,10 @@ function frameToStyledGeoJSON(rawFrameGeoJSON) {
         },
       };
     });
+
+  if (usedStyleFillColorFallback) {
+    console.log("DEBUG frame color source: style.fillColor fallback applied");
+  }
 
   return { type: "FeatureCollection", features };
 }
@@ -1233,32 +1258,25 @@ function normalizeFrameResponsePayload(framePayload) {
     throw new Error("Backend /frame returned error payload");
   }
 
-  const topLevelKeys = Object.keys(payload);
-  const hasDataKey = Object.prototype.hasOwnProperty.call(payload, "data");
-  const hasFeaturesKey = Object.prototype.hasOwnProperty.call(payload, "features");
+  const hasPolygonsFeatureCollection = isFeatureCollection(payload.polygons);
   const isDirectFeatureCollection = isFeatureCollection(payload);
   const hasNestedDataFeatureCollection = isFeatureCollection(payload.data);
-  const hasNestedFrameFeatureCollection = isFeatureCollection(payload.frame);
-  const hasNestedGeojsonFeatureCollection = isFeatureCollection(payload.geojson);
 
-  let frameFeatureCount = null;
-  if (isDirectFeatureCollection) frameFeatureCount = payload.features.length;
-  else if (hasNestedDataFeatureCollection) frameFeatureCount = payload.data.features.length;
-  else if (hasNestedFrameFeatureCollection) frameFeatureCount = payload.frame.features.length;
-  else if (hasNestedGeojsonFeatureCollection) frameFeatureCount = payload.geojson.features.length;
+  if (hasPolygonsFeatureCollection) {
+    console.log("DEBUG frame shape: using response.polygons");
+    console.log(`DEBUG frame shape: feature count = ${payload.polygons.features.length}`);
+    return payload.polygons;
+  }
 
-  console.log("DEBUG frame raw payload:", payload);
-  console.log("DEBUG frame raw keys:", topLevelKeys);
-  console.log("DEBUG frame has data key:", hasDataKey);
-  console.log("DEBUG frame has top-level features key:", hasFeaturesKey);
-  console.log("DEBUG frame is direct FeatureCollection:", isDirectFeatureCollection);
-  console.log("DEBUG frame has nested data FeatureCollection:", hasNestedDataFeatureCollection);
-  console.log("DEBUG frame feature count:", frameFeatureCount);
+  if (isDirectFeatureCollection) {
+    console.log(`DEBUG frame shape: feature count = ${payload.features.length}`);
+    return payload;
+  }
 
-  if (isDirectFeatureCollection) return payload;
-  if (hasNestedDataFeatureCollection) return payload.data;
-  if (hasNestedFrameFeatureCollection) return payload.frame;
-  if (hasNestedGeojsonFeatureCollection) return payload.geojson;
+  if (hasNestedDataFeatureCollection) {
+    console.log(`DEBUG frame shape: feature count = ${payload.data.features.length}`);
+    return payload.data;
+  }
 
   console.error("Unsupported /frame response shape", payload);
   throw new Error("Unsupported /frame response shape");
