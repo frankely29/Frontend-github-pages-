@@ -835,10 +835,15 @@ let zonePopup = null;
 function initMap() {
   map = new maplibregl.Map({
     container: "map",
-    style: "https://demotiles.maplibre.org/style.json",
+    style: "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json", // Reliable on iOS Safari 2026 (no glyph issues)
     center: [-73.98, 40.73],
     zoom: 10.5,
     attributionControl: { position: "bottom-right" },
+  });
+
+  map.on("style.load", () => {
+    console.log("✅ Style fully loaded — forcing repaint");
+    map.triggerRepaint();
   });
 
   map.on("load", () => {
@@ -875,6 +880,10 @@ function initMap() {
 
     const loading = document.getElementById("mapLoading");
     if (loading) loading.style.display = "none";
+
+    map.triggerRepaint();
+    setTimeout(() => map.triggerRepaint(), 100);
+    setTimeout(() => map.triggerRepaint(), 400);
 
     if (pendingFrame) {
       renderFrame(pendingFrame);
