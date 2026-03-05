@@ -47,6 +47,7 @@ function setLegendDrawerOpen(open) {
   legendEl.classList.toggle("closed", !open);
   legendEl.classList.remove("minimized");
   legendEl.setAttribute("aria-hidden", open ? "false" : "true");
+  if (legendLauncherBtn) legendLauncherBtn.classList.toggle("hidden", !!open);
   if (legendToggleBtn) {
     legendToggleBtn.textContent = open ? "✕" : "☰";
     legendToggleBtn.setAttribute("aria-label", open ? "Close drawer" : "Open drawer");
@@ -72,6 +73,7 @@ function setRightDrawerOpen(open) {
   if (!utilityDrawerEl) return;
   utilityDrawerEl.classList.toggle("closed", !open);
   utilityDrawerEl.setAttribute("aria-hidden", open ? "false" : "true");
+  if (utilityLauncherBtn) utilityLauncherBtn.classList.toggle("hidden", !!open);
   if (utilityToggleBtn) {
     utilityToggleBtn.textContent = open ? "✕" : "☰";
     utilityToggleBtn.setAttribute("aria-label", open ? "Close drawer" : "Open drawer");
@@ -625,13 +627,7 @@ function labelHTML(props, zoom) {
 
   const zoneText = zoom < 13 ? shortenLabel(name, LABEL_MAX_CHARS_MID) : name;
 
-  const borough = (props.borough || "").trim();
-  const showBorough = zoom >= 15 && borough;
-
-  return `
-    <div class="zn">${escapeHtml(zoneText)}</div>
-    ${showBorough ? `<div class="br">${escapeHtml(borough)}</div>` : ""}
-  `;
+  return `<div class="zn">${escapeHtml(zoneText)}</div>`;
 }
 
 /* =========================================================
@@ -804,6 +800,9 @@ L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
 const labelsPane = map.createPane("labelsPane");
 labelsPane.style.zIndex = 450;
 
+const boroughLabelsPane = map.createPane("boroughLabelsPane");
+boroughLabelsPane.style.zIndex = 460;
+
 const navPane = map.createPane("navPane");
 navPane.style.zIndex = 1000;
 
@@ -815,6 +814,68 @@ let timeline = [];
 let minutesOfWeek = [];
 let currentFrame = null;
 let lastUserSliderTs = 0;
+let boroughLabelsLayer = L.layerGroup().addTo(map);
+let boroughLabelAnchors = null;
+
+function geometryWeight(geom) {
+  if (!geom) return 0;
+  if (geom.type === "Polygon") {
+    const outer = ringCentroidArea(geom.coordinates?.[0] || []);
+    return outer ? Math.abs(outer.area2) : 1;
+  }
+  if (geom.type === "MultiPolygon") {
+    let total = 0;
+    for (const poly of geom.coordinates || []) {
+      const outer = ringCentroidArea(poly?.[0] || []);
+      total += outer ? Math.abs(outer.area2) : 0;
+    }
+    return total || 1;
+  }
+  return 1;
+}
+
+function buildBoroughLabelAnchors(features) {
+  const byBorough = new Map();
+  for (const f of features || []) {
+    const props = f?.properties || {};
+    const borough = (props.borough || "").trim();
+    if (!borough) continue;
+    const center = geometryCenter(f.geometry);
+    if (!center) continue;
+    const w = geometryWeight(f.geometry);
+    const prev = byBorough.get(borough) || { lat: 0, lng: 0, w: 0 };
+    prev.lat += center.lat * w;
+    prev.lng += center.lng * w;
+    prev.w += w;
+    byBorough.set(borough, prev);
+  }
+
+  const anchors = [];
+  for (const [borough, acc] of byBorough.entries()) {
+    if (!acc.w) continue;
+    anchors.push({
+      borough,
+      lat: acc.lat / acc.w,
+      lng: acc.lng / acc.w,
+    });
+  }
+  return anchors;
+}
+
+function renderBoroughLabels() {
+  boroughLabelsLayer.clearLayers();
+  for (const b of boroughLabelAnchors || []) {
+    L.marker([b.lat, b.lng], {
+      pane: "boroughLabelsPane",
+      interactive: false,
+      zIndexOffset: 50,
+      icon: L.divIcon({
+        className: "borough-label",
+        html: `<div class="btxt">${escapeHtml(b.borough)}</div>`,
+      }),
+    }).addTo(boroughLabelsLayer);
+  }
+}
 
 /* =========================================================
    NEXT BIN CACHE
@@ -946,6 +1007,11 @@ function renderFrame(frame) {
       });
     },
   }).addTo(map);
+
+  if (!boroughLabelAnchors) {
+    boroughLabelAnchors = buildBoroughLabelAnchors(currentFrame?.polygons?.features || []);
+  }
+  renderBoroughLabels();
 
   updateRecommendation(currentFrame);
 }
