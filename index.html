@@ -148,24 +148,27 @@
     .legendLauncher{
       position: relative;
       z-index: 1001;
-      border: none;
+      border: 1px solid rgba(9,30,66,0.14);
       border-radius: 14px;
-      width: 44px;
-      height: 44px;
+      width: 46px;
+      height: 46px;
       padding: 0;
       font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
-      font-size: 17px;
+      font-size: 18px;
       font-weight: 950;
       line-height: 1;
-      color: #0b2a3a;
-      background: rgba(255,255,255,0.86);
-      box-shadow: 0 6px 16px rgba(0,0,0,0.14);
-      border: 1px solid rgba(0,0,0,0.12);
+      color: #113245;
+      background: rgba(255,255,255,0.84);
+      backdrop-filter: blur(9px);
+      box-shadow: 0 8px 20px rgba(12,25,42,0.16);
       cursor: pointer;
       -webkit-tap-highlight-color: transparent;
       touch-action: manipulation;
-      transition: opacity 180ms ease, transform 180ms ease;
+      transition: opacity 180ms ease, transform 180ms ease, box-shadow 180ms ease;
     }
+    .legendLauncher:hover,
+    .utilityLauncher:hover,
+    .toggleBtnSmall:hover{ box-shadow: 0 10px 24px rgba(12,25,42,0.18); }
     .legendLauncher:active{ transform: scale(0.98); }
 
     .legend {
@@ -173,10 +176,11 @@
       top: calc(8px + env(safe-area-inset-top));
       left: 8px;
       z-index: 1000;
-      background: rgba(255,255,255,0.92);
-      padding: 7px 8px;
-      border-radius: 12px;
-      box-shadow: 0 10px 24px rgba(0,0,0,0.17);
+      background: rgba(255,255,255,0.90);
+      padding: 10px 11px;
+      border-radius: 14px;
+      box-shadow: 0 14px 30px rgba(12,25,42,0.18);
+      border: 1px solid rgba(9,30,66,0.10);
       font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
       max-width: 220px;
       transform: translateX(0);
@@ -195,7 +199,7 @@
       align-items:center;
       justify-content:space-between;
       gap:8px;
-      margin-bottom:4px;
+      margin-bottom:6px;
     }
     .legend h3 {
       margin: 0;
@@ -216,7 +220,7 @@
     .legend.minimized .legendBody{ display:none; }
 
     .legend .recommendLine{
-      margin: 0 0 6px 0;
+      margin: 0 0 8px 0;
       font-size: 10px;
       font-weight: 900;
       opacity: 0.92;
@@ -227,7 +231,7 @@
       display:flex;
       gap:8px;
       align-items:center;
-      margin: 0 0 6px 0;
+      margin: 0 0 8px 0;
       flex-wrap: wrap;
     }
 
@@ -270,7 +274,7 @@
       display: flex;
       align-items: center;
       gap: 7px;
-      margin: 4px 0;
+      margin: 6px 0;
       font-size: 11px;
       font-weight: 800;
     }
@@ -325,11 +329,11 @@
       position: absolute;
       left: 12px;
       right: 12px;
-      bottom: calc(8px + env(safe-area-inset-bottom));
+      bottom: calc(10px + env(safe-area-inset-bottom));
       z-index: 1000;
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 9px;
       pointer-events: none;
     }
 
@@ -338,7 +342,7 @@
       max-width: min(94vw, 520px);
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 10px;
       pointer-events: auto;
       flex-wrap: wrap;
     }
@@ -346,7 +350,7 @@
     .dockLaunchers{
       display: flex;
       align-items: center;
-      gap: 7px;
+      gap: 8px;
       flex-shrink: 0;
     }
 
@@ -355,8 +359,8 @@
       background: rgba(255,255,255,0.95);
       border: 1px solid rgba(0,0,0,0.09);
       border-radius: 16px;
-      box-shadow: 0 8px 20px rgba(0,0,0,0.14);
-      padding: 8px 10px 9px;
+      box-shadow: 0 10px 22px rgba(12,25,42,0.15);
+      padding: 10px 12px 10px;
       font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
       backdrop-filter: blur(8px);
     }
@@ -365,8 +369,8 @@
       display:flex;
       align-items:center;
       justify-content:space-between;
-      gap:8px;
-      margin-bottom:6px;
+      gap:9px;
+      margin-bottom:8px;
     }
 
     .timeLabel {
@@ -376,26 +380,28 @@
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      max-width: 34vw;
+      max-width: 36vw;
+      letter-spacing: 0.1px;
     }
 
     .weatherBadge{
       display:inline-flex;
       align-items:center;
-      gap:6px;
-      padding: 3px 8px;
+      gap:5px;
+      padding: 6px 10px;
       border-radius: 999px;
-      border: 1px solid rgba(0,0,0,0.14);
-      background: rgba(255,255,255,0.80);
+      border: 1px solid rgba(9,30,66,0.14);
+      background: rgba(255,255,255,0.82);
+      box-shadow: 0 7px 16px rgba(12,25,42,0.14);
       font-size: 10px;
       font-weight: 900;
-      opacity: 0.95;
+      opacity: 0.96;
       white-space: nowrap;
-      max-width: 38vw;
+      max-width: 40vw;
       overflow: hidden;
       text-overflow: ellipsis;
     }
-    .weatherBadge .wxIcon{ font-size: 12px; }
+    .weatherBadge .wxIcon{ font-size: 11px; }
     .weatherBadge .wxTxt{ opacity: 0.9; }
 
     /* =========================================================
@@ -448,23 +454,23 @@
     .utilityLauncher{
       position: relative;
       z-index: 1001;
-      border: none;
+      border: 1px solid rgba(9,30,66,0.14);
       border-radius: 14px;
-      width: 44px;
-      height: 44px;
+      width: 46px;
+      height: 46px;
       padding: 0;
       font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
-      font-size: 17px;
+      font-size: 18px;
       font-weight: 950;
       line-height: 1;
-      color: #0b2a3a;
-      background: rgba(255,255,255,0.86);
-      box-shadow: 0 6px 16px rgba(0,0,0,0.14);
-      border: 1px solid rgba(0,0,0,0.12);
+      color: #113245;
+      background: rgba(255,255,255,0.84);
+      backdrop-filter: blur(9px);
+      box-shadow: 0 8px 20px rgba(12,25,42,0.16);
       cursor: pointer;
       -webkit-tap-highlight-color: transparent;
       touch-action: manipulation;
-      transition: opacity 180ms ease, transform 180ms ease;
+      transition: opacity 180ms ease, transform 180ms ease, box-shadow 180ms ease;
     }
     .utilityLauncher:active{ transform: scale(0.98); }
 
@@ -474,11 +480,11 @@
       left: 8px;
       z-index: 1000;
       width: min(220px, calc(100vw - 16px));
-      background: rgba(255,255,255,0.92);
-      padding: 9px;
-      border-radius: 12px;
-      box-shadow: 0 10px 24px rgba(0,0,0,0.17);
-      border: 1px solid rgba(0,0,0,0.09);
+      background: rgba(255,255,255,0.90);
+      padding: 11px;
+      border-radius: 14px;
+      box-shadow: 0 14px 30px rgba(12,25,42,0.18);
+      border: 1px solid rgba(9,30,66,0.10);
       font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
       transform: translateX(0);
       opacity: 1;
@@ -495,7 +501,7 @@
       align-items:center;
       justify-content:space-between;
       gap:8px;
-      margin-bottom:8px;
+      margin-bottom:10px;
     }
     .utilityTitle{
       font-size: 12px;
@@ -515,8 +521,8 @@
     .radioRow{
       display:flex;
       align-items:flex-end;
-      gap:6px;
-      margin-top: 6px;
+      gap:8px;
+      margin-top: 8px;
       justify-content: space-between;
     }
     .radioBtns{
@@ -564,15 +570,19 @@
     .toggleBtnSmall{
       border:none;
       border-radius: 999px;
-      padding: 5px 9px;
+      min-height: 38px;
+      padding: 8px 12px;
       font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
       font-weight: 950;
       font-size: 10px;
       cursor: pointer;
-      background: rgba(245,247,249,0.97);
-      border: 1px solid rgba(0,0,0,0.12);
-      box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+      background: rgba(255,255,255,0.84);
+      backdrop-filter: blur(9px);
+      border: 1px solid rgba(9,30,66,0.14);
+      box-shadow: 0 8px 20px rgba(12,25,42,0.16);
       white-space: nowrap;
+      color: #113245;
+      letter-spacing: 0.1px;
     }
     .toggleBtnSmall.on { outline: 2px solid rgba(0,160,255,0.45); }
     .toggleBtnSmall:active { transform: scale(0.98); }
@@ -584,12 +594,13 @@
       .bottomControls{
         left: 10px;
         right: 10px;
+        bottom: calc(8px + env(safe-area-inset-bottom));
       }
       .appDock{
         max-width: calc(100vw - 20px);
       }
-      .timeLabel{ max-width: 32vw; font-size: 12px; }
-      .weatherBadge{ max-width: 33vw; }
+      .timeLabel{ max-width: 34vw; font-size: 12px; }
+      .weatherBadge{ max-width: 37vw; }
       .radioRow{
         flex-wrap: wrap;
         align-items:center;
@@ -650,15 +661,15 @@
     .borough-label .btxt{
       display: inline-block;
       font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
-      font-size: 10px;
+      font-size: 9px;
       font-weight: 800;
       letter-spacing: 0.45px;
       text-transform: uppercase;
-      color: rgba(16,35,49,0.84);
-      background: rgba(255,255,255,0.52);
+      color: rgba(16,35,49,0.78);
+      background: rgba(255,255,255,0.44);
       border-radius: 4px;
       padding: 1px 4px;
-      text-shadow: 0 1px 1px rgba(255,255,255,0.65);
+      text-shadow: 0 1px 1px rgba(255,255,255,0.55);
       white-space: nowrap;
     }
 
