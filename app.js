@@ -721,6 +721,65 @@ const timeLabel = document.getElementById("timeLabel");
 const debugToggle = document.getElementById("debugToggle");
 const debugPanel = document.getElementById("debugPanel");
 const dbgReloadFrame = document.getElementById("dbgReloadFrame");
+const dockColors = document.getElementById("dockColors");
+const dockModes = document.getElementById("dockModes");
+const dockChat = document.getElementById("dockChat");
+const dockMusic = document.getElementById("dockMusic");
+
+const panelColors = document.getElementById("panelColors");
+const panelModes = document.getElementById("panelModes");
+const panelChat = document.getElementById("panelChat");
+const panelMusic = document.getElementById("panelMusic");
+
+let openPanelKey = null;
+
+function closeAllPanels() {
+  [panelColors, panelModes, panelChat, panelMusic].forEach((p) => p && p.classList.remove("open"));
+  [dockColors, dockModes, dockChat, dockMusic].forEach((b) => b && b.classList.remove("dockBtnActive"));
+  openPanelKey = null;
+}
+
+function togglePanel(key) {
+  if (openPanelKey === key) {
+    closeAllPanels();
+    return;
+  }
+
+  closeAllPanels();
+  openPanelKey = key;
+
+  if (key === "colors") {
+    panelColors?.classList.add("open");
+    dockColors?.classList.add("dockBtnActive");
+  }
+  if (key === "modes") {
+    panelModes?.classList.add("open");
+    dockModes?.classList.add("dockBtnActive");
+  }
+  if (key === "chat") {
+    panelChat?.classList.add("open");
+    dockChat?.classList.add("dockBtnActive");
+  }
+  if (key === "music") {
+    panelMusic?.classList.add("open");
+    dockMusic?.classList.add("dockBtnActive");
+  }
+}
+
+function bindDock(btn, key) {
+  if (!btn) return;
+  btn.addEventListener("pointerdown", (e) => e.stopPropagation());
+  btn.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    togglePanel(key);
+  });
+}
+
+bindDock(dockColors, "colors");
+bindDock(dockModes, "modes");
+bindDock(dockChat, "chat");
+bindDock(dockMusic, "music");
 
 /* =========================================================
    Precision Slider Popup
@@ -844,6 +903,11 @@ function initMap() {
 
     // Zone click popup (restored)
     wireZoneClickPopup();
+
+    map.on("click", (e) => {
+      const features = map.queryRenderedFeatures(e.point, { layers: ["zones-fill"] });
+      if (!features.length) closeAllPanels();
+    });
 
     const loading = document.getElementById("mapLoading");
     if (loading) loading.style.display = "none";

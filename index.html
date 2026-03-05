@@ -18,7 +18,12 @@
 
   <style>
     html, body { height: 100%; margin: 0; padding: 0; }
-    #map { height: 100vh; width: 100vw; }
+    #map {
+      position: fixed;
+      inset: 0;
+      height: 100vh;
+      width: 100vw;
+    }
 
     /* =========================================================
        LOCKED OVERLAY (SIGNED OUT)
@@ -142,20 +147,13 @@
       filter: brightness(0.65) contrast(1.08) saturate(0.85);
     }
 
-    /* ---------- Legend (small + minimize) ---------- */
+    /* ---------- Side panel content ---------- */
     .legend {
-      position: absolute;
-      top: calc(8px + env(safe-area-inset-top));
-      left: 8px;
-      z-index: 1000;
       background: rgba(255,255,255,0.92);
       padding: 6px;
       border-radius: 10px;
-      box-shadow: 0 5px 14px rgba(0,0,0,0.14);
       font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
-      max-width: 220px;
-      transform: scale(0.86);
-      transform-origin: top left;
+      max-width: 100%;
     }
     .legendHeader{
       display:flex;
@@ -289,15 +287,15 @@
        Bottom slider + Weather badge
        ========================================================= */
     .sliderWrap {
-      position: absolute;
-      left: 10px;
-      right: 10px;
-      bottom: calc(6px + env(safe-area-inset-bottom));
-      z-index: 1000;
-      background: rgba(255,255,255,0.92);
-      border-radius: 14px;
-      box-shadow: 0 6px 18px rgba(0,0,0,0.15);
-      padding: 6px 10px;
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: env(safe-area-inset-bottom);
+      z-index: 1200;
+      background: rgba(255,255,255,0.85);
+      backdrop-filter: blur(10px);
+      border-radius: 0;
+      padding: 10px 14px;
       font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
     }
 
@@ -306,7 +304,7 @@
       align-items:center;
       justify-content:space-between;
       gap:10px;
-      margin-bottom: 4px;
+      margin-bottom: 0;
     }
 
     .timeLabel {
@@ -316,6 +314,10 @@
     }
 
     .weatherBadge{
+      position: fixed;
+      top: calc(env(safe-area-inset-top) + 10px);
+      right: 12px;
+      z-index: 1400;
       display:inline-flex;
       align-items:center;
       gap:6px;
@@ -327,7 +329,7 @@
       font-weight: 900;
       opacity: 0.95;
       white-space: nowrap;
-      max-width: 46vw;
+      max-width: 52vw;
       overflow: hidden;
       text-overflow: ellipsis;
     }
@@ -376,7 +378,7 @@
       border-top: 7px solid rgba(20, 20, 20, 0.92);
     }
 
-    input[type="range"] { width: 100%; height: 18px; margin: 0; }
+input[type="range"] { width: 100%; height: 6px; margin: 0; border-radius: 999px; }
 
     /* =========================================================
        Radio row inside bottom box
@@ -466,19 +468,69 @@
     .zone-label .zn { font-weight: 950; letter-spacing: 0.1px; }
     .zone-label .br { font-weight: 900; opacity: 0.7; padding: 1px 6px; border-radius: 10px; }
 
-    .zone-label.z10 .zn { font-size: 05px; }
-    .zone-label.z11 .zn { font-size: 06px; }
-    .zone-label.z12 .zn { font-size: 07px; }
-    .zone-label.z13 .zn { font-size: 08px; }
-    .zone-label.z14 .zn { font-size: 09px; }
-    .zone-label.z15 .zn { font-size: 10px; }
+    .zone-label.z15 .zn { font-size: 13px; }
+    .zone-label.z14 .zn { font-size: 12px; }
+    .zone-label.z13 .zn { font-size: 11px; }
+    .zone-label.z12 .zn { font-size: 10px; }
+    .zone-label.z11 .zn { font-size: 9px; }
+    .zone-label.z10 .zn { font-size: 8px; }
 
     .zone-label.z10 .br,
     .zone-label.z11 .br,
     .zone-label.z12 .br,
     .zone-label.z13 .br,
     .zone-label.z14 .br { font-size: 0px; padding: 0; border: 0; }
-    .zone-label.z15 .br { font-size: 03px; }
+    .zone-label.z15 .br { font-size: 8px; }
+
+    #dock {
+      position: fixed;
+      left: 50%;
+      transform: translateX(-50%);
+      bottom: calc(env(safe-area-inset-bottom) + 58px);
+      display: flex;
+      gap: 14px;
+      align-items: center;
+      z-index: 1300;
+      pointer-events: auto;
+    }
+    .dockBtn {
+      width: 46px;
+      height: 46px;
+      border-radius: 999px;
+      border: 0;
+      background: rgba(240,240,240,0.95);
+      box-shadow: 0 8px 22px rgba(0,0,0,0.18);
+      display: grid;
+      place-items: center;
+    }
+    .dockBtnMain { width: 56px; height: 56px; }
+    .dockBtnMusic { background: rgba(235,60,60,0.95); color: white; }
+    .dockBtnActive { outline: 2px solid rgba(0,0,0,0.15); }
+    .dockIcon { font-size: 20px; }
+    .dockBtnMain .dockIcon { font-size: 22px; }
+    .dockBtnMusic .dockIcon { font-size: 22px; }
+
+    .sidePanel {
+      position: fixed;
+      top: 12px;
+      left: 12px;
+      bottom: calc(env(safe-area-inset-bottom) + 120px);
+      width: min(360px, calc(100vw - 24px));
+      background: rgba(255,255,255,0.92);
+      backdrop-filter: blur(12px);
+      border-radius: 16px;
+      box-shadow: 0 14px 40px rgba(0,0,0,0.20);
+      transform: translateX(-110%);
+      transition: transform 180ms ease;
+      z-index: 1250;
+      overflow: auto;
+      padding: 12px;
+    }
+    .sidePanel.open { transform: translateX(0); }
+    .panelTitle {
+      margin: 0 0 10px 0;
+      font: 700 16px/1.2 system-ui;
+    }
 
     /* ---------- You arrow: force on top of EVERYTHING ---------- */
     .maplibregl-marker { z-index: 800; }
@@ -792,58 +844,55 @@
     </div>
   </div>
 
-  <div id="legend" class="legend" aria-label="Demand legend">
-    <div class="legendHeader">
-      <h3>Demand Colors</h3>
-      <button id="legendToggle" class="legendToggleBtn" type="button">–</button>
-    </div>
-
-    <div class="legendBody">
-      <div id="recommendLine" class="recommendLine">Recommended: …</div>
-
-      <div class="navRow" id="navRow">
-        <button id="btnAuth" class="modeBtn" type="button">Sign in</button>
-        <a id="navBtn" class="navBtn disabled" href="#" target="_blank" rel="noopener">Navigate</a>
-        <button id="btnStatenIsland" class="modeBtn" type="button">Staten Island Mode: OFF</button>
-        <button id="btnGhostMode" class="modeBtn" type="button">Ghost Mode: OFF</button>
-
-        <!-- community quick actions -->
-        <button id="btnPolice" class="dangerBtn" type="button">🚨 Police</button>
-        <button id="btnPickup" class="okBtn" type="button">✅ Pickup</button>
+  <div id="panelColors" class="sidePanel" aria-label="Demand legend">
+    <h3 class="panelTitle">Colors</h3>
+    <div id="legend" class="legend">
+      <div class="legendHeader">
+        <h3>Demand Colors</h3>
       </div>
 
-      <div class="row"><span class="swatch" style="background:#00b050"></span> Green = Highest</div>
-      <div class="row"><span class="swatch" style="background:#8000ff"></span> Purple = High</div>
-      <div class="row"><span class="swatch" style="background:#0066ff"></span> Blue = Medium</div>
-      <div class="row"><span class="swatch" style="background:#66ccff"></span> Sky = Normal</div>
-      <div class="row"><span class="swatch" style="background:#ffd400"></span> Yellow = Below Normal</div>
-      <div class="row"><span class="swatch" style="background:#e60000"></span> Red = Very Low / Avoid</div>
+      <div class="legendBody">
+        <div class="row"><span class="swatch" style="background:#00b050"></span> Green = Highest</div>
+        <div class="row"><span class="swatch" style="background:#8000ff"></span> Purple = High</div>
+        <div class="row"><span class="swatch" style="background:#0066ff"></span> Blue = Medium</div>
+        <div class="row"><span class="swatch" style="background:#66ccff"></span> Sky = Normal</div>
+        <div class="row"><span class="swatch" style="background:#ffd400"></span> Yellow = Below Normal</div>
+        <div class="row"><span class="swatch" style="background:#e60000"></span> Red = Very Low / Avoid</div>
 
-      <div id="modeNote" class="sub" style="margin-top:7px;">
-        Colors come from rating (1–100) for the selected 20-minute window.<br/>
-        Time label is NYC time.
-      </div>
-
-      <div id="communityNote" class="sub" style="margin-top:7px;">
-        Community: sign in to see other drivers + report police + log pickups.
+        <div id="modeNote" class="sub" style="margin-top:7px;">
+          Colors come from rating (1–100) for the selected 20-minute window.<br/>
+          Time label is NYC time.
+        </div>
       </div>
     </div>
   </div>
 
-  <div class="sliderWrap">
-    <div class="sliderTopRow">
-      <div id="timeLabel" class="timeLabel">Loading…</div>
-      <div id="weatherBadge" class="weatherBadge" title="Local weather">
-        <span class="wxIcon">⛅</span>
-        <span class="wxTxt">Weather…</span>
-      </div>
+  <div id="panelModes" class="sidePanel" aria-label="Modes panel">
+    <h3 class="panelTitle">Modes</h3>
+    <div id="recommendLine" class="recommendLine">Recommended: …</div>
+
+    <div class="navRow" id="navRow">
+      <button id="btnAuth" class="modeBtn" type="button">Sign in</button>
+      <a id="navBtn" class="navBtn disabled" href="#" target="_blank" rel="noopener">Navigate</a>
+      <button id="btnStatenIsland" class="modeBtn" type="button">Staten Island Mode: OFF</button>
+      <button id="btnGhostMode" class="modeBtn" type="button">Ghost Mode: OFF</button>
+
+      <button id="btnPolice" class="dangerBtn" type="button">🚨 Police</button>
+      <button id="btnPickup" class="okBtn" type="button">✅ Pickup</button>
     </div>
 
-    <div class="sliderTrackWrap">
-      <div id="sliderBubble" class="sliderBubble">…</div>
-      <input id="slider" type="range" min="0" max="0" value="0" step="1" />
+    <div id="communityNote" class="sub" style="margin-top:7px;">
+      Community: sign in to see other drivers + report police + log pickups.
     </div>
+  </div>
 
+  <div id="panelChat" class="sidePanel" aria-label="Chat panel">
+    <h3 class="panelTitle">Chat</h3>
+    <div class="panelBody">Coming soon…</div>
+  </div>
+
+  <div id="panelMusic" class="sidePanel" aria-label="Music panel">
+    <h3 class="panelTitle">Music</h3>
     <div class="radioRow">
       <div class="radioBtns">
         <button id="btnHot97" class="radioBtn" type="button">▶ HOT 97</button>
@@ -851,10 +900,44 @@
       </div>
       <div id="radioStatus" class="radioStatus">Radio: off</div>
     </div>
+  </div>
+
+  <div id="dock">
+    <button class="dockBtn" id="dockColors" aria-label="Colors">
+      <span class="dockIcon">🎨</span>
+    </button>
+
+    <button class="dockBtn dockBtnMain" id="dockModes" aria-label="Modes">
+      <span class="dockIcon">⚙️</span>
+    </button>
+
+    <button class="dockBtn dockBtnMain" id="dockChat" aria-label="Chat">
+      <span class="dockIcon">💬</span>
+    </button>
+
+    <button class="dockBtn dockBtnMusic dockBtnMain" id="dockMusic" aria-label="Music">
+      <span class="dockIcon">♪</span>
+    </button>
+  </div>
+
+  <div class="sliderWrap" id="sliderWrap">
+    <div class="sliderTopRow">
+      <div id="timeLabel" class="timeLabel">Loading…</div>
+    </div>
+
+    <div class="sliderTrackWrap">
+      <div id="sliderBubble" class="sliderBubble">…</div>
+      <input id="slider" type="range" min="0" max="0" value="0" step="1" />
+    </div>
 
     <div class="centerBtnInBar">
       <button id="btnCenter" class="toggleBtnSmall on" type="button">Auto-center: ON</button>
     </div>
+  </div>
+
+  <div id="weatherBadge" class="weatherBadge" title="Local weather">
+    <span class="wxIcon">⛅</span>
+    <span class="wxTxt">Weather…</span>
   </div>
 
   <div id="radioModal" class="radioModal" aria-hidden="true">
