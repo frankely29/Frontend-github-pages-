@@ -1,8 +1,9 @@
+// BOOT_SIGNATURE: app.js root v2026-03-05-1
 /* =========================================================
    NYC TLC Hotspot Map (Frontend) - SIMPLE + STABLE
    ========================================================= */
 
-const RAILWAY_BASE = "";   // relative = same domain (teamjoseo.up.railway.app)
+const RAILWAY_BASE = "https://web-production-78f67.up.railway.app";
 const BIN_MINUTES = 20;
 
 const REFRESH_MS = 5 * 60 * 1000;
