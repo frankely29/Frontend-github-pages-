@@ -791,55 +791,117 @@ function lerp(a, b, t) {
   return a + (b - a) * t;
 }
 
-function getZoneLabelStyleForZoom(zoom) {
-  const t = clamp((zoom - 9) / 5, 0, 1);
-  const farZoom = clamp((zoom - 8) / 2, 0, 1);
-  const fontSize = lerp(7.1, 8.8, t);
-  const maxWidth = lerp(60, 92, t);
-  const lineHeight = lerp(1.08, 1.12, t);
-  const opacity = lerp(0.96, 1, farZoom);
-  const letterSpacing = lerp(0.01, 0.08, t);
-  const maxChars = Math.round(lerp(10, 16, t));
-  return { fontSize, maxWidth, lineHeight, opacity, letterSpacing, maxChars };
+const zoneTextMeasureCanvas = document.createElement("canvas");
+const zoneTextMeasureCtx = zoneTextMeasureCanvas.getContext("2d");
+
+function abbreviateZoneWord(word) {
+  if (word.length <= 5) return word;
+  const exact = {
+    district: "Dist",
+    avenue: "Ave",
+    south: "S",
+    north: "N",
+    east: "E",
+    west: "W",
+    terminal: "Term",
+  };
+  const key = word.toLowerCase();
+  if (exact[key]) return exact[key];
+  return `${word.slice(0, 5)}`;
 }
 
-function nameWrapLimit(zoneName, ratio, zoomChars) {
-  const boundedRatio = clamp(ratio, 0.4, 1.8);
-  const ratioAdj = Math.round((boundedRatio - 1) * 2.2);
-  const longNameAdj = zoneName.length > 22 ? -1 : 0;
-  return clamp(zoomChars + ratioAdj + longNameAdj, 8, 24);
+function abbreviateZoneName(zoneName) {
+  return zoneName
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w) => abbreviateZoneWord(w))
+    .join(" ");
 }
 
-function wrapZoneLabelText(zoneName, ratio, zoomChars) {
-  const maxChars = nameWrapLimit(zoneName, ratio, zoomChars);
-
-  const words = zoneName
-    .split(/(\s+|\/)/)
-    .map((w) => w.trim())
-    .filter(Boolean);
-
-  if (words.length < 2 || zoneName.length <= maxChars) {
-    return { text: zoneName, maxChars };
+function shortenTokenToFit(token, maxWidth, fontPx) {
+  if (!zoneTextMeasureCtx) return token;
+  zoneTextMeasureCtx.font = `700 ${fontPx}px system-ui,-apple-system,Segoe UI,Roboto,Arial`;
+  if (zoneTextMeasureCtx.measureText(token).width <= maxWidth) return token;
+  for (let i = Math.max(2, token.length - 1); i >= 1; i--) {
+    const candidate = `${token.slice(0, i)}…`;
+    if (zoneTextMeasureCtx.measureText(candidate).width <= maxWidth) return candidate;
   }
+  return "…";
+}
 
-  let line1 = "";
-  let line2 = "";
-  for (const token of words) {
-    const candidate = line1 ? `${line1} ${token}` : token;
-    if (candidate.length <= maxChars || !line1) {
-      line1 = candidate;
-    } else {
-      line2 = line2 ? `${line2} ${token}` : token;
+function wrapTextToWidth(text, maxWidth, maxLines, fontPx) {
+  if (!zoneTextMeasureCtx) return [text];
+  zoneTextMeasureCtx.font = `700 ${fontPx}px system-ui,-apple-system,Segoe UI,Roboto,Arial`;
+
+  const words = text.split(/\s+/).filter(Boolean);
+  if (!words.length) return [text];
+
+  const lines = [];
+  let line = "";
+
+  for (const rawWord of words) {
+    const word = shortenTokenToFit(rawWord, maxWidth, fontPx);
+    const candidate = line ? `${line} ${word}` : word;
+    if (zoneTextMeasureCtx.measureText(candidate).width <= maxWidth || !line) {
+      line = candidate;
+      continue;
     }
+
+    lines.push(line);
+    line = word;
+    if (lines.length >= maxLines) return null;
   }
 
-  if (!line2) return { text: line1, maxChars };
+  if (line) lines.push(line);
+  if (lines.length > maxLines) return null;
+  return lines;
+}
 
-  if (line2.length > maxChars) {
-    line2 = `${line2.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
+function fitZoneLabelText(zoneName, maxLabelWidth, maxLabelHeight) {
+  const maxWidth = Math.max(20, maxLabelWidth);
+  const maxHeight = Math.max(8, maxLabelHeight);
+  const minFont = 3;
+  const maxFont = 22;
+  const lineHeight = 1.03;
+
+  const names = [zoneName, abbreviateZoneName(zoneName)];
+  let best = null;
+
+  for (const name of names) {
+    for (let font = maxFont; font >= minFont; font -= 0.5) {
+      for (let maxLines = 1; maxLines <= 4; maxLines++) {
+        const lines = wrapTextToWidth(name, maxWidth, maxLines, font);
+        if (!lines || !zoneTextMeasureCtx) continue;
+
+        zoneTextMeasureCtx.font = `700 ${font}px system-ui,-apple-system,Segoe UI,Roboto,Arial`;
+        const textWidth = lines.reduce((m, line) => Math.max(m, zoneTextMeasureCtx.measureText(line).width), 0);
+        const textHeight = lines.length * font * lineHeight;
+        if (textWidth <= maxWidth && textHeight <= maxHeight) {
+          const fit = {
+            lines,
+            fontPx: font,
+            lineHeight,
+            widthPx: Math.min(maxWidth, Math.max(1, textWidth + 2)),
+            heightPx: Math.min(maxHeight, Math.max(1, textHeight + 1)),
+          };
+          if (!best || fit.fontPx > best.fontPx) best = fit;
+        }
+      }
+      if (best && best.fontPx >= font) break;
+    }
+    if (best) break;
   }
 
-  return { text: `${line1}\n${line2}`.trim(), maxChars };
+  if (best) return best;
+
+  const emergency = shortenTokenToFit(abbreviateZoneName(zoneName), maxWidth, minFont);
+  return {
+    lines: [emergency || "…"],
+    fontPx: minFont,
+    lineHeight,
+    widthPx: Math.min(maxWidth, Math.max(1, maxWidth)),
+    heightPx: Math.min(maxHeight, Math.max(1, minFont * lineHeight + 1)),
+  };
 }
 
 function geometryWeight(geom) {
@@ -914,47 +976,45 @@ function buildZoneLabelAnchors(features) {
     return [];
   }
 
-  function dominantAngleFromGeometry(geom) {
-    const rings = collectOuterRings(geom);
-    if (!rings.length) return 0;
+  function pointInRing(ring, lng, lat) {
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const xi = Number(ring[i]?.[0]);
+      const yi = Number(ring[i]?.[1]);
+      const xj = Number(ring[j]?.[0]);
+      const yj = Number(ring[j]?.[1]);
+      if (![xi, yi, xj, yj].every(Number.isFinite)) continue;
 
-    let bestRing = null;
-    let bestArea = -1;
-    for (const ring of rings) {
-      const outer = ringCentroidArea(ring);
-      const area = outer ? Math.abs(outer.area2) : 0;
-      if (area > bestArea) {
-        bestArea = area;
-        bestRing = ring;
-      }
+      const intersects = ((yi > lat) !== (yj > lat))
+        && (lng < ((xj - xi) * (lat - yi)) / ((yj - yi) || 1e-12) + xi);
+      if (intersects) inside = !inside;
     }
-    if (!bestRing || bestRing.length < 2) return 0;
-
-    let sumX = 0;
-    let sumY = 0;
-    for (let i = 0; i < bestRing.length - 1; i++) {
-      const [x0, y0] = bestRing[i];
-      const [x1, y1] = bestRing[i + 1];
-      const dx = x1 - x0;
-      const dy = y1 - y0;
-      const len = Math.hypot(dx, dy);
-      if (!Number.isFinite(len) || len < 1e-9) continue;
-
-      const theta2 = 2 * Math.atan2(dy, dx);
-      sumX += Math.cos(theta2) * len;
-      sumY += Math.sin(theta2) * len;
-    }
-
-    if (Math.abs(sumX) < 1e-9 && Math.abs(sumY) < 1e-9) return 0;
-    let angle = (Math.atan2(sumY, sumX) * 180) / Math.PI / 2;
-    if (angle > 90) angle -= 180;
-    if (angle < -90) angle += 180;
-    if (angle > 70) angle = 70;
-    if (angle < -70) angle = -70;
-    return Math.round(angle);
+    return inside;
   }
 
-  function boundsFromGeometry(geom) {
+  function pointInPolygonWithHoles(polygon, lng, lat) {
+    const [outer, ...holes] = polygon || [];
+    if (!outer?.length || !pointInRing(outer, lng, lat)) return false;
+    for (const hole of holes) {
+      if (hole?.length && pointInRing(hole, lng, lat)) return false;
+    }
+    return true;
+  }
+
+  function pointInsideGeometry(geom, lng, lat) {
+    if (!geom) return false;
+    if (geom.type === "Polygon") {
+      return pointInPolygonWithHoles(geom.coordinates, lng, lat);
+    }
+    if (geom.type === "MultiPolygon") {
+      for (const poly of geom.coordinates || []) {
+        if (pointInPolygonWithHoles(poly, lng, lat)) return true;
+      }
+    }
+    return false;
+  }
+
+  function geometryLngLatBounds(geom) {
     const rings = collectOuterRings(geom);
     let minLng = Infinity;
     let maxLng = -Infinity;
@@ -977,31 +1037,46 @@ function buildZoneLabelAnchors(features) {
     if (!Number.isFinite(minLng) || !Number.isFinite(maxLng) || !Number.isFinite(minLat) || !Number.isFinite(maxLat)) {
       return null;
     }
-    return {
-      width: Math.max(0, maxLng - minLng),
-      height: Math.max(0, maxLat - minLat),
-    };
+    return { minLng, maxLng, minLat, maxLat };
   }
 
+  function findInteriorAnchor(geom) {
+    const center = geometryCenter(geom);
+    if (!center) return null;
+    if (pointInsideGeometry(geom, center.lng, center.lat)) return center;
+
+    const bounds = geometryLngLatBounds(geom);
+    if (!bounds) return center;
+
+    const steps = [7, 11, 15];
+    for (const n of steps) {
+      for (let yi = 0; yi <= n; yi++) {
+        for (let xi = 0; xi <= n; xi++) {
+          const lng = bounds.minLng + ((bounds.maxLng - bounds.minLng) * xi) / n;
+          const lat = bounds.minLat + ((bounds.maxLat - bounds.minLat) * yi) / n;
+          if (pointInsideGeometry(geom, lng, lat)) {
+            return { lat, lng };
+          }
+        }
+      }
+    }
+    return center;
+  }
 
   for (const f of features || []) {
     const props = f?.properties || {};
     const zoneName = (props.zone_name || "").trim();
     if (!zoneName) continue;
 
-    const center = geometryCenter(f.geometry);
-    if (!center) continue;
-
-    const bounds = boundsFromGeometry(f.geometry);
-    const shapeRatio = bounds && bounds.height > 1e-9 ? bounds.width / bounds.height : 1;
+    const anchor = findInteriorAnchor(f.geometry);
+    if (!anchor) continue;
 
     anchors.push({
-      lat: center.lat,
-      lng: center.lng,
+      lat: anchor.lat,
+      lng: anchor.lng,
       zoneName,
-      shapeRatio,
-      angle: dominantAngleFromGeometry(f.geometry),
       id: props.LocationID ?? null,
+      geometry: f.geometry,
     });
   }
 
@@ -1019,21 +1094,58 @@ function renderZoneLabels() {
   zoneLabelsLayer.clearLayers();
   if (!zoneLabelAnchors.length) return;
 
-  const style = getZoneLabelStyleForZoom(map.getZoom());
+  function projectedSizeFromGeometry(geom) {
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+
+    function projectRing(ring) {
+      for (const pt of ring || []) {
+        const lng = Number(pt?.[0]);
+        const lat = Number(pt?.[1]);
+        if (!Number.isFinite(lng) || !Number.isFinite(lat)) continue;
+        const p = map.latLngToLayerPoint([lat, lng]);
+        if (!p) continue;
+        if (p.x < minX) minX = p.x;
+        if (p.x > maxX) maxX = p.x;
+        if (p.y < minY) minY = p.y;
+        if (p.y > maxY) maxY = p.y;
+      }
+    }
+
+    if (geom?.type === "Polygon") {
+      for (const ring of geom.coordinates || []) projectRing(ring);
+    } else if (geom?.type === "MultiPolygon") {
+      for (const poly of geom.coordinates || []) {
+        for (const ring of poly || []) projectRing(ring);
+      }
+    }
+
+    if (![minX, maxX, minY, maxY].every(Number.isFinite)) return null;
+    return {
+      width: Math.max(1, maxX - minX),
+      height: Math.max(1, maxY - minY),
+    };
+  }
 
   for (const z of zoneLabelAnchors) {
-    const wrapped = wrapZoneLabelText(z.zoneName, z.shapeRatio, style.maxChars).text;
-    const fontSizePx = style.fontSize.toFixed(2);
-    const maxWidthPx = style.maxWidth.toFixed(1);
-    const lineHeight = style.lineHeight.toFixed(2);
-    const opacity = style.opacity.toFixed(2);
-    const letterSpacingPx = style.letterSpacing.toFixed(2);
+    const projected = projectedSizeFromGeometry(z.geometry);
+    const zoneWidth = projected?.width || 60;
+    const zoneHeight = projected?.height || 30;
+
+    const maxLabelWidth = Math.max(8, zoneWidth * 0.5);
+    const maxLabelHeight = Math.max(6, zoneHeight * 0.5);
+    const fitted = fitZoneLabelText(z.zoneName, maxLabelWidth, maxLabelHeight);
+
+    const htmlLines = fitted.lines.map((line) => escapeHtml(line)).join("<br>");
+
     L.marker([z.lat, z.lng], {
       pane: "labelsPane",
       interactive: false,
       icon: L.divIcon({
         className: "zone-label",
-        html: `<div class="zn-wrap"><div class="zn" style="transform:rotate(${z.angle || 0}deg);font-size:${fontSizePx}px;max-width:${maxWidthPx}px;line-height:${lineHeight};opacity:${opacity};letter-spacing:${letterSpacingPx}px;">${escapeHtml(wrapped).replaceAll("\n", "<br>")}</div></div>`,
+        html: `<div class="zn-wrap" style="width:${fitted.widthPx.toFixed(1)}px;height:${fitted.heightPx.toFixed(1)}px;"><div class="zn" style="font-size:${fitted.fontPx.toFixed(2)}px;line-height:${fitted.lineHeight.toFixed(2)};width:${fitted.widthPx.toFixed(1)}px;max-width:${fitted.widthPx.toFixed(1)}px;height:${fitted.heightPx.toFixed(1)}px;max-height:${fitted.heightPx.toFixed(1)}px;">${htmlLines}</div></div>`,
       }),
     }).addTo(zoneLabelsLayer);
   }
@@ -1199,6 +1311,10 @@ map.on("zoomend", () => {
   if (authHeaderOK()) pullPresenceAll().catch(() => {});
 });
 
+map.on("moveend viewreset", () => {
+  renderZoneLabels();
+});
+
 let sliderDebounce = null;
 
 slider.addEventListener("pointerdown", bubbleUpdateNow);
@@ -1215,6 +1331,7 @@ slider.addEventListener("input", () => {
 
 window.addEventListener("resize", () => {
   if (timeline.length) setSliderBubbleTextAndPos();
+  renderZoneLabels();
 });
 
 /* =========================================================
