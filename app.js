@@ -100,24 +100,6 @@ if (utilityLauncherBtn) {
 }
 
 /* =========================================================
-   Label visibility rules (mobile-friendly)
-   ========================================================= */
-const LABEL_ZOOM_MIN = 10;
-const BOROUGH_ZOOM_SHOW = 15;
-const LABEL_MAX_CHARS_MID = 14;
-
-function shouldShowLabel(bucket, zoom) {
-  if (zoom < LABEL_ZOOM_MIN) return false;
-  const b = (bucket || "").trim();
-  if (zoom >= 15) return true;
-  if (zoom === 14) return b !== "red";
-  if (zoom === 13) return b === "green" || b === "purple" || b === "blue" || b === "sky";
-  if (zoom === 12) return b === "green" || b === "purple" || b === "blue";
-  if (zoom === 11) return b === "green" || b === "purple";
-  return b === "green";
-}
-
-/* =========================================================
    Time helpers
    ========================================================= */
 function parseIsoNoTz(iso) {
@@ -230,16 +212,6 @@ function prettyBucket(b) {
 /* =========================================================
    Label helpers
    ========================================================= */
-function shortenLabel(text, maxChars) {
-  const t = (text || "").trim();
-  if (!t) return "";
-  if (t.length <= maxChars) return t;
-  return t.slice(0, maxChars - 1) + "…";
-}
-function zoomClass(zoom) {
-  const z = Math.max(10, Math.min(15, Math.round(zoom)));
-  return `z${z}`;
-}
 function escapeHtml(s) {
   return String(s)
     .replaceAll("&", "&amp;")
@@ -622,18 +594,6 @@ function effectiveRating(props, geom) {
   return Number(props.rating ?? NaN);
 }
 
-function labelHTML(props, zoom) {
-  const name = (props.zone_name || "").trim();
-  if (!name) return "";
-
-  const b = effectiveBucket(props, null);
-  if (!shouldShowLabel(b, Math.round(zoom))) return "";
-
-  const zoneText = zoom < 13 ? shortenLabel(name, LABEL_MAX_CHARS_MID) : name;
-
-  return `<div class="zn">${escapeHtml(zoneText)}</div>`;
-}
-
 /* =========================================================
    Recommendation + Navigation
    ========================================================= */
@@ -818,6 +778,7 @@ let timeline = [];
 let minutesOfWeek = [];
 let currentFrame = null;
 let lastUserSliderTs = 0;
+let zoneLabelsLayer = L.layerGroup().addTo(map);
 let boroughLabelsLayer = L.layerGroup().addTo(map);
 let boroughLabelAnchors = null;
 
@@ -878,6 +839,51 @@ function renderBoroughLabels() {
         html: `<div class="btxt">${escapeHtml(b.borough)}</div>`,
       }),
     }).addTo(boroughLabelsLayer);
+  }
+}
+
+function buildZoneLabelAnchors(features) {
+  const anchors = [];
+
+  for (const f of features || []) {
+    const props = f?.properties || {};
+    const zoneName = (props.zone_name || "").trim();
+    if (!zoneName) continue;
+
+    const center = geometryCenter(f.geometry);
+    if (!center) continue;
+
+    anchors.push({
+      lat: center.lat,
+      lng: center.lng,
+      zoneName,
+      id: props.LocationID ?? null,
+    });
+  }
+
+  anchors.sort((a, b) => {
+    const aId = Number(a.id ?? NaN);
+    const bId = Number(b.id ?? NaN);
+    if (Number.isFinite(aId) && Number.isFinite(bId)) return aId - bId;
+    return a.zoneName.localeCompare(b.zoneName);
+  });
+
+  return anchors;
+}
+
+function renderZoneLabels(features) {
+  zoneLabelsLayer.clearLayers();
+
+  const anchors = buildZoneLabelAnchors(features);
+  for (const z of anchors) {
+    L.marker([z.lat, z.lng], {
+      pane: "labelsPane",
+      interactive: false,
+      icon: L.divIcon({
+        className: "zone-label",
+        html: `<div class="zn">${escapeHtml(z.zoneName)}</div>`,
+      }),
+    }).addTo(zoneLabelsLayer);
   }
 }
 
@@ -977,8 +983,7 @@ function renderFrame(frame) {
     geoLayer = null;
   }
 
-  const zoomNow = map.getZoom();
-  const zClass = zoomClass(zoomNow);
+  const features = currentFrame?.polygons?.features || [];
 
   geoLayer = L.geoJSON(currentFrame.polygons, {
     style: (feature) => {
@@ -997,20 +1002,10 @@ function renderFrame(frame) {
     onEachFeature: (feature, layer) => {
       const props = feature.properties || {};
       layer.bindPopup(buildPopupHTML(props, feature.geometry), { maxWidth: 320 });
-
-      const html = labelHTML(props, zoomNow);
-      if (!html) return;
-
-      layer.bindTooltip(html, {
-        permanent: true,
-        direction: "center",
-        className: `zone-label ${zClass}`,
-        opacity: 0.92,
-        interactive: false,
-        pane: "labelsPane",
-      });
     },
   }).addTo(map);
+
+  renderZoneLabels(features);
 
   if (!boroughLabelAnchors) {
     boroughLabelAnchors = buildBoroughLabelAnchors(currentFrame?.polygons?.features || []);
@@ -1047,7 +1042,6 @@ async function loadTimeline() {
 }
 
 map.on("zoomend", () => {
-  if (currentFrame) renderFrame(currentFrame);
   if (authHeaderOK()) pullPresenceAll().catch(() => {});
 });
 
