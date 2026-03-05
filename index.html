@@ -5,43 +5,22 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>NYC TLC Hotspot Map</title>
 
-  <!-- MapLibre GL JS -->
+  <!-- Leaflet -->
   <link
     rel="stylesheet"
-    href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
   />
   <script
-    src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
   ></script>
 
   <style>
-    html, body {
-      height: 100%;
-      width: 100%;
-      margin: 0;
-      padding: 0;
-    }
-    body {
-      position: relative;
-      overflow: hidden;
-      background: #dbe8f4;
-    }
-    #map {
-      position: absolute;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-      z-index: 0;
-      background: #dbe8f4;
-    }
-    #map .maplibregl-map,
-    #map .maplibregl-canvas-container,
-    #map .maplibregl-canvas {
-      width: 100%;
-      height: 100%;
-      visibility: visible;
-      opacity: 1;
-    }
+    html, body { height: 100%; margin: 0; padding: 0; }
+    #map { height: 100vh; width: 100vw; }
 
     /* =========================================================
        LOCKED OVERLAY (SIGNED OUT)
@@ -158,69 +137,34 @@
     /* =========================================================
        NIGHT THEME
        ========================================================= */
-    body.night .maplibregl-canvas{
+    body.night .leaflet-tile-pane{
       filter: brightness(0.65) contrast(1.08) saturate(0.85);
     }
-    body.sunny .maplibregl-canvas{
+    body.sunny .leaflet-tile-pane{
       filter: brightness(1.03) saturate(1.08);
     }
 
-    /* ---------- Legend drawer (phase 2) ---------- */
-    .legendLauncher{
-      position: relative;
-      z-index: 1001;
-      border: 1px solid rgba(9,30,66,0.14);
-      border-radius: 14px;
-      width: 46px;
-      height: 46px;
-      padding: 0;
-      font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
-      font-size: 18px;
-      font-weight: 950;
-      line-height: 1;
-      color: #113245;
-      background: rgba(255,255,255,0.84);
-      backdrop-filter: blur(9px);
-      box-shadow: 0 8px 20px rgba(12,25,42,0.16);
-      cursor: pointer;
-      -webkit-tap-highlight-color: transparent;
-      touch-action: manipulation;
-      transition: opacity 180ms ease, transform 180ms ease, box-shadow 180ms ease;
-    }
-    .legendLauncher:hover,
-    .utilityLauncher:hover,
-    .toggleBtnSmall:hover{ box-shadow: 0 10px 24px rgba(12,25,42,0.18); }
-    .legendLauncher:active{ transform: scale(0.98); }
-
+    /* ---------- Legend (small + minimize) ---------- */
     .legend {
       position: absolute;
       top: calc(8px + env(safe-area-inset-top));
       left: 8px;
       z-index: 1000;
-      background: rgba(255,255,255,0.90);
-      padding: 10px 11px;
-      border-radius: 14px;
-      box-shadow: 0 14px 30px rgba(12,25,42,0.18);
-      border: 1px solid rgba(9,30,66,0.10);
+      background: rgba(255,255,255,0.92);
+      padding: 6px;
+      border-radius: 10px;
+      box-shadow: 0 5px 14px rgba(0,0,0,0.14);
       font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
       max-width: 220px;
-      transform: translateX(0);
-      opacity: 1;
-      transition: transform 220ms ease, opacity 220ms ease;
-      will-change: transform, opacity;
+      transform: scale(0.86);
+      transform-origin: top left;
     }
-    .legend.closed{
-      transform: translateX(calc(-100% - 16px));
-      opacity: 0;
-      pointer-events: none;
-    }
-    .legendLauncher.hidden{ opacity: 0; pointer-events: none; }
     .legendHeader{
       display:flex;
       align-items:center;
       justify-content:space-between;
       gap:8px;
-      margin-bottom:6px;
+      margin-bottom:4px;
     }
     .legend h3 {
       margin: 0;
@@ -241,7 +185,7 @@
     .legend.minimized .legendBody{ display:none; }
 
     .legend .recommendLine{
-      margin: 0 0 8px 0;
+      margin: 0 0 6px 0;
       font-size: 10px;
       font-weight: 900;
       opacity: 0.92;
@@ -252,7 +196,7 @@
       display:flex;
       gap:8px;
       align-items:center;
-      margin: 0 0 8px 0;
+      margin: 0 0 6px 0;
       flex-wrap: wrap;
     }
 
@@ -295,7 +239,7 @@
       display: flex;
       align-items: center;
       gap: 7px;
-      margin: 6px 0;
+      margin: 4px 0;
       font-size: 11px;
       font-weight: 800;
     }
@@ -346,83 +290,50 @@
     /* =========================================================
        Bottom slider + Weather badge
        ========================================================= */
-    .bottomControls{
-      position: absolute;
-      left: 12px;
-      right: 12px;
-      bottom: calc(10px + env(safe-area-inset-bottom));
-      z-index: 1000;
-      display: flex;
-      flex-direction: column;
-      gap: 9px;
-      pointer-events: none;
-    }
-
-    .appDock{
-      align-self: flex-start;
-      max-width: min(94vw, 520px);
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      pointer-events: auto;
-      flex-wrap: wrap;
-    }
-
-    .dockLaunchers{
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      flex-shrink: 0;
-    }
-
     .sliderWrap {
-      pointer-events: auto;
-      background: rgba(255,255,255,0.95);
-      border: 1px solid rgba(0,0,0,0.09);
-      border-radius: 16px;
-      box-shadow: 0 10px 22px rgba(12,25,42,0.15);
-      padding: 10px 12px 10px;
+      position: absolute;
+      left: 10px;
+      right: 10px;
+      bottom: calc(6px + env(safe-area-inset-bottom));
+      z-index: 1000;
+      background: rgba(255,255,255,0.92);
+      border-radius: 14px;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.15);
+      padding: 6px 10px;
       font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
-      backdrop-filter: blur(8px);
     }
 
     .sliderTopRow{
       display:flex;
       align-items:center;
       justify-content:space-between;
-      gap:9px;
-      margin-bottom:8px;
+      gap:10px;
+      margin-bottom: 4px;
     }
 
     .timeLabel {
-      font-size: 13px;
+      font-size: 16px;
       font-weight: 950;
       margin: 0;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      max-width: 36vw;
-      letter-spacing: 0.1px;
     }
 
     .weatherBadge{
       display:inline-flex;
       align-items:center;
-      gap:5px;
-      padding: 6px 10px;
+      gap:6px;
+      padding: 3px 8px;
       border-radius: 999px;
-      border: 1px solid rgba(9,30,66,0.14);
-      background: rgba(255,255,255,0.82);
-      box-shadow: 0 7px 16px rgba(12,25,42,0.14);
-      font-size: 10px;
+      border: 1px solid rgba(0,0,0,0.14);
+      background: rgba(255,255,255,0.80);
+      font-size: 11px;
       font-weight: 900;
-      opacity: 0.96;
+      opacity: 0.95;
       white-space: nowrap;
-      max-width: 40vw;
+      max-width: 46vw;
       overflow: hidden;
       text-overflow: ellipsis;
     }
-    .weatherBadge .wxIcon{ font-size: 11px; }
+    .weatherBadge .wxIcon{ font-size: 12px; }
     .weatherBadge .wxTxt{ opacity: 0.9; }
 
     /* =========================================================
@@ -470,96 +381,28 @@
     input[type="range"] { width: 100%; height: 18px; margin: 0; }
 
     /* =========================================================
-       Radio controls (phase 3 right drawer)
+       Radio row inside bottom box
        ========================================================= */
-    .utilityLauncher{
-      position: relative;
-      z-index: 1001;
-      border: 1px solid rgba(9,30,66,0.14);
-      border-radius: 14px;
-      width: 46px;
-      height: 46px;
-      padding: 0;
-      font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
-      font-size: 18px;
-      font-weight: 950;
-      line-height: 1;
-      color: #113245;
-      background: rgba(255,255,255,0.84);
-      backdrop-filter: blur(9px);
-      box-shadow: 0 8px 20px rgba(12,25,42,0.16);
-      cursor: pointer;
-      -webkit-tap-highlight-color: transparent;
-      touch-action: manipulation;
-      transition: opacity 180ms ease, transform 180ms ease, box-shadow 180ms ease;
-    }
-    .utilityLauncher:active{ transform: scale(0.98); }
-
-    .utilityDrawer{
-      position: absolute;
-      top: calc(62px + env(safe-area-inset-top));
-      left: 8px;
-      z-index: 1000;
-      width: min(220px, calc(100vw - 16px));
-      background: rgba(255,255,255,0.90);
-      padding: 11px;
-      border-radius: 14px;
-      box-shadow: 0 14px 30px rgba(12,25,42,0.18);
-      border: 1px solid rgba(9,30,66,0.10);
-      font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
-      transform: translateX(0);
-      opacity: 1;
-      transition: transform 220ms ease, opacity 220ms ease;
-      will-change: transform, opacity;
-    }
-    .utilityDrawer.closed{
-      transform: translateX(calc(-100% - 16px));
-      opacity: 0;
-      pointer-events: none;
-    }
-    .utilityHeader{
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:8px;
-      margin-bottom:10px;
-    }
-    .utilityTitle{
-      font-size: 12px;
-      font-weight: 900;
-      margin: 0;
-    }
-    .utilityToggleBtn{
-      border: none;
-      background: rgba(0,0,0,0.06);
-      border-radius: 10px;
-      padding: 4px 8px;
-      font-weight: 950;
-      font-size: 12px;
-      cursor: pointer;
-    }
-
     .radioRow{
       display:flex;
-      align-items:flex-end;
+      align-items:center;
       gap:8px;
-      margin-top: 8px;
+      margin-top: 6px;
       justify-content: space-between;
     }
     .radioBtns{
       display:flex;
-      gap:6px;
+      gap:8px;
       align-items:center;
       flex-wrap: wrap;
-      min-width: 0;
     }
     .radioBtn{
       border:none;
       border-radius: 999px;
-      padding: 5px 8px;
+      padding: 6px 9px;
       font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
       font-weight: 950;
-      font-size: 10px;
+      font-size: 11px;
       cursor: pointer;
       background: rgba(0,0,0,0.06);
       color: #111;
@@ -569,14 +412,6 @@
     .radioBtn:active{ transform: scale(0.98); }
     .radioBtn.on { outline: 2px solid rgba(0,160,255,0.45); }
 
-    .radioRight{
-      display:flex;
-      align-items:center;
-      gap:6px;
-      min-width: 0;
-      flex-shrink: 0;
-    }
-
     .radioStatus{
       font-size: 10px;
       font-weight: 900;
@@ -584,56 +419,73 @@
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      max-width: 24vw;
+      max-width: 38vw;
       text-align: right;
     }
 
+    .centerBtnInBar{
+      margin-top: 6px;
+      display:flex;
+      justify-content:flex-end;
+    }
     .toggleBtnSmall{
       border:none;
       border-radius: 999px;
-      min-height: 38px;
-      padding: 8px 12px;
+      padding: 6px 9px;
       font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
       font-weight: 950;
-      font-size: 10px;
+      font-size: 11px;
       cursor: pointer;
-      background: rgba(255,255,255,0.84);
-      backdrop-filter: blur(9px);
-      border: 1px solid rgba(9,30,66,0.14);
-      box-shadow: 0 8px 20px rgba(12,25,42,0.16);
-      white-space: nowrap;
-      color: #113245;
-      letter-spacing: 0.1px;
+      background: rgba(255,255,255,0.95);
+      box-shadow: 0 6px 18px rgba(0,0,0,0.18);
     }
     .toggleBtnSmall.on { outline: 2px solid rgba(0,160,255,0.45); }
     .toggleBtnSmall:active { transform: scale(0.98); }
 
-    @media (max-width: 430px) {
-      .utilityDrawer{
-        top: calc(56px + env(safe-area-inset-top));
-      }
-      .bottomControls{
-        left: 10px;
-        right: 10px;
-        bottom: calc(8px + env(safe-area-inset-bottom));
-      }
-      .appDock{
-        max-width: calc(100vw - 20px);
-      }
-      .timeLabel{ max-width: 34vw; font-size: 12px; }
-      .weatherBadge{ max-width: 37vw; }
-      .radioRow{
-        flex-wrap: wrap;
-        align-items:center;
-      }
-      .radioRight{
-        width: 100%;
-        justify-content: space-between;
-      }
-      .radioStatus{ max-width: 54vw; }
+    /* ---------- Zone labels ---------- */
+    .zone-label {
+      background: transparent;
+      border: none;
+      box-shadow: none;
+      color: #111;
+      text-align: center;
+      pointer-events: none;
     }
+    .zone-label .zn,
+    .zone-label .br {
+      display: inline-block;
+      background: rgba(255,255,255,0.86);
+      border: 1px solid rgba(0,0,0,0.18);
+      border-radius: 999px;
+      padding: 2px 8px;
+      margin: 1px 0;
+      white-space: nowrap;
+      max-width: 210px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+    }
+    .zone-label .zn { font-weight: 950; letter-spacing: 0.1px; }
+    .zone-label .br { font-weight: 900; opacity: 0.7; padding: 1px 6px; border-radius: 10px; }
 
-    .maplibregl-popup-content { border-radius: 12px; }
+    .zone-label.z10 .zn { font-size: 05px; }
+    .zone-label.z11 .zn { font-size: 06px; }
+    .zone-label.z12 .zn { font-size: 07px; }
+    .zone-label.z13 .zn { font-size: 08px; }
+    .zone-label.z14 .zn { font-size: 09px; }
+    .zone-label.z15 .zn { font-size: 10px; }
+
+    .zone-label.z10 .br,
+    .zone-label.z11 .br,
+    .zone-label.z12 .br,
+    .zone-label.z13 .br,
+    .zone-label.z14 .br { font-size: 0px; padding: 0; border: 0; }
+    .zone-label.z15 .br { font-size: 03px; }
+
+    /* ---------- You arrow: force on top of EVERYTHING ---------- */
+    .leaflet-marker-pane { z-index: 800 !important; }
+    .leaflet-tooltip-pane { z-index: 650 !important; }
+    .leaflet-overlay-pane { z-index: 400 !important; }
 
     /* =========================================================
        GPS ARROW
@@ -900,10 +752,10 @@
     </div>
   </div>
 
-  <div id="legend" class="legend closed" aria-label="Demand legend" aria-hidden="true">
+  <div id="legend" class="legend" aria-label="Demand legend">
     <div class="legendHeader">
       <h3>Demand Colors</h3>
-      <button id="legendToggle" class="legendToggleBtn" type="button" aria-label="Close drawer">✕</button>
+      <button id="legendToggle" class="legendToggleBtn" type="button">–</button>
     </div>
 
     <div class="legendBody">
@@ -937,43 +789,31 @@
       </div>
     </div>
   </div>
-  <div id="utilityDrawer" class="utilityDrawer closed" aria-label="Media and tools" aria-hidden="true">
-    <div class="utilityHeader">
-      <h3 class="utilityTitle">Media &amp; Tools</h3>
-      <button id="utilityToggle" class="utilityToggleBtn" type="button" aria-label="Close drawer">✕</button>
+
+  <div class="sliderWrap">
+    <div class="sliderTopRow">
+      <div id="timeLabel" class="timeLabel">Loading…</div>
+      <div id="weatherBadge" class="weatherBadge" title="Local weather">
+        <span class="wxIcon">⛅</span>
+        <span class="wxTxt">Weather…</span>
+      </div>
     </div>
+
+    <div class="sliderTrackWrap">
+      <div id="sliderBubble" class="sliderBubble">…</div>
+      <input id="slider" type="range" min="0" max="0" value="0" step="1" />
+    </div>
+
     <div class="radioRow">
       <div class="radioBtns">
         <button id="btnHot97" class="radioBtn" type="button">▶ HOT 97</button>
         <button id="btnMega979" class="radioBtn" type="button">▶ La Mega 97.9</button>
       </div>
-      <div class="radioRight">
-        <div id="radioStatus" class="radioStatus">Radio: off</div>
-      </div>
-    </div>
-  </div>
-  <div class="bottomControls">
-    <div class="appDock" aria-label="Bottom app dock">
-      <div class="dockLaunchers">
-        <button id="legendLauncher" class="legendLauncher" type="button" aria-label="Open demand controls">☰</button>
-        <button id="utilityLauncher" class="utilityLauncher" type="button" aria-label="Open media and tools">♫</button>
-        <div id="weatherBadge" class="weatherBadge" title="Local weather">
-          <span class="wxIcon">⛅</span>
-          <span class="wxTxt">Weather…</span>
-        </div>
-        <button id="btnCenter" class="toggleBtnSmall on" type="button">Auto-center: ON</button>
-      </div>
-
+      <div id="radioStatus" class="radioStatus">Radio: off</div>
     </div>
 
-    <div class="sliderWrap">
-      <div class="sliderTopRow">
-        <div id="timeLabel" class="timeLabel">Loading…</div>
-      </div>
-      <div class="sliderTrackWrap">
-        <div id="sliderBubble" class="sliderBubble">…</div>
-        <input id="slider" type="range" min="0" max="0" value="0" step="1" />
-      </div>
+    <div class="centerBtnInBar">
+      <button id="btnCenter" class="toggleBtnSmall on" type="button">Auto-center: ON</button>
     </div>
   </div>
 
