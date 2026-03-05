@@ -228,6 +228,49 @@ function escapeHtml(s) {
     .replaceAll("'", "&#039;");
 }
 
+function shouldShowLabel(bucket, zoom) {
+  if (zoom < 10) return false;
+  if (zoom >= 15) return true;
+  if (zoom >= 14) return ["green", "purple", "blue", "sky", "yellow", "red"].includes(bucket);
+  if (zoom >= 13) return ["green", "purple", "blue", "sky"].includes(bucket);
+  if (zoom >= 12) return ["green", "purple", "blue"].includes(bucket);
+  if (zoom >= 11) return ["green", "purple"].includes(bucket);
+  return ["green"].includes(bucket);
+}
+
+function shortenLabel(name) {
+  const s = String(name || "").trim();
+  if (!s) return s;
+  return s
+    .replace(/\bInternational\b/gi, "Intl")
+    .replace(/\bAirport\b/gi, "Airpt")
+    .replace(/\bAvenue\b/gi, "Ave")
+    .replace(/\bBoulevard\b/gi, "Blvd")
+    .replace(/\bStreet\b/gi, "St")
+    .replace(/\bRoad\b/gi, "Rd")
+    .replace(/\bWest\b/gi, "W")
+    .replace(/\bEast\b/gi, "E")
+    .replace(/\bNorth\b/gi, "N")
+    .replace(/\bSouth\b/gi, "S")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+function zoomClass(zoom) {
+  if (zoom >= 15) return "z15";
+  if (zoom >= 14) return "z14";
+  if (zoom >= 13) return "z13";
+  if (zoom >= 12) return "z12";
+  if (zoom >= 11) return "z11";
+  return "z10";
+}
+
+function labelHTML(name, borough, zoom) {
+  const short = shortenLabel(name);
+  if (zoom >= 14 && borough) return `${escapeHtml(short)}\n${escapeHtml(borough)}`;
+  return escapeHtml(short);
+}
+
 /* =========================================================
    Staten Island Mode (local percentile recolor)
    ========================================================= */
@@ -401,6 +444,7 @@ if (btnManhattan) {
     localStorage.setItem(LS_KEY_MANHATTAN, manhattanMode ? "1" : "0");
     syncManhattanUI();
     if (currentFrame) renderFrame(currentFrame).catch(console.error);
+    if (currentFrame) updateMapFrameSources(currentFrame.polygons).catch(() => {});
   });
 }
 
@@ -574,6 +618,7 @@ if (btnStatenIsland) {
     localStorage.setItem(LS_KEY_STATEN, statenIslandMode ? "1" : "0");
     syncStatenIslandUI();
     if (currentFrame) renderFrame(currentFrame).catch(console.error);
+    if (currentFrame) updateMapFrameSources(currentFrame.polygons).catch(() => {});
   });
 }
 
@@ -1142,6 +1187,31 @@ async function ensureMapDataLayers() {
     }
   }
 
+  // FIXED: zone labels now follow old Leaflet rules exactly (shouldShowLabel + zoom + bucket + shorten + borough)
+  if (!map.getLayer(ZONE_LABEL_LAYER_ID)) {
+    map.addLayer({
+      id: ZONE_LABEL_LAYER_ID,
+      type: "symbol",
+      source: ZONE_SOURCE_ID,
+      layout: {
+        "text-field": ["get", "zone_label_name"],
+        "text-size": ["step", ["zoom"], 0, 10, 8, 11, 12, 9, 13, 10, 14, 11, 15],
+        "text-anchor": "center",
+        "text-font": ["Open Sans Bold"],
+        "text-max-width": 8,
+        "text-allow-overlap": false,
+        "text-ignore-placement": false,
+      },
+      paint: {
+        "text-color": "#111",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 2,
+        "text-halo-blur": 1,
+      },
+      minzoom: 10,
+    });
+  }
+
   if (!mapInteractionHandlersBound) {
     mapInteractionHandlersBound = true;
 
@@ -1495,6 +1565,8 @@ async function loadTimeline() {
 
 map.on("zoomend", () => {
   if (authHeaderOK()) pullPresenceAll().catch(() => {});
+  // re-apply labels on zoom (matches old Leaflet behavior)
+  if (currentFrame) updateMapFrameSources(currentFrame.polygons).catch(() => {});
 });
 
 let sliderDebounce = null;
