@@ -3,7 +3,7 @@
    NYC TLC Hotspot Map (Frontend) - SIMPLE + STABLE (MapLibre)
    Restored: Staten Island Mode, Manhattan Mode, Ghost Mode,
    Self GPS/nav arrow + auto-center, presence, slider, weather, radio.
-   PLUS: Zone click popup details + hover cursor (Leaflet behavior)
+   + ADDED NOW: Zone click popup details (MapLibre equivalent of Leaflet bindPopup)
    ========================================================= */
 
 const RAILWAY_BASE = "https://web-production-78f67.up.railway.app";
@@ -423,11 +423,15 @@ function applyStatenLocalView(frame) {
   const n = sorted.length;
 
   function percentileOfRating(r) {
-    let lo = 0, hi = n - 1, ans = -1;
+    let lo = 0,
+      hi = n - 1,
+      ans = -1;
     while (lo <= hi) {
       const mid = (lo + hi) >> 1;
-      if (sorted[mid] <= r) { ans = mid; lo = mid + 1; }
-      else hi = mid - 1;
+      if (sorted[mid] <= r) {
+        ans = mid;
+        lo = mid + 1;
+      } else hi = mid - 1;
     }
     if (n <= 1) return 0;
     return Math.max(0, Math.min(1, ans / (n - 1)));
@@ -490,11 +494,15 @@ function applyManhattanLocalView(frame) {
   function percentileFromSorted(sorted, v) {
     const n = sorted.length;
     if (n <= 1) return 0;
-    let lo = 0, hi = n - 1, ans = -1;
+    let lo = 0,
+      hi = n - 1,
+      ans = -1;
     while (lo <= hi) {
       const mid = (lo + hi) >> 1;
-      if (sorted[mid] <= v) { ans = mid; lo = mid + 1; }
-      else hi = mid - 1;
+      if (sorted[mid] <= v) {
+        ans = mid;
+        lo = mid + 1;
+      } else hi = mid - 1;
     }
     return Math.max(0, Math.min(1, ans / (n - 1)));
   }
@@ -599,7 +607,7 @@ function labelHTML(props, zoom) {
   const zoneText = zoom < 13 ? shortenLabel(name, LABEL_MAX_CHARS_MID) : name;
 
   const borough = (props.borough || "").trim();
-  const showBorough = zoom >= BOROUGH_ZOOM_SHOW && borough;
+  const showBorough = zoom >= 15 && borough;
 
   return `
     <div class="zn">${escapeHtml(zoneText)}</div>
@@ -755,6 +763,7 @@ function showSliderBubble() {
   if (bubbleHideTimer) clearTimeout(bubbleHideTimer);
   bubbleHideTimer = setTimeout(() => sliderBubble.classList.remove("show"), 900);
 }
+
 function setSliderBubbleTextAndPos() {
   if (!sliderBubble || !slider || !timeline.length) return;
 
@@ -774,6 +783,7 @@ function setSliderBubbleTextAndPos() {
 
   sliderBubble.style.left = `${clampedX}px`;
 }
+
 function bubbleUpdateNow() {
   setSliderBubbleTextAndPos();
   showSliderBubble();
@@ -803,7 +813,8 @@ if (dbgReloadFrame) {
    MapLibre init
    ========================================================= */
 const zoneLabelMarkers = new Map();
-let zonePopup = null;
+let zonePopup = null; // MapLibre popup (zone details)
+let zonesInteractivityInstalled = false;
 
 function initMap() {
   map = new maplibregl.Map({
@@ -842,7 +853,12 @@ function initMap() {
     mapReady = true;
     map.resize();
 
-    ensureZonesSourceAndLayers().catch((e) => console.warn("zones source/layers init failed:", e));
+    ensureZonesSourceAndLayers()
+      .then(() => {
+        // Install click/hover handlers once zones layers exist
+        installZonesInteractivity();
+      })
+      .catch((e) => console.warn("zones source/layers init failed:", e));
 
     if (!debugOnce.mapCenter) {
       const c = map.getCenter();
@@ -879,13 +895,7 @@ function initMap() {
     }
   });
 
-  // If styles ever reload, make sure interactions re-bind
-  map.on("style.load", () => {
-    zonesInteractionBound = false;
-    map.triggerRepaint();
-    ensureZonesSourceAndLayers().catch(() => {});
-  });
-
+  map.on("style.load", () => map.triggerRepaint());
   map.on("error", (e) => console.error("MapLibre error:", e));
 }
 
@@ -914,95 +924,6 @@ async function waitForStyleReady(timeoutMs = 5000) {
     map.on("styledata", onStyleData);
     map.on("load", onLoad);
     map.on("error", onError);
-  });
-}
-
-let zonesInteractionBound = false;
-
-/* ---------- Popup/interaction helpers (Leaflet behavior) ---------- */
-function safeParseJSONMaybe(v) {
-  if (v == null) return v;
-  if (typeof v !== "string") return v;
-  const s = v.trim();
-  if (!s) return v;
-  if (!(s.startsWith("{") || s.startsWith("["))) return v;
-  try { return JSON.parse(s); } catch { return v; }
-}
-
-function normalizeMapFeatureProps(rawProps) {
-  const p = rawProps ? { ...rawProps } : {};
-  // style can arrive as a JSON string in MapLibre feature props
-  p.style = safeParseJSONMaybe(p.style) || p.style;
-
-  // best effort numeric coercion (keeps old popup formatting stable)
-  const numKeys = ["LocationID", "rating", "pickups", "avg_driver_pay", "avg_tips", "si_local_rating", "mh_local_rating"];
-  for (const k of numKeys) {
-    if (p[k] == null) continue;
-    const n = Number(p[k]);
-    if (Number.isFinite(n)) p[k] = n;
-  }
-
-  // sometimes keys arrive lowercased depending on source
-  if (p.LocationID == null && p.locationid != null) {
-    const n = Number(p.locationid);
-    if (Number.isFinite(n)) p.LocationID = n;
-  }
-  return p;
-}
-
-function closeZonePopup() {
-  if (zonePopup) {
-    try { zonePopup.remove(); } catch {}
-    zonePopup = null;
-  }
-}
-
-function bindZonesInteractionsIfNeeded() {
-  if (!map) return;
-  if (zonesInteractionBound) return;
-  if (!map.getLayer("zones-fill")) return;
-
-  zonesInteractionBound = true;
-
-  // hover cursor like Leaflet polygons
-  map.on("mouseenter", "zones-fill", () => {
-    try { map.getCanvas().style.cursor = "pointer"; } catch {}
-  });
-  map.on("mouseleave", "zones-fill", () => {
-    try { map.getCanvas().style.cursor = ""; } catch {}
-  });
-
-  // click -> show popup (old bindPopup)
-  map.on("click", "zones-fill", (e) => {
-    try {
-      if (!e || !e.features || !e.features.length) return;
-
-      const f = e.features[0];
-      const props = normalizeMapFeatureProps(f.properties || {});
-      const geom = f.geometry || null;
-
-      const html = buildPopupHTML(props, geom);
-
-      closeZonePopup();
-      zonePopup = new maplibregl.Popup({ closeButton: true, closeOnClick: false, maxWidth: "320px" })
-        .setLngLat(e.lngLat)
-        .setHTML(html)
-        .addTo(map);
-
-      // prevent the global map click (close handler) from firing first
-      if (e.originalEvent && typeof e.originalEvent.stopPropagation === "function") {
-        e.originalEvent.stopPropagation();
-      }
-    } catch (err) {
-      console.warn("zones popup failed:", err);
-    }
-  });
-
-  // click anywhere else closes popup (Leaflet feel)
-  map.on("click", (e) => {
-    // If click hit zones-fill, the layer handler above runs first and stops propagation.
-    // So this will only run for non-zone clicks.
-    closeZonePopup();
   });
 }
 
@@ -1036,8 +957,77 @@ async function ensureZonesSourceAndLayers() {
     });
   }
 
-  bindZonesInteractionsIfNeeded();
   return true;
+}
+
+/* =========================================================
+   Zone CLICK popup details (MapLibre equivalent of Leaflet bindPopup)
+   ========================================================= */
+function closeZonePopup() {
+  if (zonePopup) {
+    try {
+      zonePopup.remove();
+    } catch {}
+    zonePopup = null;
+  }
+}
+
+function installZonesInteractivity() {
+  if (!map || zonesInteractivityInstalled) return;
+  if (!map.getLayer("zones-fill")) return;
+
+  zonesInteractivityInstalled = true;
+
+  map.on("mouseenter", "zones-fill", () => {
+    try {
+      map.getCanvas().style.cursor = "pointer";
+    } catch {}
+  });
+
+  map.on("mouseleave", "zones-fill", () => {
+    try {
+      map.getCanvas().style.cursor = "";
+    } catch {}
+  });
+
+  map.on("click", "zones-fill", async (e) => {
+    try {
+      const feat = e?.features?.[0];
+      if (!feat) return;
+
+      // Make sure next-bin cache is up-to-date before showing popup numbers
+      const idx = Number(slider?.value || "0");
+      loadNextFramePickupsMap(idx).catch(() => {});
+
+      const props = feat.properties || {};
+      const geom = feat.geometry;
+
+      const html = buildPopupHTML(props, geom);
+
+      if (!zonePopup) {
+        zonePopup = new maplibregl.Popup({
+          closeButton: true,
+          closeOnClick: false, // allow tapping popup without it disappearing
+          maxWidth: "320px",
+        });
+      }
+
+      zonePopup.setLngLat(e.lngLat).setHTML(html).addTo(map);
+    } catch (err) {
+      console.warn("zones click popup failed:", err);
+    }
+  });
+
+  // Close popup when clicking outside zones (Leaflet-like feel)
+  map.on("click", (e) => {
+    try {
+      if (!zonePopup) return;
+      const feats = map.queryRenderedFeatures(e.point, { layers: ["zones-fill"] });
+      if (!feats || feats.length === 0) {
+        closeZonePopup();
+      }
+    } catch {}
+  });
 }
 
 /* =========================================================
@@ -1169,7 +1159,9 @@ function buildPopupHTML(props, geom) {
   const nycRating = props.rating ?? "";
   const nycBucket = props.bucket ?? "";
   const pickups = props.pickups ?? "";
-  const pay = props.avg_driver_pay == null ? "n/a" : Number(props.avg_driver_pay).toFixed(2);
+
+  const payNum = Number(props.avg_driver_pay ?? NaN);
+  const pay = Number.isFinite(payNum) ? payNum.toFixed(2) : "n/a";
 
   const nextPuVal = nextFramePickupsById.get(String(props.LocationID ?? ""));
   const nextPickups = nextPuVal == null ? "n/a" : String(Math.round(nextPuVal));
@@ -1247,6 +1239,9 @@ async function renderFrame(frame) {
     return;
   }
 
+  // Leaflet behavior: when frame changes, any open popup disappears
+  closeZonePopup();
+
   currentFrame = frame;
 
   // apply modes to mutate props (same as old)
@@ -1255,7 +1250,7 @@ async function renderFrame(frame) {
 
   const fc = frame.polygons || { type: "FeatureCollection", features: [] };
 
-  // always recompute effectiveColor each render so toggles update colors
+  // Always recompute effectiveColor each render so toggles update colors.
   for (const f of fc.features) {
     const props = f.properties || {};
     const col = effectiveColor(props, f.geometry) || (props?.style?.fillColor || props?.style?.color) || "#66aaff";
@@ -1268,6 +1263,9 @@ async function renderFrame(frame) {
   }
 
   map.getSource("zones").setData(fc);
+
+  // Make sure click handlers exist after first data render too (safe)
+  installZonesInteractivity();
 
   if (debugEnabled) {
     dbg("dbgSetData", `OK features=${fc.features.length}`);
@@ -1574,7 +1572,9 @@ async function tickNYCClockAndAdvanceIfNeeded() {
     if (bestIdx === curIdx) return;
 
     slider.value = String(bestIdx);
+
     bubbleUpdateNow();
+
     await loadFrame(bestIdx);
   } catch (e) {
     console.warn("NYC clock tick failed:", e);
@@ -1835,7 +1835,7 @@ function ensureWxAnimationRunning() {
 }
 
 /* =========================================================
-   RADIO (unchanged) — expects your index.html has these ids
+   RADIO (unchanged)
    ========================================================= */
 const btnHot97 = document.getElementById("btnHot97");
 const btnMega979 = document.getElementById("btnMega979");
@@ -1879,7 +1879,9 @@ function closeHot97Modal() {
   }
   if (radioFrame) radioFrame.src = "about:blank";
 }
-function openHot97Modal() { closeHot97Modal(); }
+function openHot97Modal() {
+  closeHot97Modal();
+}
 
 async function toggleMega() {
   try {
@@ -1926,7 +1928,9 @@ async function toggleHot97() {
   closeHot97Modal();
 
   if (hot97Playing) {
-    try { hot97Audio.pause(); } catch {}
+    try {
+      hot97Audio.pause();
+    } catch {}
     hot97Playing = false;
     setBtnState(btnHot97, false);
     setRadioStatus("Radio: off");
@@ -2014,7 +2018,7 @@ hot97Audio.addEventListener("error", () => {
 });
 
 /* =========================================================
-   COMMUNITY (AUTH + PRESENCE + POLICE + PICKUP)
+   COMMUNITY (AUTH + PRESENCE + POLICE + PICKUP) (restored)
    ========================================================= */
 const lockedOverlay = document.getElementById("lockedOverlay");
 const authEmail = document.getElementById("authEmail");
@@ -2278,7 +2282,9 @@ function makeDriverIcon(name, headingDeg, labelSide = "right", labelDx = 0, labe
 
 function clearOtherDrivers() {
   for (const m of otherMarkers.values()) {
-    try { m.remove(); } catch {}
+    try {
+      m.remove();
+    } catch {}
   }
   otherMarkers.clear();
 }
@@ -2298,6 +2304,7 @@ function upsertDriverMarker(userId, name, lat, lng, heading, labelSide, labelDx 
 
   const el = makeDriverIcon(name || `Driver ${userId}`, heading, labelSide, labelDx, labelDy);
   const mk = new maplibregl.Marker({ element: el, anchor: "center" }).setLngLat([lng, lat]).addTo(map);
+
   otherMarkers.set(userId, mk);
 }
 
@@ -2399,7 +2406,9 @@ async function pullPresenceAll() {
     for (const uid of Array.from(otherMarkers.keys())) {
       if (!seen.has(uid)) {
         const mk = otherMarkers.get(uid);
-        try { mk.remove(); } catch {}
+        try {
+          mk.remove();
+        } catch {}
         otherMarkers.delete(uid);
       }
     }
