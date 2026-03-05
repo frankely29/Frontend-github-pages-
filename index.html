@@ -612,46 +612,14 @@
       .radioStatus{ max-width: 54vw; }
     }
 
-    /* ---------- Zone labels ---------- */
-    .zone-label {
-      background: transparent;
-      border: none;
-      box-shadow: none;
+    /* ---------- Zone labels (canvas overlay) ---------- */
+    .zone-labels-pane{
       pointer-events: none;
-      text-align: center;
     }
-    .zone-label .zn-wrap {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      overflow: hidden;
-      transform: translate(-50%, -50%);
-    }
-    .zone-label .zn {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-      white-space: normal;
-      word-break: keep-all;
-      overflow-wrap: break-word;
-      text-align: center;
-      line-height: 1.1;
-      font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
-      font-size: 8px;
-      font-weight: 700;
-      letter-spacing: 0;
-      text-transform: none;
-      color: rgba(24, 42, 55, 0.98);
-      background: transparent;
-      border: none;
-      border-radius: 0;
-      box-shadow: none;
-      text-shadow: none;
-      transform-origin: 50% 50%;
-      overflow: hidden;
+    .zone-labels-canvas{
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
     }
 
     .borough-label {
