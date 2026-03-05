@@ -1109,12 +1109,13 @@ async function ensureMapDataLayers() {
 
   if (!map.getLayer(ZONE_FILL_LAYER_ID)) {
     try {
+      // FIXED: use demand_color (respects local modes + backend colors) instead of effectiveColor
       map.addLayer({
         id: ZONE_FILL_LAYER_ID,
         type: "fill",
         source: ZONE_SOURCE_ID,
         paint: {
-          "fill-color": ["get", "effectiveColor"],
+          "fill-color": ["coalesce", ["get", "demand_color"], "#66ccff"],
           "fill-opacity": 0.82,
         },
       });
