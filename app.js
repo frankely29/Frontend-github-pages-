@@ -1,4 +1,4 @@
-// BOOT_SIGNATURE: app.js root v2026-03-05-1
+// BOOT_SIGNATURE: railway-frontend-v1
 /* =========================================================
    NYC TLC Hotspot Map (Frontend) - SIMPLE + STABLE
    ========================================================= */
