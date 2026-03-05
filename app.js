@@ -12,6 +12,7 @@ const USER_SLIDER_GRACE_MS = 25 * 1000;
 let map; // global MapLibre instance
 let pendingFrame = null;
 let mapReady = false;
+let didFitToZonesOnce = false;
 const debugOnce = {
   frame: false,
   mapCenter: false,
@@ -1056,6 +1057,40 @@ function getEffectiveColorForMap(feature) {
   return props.effectiveColor || style.fillColor || style.color || "#66aaff";
 }
 
+function getFeatureCollectionBounds(fc) {
+  if (!fc || !Array.isArray(fc.features) || fc.features.length === 0) return null;
+
+  let minLng = Infinity;
+  let minLat = Infinity;
+  let maxLng = -Infinity;
+  let maxLat = -Infinity;
+
+  const visitCoordinates = (coords) => {
+    if (!Array.isArray(coords)) return;
+    if (
+      coords.length >= 2 &&
+      Number.isFinite(coords[0]) &&
+      Number.isFinite(coords[1])
+    ) {
+      const lng = coords[0];
+      const lat = coords[1];
+      if (lng < minLng) minLng = lng;
+      if (lat < minLat) minLat = lat;
+      if (lng > maxLng) maxLng = lng;
+      if (lat > maxLat) maxLat = lat;
+      return;
+    }
+    coords.forEach(visitCoordinates);
+  };
+
+  fc.features.forEach((f) => visitCoordinates(f?.geometry?.coordinates));
+
+  if (!Number.isFinite(minLng) || !Number.isFinite(minLat) || !Number.isFinite(maxLng) || !Number.isFinite(maxLat)) {
+    return null;
+  }
+  return { minLng, minLat, maxLng, maxLat };
+}
+
 async function renderFrame(frame) {
   if (!map || !mapReady) {
     pendingFrame = frame;
@@ -1085,9 +1120,28 @@ async function renderFrame(frame) {
   }
 
   map.getSource("zones").setData(fc);
+  console.log("DEBUG zones: setData done");
+  console.log("DEBUG zones: feature count", fc.features.length);
+  console.log("DEBUG zones: source exists", Boolean(map.getSource("zones")));
+  console.log("DEBUG zones: zones-fill exists", Boolean(map.getLayer("zones-fill")));
+  console.log("DEBUG zones: zones-line exists", Boolean(map.getLayer("zones-line")));
+
+  if (fc.features.length <= 0) {
+    console.log("DEBUG zones: feature count is 0 (nothing to render)");
+  } else if (!didFitToZonesOnce) {
+    const bounds = getFeatureCollectionBounds(fc);
+    if (bounds) {
+      map.fitBounds(
+        [[bounds.minLng, bounds.minLat], [bounds.maxLng, bounds.maxLat]],
+        { padding: 40, duration: 0 }
+      );
+      didFitToZonesOnce = true;
+    } else {
+      console.log("DEBUG zones: feature count is 0 (nothing to render)");
+    }
+  }
 
   if (!debugOnce.zonesSetData) {
-    console.log("DEBUG zones setData feature count", fc.features.length);
     debugOnce.zonesSetData = true;
   }
 
