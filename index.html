@@ -709,6 +709,50 @@
       border: 0;
       background: #fff;
     }
+
+    .debugToggle {
+      position: fixed;
+      right: 10px;
+      bottom: calc(125px + env(safe-area-inset-bottom));
+      z-index: 1400;
+      border: 1px solid rgba(0,0,0,0.2);
+      border-radius: 999px;
+      background: rgba(255,255,255,0.95);
+      padding: 6px 10px;
+      font-size: 12px;
+      font-weight: 900;
+      cursor: pointer;
+    }
+    .debugPanel {
+      position: fixed;
+      right: 10px;
+      bottom: calc(170px + env(safe-area-inset-bottom));
+      width: min(92vw, 360px);
+      max-height: 45vh;
+      overflow: auto;
+      z-index: 1400;
+      background: rgba(0,0,0,0.88);
+      color: #d7f0ff;
+      border: 1px solid rgba(255,255,255,0.16);
+      border-radius: 10px;
+      padding: 10px;
+      font: 11px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .debugPanel pre {
+      margin: 0 0 6px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .dbgReloadFrame {
+      border: 1px solid rgba(255,255,255,0.35);
+      border-radius: 6px;
+      background: rgba(255,255,255,0.1);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 800;
+      padding: 5px 8px;
+      cursor: pointer;
+    }
   </style>
 </head>
 
@@ -826,6 +870,21 @@
   </div>
 
   <div id="mapLoading" style="position:absolute;inset:0;background:rgba(255,255,255,0.85);display:flex;align-items:center;justify-content:center;font-weight:900;color:#0066ff;z-index:999;">Loading map… (first load may take a few seconds)</div>
+
+  <button id="debugToggle" class="debugToggle" type="button">Debug</button>
+  <div id="debugPanel" class="debugPanel" hidden>
+    <pre>baseUrl: <span id="dbgBaseUrl"></span></pre>
+    <pre>status: <span id="dbgStatus"></span></pre>
+    <pre>timeline: <span id="dbgTimeline"></span></pre>
+    <pre>frame: <span id="dbgFrame"></span></pre>
+    <pre>frameKeys: <span id="dbgFrameKeys"></span></pre>
+    <pre>polyCount: <span id="dbgPolyCount"></span></pre>
+    <pre>setData: <span id="dbgSetData"></span></pre>
+    <pre>layers: <span id="dbgLayers"></span></pre>
+    <pre>bounds: <span id="dbgBounds"></span></pre>
+    <pre>fit: <span id="dbgFit"></span></pre>
+    <button id="dbgReloadFrame" class="dbgReloadFrame" type="button">Reload Frame</button>
+  </div>
 
   <script src="./app.js"></script>
 </body>
