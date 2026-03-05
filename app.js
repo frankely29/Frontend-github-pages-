@@ -2,7 +2,7 @@
    NYC TLC Hotspot Map (Frontend) - SIMPLE + STABLE
    ========================================================= */
 
-const RAILWAY_BASE = "https://web-production-78f67.up.railway.app";
+const RAILWAY_BASE = "";
 const BIN_MINUTES = 20;
 
 const REFRESH_MS = 5 * 60 * 1000;
@@ -783,7 +783,7 @@ function updateRecommendation(frame) {
 }
 
 /* =========================================================
-   Leaflet map setup
+   Map setup
    ========================================================= */
 const slider = document.getElementById("slider");
 const timeLabel = document.getElementById("timeLabel");
@@ -835,7 +835,6 @@ let zonePopup = null;
 function initMap() {
   map = new maplibregl.Map({
     container: 'map',
-    // COMPLETE raster style object — fixes Safari glyph failure
     style: {
       version: 8,
       sources: {
@@ -855,7 +854,7 @@ function initMap() {
         source: 'carto-raster',
         paint: { 'raster-opacity': 1 }
       }],
-      glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',  // REQUIRED for Safari
+      glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
       sprite: ''
     },
     center: [-73.98, 40.73],
@@ -868,21 +867,15 @@ function initMap() {
     mapReady = true;
     map.resize();
 
-    // ZONES VECTOR LAYERS (colored demand polygons on top)
     map.addSource('zones', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-    map.addLayer({ id: 'zones-fill', type: 'fill', source: 'zones',
-      paint: { 'fill-color': ['get', 'displayColor'], 'fill-opacity': 0.82 }
-    });
-    map.addLayer({ id: 'zones-line', type: 'line', source: 'zones',
-      paint: { 'line-color': '#ffffff', 'line-width': 1.5, 'line-opacity': 0.3 }
-    });
+    map.addLayer({ id: 'zones-fill', type: 'fill', source: 'zones', paint: { 'fill-color': ['get', 'displayColor'], 'fill-opacity': 0.82 } });
+    map.addLayer({ id: 'zones-line', type: 'line', source: 'zones', paint: { 'line-color': '#ffffff', 'line-width': 1.5, 'line-opacity': 0.3 } });
 
     map.on('zoomend', updateZoneLabelVisibility);
 
     const loading = document.getElementById('mapLoading');
     if (loading) loading.style.display = 'none';
 
-    // Safari repaint chain
     map.triggerRepaint();
     setTimeout(() => map.triggerRepaint(), 150);
     setTimeout(() => map.triggerRepaint(), 400);
@@ -1995,26 +1988,22 @@ function clearOtherDrivers() {
 }
 
 function upsertDriverMarker(userId, name, lat, lng, heading, labelSide, labelDx = 0, labelDy = 0) {
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || !map) return;
   if (!userId) return;
 
   const existing = otherMarkers.get(userId);
   if (existing) {
     existing.setLngLat([lng, lat]);
     const el = existing.getElement();
-    const nextEl = makeDriverIcon(name || `Driver ${userId}`, heading, labelSide, labelDx, labelDy);
-    el.innerHTML = nextEl.innerHTML;
+    const newEl = makeDriverIcon(name || `Driver ${userId}`, heading, labelSide, labelDx, labelDy);
+    el.innerHTML = newEl.innerHTML;
     return;
   }
 
-  const mk = new maplibregl.Marker({
-    element: makeDriverIcon(name || `Driver ${userId}`, heading, labelSide, labelDx, labelDy),
-    anchor: "center",
-    offset: [0, 0],
-  })
+  const el = makeDriverIcon(name || `Driver ${userId}`, heading, labelSide, labelDx, labelDy);
+  const mk = new maplibregl.Marker({ element: el, anchor: "center" })
     .setLngLat([lng, lat])
     .addTo(map);
-  mk.getElement().style.zIndex = "1500";
 
   otherMarkers.set(userId, mk);
 }
