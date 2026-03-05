@@ -9,6 +9,8 @@ const REFRESH_MS = 5 * 60 * 1000;
 const NYC_CLOCK_TICK_MS = 60 * 1000;
 const USER_SLIDER_GRACE_MS = 25 * 1000;
 
+let map; // global MapLibre instance
+
 /* =========================================================
    COMMUNITY SETTINGS (cheap polling)
    ========================================================= */
@@ -585,6 +587,86 @@ function labelHTML(props, zoom) {
   `;
 }
 
+function projectToPoint(lng, lat) {
+  const p = map.project([lng, lat]);
+  return { x: p.x, y: p.y };
+}
+
+function pointDistance(a, b) {
+  const dx = a.x - b.x;
+  const dy = a.y - b.y;
+  return Math.hypot(dx, dy);
+}
+
+function refreshZoneLabels() {
+  if (!map || !currentFrame) return;
+
+  const active = new Set();
+  const zoomNow = map.getZoom();
+  const zClass = zoomClass(zoomNow);
+
+  for (const feature of (currentFrame.polygons?.features || [])) {
+    const props = feature?.properties || {};
+    const locId = String(props.LocationID ?? "");
+    if (!locId) continue;
+
+    const html = labelHTML(props, zoomNow);
+    const center = geometryCenter(feature.geometry);
+    active.add(locId);
+
+    let marker = zoneLabelMarkers.get(locId);
+
+    if (!html || !center) {
+      if (marker) {
+        marker.remove();
+        zoneLabelMarkers.delete(locId);
+      }
+      continue;
+    }
+
+    if (!marker) {
+      const el = document.createElement("div");
+      el.className = `zone-label ${zClass}`;
+      el.style.opacity = "0.92";
+      el.innerHTML = html;
+      marker = new maplibregl.Marker({ element: el, anchor: "center", offset: [0, 0] })
+        .setLngLat([center.lng, center.lat])
+        .addTo(map);
+      marker.getElement().style.zIndex = "650";
+      zoneLabelMarkers.set(locId, marker);
+    } else {
+      const el = marker.getElement();
+      el.className = `zone-label ${zClass}`;
+      el.innerHTML = html;
+      marker.setLngLat([center.lng, center.lat]);
+    }
+  }
+
+  for (const [locId, marker] of Array.from(zoneLabelMarkers.entries())) {
+    if (!active.has(locId)) {
+      marker.remove();
+      zoneLabelMarkers.delete(locId);
+    }
+  }
+
+  updateZoneLabelVisibility();
+}
+
+function updateZoneLabelVisibility() {
+  if (!map) return;
+  const zoomNow = map.getZoom();
+  const zClass = zoomClass(zoomNow);
+
+  for (const marker of zoneLabelMarkers.values()) {
+    const el = marker.getElement();
+    el.classList.remove("z10", "z11", "z12", "z13", "z14", "z15");
+    el.classList.add(zClass);
+    const show = !!el.querySelector(".zn");
+    el.style.opacity = show ? "0.92" : "0";
+    el.style.display = show ? "block" : "none";
+  }
+}
+
 /* =========================================================
    Recommendation + Navigation
    ========================================================= */
@@ -745,23 +827,72 @@ function bubbleUpdateNow() {
 /* =========================================================
    Map
    ========================================================= */
-const map = L.map("map", { zoomControl: true }).setView([40.7128, -74.0060], 8);
+const zoneLabelMarkers = new Map();
+let zonePopup = null;
 
-L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
-  attribution: "&copy; OpenStreetMap &copy; CARTO",
-  maxZoom: 19,
-}).addTo(map);
+function initMap() {
+  return new Promise((resolve) => {
+    map = new maplibregl.Map({
+      container: "map",
+      style: "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json",
+      center: [-73.98, 40.73],
+      zoom: 10.5,
+      pitch: 0,
+      bearing: 0,
+      attributionControl: true,
+    });
 
-const labelsPane = map.createPane("labelsPane");
-labelsPane.style.zIndex = 450;
+    map.addControl(new maplibregl.NavigationControl({ visualizePitch: false }));
 
-const navPane = map.createPane("navPane");
-navPane.style.zIndex = 1000;
+    map.on("load", () => {
+      map.addSource("zones", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
 
-const communityPane = map.createPane("communityPane");
-communityPane.style.zIndex = 980;
+      map.addLayer({
+        id: "zones-fill",
+        type: "fill",
+        source: "zones",
+        paint: {
+          "fill-color": ["get", "displayColor"],
+          "fill-opacity": 0.82,
+        },
+      });
 
-let geoLayer = null;
+      map.addLayer({
+        id: "zones-line",
+        type: "line",
+        source: "zones",
+        paint: {
+          "line-color": "#ffffff",
+          "line-width": 1,
+          "line-opacity": 0.3,
+        },
+      });
+
+      map.on("zoomend", updateZoneLabelVisibility);
+      map.on("zoomend", () => {
+        if (authHeaderOK()) pullPresenceAll().catch(() => {});
+      });
+      map.on("dragstart", disableAutoCenterBecauseUserIsExploring);
+      map.on("zoomstart", disableAutoCenterBecauseUserIsExploring);
+
+      map.on("click", "zones-fill", (e) => {
+        const feature = e.features?.[0];
+        if (!feature) return;
+        const props = feature.properties || {};
+        if (zonePopup) zonePopup.remove();
+        zonePopup = new maplibregl.Popup({ maxWidth: "320px" })
+          .setLngLat(e.lngLat)
+          .setHTML(buildPopupHTML(props, feature.geometry))
+          .addTo(map);
+      });
+
+      resolve();
+    });
+  });
+}
 let timeline = [];
 let minutesOfWeek = [];
 let currentFrame = null;
@@ -858,46 +989,16 @@ function renderFrame(frame) {
 
   timeLabel.textContent = formatNYCLabel(currentFrame.time);
 
-  if (geoLayer) {
-    geoLayer.remove();
-    geoLayer = null;
+  if (map && map.getSource("zones")) {
+    const fc = currentFrame.polygons;
+    fc.features.forEach((f) => {
+      const props = f.properties || {};
+      props.displayColor = effectiveColor(props, f.geometry) || (props.style?.fillColor || "#0066ff");
+    });
+    map.getSource("zones").setData(fc);
   }
 
-  const zoomNow = map.getZoom();
-  const zClass = zoomClass(zoomNow);
-
-  geoLayer = L.geoJSON(currentFrame.polygons, {
-    style: (feature) => {
-      const props = feature?.properties || {};
-      const st = props.style || {};
-      const fill = effectiveColor(props, feature.geometry);
-
-      return {
-        color: fill,
-        weight: st.weight ?? 0,
-        opacity: st.opacity ?? 0,
-        fillColor: fill,
-        fillOpacity: st.fillOpacity ?? 0.82,
-      };
-    },
-    onEachFeature: (feature, layer) => {
-      const props = feature.properties || {};
-      layer.bindPopup(buildPopupHTML(props, feature.geometry), { maxWidth: 320 });
-
-      const html = labelHTML(props, zoomNow);
-      if (!html) return;
-
-      layer.bindTooltip(html, {
-        permanent: true,
-        direction: "center",
-        className: `zone-label ${zClass}`,
-        opacity: 0.92,
-        interactive: false,
-        pane: "labelsPane",
-      });
-    },
-  }).addTo(map);
-
+  refreshZoneLabels();
   updateRecommendation(currentFrame);
 }
 
@@ -926,11 +1027,6 @@ async function loadTimeline() {
 
   await loadFrame(idx);
 }
-
-map.on("zoomend", () => {
-  if (currentFrame) renderFrame(currentFrame);
-  if (authHeaderOK()) pullPresenceAll().catch(() => {});
-});
 
 let sliderDebounce = null;
 
@@ -981,7 +1077,7 @@ if (btnCenter) {
     syncCenterButton();
 
     if (autoCenter && userLatLng) {
-      suppressAutoDisableFor(800, () => map.panTo(userLatLng, { animate: true }));
+      suppressAutoDisableFor(800, () => map.flyTo({ center: [userLatLng.lng, userLatLng.lat], duration: 500 }));
     }
   });
 }
@@ -992,9 +1088,6 @@ function disableAutoCenterBecauseUserIsExploring() {
   autoCenter = false;
   syncCenterButton();
 }
-map.on("dragstart", disableAutoCenterBecauseUserIsExploring);
-map.on("zoomstart", disableAutoCenterBecauseUserIsExploring);
-
 /* =========================================================
    Live location arrow + follow behavior
    ========================================================= */
@@ -1006,17 +1099,14 @@ let lastMoveTs = 0;
 
 function makeNavIcon() {
   const myName = authHeaderOK() ? (me?.display_name || "") : "";
-  return L.divIcon({
-    className: "",
-    html: `
-      <div id="navWrap" class="navArrowWrap navPulse">
-        <div id="navArrowRot" class="navArrowRot"><div class="navArrow"></div></div>
-        <div id="navMeName" class="meName" style="display:${myName ? "block" : "none"}">${escapeHtml(myName)}</div>
-      </div>
-    `,
-    iconSize: [30, 30],
-    iconAnchor: [15, 15],
-  });
+  const el = document.createElement("div");
+  el.innerHTML = `
+    <div id="navWrap" class="navArrowWrap navPulse">
+      <div id="navArrowRot" class="navArrowRot"><div class="navArrow"></div></div>
+      <div id="navMeName" class="meName" style="display:${myName ? "block" : "none"}">${escapeHtml(myName)}</div>
+    </div>
+  `;
+  return el;
 }
 
 function refreshNavNameLabel() {
@@ -1060,12 +1150,14 @@ function startLocationWatch() {
     return;
   }
 
-  navMarker = L.marker([40.7128, -74.0060], {
-    icon: makeNavIcon(),
-    interactive: false,
-    zIndexOffset: 2000000,
-    pane: "navPane",
-  }).addTo(map);
+  navMarker = new maplibregl.Marker({
+    element: makeNavIcon(),
+    anchor: "center",
+    offset: [0, 0],
+  })
+    .setLngLat([-74.0060, 40.7128])
+    .addTo(map);
+  navMarker.getElement().style.zIndex = "2000";
 
   navigator.geolocation.watchPosition(
     (pos) => {
@@ -1077,7 +1169,7 @@ function startLocationWatch() {
 
       userLatLng = { lat, lng };
       lastGpsAccuracyM = (typeof accuracy === "number" && Number.isFinite(accuracy)) ? accuracy : null;
-      if (navMarker) navMarker.setLatLng(userLatLng);
+      if (navMarker) navMarker.setLngLat([userLatLng.lng, userLatLng.lat]);
 
       let isMoving = false;
 
@@ -1105,10 +1197,10 @@ function startLocationWatch() {
       if (!gpsFirstFixDone) {
         gpsFirstFixDone = true;
         const targetZoom = Math.max(map.getZoom(), 12.5);
-        suppressAutoDisableFor(1200, () => map.setView(userLatLng, targetZoom, { animate: true }));
+        suppressAutoDisableFor(1200, () => map.flyTo({ center: [userLatLng.lng, userLatLng.lat], zoom: targetZoom, duration: 700 }));
       } else {
         if (autoCenter) {
-          suppressAutoDisableFor(700, () => map.panTo(userLatLng, { animate: true }));
+          suppressAutoDisableFor(700, () => map.flyTo({ center: [userLatLng.lng, userLatLng.lat], duration: 500 }));
         }
       }
 
@@ -1873,22 +1965,18 @@ function makeDriverIcon(name, headingDeg, labelSide = "right", labelDx = 0, labe
   const defaultLabelX = labelSide === "left" ? -28 : 28;
   const labelTranslateX = Number.isFinite(labelDx) ? labelDx : defaultLabelX;
   const labelTranslateY = Number.isFinite(labelDy) ? labelDy : -8;
-  const html = `
-    <div class="otherDrvWrap">
-      <div class="otherArrowWrap otherPulse" style="transform:rotate(${rot}deg)">
-        <div class="otherArrow"></div>
-      </div>
-      <div class="otherDrvName" style="transform:translate(${labelTranslateX}px, ${labelTranslateY}px);">
-        ${escapeHtml(safe)}
-      </div>
+
+  const el = document.createElement("div");
+  el.className = "otherDrvWrap";
+  el.innerHTML = `
+    <div class="otherArrowWrap otherPulse" style="transform:rotate(${rot}deg)">
+      <div class="otherArrow"></div>
+    </div>
+    <div class="otherDrvName" style="transform:translate(${labelTranslateX}px, ${labelTranslateY}px);">
+      ${escapeHtml(safe)}
     </div>
   `;
-  return L.divIcon({
-    className: "",
-    html,
-    iconSize: [40, 40],
-    iconAnchor: [20, 20],
-  });
+  return el;
 }
 
 function clearOtherDrivers() {
@@ -1904,23 +1992,27 @@ function upsertDriverMarker(userId, name, lat, lng, heading, labelSide, labelDx 
 
   const existing = otherMarkers.get(userId);
   if (existing) {
-    existing.setLatLng([lat, lng]);
-    existing.setIcon(makeDriverIcon(name || `Driver ${userId}`, heading, labelSide, labelDx, labelDy));
+    existing.setLngLat([lng, lat]);
+    const el = existing.getElement();
+    const nextEl = makeDriverIcon(name || `Driver ${userId}`, heading, labelSide, labelDx, labelDy);
+    el.innerHTML = nextEl.innerHTML;
     return;
   }
 
-  const mk = L.marker([lat, lng], {
-    icon: makeDriverIcon(name || `Driver ${userId}`, heading, labelSide, labelDx, labelDy),
-    interactive: false,
-    pane: "communityPane",
-    zIndexOffset: 1500000,
-  }).addTo(map);
+  const mk = new maplibregl.Marker({
+    element: makeDriverIcon(name || `Driver ${userId}`, heading, labelSide, labelDx, labelDy),
+    anchor: "center",
+    offset: [0, 0],
+  })
+    .setLngLat([lng, lat])
+    .addTo(map);
+  mk.getElement().style.zIndex = "1500";
 
   otherMarkers.set(userId, mk);
 }
 
 async function pullPresenceAll() {
-  if (!authHeaderOK()) return;
+  if (!authHeaderOK() || !map) return;
 
   try {
     const list = await getJSONAuth("/presence/all", communityToken);
@@ -1955,12 +2047,12 @@ async function pullPresenceAll() {
     }
 
     const selfPt = userLatLng
-      ? map.latLngToLayerPoint([userLatLng.lat, userLatLng.lng])
+      ? projectToPoint(userLatLng.lng, userLatLng.lat)
       : null;
 
     const driversWithPoints = visibleDrivers.map((drv) => ({
       ...drv,
-      basePoint: map.latLngToLayerPoint([drv.lat, drv.lng]),
+      basePoint: projectToPoint(drv.lng, drv.lat),
     }));
 
     const COLLISION_PX = 28;
@@ -1981,7 +2073,7 @@ async function pullPresenceAll() {
 
         for (const candidate of driversWithPoints) {
           if (clustered.has(candidate.uid)) continue;
-          if (current.basePoint.distanceTo(candidate.basePoint) > COLLISION_PX) continue;
+          if (pointDistance(current.basePoint, candidate.basePoint) > COLLISION_PX) continue;
           clustered.add(candidate.uid);
           queue.push(candidate);
         }
@@ -2003,7 +2095,7 @@ async function pullPresenceAll() {
         const basePoint = drv.basePoint;
 
         if (selfPt) {
-          const distPx = basePoint.distanceTo(selfPt);
+          const distPx = pointDistance(basePoint, selfPt);
           if (distPx < SELF_COLLISION_THRESHOLD_PX) {
             labelDx = (SELF_LABEL_SIDE === "right")
               ? -SELF_COLLISION_OFFSET_PX
@@ -2163,26 +2255,29 @@ setInterval(() => {
    ========================================================= */
 setNavDestination(null);
 
-loadTimeline().catch((err) => {
-  console.error(err);
-  timeLabel.textContent = `Error loading timeline: ${err.message}`;
-});
-
-/* auth boot */
 (async () => {
-  if (authHeaderOK()) {
-    setAuthUI(true, "Checking session…");
-    await loadMe();
+  try {
+    await initMap();
+
+    await loadTimeline();
+
     if (authHeaderOK()) {
-      setAuthUI(true, `Status: signed in as ${me?.display_name || me?.email || "Driver"}`);
-      pullPresenceAll().catch(() => {});
+      setAuthUI(true, "Checking session…");
+      await loadMe();
+      if (authHeaderOK()) {
+        setAuthUI(true, `Status: signed in as ${me?.display_name || me?.email || "Driver"}`);
+        pullPresenceAll().catch(() => {});
+      } else {
+        setAuthUI(false, "Status: signed out");
+      }
     } else {
       setAuthUI(false, "Status: signed out");
     }
-  } else {
-    setAuthUI(false, "Status: signed out");
+
+    startLocationWatch();
+    updateWeatherNow().catch(() => {});
+  } catch (err) {
+    console.error(err);
+    timeLabel.textContent = `Error loading timeline: ${err.message}`;
   }
 })();
-
-startLocationWatch();
-updateWeatherNow().catch(() => {});
