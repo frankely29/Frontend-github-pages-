@@ -5,17 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>NYC TLC Hotspot Map</title>
 
-  <!-- Leaflet -->
+  <!-- MapLibre GL JS -->
   <link
     rel="stylesheet"
-    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
-    crossorigin=""
+    href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css"
   />
   <script
-    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-    crossorigin=""
+    src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"
   ></script>
 
   <style>
@@ -137,10 +133,10 @@
     /* =========================================================
        NIGHT THEME
        ========================================================= */
-    body.night .leaflet-tile-pane{
+    body.night .maplibregl-canvas{
       filter: brightness(0.65) contrast(1.08) saturate(0.85);
     }
-    body.sunny .leaflet-tile-pane{
+    body.sunny .maplibregl-canvas{
       filter: brightness(1.03) saturate(1.08);
     }
 
@@ -612,41 +608,7 @@
       .radioStatus{ max-width: 54vw; }
     }
 
-    /* ---------- Zone labels (canvas overlay) ---------- */
-    .zone-labels-pane{
-      pointer-events: none;
-    }
-    .zone-labels-canvas{
-      position: absolute;
-      inset: 0;
-      pointer-events: none;
-    }
-
-    .borough-label {
-      background: transparent;
-      border: none;
-      box-shadow: none;
-      pointer-events: none;
-    }
-    .borough-label .btxt{
-      display: inline-block;
-      font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
-      font-size: 9px;
-      font-weight: 800;
-      letter-spacing: 0.45px;
-      text-transform: uppercase;
-      color: rgba(16,35,49,0.78);
-      background: rgba(255,255,255,0.44);
-      border-radius: 4px;
-      padding: 1px 4px;
-      text-shadow: 0 1px 1px rgba(255,255,255,0.55);
-      white-space: nowrap;
-    }
-
-    /* ---------- You arrow: force on top of EVERYTHING ---------- */
-    .leaflet-marker-pane { z-index: 800 !important; }
-    .leaflet-tooltip-pane { z-index: 650 !important; }
-    .leaflet-overlay-pane { z-index: 400 !important; }
+    .maplibregl-popup-content { border-radius: 12px; }
 
     /* =========================================================
        GPS ARROW

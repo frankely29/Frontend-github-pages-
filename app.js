@@ -708,7 +708,7 @@ function updateRecommendation(frame) {
 }
 
 /* =========================================================
-   Leaflet map setup
+   Map (MapLibre)
    ========================================================= */
 const slider = document.getElementById("slider");
 const timeLabel = document.getElementById("timeLabel");
@@ -751,166 +751,52 @@ function bubbleUpdateNow() {
   showSliderBubble();
 }
 
-/* =========================================================
-   Map
-   ========================================================= */
-const map = L.map("map", { zoomControl: true }).setView([40.7128, -74.0060], 8);
+const ZONE_SOURCE_ID = "zones-source";
+const ZONE_FILL_LAYER_ID = "zones-fill";
+const ZONE_LINE_LAYER_ID = "zones-line";
+const ZONE_LABEL_LAYER_ID = "zones-label";
+const BOROUGH_SOURCE_ID = "borough-label-source";
+const BOROUGH_LABEL_LAYER_ID = "borough-label-layer";
 
-L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
-  attribution: "&copy; OpenStreetMap &copy; CARTO",
-  maxZoom: 19,
-}).addTo(map);
+const baseStyle = {
+  version: 8,
+  glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
+  sources: {
+    cartoLight: {
+      type: "raster",
+      tiles: ["https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png", "https://b.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png", "https://c.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png"],
+      tileSize: 256,
+      attribution: "&copy; OpenStreetMap &copy; CARTO",
+      maxzoom: 19,
+    },
+  },
+  layers: [{ id: "basemap", type: "raster", source: "cartoLight" }],
+};
 
-const labelsPane = map.createPane("labelsPane");
-labelsPane.style.zIndex = 450;
-labelsPane.classList.add("zone-labels-pane");
+const map = new maplibregl.Map({
+  container: "map",
+  style: baseStyle,
+  center: [-74.0060, 40.7128],
+  zoom: 8,
+});
+map.addControl(new maplibregl.NavigationControl(), "top-right");
 
-const boroughLabelsPane = map.createPane("boroughLabelsPane");
-boroughLabelsPane.style.zIndex = 460;
+let mapReadyResolve;
+const mapReady = new Promise((resolve) => { mapReadyResolve = resolve; });
+map.on("load", () => {
+  ensureMapDataLayers();
+  mapReadyResolve();
+});
 
-const navPane = map.createPane("navPane");
-navPane.style.zIndex = 1000;
-
-const communityPane = map.createPane("communityPane");
-communityPane.style.zIndex = 980;
-
-let geoLayer = null;
 let timeline = [];
 let minutesOfWeek = [];
 let currentFrame = null;
 let lastUserSliderTs = 0;
-let zoneLabelAnchors = [];
-let zoneLabelsCanvas = null;
-let zoneLabelsCtx = null;
-let zoneLabelsCanvasReady = false;
-let boroughLabelsLayer = L.layerGroup().addTo(map);
 let boroughLabelAnchors = null;
+let zonePopup = null;
 
 function clamp(v, min, max) {
   return Math.max(min, Math.min(max, v));
-}
-
-function lerp(a, b, t) {
-  return a + (b - a) * t;
-}
-
-const zoneTextMeasureCanvas = document.createElement("canvas");
-const zoneTextMeasureCtx = zoneTextMeasureCanvas.getContext("2d");
-
-function abbreviateZoneWord(word) {
-  if (word.length <= 5) return word;
-  const exact = {
-    district: "Dist",
-    avenue: "Ave",
-    south: "S",
-    north: "N",
-    east: "E",
-    west: "W",
-    terminal: "Term",
-  };
-  const key = word.toLowerCase();
-  if (exact[key]) return exact[key];
-  return `${word.slice(0, 5)}`;
-}
-
-function abbreviateZoneName(zoneName) {
-  return zoneName
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((w) => abbreviateZoneWord(w))
-    .join(" ");
-}
-
-function shortenTokenToFit(token, maxWidth, fontPx) {
-  if (!zoneTextMeasureCtx) return token;
-  zoneTextMeasureCtx.font = `700 ${fontPx}px system-ui,-apple-system,Segoe UI,Roboto,Arial`;
-  if (zoneTextMeasureCtx.measureText(token).width <= maxWidth) return token;
-  for (let i = Math.max(2, token.length - 1); i >= 1; i--) {
-    const candidate = `${token.slice(0, i)}…`;
-    if (zoneTextMeasureCtx.measureText(candidate).width <= maxWidth) return candidate;
-  }
-  return "…";
-}
-
-function wrapTextToWidth(text, maxWidth, maxLines, fontPx) {
-  if (!zoneTextMeasureCtx) return [text];
-  zoneTextMeasureCtx.font = `700 ${fontPx}px system-ui,-apple-system,Segoe UI,Roboto,Arial`;
-
-  const words = text.split(/\s+/).filter(Boolean);
-  if (!words.length) return [text];
-
-  const lines = [];
-  let line = "";
-
-  for (const rawWord of words) {
-    const word = shortenTokenToFit(rawWord, maxWidth, fontPx);
-    const candidate = line ? `${line} ${word}` : word;
-    if (zoneTextMeasureCtx.measureText(candidate).width <= maxWidth || !line) {
-      line = candidate;
-      continue;
-    }
-
-    lines.push(line);
-    line = word;
-    if (lines.length >= maxLines) return null;
-  }
-
-  if (line) lines.push(line);
-  if (lines.length > maxLines) return null;
-  return lines;
-}
-
-function getZoneLabelFontPx(zoom) {
-  if (!Number.isFinite(zoom)) return 10;
-  return clamp(6 + (zoom - 8) * 0.55, 5.5, 14);
-}
-
-function fitZoneLabelTextForZone(zoneName, maxLabelWidth, maxLabelHeight, zoom) {
-  const maxWidth = Math.max(20, maxLabelWidth);
-  const maxHeight = Math.max(8, maxLabelHeight);
-  const zoomFont = getZoneLabelFontPx(zoom);
-  const minFont = clamp(zoomFont - 3, 4, 11);
-  const maxFont = clamp(zoomFont + 2, minFont, 15);
-  const lineHeight = 1.03;
-
-  const names = [zoneName, abbreviateZoneName(zoneName)];
-  let best = null;
-
-  for (const name of names) {
-    for (let font = maxFont; font >= minFont; font -= 0.5) {
-      for (let maxLines = 1; maxLines <= 3; maxLines++) {
-        const lines = wrapTextToWidth(name, maxWidth, maxLines, font);
-        if (!lines || !zoneTextMeasureCtx) continue;
-
-        zoneTextMeasureCtx.font = `700 ${font}px system-ui,-apple-system,Segoe UI,Roboto,Arial`;
-        const textWidth = lines.reduce((m, line) => Math.max(m, zoneTextMeasureCtx.measureText(line).width), 0);
-        const textHeight = lines.length * font * lineHeight;
-        if (textWidth <= maxWidth && textHeight <= maxHeight) {
-          const fit = {
-            lines,
-            fontPx: font,
-            lineHeight,
-            widthPx: Math.min(maxWidth, Math.max(1, textWidth + 2)),
-            heightPx: Math.min(maxHeight, Math.max(1, textHeight + 1)),
-          };
-          if (!best || fit.fontPx > best.fontPx) best = fit;
-        }
-      }
-      if (best && best.fontPx >= font) break;
-    }
-    if (best) break;
-  }
-
-  if (best) return best;
-
-  const emergency = shortenTokenToFit(abbreviateZoneName(zoneName), maxWidth, minFont);
-  return {
-    lines: [emergency || "…"],
-    fontPx: minFont,
-    lineHeight,
-    widthPx: Math.min(maxWidth, Math.max(1, maxWidth)),
-    heightPx: Math.min(maxHeight, Math.max(1, minFont * lineHeight + 1)),
-  };
 }
 
 function geometryWeight(geom) {
@@ -949,266 +835,158 @@ function buildBoroughLabelAnchors(features) {
   const anchors = [];
   for (const [borough, acc] of byBorough.entries()) {
     if (!acc.w) continue;
-    anchors.push({
-      borough,
-      lat: acc.lat / acc.w,
-      lng: acc.lng / acc.w,
-    });
+    anchors.push({ borough, lat: acc.lat / acc.w, lng: acc.lng / acc.w });
   }
   return anchors;
 }
 
-function renderBoroughLabels() {
-  boroughLabelsLayer.clearLayers();
-  for (const b of boroughLabelAnchors || []) {
-    L.marker([b.lat, b.lng], {
-      pane: "boroughLabelsPane",
-      interactive: false,
-      zIndexOffset: 50,
-      icon: L.divIcon({
-        className: "borough-label",
-        html: `<div class="btxt">${escapeHtml(b.borough)}</div>`,
-      }),
-    }).addTo(boroughLabelsLayer);
-  }
+function enrichFeatureForMap(feature) {
+  const props = feature?.properties || {};
+  const geom = feature?.geometry;
+  const weight = geometryWeight(geom);
+  const pickups = Number(props.pickups ?? NaN);
+  const rating = Number(props.rating ?? NaN);
+
+  const priority = (Number.isFinite(rating) ? rating * 100 : 0)
+    + (Number.isFinite(pickups) ? pickups : 0)
+    + Math.min(6000, Math.sqrt(Math.max(1, weight)) * 35);
+
+  return {
+    ...feature,
+    properties: {
+      ...props,
+      demand_color: effectiveColor(props, geom),
+      zone_label_priority: Number.isFinite(priority) ? priority : 0,
+      zone_label_name: (props.zone_name || "").trim() || `Zone ${props.LocationID ?? ""}`,
+    },
+  };
 }
 
-function buildZoneLabelAnchors(features) {
-  const anchors = [];
+function frameToStyledGeoJSON(frame) {
+  const src = frame?.polygons || { type: "FeatureCollection", features: [] };
+  const features = Array.isArray(src.features) ? src.features.map(enrichFeatureForMap) : [];
+  return { type: "FeatureCollection", features };
+}
 
-  function collectOuterRings(geom) {
-    if (!geom) return [];
-    if (geom.type === "Polygon") return [geom.coordinates?.[0] || []];
-    if (geom.type === "MultiPolygon") {
-      return (geom.coordinates || []).map((poly) => poly?.[0] || []);
-    }
-    return [];
+function boroughAnchorsToGeoJSON(anchors) {
+  return {
+    type: "FeatureCollection",
+    features: (anchors || []).map((b) => ({
+      type: "Feature",
+      properties: { borough: b.borough },
+      geometry: { type: "Point", coordinates: [b.lng, b.lat] },
+    })),
+  };
+}
+
+function ensureMapDataLayers() {
+  if (!map.getSource(ZONE_SOURCE_ID)) {
+    map.addSource(ZONE_SOURCE_ID, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
   }
 
-  function pointInRing(ring, lng, lat) {
-    let inside = false;
-    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-      const xi = Number(ring[i]?.[0]);
-      const yi = Number(ring[i]?.[1]);
-      const xj = Number(ring[j]?.[0]);
-      const yj = Number(ring[j]?.[1]);
-      if (![xi, yi, xj, yj].every(Number.isFinite)) continue;
-
-      const intersects = ((yi > lat) !== (yj > lat))
-        && (lng < ((xj - xi) * (lat - yi)) / ((yj - yi) || 1e-12) + xi);
-      if (intersects) inside = !inside;
-    }
-    return inside;
-  }
-
-  function pointInPolygonWithHoles(polygon, lng, lat) {
-    const [outer, ...holes] = polygon || [];
-    if (!outer?.length || !pointInRing(outer, lng, lat)) return false;
-    for (const hole of holes) {
-      if (hole?.length && pointInRing(hole, lng, lat)) return false;
-    }
-    return true;
-  }
-
-  function pointInsideGeometry(geom, lng, lat) {
-    if (!geom) return false;
-    if (geom.type === "Polygon") {
-      return pointInPolygonWithHoles(geom.coordinates, lng, lat);
-    }
-    if (geom.type === "MultiPolygon") {
-      for (const poly of geom.coordinates || []) {
-        if (pointInPolygonWithHoles(poly, lng, lat)) return true;
-      }
-    }
-    return false;
-  }
-
-  function geometryLngLatBounds(geom) {
-    const rings = collectOuterRings(geom);
-    let minLng = Infinity;
-    let maxLng = -Infinity;
-    let minLat = Infinity;
-    let maxLat = -Infinity;
-
-    for (const ring of rings) {
-      for (const pt of ring || []) {
-        if (!Array.isArray(pt) || pt.length < 2) continue;
-        const lng = Number(pt[0]);
-        const lat = Number(pt[1]);
-        if (!Number.isFinite(lng) || !Number.isFinite(lat)) continue;
-        if (lng < minLng) minLng = lng;
-        if (lng > maxLng) maxLng = lng;
-        if (lat < minLat) minLat = lat;
-        if (lat > maxLat) maxLat = lat;
-      }
-    }
-
-    if (!Number.isFinite(minLng) || !Number.isFinite(maxLng) || !Number.isFinite(minLat) || !Number.isFinite(maxLat)) {
-      return null;
-    }
-    return { minLng, maxLng, minLat, maxLat };
-  }
-
-  function findInteriorAnchor(geom) {
-    const center = geometryCenter(geom);
-    if (!center) return null;
-    if (pointInsideGeometry(geom, center.lng, center.lat)) return center;
-
-    const bounds = geometryLngLatBounds(geom);
-    if (!bounds) return center;
-
-    const steps = [7, 11, 15];
-    for (const n of steps) {
-      for (let yi = 0; yi <= n; yi++) {
-        for (let xi = 0; xi <= n; xi++) {
-          const lng = bounds.minLng + ((bounds.maxLng - bounds.minLng) * xi) / n;
-          const lat = bounds.minLat + ((bounds.maxLat - bounds.minLat) * yi) / n;
-          if (pointInsideGeometry(geom, lng, lat)) {
-            return { lat, lng };
-          }
-        }
-      }
-    }
-    return center;
-  }
-
-  for (const f of features || []) {
-    const props = f?.properties || {};
-    const zoneName = (props.zone_name || "").trim();
-    if (!zoneName) continue;
-
-    const anchor = findInteriorAnchor(f.geometry);
-    if (!anchor) continue;
-
-    anchors.push({
-      lat: anchor.lat,
-      lng: anchor.lng,
-      zoneName,
-      id: props.LocationID ?? null,
-      geometry: f.geometry,
+  if (!map.getLayer(ZONE_FILL_LAYER_ID)) {
+    map.addLayer({
+      id: ZONE_FILL_LAYER_ID,
+      type: "fill",
+      source: ZONE_SOURCE_ID,
+      paint: {
+        "fill-color": ["coalesce", ["get", "demand_color"], "#9ecae1"],
+        "fill-opacity": 0.82,
+      },
     });
   }
 
-  anchors.sort((a, b) => {
-    const aId = Number(a.id ?? NaN);
-    const bId = Number(b.id ?? NaN);
-    if (Number.isFinite(aId) && Number.isFinite(bId)) return aId - bId;
-    return a.zoneName.localeCompare(b.zoneName);
+  if (!map.getLayer(ZONE_LINE_LAYER_ID)) {
+    map.addLayer({
+      id: ZONE_LINE_LAYER_ID,
+      type: "line",
+      source: ZONE_SOURCE_ID,
+      paint: {
+        "line-color": ["coalesce", ["get", "demand_color"], "#7f8c8d"],
+        "line-width": ["interpolate", ["linear"], ["zoom"], 8, 0.35, 14, 1.4],
+        "line-opacity": 0.52,
+      },
+    });
+  }
+
+  if (!map.getLayer(ZONE_LABEL_LAYER_ID)) {
+    map.addLayer({
+      id: ZONE_LABEL_LAYER_ID,
+      type: "symbol",
+      source: ZONE_SOURCE_ID,
+      layout: {
+        "text-field": ["coalesce", ["get", "zone_label_name"], ""],
+        "text-font": ["Noto Sans Bold"],
+        "text-size": ["interpolate", ["linear"], ["zoom"], 9, 9, 11, 10.5, 13.5, 12.5, 15, 14],
+        "text-max-width": 8,
+        "text-letter-spacing": 0.01,
+        "text-variable-anchor": ["center", "top", "bottom", "left", "right"],
+        "text-radial-offset": 0.35,
+        "text-justify": "auto",
+        "text-padding": 2,
+        "text-allow-overlap": false,
+        "symbol-sort-key": ["*", -1, ["coalesce", ["get", "zone_label_priority"], 0]],
+      },
+      paint: {
+        "text-color": "rgba(20,36,52,0.92)",
+        "text-halo-color": "rgba(255,255,255,0.9)",
+        "text-halo-width": 1.2,
+        "text-halo-blur": 0.45,
+      },
+      minzoom: 8.5,
+    });
+  }
+
+  if (!map.getSource(BOROUGH_SOURCE_ID)) {
+    map.addSource(BOROUGH_SOURCE_ID, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+  }
+
+  if (!map.getLayer(BOROUGH_LABEL_LAYER_ID)) {
+    map.addLayer({
+      id: BOROUGH_LABEL_LAYER_ID,
+      type: "symbol",
+      source: BOROUGH_SOURCE_ID,
+      layout: {
+        "text-field": ["upcase", ["get", "borough"]],
+        "text-font": ["Noto Sans Bold"],
+        "text-size": ["interpolate", ["linear"], ["zoom"], 8, 12, 11, 14, 14, 17],
+        "text-letter-spacing": 0.12,
+        "text-allow-overlap": false,
+        "text-padding": 4,
+      },
+      paint: {
+        "text-color": "rgba(15,35,49,0.75)",
+        "text-halo-color": "rgba(255,255,255,0.88)",
+        "text-halo-width": 1.3,
+      },
+      minzoom: 7,
+    });
+  }
+
+  map.on("click", ZONE_FILL_LAYER_ID, (e) => {
+    const feature = e.features?.[0];
+    if (!feature) return;
+    if (zonePopup) zonePopup.remove();
+    zonePopup = new maplibregl.Popup({ maxWidth: "320px" })
+      .setLngLat(e.lngLat)
+      .setHTML(buildPopupHTML(feature.properties || {}, feature.geometry))
+      .addTo(map);
   });
 
-  return anchors;
+  map.on("mouseenter", ZONE_FILL_LAYER_ID, () => { map.getCanvas().style.cursor = "pointer"; });
+  map.on("mouseleave", ZONE_FILL_LAYER_ID, () => { map.getCanvas().style.cursor = ""; });
 }
 
-function ensureZoneLabelCanvas() {
-  if (zoneLabelsCanvasReady) return;
-  const pane = map.getPane("labelsPane");
-  if (!pane) return;
+function updateMapFrameSources(frame) {
+  const styled = frameToStyledGeoJSON(frame);
+  const zoneSource = map.getSource(ZONE_SOURCE_ID);
+  if (zoneSource) zoneSource.setData(styled);
 
-  zoneLabelsCanvas = document.createElement("canvas");
-  zoneLabelsCanvas.className = "zone-labels-canvas";
-  zoneLabelsCanvas.setAttribute("aria-hidden", "true");
-  pane.appendChild(zoneLabelsCanvas);
-
-  zoneLabelsCtx = zoneLabelsCanvas.getContext("2d");
-  zoneLabelsCanvasReady = !!zoneLabelsCtx;
-}
-
-function resizeZoneLabelCanvas() {
-  ensureZoneLabelCanvas();
-  if (!zoneLabelsCanvas || !zoneLabelsCtx) return;
-
-  const size = map.getSize();
-  const dpr = window.devicePixelRatio || 1;
-  const cssW = Math.max(1, Math.round(size.x));
-  const cssH = Math.max(1, Math.round(size.y));
-  const pixelW = Math.max(1, Math.round(cssW * dpr));
-  const pixelH = Math.max(1, Math.round(cssH * dpr));
-
-  if (zoneLabelsCanvas.width !== pixelW) zoneLabelsCanvas.width = pixelW;
-  if (zoneLabelsCanvas.height !== pixelH) zoneLabelsCanvas.height = pixelH;
-  zoneLabelsCanvas.style.width = `${cssW}px`;
-  zoneLabelsCanvas.style.height = `${cssH}px`;
-  zoneLabelsCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
-}
-
-function drawZoneLabelsCanvas() {
-  resizeZoneLabelCanvas();
-  if (!zoneLabelsCtx || !zoneLabelsCanvas) return;
-
-  const size = map.getSize();
-  zoneLabelsCtx.clearRect(0, 0, size.x, size.y);
-  if (!zoneLabelAnchors.length) return;
-
-  const zoom = map.getZoom();
-
-  function projectedSizeFromGeometry(geom) {
-    let minX = Infinity;
-    let maxX = -Infinity;
-    let minY = Infinity;
-    let maxY = -Infinity;
-
-    function projectRing(ring) {
-      for (const pt of ring || []) {
-        const lng = Number(pt?.[0]);
-        const lat = Number(pt?.[1]);
-        if (!Number.isFinite(lng) || !Number.isFinite(lat)) continue;
-        const p = map.latLngToLayerPoint([lat, lng]);
-        if (!p) continue;
-        if (p.x < minX) minX = p.x;
-        if (p.x > maxX) maxX = p.x;
-        if (p.y < minY) minY = p.y;
-        if (p.y > maxY) maxY = p.y;
-      }
-    }
-
-    if (geom?.type === "Polygon") {
-      for (const ring of geom.coordinates || []) projectRing(ring);
-    } else if (geom?.type === "MultiPolygon") {
-      for (const poly of geom.coordinates || []) {
-        for (const ring of poly || []) projectRing(ring);
-      }
-    }
-
-    if (![minX, maxX, minY, maxY].every(Number.isFinite)) return null;
-    return {
-      width: Math.max(1, maxX - minX),
-      height: Math.max(1, maxY - minY),
-    };
+  if (!boroughLabelAnchors) {
+    boroughLabelAnchors = buildBoroughLabelAnchors(styled.features || []);
   }
-
-  for (const z of zoneLabelAnchors) {
-    const pt = map.latLngToLayerPoint([z.lat, z.lng]);
-    if (!pt) continue;
-    if (pt.x < -60 || pt.x > size.x + 60 || pt.y < -30 || pt.y > size.y + 30) continue;
-
-    const projected = projectedSizeFromGeometry(z.geometry);
-    const zoneWidth = projected?.width || 60;
-    const zoneHeight = projected?.height || 30;
-    const maxLabelWidth = Math.max(20, Math.min(160, zoneWidth * 0.65));
-    const maxLabelHeight = Math.max(10, Math.min(52, zoneHeight * 0.62));
-    const fitted = fitZoneLabelTextForZone(z.zoneName, maxLabelWidth, maxLabelHeight, zoom);
-
-    zoneLabelsCtx.save();
-    zoneLabelsCtx.translate(pt.x, pt.y);
-    zoneLabelsCtx.font = `700 ${fitted.fontPx}px system-ui,-apple-system,Segoe UI,Roboto,Arial`;
-    zoneLabelsCtx.textAlign = "center";
-    zoneLabelsCtx.textBaseline = "middle";
-    zoneLabelsCtx.strokeStyle = "rgba(255,255,255,0.82)";
-    zoneLabelsCtx.fillStyle = "rgba(18,35,50,0.90)";
-    zoneLabelsCtx.lineWidth = Math.max(1, fitted.fontPx * 0.18);
-    zoneLabelsCtx.lineJoin = "round";
-
-    const lineStep = fitted.fontPx * fitted.lineHeight;
-    const totalHeight = lineStep * fitted.lines.length;
-    let y = -((totalHeight - lineStep) / 2);
-
-    for (const line of fitted.lines) {
-      zoneLabelsCtx.strokeText(line, 0, y);
-      zoneLabelsCtx.fillText(line, 0, y);
-      y += lineStep;
-    }
-    zoneLabelsCtx.restore();
-  }
+  const boroughSource = map.getSource(BOROUGH_SOURCE_ID);
+  if (boroughSource) boroughSource.setData(boroughAnchorsToGeoJSON(boroughLabelAnchors));
 }
 
 /* =========================================================
@@ -1301,46 +1079,13 @@ function renderFrame(frame) {
   if (manhattanMode) applyManhattanLocalView(currentFrame);
 
   timeLabel.textContent = formatNYCLabel(currentFrame.time);
-
-  if (geoLayer) {
-    geoLayer.remove();
-    geoLayer = null;
-  }
-
-  const features = currentFrame?.polygons?.features || [];
-
-  geoLayer = L.geoJSON(currentFrame.polygons, {
-    style: (feature) => {
-      const props = feature?.properties || {};
-      const st = props.style || {};
-      const fill = effectiveColor(props, feature.geometry);
-
-      return {
-        color: fill,
-        weight: st.weight ?? 0,
-        opacity: st.opacity ?? 0,
-        fillColor: fill,
-        fillOpacity: st.fillOpacity ?? 0.82,
-      };
-    },
-    onEachFeature: (feature, layer) => {
-      const props = feature.properties || {};
-      layer.bindPopup(buildPopupHTML(props, feature.geometry), { maxWidth: 320 });
-    },
-  }).addTo(map);
-
-  zoneLabelAnchors = buildZoneLabelAnchors(features);
-  drawZoneLabelsCanvas();
-
-  if (!boroughLabelAnchors) {
-    boroughLabelAnchors = buildBoroughLabelAnchors(currentFrame?.polygons?.features || []);
-  }
-  renderBoroughLabels();
+  updateMapFrameSources(currentFrame);
 
   updateRecommendation(currentFrame);
 }
 
 async function loadFrame(idx) {
+  await mapReady;
   loadNextFramePickupsMap(idx).catch(() => {});
   const frame = await fetchJSON(`${RAILWAY_BASE}/frame/${idx}`);
   renderFrame(frame);
@@ -1367,16 +1112,7 @@ async function loadTimeline() {
 }
 
 map.on("zoomend", () => {
-  drawZoneLabelsCanvas();
   if (authHeaderOK()) pullPresenceAll().catch(() => {});
-});
-
-map.on("moveend viewreset", () => {
-  drawZoneLabelsCanvas();
-});
-
-map.on("zoomanim", () => {
-  drawZoneLabelsCanvas();
 });
 
 let sliderDebounce = null;
@@ -1395,7 +1131,6 @@ slider.addEventListener("input", () => {
 
 window.addEventListener("resize", () => {
   if (timeline.length) setSliderBubbleTextAndPos();
-  drawZoneLabelsCanvas();
 });
 
 /* =========================================================
@@ -1429,7 +1164,7 @@ if (btnCenter) {
     syncCenterButton();
 
     if (autoCenter && userLatLng) {
-      suppressAutoDisableFor(800, () => map.panTo(userLatLng, { animate: true }));
+      suppressAutoDisableFor(800, () => map.easeTo({ center: [userLatLng.lng, userLatLng.lat], duration: 800 }));
     }
   });
 }
@@ -1440,7 +1175,7 @@ function disableAutoCenterBecauseUserIsExploring() {
   autoCenter = false;
   syncCenterButton();
 }
-map.on("dragstart", disableAutoCenterBecauseUserIsExploring);
+map.on("movestart", disableAutoCenterBecauseUserIsExploring);
 map.on("zoomstart", disableAutoCenterBecauseUserIsExploring);
 
 /* =========================================================
@@ -1452,19 +1187,16 @@ let lastPos = null;
 let lastHeadingDeg = 0;
 let lastMoveTs = 0;
 
-function makeNavIcon() {
+function makeNavIconElement() {
   const myName = authHeaderOK() ? (me?.display_name || "") : "";
-  return L.divIcon({
-    className: "",
-    html: `
-      <div id="navWrap" class="navArrowWrap navPulse">
-        <div id="navArrowRot" class="navArrowRot"><div class="navArrow"></div></div>
-        <div id="navMeName" class="meName" style="display:${myName ? "block" : "none"}">${escapeHtml(myName)}</div>
-      </div>
-    `,
-    iconSize: [30, 30],
-    iconAnchor: [15, 15],
-  });
+  const wrap = document.createElement("div");
+  wrap.id = "navWrap";
+  wrap.className = "navArrowWrap navPulse";
+  wrap.innerHTML = `
+    <div id="navArrowRot" class="navArrowRot"><div class="navArrow"></div></div>
+    <div id="navMeName" class="meName" style="display:${myName ? "block" : "none"}">${escapeHtml(myName)}</div>
+  `;
+  return wrap;
 }
 
 function refreshNavNameLabel() {
@@ -1508,12 +1240,9 @@ function startLocationWatch() {
     return;
   }
 
-  navMarker = L.marker([40.7128, -74.0060], {
-    icon: makeNavIcon(),
-    interactive: false,
-    zIndexOffset: 2000000,
-    pane: "navPane",
-  }).addTo(map);
+  navMarker = new maplibregl.Marker({ element: makeNavIconElement(), anchor: "center" })
+    .setLngLat([-74.0060, 40.7128])
+    .addTo(map);
 
   navigator.geolocation.watchPosition(
     (pos) => {
@@ -1525,7 +1254,7 @@ function startLocationWatch() {
 
       userLatLng = { lat, lng };
       lastGpsAccuracyM = (typeof accuracy === "number" && Number.isFinite(accuracy)) ? accuracy : null;
-      if (navMarker) navMarker.setLatLng(userLatLng);
+      if (navMarker) navMarker.setLngLat([userLatLng.lng, userLatLng.lat]);
 
       let isMoving = false;
 
@@ -1553,10 +1282,10 @@ function startLocationWatch() {
       if (!gpsFirstFixDone) {
         gpsFirstFixDone = true;
         const targetZoom = Math.max(map.getZoom(), 12.5);
-        suppressAutoDisableFor(1200, () => map.setView(userLatLng, targetZoom, { animate: true }));
+        suppressAutoDisableFor(1200, () => map.easeTo({ center: [userLatLng.lng, userLatLng.lat], zoom: targetZoom, duration: 1200 }));
       } else {
         if (autoCenter) {
-          suppressAutoDisableFor(700, () => map.panTo(userLatLng, { animate: true }));
+          suppressAutoDisableFor(700, () => map.easeTo({ center: [userLatLng.lng, userLatLng.lat], duration: 700 }));
         }
       }
 
@@ -2315,28 +2044,23 @@ if (btnGhostMode) {
   });
 }
 
-function makeDriverIcon(name, headingDeg, labelSide = "right", labelDx = 0, labelDy = 0) {
+function makeDriverIconElement(name, headingDeg, labelSide = "right", labelDx = 0, labelDy = 0) {
   const safe = (name || "Driver").trim() || "Driver";
   const rot = Number.isFinite(headingDeg) ? headingDeg : 0;
   const defaultLabelX = labelSide === "left" ? -28 : 28;
   const labelTranslateX = Number.isFinite(labelDx) ? labelDx : defaultLabelX;
   const labelTranslateY = Number.isFinite(labelDy) ? labelDy : -8;
-  const html = `
-    <div class="otherDrvWrap">
-      <div class="otherArrowWrap otherPulse" style="transform:rotate(${rot}deg)">
-        <div class="otherArrow"></div>
-      </div>
-      <div class="otherDrvName" style="transform:translate(${labelTranslateX}px, ${labelTranslateY}px);">
-        ${escapeHtml(safe)}
-      </div>
+  const wrap = document.createElement("div");
+  wrap.className = "otherDrvWrap";
+  wrap.innerHTML = `
+    <div class="otherArrowWrap otherPulse" style="transform:rotate(${rot}deg)">
+      <div class="otherArrow"></div>
+    </div>
+    <div class="otherDrvName" style="transform:translate(${labelTranslateX}px, ${labelTranslateY}px);">
+      ${escapeHtml(safe)}
     </div>
   `;
-  return L.divIcon({
-    className: "",
-    html,
-    iconSize: [40, 40],
-    iconAnchor: [20, 20],
-  });
+  return wrap;
 }
 
 function clearOtherDrivers() {
@@ -2352,17 +2076,16 @@ function upsertDriverMarker(userId, name, lat, lng, heading, labelSide, labelDx 
 
   const existing = otherMarkers.get(userId);
   if (existing) {
-    existing.setLatLng([lat, lng]);
-    existing.setIcon(makeDriverIcon(name || `Driver ${userId}`, heading, labelSide, labelDx, labelDy));
-    return;
+    existing.remove();
+    otherMarkers.delete(userId);
   }
 
-  const mk = L.marker([lat, lng], {
-    icon: makeDriverIcon(name || `Driver ${userId}`, heading, labelSide, labelDx, labelDy),
-    interactive: false,
-    pane: "communityPane",
-    zIndexOffset: 1500000,
-  }).addTo(map);
+  const mk = new maplibregl.Marker({
+    element: makeDriverIconElement(name || `Driver ${userId}`, heading, labelSide, labelDx, labelDy),
+    anchor: "center",
+  })
+    .setLngLat([lng, lat])
+    .addTo(map);
 
   otherMarkers.set(userId, mk);
 }
@@ -2403,12 +2126,12 @@ async function pullPresenceAll() {
     }
 
     const selfPt = userLatLng
-      ? map.latLngToLayerPoint([userLatLng.lat, userLatLng.lng])
+      ? map.project([userLatLng.lng, userLatLng.lat])
       : null;
 
     const driversWithPoints = visibleDrivers.map((drv) => ({
       ...drv,
-      basePoint: map.latLngToLayerPoint([drv.lat, drv.lng]),
+      basePoint: map.project([drv.lng, drv.lat]),
     }));
 
     const COLLISION_PX = 28;
@@ -2429,7 +2152,7 @@ async function pullPresenceAll() {
 
         for (const candidate of driversWithPoints) {
           if (clustered.has(candidate.uid)) continue;
-          if (current.basePoint.distanceTo(candidate.basePoint) > COLLISION_PX) continue;
+          if (Math.hypot(current.basePoint.x - candidate.basePoint.x, current.basePoint.y - candidate.basePoint.y) > COLLISION_PX) continue;
           clustered.add(candidate.uid);
           queue.push(candidate);
         }
@@ -2451,7 +2174,7 @@ async function pullPresenceAll() {
         const basePoint = drv.basePoint;
 
         if (selfPt) {
-          const distPx = basePoint.distanceTo(selfPt);
+          const distPx = Math.hypot(basePoint.x - selfPt.x, basePoint.y - selfPt.y);
           if (distPx < SELF_COLLISION_THRESHOLD_PX) {
             labelDx = (SELF_LABEL_SIDE === "right")
               ? -SELF_COLLISION_OFFSET_PX
