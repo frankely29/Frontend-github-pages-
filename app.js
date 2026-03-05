@@ -835,7 +835,7 @@ let zonePopup = null;
 function initMap() {
   map = new maplibregl.Map({
     container: 'map',
-    // PURE RASTER STYLE OBJECT — no vector JSON = no glyph issues on iOS Safari
+    // COMPLETE raster style object — fixes Safari glyph failure
     style: {
       version: 8,
       sources: {
@@ -854,7 +854,9 @@ function initMap() {
         type: 'raster',
         source: 'carto-raster',
         paint: { 'raster-opacity': 1 }
-      }]
+      }],
+      glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',  // REQUIRED for Safari
+      sprite: ''
     },
     center: [-73.98, 40.73],
     zoom: 10.5,
@@ -866,7 +868,7 @@ function initMap() {
     mapReady = true;
     map.resize();
 
-    // ZONES VECTOR LAYERS (colored demand polygons on top of raster base)
+    // ZONES VECTOR LAYERS (colored demand polygons on top)
     map.addSource('zones', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
     map.addLayer({ id: 'zones-fill', type: 'fill', source: 'zones',
       paint: { 'fill-color': ['get', 'displayColor'], 'fill-opacity': 0.82 }
