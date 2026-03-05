@@ -1135,8 +1135,8 @@ async function renderFrame(frame) {
   }
 
   currentFrame = frame;
-  applyStatenLocalView(frame);
-  applyManhattanLocalView(frame);
+  if (statenIslandMode) applyStatenLocalView(frame);
+  if (manhattanMode) applyManhattanLocalView(frame);
 
   const fc = frame.polygons || { type: "FeatureCollection", features: [] };
   fc.features.forEach((f) => {
@@ -2492,4 +2492,20 @@ setNavDestination(null);
 
   initMap();
   await loadTimeline();
+
+  if (authHeaderOK()) {
+    setAuthUI(true, "Checking session…");
+    await loadMe();
+    if (authHeaderOK()) {
+      setAuthUI(true, `Status: signed in as ${me?.display_name || me?.email || "Driver"}`);
+      pullPresenceAll().catch(() => {});
+    } else {
+      setAuthUI(false, "Status: signed out");
+    }
+  } else {
+    setAuthUI(false, "Status: signed out");
+  }
+
+  startLocationWatch();
+  updateWeatherNow().catch(() => {});
 })();
