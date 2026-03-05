@@ -835,7 +835,27 @@ let zonePopup = null;
 function initMap() {
   map = new maplibregl.Map({
     container: 'map',
-    style: 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json',
+    // PURE RASTER STYLE OBJECT — no vector JSON = no glyph issues on iOS Safari
+    style: {
+      version: 8,
+      sources: {
+        'carto-raster': {
+          type: 'raster',
+          tiles: [
+            'https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+            'https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+            'https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png'
+          ],
+          tileSize: 256
+        }
+      },
+      layers: [{
+        id: 'carto-base',
+        type: 'raster',
+        source: 'carto-raster',
+        paint: { 'raster-opacity': 1 }
+      }]
+    },
     center: [-73.98, 40.73],
     zoom: 10.5,
     attributionControl: { position: 'bottom-right' },
@@ -846,24 +866,7 @@ function initMap() {
     mapReady = true;
     map.resize();
 
-    // === RELIABLE RASTER BASE (Carto Voyager PNG tiles — always loads on iOS Safari) ===
-    map.addSource('base-raster', {
-      type: 'raster',
-      tiles: [
-        'https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
-        'https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
-        'https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png'
-      ],
-      tileSize: 256,
-    });
-    map.addLayer({
-      id: 'base-raster-layer',
-      type: 'raster',
-      source: 'base-raster',
-      paint: { 'raster-opacity': 1 }
-    });
-
-    // === ZONES VECTOR (colored demand polygons stay on top) ===
+    // ZONES VECTOR LAYERS (colored demand polygons on top of raster base)
     map.addSource('zones', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
     map.addLayer({ id: 'zones-fill', type: 'fill', source: 'zones',
       paint: { 'fill-color': ['get', 'displayColor'], 'fill-opacity': 0.82 }
