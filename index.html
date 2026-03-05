@@ -15,8 +15,33 @@
   ></script>
 
   <style>
-    html, body { height: 100%; margin: 0; padding: 0; }
-    #map { height: 100vh; width: 100vw; }
+    html, body {
+      height: 100%;
+      width: 100%;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      position: relative;
+      overflow: hidden;
+      background: #dbe8f4;
+    }
+    #map {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 0;
+      background: #dbe8f4;
+    }
+    #map .maplibregl-map,
+    #map .maplibregl-canvas-container,
+    #map .maplibregl-canvas {
+      width: 100%;
+      height: 100%;
+      visibility: visible;
+      opacity: 1;
+    }
 
     /* =========================================================
        LOCKED OVERLAY (SIGNED OUT)

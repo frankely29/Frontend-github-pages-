@@ -99,6 +99,13 @@ if (utilityLauncherBtn) {
   });
 }
 
+if (legendEl) {
+  legendEl.addEventListener("transitionend", () => scheduleMapResizeSequence("legend-transition"));
+}
+if (utilityDrawerEl) {
+  utilityDrawerEl.addEventListener("transitionend", () => scheduleMapResizeSequence("utility-transition"));
+}
+
 /* =========================================================
    Time helpers
    ========================================================= */
@@ -781,6 +788,38 @@ const map = new maplibregl.Map({
 });
 map.addControl(new maplibregl.NavigationControl(), "top-right");
 
+const mapContainerEl = document.getElementById("map");
+
+function forceMapResize(label = "") {
+  if (!map) return;
+  try {
+    map.resize();
+  } catch (err) {
+    console.warn(`map.resize failed${label ? ` (${label})` : ""}:`, err);
+  }
+}
+
+function scheduleMapResizeSequence(label = "") {
+  forceMapResize(label || "immediate");
+  requestAnimationFrame(() => forceMapResize(label ? `${label}:raf` : "raf"));
+  setTimeout(() => forceMapResize(label ? `${label}:t150` : "t150"), 150);
+}
+
+function forceFirstVisibleMapRender() {
+  scheduleMapResizeSequence("first-render");
+  try {
+    const center = map.getCenter();
+    const zoom = map.getZoom();
+    map.jumpTo({ center, zoom, bearing: map.getBearing(), pitch: map.getPitch() });
+  } catch (err) {
+    console.warn("Unable to force first visible map render:", err);
+  }
+}
+
+if (mapContainerEl) {
+  mapContainerEl.style.backgroundColor = "#dbe8f4";
+}
+
 const MAP_READY_TIMEOUT_MS = 10_000;
 let mapReadySettled = false;
 let mapLoadSeen = false;
@@ -813,14 +852,26 @@ const mapReadyTimer = setTimeout(() => {
 map.on("load", () => {
   mapLoadSeen = true;
   clearTimeout(mapReadyTimer);
+  scheduleMapResizeSequence("map-load");
   settleMapReadyOk();
 });
 
+map.on("style.load", () => {
+  scheduleMapResizeSequence("style-load");
+});
+
 map.on("error", (e) => {
-  if (mapLoadSeen) return;
   const reason = e?.error?.message || e?.message || "Unknown map initialization error.";
-  clearTimeout(mapReadyTimer);
-  settleMapReadyErr(new Error(reason));
+  console.error("MapLibre runtime error:", reason, e);
+
+  if (!mapLoadSeen) {
+    clearTimeout(mapReadyTimer);
+    settleMapReadyErr(new Error(reason));
+  }
+
+  if (timeLabel && /style|source|tile|sprite|glyph/i.test(reason)) {
+    timeLabel.textContent = "Map style failed to load";
+  }
 });
 
 let timeline = [];
@@ -1132,6 +1183,12 @@ async function renderFrame(frame) {
   try {
     await mapReadyPromise;
     updateMapFrameSources(currentFrame);
+    if (!renderFrame._firstVisibleRenderDone) {
+      renderFrame._firstVisibleRenderDone = true;
+      forceFirstVisibleMapRender();
+    } else {
+      forceMapResize("frame-render");
+    }
   } catch (err) {
     if (mapInitError) {
       timeLabel.textContent = `Error initializing map: ${mapInitError.message}`;
@@ -1192,6 +1249,11 @@ slider.addEventListener("input", () => {
 
 window.addEventListener("resize", () => {
   if (timeline.length) setSliderBubbleTextAndPos();
+  scheduleMapResizeSequence("window-resize");
+});
+
+window.addEventListener("orientationchange", () => {
+  scheduleMapResizeSequence("orientation-change");
 });
 
 /* =========================================================
@@ -2400,12 +2462,16 @@ loadTimeline().catch((err) => {
   timeLabel.textContent = `Error loading timeline: ${err.message}`;
 });
 
-mapReadyPromise.catch((err) => {
-  console.error("Map initialization failed:", err);
-  if (!timeline.length) {
-    timeLabel.textContent = `Error initializing map: ${err.message || err}`;
-  }
-});
+mapReadyPromise
+  .then(() => {
+    scheduleMapResizeSequence("map-ready");
+  })
+  .catch((err) => {
+    console.error("Map initialization failed:", err);
+    if (!timeline.length) {
+      timeLabel.textContent = `Error initializing map: ${err.message || err}`;
+    }
+  });
 
 /* auth boot */
 (async () => {
