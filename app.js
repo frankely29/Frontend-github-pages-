@@ -943,23 +943,25 @@ async function ensureZonesSourceAndLayers() {
           "interpolate",
           ["linear"],
           ["zoom"],
-          10, 10,
-          11, 11,
-          12.5, 12.5,
-          14, 14,
-          15.5, 16
+          10, 6,
+          11, 7,
+          12, 8,
+          13, 10,
+          14, 12,
+          15, 13,
+          16, 15
         ],
-        "text-max-width": 9,
+        "text-max-width": 7,
         "text-anchor": "center",
         "text-justify": "center",
         "text-allow-overlap": false,
         "text-ignore-placement": false,
-        "text-padding": 2,
+        "text-padding": 1.5,
       },
       paint: {
         "text-color": "#111111",
-        "text-halo-color": "rgba(255,255,255,0.92)",
-        "text-halo-width": 2.2,
+        "text-halo-color": "rgba(255,255,255,0.90)",
+        "text-halo-width": 1.8,
         "text-halo-blur": 0.6,
       },
       minzoom: LABEL_ZOOM_MIN,
@@ -1283,11 +1285,17 @@ function buildZoneLabelsFeatureCollection(frame) {
     const name = (props.zone_name || "").trim();
     if (!name) continue;
 
-    // If you want them truly always visible and not shortened:
-    // const label = name;
-    // If you want cleaner on mid zoom (still professional):
     const z = map ? Math.round(map.getZoom()) : 12;
-    const label = (z < 13) ? shortenLabel(name, LABEL_MAX_CHARS_MID) : name;
+
+    // More aggressive truncation when zoomed out to keep labels compact and inside zones
+    let maxChars = name.length;
+    if (z <= 10) maxChars = 9;
+    else if (z === 11) maxChars = 11;
+    else if (z === 12) maxChars = 13;
+    else if (z === 13) maxChars = 16;
+    else maxChars = 28;
+
+    const label = shortenLabel(name, maxChars);
 
     const pt = findInteriorPointForGeometry(f.geometry);
     if (!pt) continue;
