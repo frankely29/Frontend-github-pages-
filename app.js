@@ -975,11 +975,18 @@ function frameToStyledGeoJSON(frame) {
     })
     .map((feature) => {
       const enriched = enrichFeatureForMap(feature);
+      const effectiveColorValue =
+        typeof enriched.properties?.effectiveColor === "string" && enriched.properties.effectiveColor.trim()
+          ? enriched.properties.effectiveColor
+          : (typeof enriched.properties?.demand_color === "string" && enriched.properties.demand_color.trim()
+            ? enriched.properties.demand_color
+            : "#66aaff");
       return {
         ...enriched,
         properties: {
           ...enriched.properties,
-          demand_color: enriched.properties?.demand_color || "#9ecae1",
+          effectiveColor: effectiveColorValue,
+          demand_color: enriched.properties?.demand_color || effectiveColorValue,
           zone_label_name: (enriched.properties?.zone_label_name || "").trim() || `Zone ${enriched.properties?.LocationID ?? ""}`,
           zone_label_priority: Number.isFinite(Number(enriched.properties?.zone_label_priority))
             ? Number(enriched.properties.zone_label_priority)
@@ -1023,7 +1030,7 @@ function ensureMapDataLayers() {
         type: "fill",
         source: ZONE_SOURCE_ID,
         paint: {
-          "fill-color": ["coalesce", ["get", "demand_color"], "#9ecae1"],
+          "fill-color": ["get", "effectiveColor"],
           "fill-opacity": 0.82,
         },
       });
@@ -1040,74 +1047,14 @@ function ensureMapDataLayers() {
         type: "line",
         source: ZONE_SOURCE_ID,
         paint: {
-          "line-color": ["coalesce", ["get", "demand_color"], "#7f8c8d"],
-          "line-width": ["interpolate", ["linear"], ["zoom"], 8, 0.35, 14, 1.4],
-          "line-opacity": 0.52,
+          "line-color": "#ffffff",
+          "line-width": 1,
         },
       });
     } catch (err) {
       console.error("layer creation failed: zones line layer add failed.", err);
       throw err;
     }
-  }
-
-  if (!map.getLayer(ZONE_LABEL_LAYER_ID)) {
-    try {
-      map.addLayer({
-        id: ZONE_LABEL_LAYER_ID,
-        type: "symbol",
-        source: ZONE_SOURCE_ID,
-        layout: {
-          "text-field": ["coalesce", ["get", "zone_label_name"], ""],
-          "text-font": ["Noto Sans Bold"],
-          "text-size": ["interpolate", ["linear"], ["zoom"], 9, 9, 11, 10.5, 13.5, 12.5, 15, 14],
-          "text-max-width": 8,
-          "text-letter-spacing": 0.01,
-          "text-variable-anchor": ["center", "top", "bottom", "left", "right"],
-          "text-radial-offset": 0.35,
-          "text-justify": "auto",
-          "text-padding": 2,
-          "text-allow-overlap": false,
-          "symbol-sort-key": ["*", -1, ["coalesce", ["get", "zone_label_priority"], 0]],
-        },
-        paint: {
-          "text-color": "rgba(20,36,52,0.92)",
-          "text-halo-color": "rgba(255,255,255,0.9)",
-          "text-halo-width": 1.2,
-          "text-halo-blur": 0.45,
-        },
-        minzoom: 8.5,
-      });
-    } catch (err) {
-      console.error("layer creation failed: zones label layer add failed.", err);
-      throw err;
-    }
-  }
-
-  if (!map.getSource(BOROUGH_SOURCE_ID)) {
-    map.addSource(BOROUGH_SOURCE_ID, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
-  }
-
-  if (!map.getLayer(BOROUGH_LABEL_LAYER_ID)) {
-    map.addLayer({
-      id: BOROUGH_LABEL_LAYER_ID,
-      type: "symbol",
-      source: BOROUGH_SOURCE_ID,
-      layout: {
-        "text-field": ["upcase", ["get", "borough"]],
-        "text-font": ["Noto Sans Bold"],
-        "text-size": ["interpolate", ["linear"], ["zoom"], 8, 12, 11, 14, 14, 17],
-        "text-letter-spacing": 0.12,
-        "text-allow-overlap": false,
-        "text-padding": 4,
-      },
-      paint: {
-        "text-color": "rgba(15,35,49,0.75)",
-        "text-halo-color": "rgba(255,255,255,0.88)",
-        "text-halo-width": 1.3,
-      },
-      minzoom: 7,
-    });
   }
 
   if (!mapInteractionHandlersBound) {
@@ -1164,35 +1111,36 @@ function updateMapFrameSources(frame) {
 
   try {
     ensureMapDataLayers();
+    console.log("DEBUG render: ensureMapDataLayers ok");
 
     const styled = frameToStyledGeoJSON(frame);
     const styledValidationError = validateStyledFeatureCollection(styled);
     if (styledValidationError) {
+      console.error("DEBUG render failed at styled GeoJSON valid", styledValidationError);
       console.error(styledValidationError, { frame, styled });
       throw new Error(styledValidationError);
     }
+    console.log("DEBUG render: styled GeoJSON valid");
 
     let zoneSource;
     try {
       zoneSource = getGeoJSONSourceWithRecovery(ZONE_SOURCE_ID, "zones");
+      console.log("DEBUG render: zones source found");
     } catch (err) {
+      console.error("DEBUG render failed at zones source found", err);
       console.error("zones source missing", err);
       throw err;
     }
 
     try {
       zoneSource.setData(styled);
+      console.log("DEBUG render: setData ok");
     } catch (err) {
+      console.error("DEBUG render failed at setData", err);
       console.error("setData failed", err);
       throw err;
     }
-
-    if (!boroughLabelAnchors) {
-      boroughLabelAnchors = buildBoroughLabelAnchors(styled.features || []);
-    }
-
-    const boroughSource = getGeoJSONSourceWithRecovery(BOROUGH_SOURCE_ID, "borough labels");
-    boroughSource.setData(boroughAnchorsToGeoJSON(boroughLabelAnchors));
+    console.log("DEBUG render: simplified layers active");
   } catch (err) {
     console.error("updateMapFrameSources failed", err);
     throw err;
