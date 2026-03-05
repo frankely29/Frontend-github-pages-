@@ -21,6 +21,9 @@ const debugOnce = {
   zonesSetData: false,
 };
 
+function dbg(id, text) { const el = document.getElementById(id); if (el) el.textContent = String(text || ""); }
+
+
 /* =========================================================
    COMMUNITY SETTINGS (cheap polling)
    ========================================================= */
@@ -147,11 +150,11 @@ function pickClosestIndex(minutesOfWeekArr, target) {
 async function fetchJSON(url, opts = {}) {
   const res = await fetch(url, { cache: "no-store", mode: "cors", ...opts });
   const text = await res.text();
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText} @ ${url} :: ${text.slice(0, 200)}`);
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText} @ ${url} :: ${text.slice(0, 120)}`);
   try {
     return JSON.parse(text);
   } catch {
-    throw new Error(`Invalid JSON @ ${url} :: ${text.slice(0, 200)}`);
+    throw new Error(`Invalid JSON @ ${url} :: ${text.slice(0, 120)}`);
   }
 }
 async function postJSON(path, body, token) {
@@ -795,6 +798,10 @@ function updateRecommendation(frame) {
    ========================================================= */
 const slider = document.getElementById("slider");
 const timeLabel = document.getElementById("timeLabel");
+const debugToggle = document.getElementById("debugToggle");
+const debugPanel = document.getElementById("debugPanel");
+const dbgReloadFrame = document.getElementById("dbgReloadFrame");
+
 
 /* =========================================================
    PRECISION SLIDER POPUP
@@ -832,6 +839,19 @@ function setSliderBubbleTextAndPos() {
 function bubbleUpdateNow() {
   setSliderBubbleTextAndPos();
   showSliderBubble();
+}
+
+if (debugToggle && debugPanel) {
+  debugToggle.addEventListener("click", () => {
+    debugPanel.hidden = !debugPanel.hidden;
+  });
+}
+
+if (dbgReloadFrame) {
+  dbgReloadFrame.addEventListener("click", () => {
+    const idx = Number(slider?.value || "0");
+    loadFrame(idx).catch(console.error);
+  });
 }
 
 /* =========================================================
@@ -1120,16 +1140,24 @@ async function renderFrame(frame) {
   }
 
   map.getSource("zones").setData(fc);
+  dbg("dbgSetData", `OK features=${fc.features.length}`);
+  dbg("dbgLayers", `source=${Boolean(map.getSource("zones"))} fill=${Boolean(map.getLayer("zones-fill"))} line=${Boolean(map.getLayer("zones-line"))}`);
   console.log("DEBUG zones: setData done");
   console.log("DEBUG zones: feature count", fc.features.length);
   console.log("DEBUG zones: source exists", Boolean(map.getSource("zones")));
   console.log("DEBUG zones: zones-fill exists", Boolean(map.getLayer("zones-fill")));
   console.log("DEBUG zones: zones-line exists", Boolean(map.getLayer("zones-line")));
 
+  const bounds = getFeatureCollectionBounds(fc);
+  if (bounds) {
+    dbg("dbgBounds", `${bounds.minLng},${bounds.minLat},${bounds.maxLng},${bounds.maxLat}`);
+  } else {
+    dbg("dbgBounds", "invalid");
+  }
+
   if (fc.features.length <= 0) {
     console.log("DEBUG zones: feature count is 0 (nothing to render)");
   } else if (!didFitToZonesOnce) {
-    const bounds = getFeatureCollectionBounds(fc);
     if (bounds) {
       map.fitBounds(
         [[bounds.minLng, bounds.minLat], [bounds.maxLng, bounds.maxLat]],
@@ -1140,6 +1168,7 @@ async function renderFrame(frame) {
       console.log("DEBUG zones: feature count is 0 (nothing to render)");
     }
   }
+  dbg("dbgFit", didFitToZonesOnce);
 
   if (!debugOnce.zonesSetData) {
     debugOnce.zonesSetData = true;
@@ -1154,29 +1183,45 @@ async function renderFrame(frame) {
 }
 
 async function loadFrame(idx) {
+  const frameUrl = `${RAILWAY_BASE}/frame/${idx}`;
   loadNextFramePickupsMap(idx).catch(() => {});
-  const frame = await fetchJSON(`${RAILWAY_BASE}/frame/${idx}`);
-  await renderFrame(frame);
+  try {
+    const frame = await fetchJSON(frameUrl);
+    dbg("dbgFrame", `OK ${frameUrl}`);
+    dbg("dbgFrameKeys", Object.keys(frame || {}).join(", "));
+    dbg("dbgPolyCount", frame?.polygons?.features?.length ?? 0);
+    await renderFrame(frame);
+  } catch (e) {
+    dbg("dbgFrame", `FAIL ${e?.message || e}`);
+    throw e;
+  }
 }
 
 async function loadTimeline() {
-  const t = await fetchJSON(`${RAILWAY_BASE}/timeline`);
-  timeline = Array.isArray(t) ? t : (t.timeline || []);
-  if (!timeline.length) throw new Error("Timeline empty. Run /generate once on Railway.");
+  const timelineUrl = `${RAILWAY_BASE}/timeline`;
+  try {
+    const t = await fetchJSON(timelineUrl);
+    timeline = Array.isArray(t) ? t : (t.timeline || []);
+    dbg("dbgTimeline", `OK ${timelineUrl} count=${timeline.length}`);
+    if (!timeline.length) throw new Error("Timeline empty. Run /generate once on Railway.");
 
-  minutesOfWeek = timeline.map(minuteOfWeekFromIso);
+    minutesOfWeek = timeline.map(minuteOfWeekFromIso);
 
-  slider.min = "0";
-  slider.max = String(timeline.length - 1);
-  slider.step = "1";
+    slider.min = "0";
+    slider.max = String(timeline.length - 1);
+    slider.step = "1";
 
-  const nowMinWeek = getNowNYCMinuteOfWeekRounded();
-  const idx = pickClosestIndex(minutesOfWeek, nowMinWeek);
-  slider.value = String(idx);
+    const nowMinWeek = getNowNYCMinuteOfWeekRounded();
+    const idx = pickClosestIndex(minutesOfWeek, nowMinWeek);
+    slider.value = String(idx);
 
-  bubbleUpdateNow();
+    bubbleUpdateNow();
 
-  await loadFrame(idx);
+    await loadFrame(idx);
+  } catch (e) {
+    dbg("dbgTimeline", `FAIL ${e?.message || e}`);
+    throw e;
+  }
 }
 
 let sliderDebounce = null;
@@ -2417,6 +2462,15 @@ setInterval(() => {
 setNavDestination(null);
 
 (async () => {
+  dbg("dbgBaseUrl", RAILWAY_BASE || "(relative)");
+
+  try {
+    await fetchJSON(`${RAILWAY_BASE}/status`);
+    dbg("dbgStatus", "OK");
+  } catch (e) {
+    dbg("dbgStatus", `FAIL ${e?.message || e}`);
+  }
+
   const loading = document.getElementById("mapLoading");
   if (loading) loading.style.display = "flex";
 
