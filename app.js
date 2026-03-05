@@ -835,15 +835,11 @@ let zonePopup = null;
 function initMap() {
   map = new maplibregl.Map({
     container: "map",
-    style: "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json",
+    style: "https://demotiles.maplibre.org/style.json",
     center: [-73.98, 40.73],
     zoom: 10.5,
-    pitch: 0,
-    bearing: 0,
     attributionControl: { position: "bottom-right" },
   });
-
-  map.addControl(new maplibregl.NavigationControl({ visualizePitch: false }));
 
   map.on("load", () => {
     mapReady = true;
@@ -870,42 +866,25 @@ function initMap() {
       source: "zones",
       paint: {
         "line-color": "#ffffff",
-        "line-width": 1,
-        "line-opacity": 0.25,
+        "line-width": 1.5,
+        "line-opacity": 0.3,
       },
     });
 
     map.on("zoomend", updateZoneLabelVisibility);
-    map.on("zoomend", () => {
-      if (authHeaderOK()) pullPresenceAll().catch(() => {});
-    });
-    map.on("moveend", () => {});
-    map.on("dragstart", disableAutoCenterBecauseUserIsExploring);
-    map.on("zoomstart", disableAutoCenterBecauseUserIsExploring);
 
-    map.on("click", "zones-fill", (e) => {
-      const feature = e.features?.[0];
-      if (!feature) return;
-      const props = feature.properties || {};
-      if (zonePopup) zonePopup.remove();
-      zonePopup = new maplibregl.Popup({ maxWidth: "320px" })
-        .setLngLat(e.lngLat)
-        .setHTML(buildPopupHTML(props, feature.geometry))
-        .addTo(map);
-    });
+    const loading = document.getElementById("mapLoading");
+    if (loading) loading.style.display = "none";
 
     if (pendingFrame) {
       renderFrame(pendingFrame);
       pendingFrame = null;
     }
 
-    const loadingEl = document.getElementById("mapLoading");
-    if (loadingEl) loadingEl.style.display = "none";
-
-    console.log("✅ MapLibre fully ready");
+    console.log("✅ MapLibre loaded & ready");
   });
 
-  map.on("error", (e) => console.error("MapLibre error:", e));
+  map.on("error", (e) => console.error("Map error:", e));
 }
 let timeline = [];
 let minutesOfWeek = [];
@@ -998,29 +977,24 @@ function buildPopupHTML(props, geom) {
 function renderFrame(frame) {
   if (!map || !mapReady || !map.getSource("zones")) {
     pendingFrame = frame;
-    console.log("⏳ Map not ready yet — queuing frame");
     return;
   }
 
   currentFrame = frame;
+  applyStatenLocalView(frame);
+  applyManhattanLocalView(frame);
 
-  applyStatenLocalView(currentFrame);
-  applyManhattanLocalView(currentFrame);
-
-  timeLabel.textContent = formatNYCLabel(currentFrame.time);
-
-  const fc = currentFrame.polygons || { type: "FeatureCollection", features: [] };
+  const fc = frame.polygons || { type: "FeatureCollection", features: [] };
   fc.features.forEach((f) => {
     const props = f.properties || {};
     props.displayColor = effectiveColor(props, f.geometry) || "#0066ff";
   });
 
-  try {
-    map.getSource("zones").setData(fc);
-  } catch (e) {
-    console.error("setData failed:", e);
-  }
+  map.getSource("zones").setData(fc);
+  map.resize();
+  map.triggerRepaint();
 
+  timeLabel.textContent = formatNYCLabel(currentFrame.time);
   refreshZoneLabels();
   updateRecommendation(currentFrame);
 }
@@ -2279,27 +2253,14 @@ setInterval(() => {
 setNavDestination(null);
 
 (async () => {
-  try {
-    initMap();
-    await loadTimeline();
+  const loading = document.getElementById("mapLoading");
+  if (loading) loading.style.display = "flex";
 
-    if (authHeaderOK()) {
-      setAuthUI(true, "Checking session…");
-      await loadMe();
-      if (authHeaderOK()) {
-        setAuthUI(true, `Status: signed in as ${me?.display_name || me?.email || "Driver"}`);
-        pullPresenceAll().catch(() => {});
-      } else {
-        setAuthUI(false, "Status: signed out");
-      }
-    } else {
-      setAuthUI(false, "Status: signed out");
-    }
+  initMap();
+  await loadTimeline();
 
-    startLocationWatch();
-    updateWeatherNow().catch(() => {});
-  } catch (err) {
-    console.error(err);
-    timeLabel.textContent = `Error loading timeline: ${err.message}`;
-  }
+  setTimeout(() => {
+    const loading = document.getElementById("mapLoading");
+    if (loading) loading.style.display = "none";
+  }, 10000);
 })();
