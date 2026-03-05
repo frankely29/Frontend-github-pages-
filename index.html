@@ -5,17 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>NYC TLC Hotspot Map</title>
 
-  <!-- Leaflet -->
+  <!-- MapLibre GL -->
   <link
     rel="stylesheet"
-    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
-    crossorigin=""
+    href="https://unpkg.com/maplibre-gl@latest/dist/maplibre-gl.css"
+    crossorigin="anonymous"
   />
   <script
-    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-    crossorigin=""
+    src="https://unpkg.com/maplibre-gl@latest/dist/maplibre-gl.js"
+    crossorigin="anonymous"
   ></script>
 
   <style>
@@ -137,11 +135,11 @@
     /* =========================================================
        NIGHT THEME
        ========================================================= */
-    body.night .leaflet-tile-pane{
+    body.night .maplibregl-canvas{
       filter: brightness(0.65) contrast(1.08) saturate(0.85);
     }
-    body.sunny .leaflet-tile-pane{
-      filter: brightness(1.03) saturate(1.08);
+    body.sunny .maplibregl-canvas{
+      filter: brightness(0.65) contrast(1.08) saturate(0.85);
     }
 
     /* ---------- Legend (small + minimize) ---------- */
@@ -483,9 +481,7 @@
     .zone-label.z15 .br { font-size: 03px; }
 
     /* ---------- You arrow: force on top of EVERYTHING ---------- */
-    .leaflet-marker-pane { z-index: 800 !important; }
-    .leaflet-tooltip-pane { z-index: 650 !important; }
-    .leaflet-overlay-pane { z-index: 400 !important; }
+    .maplibregl-marker { z-index: 800; }
 
     /* =========================================================
        GPS ARROW
