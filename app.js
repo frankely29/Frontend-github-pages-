@@ -779,8 +779,67 @@ let minutesOfWeek = [];
 let currentFrame = null;
 let lastUserSliderTs = 0;
 let zoneLabelsLayer = L.layerGroup().addTo(map);
+let zoneLabelAnchors = [];
 let boroughLabelsLayer = L.layerGroup().addTo(map);
 let boroughLabelAnchors = null;
+
+function clamp(v, min, max) {
+  return Math.max(min, Math.min(max, v));
+}
+
+function lerp(a, b, t) {
+  return a + (b - a) * t;
+}
+
+function getZoneLabelStyleForZoom(zoom) {
+  const t = clamp((zoom - 8) / 6, 0, 1);
+  const fontSize = lerp(7, 11, t);
+  const maxWidth = lerp(48, 108, t);
+  const lineHeight = lerp(1.04, 1.14, t);
+  const opacity = lerp(0.56, 0.8, t);
+  const letterSpacing = lerp(0.05, 0.16, t);
+  const maxChars = Math.round(lerp(10, 20, t));
+  return { fontSize, maxWidth, lineHeight, opacity, letterSpacing, maxChars };
+}
+
+function nameWrapLimit(zoneName, ratio, zoomChars) {
+  const boundedRatio = clamp(ratio, 0.4, 1.8);
+  const ratioAdj = Math.round((boundedRatio - 1) * 2.2);
+  const longNameAdj = zoneName.length > 22 ? -1 : 0;
+  return clamp(zoomChars + ratioAdj + longNameAdj, 8, 24);
+}
+
+function wrapZoneLabelText(zoneName, ratio, zoomChars) {
+  const maxChars = nameWrapLimit(zoneName, ratio, zoomChars);
+
+  const words = zoneName
+    .split(/(\s+|\/)/)
+    .map((w) => w.trim())
+    .filter(Boolean);
+
+  if (words.length < 2 || zoneName.length <= maxChars) {
+    return { text: zoneName, maxChars };
+  }
+
+  let line1 = "";
+  let line2 = "";
+  for (const token of words) {
+    const candidate = line1 ? `${line1} ${token}` : token;
+    if (candidate.length <= maxChars || !line1) {
+      line1 = candidate;
+    } else {
+      line2 = line2 ? `${line2} ${token}` : token;
+    }
+  }
+
+  if (!line2) return { text: line1, maxChars };
+
+  if (line2.length > maxChars) {
+    line2 = `${line2.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
+  }
+
+  return { text: `${line1}\n${line2}`.trim(), maxChars };
+}
 
 function geometryWeight(geom) {
   if (!geom) return 0;
@@ -923,39 +982,6 @@ function buildZoneLabelAnchors(features) {
     };
   }
 
-  function wrapZoneLabelText(zoneName, geom) {
-    const bounds = boundsFromGeometry(geom);
-    const ratio = bounds && bounds.height > 1e-9 ? bounds.width / bounds.height : 1;
-    const maxChars = Math.max(10, Math.min(18, Math.round(12 + Math.min(1.4, Math.max(0, ratio)) * 3)));
-
-    const words = zoneName
-      .split(/(\s+|\/)/)
-      .map((w) => w.trim())
-      .filter(Boolean);
-
-    if (words.length < 2 || zoneName.length <= maxChars) {
-      return { text: zoneName, maxChars };
-    }
-
-    let line1 = "";
-    let line2 = "";
-    for (const token of words) {
-      const candidate = line1 ? `${line1} ${token}` : token;
-      if (candidate.length <= maxChars || !line1) {
-        line1 = candidate;
-      } else {
-        line2 = line2 ? `${line2} ${token}` : token;
-      }
-    }
-
-    if (!line2) return { text: line1, maxChars };
-
-    if (line2.length > maxChars) {
-      line2 = `${line2.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
-    }
-
-    return { text: `${line1}\n${line2}`.trim(), maxChars };
-  }
 
   for (const f of features || []) {
     const props = f?.properties || {};
@@ -965,11 +991,14 @@ function buildZoneLabelAnchors(features) {
     const center = geometryCenter(f.geometry);
     if (!center) continue;
 
+    const bounds = boundsFromGeometry(f.geometry);
+    const shapeRatio = bounds && bounds.height > 1e-9 ? bounds.width / bounds.height : 1;
+
     anchors.push({
       lat: center.lat,
       lng: center.lng,
       zoneName,
-      wrappedText: wrapZoneLabelText(zoneName, f.geometry).text,
+      shapeRatio,
       angle: dominantAngleFromGeometry(f.geometry),
       id: props.LocationID ?? null,
     });
@@ -985,18 +1014,25 @@ function buildZoneLabelAnchors(features) {
   return anchors;
 }
 
-function renderZoneLabels(features) {
+function renderZoneLabels() {
   zoneLabelsLayer.clearLayers();
+  if (!zoneLabelAnchors.length) return;
 
-  const anchors = buildZoneLabelAnchors(features);
-  for (const z of anchors) {
-    const labelHtml = escapeHtml(z.wrappedText || z.zoneName).replaceAll("\n", "<br>");
+  const style = getZoneLabelStyleForZoom(map.getZoom());
+
+  for (const z of zoneLabelAnchors) {
+    const wrapped = wrapZoneLabelText(z.zoneName, z.shapeRatio, style.maxChars).text;
+    const fontSizePx = style.fontSize.toFixed(2);
+    const maxWidthPx = style.maxWidth.toFixed(1);
+    const lineHeight = style.lineHeight.toFixed(2);
+    const opacity = style.opacity.toFixed(2);
+    const letterSpacingPx = style.letterSpacing.toFixed(2);
     L.marker([z.lat, z.lng], {
       pane: "labelsPane",
       interactive: false,
       icon: L.divIcon({
         className: "zone-label",
-        html: `<div class="zn-wrap"><div class="zn" style="transform:rotate(${z.angle || 0}deg);">${labelHtml}</div></div>`,
+        html: `<div class="zn-wrap"><div class="zn" style="transform:rotate(${z.angle || 0}deg);font-size:${fontSizePx}px;max-width:${maxWidthPx}px;line-height:${lineHeight};opacity:${opacity};letter-spacing:${letterSpacingPx}px;">${escapeHtml(wrapped).replaceAll("\n", "<br>")}</div></div>`,
       }),
     }).addTo(zoneLabelsLayer);
   }
@@ -1120,7 +1156,8 @@ function renderFrame(frame) {
     },
   }).addTo(map);
 
-  renderZoneLabels(features);
+  zoneLabelAnchors = buildZoneLabelAnchors(features);
+  renderZoneLabels();
 
   if (!boroughLabelAnchors) {
     boroughLabelAnchors = buildBoroughLabelAnchors(currentFrame?.polygons?.features || []);
@@ -1157,6 +1194,7 @@ async function loadTimeline() {
 }
 
 map.on("zoomend", () => {
+  renderZoneLabels();
   if (authHeaderOK()) pullPresenceAll().catch(() => {});
 });
 
