@@ -47,7 +47,6 @@ function setLegendDrawerOpen(open) {
   legendEl.classList.toggle("closed", !open);
   legendEl.classList.remove("minimized");
   legendEl.setAttribute("aria-hidden", open ? "false" : "true");
-  if (legendLauncherBtn) legendLauncherBtn.classList.toggle("hidden", !!open);
   if (legendToggleBtn) {
     legendToggleBtn.textContent = open ? "✕" : "☰";
     legendToggleBtn.setAttribute("aria-label", open ? "Close drawer" : "Open drawer");
@@ -66,14 +65,16 @@ if (legendToggleBtn) {
 }
 
 if (legendLauncherBtn) {
-  legendLauncherBtn.addEventListener("click", () => setLegendDrawerOpen(true));
+  legendLauncherBtn.addEventListener("click", () => {
+    const isOpen = legendEl ? !legendEl.classList.contains("closed") : false;
+    setLegendDrawerOpen(!isOpen);
+  });
 }
 
 function setRightDrawerOpen(open) {
   if (!utilityDrawerEl) return;
   utilityDrawerEl.classList.toggle("closed", !open);
   utilityDrawerEl.setAttribute("aria-hidden", open ? "false" : "true");
-  if (utilityLauncherBtn) utilityLauncherBtn.classList.toggle("hidden", !!open);
   if (utilityToggleBtn) {
     utilityToggleBtn.textContent = open ? "✕" : "☰";
     utilityToggleBtn.setAttribute("aria-label", open ? "Close drawer" : "Open drawer");
@@ -92,7 +93,10 @@ if (utilityToggleBtn) {
 }
 
 if (utilityLauncherBtn) {
-  utilityLauncherBtn.addEventListener("click", () => setRightDrawerOpen(true));
+  utilityLauncherBtn.addEventListener("click", () => {
+    const isOpen = utilityDrawerEl ? !utilityDrawerEl.classList.contains("closed") : false;
+    setRightDrawerOpen(!isOpen);
+  });
 }
 
 /* =========================================================

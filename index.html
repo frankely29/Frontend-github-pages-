@@ -336,16 +336,11 @@
     .appDock{
       align-self: flex-start;
       max-width: min(94vw, 520px);
-      background: rgba(255,255,255,0.78);
-      border: 1px solid rgba(0,0,0,0.10);
-      border-radius: 20px;
-      box-shadow: 0 10px 24px rgba(0,0,0,0.15);
-      padding: 8px;
       display: flex;
       align-items: center;
       gap: 8px;
-      backdrop-filter: blur(12px);
       pointer-events: auto;
+      flex-wrap: wrap;
     }
 
     .dockLaunchers{
@@ -353,14 +348,6 @@
       align-items: center;
       gap: 7px;
       flex-shrink: 0;
-    }
-
-    .dockMeta{
-      display: flex;
-      align-items: center;
-      gap: 7px;
-      min-width: 0;
-      flex-wrap: wrap;
     }
 
     .sliderWrap {
@@ -372,6 +359,14 @@
       padding: 8px 10px 9px;
       font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
       backdrop-filter: blur(8px);
+    }
+
+    .sliderTopRow{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+      margin-bottom:6px;
     }
 
     .timeLabel {
@@ -388,7 +383,7 @@
       display:inline-flex;
       align-items:center;
       gap:6px;
-      padding: 2px 8px;
+      padding: 3px 8px;
       border-radius: 999px;
       border: 1px solid rgba(0,0,0,0.14);
       background: rgba(255,255,255,0.80);
@@ -396,7 +391,7 @@
       font-weight: 900;
       opacity: 0.95;
       white-space: nowrap;
-      max-width: 36vw;
+      max-width: 38vw;
       overflow: hidden;
       text-overflow: ellipsis;
     }
@@ -476,7 +471,7 @@
     .utilityDrawer{
       position: absolute;
       top: calc(62px + env(safe-area-inset-top));
-      right: 8px;
+      left: 8px;
       z-index: 1000;
       width: min(220px, calc(100vw - 16px));
       background: rgba(255,255,255,0.92);
@@ -491,11 +486,10 @@
       will-change: transform, opacity;
     }
     .utilityDrawer.closed{
-      transform: translateX(calc(100% + 16px));
+      transform: translateX(calc(-100% - 16px));
       opacity: 0;
       pointer-events: none;
     }
-    .utilityLauncher.hidden{ opacity: 0; pointer-events: none; }
     .utilityHeader{
       display:flex;
       align-items:center;
@@ -594,9 +588,6 @@
       .appDock{
         max-width: calc(100vw - 20px);
       }
-      .dockMeta{
-        gap: 6px;
-      }
       .timeLabel{ max-width: 32vw; font-size: 12px; }
       .weatherBadge{ max-width: 33vw; }
       .radioRow{
@@ -659,15 +650,15 @@
     .borough-label .btxt{
       display: inline-block;
       font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
-      font-size: 12px;
-      font-weight: 950;
-      letter-spacing: 0.2px;
-      color: #102331;
-      background: rgba(255,255,255,0.88);
-      border: 1px solid rgba(0,0,0,0.2);
-      border-radius: 999px;
-      padding: 3px 9px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.10);
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.45px;
+      text-transform: uppercase;
+      color: rgba(16,35,49,0.84);
+      background: rgba(255,255,255,0.52);
+      border-radius: 4px;
+      padding: 1px 4px;
+      text-shadow: 0 1px 1px rgba(255,255,255,0.65);
       white-space: nowrap;
     }
 
@@ -998,18 +989,19 @@
       <div class="dockLaunchers">
         <button id="legendLauncher" class="legendLauncher" type="button" aria-label="Open demand controls">☰</button>
         <button id="utilityLauncher" class="utilityLauncher" type="button" aria-label="Open media and tools">♫</button>
-      </div>
-      <div class="dockMeta">
-        <div id="timeLabel" class="timeLabel">Loading…</div>
         <div id="weatherBadge" class="weatherBadge" title="Local weather">
           <span class="wxIcon">⛅</span>
           <span class="wxTxt">Weather…</span>
         </div>
         <button id="btnCenter" class="toggleBtnSmall on" type="button">Auto-center: ON</button>
       </div>
+
     </div>
 
     <div class="sliderWrap">
+      <div class="sliderTopRow">
+        <div id="timeLabel" class="timeLabel">Loading…</div>
+      </div>
       <div class="sliderTrackWrap">
         <div id="sliderBubble" class="sliderBubble">…</div>
         <input id="slider" type="range" min="0" max="0" value="0" step="1" />
