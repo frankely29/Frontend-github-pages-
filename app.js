@@ -842,8 +842,18 @@ function bubbleUpdateNow() {
   showSliderBubble();
 }
 
+const debugEnabled = new URLSearchParams(window.location.search).get("debug") === "1";
+
 if (debugToggle && debugPanel) {
+  if (debugEnabled) {
+    debugToggle.hidden = false;
+  } else {
+    debugToggle.hidden = true;
+    debugPanel.hidden = true;
+  }
+
   debugToggle.addEventListener("click", () => {
+    if (!debugEnabled) return;
     debugPanel.hidden = !debugPanel.hidden;
   });
 }
