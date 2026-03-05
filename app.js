@@ -38,6 +38,9 @@ const MANHATTAN_CORE_MAX_LAT = 40.795;
 const legendEl = document.getElementById("legend");
 const legendToggleBtn = document.getElementById("legendToggle");
 const legendLauncherBtn = document.getElementById("legendLauncher");
+const utilityDrawerEl = document.getElementById("utilityDrawer");
+const utilityToggleBtn = document.getElementById("utilityToggle");
+const utilityLauncherBtn = document.getElementById("utilityLauncher");
 
 function setLegendDrawerOpen(open) {
   if (!legendEl) return;
@@ -63,6 +66,31 @@ if (legendToggleBtn) {
 
 if (legendLauncherBtn) {
   legendLauncherBtn.addEventListener("click", () => setLegendDrawerOpen(true));
+}
+
+function setRightDrawerOpen(open) {
+  if (!utilityDrawerEl) return;
+  utilityDrawerEl.classList.toggle("closed", !open);
+  utilityDrawerEl.setAttribute("aria-hidden", open ? "false" : "true");
+  if (utilityToggleBtn) {
+    utilityToggleBtn.textContent = open ? "✕" : "☰";
+    utilityToggleBtn.setAttribute("aria-label", open ? "Close drawer" : "Open drawer");
+  }
+}
+
+if (utilityDrawerEl) {
+  setRightDrawerOpen(!utilityDrawerEl.classList.contains("closed"));
+}
+
+if (utilityToggleBtn) {
+  utilityToggleBtn.addEventListener("click", () => {
+    const open = utilityDrawerEl ? utilityDrawerEl.classList.contains("closed") : false;
+    setRightDrawerOpen(open);
+  });
+}
+
+if (utilityLauncherBtn) {
+  utilityLauncherBtn.addEventListener("click", () => setRightDrawerOpen(true));
 }
 
 /* =========================================================
