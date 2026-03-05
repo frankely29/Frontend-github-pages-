@@ -835,15 +835,11 @@ let zonePopup = null;
 function initMap() {
   map = new maplibregl.Map({
     container: "map",
-    style: "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json", // Reliable on iOS Safari 2026 (no glyph issues)
+    style: "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json", // proven reliable on iOS Safari 2026
     center: [-73.98, 40.73],
     zoom: 10.5,
     attributionControl: { position: "bottom-right" },
-  });
-
-  map.on("style.load", () => {
-    console.log("✅ Style fully loaded — forcing repaint");
-    map.triggerRepaint();
+    localIdeographFontFamily: "sans-serif", // CRITICAL: fixes Safari glyph loading bug
   });
 
   map.on("load", () => {
@@ -878,22 +874,28 @@ function initMap() {
 
     map.on("zoomend", updateZoneLabelVisibility);
 
+    // Hide overlay + force multiple repaints for Safari
     const loading = document.getElementById("mapLoading");
     if (loading) loading.style.display = "none";
 
     map.triggerRepaint();
-    setTimeout(() => map.triggerRepaint(), 100);
+    setTimeout(() => map.triggerRepaint(), 150);
     setTimeout(() => map.triggerRepaint(), 400);
+    setTimeout(() => map.triggerRepaint(), 800);
 
     if (pendingFrame) {
       renderFrame(pendingFrame);
       pendingFrame = null;
     }
-
-    console.log("✅ MapLibre loaded & ready");
   });
 
-  map.on("error", (e) => console.error("Map error:", e));
+  // Extra safety for glyph/tile loading on iOS
+  map.on("style.load", () => {
+    console.log("✅ Style loaded — forcing final repaint");
+    map.triggerRepaint();
+  });
+
+  map.on("error", (e) => console.error("MapLibre error:", e));
 }
 let timeline = [];
 let minutesOfWeek = [];
@@ -2265,11 +2267,12 @@ setNavDestination(null);
   const loading = document.getElementById("mapLoading");
   if (loading) loading.style.display = "flex";
 
-  initMap();
-  await loadTimeline();
-
+  // Immediate safety timeout (always runs)
   setTimeout(() => {
     const loading = document.getElementById("mapLoading");
     if (loading) loading.style.display = "none";
-  }, 10000);
+  }, 7000);
+
+  initMap();
+  await loadTimeline();
 })();
