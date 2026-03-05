@@ -1017,10 +1017,10 @@ function hasValidGeometry(geometry) {
   );
 }
 
-function frameToStyledGeoJSON(frame) {
-  const src = frame?.polygons;
+function frameToStyledGeoJSON(rawFrameGeoJSON) {
+  const src = rawFrameGeoJSON;
   if (!src || src.type !== "FeatureCollection" || !Array.isArray(src.features)) {
-    console.error("frameToStyledGeoJSON invalid output: frame polygons must be a GeoJSON FeatureCollection.", frame);
+    console.error("frameToStyledGeoJSON invalid output: frame polygons must be a GeoJSON FeatureCollection.", rawFrameGeoJSON);
     return { type: "FeatureCollection", features: [] };
   }
 
@@ -1216,18 +1216,66 @@ async function getGeoJSONSourceWithRecovery(sourceId, sourceName) {
   return source;
 }
 
-async function updateMapFrameSources(frame) {
+function isFeatureCollection(value) {
+  return Boolean(
+    value
+    && typeof value === "object"
+    && value.type === "FeatureCollection"
+    && Array.isArray(value.features),
+  );
+}
+
+function normalizeFrameResponsePayload(framePayload) {
+  const payload = framePayload && typeof framePayload === "object" ? framePayload : {};
+
+  if ("error" in payload || "detail" in payload) {
+    console.error("Backend /frame returned error payload", payload);
+    throw new Error("Backend /frame returned error payload");
+  }
+
+  const topLevelKeys = Object.keys(payload);
+  const hasDataKey = Object.prototype.hasOwnProperty.call(payload, "data");
+  const hasFeaturesKey = Object.prototype.hasOwnProperty.call(payload, "features");
+  const isDirectFeatureCollection = isFeatureCollection(payload);
+  const hasNestedDataFeatureCollection = isFeatureCollection(payload.data);
+  const hasNestedFrameFeatureCollection = isFeatureCollection(payload.frame);
+  const hasNestedGeojsonFeatureCollection = isFeatureCollection(payload.geojson);
+
+  let frameFeatureCount = null;
+  if (isDirectFeatureCollection) frameFeatureCount = payload.features.length;
+  else if (hasNestedDataFeatureCollection) frameFeatureCount = payload.data.features.length;
+  else if (hasNestedFrameFeatureCollection) frameFeatureCount = payload.frame.features.length;
+  else if (hasNestedGeojsonFeatureCollection) frameFeatureCount = payload.geojson.features.length;
+
+  console.log("DEBUG frame raw payload:", payload);
+  console.log("DEBUG frame raw keys:", topLevelKeys);
+  console.log("DEBUG frame has data key:", hasDataKey);
+  console.log("DEBUG frame has top-level features key:", hasFeaturesKey);
+  console.log("DEBUG frame is direct FeatureCollection:", isDirectFeatureCollection);
+  console.log("DEBUG frame has nested data FeatureCollection:", hasNestedDataFeatureCollection);
+  console.log("DEBUG frame feature count:", frameFeatureCount);
+
+  if (isDirectFeatureCollection) return payload;
+  if (hasNestedDataFeatureCollection) return payload.data;
+  if (hasNestedFrameFeatureCollection) return payload.frame;
+  if (hasNestedGeojsonFeatureCollection) return payload.geojson;
+
+  console.error("Unsupported /frame response shape", payload);
+  throw new Error("Unsupported /frame response shape");
+}
+
+async function updateMapFrameSources(rawFrameGeoJSON) {
   await waitForStyleReady();
 
   try {
     await ensureMapDataLayers();
     console.log("DEBUG render: ensureMapDataLayers ok");
 
-    const styled = frameToStyledGeoJSON(frame);
+    const styled = frameToStyledGeoJSON(rawFrameGeoJSON);
     const styledValidationError = validateStyledFeatureCollection(styled);
     if (styledValidationError) {
       console.error("DEBUG render failed at styled GeoJSON valid", styledValidationError);
-      console.error(styledValidationError, { frame, styled });
+      console.error(styledValidationError, { rawFrameGeoJSON, styled });
       throw new Error(styledValidationError);
     }
     console.log("DEBUG render: styled GeoJSON valid");
@@ -1274,8 +1322,9 @@ async function loadNextFramePickupsMap(curIdx) {
       return;
     }
 
-    const frame = await fetchJSON(`${RAILWAY_BASE}/frame/${nextIdx}`);
-    const feats = frame?.polygons?.features || [];
+    const framePayload = await fetchJSON(`${RAILWAY_BASE}/frame/${nextIdx}`);
+    const rawFrameGeoJSON = normalizeFrameResponsePayload(framePayload);
+    const feats = rawFrameGeoJSON?.features || [];
 
     const puMap = new Map();
     const payMap = new Map();
@@ -1343,6 +1392,18 @@ function buildPopupHTML(props, geom) {
 async function renderFrame(frame) {
   currentFrame = frame;
 
+  const rawFrameGeoJSON = frame?.rawFrameGeoJSON;
+  if (!isFeatureCollection(rawFrameGeoJSON)) {
+    console.error("invalid FeatureCollection", { rawFrameGeoJSON, frame });
+    timeLabel.textContent = "Error rendering map";
+    updateRecommendation(currentFrame);
+    return;
+  }
+
+  if (rawFrameGeoJSON.features.length === 0) {
+    console.error("empty features array", rawFrameGeoJSON);
+  }
+
   if (statenIslandMode) applyStatenLocalView(currentFrame);
   if (manhattanMode) applyManhattanLocalView(currentFrame);
 
@@ -1351,7 +1412,7 @@ async function renderFrame(frame) {
     await mapReadyPromise;
     await waitForStyleReady();
     await ensureMapDataLayers();
-    await updateMapFrameSources(currentFrame);
+    await updateMapFrameSources(rawFrameGeoJSON);
     if (!renderFrame._firstVisibleRenderDone) {
       renderFrame._firstVisibleRenderDone = true;
       forceFirstVisibleMapRender();
@@ -1362,7 +1423,7 @@ async function renderFrame(frame) {
     if (mapInitError) {
       timeLabel.textContent = `Error initializing map: ${mapInitError.message}`;
     } else {
-      timeLabel.textContent = `Error rendering map data: ${err.message || err}`;
+      timeLabel.textContent = "Error rendering map";
     }
   }
 
@@ -1371,7 +1432,14 @@ async function renderFrame(frame) {
 
 async function loadFrame(idx) {
   loadNextFramePickupsMap(idx).catch(() => {});
-  const frame = await fetchJSON(`${RAILWAY_BASE}/frame/${idx}`);
+  const framePayload = await fetchJSON(`${RAILWAY_BASE}/frame/${idx}`);
+  const rawFrameGeoJSON = normalizeFrameResponsePayload(framePayload);
+  const frame = {
+    ...(framePayload && typeof framePayload === "object" ? framePayload : {}),
+    time: framePayload?.time || timeline?.[Number(idx)] || null,
+    polygons: rawFrameGeoJSON,
+    rawFrameGeoJSON,
+  };
   await renderFrame(frame);
 }
 
@@ -1394,7 +1462,7 @@ async function loadTimeline() {
 
   loadFrame(idx).catch((err) => {
     console.error(err);
-    timeLabel.textContent = `Error rendering map data: ${err.message || err}`;
+    timeLabel.textContent = "Error rendering map";
   });
 }
 
