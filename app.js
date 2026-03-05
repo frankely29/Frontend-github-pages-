@@ -12,6 +12,13 @@ const USER_SLIDER_GRACE_MS = 25 * 1000;
 let map; // global MapLibre instance
 let pendingFrame = null;
 let mapReady = false;
+const debugOnce = {
+  frame: false,
+  mapCenter: false,
+  selfMarker: false,
+  otherMarker: false,
+  zonesSetData: false,
+};
 
 /* =========================================================
    COMMUNITY SETTINGS (cheap polling)
@@ -867,13 +874,13 @@ function initMap() {
     mapReady = true;
     map.resize();
 
-    map.addSource('zones', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-    map.addLayer({ id: 'zones-fill', type: 'fill', source: 'zones',
-      paint: { 'fill-color': ['get', 'displayColor'], 'fill-opacity': 0.82 }
-    });
-    map.addLayer({ id: 'zones-line', type: 'line', source: 'zones',
-      paint: { 'line-color': '#ffffff', 'line-width': 1.5, 'line-opacity': 0.3 }
-    });
+    ensureZonesSourceAndLayers().catch((e) => console.warn("zones source/layers init failed:", e));
+
+    if (!debugOnce.mapCenter) {
+      const c = map.getCenter();
+      console.log("DEBUG map center lngLat", { lng: c.lng, lat: c.lat });
+      debugOnce.mapCenter = true;
+    }
 
     map.on('zoomend', updateZoneLabelVisibility);
 
@@ -893,6 +900,67 @@ function initMap() {
 
   map.on('style.load', () => map.triggerRepaint());
   map.on('error', e => console.error('MapLibre error:', e));
+}
+
+async function waitForStyleReady(timeoutMs = 5000) {
+  if (!map) return false;
+  if (map.isStyleLoaded()) return true;
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (ok) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(tid);
+      map.off("styledata", onStyleData);
+      map.off("load", onLoad);
+      map.off("error", onError);
+      resolve(ok);
+    };
+    const onStyleData = () => {
+      if (map?.isStyleLoaded()) done(true);
+    };
+    const onLoad = () => done(!!map?.isStyleLoaded());
+    const onError = () => done(false);
+
+    const tid = setTimeout(() => done(!!map?.isStyleLoaded()), timeoutMs);
+    map.on("styledata", onStyleData);
+    map.on("load", onLoad);
+    map.on("error", onError);
+  });
+}
+
+async function ensureZonesSourceAndLayers() {
+  if (!map) return false;
+  const styleReady = await waitForStyleReady();
+  if (!styleReady) return false;
+
+  if (!map.getSource("zones")) {
+    map.addSource("zones", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+  }
+
+  if (!map.getLayer("zones-fill")) {
+    map.addLayer({
+      id: "zones-fill",
+      type: "fill",
+      source: "zones",
+      paint: {
+        "fill-color": ["coalesce", ["to-string", ["get", "effectiveColor"]], "#66aaff"],
+        "fill-opacity": 0.82,
+      },
+    });
+  }
+
+  if (!map.getLayer("zones-line")) {
+    map.addLayer({
+      id: "zones-line",
+      type: "line",
+      source: "zones",
+      paint: { "line-color": "#ffffff", "line-width": 1, "line-opacity": 1 },
+    });
+  }
+
+  return true;
 }
 let timeline = [];
 let minutesOfWeek = [];
@@ -982,8 +1050,20 @@ function buildPopupHTML(props, geom) {
   `;
 }
 
-function renderFrame(frame) {
-  if (!map || !mapReady || !map.getSource("zones")) {
+function getEffectiveColorForMap(feature) {
+  const props = feature?.properties || {};
+  const style = props?.style || {};
+  return props.effectiveColor || style.fillColor || style.color || "#66aaff";
+}
+
+async function renderFrame(frame) {
+  if (!map || !mapReady) {
+    pendingFrame = frame;
+    return;
+  }
+
+  const zonesReady = await ensureZonesSourceAndLayers();
+  if (!zonesReady || !map.getSource("zones")) {
     pendingFrame = frame;
     return;
   }
@@ -995,10 +1075,22 @@ function renderFrame(frame) {
   const fc = frame.polygons || { type: "FeatureCollection", features: [] };
   fc.features.forEach((f) => {
     const props = f.properties || {};
-    props.displayColor = effectiveColor(props, f.geometry) || "#0066ff";
+    const legacyModeColor = effectiveColor(props, f.geometry);
+    props.effectiveColor = props.effectiveColor || legacyModeColor || getEffectiveColorForMap(f);
   });
 
+  if (!debugOnce.frame) {
+    console.log("DEBUG frame", { time: frame?.time, featureCount: fc.features.length });
+    debugOnce.frame = true;
+  }
+
   map.getSource("zones").setData(fc);
+
+  if (!debugOnce.zonesSetData) {
+    console.log("DEBUG zones setData feature count", fc.features.length);
+    debugOnce.zonesSetData = true;
+  }
+
   map.resize();
   map.triggerRepaint();
 
@@ -1010,7 +1102,7 @@ function renderFrame(frame) {
 async function loadFrame(idx) {
   loadNextFramePickupsMap(idx).catch(() => {});
   const frame = await fetchJSON(`${RAILWAY_BASE}/frame/${idx}`);
-  renderFrame(frame);
+  await renderFrame(frame);
 }
 
 async function loadTimeline() {
@@ -1175,6 +1267,11 @@ function startLocationWatch() {
       userLatLng = { lat, lng };
       lastGpsAccuracyM = (typeof accuracy === "number" && Number.isFinite(accuracy)) ? accuracy : null;
       if (navMarker) navMarker.setLngLat([userLatLng.lng, userLatLng.lat]);
+
+      if (!debugOnce.selfMarker) {
+        console.log("DEBUG self marker lngLat", { lng: userLatLng.lng, lat: userLatLng.lat });
+        debugOnce.selfMarker = true;
+      }
 
       let isMoving = false;
 
@@ -1998,6 +2095,10 @@ function upsertDriverMarker(userId, name, lat, lng, heading, labelSide, labelDx 
   const existing = otherMarkers.get(userId);
   if (existing) {
     existing.setLngLat([lng, lat]);
+    if (!debugOnce.otherMarker) {
+      console.log("DEBUG other marker lngLat", { lng, lat });
+      debugOnce.otherMarker = true;
+    }
     const el = existing.getElement();
     const newEl = makeDriverIcon(name || `Driver ${userId}`, heading, labelSide, labelDx, labelDy);
     el.innerHTML = newEl.innerHTML;
@@ -2008,6 +2109,11 @@ function upsertDriverMarker(userId, name, lat, lng, heading, labelSide, labelDx 
   const mk = new maplibregl.Marker({ element: el, anchor: "center" })
     .setLngLat([lng, lat])
     .addTo(map);
+
+  if (!debugOnce.otherMarker) {
+    console.log("DEBUG other marker lngLat", { lng, lat });
+    debugOnce.otherMarker = true;
+  }
 
   otherMarkers.set(userId, mk);
 }
