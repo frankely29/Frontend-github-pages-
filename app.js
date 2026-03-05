@@ -1284,12 +1284,15 @@ function normalizeFrameResponsePayload(framePayload) {
 
 async function updateMapFrameSources(rawFrameGeoJSON) {
   await waitForStyleReady();
+  let renderStage = "ensureMapDataLayers";
 
   try {
     await ensureMapDataLayers();
     console.log("DEBUG render: ensureMapDataLayers ok");
 
+    renderStage = "frameToStyledGeoJSON";
     const styled = frameToStyledGeoJSON(rawFrameGeoJSON);
+    renderStage = "validate styled GeoJSON";
     const styledValidationError = validateStyledFeatureCollection(styled);
     if (styledValidationError) {
       console.error("DEBUG render failed at styled GeoJSON valid", styledValidationError);
@@ -1300,6 +1303,7 @@ async function updateMapFrameSources(rawFrameGeoJSON) {
 
     let zoneSource;
     try {
+      renderStage = "get zones source";
       zoneSource = await getGeoJSONSourceWithRecovery(ZONE_SOURCE_ID, "zones");
       console.log("DEBUG render: zones source found");
     } catch (err) {
@@ -1309,6 +1313,7 @@ async function updateMapFrameSources(rawFrameGeoJSON) {
     }
 
     try {
+      renderStage = "setData";
       zoneSource.setData(styled);
       console.log("DEBUG render: setData ok");
     } catch (err) {
@@ -1316,8 +1321,12 @@ async function updateMapFrameSources(rawFrameGeoJSON) {
       console.error("setData failed", err);
       throw err;
     }
+    renderStage = "render complete";
     console.log("DEBUG render: simplified layers active");
   } catch (err) {
+    const errMessage = err?.message || String(err);
+    console.error(`DEBUG render failed at stage: ${renderStage}`);
+    console.error(`DEBUG render exact error: ${errMessage}`);
     console.error("updateMapFrameSources failed", err);
     throw err;
   }
@@ -1409,11 +1418,15 @@ function buildPopupHTML(props, geom) {
 
 async function renderFrame(frame) {
   currentFrame = frame;
+  let renderStage = "normalize frame payload";
 
   const rawFrameGeoJSON = frame?.rawFrameGeoJSON;
   if (!isFeatureCollection(rawFrameGeoJSON)) {
     console.error("invalid FeatureCollection", { rawFrameGeoJSON, frame });
-    timeLabel.textContent = "Error rendering map";
+    const errMessage = "invalid FeatureCollection";
+    timeLabel.textContent = `Render error at ${renderStage}: ${errMessage}`;
+    console.error(`DEBUG render failed at stage: ${renderStage}`);
+    console.error(`DEBUG render exact error: ${errMessage}`);
     updateRecommendation(currentFrame);
     return;
   }
@@ -1427,10 +1440,15 @@ async function renderFrame(frame) {
 
   timeLabel.textContent = formatNYCLabel(currentFrame.time);
   try {
+    renderStage = "mapReadyPromise";
     await mapReadyPromise;
+    renderStage = "waitForStyleReady";
     await waitForStyleReady();
+    renderStage = "ensureMapDataLayers";
     await ensureMapDataLayers();
+    renderStage = "updateMapFrameSources";
     await updateMapFrameSources(rawFrameGeoJSON);
+    renderStage = "render complete";
     if (!renderFrame._firstVisibleRenderDone) {
       renderFrame._firstVisibleRenderDone = true;
       forceFirstVisibleMapRender();
@@ -1438,11 +1456,10 @@ async function renderFrame(frame) {
       forceMapResize("frame-render");
     }
   } catch (err) {
-    if (mapInitError) {
-      timeLabel.textContent = `Error initializing map: ${mapInitError.message}`;
-    } else {
-      timeLabel.textContent = "Error rendering map";
-    }
+    const errMessage = mapInitError?.message || err?.message || String(err);
+    console.error(`DEBUG render failed at stage: ${renderStage}`);
+    console.error(`DEBUG render exact error: ${errMessage}`);
+    timeLabel.textContent = `Render error at ${renderStage}: ${errMessage}`;
   }
 
   updateRecommendation(currentFrame);
