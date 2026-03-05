@@ -142,20 +142,54 @@
       filter: brightness(0.65) contrast(1.08) saturate(0.85);
     }
 
-    /* ---------- Legend (small + minimize) ---------- */
+    /* ---------- Legend Drawer (phase 2) ---------- */
+    .legendLauncher {
+      position: absolute;
+      top: calc(10px + env(safe-area-inset-top));
+      left: 8px;
+      z-index: 1001;
+      border: none;
+      border-radius: 0 12px 12px 0;
+      background: rgba(255,255,255,0.96);
+      box-shadow: 0 6px 14px rgba(0,0,0,0.16);
+      padding: 10px 10px 10px 8px;
+      min-width: 44px;
+      min-height: 44px;
+      font-weight: 900;
+      font-size: 11px;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+      transition: left 220ms ease, opacity 180ms ease;
+    }
+    .legendLauncher:active { transform: scale(0.98); }
+    .legendLauncher .drawerGlyph { font-size: 16px; line-height: 1; }
+
     .legend {
       position: absolute;
       top: calc(8px + env(safe-area-inset-top));
       left: 8px;
       z-index: 1000;
       background: rgba(255,255,255,0.92);
-      padding: 6px;
+      padding: 8px;
       border-radius: 10px;
       box-shadow: 0 5px 14px rgba(0,0,0,0.14);
       font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
       max-width: 220px;
-      transform: scale(0.86);
+      transform: translateX(-115%) scale(0.86);
       transform-origin: top left;
+      opacity: 0;
+      pointer-events: none;
+      transition: transform 220ms ease, opacity 180ms ease;
+    }
+    .legend.drawerOpen {
+      transform: translateX(0) scale(0.86);
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .legend.drawerOpen + .legendLauncher,
+    .legendLauncher.open {
+      left: min(188px, 44vw);
     }
     .legendHeader{
       display:flex;
@@ -180,7 +214,6 @@
     }
     .legendToggleBtn:active{ transform: scale(0.98); }
     .legendBody{ display:block; }
-    .legend.minimized .legendBody{ display:none; }
 
     .legend .recommendLine{
       margin: 0 0 6px 0;
@@ -751,7 +784,7 @@
   <div id="legend" class="legend" aria-label="Demand legend">
     <div class="legendHeader">
       <h3>Demand Colors</h3>
-      <button id="legendToggle" class="legendToggleBtn" type="button">–</button>
+      <button id="legendToggle" class="legendToggleBtn" type="button" aria-label="Collapse legend drawer">Close</button>
     </div>
 
     <div class="legendBody">
@@ -785,6 +818,10 @@
       </div>
     </div>
   </div>
+
+  <button id="legendLauncher" class="legendLauncher" type="button" aria-label="Open legend drawer" aria-expanded="false">
+    <span class="drawerGlyph">☰</span>
+  </button>
 
   <div class="sliderWrap">
     <div class="sliderTopRow">

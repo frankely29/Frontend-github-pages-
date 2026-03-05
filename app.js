@@ -35,14 +35,36 @@ const MANHATTAN_MIN_ZONES = 40;
 const MANHATTAN_CORE_MAX_LAT = 40.795;
 
 /* =========================================================
-   Legend minimize
+   Legend drawer (phase 2)
    ========================================================= */
 const legendEl = document.getElementById("legend");
 const legendToggleBtn = document.getElementById("legendToggle");
-if (legendEl && legendToggleBtn) {
+const legendLauncherBtn = document.getElementById("legendLauncher");
+
+function setLegendDrawerOpen(open) {
+  if (!legendEl) return;
+  legendEl.classList.toggle("drawerOpen", !!open);
+  if (legendToggleBtn) {
+    legendToggleBtn.textContent = open ? "Close" : "Open";
+    legendToggleBtn.setAttribute("aria-label", open ? "Collapse legend drawer" : "Open legend drawer");
+  }
+  if (legendLauncherBtn) {
+    legendLauncherBtn.classList.toggle("open", !!open);
+    legendLauncherBtn.setAttribute("aria-expanded", open ? "true" : "false");
+    legendLauncherBtn.setAttribute("aria-label", open ? "Collapse legend drawer" : "Open legend drawer");
+  }
+}
+
+if (legendEl) setLegendDrawerOpen(false);
+
+if (legendToggleBtn) {
   legendToggleBtn.addEventListener("click", () => {
-    const minimized = legendEl.classList.toggle("minimized");
-    legendToggleBtn.textContent = minimized ? "+" : "–";
+    setLegendDrawerOpen(!legendEl?.classList.contains("drawerOpen"));
+  });
+}
+if (legendLauncherBtn) {
+  legendLauncherBtn.addEventListener("click", () => {
+    setLegendDrawerOpen(!legendEl?.classList.contains("drawerOpen"));
   });
 }
 
