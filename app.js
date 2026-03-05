@@ -2,7 +2,7 @@
    NYC TLC Hotspot Map (Frontend) - SIMPLE + STABLE
    ========================================================= */
 
-const RAILWAY_BASE = "";
+const RAILWAY_BASE = "";   // relative = same domain (teamjoseo.up.railway.app)
 const BIN_MINUTES = 20;
 
 const REFRESH_MS = 5 * 60 * 1000;
@@ -590,14 +590,14 @@ function labelHTML(props, zoom) {
 }
 
 function projectToPoint(lng, lat) {
+  if (!map) return { x: 0, y: 0 };
   const p = map.project([lng, lat]);
   return { x: p.x, y: p.y };
 }
-
-function pointDistance(a, b) {
-  const dx = a.x - b.x;
-  const dy = a.y - b.y;
-  return Math.hypot(dx, dy);
+function pointDistance(p1, p2) {
+  const dx = p1.x - p2.x;
+  const dy = p1.y - p2.y;
+  return Math.sqrt(dx * dx + dy * dy);
 }
 
 function refreshZoneLabels() {
@@ -868,8 +868,12 @@ function initMap() {
     map.resize();
 
     map.addSource('zones', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-    map.addLayer({ id: 'zones-fill', type: 'fill', source: 'zones', paint: { 'fill-color': ['get', 'displayColor'], 'fill-opacity': 0.82 } });
-    map.addLayer({ id: 'zones-line', type: 'line', source: 'zones', paint: { 'line-color': '#ffffff', 'line-width': 1.5, 'line-opacity': 0.3 } });
+    map.addLayer({ id: 'zones-fill', type: 'fill', source: 'zones',
+      paint: { 'fill-color': ['get', 'displayColor'], 'fill-opacity': 0.82 }
+    });
+    map.addLayer({ id: 'zones-line', type: 'line', source: 'zones',
+      paint: { 'line-color': '#ffffff', 'line-width': 1.5, 'line-opacity': 0.3 }
+    });
 
     map.on('zoomend', updateZoneLabelVisibility);
 
@@ -2256,7 +2260,6 @@ setNavDestination(null);
   const loading = document.getElementById("mapLoading");
   if (loading) loading.style.display = "flex";
 
-  // Immediate safety timeout (always runs)
   setTimeout(() => {
     const loading = document.getElementById("mapLoading");
     if (loading) loading.style.display = "none";
