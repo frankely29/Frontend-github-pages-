@@ -792,13 +792,14 @@ function lerp(a, b, t) {
 }
 
 function getZoneLabelStyleForZoom(zoom) {
-  const t = clamp((zoom - 8) / 6, 0, 1);
-  const fontSize = lerp(7, 11, t);
-  const maxWidth = lerp(48, 108, t);
-  const lineHeight = lerp(1.04, 1.14, t);
-  const opacity = lerp(0.56, 0.8, t);
-  const letterSpacing = lerp(0.05, 0.16, t);
-  const maxChars = Math.round(lerp(10, 20, t));
+  const t = clamp((zoom - 9) / 5, 0, 1);
+  const farZoom = clamp((zoom - 8) / 2, 0, 1);
+  const fontSize = lerp(7.1, 8.8, t);
+  const maxWidth = lerp(60, 92, t);
+  const lineHeight = lerp(1.08, 1.12, t);
+  const opacity = lerp(0.96, 1, farZoom);
+  const letterSpacing = lerp(0.01, 0.08, t);
+  const maxChars = Math.round(lerp(10, 16, t));
   return { fontSize, maxWidth, lineHeight, opacity, letterSpacing, maxChars };
 }
 
