@@ -228,47 +228,45 @@ function escapeHtml(s) {
     .replaceAll("'", "&#039;");
 }
 
-function shouldShowLabel(bucket, zoom) {
-  if (zoom < 10) return false;
-  if (zoom >= 15) return true;
-  if (zoom >= 14) return ["green", "purple", "blue", "sky", "yellow", "red"].includes(bucket);
-  if (zoom >= 13) return ["green", "purple", "blue", "sky"].includes(bucket);
-  if (zoom >= 12) return ["green", "purple", "blue"].includes(bucket);
-  if (zoom >= 11) return ["green", "purple"].includes(bucket);
-  return ["green"].includes(bucket);
-}
+const LABEL_ZOOM_MIN = 10;
+const LABEL_MAX_CHARS_MID = 8;
 
-function shortenLabel(name) {
-  const s = String(name || "").trim();
-  if (!s) return s;
-  return s
-    .replace(/\bInternational\b/gi, "Intl")
-    .replace(/\bAirport\b/gi, "Airpt")
-    .replace(/\bAvenue\b/gi, "Ave")
-    .replace(/\bBoulevard\b/gi, "Blvd")
-    .replace(/\bStreet\b/gi, "St")
-    .replace(/\bRoad\b/gi, "Rd")
-    .replace(/\bWest\b/gi, "W")
-    .replace(/\bEast\b/gi, "E")
-    .replace(/\bNorth\b/gi, "N")
-    .replace(/\bSouth\b/gi, "S")
-    .replace(/\s{2,}/g, " ")
-    .trim();
+function shortenLabel(text, maxChars) {
+  const t = (text || "").trim();
+  if (!t) return "";
+  if (t.length <= maxChars) return t;
+  return t.slice(0, maxChars - 1) + "…";
 }
-
 function zoomClass(zoom) {
-  if (zoom >= 15) return "z15";
-  if (zoom >= 14) return "z14";
-  if (zoom >= 13) return "z13";
-  if (zoom >= 12) return "z12";
-  if (zoom >= 11) return "z11";
-  return "z10";
+  const z = Math.max(10, Math.min(15, Math.round(zoom)));
+  return `z${z}`;
 }
+function shouldShowLabel(bucket, zoom) {
+  if (zoom < LABEL_ZOOM_MIN) return false;
+  const b = (bucket || "").trim();
+  if (zoom >= 15) return true;
+  if (zoom === 14) return b !== "red";
+  if (zoom === 13) return b === "green" || b === "purple" || b === "blue" || b === "sky";
+  if (zoom === 12) return b === "green" || b === "purple" || b === "blue";
+  if (zoom === 11) return b === "green" || b === "purple";
+  return b === "green";
+}
+function labelHTML(props, zoom) {
+  const name = (props.zone_name || "").trim();
+  if (!name) return "";
 
-function labelHTML(name, borough, zoom) {
-  const short = shortenLabel(name);
-  if (zoom >= 14 && borough) return `${escapeHtml(short)}\n${escapeHtml(borough)}`;
-  return escapeHtml(short);
+  const b = effectiveBucket(props, null);
+  if (!shouldShowLabel(b, Math.round(zoom))) return "";
+
+  const zoneText = zoom < 13 ? shortenLabel(name, LABEL_MAX_CHARS_MID) : name;
+
+  const borough = (props.borough || "").trim();
+  const showBorough = zoom >= 15 && borough;
+
+  return `
+    <div class="zn">${escapeHtml(zoneText)}</div>
+    ${showBorough ? `<div class="br">${escapeHtml(borough)}</div>` : ""}
+  `;
 }
 
 /* =========================================================
@@ -1187,20 +1185,19 @@ async function ensureMapDataLayers() {
     }
   }
 
-  // FIXED: zone labels now follow old Leaflet rules exactly (shouldShowLabel + zoom + bucket + shorten + borough)
+  // FIXED: zone labels now match old Leaflet exactly (shouldShowLabel + zoom + bucket + shorten + borough)
   if (!map.getLayer(ZONE_LABEL_LAYER_ID)) {
     map.addLayer({
       id: ZONE_LABEL_LAYER_ID,
       type: "symbol",
       source: ZONE_SOURCE_ID,
+      minzoom: LABEL_ZOOM_MIN,
       layout: {
         "text-field": ["get", "zone_label_name"],
-        "text-size": ["step", ["zoom"], 0, 10, 8, 11, 12, 9, 13, 10, 14, 11, 15],
+        "text-size": ["step", ["zoom"], 8, 10, 9, 11, 10, 12, 11, 13, 12, 14, 13, 15],
         "text-anchor": "center",
         "text-font": ["Open Sans Bold"],
-        "text-max-width": 8,
-        "text-allow-overlap": false,
-        "text-ignore-placement": false,
+        "text-max-width": LABEL_MAX_CHARS_MID,
       },
       paint: {
         "text-color": "#111",
@@ -1208,7 +1205,6 @@ async function ensureMapDataLayers() {
         "text-halo-width": 2,
         "text-halo-blur": 1,
       },
-      minzoom: 10,
     });
   }
 
@@ -1477,48 +1473,20 @@ function buildPopupHTML(props, geom) {
 
 async function renderFrame(frame) {
   currentFrame = frame;
-  let renderStage = "normalize frame payload";
-
-  const rawFrameGeoJSON = frame?.polygons;
-  if (!isFeatureCollection(rawFrameGeoJSON)) {
-    console.error("invalid FeatureCollection", { rawFrameGeoJSON, frame });
-    const errMessage = "invalid FeatureCollection";
-    timeLabel.textContent = `Render error at ${renderStage}: ${errMessage}`;
-    console.error(`DEBUG render failed at stage: ${renderStage}`);
-    console.error(`DEBUG render exact error: ${errMessage}`);
-    updateRecommendation(currentFrame);
-    return;
-  }
-
-  if (rawFrameGeoJSON.features.length === 0) {
-    console.error("empty features array", rawFrameGeoJSON);
-  }
 
   if (statenIslandMode) applyStatenLocalView(currentFrame);
   if (manhattanMode) applyManhattanLocalView(currentFrame);
 
   timeLabel.textContent = formatNYCLabel(currentFrame.time);
+
   try {
-    renderStage = "mapReadyPromise";
     await mapReadyPromise;
-    renderStage = "waitForStyleReady";
     await waitForStyleReady();
-    renderStage = "ensureMapDataLayers";
     await ensureMapDataLayers();
-    renderStage = "updateMapFrameSources";
-    await updateMapFrameSources(rawFrameGeoJSON);
-    renderStage = "render complete";
-    if (!renderFrame._firstVisibleRenderDone) {
-      renderFrame._firstVisibleRenderDone = true;
-      forceFirstVisibleMapRender();
-    } else {
-      forceMapResize("frame-render");
-    }
+    await updateMapFrameSources(currentFrame.polygons);
   } catch (err) {
-    const errMessage = mapInitError?.message || err?.message || String(err);
-    console.error(`DEBUG render failed at stage: ${renderStage}`);
-    console.error(`DEBUG render exact error: ${errMessage}`);
-    timeLabel.textContent = `Render error at ${renderStage}: ${errMessage}`;
+    console.error("Render failed:", err);
+    timeLabel.textContent = `Render error: ${err.message.slice(0, 80)}`;
   }
 
   updateRecommendation(currentFrame);
@@ -1526,18 +1494,8 @@ async function renderFrame(frame) {
 
 async function loadFrame(idx) {
   loadNextFramePickupsMap(idx).catch(() => {});
-  const framePayload = await fetchJSON(`${RAILWAY_BASE}/frame/${idx}`);
-  const polygons = normalizeFrameResponsePayload(framePayload);
-  const frame = {
-    ...(framePayload && typeof framePayload === "object" ? framePayload : {}),
-    time: framePayload?.time || timeline?.[Number(idx)] || null,
-    polygons,
-  };
-  console.log("DEBUG frame uses wrapper time + polygons", {
-    time: frame.time,
-    featureCount: Array.isArray(frame.polygons?.features) ? frame.polygons.features.length : 0,
-  });
-  await renderFrame(frame);
+  const frame = await fetchJSON(`${RAILWAY_BASE}/frame/${idx}`);
+  renderFrame(frame);
 }
 
 async function loadTimeline() {
