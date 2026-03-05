@@ -10,6 +10,8 @@ const NYC_CLOCK_TICK_MS = 60 * 1000;
 const USER_SLIDER_GRACE_MS = 25 * 1000;
 
 let map; // global MapLibre instance
+let pendingFrame = null;
+let mapReady = false;
 
 /* =========================================================
    COMMUNITY SETTINGS (cheap polling)
@@ -831,67 +833,79 @@ const zoneLabelMarkers = new Map();
 let zonePopup = null;
 
 function initMap() {
-  return new Promise((resolve) => {
-    map = new maplibregl.Map({
-      container: "map",
-      style: "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json",
-      center: [-73.98, 40.73],
-      zoom: 10.5,
-      pitch: 0,
-      bearing: 0,
-      attributionControl: true,
-    });
-
-    map.addControl(new maplibregl.NavigationControl({ visualizePitch: false }));
-
-    map.on("load", () => {
-      map.addSource("zones", {
-        type: "geojson",
-        data: { type: "FeatureCollection", features: [] },
-      });
-
-      map.addLayer({
-        id: "zones-fill",
-        type: "fill",
-        source: "zones",
-        paint: {
-          "fill-color": ["get", "displayColor"],
-          "fill-opacity": 0.82,
-        },
-      });
-
-      map.addLayer({
-        id: "zones-line",
-        type: "line",
-        source: "zones",
-        paint: {
-          "line-color": "#ffffff",
-          "line-width": 1,
-          "line-opacity": 0.3,
-        },
-      });
-
-      map.on("zoomend", updateZoneLabelVisibility);
-      map.on("zoomend", () => {
-        if (authHeaderOK()) pullPresenceAll().catch(() => {});
-      });
-      map.on("dragstart", disableAutoCenterBecauseUserIsExploring);
-      map.on("zoomstart", disableAutoCenterBecauseUserIsExploring);
-
-      map.on("click", "zones-fill", (e) => {
-        const feature = e.features?.[0];
-        if (!feature) return;
-        const props = feature.properties || {};
-        if (zonePopup) zonePopup.remove();
-        zonePopup = new maplibregl.Popup({ maxWidth: "320px" })
-          .setLngLat(e.lngLat)
-          .setHTML(buildPopupHTML(props, feature.geometry))
-          .addTo(map);
-      });
-
-      resolve();
-    });
+  map = new maplibregl.Map({
+    container: "map",
+    style: "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json",
+    center: [-73.98, 40.73],
+    zoom: 10.5,
+    pitch: 0,
+    bearing: 0,
+    attributionControl: { position: "bottom-right" },
   });
+
+  map.addControl(new maplibregl.NavigationControl({ visualizePitch: false }));
+
+  map.on("load", () => {
+    mapReady = true;
+    map.resize();
+
+    map.addSource("zones", {
+      type: "geojson",
+      data: { type: "FeatureCollection", features: [] },
+    });
+
+    map.addLayer({
+      id: "zones-fill",
+      type: "fill",
+      source: "zones",
+      paint: {
+        "fill-color": ["get", "displayColor"],
+        "fill-opacity": 0.82,
+      },
+    });
+
+    map.addLayer({
+      id: "zones-line",
+      type: "line",
+      source: "zones",
+      paint: {
+        "line-color": "#ffffff",
+        "line-width": 1,
+        "line-opacity": 0.25,
+      },
+    });
+
+    map.on("zoomend", updateZoneLabelVisibility);
+    map.on("zoomend", () => {
+      if (authHeaderOK()) pullPresenceAll().catch(() => {});
+    });
+    map.on("moveend", () => {});
+    map.on("dragstart", disableAutoCenterBecauseUserIsExploring);
+    map.on("zoomstart", disableAutoCenterBecauseUserIsExploring);
+
+    map.on("click", "zones-fill", (e) => {
+      const feature = e.features?.[0];
+      if (!feature) return;
+      const props = feature.properties || {};
+      if (zonePopup) zonePopup.remove();
+      zonePopup = new maplibregl.Popup({ maxWidth: "320px" })
+        .setLngLat(e.lngLat)
+        .setHTML(buildPopupHTML(props, feature.geometry))
+        .addTo(map);
+    });
+
+    if (pendingFrame) {
+      renderFrame(pendingFrame);
+      pendingFrame = null;
+    }
+
+    const loadingEl = document.getElementById("mapLoading");
+    if (loadingEl) loadingEl.style.display = "none";
+
+    console.log("✅ MapLibre fully ready");
+  });
+
+  map.on("error", (e) => console.error("MapLibre error:", e));
 }
 let timeline = [];
 let minutesOfWeek = [];
@@ -982,20 +996,29 @@ function buildPopupHTML(props, geom) {
 }
 
 function renderFrame(frame) {
+  if (!map || !mapReady || !map.getSource("zones")) {
+    pendingFrame = frame;
+    console.log("⏳ Map not ready yet — queuing frame");
+    return;
+  }
+
   currentFrame = frame;
 
-  if (statenIslandMode) applyStatenLocalView(currentFrame);
-  if (manhattanMode) applyManhattanLocalView(currentFrame);
+  applyStatenLocalView(currentFrame);
+  applyManhattanLocalView(currentFrame);
 
   timeLabel.textContent = formatNYCLabel(currentFrame.time);
 
-  if (map && map.getSource("zones")) {
-    const fc = currentFrame.polygons;
-    fc.features.forEach((f) => {
-      const props = f.properties || {};
-      props.displayColor = effectiveColor(props, f.geometry) || (props.style?.fillColor || "#0066ff");
-    });
+  const fc = currentFrame.polygons || { type: "FeatureCollection", features: [] };
+  fc.features.forEach((f) => {
+    const props = f.properties || {};
+    props.displayColor = effectiveColor(props, f.geometry) || "#0066ff";
+  });
+
+  try {
     map.getSource("zones").setData(fc);
+  } catch (e) {
+    console.error("setData failed:", e);
   }
 
   refreshZoneLabels();
@@ -2257,8 +2280,7 @@ setNavDestination(null);
 
 (async () => {
   try {
-    await initMap();
-
+    initMap();
     await loadTimeline();
 
     if (authHeaderOK()) {
