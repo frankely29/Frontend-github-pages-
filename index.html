@@ -146,20 +146,20 @@
 
     /* ---------- Legend drawer (phase 2) ---------- */
     .legendLauncher{
-      position: absolute;
-      top: calc(10px + env(safe-area-inset-top));
-      left: 8px;
+      position: relative;
       z-index: 1001;
       border: none;
-      border-radius: 12px;
-      padding: 10px 11px;
+      border-radius: 14px;
+      width: 44px;
+      height: 44px;
+      padding: 0;
       font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
-      font-size: 12px;
+      font-size: 17px;
       font-weight: 950;
       line-height: 1;
       color: #0b2a3a;
-      background: rgba(255,255,255,0.95);
-      box-shadow: 0 6px 18px rgba(0,0,0,0.16);
+      background: rgba(255,255,255,0.86);
+      box-shadow: 0 6px 16px rgba(0,0,0,0.14);
       border: 1px solid rgba(0,0,0,0.12);
       cursor: pointer;
       -webkit-tap-highlight-color: transparent;
@@ -189,14 +189,7 @@
       opacity: 0;
       pointer-events: none;
     }
-    .legend.closed + .legendLauncher{
-      opacity: 1;
-      pointer-events: auto;
-    }
-    .legend:not(.closed) + .legendLauncher{
-      opacity: 0;
-      pointer-events: none;
-    }
+    .legendLauncher.hidden{ opacity: 0; pointer-events: none; }
     .legendHeader{
       display:flex;
       align-items:center;
@@ -328,37 +321,67 @@
     /* =========================================================
        Bottom slider + Weather badge
        ========================================================= */
-    .sliderWrap {
+    .bottomControls{
       position: absolute;
       left: 12px;
       right: 12px;
       bottom: calc(8px + env(safe-area-inset-bottom));
       z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      pointer-events: none;
+    }
+
+    .appDock{
+      align-self: flex-start;
+      max-width: min(94vw, 520px);
+      background: rgba(255,255,255,0.78);
+      border: 1px solid rgba(0,0,0,0.10);
+      border-radius: 20px;
+      box-shadow: 0 10px 24px rgba(0,0,0,0.15);
+      padding: 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      backdrop-filter: blur(12px);
+      pointer-events: auto;
+    }
+
+    .dockLaunchers{
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      flex-shrink: 0;
+    }
+
+    .dockMeta{
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      min-width: 0;
+      flex-wrap: wrap;
+    }
+
+    .sliderWrap {
+      pointer-events: auto;
       background: rgba(255,255,255,0.95);
       border: 1px solid rgba(0,0,0,0.09);
-      border-radius: 18px;
-      box-shadow: 0 10px 24px rgba(0,0,0,0.14);
-      padding: 8px 10px;
+      border-radius: 16px;
+      box-shadow: 0 8px 20px rgba(0,0,0,0.14);
+      padding: 8px 10px 9px;
       font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
       backdrop-filter: blur(8px);
     }
 
-    .sliderTopRow{
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:8px;
-      margin-bottom: 5px;
-    }
-
     .timeLabel {
-      font-size: 14px;
+      font-size: 13px;
       font-weight: 950;
       margin: 0;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      max-width: 52vw;
+      max-width: 34vw;
     }
 
     .weatherBadge{
@@ -373,7 +396,7 @@
       font-weight: 900;
       opacity: 0.95;
       white-space: nowrap;
-      max-width: 46vw;
+      max-width: 36vw;
       overflow: hidden;
       text-overflow: ellipsis;
     }
@@ -428,20 +451,20 @@
        Radio controls (phase 3 right drawer)
        ========================================================= */
     .utilityLauncher{
-      position: absolute;
-      top: calc(64px + env(safe-area-inset-top));
-      right: 8px;
+      position: relative;
       z-index: 1001;
       border: none;
-      border-radius: 12px;
-      padding: 10px 11px;
+      border-radius: 14px;
+      width: 44px;
+      height: 44px;
+      padding: 0;
       font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
-      font-size: 12px;
+      font-size: 17px;
       font-weight: 950;
       line-height: 1;
       color: #0b2a3a;
-      background: rgba(255,255,255,0.95);
-      box-shadow: 0 6px 18px rgba(0,0,0,0.16);
+      background: rgba(255,255,255,0.86);
+      box-shadow: 0 6px 16px rgba(0,0,0,0.14);
       border: 1px solid rgba(0,0,0,0.12);
       cursor: pointer;
       -webkit-tap-highlight-color: transparent;
@@ -472,14 +495,7 @@
       opacity: 0;
       pointer-events: none;
     }
-    .utilityDrawer.closed + .utilityLauncher{
-      opacity: 1;
-      pointer-events: auto;
-    }
-    .utilityDrawer:not(.closed) + .utilityLauncher{
-      opacity: 0;
-      pointer-events: none;
-    }
+    .utilityLauncher.hidden{ opacity: 0; pointer-events: none; }
     .utilityHeader{
       display:flex;
       align-items:center;
@@ -551,11 +567,6 @@
       text-align: right;
     }
 
-    .centerBtnInBar{
-      display:flex;
-      margin-top: 6px;
-      justify-content: flex-end;
-    }
     .toggleBtnSmall{
       border:none;
       border-radius: 999px;
@@ -567,15 +578,27 @@
       background: rgba(245,247,249,0.97);
       border: 1px solid rgba(0,0,0,0.12);
       box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+      white-space: nowrap;
     }
     .toggleBtnSmall.on { outline: 2px solid rgba(0,160,255,0.45); }
     .toggleBtnSmall:active { transform: scale(0.98); }
 
     @media (max-width: 430px) {
-      .utilityDrawer,
-      .utilityLauncher{
+      .utilityDrawer{
         top: calc(56px + env(safe-area-inset-top));
       }
+      .bottomControls{
+        left: 10px;
+        right: 10px;
+      }
+      .appDock{
+        max-width: calc(100vw - 20px);
+      }
+      .dockMeta{
+        gap: 6px;
+      }
+      .timeLabel{ max-width: 32vw; font-size: 12px; }
+      .weatherBadge{ max-width: 33vw; }
       .radioRow{
         flex-wrap: wrap;
         align-items:center;
@@ -626,6 +649,27 @@
     .zone-label.z13 .br,
     .zone-label.z14 .br { font-size: 0px; padding: 0; border: 0; }
     .zone-label.z15 .br { font-size: 03px; }
+
+    .borough-label {
+      background: transparent;
+      border: none;
+      box-shadow: none;
+      pointer-events: none;
+    }
+    .borough-label .btxt{
+      display: inline-block;
+      font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
+      font-size: 12px;
+      font-weight: 950;
+      letter-spacing: 0.2px;
+      color: #102331;
+      background: rgba(255,255,255,0.88);
+      border: 1px solid rgba(0,0,0,0.2);
+      border-radius: 999px;
+      padding: 3px 9px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.10);
+      white-space: nowrap;
+    }
 
     /* ---------- You arrow: force on top of EVERYTHING ---------- */
     .leaflet-marker-pane { z-index: 800 !important; }
@@ -934,8 +978,6 @@
       </div>
     </div>
   </div>
-  <button id="legendLauncher" class="legendLauncher" type="button" aria-label="Open demand controls">☰</button>
-
   <div id="utilityDrawer" class="utilityDrawer closed" aria-label="Media and tools" aria-hidden="true">
     <div class="utilityHeader">
       <h3 class="utilityTitle">Media &amp; Tools</h3>
@@ -951,24 +993,27 @@
       </div>
     </div>
   </div>
-  <button id="utilityLauncher" class="utilityLauncher" type="button" aria-label="Open media and tools">♫</button>
-
-  <div class="sliderWrap">
-    <div class="sliderTopRow">
-      <div id="timeLabel" class="timeLabel">Loading…</div>
-      <div id="weatherBadge" class="weatherBadge" title="Local weather">
-        <span class="wxIcon">⛅</span>
-        <span class="wxTxt">Weather…</span>
+  <div class="bottomControls">
+    <div class="appDock" aria-label="Bottom app dock">
+      <div class="dockLaunchers">
+        <button id="legendLauncher" class="legendLauncher" type="button" aria-label="Open demand controls">☰</button>
+        <button id="utilityLauncher" class="utilityLauncher" type="button" aria-label="Open media and tools">♫</button>
+      </div>
+      <div class="dockMeta">
+        <div id="timeLabel" class="timeLabel">Loading…</div>
+        <div id="weatherBadge" class="weatherBadge" title="Local weather">
+          <span class="wxIcon">⛅</span>
+          <span class="wxTxt">Weather…</span>
+        </div>
+        <button id="btnCenter" class="toggleBtnSmall on" type="button">Auto-center: ON</button>
       </div>
     </div>
 
-    <div class="sliderTrackWrap">
-      <div id="sliderBubble" class="sliderBubble">…</div>
-      <input id="slider" type="range" min="0" max="0" value="0" step="1" />
-    </div>
-
-    <div class="centerBtnInBar">
-      <button id="btnCenter" class="toggleBtnSmall on" type="button">Auto-center: ON</button>
+    <div class="sliderWrap">
+      <div class="sliderTrackWrap">
+        <div id="sliderBubble" class="sliderBubble">…</div>
+        <input id="slider" type="range" min="0" max="0" value="0" step="1" />
+      </div>
     </div>
   </div>
 
