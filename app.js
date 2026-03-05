@@ -809,6 +809,7 @@ const map = new maplibregl.Map({
   center: [-74.0060, 40.7128],
   zoom: 8,
 });
+console.log("DEBUG map center lngLat", [-74.0060, 40.7128]);
 map.addControl(new maplibregl.NavigationControl(), "top-right");
 
 const mapContainerEl = document.getElementById("map");
@@ -1258,24 +1259,10 @@ function normalizeFrameResponsePayload(framePayload) {
     throw new Error("Backend /frame returned error payload");
   }
 
-  const hasPolygonsFeatureCollection = isFeatureCollection(payload.polygons);
-  const isDirectFeatureCollection = isFeatureCollection(payload);
-  const hasNestedDataFeatureCollection = isFeatureCollection(payload.data);
-
-  if (hasPolygonsFeatureCollection) {
-    console.log("DEBUG frame shape: using response.polygons");
+  if (isFeatureCollection(payload.polygons)) {
+    console.log("DEBUG frame shape: using wrapper.polygons");
     console.log(`DEBUG frame shape: feature count = ${payload.polygons.features.length}`);
     return payload.polygons;
-  }
-
-  if (isDirectFeatureCollection) {
-    console.log(`DEBUG frame shape: feature count = ${payload.features.length}`);
-    return payload;
-  }
-
-  if (hasNestedDataFeatureCollection) {
-    console.log(`DEBUG frame shape: feature count = ${payload.data.features.length}`);
-    return payload.data;
   }
 
   console.error("Unsupported /frame response shape", payload);
@@ -1420,7 +1407,7 @@ async function renderFrame(frame) {
   currentFrame = frame;
   let renderStage = "normalize frame payload";
 
-  const rawFrameGeoJSON = frame?.rawFrameGeoJSON;
+  const rawFrameGeoJSON = frame?.polygons;
   if (!isFeatureCollection(rawFrameGeoJSON)) {
     console.error("invalid FeatureCollection", { rawFrameGeoJSON, frame });
     const errMessage = "invalid FeatureCollection";
@@ -1468,13 +1455,16 @@ async function renderFrame(frame) {
 async function loadFrame(idx) {
   loadNextFramePickupsMap(idx).catch(() => {});
   const framePayload = await fetchJSON(`${RAILWAY_BASE}/frame/${idx}`);
-  const rawFrameGeoJSON = normalizeFrameResponsePayload(framePayload);
+  const polygons = normalizeFrameResponsePayload(framePayload);
   const frame = {
     ...(framePayload && typeof framePayload === "object" ? framePayload : {}),
     time: framePayload?.time || timeline?.[Number(idx)] || null,
-    polygons: rawFrameGeoJSON,
-    rawFrameGeoJSON,
+    polygons,
   };
+  console.log("DEBUG frame uses wrapper time + polygons", {
+    time: frame.time,
+    featureCount: Array.isArray(frame.polygons?.features) ? frame.polygons.features.length : 0,
+  });
   await renderFrame(frame);
 }
 
@@ -1649,7 +1639,11 @@ function startLocationWatch() {
 
       userLatLng = { lat, lng };
       lastGpsAccuracyM = (typeof accuracy === "number" && Number.isFinite(accuracy)) ? accuracy : null;
-      if (navMarker) navMarker.setLngLat([userLatLng.lng, userLatLng.lat]);
+      if (navMarker) {
+        const selfLngLat = [userLatLng.lng, userLatLng.lat];
+        navMarker.setLngLat(selfLngLat);
+        console.log("DEBUG self marker lngLat", selfLngLat);
+      }
 
       let isMoving = false;
 
@@ -2475,11 +2469,14 @@ function upsertDriverMarker(userId, name, lat, lng, heading, labelSide, labelDx 
     otherMarkers.delete(userId);
   }
 
+  const otherLngLat = [lng, lat];
+  console.log("DEBUG other marker lngLat", { userId, lngLat: otherLngLat });
+
   const mk = new maplibregl.Marker({
     element: makeDriverIconElement(name || `Driver ${userId}`, heading, labelSide, labelDx, labelDy),
     anchor: "center",
   })
-    .setLngLat([lng, lat])
+    .setLngLat(otherLngLat)
     .addTo(map);
 
   otherMarkers.set(userId, mk);
