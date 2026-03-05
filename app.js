@@ -1,9 +1,13 @@
 // BOOT_SIGNATURE: railway-frontend-v1
 /* =========================================================
    NYC TLC Hotspot Map (Frontend) - SIMPLE + STABLE (MapLibre)
-   Restored: Staten Island Mode, Manhattan Mode, Ghost Mode,
-   Self GPS/nav arrow + auto-center, presence, slider, weather, radio.
-   + ADDED NOW: Zone click popup details (MapLibre equivalent of Leaflet bindPopup)
+   ✅ Restored: Staten Island Mode, Manhattan Mode, Ghost Mode,
+      Self GPS/nav arrow + auto-center, presence, slider, weather, radio.
+   ✅ Added back (OLD behavior): Zone click popup details (like Leaflet bindPopup)
+   ✅ Upgraded labels (NEW): Clean professional MapLibre symbol labels
+      - always visible (from zoom >= 10)
+      - centered & non-overlapping-ish via halo + size scaling
+      - computed “inside polygon” label points (no floating outside zones)
    ========================================================= */
 
 const RAILWAY_BASE = "https://web-production-78f67.up.railway.app";
@@ -67,7 +71,7 @@ if (legendEl && legendToggleBtn) {
 }
 
 /* =========================================================
-   Label visibility rules (mobile-friendly)
+   Label visibility rules (kept, but NEW labels are "major map app style")
    ========================================================= */
 const LABEL_ZOOM_MIN = 10;
 const BOROUGH_ZOOM_SHOW = 15;
@@ -202,10 +206,6 @@ function shortenLabel(text, maxChars) {
   if (!t) return "";
   if (t.length <= maxChars) return t;
   return t.slice(0, maxChars - 1) + "…";
-}
-function zoomClass(zoom) {
-  const z = Math.max(10, Math.min(15, Math.round(zoom)));
-  return `z${z}`;
 }
 function escapeHtml(s) {
   return String(s)
@@ -423,15 +423,11 @@ function applyStatenLocalView(frame) {
   const n = sorted.length;
 
   function percentileOfRating(r) {
-    let lo = 0,
-      hi = n - 1,
-      ans = -1;
+    let lo = 0, hi = n - 1, ans = -1;
     while (lo <= hi) {
       const mid = (lo + hi) >> 1;
-      if (sorted[mid] <= r) {
-        ans = mid;
-        lo = mid + 1;
-      } else hi = mid - 1;
+      if (sorted[mid] <= r) { ans = mid; lo = mid + 1; }
+      else hi = mid - 1;
     }
     if (n <= 1) return 0;
     return Math.max(0, Math.min(1, ans / (n - 1)));
@@ -494,15 +490,11 @@ function applyManhattanLocalView(frame) {
   function percentileFromSorted(sorted, v) {
     const n = sorted.length;
     if (n <= 1) return 0;
-    let lo = 0,
-      hi = n - 1,
-      ans = -1;
+    let lo = 0, hi = n - 1, ans = -1;
     while (lo <= hi) {
       const mid = (lo + hi) >> 1;
-      if (sorted[mid] <= v) {
-        ans = mid;
-        lo = mid + 1;
-      } else hi = mid - 1;
+      if (sorted[mid] <= v) { ans = mid; lo = mid + 1; }
+      else hi = mid - 1;
     }
     return Math.max(0, Math.min(1, ans / (n - 1)));
   }
@@ -597,24 +589,6 @@ function effectiveRating(props, geom) {
   return Number(props.rating ?? NaN);
 }
 
-function labelHTML(props, zoom) {
-  const name = (props.zone_name || "").trim();
-  if (!name) return "";
-
-  const b = effectiveBucket(props, null);
-  if (!shouldShowLabel(b, Math.round(zoom))) return "";
-
-  const zoneText = zoom < 13 ? shortenLabel(name, LABEL_MAX_CHARS_MID) : name;
-
-  const borough = (props.borough || "").trim();
-  const showBorough = zoom >= 15 && borough;
-
-  return `
-    <div class="zn">${escapeHtml(zoneText)}</div>
-    ${showBorough ? `<div class="br">${escapeHtml(borough)}</div>` : ""}
-  `;
-}
-
 /* =========================================================
    Map projection helpers (for collisions, etc.)
    ========================================================= */
@@ -653,10 +627,7 @@ function setNavDestination(dest) {
   }
 
   const { lat, lng } = recommendedDest;
-  navBtn.href = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
-    `${lat},${lng}`
-  )}&travelmode=driving`;
-
+  navBtn.href = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${lat},${lng}`)}&travelmode=driving`;
   setNavDisabled(false);
 }
 
@@ -812,9 +783,7 @@ if (dbgReloadFrame) {
 /* =========================================================
    MapLibre init
    ========================================================= */
-const zoneLabelMarkers = new Map();
-let zonePopup = null; // MapLibre popup (zone details)
-let zonesInteractivityInstalled = false;
+let zonePopup = null;
 
 function initMap() {
   map = new maplibregl.Map({
@@ -853,12 +822,7 @@ function initMap() {
     mapReady = true;
     map.resize();
 
-    ensureZonesSourceAndLayers()
-      .then(() => {
-        // Install click/hover handlers once zones layers exist
-        installZonesInteractivity();
-      })
-      .catch((e) => console.warn("zones source/layers init failed:", e));
+    ensureZonesSourceAndLayers().catch((e) => console.warn("zones source/layers init failed:", e));
 
     if (!debugOnce.mapCenter) {
       const c = map.getCenter();
@@ -870,16 +834,16 @@ function initMap() {
     map.on("dragstart", disableAutoCenterBecauseUserIsExploring);
     map.on("zoomstart", disableAutoCenterBecauseUserIsExploring);
 
-    // Re-evaluate labels + presence layout on map changes
+    // Presence refresh on moves to keep label collision offsets stable
     map.on("moveend", () => {
-      refreshZoneLabels();
       if (authHeaderOK()) pullPresenceAll().catch(() => {});
     });
     map.on("zoomend", () => {
-      updateZoneLabelVisibility();
-      refreshZoneLabels();
       if (authHeaderOK()) pullPresenceAll().catch(() => {});
     });
+
+    // Zone click popup (restored)
+    wireZoneClickPopup();
 
     const loading = document.getElementById("mapLoading");
     if (loading) loading.style.display = "none";
@@ -932,10 +896,12 @@ async function ensureZonesSourceAndLayers() {
   const styleReady = await waitForStyleReady();
   if (!styleReady) return false;
 
+  // Polygons source
   if (!map.getSource("zones")) {
     map.addSource("zones", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
   }
 
+  // Fill
   if (!map.getLayer("zones-fill")) {
     map.addLayer({
       id: "zones-fill",
@@ -948,6 +914,7 @@ async function ensureZonesSourceAndLayers() {
     });
   }
 
+  // Outline
   if (!map.getLayer("zones-line")) {
     map.addLayer({
       id: "zones-line",
@@ -957,149 +924,231 @@ async function ensureZonesSourceAndLayers() {
     });
   }
 
+  // Labels source (points INSIDE polygons)
+  if (!map.getSource("zone-labels")) {
+    map.addSource("zone-labels", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+  }
+
+  // Labels layer (clean, professional, fun)
+  if (!map.getLayer("zone-labels")) {
+    map.addLayer({
+      id: "zone-labels",
+      type: "symbol",
+      source: "zone-labels",
+      layout: {
+        "symbol-placement": "point",
+        "text-field": ["coalesce", ["get", "label"], ""],
+        "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
+        "text-size": [
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          10, 10,
+          11, 11,
+          12.5, 12.5,
+          14, 14,
+          15.5, 16
+        ],
+        "text-max-width": 9,
+        "text-anchor": "center",
+        "text-justify": "center",
+        "text-allow-overlap": false,
+        "text-ignore-placement": false,
+        "text-padding": 2,
+      },
+      paint: {
+        "text-color": "#111111",
+        "text-halo-color": "rgba(255,255,255,0.92)",
+        "text-halo-width": 2.2,
+        "text-halo-blur": 0.6,
+      },
+      minzoom: LABEL_ZOOM_MIN,
+    });
+  }
+
   return true;
 }
 
 /* =========================================================
-   Zone CLICK popup details (MapLibre equivalent of Leaflet bindPopup)
+   Zone click popup (restored like Leaflet bindPopup)
    ========================================================= */
 function closeZonePopup() {
-  if (zonePopup) {
-    try {
-      zonePopup.remove();
-    } catch {}
-    zonePopup = null;
-  }
+  try {
+    if (zonePopup) zonePopup.remove();
+  } catch {}
+  zonePopup = null;
 }
 
-function installZonesInteractivity() {
-  if (!map || zonesInteractivityInstalled) return;
-  if (!map.getLayer("zones-fill")) return;
+function wireZoneClickPopup() {
+  if (!map) return;
 
-  zonesInteractivityInstalled = true;
-
+  // cursor UX
   map.on("mouseenter", "zones-fill", () => {
-    try {
-      map.getCanvas().style.cursor = "pointer";
-    } catch {}
+    try { map.getCanvas().style.cursor = "pointer"; } catch {}
   });
-
   map.on("mouseleave", "zones-fill", () => {
-    try {
-      map.getCanvas().style.cursor = "";
-    } catch {}
+    try { map.getCanvas().style.cursor = ""; } catch {}
   });
 
-  map.on("click", "zones-fill", async (e) => {
+  map.on("click", "zones-fill", (e) => {
     try {
       const feat = e?.features?.[0];
       if (!feat) return;
 
-      // Make sure next-bin cache is up-to-date before showing popup numbers
-      const idx = Number(slider?.value || "0");
-      loadNextFramePickupsMap(idx).catch(() => {});
-
       const props = feat.properties || {};
-      const geom = feat.geometry;
+      // MapLibre can stringify nested props; your popup only needs top-level keys used below.
+      const geom = feat.geometry || null;
 
+      const lngLat = e.lngLat;
       const html = buildPopupHTML(props, geom);
 
-      if (!zonePopup) {
-        zonePopup = new maplibregl.Popup({
-          closeButton: true,
-          closeOnClick: false, // allow tapping popup without it disappearing
-          maxWidth: "320px",
-        });
-      }
+      closeZonePopup();
 
-      zonePopup.setLngLat(e.lngLat).setHTML(html).addTo(map);
+      zonePopup = new maplibregl.Popup({
+        closeButton: true,
+        closeOnClick: true,
+        maxWidth: "340px",
+      })
+        .setLngLat([lngLat.lng, lngLat.lat])
+        .setHTML(html)
+        .addTo(map);
     } catch (err) {
-      console.warn("zones click popup failed:", err);
+      console.warn("zone popup failed:", err);
     }
-  });
-
-  // Close popup when clicking outside zones (Leaflet-like feel)
-  map.on("click", (e) => {
-    try {
-      if (!zonePopup) return;
-      const feats = map.queryRenderedFeatures(e.point, { layers: ["zones-fill"] });
-      if (!feats || feats.length === 0) {
-        closeZonePopup();
-      }
-    } catch {}
   });
 }
 
 /* =========================================================
-   Zone labels as MapLibre markers (legacy behavior)
+   Label point computation (inside polygon) — for “major map app” behavior
+   - We DO NOT modify polygon geometry arrays.
+   - We create a separate point FeatureCollection for labels.
    ========================================================= */
-function refreshZoneLabels() {
-  if (!map || !currentFrame) return;
 
-  const active = new Set();
-  const zoomNow = map.getZoom();
-  const zClass = zoomClass(zoomNow);
-
-  for (const feature of currentFrame.polygons?.features || []) {
-    const props = feature?.properties || {};
-    const locId = String(props.LocationID ?? "");
-    if (!locId) continue;
-
-    const html = labelHTML(props, zoomNow);
-    const center = geometryCenter(feature.geometry);
-    active.add(locId);
-
-    let marker = zoneLabelMarkers.get(locId);
-
-    if (!html || !center) {
-      if (marker) {
-        marker.remove();
-        zoneLabelMarkers.delete(locId);
-      }
-      continue;
-    }
-
-    if (!marker) {
-      const el = document.createElement("div");
-      el.className = `zone-label ${zClass}`;
-      el.style.opacity = "0.92";
-      el.innerHTML = html;
-      marker = new maplibregl.Marker({ element: el, anchor: "center", offset: [0, 0] })
-        .setLngLat([center.lng, center.lat])
-        .addTo(map);
-      marker.getElement().style.zIndex = "650";
-      zoneLabelMarkers.set(locId, marker);
-    } else {
-      const el = marker.getElement();
-      el.className = `zone-label ${zClass}`;
-      el.innerHTML = html;
-      marker.setLngLat([center.lng, center.lat]);
-    }
-  }
-
-  for (const [locId, marker] of Array.from(zoneLabelMarkers.entries())) {
-    if (!active.has(locId)) {
-      marker.remove();
-      zoneLabelMarkers.delete(locId);
-    }
-  }
-
-  updateZoneLabelVisibility();
+function clamp(v, lo, hi) {
+  return Math.max(lo, Math.min(hi, v));
 }
 
-function updateZoneLabelVisibility() {
-  if (!map) return;
-  const zoomNow = map.getZoom();
-  const zClass = zoomClass(zoomNow);
+function bboxFromCoords(coords) {
+  let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
+  const visit = (c) => {
+    if (!Array.isArray(c)) return;
+    if (c.length >= 2 && Number.isFinite(c[0]) && Number.isFinite(c[1])) {
+      minLng = Math.min(minLng, c[0]);
+      minLat = Math.min(minLat, c[1]);
+      maxLng = Math.max(maxLng, c[0]);
+      maxLat = Math.max(maxLat, c[1]);
+      return;
+    }
+    for (const cc of c) visit(cc);
+  };
+  visit(coords);
+  if (!Number.isFinite(minLng) || !Number.isFinite(minLat) || !Number.isFinite(maxLng) || !Number.isFinite(maxLat)) return null;
+  return { minLng, minLat, maxLng, maxLat };
+}
 
-  for (const marker of zoneLabelMarkers.values()) {
-    const el = marker.getElement();
-    el.classList.remove("z10", "z11", "z12", "z13", "z14", "z15");
-    el.classList.add(zClass);
-    const show = !!el.querySelector(".zn");
-    el.style.opacity = show ? "0.92" : "0";
-    el.style.display = show ? "block" : "none";
+// ray-casting point in ring
+function pointInRing(ptLng, ptLat, ring) {
+  if (!Array.isArray(ring) || ring.length < 3) return false;
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i][0], yi = ring[i][1];
+    const xj = ring[j][0], yj = ring[j][1];
+    const intersect =
+      ((yi > ptLat) !== (yj > ptLat)) &&
+      (ptLng < ((xj - xi) * (ptLat - yi)) / (yj - yi + 1e-15) + xi);
+    if (intersect) inside = !inside;
   }
+  return inside;
+}
+
+// point in polygon (outer + holes)
+function pointInPolygonLngLat(ptLng, ptLat, polyCoords) {
+  if (!Array.isArray(polyCoords) || polyCoords.length === 0) return false;
+  const outer = polyCoords[0];
+  if (!pointInRing(ptLng, ptLat, outer)) return false;
+
+  // holes: if inside any hole => outside
+  for (let i = 1; i < polyCoords.length; i++) {
+    if (pointInRing(ptLng, ptLat, polyCoords[i])) return false;
+  }
+  return true;
+}
+
+// choose largest polygon in multipolygon by bbox area (cheap & stable)
+function pickLargestPolygonFromMulti(multiCoords) {
+  if (!Array.isArray(multiCoords) || multiCoords.length === 0) return null;
+  let best = null;
+  let bestArea = -Infinity;
+  for (const poly of multiCoords) {
+    const bb = bboxFromCoords(poly);
+    if (!bb) continue;
+    const area = (bb.maxLng - bb.minLng) * (bb.maxLat - bb.minLat);
+    if (area > bestArea) {
+      bestArea = area;
+      best = poly;
+    }
+  }
+  return best;
+}
+
+// Find a point inside polygon. Start at centroid; if outside, spiral search inside bbox.
+function findInteriorPointForGeometry(geom) {
+  if (!geom) return null;
+
+  let poly = null;
+  if (geom.type === "Polygon") poly = geom.coordinates;
+  else if (geom.type === "MultiPolygon") poly = pickLargestPolygonFromMulti(geom.coordinates);
+  else return null;
+
+  if (!poly) return null;
+
+  const bb = bboxFromCoords(poly);
+  if (!bb) return null;
+
+  // seed = centroid (area-weighted)
+  let seed = geometryCenter({ type: "Polygon", coordinates: poly });
+  if (seed && Number.isFinite(seed.lng) && Number.isFinite(seed.lat)) {
+    if (pointInPolygonLngLat(seed.lng, seed.lat, poly)) return seed;
+  }
+
+  // fallback seed = bbox center
+  const cx = (bb.minLng + bb.maxLng) / 2;
+  const cy = (bb.minLat + bb.maxLat) / 2;
+  if (pointInPolygonLngLat(cx, cy, poly)) return { lng: cx, lat: cy };
+
+  // spiral search around bbox center
+  const w = bb.maxLng - bb.minLng;
+  const h = bb.maxLat - bb.minLat;
+
+  // step size scaled by bbox
+  const stepLng = Math.max(w / 40, 1e-4);
+  const stepLat = Math.max(h / 40, 1e-4);
+
+  const maxR = 60; // attempts radius steps
+  for (let r = 1; r <= maxR; r++) {
+    const dx = r * stepLng;
+    const dy = r * stepLat;
+
+    const candidates = [
+      [cx + dx, cy],
+      [cx - dx, cy],
+      [cx, cy + dy],
+      [cx, cy - dy],
+      [cx + dx, cy + dy],
+      [cx - dx, cy + dy],
+      [cx + dx, cy - dy],
+      [cx - dx, cy - dy],
+    ];
+
+    for (const [x, y] of candidates) {
+      const lng = clamp(x, bb.minLng, bb.maxLng);
+      const lat = clamp(y, bb.minLat, bb.maxLat);
+      if (pointInPolygonLngLat(lng, lat, poly)) return { lng, lat };
+    }
+  }
+
+  // last fallback: bbox center even if not perfect (should be rare)
+  return { lng: cx, lat: cy };
 }
 
 /* =========================================================
@@ -1159,9 +1208,7 @@ function buildPopupHTML(props, geom) {
   const nycRating = props.rating ?? "";
   const nycBucket = props.bucket ?? "";
   const pickups = props.pickups ?? "";
-
-  const payNum = Number(props.avg_driver_pay ?? NaN);
-  const pay = Number.isFinite(payNum) ? payNum.toFixed(2) : "n/a";
+  const pay = props.avg_driver_pay == null ? "n/a" : Number(props.avg_driver_pay).toFixed(2);
 
   const nextPuVal = nextFramePickupsById.get(String(props.LocationID ?? ""));
   const nextPickups = nextPuVal == null ? "n/a" : String(Math.round(nextPuVal));
@@ -1172,15 +1219,11 @@ function buildPopupHTML(props, geom) {
   let extra = "";
 
   if (statenIslandMode && isStatenIslandFeature(props) && Number.isFinite(Number(props.si_local_rating))) {
-    extra += `<div style="margin-top:6px;"><b>Staten Local Rating:</b> ${props.si_local_rating} (${prettyBucket(
-      props.si_local_bucket
-    )})</div>`;
+    extra += `<div style="margin-top:6px;"><b>Staten Local Rating:</b> ${props.si_local_rating} (${prettyBucket(props.si_local_bucket)})</div>`;
   }
 
   if (manhattanMode && isCoreManhattan(props, geom) && Number.isFinite(Number(props.mh_local_rating))) {
-    extra += `<div style="margin-top:6px;"><b>Manhattan Adjusted:</b> ${props.mh_local_rating} (${prettyBucket(
-      props.mh_local_bucket
-    )})</div>`;
+    extra += `<div style="margin-top:6px;"><b>Manhattan Adjusted:</b> ${props.mh_local_rating} (${prettyBucket(props.mh_local_bucket)})</div>`;
   }
 
   return `
@@ -1227,6 +1270,54 @@ function getFeatureCollectionBounds(fc) {
   return { minLng, minLat, maxLng, maxLat };
 }
 
+/* =========================================================
+   Label refresh (MapLibre symbol layer)
+   ========================================================= */
+function buildZoneLabelsFeatureCollection(frame) {
+  const feats = frame?.polygons?.features || [];
+  const out = [];
+
+  // “Major map app style”: show labels always (>= LABEL_ZOOM_MIN), but still avoid empty names.
+  for (const f of feats) {
+    const props = f?.properties || {};
+    const name = (props.zone_name || "").trim();
+    if (!name) continue;
+
+    // If you want them truly always visible and not shortened:
+    // const label = name;
+    // If you want cleaner on mid zoom (still professional):
+    const z = map ? Math.round(map.getZoom()) : 12;
+    const label = (z < 13) ? shortenLabel(name, LABEL_MAX_CHARS_MID) : name;
+
+    const pt = findInteriorPointForGeometry(f.geometry);
+    if (!pt) continue;
+
+    out.push({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [pt.lng, pt.lat] },
+      properties: {
+        LocationID: props.LocationID,
+        label,
+      },
+    });
+  }
+
+  return { type: "FeatureCollection", features: out };
+}
+
+function refreshZoneLabels(frame) {
+  if (!map || !mapReady) return;
+  if (!frame) return;
+  const src = map.getSource("zone-labels");
+  if (!src) return;
+
+  const fc = buildZoneLabelsFeatureCollection(frame);
+  src.setData(fc);
+}
+
+/* =========================================================
+   Render frame
+   ========================================================= */
 async function renderFrame(frame) {
   if (!map || !mapReady) {
     pendingFrame = frame;
@@ -1239,9 +1330,6 @@ async function renderFrame(frame) {
     return;
   }
 
-  // Leaflet behavior: when frame changes, any open popup disappears
-  closeZonePopup();
-
   currentFrame = frame;
 
   // apply modes to mutate props (same as old)
@@ -1250,7 +1338,7 @@ async function renderFrame(frame) {
 
   const fc = frame.polygons || { type: "FeatureCollection", features: [] };
 
-  // Always recompute effectiveColor each render so toggles update colors.
+  // IMPORTANT FIX: always recompute effectiveColor each render so toggles update instantly
   for (const f of fc.features) {
     const props = f.properties || {};
     const col = effectiveColor(props, f.geometry) || (props?.style?.fillColor || props?.style?.color) || "#66aaff";
@@ -1264,8 +1352,8 @@ async function renderFrame(frame) {
 
   map.getSource("zones").setData(fc);
 
-  // Make sure click handlers exist after first data render too (safe)
-  installZonesInteractivity();
+  // Labels update (points inside polygons)
+  refreshZoneLabels(frame);
 
   if (debugEnabled) {
     dbg("dbgSetData", `OK features=${fc.features.length}`);
@@ -1278,9 +1366,7 @@ async function renderFrame(frame) {
   }
 
   const bounds = getFeatureCollectionBounds(fc);
-  if (debugEnabled) {
-    dbg("dbgBounds", bounds ? `${bounds.minLng},${bounds.minLat},${bounds.maxLng},${bounds.maxLat}` : "invalid");
-  }
+  if (debugEnabled) dbg("dbgBounds", bounds ? `${bounds.minLng},${bounds.minLat},${bounds.maxLng},${bounds.maxLat}` : "invalid");
 
   if (fc.features.length > 0 && !didFitToZonesOnce && bounds) {
     map.fitBounds(
@@ -1294,11 +1380,13 @@ async function renderFrame(frame) {
   }
   if (debugEnabled) dbg("dbgFit", didFitToZonesOnce);
 
-  timeLabel.textContent = formatNYCLabel(currentFrame.time);
-  refreshZoneLabels();
+  if (timeLabel && currentFrame?.time) timeLabel.textContent = formatNYCLabel(currentFrame.time);
   updateRecommendation(currentFrame);
 }
 
+/* =========================================================
+   Load frame / timeline
+   ========================================================= */
 async function loadFrame(idx) {
   const frameUrl = `${RAILWAY_BASE}/frame/${idx}`;
   loadNextFramePickupsMap(idx).catch(() => {});
@@ -1572,9 +1660,7 @@ async function tickNYCClockAndAdvanceIfNeeded() {
     if (bestIdx === curIdx) return;
 
     slider.value = String(bestIdx);
-
     bubbleUpdateNow();
-
     await loadFrame(bestIdx);
   } catch (e) {
     console.warn("NYC clock tick failed:", e);
@@ -1879,9 +1965,7 @@ function closeHot97Modal() {
   }
   if (radioFrame) radioFrame.src = "about:blank";
 }
-function openHot97Modal() {
-  closeHot97Modal();
-}
+function openHot97Modal() { closeHot97Modal(); }
 
 async function toggleMega() {
   try {
@@ -1928,9 +2012,7 @@ async function toggleHot97() {
   closeHot97Modal();
 
   if (hot97Playing) {
-    try {
-      hot97Audio.pause();
-    } catch {}
+    try { hot97Audio.pause(); } catch {}
     hot97Playing = false;
     setBtnState(btnHot97, false);
     setRadioStatus("Radio: off");
@@ -2018,7 +2100,7 @@ hot97Audio.addEventListener("error", () => {
 });
 
 /* =========================================================
-   COMMUNITY (AUTH + PRESENCE + POLICE + PICKUP) (restored)
+   COMMUNITY (AUTH + PRESENCE + POLICE + PICKUP)
    ========================================================= */
 const lockedOverlay = document.getElementById("lockedOverlay");
 const authEmail = document.getElementById("authEmail");
@@ -2187,9 +2269,7 @@ async function doSignup(email, password, desiredGhostMode) {
 }
 
 function safeEmail() {
-  return authEmail && authEmail.value
-    ? authEmail.value.trim()
-    : (localStorage.getItem(LS_EMAIL) || "").trim();
+  return authEmail && authEmail.value ? authEmail.value.trim() : (localStorage.getItem(LS_EMAIL) || "").trim();
 }
 function safePass() {
   return authPass && authPass.value ? authPass.value : "";
@@ -2282,9 +2362,7 @@ function makeDriverIcon(name, headingDeg, labelSide = "right", labelDx = 0, labe
 
 function clearOtherDrivers() {
   for (const m of otherMarkers.values()) {
-    try {
-      m.remove();
-    } catch {}
+    try { m.remove(); } catch {}
   }
   otherMarkers.clear();
 }
@@ -2304,6 +2382,11 @@ function upsertDriverMarker(userId, name, lat, lng, heading, labelSide, labelDx 
 
   const el = makeDriverIcon(name || `Driver ${userId}`, heading, labelSide, labelDx, labelDy);
   const mk = new maplibregl.Marker({ element: el, anchor: "center" }).setLngLat([lng, lat]).addTo(map);
+
+  if (!debugOnce.otherMarker) {
+    console.log("DEBUG other marker lngLat", { lng, lat });
+    debugOnce.otherMarker = true;
+  }
 
   otherMarkers.set(userId, mk);
 }
@@ -2406,9 +2489,7 @@ async function pullPresenceAll() {
     for (const uid of Array.from(otherMarkers.keys())) {
       if (!seen.has(uid)) {
         const mk = otherMarkers.get(uid);
-        try {
-          mk.remove();
-        } catch {}
+        try { mk.remove(); } catch {}
         otherMarkers.delete(uid);
       }
     }
