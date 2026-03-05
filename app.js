@@ -803,9 +803,10 @@ const baseStyle = {
   layers: [{ id: "basemap", type: "raster", source: "cartoLight" }],
 };
 
+// FIXED: using local baseStyle (Carto Light) instead of broken demotiles
 const map = new maplibregl.Map({
   container: "map",
-  style: "https://demotiles.maplibre.org/style.json",
+  style: baseStyle,
   center: [-74.0060, 40.7128],
   zoom: 8,
 });
