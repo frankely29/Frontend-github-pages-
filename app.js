@@ -834,69 +834,54 @@ let zonePopup = null;
 
 function initMap() {
   map = new maplibregl.Map({
-    container: "map",
-    style: "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json",
+    container: 'map',
+    style: 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json',
     center: [-73.98, 40.73],
     zoom: 10.5,
-    attributionControl: { position: "bottom-right" },
-    localIdeographFontFamily: "sans-serif",
+    attributionControl: { position: 'bottom-right' },
+    localIdeographFontFamily: 'sans-serif'
   });
 
-  map.on("load", () => {
+  map.on('load', () => {
     mapReady = true;
     map.resize();
 
-    // === RELIABLE RASTER BASE MAP (always loads on iOS Safari) ===
-    map.addSource("osm-base", {
-      type: "raster",
-      tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+    // === RELIABLE RASTER BASE (Carto Voyager PNG tiles — always loads on iOS Safari) ===
+    map.addSource('base-raster', {
+      type: 'raster',
+      tiles: [
+        'https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+        'https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+        'https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png'
+      ],
       tileSize: 256,
-      attribution: "&copy; OpenStreetMap contributors",
     });
-
     map.addLayer({
-      id: "osm-base-layer",
-      type: "raster",
-      source: "osm-base",
-      paint: { "raster-opacity": 1 },
+      id: 'base-raster-layer',
+      type: 'raster',
+      source: 'base-raster',
+      paint: { 'raster-opacity': 1 }
     });
 
-    // === ZONES VECTOR LAYERS (colored demand polygons) ===
-    map.addSource("zones", {
-      type: "geojson",
-      data: { type: "FeatureCollection", features: [] },
+    // === ZONES VECTOR (colored demand polygons stay on top) ===
+    map.addSource('zones', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    map.addLayer({ id: 'zones-fill', type: 'fill', source: 'zones',
+      paint: { 'fill-color': ['get', 'displayColor'], 'fill-opacity': 0.82 }
+    });
+    map.addLayer({ id: 'zones-line', type: 'line', source: 'zones',
+      paint: { 'line-color': '#ffffff', 'line-width': 1.5, 'line-opacity': 0.3 }
     });
 
-    map.addLayer({
-      id: "zones-fill",
-      type: "fill",
-      source: "zones",
-      paint: {
-        "fill-color": ["get", "displayColor"],
-        "fill-opacity": 0.82,
-      },
-    });
+    map.on('zoomend', updateZoneLabelVisibility);
 
-    map.addLayer({
-      id: "zones-line",
-      type: "line",
-      source: "zones",
-      paint: {
-        "line-color": "#ffffff",
-        "line-width": 1.5,
-        "line-opacity": 0.3,
-      },
-    });
+    const loading = document.getElementById('mapLoading');
+    if (loading) loading.style.display = 'none';
 
-    map.on("zoomend", updateZoneLabelVisibility);
-
-    const loading = document.getElementById("mapLoading");
-    if (loading) loading.style.display = "none";
-
-    // Extra Safari repaints
+    // Safari repaint chain
     map.triggerRepaint();
     setTimeout(() => map.triggerRepaint(), 150);
     setTimeout(() => map.triggerRepaint(), 400);
+    setTimeout(() => map.triggerRepaint(), 800);
 
     if (pendingFrame) {
       renderFrame(pendingFrame);
@@ -904,9 +889,8 @@ function initMap() {
     }
   });
 
-  map.on("style.load", () => map.triggerRepaint());
-
-  map.on("error", (e) => console.error("MapLibre error:", e));
+  map.on('style.load', () => map.triggerRepaint());
+  map.on('error', e => console.error('MapLibre error:', e));
 }
 let timeline = [];
 let minutesOfWeek = [];
