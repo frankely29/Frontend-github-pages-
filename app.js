@@ -763,6 +763,7 @@ L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
 
 const labelsPane = map.createPane("labelsPane");
 labelsPane.style.zIndex = 450;
+labelsPane.classList.add("zone-labels-pane");
 
 const boroughLabelsPane = map.createPane("boroughLabelsPane");
 boroughLabelsPane.style.zIndex = 460;
@@ -778,8 +779,10 @@ let timeline = [];
 let minutesOfWeek = [];
 let currentFrame = null;
 let lastUserSliderTs = 0;
-let zoneLabelsLayer = L.layerGroup().addTo(map);
 let zoneLabelAnchors = [];
+let zoneLabelsCanvas = null;
+let zoneLabelsCtx = null;
+let zoneLabelsCanvasReady = false;
 let boroughLabelsLayer = L.layerGroup().addTo(map);
 let boroughLabelAnchors = null;
 
@@ -857,11 +860,17 @@ function wrapTextToWidth(text, maxWidth, maxLines, fontPx) {
   return lines;
 }
 
-function fitZoneLabelText(zoneName, maxLabelWidth, maxLabelHeight) {
+function getZoneLabelFontPx(zoom) {
+  if (!Number.isFinite(zoom)) return 10;
+  return clamp(6 + (zoom - 8) * 0.55, 5.5, 14);
+}
+
+function fitZoneLabelTextForZone(zoneName, maxLabelWidth, maxLabelHeight, zoom) {
   const maxWidth = Math.max(20, maxLabelWidth);
   const maxHeight = Math.max(8, maxLabelHeight);
-  const minFont = 3;
-  const maxFont = 22;
+  const zoomFont = getZoneLabelFontPx(zoom);
+  const minFont = clamp(zoomFont - 3, 4, 11);
+  const maxFont = clamp(zoomFont + 2, minFont, 15);
   const lineHeight = 1.03;
 
   const names = [zoneName, abbreviateZoneName(zoneName)];
@@ -869,7 +878,7 @@ function fitZoneLabelText(zoneName, maxLabelWidth, maxLabelHeight) {
 
   for (const name of names) {
     for (let font = maxFont; font >= minFont; font -= 0.5) {
-      for (let maxLines = 1; maxLines <= 4; maxLines++) {
+      for (let maxLines = 1; maxLines <= 3; maxLines++) {
         const lines = wrapTextToWidth(name, maxWidth, maxLines, font);
         if (!lines || !zoneTextMeasureCtx) continue;
 
@@ -1090,9 +1099,47 @@ function buildZoneLabelAnchors(features) {
   return anchors;
 }
 
-function renderZoneLabels() {
-  zoneLabelsLayer.clearLayers();
+function ensureZoneLabelCanvas() {
+  if (zoneLabelsCanvasReady) return;
+  const pane = map.getPane("labelsPane");
+  if (!pane) return;
+
+  zoneLabelsCanvas = document.createElement("canvas");
+  zoneLabelsCanvas.className = "zone-labels-canvas";
+  zoneLabelsCanvas.setAttribute("aria-hidden", "true");
+  pane.appendChild(zoneLabelsCanvas);
+
+  zoneLabelsCtx = zoneLabelsCanvas.getContext("2d");
+  zoneLabelsCanvasReady = !!zoneLabelsCtx;
+}
+
+function resizeZoneLabelCanvas() {
+  ensureZoneLabelCanvas();
+  if (!zoneLabelsCanvas || !zoneLabelsCtx) return;
+
+  const size = map.getSize();
+  const dpr = window.devicePixelRatio || 1;
+  const cssW = Math.max(1, Math.round(size.x));
+  const cssH = Math.max(1, Math.round(size.y));
+  const pixelW = Math.max(1, Math.round(cssW * dpr));
+  const pixelH = Math.max(1, Math.round(cssH * dpr));
+
+  if (zoneLabelsCanvas.width !== pixelW) zoneLabelsCanvas.width = pixelW;
+  if (zoneLabelsCanvas.height !== pixelH) zoneLabelsCanvas.height = pixelH;
+  zoneLabelsCanvas.style.width = `${cssW}px`;
+  zoneLabelsCanvas.style.height = `${cssH}px`;
+  zoneLabelsCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+function drawZoneLabelsCanvas() {
+  resizeZoneLabelCanvas();
+  if (!zoneLabelsCtx || !zoneLabelsCanvas) return;
+
+  const size = map.getSize();
+  zoneLabelsCtx.clearRect(0, 0, size.x, size.y);
   if (!zoneLabelAnchors.length) return;
+
+  const zoom = map.getZoom();
 
   function projectedSizeFromGeometry(geom) {
     let minX = Infinity;
@@ -1130,24 +1177,37 @@ function renderZoneLabels() {
   }
 
   for (const z of zoneLabelAnchors) {
+    const pt = map.latLngToLayerPoint([z.lat, z.lng]);
+    if (!pt) continue;
+    if (pt.x < -60 || pt.x > size.x + 60 || pt.y < -30 || pt.y > size.y + 30) continue;
+
     const projected = projectedSizeFromGeometry(z.geometry);
     const zoneWidth = projected?.width || 60;
     const zoneHeight = projected?.height || 30;
+    const maxLabelWidth = Math.max(20, Math.min(160, zoneWidth * 0.65));
+    const maxLabelHeight = Math.max(10, Math.min(52, zoneHeight * 0.62));
+    const fitted = fitZoneLabelTextForZone(z.zoneName, maxLabelWidth, maxLabelHeight, zoom);
 
-    const maxLabelWidth = Math.max(8, zoneWidth * 0.5);
-    const maxLabelHeight = Math.max(6, zoneHeight * 0.5);
-    const fitted = fitZoneLabelText(z.zoneName, maxLabelWidth, maxLabelHeight);
+    zoneLabelsCtx.save();
+    zoneLabelsCtx.translate(pt.x, pt.y);
+    zoneLabelsCtx.font = `700 ${fitted.fontPx}px system-ui,-apple-system,Segoe UI,Roboto,Arial`;
+    zoneLabelsCtx.textAlign = "center";
+    zoneLabelsCtx.textBaseline = "middle";
+    zoneLabelsCtx.strokeStyle = "rgba(255,255,255,0.82)";
+    zoneLabelsCtx.fillStyle = "rgba(18,35,50,0.90)";
+    zoneLabelsCtx.lineWidth = Math.max(1, fitted.fontPx * 0.18);
+    zoneLabelsCtx.lineJoin = "round";
 
-    const htmlLines = fitted.lines.map((line) => escapeHtml(line)).join("<br>");
+    const lineStep = fitted.fontPx * fitted.lineHeight;
+    const totalHeight = lineStep * fitted.lines.length;
+    let y = -((totalHeight - lineStep) / 2);
 
-    L.marker([z.lat, z.lng], {
-      pane: "labelsPane",
-      interactive: false,
-      icon: L.divIcon({
-        className: "zone-label",
-        html: `<div class="zn-wrap" style="width:${fitted.widthPx.toFixed(1)}px;height:${fitted.heightPx.toFixed(1)}px;"><div class="zn" style="font-size:${fitted.fontPx.toFixed(2)}px;line-height:${fitted.lineHeight.toFixed(2)};width:${fitted.widthPx.toFixed(1)}px;max-width:${fitted.widthPx.toFixed(1)}px;height:${fitted.heightPx.toFixed(1)}px;max-height:${fitted.heightPx.toFixed(1)}px;">${htmlLines}</div></div>`,
-      }),
-    }).addTo(zoneLabelsLayer);
+    for (const line of fitted.lines) {
+      zoneLabelsCtx.strokeText(line, 0, y);
+      zoneLabelsCtx.fillText(line, 0, y);
+      y += lineStep;
+    }
+    zoneLabelsCtx.restore();
   }
 }
 
@@ -1270,7 +1330,7 @@ function renderFrame(frame) {
   }).addTo(map);
 
   zoneLabelAnchors = buildZoneLabelAnchors(features);
-  renderZoneLabels();
+  drawZoneLabelsCanvas();
 
   if (!boroughLabelAnchors) {
     boroughLabelAnchors = buildBoroughLabelAnchors(currentFrame?.polygons?.features || []);
@@ -1307,12 +1367,16 @@ async function loadTimeline() {
 }
 
 map.on("zoomend", () => {
-  renderZoneLabels();
+  drawZoneLabelsCanvas();
   if (authHeaderOK()) pullPresenceAll().catch(() => {});
 });
 
 map.on("moveend viewreset", () => {
-  renderZoneLabels();
+  drawZoneLabelsCanvas();
+});
+
+map.on("zoomanim", () => {
+  drawZoneLabelsCanvas();
 });
 
 let sliderDebounce = null;
@@ -1331,7 +1395,7 @@ slider.addEventListener("input", () => {
 
 window.addEventListener("resize", () => {
   if (timeline.length) setSliderBubbleTextAndPos();
-  renderZoneLabels();
+  drawZoneLabelsCanvas();
 });
 
 /* =========================================================
