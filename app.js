@@ -949,9 +949,45 @@ function enrichFeatureForMap(feature) {
   };
 }
 
+function hasValidGeometry(geometry) {
+  return Boolean(
+    geometry
+    && typeof geometry === "object"
+    && typeof geometry.type === "string"
+    && geometry.coordinates !== undefined,
+  );
+}
+
 function frameToStyledGeoJSON(frame) {
-  const src = frame?.polygons || { type: "FeatureCollection", features: [] };
-  const features = Array.isArray(src.features) ? src.features.map(enrichFeatureForMap) : [];
+  const src = frame?.polygons;
+  if (!src || src.type !== "FeatureCollection" || !Array.isArray(src.features)) {
+    console.error("frameToStyledGeoJSON invalid output: frame polygons must be a GeoJSON FeatureCollection.", frame);
+    return { type: "FeatureCollection", features: [] };
+  }
+
+  const features = src.features
+    .filter((feature) => {
+      if (!hasValidGeometry(feature?.geometry)) {
+        console.error("frameToStyledGeoJSON invalid output: feature missing valid geometry.", feature);
+        return false;
+      }
+      return true;
+    })
+    .map((feature) => {
+      const enriched = enrichFeatureForMap(feature);
+      return {
+        ...enriched,
+        properties: {
+          ...enriched.properties,
+          demand_color: enriched.properties?.demand_color || "#9ecae1",
+          zone_label_name: (enriched.properties?.zone_label_name || "").trim() || `Zone ${enriched.properties?.LocationID ?? ""}`,
+          zone_label_priority: Number.isFinite(Number(enriched.properties?.zone_label_priority))
+            ? Number(enriched.properties.zone_label_priority)
+            : 0,
+        },
+      };
+    });
+
   return { type: "FeatureCollection", features };
 }
 
@@ -972,60 +1008,80 @@ function ensureMapDataLayers() {
   }
 
   if (!map.getSource(ZONE_SOURCE_ID)) {
-    map.addSource(ZONE_SOURCE_ID, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+    try {
+      map.addSource(ZONE_SOURCE_ID, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+    } catch (err) {
+      console.error("layer creation failed: zones source add failed.", err);
+      throw err;
+    }
   }
 
   if (!map.getLayer(ZONE_FILL_LAYER_ID)) {
-    map.addLayer({
-      id: ZONE_FILL_LAYER_ID,
-      type: "fill",
-      source: ZONE_SOURCE_ID,
-      paint: {
-        "fill-color": ["coalesce", ["get", "demand_color"], "#9ecae1"],
-        "fill-opacity": 0.82,
-      },
-    });
+    try {
+      map.addLayer({
+        id: ZONE_FILL_LAYER_ID,
+        type: "fill",
+        source: ZONE_SOURCE_ID,
+        paint: {
+          "fill-color": ["coalesce", ["get", "demand_color"], "#9ecae1"],
+          "fill-opacity": 0.82,
+        },
+      });
+    } catch (err) {
+      console.error("layer creation failed: zones fill layer add failed.", err);
+      throw err;
+    }
   }
 
   if (!map.getLayer(ZONE_LINE_LAYER_ID)) {
-    map.addLayer({
-      id: ZONE_LINE_LAYER_ID,
-      type: "line",
-      source: ZONE_SOURCE_ID,
-      paint: {
-        "line-color": ["coalesce", ["get", "demand_color"], "#7f8c8d"],
-        "line-width": ["interpolate", ["linear"], ["zoom"], 8, 0.35, 14, 1.4],
-        "line-opacity": 0.52,
-      },
-    });
+    try {
+      map.addLayer({
+        id: ZONE_LINE_LAYER_ID,
+        type: "line",
+        source: ZONE_SOURCE_ID,
+        paint: {
+          "line-color": ["coalesce", ["get", "demand_color"], "#7f8c8d"],
+          "line-width": ["interpolate", ["linear"], ["zoom"], 8, 0.35, 14, 1.4],
+          "line-opacity": 0.52,
+        },
+      });
+    } catch (err) {
+      console.error("layer creation failed: zones line layer add failed.", err);
+      throw err;
+    }
   }
 
   if (!map.getLayer(ZONE_LABEL_LAYER_ID)) {
-    map.addLayer({
-      id: ZONE_LABEL_LAYER_ID,
-      type: "symbol",
-      source: ZONE_SOURCE_ID,
-      layout: {
-        "text-field": ["coalesce", ["get", "zone_label_name"], ""],
-        "text-font": ["Noto Sans Bold"],
-        "text-size": ["interpolate", ["linear"], ["zoom"], 9, 9, 11, 10.5, 13.5, 12.5, 15, 14],
-        "text-max-width": 8,
-        "text-letter-spacing": 0.01,
-        "text-variable-anchor": ["center", "top", "bottom", "left", "right"],
-        "text-radial-offset": 0.35,
-        "text-justify": "auto",
-        "text-padding": 2,
-        "text-allow-overlap": false,
-        "symbol-sort-key": ["*", -1, ["coalesce", ["get", "zone_label_priority"], 0]],
-      },
-      paint: {
-        "text-color": "rgba(20,36,52,0.92)",
-        "text-halo-color": "rgba(255,255,255,0.9)",
-        "text-halo-width": 1.2,
-        "text-halo-blur": 0.45,
-      },
-      minzoom: 8.5,
-    });
+    try {
+      map.addLayer({
+        id: ZONE_LABEL_LAYER_ID,
+        type: "symbol",
+        source: ZONE_SOURCE_ID,
+        layout: {
+          "text-field": ["coalesce", ["get", "zone_label_name"], ""],
+          "text-font": ["Noto Sans Bold"],
+          "text-size": ["interpolate", ["linear"], ["zoom"], 9, 9, 11, 10.5, 13.5, 12.5, 15, 14],
+          "text-max-width": 8,
+          "text-letter-spacing": 0.01,
+          "text-variable-anchor": ["center", "top", "bottom", "left", "right"],
+          "text-radial-offset": 0.35,
+          "text-justify": "auto",
+          "text-padding": 2,
+          "text-allow-overlap": false,
+          "symbol-sort-key": ["*", -1, ["coalesce", ["get", "zone_label_priority"], 0]],
+        },
+        paint: {
+          "text-color": "rgba(20,36,52,0.92)",
+          "text-halo-color": "rgba(255,255,255,0.9)",
+          "text-halo-width": 1.2,
+          "text-halo-blur": 0.45,
+        },
+        minzoom: 8.5,
+      });
+    } catch (err) {
+      console.error("layer creation failed: zones label layer add failed.", err);
+      throw err;
+    }
   }
 
   if (!map.getSource(BOROUGH_SOURCE_ID)) {
@@ -1072,22 +1128,75 @@ function ensureMapDataLayers() {
   }
 }
 
+function validateStyledFeatureCollection(styled) {
+  if (!styled || styled.type !== "FeatureCollection") {
+    return "frameToStyledGeoJSON invalid output: not a FeatureCollection";
+  }
+  if (!Array.isArray(styled.features)) {
+    return "frameToStyledGeoJSON invalid output: features is not an array";
+  }
+  for (const feature of styled.features) {
+    if (!hasValidGeometry(feature?.geometry)) {
+      return "frameToStyledGeoJSON invalid output: feature is missing geometry";
+    }
+  }
+  return null;
+}
+
+function getGeoJSONSourceWithRecovery(sourceId, sourceName) {
+  let source = map.getSource(sourceId);
+  if (source && typeof source.setData === "function") return source;
+
+  console.error(`${sourceName} source missing or invalid before setData.`);
+  ensureMapDataLayers();
+
+  source = map.getSource(sourceId);
+  if (!source || typeof source.setData !== "function") {
+    throw new Error(`${sourceName} source missing`);
+  }
+  return source;
+}
+
 function updateMapFrameSources(frame) {
   if (!map || !map.isStyleLoaded()) {
     throw new Error("Map style is not ready for frame rendering.");
   }
 
-  ensureMapDataLayers();
+  try {
+    ensureMapDataLayers();
 
-  const styled = frameToStyledGeoJSON(frame);
-  const zoneSource = map.getSource(ZONE_SOURCE_ID);
-  if (zoneSource) zoneSource.setData(styled);
+    const styled = frameToStyledGeoJSON(frame);
+    const styledValidationError = validateStyledFeatureCollection(styled);
+    if (styledValidationError) {
+      console.error(styledValidationError, { frame, styled });
+      throw new Error(styledValidationError);
+    }
 
-  if (!boroughLabelAnchors) {
-    boroughLabelAnchors = buildBoroughLabelAnchors(styled.features || []);
+    let zoneSource;
+    try {
+      zoneSource = getGeoJSONSourceWithRecovery(ZONE_SOURCE_ID, "zones");
+    } catch (err) {
+      console.error("zones source missing", err);
+      throw err;
+    }
+
+    try {
+      zoneSource.setData(styled);
+    } catch (err) {
+      console.error("setData failed", err);
+      throw err;
+    }
+
+    if (!boroughLabelAnchors) {
+      boroughLabelAnchors = buildBoroughLabelAnchors(styled.features || []);
+    }
+
+    const boroughSource = getGeoJSONSourceWithRecovery(BOROUGH_SOURCE_ID, "borough labels");
+    boroughSource.setData(boroughAnchorsToGeoJSON(boroughLabelAnchors));
+  } catch (err) {
+    console.error("updateMapFrameSources failed", err);
+    throw err;
   }
-  const boroughSource = map.getSource(BOROUGH_SOURCE_ID);
-  if (boroughSource) boroughSource.setData(boroughAnchorsToGeoJSON(boroughLabelAnchors));
 }
 
 /* =========================================================
@@ -1182,6 +1291,7 @@ async function renderFrame(frame) {
   timeLabel.textContent = formatNYCLabel(currentFrame.time);
   try {
     await mapReadyPromise;
+    ensureMapDataLayers();
     updateMapFrameSources(currentFrame);
     if (!renderFrame._firstVisibleRenderDone) {
       renderFrame._firstVisibleRenderDone = true;
