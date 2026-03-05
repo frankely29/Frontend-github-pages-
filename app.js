@@ -764,6 +764,29 @@ const ZONE_LINE_LAYER_ID = "zones-line";
 const ZONE_LABEL_LAYER_ID = "zones-label";
 const BOROUGH_SOURCE_ID = "borough-label-source";
 const BOROUGH_LABEL_LAYER_ID = "borough-label-layer";
+const DEBUG_SOURCE_ID = "debug-hardcoded-source";
+const DEBUG_FILL_LAYER_ID = "debug-hardcoded-fill";
+const DEBUG_LINE_LAYER_ID = "debug-hardcoded-line";
+
+const DEBUG_HARDCODED_POLYGON = {
+  type: "FeatureCollection",
+  features: [
+    {
+      type: "Feature",
+      properties: {},
+      geometry: {
+        type: "Polygon",
+        coordinates: [[
+          [-74.02, 40.70],
+          [-73.98, 40.70],
+          [-73.98, 40.73],
+          [-74.02, 40.73],
+          [-74.02, 40.70],
+        ]],
+      },
+    },
+  ],
+};
 
 const baseStyle = {
   version: 8,
@@ -853,11 +876,13 @@ map.on("load", () => {
   mapLoadSeen = true;
   clearTimeout(mapReadyTimer);
   scheduleMapResizeSequence("map-load");
+  ensureDebugHardcodedPolygon();
   settleMapReadyOk();
 });
 
 map.on("style.load", () => {
   scheduleMapResizeSequence("style-load");
+  ensureDebugHardcodedPolygon();
 });
 
 map.on("error", (e) => {
@@ -1088,6 +1113,45 @@ function validateStyledFeatureCollection(styled) {
     }
   }
   return null;
+}
+
+function ensureDebugHardcodedPolygon() {
+  if (!map || !map.isStyleLoaded()) return;
+
+  if (!map.getSource(DEBUG_SOURCE_ID)) {
+    console.log("DEBUG map: adding hardcoded source");
+    map.addSource(DEBUG_SOURCE_ID, {
+      type: "geojson",
+      data: DEBUG_HARDCODED_POLYGON,
+    });
+    console.log("DEBUG map: hardcoded source added");
+  }
+
+  if (!map.getLayer(DEBUG_FILL_LAYER_ID)) {
+    map.addLayer({
+      id: DEBUG_FILL_LAYER_ID,
+      type: "fill",
+      source: DEBUG_SOURCE_ID,
+      paint: {
+        "fill-color": "#ff00aa",
+        "fill-opacity": 0.35,
+      },
+    });
+    console.log("DEBUG map: hardcoded fill layer added");
+  }
+
+  if (!map.getLayer(DEBUG_LINE_LAYER_ID)) {
+    map.addLayer({
+      id: DEBUG_LINE_LAYER_ID,
+      type: "line",
+      source: DEBUG_SOURCE_ID,
+      paint: {
+        "line-color": "#ffffff",
+        "line-width": 2,
+      },
+    });
+    console.log("DEBUG map: hardcoded line layer added");
+  }
 }
 
 function getGeoJSONSourceWithRecovery(sourceId, sourceName) {
