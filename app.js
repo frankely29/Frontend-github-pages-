@@ -37,11 +37,32 @@ const MANHATTAN_CORE_MAX_LAT = 40.795;
    ========================================================= */
 const legendEl = document.getElementById("legend");
 const legendToggleBtn = document.getElementById("legendToggle");
-if (legendEl && legendToggleBtn) {
+const legendLauncherBtn = document.getElementById("legendLauncher");
+
+function setLegendDrawerOpen(open) {
+  if (!legendEl) return;
+  legendEl.classList.toggle("closed", !open);
+  legendEl.classList.remove("minimized");
+  legendEl.setAttribute("aria-hidden", open ? "false" : "true");
+  if (legendToggleBtn) {
+    legendToggleBtn.textContent = open ? "✕" : "☰";
+    legendToggleBtn.setAttribute("aria-label", open ? "Close drawer" : "Open drawer");
+  }
+}
+
+if (legendEl) {
+  setLegendDrawerOpen(!legendEl.classList.contains("closed"));
+}
+
+if (legendToggleBtn) {
   legendToggleBtn.addEventListener("click", () => {
-    const minimized = legendEl.classList.toggle("minimized");
-    legendToggleBtn.textContent = minimized ? "+" : "–";
+    const open = legendEl ? legendEl.classList.contains("closed") : false;
+    setLegendDrawerOpen(open);
   });
+}
+
+if (legendLauncherBtn) {
+  legendLauncherBtn.addEventListener("click", () => setLegendDrawerOpen(true));
 }
 
 /* =========================================================
