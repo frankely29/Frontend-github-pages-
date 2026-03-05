@@ -337,3 +337,30 @@ When zooming out, some other-driver markers appeared to “move” relative to t
 ├── requirements.txt
 └── Procfile
 ```
+
+## Incident: Railway frontend was not pulling backend polygons (teamjoseo)
+
+### Symptoms
+- GitHub Pages rendered polygons correctly, but Railway teamjoseo did not render polygons.
+- Backend health and data endpoints (`/status`, `/timeline`, `/frame/{idx}`) were responding correctly, so volume/data generation was not the issue.
+
+### Root cause
+- Railway frontend was serving a different JS build (or stale cached JS) than the intended frontend code.
+- The running JS lacked the correct backend base URL wiring, so it was not calling the real backend used for timeline/frame data.
+
+### Fix
+- Ensure `index.html` loads the correct `app.js` as the single source of truth and apply cache-busting on the script URL.
+- Add a temporary debug panel/logging path to verify timeline load, frame load, and `setData` execution.
+- After applying the correct script/build, teamjoseo resumed polygon rendering.
+
+### Regressions introduced
+- Manhattan Mode broke.
+- Staten Island Mode broke.
+- Ghost Mode (auth/profile toggle behavior) broke.
+- Self GPS/nav arrow behavior broke.
+
+### Restoration plan
+- Re-import the known-working feature blocks from `old_app.js` into current `app.js` with minimal diff.
+- Keep current polygon rendering pipeline and backend paths intact.
+- Restore only Manhattan/Staten/Ghost/Self GPS flows and verify they work without breaking teamjoseo polygon rendering.
+
