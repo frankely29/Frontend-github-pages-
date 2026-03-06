@@ -21,11 +21,6 @@ let map; // global MapLibre instance
 let pendingFrame = null;
 let mapReady = false;
 let didFitToZonesOnce = false;
-let backendDownUntil = 0;
-let backendOnline = true;
-let lastBackendCheckMs = 0;
-let backendRetryTimer = null;
-let backendStatusPollTimer = null;
 
 const ROTATE_ENABLED = true;
 const ROTATE_MIN_MPH = 2.0;
@@ -48,61 +43,6 @@ function dbg(id, text) {
   if (el) el.textContent = String(text || "");
 }
 
-function markBackendDown(ms = 15000) {
-  backendDownUntil = Date.now() + ms;
-  if (timeLabel) timeLabel.textContent = "Backend restarting… retrying";
-}
-
-function scheduleBackendRetry(delayMs = 30000) {
-  if (backendRetryTimer) return;
-  backendRetryTimer = setTimeout(() => {
-    backendRetryTimer = null;
-    checkBackend().catch(() => {});
-  }, delayMs);
-}
-
-async function checkBackendNow() {
-  const now = Date.now();
-  if (now - lastBackendCheckMs < 4000) return backendOnline;
-  lastBackendCheckMs = now;
-  try {
-    await fetchJSON(`${RAILWAY_BASE}/status`, { skipBackendOfflineHandling: true });
-    backendOnline = true;
-  } catch {
-    backendOnline = false;
-  }
-  syncBackendUI();
-  return backendOnline;
-}
-
-function startBackendStatusPolling() {
-  if (backendStatusPollTimer) return;
-  backendStatusPollTimer = setInterval(async () => {
-    if (backendOnline) return;
-    try {
-      await fetchJSON(`${RAILWAY_BASE}/status`, { skipBackendOfflineHandling: true });
-      backendOnline = true;
-      syncBackendUI();
-      if (authHeaderOK()) {
-        await loadMe();
-        if (authHeaderOK() && backendOnline) {
-          setAuthUI(true, `Status: signed in as ${me?.display_name || me?.email || "Driver"}`);
-        }
-      }
-      if (chatIsOpen) renderChatPanel();
-    } catch {
-      backendOnline = false;
-      syncBackendUI();
-    }
-  }, 4000);
-}
-
-function stopBackendStatusPolling() {
-  if (!backendStatusPollTimer) return;
-  clearInterval(backendStatusPollTimer);
-  backendStatusPollTimer = null;
-}
-
 /* =========================================================
    COMMUNITY SETTINGS (cheap polling)
    ========================================================= */
@@ -114,41 +54,11 @@ const LS_TOKEN = "community_token_v1";
 const LS_EMAIL = "community_email_v1";
 const LS_DISPLAY_NAME = "community_display_name_v1";
 const CHAT_ROOM = "global";
-const CHAT_POLL_MS = 2500;
-const MAX_VOICE_SECONDS = 10;
-const MAX_VOICE_BYTES = 1_500_000;
+const CHAT_POLL_MS = 1200;
 
 let chatPollTimer = null;
-let chatLastServerId = null;
-let chatSeenServerIds = new Set();
-const optimisticChatById = new Map();
-let isRecording = false;
-let voiceLock = false;
-let mediaStream = null;
-let recorder = null;
-let chunks = [];
-let recordStartTs = 0;
-let voiceMimeType = "";
-let voiceTimerId = null;
-let autoStopTimer = null;
-let voiceIsUploading = false;
-let chatIsOpen = false;
-let chatViewportKeyboardOffset = 0;
-let chatViewportListenerBound = false;
-
-window.__chatOpen = false;
-
-// iOS zoom guards: block pinch + double-tap zoom globally
-document.addEventListener("gesturestart", (e) => e.preventDefault(), { passive: false });
-document.addEventListener("gesturechange", (e) => e.preventDefault(), { passive: false });
-document.addEventListener("gestureend", (e) => e.preventDefault(), { passive: false });
-let lastTouchEnd = 0;
-document.addEventListener("touchend", (e) => {
-  const now = Date.now();
-  if (now - lastTouchEnd <= 300) e.preventDefault();
-  lastTouchEnd = now;
-}, { passive: false });
-
+let chatLastSeen = null;
+let chatSeenKeys = new Set();
 
 /* =========================================================
    MANHATTAN MODE — DEFAULT SETTINGS (SAFE TO EDIT)
@@ -263,32 +173,13 @@ function pickClosestIndex(minutesOfWeekArr, target) {
    Network helper (+ auth support)
    ========================================================= */
 async function fetchJSON(url, opts = {}) {
-  const { skipBackendOfflineHandling = false, ...fetchOpts } = opts;
+  const res = await fetch(url, { cache: "no-store", mode: "cors", ...opts });
+  const text = await res.text();
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText} @ ${url} :: ${text.slice(0, 120)}`);
   try {
-    const res = await fetch(url, { cache: "no-store", mode: "cors", ...fetchOpts });
-    const text = await res.text();
-    if (!res.ok) {
-      backendOnline = true;
-      syncBackendUI();
-      throw new Error(`${res.status} ${res.statusText} @ ${url} :: ${text.slice(0, 120)}`);
-    }
-    try {
-      const data = JSON.parse(text);
-      backendOnline = true;
-      syncBackendUI();
-      return data;
-    } catch {
-      backendOnline = false;
-      syncBackendUI();
-      throw new Error(`Invalid JSON @ ${url} :: ${text.slice(0, 120)}`);
-    }
-  } catch (err) {
-    backendOnline = false;
-    syncBackendUI();
-    if (!skipBackendOfflineHandling) {
-      scheduleBackendRetry(30000);
-    }
-    throw err;
+    return JSON.parse(text);
+  } catch {
+    throw new Error(`Invalid JSON @ ${url} :: ${text.slice(0, 120)}`);
   }
 }
 async function postJSON(path, body, token) {
@@ -304,30 +195,6 @@ async function getJSONAuth(path, token) {
   const headers = {};
   if (token) headers["Authorization"] = `Bearer ${token}`;
   return fetchJSON(`${RAILWAY_BASE}${path}`, { headers });
-}
-
-function isAuthFailure(err) {
-  const msg = String(err?.message || err || "");
-  return msg.startsWith("401 ") || msg.startsWith("403 ");
-}
-
-async function postFormAuth(path, formData, token) {
-  const headers = {};
-  if (token) headers["Authorization"] = `Bearer ${token}`;
-  const res = await fetch(`${RAILWAY_BASE}${path}`, {
-    method: "POST",
-    headers,
-    body: formData,
-    cache: "no-store",
-    mode: "cors",
-  });
-  const text = await res.text();
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText} @ ${path} :: ${text.slice(0, 120)}`);
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text;
-  }
 }
 
 /* =========================================================
@@ -878,26 +745,8 @@ const dockDrawerTitle = document.getElementById("dockDrawerTitle");
 const dockDrawerBody = document.getElementById("dockDrawerBody");
 const dockDrawerClose = document.getElementById("dockDrawerClose");
 const dockBackdrop = document.getElementById("dockBackdrop");
-const chatModal = document.getElementById("chatModal");
-const chatCard = document.getElementById("chatCard");
-const chatMsgs = document.getElementById("chatMsgs");
-const chatInputEl = document.getElementById("chatInput");
-const chatSendEl = document.getElementById("chatSend");
-const chatCloseEl = document.getElementById("chatClose");
-const chatStatusEl = document.getElementById("chatStatus");
-const btnChatOpen = document.getElementById("btnChatOpen");
-const sliderWrapEl = document.getElementById("sliderWrap");
 
 let openPanelKey = null;
-
-function syncBottomUiOffset() {
-  const fallback = 110;
-  const measured = sliderWrapEl?.offsetHeight || fallback;
-  const bottomUi = Math.max(fallback, Math.round(measured));
-  document.documentElement.style.setProperty("--bottom-ui", `${bottomUi}px`);
-  applyChatModalBottomPadding();
-}
-
 
 function syncDrawerPanelPosition() {
   if (!dockDrawer) return;
@@ -910,7 +759,7 @@ function syncDockActiveButton() {
   [dockColors, dockModes, dockChat, dockMusic].forEach((b) => b && b.classList.remove("dockBtnActive"));
   if (openPanelKey === "colors") dockColors?.classList.add("dockBtnActive");
   if (openPanelKey === "modes") dockModes?.classList.add("dockBtnActive");
-  if (openPanelKey === "chat" || chatIsOpen) dockChat?.classList.add("dockBtnActive");
+  if (openPanelKey === "chat") dockChat?.classList.add("dockBtnActive");
   if (openPanelKey === "music") dockMusic?.classList.add("dockBtnActive");
 }
 
@@ -956,7 +805,6 @@ function musicPanelHTML() {
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
         <button id="dockHot97Btn" class="chipBtn">${hot97Playing ? "⏸" : "▶"} HOT 97.1</button>
         <button id="dockMegaBtn" class="chipBtn">${megaPlaying ? "⏸" : "▶"} La Mega 97.9</button>
-        <button id="dockKQ945Btn" class="chipBtn">${kq945Playing ? "⏸" : "▶"} KQ 94.5 (RD)</button>
         <div style="margin-left:auto;font-weight:700;opacity:0.75;">${escapeHtml(radioStatusEl?.textContent || "Radio: off")}</div>
       </div>
     </div>
@@ -966,7 +814,6 @@ function musicPanelHTML() {
 function wireMusicPanel() {
   const a = document.getElementById("dockHot97Btn");
   const b = document.getElementById("dockMegaBtn");
-  const c = document.getElementById("dockKQ945Btn");
   a?.addEventListener("click", async (e) => {
     e.preventDefault();
     await toggleHot97();
@@ -976,12 +823,6 @@ function wireMusicPanel() {
   b?.addEventListener("click", async (e) => {
     e.preventDefault();
     await toggleMega();
-    openDrawer("music", "Music", musicPanelHTML());
-    wireMusicPanel();
-  });
-  c?.addEventListener("click", async (e) => {
-    e.preventDefault();
-    await toggleKQ945();
     openDrawer("music", "Music", musicPanelHTML());
     wireMusicPanel();
   });
@@ -1064,171 +905,37 @@ function wireModesPanel() {
   });
 }
 
-function setChatStatus(text) {
-  if (chatStatusEl) chatStatusEl.textContent = text || "";
-}
-
-function getKeyboardOffsetFromViewport() {
-  if (!window.visualViewport) return 0;
-  const raw = window.innerHeight - window.visualViewport.height - window.visualViewport.offsetTop;
-  return Math.max(0, Math.round(raw));
-}
-
-function applyChatModalBottomPadding() {
-  if (!chatModal) return;
-  const keyboardOffset = chatIsOpen ? chatViewportKeyboardOffset : 0;
-  chatModal.style.paddingBottom = `calc(var(--bottom-ui,120px) + env(safe-area-inset-bottom) + 10px + ${keyboardOffset}px)`;
-}
-
-function onVisualViewportResizeForChat() {
-  chatViewportKeyboardOffset = getKeyboardOffsetFromViewport();
-  applyChatModalBottomPadding();
-}
-
-if (window.visualViewport) {
-  window.visualViewport.addEventListener("resize", () => {
-    if (map) map.resize();
-  });
-}
-
-function bindChatViewportResize() {
-  if (chatViewportListenerBound || !window.visualViewport) return;
-  window.visualViewport.addEventListener("resize", onVisualViewportResizeForChat);
-  chatViewportListenerBound = true;
-}
-
-function setMapInteractionsForChat(disabled) {
-  if (!map) return;
-  if (disabled) {
-    map.dragging?.disable?.();
-    map.dragPan?.disable?.();
-    map.touchZoom?.disable?.();
-    map.doubleClickZoom?.disable?.();
-    map.scrollWheelZoom?.disable?.();
-    map.scrollZoom?.disable?.();
-    map.boxZoom?.disable?.();
-    map.keyboard?.disable?.();
-    map.tap?.disable?.();
-    map.touchZoomRotate?.disable?.();
-    map.touchPitch?.disable?.();
-    map.touchZoomRotate?.disableRotation?.();
-    return;
-  }
-
-  map.dragging?.enable?.();
-  map.dragPan?.enable?.();
-  map.touchZoom?.enable?.();
-  map.doubleClickZoom?.enable?.();
-  map.scrollWheelZoom?.enable?.();
-  map.scrollZoom?.enable?.();
-  map.boxZoom?.enable?.();
-  map.keyboard?.enable?.();
-  map.tap?.enable?.();
-  map.touchZoomRotate?.enable?.();
-  map.touchPitch?.enable?.();
-}
-
-function renderChatPanel() {
-  if (!chatMsgs) return;
-
-  const composer = chatModal?.querySelector(".chatComposer");
-  const setComposerVisible = (visible) => {
-    if (!composer) return;
-    composer.style.display = visible ? "flex" : "none";
-  };
-
-  if (!backendOnline) {
-    setComposerVisible(false);
-    setChatStatus("Backend restarting…");
-    chatMsgs.innerHTML = `
-      <div class="panelNote">
-        <b>Backend restarting…</b><br/>
-        Chat + sign-in are temporarily unavailable.<br/>
-        <button id="btnChatRetry" class="pillBtn" type="button">Retry</button>
-      </div>
-    `;
-    const retryBtn = document.getElementById("btnChatRetry");
-    if (retryBtn) {
-      retryBtn.onclick = async () => {
-        await checkBackendNow();
-        renderChatPanel();
-      };
-    }
-    return;
-  }
-
+function chatPanelHTML() {
   if (!authHeaderOK()) {
-    setComposerVisible(false);
-    setChatStatus("");
-    chatMsgs.innerHTML = `
-      <div class="panelNote">
-        <b>Sign in required</b><br/>
-        Use the <b>Modes</b> panel to sign in / create account.
+    return `
+      <div class="panelBlock chatPanelWrap">
+        <div class="chatSignedOut">Sign in to chat with the community.</div>
       </div>
     `;
-    return;
   }
 
-  setComposerVisible(true);
-  if (!chatMsgs.children.length) {
-    chatMsgs.innerHTML = `<div class="panelNote">Chat coming soon…</div>`;
-  }
-  setChatStatus("");
+  return `
+    <div class="panelBlock chatPanelWrap">
+      <div id="chatList" class="chatList" aria-live="polite"></div>
+      <div class="chatComposer">
+        <input id="chatInput" type="text" class="chatInput" placeholder="Message drivers…" maxlength="600" />
+        <button id="chatSendBtn" class="chipBtn" type="button">Send</button>
+      </div>
+    </div>
+  `;
 }
 
-async function openChatPanel() {
-  await checkBackendNow();
-  openChatModal();
-  renderChatPanel();
+function chatMsgCursor(msg) {
+  return msg?.created_at || msg?.id || null;
 }
 
-function openChatModal() {
-  if (!chatModal) return;
-  window.__chatOpen = true;
-  chatIsOpen = true;
-  chatViewportKeyboardOffset = getKeyboardOffsetFromViewport();
-  applyChatModalBottomPadding();
-  bindChatViewportResize();
-  setMapInteractionsForChat(true);
-
-  chatModal.classList.add("open");
-  chatModal.setAttribute("aria-hidden", "false");
-  renderChatPanel();
-  syncChatPollingState();
-  if (authHeaderOK() && backendOnline) chatPollOnce();
-}
-
-function closeChatModal() {
-  if (!chatModal) return;
-  chatIsOpen = false;
-  window.__chatOpen = false;
-  chatViewportKeyboardOffset = 0;
-  applyChatModalBottomPadding();
-
-  chatModal.classList.remove("open");
-  chatModal.setAttribute("aria-hidden", "true");
-  stopVoiceRecording();
-  setMapInteractionsForChat(false);
-
-  if (chatMsgs) chatMsgs.innerHTML = "";
-  chatLastServerId = null;
-  chatSeenServerIds.clear();
-  optimisticChatById.clear();
-  setChatStatus("");
-
-  syncChatPollingState();
-}
-
-function parseServerChatId(rawId) {
-  if (typeof rawId === "number" && Number.isFinite(rawId)) return rawId;
-  if (typeof rawId === "string" && /^\d+$/.test(rawId.trim())) return Number(rawId.trim());
-  return null;
-}
-
-function updateChatLastServerIdFromMessage(msg) {
-  const id = parseServerChatId(msg?.id);
-  if (id === null) return;
-  chatLastServerId = Math.max(chatLastServerId || 0, id);
+function chatMsgKey(msg) {
+  const id = msg?.id;
+  if (id !== undefined && id !== null) return `id:${id}`;
+  const t = msg?.created_at || "";
+  const n = msg?.display_name || msg?.user_name || msg?.name || "";
+  const body = msg?.text || msg?.message || "";
+  return `fallback:${t}|${n}|${body}`;
 }
 
 function formatChatTime(ts) {
@@ -1243,245 +950,8 @@ function isChatNearBottom(listEl, px = 80) {
   return listEl.scrollHeight - listEl.scrollTop - listEl.clientHeight <= px;
 }
 
-function getVoiceSupport() {
-  return Boolean(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
-}
-
-function getPreferredVoiceMimeType() {
-  const choices = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/aac"];
-  for (const t of choices) {
-    if (window.MediaRecorder?.isTypeSupported?.(t)) return t;
-  }
-  return "";
-}
-
-function voiceFilenameFromMimeType(mimeType) {
-  if (mimeType.includes("webm")) return `voice-${Date.now()}.webm`;
-  if (mimeType.includes("mp4")) return `voice-${Date.now()}.mp4`;
-  if (mimeType.includes("aac")) return `voice-${Date.now()}.aac`;
-  if (mimeType.includes("m4a")) return `voice-${Date.now()}.m4a`;
-  return `voice-${Date.now()}.bin`;
-}
-
-function formatVoiceDuration(sec) {
-  const n = Number(sec);
-  if (!Number.isFinite(n) || n <= 0) return "";
-  return `${n.toFixed(1)}s`;
-}
-
-function setVoiceStatus(text) {
-  const el = document.getElementById("voiceStatus");
-  if (el) el.textContent = text || "";
-}
-
-function setVoiceTimer(seconds) {
-  const el = document.getElementById("voiceTimer");
-  if (el) el.textContent = `${Number(seconds || 0).toFixed(1)}s`;
-}
-
-function setVoiceButtonState(forceDisabled = false) {
-  const btn = document.getElementById("btnVoice");
-  if (!btn) return;
-  btn.disabled = forceDisabled || voiceIsUploading;
-  btn.textContent = isRecording ? "⏹" : "🎤";
-}
-
-function stopVoiceTimers() {
-  if (voiceTimerId) {
-    clearInterval(voiceTimerId);
-    voiceTimerId = null;
-  }
-  if (autoStopTimer) {
-    clearTimeout(autoStopTimer);
-    autoStopTimer = null;
-  }
-}
-
-async function uploadVoiceBlob(blob, mimeType) {
-  const token = localStorage.getItem(LS_TOKEN) || "";
-  if (!token) {
-    setVoiceStatus("Sign in to send voice.");
-    return;
-  }
-
-  const fd = new FormData();
-  fd.append("room", CHAT_ROOM);
-  fd.append("audio", blob, voiceFilenameFromMimeType(mimeType));
-
-  voiceIsUploading = true;
-  setVoiceButtonState();
-  setVoiceStatus("Uploading…");
-  try {
-    const resp = await fetch(`${RAILWAY_BASE}/chat/send_voice`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-      body: fd,
-      cache: "no-store",
-      mode: "cors",
-    });
-    if (!resp.ok) {
-      const text = await resp.text();
-      setVoiceStatus(`Upload failed ${resp.status}: ${text.slice(0, 180)}`);
-      return;
-    }
-
-    setVoiceStatus("Sent ✓");
-    await chatFetchNew().then(renderChatMessages);
-  } catch (e) {
-    console.warn("voice upload failed:", e);
-    setVoiceStatus(`Upload failed: ${String(e?.message || e).slice(0, 120)}`);
-  } finally {
-    voiceIsUploading = false;
-    setVoiceButtonState();
-  }
-}
-
-async function finalizeAndUploadVoice() {
-  const mimeType = recorder?.mimeType || voiceMimeType || "audio/webm";
-  const blob = new Blob(chunks, { type: mimeType });
-  chunks = [];
-  if (!blob.size) {
-    setVoiceStatus("No audio captured");
-    setVoiceTimer(0);
-    return;
-  }
-  if (blob.size > MAX_VOICE_BYTES) {
-    setVoiceStatus("Too large");
-    setVoiceTimer(0);
-    return;
-  }
-
-  setVoiceTimer(0);
-  await uploadVoiceBlob(blob, mimeType);
-}
-
-async function stopVoiceRecording() {
-  if (!isRecording) return;
-  isRecording = false;
-  stopVoiceTimers();
-  setVoiceStatus("Processing…");
-
-  const rec = recorder;
-  recorder = null;
-  if (rec && rec.state !== "inactive") rec.stop();
-
-  const stream = mediaStream;
-  mediaStream = null;
-  if (stream) stream.getTracks().forEach((t) => t.stop());
-  setVoiceButtonState();
-}
-
-async function startVoiceRecording() {
-  const token = localStorage.getItem(LS_TOKEN) || "";
-  if (!token) {
-    alert("Sign in to send voice.");
-    setVoiceStatus("Sign in to send voice.");
-    return;
-  }
-  if (!getVoiceSupport()) {
-    setVoiceStatus("Voice not supported");
-    return;
-  }
-
-  const mimeType = getPreferredVoiceMimeType();
-
-  try {
-    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    chunks = [];
-    voiceMimeType = mimeType || "";
-    recorder = mimeType ? new MediaRecorder(mediaStream, { mimeType }) : new MediaRecorder(mediaStream);
-
-    recorder.ondataavailable = (ev) => {
-      if (ev.data && ev.data.size > 0) chunks.push(ev.data);
-    };
-    recorder.onstop = async () => {
-      await finalizeAndUploadVoice();
-    };
-
-    recorder.start(250);
-    isRecording = true;
-    recordStartTs = Date.now();
-    setVoiceStatus("Recording…");
-    setVoiceTimer(0);
-    voiceTimerId = setInterval(() => {
-      const elapsed = (Date.now() - recordStartTs) / 1000;
-      setVoiceTimer(Math.min(MAX_VOICE_SECONDS, elapsed));
-    }, 100);
-    autoStopTimer = setTimeout(() => {
-      if (isRecording) stopVoiceRecording();
-    }, MAX_VOICE_SECONDS * 1000);
-    setVoiceButtonState();
-  } catch (e) {
-    console.warn("voice start failed:", e);
-    setVoiceStatus("Microphone permission denied or unavailable");
-  }
-}
-
-function chatAppendMessage(message) {
-  if (!message || !chatMsgs) return;
-  const nearBottom = isChatNearBottom(chatMsgs, 80);
-  const row = document.createElement("div");
-  row.className = "chatMsgRow";
-  row.dataset.chatId = String(message.id || `tmp_${Date.now()}`);
-  row.dataset.tmp = "1";
-  row.dataset.text = String(message?.text || message?.message || "").trim();
-  row.dataset.sender = String(message?.display_name || "Driver").trim();
-  row.dataset.createdAt = String(message?.created_at || new Date().toISOString());
-
-  const line = document.createElement("div");
-  line.className = "chatMsgLine";
-  const who = document.createElement("strong");
-  who.className = "chatMsgName";
-  who.textContent = `${row.dataset.sender}: `;
-  const text = document.createElement("span");
-  text.className = "chatMsgText";
-  text.textContent = row.dataset.text;
-  const time = document.createElement("div");
-  time.className = "chatMsgTime";
-  time.textContent = formatChatTime(row.dataset.createdAt);
-
-  line.appendChild(who);
-  line.appendChild(text);
-  row.appendChild(line);
-  row.appendChild(time);
-  chatMsgs.appendChild(row);
-  if (nearBottom) chatMsgs.scrollTop = chatMsgs.scrollHeight;
-}
-
-function removeOptimisticChatMessage(tmpId) {
-  if (!tmpId || !chatMsgs) return;
-  const row = chatMsgs.querySelector(`[data-chat-id="${String(tmpId)}"]`);
-  if (row) row.remove();
-}
-
-function reconcileOptimisticMessages(serverMsg) {
-  if (!serverMsg || !chatMsgs) return;
-  const serverText = String(serverMsg?.text || serverMsg?.message || "").trim();
-  const serverName = String(serverMsg?.display_name || "Driver").trim();
-  if (!serverText || !serverName) return;
-  const serverTs = new Date(serverMsg?.created_at || serverMsg?.ts || serverMsg?.timestamp || Date.now()).getTime();
-  const DEDUPE_WINDOW_MS = 15 * 1000;
-
-  const optimisticNodes = chatMsgs.querySelectorAll('[data-tmp="1"]');
-  for (const node of optimisticNodes) {
-    const optimisticText = String(node.dataset.text || "").trim();
-    const optimisticName = String(node.dataset.sender || "").trim();
-    const optimisticTs = new Date(node.dataset.createdAt || 0).getTime();
-    const textMatch = optimisticText === serverText;
-    const nameMatch = optimisticName === serverName;
-    const withinWindow = Number.isFinite(optimisticTs)
-      ? Math.abs(serverTs - optimisticTs) <= DEDUPE_WINDOW_MS
-      : true;
-    if (textMatch && nameMatch && withinWindow) {
-      node.remove();
-      optimisticChatById.delete(String(node.dataset.chatId || ""));
-      break;
-    }
-  }
-}
-
 function renderChatMessages(messages) {
-  const listEl = chatMsgs;
+  const listEl = document.getElementById("chatList");
   if (!listEl || !Array.isArray(messages) || !messages.length) return;
 
   const nearBottom = isChatNearBottom(listEl, 80);
@@ -1489,68 +959,36 @@ function renderChatMessages(messages) {
   let appended = 0;
 
   for (const msg of messages) {
-    const serverId = parseServerChatId(msg?.id);
-    if (serverId === null) continue;
-    if (!msg?.display_name || msg?.sender_id === undefined || msg?.sender_id === null) {
-      console.warn("chat message missing sender fields", msg);
-      continue;
-    }
-    if (chatSeenServerIds.has(serverId)) continue;
-    chatSeenServerIds.add(serverId);
-    reconcileOptimisticMessages(msg);
+    const key = chatMsgKey(msg);
+    if (chatSeenKeys.has(key)) continue;
+    chatSeenKeys.add(key);
 
     const row = document.createElement("div");
     row.className = "chatMsgRow";
-    row.dataset.chatId = String(serverId);
 
     const line = document.createElement("div");
     line.className = "chatMsgLine";
 
     const who = document.createElement("strong");
     who.className = "chatMsgName";
-    who.textContent = `${msg.display_name}: `;
+    who.textContent = `${msg?.display_name || msg?.user_name || msg?.name || "Driver"}: `;
+
+    const text = document.createElement("span");
+    text.className = "chatMsgText";
+    text.textContent = String(msg?.text || msg?.message || "");
 
     const time = document.createElement("div");
     time.className = "chatMsgTime";
-    const baseTime = formatChatTime(msg?.created_at || msg?.ts || msg?.timestamp);
-    const duration = formatVoiceDuration(msg?.duration_sec || msg?.duration);
-    time.textContent = duration ? `${baseTime} • ${duration}` : baseTime;
-
-    const msgType = String(msg?.type || "text").toLowerCase();
+    time.textContent = formatChatTime(msg?.created_at || msg?.ts || msg?.timestamp);
 
     line.appendChild(who);
-    if (msgType === "voice") {
-      const voiceLabel = document.createElement("span");
-      voiceLabel.textContent = "Voice message";
-      line.appendChild(voiceLabel);
-      row.appendChild(line);
-
-      const audio = document.createElement("audio");
-      audio.controls = true;
-      audio.preload = "none";
-      audio.src = String(msg?.audio_url || "");
-      audio.className = "chatMsgAudio";
-      audio.addEventListener(
-        "error",
-        () => {
-          const expired = document.createElement("div");
-          expired.textContent = "Expired (24h retention).";
-          audio.replaceWith(expired);
-        },
-        { once: true }
-      );
-      row.appendChild(audio);
-    } else {
-      const text = document.createElement("span");
-      text.className = "chatMsgText";
-      text.textContent = String(msg?.text || msg?.message || "");
-      line.appendChild(text);
-      row.appendChild(line);
-    }
+    line.appendChild(text);
+    row.appendChild(line);
     row.appendChild(time);
     frag.appendChild(row);
 
-    updateChatLastServerIdFromMessage(msg);
+    const cursor = chatMsgCursor(msg);
+    if (cursor) chatLastSeen = cursor;
     appended += 1;
   }
 
@@ -1561,56 +999,31 @@ function renderChatMessages(messages) {
 
 async function chatFetchNew() {
   if (!authHeaderOK()) return [];
-  const hasServerCursor = Number.isFinite(chatLastServerId) && chatLastServerId > 0;
-  const q = hasServerCursor
-    ? `?room=${encodeURIComponent(CHAT_ROOM)}&since_id=${encodeURIComponent(chatLastServerId)}&limit=80`
-    : `?room=${encodeURIComponent(CHAT_ROOM)}&limit=80`;
-  const data = await getJSONAuth(`/chat/since${q}`, communityToken);
+  const q = chatLastSeen ? `?after=${encodeURIComponent(chatLastSeen)}&limit=50` : "?limit=50";
+  const data = await getJSONAuth(`/chat/rooms/${CHAT_ROOM}${q}`, communityToken);
   const msgs = Array.isArray(data) ? data : data?.messages || [];
   return msgs;
 }
 
 async function chatSend(text) {
   if (!authHeaderOK()) throw new Error("Not signed in");
-  const token = localStorage.getItem(LS_TOKEN) || communityToken || "";
-  const endpoint = `${RAILWAY_BASE}/chat/send`;
-  console.info("chat send endpoint", endpoint);
-  console.info("chat token present", Boolean(token));
-  const res = await fetch(endpoint, {
-    method: "POST",
-    cache: "no-store",
-    mode: "cors",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({ room: CHAT_ROOM, text }),
-  });
-  if (!res.ok) {
-    const textBody = await res.text();
-    throw new Error(`${res.status} ${res.statusText} @ ${endpoint} :: ${textBody.slice(0, 500)}`);
-  }
-  const textBody = await res.text();
-  try {
-    return JSON.parse(textBody);
-  } catch {
-    return textBody;
-  }
+  const body = { text };
+  const msg = await postJSON(`/chat/rooms/${CHAT_ROOM}`, body, communityToken);
+  return msg;
 }
 
 async function chatPollOnce() {
-  if (!authHeaderOK() || !chatIsOpen) return;
+  if (!authHeaderOK() || openPanelKey !== "chat") return;
   try {
     const msgs = await chatFetchNew();
     renderChatMessages(msgs);
   } catch (e) {
     console.warn("chat poll failed:", e);
-    setChatStatus(`Receive failed: ${String(e?.message || e)}`);
   }
 }
 
 function startChatPolling() {
-  if (chatPollTimer || !authHeaderOK() || !chatIsOpen) return;
+  if (chatPollTimer || !authHeaderOK() || openPanelKey !== "chat") return;
   chatPollOnce();
   chatPollTimer = setInterval(chatPollOnce, CHAT_POLL_MS);
 }
@@ -1622,127 +1035,47 @@ function stopChatPolling() {
 }
 
 function syncChatPollingState() {
-  if (authHeaderOK() && backendOnline && chatIsOpen) startChatPolling();
+  if (authHeaderOK() && openPanelKey === "chat") startChatPolling();
   else stopChatPolling();
 }
 
 function wireChatPanel() {
-  if (!chatInputEl || !chatSendEl) return;
-  if (wireChatPanel._bound) return;
-  wireChatPanel._bound = true;
-
-  const voiceSupported = getVoiceSupport();
-  if (!voiceSupported) {
-    const btnVoice = document.getElementById("btnVoice");
-    if (btnVoice) btnVoice.disabled = true;
-    setVoiceStatus("Voice not supported on this device; use text.");
-  } else {
-    setVoiceStatus("");
-    setVoiceTimer(0);
-  }
-  setVoiceButtonState(!voiceSupported);
+  const chatInput = document.getElementById("chatInput");
+  const chatSendBtn = document.getElementById("chatSendBtn");
+  if (!chatInput || !chatSendBtn) return;
 
   const sendNow = async () => {
-    const text = String(chatInputEl.value || "").trim();
+    const text = String(chatInput.value || "").trim();
     if (!text) return;
 
-    chatSendEl.disabled = true;
-    const optimisticId = `tmp_${Date.now()}`;
-    const myDisplayName = me?.display_name || "Driver";
-    const optimisticMessage = {
-      sender_id: me?.id || "me",
-      display_name: myDisplayName,
-      type: "text",
-      text,
-      created_at: new Date().toISOString(),
-      id: optimisticId,
-    };
-    optimisticChatById.set(optimisticId, optimisticMessage);
-    chatAppendMessage(optimisticMessage);
-
+    chatSendBtn.disabled = true;
     try {
-      await chatSend(text);
-      chatInputEl.value = "";
+      const msg = await chatSend(text);
+      chatInput.value = "";
+      if (msg) {
+        renderChatMessages(Array.isArray(msg) ? msg : [msg]);
+      }
       await chatPollOnce();
     } catch (e) {
       console.warn("chat send failed:", e);
-      removeOptimisticChatMessage(optimisticId);
-      optimisticChatById.delete(optimisticId);
-      const msg = String(e?.message || "Unknown error");
-      if (msg.startsWith("401") || msg.startsWith("403")) setChatStatus(`Send failed: ${msg}`);
-      else setChatStatus(`Send failed: ${msg}`);
     } finally {
-      chatSendEl.disabled = false;
+      chatSendBtn.disabled = false;
     }
   };
 
-  chatSendEl.addEventListener("click", (e) => {
+  chatSendBtn.addEventListener("click", (e) => {
     e.preventDefault();
-    setChatStatus("");
     sendNow();
   });
-  chatInputEl.addEventListener("keydown", (e) => {
+  chatInput.addEventListener("keydown", (e) => {
     if (e.key !== "Enter") return;
     e.preventDefault();
-    setChatStatus("");
     sendNow();
-  });
-
-  const btnVoice = document.getElementById("btnVoice");
-  const releaseVoiceLockSoon = () => {
-    setTimeout(() => {
-      voiceLock = false;
-    }, 250);
-  };
-
-  const handleVoiceStart = async (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!voiceSupported || voiceIsUploading) return;
-    if (voiceLock || isRecording) return;
-    voiceLock = true;
-    await startVoiceRecording();
-    releaseVoiceLockSoon();
-  };
-  const handleVoiceStop = async (e) => {
-    e?.preventDefault?.();
-    e?.stopPropagation?.();
-    if (!voiceSupported || voiceIsUploading) return;
-    if (voiceLock || !isRecording) return;
-    voiceLock = true;
-    await stopVoiceRecording();
-    releaseVoiceLockSoon();
-  };
-
-  if (btnVoice) {
-    if (window.PointerEvent) {
-      btnVoice.addEventListener("pointerdown", handleVoiceStart);
-      btnVoice.addEventListener("pointerup", handleVoiceStop);
-      btnVoice.addEventListener("pointercancel", handleVoiceStop);
-    } else {
-      btnVoice.addEventListener("touchstart", handleVoiceStart, { passive: false });
-      btnVoice.addEventListener("touchend", handleVoiceStop, { passive: false });
-      btnVoice.addEventListener("touchcancel", handleVoiceStop, { passive: false });
-    }
-  }
-
-  chatCloseEl?.addEventListener("click", (e) => {
-    e.preventDefault();
-    closeChatModal();
-  });
-  chatModal?.addEventListener("click", (e) => {
-    if (e.target === chatModal) closeChatModal();
-  });
-
-  ["touchstart", "touchmove", "wheel", "click"].forEach((evt) => {
-    chatCard?.addEventListener(evt, (e) => e.stopPropagation(), { passive: false });
   });
 
   chatPollOnce();
 }
 
-wireChatPanel._bound = false;
-syncBottomUiOffset();
 function colorsPanelHTML() {
   return `
     <div class="panelBlock">
@@ -1775,19 +1108,7 @@ function bindDockToggle(btn, key, title, htmlFactory, wireFn) {
 
 bindDockToggle(dockMusic, "music", "Music", musicPanelHTML, wireMusicPanel);
 bindDockToggle(dockModes, "modes", "Modes", modesPanelHTML, wireModesPanel);
-if (dockChat) {
-  dockChat.addEventListener("pointerdown", (e) => e.stopPropagation());
-  dockChat.addEventListener("click", (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!chatIsOpen) {
-      openChatPanel();
-      wireChatPanel();
-    } else {
-      closeChatModal();
-    }
-  });
-}
+bindDockToggle(dockChat, "chat", "Chat", chatPanelHTML, wireChatPanel);
 bindDockToggle(dockColors, "colors", "Colors", colorsPanelHTML);
 
 /* =========================================================
@@ -1845,7 +1166,6 @@ if (debugToggle && debugPanel) {
 }
 if (dbgReloadFrame) {
   dbgReloadFrame.addEventListener("click", () => {
-    if (Date.now() < backendDownUntil) return;
     const idx = Number(slider?.value || "0");
     loadFrame(idx).catch(console.error);
   });
@@ -2473,16 +1793,9 @@ async function renderFrame(frame) {
    Load frame / timeline
    ========================================================= */
 async function loadFrame(idx) {
-  if (Date.now() < backendDownUntil) return;
   const frameUrl = `${RAILWAY_BASE}/frame/${idx}`;
   loadNextFramePickupsMap(idx).catch(() => {});
-  let frame;
-  try {
-    frame = await fetchJSON(frameUrl);
-  } catch {
-    markBackendDown(15000);
-    return;
-  }
+  const frame = await fetchJSON(frameUrl);
 
   if (debugEnabled) {
     dbg("dbgFrame", `OK ${frameUrl}`);
@@ -2494,18 +1807,8 @@ async function loadFrame(idx) {
 }
 
 async function loadTimeline() {
-  if (Date.now() < backendDownUntil) return;
   const timelineUrl = `${RAILWAY_BASE}/timeline`;
-  let t;
-  try {
-    t = await fetchJSON(timelineUrl);
-  } catch {
-    markBackendDown(15000);
-    setTimeout(() => {
-      if (Date.now() >= backendDownUntil) loadTimeline().catch(() => {});
-    }, 15000);
-    return;
-  }
+  const t = await fetchJSON(timelineUrl);
   timeline = Array.isArray(t) ? t : t.timeline || [];
   if (!timeline.length) throw new Error("Timeline empty. Run /generate once on Railway.");
 
@@ -2536,14 +1839,10 @@ slider?.addEventListener("input", () => {
 
   const idx = Number(slider.value);
   if (sliderDebounce) clearTimeout(sliderDebounce);
-  sliderDebounce = setTimeout(() => {
-    if (Date.now() < backendDownUntil) return;
-    loadFrame(idx).catch(console.error);
-  }, 80);
+  sliderDebounce = setTimeout(() => loadFrame(idx).catch(console.error), 80);
 });
 
 window.addEventListener("resize", () => {
-  syncBottomUiOffset();
   if (timeline.length) setSliderBubbleTextAndPos();
 });
 
@@ -2569,7 +1868,6 @@ function clamp(n, a, b) {
 }
 
 function autoCenterAndAutoZoom() {
-  if (window.__chatOpen) return;
   if (!map || !userLatLng) return;
 
   const now = Date.now();
@@ -2731,7 +2029,6 @@ function shortestAngleDelta(a, b) {
   return d;
 }
 function maybeRotateMapTo(deg) {
-  if (window.__chatOpen) return;
   if (!ROTATE_ENABLED) return;
   if (!map || !mapReady) return;
   if (!autoCenter) return;
@@ -2835,12 +2132,12 @@ function startLocationWatch() {
         maybeRotateMapTo(lastHeadingDeg);
       }
 
-      if (!window.__chatOpen) {
-        if (!gpsFirstFixDone) {
-          gpsFirstFixDone = true;
-          const targetZoom = Math.max(map.getZoom(), 12.5);
-          suppressAutoDisableFor(1200, () => map.flyTo({ center: [lng, lat], zoom: targetZoom, duration: 700 }));
-        } else if (autoCenter && map) {
+      if (!gpsFirstFixDone) {
+        gpsFirstFixDone = true;
+        const targetZoom = Math.max(map.getZoom(), 12.5);
+        suppressAutoDisableFor(1200, () => map.flyTo({ center: [lng, lat], zoom: targetZoom, duration: 700 }));
+      } else {
+        if (autoCenter && map) {
           const c = (navMarker && navMarker.getLngLat) ? navMarker.getLngLat() : { lng, lat };
           suppressAutoDisableFor(700, () => map.flyTo({ center: [c.lng, c.lat], duration: 500 }));
         }
@@ -2877,7 +2174,6 @@ function startLocationWatch() {
    ========================================================= */
 async function refreshCurrentFrame() {
   try {
-    if (Date.now() < backendDownUntil) return;
     const idx = Number(slider.value || "0");
     await loadFrame(idx);
   } catch (e) {
@@ -2888,7 +2184,6 @@ setInterval(refreshCurrentFrame, REFRESH_MS);
 
 async function tickNYCClockAndAdvanceIfNeeded() {
   try {
-    if (Date.now() < backendDownUntil) return;
     if (Date.now() - lastUserSliderTs < USER_SLIDER_GRACE_MS) return;
     if (!timeline.length || !minutesOfWeek.length) return;
 
@@ -2909,7 +2204,6 @@ setInterval(tickNYCClockAndAdvanceIfNeeded, NYC_CLOCK_TICK_MS);
 
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
-    if (Date.now() < backendDownUntil) return;
     refreshCurrentFrame().catch(() => {});
     tickNYCClockAndAdvanceIfNeeded().catch(() => {});
     updateWeatherNow().catch(() => {});
@@ -3178,8 +2472,6 @@ function ensureWxAnimationRunning() {
    ========================================================= */
 const btnHot97 = document.getElementById("btnHot97");
 const btnMega979 = document.getElementById("btnMega979");
-const btnZ100 = document.getElementById("btnZ100");
-const btnKQ945 = document.getElementById("btnKQ945");
 const radioStatusEl = document.getElementById("radioStatus");
 
 const radioModal = document.getElementById("radioModal");
@@ -3189,12 +2481,6 @@ const radioModalTitle = document.getElementById("radioModalTitle");
 
 const HOT97_STREAM_URL = "https://26313.live.streamtheworld.com/WQHTFMAAC.aac";
 const MEGA979_STREAM_URL = "https://liveaudio.lamusica.com/NY_WSKQ_icy";
-
-// Z100 (WHTZ 100.3 NYC) — replace with direct MP3/AAC stream when available
-const Z100_STREAM_URL = "Z100_STREAM_URL";
-
-// KQ 94.5 (RD)
-const KQ945_STREAM_URL = "https://radio.yaservers.com:9990/stream?icy=http";
 
 const megaAudio = new Audio();
 megaAudio.src = MEGA979_STREAM_URL;
@@ -3206,20 +2492,8 @@ hot97Audio.src = HOT97_STREAM_URL;
 hot97Audio.preload = "none";
 hot97Audio.crossOrigin = "anonymous";
 
-const z100Audio = new Audio();
-z100Audio.src = Z100_STREAM_URL;
-z100Audio.preload = "none";
-z100Audio.crossOrigin = "anonymous";
-
-const kq945Audio = new Audio();
-kq945Audio.src = KQ945_STREAM_URL;
-kq945Audio.preload = "none";
-kq945Audio.crossOrigin = "anonymous";
-
 let megaPlaying = false;
 let hot97Playing = false;
-let z100Playing = false;
-let kq945Playing = false;
 
 function setRadioStatus(txt) {
   if (radioStatusEl) radioStatusEl.textContent = txt;
@@ -3227,28 +2501,8 @@ function setRadioStatus(txt) {
 function setBtnState(btn, on) {
   if (!btn) return;
   btn.classList.toggle("on", !!on);
-  const base =
-    btn === btnMega979 ? "La Mega 97.9" :
-    btn === btnHot97 ? "HOT 97.1" :
-    btn === btnKQ945 ? "KQ 94.5 (RD)" :
-    btn === btnZ100 ? "Z100" :
-    "Radio";
+  const base = btn === btnMega979 ? "La Mega 97.9" : "HOT 97.1";
   btn.textContent = (on ? "⏸ " : "▶ ") + base;
-}
-
-function stopAllRadio() {
-  try { megaAudio.pause(); } catch {}
-  try { hot97Audio.pause(); } catch {}
-  try { z100Audio.pause(); } catch {}
-  try { kq945Audio.pause(); } catch {}
-  megaPlaying = false;
-  hot97Playing = false;
-  z100Playing = false;
-  kq945Playing = false;
-  setBtnState(btnMega979, false);
-  setBtnState(btnHot97, false);
-  setBtnState(btnZ100, false);
-  setBtnState(btnKQ945, false);
 }
 
 function closeHot97Modal() {
@@ -3261,26 +2515,28 @@ function closeHot97Modal() {
 function openHot97Modal() { closeHot97Modal(); }
 
 async function toggleMega() {
-  closeHot97Modal();
-
-  if (megaPlaying) {
-    try { megaAudio.pause(); } catch {}
-    megaPlaying = false;
-    setBtnState(btnMega979, false);
-    setRadioStatus("Radio: off");
-    return;
-  }
-
-  stopAllRadio();
+  try {
+    if (hot97Playing) {
+      hot97Audio.pause();
+      hot97Playing = false;
+      setBtnState(btnHot97, false);
+    }
+  } catch {}
 
   try {
-    megaAudio.src = MEGA979_STREAM_URL;
-    megaAudio.volume = 1;
-    const p = megaAudio.play();
-    if (p && typeof p.then === "function") await p;
+    if (megaPlaying) {
+      megaAudio.pause();
+      megaPlaying = false;
+      setBtnState(btnMega979, false);
+      setRadioStatus("Radio: off");
+      return;
+    }
 
+    await megaAudio.play();
     megaPlaying = true;
+
     setBtnState(btnMega979, true);
+    setBtnState(btnHot97, false);
     setRadioStatus("Radio: La Mega 97.9 playing");
   } catch (e) {
     console.warn("La Mega play failed:", e);
@@ -3292,6 +2548,14 @@ async function toggleMega() {
 }
 
 async function toggleHot97() {
+  try {
+    if (megaPlaying) {
+      megaAudio.pause();
+      megaPlaying = false;
+      setBtnState(btnMega979, false);
+    }
+  } catch {}
+
   closeHot97Modal();
 
   if (hot97Playing) {
@@ -3302,8 +2566,6 @@ async function toggleHot97() {
     return;
   }
 
-  stopAllRadio();
-
   try {
     hot97Audio.src = HOT97_STREAM_URL;
     hot97Audio.volume = 1;
@@ -3313,6 +2575,7 @@ async function toggleHot97() {
 
     hot97Playing = true;
     setBtnState(btnHot97, true);
+    setBtnState(btnMega979, false);
     setRadioStatus("Radio: HOT 97.1 playing");
   } catch (e) {
     const errName = e && e.name ? String(e.name) : "";
@@ -3332,68 +2595,6 @@ async function toggleHot97() {
   }
 }
 
-async function toggleZ100() {
-  closeHot97Modal();
-  if (Z100_STREAM_URL === "Z100_STREAM_URL") {
-    alert("Z100 stream URL is not set yet. Replace Z100_STREAM_URL in app.js with the station’s direct MP3/AAC stream.");
-    return;
-  }
-  if (z100Playing) {
-    try { z100Audio.pause(); } catch {}
-    z100Playing = false;
-    setBtnState(btnZ100, false);
-    setRadioStatus("Radio: off");
-    return;
-  }
-  stopAllRadio();
-  try {
-    z100Audio.src = Z100_STREAM_URL;
-    z100Audio.volume = 1;
-    const p = z100Audio.play();
-    if (p && typeof p.then === "function") await p;
-    z100Playing = true;
-    setBtnState(btnZ100, true);
-    setRadioStatus("Radio: Z100 playing");
-  } catch (e) {
-    console.warn("Z100 play failed:", e);
-    z100Playing = false;
-    setBtnState(btnZ100, false);
-    setRadioStatus("Radio: Z100 failed to play");
-    alert("Z100 could not start. If it fails consistently, replace Z100_STREAM_URL with a working public stream.");
-  }
-}
-
-async function toggleKQ945() {
-  closeHot97Modal();
-  if (KQ945_STREAM_URL.includes("PASTE_STREAM_URL_HERE")) {
-    alert("KQ 94.5 stream URL is not set yet. Replace KQ945_STREAM_URL in app.js with the station’s direct MP3/AAC stream.");
-    return;
-  }
-  if (kq945Playing) {
-    try { kq945Audio.pause(); } catch {}
-    kq945Playing = false;
-    setBtnState(btnKQ945, false);
-    setRadioStatus("Radio: off");
-    return;
-  }
-  stopAllRadio();
-  try {
-    kq945Audio.src = KQ945_STREAM_URL;
-    kq945Audio.volume = 1;
-    const p = kq945Audio.play();
-    if (p && typeof p.then === "function") await p;
-    kq945Playing = true;
-    setBtnState(btnKQ945, true);
-    setRadioStatus("Radio: KQ 94.5 playing");
-  } catch (e) {
-    console.warn("KQ 94.5 play failed:", e);
-    kq945Playing = false;
-    setBtnState(btnKQ945, false);
-    setRadioStatus("Radio: KQ 94.5 failed to play");
-    alert("KQ 94.5 could not start. Replace KQ945_STREAM_URL with a working direct MP3/AAC stream.");
-  }
-}
-
 if (btnMega979) {
   btnMega979.addEventListener("pointerdown", (e) => e.stopPropagation());
   btnMega979.addEventListener("click", (e) => {
@@ -3408,22 +2609,6 @@ if (btnHot97) {
     e.preventDefault();
     e.stopPropagation();
     toggleHot97();
-  });
-}
-if (btnZ100) {
-  btnZ100.addEventListener("pointerdown", (e) => e.stopPropagation());
-  btnZ100.addEventListener("click", (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    toggleZ100();
-  });
-}
-if (btnKQ945) {
-  btnKQ945.addEventListener("pointerdown", (e) => e.stopPropagation());
-  btnKQ945.addEventListener("click", (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    toggleKQ945();
   });
 }
 if (radioModalClose) {
@@ -3459,26 +2644,6 @@ hot97Audio.addEventListener("error", () => {
   hot97Playing = false;
   setBtnState(btnHot97, false);
   setRadioStatus("Radio: HOT 97.1 stream error");
-});
-z100Audio.addEventListener("ended", () => {
-  z100Playing = false;
-  setBtnState(btnZ100, false);
-  setRadioStatus("Radio: off");
-});
-z100Audio.addEventListener("error", () => {
-  z100Playing = false;
-  setBtnState(btnZ100, false);
-  setRadioStatus("Radio: Z100 stream error");
-});
-kq945Audio.addEventListener("ended", () => {
-  kq945Playing = false;
-  setBtnState(btnKQ945, false);
-  setRadioStatus("Radio: off");
-});
-kq945Audio.addEventListener("error", () => {
-  kq945Playing = false;
-  setBtnState(btnKQ945, false);
-  setRadioStatus("Radio: KQ 94.5 stream error");
 });
 
 /* =========================================================
@@ -3556,19 +2721,22 @@ function setAuthUI(signedIn, note) {
   if (btnGhostMode) btnGhostMode.classList.toggle("disabled", !signedIn);
 
   if (authStatus) authStatus.textContent = note || (signedIn ? "Status: signed in" : "Status: signed out");
-  syncBackendUI();
   syncGhostUI();
   refreshNavNameLabel();
   syncChatPollingState();
 
+  if (openPanelKey === "chat") {
+    openDrawer("chat", "Chat", chatPanelHTML());
+    wireChatPanel();
+  }
 }
 
 function clearAuth() {
   communityToken = "";
   me = null;
   localStorage.removeItem(LS_TOKEN);
-  chatLastServerId = null;
-  chatSeenServerIds.clear();
+  chatLastSeen = null;
+  chatSeenKeys.clear();
   stopChatPolling();
   setAuthUI(false, "Status: signed out");
   clearOtherDrivers();
@@ -3578,55 +2746,18 @@ function authHeaderOK() {
   return communityToken && communityToken.length > 10;
 }
 
-function syncBackendUI() {
-  const off = !backendOnline;
-  if (off) startBackendStatusPolling();
-  else stopBackendStatusPolling();
-
-  if (btnLogin) {
-    btnLogin.disabled = off;
-    btnLogin.classList.toggle("disabled", off);
-  }
-  if (btnSignup) {
-    btnSignup.disabled = off;
-    btnSignup.classList.toggle("disabled", off);
-  }
-  if (authStatus && off) authStatus.textContent = "Backend restarting… try again in 30s";
-}
-
-function syncAuthButtons() {
-  syncBackendUI();
-}
-
-async function checkBackend() {
-  const ok = await checkBackendNow();
-  if (!ok) scheduleBackendRetry(30000);
-}
-
 async function loadMe() {
   if (!authHeaderOK()) return null;
   try {
     const data = await getJSONAuth("/me", communityToken);
-    me = data
-      ? {
-          ...data,
-          id: data.id,
-          display_name: data.display_name,
-        }
-      : null;
+    me = data || null;
     if (me?.display_name) localStorage.setItem(LS_DISPLAY_NAME, me.display_name);
     syncGhostUI();
     refreshNavNameLabel();
     return me;
   } catch (e) {
     console.warn("/me failed:", e);
-    if (isAuthFailure(e)) {
-      clearAuth();
-      return null;
-    }
-    backendOnline = false;
-    syncBackendUI();
-    setAuthUI(true, "Backend offline — restarting");
+    clearAuth();
     return null;
   }
 }
@@ -3639,8 +2770,6 @@ async function updateMeProfile(updates) {
   if (!authHeaderOK()) return;
   await postJSON("/me/update", updates, communityToken);
   await loadMe();
-  refreshNavNameLabel();
-  pullPresenceAll().catch(() => {});
 }
 
 async function applyPostAuthPreferences({ email, forceGhostSync, desiredGhostMode }) {
@@ -3696,8 +2825,7 @@ async function doSignup(email, password, desiredGhostMode) {
 }
 
 function safeEmail() {
-  const raw = authEmail && authEmail.value ? authEmail.value : (localStorage.getItem(LS_EMAIL) || "");
-  return raw.trim().toLowerCase();
+  return authEmail && authEmail.value ? authEmail.value.trim() : (localStorage.getItem(LS_EMAIL) || "").trim();
 }
 function safePass() {
   return authPass && authPass.value ? authPass.value : "";
@@ -3734,16 +2862,6 @@ if (btnSignup) {
     }
   });
 }
-
-btnChatOpen?.addEventListener("click", (e) => {
-  e.preventDefault();
-  if (!chatIsOpen) {
-    openChatModal();
-    wireChatPanel();
-  } else {
-    closeChatModal();
-  }
-});
 
 if (btnAuth) {
   btnAuth.addEventListener("pointerdown", (e) => e.stopPropagation());
@@ -3841,7 +2959,7 @@ async function pullPresenceAll() {
     const visibleDrivers = [];
 
     for (const it of items) {
-      const uid = String(it.user_id ?? "");
+      const uid = String(it.user_id ?? it.userId ?? it.id ?? "");
       if (!uid) continue;
 
       if (me && String(me.id) === uid) continue;
@@ -3855,7 +2973,7 @@ async function pullPresenceAll() {
         if (now - updated > PRESENCE_STALE_SEC) continue;
       }
 
-      const name = it.display_name || it.email || "Driver";
+      const name = it.display_name || it.name || it.email || "Driver";
       const heading = Number(it.heading ?? it.bearing ?? NaN);
       visibleDrivers.push({ uid, name, heading, lat, lng });
       seen.add(uid);
@@ -4061,10 +3179,6 @@ setInterval(() => {
   pullPresenceAll().catch(() => {});
 }, PRESENCE_PULL_MS);
 
-setInterval(() => {
-  checkBackend().catch(() => {});
-}, 15000);
-
 /* =========================================================
    Boot
    ========================================================= */
@@ -4089,20 +3203,14 @@ setNavDestination(null);
   }, 7000);
 
   initMap();
-  checkBackend().catch(() => {});
-  if (Date.now() < backendDownUntil) return;
   await loadTimeline();
 
   if (authHeaderOK()) {
     setAuthUI(true, "Checking session…");
     await loadMe();
     if (authHeaderOK()) {
-      if (backendOnline) {
-        setAuthUI(true, `Status: signed in as ${me?.display_name || me?.email || "Driver"}`);
-        pullPresenceAll().catch(() => {});
-      } else {
-        setAuthUI(true, "Backend offline — restarting");
-      }
+      setAuthUI(true, `Status: signed in as ${me?.display_name || me?.email || "Driver"}`);
+      pullPresenceAll().catch(() => {});
     } else {
       setAuthUI(false, "Status: signed out");
     }
