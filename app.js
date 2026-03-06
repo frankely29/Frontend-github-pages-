@@ -27,6 +27,8 @@ const ROTATE_MIN_MPH = 2.0;
 const ROTATE_MIN_DELTA_DEG = 3;
 const ROTATE_RATE_LIMIT_MS = 200;
 const ROTATE_ANIM_MS = 250;
+const GPS_ACCURACY_THRESHOLD = 50;
+const MAX_JUMP_MILES = 2.0;
 let lastMapBearingDeg = 0;
 let lastRotateTs = 0;
 
@@ -1964,7 +1966,6 @@ if (btnCenter) {
           });
         });
       }
-      if (Number.isFinite(lastHeadingDeg)) maybeRotateMapTo(lastHeadingDeg);
     } else if (map && mapReady) {
       const b = map.getBearing ? map.getBearing() : 0;
       lastMapBearingDeg = normDeg(b);
@@ -2111,13 +2112,16 @@ function startLocationWatch() {
         const dMi = haversineMiles({ lat: lastPos.lat, lng: lastPos.lng }, userLatLng);
         const dtSec = Math.max(1, (ts - lastPos.ts) / 1000);
         const mph = (dMi / dtSec) * 3600;
+        const hasGoodAccuracy = Number.isFinite(accuracy) && accuracy < GPS_ACCURACY_THRESHOLD;
 
-        isMoving = mph >= ROTATE_MIN_MPH;
+        isMoving = mph >= ROTATE_MIN_MPH && hasGoodAccuracy;
 
-        if (typeof heading === "number" && Number.isFinite(heading)) {
-          lastHeadingDeg = heading;
-        } else if (dMi > 0.01) {
-          lastHeadingDeg = computeBearingDeg({ lat: lastPos.lat, lng: lastPos.lng }, userLatLng);
+        if (isMoving) {
+          if (typeof heading === "number" && Number.isFinite(heading)) {
+            lastHeadingDeg = heading;
+          } else if (dMi > 0.01) {
+            lastHeadingDeg = computeBearingDeg({ lat: lastPos.lat, lng: lastPos.lng }, userLatLng);
+          }
         }
 
         if (isMoving) lastMoveTs = ts;
@@ -3055,9 +3059,16 @@ async function pullPresenceAll() {
 }
 
 let lastPresencePushMs = 0;
+let lastPresenceSentLatLng = null;
 async function communityMaybePushPresence(tsMsOrUnix, heading, accuracy) {
   if (!authHeaderOK()) return;
   if (!userLatLng) return;
+  if (Number.isFinite(accuracy) && accuracy > GPS_ACCURACY_THRESHOLD) return;
+
+  if (lastPresenceSentLatLng) {
+    const jumpMi = haversineMiles(lastPresenceSentLatLng, userLatLng);
+    if (jumpMi > MAX_JUMP_MILES) return;
+  }
 
   const nowMs = Date.now();
   if (nowMs - lastPresencePushMs < PRESENCE_PUSH_MS) return;
@@ -3076,6 +3087,7 @@ async function communityMaybePushPresence(tsMsOrUnix, heading, accuracy) {
       },
       communityToken
     );
+    lastPresenceSentLatLng = { lat: userLatLng.lat, lng: userLatLng.lng };
   } catch (e) {
     console.warn("presence/update failed:", e);
   }
