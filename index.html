@@ -978,41 +978,41 @@ input[type="range"] { width: 100%; height: 6px; margin: 0; border-radius: 999px;
 
 /* =========================================================
    LOCK DOCK ICON COLORS (do NOT dim/recolor in night mode)
+   Keep this below night-mode rules so it wins the cascade.
    ========================================================= */
 body.night #dock,
-body.night .dock,
-body.night .dockBar,
-body.night #dock .dockBtn,
-body.night .dock .dockBtn,
-body.night .dockIcon,
-body.night #btnMusic,
-body.night #btnModes,
-body.night #btnChat,
-body.night #btnColors {
+body.night #dock * {
   filter: none !important;
   opacity: 1 !important;
   mix-blend-mode: normal !important;
   -webkit-filter: none !important;
 }
 
-/* If your “night mode” uses filter on a parent container,
-   force the dock out of that filter by re-layering it. */
-body.night #dock,
-body.night .dock,
-body.night .dockBar {
-  position: fixed !important;
-  z-index: 99999 !important;
-}
-
-/* Keep the MUSIC icon RED even in dark mode */
-body.night #btnMusic {
-  background: #d94b4b !important;   /* your red */
-  color: #ffffff !important;
-}
-
-/* Optional: if your icons are inside a translucent panel that darkens */
+/* Keep dock bubbles readable at night without gray tinting */
 body.night #dock .dockBtn {
-  background: rgba(255,255,255,0.88) !important;
+  background: rgba(255,255,255,0.82) !important;
+  color: #111 !important;
+}
+
+/* Keep the music dock icon red in both day + night */
+#dockMusic.dockBtnMusic,
+body.night #dockMusic.dockBtnMusic {
+  background: #e14b4b !important;
+  color: #fff !important;
+}
+
+#dockMusic .dockIcon,
+body.night #dockMusic .dockIcon {
+  color: #fff !important;
+  fill: #fff !important;
+  filter: none !important;
+  opacity: 1 !important;
+}
+
+/* Ensure dock sits above dim overlays, while map can still be dimmed */
+body.night #dock {
+  position: fixed !important;
+  z-index: 5000 !important;
 }
   </style>
 </head>
