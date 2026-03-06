@@ -53,6 +53,12 @@ const PRESENCE_STALE_SEC = 70; // hide if older than this
 const LS_TOKEN = "community_token_v1";
 const LS_EMAIL = "community_email_v1";
 const LS_DISPLAY_NAME = "community_display_name_v1";
+const CHAT_ROOM = "global";
+const CHAT_POLL_MS = 1200;
+
+let chatPollTimer = null;
+let chatLastSeen = null;
+let chatSeenKeys = new Set();
 
 /* =========================================================
    MANHATTAN MODE — DEFAULT SETTINGS (SAFE TO EDIT)
@@ -767,6 +773,7 @@ function openDrawer(key, title, html) {
   dockBackdrop?.setAttribute("aria-hidden", "false");
   syncDrawerPanelPosition();
   syncDockActiveButton();
+  syncChatPollingState();
 }
 
 function closeDrawer() {
@@ -777,6 +784,7 @@ function closeDrawer() {
   dockBackdrop?.setAttribute("aria-hidden", "true");
   syncDrawerPanelPosition();
   syncDockActiveButton();
+  syncChatPollingState();
 }
 
 function toggleDrawer(key, title, html) {
@@ -898,7 +906,174 @@ function wireModesPanel() {
 }
 
 function chatPanelHTML() {
-  return `<div class="panelBlock">Coming soon…</div>`;
+  if (!authHeaderOK()) {
+    return `
+      <div class="panelBlock chatPanelWrap">
+        <div class="chatSignedOut">Sign in to chat with the community.</div>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="panelBlock chatPanelWrap">
+      <div id="chatList" class="chatList" aria-live="polite"></div>
+      <div class="chatComposer">
+        <input id="chatInput" type="text" class="chatInput" placeholder="Message drivers…" maxlength="600" />
+        <button id="chatSendBtn" class="chipBtn" type="button">Send</button>
+      </div>
+    </div>
+  `;
+}
+
+function chatMsgCursor(msg) {
+  return msg?.created_at || msg?.id || null;
+}
+
+function chatMsgKey(msg) {
+  const id = msg?.id;
+  if (id !== undefined && id !== null) return `id:${id}`;
+  const t = msg?.created_at || "";
+  const n = msg?.display_name || msg?.user_name || msg?.name || "";
+  const body = msg?.text || msg?.message || "";
+  return `fallback:${t}|${n}|${body}`;
+}
+
+function formatChatTime(ts) {
+  if (!ts) return "";
+  const d = new Date(ts);
+  if (!Number.isFinite(d.getTime())) return "";
+  return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
+function isChatNearBottom(listEl, px = 80) {
+  if (!listEl) return true;
+  return listEl.scrollHeight - listEl.scrollTop - listEl.clientHeight <= px;
+}
+
+function renderChatMessages(messages) {
+  const listEl = document.getElementById("chatList");
+  if (!listEl || !Array.isArray(messages) || !messages.length) return;
+
+  const nearBottom = isChatNearBottom(listEl, 80);
+  const frag = document.createDocumentFragment();
+  let appended = 0;
+
+  for (const msg of messages) {
+    const key = chatMsgKey(msg);
+    if (chatSeenKeys.has(key)) continue;
+    chatSeenKeys.add(key);
+
+    const row = document.createElement("div");
+    row.className = "chatMsgRow";
+
+    const line = document.createElement("div");
+    line.className = "chatMsgLine";
+
+    const who = document.createElement("strong");
+    who.className = "chatMsgName";
+    who.textContent = `${msg?.display_name || msg?.user_name || msg?.name || "Driver"}: `;
+
+    const text = document.createElement("span");
+    text.className = "chatMsgText";
+    text.textContent = String(msg?.text || msg?.message || "");
+
+    const time = document.createElement("div");
+    time.className = "chatMsgTime";
+    time.textContent = formatChatTime(msg?.created_at || msg?.ts || msg?.timestamp);
+
+    line.appendChild(who);
+    line.appendChild(text);
+    row.appendChild(line);
+    row.appendChild(time);
+    frag.appendChild(row);
+
+    const cursor = chatMsgCursor(msg);
+    if (cursor) chatLastSeen = cursor;
+    appended += 1;
+  }
+
+  if (!appended) return;
+  listEl.appendChild(frag);
+  if (nearBottom) listEl.scrollTop = listEl.scrollHeight;
+}
+
+async function chatFetchNew() {
+  if (!authHeaderOK()) return [];
+  const q = chatLastSeen ? `?after=${encodeURIComponent(chatLastSeen)}&limit=50` : "?limit=50";
+  const data = await getJSONAuth(`/chat/rooms/${CHAT_ROOM}${q}`, communityToken);
+  const msgs = Array.isArray(data) ? data : data?.messages || [];
+  return msgs;
+}
+
+async function chatSend(text) {
+  if (!authHeaderOK()) throw new Error("Not signed in");
+  const body = { text };
+  const msg = await postJSON(`/chat/rooms/${CHAT_ROOM}`, body, communityToken);
+  return msg;
+}
+
+async function chatPollOnce() {
+  if (!authHeaderOK() || openPanelKey !== "chat") return;
+  try {
+    const msgs = await chatFetchNew();
+    renderChatMessages(msgs);
+  } catch (e) {
+    console.warn("chat poll failed:", e);
+  }
+}
+
+function startChatPolling() {
+  if (chatPollTimer || !authHeaderOK() || openPanelKey !== "chat") return;
+  chatPollOnce();
+  chatPollTimer = setInterval(chatPollOnce, CHAT_POLL_MS);
+}
+
+function stopChatPolling() {
+  if (!chatPollTimer) return;
+  clearInterval(chatPollTimer);
+  chatPollTimer = null;
+}
+
+function syncChatPollingState() {
+  if (authHeaderOK() && openPanelKey === "chat") startChatPolling();
+  else stopChatPolling();
+}
+
+function wireChatPanel() {
+  const chatInput = document.getElementById("chatInput");
+  const chatSendBtn = document.getElementById("chatSendBtn");
+  if (!chatInput || !chatSendBtn) return;
+
+  const sendNow = async () => {
+    const text = String(chatInput.value || "").trim();
+    if (!text) return;
+
+    chatSendBtn.disabled = true;
+    try {
+      const msg = await chatSend(text);
+      chatInput.value = "";
+      if (msg) {
+        renderChatMessages(Array.isArray(msg) ? msg : [msg]);
+      }
+      await chatPollOnce();
+    } catch (e) {
+      console.warn("chat send failed:", e);
+    } finally {
+      chatSendBtn.disabled = false;
+    }
+  };
+
+  chatSendBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    sendNow();
+  });
+  chatInput.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    sendNow();
+  });
+
+  chatPollOnce();
 }
 
 function colorsPanelHTML() {
@@ -933,7 +1108,7 @@ function bindDockToggle(btn, key, title, htmlFactory, wireFn) {
 
 bindDockToggle(dockMusic, "music", "Music", musicPanelHTML, wireMusicPanel);
 bindDockToggle(dockModes, "modes", "Modes", modesPanelHTML, wireModesPanel);
-bindDockToggle(dockChat, "chat", "Chat", chatPanelHTML);
+bindDockToggle(dockChat, "chat", "Chat", chatPanelHTML, wireChatPanel);
 bindDockToggle(dockColors, "colors", "Colors", colorsPanelHTML);
 
 /* =========================================================
@@ -2548,12 +2723,21 @@ function setAuthUI(signedIn, note) {
   if (authStatus) authStatus.textContent = note || (signedIn ? "Status: signed in" : "Status: signed out");
   syncGhostUI();
   refreshNavNameLabel();
+  syncChatPollingState();
+
+  if (openPanelKey === "chat") {
+    openDrawer("chat", "Chat", chatPanelHTML());
+    wireChatPanel();
+  }
 }
 
 function clearAuth() {
   communityToken = "";
   me = null;
   localStorage.removeItem(LS_TOKEN);
+  chatLastSeen = null;
+  chatSeenKeys.clear();
+  stopChatPolling();
   setAuthUI(false, "Status: signed out");
   clearOtherDrivers();
 }

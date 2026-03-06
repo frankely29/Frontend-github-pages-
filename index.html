@@ -701,6 +701,54 @@ input[type="range"] { width: 100%; height: 6px; margin: 0; border-radius: 999px;
     }
     .chipBtn.disabled{ opacity: 0.45; pointer-events: none; }
 
+    .chatPanelWrap{
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      min-height: 190px;
+    }
+    .chatSignedOut{
+      font-weight: 700;
+      opacity: 0.8;
+      padding: 6px 2px;
+    }
+    .chatList{
+      flex: 1;
+      min-height: 130px;
+      max-height: 190px;
+      overflow: auto;
+      padding: 6px;
+      border-radius: 10px;
+      border: 1px solid rgba(0,0,0,0.08);
+      background: rgba(255,255,255,0.45);
+    }
+    .chatMsgRow + .chatMsgRow{ margin-top: 8px; }
+    .chatMsgLine{
+      font-size: 13px;
+      line-height: 1.28;
+      word-break: break-word;
+    }
+    .chatMsgName{ font-weight: 800; }
+    .chatMsgTime{
+      margin-top: 2px;
+      font-size: 11px;
+      opacity: 0.7;
+    }
+    .chatComposer{
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .chatInput{
+      flex: 1;
+      border: 1px solid rgba(0,0,0,0.18);
+      border-radius: 999px;
+      padding: 8px 12px;
+      background: rgba(255,255,255,0.95);
+      color: #111;
+      font: 500 13px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial;
+    }
+
     /* ---------- You arrow: force on top of EVERYTHING ---------- */
     .maplibregl-marker { z-index: 800; }
 
@@ -1023,7 +1071,7 @@ body.night #dock {
   transform: translateX(-50%) translateY(18px);
   bottom: calc(env(safe-area-inset-bottom, 0px) + 110px);
   width: min(92vw, 520px);
-  max-height: 38vh;
+  max-height: 30vh;
   border-radius: 18px;
   overflow: hidden;
   z-index: 6000;
@@ -1118,7 +1166,7 @@ body.night #dock {
 
   <div id="panelChat" class="sidePanel" aria-label="Chat panel">
     <h3 class="panelTitle">Chat</h3>
-    <div class="panelBody">Coming soon…</div>
+    <div class="panelBody">Chat is available from the dock panel.</div>
   </div>
 
   <div id="panelMusic" class="sidePanel" aria-label="Music panel">
