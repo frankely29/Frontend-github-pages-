@@ -1010,7 +1010,7 @@ function initMap() {
       sprite: "",
     },
     center: [-73.98, 40.73],
-    zoom: 10.5,
+    zoom: 10.2,
     attributionControl: { position: "bottom-right" },
     localIdeographFontFamily: "sans-serif",
   });
@@ -1664,6 +1664,74 @@ function suppressAutoDisableFor(ms, fn) {
   fn();
 }
 
+const AUTO_ZOOM_MIN = 11.0;
+const AUTO_ZOOM_MAX = 14.0;
+const AUTO_FIT_PADDING = 70;
+let lastAutoFitMs = 0;
+
+function clamp(n, a, b) {
+  return Math.max(a, Math.min(b, n));
+}
+
+function autoCenterAndAutoZoom() {
+  if (!map || !userLatLng) return;
+
+  const now = Date.now();
+  if (now - lastAutoFitMs < 2500) return;
+  lastAutoFitMs = now;
+
+  const pts = [];
+  pts.push([userLatLng.lng, userLatLng.lat]);
+
+  for (const mk of otherMarkers.values()) {
+    try {
+      const ll = mk.getLngLat();
+      if (ll && Number.isFinite(ll.lng) && Number.isFinite(ll.lat)) {
+        pts.push([ll.lng, ll.lat]);
+      }
+    } catch {}
+  }
+
+  if (pts.length <= 1) {
+    const z = clamp(map.getZoom(), AUTO_ZOOM_MIN, AUTO_ZOOM_MAX);
+    suppressAutoDisableFor(700, () => map.flyTo({ center: pts[0], zoom: z, duration: 600 }));
+    return;
+  }
+
+  let minLng = Infinity;
+  let minLat = Infinity;
+  let maxLng = -Infinity;
+  let maxLat = -Infinity;
+  for (const [lng, lat] of pts) {
+    minLng = Math.min(minLng, lng);
+    minLat = Math.min(minLat, lat);
+    maxLng = Math.max(maxLng, lng);
+    maxLat = Math.max(maxLat, lat);
+  }
+
+  suppressAutoDisableFor(900, () => {
+    map.fitBounds(
+      [
+        [minLng, minLat],
+        [maxLng, maxLat],
+      ],
+      {
+        padding: AUTO_FIT_PADDING,
+        duration: 650,
+        maxZoom: AUTO_ZOOM_MAX,
+      }
+    );
+
+    setTimeout(() => {
+      const zNow = map.getZoom();
+      const zClamped = clamp(zNow, AUTO_ZOOM_MIN, AUTO_ZOOM_MAX);
+      if (Math.abs(zNow - zClamped) > 0.01) {
+        map.setZoom(zClamped);
+      }
+    }, 720);
+  });
+}
+
 function syncCenterButton() {
   if (!btnCenter) return;
   btnCenter.textContent = autoCenter ? "Auto-center: ON" : "Auto-center: OFF";
@@ -1683,7 +1751,7 @@ if (btnCenter) {
     syncCenterButton();
 
     if (autoCenter && userLatLng && map) {
-      suppressAutoDisableFor(800, () => map.flyTo({ center: [userLatLng.lng, userLatLng.lat], duration: 500 }));
+      autoCenterAndAutoZoom();
     }
   });
 }
@@ -1816,7 +1884,7 @@ function startLocationWatch() {
         suppressAutoDisableFor(1200, () => map.flyTo({ center: [lng, lat], zoom: targetZoom, duration: 700 }));
       } else {
         if (autoCenter) {
-          suppressAutoDisableFor(700, () => map.flyTo({ center: [lng, lat], duration: 500 }));
+          autoCenterAndAutoZoom();
         }
       }
 
