@@ -21,6 +21,7 @@ let map; // global MapLibre instance
 let pendingFrame = null;
 let mapReady = false;
 let didFitToZonesOnce = false;
+let backendDownUntil = 0;
 
 const ROTATE_ENABLED = true;
 const ROTATE_MIN_MPH = 2.0;
@@ -41,6 +42,11 @@ const debugOnce = {
 function dbg(id, text) {
   const el = document.getElementById(id);
   if (el) el.textContent = String(text || "");
+}
+
+function markBackendDown(ms = 15000) {
+  backendDownUntil = Date.now() + ms;
+  if (timeLabel) timeLabel.textContent = "Backend restarting… retrying";
 }
 
 /* =========================================================
@@ -1690,6 +1696,7 @@ if (debugToggle && debugPanel) {
 }
 if (dbgReloadFrame) {
   dbgReloadFrame.addEventListener("click", () => {
+    if (Date.now() < backendDownUntil) return;
     const idx = Number(slider?.value || "0");
     loadFrame(idx).catch(console.error);
   });
@@ -2317,9 +2324,16 @@ async function renderFrame(frame) {
    Load frame / timeline
    ========================================================= */
 async function loadFrame(idx) {
+  if (Date.now() < backendDownUntil) return;
   const frameUrl = `${RAILWAY_BASE}/frame/${idx}`;
   loadNextFramePickupsMap(idx).catch(() => {});
-  const frame = await fetchJSON(frameUrl);
+  let frame;
+  try {
+    frame = await fetchJSON(frameUrl);
+  } catch {
+    markBackendDown(15000);
+    return;
+  }
 
   if (debugEnabled) {
     dbg("dbgFrame", `OK ${frameUrl}`);
@@ -2331,8 +2345,18 @@ async function loadFrame(idx) {
 }
 
 async function loadTimeline() {
+  if (Date.now() < backendDownUntil) return;
   const timelineUrl = `${RAILWAY_BASE}/timeline`;
-  const t = await fetchJSON(timelineUrl);
+  let t;
+  try {
+    t = await fetchJSON(timelineUrl);
+  } catch {
+    markBackendDown(15000);
+    setTimeout(() => {
+      if (Date.now() >= backendDownUntil) loadTimeline().catch(() => {});
+    }, 15000);
+    return;
+  }
   timeline = Array.isArray(t) ? t : t.timeline || [];
   if (!timeline.length) throw new Error("Timeline empty. Run /generate once on Railway.");
 
@@ -2363,7 +2387,10 @@ slider?.addEventListener("input", () => {
 
   const idx = Number(slider.value);
   if (sliderDebounce) clearTimeout(sliderDebounce);
-  sliderDebounce = setTimeout(() => loadFrame(idx).catch(console.error), 80);
+  sliderDebounce = setTimeout(() => {
+    if (Date.now() < backendDownUntil) return;
+    loadFrame(idx).catch(console.error);
+  }, 80);
 });
 
 window.addEventListener("resize", () => {
@@ -2701,6 +2728,7 @@ function startLocationWatch() {
    ========================================================= */
 async function refreshCurrentFrame() {
   try {
+    if (Date.now() < backendDownUntil) return;
     const idx = Number(slider.value || "0");
     await loadFrame(idx);
   } catch (e) {
@@ -2711,6 +2739,7 @@ setInterval(refreshCurrentFrame, REFRESH_MS);
 
 async function tickNYCClockAndAdvanceIfNeeded() {
   try {
+    if (Date.now() < backendDownUntil) return;
     if (Date.now() - lastUserSliderTs < USER_SLIDER_GRACE_MS) return;
     if (!timeline.length || !minutesOfWeek.length) return;
 
@@ -2731,6 +2760,7 @@ setInterval(tickNYCClockAndAdvanceIfNeeded, NYC_CLOCK_TICK_MS);
 
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
+    if (Date.now() < backendDownUntil) return;
     refreshCurrentFrame().catch(() => {});
     tickNYCClockAndAdvanceIfNeeded().catch(() => {});
     updateWeatherNow().catch(() => {});
@@ -3874,6 +3904,7 @@ setNavDestination(null);
   }, 7000);
 
   initMap();
+  if (Date.now() < backendDownUntil) return;
   await loadTimeline();
 
   if (authHeaderOK()) {
