@@ -22,6 +22,8 @@ let pendingFrame = null;
 let mapReady = false;
 let didFitToZonesOnce = false;
 let backendDownUntil = 0;
+let backendOnline = true;
+let backendRetryTimer = null;
 
 const ROTATE_ENABLED = true;
 const ROTATE_MIN_MPH = 2.0;
@@ -47,6 +49,14 @@ function dbg(id, text) {
 function markBackendDown(ms = 15000) {
   backendDownUntil = Date.now() + ms;
   if (timeLabel) timeLabel.textContent = "Backend restarting… retrying";
+}
+
+function scheduleBackendRetry(delayMs = 30000) {
+  if (backendRetryTimer) return;
+  backendRetryTimer = setTimeout(() => {
+    backendRetryTimer = null;
+    checkBackend().catch(() => {});
+  }, delayMs);
 }
 
 /* =========================================================
@@ -198,13 +208,24 @@ function pickClosestIndex(minutesOfWeekArr, target) {
    Network helper (+ auth support)
    ========================================================= */
 async function fetchJSON(url, opts = {}) {
-  const res = await fetch(url, { cache: "no-store", mode: "cors", ...opts });
-  const text = await res.text();
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText} @ ${url} :: ${text.slice(0, 120)}`);
+  const { skipBackendOfflineHandling = false, ...fetchOpts } = opts;
   try {
-    return JSON.parse(text);
-  } catch {
-    throw new Error(`Invalid JSON @ ${url} :: ${text.slice(0, 120)}`);
+    const res = await fetch(url, { cache: "no-store", mode: "cors", ...fetchOpts });
+    const text = await res.text();
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText} @ ${url} :: ${text.slice(0, 120)}`);
+    try {
+      return JSON.parse(text);
+    } catch {
+      throw new Error(`Invalid JSON @ ${url} :: ${text.slice(0, 120)}`);
+    }
+  } catch (err) {
+    if (!skipBackendOfflineHandling) {
+      backendOnline = false;
+      setAuthUI(false, "Backend offline — try again in 30s");
+      syncAuthButtons();
+      scheduleBackendRetry(30000);
+    }
+    throw err;
   }
 }
 async function postJSON(path, body, token) {
@@ -3407,6 +3428,7 @@ function setAuthUI(signedIn, note) {
   if (btnGhostMode) btnGhostMode.classList.toggle("disabled", !signedIn);
 
   if (authStatus) authStatus.textContent = note || (signedIn ? "Status: signed in" : "Status: signed out");
+  syncAuthButtons();
   syncGhostUI();
   refreshNavNameLabel();
   syncChatPollingState();
@@ -3426,6 +3448,30 @@ function clearAuth() {
 
 function authHeaderOK() {
   return communityToken && communityToken.length > 10;
+}
+
+function syncAuthButtons() {
+  const off = !backendOnline;
+  if (btnLogin) {
+    btnLogin.disabled = off;
+    btnLogin.classList.toggle("disabled", off);
+  }
+  if (btnSignup) {
+    btnSignup.disabled = off;
+    btnSignup.classList.toggle("disabled", off);
+  }
+  if (authStatus && off) authStatus.textContent = "Backend offline — restarting";
+}
+
+async function checkBackend() {
+  try {
+    await fetchJSON(`${RAILWAY_BASE}/status`, { skipBackendOfflineHandling: true });
+    backendOnline = true;
+  } catch {
+    backendOnline = false;
+    scheduleBackendRetry(30000);
+  }
+  syncAuthButtons();
 }
 
 async function loadMe() {
@@ -3880,6 +3926,10 @@ setInterval(() => {
   pullPresenceAll().catch(() => {});
 }, PRESENCE_PULL_MS);
 
+setInterval(() => {
+  checkBackend().catch(() => {});
+}, 15000);
+
 /* =========================================================
    Boot
    ========================================================= */
@@ -3904,6 +3954,7 @@ setNavDestination(null);
   }, 7000);
 
   initMap();
+  checkBackend().catch(() => {});
   if (Date.now() < backendDownUntil) return;
   await loadTimeline();
 
