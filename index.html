@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
   <title>NYC TLC Hotspot Map</title>
 
   <!-- Leaflet -->
@@ -20,6 +20,7 @@
 
   <style>
     html, body { height: 100%; margin: 0; padding: 0; }
+    body { -webkit-text-size-adjust: 100%; touch-action: manipulation; }
     #map { height: 100vh; width: 100vw; }
 
     /* =========================================================
@@ -74,7 +75,7 @@
       padding: 10px 10px;
       border-radius: 12px;
       border: 1px solid rgba(0,0,0,0.18);
-      font-size: 13px;
+      font-size: 16px;
       font-weight: 800;
       outline: none;
     }
@@ -713,6 +714,55 @@
       border: 0;
       background: #fff;
     }
+
+    #backendBanner{
+      position: fixed;
+      top: calc(8px + env(safe-area-inset-top));
+      right: 8px;
+      z-index: 2100;
+      background: rgba(180, 20, 20, 0.92);
+      color: #fff;
+      border-radius: 999px;
+      padding: 6px 10px;
+      font: 800 12px/1.1 system-ui,-apple-system,Segoe UI,Roboto,Arial;
+      display: none;
+    }
+    #backendBanner.show{ display:block; }
+
+    #chatPanel{
+      position: fixed;
+      left: 8px;
+      right: 8px;
+      bottom: calc(8px + env(safe-area-inset-bottom));
+      z-index: 1300;
+      background: rgba(255,255,255,0.96);
+      border: 1px solid rgba(0,0,0,0.12);
+      border-radius: 14px;
+      box-shadow: 0 10px 24px rgba(0,0,0,0.22);
+      display: none;
+      max-width: 480px;
+      margin: 0 auto;
+      padding: 10px;
+      font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
+    }
+    #chatPanel.open{ display:block; }
+    #chatStatus{
+      font-size: 12px;
+      font-weight: 800;
+      margin-bottom: 8px;
+    }
+    .chatInputRow{
+      display: flex;
+      gap: 8px;
+    }
+    #chatInput{
+      flex: 1;
+      border-radius: 10px;
+      border: 1px solid rgba(0,0,0,0.2);
+      padding: 10px;
+      font-size: 16px;
+    }
+
   </style>
 </head>
 
@@ -752,6 +802,8 @@
     </div>
   </div>
 
+  <div id="backendBanner" aria-live="polite">Backend offline — retrying…</div>
+
   <div id="legend" class="legend" aria-label="Demand legend">
     <div class="legendHeader">
       <h3>Demand Colors</h3>
@@ -763,6 +815,7 @@
 
       <div class="navRow" id="navRow">
         <button id="btnAuth" class="modeBtn" type="button">Sign in</button>
+        <button id="btnChat" class="modeBtn" type="button">Chat</button>
         <a id="navBtn" class="navBtn disabled" href="#" target="_blank" rel="noopener">Navigate</a>
         <button id="btnStatenIsland" class="modeBtn" type="button">Staten Island Mode: OFF</button>
         <button id="btnGhostMode" class="modeBtn" type="button">Ghost Mode: OFF</button>
@@ -826,6 +879,16 @@
       <div class="radioModalBody">
         <iframe id="radioFrame" class="radioFrame" allow="autoplay" referrerpolicy="no-referrer"></iframe>
       </div>
+    </div>
+  </div>
+
+
+
+  <div id="chatPanel" aria-live="polite">
+    <div id="chatStatus">Chat closed</div>
+    <div class="chatInputRow">
+      <input id="chatInput" type="text" placeholder="Type a message" />
+      <button id="chatSend" class="modeBtn" type="button" disabled>Send</button>
     </div>
   </div>
 
