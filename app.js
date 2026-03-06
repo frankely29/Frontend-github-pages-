@@ -70,6 +70,11 @@ let voiceTimerId = null;
 let voiceAutoStopId = null;
 let voiceIsUploading = false;
 let chatModalOpen = false;
+let chatModalSavedCenter = null;
+let chatModalSavedZoom = null;
+let chatViewportKeyboardOffset = 0;
+let chatViewportListenerBound = false;
+
 
 /* =========================================================
    MANHATTAN MODE — DEFAULT SETTINGS (SAFE TO EDIT)
@@ -783,8 +788,18 @@ const chatSendEl = document.getElementById("chatSend");
 const chatCloseEl = document.getElementById("chatClose");
 const chatStatusEl = document.getElementById("chatStatus");
 const btnChatOpen = document.getElementById("btnChatOpen");
+const sliderWrapEl = document.getElementById("sliderWrap");
 
 let openPanelKey = null;
+
+function syncBottomUiOffset() {
+  const fallback = 110;
+  const measured = sliderWrapEl?.offsetHeight || fallback;
+  const bottomUi = Math.max(fallback, Math.round(measured));
+  document.documentElement.style.setProperty("--bottom-ui", `${bottomUi}px`);
+  applyChatModalBottomPadding();
+}
+
 
 function syncDrawerPanelPosition() {
   if (!dockDrawer) return;
@@ -947,9 +962,60 @@ function setChatStatus(text) {
   if (chatStatusEl) chatStatusEl.textContent = text || "";
 }
 
+function getKeyboardOffsetFromViewport() {
+  if (!window.visualViewport) return 0;
+  const raw = window.innerHeight - window.visualViewport.height - window.visualViewport.offsetTop;
+  return Math.max(0, Math.round(raw));
+}
+
+function applyChatModalBottomPadding() {
+  if (!chatModal) return;
+  const keyboardOffset = chatModalOpen ? chatViewportKeyboardOffset : 0;
+  chatModal.style.paddingBottom = `calc(var(--bottom-ui) + env(safe-area-inset-bottom) + 10px + ${keyboardOffset}px)`;
+}
+
+function onVisualViewportResizeForChat() {
+  chatViewportKeyboardOffset = getKeyboardOffsetFromViewport();
+  applyChatModalBottomPadding();
+}
+
+function bindChatViewportResize() {
+  if (chatViewportListenerBound || !window.visualViewport) return;
+  window.visualViewport.addEventListener("resize", onVisualViewportResizeForChat);
+  chatViewportListenerBound = true;
+}
+
+function setMapInteractionsForChat(disabled) {
+  if (!map) return;
+  const mode = disabled ? "disable" : "enable";
+  const controls = [
+    map.dragPan,
+    map.scrollZoom,
+    map.doubleClickZoom,
+    map.boxZoom,
+    map.keyboard,
+    map.touchZoomRotate,
+    map.touchPitch,
+  ];
+  for (const ctl of controls) {
+    if (ctl && typeof ctl[mode] === "function") ctl[mode]();
+  }
+  if (disabled && map.touchZoomRotate && typeof map.touchZoomRotate.disableRotation === "function") {
+    map.touchZoomRotate.disableRotation();
+  }
+}
+
 function openChatModal() {
   if (!chatModal) return;
+  chatModalSavedCenter = map?.getCenter?.() || null;
+  chatModalSavedZoom = map?.getZoom?.();
+  window.__chatOpen = true;
   chatModalOpen = true;
+  chatViewportKeyboardOffset = getKeyboardOffsetFromViewport();
+  applyChatModalBottomPadding();
+  bindChatViewportResize();
+  setMapInteractionsForChat(true);
+
   chatModal.classList.add("open");
   chatModal.setAttribute("aria-hidden", "false");
   setChatStatus(authHeaderOK() ? "" : "Sign in to chat with the community.");
@@ -960,9 +1026,19 @@ function openChatModal() {
 function closeChatModal() {
   if (!chatModal) return;
   chatModalOpen = false;
+  window.__chatOpen = false;
+  chatViewportKeyboardOffset = 0;
+  applyChatModalBottomPadding();
+
   chatModal.classList.remove("open");
   chatModal.setAttribute("aria-hidden", "true");
   stopVoiceRecording();
+  setMapInteractionsForChat(false);
+
+  if (map && chatModalSavedCenter && Number.isFinite(chatModalSavedZoom)) {
+    map.jumpTo({ center: [chatModalSavedCenter.lng, chatModalSavedCenter.lat], zoom: chatModalSavedZoom });
+  }
+
   syncChatPollingState();
 }
 
@@ -1228,7 +1304,10 @@ async function chatFetchNew() {
 async function chatSend(text) {
   if (!authHeaderOK()) throw new Error("Not signed in");
   const token = localStorage.getItem(LS_TOKEN) || communityToken || "";
-  const res = await fetch(`${RAILWAY_BASE}/chat/send`, {
+  const endpoint = `${RAILWAY_BASE}/chat/send`;
+  console.info("chat send endpoint", endpoint);
+  console.info("chat token present", Boolean(token));
+  const res = await fetch(endpoint, {
     method: "POST",
     cache: "no-store",
     mode: "cors",
@@ -1304,7 +1383,7 @@ function wireChatPanel() {
       await chatPollOnce();
     } catch (e) {
       console.warn("chat send failed:", e);
-      setChatStatus("Send failed. Try again.");
+      setChatStatus(`Send failed: ${e?.message || "Unknown error"}`);
     } finally {
       chatSendEl.disabled = false;
     }
@@ -1336,12 +1415,16 @@ function wireChatPanel() {
   chatModal?.addEventListener("click", (e) => {
     if (e.target === chatModal) closeChatModal();
   });
-  chatCard?.addEventListener("click", (e) => e.stopPropagation());
+
+  ["touchstart", "touchmove", "wheel", "click"].forEach((evt) => {
+    chatCard?.addEventListener(evt, (e) => e.stopPropagation(), { passive: evt !== "wheel" });
+  });
 
   chatPollOnce();
 }
 
 wireChatPanel._bound = false;
+syncBottomUiOffset();
 function colorsPanelHTML() {
   return `
     <div class="panelBlock">
@@ -2117,6 +2200,7 @@ slider?.addEventListener("input", () => {
 });
 
 window.addEventListener("resize", () => {
+  syncBottomUiOffset();
   if (timeline.length) setSliderBubbleTextAndPos();
 });
 
@@ -2142,6 +2226,7 @@ function clamp(n, a, b) {
 }
 
 function autoCenterAndAutoZoom() {
+  if (window.__chatOpen) return;
   if (!map || !userLatLng) return;
 
   const now = Date.now();
@@ -2303,6 +2388,7 @@ function shortestAngleDelta(a, b) {
   return d;
 }
 function maybeRotateMapTo(deg) {
+  if (window.__chatOpen) return;
   if (!ROTATE_ENABLED) return;
   if (!map || !mapReady) return;
   if (!autoCenter) return;
@@ -2406,12 +2492,12 @@ function startLocationWatch() {
         maybeRotateMapTo(lastHeadingDeg);
       }
 
-      if (!gpsFirstFixDone) {
-        gpsFirstFixDone = true;
-        const targetZoom = Math.max(map.getZoom(), 12.5);
-        suppressAutoDisableFor(1200, () => map.flyTo({ center: [lng, lat], zoom: targetZoom, duration: 700 }));
-      } else {
-        if (autoCenter && map) {
+      if (!window.__chatOpen) {
+        if (!gpsFirstFixDone) {
+          gpsFirstFixDone = true;
+          const targetZoom = Math.max(map.getZoom(), 12.5);
+          suppressAutoDisableFor(1200, () => map.flyTo({ center: [lng, lat], zoom: targetZoom, duration: 700 }));
+        } else if (autoCenter && map) {
           const c = (navMarker && navMarker.getLngLat) ? navMarker.getLngLat() : { lng, lat };
           suppressAutoDisableFor(700, () => map.flyTo({ center: [c.lng, c.lat], duration: 500 }));
         }
