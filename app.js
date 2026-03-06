@@ -1018,6 +1018,7 @@ function initMap() {
   map.on("load", () => {
     mapReady = true;
     map.resize();
+    applyNightBasemap(!!wxState?.isNight);
 
     ensureZonesSourceAndLayers().catch((e) => console.warn("zones source/layers init failed:", e));
 
@@ -1943,6 +1944,19 @@ function fFromC(c) {
 function setBodyTheme({ isNight, isSunny }) {
   document.body.classList.toggle("night", !!isNight);
   document.body.classList.toggle("sunny", !!isSunny && !isNight);
+  applyNightBasemap(!!isNight);
+}
+
+function applyNightBasemap(isNight) {
+  if (!map) return;
+  try {
+    map.setPaintProperty("carto-base", "raster-brightness-max", isNight ? 0.55 : 1.0);
+    map.setPaintProperty("carto-base", "raster-brightness-min", isNight ? 0.12 : 0.0);
+    map.setPaintProperty("carto-base", "raster-contrast", isNight ? 0.25 : 0.0);
+    map.setPaintProperty("carto-base", "raster-saturation", isNight ? -0.25 : 0.0);
+  } catch (e) {
+    console.warn("applyNightBasemap failed:", e);
+  }
 }
 function setWeatherBadge(icon, text) {
   if (!weatherBadge) return;
