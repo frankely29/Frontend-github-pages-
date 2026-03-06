@@ -60,16 +60,17 @@ const MAX_VOICE_BYTES = 1_500_000;
 
 let chatPollTimer = null;
 let chatLastServerId = null;
-let chatSeenKeys = new Set();
+let chatSeenServerIds = new Set();
 const optimisticChatById = new Map();
 let isRecording = false;
+let voiceLock = false;
 let mediaStream = null;
 let recorder = null;
 let chunks = [];
 let recordStartTs = 0;
 let voiceMimeType = "";
 let voiceTimerId = null;
-let voiceAutoStopId = null;
+let autoStopTimer = null;
 let voiceIsUploading = false;
 let chatIsOpen = false;
 let chatViewportKeyboardOffset = 0;
@@ -1056,7 +1057,7 @@ function closeChatModal() {
 
   if (chatMsgs) chatMsgs.innerHTML = "";
   chatLastServerId = null;
-  chatSeenKeys.clear();
+  chatSeenServerIds.clear();
   optimisticChatById.clear();
   setChatStatus("");
 
@@ -1073,15 +1074,6 @@ function updateChatLastServerIdFromMessage(msg) {
   const id = parseServerChatId(msg?.id);
   if (id === null) return;
   chatLastServerId = Math.max(chatLastServerId || 0, id);
-}
-
-function chatMsgKey(msg) {
-  const id = msg?.id;
-  if (id !== undefined && id !== null) return `id:${id}`;
-  const t = msg?.created_at || "";
-  const n = msg?.display_name || msg?.user_name || msg?.name || "";
-  const body = msg?.text || msg?.message || msg?.audio_url || "";
-  return `fallback:${t}|${n}|${body}`;
 }
 
 function formatChatTime(ts) {
@@ -1112,6 +1104,7 @@ function voiceFilenameFromMimeType(mimeType) {
   if (mimeType.includes("webm")) return `voice-${Date.now()}.webm`;
   if (mimeType.includes("mp4")) return `voice-${Date.now()}.mp4`;
   if (mimeType.includes("aac")) return `voice-${Date.now()}.aac`;
+  if (mimeType.includes("m4a")) return `voice-${Date.now()}.m4a`;
   return `voice-${Date.now()}.bin`;
 }
 
@@ -1143,9 +1136,9 @@ function stopVoiceTimers() {
     clearInterval(voiceTimerId);
     voiceTimerId = null;
   }
-  if (voiceAutoStopId) {
-    clearTimeout(voiceAutoStopId);
-    voiceAutoStopId = null;
+  if (autoStopTimer) {
+    clearTimeout(autoStopTimer);
+    autoStopTimer = null;
   }
 }
 
@@ -1164,12 +1157,24 @@ async function uploadVoiceBlob(blob, mimeType) {
   setVoiceButtonState();
   setVoiceStatus("Uploading…");
   try {
-    await postFormAuth(`/chat/send_voice`, fd, token);
+    const resp = await fetch(`${RAILWAY_BASE}/chat/send_voice`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: fd,
+      cache: "no-store",
+      mode: "cors",
+    });
+    if (!resp.ok) {
+      const text = await resp.text();
+      setVoiceStatus(`Upload failed ${resp.status}: ${text.slice(0, 180)}`);
+      return;
+    }
+
     setVoiceStatus("Sent ✓");
     await chatFetchNew().then(renderChatMessages);
   } catch (e) {
     console.warn("voice upload failed:", e);
-    setVoiceStatus(`Upload failed: ${String(e?.message || e).slice(0, 80)}`);
+    setVoiceStatus(`Upload failed: ${String(e?.message || e).slice(0, 120)}`);
   } finally {
     voiceIsUploading = false;
     setVoiceButtonState();
@@ -1202,9 +1207,12 @@ async function stopVoiceRecording() {
   setVoiceStatus("Processing…");
 
   const rec = recorder;
+  recorder = null;
   if (rec && rec.state !== "inactive") rec.stop();
-  if (mediaStream) mediaStream.getTracks().forEach((t) => t.stop());
+
+  const stream = mediaStream;
   mediaStream = null;
+  if (stream) stream.getTracks().forEach((t) => t.stop());
   setVoiceButtonState();
 }
 
@@ -1244,7 +1252,7 @@ async function startVoiceRecording() {
       const elapsed = (Date.now() - recordStartTs) / 1000;
       setVoiceTimer(Math.min(MAX_VOICE_SECONDS, elapsed));
     }, 100);
-    voiceAutoStopId = setTimeout(() => {
+    autoStopTimer = setTimeout(() => {
       if (isRecording) stopVoiceRecording();
     }, MAX_VOICE_SECONDS * 1000);
     setVoiceButtonState();
@@ -1255,37 +1263,63 @@ async function startVoiceRecording() {
 }
 
 function chatAppendMessage(message) {
-  if (!message) return;
-  renderChatMessages([message]);
+  if (!message || !chatMsgs) return;
+  const nearBottom = isChatNearBottom(chatMsgs, 80);
+  const row = document.createElement("div");
+  row.className = "chatMsgRow";
+  row.dataset.chatId = String(message.id || `tmp_${Date.now()}`);
+  row.dataset.tmp = "1";
+  row.dataset.text = String(message?.text || message?.message || "").trim();
+  row.dataset.sender = String(message?.display_name || "Driver").trim();
+  row.dataset.createdAt = String(message?.created_at || new Date().toISOString());
+
+  const line = document.createElement("div");
+  line.className = "chatMsgLine";
+  const who = document.createElement("strong");
+  who.className = "chatMsgName";
+  who.textContent = `${row.dataset.sender}: `;
+  const text = document.createElement("span");
+  text.className = "chatMsgText";
+  text.textContent = row.dataset.text;
+  const time = document.createElement("div");
+  time.className = "chatMsgTime";
+  time.textContent = formatChatTime(row.dataset.createdAt);
+
+  line.appendChild(who);
+  line.appendChild(text);
+  row.appendChild(line);
+  row.appendChild(time);
+  chatMsgs.appendChild(row);
+  if (nearBottom) chatMsgs.scrollTop = chatMsgs.scrollHeight;
 }
 
 function removeOptimisticChatMessage(tmpId) {
   if (!tmpId || !chatMsgs) return;
   const row = chatMsgs.querySelector(`[data-chat-id="${String(tmpId)}"]`);
   if (row) row.remove();
-  chatSeenKeys.delete(`id:${tmpId}`);
 }
 
 function reconcileOptimisticMessages(serverMsg) {
-  if (!serverMsg || optimisticChatById.size === 0) return;
+  if (!serverMsg || !chatMsgs) return;
   const serverText = String(serverMsg?.text || serverMsg?.message || "").trim();
-  if (!serverText) return;
-  const serverName = String(serverMsg?.display_name || serverMsg?.user_name || serverMsg?.name || "Driver").trim();
-  const serverTs = new Date(serverMsg?.created_at || serverMsg?.ts || serverMsg?.timestamp || 0).getTime();
-  const DEDUPE_WINDOW_MS = 10 * 1000;
+  const serverName = String(serverMsg?.display_name || "Driver").trim();
+  if (!serverText || !serverName) return;
+  const serverTs = new Date(serverMsg?.created_at || serverMsg?.ts || serverMsg?.timestamp || Date.now()).getTime();
+  const DEDUPE_WINDOW_MS = 15 * 1000;
 
-  for (const [tmpId, optimistic] of optimisticChatById.entries()) {
-    const optimisticText = String(optimistic?.text || optimistic?.message || "").trim();
-    const optimisticName = String(optimistic?.display_name || optimistic?.user_name || optimistic?.name || "Driver").trim();
-    const optimisticTs = new Date(optimistic?.created_at || 0).getTime();
-    const textMatch = optimisticText && optimisticText === serverText;
+  const optimisticNodes = chatMsgs.querySelectorAll('[data-tmp="1"]');
+  for (const node of optimisticNodes) {
+    const optimisticText = String(node.dataset.text || "").trim();
+    const optimisticName = String(node.dataset.sender || "").trim();
+    const optimisticTs = new Date(node.dataset.createdAt || 0).getTime();
+    const textMatch = optimisticText === serverText;
     const nameMatch = optimisticName === serverName;
-    const timeMatchesWindow = Number.isFinite(serverTs) && Number.isFinite(optimisticTs)
+    const withinWindow = Number.isFinite(optimisticTs)
       ? Math.abs(serverTs - optimisticTs) <= DEDUPE_WINDOW_MS
       : true;
-    if (textMatch && nameMatch && timeMatchesWindow) {
-      removeOptimisticChatMessage(tmpId);
-      optimisticChatById.delete(tmpId);
+    if (textMatch && nameMatch && withinWindow) {
+      node.remove();
+      optimisticChatById.delete(String(node.dataset.chatId || ""));
       break;
     }
   }
@@ -1300,21 +1334,26 @@ function renderChatMessages(messages) {
   let appended = 0;
 
   for (const msg of messages) {
-    const key = chatMsgKey(msg);
-    if (chatSeenKeys.has(key)) continue;
-    chatSeenKeys.add(key);
+    const serverId = parseServerChatId(msg?.id);
+    if (serverId === null) continue;
+    if (!msg?.display_name || msg?.sender_id === undefined || msg?.sender_id === null) {
+      console.warn("chat message missing sender fields", msg);
+      continue;
+    }
+    if (chatSeenServerIds.has(serverId)) continue;
+    chatSeenServerIds.add(serverId);
     reconcileOptimisticMessages(msg);
 
     const row = document.createElement("div");
     row.className = "chatMsgRow";
-    if (msg?.id !== undefined && msg?.id !== null) row.dataset.chatId = String(msg.id);
+    row.dataset.chatId = String(serverId);
 
     const line = document.createElement("div");
     line.className = "chatMsgLine";
 
     const who = document.createElement("strong");
     who.className = "chatMsgName";
-    who.textContent = `${msg?.display_name || msg?.user_name || msg?.name || "Driver"}: `;
+    who.textContent = `${msg.display_name}: `;
 
     const time = document.createElement("div");
     time.className = "chatMsgTime";
@@ -1456,6 +1495,7 @@ function wireChatPanel() {
     const optimisticId = `tmp_${Date.now()}`;
     const myDisplayName = me?.display_name || localStorage.getItem(LS_DISPLAY_NAME) || "Driver";
     const optimisticMessage = {
+      sender_id: me?.id || "me",
       display_name: myDisplayName,
       type: "text",
       text,
@@ -1494,29 +1534,41 @@ function wireChatPanel() {
   });
 
   const btnVoice = document.getElementById("btnVoice");
+  const releaseVoiceLockSoon = () => {
+    setTimeout(() => {
+      voiceLock = false;
+    }, 250);
+  };
+
   const handleVoiceStart = async (e) => {
     e.preventDefault();
     e.stopPropagation();
-    if (!voiceSupported || voiceIsUploading || isRecording) return;
+    if (!voiceSupported || voiceIsUploading) return;
+    if (voiceLock || isRecording) return;
+    voiceLock = true;
     await startVoiceRecording();
+    releaseVoiceLockSoon();
   };
   const handleVoiceStop = async (e) => {
     e?.preventDefault?.();
     e?.stopPropagation?.();
     if (!voiceSupported || voiceIsUploading) return;
+    if (voiceLock || !isRecording) return;
+    voiceLock = true;
     await stopVoiceRecording();
+    releaseVoiceLockSoon();
   };
 
   if (btnVoice) {
-    btnVoice.addEventListener("pointerdown", handleVoiceStart);
-    btnVoice.addEventListener("pointerup", handleVoiceStop);
-    btnVoice.addEventListener("pointercancel", handleVoiceStop);
-    btnVoice.addEventListener("touchstart", handleVoiceStart, { passive: false });
-    btnVoice.addEventListener("touchend", handleVoiceStop, { passive: false });
-    btnVoice.addEventListener("touchcancel", handleVoiceStop);
-    btnVoice.addEventListener("mousedown", handleVoiceStart);
-    btnVoice.addEventListener("mouseup", handleVoiceStop);
-    btnVoice.addEventListener("mouseleave", handleVoiceStop);
+    if (window.PointerEvent) {
+      btnVoice.addEventListener("pointerdown", handleVoiceStart);
+      btnVoice.addEventListener("pointerup", handleVoiceStop);
+      btnVoice.addEventListener("pointercancel", handleVoiceStop);
+    } else {
+      btnVoice.addEventListener("touchstart", handleVoiceStart, { passive: false });
+      btnVoice.addEventListener("touchend", handleVoiceStop, { passive: false });
+      btnVoice.addEventListener("touchcancel", handleVoiceStop, { passive: false });
+    }
   }
 
   chatCloseEl?.addEventListener("click", (e) => {
@@ -3336,7 +3388,7 @@ function clearAuth() {
   me = null;
   localStorage.removeItem(LS_TOKEN);
   chatLastServerId = null;
-  chatSeenKeys.clear();
+  chatSeenServerIds.clear();
   stopChatPolling();
   setAuthUI(false, "Status: signed out");
   clearOtherDrivers();
