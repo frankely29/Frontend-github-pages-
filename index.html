@@ -382,6 +382,24 @@
       border-top: 7px solid rgba(20, 20, 20, 0.92);
     }
 
+    /* Bubble always on top of everything */
+    #sliderBubble, .sliderBubble{
+      position: fixed !important;
+      z-index: 99999 !important;
+      pointer-events: none !important;
+    }
+
+    /* If your bubble is inside sliderWrap, also force that wrapper above dock */
+    #sliderWrap, .sliderWrap{
+      position: fixed !important;
+      z-index: 9000 !important;
+    }
+
+    /* Make sure dock is lower than bubble */
+    #dock, .dock, #dockBar, .iconRow{
+      z-index: 8000 !important;
+    }
+
 input[type="range"] { width: 100%; height: 6px; margin: 0; border-radius: 999px; filter: drop-shadow(0 6px 10px rgba(0,0,0,0.20)); }
 
     /* =========================================================
@@ -442,36 +460,46 @@ input[type="range"] { width: 100%; height: 6px; margin: 0; border-radius: 999px;
       background: rgba(255,255,255,0.95);
       box-shadow: 0 6px 18px rgba(0,0,0,0.18);
     }
-    #btnCenter, .btnCenter{
+    #btnCenter{
       position: fixed !important;
       left: 10px !important;
-      bottom: calc(env(safe-area-inset-bottom, 0px) + 58px) !important;
-      z-index: 1900 !important;
-      width: 40px !important;
-      height: 40px !important;
+      bottom: calc(env(safe-area-inset-bottom, 0px) + 72px) !important; /* above time */
+      z-index: 6000 !important;
+
+      width: 44px !important;
+      height: 44px !important;
       padding: 0 !important;
+
       border: none !important;
-      background: rgba(235,235,235,0.92) !important;
+      background: rgba(235,235,235,0.20) !important; /* almost invisible (no “circle button look”) */
       border-radius: 999px !important;
+
+      /* BLUE AURA (soft glow) */
       box-shadow:
-        0 0 0 3px rgba(70,140,255,0.22),
+        0 0 14px rgba(70,140,255,0.55),
+        0 0 0 6px rgba(70,140,255,0.18),
         0 10px 22px rgba(0,0,0,0.18) !important;
+
       display: grid !important;
       place-items: center !important;
-      font-size: 0 !important;
+
+      font-size: 0 !important; /* hide any text */
     }
-    #btnCenter::before, .btnCenter::before{
+
+    #btnCenter::before{
       content: "" !important;
-      width: 0;
-      height: 0;
-      border-left: 8px solid transparent;
-      border-right: 8px solid transparent;
-      border-bottom: 14px solid rgba(120,120,120,0.95);
+      width: 0; height: 0;
+      border-left: 9px solid transparent;
+      border-right: 9px solid transparent;
+      border-bottom: 16px solid rgba(140,140,140,0.95); /* light grey up arrow */
       transform: translateY(-1px);
     }
-    #btnCenter.on, .btnCenter.on{
+
+    /* Optional: stronger aura when ON */
+    #btnCenter.on{
       box-shadow:
-        0 0 0 4px rgba(70,140,255,0.32),
+        0 0 18px rgba(70,140,255,0.70),
+        0 0 0 7px rgba(70,140,255,0.22),
         0 12px 26px rgba(0,0,0,0.20) !important;
     }
     .toggleBtnSmall.on { outline: 2px solid rgba(0,160,255,0.45); }
@@ -566,6 +594,26 @@ input[type="range"] { width: 100%; height: 6px; margin: 0; border-radius: 999px;
     }
     body.night .dockIcon,
     body.night .dockIcon *{
+      filter: none !important;
+      opacity: 1 !important;
+    }
+
+    /* Keep music icon red in night mode */
+    body.night #btnMusic,
+    body.night #btnMusic *{
+      filter: none !important;
+      opacity: 1 !important;
+    }
+
+    /* If your music icon is the red circle button itself (example class .musicIconBtn) */
+    body.night .musicIconBtn,
+    body.night .musicIconBtn *{
+      filter: none !important;
+      opacity: 1 !important;
+    }
+
+    body.night #dockMusic,
+    body.night #dockMusic *{
       filter: none !important;
       opacity: 1 !important;
     }
