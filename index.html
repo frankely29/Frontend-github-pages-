@@ -292,8 +292,8 @@
       right: 0;
       bottom: env(safe-area-inset-bottom);
       z-index: 1200;
-      background: rgba(255,255,255,0.85);
-      backdrop-filter: blur(10px);
+      background: transparent;
+      backdrop-filter: none;
       border-radius: 0;
       padding: 10px 14px;
       font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
@@ -378,7 +378,7 @@
       border-top: 7px solid rgba(20, 20, 20, 0.92);
     }
 
-input[type="range"] { width: 100%; height: 6px; margin: 0; border-radius: 999px; }
+input[type="range"] { width: 100%; height: 6px; margin: 0; border-radius: 999px; filter: drop-shadow(0 6px 10px rgba(0,0,0,0.20)); }
 
     /* =========================================================
        Radio row inside bottom box
@@ -490,7 +490,7 @@ input[type="range"] { width: 100%; height: 6px; margin: 0; border-radius: 999px;
       display: flex;
       gap: 14px;
       align-items: center;
-      z-index: 1300;
+      z-index: 1600;
       pointer-events: auto;
     }
     .dockBtn {
@@ -510,27 +510,88 @@ input[type="range"] { width: 100%; height: 6px; margin: 0; border-radius: 999px;
     .dockBtnMain .dockIcon { font-size: 22px; }
     .dockBtnMusic .dockIcon { font-size: 22px; }
 
-    .sidePanel {
-      position: fixed;
-      top: 12px;
-      left: 12px;
-      bottom: calc(env(safe-area-inset-bottom) + 120px);
-      width: min(360px, calc(100vw - 24px));
-      background: rgba(255,255,255,0.92);
-      backdrop-filter: blur(12px);
-      border-radius: 16px;
-      box-shadow: 0 14px 40px rgba(0,0,0,0.20);
-      transform: translateX(-110%);
-      transition: transform 180ms ease;
-      z-index: 1250;
-      overflow: auto;
-      padding: 12px;
-    }
-    .sidePanel.open { transform: translateX(0); }
+    .sidePanel { display: none; }
     .panelTitle {
       margin: 0 0 10px 0;
       font: 700 16px/1.2 system-ui;
     }
+
+    .dockBackdrop{
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.18);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 180ms ease;
+      z-index: 1400;
+    }
+    .dockBackdrop.open{
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .dockDrawer{
+      position: fixed;
+      top: 72px;
+      left: 12px;
+      width: min(330px, 86vw);
+      max-height: calc(100vh - 190px);
+      border-radius: 18px;
+      background: rgba(255,255,255,0.72);
+      -webkit-backdrop-filter: blur(12px);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255,255,255,0.55);
+      box-shadow: 0 16px 38px rgba(0,0,0,0.22);
+      overflow: hidden;
+      transform: translateX(calc(-100% - 20px));
+      transition: transform 220ms ease;
+      z-index: 1500;
+    }
+    @supports not ((-webkit-backdrop-filter: blur(12px)) or (backdrop-filter: blur(12px))) {
+      .dockDrawer { background: rgba(255,255,255,0.92); }
+    }
+    .dockDrawer.open{ transform: translateX(0); }
+    .dockDrawerHeader{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 12px 8px 14px;
+    }
+    .dockDrawerTitle{ font-weight: 800; font-size: 18px; }
+    .dockDrawerClose{
+      appearance: none;
+      border: 0;
+      background: rgba(0,0,0,0.06);
+      border-radius: 10px;
+      padding: 6px 10px;
+      font-size: 16px;
+      cursor: pointer;
+    }
+    .dockDrawerBody{
+      padding: 10px 14px 14px 14px;
+      overflow: auto;
+      max-height: calc(100vh - 260px);
+    }
+    .dockDrawerBody .panelBlock{
+      background: rgba(255,255,255,0.55);
+      border: 1px solid rgba(0,0,0,0.06);
+      border-radius: 14px;
+      padding: 10px 10px;
+    }
+    .chipBtn{
+      border:none;
+      border-radius: 999px;
+      padding: 6px 10px;
+      font: 900 11px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial;
+      cursor: pointer;
+      background: rgba(0,0,0,0.08);
+      color: #111;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .chipBtn.disabled{ opacity: 0.45; pointer-events: none; }
 
     /* ---------- You arrow: force on top of EVERYTHING ---------- */
     .maplibregl-marker { z-index: 800; }
@@ -900,6 +961,15 @@ input[type="range"] { width: 100%; height: 6px; margin: 0; border-radius: 999px;
       </div>
       <div id="radioStatus" class="radioStatus">Radio: off</div>
     </div>
+  </div>
+
+  <div id="dockBackdrop" class="dockBackdrop" aria-hidden="true"></div>
+  <div id="dockDrawer" class="dockDrawer" aria-hidden="true">
+    <div class="dockDrawerHeader">
+      <div id="dockDrawerTitle" class="dockDrawerTitle">Panel</div>
+      <button id="dockDrawerClose" class="dockDrawerClose" type="button" aria-label="Close">✕</button>
+    </div>
+    <div id="dockDrawerBody" class="dockDrawerBody"></div>
   </div>
 
   <div id="dock">
