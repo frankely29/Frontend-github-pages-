@@ -1,13 +1,5 @@
-// BOOT_SIGNATURE: railway-frontend-v1
 /* =========================================================
-   NYC TLC Hotspot Map (Frontend) - SIMPLE + STABLE (MapLibre)
-   ✅ Restored: Staten Island Mode, Manhattan Mode, Ghost Mode,
-      Self GPS/nav arrow + auto-center, presence, slider, weather, radio.
-   ✅ Added back (OLD behavior): Zone click popup details (like Leaflet bindPopup)
-   ✅ Upgraded labels (NEW): Clean professional MapLibre symbol labels
-      - always visible (from zoom >= 10)
-      - centered & non-overlapping-ish via halo + size scaling
-      - computed “inside polygon” label points (no floating outside zones)
+   NYC TLC Hotspot Map (Frontend) - SIMPLE + STABLE
    ========================================================= */
 
 const RAILWAY_BASE = "https://web-production-78f67.up.railway.app";
@@ -17,48 +9,16 @@ const REFRESH_MS = 5 * 60 * 1000;
 const NYC_CLOCK_TICK_MS = 60 * 1000;
 const USER_SLIDER_GRACE_MS = 25 * 1000;
 
-let map; // global MapLibre instance
-let pendingFrame = null;
-let mapReady = false;
-let didFitToZonesOnce = false;
-
-const ROTATE_ENABLED = true;
-const ROTATE_MIN_MPH = 2.0;
-const ROTATE_MIN_DELTA_DEG = 3;
-const ROTATE_RATE_LIMIT_MS = 200;
-const ROTATE_ANIM_MS = 250;
-let lastMapBearingDeg = 0;
-let lastRotateTs = 0;
-
-const debugOnce = {
-  frame: false,
-  mapCenter: false,
-  selfMarker: false,
-  otherMarker: false,
-  zonesSetData: false,
-};
-
-function dbg(id, text) {
-  const el = document.getElementById(id);
-  if (el) el.textContent = String(text || "");
-}
-
 /* =========================================================
    COMMUNITY SETTINGS (cheap polling)
    ========================================================= */
-const PRESENCE_PUSH_MS = 8 * 1000; // send my location
-const PRESENCE_PULL_MS = 10 * 1000; // fetch all drivers
-const PRESENCE_STALE_SEC = 70; // hide if older than this
+const PRESENCE_PUSH_MS = 8 * 1000;     // send my location
+const PRESENCE_PULL_MS = 10 * 1000;    // fetch all drivers
+const PRESENCE_STALE_SEC = 70;         // hide if older than this
 
 const LS_TOKEN = "community_token_v1";
 const LS_EMAIL = "community_email_v1";
 const LS_DISPLAY_NAME = "community_display_name_v1";
-const CHAT_ROOM = "global";
-const CHAT_POLL_MS = 1200;
-
-let chatPollTimer = null;
-let chatLastSeen = null;
-let chatSeenKeys = new Set();
 
 /* =========================================================
    MANHATTAN MODE — DEFAULT SETTINGS (SAFE TO EDIT)
@@ -85,7 +45,7 @@ if (legendEl && legendToggleBtn) {
 }
 
 /* =========================================================
-   Label visibility rules (kept, but NEW labels are "major map app style")
+   Label visibility rules (mobile-friendly)
    ========================================================= */
 const LABEL_ZOOM_MIN = 10;
 const BOROUGH_ZOOM_SHOW = 15;
@@ -175,11 +135,11 @@ function pickClosestIndex(minutesOfWeekArr, target) {
 async function fetchJSON(url, opts = {}) {
   const res = await fetch(url, { cache: "no-store", mode: "cors", ...opts });
   const text = await res.text();
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText} @ ${url} :: ${text.slice(0, 120)}`);
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText} @ ${url} :: ${text.slice(0, 200)}`);
   try {
     return JSON.parse(text);
   } catch {
-    throw new Error(`Invalid JSON @ ${url} :: ${text.slice(0, 120)}`);
+    throw new Error(`Invalid JSON @ ${url} :: ${text.slice(0, 200)}`);
   }
 }
 async function postJSON(path, body, token) {
@@ -220,6 +180,10 @@ function shortenLabel(text, maxChars) {
   if (!t) return "";
   if (t.length <= maxChars) return t;
   return t.slice(0, maxChars - 1) + "…";
+}
+function zoomClass(zoom) {
+  const z = Math.max(10, Math.min(15, Math.round(zoom)));
+  return `z${z}`;
 }
 function escapeHtml(s) {
   return String(s)
@@ -368,7 +332,7 @@ function ensureManhattanButton() {
   const navRow =
     document.getElementById("navRow") ||
     (legendEl ? legendEl.querySelector(".navRow") : null) ||
-    legendEl;
+    (legendEl ? legendEl : null);
 
   if (navRow) {
     if (btnStatenIsland && btnStatenIsland.parentElement === navRow) {
@@ -603,18 +567,22 @@ function effectiveRating(props, geom) {
   return Number(props.rating ?? NaN);
 }
 
-/* =========================================================
-   Map projection helpers (for collisions, etc.)
-   ========================================================= */
-function projectToPoint(lng, lat) {
-  if (!map) return { x: 0, y: 0 };
-  const p = map.project([lng, lat]);
-  return { x: p.x, y: p.y };
-}
-function pointDistance(p1, p2) {
-  const dx = p1.x - p2.x;
-  const dy = p1.y - p2.y;
-  return Math.sqrt(dx * dx + dy * dy);
+function labelHTML(props, zoom) {
+  const name = (props.zone_name || "").trim();
+  if (!name) return "";
+
+  const b = effectiveBucket(props, null);
+  if (!shouldShowLabel(b, Math.round(zoom))) return "";
+
+  const zoneText = zoom < 13 ? shortenLabel(name, LABEL_MAX_CHARS_MID) : name;
+
+  const borough = (props.borough || "").trim();
+  const showBorough = zoom >= 15 && borough;
+
+  return `
+    <div class="zn">${escapeHtml(zoneText)}</div>
+    ${showBorough ? `<div class="br">${escapeHtml(borough)}</div>` : ""}
+  `;
 }
 
 /* =========================================================
@@ -641,7 +609,10 @@ function setNavDestination(dest) {
   }
 
   const { lat, lng } = recommendedDest;
-  navBtn.href = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${lat},${lng}`)}&travelmode=driving`;
+  navBtn.href = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
+    `${lat},${lng}`
+  )}&travelmode=driving`;
+
   setNavDisabled(false);
 }
 
@@ -707,8 +678,8 @@ function updateRecommendation(frame) {
         lng: center.lng,
         name: (props.zone_name || "").trim() || `Zone ${props.LocationID ?? ""}`,
         borough: (props.borough || "").trim(),
-        usedSI: statenIslandMode && isStatenIslandFeature(props) && Number.isFinite(Number(props.si_local_rating)),
-        usedMH: manhattanMode && isCoreManhattan(props, geom) && Number.isFinite(Number(props.mh_local_rating)),
+        usedSI: (statenIslandMode && isStatenIslandFeature(props) && Number.isFinite(Number(props.si_local_rating))),
+        usedMH: (manhattanMode && isCoreManhattan(props, geom) && Number.isFinite(Number(props.mh_local_rating))),
       };
     }
   }
@@ -721,398 +692,20 @@ function updateRecommendation(frame) {
 
   const distTxt = best.dMi >= 10 ? `${best.dMi.toFixed(0)} mi` : `${best.dMi.toFixed(1)} mi`;
   const bTxt = best.borough ? ` (${best.borough})` : "";
-  const modeTag = best.usedSI ? " (SI-local)" : best.usedMH ? " (Manhattan-adjusted)" : "";
+  const modeTag = best.usedSI ? " (SI-local)" : (best.usedMH ? " (Manhattan-adjusted)" : "");
   recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Rating ${best.rating}${modeTag} — ${distTxt}`;
 
   setNavDestination({ lat: best.lat, lng: best.lng });
 }
 
 /* =========================================================
-   Map setup + UI nodes
+   Leaflet map setup
    ========================================================= */
 const slider = document.getElementById("slider");
 const timeLabel = document.getElementById("timeLabel");
-const debugToggle = document.getElementById("debugToggle");
-const debugPanel = document.getElementById("debugPanel");
-const dbgReloadFrame = document.getElementById("dbgReloadFrame");
-const dockColors = document.getElementById("dockColors");
-const dockModes = document.getElementById("dockModes");
-const dockChat = document.getElementById("dockChat");
-const dockMusic = document.getElementById("dockMusic");
-
-const dockDrawer = document.getElementById("dockDrawer");
-const dockDrawerTitle = document.getElementById("dockDrawerTitle");
-const dockDrawerBody = document.getElementById("dockDrawerBody");
-const dockDrawerClose = document.getElementById("dockDrawerClose");
-const dockBackdrop = document.getElementById("dockBackdrop");
-
-let openPanelKey = null;
-
-function syncDrawerPanelPosition() {
-  if (!dockDrawer) return;
-  dockDrawer.classList.remove("panelChat", "panelMusic");
-  if (openPanelKey === "chat") dockDrawer.classList.add("panelChat");
-  if (openPanelKey === "music") dockDrawer.classList.add("panelMusic");
-}
-
-function syncDockActiveButton() {
-  [dockColors, dockModes, dockChat, dockMusic].forEach((b) => b && b.classList.remove("dockBtnActive"));
-  if (openPanelKey === "colors") dockColors?.classList.add("dockBtnActive");
-  if (openPanelKey === "modes") dockModes?.classList.add("dockBtnActive");
-  if (openPanelKey === "chat") dockChat?.classList.add("dockBtnActive");
-  if (openPanelKey === "music") dockMusic?.classList.add("dockBtnActive");
-}
-
-function openDrawer(key, title, html) {
-  openPanelKey = key;
-  if (dockDrawerTitle) dockDrawerTitle.textContent = title;
-  if (dockDrawerBody) dockDrawerBody.innerHTML = html;
-  dockDrawer?.classList.add("open");
-  dockBackdrop?.classList.add("open");
-  dockDrawer?.setAttribute("aria-hidden", "false");
-  dockBackdrop?.setAttribute("aria-hidden", "false");
-  syncDrawerPanelPosition();
-  syncDockActiveButton();
-  syncChatPollingState();
-}
-
-function closeDrawer() {
-  openPanelKey = null;
-  dockDrawer?.classList.remove("open");
-  dockBackdrop?.classList.remove("open");
-  dockDrawer?.setAttribute("aria-hidden", "true");
-  dockBackdrop?.setAttribute("aria-hidden", "true");
-  syncDrawerPanelPosition();
-  syncDockActiveButton();
-  syncChatPollingState();
-}
-
-function toggleDrawer(key, title, html) {
-  if (openPanelKey === key) {
-    closeDrawer();
-  } else {
-    openDrawer(key, title, html);
-  }
-}
-
-dockBackdrop?.addEventListener("click", closeDrawer);
-dockDrawerClose?.addEventListener("click", closeDrawer);
-dockDrawer?.addEventListener("click", (e) => e.stopPropagation());
-
-function musicPanelHTML() {
-  return `
-    <div class="panelBlock">
-      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-        <button id="dockHot97Btn" class="chipBtn">${hot97Playing ? "⏸" : "▶"} HOT 97.1</button>
-        <button id="dockMegaBtn" class="chipBtn">${megaPlaying ? "⏸" : "▶"} La Mega 97.9</button>
-        <div style="margin-left:auto;font-weight:700;opacity:0.75;">${escapeHtml(radioStatusEl?.textContent || "Radio: off")}</div>
-      </div>
-    </div>
-  `;
-}
-
-function wireMusicPanel() {
-  const a = document.getElementById("dockHot97Btn");
-  const b = document.getElementById("dockMegaBtn");
-  a?.addEventListener("click", async (e) => {
-    e.preventDefault();
-    await toggleHot97();
-    openDrawer("music", "Music", musicPanelHTML());
-    wireMusicPanel();
-  });
-  b?.addEventListener("click", async (e) => {
-    e.preventDefault();
-    await toggleMega();
-    openDrawer("music", "Music", musicPanelHTML());
-    wireMusicPanel();
-  });
-}
-
-function modesPanelHTML() {
-  return `
-    <div class="panelBlock">
-      <div style="font-weight:700;margin-bottom:8px;">${escapeHtml(recommendEl?.textContent || "")}</div>
-
-      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
-        <button id="dockAuthBtn" class="chipBtn">${authHeaderOK() ? "Sign out" : "Sign in"}</button>
-        <a id="dockNavBtn" class="chipBtn ${recommendedDest ? "" : "disabled"}" href="${navBtn?.href || "#"}" target="_blank" rel="noopener">Navigate</a>
-      </div>
-
-      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
-        <button id="dockStatenBtn" class="chipBtn">${statenIslandMode ? "Staten Island: ON" : "Staten Island: OFF"}</button>
-        <button id="dockManhattanBtn" class="chipBtn">${manhattanMode ? "Manhattan: ON" : "Manhattan: OFF"}</button>
-        <button id="dockGhostBtn" class="chipBtn">${me?.ghost_mode ? "Ghost: ON" : "Ghost: OFF"}</button>
-      </div>
-
-      <div style="display:flex;gap:10px;flex-wrap:wrap;">
-        <button id="dockPoliceBtn" class="chipBtn">🚨 Police</button>
-        <button id="dockPickupBtn" class="chipBtn">✅ Pickup</button>
-      </div>
-
-      <div style="margin-top:10px;opacity:0.75;font-weight:600;">
-        ${escapeHtml(communityNote?.textContent || "")}
-      </div>
-    </div>
-  `;
-}
-
-function wireModesPanel() {
-  document.getElementById("dockAuthBtn")?.addEventListener("click", (e) => {
-    e.preventDefault();
-    if (authHeaderOK()) clearAuth();
-    else setAuthUI(false, "Status: signed out");
-    openDrawer("modes", "Modes", modesPanelHTML());
-    wireModesPanel();
-  });
-
-  document.getElementById("dockStatenBtn")?.addEventListener("click", (e) => {
-    e.preventDefault();
-    statenIslandMode = !statenIslandMode;
-    localStorage.setItem(LS_KEY_STATEN, statenIslandMode ? "1" : "0");
-    syncStatenIslandUI();
-    if (currentFrame) renderFrame(currentFrame);
-    openDrawer("modes", "Modes", modesPanelHTML());
-    wireModesPanel();
-  });
-
-  document.getElementById("dockManhattanBtn")?.addEventListener("click", (e) => {
-    e.preventDefault();
-    manhattanMode = !manhattanMode;
-    localStorage.setItem(LS_KEY_MANHATTAN, manhattanMode ? "1" : "0");
-    syncManhattanUI();
-    if (currentFrame) renderFrame(currentFrame);
-    openDrawer("modes", "Modes", modesPanelHTML());
-    wireModesPanel();
-  });
-
-  document.getElementById("dockGhostBtn")?.addEventListener("click", (e) => {
-    e.preventDefault();
-    if (!authHeaderOK()) return;
-    const nextGhost = !Boolean(me?.ghost_mode);
-    updateMeProfile({ ghost_mode: nextGhost }).then(() => {
-      openDrawer("modes", "Modes", modesPanelHTML());
-      wireModesPanel();
-    });
-  });
-
-  document.getElementById("dockPoliceBtn")?.addEventListener("click", (e) => {
-    e.preventDefault();
-    sendPoliceReport();
-  });
-  document.getElementById("dockPickupBtn")?.addEventListener("click", (e) => {
-    e.preventDefault();
-    sendPickupLog();
-  });
-}
-
-function chatPanelHTML() {
-  if (!authHeaderOK()) {
-    return `
-      <div class="panelBlock chatPanelWrap">
-        <div class="chatSignedOut">Sign in to chat with the community.</div>
-      </div>
-    `;
-  }
-
-  return `
-    <div class="panelBlock chatPanelWrap">
-      <div id="chatList" class="chatList" aria-live="polite"></div>
-      <div class="chatComposer">
-        <input id="chatInput" type="text" class="chatInput" placeholder="Message drivers…" maxlength="600" />
-        <button id="chatSendBtn" class="chipBtn" type="button">Send</button>
-      </div>
-    </div>
-  `;
-}
-
-function chatMsgCursor(msg) {
-  return msg?.created_at || msg?.id || null;
-}
-
-function chatMsgKey(msg) {
-  const id = msg?.id;
-  if (id !== undefined && id !== null) return `id:${id}`;
-  const t = msg?.created_at || "";
-  const n = msg?.display_name || msg?.user_name || msg?.name || "";
-  const body = msg?.text || msg?.message || "";
-  return `fallback:${t}|${n}|${body}`;
-}
-
-function formatChatTime(ts) {
-  if (!ts) return "";
-  const d = new Date(ts);
-  if (!Number.isFinite(d.getTime())) return "";
-  return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-}
-
-function isChatNearBottom(listEl, px = 80) {
-  if (!listEl) return true;
-  return listEl.scrollHeight - listEl.scrollTop - listEl.clientHeight <= px;
-}
-
-function renderChatMessages(messages) {
-  const listEl = document.getElementById("chatList");
-  if (!listEl || !Array.isArray(messages) || !messages.length) return;
-
-  const nearBottom = isChatNearBottom(listEl, 80);
-  const frag = document.createDocumentFragment();
-  let appended = 0;
-
-  for (const msg of messages) {
-    const key = chatMsgKey(msg);
-    if (chatSeenKeys.has(key)) continue;
-    chatSeenKeys.add(key);
-
-    const row = document.createElement("div");
-    row.className = "chatMsgRow";
-
-    const line = document.createElement("div");
-    line.className = "chatMsgLine";
-
-    const who = document.createElement("strong");
-    who.className = "chatMsgName";
-    who.textContent = `${msg?.display_name || msg?.user_name || msg?.name || "Driver"}: `;
-
-    const text = document.createElement("span");
-    text.className = "chatMsgText";
-    text.textContent = String(msg?.text || msg?.message || "");
-
-    const time = document.createElement("div");
-    time.className = "chatMsgTime";
-    time.textContent = formatChatTime(msg?.created_at || msg?.ts || msg?.timestamp);
-
-    line.appendChild(who);
-    line.appendChild(text);
-    row.appendChild(line);
-    row.appendChild(time);
-    frag.appendChild(row);
-
-    const cursor = chatMsgCursor(msg);
-    if (cursor) chatLastSeen = cursor;
-    appended += 1;
-  }
-
-  if (!appended) return;
-  listEl.appendChild(frag);
-  if (nearBottom) listEl.scrollTop = listEl.scrollHeight;
-}
-
-async function chatFetchNew() {
-  if (!authHeaderOK()) return [];
-  const q = chatLastSeen ? `?after=${encodeURIComponent(chatLastSeen)}&limit=50` : "?limit=50";
-  const data = await getJSONAuth(`/chat/rooms/${CHAT_ROOM}${q}`, communityToken);
-  const msgs = Array.isArray(data) ? data : data?.messages || [];
-  return msgs;
-}
-
-async function chatSend(text) {
-  if (!authHeaderOK()) throw new Error("Not signed in");
-  const body = { text };
-  const msg = await postJSON(`/chat/rooms/${CHAT_ROOM}`, body, communityToken);
-  return msg;
-}
-
-async function chatPollOnce() {
-  if (!authHeaderOK() || openPanelKey !== "chat") return;
-  try {
-    const msgs = await chatFetchNew();
-    renderChatMessages(msgs);
-  } catch (e) {
-    console.warn("chat poll failed:", e);
-  }
-}
-
-function startChatPolling() {
-  if (chatPollTimer || !authHeaderOK() || openPanelKey !== "chat") return;
-  chatPollOnce();
-  chatPollTimer = setInterval(chatPollOnce, CHAT_POLL_MS);
-}
-
-function stopChatPolling() {
-  if (!chatPollTimer) return;
-  clearInterval(chatPollTimer);
-  chatPollTimer = null;
-}
-
-function syncChatPollingState() {
-  if (authHeaderOK() && openPanelKey === "chat") startChatPolling();
-  else stopChatPolling();
-}
-
-function wireChatPanel() {
-  const chatInput = document.getElementById("chatInput");
-  const chatSendBtn = document.getElementById("chatSendBtn");
-  if (!chatInput || !chatSendBtn) return;
-
-  const sendNow = async () => {
-    const text = String(chatInput.value || "").trim();
-    if (!text) return;
-
-    chatSendBtn.disabled = true;
-    try {
-      const msg = await chatSend(text);
-      chatInput.value = "";
-      if (msg) {
-        renderChatMessages(Array.isArray(msg) ? msg : [msg]);
-      }
-      await chatPollOnce();
-    } catch (e) {
-      console.warn("chat send failed:", e);
-    } finally {
-      chatSendBtn.disabled = false;
-    }
-  };
-
-  chatSendBtn.addEventListener("click", (e) => {
-    e.preventDefault();
-    sendNow();
-  });
-  chatInput.addEventListener("keydown", (e) => {
-    if (e.key !== "Enter") return;
-    e.preventDefault();
-    sendNow();
-  });
-
-  chatPollOnce();
-}
-
-function colorsPanelHTML() {
-  return `
-    <div class="panelBlock">
-      <div style="font-weight:800;margin-bottom:8px;">Demand Colors</div>
-      <div>🟩 Green = Highest</div>
-      <div>🟪 Purple = High</div>
-      <div>🟦 Blue = Medium</div>
-      <div>🟦 Sky = Normal</div>
-      <div>🟨 Yellow = Below Normal</div>
-      <div>🟥 Red = Very Low / Avoid</div>
-      <div style="margin-top:10px;opacity:0.75;font-weight:600;">
-        ${statenIslandMode
-          ? "Staten Island Mode is ON: Staten Island colors are relative within Staten Island only. Other boroughs remain NYC-wide."
-          : "Colors come from rating (1–100) for the selected 20-minute window. Time label is NYC time."}
-      </div>
-    </div>
-  `;
-}
-
-function bindDockToggle(btn, key, title, htmlFactory, wireFn) {
-  if (!btn) return;
-  btn.addEventListener("pointerdown", (e) => e.stopPropagation());
-  btn.addEventListener("click", (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    toggleDrawer(key, title, htmlFactory());
-    if (openPanelKey === key && typeof wireFn === "function") wireFn();
-  });
-}
-
-bindDockToggle(dockMusic, "music", "Music", musicPanelHTML, wireMusicPanel);
-bindDockToggle(dockModes, "modes", "Modes", modesPanelHTML, wireModesPanel);
-bindDockToggle(dockChat, "chat", "Chat", chatPanelHTML, wireChatPanel);
-bindDockToggle(dockColors, "colors", "Colors", colorsPanelHTML);
 
 /* =========================================================
-   Precision Slider Popup
+   PRECISION SLIDER POPUP
    ========================================================= */
 const sliderBubble = document.getElementById("sliderBubble");
 let bubbleHideTimer = null;
@@ -1135,15 +728,13 @@ function setSliderBubbleTextAndPos() {
   const min = Number(slider.min || 0);
   const max = Number(slider.max || 1);
   const pct = max > min ? (idx - min) / (max - min) : 0;
-  const sliderRect = slider.getBoundingClientRect();
-  const trackPx = sliderRect.width;
+  const trackPx = slider.getBoundingClientRect().width;
 
   const x = pct * trackPx;
   const pad = 18;
   const clampedX = Math.max(pad, Math.min(trackPx - pad, x));
 
-  sliderBubble.style.left = `${sliderRect.left + clampedX}px`;
-  sliderBubble.style.top = `${sliderRect.top - 38}px`;
+  sliderBubble.style.left = `${clampedX}px`;
 }
 
 function bubbleUpdateNow() {
@@ -1151,414 +742,34 @@ function bubbleUpdateNow() {
   showSliderBubble();
 }
 
-const debugEnabled = new URLSearchParams(window.location.search).get("debug") === "1";
-if (debugToggle && debugPanel) {
-  if (debugEnabled) {
-    debugToggle.hidden = false;
-  } else {
-    debugToggle.hidden = true;
-    debugPanel.hidden = true;
-  }
-  debugToggle.addEventListener("click", () => {
-    if (!debugEnabled) return;
-    debugPanel.hidden = !debugPanel.hidden;
-  });
-}
-if (dbgReloadFrame) {
-  dbgReloadFrame.addEventListener("click", () => {
-    const idx = Number(slider?.value || "0");
-    loadFrame(idx).catch(console.error);
-  });
-}
-
 /* =========================================================
-   MapLibre init
+   Map
    ========================================================= */
-let zonePopup = null;
+const map = L.map("map", { zoomControl: true }).setView([40.7128, -74.0060], 8);
 
-function initMap() {
-  map = new maplibregl.Map({
-    container: "map",
-    style: {
-      version: 8,
-      sources: {
-        "carto-raster": {
-          type: "raster",
-          tiles: [
-            "https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
-            "https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
-            "https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
-          ],
-          tileSize: 256,
-        },
-      },
-      layers: [
-        {
-          id: "carto-base",
-          type: "raster",
-          source: "carto-raster",
-          paint: { "raster-opacity": 1 },
-        },
-      ],
-      glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
-      sprite: "",
-    },
-    center: [-73.98, 40.73],
-    zoom: 10.2,
-    attributionControl: { position: "bottom-right" },
-    localIdeographFontFamily: "sans-serif",
-  });
+L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
+  attribution: "&copy; OpenStreetMap &copy; CARTO",
+  maxZoom: 19,
+}).addTo(map);
 
-  map.on("load", () => {
-    mapReady = true;
-    map.resize();
-    applyNightBasemap(!!wxState?.isNight);
+const labelsPane = map.createPane("labelsPane");
+labelsPane.style.zIndex = 450;
 
-    ensureZonesSourceAndLayers().catch((e) => console.warn("zones source/layers init failed:", e));
+const navPane = map.createPane("navPane");
+navPane.style.zIndex = 1000;
 
-    if (!debugOnce.mapCenter) {
-      const c = map.getCenter();
-      console.log("DEBUG map center lngLat", { lng: c.lng, lat: c.lat });
-      debugOnce.mapCenter = true;
-    }
+const communityPane = map.createPane("communityPane");
+communityPane.style.zIndex = 980;
 
-    // Restore “user exploring disables auto-center” behavior
-    map.on("dragstart", disableAutoCenterBecauseUserIsExploring);
-    map.on("zoomstart", disableAutoCenterBecauseUserIsExploring);
-
-    // Presence refresh on moves to keep label collision offsets stable
-    map.on("moveend", () => {
-      if (authHeaderOK()) pullPresenceAll().catch(() => {});
-    });
-    map.on("zoomend", () => {
-      if (authHeaderOK()) pullPresenceAll().catch(() => {});
-    });
-
-    // Zone click popup (restored)
-    wireZoneClickPopup();
-
-    map.on("click", (e) => {
-      const features = map.queryRenderedFeatures(e.point, { layers: ["zones-fill"] });
-      if (!features.length) closeAllPanels();
-    });
-
-    const loading = document.getElementById("mapLoading");
-    if (loading) loading.style.display = "none";
-
-    map.triggerRepaint();
-    setTimeout(() => map.triggerRepaint(), 150);
-    setTimeout(() => map.triggerRepaint(), 400);
-    setTimeout(() => map.triggerRepaint(), 800);
-
-    if (pendingFrame) {
-      renderFrame(pendingFrame);
-      pendingFrame = null;
-    }
-  });
-
-  map.on("style.load", () => map.triggerRepaint());
-  map.on("error", (e) => console.error("MapLibre error:", e));
-}
-
-async function waitForStyleReady(timeoutMs = 5000) {
-  if (!map) return false;
-  if (map.isStyleLoaded()) return true;
-
-  return new Promise((resolve) => {
-    let settled = false;
-    const done = (ok) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(tid);
-      map.off("styledata", onStyleData);
-      map.off("load", onLoad);
-      map.off("error", onError);
-      resolve(ok);
-    };
-    const onStyleData = () => {
-      if (map?.isStyleLoaded()) done(true);
-    };
-    const onLoad = () => done(!!map?.isStyleLoaded());
-    const onError = () => done(false);
-
-    const tid = setTimeout(() => done(!!map?.isStyleLoaded()), timeoutMs);
-    map.on("styledata", onStyleData);
-    map.on("load", onLoad);
-    map.on("error", onError);
-  });
-}
-
-async function ensureZonesSourceAndLayers() {
-  if (!map) return false;
-  const styleReady = await waitForStyleReady();
-  if (!styleReady) return false;
-
-  // Polygons source
-  if (!map.getSource("zones")) {
-    map.addSource("zones", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
-  }
-
-  // Fill
-  if (!map.getLayer("zones-fill")) {
-    map.addLayer({
-      id: "zones-fill",
-      type: "fill",
-      source: "zones",
-      paint: {
-        "fill-color": ["coalesce", ["to-string", ["get", "effectiveColor"]], "#66aaff"],
-        "fill-opacity": 0.82,
-      },
-    });
-  }
-
-  // Outline
-  if (!map.getLayer("zones-line")) {
-    map.addLayer({
-      id: "zones-line",
-      type: "line",
-      source: "zones",
-      paint: { "line-color": "#ffffff", "line-width": 1, "line-opacity": 1 },
-    });
-  }
-
-  // Labels source (points INSIDE polygons)
-  if (!map.getSource("zone-labels")) {
-    map.addSource("zone-labels", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
-  }
-
-  // Labels layer (clean, professional, fun)
-  if (!map.getLayer("zone-labels")) {
-    map.addLayer({
-      id: "zone-labels",
-      type: "symbol",
-      source: "zone-labels",
-      layout: {
-        "symbol-placement": "point",
-        "text-field": ["coalesce", ["get", "label"], ""],
-        "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
-        "text-size": [
-          "interpolate",
-          ["linear"],
-          ["zoom"],
-          10, 6,
-          11, 7,
-          12, 8,
-          13, 10,
-          14, 12,
-          15, 13,
-          16, 15
-        ],
-        "text-max-width": 7,
-        "text-anchor": "center",
-        "text-justify": "center",
-        "text-allow-overlap": false,
-        "text-ignore-placement": false,
-        "text-padding": 1.5,
-      },
-      paint: {
-        "text-color": "#111111",
-        "text-halo-color": "rgba(255,255,255,0.90)",
-        "text-halo-width": 1.8,
-        "text-halo-blur": 0.6,
-      },
-      minzoom: LABEL_ZOOM_MIN,
-    });
-  }
-
-  return true;
-}
-
-/* =========================================================
-   Zone click popup (restored like Leaflet bindPopup)
-   ========================================================= */
-function closeZonePopup() {
-  try {
-    if (zonePopup) zonePopup.remove();
-  } catch {}
-  zonePopup = null;
-}
-
-function wireZoneClickPopup() {
-  if (!map) return;
-
-  // cursor UX
-  map.on("mouseenter", "zones-fill", () => {
-    try { map.getCanvas().style.cursor = "pointer"; } catch {}
-  });
-  map.on("mouseleave", "zones-fill", () => {
-    try { map.getCanvas().style.cursor = ""; } catch {}
-  });
-
-  map.on("click", "zones-fill", (e) => {
-    try {
-      const feat = e?.features?.[0];
-      if (!feat) return;
-
-      const props = feat.properties || {};
-      // MapLibre can stringify nested props; your popup only needs top-level keys used below.
-      const geom = feat.geometry || null;
-
-      const lngLat = e.lngLat;
-      const html = buildPopupHTML(props, geom);
-
-      closeZonePopup();
-
-      zonePopup = new maplibregl.Popup({
-        closeButton: true,
-        closeOnClick: true,
-        maxWidth: "340px",
-      })
-        .setLngLat([lngLat.lng, lngLat.lat])
-        .setHTML(html)
-        .addTo(map);
-    } catch (err) {
-      console.warn("zone popup failed:", err);
-    }
-  });
-}
-
-/* =========================================================
-   Label point computation (inside polygon) — for “major map app” behavior
-   - We DO NOT modify polygon geometry arrays.
-   - We create a separate point FeatureCollection for labels.
-   ========================================================= */
-
-function clamp(v, lo, hi) {
-  return Math.max(lo, Math.min(hi, v));
-}
-
-function bboxFromCoords(coords) {
-  let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
-  const visit = (c) => {
-    if (!Array.isArray(c)) return;
-    if (c.length >= 2 && Number.isFinite(c[0]) && Number.isFinite(c[1])) {
-      minLng = Math.min(minLng, c[0]);
-      minLat = Math.min(minLat, c[1]);
-      maxLng = Math.max(maxLng, c[0]);
-      maxLat = Math.max(maxLat, c[1]);
-      return;
-    }
-    for (const cc of c) visit(cc);
-  };
-  visit(coords);
-  if (!Number.isFinite(minLng) || !Number.isFinite(minLat) || !Number.isFinite(maxLng) || !Number.isFinite(maxLat)) return null;
-  return { minLng, minLat, maxLng, maxLat };
-}
-
-// ray-casting point in ring
-function pointInRing(ptLng, ptLat, ring) {
-  if (!Array.isArray(ring) || ring.length < 3) return false;
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const xi = ring[i][0], yi = ring[i][1];
-    const xj = ring[j][0], yj = ring[j][1];
-    const intersect =
-      ((yi > ptLat) !== (yj > ptLat)) &&
-      (ptLng < ((xj - xi) * (ptLat - yi)) / (yj - yi + 1e-15) + xi);
-    if (intersect) inside = !inside;
-  }
-  return inside;
-}
-
-// point in polygon (outer + holes)
-function pointInPolygonLngLat(ptLng, ptLat, polyCoords) {
-  if (!Array.isArray(polyCoords) || polyCoords.length === 0) return false;
-  const outer = polyCoords[0];
-  if (!pointInRing(ptLng, ptLat, outer)) return false;
-
-  // holes: if inside any hole => outside
-  for (let i = 1; i < polyCoords.length; i++) {
-    if (pointInRing(ptLng, ptLat, polyCoords[i])) return false;
-  }
-  return true;
-}
-
-// choose largest polygon in multipolygon by bbox area (cheap & stable)
-function pickLargestPolygonFromMulti(multiCoords) {
-  if (!Array.isArray(multiCoords) || multiCoords.length === 0) return null;
-  let best = null;
-  let bestArea = -Infinity;
-  for (const poly of multiCoords) {
-    const bb = bboxFromCoords(poly);
-    if (!bb) continue;
-    const area = (bb.maxLng - bb.minLng) * (bb.maxLat - bb.minLat);
-    if (area > bestArea) {
-      bestArea = area;
-      best = poly;
-    }
-  }
-  return best;
-}
-
-// Find a point inside polygon. Start at centroid; if outside, spiral search inside bbox.
-function findInteriorPointForGeometry(geom) {
-  if (!geom) return null;
-
-  let poly = null;
-  if (geom.type === "Polygon") poly = geom.coordinates;
-  else if (geom.type === "MultiPolygon") poly = pickLargestPolygonFromMulti(geom.coordinates);
-  else return null;
-
-  if (!poly) return null;
-
-  const bb = bboxFromCoords(poly);
-  if (!bb) return null;
-
-  // seed = centroid (area-weighted)
-  let seed = geometryCenter({ type: "Polygon", coordinates: poly });
-  if (seed && Number.isFinite(seed.lng) && Number.isFinite(seed.lat)) {
-    if (pointInPolygonLngLat(seed.lng, seed.lat, poly)) return seed;
-  }
-
-  // fallback seed = bbox center
-  const cx = (bb.minLng + bb.maxLng) / 2;
-  const cy = (bb.minLat + bb.maxLat) / 2;
-  if (pointInPolygonLngLat(cx, cy, poly)) return { lng: cx, lat: cy };
-
-  // spiral search around bbox center
-  const w = bb.maxLng - bb.minLng;
-  const h = bb.maxLat - bb.minLat;
-
-  // step size scaled by bbox
-  const stepLng = Math.max(w / 40, 1e-4);
-  const stepLat = Math.max(h / 40, 1e-4);
-
-  const maxR = 60; // attempts radius steps
-  for (let r = 1; r <= maxR; r++) {
-    const dx = r * stepLng;
-    const dy = r * stepLat;
-
-    const candidates = [
-      [cx + dx, cy],
-      [cx - dx, cy],
-      [cx, cy + dy],
-      [cx, cy - dy],
-      [cx + dx, cy + dy],
-      [cx - dx, cy + dy],
-      [cx + dx, cy - dy],
-      [cx - dx, cy - dy],
-    ];
-
-    for (const [x, y] of candidates) {
-      const lng = clamp(x, bb.minLng, bb.maxLng);
-      const lat = clamp(y, bb.minLat, bb.maxLat);
-      if (pointInPolygonLngLat(lng, lat, poly)) return { lng, lat };
-    }
-  }
-
-  // last fallback: bbox center even if not perfect (should be rare)
-  return { lng: cx, lat: cy };
-}
-
-/* =========================================================
-   Timeline / frames
-   ========================================================= */
+let geoLayer = null;
 let timeline = [];
 let minutesOfWeek = [];
 let currentFrame = null;
 let lastUserSliderTs = 0;
 
-/* NEXT BIN CACHE */
+/* =========================================================
+   NEXT BIN CACHE
+   ========================================================= */
 let nextFramePickupsById = new Map();
 let nextFramePayById = new Map();
 
@@ -1607,13 +818,13 @@ function buildPopupHTML(props, geom) {
   const nycRating = props.rating ?? "";
   const nycBucket = props.bucket ?? "";
   const pickups = props.pickups ?? "";
-  const pay = props.avg_driver_pay == null ? "n/a" : Number(props.avg_driver_pay).toFixed(2);
+  const pay = props.avg_driver_pay == null ? "n/a" : props.avg_driver_pay.toFixed(2);
 
   const nextPuVal = nextFramePickupsById.get(String(props.LocationID ?? ""));
-  const nextPickups = nextPuVal == null ? "n/a" : String(Math.round(nextPuVal));
+  const nextPickups = (nextPuVal == null) ? "n/a" : String(Math.round(nextPuVal));
 
   const nextPayVal = nextFramePayById.get(String(props.LocationID ?? ""));
-  const nextPay = nextPayVal == null ? "n/a" : Number(nextPayVal).toFixed(2);
+  const nextPay = (nextPayVal == null) ? "n/a" : Number(nextPayVal).toFixed(2);
 
   let extra = "";
 
@@ -1639,180 +850,67 @@ function buildPopupHTML(props, geom) {
   `;
 }
 
-function getFeatureCollectionBounds(fc) {
-  if (!fc || !Array.isArray(fc.features) || fc.features.length === 0) return null;
-
-  let minLng = Infinity;
-  let minLat = Infinity;
-  let maxLng = -Infinity;
-  let maxLat = -Infinity;
-
-  const visitCoordinates = (coords) => {
-    if (!Array.isArray(coords)) return;
-    if (coords.length >= 2 && Number.isFinite(coords[0]) && Number.isFinite(coords[1])) {
-      const lng = coords[0];
-      const lat = coords[1];
-      if (lng < minLng) minLng = lng;
-      if (lat < minLat) minLat = lat;
-      if (lng > maxLng) maxLng = lng;
-      if (lat > maxLat) maxLat = lat;
-      return;
-    }
-    coords.forEach(visitCoordinates);
-  };
-
-  fc.features.forEach((f) => visitCoordinates(f?.geometry?.coordinates));
-
-  if (!Number.isFinite(minLng) || !Number.isFinite(minLat) || !Number.isFinite(maxLng) || !Number.isFinite(maxLat)) {
-    return null;
-  }
-  return { minLng, minLat, maxLng, maxLat };
-}
-
-/* =========================================================
-   Label refresh (MapLibre symbol layer)
-   ========================================================= */
-function buildZoneLabelsFeatureCollection(frame) {
-  const feats = frame?.polygons?.features || [];
-  const out = [];
-
-  // “Major map app style”: show labels always (>= LABEL_ZOOM_MIN), but still avoid empty names.
-  for (const f of feats) {
-    const props = f?.properties || {};
-    const name = (props.zone_name || "").trim();
-    if (!name) continue;
-
-    const z = map ? Math.round(map.getZoom()) : 12;
-
-    // More aggressive truncation when zoomed out to keep labels compact and inside zones
-    let maxChars = name.length;
-    if (z <= 10) maxChars = 9;
-    else if (z === 11) maxChars = 11;
-    else if (z === 12) maxChars = 13;
-    else if (z === 13) maxChars = 16;
-    else maxChars = 28;
-
-    const label = shortenLabel(name, maxChars);
-
-    const pt = findInteriorPointForGeometry(f.geometry);
-    if (!pt) continue;
-
-    out.push({
-      type: "Feature",
-      geometry: { type: "Point", coordinates: [pt.lng, pt.lat] },
-      properties: {
-        LocationID: props.LocationID,
-        label,
-      },
-    });
-  }
-
-  return { type: "FeatureCollection", features: out };
-}
-
-function refreshZoneLabels(frame) {
-  if (!map || !mapReady) return;
-  if (!frame) return;
-  const src = map.getSource("zone-labels");
-  if (!src) return;
-
-  const fc = buildZoneLabelsFeatureCollection(frame);
-  src.setData(fc);
-}
-
-/* =========================================================
-   Render frame
-   ========================================================= */
-async function renderFrame(frame) {
-  if (!map || !mapReady) {
-    pendingFrame = frame;
-    return;
-  }
-
-  const zonesReady = await ensureZonesSourceAndLayers();
-  if (!zonesReady || !map.getSource("zones")) {
-    pendingFrame = frame;
-    return;
-  }
-
+function renderFrame(frame) {
   currentFrame = frame;
 
-  // apply modes to mutate props (same as old)
-  if (statenIslandMode) applyStatenLocalView(frame);
-  if (manhattanMode) applyManhattanLocalView(frame);
+  if (statenIslandMode) applyStatenLocalView(currentFrame);
+  if (manhattanMode) applyManhattanLocalView(currentFrame);
 
-  const fc = frame.polygons || { type: "FeatureCollection", features: [] };
+  timeLabel.textContent = formatNYCLabel(currentFrame.time);
 
-  // IMPORTANT FIX: always recompute effectiveColor each render so toggles update instantly
-  for (const f of fc.features) {
-    const props = f.properties || {};
-    const col = effectiveColor(props, f.geometry) || (props?.style?.fillColor || props?.style?.color) || "#66aaff";
-    props.effectiveColor = col;
+  if (geoLayer) {
+    geoLayer.remove();
+    geoLayer = null;
   }
 
-  if (!debugOnce.frame) {
-    console.log("DEBUG frame", { time: frame?.time, featureCount: fc.features.length });
-    debugOnce.frame = true;
-  }
+  const zoomNow = map.getZoom();
+  const zClass = zoomClass(zoomNow);
 
-  map.getSource("zones").setData(fc);
+  geoLayer = L.geoJSON(currentFrame.polygons, {
+    style: (feature) => {
+      const props = feature?.properties || {};
+      const st = props.style || {};
+      const fill = effectiveColor(props, feature.geometry);
 
-  // Labels update (points inside polygons)
-  refreshZoneLabels(frame);
+      return {
+        color: fill,
+        weight: st.weight ?? 0,
+        opacity: st.opacity ?? 0,
+        fillColor: fill,
+        fillOpacity: st.fillOpacity ?? 0.82,
+      };
+    },
+    onEachFeature: (feature, layer) => {
+      const props = feature.properties || {};
+      layer.bindPopup(buildPopupHTML(props, feature.geometry), { maxWidth: 320 });
 
-  if (debugEnabled) {
-    dbg("dbgSetData", `OK features=${fc.features.length}`);
-    dbg(
-      "dbgLayers",
-      `source=${Boolean(map.getSource("zones"))} fill=${Boolean(map.getLayer("zones-fill"))} line=${Boolean(
-        map.getLayer("zones-line")
-      )}`
-    );
-  }
+      const html = labelHTML(props, zoomNow);
+      if (!html) return;
 
-  const bounds = getFeatureCollectionBounds(fc);
-  if (debugEnabled) dbg("dbgBounds", bounds ? `${bounds.minLng},${bounds.minLat},${bounds.maxLng},${bounds.maxLat}` : "invalid");
+      layer.bindTooltip(html, {
+        permanent: true,
+        direction: "center",
+        className: `zone-label ${zClass}`,
+        opacity: 0.92,
+        interactive: false,
+        pane: "labelsPane",
+      });
+    },
+  }).addTo(map);
 
-  if (fc.features.length > 0 && !didFitToZonesOnce && bounds) {
-    map.fitBounds(
-      [
-        [bounds.minLng, bounds.minLat],
-        [bounds.maxLng, bounds.maxLat],
-      ],
-      { padding: 40, duration: 0 }
-    );
-    didFitToZonesOnce = true;
-  }
-  if (debugEnabled) dbg("dbgFit", didFitToZonesOnce);
-
-  if (timeLabel && currentFrame?.time) timeLabel.textContent = formatNYCLabel(currentFrame.time);
   updateRecommendation(currentFrame);
 }
 
-/* =========================================================
-   Load frame / timeline
-   ========================================================= */
 async function loadFrame(idx) {
-  const frameUrl = `${RAILWAY_BASE}/frame/${idx}`;
   loadNextFramePickupsMap(idx).catch(() => {});
-  const frame = await fetchJSON(frameUrl);
-
-  if (debugEnabled) {
-    dbg("dbgFrame", `OK ${frameUrl}`);
-    dbg("dbgFrameKeys", Object.keys(frame || {}).join(", "));
-    dbg("dbgPolyCount", frame?.polygons?.features?.length ?? 0);
-  }
-
-  await renderFrame(frame);
+  const frame = await fetchJSON(`${RAILWAY_BASE}/frame/${idx}`);
+  renderFrame(frame);
 }
 
 async function loadTimeline() {
-  const timelineUrl = `${RAILWAY_BASE}/timeline`;
-  const t = await fetchJSON(timelineUrl);
-  timeline = Array.isArray(t) ? t : t.timeline || [];
+  const t = await fetchJSON(`${RAILWAY_BASE}/timeline`);
+  timeline = Array.isArray(t) ? t : (t.timeline || []);
   if (!timeline.length) throw new Error("Timeline empty. Run /generate once on Railway.");
-
-  if (debugEnabled) dbg("dbgTimeline", `OK ${timelineUrl} count=${timeline.length}`);
 
   minutesOfWeek = timeline.map(minuteOfWeekFromIso);
 
@@ -1825,15 +923,21 @@ async function loadTimeline() {
   slider.value = String(idx);
 
   bubbleUpdateNow();
+
   await loadFrame(idx);
 }
 
+map.on("zoomend", () => {
+  if (currentFrame) renderFrame(currentFrame);
+  if (authHeaderOK()) pullPresenceAll().catch(() => {});
+});
+
 let sliderDebounce = null;
 
-slider?.addEventListener("pointerdown", bubbleUpdateNow);
-slider?.addEventListener("touchstart", bubbleUpdateNow, { passive: true });
+slider.addEventListener("pointerdown", bubbleUpdateNow);
+slider.addEventListener("touchstart", bubbleUpdateNow, { passive: true });
 
-slider?.addEventListener("input", () => {
+slider.addEventListener("input", () => {
   lastUserSliderTs = Date.now();
   bubbleUpdateNow();
 
@@ -1858,76 +962,9 @@ function suppressAutoDisableFor(ms, fn) {
   fn();
 }
 
-const AUTO_ZOOM_MIN = 11.0;
-const AUTO_ZOOM_MAX = 14.0;
-const AUTO_FIT_PADDING = 70;
-let lastAutoFitMs = 0;
-
-function clamp(n, a, b) {
-  return Math.max(a, Math.min(b, n));
-}
-
-function autoCenterAndAutoZoom() {
-  if (!map || !userLatLng) return;
-
-  const now = Date.now();
-  if (now - lastAutoFitMs < 2500) return;
-  lastAutoFitMs = now;
-
-  const pts = [];
-  pts.push([userLatLng.lng, userLatLng.lat]);
-
-  for (const mk of otherMarkers.values()) {
-    try {
-      const ll = mk.getLngLat();
-      if (ll && Number.isFinite(ll.lng) && Number.isFinite(ll.lat)) {
-        pts.push([ll.lng, ll.lat]);
-      }
-    } catch {}
-  }
-
-  if (pts.length <= 1) {
-    const z = clamp(map.getZoom(), AUTO_ZOOM_MIN, AUTO_ZOOM_MAX);
-    suppressAutoDisableFor(700, () => map.flyTo({ center: pts[0], zoom: z, duration: 600 }));
-    return;
-  }
-
-  let minLng = Infinity;
-  let minLat = Infinity;
-  let maxLng = -Infinity;
-  let maxLat = -Infinity;
-  for (const [lng, lat] of pts) {
-    minLng = Math.min(minLng, lng);
-    minLat = Math.min(minLat, lat);
-    maxLng = Math.max(maxLng, lng);
-    maxLat = Math.max(maxLat, lat);
-  }
-
-  suppressAutoDisableFor(900, () => {
-    map.fitBounds(
-      [
-        [minLng, minLat],
-        [maxLng, maxLat],
-      ],
-      {
-        padding: AUTO_FIT_PADDING,
-        duration: 650,
-        maxZoom: AUTO_ZOOM_MAX,
-      }
-    );
-
-    setTimeout(() => {
-      const zNow = map.getZoom();
-      const zClamped = clamp(zNow, AUTO_ZOOM_MIN, AUTO_ZOOM_MAX);
-      if (Math.abs(zNow - zClamped) > 0.01) {
-        map.setZoom(zClamped);
-      }
-    }, 720);
-  });
-}
-
 function syncCenterButton() {
   if (!btnCenter) return;
+  btnCenter.textContent = autoCenter ? "Auto-center: ON" : "Auto-center: OFF";
   btnCenter.classList.toggle("on", !!autoCenter);
 }
 syncCenterButton();
@@ -1936,16 +973,6 @@ if (btnCenter) {
   btnCenter.addEventListener("pointerdown", (e) => e.stopPropagation());
   btnCenter.addEventListener("touchstart", (e) => e.stopPropagation(), { passive: true });
 
-  // --- center helper: always use the navMarker's real position (arrow) ---
-  function getSelfCenterLngLat() {
-    if (navMarker && typeof navMarker.getLngLat === "function") {
-      const p = navMarker.getLngLat();
-      if (p && Number.isFinite(p.lng) && Number.isFinite(p.lat)) return { lng: p.lng, lat: p.lat };
-    }
-    if (userLatLng && Number.isFinite(userLatLng.lng) && Number.isFinite(userLatLng.lat)) return { lng: userLatLng.lng, lat: userLatLng.lat };
-    return null;
-  }
-
   btnCenter.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -1953,21 +980,8 @@ if (btnCenter) {
     autoCenter = !autoCenter;
     syncCenterButton();
 
-    if (autoCenter && map) {
-      const c = getSelfCenterLngLat();
-      if (c) {
-        suppressAutoDisableFor(900, () => {
-          map.flyTo({
-            center: [c.lng, c.lat],
-            zoom: Math.max(map.getZoom(), 13.0), // keeps you tight on your arrow
-            duration: 600
-          });
-        });
-      }
-      if (Number.isFinite(lastHeadingDeg)) maybeRotateMapTo(lastHeadingDeg);
-    } else if (map && mapReady) {
-      const b = map.getBearing ? map.getBearing() : 0;
-      lastMapBearingDeg = normDeg(b);
+    if (autoCenter && userLatLng) {
+      suppressAutoDisableFor(800, () => map.panTo(userLatLng, { animate: true }));
     }
   });
 }
@@ -1978,6 +992,8 @@ function disableAutoCenterBecauseUserIsExploring() {
   autoCenter = false;
   syncCenterButton();
 }
+map.on("dragstart", disableAutoCenterBecauseUserIsExploring);
+map.on("zoomstart", disableAutoCenterBecauseUserIsExploring);
 
 /* =========================================================
    Live location arrow + follow behavior
@@ -1989,21 +1005,24 @@ let lastHeadingDeg = 0;
 let lastMoveTs = 0;
 
 function makeNavIcon() {
-  const myName = authHeaderOK() ? me?.display_name || "" : "";
-  const el = document.createElement("div");
-  el.innerHTML = `
-    <div id="navWrap" class="navArrowWrap navPulse">
-      <div id="navArrowRot" class="navArrowRot"><div class="navArrow"></div></div>
-      <div id="navMeName" class="meName" style="display:${myName ? "block" : "none"}">${escapeHtml(myName)}</div>
-    </div>
-  `;
-  return el;
+  const myName = authHeaderOK() ? (me?.display_name || "") : "";
+  return L.divIcon({
+    className: "",
+    html: `
+      <div id="navWrap" class="navArrowWrap navPulse">
+        <div id="navArrowRot" class="navArrowRot"><div class="navArrow"></div></div>
+        <div id="navMeName" class="meName" style="display:${myName ? "block" : "none"}">${escapeHtml(myName)}</div>
+      </div>
+    `,
+    iconSize: [30, 30],
+    iconAnchor: [15, 15],
+  });
 }
 
 function refreshNavNameLabel() {
   const el = document.getElementById("navMeName");
   if (!el) return;
-  const myName = authHeaderOK() ? me?.display_name || "" : "";
+  const myName = authHeaderOK() ? (me?.display_name || "") : "";
   el.textContent = myName;
   el.style.display = myName ? "block" : "none";
 }
@@ -2018,40 +1037,6 @@ function setNavRotation(deg) {
   const el = document.getElementById("navArrowRot");
   if (!el) return;
   el.style.transform = `rotate(${deg}deg)`;
-}
-function normDeg(d) {
-  return ((d % 360) + 360) % 360;
-}
-function shortestAngleDelta(a, b) {
-  let d = normDeg(b) - normDeg(a);
-  if (d > 180) d -= 360;
-  if (d < -180) d += 360;
-  return d;
-}
-function maybeRotateMapTo(deg) {
-  if (!ROTATE_ENABLED) return;
-  if (!map || !mapReady) return;
-  if (!autoCenter) return;
-
-  const now = Date.now();
-  if (now - lastRotateTs < ROTATE_RATE_LIMIT_MS) return;
-
-  const target = normDeg(deg);
-  const delta = shortestAngleDelta(lastMapBearingDeg, target);
-  if (Math.abs(delta) < ROTATE_MIN_DELTA_DEG) return;
-
-  lastRotateTs = now;
-  lastMapBearingDeg = target;
-
-  const c = map.getCenter();
-  const z = map.getZoom();
-  map.easeTo({
-    center: [c.lng, c.lat],
-    zoom: z,
-    bearing: target,
-    duration: ROTATE_ANIM_MS,
-    essential: true,
-  });
 }
 function computeBearingDeg(from, to) {
   const toRad = (x) => (x * Math.PI) / 180;
@@ -2074,18 +1059,13 @@ function startLocationWatch() {
     if (recommendEl) recommendEl.textContent = "Recommended: location not supported";
     return;
   }
-  if (!map) return;
 
-  if (!navMarker) {
-    navMarker = new maplibregl.Marker({
-      element: makeNavIcon(),
-      anchor: "center",
-      offset: [0, 0],
-    })
-      .setLngLat([-74.006, 40.7128])
-      .addTo(map);
-    navMarker.getElement().style.zIndex = "2000";
-  }
+  navMarker = L.marker([40.7128, -74.0060], {
+    icon: makeNavIcon(),
+    interactive: false,
+    zIndexOffset: 2000000,
+    pane: "navPane",
+  }).addTo(map);
 
   navigator.geolocation.watchPosition(
     (pos) => {
@@ -2096,14 +1076,8 @@ function startLocationWatch() {
       const ts = pos.timestamp || Date.now();
 
       userLatLng = { lat, lng };
-      lastGpsAccuracyM = typeof accuracy === "number" && Number.isFinite(accuracy) ? accuracy : null;
-
-      if (navMarker) navMarker.setLngLat([lng, lat]);
-
-      if (!debugOnce.selfMarker) {
-        console.log("DEBUG self marker lngLat", { lng, lat });
-        debugOnce.selfMarker = true;
-      }
+      lastGpsAccuracyM = (typeof accuracy === "number" && Number.isFinite(accuracy)) ? accuracy : null;
+      if (navMarker) navMarker.setLatLng(userLatLng);
 
       let isMoving = false;
 
@@ -2112,7 +1086,7 @@ function startLocationWatch() {
         const dtSec = Math.max(1, (ts - lastPos.ts) / 1000);
         const mph = (dMi / dtSec) * 3600;
 
-        isMoving = mph >= ROTATE_MIN_MPH;
+        isMoving = mph >= 2.0;
 
         if (typeof heading === "number" && Number.isFinite(heading)) {
           lastHeadingDeg = heading;
@@ -2128,18 +1102,13 @@ function startLocationWatch() {
       setNavRotation(lastHeadingDeg);
       setNavVisual(isMoving);
 
-      if (isMoving) {
-        maybeRotateMapTo(lastHeadingDeg);
-      }
-
       if (!gpsFirstFixDone) {
         gpsFirstFixDone = true;
         const targetZoom = Math.max(map.getZoom(), 12.5);
-        suppressAutoDisableFor(1200, () => map.flyTo({ center: [lng, lat], zoom: targetZoom, duration: 700 }));
+        suppressAutoDisableFor(1200, () => map.setView(userLatLng, targetZoom, { animate: true }));
       } else {
-        if (autoCenter && map) {
-          const c = (navMarker && navMarker.getLngLat) ? navMarker.getLngLat() : { lng, lat };
-          suppressAutoDisableFor(700, () => map.flyTo({ center: [c.lng, c.lat], duration: 500 }));
+        if (autoCenter) {
+          suppressAutoDisableFor(700, () => map.panTo(userLatLng, { animate: true }));
         }
       }
 
@@ -2164,7 +1133,7 @@ function startLocationWatch() {
 
   setInterval(() => {
     const now = Date.now();
-    const recentlyMoved = lastMoveTs && now - lastMoveTs < 5000;
+    const recentlyMoved = lastMoveTs && (now - lastMoveTs) < 5000;
     setNavVisual(!!recentlyMoved);
   }, 1200);
 }
@@ -2194,7 +1163,9 @@ async function tickNYCClockAndAdvanceIfNeeded() {
     if (bestIdx === curIdx) return;
 
     slider.value = String(bestIdx);
+
     bubbleUpdateNow();
+
     await loadFrame(bestIdx);
   } catch (e) {
     console.warn("NYC clock tick failed:", e);
@@ -2212,7 +1183,7 @@ document.addEventListener("visibilitychange", () => {
 });
 
 /* =========================================================
-   WEATHER BADGE + FX (unchanged from old)
+   WEATHER BADGE + FX (unchanged)
    ========================================================= */
 const weatherBadge = document.getElementById("weatherBadge");
 const wxCanvas = document.getElementById("wxCanvas");
@@ -2250,11 +1221,11 @@ function wxDescribe(code) {
   if (c >= 1 && c <= 3) return { text: "Cloudy", icon: "⛅", kind: "none", intensity: 0 };
   if (c === 45 || c === 48) return { text: "Fog", icon: "🌫️", kind: "none", intensity: 0 };
   if ((c >= 51 && c <= 57) || (c >= 61 && c <= 67) || (c >= 80 && c <= 82)) {
-    const intensity = c >= 65 || c >= 81 ? 0.85 : c >= 63 ? 0.65 : 0.45;
+    const intensity = (c >= 65 || c >= 81) ? 0.85 : (c >= 63 ? 0.65 : 0.45);
     return { text: "Rain", icon: "🌧️", kind: "rain", intensity };
   }
   if ((c >= 71 && c <= 77) || (c >= 85 && c <= 86)) {
-    const intensity = c >= 75 || c >= 86 ? 0.85 : 0.6;
+    const intensity = (c >= 75 || c >= 86) ? 0.85 : 0.6;
     return { text: "Snow", icon: "❄️", kind: "snow", intensity };
   }
   if (c >= 95 && c <= 99) return { text: "Storm", icon: "⛈️", kind: "rain", intensity: 0.95 };
@@ -2267,19 +1238,6 @@ function fFromC(c) {
 function setBodyTheme({ isNight, isSunny }) {
   document.body.classList.toggle("night", !!isNight);
   document.body.classList.toggle("sunny", !!isSunny && !isNight);
-  applyNightBasemap(!!isNight);
-}
-
-function applyNightBasemap(isNight) {
-  if (!map) return;
-  try {
-    map.setPaintProperty("carto-base", "raster-brightness-max", isNight ? 0.55 : 1.0);
-    map.setPaintProperty("carto-base", "raster-brightness-min", isNight ? 0.12 : 0.0);
-    map.setPaintProperty("carto-base", "raster-contrast", isNight ? 0.25 : 0.0);
-    map.setPaintProperty("carto-base", "raster-saturation", isNight ? -0.25 : 0.0);
-  } catch (e) {
-    console.warn("applyNightBasemap failed:", e);
-  }
 }
 function setWeatherBadge(icon, text) {
   if (!weatherBadge) return;
@@ -2291,7 +1249,7 @@ function setWeatherBadge(icon, text) {
 }
 function getWeatherLatLng() {
   const lat = userLatLng?.lat ?? 40.7128;
-  const lng = userLatLng?.lng ?? -74.006;
+  const lng = userLatLng?.lng ?? -74.0060;
   return { lat, lng };
 }
 function scheduleWeatherUpdateSoon() {
@@ -2356,7 +1314,10 @@ function updateWxParticlesForState() {
   }
 
   const base = Math.floor((window.innerWidth * window.innerHeight) / 45000);
-  const count = Math.max(40, Math.min(240, Math.floor(base * (kind === "rain" ? 2.4 : 1.6) * (0.6 + intensity))));
+  const count = Math.max(
+    40,
+    Math.min(240, Math.floor(base * (kind === "rain" ? 2.4 : 1.6) * (0.6 + intensity)))
+  );
 
   wxParticles = [];
   for (let i = 0; i < count; i++) wxParticles.push(makeParticle(kind));
@@ -2448,7 +1409,7 @@ function stepParticles() {
 function ensureWxAnimationRunning() {
   if (!wxCanvas || !wxCtx) return;
 
-  const shouldRun = wxState.kind !== "none" && wxState.intensity > 0;
+  const shouldRun = (wxState.kind !== "none" && wxState.intensity > 0);
   if (!shouldRun) {
     wxAnimRunning = false;
     wxCtx.clearRect(0, 0, window.innerWidth, window.innerHeight);
@@ -2468,7 +1429,7 @@ function ensureWxAnimationRunning() {
 }
 
 /* =========================================================
-   RADIO (unchanged)
+   RADIO (kept simple; manual play)
    ========================================================= */
 const btnHot97 = document.getElementById("btnHot97");
 const btnMega979 = document.getElementById("btnMega979");
@@ -2603,6 +1564,7 @@ if (btnMega979) {
     toggleMega();
   });
 }
+
 if (btnHot97) {
   btnHot97.addEventListener("pointerdown", (e) => e.stopPropagation());
   btnHot97.addEventListener("click", (e) => {
@@ -2611,6 +1573,7 @@ if (btnHot97) {
     toggleHot97();
   });
 }
+
 if (radioModalClose) {
   radioModalClose.addEventListener("click", (e) => {
     e.preventDefault();
@@ -2625,6 +1588,7 @@ if (radioModal) {
     closeHot97Modal();
   });
 }
+
 megaAudio.addEventListener("ended", () => {
   megaPlaying = false;
   setBtnState(btnMega979, false);
@@ -2635,6 +1599,7 @@ megaAudio.addEventListener("error", () => {
   setBtnState(btnMega979, false);
   setRadioStatus("Radio: La Mega stream error");
 });
+
 hot97Audio.addEventListener("ended", () => {
   hot97Playing = false;
   setBtnState(btnHot97, false);
@@ -2692,6 +1657,19 @@ function sideFromOffsetX(dx, fallback = "right") {
   return fallback;
 }
 
+function stableUidParity(uid) {
+  const uidStr = String(uid || "");
+  const uidNum = Number.parseInt(uidStr, 10);
+  if (Number.isFinite(uidNum)) return Math.abs(uidNum) % 2;
+
+  let hash = 0;
+  for (let i = 0; i < uidStr.length; i++) {
+    hash = ((hash << 5) - hash) + uidStr.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash) % 2;
+}
+
 function syncGhostUI() {
   const ghostOn = !!me?.ghost_mode;
   if (btnGhostMode) {
@@ -2716,6 +1694,7 @@ function setAuthUI(signedIn, note) {
     lockedOverlay.setAttribute("aria-hidden", showLock ? "false" : "true");
   }
 
+  // buttons still exist, but are useful only if signed in
   if (btnPolice) btnPolice.classList.toggle("disabled", !signedIn);
   if (btnPickup) btnPickup.classList.toggle("disabled", !signedIn);
   if (btnGhostMode) btnGhostMode.classList.toggle("disabled", !signedIn);
@@ -2723,21 +1702,12 @@ function setAuthUI(signedIn, note) {
   if (authStatus) authStatus.textContent = note || (signedIn ? "Status: signed in" : "Status: signed out");
   syncGhostUI();
   refreshNavNameLabel();
-  syncChatPollingState();
-
-  if (openPanelKey === "chat") {
-    openDrawer("chat", "Chat", chatPanelHTML());
-    wireChatPanel();
-  }
 }
 
 function clearAuth() {
   communityToken = "";
   me = null;
   localStorage.removeItem(LS_TOKEN);
-  chatLastSeen = null;
-  chatSeenKeys.clear();
-  stopChatPolling();
   setAuthUI(false, "Status: signed out");
   clearOtherDrivers();
 }
@@ -2763,7 +1733,7 @@ async function loadMe() {
 }
 
 function safeName() {
-  return authName && authName.value ? authName.value.trim() : "";
+  return (authName && authName.value ? authName.value.trim() : "");
 }
 
 async function updateMeProfile(updates) {
@@ -2793,7 +1763,7 @@ async function applyPostAuthPreferences({ email, forceGhostSync, desiredGhostMod
   } else if (me?.display_name) {
     localStorage.setItem(LS_DISPLAY_NAME, me.display_name);
   } else if (email) {
-    localStorage.setItem(LS_DISPLAY_NAME, email.split("@")[0] || "Driver");
+    localStorage.setItem(LS_DISPLAY_NAME, (email.split("@")[0] || "Driver"));
   }
 }
 
@@ -2825,10 +1795,10 @@ async function doSignup(email, password, desiredGhostMode) {
 }
 
 function safeEmail() {
-  return authEmail && authEmail.value ? authEmail.value.trim() : (localStorage.getItem(LS_EMAIL) || "").trim();
+  return (authEmail && authEmail.value ? authEmail.value.trim() : (localStorage.getItem(LS_EMAIL) || "").trim());
 }
 function safePass() {
-  return authPass && authPass.value ? authPass.value : "";
+  return (authPass && authPass.value ? authPass.value : "");
 }
 
 if (authEmail) authEmail.value = localStorage.getItem(LS_EMAIL) || "";
@@ -2869,8 +1839,10 @@ if (btnAuth) {
     e.preventDefault();
     e.stopPropagation();
     if (authHeaderOK()) {
+      // sign out
       clearAuth();
     } else {
+      // show overlay
       setAuthUI(false, "Status: signed out");
     }
   });
@@ -2895,25 +1867,28 @@ if (btnGhostMode) {
   });
 }
 
-// other drivers marker HTML
 function makeDriverIcon(name, headingDeg, labelSide = "right", labelDx = 0, labelDy = 0) {
   const safe = (name || "Driver").trim() || "Driver";
   const rot = Number.isFinite(headingDeg) ? headingDeg : 0;
   const defaultLabelX = labelSide === "left" ? -28 : 28;
   const labelTranslateX = Number.isFinite(labelDx) ? labelDx : defaultLabelX;
   const labelTranslateY = Number.isFinite(labelDy) ? labelDy : -8;
-
-  const el = document.createElement("div");
-  el.className = "otherDrvWrap";
-  el.innerHTML = `
-    <div class="otherArrowWrap otherPulse" style="transform:rotate(${rot}deg)">
-      <div class="otherArrow"></div>
-    </div>
-    <div class="otherDrvName" style="transform:translate(${labelTranslateX}px, ${labelTranslateY}px);">
-      ${escapeHtml(safe)}
+  const html = `
+    <div class="otherDrvWrap">
+      <div class="otherArrowWrap otherPulse" style="transform:rotate(${rot}deg)">
+        <div class="otherArrow"></div>
+      </div>
+      <div class="otherDrvName" style="transform:translate(${labelTranslateX}px, ${labelTranslateY}px);">
+        ${escapeHtml(safe)}
+      </div>
     </div>
   `;
-  return el;
+  return L.divIcon({
+    className: "",
+    html,
+    iconSize: [40, 40],
+    iconAnchor: [20, 20],
+  });
 }
 
 function clearOtherDrivers() {
@@ -2924,37 +1899,35 @@ function clearOtherDrivers() {
 }
 
 function upsertDriverMarker(userId, name, lat, lng, heading, labelSide, labelDx = 0, labelDy = 0) {
-  if (!Number.isFinite(lat) || !Number.isFinite(lng) || !map) return;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
   if (!userId) return;
 
   const existing = otherMarkers.get(userId);
   if (existing) {
-    existing.setLngLat([lng, lat]);
-    const el = existing.getElement();
-    const newEl = makeDriverIcon(name || `Driver ${userId}`, heading, labelSide, labelDx, labelDy);
-    el.innerHTML = newEl.innerHTML;
+    existing.setLatLng([lat, lng]);
+    existing.setIcon(makeDriverIcon(name || `Driver ${userId}`, heading, labelSide, labelDx, labelDy));
     return;
   }
 
-  const el = makeDriverIcon(name || `Driver ${userId}`, heading, labelSide, labelDx, labelDy);
-  const mk = new maplibregl.Marker({ element: el, anchor: "center" }).setLngLat([lng, lat]).addTo(map);
-
-  if (!debugOnce.otherMarker) {
-    console.log("DEBUG other marker lngLat", { lng, lat });
-    debugOnce.otherMarker = true;
-  }
+  const mk = L.marker([lat, lng], {
+    icon: makeDriverIcon(name || `Driver ${userId}`, heading, labelSide, labelDx, labelDy),
+    interactive: false,
+    pane: "communityPane",
+    zIndexOffset: 1500000,
+  }).addTo(map);
 
   otherMarkers.set(userId, mk);
 }
 
 async function pullPresenceAll() {
-  if (!authHeaderOK() || !map) return;
+  if (!authHeaderOK()) return;
 
   try {
     const list = await getJSONAuth("/presence/all", communityToken);
     const now = Date.now() / 1000;
 
-    const items = Array.isArray(list) ? list : list?.items || [];
+    // expected list array; if wrapped, try .items
+    const items = Array.isArray(list) ? list : (list?.items || []);
     const seen = new Set();
     const visibleDrivers = [];
 
@@ -2962,15 +1935,17 @@ async function pullPresenceAll() {
       const uid = String(it.user_id ?? it.userId ?? it.id ?? "");
       if (!uid) continue;
 
-      if (me && String(me.id) === uid) continue;
+      // hide self
+      if (me && (String(me.id) === uid)) continue;
 
       const lat = Number(it.lat ?? it.latitude ?? NaN);
       const lng = Number(it.lng ?? it.longitude ?? NaN);
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
 
+      // staleness check
       const updated = Number(it.updated_at_unix ?? it.ts_unix ?? it.updated_at ?? NaN);
       if (Number.isFinite(updated)) {
-        if (now - updated > PRESENCE_STALE_SEC) continue;
+        if ((now - updated) > PRESENCE_STALE_SEC) continue;
       }
 
       const name = it.display_name || it.name || it.email || "Driver";
@@ -2979,11 +1954,13 @@ async function pullPresenceAll() {
       seen.add(uid);
     }
 
-    const selfPt = userLatLng ? projectToPoint(userLatLng.lng, userLatLng.lat) : null;
+    const selfPt = userLatLng
+      ? map.latLngToLayerPoint([userLatLng.lat, userLatLng.lng])
+      : null;
 
     const driversWithPoints = visibleDrivers.map((drv) => ({
       ...drv,
-      basePoint: projectToPoint(drv.lng, drv.lat),
+      basePoint: map.latLngToLayerPoint([drv.lat, drv.lng]),
     }));
 
     const COLLISION_PX = 28;
@@ -3004,7 +1981,7 @@ async function pullPresenceAll() {
 
         for (const candidate of driversWithPoints) {
           if (clustered.has(candidate.uid)) continue;
-          if (pointDistance(current.basePoint, candidate.basePoint) > COLLISION_PX) continue;
+          if (current.basePoint.distanceTo(candidate.basePoint) > COLLISION_PX) continue;
           clustered.add(candidate.uid);
           queue.push(candidate);
         }
@@ -3015,9 +1992,10 @@ async function pullPresenceAll() {
     }
 
     for (const group of collisionClusters) {
+
       for (let idx = 0; idx < group.length; idx++) {
         const drv = group[idx];
-        let labelSide = idx % 2 === 0 ? "right" : "left";
+        let labelSide = (idx % 2 === 0) ? "right" : "left";
 
         let labelDx = 0;
         let labelDy = 0;
@@ -3025,9 +2003,11 @@ async function pullPresenceAll() {
         const basePoint = drv.basePoint;
 
         if (selfPt) {
-          const distPx = pointDistance(basePoint, selfPt);
+          const distPx = basePoint.distanceTo(selfPt);
           if (distPx < SELF_COLLISION_THRESHOLD_PX) {
-            labelDx = SELF_LABEL_SIDE === "right" ? -SELF_COLLISION_OFFSET_PX : SELF_COLLISION_OFFSET_PX;
+            labelDx = (SELF_LABEL_SIDE === "right")
+              ? -SELF_COLLISION_OFFSET_PX
+              : SELF_COLLISION_OFFSET_PX;
             labelDy = 0;
             labelSide = sideFromOffsetX(labelDx, SELF_LABEL_SIDE === "left" ? "right" : "left");
           }
@@ -3038,10 +2018,12 @@ async function pullPresenceAll() {
           labelSide = sideFromOffsetX(labelDx, labelSide);
         }
 
+        // Keep marker pinned to the true reported coordinates; shift labels only.
         upsertDriverMarker(drv.uid, drv.name, drv.lat, drv.lng, drv.heading, labelSide, labelDx, labelDy);
       }
     }
 
+    // remove markers not in latest response
     for (const uid of Array.from(otherMarkers.keys())) {
       if (!seen.has(uid)) {
         const mk = otherMarkers.get(uid);
@@ -3060,22 +2042,18 @@ async function communityMaybePushPresence(tsMsOrUnix, heading, accuracy) {
   if (!userLatLng) return;
 
   const nowMs = Date.now();
-  if (nowMs - lastPresencePushMs < PRESENCE_PUSH_MS) return;
+  if ((nowMs - lastPresencePushMs) < PRESENCE_PUSH_MS) return;
   lastPresencePushMs = nowMs;
 
   try {
     const ts_unix = Math.floor((tsMsOrUnix ? Number(tsMsOrUnix) : Date.now()) / 1000);
-    await postJSON(
-      "/presence/update",
-      {
-        lat: userLatLng.lat,
-        lng: userLatLng.lng,
-        heading: typeof heading === "number" && Number.isFinite(heading) ? heading : null,
-        accuracy: typeof accuracy === "number" && Number.isFinite(accuracy) ? accuracy : null,
-        ts_unix,
-      },
-      communityToken
-    );
+    await postJSON("/presence/update", {
+      lat: userLatLng.lat,
+      lng: userLatLng.lng,
+      heading: (typeof heading === "number" && Number.isFinite(heading)) ? heading : null,
+      accuracy: (typeof accuracy === "number" && Number.isFinite(accuracy)) ? accuracy : null,
+      ts_unix,
+    }, communityToken);
   } catch (e) {
     console.warn("presence/update failed:", e);
   }
@@ -3100,6 +2078,7 @@ function nearestZoneToUser(frame, latlng) {
       };
     }
   }
+  // if somehow super far, still return (NYC-wide)
   return best;
 }
 
@@ -3115,7 +2094,12 @@ async function sendPoliceReport() {
 
   try {
     const ts_unix = Math.floor(Date.now() / 1000);
-    await postJSON("/events/police", { lat: userLatLng.lat, lng: userLatLng.lng, ts_unix }, communityToken);
+    await postJSON("/events/police", {
+      lat: userLatLng.lat,
+      lng: userLatLng.lng,
+      ts_unix,
+    }, communityToken);
+
     alert("Police report sent to community ✅");
   } catch (e) {
     alert(`Police report failed: ${e.message || e}`);
@@ -3131,24 +2115,19 @@ async function sendPickupLog() {
     alert("Enable location first.");
     return;
   }
-
   try {
     const ts_unix = Math.floor(Date.now() / 1000);
     const near = nearestZoneToUser(currentFrame, userLatLng);
 
-    await postJSON(
-      "/events/pickup",
-      {
-        lat: userLatLng.lat,
-        lng: userLatLng.lng,
-        ts_unix,
-        frame_time: currentFrame?.time || null,
-        location_id: near?.location_id ?? null,
-        zone_name: near?.zone_name ?? null,
-        borough: near?.borough ?? null,
-      },
-      communityToken
-    );
+    await postJSON("/events/pickup", {
+      lat: userLatLng.lat,
+      lng: userLatLng.lng,
+      ts_unix,
+      frame_time: currentFrame?.time || null,
+      location_id: near?.location_id ?? null,
+      zone_name: near?.zone_name ?? null,
+      borough: near?.borough ?? null,
+    }, communityToken);
 
     const label = near?.zone_name ? `${near.zone_name}${near.borough ? ` (${near.borough})` : ""}` : "your location";
     alert(`Pickup logged ✅ (${label})`);
@@ -3184,27 +2163,13 @@ setInterval(() => {
    ========================================================= */
 setNavDestination(null);
 
+loadTimeline().catch((err) => {
+  console.error(err);
+  timeLabel.textContent = `Error loading timeline: ${err.message}`;
+});
+
+/* auth boot */
 (async () => {
-  if (debugEnabled) {
-    dbg("dbgBaseUrl", RAILWAY_BASE || "(relative)");
-    try {
-      await fetchJSON(`${RAILWAY_BASE}/status`);
-      dbg("dbgStatus", "OK");
-    } catch (e) {
-      dbg("dbgStatus", `FAIL ${e?.message || e}`);
-    }
-  }
-
-  const loading = document.getElementById("mapLoading");
-  if (loading) loading.style.display = "flex";
-  setTimeout(() => {
-    const l = document.getElementById("mapLoading");
-    if (l) l.style.display = "none";
-  }, 7000);
-
-  initMap();
-  await loadTimeline();
-
   if (authHeaderOK()) {
     setAuthUI(true, "Checking session…");
     await loadMe();
@@ -3217,11 +2182,7 @@ setNavDestination(null);
   } else {
     setAuthUI(false, "Status: signed out");
   }
+})();
 
-  // Start GPS AFTER map exists
-  startLocationWatch();
-  updateWeatherNow().catch(() => {});
-})().catch((err) => {
-  console.error(err);
-  if (timeLabel) timeLabel.textContent = `Error: ${err?.message || err}`;
-});
+startLocationWatch();
+updateWeatherNow().catch(() => {});
