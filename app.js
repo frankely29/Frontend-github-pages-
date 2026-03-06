@@ -70,10 +70,10 @@ let voiceTimerId = null;
 let voiceAutoStopId = null;
 let voiceIsUploading = false;
 let chatModalOpen = false;
-let chatModalSavedCenter = null;
-let chatModalSavedZoom = null;
 let chatViewportKeyboardOffset = 0;
 let chatViewportListenerBound = false;
+
+window.__chatOpen = false;
 
 
 /* =========================================================
@@ -1007,8 +1007,6 @@ function setMapInteractionsForChat(disabled) {
 
 function openChatModal() {
   if (!chatModal) return;
-  chatModalSavedCenter = map?.getCenter?.() || null;
-  chatModalSavedZoom = map?.getZoom?.();
   window.__chatOpen = true;
   chatModalOpen = true;
   chatViewportKeyboardOffset = getKeyboardOffsetFromViewport();
@@ -1034,10 +1032,6 @@ function closeChatModal() {
   chatModal.setAttribute("aria-hidden", "true");
   stopVoiceRecording();
   setMapInteractionsForChat(false);
-
-  if (map && chatModalSavedCenter && Number.isFinite(chatModalSavedZoom)) {
-    map.jumpTo({ center: [chatModalSavedCenter.lng, chatModalSavedCenter.lat], zoom: chatModalSavedZoom });
-  }
 
   syncChatPollingState();
 }
@@ -1218,6 +1212,11 @@ async function startVoiceRecording() {
   }
 }
 
+function chatAppendMessage(message) {
+  if (!message) return;
+  renderChatMessages([message]);
+}
+
 function renderChatMessages(messages) {
   const listEl = chatMsgs;
   if (!listEl || !Array.isArray(messages) || !messages.length) return;
@@ -1377,13 +1376,25 @@ function wireChatPanel() {
     if (!text) return;
 
     chatSendEl.disabled = true;
+    const optimisticId = `tmp_${Date.now()}`;
+    const myDisplayName = me?.display_name || localStorage.getItem(LS_DISPLAY_NAME) || "Driver";
+    chatAppendMessage({
+      display_name: myDisplayName,
+      type: "text",
+      text,
+      created_at: new Date().toISOString(),
+      id: optimisticId,
+    });
+
     try {
       await chatSend(text);
       chatInputEl.value = "";
       await chatPollOnce();
     } catch (e) {
       console.warn("chat send failed:", e);
-      setChatStatus(`Send failed: ${e?.message || "Unknown error"}`);
+      const msg = String(e?.message || "Unknown error");
+      if (msg.startsWith("401") || msg.startsWith("403")) setChatStatus(`Send failed: ${msg}`);
+      else setChatStatus(`Send failed: ${msg}`);
     } finally {
       chatSendEl.disabled = false;
     }
@@ -1417,7 +1428,7 @@ function wireChatPanel() {
   });
 
   ["touchstart", "touchmove", "wheel", "click"].forEach((evt) => {
-    chatCard?.addEventListener(evt, (e) => e.stopPropagation(), { passive: evt !== "wheel" });
+    chatCard?.addEventListener(evt, (e) => e.stopPropagation(), { passive: false });
   });
 
   chatPollOnce();
