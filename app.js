@@ -22,6 +22,14 @@ let pendingFrame = null;
 let mapReady = false;
 let didFitToZonesOnce = false;
 
+const ROTATE_ENABLED = true;
+const ROTATE_MIN_MPH = 2.0;
+const ROTATE_MIN_DELTA_DEG = 3;
+const ROTATE_RATE_LIMIT_MS = 200;
+const ROTATE_ANIM_MS = 250;
+let lastMapBearingDeg = 0;
+let lastRotateTs = 0;
+
 const debugOnce = {
   frame: false,
   mapCenter: false,
@@ -1772,6 +1780,10 @@ if (btnCenter) {
           });
         });
       }
+      if (Number.isFinite(lastHeadingDeg)) maybeRotateMapTo(lastHeadingDeg);
+    } else if (map && mapReady) {
+      const b = map.getBearing ? map.getBearing() : 0;
+      lastMapBearingDeg = normDeg(b);
     }
   });
 }
@@ -1822,6 +1834,40 @@ function setNavRotation(deg) {
   const el = document.getElementById("navArrowRot");
   if (!el) return;
   el.style.transform = `rotate(${deg}deg)`;
+}
+function normDeg(d) {
+  return ((d % 360) + 360) % 360;
+}
+function shortestAngleDelta(a, b) {
+  let d = normDeg(b) - normDeg(a);
+  if (d > 180) d -= 360;
+  if (d < -180) d += 360;
+  return d;
+}
+function maybeRotateMapTo(deg) {
+  if (!ROTATE_ENABLED) return;
+  if (!map || !mapReady) return;
+  if (!autoCenter) return;
+
+  const now = Date.now();
+  if (now - lastRotateTs < ROTATE_RATE_LIMIT_MS) return;
+
+  const target = normDeg(deg);
+  const delta = shortestAngleDelta(lastMapBearingDeg, target);
+  if (Math.abs(delta) < ROTATE_MIN_DELTA_DEG) return;
+
+  lastRotateTs = now;
+  lastMapBearingDeg = target;
+
+  const c = map.getCenter();
+  const z = map.getZoom();
+  map.easeTo({
+    center: [c.lng, c.lat],
+    zoom: z,
+    bearing: target,
+    duration: ROTATE_ANIM_MS,
+    essential: true,
+  });
 }
 function computeBearingDeg(from, to) {
   const toRad = (x) => (x * Math.PI) / 180;
@@ -1882,7 +1928,7 @@ function startLocationWatch() {
         const dtSec = Math.max(1, (ts - lastPos.ts) / 1000);
         const mph = (dMi / dtSec) * 3600;
 
-        isMoving = mph >= 2.0;
+        isMoving = mph >= ROTATE_MIN_MPH;
 
         if (typeof heading === "number" && Number.isFinite(heading)) {
           lastHeadingDeg = heading;
@@ -1897,6 +1943,10 @@ function startLocationWatch() {
 
       setNavRotation(lastHeadingDeg);
       setNavVisual(isMoving);
+
+      if (isMoving) {
+        maybeRotateMapTo(lastHeadingDeg);
+      }
 
       if (!gpsFirstFixDone) {
         gpsFirstFixDone = true;
