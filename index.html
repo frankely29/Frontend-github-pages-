@@ -712,8 +712,8 @@ input[type="range"] { width: 100%; height: 6px; margin: 0; border-radius: 999px;
       align-items: flex-end;
       justify-content: center;
       padding: 10px;
-      padding-bottom: calc(var(--bottom-ui) + env(safe-area-inset-bottom) + 10px);
-      background: rgba(0,0,0,0.25);
+      padding-bottom: calc(var(--bottom-ui, 120px) + env(safe-area-inset-bottom) + 10px);
+      background: rgba(0,0,0,0.18);
       z-index: 1400;
     }
     .chatModal.open{ display: flex; }
@@ -810,10 +810,11 @@ input[type="range"] { width: 100%; height: 6px; margin: 0; border-radius: 999px;
       background: rgba(255,255,255,0.95);
       color: #111;
       font: 500 16px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial;
-      font-size: 16px;
+      font-size: 16px !important;
+      line-height: 20px;
     }
     .chatInput::placeholder{
-      font-size: inherit;
+      font-size: 16px;
     }
     .chatVoiceMeta{
       width: 100%;
