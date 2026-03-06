@@ -1744,6 +1744,16 @@ if (btnCenter) {
   btnCenter.addEventListener("pointerdown", (e) => e.stopPropagation());
   btnCenter.addEventListener("touchstart", (e) => e.stopPropagation(), { passive: true });
 
+  // --- center helper: always use the navMarker's real position (arrow) ---
+  function getSelfCenterLngLat() {
+    if (navMarker && typeof navMarker.getLngLat === "function") {
+      const p = navMarker.getLngLat();
+      if (p && Number.isFinite(p.lng) && Number.isFinite(p.lat)) return { lng: p.lng, lat: p.lat };
+    }
+    if (userLatLng && Number.isFinite(userLatLng.lng) && Number.isFinite(userLatLng.lat)) return { lng: userLatLng.lng, lat: userLatLng.lat };
+    return null;
+  }
+
   btnCenter.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -1751,8 +1761,17 @@ if (btnCenter) {
     autoCenter = !autoCenter;
     syncCenterButton();
 
-    if (autoCenter && userLatLng && map) {
-      autoCenterAndAutoZoom();
+    if (autoCenter && map) {
+      const c = getSelfCenterLngLat();
+      if (c) {
+        suppressAutoDisableFor(900, () => {
+          map.flyTo({
+            center: [c.lng, c.lat],
+            zoom: Math.max(map.getZoom(), 13.0), // keeps you tight on your arrow
+            duration: 600
+          });
+        });
+      }
     }
   });
 }
@@ -1884,8 +1903,9 @@ function startLocationWatch() {
         const targetZoom = Math.max(map.getZoom(), 12.5);
         suppressAutoDisableFor(1200, () => map.flyTo({ center: [lng, lat], zoom: targetZoom, duration: 700 }));
       } else {
-        if (autoCenter) {
-          autoCenterAndAutoZoom();
+        if (autoCenter && map) {
+          const c = (navMarker && navMarker.getLngLat) ? navMarker.getLngLat() : { lng, lat };
+          suppressAutoDisableFor(700, () => map.flyTo({ center: [c.lng, c.lat], duration: 500 }));
         }
       }
 
