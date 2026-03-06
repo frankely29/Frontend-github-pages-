@@ -3140,7 +3140,10 @@ async function pullPresenceAll() {
       basePoint: projectToPoint(drv.lng, drv.lat),
     }));
 
-    const COLLISION_PX = 28;
+    // Compute a zoom‑dependent collision radius: at zoom 10 it’s ~28 px, at zoom 12 it’s ~9 px.
+    // This keeps clusters tight when zoomed in, and wider when zoomed out.
+    const zoom = map?.getZoom?.() || 12;
+    const COLLISION_PX = Math.max(20, 28 / Math.max(zoom - 9, 1));
     const clustered = new Set();
     const collisionClusters = [];
 
@@ -3188,8 +3191,13 @@ async function pullPresenceAll() {
         }
 
         if (group.length > 1 && labelDx === 0 && labelDy === 0) {
-          [labelDx, labelDy] = LABEL_OFFSETS[idx % LABEL_OFFSETS.length];
-          labelSide = sideFromOffsetX(labelDx, labelSide);
+          // Stack labels vertically so they don’t overlap.
+          // Offset all labels to the right of the marker.  Adjust dy to separate names.
+          const verticalSpacing = 18; // px between names
+          const mid = (group.length - 1) / 2;
+          labelDx = 44;               // always offset to the right of the marker
+          labelDy = (idx - mid) * verticalSpacing;
+          labelSide = sideFromOffsetX(labelDx, "right");
         }
 
         upsertDriverMarker(drv.uid, drv.name, drv.lat, drv.lng, drv.heading, labelSide, labelDx, labelDy);
