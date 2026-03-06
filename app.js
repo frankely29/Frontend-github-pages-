@@ -2931,8 +2931,8 @@ const MEGA979_STREAM_URL = "https://liveaudio.lamusica.com/NY_WSKQ_icy";
 // Z100 (WHTZ 100.3 NYC) — Top 40 / pop (mainstream)
 const Z100_STREAM_URL = "https://stream.revma.ihrhls.com/zc1469";
 
-// KQ 94.5 — placeholder (user must provide correct stream URL for their KQ 94.5)
-const KQ945_STREAM_URL = "PASTE_STREAM_URL_HERE";
+// KQ 94.5 (RD)
+const KQ945_STREAM_URL = "https://radio.yaservers.com:9990/stream?icy=http";
 
 const megaAudio = new Audio();
 megaAudio.src = MEGA979_STREAM_URL;
