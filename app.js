@@ -859,6 +859,7 @@ function musicPanelHTML() {
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
         <button id="dockHot97Btn" class="chipBtn">${hot97Playing ? "⏸" : "▶"} HOT 97.1</button>
         <button id="dockMegaBtn" class="chipBtn">${megaPlaying ? "⏸" : "▶"} La Mega 97.9</button>
+        <button id="dockKQ945Btn" class="chipBtn">${kq945Playing ? "⏸" : "▶"} KQ 94.5 (RD)</button>
         <div style="margin-left:auto;font-weight:700;opacity:0.75;">${escapeHtml(radioStatusEl?.textContent || "Radio: off")}</div>
       </div>
     </div>
@@ -868,6 +869,7 @@ function musicPanelHTML() {
 function wireMusicPanel() {
   const a = document.getElementById("dockHot97Btn");
   const b = document.getElementById("dockMegaBtn");
+  const c = document.getElementById("dockKQ945Btn");
   a?.addEventListener("click", async (e) => {
     e.preventDefault();
     await toggleHot97();
@@ -877,6 +879,12 @@ function wireMusicPanel() {
   b?.addEventListener("click", async (e) => {
     e.preventDefault();
     await toggleMega();
+    openDrawer("music", "Music", musicPanelHTML());
+    wireMusicPanel();
+  });
+  c?.addEventListener("click", async (e) => {
+    e.preventDefault();
+    await toggleKQ945();
     openDrawer("music", "Music", musicPanelHTML());
     wireMusicPanel();
   });
@@ -2924,7 +2932,7 @@ const MEGA979_STREAM_URL = "https://liveaudio.lamusica.com/NY_WSKQ_icy";
 const Z100_STREAM_URL = "https://stream.revma.ihrhls.com/zc1469";
 
 // KQ 94.5 — placeholder (user must provide correct stream URL for their KQ 94.5)
-const KQ945_STREAM_URL = "REPLACE_ME_WITH_KQ945_STREAM_URL";
+const KQ945_STREAM_URL = "PASTE_STREAM_URL_HERE";
 
 const megaAudio = new Audio();
 megaAudio.src = MEGA979_STREAM_URL;
@@ -2961,7 +2969,7 @@ function setBtnState(btn, on) {
   if (btn === btnMega979) base = "La Mega 97.9";
   else if (btn === btnHot97) base = "HOT 97.1";
   else if (btn === btnZ100) base = "Z100";
-  else if (btn === btnKQ945) base = "KQ 94.5";
+  else if (btn === btnKQ945) base = "KQ 94.5 (RD)";
   btn.textContent = (on ? "⏸ " : "▶ ") + base;
 }
 
@@ -3090,7 +3098,7 @@ async function toggleZ100() {
 
 async function toggleKQ945() {
   closeHot97Modal();
-  if (KQ945_STREAM_URL.includes("REPLACE_ME")) {
+  if (KQ945_STREAM_URL.includes("PASTE_STREAM_URL_HERE")) {
     alert("KQ 94.5 stream URL is not set yet. Replace KQ945_STREAM_URL in app.js with the station’s direct MP3/AAC stream.");
     return;
   }
