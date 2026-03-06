@@ -25,6 +25,7 @@ let backendDownUntil = 0;
 let backendOnline = true;
 let lastBackendCheckMs = 0;
 let backendRetryTimer = null;
+let backendStatusPollTimer = null;
 
 const ROTATE_ENABLED = true;
 const ROTATE_MIN_MPH = 2.0;
@@ -72,6 +73,34 @@ async function checkBackendNow() {
   }
   syncBackendUI();
   return backendOnline;
+}
+
+function startBackendStatusPolling() {
+  if (backendStatusPollTimer) return;
+  backendStatusPollTimer = setInterval(async () => {
+    if (backendOnline) return;
+    try {
+      await fetchJSON(`${RAILWAY_BASE}/status`, { skipBackendOfflineHandling: true });
+      backendOnline = true;
+      syncBackendUI();
+      if (authHeaderOK()) {
+        await loadMe();
+        if (authHeaderOK() && backendOnline) {
+          setAuthUI(true, `Status: signed in as ${me?.display_name || me?.email || "Driver"}`);
+        }
+      }
+      if (chatIsOpen) renderChatPanel();
+    } catch {
+      backendOnline = false;
+      syncBackendUI();
+    }
+  }, 4000);
+}
+
+function stopBackendStatusPolling() {
+  if (!backendStatusPollTimer) return;
+  clearInterval(backendStatusPollTimer);
+  backendStatusPollTimer = null;
 }
 
 /* =========================================================
@@ -275,6 +304,11 @@ async function getJSONAuth(path, token) {
   const headers = {};
   if (token) headers["Authorization"] = `Bearer ${token}`;
   return fetchJSON(`${RAILWAY_BASE}${path}`, { headers });
+}
+
+function isAuthFailure(err) {
+  const msg = String(err?.message || err || "");
+  return msg.startsWith("401 ") || msg.startsWith("403 ");
 }
 
 async function postFormAuth(path, formData, token) {
@@ -3546,6 +3580,9 @@ function authHeaderOK() {
 
 function syncBackendUI() {
   const off = !backendOnline;
+  if (off) startBackendStatusPolling();
+  else stopBackendStatusPolling();
+
   if (btnLogin) {
     btnLogin.disabled = off;
     btnLogin.classList.toggle("disabled", off);
@@ -3583,7 +3620,13 @@ async function loadMe() {
     return me;
   } catch (e) {
     console.warn("/me failed:", e);
-    clearAuth();
+    if (isAuthFailure(e)) {
+      clearAuth();
+      return null;
+    }
+    backendOnline = false;
+    syncBackendUI();
+    setAuthUI(true, "Backend offline — restarting");
     return null;
   }
 }
@@ -4054,8 +4097,12 @@ setNavDestination(null);
     setAuthUI(true, "Checking session…");
     await loadMe();
     if (authHeaderOK()) {
-      setAuthUI(true, `Status: signed in as ${me?.display_name || me?.email || "Driver"}`);
-      pullPresenceAll().catch(() => {});
+      if (backendOnline) {
+        setAuthUI(true, `Status: signed in as ${me?.display_name || me?.email || "Driver"}`);
+        pullPresenceAll().catch(() => {});
+      } else {
+        setAuthUI(true, "Backend offline — restarting");
+      }
     } else {
       setAuthUI(false, "Status: signed out");
     }
