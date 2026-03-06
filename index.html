@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no, viewport-fit=cover" />
   <title>NYC TLC Hotspot Map</title>
 
   <!-- MapLibre GL JS (no Leaflet) -->
@@ -21,12 +21,20 @@
       --bottom-ui: 120px;
     }
 
-    html, body { height: 100%; margin: 0; padding: 0; }
+    html, body { height: 100%; width: 100%; margin: 0; padding: 0; overflow: hidden; touch-action: manipulation; -webkit-text-size-adjust: 100%; }
     #map {
       position: fixed;
       inset: 0;
       height: 100vh;
       width: 100vw;
+    }
+
+    input, textarea, select, button {
+      font-size: 16px;
+    }
+
+    #legend, #sliderWrap, #dockBar, .panel, .modal, .bottomBar, .dock, .dockDrawer, .chatModal, .lockedOverlay {
+      touch-action: manipulation;
     }
 
     /* =========================================================
@@ -81,7 +89,7 @@
       padding: 10px 10px;
       border-radius: 12px;
       border: 1px solid rgba(0,0,0,0.18);
-      font-size: 13px;
+      font-size: 16px;
       font-weight: 800;
       outline: none;
     }
@@ -833,6 +841,22 @@ input[type="range"] { width: 100%; height: 6px; margin: 0; border-radius: 999px;
     .chatMsgAudio{
       margin-top: 6px;
       max-width: 100%;
+    }
+    .panelNote{
+      padding: 12px;
+      border-radius: 12px;
+      border: 1px solid rgba(0,0,0,0.1);
+      background: rgba(255,255,255,0.85);
+      font: 700 13px/1.35 system-ui,-apple-system,Segoe UI,Roboto,Arial;
+    }
+    .pillBtn{
+      margin-top: 8px;
+      border: none;
+      border-radius: 999px;
+      padding: 8px 12px;
+      font: 800 12px/1.1 system-ui,-apple-system,Segoe UI,Roboto,Arial;
+      background: rgba(0,0,0,0.1);
+      cursor: pointer;
     }
 
     /* ---------- You arrow: force on top of EVERYTHING ---------- */

@@ -23,6 +23,7 @@ let mapReady = false;
 let didFitToZonesOnce = false;
 let backendDownUntil = 0;
 let backendOnline = true;
+let lastBackendCheckMs = 0;
 let backendRetryTimer = null;
 
 const ROTATE_ENABLED = true;
@@ -59,6 +60,20 @@ function scheduleBackendRetry(delayMs = 30000) {
   }, delayMs);
 }
 
+async function checkBackendNow() {
+  const now = Date.now();
+  if (now - lastBackendCheckMs < 4000) return backendOnline;
+  lastBackendCheckMs = now;
+  try {
+    await fetchJSON(`${RAILWAY_BASE}/status`, { skipBackendOfflineHandling: true });
+    backendOnline = true;
+  } catch {
+    backendOnline = false;
+  }
+  syncBackendUI();
+  return backendOnline;
+}
+
 /* =========================================================
    COMMUNITY SETTINGS (cheap polling)
    ========================================================= */
@@ -93,6 +108,17 @@ let chatViewportKeyboardOffset = 0;
 let chatViewportListenerBound = false;
 
 window.__chatOpen = false;
+
+// iOS zoom guards: block pinch + double-tap zoom globally
+document.addEventListener("gesturestart", (e) => e.preventDefault(), { passive: false });
+document.addEventListener("gesturechange", (e) => e.preventDefault(), { passive: false });
+document.addEventListener("gestureend", (e) => e.preventDefault(), { passive: false });
+let lastTouchEnd = 0;
+document.addEventListener("touchend", (e) => {
+  const now = Date.now();
+  if (now - lastTouchEnd <= 300) e.preventDefault();
+  lastTouchEnd = now;
+}, { passive: false });
 
 
 /* =========================================================
@@ -212,17 +238,25 @@ async function fetchJSON(url, opts = {}) {
   try {
     const res = await fetch(url, { cache: "no-store", mode: "cors", ...fetchOpts });
     const text = await res.text();
-    if (!res.ok) throw new Error(`${res.status} ${res.statusText} @ ${url} :: ${text.slice(0, 120)}`);
+    if (!res.ok) {
+      backendOnline = true;
+      syncBackendUI();
+      throw new Error(`${res.status} ${res.statusText} @ ${url} :: ${text.slice(0, 120)}`);
+    }
     try {
-      return JSON.parse(text);
+      const data = JSON.parse(text);
+      backendOnline = true;
+      syncBackendUI();
+      return data;
     } catch {
+      backendOnline = false;
+      syncBackendUI();
       throw new Error(`Invalid JSON @ ${url} :: ${text.slice(0, 120)}`);
     }
   } catch (err) {
+    backendOnline = false;
+    syncBackendUI();
     if (!skipBackendOfflineHandling) {
-      backendOnline = false;
-      setAuthUI(false, "Backend offline — try again in 30s");
-      syncAuthButtons();
       scheduleBackendRetry(30000);
     }
     throw err;
@@ -1017,6 +1051,12 @@ function onVisualViewportResizeForChat() {
   applyChatModalBottomPadding();
 }
 
+if (window.visualViewport) {
+  window.visualViewport.addEventListener("resize", () => {
+    if (map) map.resize();
+  });
+}
+
 function bindChatViewportResize() {
   if (chatViewportListenerBound || !window.visualViewport) return;
   window.visualViewport.addEventListener("resize", onVisualViewportResizeForChat);
@@ -1054,6 +1094,60 @@ function setMapInteractionsForChat(disabled) {
   map.touchPitch?.enable?.();
 }
 
+function renderChatPanel() {
+  if (!chatMsgs) return;
+
+  const composer = chatModal?.querySelector(".chatComposer");
+  const setComposerVisible = (visible) => {
+    if (!composer) return;
+    composer.style.display = visible ? "flex" : "none";
+  };
+
+  if (!backendOnline) {
+    setComposerVisible(false);
+    setChatStatus("Backend restarting…");
+    chatMsgs.innerHTML = `
+      <div class="panelNote">
+        <b>Backend restarting…</b><br/>
+        Chat + sign-in are temporarily unavailable.<br/>
+        <button id="btnChatRetry" class="pillBtn" type="button">Retry</button>
+      </div>
+    `;
+    const retryBtn = document.getElementById("btnChatRetry");
+    if (retryBtn) {
+      retryBtn.onclick = async () => {
+        await checkBackendNow();
+        renderChatPanel();
+      };
+    }
+    return;
+  }
+
+  if (!authHeaderOK()) {
+    setComposerVisible(false);
+    setChatStatus("");
+    chatMsgs.innerHTML = `
+      <div class="panelNote">
+        <b>Sign in required</b><br/>
+        Use the <b>Modes</b> panel to sign in / create account.
+      </div>
+    `;
+    return;
+  }
+
+  setComposerVisible(true);
+  if (!chatMsgs.children.length) {
+    chatMsgs.innerHTML = `<div class="panelNote">Chat coming soon…</div>`;
+  }
+  setChatStatus("");
+}
+
+async function openChatPanel() {
+  await checkBackendNow();
+  openChatModal();
+  renderChatPanel();
+}
+
 function openChatModal() {
   if (!chatModal) return;
   window.__chatOpen = true;
@@ -1065,9 +1159,9 @@ function openChatModal() {
 
   chatModal.classList.add("open");
   chatModal.setAttribute("aria-hidden", "false");
-  setChatStatus(authHeaderOK() ? "" : "Sign in to chat with the community.");
+  renderChatPanel();
   syncChatPollingState();
-  if (authHeaderOK()) chatPollOnce();
+  if (authHeaderOK() && backendOnline) chatPollOnce();
 }
 
 function closeChatModal() {
@@ -1494,7 +1588,7 @@ function stopChatPolling() {
 }
 
 function syncChatPollingState() {
-  if (authHeaderOK() && chatIsOpen) startChatPolling();
+  if (authHeaderOK() && backendOnline && chatIsOpen) startChatPolling();
   else stopChatPolling();
 }
 
@@ -1653,7 +1747,7 @@ if (dockChat) {
     e.preventDefault();
     e.stopPropagation();
     if (!chatIsOpen) {
-      openChatModal();
+      openChatPanel();
       wireChatPanel();
     } else {
       closeChatModal();
@@ -3428,7 +3522,7 @@ function setAuthUI(signedIn, note) {
   if (btnGhostMode) btnGhostMode.classList.toggle("disabled", !signedIn);
 
   if (authStatus) authStatus.textContent = note || (signedIn ? "Status: signed in" : "Status: signed out");
-  syncAuthButtons();
+  syncBackendUI();
   syncGhostUI();
   refreshNavNameLabel();
   syncChatPollingState();
@@ -3450,7 +3544,7 @@ function authHeaderOK() {
   return communityToken && communityToken.length > 10;
 }
 
-function syncAuthButtons() {
+function syncBackendUI() {
   const off = !backendOnline;
   if (btnLogin) {
     btnLogin.disabled = off;
@@ -3460,18 +3554,16 @@ function syncAuthButtons() {
     btnSignup.disabled = off;
     btnSignup.classList.toggle("disabled", off);
   }
-  if (authStatus && off) authStatus.textContent = "Backend offline — restarting";
+  if (authStatus && off) authStatus.textContent = "Backend restarting… try again in 30s";
+}
+
+function syncAuthButtons() {
+  syncBackendUI();
 }
 
 async function checkBackend() {
-  try {
-    await fetchJSON(`${RAILWAY_BASE}/status`, { skipBackendOfflineHandling: true });
-    backendOnline = true;
-  } catch {
-    backendOnline = false;
-    scheduleBackendRetry(30000);
-  }
-  syncAuthButtons();
+  const ok = await checkBackendNow();
+  if (!ok) scheduleBackendRetry(30000);
 }
 
 async function loadMe() {
