@@ -726,60 +726,198 @@ const dockModes = document.getElementById("dockModes");
 const dockChat = document.getElementById("dockChat");
 const dockMusic = document.getElementById("dockMusic");
 
-const panelColors = document.getElementById("panelColors");
-const panelModes = document.getElementById("panelModes");
-const panelChat = document.getElementById("panelChat");
-const panelMusic = document.getElementById("panelMusic");
+const dockDrawer = document.getElementById("dockDrawer");
+const dockDrawerTitle = document.getElementById("dockDrawerTitle");
+const dockDrawerBody = document.getElementById("dockDrawerBody");
+const dockDrawerClose = document.getElementById("dockDrawerClose");
+const dockBackdrop = document.getElementById("dockBackdrop");
 
 let openPanelKey = null;
 
-function closeAllPanels() {
-  [panelColors, panelModes, panelChat, panelMusic].forEach((p) => p && p.classList.remove("open"));
+function syncDockActiveButton() {
   [dockColors, dockModes, dockChat, dockMusic].forEach((b) => b && b.classList.remove("dockBtnActive"));
-  openPanelKey = null;
+  if (openPanelKey === "colors") dockColors?.classList.add("dockBtnActive");
+  if (openPanelKey === "modes") dockModes?.classList.add("dockBtnActive");
+  if (openPanelKey === "chat") dockChat?.classList.add("dockBtnActive");
+  if (openPanelKey === "music") dockMusic?.classList.add("dockBtnActive");
 }
 
-function togglePanel(key) {
-  if (openPanelKey === key) {
-    closeAllPanels();
-    return;
-  }
-
-  closeAllPanels();
+function openDrawer(key, title, html) {
   openPanelKey = key;
+  if (dockDrawerTitle) dockDrawerTitle.textContent = title;
+  if (dockDrawerBody) dockDrawerBody.innerHTML = html;
+  dockDrawer?.classList.add("open");
+  dockBackdrop?.classList.add("open");
+  dockDrawer?.setAttribute("aria-hidden", "false");
+  dockBackdrop?.setAttribute("aria-hidden", "false");
+  syncDockActiveButton();
+}
 
-  if (key === "colors") {
-    panelColors?.classList.add("open");
-    dockColors?.classList.add("dockBtnActive");
-  }
-  if (key === "modes") {
-    panelModes?.classList.add("open");
-    dockModes?.classList.add("dockBtnActive");
-  }
-  if (key === "chat") {
-    panelChat?.classList.add("open");
-    dockChat?.classList.add("dockBtnActive");
-  }
-  if (key === "music") {
-    panelMusic?.classList.add("open");
-    dockMusic?.classList.add("dockBtnActive");
+function closeDrawer() {
+  openPanelKey = null;
+  dockDrawer?.classList.remove("open");
+  dockBackdrop?.classList.remove("open");
+  dockDrawer?.setAttribute("aria-hidden", "true");
+  dockBackdrop?.setAttribute("aria-hidden", "true");
+  syncDockActiveButton();
+}
+
+function toggleDrawer(key, title, html) {
+  if (openPanelKey === key) {
+    closeDrawer();
+  } else {
+    openDrawer(key, title, html);
   }
 }
 
-function bindDock(btn, key) {
+dockBackdrop?.addEventListener("click", closeDrawer);
+dockDrawerClose?.addEventListener("click", closeDrawer);
+dockDrawer?.addEventListener("click", (e) => e.stopPropagation());
+
+function musicPanelHTML() {
+  return `
+    <div class="panelBlock">
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+        <button id="dockHot97Btn" class="chipBtn">${hot97Playing ? "⏸" : "▶"} HOT 97.1</button>
+        <button id="dockMegaBtn" class="chipBtn">${megaPlaying ? "⏸" : "▶"} La Mega 97.9</button>
+        <div style="margin-left:auto;font-weight:700;opacity:0.75;">${escapeHtml(radioStatusEl?.textContent || "Radio: off")}</div>
+      </div>
+    </div>
+  `;
+}
+
+function wireMusicPanel() {
+  const a = document.getElementById("dockHot97Btn");
+  const b = document.getElementById("dockMegaBtn");
+  a?.addEventListener("click", async (e) => {
+    e.preventDefault();
+    await toggleHot97();
+    openDrawer("music", "Music", musicPanelHTML());
+    wireMusicPanel();
+  });
+  b?.addEventListener("click", async (e) => {
+    e.preventDefault();
+    await toggleMega();
+    openDrawer("music", "Music", musicPanelHTML());
+    wireMusicPanel();
+  });
+}
+
+function modesPanelHTML() {
+  return `
+    <div class="panelBlock">
+      <div style="font-weight:700;margin-bottom:8px;">${escapeHtml(recommendEl?.textContent || "")}</div>
+
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+        <button id="dockAuthBtn" class="chipBtn">${authHeaderOK() ? "Sign out" : "Sign in"}</button>
+        <a id="dockNavBtn" class="chipBtn ${recommendedDest ? "" : "disabled"}" href="${navBtn?.href || "#"}" target="_blank" rel="noopener">Navigate</a>
+      </div>
+
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+        <button id="dockStatenBtn" class="chipBtn">${statenIslandMode ? "Staten Island: ON" : "Staten Island: OFF"}</button>
+        <button id="dockManhattanBtn" class="chipBtn">${manhattanMode ? "Manhattan: ON" : "Manhattan: OFF"}</button>
+        <button id="dockGhostBtn" class="chipBtn">${me?.ghost_mode ? "Ghost: ON" : "Ghost: OFF"}</button>
+      </div>
+
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <button id="dockPoliceBtn" class="chipBtn">🚨 Police</button>
+        <button id="dockPickupBtn" class="chipBtn">✅ Pickup</button>
+      </div>
+
+      <div style="margin-top:10px;opacity:0.75;font-weight:600;">
+        ${escapeHtml(communityNote?.textContent || "")}
+      </div>
+    </div>
+  `;
+}
+
+function wireModesPanel() {
+  document.getElementById("dockAuthBtn")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    if (authHeaderOK()) clearAuth();
+    else setAuthUI(false, "Status: signed out");
+    openDrawer("modes", "Modes", modesPanelHTML());
+    wireModesPanel();
+  });
+
+  document.getElementById("dockStatenBtn")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    statenIslandMode = !statenIslandMode;
+    localStorage.setItem(LS_KEY_STATEN, statenIslandMode ? "1" : "0");
+    syncStatenIslandUI();
+    if (currentFrame) renderFrame(currentFrame);
+    openDrawer("modes", "Modes", modesPanelHTML());
+    wireModesPanel();
+  });
+
+  document.getElementById("dockManhattanBtn")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    manhattanMode = !manhattanMode;
+    localStorage.setItem(LS_KEY_MANHATTAN, manhattanMode ? "1" : "0");
+    syncManhattanUI();
+    if (currentFrame) renderFrame(currentFrame);
+    openDrawer("modes", "Modes", modesPanelHTML());
+    wireModesPanel();
+  });
+
+  document.getElementById("dockGhostBtn")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    if (!authHeaderOK()) return;
+    const nextGhost = !Boolean(me?.ghost_mode);
+    updateMeProfile({ ghost_mode: nextGhost }).then(() => {
+      openDrawer("modes", "Modes", modesPanelHTML());
+      wireModesPanel();
+    });
+  });
+
+  document.getElementById("dockPoliceBtn")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    sendPoliceReport();
+  });
+  document.getElementById("dockPickupBtn")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    sendPickupLog();
+  });
+}
+
+function chatPanelHTML() {
+  return `<div class="panelBlock">Coming soon…</div>`;
+}
+
+function colorsPanelHTML() {
+  return `
+    <div class="panelBlock">
+      <div style="font-weight:800;margin-bottom:8px;">Demand Colors</div>
+      <div>🟩 Green = Highest</div>
+      <div>🟪 Purple = High</div>
+      <div>🟦 Blue = Medium</div>
+      <div>🟦 Sky = Normal</div>
+      <div>🟨 Yellow = Below Normal</div>
+      <div>🟥 Red = Very Low / Avoid</div>
+      <div style="margin-top:10px;opacity:0.75;font-weight:600;">
+        ${statenIslandMode
+          ? "Staten Island Mode is ON: Staten Island colors are relative within Staten Island only. Other boroughs remain NYC-wide."
+          : "Colors come from rating (1–100) for the selected 20-minute window. Time label is NYC time."}
+      </div>
+    </div>
+  `;
+}
+
+function bindDockToggle(btn, key, title, htmlFactory, wireFn) {
   if (!btn) return;
   btn.addEventListener("pointerdown", (e) => e.stopPropagation());
   btn.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
-    togglePanel(key);
+    toggleDrawer(key, title, htmlFactory());
+    if (openPanelKey === key && typeof wireFn === "function") wireFn();
   });
 }
 
-bindDock(dockColors, "colors");
-bindDock(dockModes, "modes");
-bindDock(dockChat, "chat");
-bindDock(dockMusic, "music");
+bindDockToggle(dockMusic, "music", "Music", musicPanelHTML, wireMusicPanel);
+bindDockToggle(dockModes, "modes", "Modes", modesPanelHTML, wireModesPanel);
+bindDockToggle(dockChat, "chat", "Chat", chatPanelHTML);
+bindDockToggle(dockColors, "colors", "Colors", colorsPanelHTML);
 
 /* =========================================================
    Precision Slider Popup
