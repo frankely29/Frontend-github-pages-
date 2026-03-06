@@ -5,25 +5,22 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>NYC TLC Hotspot Map</title>
 
-  <!-- MapLibre GL JS (no Leaflet) -->
+  <!-- Leaflet -->
   <link
     rel="stylesheet"
-    href="https://unpkg.com/maplibre-gl@latest/dist/maplibre-gl.css"
-    crossorigin="anonymous"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
   />
   <script
-    src="https://unpkg.com/maplibre-gl@latest/dist/maplibre-gl.js"
-    crossorigin="anonymous"
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
   ></script>
 
   <style>
     html, body { height: 100%; margin: 0; padding: 0; }
-    #map {
-      position: fixed;
-      inset: 0;
-      height: 100vh;
-      width: 100vw;
-    }
+    #map { height: 100vh; width: 100vw; }
 
     /* =========================================================
        LOCKED OVERLAY (SIGNED OUT)
@@ -140,18 +137,27 @@
     /* =========================================================
        NIGHT THEME
        ========================================================= */
-    body.night #map{
-      filter: none !important;
-      opacity: 1 !important;
+    body.night .leaflet-tile-pane{
+      filter: brightness(0.65) contrast(1.08) saturate(0.85);
+    }
+    body.sunny .leaflet-tile-pane{
+      filter: brightness(1.03) saturate(1.08);
     }
 
-    /* ---------- Side panel content ---------- */
+    /* ---------- Legend (small + minimize) ---------- */
     .legend {
+      position: absolute;
+      top: calc(8px + env(safe-area-inset-top));
+      left: 8px;
+      z-index: 1000;
       background: rgba(255,255,255,0.92);
       padding: 6px;
       border-radius: 10px;
+      box-shadow: 0 5px 14px rgba(0,0,0,0.14);
       font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
-      max-width: 100%;
+      max-width: 220px;
+      transform: scale(0.86);
+      transform-origin: top left;
     }
     .legendHeader{
       display:flex;
@@ -285,15 +291,15 @@
        Bottom slider + Weather badge
        ========================================================= */
     .sliderWrap {
-      position: fixed;
-      left: 0;
-      right: 0;
-      bottom: calc(env(safe-area-inset-bottom, 0px) + 6px);
-      z-index: 1200;
-      background: transparent;
-      backdrop-filter: none;
-      border-radius: 0;
-      padding: 8px 14px 10px 14px;
+      position: absolute;
+      left: 10px;
+      right: 10px;
+      bottom: calc(6px + env(safe-area-inset-bottom));
+      z-index: 1000;
+      background: rgba(255,255,255,0.92);
+      border-radius: 14px;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.15);
+      padding: 6px 10px;
       font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
     }
 
@@ -302,26 +308,16 @@
       align-items:center;
       justify-content:space-between;
       gap:10px;
-      margin-bottom: 0;
+      margin-bottom: 4px;
     }
 
-    #timeLabel, .timeLabel {
-      position: fixed !important;
-      left: 14px !important;
-      bottom: calc(env(safe-area-inset-bottom, 0px) + 34px) !important;
-      z-index: 1700 !important;
-      font-size: 14px !important;
-      line-height: 1 !important;
-      font-weight: 900 !important;
+    .timeLabel {
+      font-size: 16px;
+      font-weight: 950;
       margin: 0;
-      text-shadow: 0 2px 10px rgba(0,0,0,0.25);
     }
 
     .weatherBadge{
-      position: fixed;
-      top: calc(env(safe-area-inset-top) + 10px);
-      right: 12px;
-      z-index: 1400;
       display:inline-flex;
       align-items:center;
       gap:6px;
@@ -333,7 +329,7 @@
       font-weight: 900;
       opacity: 0.95;
       white-space: nowrap;
-      max-width: 52vw;
+      max-width: 46vw;
       overflow: hidden;
       text-overflow: ellipsis;
     }
@@ -348,7 +344,7 @@
       width: 100%;
     }
     .sliderBubble{
-      position: fixed !important;
+      position: absolute;
       left: 0;
       top: -38px;
       transform: translateX(-50%);
@@ -367,7 +363,7 @@
       max-width: 92vw;
       overflow: hidden;
       text-overflow: ellipsis;
-      z-index: 9999 !important;
+      z-index: 2;
     }
     .sliderBubble.show{ opacity: 1; }
     .sliderBubble:after{
@@ -382,25 +378,7 @@
       border-top: 7px solid rgba(20, 20, 20, 0.92);
     }
 
-    /* Bubble always on top of everything */
-    #sliderBubble, .sliderBubble{
-      position: fixed !important;
-      z-index: 99999 !important;
-      pointer-events: none !important;
-    }
-
-    /* If your bubble is inside sliderWrap, also force that wrapper above dock */
-    #sliderWrap, .sliderWrap{
-      position: fixed !important;
-      z-index: 9000 !important;
-    }
-
-    /* Make sure dock is lower than bubble */
-    #dock, .dock, #dockBar, .iconRow{
-      z-index: 8000 !important;
-    }
-
-input[type="range"] { width: 100%; height: 6px; margin: 0; border-radius: 999px; filter: drop-shadow(0 6px 10px rgba(0,0,0,0.20)); }
+    input[type="range"] { width: 100%; height: 18px; margin: 0; }
 
     /* =========================================================
        Radio row inside bottom box
@@ -446,8 +424,9 @@ input[type="range"] { width: 100%; height: 6px; margin: 0; border-radius: 999px;
     }
 
     .centerBtnInBar{
-      margin-top: 0;
-      display:block;
+      margin-top: 6px;
+      display:flex;
+      justify-content:flex-end;
     }
     .toggleBtnSmall{
       border:none;
@@ -459,48 +438,6 @@ input[type="range"] { width: 100%; height: 6px; margin: 0; border-radius: 999px;
       cursor: pointer;
       background: rgba(255,255,255,0.95);
       box-shadow: 0 6px 18px rgba(0,0,0,0.18);
-    }
-    #btnCenter{
-      position: fixed !important;
-      left: 10px !important;
-      bottom: calc(env(safe-area-inset-bottom, 0px) + 72px) !important; /* above time */
-      z-index: 6000 !important;
-
-      width: 38px !important;
-      height: 38px !important;
-      padding: 0 !important;
-
-      border: none !important;
-      background: rgba(235,235,235,0.20) !important; /* almost invisible (no “circle button look”) */
-      border-radius: 999px !important;
-
-      /* BLUE AURA (soft glow) */
-      box-shadow:
-        0 0 12px rgba(70,140,255,0.55),
-        0 0 0 4px rgba(70,140,255,0.18),
-        0 10px 20px rgba(0,0,0,0.18) !important;
-
-      display: grid !important;
-      place-items: center !important;
-
-      font-size: 0 !important; /* hide any text */
-    }
-
-    #btnCenter::before{
-      content: "" !important;
-      width: 0; height: 0;
-      border-left: 8px solid transparent;
-      border-right: 8px solid transparent;
-      border-bottom: 14px solid rgba(140,140,140,0.95); /* light grey up arrow */
-      transform: translateY(-1px);
-    }
-
-    /* Optional: stronger aura when ON */
-    #btnCenter.on{
-      box-shadow:
-        0 0 18px rgba(70,140,255,0.70),
-        0 0 0 7px rgba(70,140,255,0.22),
-        0 12px 26px rgba(0,0,0,0.20) !important;
     }
     .toggleBtnSmall.on { outline: 2px solid rgba(0,160,255,0.45); }
     .toggleBtnSmall:active { transform: scale(0.98); }
@@ -531,226 +468,24 @@ input[type="range"] { width: 100%; height: 6px; margin: 0; border-radius: 999px;
     .zone-label .zn { font-weight: 950; letter-spacing: 0.1px; }
     .zone-label .br { font-weight: 900; opacity: 0.7; padding: 1px 6px; border-radius: 10px; }
 
-    .zone-label.z15 .zn { font-size: 13px; }
-    .zone-label.z14 .zn { font-size: 12px; }
-    .zone-label.z13 .zn { font-size: 11px; }
-    .zone-label.z12 .zn { font-size: 10px; }
-    .zone-label.z11 .zn { font-size: 9px; }
-    .zone-label.z10 .zn { font-size: 8px; }
+    .zone-label.z10 .zn { font-size: 05px; }
+    .zone-label.z11 .zn { font-size: 06px; }
+    .zone-label.z12 .zn { font-size: 07px; }
+    .zone-label.z13 .zn { font-size: 08px; }
+    .zone-label.z14 .zn { font-size: 09px; }
+    .zone-label.z15 .zn { font-size: 10px; }
 
     .zone-label.z10 .br,
     .zone-label.z11 .br,
     .zone-label.z12 .br,
     .zone-label.z13 .br,
     .zone-label.z14 .br { font-size: 0px; padding: 0; border: 0; }
-    .zone-label.z15 .br { font-size: 8px; }
-
-    #dock {
-      position: fixed;
-      left: 50%;
-      transform: translateX(-50%);
-      bottom: calc(env(safe-area-inset-bottom, 0px) + 38px);
-      display: flex;
-      gap: 14px;
-      align-items: center;
-      z-index: 3000 !important;
-      pointer-events: auto;
-    }
-    .dock, #dockBar, .iconRow{
-      z-index: 3000 !important;
-    }
-    .dockBtn {
-      width: 46px;
-      height: 46px;
-      border-radius: 999px;
-      border: 0;
-      background: rgba(240,240,240,0.95);
-      box-shadow: 0 8px 22px rgba(0,0,0,0.18);
-      display: grid;
-      place-items: center;
-    }
-    .dockBtnMain { width: 56px; height: 56px; }
-    .dockBtnMusic { background: rgba(235,60,60,0.95); color: white; }
-    .dockBtnActive { outline: 2px solid rgba(0,0,0,0.15); }
-    .dockIcon { font-size: 20px; }
-    .dockBtnMain .dockIcon { font-size: 22px; }
-    .dockBtnMusic .dockIcon { font-size: 22px; }
-    .dockIcon, .dockBtn { transform: scale(0.95); }
-
-    body.night .dockDrawer{
-      background: rgba(20,20,20,0.55);
-      color: #fff;
-    }
-    body.night .dockBtn,
-    body.night .toggleBtnSmall{
-      background: rgba(255,255,255,0.85);
-    }
-    body.night .dock,
-    body.night .dock *,
-    body.night #dock,
-    body.night #dock *{
-      filter: none !important;
-      opacity: 1 !important;
-    }
-    body.night .dockIcon,
-    body.night .dockIcon *{
-      filter: none !important;
-      opacity: 1 !important;
-    }
-
-    /* Keep music icon red in night mode */
-    body.night #btnMusic,
-    body.night #btnMusic *{
-      filter: none !important;
-      opacity: 1 !important;
-    }
-
-    /* If your music icon is the red circle button itself (example class .musicIconBtn) */
-    body.night .musicIconBtn,
-    body.night .musicIconBtn *{
-      filter: none !important;
-      opacity: 1 !important;
-    }
-
-    body.night #dockMusic,
-    body.night #dockMusic *{
-      filter: none !important;
-      opacity: 1 !important;
-    }
-
-    .sidePanel { display: none; }
-    .panelTitle {
-      margin: 0 0 10px 0;
-      font: 700 16px/1.2 system-ui;
-    }
-
-    .dockBackdrop{
-      position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,0.18);
-      opacity: 0;
-      pointer-events: none;
-      transition: opacity 180ms ease;
-      z-index: 1400;
-    }
-    .dockBackdrop.open{
-      opacity: 1;
-      pointer-events: auto;
-    }
-
-    .dockDrawer{
-      position: fixed;
-      top: 72px;
-      left: 12px;
-      width: min(330px, 86vw);
-      max-height: calc(100vh - 190px);
-      border-radius: 18px;
-      background: rgba(255,255,255,0.72);
-      -webkit-backdrop-filter: blur(12px);
-      backdrop-filter: blur(12px);
-      border: 1px solid rgba(255,255,255,0.55);
-      box-shadow: 0 16px 38px rgba(0,0,0,0.22);
-      overflow: hidden;
-      transform: translateX(calc(-100% - 20px));
-      transition: transform 220ms ease;
-      z-index: 1500;
-    }
-    @supports not ((-webkit-backdrop-filter: blur(12px)) or (backdrop-filter: blur(12px))) {
-      .dockDrawer { background: rgba(255,255,255,0.92); }
-    }
-    .dockDrawer.open{ transform: translateX(0); }
-    .dockDrawerHeader{
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 12px 12px 8px 14px;
-    }
-    .dockDrawerTitle{ font-weight: 800; font-size: 18px; }
-    .dockDrawerClose{
-      appearance: none;
-      border: 0;
-      background: rgba(0,0,0,0.06);
-      border-radius: 10px;
-      padding: 6px 10px;
-      font-size: 16px;
-      cursor: pointer;
-    }
-    .dockDrawerBody{
-      padding: 10px 14px 14px 14px;
-      overflow: auto;
-      max-height: calc(100vh - 260px);
-    }
-    .dockDrawerBody .panelBlock{
-      background: rgba(255,255,255,0.55);
-      border: 1px solid rgba(0,0,0,0.06);
-      border-radius: 14px;
-      padding: 10px 10px;
-    }
-    .chipBtn{
-      border:none;
-      border-radius: 999px;
-      padding: 6px 10px;
-      font: 900 11px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial;
-      cursor: pointer;
-      background: rgba(0,0,0,0.08);
-      color: #111;
-      text-decoration: none;
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-    }
-    .chipBtn.disabled{ opacity: 0.45; pointer-events: none; }
-
-    .chatPanelWrap{
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-      min-height: 190px;
-    }
-    .chatSignedOut{
-      font-weight: 700;
-      opacity: 0.8;
-      padding: 6px 2px;
-    }
-    .chatList{
-      flex: 1;
-      min-height: 130px;
-      max-height: 190px;
-      overflow: auto;
-      padding: 6px;
-      border-radius: 10px;
-      border: 1px solid rgba(0,0,0,0.08);
-      background: rgba(255,255,255,0.45);
-    }
-    .chatMsgRow + .chatMsgRow{ margin-top: 8px; }
-    .chatMsgLine{
-      font-size: 13px;
-      line-height: 1.28;
-      word-break: break-word;
-    }
-    .chatMsgName{ font-weight: 800; }
-    .chatMsgTime{
-      margin-top: 2px;
-      font-size: 11px;
-      opacity: 0.7;
-    }
-    .chatComposer{
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .chatInput{
-      flex: 1;
-      border: 1px solid rgba(0,0,0,0.18);
-      border-radius: 999px;
-      padding: 8px 12px;
-      background: rgba(255,255,255,0.95);
-      color: #111;
-      font: 500 13px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial;
-    }
+    .zone-label.z15 .br { font-size: 03px; }
 
     /* ---------- You arrow: force on top of EVERYTHING ---------- */
-    .maplibregl-marker { z-index: 800; }
+    .leaflet-marker-pane { z-index: 800 !important; }
+    .leaflet-tooltip-pane { z-index: 650 !important; }
+    .leaflet-overlay-pane { z-index: 400 !important; }
 
     /* =========================================================
        GPS ARROW
@@ -978,111 +713,6 @@ input[type="range"] { width: 100%; height: 6px; margin: 0; border-radius: 999px;
       border: 0;
       background: #fff;
     }
-
-    .debugToggle {
-      position: fixed;
-      right: 10px;
-      bottom: calc(125px + env(safe-area-inset-bottom));
-      z-index: 1400;
-      border: 1px solid rgba(0,0,0,0.2);
-      border-radius: 999px;
-      background: rgba(255,255,255,0.95);
-      padding: 6px 10px;
-      font-size: 12px;
-      font-weight: 900;
-      cursor: pointer;
-    }
-    .debugPanel {
-      position: fixed;
-      right: 10px;
-      bottom: calc(170px + env(safe-area-inset-bottom));
-      width: min(92vw, 360px);
-      max-height: 45vh;
-      overflow: auto;
-      z-index: 1400;
-      background: rgba(0,0,0,0.88);
-      color: #d7f0ff;
-      border: 1px solid rgba(255,255,255,0.16);
-      border-radius: 10px;
-      padding: 10px;
-      font: 11px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;
-    }
-    .debugPanel pre {
-      margin: 0 0 6px;
-      white-space: pre-wrap;
-      word-break: break-word;
-    }
-    .dbgReloadFrame {
-      border: 1px solid rgba(255,255,255,0.35);
-      border-radius: 6px;
-      background: rgba(255,255,255,0.1);
-      color: #fff;
-      font-size: 11px;
-      font-weight: 800;
-      padding: 5px 8px;
-      cursor: pointer;
-    }
-
-
-/* =========================================================
-   LOCK DOCK ICON COLORS (do NOT dim/recolor in night mode)
-   Keep this below night-mode rules so it wins the cascade.
-   ========================================================= */
-body.night #dock,
-body.night #dock * {
-  filter: none !important;
-  opacity: 1 !important;
-  mix-blend-mode: normal !important;
-  -webkit-filter: none !important;
-}
-
-/* Keep dock bubbles readable at night without gray tinting */
-body.night #dock .dockBtn {
-  background: rgba(255,255,255,0.82) !important;
-  color: #111 !important;
-}
-
-/* Keep the music dock icon red in both day + night */
-#dockMusic.dockBtnMusic,
-body.night #dockMusic.dockBtnMusic {
-  background: #e14b4b !important;
-  color: #fff !important;
-}
-
-#dockMusic .dockIcon,
-body.night #dockMusic .dockIcon {
-  color: #fff !important;
-  fill: #fff !important;
-  filter: none !important;
-  opacity: 1 !important;
-}
-
-/* Ensure dock sits above dim overlays, while map can still be dimmed */
-body.night #dock {
-  position: fixed !important;
-  z-index: 5000 !important;
-}
-
-/* --- Music + Chat panels: lower + bottom-center above dock --- */
-.dockDrawer.panelMusic,
-.dockDrawer.panelChat {
-  top: auto;
-  left: 50%;
-  transform: translateX(-50%) translateY(18px);
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 110px);
-  width: min(92vw, 520px);
-  max-height: 30vh;
-  border-radius: 18px;
-  overflow: hidden;
-  z-index: 6000;
-}
-
-/* Keep Music + Chat centered when open */
-.dockDrawer.panelMusic.open,
-.dockDrawer.panelChat.open {
-  transform: translateX(-50%) translateY(0);
-}
-
   </style>
 </head>
 
@@ -1122,94 +752,51 @@ body.night #dock {
     </div>
   </div>
 
-  <div id="panelColors" class="sidePanel" aria-label="Demand legend">
-    <h3 class="panelTitle">Colors</h3>
-    <div id="legend" class="legend">
-      <div class="legendHeader">
-        <h3>Demand Colors</h3>
+  <div id="legend" class="legend" aria-label="Demand legend">
+    <div class="legendHeader">
+      <h3>Demand Colors</h3>
+      <button id="legendToggle" class="legendToggleBtn" type="button">–</button>
+    </div>
+
+    <div class="legendBody">
+      <div id="recommendLine" class="recommendLine">Recommended: …</div>
+
+      <div class="navRow" id="navRow">
+        <button id="btnAuth" class="modeBtn" type="button">Sign in</button>
+        <a id="navBtn" class="navBtn disabled" href="#" target="_blank" rel="noopener">Navigate</a>
+        <button id="btnStatenIsland" class="modeBtn" type="button">Staten Island Mode: OFF</button>
+        <button id="btnGhostMode" class="modeBtn" type="button">Ghost Mode: OFF</button>
+
+        <!-- community quick actions -->
+        <button id="btnPolice" class="dangerBtn" type="button">🚨 Police</button>
+        <button id="btnPickup" class="okBtn" type="button">✅ Pickup</button>
       </div>
 
-      <div class="legendBody">
-        <div class="row"><span class="swatch" style="background:#00b050"></span> Green = Highest</div>
-        <div class="row"><span class="swatch" style="background:#8000ff"></span> Purple = High</div>
-        <div class="row"><span class="swatch" style="background:#0066ff"></span> Blue = Medium</div>
-        <div class="row"><span class="swatch" style="background:#66ccff"></span> Sky = Normal</div>
-        <div class="row"><span class="swatch" style="background:#ffd400"></span> Yellow = Below Normal</div>
-        <div class="row"><span class="swatch" style="background:#e60000"></span> Red = Very Low / Avoid</div>
+      <div class="row"><span class="swatch" style="background:#00b050"></span> Green = Highest</div>
+      <div class="row"><span class="swatch" style="background:#8000ff"></span> Purple = High</div>
+      <div class="row"><span class="swatch" style="background:#0066ff"></span> Blue = Medium</div>
+      <div class="row"><span class="swatch" style="background:#66ccff"></span> Sky = Normal</div>
+      <div class="row"><span class="swatch" style="background:#ffd400"></span> Yellow = Below Normal</div>
+      <div class="row"><span class="swatch" style="background:#e60000"></span> Red = Very Low / Avoid</div>
 
-        <div id="modeNote" class="sub" style="margin-top:7px;">
-          Colors come from rating (1–100) for the selected 20-minute window.<br/>
-          Time label is NYC time.
-        </div>
+      <div id="modeNote" class="sub" style="margin-top:7px;">
+        Colors come from rating (1–100) for the selected 20-minute window.<br/>
+        Time label is NYC time.
+      </div>
+
+      <div id="communityNote" class="sub" style="margin-top:7px;">
+        Community: sign in to see other drivers + report police + log pickups.
       </div>
     </div>
   </div>
 
-  <div id="panelModes" class="sidePanel" aria-label="Modes panel">
-    <h3 class="panelTitle">Modes</h3>
-    <div id="recommendLine" class="recommendLine">Recommended: …</div>
-
-    <div class="navRow" id="navRow">
-      <button id="btnAuth" class="modeBtn" type="button">Sign in</button>
-      <a id="navBtn" class="navBtn disabled" href="#" target="_blank" rel="noopener">Navigate</a>
-      <button id="btnStatenIsland" class="modeBtn" type="button">Staten Island Mode: OFF</button>
-      <button id="btnGhostMode" class="modeBtn" type="button">Ghost Mode: OFF</button>
-
-      <button id="btnPolice" class="dangerBtn" type="button">🚨 Police</button>
-      <button id="btnPickup" class="okBtn" type="button">✅ Pickup</button>
-    </div>
-
-    <div id="communityNote" class="sub" style="margin-top:7px;">
-      Community: sign in to see other drivers + report police + log pickups.
-    </div>
-  </div>
-
-  <div id="panelChat" class="sidePanel" aria-label="Chat panel">
-    <h3 class="panelTitle">Chat</h3>
-    <div class="panelBody">Chat is available from the dock panel.</div>
-  </div>
-
-  <div id="panelMusic" class="sidePanel" aria-label="Music panel">
-    <h3 class="panelTitle">Music</h3>
-    <div class="radioRow">
-      <div class="radioBtns">
-        <button id="btnHot97" class="radioBtn" type="button">▶ HOT 97</button>
-        <button id="btnMega979" class="radioBtn" type="button">▶ La Mega 97.9</button>
-      </div>
-      <div id="radioStatus" class="radioStatus">Radio: off</div>
-    </div>
-  </div>
-
-  <div id="dockBackdrop" class="dockBackdrop" aria-hidden="true"></div>
-  <div id="dockDrawer" class="dockDrawer" aria-hidden="true">
-    <div class="dockDrawerHeader">
-      <div id="dockDrawerTitle" class="dockDrawerTitle">Panel</div>
-      <button id="dockDrawerClose" class="dockDrawerClose" type="button" aria-label="Close">✕</button>
-    </div>
-    <div id="dockDrawerBody" class="dockDrawerBody"></div>
-  </div>
-
-  <div id="dock">
-    <button class="dockBtn" id="dockColors" aria-label="Colors">
-      <span class="dockIcon">🎨</span>
-    </button>
-
-    <button class="dockBtn dockBtnMain" id="dockModes" aria-label="Modes">
-      <span class="dockIcon">⚙️</span>
-    </button>
-
-    <button class="dockBtn dockBtnMain" id="dockChat" aria-label="Chat">
-      <span class="dockIcon">💬</span>
-    </button>
-
-    <button class="dockBtn dockBtnMusic dockBtnMain" id="dockMusic" aria-label="Music">
-      <span class="dockIcon">♪</span>
-    </button>
-  </div>
-
-  <div class="sliderWrap" id="sliderWrap">
+  <div class="sliderWrap">
     <div class="sliderTopRow">
       <div id="timeLabel" class="timeLabel">Loading…</div>
+      <div id="weatherBadge" class="weatherBadge" title="Local weather">
+        <span class="wxIcon">⛅</span>
+        <span class="wxTxt">Weather…</span>
+      </div>
     </div>
 
     <div class="sliderTrackWrap">
@@ -1217,14 +804,17 @@ body.night #dock {
       <input id="slider" type="range" min="0" max="0" value="0" step="1" />
     </div>
 
+    <div class="radioRow">
+      <div class="radioBtns">
+        <button id="btnHot97" class="radioBtn" type="button">▶ HOT 97</button>
+        <button id="btnMega979" class="radioBtn" type="button">▶ La Mega 97.9</button>
+      </div>
+      <div id="radioStatus" class="radioStatus">Radio: off</div>
+    </div>
+
     <div class="centerBtnInBar">
       <button id="btnCenter" class="toggleBtnSmall on" type="button">Auto-center: ON</button>
     </div>
-  </div>
-
-  <div id="weatherBadge" class="weatherBadge" title="Local weather">
-    <span class="wxIcon">⛅</span>
-    <span class="wxTxt">Weather…</span>
   </div>
 
   <div id="radioModal" class="radioModal" aria-hidden="true">
@@ -1239,23 +829,6 @@ body.night #dock {
     </div>
   </div>
 
-  <div id="mapLoading" style="position:absolute;inset:0;background:rgba(255,255,255,0.85);display:flex;align-items:center;justify-content:center;font-weight:900;color:#0066ff;z-index:999;">Loading map… (first load may take a few seconds)</div>
-
-  <button id="debugToggle" class="debugToggle" type="button" hidden>Debug</button>
-  <div id="debugPanel" class="debugPanel" hidden>
-    <pre>baseUrl: <span id="dbgBaseUrl"></span></pre>
-    <pre>status: <span id="dbgStatus"></span></pre>
-    <pre>timeline: <span id="dbgTimeline"></span></pre>
-    <pre>frame: <span id="dbgFrame"></span></pre>
-    <pre>frameKeys: <span id="dbgFrameKeys"></span></pre>
-    <pre>polyCount: <span id="dbgPolyCount"></span></pre>
-    <pre>setData: <span id="dbgSetData"></span></pre>
-    <pre>layers: <span id="dbgLayers"></span></pre>
-    <pre>bounds: <span id="dbgBounds"></span></pre>
-    <pre>fit: <span id="dbgFit"></span></pre>
-    <button id="dbgReloadFrame" class="dbgReloadFrame" type="button">Reload Frame</button>
-  </div>
-
-  <script src="./app.js?v=railway1"></script>
+  <script src="./app.js"></script>
 </body>
 </html>
