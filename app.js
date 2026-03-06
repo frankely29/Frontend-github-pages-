@@ -1493,7 +1493,7 @@ function wireChatPanel() {
 
     chatSendEl.disabled = true;
     const optimisticId = `tmp_${Date.now()}`;
-    const myDisplayName = me?.display_name || localStorage.getItem(LS_DISPLAY_NAME) || "Driver";
+    const myDisplayName = me?.display_name || "Driver";
     const optimisticMessage = {
       sender_id: me?.id || "me",
       display_name: myDisplayName,
@@ -3402,7 +3402,13 @@ async function loadMe() {
   if (!authHeaderOK()) return null;
   try {
     const data = await getJSONAuth("/me", communityToken);
-    me = data || null;
+    me = data
+      ? {
+          ...data,
+          id: data.id,
+          display_name: data.display_name,
+        }
+      : null;
     if (me?.display_name) localStorage.setItem(LS_DISPLAY_NAME, me.display_name);
     syncGhostUI();
     refreshNavNameLabel();
@@ -3422,6 +3428,8 @@ async function updateMeProfile(updates) {
   if (!authHeaderOK()) return;
   await postJSON("/me/update", updates, communityToken);
   await loadMe();
+  refreshNavNameLabel();
+  pullPresenceAll().catch(() => {});
 }
 
 async function applyPostAuthPreferences({ email, forceGhostSync, desiredGhostMode }) {
@@ -3622,7 +3630,7 @@ async function pullPresenceAll() {
     const visibleDrivers = [];
 
     for (const it of items) {
-      const uid = String(it.user_id ?? it.userId ?? it.id ?? "");
+      const uid = String(it.user_id ?? "");
       if (!uid) continue;
 
       if (me && String(me.id) === uid) continue;
@@ -3636,7 +3644,7 @@ async function pullPresenceAll() {
         if (now - updated > PRESENCE_STALE_SEC) continue;
       }
 
-      const name = it.display_name || it.name || it.email || "Driver";
+      const name = it.display_name || it.email || "Driver";
       const heading = Number(it.heading ?? it.bearing ?? NaN);
       visibleDrivers.push({ uid, name, heading, lat, lng });
       seen.add(uid);
