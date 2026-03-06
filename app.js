@@ -2115,15 +2115,14 @@ function startLocationWatch() {
         const hasGoodAccuracy = Number.isFinite(accuracy) && accuracy < GPS_ACCURACY_THRESHOLD;
 
         isMoving = mph >= ROTATE_MIN_MPH && hasGoodAccuracy;
-
-        if (isMoving) {
+        // Always update lastHeadingDeg when we have good GPS accuracy.
+        if (hasGoodAccuracy) {
           if (typeof heading === "number" && Number.isFinite(heading)) {
             lastHeadingDeg = heading;
           } else if (dMi > 0.01) {
             lastHeadingDeg = computeBearingDeg({ lat: lastPos.lat, lng: lastPos.lng }, userLatLng);
           }
         }
-
         if (isMoving) lastMoveTs = ts;
       }
 
@@ -2131,8 +2130,8 @@ function startLocationWatch() {
 
       setNavRotation(lastHeadingDeg);
       setNavVisual(isMoving);
-
-      if (isMoving) {
+      // Rotate the map toward the current heading whenever a valid heading exists.
+      if (Number.isFinite(lastHeadingDeg)) {
         maybeRotateMapTo(lastHeadingDeg);
       }
 
