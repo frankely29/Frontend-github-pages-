@@ -133,13 +133,29 @@ function pickClosestIndex(minutesOfWeekArr, target) {
    Network helper (+ auth support)
    ========================================================= */
 async function fetchJSON(url, opts = {}) {
-  const res = await fetch(url, { cache: "no-store", mode: "cors", ...opts });
+  let res;
+  try {
+    res = await fetch(url, { cache: "no-store", mode: "cors", ...opts });
+  } catch (err) {
+    const networkErr = new Error(`NETWORK_ERROR @ ${url}`);
+    networkErr.kind = "network";
+    networkErr.cause = err;
+    throw networkErr;
+  }
   const text = await res.text();
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText} @ ${url} :: ${text.slice(0, 200)}`);
+  if (!res.ok) {
+    const httpErr = new Error(`${res.status} ${res.statusText} @ ${url} :: ${text.slice(0, 200)}`);
+    httpErr.kind = "http";
+    httpErr.status = res.status;
+    httpErr.url = url;
+    throw httpErr;
+  }
   try {
     return JSON.parse(text);
   } catch {
-    throw new Error(`Invalid JSON @ ${url} :: ${text.slice(0, 200)}`);
+    const parseErr = new Error(`Invalid JSON @ ${url} :: ${text.slice(0, 200)}`);
+    parseErr.kind = "parse";
+    throw parseErr;
   }
 }
 async function postJSON(path, body, token) {
@@ -1622,6 +1638,7 @@ const authGhost = document.getElementById("authGhost");
 const btnLogin = document.getElementById("btnLogin");
 const btnSignup = document.getElementById("btnSignup");
 const authStatus = document.getElementById("authStatus");
+const backendBanner = document.getElementById("backendBanner");
 const btnAuth = document.getElementById("btnAuth");
 const btnGhostMode = document.getElementById("btnGhostMode");
 
@@ -1632,6 +1649,8 @@ const communityNote = document.getElementById("communityNote");
 let communityToken = localStorage.getItem(LS_TOKEN) || "";
 let me = null;
 let lastGpsAccuracyM = null;
+let backendOffline = false;
+let backendOfflineTimer = null;
 
 // other drivers markers
 const otherMarkers = new Map(); // user_id -> marker
@@ -1704,11 +1723,48 @@ function setAuthUI(signedIn, note) {
   refreshNavNameLabel();
 }
 
+function setBackendOffline(active, note) {
+  backendOffline = !!active;
+  if (backendBanner) {
+    backendBanner.textContent = note || "Backend offline — retrying…";
+    backendBanner.classList.toggle("show", backendOffline);
+  }
+}
+
+function shouldRetryBackend(err) {
+  if (!err) return false;
+  if (err.kind === "network") return true;
+  const status = Number(err.status || 0);
+  return status >= 500;
+}
+
+async function pingBackendStatus() {
+  try {
+    await fetchJSON(`${RAILWAY_BASE}/status`);
+    setBackendOffline(false);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function ensureBackendHealthLoop() {
+  if (backendOfflineTimer) return;
+  backendOfflineTimer = setInterval(async () => {
+    if (!backendOffline) return;
+    const ok = await pingBackendStatus();
+    if (ok && authHeaderOK()) {
+      loadMe().catch(() => {});
+    }
+  }, 4000);
+}
+
 function clearAuth() {
   communityToken = "";
   me = null;
   localStorage.removeItem(LS_TOKEN);
   setAuthUI(false, "Status: signed out");
+  setBackendOffline(false);
   clearOtherDrivers();
 }
 
@@ -1721,13 +1777,21 @@ async function loadMe() {
   try {
     const data = await getJSONAuth("/me", communityToken);
     me = data || null;
+    setBackendOffline(false);
     if (me?.display_name) localStorage.setItem(LS_DISPLAY_NAME, me.display_name);
     syncGhostUI();
     refreshNavNameLabel();
     return me;
   } catch (e) {
     console.warn("/me failed:", e);
-    clearAuth();
+    if (e?.status === 401 || e?.status === 403) {
+      clearAuth();
+      return null;
+    }
+    if (shouldRetryBackend(e)) {
+      setBackendOffline(true, "Backend offline — retrying…");
+      return me;
+    }
     return null;
   }
 }
@@ -1769,7 +1833,17 @@ async function applyPostAuthPreferences({ email, forceGhostSync, desiredGhostMod
 
 async function doLogin(email, password, desiredGhostMode) {
   const body = { email, password };
-  const data = await postJSON("/auth/login", body, null);
+  let data;
+  try {
+    data = await postJSON("/auth/login", body, null);
+    setBackendOffline(false);
+  } catch (err) {
+    if (err?.status === 401) throw new Error("Wrong email or password");
+    if (shouldRetryBackend(err)) {
+      setBackendOffline(true, "Backend offline — retrying…");
+    }
+    throw err;
+  }
   const token = data?.token || data?.access_token || "";
   if (!token) throw new Error("Login success but token missing.");
   communityToken = token;
@@ -1783,7 +1857,17 @@ async function doLogin(email, password, desiredGhostMode) {
 async function doSignup(email, password, desiredGhostMode) {
   const display_name = safeName() || (email || "").split("@")[0] || "Driver";
   const body = { email, password, display_name };
-  const data = await postJSON("/auth/signup", body, null);
+  let data;
+  try {
+    data = await postJSON("/auth/signup", body, null);
+    setBackendOffline(false);
+  } catch (err) {
+    if (err?.status === 409) throw new Error("Email already registered — use Sign in, or pick a different email");
+    if (shouldRetryBackend(err)) {
+      setBackendOffline(true, "Backend offline — retrying…");
+    }
+    throw err;
+  }
   const token = data?.token || data?.access_token || "";
   if (!token) throw new Error("Signup success but token missing.");
   communityToken = token;
@@ -1814,7 +1898,11 @@ if (btnLogin) {
       setAuthUI(false, "Signing in…");
       await doLogin(email, password, desiredGhostMode);
     } catch (e) {
-      setAuthUI(false, `Sign in failed: ${e.message || e}`);
+      if (e?.message === "Wrong email or password") {
+        setAuthUI(false, "Wrong email or password");
+      } else {
+        setAuthUI(false, `Sign in failed: ${e.message || e}`);
+      }
     }
   });
 }
@@ -1828,8 +1916,51 @@ if (btnSignup) {
       setAuthUI(false, "Creating account…");
       await doSignup(email, password, desiredGhostMode);
     } catch (e) {
-      setAuthUI(false, `Create account failed: ${e.message || e}`);
+      if ((e?.message || "").includes("Email already registered")) {
+        setAuthUI(false, "Email already registered — use Sign in, or pick a different email");
+      } else {
+        setAuthUI(false, `Create account failed: ${e.message || e}`);
+      }
     }
+  });
+}
+
+const btnChat = document.getElementById("btnChat");
+const chatPanel = document.getElementById("chatPanel");
+const chatStatus = document.getElementById("chatStatus");
+const chatSendBtn = document.getElementById("chatSend");
+
+async function loadChatMessages() {
+  if (!authHeaderOK()) return;
+  try {
+    await getJSONAuth("/chat/messages", communityToken);
+    if (chatStatus) chatStatus.textContent = "Chat ready";
+    if (chatSendBtn) chatSendBtn.disabled = false;
+  } catch (err) {
+    if (shouldRetryBackend(err)) {
+      setBackendOffline(true, "Backend offline — retrying…");
+      if (chatStatus) chatStatus.textContent = "Chat unavailable — backend offline";
+      if (chatSendBtn) chatSendBtn.disabled = true;
+      return;
+    }
+    if (chatStatus) chatStatus.textContent = `Chat error: ${err?.message || err}`;
+    if (chatSendBtn) chatSendBtn.disabled = true;
+  }
+}
+
+if (btnChat) {
+  btnChat.addEventListener("click", async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!chatPanel) return;
+    chatPanel.classList.toggle("open");
+    if (!chatPanel.classList.contains("open")) return;
+    if (!authHeaderOK()) {
+      if (chatStatus) chatStatus.textContent = "Sign in to use chat";
+      setAuthUI(false, "Sign in to use chat.");
+      return;
+    }
+    await loadChatMessages();
   });
 }
 
@@ -2170,6 +2301,7 @@ loadTimeline().catch((err) => {
 
 /* auth boot */
 (async () => {
+  ensureBackendHealthLoop();
   if (authHeaderOK()) {
     setAuthUI(true, "Checking session…");
     await loadMe();
