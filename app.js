@@ -2662,6 +2662,8 @@ const btnSignup = document.getElementById("btnSignup");
 const authStatus = document.getElementById("authStatus");
 const btnAuth = document.getElementById("btnAuth");
 const btnGhostMode = document.getElementById("btnGhostMode");
+const btnChangePassword = document.getElementById("btnChangePassword");
+const btnDeleteAccount = document.getElementById("btnDeleteAccount");
 
 const btnPolice = document.getElementById("btnPolice");
 const btnPickup = document.getElementById("btnPickup");
@@ -2722,6 +2724,8 @@ function setAuthUI(signedIn, note) {
   if (btnPolice) btnPolice.classList.toggle("disabled", !signedIn);
   if (btnPickup) btnPickup.classList.toggle("disabled", !signedIn);
   if (btnGhostMode) btnGhostMode.classList.toggle("disabled", !signedIn);
+  if (btnChangePassword) btnChangePassword.classList.toggle("disabled", !signedIn);
+  if (btnDeleteAccount) btnDeleteAccount.classList.toggle("disabled", !signedIn);
 
   if (authStatus) authStatus.textContent = note || (signedIn ? "Status: signed in" : "Status: signed out");
   syncGhostUI();
@@ -2747,6 +2751,12 @@ function clearAuth() {
 
 function authHeaderOK() {
   return communityToken && communityToken.length > 10;
+}
+
+function requireCommunityToken(actionLabel = "perform this action") {
+  if (authHeaderOK()) return true;
+  setAuthUI(false, `Sign in to ${actionLabel}.`);
+  return false;
 }
 
 async function loadMe() {
@@ -2827,6 +2837,52 @@ async function doSignup(email, password, desiredGhostMode) {
   setAuthUI(true, `Status: account created • signed in as ${me?.display_name || me?.email || email}`);
 }
 
+async function changePassword(oldPwd, newPwd) {
+  if (!requireCommunityToken("change password")) return;
+  try {
+    await postJSON(
+      "/me/change_password",
+      { old_password: oldPwd, new_password: newPwd },
+      communityToken
+    );
+    alert("Password changed successfully.");
+    if (authPass) authPass.value = "";
+  } catch (err) {
+    alert(err?.detail || err?.message || "Error changing password.");
+  }
+}
+
+function openChangePasswordDialog() {
+  if (!requireCommunityToken("change password")) return;
+
+  const oldPwd = prompt("Enter your current password:", "");
+  if (oldPwd === null) return;
+
+  const newPwd = prompt("Enter your new password:", "");
+  if (newPwd === null) return;
+
+  const oldTrimmed = oldPwd.trim();
+  const newTrimmed = newPwd.trim();
+  if (!oldTrimmed || !newTrimmed) {
+    alert("Both old and new passwords are required.");
+    return;
+  }
+  changePassword(oldTrimmed, newTrimmed);
+}
+
+async function deleteAccount() {
+  if (!requireCommunityToken("delete account")) return;
+  if (!confirm("Are you sure you want to delete your account? This cannot be undone.")) return;
+  try {
+    await postJSON("/me/delete_account", {}, communityToken);
+    clearAuth();
+    localStorage.removeItem("community_token");
+    location.reload();
+  } catch (err) {
+    alert(err?.detail || err?.message || "Error deleting account.");
+  }
+}
+
 function safeEmail() {
   return authEmail && authEmail.value ? authEmail.value.trim() : (localStorage.getItem(LS_EMAIL) || "").trim();
 }
@@ -2895,6 +2951,24 @@ if (btnGhostMode) {
     } catch (err) {
       setAuthUI(true, `Ghost mode update failed: ${err.message || err}`);
     }
+  });
+}
+
+if (btnChangePassword) {
+  btnChangePassword.addEventListener("pointerdown", (e) => e.stopPropagation());
+  btnChangePassword.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    openChangePasswordDialog();
+  });
+}
+
+if (btnDeleteAccount) {
+  btnDeleteAccount.addEventListener("pointerdown", (e) => e.stopPropagation());
+  btnDeleteAccount.addEventListener("click", async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    await deleteAccount();
   });
 }
 
