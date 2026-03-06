@@ -1014,6 +1014,27 @@ body.night #dock {
   position: fixed !important;
   z-index: 5000 !important;
 }
+
+/* --- Music + Chat panels: lower + bottom-center above dock --- */
+.dockDrawer.panelMusic,
+.dockDrawer.panelChat {
+  top: auto;
+  left: 50%;
+  transform: translateX(-50%) translateY(18px);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 110px);
+  width: min(92vw, 520px);
+  max-height: 38vh;
+  border-radius: 18px;
+  overflow: hidden;
+  z-index: 6000;
+}
+
+/* Keep Music + Chat centered when open */
+.dockDrawer.panelMusic.open,
+.dockDrawer.panelChat.open {
+  transform: translateX(-50%) translateY(0);
+}
+
   </style>
 </head>
 

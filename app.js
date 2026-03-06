@@ -742,6 +742,13 @@ const dockBackdrop = document.getElementById("dockBackdrop");
 
 let openPanelKey = null;
 
+function syncDrawerPanelPosition() {
+  if (!dockDrawer) return;
+  dockDrawer.classList.remove("panelChat", "panelMusic");
+  if (openPanelKey === "chat") dockDrawer.classList.add("panelChat");
+  if (openPanelKey === "music") dockDrawer.classList.add("panelMusic");
+}
+
 function syncDockActiveButton() {
   [dockColors, dockModes, dockChat, dockMusic].forEach((b) => b && b.classList.remove("dockBtnActive"));
   if (openPanelKey === "colors") dockColors?.classList.add("dockBtnActive");
@@ -758,6 +765,7 @@ function openDrawer(key, title, html) {
   dockBackdrop?.classList.add("open");
   dockDrawer?.setAttribute("aria-hidden", "false");
   dockBackdrop?.setAttribute("aria-hidden", "false");
+  syncDrawerPanelPosition();
   syncDockActiveButton();
 }
 
@@ -767,6 +775,7 @@ function closeDrawer() {
   dockBackdrop?.classList.remove("open");
   dockDrawer?.setAttribute("aria-hidden", "true");
   dockBackdrop?.setAttribute("aria-hidden", "true");
+  syncDrawerPanelPosition();
   syncDockActiveButton();
 }
 
