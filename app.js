@@ -59,7 +59,7 @@ const MAX_VOICE_SECONDS = 10;
 const MAX_VOICE_BYTES = 1_500_000;
 
 let chatPollTimer = null;
-let chatLastSeen = null;
+let chatLastServerId = null;
 let chatSeenKeys = new Set();
 const optimisticChatById = new Map();
 let voiceRecorder = null;
@@ -1046,7 +1046,7 @@ function closeChatModal() {
   setMapInteractionsForChat(false);
 
   if (chatMsgs) chatMsgs.innerHTML = "";
-  chatLastSeen = null;
+  chatLastServerId = null;
   chatSeenKeys.clear();
   optimisticChatById.clear();
   setChatStatus("");
@@ -1054,8 +1054,16 @@ function closeChatModal() {
   syncChatPollingState();
 }
 
-function chatMsgCursor(msg) {
-  return msg?.id || msg?.created_at || null;
+function parseServerChatId(rawId) {
+  if (typeof rawId === "number" && Number.isFinite(rawId)) return rawId;
+  if (typeof rawId === "string" && /^\d+$/.test(rawId.trim())) return Number(rawId.trim());
+  return null;
+}
+
+function updateChatLastServerIdFromMessage(msg) {
+  const id = parseServerChatId(msg?.id);
+  if (id === null) return;
+  chatLastServerId = Math.max(chatLastServerId || 0, id);
 }
 
 function chatMsgKey(msg) {
@@ -1248,6 +1256,7 @@ function reconcileOptimisticMessages(serverMsg) {
   if (!serverText) return;
   const serverName = String(serverMsg?.display_name || serverMsg?.user_name || serverMsg?.name || "Driver").trim();
   const serverTs = new Date(serverMsg?.created_at || serverMsg?.ts || serverMsg?.timestamp || 0).getTime();
+  const DEDUPE_WINDOW_MS = 10 * 1000;
 
   for (const [tmpId, optimistic] of optimisticChatById.entries()) {
     const optimisticText = String(optimistic?.text || optimistic?.message || "").trim();
@@ -1255,10 +1264,10 @@ function reconcileOptimisticMessages(serverMsg) {
     const optimisticTs = new Date(optimistic?.created_at || 0).getTime();
     const textMatch = optimisticText && optimisticText === serverText;
     const nameMatch = optimisticName === serverName;
-    const timeLooksNewer = Number.isFinite(serverTs) && Number.isFinite(optimisticTs)
-      ? serverTs >= optimisticTs
+    const timeMatchesWindow = Number.isFinite(serverTs) && Number.isFinite(optimisticTs)
+      ? Math.abs(serverTs - optimisticTs) <= DEDUPE_WINDOW_MS
       : true;
-    if (textMatch && nameMatch && timeLooksNewer) {
+    if (textMatch && nameMatch && timeMatchesWindow) {
       removeOptimisticChatMessage(tmpId);
       optimisticChatById.delete(tmpId);
       break;
@@ -1331,8 +1340,7 @@ function renderChatMessages(messages) {
     row.appendChild(time);
     frag.appendChild(row);
 
-    const cursor = chatMsgCursor(msg);
-    if (cursor) chatLastSeen = cursor;
+    updateChatLastServerIdFromMessage(msg);
     appended += 1;
   }
 
@@ -1343,8 +1351,9 @@ function renderChatMessages(messages) {
 
 async function chatFetchNew() {
   if (!authHeaderOK()) return [];
-  const q = chatLastSeen
-    ? `?room=${encodeURIComponent(CHAT_ROOM)}&since_id=${encodeURIComponent(chatLastSeen)}&limit=80`
+  const hasServerCursor = Number.isFinite(chatLastServerId) && chatLastServerId > 0;
+  const q = hasServerCursor
+    ? `?room=${encodeURIComponent(CHAT_ROOM)}&since_id=${encodeURIComponent(chatLastServerId)}&limit=80`
     : `?room=${encodeURIComponent(CHAT_ROOM)}&limit=80`;
   const data = await getJSONAuth(`/chat/since${q}`, communityToken);
   const msgs = Array.isArray(data) ? data : data?.messages || [];
@@ -3282,7 +3291,7 @@ function clearAuth() {
   communityToken = "";
   me = null;
   localStorage.removeItem(LS_TOKEN);
-  chatLastSeen = null;
+  chatLastServerId = null;
   chatSeenKeys.clear();
   stopChatPolling();
   setAuthUI(false, "Status: signed out");
