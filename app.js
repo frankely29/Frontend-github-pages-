@@ -943,13 +943,15 @@ function setSliderBubbleTextAndPos() {
   const min = Number(slider.min || 0);
   const max = Number(slider.max || 1);
   const pct = max > min ? (idx - min) / (max - min) : 0;
-  const trackPx = slider.getBoundingClientRect().width;
+  const sliderRect = slider.getBoundingClientRect();
+  const trackPx = sliderRect.width;
 
   const x = pct * trackPx;
   const pad = 18;
   const clampedX = Math.max(pad, Math.min(trackPx - pad, x));
 
-  sliderBubble.style.left = `${clampedX}px`;
+  sliderBubble.style.left = `${sliderRect.left + clampedX}px`;
+  sliderBubble.style.top = `${sliderRect.top - 38}px`;
 }
 
 function bubbleUpdateNow() {
@@ -1734,7 +1736,6 @@ function autoCenterAndAutoZoom() {
 
 function syncCenterButton() {
   if (!btnCenter) return;
-  btnCenter.textContent = autoCenter ? "Auto-center: ON" : "Auto-center: OFF";
   btnCenter.classList.toggle("on", !!autoCenter);
 }
 syncCenterButton();
