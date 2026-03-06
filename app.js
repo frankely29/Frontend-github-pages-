@@ -61,6 +61,7 @@ const MAX_VOICE_BYTES = 1_500_000;
 let chatPollTimer = null;
 let chatLastSeen = null;
 let chatSeenKeys = new Set();
+const optimisticChatById = new Map();
 let voiceRecorder = null;
 let voiceStream = null;
 let voiceChunks = [];
@@ -971,7 +972,7 @@ function getKeyboardOffsetFromViewport() {
 function applyChatModalBottomPadding() {
   if (!chatModal) return;
   const keyboardOffset = chatModalOpen ? chatViewportKeyboardOffset : 0;
-  chatModal.style.paddingBottom = `calc(var(--bottom-ui) + env(safe-area-inset-bottom) + 10px + ${keyboardOffset}px)`;
+  chatModal.style.paddingBottom = `calc(var(--bottom-ui,120px) + env(safe-area-inset-bottom) + 10px + ${keyboardOffset}px)`;
 }
 
 function onVisualViewportResizeForChat() {
@@ -987,22 +988,33 @@ function bindChatViewportResize() {
 
 function setMapInteractionsForChat(disabled) {
   if (!map) return;
-  const mode = disabled ? "disable" : "enable";
-  const controls = [
-    map.dragPan,
-    map.scrollZoom,
-    map.doubleClickZoom,
-    map.boxZoom,
-    map.keyboard,
-    map.touchZoomRotate,
-    map.touchPitch,
-  ];
-  for (const ctl of controls) {
-    if (ctl && typeof ctl[mode] === "function") ctl[mode]();
+  if (disabled) {
+    map.dragging?.disable?.();
+    map.dragPan?.disable?.();
+    map.touchZoom?.disable?.();
+    map.doubleClickZoom?.disable?.();
+    map.scrollWheelZoom?.disable?.();
+    map.scrollZoom?.disable?.();
+    map.boxZoom?.disable?.();
+    map.keyboard?.disable?.();
+    map.tap?.disable?.();
+    map.touchZoomRotate?.disable?.();
+    map.touchPitch?.disable?.();
+    map.touchZoomRotate?.disableRotation?.();
+    return;
   }
-  if (disabled && map.touchZoomRotate && typeof map.touchZoomRotate.disableRotation === "function") {
-    map.touchZoomRotate.disableRotation();
-  }
+
+  map.dragging?.enable?.();
+  map.dragPan?.enable?.();
+  map.touchZoom?.enable?.();
+  map.doubleClickZoom?.enable?.();
+  map.scrollWheelZoom?.enable?.();
+  map.scrollZoom?.enable?.();
+  map.boxZoom?.enable?.();
+  map.keyboard?.enable?.();
+  map.tap?.enable?.();
+  map.touchZoomRotate?.enable?.();
+  map.touchPitch?.enable?.();
 }
 
 function openChatModal() {
@@ -1032,6 +1044,12 @@ function closeChatModal() {
   chatModal.setAttribute("aria-hidden", "true");
   stopVoiceRecording();
   setMapInteractionsForChat(false);
+
+  if (chatMsgs) chatMsgs.innerHTML = "";
+  chatLastSeen = null;
+  chatSeenKeys.clear();
+  optimisticChatById.clear();
+  setChatStatus("");
 
   syncChatPollingState();
 }
@@ -1217,6 +1235,37 @@ function chatAppendMessage(message) {
   renderChatMessages([message]);
 }
 
+function removeOptimisticChatMessage(tmpId) {
+  if (!tmpId || !chatMsgs) return;
+  const row = chatMsgs.querySelector(`[data-chat-id="${String(tmpId)}"]`);
+  if (row) row.remove();
+  chatSeenKeys.delete(`id:${tmpId}`);
+}
+
+function reconcileOptimisticMessages(serverMsg) {
+  if (!serverMsg || optimisticChatById.size === 0) return;
+  const serverText = String(serverMsg?.text || serverMsg?.message || "").trim();
+  if (!serverText) return;
+  const serverName = String(serverMsg?.display_name || serverMsg?.user_name || serverMsg?.name || "Driver").trim();
+  const serverTs = new Date(serverMsg?.created_at || serverMsg?.ts || serverMsg?.timestamp || 0).getTime();
+
+  for (const [tmpId, optimistic] of optimisticChatById.entries()) {
+    const optimisticText = String(optimistic?.text || optimistic?.message || "").trim();
+    const optimisticName = String(optimistic?.display_name || optimistic?.user_name || optimistic?.name || "Driver").trim();
+    const optimisticTs = new Date(optimistic?.created_at || 0).getTime();
+    const textMatch = optimisticText && optimisticText === serverText;
+    const nameMatch = optimisticName === serverName;
+    const timeLooksNewer = Number.isFinite(serverTs) && Number.isFinite(optimisticTs)
+      ? serverTs >= optimisticTs
+      : true;
+    if (textMatch && nameMatch && timeLooksNewer) {
+      removeOptimisticChatMessage(tmpId);
+      optimisticChatById.delete(tmpId);
+      break;
+    }
+  }
+}
+
 function renderChatMessages(messages) {
   const listEl = chatMsgs;
   if (!listEl || !Array.isArray(messages) || !messages.length) return;
@@ -1229,9 +1278,11 @@ function renderChatMessages(messages) {
     const key = chatMsgKey(msg);
     if (chatSeenKeys.has(key)) continue;
     chatSeenKeys.add(key);
+    reconcileOptimisticMessages(msg);
 
     const row = document.createElement("div");
     row.className = "chatMsgRow";
+    if (msg?.id !== undefined && msg?.id !== null) row.dataset.chatId = String(msg.id);
 
     const line = document.createElement("div");
     line.className = "chatMsgLine";
@@ -1318,7 +1369,7 @@ async function chatSend(text) {
   });
   if (!res.ok) {
     const textBody = await res.text();
-    throw new Error(`${res.status} ${res.statusText} :: ${textBody.slice(0, 120)}`);
+    throw new Error(`${res.status} ${res.statusText} @ ${endpoint} :: ${textBody.slice(0, 500)}`);
   }
   const textBody = await res.text();
   try {
@@ -1335,6 +1386,7 @@ async function chatPollOnce() {
     renderChatMessages(msgs);
   } catch (e) {
     console.warn("chat poll failed:", e);
+    setChatStatus(`Receive failed: ${String(e?.message || e)}`);
   }
 }
 
@@ -1378,13 +1430,15 @@ function wireChatPanel() {
     chatSendEl.disabled = true;
     const optimisticId = `tmp_${Date.now()}`;
     const myDisplayName = me?.display_name || localStorage.getItem(LS_DISPLAY_NAME) || "Driver";
-    chatAppendMessage({
+    const optimisticMessage = {
       display_name: myDisplayName,
       type: "text",
       text,
       created_at: new Date().toISOString(),
       id: optimisticId,
-    });
+    };
+    optimisticChatById.set(optimisticId, optimisticMessage);
+    chatAppendMessage(optimisticMessage);
 
     try {
       await chatSend(text);
@@ -1392,6 +1446,8 @@ function wireChatPanel() {
       await chatPollOnce();
     } catch (e) {
       console.warn("chat send failed:", e);
+      removeOptimisticChatMessage(optimisticId);
+      optimisticChatById.delete(optimisticId);
       const msg = String(e?.message || "Unknown error");
       if (msg.startsWith("401") || msg.startsWith("403")) setChatStatus(`Send failed: ${msg}`);
       else setChatStatus(`Send failed: ${msg}`);
