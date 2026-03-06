@@ -2959,8 +2959,8 @@ const radioModalTitle = document.getElementById("radioModalTitle");
 const HOT97_STREAM_URL = "https://26313.live.streamtheworld.com/WQHTFMAAC.aac";
 const MEGA979_STREAM_URL = "https://liveaudio.lamusica.com/NY_WSKQ_icy";
 
-// Z100 (WHTZ 100.3 NYC) — Top 40 / pop (mainstream)
-const Z100_STREAM_URL = "https://stream.revma.ihrhls.com/zc1469";
+// Z100 (WHTZ 100.3 NYC) — replace with direct MP3/AAC stream when available
+const Z100_STREAM_URL = "Z100_STREAM_URL";
 
 // KQ 94.5 (RD)
 const KQ945_STREAM_URL = "https://radio.yaservers.com:9990/stream?icy=http";
@@ -2996,11 +2996,12 @@ function setRadioStatus(txt) {
 function setBtnState(btn, on) {
   if (!btn) return;
   btn.classList.toggle("on", !!on);
-  let base = "HOT 97.1";
-  if (btn === btnMega979) base = "La Mega 97.9";
-  else if (btn === btnHot97) base = "HOT 97.1";
-  else if (btn === btnZ100) base = "Z100";
-  else if (btn === btnKQ945) base = "KQ 94.5 (RD)";
+  const base =
+    btn === btnMega979 ? "La Mega 97.9" :
+    btn === btnHot97 ? "HOT 97.1" :
+    btn === btnKQ945 ? "KQ 94.5 (RD)" :
+    btn === btnZ100 ? "Z100" :
+    "Radio";
   btn.textContent = (on ? "⏸ " : "▶ ") + base;
 }
 
@@ -3102,6 +3103,10 @@ async function toggleHot97() {
 
 async function toggleZ100() {
   closeHot97Modal();
+  if (Z100_STREAM_URL === "Z100_STREAM_URL") {
+    alert("Z100 stream URL is not set yet. Replace Z100_STREAM_URL in app.js with the station’s direct MP3/AAC stream.");
+    return;
+  }
   if (z100Playing) {
     try { z100Audio.pause(); } catch {}
     z100Playing = false;
