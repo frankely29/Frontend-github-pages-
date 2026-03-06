@@ -741,6 +741,7 @@ const dockColors = document.getElementById("dockColors");
 const dockModes = document.getElementById("dockModes");
 const dockChat = document.getElementById("dockChat");
 const dockMusic = document.getElementById("dockMusic");
+const dockProfile = document.getElementById("dockProfile");
 
 const dockDrawer = document.getElementById("dockDrawer");
 const dockDrawerTitle = document.getElementById("dockDrawerTitle");
@@ -758,11 +759,12 @@ function syncDrawerPanelPosition() {
 }
 
 function syncDockActiveButton() {
-  [dockColors, dockModes, dockChat, dockMusic].forEach((b) => b && b.classList.remove("dockBtnActive"));
+  [dockColors, dockModes, dockChat, dockMusic, dockProfile].forEach((b) => b && b.classList.remove("dockBtnActive"));
   if (openPanelKey === "colors") dockColors?.classList.add("dockBtnActive");
   if (openPanelKey === "modes") dockModes?.classList.add("dockBtnActive");
   if (openPanelKey === "chat") dockChat?.classList.add("dockBtnActive");
   if (openPanelKey === "music") dockMusic?.classList.add("dockBtnActive");
+  if (openPanelKey === "profile") dockProfile?.classList.add("dockBtnActive");
 }
 
 function openDrawer(key, title, html) {
@@ -904,6 +906,80 @@ function wireModesPanel() {
   document.getElementById("dockPickupBtn")?.addEventListener("click", (e) => {
     e.preventDefault();
     sendPickupLog();
+  });
+}
+
+
+function profilePanelHTML() {
+  if (!authHeaderOK()) {
+    return `
+      <div class="panelBlock">
+        <div>Please sign in to manage your account.</div>
+      </div>
+    `;
+  }
+  return `
+    <div class="panelBlock">
+      <div style="font-weight:700;margin-bottom:8px;">Account</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+        <button id="profileChangePwdBtn" class="chipBtn">Change Password</button>
+        <button id="profileDeleteAccountBtn" class="chipBtn dangerBtn">Delete Account</button>
+        <button id="profileSignOutBtn" class="chipBtn">${authHeaderOK() ? "Sign Out" : "Sign In"}</button>
+      </div>
+    </div>
+  `;
+}
+
+function wireProfilePanel() {
+  // Change password
+  document.getElementById("profileChangePwdBtn")?.addEventListener("click", async (e) => {
+    e.preventDefault();
+    if (!authHeaderOK()) {
+      setAuthUI(false, "Status: signed out");
+      closeDrawer();
+      return;
+    }
+    const oldPwd = prompt("Enter your current password:");
+    if (oldPwd === null) return;
+    const newPwd = prompt("Enter your new password:");
+    if (newPwd === null) return;
+    try {
+      await postJSON("/me/change_password", { old_password: oldPwd, new_password: newPwd }, communityToken);
+      alert("Password changed successfully.");
+    } catch (err) {
+      alert(err?.detail || "Error changing password.");
+    }
+  });
+
+  // Delete account
+  document.getElementById("profileDeleteAccountBtn")?.addEventListener("click", async (e) => {
+    e.preventDefault();
+    if (!authHeaderOK()) {
+      setAuthUI(false, "Status: signed out");
+      closeDrawer();
+      return;
+    }
+    if (!confirm("Are you sure you want to delete your account? This cannot be undone.")) return;
+    try {
+      await postJSON("/me/delete_account", {}, communityToken);
+      // Sign out locally after deletion
+      clearAuth();
+      alert("Account deleted successfully.");
+      location.reload();
+    } catch (err) {
+      alert(err?.detail || "Error deleting account.");
+    }
+  });
+
+  // Sign out or sign in
+  document.getElementById("profileSignOutBtn")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    if (authHeaderOK()) {
+      clearAuth();
+    } else {
+      setAuthUI(false, "Status: signed out");
+    }
+    closeDrawer();
   });
 }
 
@@ -1112,6 +1188,7 @@ bindDockToggle(dockMusic, "music", "Music", musicPanelHTML, wireMusicPanel);
 bindDockToggle(dockModes, "modes", "Modes", modesPanelHTML, wireModesPanel);
 bindDockToggle(dockChat, "chat", "Chat", chatPanelHTML, wireChatPanel);
 bindDockToggle(dockColors, "colors", "Colors", colorsPanelHTML);
+bindDockToggle(dockProfile, "profile", "Profile", profilePanelHTML, wireProfilePanel);
 
 /* =========================================================
    Precision Slider Popup
