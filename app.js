@@ -3425,7 +3425,8 @@ async function doSignup(email, password, desiredGhostMode) {
 }
 
 function safeEmail() {
-  return authEmail && authEmail.value ? authEmail.value.trim() : (localStorage.getItem(LS_EMAIL) || "").trim();
+  const raw = authEmail && authEmail.value ? authEmail.value : (localStorage.getItem(LS_EMAIL) || "");
+  return raw.trim().toLowerCase();
 }
 function safePass() {
   return authPass && authPass.value ? authPass.value : "";
