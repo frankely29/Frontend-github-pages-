@@ -29,7 +29,6 @@ const ROTATE_RATE_LIMIT_MS = 200;
 const ROTATE_ANIM_MS = 250;
 const GPS_ACCURACY_THRESHOLD = 50;
 const MAX_JUMP_MILES = 2.0;
-const FOLLOW_OFFSET_Y = 110;
 let lastMapBearingDeg = 0;
 let lastRotateTs = 0;
 
@@ -62,10 +61,6 @@ const CHAT_POLL_MS = 1200;
 let chatPollTimer = null;
 let chatLastSeen = null;
 let chatSeenKeys = new Set();
-
-const SAME_SPOT_METERS = 20;
-const SAME_SPOT_MILES = SAME_SPOT_METERS / 1609.344;
-
 
 /* =========================================================
    MANHATTAN MODE — DEFAULT SETTINGS (SAFE TO EDIT)
@@ -814,9 +809,9 @@ function musicPanelHTML() {
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
         <button id="dockHot97Btn" class="chipBtn">${hot97Playing ? "⏸" : "▶"} HOT 97.1</button>
         <button id="dockMegaBtn" class="chipBtn">${megaPlaying ? "⏸" : "▶"} La Mega 97.9</button>
-        <button id="dockKQ945Btn" class="chipBtn">${kqPlaying ? "⏸" : "▶"} KQ 94.5 FM</button>
+        <button id="dockKQBtn" class="chipBtn">${kqPlaying ? "⏸" : "▶"} KQ 94.5</button>
         <button id="dockZ100Btn" class="chipBtn">${z100Playing ? "⏸" : "▶"} Z100</button>
-        <div style="margin-left:auto;font-weight:700;opacity:0.75;">${escapeHtml(radioStatusEl?.textContent || "Radio: off")}</div>
+        <div style="width:100%;font-weight:700;opacity:0.78;margin-top:2px;">${escapeHtml(radioStatusEl?.textContent || "Radio: off")}</div>
       </div>
     </div>
   `;
@@ -825,9 +820,8 @@ function musicPanelHTML() {
 function wireMusicPanel() {
   const a = document.getElementById("dockHot97Btn");
   const b = document.getElementById("dockMegaBtn");
-  const c = document.getElementById("dockKQ945Btn");
+  const c = document.getElementById("dockKQBtn");
   const d = document.getElementById("dockZ100Btn");
-
   a?.addEventListener("click", async (e) => {
     e.preventDefault();
     await toggleHot97();
@@ -1015,10 +1009,10 @@ function chatPanelHTML() {
   }
 
   return `
-    <div class="panelBlock chatPanelWrap chatPanelCompact">
+    <div class="panelBlock chatPanelWrap">
       <div id="chatList" class="chatList" aria-live="polite"></div>
       <div class="chatComposer">
-        <input id="chatInput" type="text" class="chatInput" placeholder="Message drivers…" maxlength="280" inputmode="text" autocapitalize="sentences" autocorrect="on" spellcheck="true" />
+        <input id="chatInput" type="text" class="chatInput" placeholder="Message drivers…" maxlength="600" />
         <button id="chatSendBtn" class="chipBtn" type="button">Send</button>
       </div>
     </div>
@@ -1052,7 +1046,15 @@ function isChatNearBottom(listEl, px = 80) {
 
 function renderChatMessages(messages) {
   const listEl = document.getElementById("chatList");
-  if (!listEl || !Array.isArray(messages) || !messages.length) return;
+  if (!listEl || !Array.isArray(messages)) return;
+  if (!messages.length) {
+    if (!listEl.children.length) {
+      listEl.innerHTML = '<div class="chatEmpty">No messages yet.</div>';
+    }
+    return;
+  }
+
+  if (listEl.querySelector('.chatEmpty')) listEl.innerHTML = '';
 
   const nearBottom = isChatNearBottom(listEl, 80);
   const frag = document.createDocumentFragment();
@@ -1097,13 +1099,6 @@ function renderChatMessages(messages) {
   if (nearBottom) listEl.scrollTop = listEl.scrollHeight;
 }
 
-async function chatFetchRecent(limit = 50) {
-  if (!authHeaderOK()) return [];
-  const data = await getJSONAuth(`/chat/rooms/${CHAT_ROOM}?limit=${encodeURIComponent(limit)}`, communityToken);
-  const msgs = Array.isArray(data) ? data : data?.messages || [];
-  return msgs;
-}
-
 async function chatFetchNew() {
   if (!authHeaderOK()) return [];
   const q = chatLastSeen ? `?after=${encodeURIComponent(chatLastSeen)}&limit=50` : "?limit=50";
@@ -1122,12 +1117,14 @@ async function chatSend(text) {
 async function chatPollOnce() {
   if (!authHeaderOK() || openPanelKey !== "chat") return;
   try {
-    const listEl = document.getElementById("chatList");
-    const shouldLoadWindow = !!listEl && !listEl.children.length;
-    const msgs = shouldLoadWindow ? await chatFetchRecent(50) : await chatFetchNew();
+    const msgs = await chatFetchNew();
     renderChatMessages(msgs);
   } catch (e) {
     console.warn("chat poll failed:", e);
+    const listEl = document.getElementById("chatList");
+    if (listEl && !listEl.children.length) {
+      listEl.innerHTML = '<div class="chatEmpty">Chat unavailable right now.</div>';
+    }
   }
 }
 
@@ -1148,15 +1145,20 @@ function syncChatPollingState() {
   else stopChatPolling();
 }
 
+function resetChatPanelState() {
+  chatLastSeen = null;
+  chatSeenKeys.clear();
+  const listEl = document.getElementById("chatList");
+  if (listEl) listEl.innerHTML = '<div class="chatEmpty">Loading messages…</div>';
+}
+
 function wireChatPanel() {
   const chatInput = document.getElementById("chatInput");
   const chatSendBtn = document.getElementById("chatSendBtn");
   const chatListEl = document.getElementById("chatList");
   if (!chatInput || !chatSendBtn || !chatListEl) return;
 
-  chatSeenKeys = new Set();
-  chatLastSeen = null;
-  chatListEl.innerHTML = "";
+  resetChatPanelState();
 
   const sendNow = async () => {
     const text = String(chatInput.value || "").trim();
@@ -1175,7 +1177,6 @@ function wireChatPanel() {
       alert(e?.detail || e?.message || "Chat send failed.");
     } finally {
       chatSendBtn.disabled = false;
-      try { chatInput.focus({ preventScroll: true }); } catch {}
     }
   };
 
@@ -1187,10 +1188,6 @@ function wireChatPanel() {
     if (e.key !== "Enter") return;
     e.preventDefault();
     sendNow();
-  });
-
-  chatInput.addEventListener("focus", () => {
-    try { window.scrollTo(0, 0); } catch {}
   });
 
   chatPollOnce();
@@ -2163,17 +2160,12 @@ function maybeRotateMapTo(deg) {
   lastRotateTs = now;
   lastMapBearingDeg = target;
 
-  const anchor = (navMarker && typeof navMarker.getLngLat === "function")
-    ? navMarker.getLngLat()
-    : userLatLng
-      ? { lng: userLatLng.lng, lat: userLatLng.lat }
-      : map.getCenter();
-
+  const c = map.getCenter();
+  const z = map.getZoom();
   map.easeTo({
-    center: [anchor.lng, anchor.lat],
-    zoom: map.getZoom(),
+    center: [c.lng, c.lat],
+    zoom: z,
     bearing: target,
-    offset: [0, FOLLOW_OFFSET_Y],
     duration: ROTATE_ANIM_MS,
     essential: true,
   });
@@ -2254,31 +2246,30 @@ function startLocationWatch() {
 
       setNavRotation(lastHeadingDeg);
       setNavVisual(isMoving);
-      // Rotate the map toward the current heading whenever a valid heading exists.
-      if (Number.isFinite(lastHeadingDeg)) {
-        maybeRotateMapTo(lastHeadingDeg);
-      }
 
       if (!gpsFirstFixDone) {
         gpsFirstFixDone = true;
         const targetZoom = Math.max(map.getZoom(), 12.5);
-        suppressAutoDisableFor(1200, () => map.flyTo({ center: [lng, lat], zoom: targetZoom, duration: 700 }));
+        suppressAutoDisableFor(1200, () => map.easeTo({
+          center: [lng, lat],
+          zoom: targetZoom,
+          bearing: Number.isFinite(lastHeadingDeg) ? normDeg(lastHeadingDeg) : map.getBearing(),
+          duration: 700,
+          essential: true,
+        }));
+        if (Number.isFinite(lastHeadingDeg)) lastMapBearingDeg = normDeg(lastHeadingDeg);
       } else {
         if (autoCenter && map) {
           const c = (navMarker && navMarker.getLngLat) ? navMarker.getLngLat() : { lng, lat };
-          suppressAutoDisableFor(700, () => {
-            if (isMoving && Number.isFinite(lastHeadingDeg)) {
-              map.easeTo({
-                center: [c.lng, c.lat],
-                bearing: normDeg(lastHeadingDeg),
-                offset: [0, FOLLOW_OFFSET_Y],
-                duration: 500,
-                essential: true,
-              });
-            } else {
-              map.flyTo({ center: [c.lng, c.lat], duration: 500 });
-            }
-          });
+          suppressAutoDisableFor(700, () => map.easeTo({
+            center: [c.lng, c.lat],
+            bearing: Number.isFinite(lastHeadingDeg) ? normDeg(lastHeadingDeg) : map.getBearing(),
+            duration: 450,
+            essential: true,
+          }));
+          if (Number.isFinite(lastHeadingDeg)) lastMapBearingDeg = normDeg(lastHeadingDeg);
+        } else if (Number.isFinite(lastHeadingDeg)) {
+          maybeRotateMapTo(lastHeadingDeg);
         }
       }
 
@@ -2622,7 +2613,7 @@ const radioModalTitle = document.getElementById("radioModalTitle");
 
 const HOT97_STREAM_URL = "https://26313.live.streamtheworld.com/WQHTFMAAC.aac";
 const MEGA979_STREAM_URL = "https://liveaudio.lamusica.com/NY_WSKQ_icy";
-const KQ945_STREAM_URL = "https://liveonlineradio.net/kq-94-5-fm";
+const KQ945_STREAM_URL = "https://stream.revma.ihrhls.com/zc4792";
 const Z100_STREAM_URL = "https://stream.revma.ihrhls.com/zc1469";
 
 const megaAudio = new Audio();
@@ -2658,7 +2649,7 @@ function setBtnState(btn, on) {
   btn.classList.toggle("on", !!on);
   const base = btn === btnMega979 ? "La Mega 97.9"
              : btn === btnHot97 ? "HOT 97.1"
-             : btn === btnKQ945 ? "KQ 94.5 FM"
+             : btn === btnKQ945 ? "KQ 94.5"
              : btn === btnZ100 ? "Z100"
              : "";
   btn.textContent = (on ? "⏸ " : "▶ ") + base;
@@ -2797,12 +2788,12 @@ async function toggleKQ() {
     setBtnState(btnHot97, false);
     setBtnState(btnMega979, false);
     setBtnState(btnZ100, false);
-    setRadioStatus("Radio: KQ 94.5 FM playing");
+    setRadioStatus("Radio: KQ 94.5 playing");
   } catch (e) {
     kqPlaying = false;
     setBtnState(btnKQ945, false);
-    setRadioStatus("Radio: KQ 94.5 FM failed to play");
-    alert("KQ 94.5 FM could not start. Turn volume up and try again.");
+    setRadioStatus("Radio: KQ 94.5 failed to play");
+    alert("KQ 94.5 could not start. Turn volume up and try again.");
   }
 }
 
@@ -3236,34 +3227,29 @@ if (btnDeleteAccount) {
   });
 }
 
-function labelFontPxForZoom(zoom) {
-  if (zoom <= 10) return 8;
-  if (zoom <= 12) return 9;
-  if (zoom <= 14) return 10;
-  return 11;
-}
-
-function labelMaxWidthPxForZoom(zoom) {
-  if (zoom <= 10) return 96;
-  if (zoom <= 12) return 112;
-  if (zoom <= 14) return 132;
-  return 160;
-}
-
-function labelSideForPoint(basePoint, mapWidth, preferred = "right") {
-  if (!basePoint || !Number.isFinite(basePoint.x)) return preferred;
-  if (basePoint.x > mapWidth - 120) return "left";
-  if (basePoint.x < 120) return "right";
-  return preferred;
-}
-
-function stackOffsetForIndex(idx, count, fontPx) {
-  const spacing = fontPx + 7;
-  const mid = (count - 1) / 2;
-  return (idx - mid) * spacing;
-}
-
 // other drivers marker HTML
+function driverLabelFontPx(zoom) {
+  if (zoom >= 15) return 12;
+  if (zoom >= 14) return 11.5;
+  if (zoom >= 13) return 11;
+  if (zoom >= 12) return 10.5;
+  if (zoom >= 11) return 10;
+  return 9;
+}
+
+function driverLabelMaxWidthPx(zoom) {
+  if (zoom >= 15) return 170;
+  if (zoom >= 14) return 160;
+  if (zoom >= 13) return 148;
+  if (zoom >= 12) return 136;
+  if (zoom >= 11) return 122;
+  return 108;
+}
+
+function sameSpotKey(lat, lng) {
+  return `${Number(lat).toFixed(5)},${Number(lng).toFixed(5)}`;
+}
+
 function makeDriverIcon(name, headingDeg, labelSide = "right", labelDx = 0, labelDy = 0, labelFontPx = 11, labelMaxWidthPx = 160) {
   const safe = (name || "Driver").trim() || "Driver";
   const rot = Number.isFinite(headingDeg) ? headingDeg : 0;
@@ -3274,7 +3260,7 @@ function makeDriverIcon(name, headingDeg, labelSide = "right", labelDx = 0, labe
   const el = document.createElement("div");
   el.className = "otherDrvWrap";
   el.innerHTML = `
-    <div class="otherArrowWrap otherPulse" style="--heading-deg:${rot}deg">
+    <div class="otherArrowWrap otherPulse" style="transform:rotate(${rot}deg)">
       <div class="otherArrow"></div>
     </div>
     <div class="otherDrvName" style="transform:translate(${labelTranslateX}px, ${labelTranslateY}px);font-size:${labelFontPx}px;max-width:${labelMaxWidthPx}px;">
@@ -3340,60 +3326,46 @@ async function pullPresenceAll() {
 
       const name = it.display_name || it.name || it.email || "Driver";
       const heading = Number(it.heading ?? it.bearing ?? NaN);
-      const basePoint = projectToPoint(lng, lat);
-
-      visibleDrivers.push({ uid, name, heading, lat, lng, basePoint });
+      visibleDrivers.push({ uid, name, heading, lat, lng });
       seen.add(uid);
     }
 
-    const selfPt = userLatLng ? projectToPoint(userLatLng.lng, userLatLng.lat) : null;
     const zoom = map?.getZoom?.() || 12;
-    const fontPx = labelFontPxForZoom(zoom);
-    const labelMaxWidthPx = labelMaxWidthPxForZoom(zoom);
-    const mapCanvas = map.getCanvas?.();
-    const mapWidth = mapCanvas?.width || window.innerWidth || 390;
+    const labelFontPx = driverLabelFontPx(zoom);
+    const labelMaxWidthPx = driverLabelMaxWidthPx(zoom);
+    const selfPt = userLatLng ? projectToPoint(userLatLng.lng, userLatLng.lat) : null;
 
-    const grouped = new Set();
-    const sameSpotGroups = [];
-
-    for (let i = 0; i < visibleDrivers.length; i++) {
-      const seed = visibleDrivers[i];
-      if (grouped.has(seed.uid)) continue;
-
-      const group = [];
-      for (const candidate of visibleDrivers) {
-        if (grouped.has(candidate.uid)) continue;
-        const dMi = haversineMiles({ lat: seed.lat, lng: seed.lng }, { lat: candidate.lat, lng: candidate.lng });
-        if (dMi > SAME_SPOT_MILES) continue;
-        grouped.add(candidate.uid);
-        group.push(candidate);
-      }
-
-      group.sort((a, b) => a.uid.localeCompare(b.uid));
-      sameSpotGroups.push(group);
+    const groupsBySpot = new Map();
+    for (const drv of visibleDrivers) {
+      const key = sameSpotKey(drv.lat, drv.lng);
+      if (!groupsBySpot.has(key)) groupsBySpot.set(key, []);
+      groupsBySpot.get(key).push(drv);
     }
 
-    for (const group of sameSpotGroups) {
+    for (const group of groupsBySpot.values()) {
+      group.sort((a, b) => a.uid.localeCompare(b.uid));
+      const mid = (group.length - 1) / 2;
+
       for (let idx = 0; idx < group.length; idx++) {
         const drv = group[idx];
-        const basePoint = drv.basePoint;
-        let labelSide = labelSideForPoint(basePoint, mapWidth, idx % 2 === 0 ? "right" : "left");
-        let labelDx = labelSide === "left" ? -24 : 24;
-        let labelDy = -Math.round(fontPx * 0.45);
+        let labelSide = "right";
+        let labelDx = 28;
+        let labelDy = -8;
+
+        const basePoint = projectToPoint(drv.lng, drv.lat);
 
         if (selfPt) {
           const distPx = pointDistance(basePoint, selfPt);
           if (distPx < SELF_COLLISION_THRESHOLD_PX) {
-            labelSide = basePoint.x > mapWidth / 2 ? "left" : "right";
-            labelDx = labelSide === "left" ? -SELF_COLLISION_OFFSET_PX : SELF_COLLISION_OFFSET_PX;
+            labelDx = -SELF_COLLISION_OFFSET_PX;
             labelDy = 0;
+            labelSide = "left";
           }
         }
 
         if (group.length > 1) {
-          labelSide = labelSideForPoint(basePoint, mapWidth, labelSide);
-          labelDx = labelSide === "left" ? -(28 + fontPx) : (28 + fontPx);
-          labelDy = stackOffsetForIndex(idx, group.length, fontPx);
+          labelDx = labelSide === "left" ? -54 : 54;
+          labelDy = (idx - mid) * (labelFontPx + 9);
         }
 
         upsertDriverMarker(
@@ -3405,7 +3377,7 @@ async function pullPresenceAll() {
           labelSide,
           labelDx,
           labelDy,
-          fontPx,
+          labelFontPx,
           labelMaxWidthPx
         );
       }
