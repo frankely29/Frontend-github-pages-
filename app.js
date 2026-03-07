@@ -1155,11 +1155,26 @@ async function chatFetchNew() {
 }
 
 async function chatSend(text) {
-  // Send a chat message using the newer /chat/send endpoint.
-  // The backend expects a JSON body with a `message` field and returns {ok, id, created_at, display_name}.
+  // Send a chat message using the preferred /chat/send endpoint.
+  // If that fails (e.g. due to backend version mismatch), fall back to the older /chat/rooms/<room> endpoint.
   if (!authHeaderOK()) throw new Error("Not signed in");
-  const body = { message: text };
-  await postJSON(`/chat/send`, body, communityToken);
+  const trimmed = String(text || "").trim();
+  if (!trimmed) throw new Error("Message cannot be empty");
+  // Attempt new endpoint first
+  try {
+    const res = await postJSON(`/chat/send`, { message: trimmed }, communityToken);
+    return res;
+  } catch (err) {
+    console.warn("chat/send failed, falling back to legacy endpoint", err);
+    // Legacy endpoint uses the room in the path and a `text` field
+    try {
+      const res2 = await postJSON(`/chat/rooms/${CHAT_ROOM}`, { text: trimmed }, communityToken);
+      return res2;
+    } catch (err2) {
+      // Rethrow the second error to be handled by caller
+      throw err2;
+    }
+  }
 }
 
 async function chatPollOnce() {
