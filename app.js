@@ -23,10 +23,12 @@ let mapReady = false;
 let didFitToZonesOnce = false;
 
 const ROTATE_ENABLED = true;
-const ROTATE_MIN_MPH = 2.0;
-const ROTATE_MIN_DELTA_DEG = 3;
-const ROTATE_RATE_LIMIT_MS = 200;
-const ROTATE_ANIM_MS = 250;
+// Tune rotation sensitivity and animation for smoother navigation
+// Reduced minimum speed and delta threshold to make map rotation more responsive
+const ROTATE_MIN_MPH = 1.0;
+const ROTATE_MIN_DELTA_DEG = 1.5;
+const ROTATE_RATE_LIMIT_MS = 120;
+const ROTATE_ANIM_MS = 220;
 const GPS_ACCURACY_THRESHOLD = 50;
 const MAX_JUMP_MILES = 2.0;
 let lastMapBearingDeg = 0;
@@ -2652,7 +2654,10 @@ const radioModalTitle = document.getElementById("radioModalTitle");
 
 const HOT97_STREAM_URL = "https://26313.live.streamtheworld.com/WQHTFMAAC.aac";
 const MEGA979_STREAM_URL = "https://liveaudio.lamusica.com/NY_WSKQ_icy";
-const KQ945_WEB_URL = "https://kq94.net/";
+// Streaming URL for KQ 94.5 FM. We use a direct AAC stream when available,
+// with a fallback to the station website if the stream fails.
+const KQ945_STREAM_URL = "https://radio.yaservers.com:9990/stream?icy=http";
+const KQ945_SITE_URL = "https://kq94.net/";
 const Z100_STREAM_URL = "https://stream.revma.ihrhls.com/zc1469";
 
 const megaAudio = new Audio();
@@ -2666,6 +2671,8 @@ hot97Audio.preload = "none";
 hot97Audio.crossOrigin = "anonymous";
 
 const kqAudio = new Audio();
+// Initialize with the stream URL; we will reassign src in toggleKQ().
+kqAudio.src = KQ945_STREAM_URL;
 kqAudio.preload = "none";
 kqAudio.crossOrigin = "anonymous";
 
@@ -2699,11 +2706,7 @@ function closeHot97Modal() {
     radioModal.setAttribute("aria-hidden", "true");
   }
   if (radioFrame) radioFrame.src = "about:blank";
-  if (kqPlaying) {
-    kqPlaying = false;
-    setBtnState(btnKQ945, false);
-    if (!hot97Playing && !megaPlaying && !z100Playing) setRadioStatus("Radio: off");
-  }
+  // Do not reset KQ state here. KQ streaming is handled by toggleKQ().
 }
 function openHot97Modal() { closeHot97Modal(); }
 
@@ -2821,25 +2824,41 @@ async function toggleHot97() {
   }
 }
 async function toggleKQ() {
+  // Stop any other station that may be playing
   if (hot97Playing) { hot97Audio.pause(); hot97Playing = false; setBtnState(btnHot97, false); }
   if (megaPlaying) { megaAudio.pause(); megaPlaying = false; setBtnState(btnMega979, false); }
   if (z100Playing) { z100Audio.pause(); z100Playing = false; setBtnState(btnZ100, false); }
 
+  // If KQ is already playing, pause it and reset state
   if (kqPlaying) {
+    try { kqAudio.pause(); } catch {}
     kqPlaying = false;
     setBtnState(btnKQ945, false);
     setRadioStatus("Radio: off");
-    closeHot97Modal();
     return;
   }
 
-  kqPlaying = true;
-  setBtnState(btnKQ945, true);
-  setBtnState(btnHot97, false);
-  setBtnState(btnMega979, false);
-  setBtnState(btnZ100, false);
-  setRadioStatus("Radio: KQ 94.5 FM (DR) opened");
-  openStationWebModal("KQ 94.5 FM (DR)", KQ945_WEB_URL);
+  // Attempt to play the direct KQ stream. If this fails, fall back to opening the station website.
+  try {
+    kqAudio.src = KQ945_STREAM_URL;
+    kqAudio.volume = 1;
+    const p = kqAudio.play();
+    if (p && typeof p.then === "function") await p;
+
+    kqPlaying = true;
+    setBtnState(btnKQ945, true);
+    setBtnState(btnHot97, false);
+    setBtnState(btnMega979, false);
+    setBtnState(btnZ100, false);
+    setRadioStatus("Radio: KQ 94.5 FM playing");
+  } catch (e) {
+    console.warn("KQ 94.5 play failed:", e);
+    kqPlaying = false;
+    setBtnState(btnKQ945, false);
+    setRadioStatus("Radio: KQ 94.5 FM failed to play");
+    try { window.open(KQ945_SITE_URL, "_blank", "noopener"); } catch {}
+    alert("KQ 94.5 FM could not start. Turn volume up and try again.");
+  }
 }
 
 async function toggleZ100() {
@@ -2942,6 +2961,13 @@ kqAudio.addEventListener("ended", () => {
   kqPlaying = false;
   setBtnState(btnKQ945, false);
   setRadioStatus("Radio: off");
+});
+// Handle KQ streaming errors (e.g. network issues or CORS). When an error occurs, reset the state
+// and update the UI to inform the user that the stream failed.
+kqAudio.addEventListener("error", () => {
+  kqPlaying = false;
+  setBtnState(btnKQ945, false);
+  setRadioStatus("Radio: KQ 94.5 FM stream error");
 });
 z100Audio.addEventListener("ended", () => {
   z100Playing = false;
