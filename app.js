@@ -23,15 +23,11 @@ let mapReady = false;
 let didFitToZonesOnce = false;
 
 const ROTATE_ENABLED = true;
-const ROTATE_MIN_MPH = 1.0;
-const ROTATE_MIN_DELTA_DEG = 1.5;
-const ROTATE_RATE_LIMIT_MS = 120;
-const ROTATE_ANIM_MS = 220;
+const ROTATE_MIN_MPH = 2.0;
+const ROTATE_MIN_DELTA_DEG = 3;
+const ROTATE_RATE_LIMIT_MS = 200;
+const ROTATE_ANIM_MS = 250;
 const GPS_ACCURACY_THRESHOLD = 50;
-const HEADING_MIN_SPEED_MPS = 0.8;
-const HEADING_DERIVE_MIN_MILES = 0.002;
-const HEADING_SMOOTHING = 0.42;
-const HEADING_COMPASS_STALE_MS = 2500;
 const MAX_JUMP_MILES = 2.0;
 let lastMapBearingDeg = 0;
 let lastRotateTs = 0;
@@ -61,20 +57,10 @@ const LS_EMAIL = "community_email_v1";
 const LS_DISPLAY_NAME = "community_display_name_v1";
 const CHAT_ROOM = "global";
 const CHAT_POLL_MS = 1200;
-const PICKUP_RECENT_LIMIT = 30;
-const PICKUP_ZONE_SAMPLE_LIMIT = 100;
-const PICKUP_REFRESH_DEBOUNCE_MS = 350;
-const PICKUP_FETCH_COOLDOWN_MS = 1200;
 
 let chatPollTimer = null;
 let chatLastSeen = null;
 let chatSeenKeys = new Set();
-let pickupRefreshTimer = null;
-let pickupRefreshInFlight = false;
-let pickupLogBusy = false;
-let lastPickupFetchMs = 0;
-let lastPickupFetchKey = "";
-let pickupZoneStats = new Map();
 
 /* =========================================================
    MANHATTAN MODE — DEFAULT SETTINGS (SAFE TO EDIT)
@@ -763,42 +749,7 @@ const dockDrawerBody = document.getElementById("dockDrawerBody");
 const dockDrawerClose = document.getElementById("dockDrawerClose");
 const dockBackdrop = document.getElementById("dockBackdrop");
 
-const USER_AGENT = typeof navigator !== "undefined" ? navigator.userAgent || "" : "";
-const IS_TESLA_BROWSER = /\bTesla\//i.test(USER_AGENT);
-const DRAWER_AUTO_MINIMIZE_MS = 5000;
-
 let openPanelKey = null;
-let drawerAutoMinimizeTimer = null;
-
-function clearDrawerAutoMinimizeTimer() {
-  if (drawerAutoMinimizeTimer) {
-    clearTimeout(drawerAutoMinimizeTimer);
-    drawerAutoMinimizeTimer = null;
-  }
-}
-
-function touchDrawerAutoMinimizeTimer() {
-  if (!openPanelKey) {
-    clearDrawerAutoMinimizeTimer();
-    return;
-  }
-  clearDrawerAutoMinimizeTimer();
-  drawerAutoMinimizeTimer = setTimeout(() => {
-    if (!openPanelKey) return;
-    closeDrawer();
-  }, DRAWER_AUTO_MINIMIZE_MS);
-}
-
-function bindDrawerAutoMinimizeActivity() {
-  if (!dockDrawer) return;
-  const events = ["pointerdown", "click", "input", "keydown", "focusin", "touchstart", "wheel"];
-  for (const eventName of events) {
-    dockDrawer.addEventListener(eventName, () => {
-      if (!openPanelKey) return;
-      touchDrawerAutoMinimizeTimer();
-    }, true);
-  }
-}
 
 function syncDrawerPanelPosition() {
   if (!dockDrawer) return;
@@ -827,11 +778,9 @@ function openDrawer(key, title, html) {
   syncDrawerPanelPosition();
   syncDockActiveButton();
   syncChatPollingState();
-  touchDrawerAutoMinimizeTimer();
 }
 
 function closeDrawer() {
-  clearDrawerAutoMinimizeTimer();
   openPanelKey = null;
   dockDrawer?.classList.remove("open");
   dockBackdrop?.classList.remove("open");
@@ -853,7 +802,6 @@ function toggleDrawer(key, title, html) {
 dockBackdrop?.addEventListener("click", closeDrawer);
 dockDrawerClose?.addEventListener("click", closeDrawer);
 dockDrawer?.addEventListener("click", (e) => e.stopPropagation());
-bindDrawerAutoMinimizeActivity();
 
 function musicPanelHTML() {
   return `
@@ -918,7 +866,7 @@ function modesPanelHTML() {
 
       <div style="display:flex;gap:10px;flex-wrap:wrap;">
         <button id="dockPoliceBtn" class="chipBtn">🚨 Police</button>
-        <button id="dockPickupBtn" class="chipBtn">✅ Record Trip</button>
+        <button id="dockPickupBtn" class="chipBtn">✅ Pickup</button>
       </div>
 
       <div style="margin-top:10px;opacity:0.75;font-weight:600;">
@@ -1175,14 +1123,24 @@ function renderChatMessages(messages, { replace = false } = {}) {
 }
 
 async function chatFetchMessages({ after = null, limit = 50 } = {}) {
+  // Fetch chat messages using the newer chat API endpoints in the backend.
+  // When after is null or zero, use /chat/recent. Otherwise use /chat/since.
   if (!authHeaderOK()) return [];
   const qs = new URLSearchParams();
   qs.set("limit", String(limit));
-  if (after !== null && after !== undefined && String(after).trim() !== "") {
-    qs.set("after", String(after));
+  let path;
+  const afterStr = after !== null && after !== undefined ? String(after).trim() : "";
+  if (afterStr && afterStr !== "0") {
+    // Fetch messages newer than a specific ID
+    qs.set("after_id", afterStr);
+    path = `/chat/since?${qs.toString()}`;
+  } else {
+    // Fetch the most recent messages
+    path = `/chat/recent?${qs.toString()}`;
   }
-  const data = await getJSONAuth(`/chat/rooms/${CHAT_ROOM}?${qs.toString()}`, communityToken);
-  return Array.isArray(data) ? data : data?.messages || [];
+  const data = await getJSONAuth(path, communityToken);
+  // The backend returns an object with an `items` array
+  return Array.isArray(data?.items) ? data.items : [];
 }
 
 async function chatLoadInitial() {
@@ -1195,9 +1153,11 @@ async function chatFetchNew() {
 }
 
 async function chatSend(text) {
+  // Send a chat message using the newer /chat/send endpoint.
+  // The backend expects a JSON body with a `message` field and returns {ok, id, created_at, display_name}.
   if (!authHeaderOK()) throw new Error("Not signed in");
-  const body = { text };
-  return postJSON(`/chat/rooms/${CHAT_ROOM}`, body, communityToken);
+  const body = { message: text };
+  await postJSON(`/chat/send`, body, communityToken);
 }
 
 async function chatPollOnce() {
@@ -1244,9 +1204,11 @@ function wireChatPanel() {
 
     chatSendBtn.disabled = true;
     try {
-      const msg = await chatSend(text);
+      // Send the message and then refresh the chat. We ignore the return
+      // value since /chat/send does not return the message content.
+      await chatSend(text);
       chatInput.value = "";
-      if (msg) renderChatMessages(Array.isArray(msg) ? msg : [msg]);
+      // Immediately poll for new messages to include the just-sent message
       await chatPollOnce();
     } catch (e) {
       console.warn("chat send failed:", e);
@@ -1274,27 +1236,15 @@ function wireChatPanel() {
 }
 
 function colorsPanelHTML() {
-  const teslaRows = `
-      <div style="display:flex;align-items:center;gap:8px;"><span style="display:inline-block;width:12px;height:12px;border-radius:4px;background:#00b050;border:1px solid rgba(0,0,0,0.15);flex:0 0 12px;"></span>Green = Highest</div>
-      <div style="display:flex;align-items:center;gap:8px;"><span style="display:inline-block;width:12px;height:12px;border-radius:4px;background:#8000ff;border:1px solid rgba(0,0,0,0.15);flex:0 0 12px;"></span>Purple = High</div>
-      <div style="display:flex;align-items:center;gap:8px;"><span style="display:inline-block;width:12px;height:12px;border-radius:4px;background:#0066ff;border:1px solid rgba(0,0,0,0.15);flex:0 0 12px;"></span>Blue = Medium</div>
-      <div style="display:flex;align-items:center;gap:8px;"><span style="display:inline-block;width:12px;height:12px;border-radius:4px;background:#66ccff;border:1px solid rgba(0,0,0,0.15);flex:0 0 12px;"></span>Sky = Normal</div>
-      <div style="display:flex;align-items:center;gap:8px;"><span style="display:inline-block;width:12px;height:12px;border-radius:4px;background:#ffd400;border:1px solid rgba(0,0,0,0.15);flex:0 0 12px;"></span>Yellow = Below Normal</div>
-      <div style="display:flex;align-items:center;gap:8px;"><span style="display:inline-block;width:12px;height:12px;border-radius:4px;background:#e60000;border:1px solid rgba(0,0,0,0.15);flex:0 0 12px;"></span>Red = Very Low / Avoid</div>
-  `;
-  const defaultRows = `
+  return `
+    <div class="panelBlock">
+      <div style="font-weight:800;margin-bottom:8px;">Demand Colors</div>
       <div>🟩 Green = Highest</div>
       <div>🟪 Purple = High</div>
       <div>🟦 Blue = Medium</div>
       <div>🟦 Sky = Normal</div>
       <div>🟨 Yellow = Below Normal</div>
       <div>🟥 Red = Very Low / Avoid</div>
-  `;
-
-  return `
-    <div class="panelBlock">
-      <div style="font-weight:800;margin-bottom:8px;">Demand Colors</div>
-      ${IS_TESLA_BROWSER ? teslaRows : defaultRows}
       <div style="margin-top:10px;opacity:0.75;font-weight:600;">
         ${statenIslandMode
           ? "Staten Island Mode is ON: Staten Island colors are relative within Staten Island only. Other boroughs remain NYC-wide."
@@ -1320,64 +1270,6 @@ bindDockToggle(dockModes, "modes", "Modes", modesPanelHTML, wireModesPanel);
 bindDockToggle(dockChat, "chat", "Chat", chatPanelHTML, wireChatPanel);
 bindDockToggle(dockColors, "colors", "Colors", colorsPanelHTML);
 bindDockToggle(dockProfile, "profile", "Profile", profilePanelHTML, wireProfilePanel);
-
-function applyTeslaDockIconCompatibility() {
-  if (!IS_TESLA_BROWSER) return;
-
-  const setIcon = (button, svgMarkup) => {
-    const iconEl = button?.querySelector?.(".dockIcon");
-    if (!iconEl) return;
-    iconEl.innerHTML = svgMarkup;
-    iconEl.style.fontSize = "0";
-    iconEl.style.display = "inline-grid";
-    iconEl.style.placeItems = "center";
-    iconEl.style.lineHeight = "1";
-  };
-
-  setIcon(dockColors, `
-    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false" style="display:block">
-      <circle cx="12" cy="12" r="9" fill="#ffffff" opacity="0.98"/>
-      <circle cx="8" cy="9" r="2.6" fill="#00b050"/>
-      <circle cx="14.8" cy="8" r="2.4" fill="#8000ff"/>
-      <circle cx="16.3" cy="13.7" r="2.4" fill="#0066ff"/>
-      <circle cx="10.3" cy="16.4" r="2.2" fill="#ffd400"/>
-      <circle cx="18.2" cy="18.2" r="1.2" fill="rgba(255,255,255,0)"/>
-      <path d="M19 18.4c0 1.4-1.1 2.4-2.5 2.4H12A8.4 8.4 0 1 1 20.4 12c0 1.3-.8 2.2-1.8 2.2h-1.1c-.7 0-1.2.5-1.2 1.1 0 .3.1.5.3.8.3.5.4 1 .4 1.3Z" fill="none" stroke="#111" stroke-width="1.5" stroke-linejoin="round"/>
-    </svg>
-  `);
-
-  setIcon(dockModes, `
-    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false" style="display:block">
-      <path d="M10.3 2h3.4l.5 2.2a8 8 0 0 1 1.8.8l1.9-1.2 2.4 2.4-1.2 1.9c.3.6.6 1.2.8 1.8L22 10.3v3.4l-2.2.5a8 8 0 0 1-.8 1.8l1.2 1.9-2.4 2.4-1.9-1.2a8 8 0 0 1-1.8.8l-.5 2.2h-3.4l-.5-2.2a8 8 0 0 1-1.8-.8l-1.9 1.2-2.4-2.4 1.2-1.9a8 8 0 0 1-.8-1.8L2 13.7v-3.4l2.2-.5c.2-.6.5-1.2.8-1.8L3.8 6.1l2.4-2.4 1.9 1.2a8 8 0 0 1 1.8-.8L10.3 2Z" fill="#4f7cff" opacity="0.95"/>
-      <circle cx="12" cy="12" r="3.2" fill="#ffffff"/>
-      <circle cx="12" cy="12" r="7.8" fill="none" stroke="#111" stroke-width="1.2" opacity="0.15"/>
-    </svg>
-  `);
-
-  setIcon(dockChat, `
-    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false" style="display:block">
-      <path d="M5 5.5h14a2.5 2.5 0 0 1 2.5 2.5v6.3a2.5 2.5 0 0 1-2.5 2.5H11l-4.8 3v-3H5A2.5 2.5 0 0 1 2.5 14.3V8A2.5 2.5 0 0 1 5 5.5Z" fill="#2f7cff"/>
-      <circle cx="8.3" cy="11.1" r="1.2" fill="#ffffff"/>
-      <circle cx="12" cy="11.1" r="1.2" fill="#ffffff"/>
-      <circle cx="15.7" cy="11.1" r="1.2" fill="#ffffff"/>
-    </svg>
-  `);
-
-  setIcon(dockMusic, `
-    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false" style="display:block">
-      <path d="M15.5 4v9.1a3.2 3.2 0 1 1-1.5-2.7V6.2l7-1.7v7a3.2 3.2 0 1 1-1.5-2.7V3L15.5 4Z" fill="#ffffff"/>
-    </svg>
-  `);
-
-  setIcon(dockProfile, `
-    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false" style="display:block">
-      <circle cx="12" cy="8" r="4" fill="#111"/>
-      <path d="M4 20a8 8 0 0 1 16 0" fill="none" stroke="#111" stroke-width="2.4" stroke-linecap="round"/>
-    </svg>
-  `);
-}
-
-applyTeslaDockIconCompatibility();
 
 /* =========================================================
    Precision Slider Popup
@@ -1496,17 +1388,11 @@ function initMap() {
 
     // Presence refresh on moves to keep label collision offsets stable
     map.on("moveend", () => {
-      if (authHeaderOK()) {
-        pullPresenceAll().catch(() => {});
-        schedulePickupOverlayRefresh();
-      }
+      if (authHeaderOK()) pullPresenceAll().catch(() => {});
       applyDriverLabelZoomStyles();
     });
     map.on("zoomend", () => {
-      if (authHeaderOK()) {
-        pullPresenceAll().catch(() => {});
-        schedulePickupOverlayRefresh();
-      }
+      if (authHeaderOK()) pullPresenceAll().catch(() => {});
       applyDriverLabelZoomStyles();
     });
 
@@ -1643,302 +1529,7 @@ async function ensureZonesSourceAndLayers() {
     });
   }
 
-  await ensurePickupSourceAndLayers();
   return true;
-}
-
-function emptyGeojson() {
-  return { type: "FeatureCollection", features: [] };
-}
-
-function clearPickupOverlayCache() {
-  pickupZoneStats = new Map();
-  lastPickupFetchKey = "";
-}
-
-function setPickupOverlayData(fc, items = [], zoneStats = []) {
-  pickupZoneStats = new Map();
-
-  if (Array.isArray(zoneStats) && zoneStats.length) {
-    for (const stat of zoneStats) {
-      const zoneId = stat?.zone_id;
-      if (zoneId == null) continue;
-      const key = String(zoneId);
-      const sampleSize = Number(stat?.sample_size ?? NaN);
-      const sampleLimit = Number(stat?.sample_limit ?? NaN);
-      const latestCreatedAt = Number(stat?.latest_created_at ?? NaN);
-      const avgLat = Number(stat?.avg_lat ?? NaN);
-      const avgLng = Number(stat?.avg_lng ?? NaN);
-
-      pickupZoneStats.set(key, {
-        zone_id: Number(zoneId),
-        zone_name: stat?.zone_name ?? "",
-        borough: stat?.borough ?? "",
-        sample_size: Number.isFinite(sampleSize) ? sampleSize : 0,
-        sample_limit: Number.isFinite(sampleLimit) ? sampleLimit : PICKUP_ZONE_SAMPLE_LIMIT,
-        latest_created_at: Number.isFinite(latestCreatedAt) ? latestCreatedAt : null,
-        avg_lat: Number.isFinite(avgLat) ? avgLat : null,
-        avg_lng: Number.isFinite(avgLng) ? avgLng : null,
-      });
-    }
-  } else {
-    for (const it of items || []) {
-      const zoneId = it?.zone_id;
-      if (zoneId == null) continue;
-      const key = String(zoneId);
-      const existing = pickupZoneStats.get(key) || {
-        zone_id: Number(zoneId),
-        zone_name: it?.zone_name ?? "",
-        borough: it?.borough ?? "",
-        sample_size: 0,
-        sample_limit: PICKUP_ZONE_SAMPLE_LIMIT,
-        latest_created_at: null,
-        avg_lat: null,
-        avg_lng: null,
-      };
-      existing.sample_size += 1;
-      const ts = Number(it?.created_at ?? NaN);
-      if (Number.isFinite(ts) && (!existing.latest_created_at || ts > existing.latest_created_at)) {
-        existing.latest_created_at = ts;
-      }
-      pickupZoneStats.set(key, existing);
-    }
-  }
-
-  const src = map?.getSource?.("pickup-points");
-  if (src && typeof src.setData === "function") {
-    src.setData(fc || emptyGeojson());
-  }
-}
-
-function clearPickupOverlay() {
-  setPickupOverlayData(emptyGeojson(), []);
-}
-
-function formatRelativeAge(tsUnix) {
-  const ts = Number(tsUnix ?? NaN);
-  if (!Number.isFinite(ts) || ts <= 0) return "unknown";
-  const diffSec = Math.max(0, Math.floor(Date.now() / 1000 - ts));
-  if (diffSec < 60) return `${diffSec}s ago`;
-  if (diffSec < 3600) return `${Math.max(1, Math.round(diffSec / 60))}m ago`;
-  if (diffSec < 86400) return `${Math.max(1, Math.round(diffSec / 3600))}h ago`;
-  return `${Math.max(1, Math.round(diffSec / 86400))}d ago`;
-}
-
-function buildPickupFeatureCollection(items) {
-  const features = [];
-  for (const it of items || []) {
-    const lat = Number(it?.lat ?? NaN);
-    const lng = Number(it?.lng ?? NaN);
-    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
-    const createdAt = Number(it?.created_at ?? NaN);
-    const ageSec = Number.isFinite(createdAt) ? Math.max(0, Math.floor(Date.now() / 1000 - createdAt)) : 0;
-    const recencyScore = Math.max(0.2, 1 - ageSec / (12 * 3600));
-    features.push({
-      type: "Feature",
-      geometry: { type: "Point", coordinates: [lng, lat] },
-      properties: {
-        id: it?.id ?? null,
-        zone_id: it?.zone_id ?? null,
-        zone_name: it?.zone_name ?? "",
-        borough: it?.borough ?? "",
-        frame_time: it?.frame_time ?? "",
-        created_at: Number.isFinite(createdAt) ? createdAt : null,
-        recency_score: recencyScore,
-      },
-    });
-  }
-  return { type: "FeatureCollection", features };
-}
-
-async function ensurePickupSourceAndLayers() {
-  if (!map) return false;
-  const styleReady = await waitForStyleReady();
-  if (!styleReady) return false;
-
-  if (!map.getSource("pickup-points")) {
-    map.addSource("pickup-points", { type: "geojson", data: emptyGeojson() });
-  }
-
-  if (!map.getLayer("pickup-heat")) {
-    map.addLayer(
-      {
-        id: "pickup-heat",
-        type: "heatmap",
-        source: "pickup-points",
-        paint: {
-          "heatmap-weight": ["interpolate", ["linear"], ["coalesce", ["get", "recency_score"], 0.2], 0, 0.2, 1, 1],
-          "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 9, 0.6, 12, 0.95, 15, 1.25],
-          "heatmap-color": [
-            "interpolate",
-            ["linear"],
-            ["heatmap-density"],
-            0,
-            "rgba(0,0,0,0)",
-            0.15,
-            "rgba(102,204,255,0.18)",
-            0.35,
-            "rgba(0,102,255,0.28)",
-            0.55,
-            "rgba(128,0,255,0.42)",
-            0.75,
-            "rgba(0,176,80,0.58)",
-            1,
-            "rgba(0,176,80,0.88)"
-          ],
-          "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 9, 12, 12, 18, 14, 24, 16, 32],
-          "heatmap-opacity": ["interpolate", ["linear"], ["zoom"], 9, 0.55, 15, 0.82],
-        },
-      },
-      "zone-labels"
-    );
-  }
-
-  if (!map.getLayer("pickup-circles-glow")) {
-    map.addLayer(
-      {
-        id: "pickup-circles-glow",
-        type: "circle",
-        source: "pickup-points",
-        minzoom: 12,
-        paint: {
-          "circle-radius": ["interpolate", ["linear"], ["zoom"], 12, 7, 16, 14],
-          "circle-color": "rgba(0,176,80,0.28)",
-          "circle-blur": 0.7,
-          "circle-opacity": 0.9,
-        },
-      },
-      "zone-labels"
-    );
-  }
-
-  if (!map.getLayer("pickup-circles")) {
-    map.addLayer(
-      {
-        id: "pickup-circles",
-        type: "circle",
-        source: "pickup-points",
-        minzoom: 12,
-        paint: {
-          "circle-radius": ["interpolate", ["linear"], ["zoom"], 12, 3.5, 16, 6],
-          "circle-color": "rgba(255,255,255,0.92)",
-          "circle-stroke-width": 2,
-          "circle-stroke-color": "rgba(0,176,80,0.96)",
-          "circle-opacity": 0.95,
-        },
-      },
-      "zone-labels"
-    );
-  }
-
-  if (!map.__pickupOverlayWired) {
-    map.__pickupOverlayWired = true;
-
-    map.on("mouseenter", "pickup-circles", () => {
-      try { map.getCanvas().style.cursor = "pointer"; } catch {}
-    });
-    map.on("mouseleave", "pickup-circles", () => {
-      try { map.getCanvas().style.cursor = ""; } catch {}
-    });
-    map.on("click", "pickup-circles", (e) => {
-      try {
-        const feat = e?.features?.[0];
-        if (!feat) return;
-        const props = feat.properties || {};
-        const zoneName = (props.zone_name || "").trim();
-        const borough = (props.borough || "").trim();
-        const frameTime = (props.frame_time || "").trim();
-        const createdAt = Number(props.created_at ?? NaN);
-        const when = Number.isFinite(createdAt) ? formatRelativeAge(createdAt) : "unknown";
-        const zoneStat = pickupZoneStats.get(String(props.zone_id ?? ""));
-        const zoneAvgSample = Number(zoneStat?.sample_size ?? 0);
-        const zoneAvgLimit = Number(zoneStat?.sample_limit ?? PICKUP_ZONE_SAMPLE_LIMIT);
-        const zoneAvgLine = zoneAvgSample > 0
-          ? `<div><b>Zone avg:</b> ${zoneAvgSample}/${zoneAvgLimit} trips used</div>`
-          : "";
-        new maplibregl.Popup({ closeButton: true, closeOnClick: true, maxWidth: "280px" })
-          .setLngLat(e.lngLat)
-          .setHTML(`
-            <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; font-size:13px;">
-              <div style="font-weight:900; margin-bottom:4px;">Community trip</div>
-              <div><b>Zone:</b> ${escapeHtml(zoneName || `Zone ${props.zone_id || ""}`)}</div>
-              ${borough ? `<div><b>Borough:</b> ${escapeHtml(borough)}</div>` : ""}
-              <div><b>When:</b> ${escapeHtml(when)}</div>
-              ${frameTime ? `<div><b>Frame:</b> ${escapeHtml(frameTime)}</div>` : ""}
-              ${zoneAvgLine}
-            </div>
-          `)
-          .addTo(map);
-      } catch (err) {
-        console.warn("pickup popup failed:", err);
-      }
-    });
-  }
-
-  return true;
-}
-
-function pickupOverlayQueryPath(limit = PICKUP_RECENT_LIMIT) {
-  if (!map) return null;
-  const b = map.getBounds();
-  if (!b) return null;
-  const west = Number(b.getWest());
-  const east = Number(b.getEast());
-  const south = Number(b.getSouth());
-  const north = Number(b.getNorth());
-  if (![west, east, south, north].every(Number.isFinite)) return null;
-
-  const qs = new URLSearchParams({
-    limit: String(limit),
-    zone_sample_limit: String(PICKUP_ZONE_SAMPLE_LIMIT),
-    min_lng: String(Math.min(west, east)),
-    max_lng: String(Math.max(west, east)),
-    min_lat: String(Math.min(south, north)),
-    max_lat: String(Math.max(south, north)),
-  });
-  return `/events/pickups/recent?${qs.toString()}`;
-}
-
-async function refreshPickupOverlay({ force = false } = {}) {
-  if (!map || !mapReady) return;
-  const ready = await ensurePickupSourceAndLayers();
-  if (!ready) return;
-
-  if (!authHeaderOK()) {
-    clearPickupOverlay();
-    return;
-  }
-
-  const path = pickupOverlayQueryPath(PICKUP_RECENT_LIMIT);
-  if (!path) return;
-
-  const now = Date.now();
-  if (!force && pickupRefreshInFlight) return;
-  if (!force && path === lastPickupFetchKey && now - lastPickupFetchMs < PICKUP_FETCH_COOLDOWN_MS) return;
-
-  pickupRefreshInFlight = true;
-  lastPickupFetchKey = path;
-  lastPickupFetchMs = now;
-
-  try {
-    const data = await getJSONAuth(path, communityToken);
-    const items = Array.isArray(data) ? data : data?.items || [];
-    const zoneStats = Array.isArray(data?.zone_stats) ? data.zone_stats : [];
-    const fc = buildPickupFeatureCollection(items);
-    setPickupOverlayData(fc, items, zoneStats);
-  } catch (e) {
-    console.warn("pickup overlay refresh failed:", e);
-  } finally {
-    pickupRefreshInFlight = false;
-  }
-}
-
-function schedulePickupOverlayRefresh({ force = false } = {}) {
-  if (pickupRefreshTimer) clearTimeout(pickupRefreshTimer);
-  pickupRefreshTimer = setTimeout(() => {
-    pickupRefreshTimer = null;
-    refreshPickupOverlay({ force }).catch((e) => console.warn("pickup overlay refresh failed:", e));
-  }, force ? 0 : PICKUP_REFRESH_DEBOUNCE_MS);
 }
 
 /* =========================================================
@@ -2188,14 +1779,6 @@ function buildPopupHTML(props, geom) {
   const nextPayVal = nextFramePayById.get(String(props.LocationID ?? ""));
   const nextPay = nextPayVal == null ? "n/a" : Number(nextPayVal).toFixed(2);
 
-  const zoneCommunity = pickupZoneStats.get(String(props.LocationID ?? ""));
-  const communityPickupCount = Number(zoneCommunity?.sample_size ?? 0);
-  const communitySampleLimit = Number(zoneCommunity?.sample_limit ?? PICKUP_ZONE_SAMPLE_LIMIT);
-  const communityLastTs = zoneCommunity?.latest_created_at ?? null;
-  const communityPickupLine = communityPickupCount > 0
-    ? `<div style="margin-top:6px;"><b>Community zone avg:</b> ${communityPickupCount}/${communitySampleLimit} trips used${communityLastTs ? ` • last ${escapeHtml(formatRelativeAge(communityLastTs))}` : ""}</div>`
-    : "";
-
   let extra = "";
 
   if (statenIslandMode && isStatenIslandFeature(props) && Number.isFinite(Number(props.si_local_rating))) {
@@ -2214,7 +1797,6 @@ function buildPopupHTML(props, geom) {
       ${extra}
       <div style="margin-top:6px;"><b>Pickups (last ${BIN_MINUTES} min):</b> ${pickups}</div>
       <div><b>Next ${BIN_MINUTES} min (historical):</b> ${nextPickups}</div>
-      ${communityPickupLine}
       <div><b>Avg Pay per Trip (next ${BIN_MINUTES} min historical):</b> $${nextPay}</div>
       <div><b>Avg Pay per Trip (last 20 min):</b> $${pay}</div>
     </div>
@@ -2611,25 +2193,6 @@ function shortestAngleDelta(a, b) {
   if (d < -180) d += 360;
   return d;
 }
-function blendAngleDeg(from, to, alpha = HEADING_SMOOTHING) {
-  if (!Number.isFinite(from)) return normDeg(to);
-  const a = clamp(alpha, 0, 1);
-  return normDeg(from + shortestAngleDelta(from, to) * a);
-}
-function getSelfMapCenter() {
-  if (navMarker && typeof navMarker.getLngLat === "function") {
-    const p = navMarker.getLngLat();
-    if (p && Number.isFinite(p.lng) && Number.isFinite(p.lat)) return { lng: p.lng, lat: p.lat };
-  }
-  if (userLatLng && Number.isFinite(userLatLng.lng) && Number.isFinite(userLatLng.lat)) {
-    return { lng: userLatLng.lng, lat: userLatLng.lat };
-  }
-  if (map && typeof map.getCenter === "function") {
-    const p = map.getCenter();
-    if (p && Number.isFinite(p.lng) && Number.isFinite(p.lat)) return { lng: p.lng, lat: p.lat };
-  }
-  return null;
-}
 function maybeRotateMapTo(deg) {
   if (!ROTATE_ENABLED) return;
   if (!map || !mapReady) return;
@@ -2642,105 +2205,20 @@ function maybeRotateMapTo(deg) {
   const delta = shortestAngleDelta(lastMapBearingDeg, target);
   if (Math.abs(delta) < ROTATE_MIN_DELTA_DEG) return;
 
-  const c = getSelfMapCenter();
-  if (!c) return;
-
   lastRotateTs = now;
   lastMapBearingDeg = target;
 
-  suppressAutoDisableFor(ROTATE_ANIM_MS + 120, () => {
-    map.easeTo({
-      center: [c.lng, c.lat],
-      zoom: map.getZoom(),
-      bearing: target,
-      duration: ROTATE_ANIM_MS,
-      essential: true,
-    });
+  const c = (navMarker && typeof navMarker.getLngLat === "function")
+    ? navMarker.getLngLat()
+    : (userLatLng ? { lng: userLatLng.lng, lat: userLatLng.lat } : map.getCenter());
+  const z = map.getZoom();
+  map.easeTo({
+    center: [c.lng, c.lat],
+    zoom: z,
+    bearing: target,
+    duration: ROTATE_ANIM_MS,
+    essential: true,
   });
-}
-let lastCompassHeadingDeg = null;
-let lastCompassTs = 0;
-let deviceOrientationWatching = false;
-let deviceOrientationArmDone = false;
-let lastHeadingSource = "none";
-let lastHeadingTs = 0;
-function getFreshCompassHeading(now = Date.now()) {
-  return Number.isFinite(lastCompassHeadingDeg) && (now - lastCompassTs) <= HEADING_COMPASS_STALE_MS
-    ? normDeg(lastCompassHeadingDeg)
-    : null;
-}
-function applyHeadingDeg(nextDeg, { source = "gps", ts = Date.now(), smooth = true, rotateMap = false, alpha = HEADING_SMOOTHING } = {}) {
-  if (!Number.isFinite(nextDeg)) return lastHeadingDeg;
-  const target = normDeg(nextDeg);
-  const finalDeg = smooth ? blendAngleDeg(lastHeadingDeg, target, alpha) : target;
-  lastHeadingDeg = finalDeg;
-  lastHeadingSource = source;
-  lastHeadingTs = ts;
-  setNavRotation(finalDeg);
-  if (rotateMap) maybeRotateMapTo(finalDeg);
-  return finalDeg;
-}
-function getScreenAngleDeg() {
-  const raw = Number(window.screen?.orientation?.angle ?? window.orientation ?? 0);
-  return Number.isFinite(raw) ? raw : 0;
-}
-function extractCompassHeadingDeg(evt) {
-  if (!evt) return null;
-  if (typeof evt.webkitCompassHeading === "number" && Number.isFinite(evt.webkitCompassHeading)) {
-    return normDeg(evt.webkitCompassHeading);
-  }
-  const alpha = Number(evt.alpha);
-  if (!Number.isFinite(alpha)) return null;
-  return normDeg((360 - alpha) + getScreenAngleDeg());
-}
-function handleDeviceOrientation(evt) {
-  const heading = extractCompassHeadingDeg(evt);
-  if (!Number.isFinite(heading)) return;
-  const ts = Date.now();
-  lastCompassHeadingDeg = heading;
-  lastCompassTs = ts;
-  const recentlyMoved = !!lastMoveTs && (ts - lastMoveTs) < 3500;
-  applyHeadingDeg(heading, {
-    source: "compass",
-    ts,
-    smooth: true,
-    rotateMap: autoCenter,
-    alpha: recentlyMoved ? 0.22 : 0.38,
-  });
-}
-function startDeviceOrientationWatch() {
-  if (deviceOrientationWatching || typeof window === "undefined") return;
-  deviceOrientationWatching = true;
-  window.addEventListener("deviceorientationabsolute", handleDeviceOrientation, true);
-  window.addEventListener("deviceorientation", handleDeviceOrientation, true);
-}
-async function requestDeviceOrientationAccess() {
-  try {
-    if (typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function") {
-      const result = await DeviceOrientationEvent.requestPermission();
-      if (result !== "granted") return false;
-    }
-    startDeviceOrientationWatch();
-    return true;
-  } catch (e) {
-    console.warn("Device orientation permission failed:", e);
-    return false;
-  }
-}
-function armDeviceOrientationAccess() {
-  if (deviceOrientationArmDone || typeof document === "undefined") return;
-  deviceOrientationArmDone = true;
-
-  const unlock = () => {
-    requestDeviceOrientationAccess().catch((e) => console.warn("Device orientation start failed:", e));
-    document.removeEventListener("pointerup", unlock, true);
-    document.removeEventListener("touchend", unlock, true);
-    document.removeEventListener("click", unlock, true);
-  };
-
-  document.addEventListener("pointerup", unlock, true);
-  document.addEventListener("touchend", unlock, true);
-  document.addEventListener("click", unlock, true);
 }
 function computeBearingDeg(from, to) {
   const toRad = (x) => (x * Math.PI) / 180;
@@ -2776,16 +2254,12 @@ function startLocationWatch() {
     navMarker.getElement().style.zIndex = "2000";
   }
 
-  requestDeviceOrientationAccess().catch(() => {});
-  armDeviceOrientationAccess();
-
   navigator.geolocation.watchPosition(
     (pos) => {
       const lat = pos.coords.latitude;
       const lng = pos.coords.longitude;
       const heading = pos.coords.heading;
       const accuracy = pos.coords.accuracy;
-      const speedMps = pos.coords.speed;
       const ts = pos.timestamp || Date.now();
 
       userLatLng = { lat, lng };
@@ -2799,80 +2273,43 @@ function startLocationWatch() {
       }
 
       let isMoving = false;
-      let headingCandidate = null;
-      let headingSource = "stale";
-      const freshCompass = getFreshCompassHeading(ts);
 
       if (lastPos) {
         const dMi = haversineMiles({ lat: lastPos.lat, lng: lastPos.lng }, userLatLng);
         const dtSec = Math.max(1, (ts - lastPos.ts) / 1000);
         const mph = (dMi / dtSec) * 3600;
         const hasGoodAccuracy = Number.isFinite(accuracy) && accuracy < GPS_ACCURACY_THRESHOLD;
-        const speedValid = Number.isFinite(speedMps) && speedMps >= HEADING_MIN_SPEED_MPS;
-        const movedEnough = dMi >= HEADING_DERIVE_MIN_MILES;
 
-        isMoving = (mph >= ROTATE_MIN_MPH || speedValid || movedEnough) && hasGoodAccuracy;
-
-        if (Number.isFinite(heading) && (speedValid || mph >= ROTATE_MIN_MPH || hasGoodAccuracy)) {
-          headingCandidate = heading;
-          headingSource = "gps";
-        } else if (movedEnough && hasGoodAccuracy) {
-          headingCandidate = computeBearingDeg({ lat: lastPos.lat, lng: lastPos.lng }, userLatLng);
-          headingSource = "derived";
-        } else if (Number.isFinite(freshCompass)) {
-          headingCandidate = freshCompass;
-          headingSource = "compass";
+        isMoving = mph >= ROTATE_MIN_MPH && hasGoodAccuracy;
+        // Always update lastHeadingDeg when we have good GPS accuracy.
+        if (hasGoodAccuracy) {
+          if (typeof heading === "number" && Number.isFinite(heading)) {
+            lastHeadingDeg = heading;
+          } else if (dMi > 0.01) {
+            lastHeadingDeg = computeBearingDeg({ lat: lastPos.lat, lng: lastPos.lng }, userLatLng);
+          }
         }
-
-        if (isMoving || movedEnough) lastMoveTs = ts;
-      } else if (Number.isFinite(freshCompass)) {
-        headingCandidate = freshCompass;
-        headingSource = "compass";
+        if (isMoving) lastMoveTs = ts;
       }
 
       lastPos = { lat, lng, ts };
 
-      if (Number.isFinite(headingCandidate)) {
-        applyHeadingDeg(headingCandidate, {
-          source: headingSource,
-          ts,
-          smooth: gpsFirstFixDone,
-          rotateMap: false,
-          alpha: headingSource === "gps" ? 0.58 : headingSource === "derived" ? 0.46 : 0.30,
-        });
-      } else if (Number.isFinite(lastHeadingDeg)) {
-        setNavRotation(lastHeadingDeg);
-      }
-
+      setNavRotation(lastHeadingDeg);
       setNavVisual(isMoving);
-
-      const targetBearing = Number.isFinite(lastHeadingDeg)
-        ? normDeg(lastHeadingDeg)
-        : (Number.isFinite(freshCompass) ? normDeg(freshCompass) : map.getBearing());
+      // Rotate the map toward the current heading whenever a valid heading exists.
+      if (Number.isFinite(lastHeadingDeg)) {
+        maybeRotateMapTo(lastHeadingDeg);
+      }
 
       if (!gpsFirstFixDone) {
         gpsFirstFixDone = true;
         const targetZoom = Math.max(map.getZoom(), 12.5);
-        suppressAutoDisableFor(1200, () => map.easeTo({
-          center: [lng, lat],
-          zoom: targetZoom,
-          bearing: targetBearing,
-          duration: 700,
-          essential: true,
-        }));
-        lastMapBearingDeg = targetBearing;
-        lastRotateTs = Date.now();
-      } else if (autoCenter && map) {
-        const c = getSelfMapCenter() || { lng, lat };
-        suppressAutoDisableFor(700, () => map.easeTo({
-          center: [c.lng, c.lat],
-          zoom: map.getZoom(),
-          bearing: targetBearing,
-          duration: 320,
-          essential: true,
-        }));
-        lastMapBearingDeg = targetBearing;
-        lastRotateTs = Date.now();
+        suppressAutoDisableFor(1200, () => map.flyTo({ center: [lng, lat], zoom: targetZoom, duration: 700 }));
+      } else {
+        if (autoCenter && map) {
+          const c = (navMarker && navMarker.getLngLat) ? navMarker.getLngLat() : { lng, lat };
+          suppressAutoDisableFor(700, () => map.flyTo({ center: [c.lng, c.lat], duration: 500 }));
+        }
       }
 
       if (currentFrame) updateRecommendation(currentFrame);
@@ -2880,7 +2317,7 @@ function startLocationWatch() {
       scheduleWeatherUpdateSoon();
 
       // community push (auth only)
-      communityMaybePushPresence(ts, Number.isFinite(lastHeadingDeg) ? lastHeadingDeg : heading, lastGpsAccuracyM);
+      communityMaybePushPresence(ts, heading, lastGpsAccuracyM);
     },
     (err) => {
       console.warn("Geolocation error:", err);
@@ -3215,8 +2652,7 @@ const radioModalTitle = document.getElementById("radioModalTitle");
 
 const HOT97_STREAM_URL = "https://26313.live.streamtheworld.com/WQHTFMAAC.aac";
 const MEGA979_STREAM_URL = "https://liveaudio.lamusica.com/NY_WSKQ_icy";
-const KQ945_STREAM_URL = "https://radio.yaservers.com:9990/stream?icy=http";
-const KQ945_SITE_URL = "https://kq94.net/";
+const KQ945_WEB_URL = "https://kq94.net/";
 const Z100_STREAM_URL = "https://stream.revma.ihrhls.com/zc1469";
 
 const megaAudio = new Audio();
@@ -3230,7 +2666,6 @@ hot97Audio.preload = "none";
 hot97Audio.crossOrigin = "anonymous";
 
 const kqAudio = new Audio();
-kqAudio.src = KQ945_STREAM_URL;
 kqAudio.preload = "none";
 kqAudio.crossOrigin = "anonymous";
 
@@ -3264,6 +2699,11 @@ function closeHot97Modal() {
     radioModal.setAttribute("aria-hidden", "true");
   }
   if (radioFrame) radioFrame.src = "about:blank";
+  if (kqPlaying) {
+    kqPlaying = false;
+    setBtnState(btnKQ945, false);
+    if (!hot97Playing && !megaPlaying && !z100Playing) setRadioStatus("Radio: off");
+  }
 }
 function openHot97Modal() { closeHot97Modal(); }
 
@@ -3385,36 +2825,21 @@ async function toggleKQ() {
   if (megaPlaying) { megaAudio.pause(); megaPlaying = false; setBtnState(btnMega979, false); }
   if (z100Playing) { z100Audio.pause(); z100Playing = false; setBtnState(btnZ100, false); }
 
-  closeHot97Modal();
-
   if (kqPlaying) {
-    try { kqAudio.pause(); } catch {}
     kqPlaying = false;
     setBtnState(btnKQ945, false);
     setRadioStatus("Radio: off");
+    closeHot97Modal();
     return;
   }
 
-  try {
-    kqAudio.src = KQ945_STREAM_URL;
-    kqAudio.volume = 1;
-    const p = kqAudio.play();
-    if (p && typeof p.then === "function") await p;
-
-    kqPlaying = true;
-    setBtnState(btnKQ945, true);
-    setBtnState(btnHot97, false);
-    setBtnState(btnMega979, false);
-    setBtnState(btnZ100, false);
-    setRadioStatus("Radio: KQ 94.5 FM playing");
-  } catch (e) {
-    console.warn("KQ 94.5 play failed:", e);
-    kqPlaying = false;
-    setBtnState(btnKQ945, false);
-    setRadioStatus("Radio: KQ 94.5 FM failed to play");
-    try { window.open(KQ945_SITE_URL, "_blank", "noopener"); } catch {}
-    alert("KQ 94.5 FM could not start. Turn volume up and try again.");
-  }
+  kqPlaying = true;
+  setBtnState(btnKQ945, true);
+  setBtnState(btnHot97, false);
+  setBtnState(btnMega979, false);
+  setBtnState(btnZ100, false);
+  setRadioStatus("Radio: KQ 94.5 FM (DR) opened");
+  openStationWebModal("KQ 94.5 FM (DR)", KQ945_WEB_URL);
 }
 
 async function toggleZ100() {
@@ -3518,11 +2943,6 @@ kqAudio.addEventListener("ended", () => {
   setBtnState(btnKQ945, false);
   setRadioStatus("Radio: off");
 });
-kqAudio.addEventListener("error", () => {
-  kqPlaying = false;
-  setBtnState(btnKQ945, false);
-  setRadioStatus("Radio: KQ 94.5 FM stream error");
-});
 z100Audio.addEventListener("ended", () => {
   z100Playing = false;
   setBtnState(btnZ100, false);
@@ -3547,7 +2967,6 @@ const btnDeleteAccount = document.getElementById("btnDeleteAccount");
 
 const btnPolice = document.getElementById("btnPolice");
 const btnPickup = document.getElementById("btnPickup");
-const pickupFab = document.getElementById("pickupFab");
 const communityNote = document.getElementById("communityNote");
 
 let communityToken = localStorage.getItem(LS_TOKEN) || "";
@@ -3602,8 +3021,8 @@ function setAuthUI(signedIn, note) {
   if (btnAuth) btnAuth.textContent = signedIn ? "Sign out" : "Sign in";
   if (communityNote) {
     communityNote.textContent = signedIn
-      ? "Community: live drivers, police reports, and trip heat are visible."
-      : "Community: sign in to see other drivers, report police, and record trips.";
+      ? "Community: live drivers are visible. Police reports + pickups are shared."
+      : "Community: sign in to see other drivers + report police + log pickups.";
   }
 
   const showLock = !signedIn;
@@ -3614,7 +3033,6 @@ function setAuthUI(signedIn, note) {
 
   if (btnPolice) btnPolice.classList.toggle("disabled", !signedIn);
   if (btnPickup) btnPickup.classList.toggle("disabled", !signedIn);
-  if (pickupFab) pickupFab.classList.toggle("disabled", !signedIn);
   if (btnGhostMode) btnGhostMode.classList.toggle("disabled", !signedIn);
   if (btnChangePassword) btnChangePassword.classList.toggle("disabled", !signedIn);
   if (btnDeleteAccount) btnDeleteAccount.classList.toggle("disabled", !signedIn);
@@ -3623,12 +3041,6 @@ function setAuthUI(signedIn, note) {
   syncGhostUI();
   refreshNavNameLabel();
   syncChatPollingState();
-
-  if (signedIn) {
-    schedulePickupOverlayRefresh({ force: true });
-  } else {
-    clearPickupOverlay();
-  }
 
   if (openPanelKey === "chat") {
     openDrawer("chat", "Chat", chatPanelHTML());
@@ -3645,8 +3057,6 @@ function clearAuth() {
   chatSeenKeys = new Set();
   stopChatPolling();
   clearOtherDrivers();
-  clearPickupOverlayCache();
-  clearPickupOverlay();
   if (authPass) authPass.value = "";
   if (authGhost) authGhost.checked = false;
   setAuthUI(false, "Status: signed out");
@@ -4120,60 +3530,6 @@ function nearestZoneToUser(frame, latlng) {
   return best;
 }
 
-let recordTripToastTimer = null;
-function ensureRecordTripToast() {
-  let el = document.getElementById("recordTripToast");
-  if (el) return el;
-
-  el = document.createElement("div");
-  el.id = "recordTripToast";
-  el.setAttribute("aria-hidden", "true");
-  el.style.cssText = [
-    "position:fixed",
-    "left:50%",
-    "bottom:calc(env(safe-area-inset-bottom, 0px) + 182px)",
-    "transform:translate(-50%, 18px) scale(0.94)",
-    "opacity:0",
-    "pointer-events:none",
-    "z-index:9800",
-    "transition:opacity 220ms ease, transform 220ms ease",
-  ].join(";");
-  el.innerHTML = `
-    <div aria-label="Trip recorded" style="
-      width:72px;
-      height:72px;
-      border-radius:999px;
-      background:#18b45b;
-      display:grid;
-      place-items:center;
-      color:#fff;
-      font:900 36px/1 system-ui,-apple-system,Segoe UI,Roboto,Arial;
-      box-shadow:0 16px 34px rgba(0,0,0,0.24), 0 0 0 6px rgba(24,180,91,0.18);
-      user-select:none;
-    ">✔</div>
-  `;
-  document.body.appendChild(el);
-  return el;
-}
-function hideRecordTripToast() {
-  const el = document.getElementById("recordTripToast");
-  if (!el) return;
-  el.style.opacity = "0";
-  el.style.transform = "translate(-50%, 18px) scale(0.94)";
-  el.setAttribute("aria-hidden", "true");
-}
-function showRecordTripToast() {
-  const el = ensureRecordTripToast();
-  if (recordTripToastTimer) clearTimeout(recordTripToastTimer);
-  el.style.opacity = "1";
-  el.style.transform = "translate(-50%, 0) scale(1)";
-  el.setAttribute("aria-hidden", "false");
-  recordTripToastTimer = setTimeout(() => {
-    hideRecordTripToast();
-    recordTripToastTimer = null;
-  }, 3000);
-}
-
 async function sendPoliceReport() {
   if (!authHeaderOK()) {
     setAuthUI(false, "Sign in to report police.");
@@ -4194,9 +3550,8 @@ async function sendPoliceReport() {
 }
 
 async function sendPickupLog() {
-  if (pickupLogBusy) return;
   if (!authHeaderOK()) {
-    setAuthUI(false, "Sign in to record trips.");
+    setAuthUI(false, "Sign in to log pickups.");
     return;
   }
   if (!userLatLng) {
@@ -4204,11 +3559,9 @@ async function sendPickupLog() {
     return;
   }
 
-  pickupLogBusy = true;
   try {
     const ts_unix = Math.floor(Date.now() / 1000);
     const near = nearestZoneToUser(currentFrame, userLatLng);
-    const zoneId = near?.location_id ?? null;
 
     await postJSON(
       "/events/pickup",
@@ -4217,21 +3570,17 @@ async function sendPickupLog() {
         lng: userLatLng.lng,
         ts_unix,
         frame_time: currentFrame?.time || null,
-        zone_id: zoneId,
-        location_id: zoneId,
+        location_id: near?.location_id ?? null,
         zone_name: near?.zone_name ?? null,
         borough: near?.borough ?? null,
       },
       communityToken
     );
 
-    schedulePickupOverlayRefresh({ force: true });
-
-    showRecordTripToast();
+    const label = near?.zone_name ? `${near.zone_name}${near.borough ? ` (${near.borough})` : ""}` : "your location";
+    alert(`Pickup logged ✅ (${label})`);
   } catch (e) {
-    alert(`Trip record failed: ${e.message || e}`);
-  } finally {
-    pickupLogBusy = false;
+    alert(`Pickup log failed: ${e.message || e}`);
   }
 }
 
@@ -4246,14 +3595,6 @@ if (btnPolice) {
 if (btnPickup) {
   btnPickup.addEventListener("pointerdown", (e) => e.stopPropagation());
   btnPickup.addEventListener("click", (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    sendPickupLog();
-  });
-}
-if (pickupFab) {
-  pickupFab.addEventListener("pointerdown", (e) => e.stopPropagation());
-  pickupFab.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
     sendPickupLog();
@@ -4297,7 +3638,6 @@ setNavDestination(null);
     if (authHeaderOK()) {
       setAuthUI(true, `Status: signed in as ${me?.display_name || me?.email || "Driver"}`);
       pullPresenceAll().catch(() => {});
-      schedulePickupOverlayRefresh({ force: true });
     } else {
       setAuthUI(false, "Status: signed out");
     }
