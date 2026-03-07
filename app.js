@@ -57,7 +57,8 @@ const LS_EMAIL = "community_email_v1";
 const LS_DISPLAY_NAME = "community_display_name_v1";
 const CHAT_ROOM = "global";
 const CHAT_POLL_MS = 1200;
-const PICKUP_RECENT_LIMIT = 50;
+const PICKUP_RECENT_LIMIT = 30;
+const PICKUP_ZONE_SAMPLE_LIMIT = 100;
 const PICKUP_REFRESH_DEBOUNCE_MS = 350;
 const PICKUP_FETCH_COOLDOWN_MS = 1200;
 
@@ -69,8 +70,7 @@ let pickupRefreshInFlight = false;
 let pickupLogBusy = false;
 let lastPickupFetchMs = 0;
 let lastPickupFetchKey = "";
-let pickupRecentZoneCounts = new Map();
-let pickupRecentZoneLatestTs = new Map();
+let pickupZoneStats = new Map();
 
 /* =========================================================
    MANHATTAN MODE — DEFAULT SETTINGS (SAFE TO EDIT)
@@ -876,7 +876,7 @@ function modesPanelHTML() {
 
       <div style="display:flex;gap:10px;flex-wrap:wrap;">
         <button id="dockPoliceBtn" class="chipBtn">🚨 Police</button>
-        <button id="dockPickupBtn" class="chipBtn">✅ Pickup</button>
+        <button id="dockPickupBtn" class="chipBtn">✅ Record Trip</button>
       </div>
 
       <div style="margin-top:10px;opacity:0.75;font-weight:600;">
@@ -1540,24 +1540,56 @@ function emptyGeojson() {
 }
 
 function clearPickupOverlayCache() {
-  pickupRecentZoneCounts = new Map();
-  pickupRecentZoneLatestTs = new Map();
+  pickupZoneStats = new Map();
   lastPickupFetchKey = "";
 }
 
-function setPickupOverlayData(fc, items = []) {
-  pickupRecentZoneCounts = new Map();
-  pickupRecentZoneLatestTs = new Map();
+function setPickupOverlayData(fc, items = [], zoneStats = []) {
+  pickupZoneStats = new Map();
 
-  for (const it of items) {
-    const zoneId = it?.zone_id;
-    if (zoneId == null) continue;
-    const key = String(zoneId);
-    pickupRecentZoneCounts.set(key, (pickupRecentZoneCounts.get(key) || 0) + 1);
-    const ts = Number(it?.created_at ?? NaN);
-    if (Number.isFinite(ts)) {
-      const prev = pickupRecentZoneLatestTs.get(key);
-      if (!prev || ts > prev) pickupRecentZoneLatestTs.set(key, ts);
+  if (Array.isArray(zoneStats) && zoneStats.length) {
+    for (const stat of zoneStats) {
+      const zoneId = stat?.zone_id;
+      if (zoneId == null) continue;
+      const key = String(zoneId);
+      const sampleSize = Number(stat?.sample_size ?? NaN);
+      const sampleLimit = Number(stat?.sample_limit ?? NaN);
+      const latestCreatedAt = Number(stat?.latest_created_at ?? NaN);
+      const avgLat = Number(stat?.avg_lat ?? NaN);
+      const avgLng = Number(stat?.avg_lng ?? NaN);
+
+      pickupZoneStats.set(key, {
+        zone_id: Number(zoneId),
+        zone_name: stat?.zone_name ?? "",
+        borough: stat?.borough ?? "",
+        sample_size: Number.isFinite(sampleSize) ? sampleSize : 0,
+        sample_limit: Number.isFinite(sampleLimit) ? sampleLimit : PICKUP_ZONE_SAMPLE_LIMIT,
+        latest_created_at: Number.isFinite(latestCreatedAt) ? latestCreatedAt : null,
+        avg_lat: Number.isFinite(avgLat) ? avgLat : null,
+        avg_lng: Number.isFinite(avgLng) ? avgLng : null,
+      });
+    }
+  } else {
+    for (const it of items || []) {
+      const zoneId = it?.zone_id;
+      if (zoneId == null) continue;
+      const key = String(zoneId);
+      const existing = pickupZoneStats.get(key) || {
+        zone_id: Number(zoneId),
+        zone_name: it?.zone_name ?? "",
+        borough: it?.borough ?? "",
+        sample_size: 0,
+        sample_limit: PICKUP_ZONE_SAMPLE_LIMIT,
+        latest_created_at: null,
+        avg_lat: null,
+        avg_lng: null,
+      };
+      existing.sample_size += 1;
+      const ts = Number(it?.created_at ?? NaN);
+      if (Number.isFinite(ts) && (!existing.latest_created_at || ts > existing.latest_created_at)) {
+        existing.latest_created_at = ts;
+      }
+      pickupZoneStats.set(key, existing);
     }
   }
 
@@ -1706,15 +1738,22 @@ async function ensurePickupSourceAndLayers() {
         const frameTime = (props.frame_time || "").trim();
         const createdAt = Number(props.created_at ?? NaN);
         const when = Number.isFinite(createdAt) ? formatRelativeAge(createdAt) : "unknown";
+        const zoneStat = pickupZoneStats.get(String(props.zone_id ?? ""));
+        const zoneAvgSample = Number(zoneStat?.sample_size ?? 0);
+        const zoneAvgLimit = Number(zoneStat?.sample_limit ?? PICKUP_ZONE_SAMPLE_LIMIT);
+        const zoneAvgLine = zoneAvgSample > 0
+          ? `<div><b>Zone avg:</b> ${zoneAvgSample}/${zoneAvgLimit} trips used</div>`
+          : "";
         new maplibregl.Popup({ closeButton: true, closeOnClick: true, maxWidth: "280px" })
           .setLngLat(e.lngLat)
           .setHTML(`
             <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; font-size:13px;">
-              <div style="font-weight:900; margin-bottom:4px;">Community pickup</div>
+              <div style="font-weight:900; margin-bottom:4px;">Community trip</div>
               <div><b>Zone:</b> ${escapeHtml(zoneName || `Zone ${props.zone_id || ""}`)}</div>
               ${borough ? `<div><b>Borough:</b> ${escapeHtml(borough)}</div>` : ""}
               <div><b>When:</b> ${escapeHtml(when)}</div>
               ${frameTime ? `<div><b>Frame:</b> ${escapeHtml(frameTime)}</div>` : ""}
+              ${zoneAvgLine}
             </div>
           `)
           .addTo(map);
@@ -1739,6 +1778,7 @@ function pickupOverlayQueryPath(limit = PICKUP_RECENT_LIMIT) {
 
   const qs = new URLSearchParams({
     limit: String(limit),
+    zone_sample_limit: String(PICKUP_ZONE_SAMPLE_LIMIT),
     min_lng: String(Math.min(west, east)),
     max_lng: String(Math.max(west, east)),
     min_lat: String(Math.min(south, north)),
@@ -1771,8 +1811,9 @@ async function refreshPickupOverlay({ force = false } = {}) {
   try {
     const data = await getJSONAuth(path, communityToken);
     const items = Array.isArray(data) ? data : data?.items || [];
+    const zoneStats = Array.isArray(data?.zone_stats) ? data.zone_stats : [];
     const fc = buildPickupFeatureCollection(items);
-    setPickupOverlayData(fc, items);
+    setPickupOverlayData(fc, items, zoneStats);
   } catch (e) {
     console.warn("pickup overlay refresh failed:", e);
   } finally {
@@ -2035,10 +2076,12 @@ function buildPopupHTML(props, geom) {
   const nextPayVal = nextFramePayById.get(String(props.LocationID ?? ""));
   const nextPay = nextPayVal == null ? "n/a" : Number(nextPayVal).toFixed(2);
 
-  const communityPickupCount = pickupRecentZoneCounts.get(String(props.LocationID ?? "")) || 0;
-  const communityLastTs = pickupRecentZoneLatestTs.get(String(props.LocationID ?? ""));
+  const zoneCommunity = pickupZoneStats.get(String(props.LocationID ?? ""));
+  const communityPickupCount = Number(zoneCommunity?.sample_size ?? 0);
+  const communitySampleLimit = Number(zoneCommunity?.sample_limit ?? PICKUP_ZONE_SAMPLE_LIMIT);
+  const communityLastTs = zoneCommunity?.latest_created_at ?? null;
   const communityPickupLine = communityPickupCount > 0
-    ? `<div style="margin-top:6px;"><b>Community pickups in current map view:</b> ${communityPickupCount}${communityLastTs ? ` • last ${escapeHtml(formatRelativeAge(communityLastTs))}` : ""}</div>`
+    ? `<div style="margin-top:6px;"><b>Community zone avg:</b> ${communityPickupCount}/${communitySampleLimit} trips used${communityLastTs ? ` • last ${escapeHtml(formatRelativeAge(communityLastTs))}` : ""}</div>`
     : "";
 
   let extra = "";
@@ -3285,8 +3328,8 @@ function setAuthUI(signedIn, note) {
   if (btnAuth) btnAuth.textContent = signedIn ? "Sign out" : "Sign in";
   if (communityNote) {
     communityNote.textContent = signedIn
-      ? "Community: live drivers, police reports, and pickup heat are visible."
-      : "Community: sign in to see other drivers, report police, and log pickups.";
+      ? "Community: live drivers, police reports, and trip heat are visible."
+      : "Community: sign in to see other drivers, report police, and record trips.";
   }
 
   const showLock = !signedIn;
@@ -3825,7 +3868,7 @@ async function sendPoliceReport() {
 async function sendPickupLog() {
   if (pickupLogBusy) return;
   if (!authHeaderOK()) {
-    setAuthUI(false, "Sign in to log pickups.");
+    setAuthUI(false, "Sign in to record trips.");
     return;
   }
   if (!userLatLng) {
@@ -3857,9 +3900,9 @@ async function sendPickupLog() {
     schedulePickupOverlayRefresh({ force: true });
 
     const label = near?.zone_name ? `${near.zone_name}${near.borough ? ` (${near.borough})` : ""}` : "your location";
-    alert(`Pickup logged ✅ (${label})`);
+    alert(`Trip recorded ✅ (${label})`);
   } catch (e) {
-    alert(`Pickup log failed: ${e.message || e}`);
+    alert(`Trip record failed: ${e.message || e}`);
   } finally {
     pickupLogBusy = false;
   }
