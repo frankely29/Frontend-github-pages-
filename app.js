@@ -2879,22 +2879,29 @@ let me = null;
 let lastGpsAccuracyM = null;
 
 // other drivers markers
-const otherMarkers = new Map(); // user_id -> marker
-
-const LABEL_OFFSETS = [
-  [44, 0],
-  [-44, 0],
-  [0, 30],
-  [0, -30],
-  [34, 20],
-  [-34, 20],
-  [34, -20],
-  [-34, -20],
-];
+const otherMarkers = new Map(); // marker_key -> marker
 
 const SELF_COLLISION_THRESHOLD_PX = 44;
 const SELF_COLLISION_OFFSET_PX = 64;
 const SELF_LABEL_SIDE = "right";
+const DRIVER_LABEL_ZOOM_SOLO = 14;
+const DRIVER_LABEL_ZOOM_GROUP = 12.5;
+const DRIVER_SAME_SPOT_DECIMALS = 5; // ~1.1m tolerance so only near-identical positions collapse
+
+function driverPositionKey(lat, lng) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return "";
+  return `${lat.toFixed(DRIVER_SAME_SPOT_DECIMALS)}|${lng.toFixed(DRIVER_SAME_SPOT_DECIMALS)}`;
+}
+
+function groupedDriverLabelText(group) {
+  const names = group
+    .map((drv) => String(drv?.name || "Driver").trim() || "Driver")
+    .filter(Boolean);
+  if (!names.length) return "Drivers";
+  if (names.length === 1) return names[0];
+  if (names.length === 2) return `${names[0]} • ${names[1]}`;
+  return `${names[0]} +${names.length - 1}`;
+}
 
 function sideFromOffsetX(dx, fallback = "right") {
   if (dx > 0) return "right";
@@ -3178,12 +3185,15 @@ if (btnDeleteAccount) {
 }
 
 // other drivers marker HTML
-function makeDriverIcon(name, headingDeg, labelSide = "right", labelDx = 0, labelDy = 0) {
+function makeDriverIcon(name, headingDeg, labelSide = "right", labelDx = 0, labelDy = 0, opts = {}) {
   const safe = (name || "Driver").trim() || "Driver";
   const rot = Number.isFinite(headingDeg) ? headingDeg : 0;
   const defaultLabelX = labelSide === "left" ? -28 : 28;
   const labelTranslateX = Number.isFinite(labelDx) ? labelDx : defaultLabelX;
   const labelTranslateY = Number.isFinite(labelDy) ? labelDy : -8;
+  const showLabel = opts.showLabel !== false;
+  const labelHtml = opts.labelHtml || escapeHtml(safe);
+  const countBadge = Number(opts.countBadge || 0);
 
   const el = document.createElement("div");
   el.className = "otherDrvWrap";
@@ -3191,9 +3201,8 @@ function makeDriverIcon(name, headingDeg, labelSide = "right", labelDx = 0, labe
     <div class="otherArrowWrap otherPulse" style="transform:rotate(${rot}deg)">
       <div class="otherArrow"></div>
     </div>
-    <div class="otherDrvName" style="transform:translate(${labelTranslateX}px, ${labelTranslateY}px);">
-      ${escapeHtml(safe)}
-    </div>
+    ${countBadge > 1 ? `<div style="position:absolute;left:22px;top:2px;min-width:16px;height:16px;padding:0 5px;border-radius:999px;background:rgba(17,17,17,0.92);color:#fff;font:900 10px/16px system-ui,-apple-system,Segoe UI,Roboto,Arial;text-align:center;box-shadow:0 4px 12px rgba(0,0,0,0.22);pointer-events:none;">${countBadge}</div>` : ""}
+    ${showLabel ? `<div class="otherDrvName" style="transform:translate(${labelTranslateX}px, ${labelTranslateY}px);">${labelHtml}</div>` : ""}
   `;
   return el;
 }
@@ -3205,20 +3214,20 @@ function clearOtherDrivers() {
   otherMarkers.clear();
 }
 
-function upsertDriverMarker(userId, name, lat, lng, heading, labelSide, labelDx = 0, labelDy = 0) {
+function upsertDriverMarker(markerKey, name, lat, lng, heading, labelSide, labelDx = 0, labelDy = 0, opts = {}) {
   if (!Number.isFinite(lat) || !Number.isFinite(lng) || !map) return;
-  if (!userId) return;
+  if (!markerKey) return;
 
-  const existing = otherMarkers.get(userId);
+  const existing = otherMarkers.get(markerKey);
   if (existing) {
     existing.setLngLat([lng, lat]);
     const el = existing.getElement();
-    const newEl = makeDriverIcon(name || `Driver ${userId}`, heading, labelSide, labelDx, labelDy);
+    const newEl = makeDriverIcon(name || `Driver ${markerKey}`, heading, labelSide, labelDx, labelDy, opts);
     el.innerHTML = newEl.innerHTML;
     return;
   }
 
-  const el = makeDriverIcon(name || `Driver ${userId}`, heading, labelSide, labelDx, labelDy);
+  const el = makeDriverIcon(name || `Driver ${markerKey}`, heading, labelSide, labelDx, labelDy, opts);
   const mk = new maplibregl.Marker({ element: el, anchor: "center" }).setLngLat([lng, lat]).addTo(map);
 
   if (!debugOnce.otherMarker) {
@@ -3226,7 +3235,7 @@ function upsertDriverMarker(userId, name, lat, lng, heading, labelSide, labelDx 
     debugOnce.otherMarker = true;
   }
 
-  otherMarkers.set(userId, mk);
+  otherMarkers.set(markerKey, mk);
 }
 
 async function pullPresenceAll() {
@@ -3235,15 +3244,14 @@ async function pullPresenceAll() {
   try {
     const list = await getJSONAuth("/presence/all", communityToken);
     const now = Date.now() / 1000;
+    const zoom = map?.getZoom?.() || 12;
 
     const items = Array.isArray(list) ? list : list?.items || [];
-    const seen = new Set();
     const visibleDrivers = [];
 
     for (const it of items) {
       const uid = String(it.user_id ?? it.userId ?? it.id ?? "");
       if (!uid) continue;
-
       if (me && String(me.id) === uid) continue;
 
       const lat = Number(it.lat ?? it.latitude ?? NaN);
@@ -3251,92 +3259,106 @@ async function pullPresenceAll() {
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
 
       const updated = Number(it.updated_at_unix ?? it.ts_unix ?? it.updated_at ?? NaN);
-      if (Number.isFinite(updated)) {
-        if (now - updated > PRESENCE_STALE_SEC) continue;
-      }
+      if (Number.isFinite(updated) && now - updated > PRESENCE_STALE_SEC) continue;
 
       const name = it.display_name || it.name || it.email || "Driver";
       const heading = Number(it.heading ?? it.bearing ?? NaN);
       visibleDrivers.push({ uid, name, heading, lat, lng });
-      seen.add(uid);
     }
 
     const selfPt = userLatLng ? projectToPoint(userLatLng.lng, userLatLng.lat) : null;
 
-    const driversWithPoints = visibleDrivers.map((drv) => ({
-      ...drv,
-      basePoint: projectToPoint(drv.lng, drv.lat),
-    }));
-
-    // Compute a zoom‑dependent collision radius: at zoom 10 it’s ~28 px, at zoom 12 it’s ~9 px.
-    // This keeps clusters tight when zoomed in, and wider when zoomed out.
-    const zoom = map?.getZoom?.() || 12;
-    const COLLISION_PX = Math.max(20, 28 / Math.max(zoom - 9, 1));
-    const clustered = new Set();
-    const collisionClusters = [];
-
-    for (let i = 0; i < driversWithPoints.length; i++) {
-      const start = driversWithPoints[i];
-      if (clustered.has(start.uid)) continue;
-
-      const cluster = [];
-      const queue = [start];
-      clustered.add(start.uid);
-
-      while (queue.length) {
-        const current = queue.pop();
-        cluster.push(current);
-
-        for (const candidate of driversWithPoints) {
-          if (clustered.has(candidate.uid)) continue;
-          if (pointDistance(current.basePoint, candidate.basePoint) > COLLISION_PX) continue;
-          clustered.add(candidate.uid);
-          queue.push(candidate);
-        }
-      }
-
-      cluster.sort((a, b) => a.uid.localeCompare(b.uid));
-      collisionClusters.push(cluster);
+    // Group only drivers that are effectively in the SAME real-world spot.
+    // Never cluster by on-screen pixels, because that makes locations look wrong as you zoom out.
+    const groupsByPosition = new Map();
+    for (const drv of visibleDrivers) {
+      const key = driverPositionKey(drv.lat, drv.lng);
+      if (!groupsByPosition.has(key)) groupsByPosition.set(key, []);
+      groupsByPosition.get(key).push({
+        ...drv,
+        basePoint: projectToPoint(drv.lng, drv.lat),
+      });
     }
 
-    for (const group of collisionClusters) {
-      for (let idx = 0; idx < group.length; idx++) {
-        const drv = group[idx];
-        let labelSide = idx % 2 === 0 ? "right" : "left";
+    const renderedMarkerKeys = new Set();
 
+    for (const group of groupsByPosition.values()) {
+      group.sort((a, b) => a.uid.localeCompare(b.uid));
+      const sameSpot = group.length > 1;
+
+      if (!sameSpot) {
+        const drv = group[0];
+        let labelSide = "right";
         let labelDx = 0;
         let labelDy = 0;
+        let showLabel = zoom >= DRIVER_LABEL_ZOOM_SOLO;
 
-        const basePoint = drv.basePoint;
-
-        if (selfPt) {
-          const distPx = pointDistance(basePoint, selfPt);
+        if (showLabel && selfPt) {
+          const distPx = pointDistance(drv.basePoint, selfPt);
           if (distPx < SELF_COLLISION_THRESHOLD_PX) {
             labelDx = SELF_LABEL_SIDE === "right" ? -SELF_COLLISION_OFFSET_PX : SELF_COLLISION_OFFSET_PX;
-            labelDy = 0;
             labelSide = sideFromOffsetX(labelDx, SELF_LABEL_SIDE === "left" ? "right" : "left");
           }
         }
 
-        if (group.length > 1 && labelDx === 0 && labelDy === 0) {
-          // Stack labels vertically so they don’t overlap.
-          // Offset all labels to the right of the marker.  Adjust dy to separate names.
-          const verticalSpacing = 18; // px between names
-          const mid = (group.length - 1) / 2;
-          labelDx = 44;               // always offset to the right of the marker
-          labelDy = (idx - mid) * verticalSpacing;
-          labelSide = sideFromOffsetX(labelDx, "right");
-        }
-
-        upsertDriverMarker(drv.uid, drv.name, drv.lat, drv.lng, drv.heading, labelSide, labelDx, labelDy);
+        const markerKey = `u:${drv.uid}`;
+        renderedMarkerKeys.add(markerKey);
+        upsertDriverMarker(
+          markerKey,
+          drv.name,
+          drv.lat,
+          drv.lng,
+          drv.heading,
+          labelSide,
+          labelDx,
+          labelDy,
+          { showLabel }
+        );
+        continue;
       }
+
+      // Multiple drivers in the same spot:
+      // keep a SINGLE anchor at the real location, add a count badge,
+      // and only show a compact combined label when zoomed in enough.
+      const anchor = group[0];
+      const groupLabel = groupedDriverLabelText(group);
+      let labelSide = "right";
+      let labelDx = 44;
+      let labelDy = -8;
+      let showLabel = zoom >= DRIVER_LABEL_ZOOM_GROUP;
+
+      if (showLabel && selfPt) {
+        const distPx = pointDistance(anchor.basePoint, selfPt);
+        if (distPx < SELF_COLLISION_THRESHOLD_PX) {
+          labelDx = -SELF_COLLISION_OFFSET_PX;
+          labelSide = sideFromOffsetX(labelDx, "left");
+        }
+      }
+
+      const markerKey = `g:${group.map((drv) => drv.uid).join(",")}`;
+      renderedMarkerKeys.add(markerKey);
+      upsertDriverMarker(
+        markerKey,
+        groupLabel,
+        anchor.lat,
+        anchor.lng,
+        anchor.heading,
+        labelSide,
+        labelDx,
+        labelDy,
+        {
+          showLabel,
+          countBadge: group.length,
+          labelHtml: escapeHtml(groupLabel),
+        }
+      );
     }
 
-    for (const uid of Array.from(otherMarkers.keys())) {
-      if (!seen.has(uid)) {
-        const mk = otherMarkers.get(uid);
+    for (const key of Array.from(otherMarkers.keys())) {
+      if (!renderedMarkerKeys.has(key)) {
+        const mk = otherMarkers.get(key);
         try { mk.remove(); } catch {}
-        otherMarkers.delete(uid);
+        otherMarkers.delete(key);
       }
     }
   } catch (e) {
