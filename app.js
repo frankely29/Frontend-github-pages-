@@ -29,6 +29,7 @@ const ROTATE_RATE_LIMIT_MS = 200;
 const ROTATE_ANIM_MS = 250;
 const GPS_ACCURACY_THRESHOLD = 50;
 const MAX_JUMP_MILES = 2.0;
+const FOLLOW_OFFSET_Y = 110;
 let lastMapBearingDeg = 0;
 let lastRotateTs = 0;
 
@@ -61,6 +62,10 @@ const CHAT_POLL_MS = 1200;
 let chatPollTimer = null;
 let chatLastSeen = null;
 let chatSeenKeys = new Set();
+
+const SAME_SPOT_METERS = 20;
+const SAME_SPOT_MILES = SAME_SPOT_METERS / 1609.344;
+
 
 /* =========================================================
    MANHATTAN MODE — DEFAULT SETTINGS (SAFE TO EDIT)
@@ -806,9 +811,11 @@ dockDrawer?.addEventListener("click", (e) => e.stopPropagation());
 function musicPanelHTML() {
   return `
     <div class="panelBlock">
-      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
         <button id="dockHot97Btn" class="chipBtn">${hot97Playing ? "⏸" : "▶"} HOT 97.1</button>
         <button id="dockMegaBtn" class="chipBtn">${megaPlaying ? "⏸" : "▶"} La Mega 97.9</button>
+        <button id="dockKQ945Btn" class="chipBtn">${kqPlaying ? "⏸" : "▶"} KQ 94.5</button>
+        <button id="dockZ100Btn" class="chipBtn">${z100Playing ? "⏸" : "▶"} Z100</button>
         <div style="margin-left:auto;font-weight:700;opacity:0.75;">${escapeHtml(radioStatusEl?.textContent || "Radio: off")}</div>
       </div>
     </div>
@@ -818,6 +825,9 @@ function musicPanelHTML() {
 function wireMusicPanel() {
   const a = document.getElementById("dockHot97Btn");
   const b = document.getElementById("dockMegaBtn");
+  const c = document.getElementById("dockKQ945Btn");
+  const d = document.getElementById("dockZ100Btn");
+
   a?.addEventListener("click", async (e) => {
     e.preventDefault();
     await toggleHot97();
@@ -827,6 +837,18 @@ function wireMusicPanel() {
   b?.addEventListener("click", async (e) => {
     e.preventDefault();
     await toggleMega();
+    openDrawer("music", "Music", musicPanelHTML());
+    wireMusicPanel();
+  });
+  c?.addEventListener("click", async (e) => {
+    e.preventDefault();
+    await toggleKQ();
+    openDrawer("music", "Music", musicPanelHTML());
+    wireMusicPanel();
+  });
+  d?.addEventListener("click", async (e) => {
+    e.preventDefault();
+    await toggleZ100();
     openDrawer("music", "Music", musicPanelHTML());
     wireMusicPanel();
   });
@@ -993,10 +1015,10 @@ function chatPanelHTML() {
   }
 
   return `
-    <div class="panelBlock chatPanelWrap">
+    <div class="panelBlock chatPanelWrap chatPanelCompact">
       <div id="chatList" class="chatList" aria-live="polite"></div>
       <div class="chatComposer">
-        <input id="chatInput" type="text" class="chatInput" placeholder="Message drivers…" maxlength="600" />
+        <input id="chatInput" type="text" class="chatInput" placeholder="Message drivers…" maxlength="280" inputmode="text" autocapitalize="sentences" autocorrect="on" spellcheck="true" />
         <button id="chatSendBtn" class="chipBtn" type="button">Send</button>
       </div>
     </div>
@@ -1075,6 +1097,13 @@ function renderChatMessages(messages) {
   if (nearBottom) listEl.scrollTop = listEl.scrollHeight;
 }
 
+async function chatFetchRecent(limit = 50) {
+  if (!authHeaderOK()) return [];
+  const data = await getJSONAuth(`/chat/rooms/${CHAT_ROOM}?limit=${encodeURIComponent(limit)}`, communityToken);
+  const msgs = Array.isArray(data) ? data : data?.messages || [];
+  return msgs;
+}
+
 async function chatFetchNew() {
   if (!authHeaderOK()) return [];
   const q = chatLastSeen ? `?after=${encodeURIComponent(chatLastSeen)}&limit=50` : "?limit=50";
@@ -1093,7 +1122,9 @@ async function chatSend(text) {
 async function chatPollOnce() {
   if (!authHeaderOK() || openPanelKey !== "chat") return;
   try {
-    const msgs = await chatFetchNew();
+    const listEl = document.getElementById("chatList");
+    const shouldLoadWindow = !!listEl && !listEl.children.length;
+    const msgs = shouldLoadWindow ? await chatFetchRecent(50) : await chatFetchNew();
     renderChatMessages(msgs);
   } catch (e) {
     console.warn("chat poll failed:", e);
@@ -1120,7 +1151,12 @@ function syncChatPollingState() {
 function wireChatPanel() {
   const chatInput = document.getElementById("chatInput");
   const chatSendBtn = document.getElementById("chatSendBtn");
-  if (!chatInput || !chatSendBtn) return;
+  const chatListEl = document.getElementById("chatList");
+  if (!chatInput || !chatSendBtn || !chatListEl) return;
+
+  chatSeenKeys = new Set();
+  chatLastSeen = null;
+  chatListEl.innerHTML = "";
 
   const sendNow = async () => {
     const text = String(chatInput.value || "").trim();
@@ -1136,8 +1172,10 @@ function wireChatPanel() {
       await chatPollOnce();
     } catch (e) {
       console.warn("chat send failed:", e);
+      alert(e?.detail || e?.message || "Chat send failed.");
     } finally {
       chatSendBtn.disabled = false;
+      try { chatInput.focus({ preventScroll: true }); } catch {}
     }
   };
 
@@ -1149,6 +1187,10 @@ function wireChatPanel() {
     if (e.key !== "Enter") return;
     e.preventDefault();
     sendNow();
+  });
+
+  chatInput.addEventListener("focus", () => {
+    try { window.scrollTo(0, 0); } catch {}
   });
 
   chatPollOnce();
@@ -2121,12 +2163,17 @@ function maybeRotateMapTo(deg) {
   lastRotateTs = now;
   lastMapBearingDeg = target;
 
-  const c = map.getCenter();
-  const z = map.getZoom();
+  const anchor = (navMarker && typeof navMarker.getLngLat === "function")
+    ? navMarker.getLngLat()
+    : userLatLng
+      ? { lng: userLatLng.lng, lat: userLatLng.lat }
+      : map.getCenter();
+
   map.easeTo({
-    center: [c.lng, c.lat],
-    zoom: z,
+    center: [anchor.lng, anchor.lat],
+    zoom: map.getZoom(),
     bearing: target,
+    offset: [0, FOLLOW_OFFSET_Y],
     duration: ROTATE_ANIM_MS,
     essential: true,
   });
@@ -2219,7 +2266,19 @@ function startLocationWatch() {
       } else {
         if (autoCenter && map) {
           const c = (navMarker && navMarker.getLngLat) ? navMarker.getLngLat() : { lng, lat };
-          suppressAutoDisableFor(700, () => map.flyTo({ center: [c.lng, c.lat], duration: 500 }));
+          suppressAutoDisableFor(700, () => {
+            if (isMoving && Number.isFinite(lastHeadingDeg)) {
+              map.easeTo({
+                center: [c.lng, c.lat],
+                bearing: normDeg(lastHeadingDeg),
+                offset: [0, FOLLOW_OFFSET_Y],
+                duration: 500,
+                essential: true,
+              });
+            } else {
+              map.flyTo({ center: [c.lng, c.lat], duration: 500 });
+            }
+          });
         }
       }
 
@@ -2879,29 +2938,22 @@ let me = null;
 let lastGpsAccuracyM = null;
 
 // other drivers markers
-const otherMarkers = new Map(); // marker_key -> marker
+const otherMarkers = new Map(); // user_id -> marker
+
+const LABEL_OFFSETS = [
+  [44, 0],
+  [-44, 0],
+  [0, 30],
+  [0, -30],
+  [34, 20],
+  [-34, 20],
+  [34, -20],
+  [-34, -20],
+];
 
 const SELF_COLLISION_THRESHOLD_PX = 44;
 const SELF_COLLISION_OFFSET_PX = 64;
 const SELF_LABEL_SIDE = "right";
-const DRIVER_LABEL_ZOOM_SOLO = 14;
-const DRIVER_LABEL_ZOOM_GROUP = 12.5;
-const DRIVER_SAME_SPOT_DECIMALS = 5; // ~1.1m tolerance so only near-identical positions collapse
-
-function driverPositionKey(lat, lng) {
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return "";
-  return `${lat.toFixed(DRIVER_SAME_SPOT_DECIMALS)}|${lng.toFixed(DRIVER_SAME_SPOT_DECIMALS)}`;
-}
-
-function groupedDriverLabelText(group) {
-  const names = group
-    .map((drv) => String(drv?.name || "Driver").trim() || "Driver")
-    .filter(Boolean);
-  if (!names.length) return "Drivers";
-  if (names.length === 1) return names[0];
-  if (names.length === 2) return `${names[0]} • ${names[1]}`;
-  return `${names[0]} +${names.length - 1}`;
-}
 
 function sideFromOffsetX(dx, fallback = "right") {
   if (dx > 0) return "right";
@@ -3184,16 +3236,40 @@ if (btnDeleteAccount) {
   });
 }
 
+function labelFontPxForZoom(zoom) {
+  if (zoom <= 10) return 8;
+  if (zoom <= 12) return 9;
+  if (zoom <= 14) return 10;
+  return 11;
+}
+
+function labelMaxWidthPxForZoom(zoom) {
+  if (zoom <= 10) return 96;
+  if (zoom <= 12) return 112;
+  if (zoom <= 14) return 132;
+  return 160;
+}
+
+function labelSideForPoint(basePoint, mapWidth, preferred = "right") {
+  if (!basePoint || !Number.isFinite(basePoint.x)) return preferred;
+  if (basePoint.x > mapWidth - 120) return "left";
+  if (basePoint.x < 120) return "right";
+  return preferred;
+}
+
+function stackOffsetForIndex(idx, count, fontPx) {
+  const spacing = fontPx + 7;
+  const mid = (count - 1) / 2;
+  return (idx - mid) * spacing;
+}
+
 // other drivers marker HTML
-function makeDriverIcon(name, headingDeg, labelSide = "right", labelDx = 0, labelDy = 0, opts = {}) {
+function makeDriverIcon(name, headingDeg, labelSide = "right", labelDx = 0, labelDy = 0, labelFontPx = 11, labelMaxWidthPx = 160) {
   const safe = (name || "Driver").trim() || "Driver";
   const rot = Number.isFinite(headingDeg) ? headingDeg : 0;
   const defaultLabelX = labelSide === "left" ? -28 : 28;
   const labelTranslateX = Number.isFinite(labelDx) ? labelDx : defaultLabelX;
   const labelTranslateY = Number.isFinite(labelDy) ? labelDy : -8;
-  const showLabel = opts.showLabel !== false;
-  const labelHtml = opts.labelHtml || escapeHtml(safe);
-  const countBadge = Number(opts.countBadge || 0);
 
   const el = document.createElement("div");
   el.className = "otherDrvWrap";
@@ -3201,8 +3277,9 @@ function makeDriverIcon(name, headingDeg, labelSide = "right", labelDx = 0, labe
     <div class="otherArrowWrap otherPulse" style="transform:rotate(${rot}deg)">
       <div class="otherArrow"></div>
     </div>
-    ${countBadge > 1 ? `<div style="position:absolute;left:22px;top:2px;min-width:16px;height:16px;padding:0 5px;border-radius:999px;background:rgba(17,17,17,0.92);color:#fff;font:900 10px/16px system-ui,-apple-system,Segoe UI,Roboto,Arial;text-align:center;box-shadow:0 4px 12px rgba(0,0,0,0.22);pointer-events:none;">${countBadge}</div>` : ""}
-    ${showLabel ? `<div class="otherDrvName" style="transform:translate(${labelTranslateX}px, ${labelTranslateY}px);">${labelHtml}</div>` : ""}
+    <div class="otherDrvName" style="transform:translate(${labelTranslateX}px, ${labelTranslateY}px);font-size:${labelFontPx}px;max-width:${labelMaxWidthPx}px;">
+      ${escapeHtml(safe)}
+    </div>
   `;
   return el;
 }
@@ -3214,20 +3291,20 @@ function clearOtherDrivers() {
   otherMarkers.clear();
 }
 
-function upsertDriverMarker(markerKey, name, lat, lng, heading, labelSide, labelDx = 0, labelDy = 0, opts = {}) {
+function upsertDriverMarker(userId, name, lat, lng, heading, labelSide, labelDx = 0, labelDy = 0, labelFontPx = 11, labelMaxWidthPx = 160) {
   if (!Number.isFinite(lat) || !Number.isFinite(lng) || !map) return;
-  if (!markerKey) return;
+  if (!userId) return;
 
-  const existing = otherMarkers.get(markerKey);
+  const existing = otherMarkers.get(userId);
   if (existing) {
     existing.setLngLat([lng, lat]);
     const el = existing.getElement();
-    const newEl = makeDriverIcon(name || `Driver ${markerKey}`, heading, labelSide, labelDx, labelDy, opts);
+    const newEl = makeDriverIcon(name || `Driver ${userId}`, heading, labelSide, labelDx, labelDy, labelFontPx, labelMaxWidthPx);
     el.innerHTML = newEl.innerHTML;
     return;
   }
 
-  const el = makeDriverIcon(name || `Driver ${markerKey}`, heading, labelSide, labelDx, labelDy, opts);
+  const el = makeDriverIcon(name || `Driver ${userId}`, heading, labelSide, labelDx, labelDy, labelFontPx, labelMaxWidthPx);
   const mk = new maplibregl.Marker({ element: el, anchor: "center" }).setLngLat([lng, lat]).addTo(map);
 
   if (!debugOnce.otherMarker) {
@@ -3235,7 +3312,7 @@ function upsertDriverMarker(markerKey, name, lat, lng, heading, labelSide, label
     debugOnce.otherMarker = true;
   }
 
-  otherMarkers.set(markerKey, mk);
+  otherMarkers.set(userId, mk);
 }
 
 async function pullPresenceAll() {
@@ -3244,9 +3321,9 @@ async function pullPresenceAll() {
   try {
     const list = await getJSONAuth("/presence/all", communityToken);
     const now = Date.now() / 1000;
-    const zoom = map?.getZoom?.() || 12;
 
     const items = Array.isArray(list) ? list : list?.items || [];
+    const seen = new Set();
     const visibleDrivers = [];
 
     for (const it of items) {
@@ -3259,52 +3336,68 @@ async function pullPresenceAll() {
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
 
       const updated = Number(it.updated_at_unix ?? it.ts_unix ?? it.updated_at ?? NaN);
-      if (Number.isFinite(updated) && now - updated > PRESENCE_STALE_SEC) continue;
+      if (Number.isFinite(updated) && (now - updated > PRESENCE_STALE_SEC)) continue;
 
       const name = it.display_name || it.name || it.email || "Driver";
       const heading = Number(it.heading ?? it.bearing ?? NaN);
-      visibleDrivers.push({ uid, name, heading, lat, lng });
+      const basePoint = projectToPoint(lng, lat);
+
+      visibleDrivers.push({ uid, name, heading, lat, lng, basePoint });
+      seen.add(uid);
     }
 
     const selfPt = userLatLng ? projectToPoint(userLatLng.lng, userLatLng.lat) : null;
+    const zoom = map?.getZoom?.() || 12;
+    const fontPx = labelFontPxForZoom(zoom);
+    const labelMaxWidthPx = labelMaxWidthPxForZoom(zoom);
+    const mapCanvas = map.getCanvas?.();
+    const mapWidth = mapCanvas?.width || window.innerWidth || 390;
 
-    // Group only drivers that are effectively in the SAME real-world spot.
-    // Never cluster by on-screen pixels, because that makes locations look wrong as you zoom out.
-    const groupsByPosition = new Map();
-    for (const drv of visibleDrivers) {
-      const key = driverPositionKey(drv.lat, drv.lng);
-      if (!groupsByPosition.has(key)) groupsByPosition.set(key, []);
-      groupsByPosition.get(key).push({
-        ...drv,
-        basePoint: projectToPoint(drv.lng, drv.lat),
-      });
+    const grouped = new Set();
+    const sameSpotGroups = [];
+
+    for (let i = 0; i < visibleDrivers.length; i++) {
+      const seed = visibleDrivers[i];
+      if (grouped.has(seed.uid)) continue;
+
+      const group = [];
+      for (const candidate of visibleDrivers) {
+        if (grouped.has(candidate.uid)) continue;
+        const dMi = haversineMiles({ lat: seed.lat, lng: seed.lng }, { lat: candidate.lat, lng: candidate.lng });
+        if (dMi > SAME_SPOT_MILES) continue;
+        grouped.add(candidate.uid);
+        group.push(candidate);
+      }
+
+      group.sort((a, b) => a.uid.localeCompare(b.uid));
+      sameSpotGroups.push(group);
     }
 
-    const renderedMarkerKeys = new Set();
+    for (const group of sameSpotGroups) {
+      for (let idx = 0; idx < group.length; idx++) {
+        const drv = group[idx];
+        const basePoint = drv.basePoint;
+        let labelSide = labelSideForPoint(basePoint, mapWidth, idx % 2 === 0 ? "right" : "left");
+        let labelDx = labelSide === "left" ? -24 : 24;
+        let labelDy = -Math.round(fontPx * 0.45);
 
-    for (const group of groupsByPosition.values()) {
-      group.sort((a, b) => a.uid.localeCompare(b.uid));
-      const sameSpot = group.length > 1;
-
-      if (!sameSpot) {
-        const drv = group[0];
-        let labelSide = "right";
-        let labelDx = 0;
-        let labelDy = 0;
-        let showLabel = zoom >= DRIVER_LABEL_ZOOM_SOLO;
-
-        if (showLabel && selfPt) {
-          const distPx = pointDistance(drv.basePoint, selfPt);
+        if (selfPt) {
+          const distPx = pointDistance(basePoint, selfPt);
           if (distPx < SELF_COLLISION_THRESHOLD_PX) {
-            labelDx = SELF_LABEL_SIDE === "right" ? -SELF_COLLISION_OFFSET_PX : SELF_COLLISION_OFFSET_PX;
-            labelSide = sideFromOffsetX(labelDx, SELF_LABEL_SIDE === "left" ? "right" : "left");
+            labelSide = basePoint.x > mapWidth / 2 ? "left" : "right";
+            labelDx = labelSide === "left" ? -SELF_COLLISION_OFFSET_PX : SELF_COLLISION_OFFSET_PX;
+            labelDy = 0;
           }
         }
 
-        const markerKey = `u:${drv.uid}`;
-        renderedMarkerKeys.add(markerKey);
+        if (group.length > 1) {
+          labelSide = labelSideForPoint(basePoint, mapWidth, labelSide);
+          labelDx = labelSide === "left" ? -(28 + fontPx) : (28 + fontPx);
+          labelDy = stackOffsetForIndex(idx, group.length, fontPx);
+        }
+
         upsertDriverMarker(
-          markerKey,
+          drv.uid,
           drv.name,
           drv.lat,
           drv.lng,
@@ -3312,53 +3405,17 @@ async function pullPresenceAll() {
           labelSide,
           labelDx,
           labelDy,
-          { showLabel }
+          fontPx,
+          labelMaxWidthPx
         );
-        continue;
       }
-
-      // Multiple drivers in the same spot:
-      // keep a SINGLE anchor at the real location, add a count badge,
-      // and only show a compact combined label when zoomed in enough.
-      const anchor = group[0];
-      const groupLabel = groupedDriverLabelText(group);
-      let labelSide = "right";
-      let labelDx = 44;
-      let labelDy = -8;
-      let showLabel = zoom >= DRIVER_LABEL_ZOOM_GROUP;
-
-      if (showLabel && selfPt) {
-        const distPx = pointDistance(anchor.basePoint, selfPt);
-        if (distPx < SELF_COLLISION_THRESHOLD_PX) {
-          labelDx = -SELF_COLLISION_OFFSET_PX;
-          labelSide = sideFromOffsetX(labelDx, "left");
-        }
-      }
-
-      const markerKey = `g:${group.map((drv) => drv.uid).join(",")}`;
-      renderedMarkerKeys.add(markerKey);
-      upsertDriverMarker(
-        markerKey,
-        groupLabel,
-        anchor.lat,
-        anchor.lng,
-        anchor.heading,
-        labelSide,
-        labelDx,
-        labelDy,
-        {
-          showLabel,
-          countBadge: group.length,
-          labelHtml: escapeHtml(groupLabel),
-        }
-      );
     }
 
-    for (const key of Array.from(otherMarkers.keys())) {
-      if (!renderedMarkerKeys.has(key)) {
-        const mk = otherMarkers.get(key);
+    for (const uid of Array.from(otherMarkers.keys())) {
+      if (!seen.has(uid)) {
+        const mk = otherMarkers.get(uid);
         try { mk.remove(); } catch {}
-        otherMarkers.delete(key);
+        otherMarkers.delete(uid);
       }
     }
   } catch (e) {
