@@ -2552,6 +2552,8 @@ function ensureWxAnimationRunning() {
    ========================================================= */
 const btnHot97 = document.getElementById("btnHot97");
 const btnMega979 = document.getElementById("btnMega979");
+const btnKQ945 = document.getElementById("btnKQ945");
+const btnZ100 = document.getElementById("btnZ100");
 const radioStatusEl = document.getElementById("radioStatus");
 
 const radioModal = document.getElementById("radioModal");
@@ -2561,6 +2563,8 @@ const radioModalTitle = document.getElementById("radioModalTitle");
 
 const HOT97_STREAM_URL = "https://26313.live.streamtheworld.com/WQHTFMAAC.aac";
 const MEGA979_STREAM_URL = "https://liveaudio.lamusica.com/NY_WSKQ_icy";
+const KQ945_STREAM_URL = "https://stream.revma.ihrhls.com/zc4792";
+const Z100_STREAM_URL = "https://stream.revma.ihrhls.com/zc1469";
 
 const megaAudio = new Audio();
 megaAudio.src = MEGA979_STREAM_URL;
@@ -2572,8 +2576,20 @@ hot97Audio.src = HOT97_STREAM_URL;
 hot97Audio.preload = "none";
 hot97Audio.crossOrigin = "anonymous";
 
+const kqAudio = new Audio();
+kqAudio.src = KQ945_STREAM_URL;
+kqAudio.preload = "none";
+kqAudio.crossOrigin = "anonymous";
+
+const z100Audio = new Audio();
+z100Audio.src = Z100_STREAM_URL;
+z100Audio.preload = "none";
+z100Audio.crossOrigin = "anonymous";
+
 let megaPlaying = false;
 let hot97Playing = false;
+let kqPlaying = false;
+let z100Playing = false;
 
 function setRadioStatus(txt) {
   if (radioStatusEl) radioStatusEl.textContent = txt;
@@ -2581,7 +2597,11 @@ function setRadioStatus(txt) {
 function setBtnState(btn, on) {
   if (!btn) return;
   btn.classList.toggle("on", !!on);
-  const base = btn === btnMega979 ? "La Mega 97.9" : "HOT 97.1";
+  const base = btn === btnMega979 ? "La Mega 97.9"
+             : btn === btnHot97 ? "HOT 97.1"
+             : btn === btnKQ945 ? "KQ 94.5"
+             : btn === btnZ100 ? "Z100"
+             : "";
   btn.textContent = (on ? "⏸ " : "▶ ") + base;
 }
 
@@ -2601,6 +2621,16 @@ async function toggleMega() {
       hot97Playing = false;
       setBtnState(btnHot97, false);
     }
+    if (kqPlaying) {
+      kqAudio.pause();
+      kqPlaying = false;
+      setBtnState(btnKQ945, false);
+    }
+    if (z100Playing) {
+      z100Audio.pause();
+      z100Playing = false;
+      setBtnState(btnZ100, false);
+    }
   } catch {}
 
   try {
@@ -2617,6 +2647,8 @@ async function toggleMega() {
 
     setBtnState(btnMega979, true);
     setBtnState(btnHot97, false);
+    setBtnState(btnKQ945, false);
+    setBtnState(btnZ100, false);
     setRadioStatus("Radio: La Mega 97.9 playing");
   } catch (e) {
     console.warn("La Mega play failed:", e);
@@ -2633,6 +2665,16 @@ async function toggleHot97() {
       megaAudio.pause();
       megaPlaying = false;
       setBtnState(btnMega979, false);
+    }
+    if (kqPlaying) {
+      kqAudio.pause();
+      kqPlaying = false;
+      setBtnState(btnKQ945, false);
+    }
+    if (z100Playing) {
+      z100Audio.pause();
+      z100Playing = false;
+      setBtnState(btnZ100, false);
     }
   } catch {}
 
@@ -2656,6 +2698,8 @@ async function toggleHot97() {
     hot97Playing = true;
     setBtnState(btnHot97, true);
     setBtnState(btnMega979, false);
+    setBtnState(btnKQ945, false);
+    setBtnState(btnZ100, false);
     setRadioStatus("Radio: HOT 97.1 playing");
   } catch (e) {
     const errName = e && e.name ? String(e.name) : "";
@@ -2674,6 +2718,64 @@ async function toggleHot97() {
     alert("HOT 97.1 could not start. Turn volume up and try again.");
   }
 }
+async function toggleKQ() {
+  if (hot97Playing) { hot97Audio.pause(); hot97Playing = false; setBtnState(btnHot97, false); }
+  if (megaPlaying) { megaAudio.pause(); megaPlaying = false; setBtnState(btnMega979, false); }
+  if (z100Playing) { z100Audio.pause(); z100Playing = false; setBtnState(btnZ100, false); }
+
+  if (kqPlaying) {
+    kqAudio.pause();
+    kqPlaying = false;
+    setBtnState(btnKQ945, false);
+    setRadioStatus("Radio: off");
+    return;
+  }
+  try {
+    kqAudio.src = KQ945_STREAM_URL;
+    await kqAudio.play();
+    kqPlaying = true;
+    setBtnState(btnKQ945, true);
+    setBtnState(btnHot97, false);
+    setBtnState(btnMega979, false);
+    setBtnState(btnZ100, false);
+    setRadioStatus("Radio: KQ 94.5 playing");
+  } catch (e) {
+    kqPlaying = false;
+    setBtnState(btnKQ945, false);
+    setRadioStatus("Radio: KQ 94.5 failed to play");
+    alert("KQ 94.5 could not start. Turn volume up and try again.");
+  }
+}
+
+async function toggleZ100() {
+  if (hot97Playing) { hot97Audio.pause(); hot97Playing = false; setBtnState(btnHot97, false); }
+  if (megaPlaying) { megaAudio.pause(); megaPlaying = false; setBtnState(btnMega979, false); }
+  if (kqPlaying) { kqAudio.pause(); kqPlaying = false; setBtnState(btnKQ945, false); }
+
+  if (z100Playing) {
+    z100Audio.pause();
+    z100Playing = false;
+    setBtnState(btnZ100, false);
+    setRadioStatus("Radio: off");
+    return;
+  }
+  try {
+    z100Audio.src = Z100_STREAM_URL;
+    await z100Audio.play();
+    z100Playing = true;
+    setBtnState(btnZ100, true);
+    setBtnState(btnHot97, false);
+    setBtnState(btnMega979, false);
+    setBtnState(btnKQ945, false);
+    setRadioStatus("Radio: Z100 playing");
+  } catch (e) {
+    z100Playing = false;
+    setBtnState(btnZ100, false);
+    setRadioStatus("Radio: Z100 failed to play");
+    alert("Z100 could not start. Turn volume up and try again.");
+  }
+}
+
 
 if (btnMega979) {
   btnMega979.addEventListener("pointerdown", (e) => e.stopPropagation());
@@ -2689,6 +2791,22 @@ if (btnHot97) {
     e.preventDefault();
     e.stopPropagation();
     toggleHot97();
+  });
+}
+if (btnKQ945) {
+  btnKQ945.addEventListener("pointerdown", (e) => e.stopPropagation());
+  btnKQ945.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    toggleKQ();
+  });
+}
+if (btnZ100) {
+  btnZ100.addEventListener("pointerdown", (e) => e.stopPropagation());
+  btnZ100.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    toggleZ100();
   });
 }
 if (radioModalClose) {
@@ -2724,6 +2842,16 @@ hot97Audio.addEventListener("error", () => {
   hot97Playing = false;
   setBtnState(btnHot97, false);
   setRadioStatus("Radio: HOT 97.1 stream error");
+});
+kqAudio.addEventListener("ended", () => {
+  kqPlaying = false;
+  setBtnState(btnKQ945, false);
+  setRadioStatus("Radio: off");
+});
+z100Audio.addEventListener("ended", () => {
+  z100Playing = false;
+  setBtnState(btnZ100, false);
+  setRadioStatus("Radio: off");
 });
 
 /* =========================================================
