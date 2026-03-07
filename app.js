@@ -2622,7 +2622,7 @@ const radioModalTitle = document.getElementById("radioModalTitle");
 
 const HOT97_STREAM_URL = "https://26313.live.streamtheworld.com/WQHTFMAAC.aac";
 const MEGA979_STREAM_URL = "https://liveaudio.lamusica.com/NY_WSKQ_icy";
-const KQ945_STREAM_URL = "https://stream.revma.ihrhls.com/zc4792";
+const KQ945_STREAM_URL = "https://cdn4.hostlagarto.com:8081/kq945";
 const Z100_STREAM_URL = "https://stream.revma.ihrhls.com/zc1469";
 
 const megaAudio = new Audio();
