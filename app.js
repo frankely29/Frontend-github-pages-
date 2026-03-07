@@ -814,7 +814,7 @@ function musicPanelHTML() {
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
         <button id="dockHot97Btn" class="chipBtn">${hot97Playing ? "⏸" : "▶"} HOT 97.1</button>
         <button id="dockMegaBtn" class="chipBtn">${megaPlaying ? "⏸" : "▶"} La Mega 97.9</button>
-        <button id="dockKQ945Btn" class="chipBtn">${kqPlaying ? "⏸" : "▶"} KQ 94.5 FM (Santo Domingo)</button>
+        <button id="dockKQ945Btn" class="chipBtn">${kqPlaying ? "⏸" : "▶"} KQ 94.5 FM</button>
         <button id="dockZ100Btn" class="chipBtn">${z100Playing ? "⏸" : "▶"} Z100</button>
         <div style="margin-left:auto;font-weight:700;opacity:0.75;">${escapeHtml(radioStatusEl?.textContent || "Radio: off")}</div>
       </div>
@@ -2622,7 +2622,7 @@ const radioModalTitle = document.getElementById("radioModalTitle");
 
 const HOT97_STREAM_URL = "https://26313.live.streamtheworld.com/WQHTFMAAC.aac";
 const MEGA979_STREAM_URL = "https://liveaudio.lamusica.com/NY_WSKQ_icy";
-const KQ945_STREAM_URL = "https://stream.revma.ihrhls.com/zc4792";
+const KQ945_STREAM_URL = "https://kq94.net";
 const Z100_STREAM_URL = "https://stream.revma.ihrhls.com/zc1469";
 
 const megaAudio = new Audio();
@@ -2658,7 +2658,7 @@ function setBtnState(btn, on) {
   btn.classList.toggle("on", !!on);
   const base = btn === btnMega979 ? "La Mega 97.9"
              : btn === btnHot97 ? "HOT 97.1"
-             : btn === btnKQ945 ? "KQ 94.5 FM (Santo Domingo)"
+             : btn === btnKQ945 ? "KQ 94.5 FM"
              : btn === btnZ100 ? "Z100"
              : "";
   btn.textContent = (on ? "⏸ " : "▶ ") + base;
@@ -2797,12 +2797,12 @@ async function toggleKQ() {
     setBtnState(btnHot97, false);
     setBtnState(btnMega979, false);
     setBtnState(btnZ100, false);
-    setRadioStatus("Radio: KQ 94.5 FM (Santo Domingo) playing");
+    setRadioStatus("Radio: KQ 94.5 FM playing");
   } catch (e) {
     kqPlaying = false;
     setBtnState(btnKQ945, false);
-    setRadioStatus("Radio: KQ 94.5 FM (Santo Domingo) failed to play");
-    alert("KQ 94.5 FM (Santo Domingo) could not start. Turn volume up and try again.");
+    setRadioStatus("Radio: KQ 94.5 FM failed to play");
+    alert("KQ 94.5 FM could not start. Turn volume up and try again.");
   }
 }
 
