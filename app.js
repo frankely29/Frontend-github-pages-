@@ -23,11 +23,15 @@ let mapReady = false;
 let didFitToZonesOnce = false;
 
 const ROTATE_ENABLED = true;
-const ROTATE_MIN_MPH = 2.0;
-const ROTATE_MIN_DELTA_DEG = 3;
-const ROTATE_RATE_LIMIT_MS = 200;
-const ROTATE_ANIM_MS = 250;
+const ROTATE_MIN_MPH = 1.0;
+const ROTATE_MIN_DELTA_DEG = 1.5;
+const ROTATE_RATE_LIMIT_MS = 120;
+const ROTATE_ANIM_MS = 220;
 const GPS_ACCURACY_THRESHOLD = 50;
+const HEADING_MIN_SPEED_MPS = 0.8;
+const HEADING_DERIVE_MIN_MILES = 0.002;
+const HEADING_SMOOTHING = 0.42;
+const HEADING_COMPASS_STALE_MS = 2500;
 const MAX_JUMP_MILES = 2.0;
 let lastMapBearingDeg = 0;
 let lastRotateTs = 0;
@@ -2499,6 +2503,25 @@ function shortestAngleDelta(a, b) {
   if (d < -180) d += 360;
   return d;
 }
+function blendAngleDeg(from, to, alpha = HEADING_SMOOTHING) {
+  if (!Number.isFinite(from)) return normDeg(to);
+  const a = clamp(alpha, 0, 1);
+  return normDeg(from + shortestAngleDelta(from, to) * a);
+}
+function getSelfMapCenter() {
+  if (navMarker && typeof navMarker.getLngLat === "function") {
+    const p = navMarker.getLngLat();
+    if (p && Number.isFinite(p.lng) && Number.isFinite(p.lat)) return { lng: p.lng, lat: p.lat };
+  }
+  if (userLatLng && Number.isFinite(userLatLng.lng) && Number.isFinite(userLatLng.lat)) {
+    return { lng: userLatLng.lng, lat: userLatLng.lat };
+  }
+  if (map && typeof map.getCenter === "function") {
+    const p = map.getCenter();
+    if (p && Number.isFinite(p.lng) && Number.isFinite(p.lat)) return { lng: p.lng, lat: p.lat };
+  }
+  return null;
+}
 function maybeRotateMapTo(deg) {
   if (!ROTATE_ENABLED) return;
   if (!map || !mapReady) return;
@@ -2511,20 +2534,105 @@ function maybeRotateMapTo(deg) {
   const delta = shortestAngleDelta(lastMapBearingDeg, target);
   if (Math.abs(delta) < ROTATE_MIN_DELTA_DEG) return;
 
+  const c = getSelfMapCenter();
+  if (!c) return;
+
   lastRotateTs = now;
   lastMapBearingDeg = target;
 
-  const c = (navMarker && typeof navMarker.getLngLat === "function")
-    ? navMarker.getLngLat()
-    : (userLatLng ? { lng: userLatLng.lng, lat: userLatLng.lat } : map.getCenter());
-  const z = map.getZoom();
-  map.easeTo({
-    center: [c.lng, c.lat],
-    zoom: z,
-    bearing: target,
-    duration: ROTATE_ANIM_MS,
-    essential: true,
+  suppressAutoDisableFor(ROTATE_ANIM_MS + 120, () => {
+    map.easeTo({
+      center: [c.lng, c.lat],
+      zoom: map.getZoom(),
+      bearing: target,
+      duration: ROTATE_ANIM_MS,
+      essential: true,
+    });
   });
+}
+let lastCompassHeadingDeg = null;
+let lastCompassTs = 0;
+let deviceOrientationWatching = false;
+let deviceOrientationArmDone = false;
+let lastHeadingSource = "none";
+let lastHeadingTs = 0;
+function getFreshCompassHeading(now = Date.now()) {
+  return Number.isFinite(lastCompassHeadingDeg) && (now - lastCompassTs) <= HEADING_COMPASS_STALE_MS
+    ? normDeg(lastCompassHeadingDeg)
+    : null;
+}
+function applyHeadingDeg(nextDeg, { source = "gps", ts = Date.now(), smooth = true, rotateMap = false, alpha = HEADING_SMOOTHING } = {}) {
+  if (!Number.isFinite(nextDeg)) return lastHeadingDeg;
+  const target = normDeg(nextDeg);
+  const finalDeg = smooth ? blendAngleDeg(lastHeadingDeg, target, alpha) : target;
+  lastHeadingDeg = finalDeg;
+  lastHeadingSource = source;
+  lastHeadingTs = ts;
+  setNavRotation(finalDeg);
+  if (rotateMap) maybeRotateMapTo(finalDeg);
+  return finalDeg;
+}
+function getScreenAngleDeg() {
+  const raw = Number(window.screen?.orientation?.angle ?? window.orientation ?? 0);
+  return Number.isFinite(raw) ? raw : 0;
+}
+function extractCompassHeadingDeg(evt) {
+  if (!evt) return null;
+  if (typeof evt.webkitCompassHeading === "number" && Number.isFinite(evt.webkitCompassHeading)) {
+    return normDeg(evt.webkitCompassHeading);
+  }
+  const alpha = Number(evt.alpha);
+  if (!Number.isFinite(alpha)) return null;
+  return normDeg((360 - alpha) + getScreenAngleDeg());
+}
+function handleDeviceOrientation(evt) {
+  const heading = extractCompassHeadingDeg(evt);
+  if (!Number.isFinite(heading)) return;
+  const ts = Date.now();
+  lastCompassHeadingDeg = heading;
+  lastCompassTs = ts;
+  const recentlyMoved = !!lastMoveTs && (ts - lastMoveTs) < 3500;
+  applyHeadingDeg(heading, {
+    source: "compass",
+    ts,
+    smooth: true,
+    rotateMap: autoCenter,
+    alpha: recentlyMoved ? 0.22 : 0.38,
+  });
+}
+function startDeviceOrientationWatch() {
+  if (deviceOrientationWatching || typeof window === "undefined") return;
+  deviceOrientationWatching = true;
+  window.addEventListener("deviceorientationabsolute", handleDeviceOrientation, true);
+  window.addEventListener("deviceorientation", handleDeviceOrientation, true);
+}
+async function requestDeviceOrientationAccess() {
+  try {
+    if (typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function") {
+      const result = await DeviceOrientationEvent.requestPermission();
+      if (result !== "granted") return false;
+    }
+    startDeviceOrientationWatch();
+    return true;
+  } catch (e) {
+    console.warn("Device orientation permission failed:", e);
+    return false;
+  }
+}
+function armDeviceOrientationAccess() {
+  if (deviceOrientationArmDone || typeof document === "undefined") return;
+  deviceOrientationArmDone = true;
+
+  const unlock = () => {
+    requestDeviceOrientationAccess().catch((e) => console.warn("Device orientation start failed:", e));
+    document.removeEventListener("pointerup", unlock, true);
+    document.removeEventListener("touchend", unlock, true);
+    document.removeEventListener("click", unlock, true);
+  };
+
+  document.addEventListener("pointerup", unlock, true);
+  document.addEventListener("touchend", unlock, true);
+  document.addEventListener("click", unlock, true);
 }
 function computeBearingDeg(from, to) {
   const toRad = (x) => (x * Math.PI) / 180;
@@ -2560,12 +2668,16 @@ function startLocationWatch() {
     navMarker.getElement().style.zIndex = "2000";
   }
 
+  requestDeviceOrientationAccess().catch(() => {});
+  armDeviceOrientationAccess();
+
   navigator.geolocation.watchPosition(
     (pos) => {
       const lat = pos.coords.latitude;
       const lng = pos.coords.longitude;
       const heading = pos.coords.heading;
       const accuracy = pos.coords.accuracy;
+      const speedMps = pos.coords.speed;
       const ts = pos.timestamp || Date.now();
 
       userLatLng = { lat, lng };
@@ -2579,43 +2691,80 @@ function startLocationWatch() {
       }
 
       let isMoving = false;
+      let headingCandidate = null;
+      let headingSource = "stale";
+      const freshCompass = getFreshCompassHeading(ts);
 
       if (lastPos) {
         const dMi = haversineMiles({ lat: lastPos.lat, lng: lastPos.lng }, userLatLng);
         const dtSec = Math.max(1, (ts - lastPos.ts) / 1000);
         const mph = (dMi / dtSec) * 3600;
         const hasGoodAccuracy = Number.isFinite(accuracy) && accuracy < GPS_ACCURACY_THRESHOLD;
+        const speedValid = Number.isFinite(speedMps) && speedMps >= HEADING_MIN_SPEED_MPS;
+        const movedEnough = dMi >= HEADING_DERIVE_MIN_MILES;
 
-        isMoving = mph >= ROTATE_MIN_MPH && hasGoodAccuracy;
-        // Always update lastHeadingDeg when we have good GPS accuracy.
-        if (hasGoodAccuracy) {
-          if (typeof heading === "number" && Number.isFinite(heading)) {
-            lastHeadingDeg = heading;
-          } else if (dMi > 0.01) {
-            lastHeadingDeg = computeBearingDeg({ lat: lastPos.lat, lng: lastPos.lng }, userLatLng);
-          }
+        isMoving = (mph >= ROTATE_MIN_MPH || speedValid || movedEnough) && hasGoodAccuracy;
+
+        if (Number.isFinite(heading) && (speedValid || mph >= ROTATE_MIN_MPH || hasGoodAccuracy)) {
+          headingCandidate = heading;
+          headingSource = "gps";
+        } else if (movedEnough && hasGoodAccuracy) {
+          headingCandidate = computeBearingDeg({ lat: lastPos.lat, lng: lastPos.lng }, userLatLng);
+          headingSource = "derived";
+        } else if (Number.isFinite(freshCompass)) {
+          headingCandidate = freshCompass;
+          headingSource = "compass";
         }
-        if (isMoving) lastMoveTs = ts;
+
+        if (isMoving || movedEnough) lastMoveTs = ts;
+      } else if (Number.isFinite(freshCompass)) {
+        headingCandidate = freshCompass;
+        headingSource = "compass";
       }
 
       lastPos = { lat, lng, ts };
 
-      setNavRotation(lastHeadingDeg);
-      setNavVisual(isMoving);
-      // Rotate the map toward the current heading whenever a valid heading exists.
-      if (Number.isFinite(lastHeadingDeg)) {
-        maybeRotateMapTo(lastHeadingDeg);
+      if (Number.isFinite(headingCandidate)) {
+        applyHeadingDeg(headingCandidate, {
+          source: headingSource,
+          ts,
+          smooth: gpsFirstFixDone,
+          rotateMap: false,
+          alpha: headingSource === "gps" ? 0.58 : headingSource === "derived" ? 0.46 : 0.30,
+        });
+      } else if (Number.isFinite(lastHeadingDeg)) {
+        setNavRotation(lastHeadingDeg);
       }
+
+      setNavVisual(isMoving);
+
+      const targetBearing = Number.isFinite(lastHeadingDeg)
+        ? normDeg(lastHeadingDeg)
+        : (Number.isFinite(freshCompass) ? normDeg(freshCompass) : map.getBearing());
 
       if (!gpsFirstFixDone) {
         gpsFirstFixDone = true;
         const targetZoom = Math.max(map.getZoom(), 12.5);
-        suppressAutoDisableFor(1200, () => map.flyTo({ center: [lng, lat], zoom: targetZoom, duration: 700 }));
-      } else {
-        if (autoCenter && map) {
-          const c = (navMarker && navMarker.getLngLat) ? navMarker.getLngLat() : { lng, lat };
-          suppressAutoDisableFor(700, () => map.flyTo({ center: [c.lng, c.lat], duration: 500 }));
-        }
+        suppressAutoDisableFor(1200, () => map.easeTo({
+          center: [lng, lat],
+          zoom: targetZoom,
+          bearing: targetBearing,
+          duration: 700,
+          essential: true,
+        }));
+        lastMapBearingDeg = targetBearing;
+        lastRotateTs = Date.now();
+      } else if (autoCenter && map) {
+        const c = getSelfMapCenter() || { lng, lat };
+        suppressAutoDisableFor(700, () => map.easeTo({
+          center: [c.lng, c.lat],
+          zoom: map.getZoom(),
+          bearing: targetBearing,
+          duration: 320,
+          essential: true,
+        }));
+        lastMapBearingDeg = targetBearing;
+        lastRotateTs = Date.now();
       }
 
       if (currentFrame) updateRecommendation(currentFrame);
@@ -2623,7 +2772,7 @@ function startLocationWatch() {
       scheduleWeatherUpdateSoon();
 
       // community push (auth only)
-      communityMaybePushPresence(ts, heading, lastGpsAccuracyM);
+      communityMaybePushPresence(ts, Number.isFinite(lastHeadingDeg) ? lastHeadingDeg : heading, lastGpsAccuracyM);
     },
     (err) => {
       console.warn("Geolocation error:", err);
@@ -2958,7 +3107,8 @@ const radioModalTitle = document.getElementById("radioModalTitle");
 
 const HOT97_STREAM_URL = "https://26313.live.streamtheworld.com/WQHTFMAAC.aac";
 const MEGA979_STREAM_URL = "https://liveaudio.lamusica.com/NY_WSKQ_icy";
-const KQ945_WEB_URL = "https://kq94.net/";
+const KQ945_STREAM_URL = "https://radio.yaservers.com:9990/stream?icy=http";
+const KQ945_SITE_URL = "https://kq94.net/";
 const Z100_STREAM_URL = "https://stream.revma.ihrhls.com/zc1469";
 
 const megaAudio = new Audio();
@@ -2972,6 +3122,7 @@ hot97Audio.preload = "none";
 hot97Audio.crossOrigin = "anonymous";
 
 const kqAudio = new Audio();
+kqAudio.src = KQ945_STREAM_URL;
 kqAudio.preload = "none";
 kqAudio.crossOrigin = "anonymous";
 
@@ -3005,11 +3156,6 @@ function closeHot97Modal() {
     radioModal.setAttribute("aria-hidden", "true");
   }
   if (radioFrame) radioFrame.src = "about:blank";
-  if (kqPlaying) {
-    kqPlaying = false;
-    setBtnState(btnKQ945, false);
-    if (!hot97Playing && !megaPlaying && !z100Playing) setRadioStatus("Radio: off");
-  }
 }
 function openHot97Modal() { closeHot97Modal(); }
 
@@ -3131,21 +3277,36 @@ async function toggleKQ() {
   if (megaPlaying) { megaAudio.pause(); megaPlaying = false; setBtnState(btnMega979, false); }
   if (z100Playing) { z100Audio.pause(); z100Playing = false; setBtnState(btnZ100, false); }
 
+  closeHot97Modal();
+
   if (kqPlaying) {
+    try { kqAudio.pause(); } catch {}
     kqPlaying = false;
     setBtnState(btnKQ945, false);
     setRadioStatus("Radio: off");
-    closeHot97Modal();
     return;
   }
 
-  kqPlaying = true;
-  setBtnState(btnKQ945, true);
-  setBtnState(btnHot97, false);
-  setBtnState(btnMega979, false);
-  setBtnState(btnZ100, false);
-  setRadioStatus("Radio: KQ 94.5 FM (DR) opened");
-  openStationWebModal("KQ 94.5 FM (DR)", KQ945_WEB_URL);
+  try {
+    kqAudio.src = KQ945_STREAM_URL;
+    kqAudio.volume = 1;
+    const p = kqAudio.play();
+    if (p && typeof p.then === "function") await p;
+
+    kqPlaying = true;
+    setBtnState(btnKQ945, true);
+    setBtnState(btnHot97, false);
+    setBtnState(btnMega979, false);
+    setBtnState(btnZ100, false);
+    setRadioStatus("Radio: KQ 94.5 FM playing");
+  } catch (e) {
+    console.warn("KQ 94.5 play failed:", e);
+    kqPlaying = false;
+    setBtnState(btnKQ945, false);
+    setRadioStatus("Radio: KQ 94.5 FM failed to play");
+    try { window.open(KQ945_SITE_URL, "_blank", "noopener"); } catch {}
+    alert("KQ 94.5 FM could not start. Turn volume up and try again.");
+  }
 }
 
 async function toggleZ100() {
@@ -3248,6 +3409,11 @@ kqAudio.addEventListener("ended", () => {
   kqPlaying = false;
   setBtnState(btnKQ945, false);
   setRadioStatus("Radio: off");
+});
+kqAudio.addEventListener("error", () => {
+  kqPlaying = false;
+  setBtnState(btnKQ945, false);
+  setRadioStatus("Radio: KQ 94.5 FM stream error");
 });
 z100Audio.addEventListener("ended", () => {
   z100Playing = false;
@@ -3846,6 +4012,60 @@ function nearestZoneToUser(frame, latlng) {
   return best;
 }
 
+let recordTripToastTimer = null;
+function ensureRecordTripToast() {
+  let el = document.getElementById("recordTripToast");
+  if (el) return el;
+
+  el = document.createElement("div");
+  el.id = "recordTripToast";
+  el.setAttribute("aria-hidden", "true");
+  el.style.cssText = [
+    "position:fixed",
+    "left:50%",
+    "bottom:calc(env(safe-area-inset-bottom, 0px) + 182px)",
+    "transform:translate(-50%, 18px) scale(0.94)",
+    "opacity:0",
+    "pointer-events:none",
+    "z-index:9800",
+    "transition:opacity 220ms ease, transform 220ms ease",
+  ].join(";");
+  el.innerHTML = `
+    <div aria-label="Trip recorded" style="
+      width:72px;
+      height:72px;
+      border-radius:999px;
+      background:#18b45b;
+      display:grid;
+      place-items:center;
+      color:#fff;
+      font:900 36px/1 system-ui,-apple-system,Segoe UI,Roboto,Arial;
+      box-shadow:0 16px 34px rgba(0,0,0,0.24), 0 0 0 6px rgba(24,180,91,0.18);
+      user-select:none;
+    ">✔</div>
+  `;
+  document.body.appendChild(el);
+  return el;
+}
+function hideRecordTripToast() {
+  const el = document.getElementById("recordTripToast");
+  if (!el) return;
+  el.style.opacity = "0";
+  el.style.transform = "translate(-50%, 18px) scale(0.94)";
+  el.setAttribute("aria-hidden", "true");
+}
+function showRecordTripToast() {
+  const el = ensureRecordTripToast();
+  if (recordTripToastTimer) clearTimeout(recordTripToastTimer);
+  el.style.opacity = "1";
+  el.style.transform = "translate(-50%, 0) scale(1)";
+  el.setAttribute("aria-hidden", "false");
+  recordTripToastTimer = setTimeout(() => {
+    hideRecordTripToast();
+    recordTripToastTimer = null;
+  }, 3000);
+}
+
 async function sendPoliceReport() {
   if (!authHeaderOK()) {
     setAuthUI(false, "Sign in to report police.");
@@ -3899,8 +4119,7 @@ async function sendPickupLog() {
 
     schedulePickupOverlayRefresh({ force: true });
 
-    const label = near?.zone_name ? `${near.zone_name}${near.borough ? ` (${near.borough})` : ""}` : "your location";
-    alert(`Trip recorded ✅ (${label})`);
+    showRecordTripToast();
   } catch (e) {
     alert(`Trip record failed: ${e.message || e}`);
   } finally {
