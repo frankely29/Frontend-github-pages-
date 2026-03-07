@@ -3274,7 +3274,7 @@ function makeDriverIcon(name, headingDeg, labelSide = "right", labelDx = 0, labe
   const el = document.createElement("div");
   el.className = "otherDrvWrap";
   el.innerHTML = `
-    <div class="otherArrowWrap otherPulse" style="transform:rotate(${rot}deg)">
+    <div class="otherArrowWrap otherPulse" style="--heading-deg:${rot}deg">
       <div class="otherArrow"></div>
     </div>
     <div class="otherDrvName" style="transform:translate(${labelTranslateX}px, ${labelTranslateY}px);font-size:${labelFontPx}px;max-width:${labelMaxWidthPx}px;">
