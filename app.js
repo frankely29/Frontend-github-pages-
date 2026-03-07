@@ -811,7 +811,7 @@ function musicPanelHTML() {
         <button id="dockMegaBtn" class="chipBtn">${megaPlaying ? "⏸" : "▶"} La Mega 97.9</button>
         <button id="dockKQBtn" class="chipBtn">${kqPlaying ? "⏸" : "▶"} KQ 94.5</button>
         <button id="dockZ100Btn" class="chipBtn">${z100Playing ? "⏸" : "▶"} Z100</button>
-        <div style="width:100%;font-weight:700;opacity:0.78;margin-top:2px;">${escapeHtml(radioStatusEl?.textContent || "Radio: off")}</div>
+        <div style="margin-left:auto;font-weight:700;opacity:0.75;">${escapeHtml(radioStatusEl?.textContent || "Radio: off")}</div>
       </div>
     </div>
   `;
@@ -879,8 +879,11 @@ function modesPanelHTML() {
 function wireModesPanel() {
   document.getElementById("dockAuthBtn")?.addEventListener("click", (e) => {
     e.preventDefault();
-    if (authHeaderOK()) clearAuth();
-    else setAuthUI(false, "Status: signed out");
+    if (authHeaderOK()) {
+      signOutNow({ reload: true });
+      return;
+    }
+    setAuthUI(false, "Status: signed out");
     openDrawer("modes", "Modes", modesPanelHTML());
     wireModesPanel();
   });
@@ -991,10 +994,10 @@ function wireProfilePanel() {
   document.getElementById("profileSignOutBtn")?.addEventListener("click", (e) => {
     e.preventDefault();
     if (authHeaderOK()) {
-      clearAuth();
-    } else {
-      setAuthUI(false, "Status: signed out");
+      signOutNow({ reload: true });
+      return;
     }
+    setAuthUI(false, "Status: signed out");
     closeDrawer();
   });
 }
@@ -1020,7 +1023,7 @@ function chatPanelHTML() {
 }
 
 function chatMsgCursor(msg) {
-  return msg?.created_at || msg?.id || null;
+  return msg?.id ?? msg?.created_at ?? null;
 }
 
 function chatMsgKey(msg) {
@@ -1044,17 +1047,31 @@ function isChatNearBottom(listEl, px = 80) {
   return listEl.scrollHeight - listEl.scrollTop - listEl.clientHeight <= px;
 }
 
-function renderChatMessages(messages) {
+function setChatStatus(text) {
   const listEl = document.getElementById("chatList");
-  if (!listEl || !Array.isArray(messages)) return;
-  if (!messages.length) {
-    if (!listEl.children.length) {
-      listEl.innerHTML = '<div class="chatEmpty">No messages yet.</div>';
-    }
-    return;
+  if (!listEl) return;
+  if (listEl.dataset.hasMessages === "1") return;
+  listEl.innerHTML = `<div class="chatEmpty">${escapeHtml(text)}</div>`;
+}
+
+function chatResetState() {
+  chatLastSeen = null;
+  chatSeenKeys = new Set();
+}
+
+function renderChatMessages(messages, { replace = false } = {}) {
+  const listEl = document.getElementById("chatList");
+  if (!listEl) return;
+
+  if (replace) {
+    listEl.innerHTML = "";
+    listEl.dataset.hasMessages = "0";
   }
 
-  if (listEl.querySelector('.chatEmpty')) listEl.innerHTML = '';
+  if (!Array.isArray(messages) || !messages.length) {
+    if (replace) setChatStatus("No messages yet.");
+    return;
+  }
 
   const nearBottom = isChatNearBottom(listEl, 80);
   const frag = document.createDocumentFragment();
@@ -1090,28 +1107,45 @@ function renderChatMessages(messages) {
     frag.appendChild(row);
 
     const cursor = chatMsgCursor(msg);
-    if (cursor) chatLastSeen = cursor;
+    if (cursor !== null && cursor !== undefined) chatLastSeen = cursor;
     appended += 1;
   }
 
-  if (!appended) return;
+  if (!appended) {
+    if (replace) setChatStatus("No messages yet.");
+    return;
+  }
+
+  listEl.dataset.hasMessages = "1";
+  if (replace) listEl.innerHTML = "";
   listEl.appendChild(frag);
-  if (nearBottom) listEl.scrollTop = listEl.scrollHeight;
+  if (nearBottom || replace) listEl.scrollTop = listEl.scrollHeight;
+}
+
+async function chatFetchMessages({ after = null, limit = 50 } = {}) {
+  if (!authHeaderOK()) return [];
+  const qs = new URLSearchParams();
+  qs.set("limit", String(limit));
+  if (after !== null && after !== undefined && String(after).trim() !== "") {
+    qs.set("after", String(after));
+  }
+  const data = await getJSONAuth(`/chat/rooms/${CHAT_ROOM}?${qs.toString()}`, communityToken);
+  return Array.isArray(data) ? data : data?.messages || [];
+}
+
+async function chatLoadInitial() {
+  const msgs = await chatFetchMessages({ limit: 60 });
+  renderChatMessages(msgs, { replace: true });
 }
 
 async function chatFetchNew() {
-  if (!authHeaderOK()) return [];
-  const q = chatLastSeen ? `?after=${encodeURIComponent(chatLastSeen)}&limit=50` : "?limit=50";
-  const data = await getJSONAuth(`/chat/rooms/${CHAT_ROOM}${q}`, communityToken);
-  const msgs = Array.isArray(data) ? data : data?.messages || [];
-  return msgs;
+  return chatFetchMessages({ after: chatLastSeen, limit: 50 });
 }
 
 async function chatSend(text) {
   if (!authHeaderOK()) throw new Error("Not signed in");
   const body = { text };
-  const msg = await postJSON(`/chat/rooms/${CHAT_ROOM}`, body, communityToken);
-  return msg;
+  return postJSON(`/chat/rooms/${CHAT_ROOM}`, body, communityToken);
 }
 
 async function chatPollOnce() {
@@ -1121,16 +1155,11 @@ async function chatPollOnce() {
     renderChatMessages(msgs);
   } catch (e) {
     console.warn("chat poll failed:", e);
-    const listEl = document.getElementById("chatList");
-    if (listEl && !listEl.children.length) {
-      listEl.innerHTML = '<div class="chatEmpty">Chat unavailable right now.</div>';
-    }
   }
 }
 
 function startChatPolling() {
   if (chatPollTimer || !authHeaderOK() || openPanelKey !== "chat") return;
-  chatPollOnce();
   chatPollTimer = setInterval(chatPollOnce, CHAT_POLL_MS);
 }
 
@@ -1145,20 +1174,17 @@ function syncChatPollingState() {
   else stopChatPolling();
 }
 
-function resetChatPanelState() {
-  chatLastSeen = null;
-  chatSeenKeys.clear();
-  const listEl = document.getElementById("chatList");
-  if (listEl) listEl.innerHTML = '<div class="chatEmpty">Loading messages…</div>';
-}
-
 function wireChatPanel() {
   const chatInput = document.getElementById("chatInput");
   const chatSendBtn = document.getElementById("chatSendBtn");
-  const chatListEl = document.getElementById("chatList");
-  if (!chatInput || !chatSendBtn || !chatListEl) return;
+  if (!chatInput || !chatSendBtn) return;
 
-  resetChatPanelState();
+  chatInput.style.fontSize = "16px";
+  chatInput.setAttribute("autocapitalize", "sentences");
+  chatInput.setAttribute("autocomplete", "off");
+  chatInput.setAttribute("autocorrect", "on");
+  chatInput.setAttribute("spellcheck", "true");
+  chatInput.setAttribute("enterkeyhint", "send");
 
   const sendNow = async () => {
     const text = String(chatInput.value || "").trim();
@@ -1168,13 +1194,11 @@ function wireChatPanel() {
     try {
       const msg = await chatSend(text);
       chatInput.value = "";
-      if (msg) {
-        renderChatMessages(Array.isArray(msg) ? msg : [msg]);
-      }
+      if (msg) renderChatMessages(Array.isArray(msg) ? msg : [msg]);
       await chatPollOnce();
     } catch (e) {
       console.warn("chat send failed:", e);
-      alert(e?.detail || e?.message || "Chat send failed.");
+      alert(e?.message || "Message failed to send.");
     } finally {
       chatSendBtn.disabled = false;
     }
@@ -1190,7 +1214,11 @@ function wireChatPanel() {
     sendNow();
   });
 
-  chatPollOnce();
+  chatResetState();
+  chatLoadInitial().then(() => chatPollOnce()).catch((e) => {
+    console.warn("chat initial load failed:", e);
+    setChatStatus("Chat unavailable right now.");
+  });
 }
 
 function colorsPanelHTML() {
@@ -1347,9 +1375,11 @@ function initMap() {
     // Presence refresh on moves to keep label collision offsets stable
     map.on("moveend", () => {
       if (authHeaderOK()) pullPresenceAll().catch(() => {});
+      applyDriverLabelZoomStyles();
     });
     map.on("zoomend", () => {
       if (authHeaderOK()) pullPresenceAll().catch(() => {});
+      applyDriverLabelZoomStyles();
     });
 
     // Zone click popup (restored)
@@ -1367,6 +1397,8 @@ function initMap() {
     setTimeout(() => map.triggerRepaint(), 150);
     setTimeout(() => map.triggerRepaint(), 400);
     setTimeout(() => map.triggerRepaint(), 800);
+
+    applyDriverLabelZoomStyles();
 
     if (pendingFrame) {
       renderFrame(pendingFrame);
@@ -2077,7 +2109,8 @@ if (btnCenter) {
         suppressAutoDisableFor(900, () => {
           map.flyTo({
             center: [c.lng, c.lat],
-            zoom: Math.max(map.getZoom(), 13.0), // keeps you tight on your arrow
+            zoom: Math.max(map.getZoom(), 13.0),
+            bearing: Number.isFinite(lastHeadingDeg) ? normDeg(lastHeadingDeg) : map.getBearing(),
             duration: 600
           });
         });
@@ -2123,6 +2156,7 @@ function refreshNavNameLabel() {
   const myName = authHeaderOK() ? me?.display_name || "" : "";
   el.textContent = myName;
   el.style.display = myName ? "block" : "none";
+  applyDriverLabelZoomStyles();
 }
 
 function setNavVisual(isMoving) {
@@ -2160,7 +2194,9 @@ function maybeRotateMapTo(deg) {
   lastRotateTs = now;
   lastMapBearingDeg = target;
 
-  const c = map.getCenter();
+  const c = (navMarker && typeof navMarker.getLngLat === "function")
+    ? navMarker.getLngLat()
+    : (userLatLng ? { lng: userLatLng.lng, lat: userLatLng.lat } : map.getCenter());
   const z = map.getZoom();
   map.easeTo({
     center: [c.lng, c.lat],
@@ -2246,30 +2282,19 @@ function startLocationWatch() {
 
       setNavRotation(lastHeadingDeg);
       setNavVisual(isMoving);
+      // Rotate the map toward the current heading whenever a valid heading exists.
+      if (Number.isFinite(lastHeadingDeg)) {
+        maybeRotateMapTo(lastHeadingDeg);
+      }
 
       if (!gpsFirstFixDone) {
         gpsFirstFixDone = true;
         const targetZoom = Math.max(map.getZoom(), 12.5);
-        suppressAutoDisableFor(1200, () => map.easeTo({
-          center: [lng, lat],
-          zoom: targetZoom,
-          bearing: Number.isFinite(lastHeadingDeg) ? normDeg(lastHeadingDeg) : map.getBearing(),
-          duration: 700,
-          essential: true,
-        }));
-        if (Number.isFinite(lastHeadingDeg)) lastMapBearingDeg = normDeg(lastHeadingDeg);
+        suppressAutoDisableFor(1200, () => map.flyTo({ center: [lng, lat], zoom: targetZoom, duration: 700 }));
       } else {
         if (autoCenter && map) {
           const c = (navMarker && navMarker.getLngLat) ? navMarker.getLngLat() : { lng, lat };
-          suppressAutoDisableFor(700, () => map.easeTo({
-            center: [c.lng, c.lat],
-            bearing: Number.isFinite(lastHeadingDeg) ? normDeg(lastHeadingDeg) : map.getBearing(),
-            duration: 450,
-            essential: true,
-          }));
-          if (Number.isFinite(lastHeadingDeg)) lastMapBearingDeg = normDeg(lastHeadingDeg);
-        } else if (Number.isFinite(lastHeadingDeg)) {
-          maybeRotateMapTo(lastHeadingDeg);
+          suppressAutoDisableFor(700, () => map.flyTo({ center: [c.lng, c.lat], duration: 500 }));
         }
       }
 
@@ -2613,7 +2638,7 @@ const radioModalTitle = document.getElementById("radioModalTitle");
 
 const HOT97_STREAM_URL = "https://26313.live.streamtheworld.com/WQHTFMAAC.aac";
 const MEGA979_STREAM_URL = "https://liveaudio.lamusica.com/NY_WSKQ_icy";
-const KQ945_STREAM_URL = "https://stream.revma.ihrhls.com/zc4792";
+const KQ945_WEB_URL = "https://kq94.net/";
 const Z100_STREAM_URL = "https://stream.revma.ihrhls.com/zc1469";
 
 const megaAudio = new Audio();
@@ -2627,7 +2652,6 @@ hot97Audio.preload = "none";
 hot97Audio.crossOrigin = "anonymous";
 
 const kqAudio = new Audio();
-kqAudio.src = KQ945_STREAM_URL;
 kqAudio.preload = "none";
 kqAudio.crossOrigin = "anonymous";
 
@@ -2661,8 +2685,22 @@ function closeHot97Modal() {
     radioModal.setAttribute("aria-hidden", "true");
   }
   if (radioFrame) radioFrame.src = "about:blank";
+  if (kqPlaying) {
+    kqPlaying = false;
+    setBtnState(btnKQ945, false);
+    if (!hot97Playing && !megaPlaying && !z100Playing) setRadioStatus("Radio: off");
+  }
 }
 function openHot97Modal() { closeHot97Modal(); }
+
+function openStationWebModal(title, url) {
+  if (!radioModal || !radioFrame || !radioModalTitle) return;
+  radioModalTitle.textContent = title;
+  radioFrame.src = url;
+  radioModal.classList.add("open");
+  radioModal.setAttribute("aria-hidden", "false");
+}
+
 
 async function toggleMega() {
   try {
@@ -2774,27 +2812,20 @@ async function toggleKQ() {
   if (z100Playing) { z100Audio.pause(); z100Playing = false; setBtnState(btnZ100, false); }
 
   if (kqPlaying) {
-    kqAudio.pause();
     kqPlaying = false;
     setBtnState(btnKQ945, false);
     setRadioStatus("Radio: off");
+    closeHot97Modal();
     return;
   }
-  try {
-    kqAudio.src = KQ945_STREAM_URL;
-    await kqAudio.play();
-    kqPlaying = true;
-    setBtnState(btnKQ945, true);
-    setBtnState(btnHot97, false);
-    setBtnState(btnMega979, false);
-    setBtnState(btnZ100, false);
-    setRadioStatus("Radio: KQ 94.5 playing");
-  } catch (e) {
-    kqPlaying = false;
-    setBtnState(btnKQ945, false);
-    setRadioStatus("Radio: KQ 94.5 failed to play");
-    alert("KQ 94.5 could not start. Turn volume up and try again.");
-  }
+
+  kqPlaying = true;
+  setBtnState(btnKQ945, true);
+  setBtnState(btnHot97, false);
+  setBtnState(btnMega979, false);
+  setBtnState(btnZ100, false);
+  setRadioStatus("Radio: KQ 94.5 FM (DR) opened");
+  openStationWebModal("KQ 94.5 FM (DR)", KQ945_WEB_URL);
 }
 
 async function toggleZ100() {
@@ -2962,6 +2993,16 @@ function syncGhostUI() {
   if (authGhost) authGhost.checked = ghostOn;
 }
 
+function signOutNow({ reload = false } = {}) {
+  clearAuth();
+  closeDrawer();
+  if (reload) {
+    setTimeout(() => {
+      window.location.reload();
+    }, 40);
+  }
+}
+
 function setAuthUI(signedIn, note) {
   if (btnAuth) btnAuth.textContent = signedIn ? "Sign out" : "Sign in";
   if (communityNote) {
@@ -2997,11 +3038,14 @@ function clearAuth() {
   communityToken = "";
   me = null;
   localStorage.removeItem(LS_TOKEN);
+  localStorage.removeItem("community_token");
   chatLastSeen = null;
-  chatSeenKeys.clear();
+  chatSeenKeys = new Set();
   stopChatPolling();
-  setAuthUI(false, "Status: signed out");
   clearOtherDrivers();
+  if (authPass) authPass.value = "";
+  if (authGhost) authGhost.checked = false;
+  setAuthUI(false, "Status: signed out");
 }
 
 function authHeaderOK() {
@@ -3183,10 +3227,10 @@ if (btnAuth) {
     e.preventDefault();
     e.stopPropagation();
     if (authHeaderOK()) {
-      clearAuth();
-    } else {
-      setAuthUI(false, "Status: signed out");
+      signOutNow({ reload: true });
+      return;
     }
+    setAuthUI(false, "Status: signed out");
   });
 }
 
@@ -3228,34 +3272,32 @@ if (btnDeleteAccount) {
 }
 
 // other drivers marker HTML
-function driverLabelFontPx(zoom) {
-  if (zoom >= 15) return 12;
-  if (zoom >= 14) return 11.5;
-  if (zoom >= 13) return 11;
-  if (zoom >= 12) return 10.5;
-  if (zoom >= 11) return 10;
-  return 9;
+function driverLabelFontPx() {
+  const z = map?.getZoom?.() || 12;
+  if (z >= 15) return 11;
+  if (z >= 14) return 10.5;
+  if (z >= 13) return 10;
+  if (z >= 12) return 9.5;
+  if (z >= 11) return 9;
+  if (z >= 10) return 8.5;
+  return 8;
 }
 
-function driverLabelMaxWidthPx(zoom) {
-  if (zoom >= 15) return 170;
-  if (zoom >= 14) return 160;
-  if (zoom >= 13) return 148;
-  if (zoom >= 12) return 136;
-  if (zoom >= 11) return 122;
-  return 108;
+function applyDriverLabelZoomStyles() {
+  const sizePx = driverLabelFontPx();
+  document.querySelectorAll(".otherDrvName, .meName").forEach((el) => {
+    el.style.fontSize = `${sizePx}px`;
+    el.style.padding = sizePx <= 8.5 ? "2px 6px" : "3px 7px";
+  });
 }
 
-function sameSpotKey(lat, lng) {
-  return `${Number(lat).toFixed(5)},${Number(lng).toFixed(5)}`;
-}
-
-function makeDriverIcon(name, headingDeg, labelSide = "right", labelDx = 0, labelDy = 0, labelFontPx = 11, labelMaxWidthPx = 160) {
+function makeDriverIcon(name, headingDeg, labelSide = "right", labelDx = 0, labelDy = 0) {
   const safe = (name || "Driver").trim() || "Driver";
   const rot = Number.isFinite(headingDeg) ? headingDeg : 0;
   const defaultLabelX = labelSide === "left" ? -28 : 28;
   const labelTranslateX = Number.isFinite(labelDx) ? labelDx : defaultLabelX;
   const labelTranslateY = Number.isFinite(labelDy) ? labelDy : -8;
+  const fontPx = driverLabelFontPx();
 
   const el = document.createElement("div");
   el.className = "otherDrvWrap";
@@ -3263,7 +3305,7 @@ function makeDriverIcon(name, headingDeg, labelSide = "right", labelDx = 0, labe
     <div class="otherArrowWrap otherPulse" style="transform:rotate(${rot}deg)">
       <div class="otherArrow"></div>
     </div>
-    <div class="otherDrvName" style="transform:translate(${labelTranslateX}px, ${labelTranslateY}px);font-size:${labelFontPx}px;max-width:${labelMaxWidthPx}px;">
+    <div class="otherDrvName" style="font-size:${fontPx}px;transform:translate(${labelTranslateX}px, ${labelTranslateY}px);">
       ${escapeHtml(safe)}
     </div>
   `;
@@ -3277,7 +3319,7 @@ function clearOtherDrivers() {
   otherMarkers.clear();
 }
 
-function upsertDriverMarker(userId, name, lat, lng, heading, labelSide, labelDx = 0, labelDy = 0, labelFontPx = 11, labelMaxWidthPx = 160) {
+function upsertDriverMarker(userId, name, lat, lng, heading, labelSide, labelDx = 0, labelDy = 0) {
   if (!Number.isFinite(lat) || !Number.isFinite(lng) || !map) return;
   if (!userId) return;
 
@@ -3285,12 +3327,12 @@ function upsertDriverMarker(userId, name, lat, lng, heading, labelSide, labelDx 
   if (existing) {
     existing.setLngLat([lng, lat]);
     const el = existing.getElement();
-    const newEl = makeDriverIcon(name || `Driver ${userId}`, heading, labelSide, labelDx, labelDy, labelFontPx, labelMaxWidthPx);
+    const newEl = makeDriverIcon(name || `Driver ${userId}`, heading, labelSide, labelDx, labelDy);
     el.innerHTML = newEl.innerHTML;
     return;
   }
 
-  const el = makeDriverIcon(name || `Driver ${userId}`, heading, labelSide, labelDx, labelDy, labelFontPx, labelMaxWidthPx);
+  const el = makeDriverIcon(name || `Driver ${userId}`, heading, labelSide, labelDx, labelDy);
   const mk = new maplibregl.Marker({ element: el, anchor: "center" }).setLngLat([lng, lat]).addTo(map);
 
   if (!debugOnce.otherMarker) {
@@ -3299,6 +3341,7 @@ function upsertDriverMarker(userId, name, lat, lng, heading, labelSide, labelDx 
   }
 
   otherMarkers.set(userId, mk);
+  applyDriverLabelZoomStyles();
 }
 
 async function pullPresenceAll() {
@@ -3315,6 +3358,7 @@ async function pullPresenceAll() {
     for (const it of items) {
       const uid = String(it.user_id ?? it.userId ?? it.id ?? "");
       if (!uid) continue;
+
       if (me && String(me.id) === uid) continue;
 
       const lat = Number(it.lat ?? it.latitude ?? NaN);
@@ -3322,7 +3366,9 @@ async function pullPresenceAll() {
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
 
       const updated = Number(it.updated_at_unix ?? it.ts_unix ?? it.updated_at ?? NaN);
-      if (Number.isFinite(updated) && (now - updated > PRESENCE_STALE_SEC)) continue;
+      if (Number.isFinite(updated)) {
+        if (now - updated > PRESENCE_STALE_SEC) continue;
+      }
 
       const name = it.display_name || it.name || it.email || "Driver";
       const heading = Number(it.heading ?? it.bearing ?? NaN);
@@ -3330,56 +3376,74 @@ async function pullPresenceAll() {
       seen.add(uid);
     }
 
-    const zoom = map?.getZoom?.() || 12;
-    const labelFontPx = driverLabelFontPx(zoom);
-    const labelMaxWidthPx = driverLabelMaxWidthPx(zoom);
     const selfPt = userLatLng ? projectToPoint(userLatLng.lng, userLatLng.lat) : null;
 
-    const groupsBySpot = new Map();
-    for (const drv of visibleDrivers) {
-      const key = sameSpotKey(drv.lat, drv.lng);
-      if (!groupsBySpot.has(key)) groupsBySpot.set(key, []);
-      groupsBySpot.get(key).push(drv);
+    const driversWithPoints = visibleDrivers.map((drv) => ({
+      ...drv,
+      basePoint: projectToPoint(drv.lng, drv.lat),
+    }));
+
+    // Compute a zoom‑dependent collision radius: at zoom 10 it’s ~28 px, at zoom 12 it’s ~9 px.
+    // This keeps clusters tight when zoomed in, and wider when zoomed out.
+    const zoom = map?.getZoom?.() || 12;
+    const COLLISION_PX = Math.max(20, 28 / Math.max(zoom - 9, 1));
+    const clustered = new Set();
+    const collisionClusters = [];
+
+    for (let i = 0; i < driversWithPoints.length; i++) {
+      const start = driversWithPoints[i];
+      if (clustered.has(start.uid)) continue;
+
+      const cluster = [];
+      const queue = [start];
+      clustered.add(start.uid);
+
+      while (queue.length) {
+        const current = queue.pop();
+        cluster.push(current);
+
+        for (const candidate of driversWithPoints) {
+          if (clustered.has(candidate.uid)) continue;
+          if (pointDistance(current.basePoint, candidate.basePoint) > COLLISION_PX) continue;
+          clustered.add(candidate.uid);
+          queue.push(candidate);
+        }
+      }
+
+      cluster.sort((a, b) => a.uid.localeCompare(b.uid));
+      collisionClusters.push(cluster);
     }
 
-    for (const group of groupsBySpot.values()) {
-      group.sort((a, b) => a.uid.localeCompare(b.uid));
-      const mid = (group.length - 1) / 2;
-
+    for (const group of collisionClusters) {
       for (let idx = 0; idx < group.length; idx++) {
         const drv = group[idx];
-        let labelSide = "right";
-        let labelDx = 28;
-        let labelDy = -8;
+        let labelSide = idx % 2 === 0 ? "right" : "left";
 
-        const basePoint = projectToPoint(drv.lng, drv.lat);
+        let labelDx = 0;
+        let labelDy = 0;
+
+        const basePoint = drv.basePoint;
 
         if (selfPt) {
           const distPx = pointDistance(basePoint, selfPt);
           if (distPx < SELF_COLLISION_THRESHOLD_PX) {
-            labelDx = -SELF_COLLISION_OFFSET_PX;
+            labelDx = SELF_LABEL_SIDE === "right" ? -SELF_COLLISION_OFFSET_PX : SELF_COLLISION_OFFSET_PX;
             labelDy = 0;
-            labelSide = "left";
+            labelSide = sideFromOffsetX(labelDx, SELF_LABEL_SIDE === "left" ? "right" : "left");
           }
         }
 
-        if (group.length > 1) {
-          labelDx = labelSide === "left" ? -54 : 54;
-          labelDy = (idx - mid) * (labelFontPx + 9);
+        if (group.length > 1 && labelDx === 0 && labelDy === 0) {
+          // Stack labels vertically so they don’t overlap.
+          // Offset all labels to the right of the marker.  Adjust dy to separate names.
+          const verticalSpacing = (map?.getZoom?.() || 12) <= 11 ? 14 : 18; // px between names
+          const mid = (group.length - 1) / 2;
+          labelDx = 44;               // always offset to the right of the marker
+          labelDy = (idx - mid) * verticalSpacing;
+          labelSide = sideFromOffsetX(labelDx, "right");
         }
 
-        upsertDriverMarker(
-          drv.uid,
-          drv.name,
-          drv.lat,
-          drv.lng,
-          drv.heading,
-          labelSide,
-          labelDx,
-          labelDy,
-          labelFontPx,
-          labelMaxWidthPx
-        );
+        upsertDriverMarker(drv.uid, drv.name, drv.lat, drv.lng, drv.heading, labelSide, labelDx, labelDy);
       }
     }
 
