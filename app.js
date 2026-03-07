@@ -763,7 +763,42 @@ const dockDrawerBody = document.getElementById("dockDrawerBody");
 const dockDrawerClose = document.getElementById("dockDrawerClose");
 const dockBackdrop = document.getElementById("dockBackdrop");
 
+const USER_AGENT = typeof navigator !== "undefined" ? navigator.userAgent || "" : "";
+const IS_TESLA_BROWSER = /\bTesla\//i.test(USER_AGENT);
+const DRAWER_AUTO_MINIMIZE_MS = 5000;
+
 let openPanelKey = null;
+let drawerAutoMinimizeTimer = null;
+
+function clearDrawerAutoMinimizeTimer() {
+  if (drawerAutoMinimizeTimer) {
+    clearTimeout(drawerAutoMinimizeTimer);
+    drawerAutoMinimizeTimer = null;
+  }
+}
+
+function touchDrawerAutoMinimizeTimer() {
+  if (!openPanelKey) {
+    clearDrawerAutoMinimizeTimer();
+    return;
+  }
+  clearDrawerAutoMinimizeTimer();
+  drawerAutoMinimizeTimer = setTimeout(() => {
+    if (!openPanelKey) return;
+    closeDrawer();
+  }, DRAWER_AUTO_MINIMIZE_MS);
+}
+
+function bindDrawerAutoMinimizeActivity() {
+  if (!dockDrawer) return;
+  const events = ["pointerdown", "click", "input", "keydown", "focusin", "touchstart", "wheel"];
+  for (const eventName of events) {
+    dockDrawer.addEventListener(eventName, () => {
+      if (!openPanelKey) return;
+      touchDrawerAutoMinimizeTimer();
+    }, true);
+  }
+}
 
 function syncDrawerPanelPosition() {
   if (!dockDrawer) return;
@@ -792,9 +827,11 @@ function openDrawer(key, title, html) {
   syncDrawerPanelPosition();
   syncDockActiveButton();
   syncChatPollingState();
+  touchDrawerAutoMinimizeTimer();
 }
 
 function closeDrawer() {
+  clearDrawerAutoMinimizeTimer();
   openPanelKey = null;
   dockDrawer?.classList.remove("open");
   dockBackdrop?.classList.remove("open");
@@ -816,6 +853,7 @@ function toggleDrawer(key, title, html) {
 dockBackdrop?.addEventListener("click", closeDrawer);
 dockDrawerClose?.addEventListener("click", closeDrawer);
 dockDrawer?.addEventListener("click", (e) => e.stopPropagation());
+bindDrawerAutoMinimizeActivity();
 
 function musicPanelHTML() {
   return `
@@ -1236,15 +1274,27 @@ function wireChatPanel() {
 }
 
 function colorsPanelHTML() {
-  return `
-    <div class="panelBlock">
-      <div style="font-weight:800;margin-bottom:8px;">Demand Colors</div>
+  const teslaRows = `
+      <div style="display:flex;align-items:center;gap:8px;"><span style="display:inline-block;width:12px;height:12px;border-radius:4px;background:#00b050;border:1px solid rgba(0,0,0,0.15);flex:0 0 12px;"></span>Green = Highest</div>
+      <div style="display:flex;align-items:center;gap:8px;"><span style="display:inline-block;width:12px;height:12px;border-radius:4px;background:#8000ff;border:1px solid rgba(0,0,0,0.15);flex:0 0 12px;"></span>Purple = High</div>
+      <div style="display:flex;align-items:center;gap:8px;"><span style="display:inline-block;width:12px;height:12px;border-radius:4px;background:#0066ff;border:1px solid rgba(0,0,0,0.15);flex:0 0 12px;"></span>Blue = Medium</div>
+      <div style="display:flex;align-items:center;gap:8px;"><span style="display:inline-block;width:12px;height:12px;border-radius:4px;background:#66ccff;border:1px solid rgba(0,0,0,0.15);flex:0 0 12px;"></span>Sky = Normal</div>
+      <div style="display:flex;align-items:center;gap:8px;"><span style="display:inline-block;width:12px;height:12px;border-radius:4px;background:#ffd400;border:1px solid rgba(0,0,0,0.15);flex:0 0 12px;"></span>Yellow = Below Normal</div>
+      <div style="display:flex;align-items:center;gap:8px;"><span style="display:inline-block;width:12px;height:12px;border-radius:4px;background:#e60000;border:1px solid rgba(0,0,0,0.15);flex:0 0 12px;"></span>Red = Very Low / Avoid</div>
+  `;
+  const defaultRows = `
       <div>🟩 Green = Highest</div>
       <div>🟪 Purple = High</div>
       <div>🟦 Blue = Medium</div>
       <div>🟦 Sky = Normal</div>
       <div>🟨 Yellow = Below Normal</div>
       <div>🟥 Red = Very Low / Avoid</div>
+  `;
+
+  return `
+    <div class="panelBlock">
+      <div style="font-weight:800;margin-bottom:8px;">Demand Colors</div>
+      ${IS_TESLA_BROWSER ? teslaRows : defaultRows}
       <div style="margin-top:10px;opacity:0.75;font-weight:600;">
         ${statenIslandMode
           ? "Staten Island Mode is ON: Staten Island colors are relative within Staten Island only. Other boroughs remain NYC-wide."
@@ -1270,6 +1320,64 @@ bindDockToggle(dockModes, "modes", "Modes", modesPanelHTML, wireModesPanel);
 bindDockToggle(dockChat, "chat", "Chat", chatPanelHTML, wireChatPanel);
 bindDockToggle(dockColors, "colors", "Colors", colorsPanelHTML);
 bindDockToggle(dockProfile, "profile", "Profile", profilePanelHTML, wireProfilePanel);
+
+function applyTeslaDockIconCompatibility() {
+  if (!IS_TESLA_BROWSER) return;
+
+  const setIcon = (button, svgMarkup) => {
+    const iconEl = button?.querySelector?.(".dockIcon");
+    if (!iconEl) return;
+    iconEl.innerHTML = svgMarkup;
+    iconEl.style.fontSize = "0";
+    iconEl.style.display = "inline-grid";
+    iconEl.style.placeItems = "center";
+    iconEl.style.lineHeight = "1";
+  };
+
+  setIcon(dockColors, `
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false" style="display:block">
+      <circle cx="12" cy="12" r="9" fill="#ffffff" opacity="0.98"/>
+      <circle cx="8" cy="9" r="2.6" fill="#00b050"/>
+      <circle cx="14.8" cy="8" r="2.4" fill="#8000ff"/>
+      <circle cx="16.3" cy="13.7" r="2.4" fill="#0066ff"/>
+      <circle cx="10.3" cy="16.4" r="2.2" fill="#ffd400"/>
+      <circle cx="18.2" cy="18.2" r="1.2" fill="rgba(255,255,255,0)"/>
+      <path d="M19 18.4c0 1.4-1.1 2.4-2.5 2.4H12A8.4 8.4 0 1 1 20.4 12c0 1.3-.8 2.2-1.8 2.2h-1.1c-.7 0-1.2.5-1.2 1.1 0 .3.1.5.3.8.3.5.4 1 .4 1.3Z" fill="none" stroke="#111" stroke-width="1.5" stroke-linejoin="round"/>
+    </svg>
+  `);
+
+  setIcon(dockModes, `
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false" style="display:block">
+      <path d="M10.3 2h3.4l.5 2.2a8 8 0 0 1 1.8.8l1.9-1.2 2.4 2.4-1.2 1.9c.3.6.6 1.2.8 1.8L22 10.3v3.4l-2.2.5a8 8 0 0 1-.8 1.8l1.2 1.9-2.4 2.4-1.9-1.2a8 8 0 0 1-1.8.8l-.5 2.2h-3.4l-.5-2.2a8 8 0 0 1-1.8-.8l-1.9 1.2-2.4-2.4 1.2-1.9a8 8 0 0 1-.8-1.8L2 13.7v-3.4l2.2-.5c.2-.6.5-1.2.8-1.8L3.8 6.1l2.4-2.4 1.9 1.2a8 8 0 0 1 1.8-.8L10.3 2Z" fill="#4f7cff" opacity="0.95"/>
+      <circle cx="12" cy="12" r="3.2" fill="#ffffff"/>
+      <circle cx="12" cy="12" r="7.8" fill="none" stroke="#111" stroke-width="1.2" opacity="0.15"/>
+    </svg>
+  `);
+
+  setIcon(dockChat, `
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false" style="display:block">
+      <path d="M5 5.5h14a2.5 2.5 0 0 1 2.5 2.5v6.3a2.5 2.5 0 0 1-2.5 2.5H11l-4.8 3v-3H5A2.5 2.5 0 0 1 2.5 14.3V8A2.5 2.5 0 0 1 5 5.5Z" fill="#2f7cff"/>
+      <circle cx="8.3" cy="11.1" r="1.2" fill="#ffffff"/>
+      <circle cx="12" cy="11.1" r="1.2" fill="#ffffff"/>
+      <circle cx="15.7" cy="11.1" r="1.2" fill="#ffffff"/>
+    </svg>
+  `);
+
+  setIcon(dockMusic, `
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false" style="display:block">
+      <path d="M15.5 4v9.1a3.2 3.2 0 1 1-1.5-2.7V6.2l7-1.7v7a3.2 3.2 0 1 1-1.5-2.7V3L15.5 4Z" fill="#ffffff"/>
+    </svg>
+  `);
+
+  setIcon(dockProfile, `
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false" style="display:block">
+      <circle cx="12" cy="8" r="4" fill="#111"/>
+      <path d="M4 20a8 8 0 0 1 16 0" fill="none" stroke="#111" stroke-width="2.4" stroke-linecap="round"/>
+    </svg>
+  `);
+}
+
+applyTeslaDockIconCompatibility();
 
 /* =========================================================
    Precision Slider Popup
