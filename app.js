@@ -3735,7 +3735,8 @@ function upsertDriverMarker(userId, name, lat, lng, heading, labelSide, labelDx 
   }
 
   const el = makeDriverIcon(name || `Driver ${userId}`, heading, labelSide, labelDx, labelDy);
-  const mk = new maplibregl.Marker({ element: el, anchor: "center" }).setLngLat([lng, lat]).addTo(map);
+  // Pin the marker's bottom-center to the exact coordinates so arrow-tip stays true.
+  const mk = new maplibregl.Marker({ element: el, anchor: "bottom" }).setLngLat([lng, lat]).addTo(map);
 
   if (!debugOnce.otherMarker) {
     console.log("DEBUG other marker lngLat", { lng, lat });
