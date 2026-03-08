@@ -911,11 +911,15 @@
       top: 0;
       display:flex;
       /*
-       * Position the arrow so its tip sits on the bottom edge of this 40×40 container.
-       * When centred, the tip was ~13px above the bottom, causing the marker to drift
-       * on zoom out. Aligning items to flex-end keeps the tip flush with the bottom.
+       * Align the arrow element vertically in the centre of its 40×40 container.
+       * The arrow is drawn as an isosceles triangle whose tip sits slightly
+       * below the vertical midpoint.  Centering the element keeps the tip
+       * consistently positioned relative to the marker, while a small
+       * downward offset is applied in JavaScript (see app.js) to ensure the
+       * tip is pinned to the exact latitude/longitude.  Using centre
+       * alignment here avoids distortions when zooming in/out.
        */
-      align-items:flex-end;
+      align-items: center;
       justify-content:center;
       transform-origin: 50% 50%;
     }
