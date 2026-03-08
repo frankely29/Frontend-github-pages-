@@ -64,28 +64,26 @@
 
   function playBeep() {
     try {
-      // Create the audio context if it doesn’t exist yet
       if (!beepAudioContext) {
         const Ctor = window.AudioContext || window.webkitAudioContext;
         beepAudioContext = new Ctor();
       }
-      const ctx = beepAudioContext;
-      // If the context is suspended (common on mobile), resume it
-      if (ctx.state === 'suspended') {
-        ctx.resume().catch(() => {});
+      // Always resume the context in case it was suspended (mobile Safari)
+      if (beepAudioContext.state === 'suspended') {
+        beepAudioContext.resume().catch(() => {});
       }
-      // Generate a short sine-wave beep: 660 Hz, 0.3 seconds, louder volume
+      const ctx = beepAudioContext;
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.type = 'sine';
-      osc.frequency.setValueAtTime(660, ctx.currentTime);
-      gain.gain.setValueAtTime(0.3, ctx.currentTime);
+      osc.frequency.setValueAtTime(660, ctx.currentTime); // pleasant beep tone
+      gain.gain.setValueAtTime(0.35, ctx.currentTime);    // moderate volume
       osc.connect(gain);
       gain.connect(ctx.destination);
-      osc.start();
-      osc.stop(ctx.currentTime + 0.3);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.2);
     } catch (err) {
-      console.warn('Beep failed:', err);
+      console.warn('beep failed:', err);
     }
   }
 
