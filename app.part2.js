@@ -235,9 +235,18 @@
       if (typeof openPanelKey !== 'undefined' && openPanelKey === 'chat') {
         renderChatMessages(msgs);
       }
-      // Display new messages in the kill feed (after the initial load)
-      if (initialChatLoaded && Array.isArray(msgs) && msgs.length) {
-        showKillFeed(msgs);
+      // The first call to chatPollOnce() marks the chat as loaded; do
+      // not show old messages in the kill feed on the first poll.
+      if (!initialChatLoaded) {
+        initialChatLoaded = true;
+      } else if (Array.isArray(msgs) && msgs.length) {
+        // Hide the feed when the chat drawer is open
+        if (typeof openPanelKey !== "undefined" && openPanelKey === "chat") {
+          if (killFeedContainer) killFeedContainer.style.display = "none";
+        } else {
+          if (killFeedContainer) killFeedContainer.style.display = "flex";
+          showKillFeed(msgs);
+        }
       }
     } catch (e) {
       console.warn('chat poll failed:', e);
@@ -288,10 +297,7 @@
     chatInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); sendNow(); } });
     chatResetState();
     chatLoadInitial()
-      .then(() => {
-        initialChatLoaded = true;
-        return chatPollOnce();
-      })
+      .then(() => chatPollOnce())
       .catch((e) => {
         console.warn('chat initial load failed:', e);
         setChatStatus('Chat unavailable right now.');
