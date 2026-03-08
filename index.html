@@ -1182,23 +1182,22 @@
     .killFeed {
       position: fixed;
       left: 14px;
-      /* Keep the overlay above the auto-center button; adjust bottom offset as needed */
       bottom: calc(env(safe-area-inset-bottom, 0px) + 170px);
       z-index: 6500;
       display: flex;
       flex-direction: column;
-      gap: 3px;
+      gap: 2px;
       pointer-events: none;
       align-items: flex-start;
-      max-width: 95vw;    /* wider container for longer messages */
+      max-width: 95vw;    /* increased width */
     }
 
     .killFeedMsg {
-      font-size: 14px;     /* larger text for readability */
+      font-size: 14px;     /* slightly larger text for readability */
       font-weight: 950;
-      color: #ffffff;      /* bright white text instead of red */
-      text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9); /* improve contrast */
-      white-space: normal; /* allow text wrapping */
+      color: #fff;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+      white-space: normal; /* allow wrapping across multiple lines */
       word-break: break-word;
       max-width: 95%;      /* match container width */
     }
