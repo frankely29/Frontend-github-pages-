@@ -1106,7 +1106,8 @@
       top: auto;
       left: 50%;
       transform: translateX(-50%) translateY(18px);
-      bottom: calc(env(safe-area-inset-bottom, 0px) + 110px);
+      /* Raise the music pop-up so it doesn’t overlap the record-trip button */
+      bottom: calc(env(safe-area-inset-bottom, 0px) + 170px); /* previously 110px */
       width: min(92vw, 520px);
       max-height: 30vh;
       border-radius: 18px;
@@ -1121,7 +1122,8 @@
       top: auto;
       left: 50%;
       transform: translateX(-50%) translateY(18px);
-      bottom: calc(env(safe-area-inset-bottom, 0px) + 132px);
+      /* Raise the chat pop-up to sit above the record-trip button */
+      bottom: calc(env(safe-area-inset-bottom, 0px) + 192px); /* previously 132px */
       width: min(88vw, 420px);
       max-height: 250px;
       border-radius: 20px;
