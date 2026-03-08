@@ -1354,9 +1354,6 @@ function initMap() {
       }
       applyDriverLabelZoomStyles();
     });
-    map.on("rotate", () => {
-      if (Number.isFinite(lastHeadingDeg)) setNavRotation(lastHeadingDeg);
-    });
 
     // Zone click popup (restored)
     wireZoneClickPopup();
@@ -1648,7 +1645,7 @@ async function ensurePickupSourceAndLayers() {
         id: "pickup-circles-glow",
         type: "circle",
         source: "pickup-points",
-        minzoom: 10,
+        minzoom: 12,
         paint: {
           "circle-radius": ["interpolate", ["linear"], ["zoom"], 12, 7, 16, 14],
           "circle-color": "rgba(0,176,80,0.28)",
@@ -1666,7 +1663,7 @@ async function ensurePickupSourceAndLayers() {
         id: "pickup-circles",
         type: "circle",
         source: "pickup-points",
-        minzoom: 10,
+        minzoom: 12,
         paint: {
           "circle-radius": ["interpolate", ["linear"], ["zoom"], 12, 3.5, 16, 6],
           "circle-color": "rgba(255,255,255,0.92)",
@@ -2448,12 +2445,7 @@ function setNavVisual(isMoving) {
 function setNavRotation(deg) {
   const el = document.getElementById("navArrowRot");
   if (!el) return;
-  let relative = deg;
-  if (map && typeof map.getBearing === "function") {
-    const bearing = Number(map.getBearing()) || 0;
-    relative = normDeg(deg - bearing);
-  }
-  el.style.transform = `rotate(${relative}deg)`;
+  el.style.transform = `rotate(${deg}deg)`;
 }
 function normDeg(d) {
   return ((d % 360) + 360) % 360;
