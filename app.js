@@ -2346,6 +2346,10 @@ function clamp(n, a, b) {
 function autoCenterAndAutoZoom() {
   if (!map || !userLatLng) return;
 
+  // If autoCenter is disabled, do nothing.  Without this check the map may
+  // keep snapping back to the user's location and appear to “shake.”
+  if (!autoCenter) return;
+
   const now = Date.now();
   if (now - lastAutoFitMs < 2500) return;
   lastAutoFitMs = now;
@@ -2362,9 +2366,19 @@ function autoCenterAndAutoZoom() {
     } catch {}
   }
 
+  // When there is only one point to follow, compute the difference to the current
+  // map center and only fly if the change is significant (~0.0002 degrees).
   if (pts.length <= 1) {
     const z = clamp(map.getZoom(), AUTO_ZOOM_MIN, AUTO_ZOOM_MAX);
-    suppressAutoDisableFor(700, () => map.flyTo({ center: pts[0], zoom: z, duration: 600 }));
+    const curr = map.getCenter();
+    const dx = pts[0][0] - curr.lng;
+    const dy = pts[0][1] - curr.lat;
+    const threshold = 0.0002;
+    if (Math.abs(dx) > threshold || Math.abs(dy) > threshold) {
+      suppressAutoDisableFor(700, () =>
+        map.flyTo({ center: pts[0], zoom: z, duration: 600 })
+      );
+    }
     return;
   }
 

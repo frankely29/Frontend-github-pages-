@@ -12,7 +12,10 @@
 
   // Chat constants
   const CHAT_ROOM = typeof window !== 'undefined' && window.CHAT_ROOM ? window.CHAT_ROOM : 'global';
-  const CHAT_POLL_MS = typeof window !== 'undefined' && window.CHAT_POLL_MS ? window.CHAT_POLL_MS : 1200;
+  // Reduce the polling interval so new messages appear more promptly.
+  const CHAT_POLL_MS = typeof window !== 'undefined' && window.CHAT_POLL_MS
+    ? window.CHAT_POLL_MS
+    : 800; // milliseconds
 
   // Token helper (matches LS_TOKEN in app.js)
   const LS_TOKEN = 'community_token_v1';
