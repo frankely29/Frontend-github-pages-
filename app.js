@@ -57,10 +57,20 @@ const LS_EMAIL = "community_email_v1";
 const LS_DISPLAY_NAME = "community_display_name_v1";
 const CHAT_ROOM = "global";
 const CHAT_POLL_MS = 1200;
+const PICKUP_RECENT_LIMIT = 50;
+const PICKUP_REFRESH_DEBOUNCE_MS = 350;
+const PICKUP_FETCH_COOLDOWN_MS = 1200;
 
 let chatPollTimer = null;
 let chatLastSeen = null;
 let chatSeenKeys = new Set();
+let pickupRefreshTimer = null;
+let pickupRefreshInFlight = false;
+let pickupLogBusy = false;
+let lastPickupFetchMs = 0;
+let lastPickupFetchKey = "";
+let pickupRecentZoneCounts = new Map();
+let pickupRecentZoneLatestTs = new Map();
 
 /* =========================================================
    MANHATTAN MODE — DEFAULT SETTINGS (SAFE TO EDIT)
@@ -1123,24 +1133,14 @@ function renderChatMessages(messages, { replace = false } = {}) {
 }
 
 async function chatFetchMessages({ after = null, limit = 50 } = {}) {
-  // Fetch chat messages using the newer chat API endpoints in the backend.
-  // When after is null or zero, use /chat/recent. Otherwise use /chat/since.
   if (!authHeaderOK()) return [];
   const qs = new URLSearchParams();
   qs.set("limit", String(limit));
-  let path;
-  const afterStr = after !== null && after !== undefined ? String(after).trim() : "";
-  if (afterStr && afterStr !== "0") {
-    // Fetch messages newer than a specific ID
-    qs.set("after_id", afterStr);
-    path = `/chat/since?${qs.toString()}`;
-  } else {
-    // Fetch the most recent messages
-    path = `/chat/recent?${qs.toString()}`;
+  if (after !== null && after !== undefined && String(after).trim() !== "") {
+    qs.set("after", String(after));
   }
-  const data = await getJSONAuth(path, communityToken);
-  // The backend returns an object with an `items` array
-  return Array.isArray(data?.items) ? data.items : [];
+  const data = await getJSONAuth(`/chat/rooms/${CHAT_ROOM}?${qs.toString()}`, communityToken);
+  return Array.isArray(data) ? data : data?.messages || [];
 }
 
 async function chatLoadInitial() {
@@ -1153,11 +1153,9 @@ async function chatFetchNew() {
 }
 
 async function chatSend(text) {
-  // Send a chat message using the newer /chat/send endpoint.
-  // The backend expects a JSON body with a `message` field and returns {ok, id, created_at, display_name}.
   if (!authHeaderOK()) throw new Error("Not signed in");
-  const body = { message: text };
-  await postJSON(`/chat/send`, body, communityToken);
+  const body = { text };
+  return postJSON(`/chat/rooms/${CHAT_ROOM}`, body, communityToken);
 }
 
 async function chatPollOnce() {
@@ -1204,11 +1202,9 @@ function wireChatPanel() {
 
     chatSendBtn.disabled = true;
     try {
-      // Send the message and then refresh the chat. We ignore the return
-      // value since /chat/send does not return the message content.
-      await chatSend(text);
+      const msg = await chatSend(text);
       chatInput.value = "";
-      // Immediately poll for new messages to include the just-sent message
+      if (msg) renderChatMessages(Array.isArray(msg) ? msg : [msg]);
       await chatPollOnce();
     } catch (e) {
       console.warn("chat send failed:", e);
@@ -1388,11 +1384,17 @@ function initMap() {
 
     // Presence refresh on moves to keep label collision offsets stable
     map.on("moveend", () => {
-      if (authHeaderOK()) pullPresenceAll().catch(() => {});
+      if (authHeaderOK()) {
+        pullPresenceAll().catch(() => {});
+        schedulePickupOverlayRefresh();
+      }
       applyDriverLabelZoomStyles();
     });
     map.on("zoomend", () => {
-      if (authHeaderOK()) pullPresenceAll().catch(() => {});
+      if (authHeaderOK()) {
+        pullPresenceAll().catch(() => {});
+        schedulePickupOverlayRefresh();
+      }
       applyDriverLabelZoomStyles();
     });
 
@@ -1529,7 +1531,261 @@ async function ensureZonesSourceAndLayers() {
     });
   }
 
+  await ensurePickupSourceAndLayers();
   return true;
+}
+
+function emptyGeojson() {
+  return { type: "FeatureCollection", features: [] };
+}
+
+function clearPickupOverlayCache() {
+  pickupRecentZoneCounts = new Map();
+  pickupRecentZoneLatestTs = new Map();
+  lastPickupFetchKey = "";
+}
+
+function setPickupOverlayData(fc, items = []) {
+  pickupRecentZoneCounts = new Map();
+  pickupRecentZoneLatestTs = new Map();
+
+  for (const it of items) {
+    const zoneId = it?.zone_id;
+    if (zoneId == null) continue;
+    const key = String(zoneId);
+    pickupRecentZoneCounts.set(key, (pickupRecentZoneCounts.get(key) || 0) + 1);
+    const ts = Number(it?.created_at ?? NaN);
+    if (Number.isFinite(ts)) {
+      const prev = pickupRecentZoneLatestTs.get(key);
+      if (!prev || ts > prev) pickupRecentZoneLatestTs.set(key, ts);
+    }
+  }
+
+  const src = map?.getSource?.("pickup-points");
+  if (src && typeof src.setData === "function") {
+    src.setData(fc || emptyGeojson());
+  }
+}
+
+function clearPickupOverlay() {
+  setPickupOverlayData(emptyGeojson(), []);
+}
+
+function formatRelativeAge(tsUnix) {
+  const ts = Number(tsUnix ?? NaN);
+  if (!Number.isFinite(ts) || ts <= 0) return "unknown";
+  const diffSec = Math.max(0, Math.floor(Date.now() / 1000 - ts));
+  if (diffSec < 60) return `${diffSec}s ago`;
+  if (diffSec < 3600) return `${Math.max(1, Math.round(diffSec / 60))}m ago`;
+  if (diffSec < 86400) return `${Math.max(1, Math.round(diffSec / 3600))}h ago`;
+  return `${Math.max(1, Math.round(diffSec / 86400))}d ago`;
+}
+
+function buildPickupFeatureCollection(items) {
+  const features = [];
+  for (const it of items || []) {
+    const lat = Number(it?.lat ?? NaN);
+    const lng = Number(it?.lng ?? NaN);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+    const createdAt = Number(it?.created_at ?? NaN);
+    const ageSec = Number.isFinite(createdAt) ? Math.max(0, Math.floor(Date.now() / 1000 - createdAt)) : 0;
+    const recencyScore = Math.max(0.2, 1 - ageSec / (12 * 3600));
+    features.push({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [lng, lat] },
+      properties: {
+        id: it?.id ?? null,
+        zone_id: it?.zone_id ?? null,
+        zone_name: it?.zone_name ?? "",
+        borough: it?.borough ?? "",
+        frame_time: it?.frame_time ?? "",
+        created_at: Number.isFinite(createdAt) ? createdAt : null,
+        recency_score: recencyScore,
+      },
+    });
+  }
+  return { type: "FeatureCollection", features };
+}
+
+async function ensurePickupSourceAndLayers() {
+  if (!map) return false;
+  const styleReady = await waitForStyleReady();
+  if (!styleReady) return false;
+
+  if (!map.getSource("pickup-points")) {
+    map.addSource("pickup-points", { type: "geojson", data: emptyGeojson() });
+  }
+
+  if (!map.getLayer("pickup-heat")) {
+    map.addLayer(
+      {
+        id: "pickup-heat",
+        type: "heatmap",
+        source: "pickup-points",
+        paint: {
+          "heatmap-weight": ["interpolate", ["linear"], ["coalesce", ["get", "recency_score"], 0.2], 0, 0.2, 1, 1],
+          "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 9, 0.6, 12, 0.95, 15, 1.25],
+          "heatmap-color": [
+            "interpolate",
+            ["linear"],
+            ["heatmap-density"],
+            0,
+            "rgba(0,0,0,0)",
+            0.15,
+            "rgba(102,204,255,0.18)",
+            0.35,
+            "rgba(0,102,255,0.28)",
+            0.55,
+            "rgba(128,0,255,0.42)",
+            0.75,
+            "rgba(0,176,80,0.58)",
+            1,
+            "rgba(0,176,80,0.88)"
+          ],
+          "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 9, 12, 12, 18, 14, 24, 16, 32],
+          "heatmap-opacity": ["interpolate", ["linear"], ["zoom"], 9, 0.55, 15, 0.82],
+        },
+      },
+      "zone-labels"
+    );
+  }
+
+  if (!map.getLayer("pickup-circles-glow")) {
+    map.addLayer(
+      {
+        id: "pickup-circles-glow",
+        type: "circle",
+        source: "pickup-points",
+        minzoom: 12,
+        paint: {
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], 12, 7, 16, 14],
+          "circle-color": "rgba(0,176,80,0.28)",
+          "circle-blur": 0.7,
+          "circle-opacity": 0.9,
+        },
+      },
+      "zone-labels"
+    );
+  }
+
+  if (!map.getLayer("pickup-circles")) {
+    map.addLayer(
+      {
+        id: "pickup-circles",
+        type: "circle",
+        source: "pickup-points",
+        minzoom: 12,
+        paint: {
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], 12, 3.5, 16, 6],
+          "circle-color": "rgba(255,255,255,0.92)",
+          "circle-stroke-width": 2,
+          "circle-stroke-color": "rgba(0,176,80,0.96)",
+          "circle-opacity": 0.95,
+        },
+      },
+      "zone-labels"
+    );
+  }
+
+  if (!map.__pickupOverlayWired) {
+    map.__pickupOverlayWired = true;
+
+    map.on("mouseenter", "pickup-circles", () => {
+      try { map.getCanvas().style.cursor = "pointer"; } catch {}
+    });
+    map.on("mouseleave", "pickup-circles", () => {
+      try { map.getCanvas().style.cursor = ""; } catch {}
+    });
+    map.on("click", "pickup-circles", (e) => {
+      try {
+        const feat = e?.features?.[0];
+        if (!feat) return;
+        const props = feat.properties || {};
+        const zoneName = (props.zone_name || "").trim();
+        const borough = (props.borough || "").trim();
+        const frameTime = (props.frame_time || "").trim();
+        const createdAt = Number(props.created_at ?? NaN);
+        const when = Number.isFinite(createdAt) ? formatRelativeAge(createdAt) : "unknown";
+        new maplibregl.Popup({ closeButton: true, closeOnClick: true, maxWidth: "280px" })
+          .setLngLat(e.lngLat)
+          .setHTML(`
+            <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; font-size:13px;">
+              <div style="font-weight:900; margin-bottom:4px;">Community pickup</div>
+              <div><b>Zone:</b> ${escapeHtml(zoneName || `Zone ${props.zone_id || ""}`)}</div>
+              ${borough ? `<div><b>Borough:</b> ${escapeHtml(borough)}</div>` : ""}
+              <div><b>When:</b> ${escapeHtml(when)}</div>
+              ${frameTime ? `<div><b>Frame:</b> ${escapeHtml(frameTime)}</div>` : ""}
+            </div>
+          `)
+          .addTo(map);
+      } catch (err) {
+        console.warn("pickup popup failed:", err);
+      }
+    });
+  }
+
+  return true;
+}
+
+function pickupOverlayQueryPath(limit = PICKUP_RECENT_LIMIT) {
+  if (!map) return null;
+  const b = map.getBounds();
+  if (!b) return null;
+  const west = Number(b.getWest());
+  const east = Number(b.getEast());
+  const south = Number(b.getSouth());
+  const north = Number(b.getNorth());
+  if (![west, east, south, north].every(Number.isFinite)) return null;
+
+  const qs = new URLSearchParams({
+    limit: String(limit),
+    min_lng: String(Math.min(west, east)),
+    max_lng: String(Math.max(west, east)),
+    min_lat: String(Math.min(south, north)),
+    max_lat: String(Math.max(south, north)),
+  });
+  return `/events/pickups/recent?${qs.toString()}`;
+}
+
+async function refreshPickupOverlay({ force = false } = {}) {
+  if (!map || !mapReady) return;
+  const ready = await ensurePickupSourceAndLayers();
+  if (!ready) return;
+
+  if (!authHeaderOK()) {
+    clearPickupOverlay();
+    return;
+  }
+
+  const path = pickupOverlayQueryPath(PICKUP_RECENT_LIMIT);
+  if (!path) return;
+
+  const now = Date.now();
+  if (!force && pickupRefreshInFlight) return;
+  if (!force && path === lastPickupFetchKey && now - lastPickupFetchMs < PICKUP_FETCH_COOLDOWN_MS) return;
+
+  pickupRefreshInFlight = true;
+  lastPickupFetchKey = path;
+  lastPickupFetchMs = now;
+
+  try {
+    const data = await getJSONAuth(path, communityToken);
+    const items = Array.isArray(data) ? data : data?.items || [];
+    const fc = buildPickupFeatureCollection(items);
+    setPickupOverlayData(fc, items);
+  } catch (e) {
+    console.warn("pickup overlay refresh failed:", e);
+  } finally {
+    pickupRefreshInFlight = false;
+  }
+}
+
+function schedulePickupOverlayRefresh({ force = false } = {}) {
+  if (pickupRefreshTimer) clearTimeout(pickupRefreshTimer);
+  pickupRefreshTimer = setTimeout(() => {
+    pickupRefreshTimer = null;
+    refreshPickupOverlay({ force }).catch((e) => console.warn("pickup overlay refresh failed:", e));
+  }, force ? 0 : PICKUP_REFRESH_DEBOUNCE_MS);
 }
 
 /* =========================================================
@@ -1779,6 +2035,12 @@ function buildPopupHTML(props, geom) {
   const nextPayVal = nextFramePayById.get(String(props.LocationID ?? ""));
   const nextPay = nextPayVal == null ? "n/a" : Number(nextPayVal).toFixed(2);
 
+  const communityPickupCount = pickupRecentZoneCounts.get(String(props.LocationID ?? "")) || 0;
+  const communityLastTs = pickupRecentZoneLatestTs.get(String(props.LocationID ?? ""));
+  const communityPickupLine = communityPickupCount > 0
+    ? `<div style="margin-top:6px;"><b>Community pickups in current map view:</b> ${communityPickupCount}${communityLastTs ? ` • last ${escapeHtml(formatRelativeAge(communityLastTs))}` : ""}</div>`
+    : "";
+
   let extra = "";
 
   if (statenIslandMode && isStatenIslandFeature(props) && Number.isFinite(Number(props.si_local_rating))) {
@@ -1797,6 +2059,7 @@ function buildPopupHTML(props, geom) {
       ${extra}
       <div style="margin-top:6px;"><b>Pickups (last ${BIN_MINUTES} min):</b> ${pickups}</div>
       <div><b>Next ${BIN_MINUTES} min (historical):</b> ${nextPickups}</div>
+      ${communityPickupLine}
       <div><b>Avg Pay per Trip (next ${BIN_MINUTES} min historical):</b> $${nextPay}</div>
       <div><b>Avg Pay per Trip (last 20 min):</b> $${pay}</div>
     </div>
@@ -2967,6 +3230,7 @@ const btnDeleteAccount = document.getElementById("btnDeleteAccount");
 
 const btnPolice = document.getElementById("btnPolice");
 const btnPickup = document.getElementById("btnPickup");
+const pickupFab = document.getElementById("pickupFab");
 const communityNote = document.getElementById("communityNote");
 
 let communityToken = localStorage.getItem(LS_TOKEN) || "";
@@ -3021,8 +3285,8 @@ function setAuthUI(signedIn, note) {
   if (btnAuth) btnAuth.textContent = signedIn ? "Sign out" : "Sign in";
   if (communityNote) {
     communityNote.textContent = signedIn
-      ? "Community: live drivers are visible. Police reports + pickups are shared."
-      : "Community: sign in to see other drivers + report police + log pickups.";
+      ? "Community: live drivers, police reports, and pickup heat are visible."
+      : "Community: sign in to see other drivers, report police, and log pickups.";
   }
 
   const showLock = !signedIn;
@@ -3033,6 +3297,7 @@ function setAuthUI(signedIn, note) {
 
   if (btnPolice) btnPolice.classList.toggle("disabled", !signedIn);
   if (btnPickup) btnPickup.classList.toggle("disabled", !signedIn);
+  if (pickupFab) pickupFab.classList.toggle("disabled", !signedIn);
   if (btnGhostMode) btnGhostMode.classList.toggle("disabled", !signedIn);
   if (btnChangePassword) btnChangePassword.classList.toggle("disabled", !signedIn);
   if (btnDeleteAccount) btnDeleteAccount.classList.toggle("disabled", !signedIn);
@@ -3041,6 +3306,12 @@ function setAuthUI(signedIn, note) {
   syncGhostUI();
   refreshNavNameLabel();
   syncChatPollingState();
+
+  if (signedIn) {
+    schedulePickupOverlayRefresh({ force: true });
+  } else {
+    clearPickupOverlay();
+  }
 
   if (openPanelKey === "chat") {
     openDrawer("chat", "Chat", chatPanelHTML());
@@ -3057,6 +3328,8 @@ function clearAuth() {
   chatSeenKeys = new Set();
   stopChatPolling();
   clearOtherDrivers();
+  clearPickupOverlayCache();
+  clearPickupOverlay();
   if (authPass) authPass.value = "";
   if (authGhost) authGhost.checked = false;
   setAuthUI(false, "Status: signed out");
@@ -3550,6 +3823,7 @@ async function sendPoliceReport() {
 }
 
 async function sendPickupLog() {
+  if (pickupLogBusy) return;
   if (!authHeaderOK()) {
     setAuthUI(false, "Sign in to log pickups.");
     return;
@@ -3559,9 +3833,11 @@ async function sendPickupLog() {
     return;
   }
 
+  pickupLogBusy = true;
   try {
     const ts_unix = Math.floor(Date.now() / 1000);
     const near = nearestZoneToUser(currentFrame, userLatLng);
+    const zoneId = near?.location_id ?? null;
 
     await postJSON(
       "/events/pickup",
@@ -3570,17 +3846,22 @@ async function sendPickupLog() {
         lng: userLatLng.lng,
         ts_unix,
         frame_time: currentFrame?.time || null,
-        location_id: near?.location_id ?? null,
+        zone_id: zoneId,
+        location_id: zoneId,
         zone_name: near?.zone_name ?? null,
         borough: near?.borough ?? null,
       },
       communityToken
     );
 
+    schedulePickupOverlayRefresh({ force: true });
+
     const label = near?.zone_name ? `${near.zone_name}${near.borough ? ` (${near.borough})` : ""}` : "your location";
     alert(`Pickup logged ✅ (${label})`);
   } catch (e) {
     alert(`Pickup log failed: ${e.message || e}`);
+  } finally {
+    pickupLogBusy = false;
   }
 }
 
@@ -3595,6 +3876,14 @@ if (btnPolice) {
 if (btnPickup) {
   btnPickup.addEventListener("pointerdown", (e) => e.stopPropagation());
   btnPickup.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    sendPickupLog();
+  });
+}
+if (pickupFab) {
+  pickupFab.addEventListener("pointerdown", (e) => e.stopPropagation());
+  pickupFab.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
     sendPickupLog();
@@ -3638,6 +3927,7 @@ setNavDestination(null);
     if (authHeaderOK()) {
       setAuthUI(true, `Status: signed in as ${me?.display_name || me?.email || "Driver"}`);
       pullPresenceAll().catch(() => {});
+      schedulePickupOverlayRefresh({ force: true });
     } else {
       setAuthUI(false, "Status: signed out");
     }
