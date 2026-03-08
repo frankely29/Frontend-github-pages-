@@ -47,28 +47,28 @@
 
   /**
    * Returns the HTML markup for the chat panel.  If the user is not signed
-   * in (authHeaderOK() returns false), a sign-in prompt is displayed.  When
+   * in (authHeaderOK() returns false), a sign‑in prompt is displayed.  When
    * signed in, the panel contains a scrollable list of messages and a
    * composer for sending messages.
    */
   function chatPanelHTML() {
     if (typeof authHeaderOK === 'function' && !authHeaderOK()) {
       return `
-      <div class="panelBlock chatPanelWrap">
-        <div class="chatSignedOut">Sign in to chat with the community.</div>
-      </div>
-    `;
+        <div class="panelBlock chatPanelWrap">
+          <div class="chatSignedOut">Sign in to chat with the community.</div>
+        </div>
+      `;
     }
 
     return `
-    <div class="panelBlock chatPanelWrap">
-      <div id="chatList" class="chatList" aria-live="polite"></div>
-      <div class="chatComposer">
-        <input id="chatInput" type="text" class="chatInput" placeholder="Message drivers…" maxlength="600" />
-        <button id="chatSendBtn" class="chipBtn" type="button">Send</button>
+      <div class="panelBlock chatPanelWrap">
+        <div id="chatList" class="chatList" aria-live="polite"></div>
+        <div class="chatComposer">
+          <input id="chatInput" type="text" class="chatInput" placeholder="Message drivers…" maxlength="600" />
+          <button id="chatSendBtn" class="chipBtn" type="button">Send</button>
+        </div>
       </div>
-    </div>
-  `;
+    `;
   }
 
   /**
@@ -93,7 +93,7 @@
   }
 
   /**
-   * Format a timestamp into a human-readable HH:MM AM/PM string.  Returns
+   * Format a timestamp into a human‑readable HH:MM AM/PM string.  Returns
    * an empty string if the timestamp is invalid.
    */
   function formatChatTime(ts) {
@@ -121,6 +121,7 @@
     const listEl = document.getElementById('chatList');
     if (!listEl) return;
     if (listEl.dataset.hasMessages === '1') return;
+    // escapeHtml is defined in app.js and will escape any markup in the status.
     if (typeof escapeHtml === 'function') {
       listEl.innerHTML = `<div class="chatEmpty">${escapeHtml(text)}</div>`;
     } else {
@@ -362,15 +363,21 @@
   window.startChatPolling = startChatPolling;
   window.chatResetState = chatResetState;
 
-  // Bind the chat dock button to open this chat panel.  The variables
-  // bindDockToggle and dockChat are defined in app.js.  We only bind
-  // the chat dock if they exist; this avoids errors if the DOM hasn't
-  // loaded yet or if the dock button isn't present.
-  if (typeof bindDockToggle === 'function' && typeof dockChat !== 'undefined') {
-    bindDockToggle(dockChat, 'chat', 'Chat', chatPanelHTML, wireChatPanel);
+  // Bind the chat dock button to open this chat panel.  Because
+  // `dockChat` is declared with `const` in app.js, it is not a global
+  // variable.  Look up the element by its ID instead.  Only call
+  // bindDockToggle when the button exists to avoid errors in cases where
+  // the dock hasn't rendered yet.  This ensures the chat panel opens
+  // correctly when the user taps the chat icon.
+  if (typeof bindDockToggle === 'function') {
+    const chatBtn = document.getElementById('dockChat');
+    if (chatBtn) {
+      bindDockToggle(chatBtn, 'chat', 'Chat', chatPanelHTML, wireChatPanel);
+    }
   }
 
-  // Optional: simple night mode toggle retained from the original stub.
+  // Example: add a simple night mode toggle (currently unused).  Retained
+  // from the original stub in case you wish to experiment with UI toggles.
   function toggleNightMode() {
     document.body.classList.toggle('night');
   }
