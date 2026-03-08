@@ -1288,6 +1288,24 @@ if (dbgReloadFrame) {
    MapLibre init
    ========================================================= */
 let zonePopup = null;
+let zonePopupAutoCloseTimer = null;
+let zonePopupActivityListenersBound = false;
+
+function startZonePopupAutoCloseTimer() {
+  clearTimeout(zonePopupAutoCloseTimer);
+  zonePopupAutoCloseTimer = setTimeout(() => {
+    closeZonePopup();
+  }, 10000);
+}
+
+function resetZonePopupAutoCloseTimer() {
+  if (zonePopup) {
+    clearTimeout(zonePopupAutoCloseTimer);
+    zonePopupAutoCloseTimer = setTimeout(() => {
+      closeZonePopup();
+    }, 10000);
+  }
+}
 
 function initMap() {
   map = new maplibregl.Map({
@@ -1354,9 +1372,16 @@ function initMap() {
       }
       applyDriverLabelZoomStyles();
     });
+    map.on("rotate", () => {
+      if (Number.isFinite(lastHeadingDeg)) setNavRotation(lastHeadingDeg);
+    });
 
     // Zone click popup (restored)
     wireZoneClickPopup();
+
+    document.addEventListener("pointerdown", resetInactivityTimer, { passive: true });
+    document.addEventListener("touchstart", resetInactivityTimer, { passive: true });
+    resetInactivityTimer();
 
     map.on("click", (e) => {
       const features = map.queryRenderedFeatures(e.point, { layers: ["zones-fill"] });
@@ -1645,7 +1670,7 @@ async function ensurePickupSourceAndLayers() {
         id: "pickup-circles-glow",
         type: "circle",
         source: "pickup-points",
-        minzoom: 12,
+        minzoom: 10,
         paint: {
           "circle-radius": ["interpolate", ["linear"], ["zoom"], 12, 7, 16, 14],
           "circle-color": "rgba(0,176,80,0.28)",
@@ -1663,7 +1688,7 @@ async function ensurePickupSourceAndLayers() {
         id: "pickup-circles",
         type: "circle",
         source: "pickup-points",
-        minzoom: 12,
+        minzoom: 10,
         paint: {
           "circle-radius": ["interpolate", ["linear"], ["zoom"], 12, 3.5, 16, 6],
           "circle-color": "rgba(255,255,255,0.92)",
@@ -1794,6 +1819,8 @@ function closeZonePopup() {
     if (zonePopup) zonePopup.remove();
   } catch {}
   zonePopup = null;
+  clearTimeout(zonePopupAutoCloseTimer);
+  zonePopupAutoCloseTimer = null;
 }
 
 function wireZoneClickPopup() {
@@ -1824,15 +1851,23 @@ function wireZoneClickPopup() {
       zonePopup = new maplibregl.Popup({
         closeButton: true,
         closeOnClick: true,
-        maxWidth: "340px",
+        maxWidth: "238px",
       })
         .setLngLat([lngLat.lng, lngLat.lat])
         .setHTML(html)
         .addTo(map);
+
+      startZonePopupAutoCloseTimer();
     } catch (err) {
       console.warn("zone popup failed:", err);
     }
   });
+
+  if (!zonePopupActivityListenersBound) {
+    document.addEventListener("pointerdown", resetZonePopupAutoCloseTimer, { passive: true });
+    document.addEventListener("touchstart", resetZonePopupAutoCloseTimer, { passive: true });
+    zonePopupActivityListenersBound = true;
+  }
 }
 
 /* =========================================================
@@ -2278,6 +2313,20 @@ window.addEventListener("resize", () => {
    ========================================================= */
 const btnCenter = document.getElementById("btnCenter");
 let autoCenter = true;
+let inactivityTimer = null;
+
+function resetInactivityTimer() {
+  clearTimeout(inactivityTimer);
+  inactivityTimer = setTimeout(() => {
+    if (!autoCenter) {
+      autoCenter = true;
+      syncCenterButton();
+      if (typeof autoCenterAndAutoZoom === "function") {
+        autoCenterAndAutoZoom();
+      }
+    }
+  }, 30000);
+}
 
 let suppressAutoDisableUntil = 0;
 function suppressAutoDisableFor(ms, fn) {
@@ -2297,6 +2346,10 @@ function clamp(n, a, b) {
 function autoCenterAndAutoZoom() {
   if (!map || !userLatLng) return;
 
+  // If autoCenter is disabled, do nothing.  Without this check the map may
+  // keep snapping back to the user's location and appear to “shake.”
+  if (!autoCenter) return;
+
   const now = Date.now();
   if (now - lastAutoFitMs < 2500) return;
   lastAutoFitMs = now;
@@ -2313,9 +2366,19 @@ function autoCenterAndAutoZoom() {
     } catch {}
   }
 
+  // When there is only one point to follow, compute the difference to the current
+  // map center and only fly if the change is significant (~0.0002 degrees).
   if (pts.length <= 1) {
     const z = clamp(map.getZoom(), AUTO_ZOOM_MIN, AUTO_ZOOM_MAX);
-    suppressAutoDisableFor(700, () => map.flyTo({ center: pts[0], zoom: z, duration: 600 }));
+    const curr = map.getCenter();
+    const dx = pts[0][0] - curr.lng;
+    const dy = pts[0][1] - curr.lat;
+    const threshold = 0.0002;
+    if (Math.abs(dx) > threshold || Math.abs(dy) > threshold) {
+      suppressAutoDisableFor(700, () =>
+        map.flyTo({ center: pts[0], zoom: z, duration: 600 })
+      );
+    }
     return;
   }
 
@@ -2404,6 +2467,7 @@ function disableAutoCenterBecauseUserIsExploring() {
   if (!autoCenter) return;
   autoCenter = false;
   syncCenterButton();
+  resetInactivityTimer();
 }
 
 /* =========================================================
@@ -2445,7 +2509,12 @@ function setNavVisual(isMoving) {
 function setNavRotation(deg) {
   const el = document.getElementById("navArrowRot");
   if (!el) return;
-  el.style.transform = `rotate(${deg}deg)`;
+  let relative = deg;
+  if (map && typeof map.getBearing === "function") {
+    const bearing = Number(map.getBearing()) || 0;
+    relative = normDeg(deg - bearing);
+  }
+  el.style.transform = `rotate(${relative}deg)`;
 }
 function normDeg(d) {
   return ((d % 360) + 360) % 360;
@@ -2709,13 +2778,20 @@ function startLocationWatch() {
         lastRotateTs = Date.now();
       } else if (autoCenter && map) {
         const c = getSelfMapCenter() || { lng, lat };
-        suppressAutoDisableFor(700, () => map.easeTo({
-          center: [c.lng, c.lat],
-          zoom: map.getZoom(),
-          bearing: targetBearing,
-          duration: 320,
-          essential: true,
-        }));
+        // Only re-center if the location has moved more than ~15 m (0.0002°).
+        const curr = map.getCenter();
+        const dx = c.lng - curr.lng;
+        const dy = c.lat - curr.lat;
+        const threshold = 0.0002;  // latitude/longitude threshold
+        if (Math.abs(dx) > threshold || Math.abs(dy) > threshold) {
+          suppressAutoDisableFor(700, () => map.easeTo({
+            center: [c.lng, c.lat],
+            zoom: map.getZoom(),
+            bearing: targetBearing,
+            duration: 320,
+            essential: true,
+          }));
+        }
         lastMapBearingDeg = targetBearing;
         lastRotateTs = Date.now();
       }
