@@ -3931,14 +3931,6 @@ async function pullPresenceAll() {
       let lat = Number(it.lat ?? it.latitude ?? NaN);
       let lng = Number(it.lng ?? it.longitude ?? NaN);
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
-      // Normalize lat/lng to ~1m precision.  When two drivers are in nearly
-      // the same place, tiny floating‑point differences can cause their
-      // markers to drift apart as you zoom out.  Rounding the coordinates to
-      // 5 decimal places (~1.1 meters at NYC latitudes) ensures that nearby
-      // drivers share the same map position without altering their true
-      // location appreciably.
-      lat = Math.round(lat * 100000) / 100000;
-      lng = Math.round(lng * 100000) / 100000;
 
       const updated = Number(it.updated_at_unix ?? it.ts_unix ?? it.updated_at ?? NaN);
       if (Number.isFinite(updated)) {
