@@ -1169,6 +1169,40 @@
       overflow: hidden;
     }
 
+    /* =========================================================
+       Kill feed overlay
+       ========================================================= */
+    /*
+     * The kill feed displays the most recent incoming chat messages as a
+     * floating overlay above the auto‑center button.  Each message
+     * appears as plain text with a subtle drop shadow to aid readability.
+     * The container uses pointer‑events: none so it does not intercept
+     * taps or clicks.  Adjust bottom offset as necessary for your layout.
+     */
+    .killFeed {
+      position: fixed;
+      left: 14px;
+      bottom: calc(env(safe-area-inset-bottom, 0px) + 170px);
+      z-index: 6500;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      pointer-events: none;
+      align-items: flex-start;
+      max-width: 70vw;
+    }
+
+    .killFeedMsg {
+      font-size: 11px;
+      font-weight: 900;
+      color: #fff;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 80%;
+    }
+
   </style>
 </head>
 
