@@ -3762,9 +3762,12 @@ async function pullPresenceAll() {
       if (!uid) continue;
       if (me && String(me.id) === uid) continue;
 
-      const lat = Number(it.lat ?? it.latitude ?? NaN);
-      const lng = Number(it.lng ?? it.longitude ?? NaN);
+      let lat = Number(it.lat ?? it.latitude ?? NaN);
+      let lng = Number(it.lng ?? it.longitude ?? NaN);
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+      // Normalise to ~1 m precision to prevent tiny floating-point GPS drift.
+      lat = Math.round(lat * 100000) / 100000;
+      lng = Math.round(lng * 100000) / 100000;
 
       const updated = Number(it.updated_at_unix ?? it.ts_unix ?? it.updated_at ?? NaN);
       if (Number.isFinite(updated) && now - updated > PRESENCE_STALE_SEC) continue;
