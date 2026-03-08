@@ -2704,8 +2704,18 @@ function startLocationWatch() {
       const speedMps = pos.coords.speed;
       const ts = pos.timestamp || Date.now();
 
-      userLatLng = { lat, lng };
       lastGpsAccuracyM = typeof accuracy === "number" && Number.isFinite(accuracy) ? accuracy : null;
+
+      // Ignore noisy fixes after the initial lock. Otherwise a brief accuracy
+      // spike (e.g. 120-300m) can make the marker/presence jump and then snap
+      // back, which looks like the map is "confused".
+      const hasUsableAccuracy = !Number.isFinite(accuracy) || accuracy <= GPS_ACCURACY_THRESHOLD || !gpsFirstFixDone;
+      if (!hasUsableAccuracy) {
+        setNavVisual(false);
+        return;
+      }
+
+      userLatLng = { lat, lng };
 
       if (navMarker) navMarker.setLngLat([lng, lat]);
 
@@ -3935,6 +3945,11 @@ async function pullPresenceAll() {
       const updated = Number(it.updated_at_unix ?? it.ts_unix ?? it.updated_at ?? NaN);
       if (Number.isFinite(updated)) {
         if (now - updated > PRESENCE_STALE_SEC) continue;
+      }
+
+      const reportedAccuracy = Number(it.accuracy ?? it.acc ?? NaN);
+      if (Number.isFinite(reportedAccuracy) && reportedAccuracy > GPS_ACCURACY_THRESHOLD) {
+        continue;
       }
 
       const name = it.display_name || it.name || it.email || "Driver";
