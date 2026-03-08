@@ -45,34 +45,47 @@
     document.body.appendChild(killFeedContainer);
   }
 
-  // Pre-create an AudioContext so the beep plays instantly.
-  const beepAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+  let beepAudioContext = null;
 
   // Resume audio on first user interaction so notification sounds can play immediately on mobile browsers.
-  document.addEventListener('pointerdown', () => {
+  const resumeBeepContext = () => {
     try {
+      if (!beepAudioContext) {
+        const Ctor = window.AudioContext || window.webkitAudioContext;
+        beepAudioContext = new Ctor();
+      }
       if (beepAudioContext && beepAudioContext.state === 'suspended') {
         beepAudioContext.resume();
       }
     } catch (_) {}
-  }, { once: true, passive: true });
+  };
+  document.addEventListener('pointerdown', resumeBeepContext, { once: true, passive: true });
+  document.addEventListener('touchstart', resumeBeepContext, { once: true, passive: true });
 
-  // Play a short sine-wave beep with no noticeable delay.
   function playBeep() {
     try {
-      if (beepAudioContext.state === 'suspended') beepAudioContext.resume();
-      const osc = beepAudioContext.createOscillator();
-      const gain = beepAudioContext.createGain();
+      // Create the audio context if it doesn’t exist yet
+      if (!beepAudioContext) {
+        const Ctor = window.AudioContext || window.webkitAudioContext;
+        beepAudioContext = new Ctor();
+      }
+      const ctx = beepAudioContext;
+      // If the context is suspended (common on mobile), resume it
+      if (ctx.state === 'suspended') {
+        ctx.resume().catch(() => {});
+      }
+      // Generate a short sine-wave beep: 660 Hz, 0.3 seconds, louder volume
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
       osc.type = 'sine';
-      osc.frequency.setValueAtTime(880, beepAudioContext.currentTime);
-      gain.gain.setValueAtTime(0.2, beepAudioContext.currentTime);
+      osc.frequency.setValueAtTime(660, ctx.currentTime);
+      gain.gain.setValueAtTime(0.3, ctx.currentTime);
       osc.connect(gain);
-      gain.connect(beepAudioContext.destination);
-      const now = beepAudioContext.currentTime;
-      osc.start(now);
-      osc.stop(now + 0.15);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.3);
     } catch (err) {
-      console.warn('beep failed:', err);
+      console.warn('Beep failed:', err);
     }
   }
 
