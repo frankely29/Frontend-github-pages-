@@ -45,44 +45,20 @@
     document.body.appendChild(killFeedContainer);
   }
 
-  let beepAudioContext = null;
-
-  // Resume audio on first user interaction so notification sounds can play immediately on mobile browsers.
-  const resumeBeepContext = () => {
-    try {
-      if (!beepAudioContext) {
-        const Ctor = window.AudioContext || window.webkitAudioContext;
-        beepAudioContext = new Ctor();
-      }
-      if (beepAudioContext && beepAudioContext.state === 'suspended') {
-        beepAudioContext.resume();
-      }
-    } catch (_) {}
-  };
-  document.addEventListener('pointerdown', resumeBeepContext, { once: true, passive: true });
-  document.addEventListener('touchstart', resumeBeepContext, { once: true, passive: true });
+  // Preload a short beep sound as a data URI. The base64 string here
+  // encodes a simple beep and avoids cross-origin or network delays.
+  // (If you have your own .wav, you can convert it to base64.)
+  const beepAudio = new Audio(
+    'data:audio/wav;base64,//uQRAAAAWMSLwUIYAAsYkXgoQwAEaYLWfkWgAI0wWs/ItAAAGDgYtAgAyN+QWaAAihwMWm4G8QQRDiMcCBcH3Cc+CDv/7xA4Tvh9Rz/y8QADBwMWgQAZG/ILNAARQ4GLTcDeIIIhxGOBAuD7hOfBB3/94gcJ3w+o5/5eIAIAAAVwWgQAVQ2ORaIQwEMAJiDg95G4nQL7mQVWI6GwRcfsZAcsKkJvxgxEjzFUgfHoSQ9Qq7KNwqHwuB13MA4a1q/DmBrHgPcmjiGoh//EwC5nGPEmS4RcfkVKOhJf+WOgoxJclFz3kgn//dBA+ya1GhurNn8zb//9NNutNuhz31f////9vt///z+IdAEAAAK4LQIAKobHItEIYCGAExBwe8jcToF9zIKrEdDYIuP2MgOWFSE34wYiR5iqQPj0JIeoVdlG4VD4XA67mAcNa1fhzA1jwHuTRxDUQ//iYBczjHiTJcIuPyKlHQkv/LHQUYkuSi57yQT//uggfZNajQ3Vmz+Zt//+mm3Wm3Q576v////+32///5/EOgAAADVghQAAAAA'
+  );
+  beepAudio.load();
 
   function playBeep() {
     try {
-      if (!beepAudioContext) {
-        const Ctor = window.AudioContext || window.webkitAudioContext;
-        beepAudioContext = new Ctor();
-      }
-      const ctx = beepAudioContext;
-      // Resume the context if suspended (mobile Safari requirement)
-      if (ctx.state === 'suspended') {
-        ctx.resume().catch(() => {});
-      }
-      // Generate a short sine-wave beep
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(660, ctx.currentTime);
-      gain.gain.setValueAtTime(0.3, ctx.currentTime); // moderate volume
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start(ctx.currentTime);
-      osc.stop(ctx.currentTime + 0.3);
+      // Restart the sound from the beginning and play it.
+      beepAudio.pause();
+      beepAudio.currentTime = 0;
+      beepAudio.play().catch(() => {});
     } catch (err) {
       console.warn('Beep failed:', err);
     }
@@ -138,15 +114,19 @@
         if (div.parentNode) div.parentNode.removeChild(div);
       }, 30000);
 
-      // Play the beep only when the chat drawer is closed and the message is from someone else.
-      try {
+      {
+        // Only beep if the chat drawer is closed and the message is from someone else
         const panelIsOpen =
           typeof openPanelKey !== 'undefined' && openPanelKey === 'chat';
+        const selfId = (typeof window !== 'undefined' && window.me && window.me.id != null)
+          ? String(window.me.id)
+          : null;
+        const msgUserId = msg.user_id != null
+          ? String(msg.user_id)
+          : (msg.userId != null ? String(msg.userId) : null);
         if (!panelIsOpen && selfId && msgUserId && selfId !== msgUserId) {
           playBeep();
         }
-      } catch (_) {
-        /* ignore errors in determining panel or user ID */
       }
     });
   }
