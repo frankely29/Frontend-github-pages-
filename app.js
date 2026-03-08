@@ -1354,6 +1354,9 @@ function initMap() {
       }
       applyDriverLabelZoomStyles();
     });
+    map.on("rotate", () => {
+      if (Number.isFinite(lastHeadingDeg)) setNavRotation(lastHeadingDeg);
+    });
 
     // Zone click popup (restored)
     wireZoneClickPopup();
@@ -2445,7 +2448,12 @@ function setNavVisual(isMoving) {
 function setNavRotation(deg) {
   const el = document.getElementById("navArrowRot");
   if (!el) return;
-  el.style.transform = `rotate(${deg}deg)`;
+  let relative = deg;
+  if (map && typeof map.getBearing === "function") {
+    const bearing = Number(map.getBearing()) || 0;
+    relative = normDeg(deg - bearing);
+  }
+  el.style.transform = `rotate(${relative}deg)`;
 }
 function normDeg(d) {
   return ((d % 360) + 360) % 360;
