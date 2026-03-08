@@ -11,19 +11,18 @@
    ========================================================= */
 
 /*
- * Determine the API base dynamically.  Historically the frontend hard‑coded a particular
- * Railway URL which often broke when the deployment moved to a new domain.  To make the
- * chat and presence endpoints more robust we resolve the base from the current page’s
- * origin.  When the app is served via Railway (e.g. https://teamjoseo.up.railway.app)
- * the backend lives on the same domain, so using window.location.origin ensures all
- * requests remain relative and CORS is not triggered.  If you wish to proxy to a
- * completely different backend you can set window.API_BASE before this script loads.
+ * API base configuration
+ *
+ * Provide a default backend host for all API calls. If your frontend is deployed on a
+ * different host than the backend, this constant ensures requests target the correct
+ * server. You can override this default by defining `window.API_BASE` before
+ * this script runs. If `window.API_BASE` is defined, it will be used instead of
+ * the default.
  */
+const DEFAULT_API_BASE = "https://web-production-78f67.up.railway.app";
 const RAILWAY_BASE = (typeof window !== "undefined" && window.API_BASE !== undefined)
-  ? String(window.API_BASE || "")
-  : (typeof window !== "undefined" && window.location && window.location.origin)
-    ? window.location.origin
-    : "";
+  ? String(window.API_BASE || DEFAULT_API_BASE)
+  : DEFAULT_API_BASE;
 const BIN_MINUTES = 20;
 
 const REFRESH_MS = 5 * 60 * 1000;
@@ -3971,16 +3970,6 @@ async function pullPresenceAll() {
     const items = Array.isArray(list) ? list : list?.items || [];
     const seen = new Set();
 
-    /*
-     * The original implementation clustered nearby drivers together and then offset
-     * their labels to reduce visual overlap.  Although this made crowded areas
-     * more readable, it inadvertently shifted markers away from their true
-     * locations, which confused drivers when multiple cars were close together.
-     * A key requirement is that each driver marker always remains at the exact
-     * latitude/longitude that was reported by the backend.  To honor this,
-     * we remove the clustering logic entirely.  Each presence record is
-     * rendered individually at its real coordinates, with a default label side.
-     */
     for (const it of items) {
       const uid = String(it.user_id ?? it.userId ?? it.id ?? "");
       if (!uid) continue;
@@ -3991,17 +3980,12 @@ async function pullPresenceAll() {
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
 
       const updated = Number(it.updated_at_unix ?? it.ts_unix ?? it.updated_at ?? NaN);
-      if (Number.isFinite(updated)) {
-        if (now - updated > PRESENCE_STALE_SEC) continue;
-      }
+      if (Number.isFinite(updated) && now - updated > PRESENCE_STALE_SEC) continue;
 
       const name = it.display_name || it.name || it.email || "Driver";
       const heading = Number(it.heading ?? it.bearing ?? NaN);
 
-      // Always render the marker at the provided lat/lng.  Use a consistent label side
-      // (right by default).  If you wish to improve label placement further, consider
-      // computing labelSide based on heading or alternating between left/right for
-      // successive markers.
+      // Always render the marker at the provided lat/lng with a consistent label side.
       upsertDriverMarker(uid, name, lat, lng, heading, "right", 0, 0);
       seen.add(uid);
     }
