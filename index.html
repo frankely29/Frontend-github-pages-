@@ -1182,7 +1182,7 @@
     .killFeed {
       position: fixed;
       left: 14px;
-      /* Keep the feed above the auto‑center and record-trip buttons */
+      /* Position the feed above the auto-center and record-trip buttons */
       bottom: calc(env(safe-area-inset-bottom, 0px) + 170px);
       z-index: 6500;
       display: flex;
@@ -1190,21 +1190,20 @@
       gap: 3px;
       pointer-events: none;
       align-items: flex-start;
-      /* Give more horizontal space to avoid truncation */
-      max-width: 98vw;
+      /* Keep the feed to ~1/3 of the screen width so long messages wrap below */
+      max-width: 34vw;
     }
 
     .killFeedMsg {
-      /* Larger, clearer text; white for high contrast */
-      font-size: 16px !important;   /* ensure this overrides any other rule */
+      font-size: 16px !important;   /* larger text for visibility */
       font-weight: 950;
-      color: #ffffff !important;     /* white text instead of red */
+      color: inherit !important;     /* colour will be set dynamically in JS */
       text-shadow: 0 2px 4px rgba(0,0,0,0.95);
-      white-space: normal;           /* allow wrapping onto multiple lines */
+      white-space: normal;           /* allow multi-line messages */
       word-break: break-word;
       overflow: hidden;
       text-overflow: ellipsis;
-      max-width: 98%;
+      max-width: 100%;
     }
 
   </style>
