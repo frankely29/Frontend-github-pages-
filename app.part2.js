@@ -46,20 +46,29 @@
   }
 
   // Pre-create an AudioContext so the beep plays instantly.
-  const beepCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const beepAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+  // Resume audio on first user interaction so notification sounds can play immediately on mobile browsers.
+  document.addEventListener('pointerdown', () => {
+    try {
+      if (beepAudioContext && beepAudioContext.state === 'suspended') {
+        beepAudioContext.resume();
+      }
+    } catch (_) {}
+  }, { once: true, passive: true });
 
   // Play a short sine-wave beep with no noticeable delay.
   function playBeep() {
     try {
-      if (beepCtx.state === 'suspended') beepCtx.resume();
-      const osc = beepCtx.createOscillator();
-      const gain = beepCtx.createGain();
+      if (beepAudioContext.state === 'suspended') beepAudioContext.resume();
+      const osc = beepAudioContext.createOscillator();
+      const gain = beepAudioContext.createGain();
       osc.type = 'sine';
-      osc.frequency.setValueAtTime(880, beepCtx.currentTime);
-      gain.gain.setValueAtTime(0.2, beepCtx.currentTime);
+      osc.frequency.setValueAtTime(880, beepAudioContext.currentTime);
+      gain.gain.setValueAtTime(0.2, beepAudioContext.currentTime);
       osc.connect(gain);
-      gain.connect(beepCtx.destination);
-      const now = beepCtx.currentTime;
+      gain.connect(beepAudioContext.destination);
+      const now = beepAudioContext.currentTime;
       osc.start(now);
       osc.stop(now + 0.15);
     } catch (err) {
@@ -70,7 +79,7 @@
   // Append new messages to the kill feed. Keep only the last 4 and
   // remove each after 30 seconds.
   function showKillFeed(msgs) {
-    if (!Array.isArray(msgs) || !msgs.length) return;
+    if (!Array.isArray(msgs)) return;
 
     msgs.forEach((msg) => {
       // Use chatMsgKey() if available to generate a stable key; fall back to a simple composite.
