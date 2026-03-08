@@ -13,11 +13,13 @@
 /*
  * API base configuration
  *
- * Provide a default backend host for all API calls. If your frontend is deployed on a
- * different host than the backend, this constant ensures requests target the correct
- * server. You can override this default by defining `window.API_BASE` before
- * this script runs. If `window.API_BASE` is defined, it will be used instead of
- * the default.
+ * Historically the frontend hard‑coded a Railway domain (e.g. https://web-production-78f67.up.railway.app)
+ * as the base for all API calls.  When only app.js is replaced without updating other files,
+ * using window.location.origin can break critical endpoints like `/timeline` because the static
+ * frontend is often hosted separately from the backend.  To maintain compatibility we
+ * provide a default API base that points at the original backend.  You can override this by
+ * setting `window.API_BASE` before app.js loads.  This allows new deployments to specify
+ * their backend host without modifying the source code.
  */
 const DEFAULT_API_BASE = "https://web-production-78f67.up.railway.app";
 const RAILWAY_BASE = (typeof window !== "undefined" && window.API_BASE !== undefined)
@@ -71,11 +73,21 @@ const PRESENCE_STALE_SEC = 70; // hide if older than this
 const LS_TOKEN = "community_token_v1";
 const LS_EMAIL = "community_email_v1";
 const LS_DISPLAY_NAME = "community_display_name_v1";
+// NOTE: Chat constants have been moved to app.part2.js.  If you need to override
+// them, define `window.CHAT_ROOM` and `window.CHAT_POLL_MS` in your new chat file.
+// const CHAT_ROOM = "global";
+// const CHAT_POLL_MS = 1200;
 const PICKUP_RECENT_LIMIT = 30;
 const PICKUP_ZONE_SAMPLE_LIMIT = 100;
 const PICKUP_REFRESH_DEBOUNCE_MS = 350;
 const PICKUP_FETCH_COOLDOWN_MS = 1200;
 
+// Chat state variables were used by the built‑in chat implementation.  They have
+// been migrated to app.part2.js.  Leaving these commented prevents undefined
+// variable errors if the old chat logic is removed.
+// let chatPollTimer = null;
+// let chatLastSeen = null;
+// let chatSeenKeys = new Set();
 let pickupRefreshTimer = null;
 let pickupRefreshInFlight = false;
 let pickupLogBusy = false;
@@ -833,6 +845,7 @@ function openDrawer(key, title, html) {
   dockBackdrop?.setAttribute("aria-hidden", "false");
   syncDrawerPanelPosition();
   syncDockActiveButton();
+  // If a chat implementation defines syncChatPollingState on window, call it.
   if (typeof window !== "undefined" && typeof window.syncChatPollingState === "function") {
     window.syncChatPollingState();
   }
@@ -848,6 +861,7 @@ function closeDrawer() {
   dockBackdrop?.setAttribute("aria-hidden", "true");
   syncDrawerPanelPosition();
   syncDockActiveButton();
+  // If a chat implementation defines syncChatPollingState on window, call it.
   if (typeof window !== "undefined" && typeof window.syncChatPollingState === "function") {
     window.syncChatPollingState();
   }
@@ -1065,6 +1079,43 @@ function wireProfilePanel() {
   });
 }
 
+// The built‑in chat panel implementation has been removed from app.js.
+// A new chat implementation is provided in app.part2.js.
+
+/* function chatPanelHTML() {} */
+
+/* chatMsgCursor has been removed */
+
+/* chatMsgKey has been removed */
+
+/* formatChatTime has been removed */
+
+/* isChatNearBottom has been removed */
+
+/* setChatStatus has been removed */
+
+/* chatResetState has been removed */
+
+/* renderChatMessages has been removed */
+
+/* chatFetchMessages has been removed */
+
+/* chatLoadInitial has been removed */
+
+/* chatFetchNew has been removed */
+
+/* chatSend has been removed */
+
+/* chatPollOnce has been removed */
+
+/* startChatPolling has been removed */
+
+/* stopChatPolling has been removed */
+
+/* syncChatPollingState has been removed */
+
+/* wireChatPanel has been removed */
+
 function colorsPanelHTML() {
   const teslaRows = `
       <div style="display:flex;align-items:center;gap:8px;"><span style="display:inline-block;width:12px;height:12px;border-radius:4px;background:#00b050;border:1px solid rgba(0,0,0,0.15);flex:0 0 12px;"></span>Green = Highest</div>
@@ -1109,6 +1160,9 @@ function bindDockToggle(btn, key, title, htmlFactory, wireFn) {
 
 bindDockToggle(dockMusic, "music", "Music", musicPanelHTML, wireMusicPanel);
 bindDockToggle(dockModes, "modes", "Modes", modesPanelHTML, wireModesPanel);
+// Chat binding has been removed from app.js.  A new chat implementation
+// in app.part2.js will call bindDockToggle(dockChat, ...) with its own
+// panel and wiring functions.
 bindDockToggle(dockColors, "colors", "Colors", colorsPanelHTML);
 bindDockToggle(dockProfile, "profile", "Profile", profilePanelHTML, wireProfilePanel);
 
@@ -3413,6 +3467,7 @@ function setAuthUI(signedIn, note) {
   if (authStatus) authStatus.textContent = note || (signedIn ? "Status: signed in" : "Status: signed out");
   syncGhostUI();
   refreshNavNameLabel();
+  // Update chat polling state only if a new chat implementation defines it.
   if (typeof window !== "undefined" && typeof window.syncChatPollingState === "function") {
     window.syncChatPollingState();
   }
@@ -3424,8 +3479,8 @@ function setAuthUI(signedIn, note) {
   }
 
   if (openPanelKey === "chat") {
-    const html = (typeof window !== "undefined" && typeof window.chatPanelHTML === "function")
-      ? window.chatPanelHTML() : "";
+    // If the chat panel is currently open, refresh it using the new chat implementation.
+    const html = (typeof window !== "undefined" && typeof window.chatPanelHTML === "function") ? window.chatPanelHTML() : "";
     openDrawer("chat", "Chat", html);
     if (typeof window !== "undefined" && typeof window.wireChatPanel === "function") {
       window.wireChatPanel();
@@ -3438,6 +3493,7 @@ function clearAuth() {
   me = null;
   localStorage.removeItem(LS_TOKEN);
   localStorage.removeItem("community_token");
+  // Reset chat state if a new chat implementation exists.
   if (typeof window !== "undefined") {
     if (typeof window.chatResetState === "function") window.chatResetState();
     if (typeof window.stopChatPolling === "function") window.stopChatPolling();
@@ -3735,8 +3791,25 @@ function upsertDriverMarker(userId, name, lat, lng, heading, labelSide, labelDx 
   }
 
   const el = makeDriverIcon(name || `Driver ${userId}`, heading, labelSide, labelDx, labelDy);
-  // Pin the marker's bottom-center to the exact coordinates so arrow-tip stays true.
-  const mk = new maplibregl.Marker({ element: el, anchor: "bottom" }).setLngLat([lng, lat]).addTo(map);
+  // A custom HTML marker's triangle arrow sits slightly below the centre of its
+  // 40×40 container (the tip is ~7 px below the vertical midpoint). When the
+  // marker is anchored at "center" without an offset, the geographic point
+  // corresponds to the centre of the container, causing the arrow tip to
+  // hover ~7 px above the true location. To pin the arrow tip to the exact
+  // latitude/longitude, we anchor the marker at the centre and apply a
+  // downward offset equal to that vertical difference. Positive y offsets
+  // move the marker downwards relative to its anchor; see MapLibre docs.
+  const arrowOffsetY = 7; // pixels the arrow tip sits below the centre
+  const mk = new maplibregl.Marker({ element: el, anchor: "center", offset: [0, arrowOffsetY] })
+    .setLngLat([lng, lat])
+    .addTo(map);
+
+  // Enable subpixel positioning so the marker isn’t snapped to integer pixel
+  // boundaries. This reduces apparent drift when zooming or panning at
+  // fractional zoom levels.
+  if (typeof mk.setSubpixelPositioning === 'function') {
+    mk.setSubpixelPositioning(true);
+  }
 
   if (!debugOnce.otherMarker) {
     console.log("DEBUG other marker lngLat", { lng, lat });
@@ -3757,6 +3830,16 @@ async function pullPresenceAll() {
     const items = Array.isArray(list) ? list : list?.items || [];
     const seen = new Set();
 
+    /*
+     * The original implementation clustered nearby drivers together and then offset
+     * their labels to reduce visual overlap.  Although this made crowded areas
+     * more readable, it inadvertently shifted markers away from their true
+     * locations, which confused drivers when multiple cars were close together.
+     * A key requirement is that each driver marker always remains at the exact
+     * latitude/longitude that was reported by the backend.  To honor this,
+     * we remove the clustering logic entirely.  Each presence record is
+     * rendered individually at its real coordinates, with a default label side.
+     */
     for (const it of items) {
       const uid = String(it.user_id ?? it.userId ?? it.id ?? "");
       if (!uid) continue;
@@ -3765,17 +3848,27 @@ async function pullPresenceAll() {
       let lat = Number(it.lat ?? it.latitude ?? NaN);
       let lng = Number(it.lng ?? it.longitude ?? NaN);
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
-      // Normalise to ~1 m precision to prevent tiny floating-point GPS drift.
+      // Normalize lat/lng to ~1m precision.  When two drivers are in nearly
+      // the same place, tiny floating‑point differences can cause their
+      // markers to drift apart as you zoom out.  Rounding the coordinates to
+      // 5 decimal places (~1.1 meters at NYC latitudes) ensures that nearby
+      // drivers share the same map position without altering their true
+      // location appreciably.
       lat = Math.round(lat * 100000) / 100000;
       lng = Math.round(lng * 100000) / 100000;
 
       const updated = Number(it.updated_at_unix ?? it.ts_unix ?? it.updated_at ?? NaN);
-      if (Number.isFinite(updated) && now - updated > PRESENCE_STALE_SEC) continue;
+      if (Number.isFinite(updated)) {
+        if (now - updated > PRESENCE_STALE_SEC) continue;
+      }
 
       const name = it.display_name || it.name || it.email || "Driver";
       const heading = Number(it.heading ?? it.bearing ?? NaN);
 
-      // Always render the marker at the provided lat/lng with a consistent label side.
+      // Always render the marker at the provided lat/lng.  Use a consistent label side
+      // (right by default).  If you wish to improve label placement further, consider
+      // computing labelSide based on heading or alternating between left/right for
+      // successive markers.
       upsertDriverMarker(uid, name, lat, lng, heading, "right", 0, 0);
       seen.add(uid);
     }
