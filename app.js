@@ -23,11 +23,15 @@ let mapReady = false;
 let didFitToZonesOnce = false;
 
 const ROTATE_ENABLED = true;
-const ROTATE_MIN_MPH = 2.0;
-const ROTATE_MIN_DELTA_DEG = 3;
-const ROTATE_RATE_LIMIT_MS = 200;
-const ROTATE_ANIM_MS = 250;
+const ROTATE_MIN_MPH = 1.0;
+const ROTATE_MIN_DELTA_DEG = 1.5;
+const ROTATE_RATE_LIMIT_MS = 120;
+const ROTATE_ANIM_MS = 220;
 const GPS_ACCURACY_THRESHOLD = 50;
+const HEADING_MIN_SPEED_MPS = 0.8;
+const HEADING_DERIVE_MIN_MILES = 0.002;
+const HEADING_SMOOTHING = 0.42;
+const HEADING_COMPASS_STALE_MS = 2500;
 const MAX_JUMP_MILES = 2.0;
 let lastMapBearingDeg = 0;
 let lastRotateTs = 0;
@@ -57,7 +61,8 @@ const LS_EMAIL = "community_email_v1";
 const LS_DISPLAY_NAME = "community_display_name_v1";
 const CHAT_ROOM = "global";
 const CHAT_POLL_MS = 1200;
-const PICKUP_RECENT_LIMIT = 50;
+const PICKUP_RECENT_LIMIT = 30;
+const PICKUP_ZONE_SAMPLE_LIMIT = 100;
 const PICKUP_REFRESH_DEBOUNCE_MS = 350;
 const PICKUP_FETCH_COOLDOWN_MS = 1200;
 
@@ -69,8 +74,7 @@ let pickupRefreshInFlight = false;
 let pickupLogBusy = false;
 let lastPickupFetchMs = 0;
 let lastPickupFetchKey = "";
-let pickupRecentZoneCounts = new Map();
-let pickupRecentZoneLatestTs = new Map();
+let pickupZoneStats = new Map();
 
 /* =========================================================
    MANHATTAN MODE — DEFAULT SETTINGS (SAFE TO EDIT)
@@ -759,7 +763,42 @@ const dockDrawerBody = document.getElementById("dockDrawerBody");
 const dockDrawerClose = document.getElementById("dockDrawerClose");
 const dockBackdrop = document.getElementById("dockBackdrop");
 
+const USER_AGENT = typeof navigator !== "undefined" ? navigator.userAgent || "" : "";
+const IS_TESLA_BROWSER = /\bTesla\//i.test(USER_AGENT);
+const DRAWER_AUTO_MINIMIZE_MS = 5000;
+
 let openPanelKey = null;
+let drawerAutoMinimizeTimer = null;
+
+function clearDrawerAutoMinimizeTimer() {
+  if (drawerAutoMinimizeTimer) {
+    clearTimeout(drawerAutoMinimizeTimer);
+    drawerAutoMinimizeTimer = null;
+  }
+}
+
+function touchDrawerAutoMinimizeTimer() {
+  if (!openPanelKey) {
+    clearDrawerAutoMinimizeTimer();
+    return;
+  }
+  clearDrawerAutoMinimizeTimer();
+  drawerAutoMinimizeTimer = setTimeout(() => {
+    if (!openPanelKey) return;
+    closeDrawer();
+  }, DRAWER_AUTO_MINIMIZE_MS);
+}
+
+function bindDrawerAutoMinimizeActivity() {
+  if (!dockDrawer) return;
+  const events = ["pointerdown", "click", "input", "keydown", "focusin", "touchstart", "wheel"];
+  for (const eventName of events) {
+    dockDrawer.addEventListener(eventName, () => {
+      if (!openPanelKey) return;
+      touchDrawerAutoMinimizeTimer();
+    }, true);
+  }
+}
 
 function syncDrawerPanelPosition() {
   if (!dockDrawer) return;
@@ -788,9 +827,11 @@ function openDrawer(key, title, html) {
   syncDrawerPanelPosition();
   syncDockActiveButton();
   syncChatPollingState();
+  touchDrawerAutoMinimizeTimer();
 }
 
 function closeDrawer() {
+  clearDrawerAutoMinimizeTimer();
   openPanelKey = null;
   dockDrawer?.classList.remove("open");
   dockBackdrop?.classList.remove("open");
@@ -812,6 +853,7 @@ function toggleDrawer(key, title, html) {
 dockBackdrop?.addEventListener("click", closeDrawer);
 dockDrawerClose?.addEventListener("click", closeDrawer);
 dockDrawer?.addEventListener("click", (e) => e.stopPropagation());
+bindDrawerAutoMinimizeActivity();
 
 function musicPanelHTML() {
   return `
@@ -876,7 +918,7 @@ function modesPanelHTML() {
 
       <div style="display:flex;gap:10px;flex-wrap:wrap;">
         <button id="dockPoliceBtn" class="chipBtn">🚨 Police</button>
-        <button id="dockPickupBtn" class="chipBtn">✅ Pickup</button>
+        <button id="dockPickupBtn" class="chipBtn">✅ Record Trip</button>
       </div>
 
       <div style="margin-top:10px;opacity:0.75;font-weight:600;">
@@ -1232,15 +1274,27 @@ function wireChatPanel() {
 }
 
 function colorsPanelHTML() {
-  return `
-    <div class="panelBlock">
-      <div style="font-weight:800;margin-bottom:8px;">Demand Colors</div>
+  const teslaRows = `
+      <div style="display:flex;align-items:center;gap:8px;"><span style="display:inline-block;width:12px;height:12px;border-radius:4px;background:#00b050;border:1px solid rgba(0,0,0,0.15);flex:0 0 12px;"></span>Green = Highest</div>
+      <div style="display:flex;align-items:center;gap:8px;"><span style="display:inline-block;width:12px;height:12px;border-radius:4px;background:#8000ff;border:1px solid rgba(0,0,0,0.15);flex:0 0 12px;"></span>Purple = High</div>
+      <div style="display:flex;align-items:center;gap:8px;"><span style="display:inline-block;width:12px;height:12px;border-radius:4px;background:#0066ff;border:1px solid rgba(0,0,0,0.15);flex:0 0 12px;"></span>Blue = Medium</div>
+      <div style="display:flex;align-items:center;gap:8px;"><span style="display:inline-block;width:12px;height:12px;border-radius:4px;background:#66ccff;border:1px solid rgba(0,0,0,0.15);flex:0 0 12px;"></span>Sky = Normal</div>
+      <div style="display:flex;align-items:center;gap:8px;"><span style="display:inline-block;width:12px;height:12px;border-radius:4px;background:#ffd400;border:1px solid rgba(0,0,0,0.15);flex:0 0 12px;"></span>Yellow = Below Normal</div>
+      <div style="display:flex;align-items:center;gap:8px;"><span style="display:inline-block;width:12px;height:12px;border-radius:4px;background:#e60000;border:1px solid rgba(0,0,0,0.15);flex:0 0 12px;"></span>Red = Very Low / Avoid</div>
+  `;
+  const defaultRows = `
       <div>🟩 Green = Highest</div>
       <div>🟪 Purple = High</div>
       <div>🟦 Blue = Medium</div>
       <div>🟦 Sky = Normal</div>
       <div>🟨 Yellow = Below Normal</div>
       <div>🟥 Red = Very Low / Avoid</div>
+  `;
+
+  return `
+    <div class="panelBlock">
+      <div style="font-weight:800;margin-bottom:8px;">Demand Colors</div>
+      ${IS_TESLA_BROWSER ? teslaRows : defaultRows}
       <div style="margin-top:10px;opacity:0.75;font-weight:600;">
         ${statenIslandMode
           ? "Staten Island Mode is ON: Staten Island colors are relative within Staten Island only. Other boroughs remain NYC-wide."
@@ -1266,6 +1320,64 @@ bindDockToggle(dockModes, "modes", "Modes", modesPanelHTML, wireModesPanel);
 bindDockToggle(dockChat, "chat", "Chat", chatPanelHTML, wireChatPanel);
 bindDockToggle(dockColors, "colors", "Colors", colorsPanelHTML);
 bindDockToggle(dockProfile, "profile", "Profile", profilePanelHTML, wireProfilePanel);
+
+function applyTeslaDockIconCompatibility() {
+  if (!IS_TESLA_BROWSER) return;
+
+  const setIcon = (button, svgMarkup) => {
+    const iconEl = button?.querySelector?.(".dockIcon");
+    if (!iconEl) return;
+    iconEl.innerHTML = svgMarkup;
+    iconEl.style.fontSize = "0";
+    iconEl.style.display = "inline-grid";
+    iconEl.style.placeItems = "center";
+    iconEl.style.lineHeight = "1";
+  };
+
+  setIcon(dockColors, `
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false" style="display:block">
+      <circle cx="12" cy="12" r="9" fill="#ffffff" opacity="0.98"/>
+      <circle cx="8" cy="9" r="2.6" fill="#00b050"/>
+      <circle cx="14.8" cy="8" r="2.4" fill="#8000ff"/>
+      <circle cx="16.3" cy="13.7" r="2.4" fill="#0066ff"/>
+      <circle cx="10.3" cy="16.4" r="2.2" fill="#ffd400"/>
+      <circle cx="18.2" cy="18.2" r="1.2" fill="rgba(255,255,255,0)"/>
+      <path d="M19 18.4c0 1.4-1.1 2.4-2.5 2.4H12A8.4 8.4 0 1 1 20.4 12c0 1.3-.8 2.2-1.8 2.2h-1.1c-.7 0-1.2.5-1.2 1.1 0 .3.1.5.3.8.3.5.4 1 .4 1.3Z" fill="none" stroke="#111" stroke-width="1.5" stroke-linejoin="round"/>
+    </svg>
+  `);
+
+  setIcon(dockModes, `
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false" style="display:block">
+      <path d="M10.3 2h3.4l.5 2.2a8 8 0 0 1 1.8.8l1.9-1.2 2.4 2.4-1.2 1.9c.3.6.6 1.2.8 1.8L22 10.3v3.4l-2.2.5a8 8 0 0 1-.8 1.8l1.2 1.9-2.4 2.4-1.9-1.2a8 8 0 0 1-1.8.8l-.5 2.2h-3.4l-.5-2.2a8 8 0 0 1-1.8-.8l-1.9 1.2-2.4-2.4 1.2-1.9a8 8 0 0 1-.8-1.8L2 13.7v-3.4l2.2-.5c.2-.6.5-1.2.8-1.8L3.8 6.1l2.4-2.4 1.9 1.2a8 8 0 0 1 1.8-.8L10.3 2Z" fill="#4f7cff" opacity="0.95"/>
+      <circle cx="12" cy="12" r="3.2" fill="#ffffff"/>
+      <circle cx="12" cy="12" r="7.8" fill="none" stroke="#111" stroke-width="1.2" opacity="0.15"/>
+    </svg>
+  `);
+
+  setIcon(dockChat, `
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false" style="display:block">
+      <path d="M5 5.5h14a2.5 2.5 0 0 1 2.5 2.5v6.3a2.5 2.5 0 0 1-2.5 2.5H11l-4.8 3v-3H5A2.5 2.5 0 0 1 2.5 14.3V8A2.5 2.5 0 0 1 5 5.5Z" fill="#2f7cff"/>
+      <circle cx="8.3" cy="11.1" r="1.2" fill="#ffffff"/>
+      <circle cx="12" cy="11.1" r="1.2" fill="#ffffff"/>
+      <circle cx="15.7" cy="11.1" r="1.2" fill="#ffffff"/>
+    </svg>
+  `);
+
+  setIcon(dockMusic, `
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false" style="display:block">
+      <path d="M15.5 4v9.1a3.2 3.2 0 1 1-1.5-2.7V6.2l7-1.7v7a3.2 3.2 0 1 1-1.5-2.7V3L15.5 4Z" fill="#ffffff"/>
+    </svg>
+  `);
+
+  setIcon(dockProfile, `
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false" style="display:block">
+      <circle cx="12" cy="8" r="4" fill="#111"/>
+      <path d="M4 20a8 8 0 0 1 16 0" fill="none" stroke="#111" stroke-width="2.4" stroke-linecap="round"/>
+    </svg>
+  `);
+}
+
+applyTeslaDockIconCompatibility();
 
 /* =========================================================
    Precision Slider Popup
@@ -1540,24 +1652,56 @@ function emptyGeojson() {
 }
 
 function clearPickupOverlayCache() {
-  pickupRecentZoneCounts = new Map();
-  pickupRecentZoneLatestTs = new Map();
+  pickupZoneStats = new Map();
   lastPickupFetchKey = "";
 }
 
-function setPickupOverlayData(fc, items = []) {
-  pickupRecentZoneCounts = new Map();
-  pickupRecentZoneLatestTs = new Map();
+function setPickupOverlayData(fc, items = [], zoneStats = []) {
+  pickupZoneStats = new Map();
 
-  for (const it of items) {
-    const zoneId = it?.zone_id;
-    if (zoneId == null) continue;
-    const key = String(zoneId);
-    pickupRecentZoneCounts.set(key, (pickupRecentZoneCounts.get(key) || 0) + 1);
-    const ts = Number(it?.created_at ?? NaN);
-    if (Number.isFinite(ts)) {
-      const prev = pickupRecentZoneLatestTs.get(key);
-      if (!prev || ts > prev) pickupRecentZoneLatestTs.set(key, ts);
+  if (Array.isArray(zoneStats) && zoneStats.length) {
+    for (const stat of zoneStats) {
+      const zoneId = stat?.zone_id;
+      if (zoneId == null) continue;
+      const key = String(zoneId);
+      const sampleSize = Number(stat?.sample_size ?? NaN);
+      const sampleLimit = Number(stat?.sample_limit ?? NaN);
+      const latestCreatedAt = Number(stat?.latest_created_at ?? NaN);
+      const avgLat = Number(stat?.avg_lat ?? NaN);
+      const avgLng = Number(stat?.avg_lng ?? NaN);
+
+      pickupZoneStats.set(key, {
+        zone_id: Number(zoneId),
+        zone_name: stat?.zone_name ?? "",
+        borough: stat?.borough ?? "",
+        sample_size: Number.isFinite(sampleSize) ? sampleSize : 0,
+        sample_limit: Number.isFinite(sampleLimit) ? sampleLimit : PICKUP_ZONE_SAMPLE_LIMIT,
+        latest_created_at: Number.isFinite(latestCreatedAt) ? latestCreatedAt : null,
+        avg_lat: Number.isFinite(avgLat) ? avgLat : null,
+        avg_lng: Number.isFinite(avgLng) ? avgLng : null,
+      });
+    }
+  } else {
+    for (const it of items || []) {
+      const zoneId = it?.zone_id;
+      if (zoneId == null) continue;
+      const key = String(zoneId);
+      const existing = pickupZoneStats.get(key) || {
+        zone_id: Number(zoneId),
+        zone_name: it?.zone_name ?? "",
+        borough: it?.borough ?? "",
+        sample_size: 0,
+        sample_limit: PICKUP_ZONE_SAMPLE_LIMIT,
+        latest_created_at: null,
+        avg_lat: null,
+        avg_lng: null,
+      };
+      existing.sample_size += 1;
+      const ts = Number(it?.created_at ?? NaN);
+      if (Number.isFinite(ts) && (!existing.latest_created_at || ts > existing.latest_created_at)) {
+        existing.latest_created_at = ts;
+      }
+      pickupZoneStats.set(key, existing);
     }
   }
 
@@ -1706,15 +1850,22 @@ async function ensurePickupSourceAndLayers() {
         const frameTime = (props.frame_time || "").trim();
         const createdAt = Number(props.created_at ?? NaN);
         const when = Number.isFinite(createdAt) ? formatRelativeAge(createdAt) : "unknown";
+        const zoneStat = pickupZoneStats.get(String(props.zone_id ?? ""));
+        const zoneAvgSample = Number(zoneStat?.sample_size ?? 0);
+        const zoneAvgLimit = Number(zoneStat?.sample_limit ?? PICKUP_ZONE_SAMPLE_LIMIT);
+        const zoneAvgLine = zoneAvgSample > 0
+          ? `<div><b>Zone avg:</b> ${zoneAvgSample}/${zoneAvgLimit} trips used</div>`
+          : "";
         new maplibregl.Popup({ closeButton: true, closeOnClick: true, maxWidth: "280px" })
           .setLngLat(e.lngLat)
           .setHTML(`
             <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; font-size:13px;">
-              <div style="font-weight:900; margin-bottom:4px;">Community pickup</div>
+              <div style="font-weight:900; margin-bottom:4px;">Community trip</div>
               <div><b>Zone:</b> ${escapeHtml(zoneName || `Zone ${props.zone_id || ""}`)}</div>
               ${borough ? `<div><b>Borough:</b> ${escapeHtml(borough)}</div>` : ""}
               <div><b>When:</b> ${escapeHtml(when)}</div>
               ${frameTime ? `<div><b>Frame:</b> ${escapeHtml(frameTime)}</div>` : ""}
+              ${zoneAvgLine}
             </div>
           `)
           .addTo(map);
@@ -1739,6 +1890,7 @@ function pickupOverlayQueryPath(limit = PICKUP_RECENT_LIMIT) {
 
   const qs = new URLSearchParams({
     limit: String(limit),
+    zone_sample_limit: String(PICKUP_ZONE_SAMPLE_LIMIT),
     min_lng: String(Math.min(west, east)),
     max_lng: String(Math.max(west, east)),
     min_lat: String(Math.min(south, north)),
@@ -1771,8 +1923,9 @@ async function refreshPickupOverlay({ force = false } = {}) {
   try {
     const data = await getJSONAuth(path, communityToken);
     const items = Array.isArray(data) ? data : data?.items || [];
+    const zoneStats = Array.isArray(data?.zone_stats) ? data.zone_stats : [];
     const fc = buildPickupFeatureCollection(items);
-    setPickupOverlayData(fc, items);
+    setPickupOverlayData(fc, items, zoneStats);
   } catch (e) {
     console.warn("pickup overlay refresh failed:", e);
   } finally {
@@ -2035,10 +2188,12 @@ function buildPopupHTML(props, geom) {
   const nextPayVal = nextFramePayById.get(String(props.LocationID ?? ""));
   const nextPay = nextPayVal == null ? "n/a" : Number(nextPayVal).toFixed(2);
 
-  const communityPickupCount = pickupRecentZoneCounts.get(String(props.LocationID ?? "")) || 0;
-  const communityLastTs = pickupRecentZoneLatestTs.get(String(props.LocationID ?? ""));
+  const zoneCommunity = pickupZoneStats.get(String(props.LocationID ?? ""));
+  const communityPickupCount = Number(zoneCommunity?.sample_size ?? 0);
+  const communitySampleLimit = Number(zoneCommunity?.sample_limit ?? PICKUP_ZONE_SAMPLE_LIMIT);
+  const communityLastTs = zoneCommunity?.latest_created_at ?? null;
   const communityPickupLine = communityPickupCount > 0
-    ? `<div style="margin-top:6px;"><b>Community pickups in current map view:</b> ${communityPickupCount}${communityLastTs ? ` • last ${escapeHtml(formatRelativeAge(communityLastTs))}` : ""}</div>`
+    ? `<div style="margin-top:6px;"><b>Community zone avg:</b> ${communityPickupCount}/${communitySampleLimit} trips used${communityLastTs ? ` • last ${escapeHtml(formatRelativeAge(communityLastTs))}` : ""}</div>`
     : "";
 
   let extra = "";
@@ -2456,6 +2611,25 @@ function shortestAngleDelta(a, b) {
   if (d < -180) d += 360;
   return d;
 }
+function blendAngleDeg(from, to, alpha = HEADING_SMOOTHING) {
+  if (!Number.isFinite(from)) return normDeg(to);
+  const a = clamp(alpha, 0, 1);
+  return normDeg(from + shortestAngleDelta(from, to) * a);
+}
+function getSelfMapCenter() {
+  if (navMarker && typeof navMarker.getLngLat === "function") {
+    const p = navMarker.getLngLat();
+    if (p && Number.isFinite(p.lng) && Number.isFinite(p.lat)) return { lng: p.lng, lat: p.lat };
+  }
+  if (userLatLng && Number.isFinite(userLatLng.lng) && Number.isFinite(userLatLng.lat)) {
+    return { lng: userLatLng.lng, lat: userLatLng.lat };
+  }
+  if (map && typeof map.getCenter === "function") {
+    const p = map.getCenter();
+    if (p && Number.isFinite(p.lng) && Number.isFinite(p.lat)) return { lng: p.lng, lat: p.lat };
+  }
+  return null;
+}
 function maybeRotateMapTo(deg) {
   if (!ROTATE_ENABLED) return;
   if (!map || !mapReady) return;
@@ -2468,20 +2642,105 @@ function maybeRotateMapTo(deg) {
   const delta = shortestAngleDelta(lastMapBearingDeg, target);
   if (Math.abs(delta) < ROTATE_MIN_DELTA_DEG) return;
 
+  const c = getSelfMapCenter();
+  if (!c) return;
+
   lastRotateTs = now;
   lastMapBearingDeg = target;
 
-  const c = (navMarker && typeof navMarker.getLngLat === "function")
-    ? navMarker.getLngLat()
-    : (userLatLng ? { lng: userLatLng.lng, lat: userLatLng.lat } : map.getCenter());
-  const z = map.getZoom();
-  map.easeTo({
-    center: [c.lng, c.lat],
-    zoom: z,
-    bearing: target,
-    duration: ROTATE_ANIM_MS,
-    essential: true,
+  suppressAutoDisableFor(ROTATE_ANIM_MS + 120, () => {
+    map.easeTo({
+      center: [c.lng, c.lat],
+      zoom: map.getZoom(),
+      bearing: target,
+      duration: ROTATE_ANIM_MS,
+      essential: true,
+    });
   });
+}
+let lastCompassHeadingDeg = null;
+let lastCompassTs = 0;
+let deviceOrientationWatching = false;
+let deviceOrientationArmDone = false;
+let lastHeadingSource = "none";
+let lastHeadingTs = 0;
+function getFreshCompassHeading(now = Date.now()) {
+  return Number.isFinite(lastCompassHeadingDeg) && (now - lastCompassTs) <= HEADING_COMPASS_STALE_MS
+    ? normDeg(lastCompassHeadingDeg)
+    : null;
+}
+function applyHeadingDeg(nextDeg, { source = "gps", ts = Date.now(), smooth = true, rotateMap = false, alpha = HEADING_SMOOTHING } = {}) {
+  if (!Number.isFinite(nextDeg)) return lastHeadingDeg;
+  const target = normDeg(nextDeg);
+  const finalDeg = smooth ? blendAngleDeg(lastHeadingDeg, target, alpha) : target;
+  lastHeadingDeg = finalDeg;
+  lastHeadingSource = source;
+  lastHeadingTs = ts;
+  setNavRotation(finalDeg);
+  if (rotateMap) maybeRotateMapTo(finalDeg);
+  return finalDeg;
+}
+function getScreenAngleDeg() {
+  const raw = Number(window.screen?.orientation?.angle ?? window.orientation ?? 0);
+  return Number.isFinite(raw) ? raw : 0;
+}
+function extractCompassHeadingDeg(evt) {
+  if (!evt) return null;
+  if (typeof evt.webkitCompassHeading === "number" && Number.isFinite(evt.webkitCompassHeading)) {
+    return normDeg(evt.webkitCompassHeading);
+  }
+  const alpha = Number(evt.alpha);
+  if (!Number.isFinite(alpha)) return null;
+  return normDeg((360 - alpha) + getScreenAngleDeg());
+}
+function handleDeviceOrientation(evt) {
+  const heading = extractCompassHeadingDeg(evt);
+  if (!Number.isFinite(heading)) return;
+  const ts = Date.now();
+  lastCompassHeadingDeg = heading;
+  lastCompassTs = ts;
+  const recentlyMoved = !!lastMoveTs && (ts - lastMoveTs) < 3500;
+  applyHeadingDeg(heading, {
+    source: "compass",
+    ts,
+    smooth: true,
+    rotateMap: autoCenter,
+    alpha: recentlyMoved ? 0.22 : 0.38,
+  });
+}
+function startDeviceOrientationWatch() {
+  if (deviceOrientationWatching || typeof window === "undefined") return;
+  deviceOrientationWatching = true;
+  window.addEventListener("deviceorientationabsolute", handleDeviceOrientation, true);
+  window.addEventListener("deviceorientation", handleDeviceOrientation, true);
+}
+async function requestDeviceOrientationAccess() {
+  try {
+    if (typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function") {
+      const result = await DeviceOrientationEvent.requestPermission();
+      if (result !== "granted") return false;
+    }
+    startDeviceOrientationWatch();
+    return true;
+  } catch (e) {
+    console.warn("Device orientation permission failed:", e);
+    return false;
+  }
+}
+function armDeviceOrientationAccess() {
+  if (deviceOrientationArmDone || typeof document === "undefined") return;
+  deviceOrientationArmDone = true;
+
+  const unlock = () => {
+    requestDeviceOrientationAccess().catch((e) => console.warn("Device orientation start failed:", e));
+    document.removeEventListener("pointerup", unlock, true);
+    document.removeEventListener("touchend", unlock, true);
+    document.removeEventListener("click", unlock, true);
+  };
+
+  document.addEventListener("pointerup", unlock, true);
+  document.addEventListener("touchend", unlock, true);
+  document.addEventListener("click", unlock, true);
 }
 function computeBearingDeg(from, to) {
   const toRad = (x) => (x * Math.PI) / 180;
@@ -2517,12 +2776,16 @@ function startLocationWatch() {
     navMarker.getElement().style.zIndex = "2000";
   }
 
+  requestDeviceOrientationAccess().catch(() => {});
+  armDeviceOrientationAccess();
+
   navigator.geolocation.watchPosition(
     (pos) => {
       const lat = pos.coords.latitude;
       const lng = pos.coords.longitude;
       const heading = pos.coords.heading;
       const accuracy = pos.coords.accuracy;
+      const speedMps = pos.coords.speed;
       const ts = pos.timestamp || Date.now();
 
       userLatLng = { lat, lng };
@@ -2536,43 +2799,80 @@ function startLocationWatch() {
       }
 
       let isMoving = false;
+      let headingCandidate = null;
+      let headingSource = "stale";
+      const freshCompass = getFreshCompassHeading(ts);
 
       if (lastPos) {
         const dMi = haversineMiles({ lat: lastPos.lat, lng: lastPos.lng }, userLatLng);
         const dtSec = Math.max(1, (ts - lastPos.ts) / 1000);
         const mph = (dMi / dtSec) * 3600;
         const hasGoodAccuracy = Number.isFinite(accuracy) && accuracy < GPS_ACCURACY_THRESHOLD;
+        const speedValid = Number.isFinite(speedMps) && speedMps >= HEADING_MIN_SPEED_MPS;
+        const movedEnough = dMi >= HEADING_DERIVE_MIN_MILES;
 
-        isMoving = mph >= ROTATE_MIN_MPH && hasGoodAccuracy;
-        // Always update lastHeadingDeg when we have good GPS accuracy.
-        if (hasGoodAccuracy) {
-          if (typeof heading === "number" && Number.isFinite(heading)) {
-            lastHeadingDeg = heading;
-          } else if (dMi > 0.01) {
-            lastHeadingDeg = computeBearingDeg({ lat: lastPos.lat, lng: lastPos.lng }, userLatLng);
-          }
+        isMoving = (mph >= ROTATE_MIN_MPH || speedValid || movedEnough) && hasGoodAccuracy;
+
+        if (Number.isFinite(heading) && (speedValid || mph >= ROTATE_MIN_MPH || hasGoodAccuracy)) {
+          headingCandidate = heading;
+          headingSource = "gps";
+        } else if (movedEnough && hasGoodAccuracy) {
+          headingCandidate = computeBearingDeg({ lat: lastPos.lat, lng: lastPos.lng }, userLatLng);
+          headingSource = "derived";
+        } else if (Number.isFinite(freshCompass)) {
+          headingCandidate = freshCompass;
+          headingSource = "compass";
         }
-        if (isMoving) lastMoveTs = ts;
+
+        if (isMoving || movedEnough) lastMoveTs = ts;
+      } else if (Number.isFinite(freshCompass)) {
+        headingCandidate = freshCompass;
+        headingSource = "compass";
       }
 
       lastPos = { lat, lng, ts };
 
-      setNavRotation(lastHeadingDeg);
-      setNavVisual(isMoving);
-      // Rotate the map toward the current heading whenever a valid heading exists.
-      if (Number.isFinite(lastHeadingDeg)) {
-        maybeRotateMapTo(lastHeadingDeg);
+      if (Number.isFinite(headingCandidate)) {
+        applyHeadingDeg(headingCandidate, {
+          source: headingSource,
+          ts,
+          smooth: gpsFirstFixDone,
+          rotateMap: false,
+          alpha: headingSource === "gps" ? 0.58 : headingSource === "derived" ? 0.46 : 0.30,
+        });
+      } else if (Number.isFinite(lastHeadingDeg)) {
+        setNavRotation(lastHeadingDeg);
       }
+
+      setNavVisual(isMoving);
+
+      const targetBearing = Number.isFinite(lastHeadingDeg)
+        ? normDeg(lastHeadingDeg)
+        : (Number.isFinite(freshCompass) ? normDeg(freshCompass) : map.getBearing());
 
       if (!gpsFirstFixDone) {
         gpsFirstFixDone = true;
         const targetZoom = Math.max(map.getZoom(), 12.5);
-        suppressAutoDisableFor(1200, () => map.flyTo({ center: [lng, lat], zoom: targetZoom, duration: 700 }));
-      } else {
-        if (autoCenter && map) {
-          const c = (navMarker && navMarker.getLngLat) ? navMarker.getLngLat() : { lng, lat };
-          suppressAutoDisableFor(700, () => map.flyTo({ center: [c.lng, c.lat], duration: 500 }));
-        }
+        suppressAutoDisableFor(1200, () => map.easeTo({
+          center: [lng, lat],
+          zoom: targetZoom,
+          bearing: targetBearing,
+          duration: 700,
+          essential: true,
+        }));
+        lastMapBearingDeg = targetBearing;
+        lastRotateTs = Date.now();
+      } else if (autoCenter && map) {
+        const c = getSelfMapCenter() || { lng, lat };
+        suppressAutoDisableFor(700, () => map.easeTo({
+          center: [c.lng, c.lat],
+          zoom: map.getZoom(),
+          bearing: targetBearing,
+          duration: 320,
+          essential: true,
+        }));
+        lastMapBearingDeg = targetBearing;
+        lastRotateTs = Date.now();
       }
 
       if (currentFrame) updateRecommendation(currentFrame);
@@ -2580,7 +2880,7 @@ function startLocationWatch() {
       scheduleWeatherUpdateSoon();
 
       // community push (auth only)
-      communityMaybePushPresence(ts, heading, lastGpsAccuracyM);
+      communityMaybePushPresence(ts, Number.isFinite(lastHeadingDeg) ? lastHeadingDeg : heading, lastGpsAccuracyM);
     },
     (err) => {
       console.warn("Geolocation error:", err);
@@ -2915,7 +3215,8 @@ const radioModalTitle = document.getElementById("radioModalTitle");
 
 const HOT97_STREAM_URL = "https://26313.live.streamtheworld.com/WQHTFMAAC.aac";
 const MEGA979_STREAM_URL = "https://liveaudio.lamusica.com/NY_WSKQ_icy";
-const KQ945_WEB_URL = "https://kq94.net/";
+const KQ945_STREAM_URL = "https://radio.yaservers.com:9990/stream?icy=http";
+const KQ945_SITE_URL = "https://kq94.net/";
 const Z100_STREAM_URL = "https://stream.revma.ihrhls.com/zc1469";
 
 const megaAudio = new Audio();
@@ -2929,6 +3230,7 @@ hot97Audio.preload = "none";
 hot97Audio.crossOrigin = "anonymous";
 
 const kqAudio = new Audio();
+kqAudio.src = KQ945_STREAM_URL;
 kqAudio.preload = "none";
 kqAudio.crossOrigin = "anonymous";
 
@@ -2962,11 +3264,6 @@ function closeHot97Modal() {
     radioModal.setAttribute("aria-hidden", "true");
   }
   if (radioFrame) radioFrame.src = "about:blank";
-  if (kqPlaying) {
-    kqPlaying = false;
-    setBtnState(btnKQ945, false);
-    if (!hot97Playing && !megaPlaying && !z100Playing) setRadioStatus("Radio: off");
-  }
 }
 function openHot97Modal() { closeHot97Modal(); }
 
@@ -3088,21 +3385,36 @@ async function toggleKQ() {
   if (megaPlaying) { megaAudio.pause(); megaPlaying = false; setBtnState(btnMega979, false); }
   if (z100Playing) { z100Audio.pause(); z100Playing = false; setBtnState(btnZ100, false); }
 
+  closeHot97Modal();
+
   if (kqPlaying) {
+    try { kqAudio.pause(); } catch {}
     kqPlaying = false;
     setBtnState(btnKQ945, false);
     setRadioStatus("Radio: off");
-    closeHot97Modal();
     return;
   }
 
-  kqPlaying = true;
-  setBtnState(btnKQ945, true);
-  setBtnState(btnHot97, false);
-  setBtnState(btnMega979, false);
-  setBtnState(btnZ100, false);
-  setRadioStatus("Radio: KQ 94.5 FM (DR) opened");
-  openStationWebModal("KQ 94.5 FM (DR)", KQ945_WEB_URL);
+  try {
+    kqAudio.src = KQ945_STREAM_URL;
+    kqAudio.volume = 1;
+    const p = kqAudio.play();
+    if (p && typeof p.then === "function") await p;
+
+    kqPlaying = true;
+    setBtnState(btnKQ945, true);
+    setBtnState(btnHot97, false);
+    setBtnState(btnMega979, false);
+    setBtnState(btnZ100, false);
+    setRadioStatus("Radio: KQ 94.5 FM playing");
+  } catch (e) {
+    console.warn("KQ 94.5 play failed:", e);
+    kqPlaying = false;
+    setBtnState(btnKQ945, false);
+    setRadioStatus("Radio: KQ 94.5 FM failed to play");
+    try { window.open(KQ945_SITE_URL, "_blank", "noopener"); } catch {}
+    alert("KQ 94.5 FM could not start. Turn volume up and try again.");
+  }
 }
 
 async function toggleZ100() {
@@ -3206,6 +3518,11 @@ kqAudio.addEventListener("ended", () => {
   setBtnState(btnKQ945, false);
   setRadioStatus("Radio: off");
 });
+kqAudio.addEventListener("error", () => {
+  kqPlaying = false;
+  setBtnState(btnKQ945, false);
+  setRadioStatus("Radio: KQ 94.5 FM stream error");
+});
 z100Audio.addEventListener("ended", () => {
   z100Playing = false;
   setBtnState(btnZ100, false);
@@ -3285,8 +3602,8 @@ function setAuthUI(signedIn, note) {
   if (btnAuth) btnAuth.textContent = signedIn ? "Sign out" : "Sign in";
   if (communityNote) {
     communityNote.textContent = signedIn
-      ? "Community: live drivers, police reports, and pickup heat are visible."
-      : "Community: sign in to see other drivers, report police, and log pickups.";
+      ? "Community: live drivers, police reports, and trip heat are visible."
+      : "Community: sign in to see other drivers, report police, and record trips.";
   }
 
   const showLock = !signedIn;
@@ -3803,6 +4120,60 @@ function nearestZoneToUser(frame, latlng) {
   return best;
 }
 
+let recordTripToastTimer = null;
+function ensureRecordTripToast() {
+  let el = document.getElementById("recordTripToast");
+  if (el) return el;
+
+  el = document.createElement("div");
+  el.id = "recordTripToast";
+  el.setAttribute("aria-hidden", "true");
+  el.style.cssText = [
+    "position:fixed",
+    "left:50%",
+    "bottom:calc(env(safe-area-inset-bottom, 0px) + 182px)",
+    "transform:translate(-50%, 18px) scale(0.94)",
+    "opacity:0",
+    "pointer-events:none",
+    "z-index:9800",
+    "transition:opacity 220ms ease, transform 220ms ease",
+  ].join(";");
+  el.innerHTML = `
+    <div aria-label="Trip recorded" style="
+      width:72px;
+      height:72px;
+      border-radius:999px;
+      background:#18b45b;
+      display:grid;
+      place-items:center;
+      color:#fff;
+      font:900 36px/1 system-ui,-apple-system,Segoe UI,Roboto,Arial;
+      box-shadow:0 16px 34px rgba(0,0,0,0.24), 0 0 0 6px rgba(24,180,91,0.18);
+      user-select:none;
+    ">✔</div>
+  `;
+  document.body.appendChild(el);
+  return el;
+}
+function hideRecordTripToast() {
+  const el = document.getElementById("recordTripToast");
+  if (!el) return;
+  el.style.opacity = "0";
+  el.style.transform = "translate(-50%, 18px) scale(0.94)";
+  el.setAttribute("aria-hidden", "true");
+}
+function showRecordTripToast() {
+  const el = ensureRecordTripToast();
+  if (recordTripToastTimer) clearTimeout(recordTripToastTimer);
+  el.style.opacity = "1";
+  el.style.transform = "translate(-50%, 0) scale(1)";
+  el.setAttribute("aria-hidden", "false");
+  recordTripToastTimer = setTimeout(() => {
+    hideRecordTripToast();
+    recordTripToastTimer = null;
+  }, 3000);
+}
+
 async function sendPoliceReport() {
   if (!authHeaderOK()) {
     setAuthUI(false, "Sign in to report police.");
@@ -3825,7 +4196,7 @@ async function sendPoliceReport() {
 async function sendPickupLog() {
   if (pickupLogBusy) return;
   if (!authHeaderOK()) {
-    setAuthUI(false, "Sign in to log pickups.");
+    setAuthUI(false, "Sign in to record trips.");
     return;
   }
   if (!userLatLng) {
@@ -3856,10 +4227,9 @@ async function sendPickupLog() {
 
     schedulePickupOverlayRefresh({ force: true });
 
-    const label = near?.zone_name ? `${near.zone_name}${near.borough ? ` (${near.borough})` : ""}` : "your location";
-    alert(`Pickup logged ✅ (${label})`);
+    showRecordTripToast();
   } catch (e) {
-    alert(`Pickup log failed: ${e.message || e}`);
+    alert(`Trip record failed: ${e.message || e}`);
   } finally {
     pickupLogBusy = false;
   }
