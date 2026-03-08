@@ -910,7 +910,12 @@
       left: 0;
       top: 0;
       display:flex;
-      align-items:center;
+      /*
+       * Position the arrow so its tip sits on the bottom edge of this 40×40 container.
+       * When centred, the tip was ~13px above the bottom, causing the marker to drift
+       * on zoom out. Aligning items to flex-end keeps the tip flush with the bottom.
+       */
+      align-items:flex-end;
       justify-content:center;
       transform-origin: 50% 50%;
     }
