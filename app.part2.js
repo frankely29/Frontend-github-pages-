@@ -68,22 +68,23 @@
         const Ctor = window.AudioContext || window.webkitAudioContext;
         beepAudioContext = new Ctor();
       }
-      // Always resume the context in case it was suspended (mobile Safari)
-      if (beepAudioContext.state === 'suspended') {
-        beepAudioContext.resume().catch(() => {});
-      }
       const ctx = beepAudioContext;
+      // Resume the context if suspended (mobile Safari requirement)
+      if (ctx.state === 'suspended') {
+        ctx.resume().catch(() => {});
+      }
+      // Generate a short sine-wave beep
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.type = 'sine';
-      osc.frequency.setValueAtTime(660, ctx.currentTime); // pleasant beep tone
-      gain.gain.setValueAtTime(0.35, ctx.currentTime);    // moderate volume
+      osc.frequency.setValueAtTime(660, ctx.currentTime);
+      gain.gain.setValueAtTime(0.3, ctx.currentTime); // moderate volume
       osc.connect(gain);
       gain.connect(ctx.destination);
       osc.start(ctx.currentTime);
-      osc.stop(ctx.currentTime + 0.2);
+      osc.stop(ctx.currentTime + 0.3);
     } catch (err) {
-      console.warn('beep failed:', err);
+      console.warn('Beep failed:', err);
     }
   }
 
@@ -137,8 +138,16 @@
         if (div.parentNode) div.parentNode.removeChild(div);
       }, 30000);
 
-      // Play the alert sound for each new message.
-      playBeep();
+      // Play the beep only when the chat drawer is closed and the message is from someone else.
+      try {
+        const panelIsOpen =
+          typeof openPanelKey !== 'undefined' && openPanelKey === 'chat';
+        if (!panelIsOpen && selfId && msgUserId && selfId !== msgUserId) {
+          playBeep();
+        }
+      } catch (_) {
+        /* ignore errors in determining panel or user ID */
+      }
     });
   }
 

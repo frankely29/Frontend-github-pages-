@@ -1194,18 +1194,18 @@
     }
 
     .killFeedMsg {
+      /* Larger text for readability and no background behind the letters */
       font-size: 16px !important;
       font-weight: 950;
-      color: inherit !important;   /* colour set in JS */
-      background: rgba(229, 57, 53, 0.8); /* red backdrop with slight opacity */
-      padding: 4px 6px;
-      border-radius: 6px;
-      text-shadow: none;
+      color: inherit !important;        /* colour set in JS (red/yellow) */
+      background: none !important;      /* remove any coloured backdrop */
+      text-shadow: 0 2px 4px rgba(0,0,0,0.9); /* subtle shadow for legibility */
       white-space: normal;
       word-break: break-word;
       overflow: hidden;
       text-overflow: ellipsis;
       max-width: 100%;
+      padding: 0;
     }
 
   </style>
