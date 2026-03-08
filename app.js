@@ -1288,6 +1288,24 @@ if (dbgReloadFrame) {
    MapLibre init
    ========================================================= */
 let zonePopup = null;
+let zonePopupAutoCloseTimer = null;
+let zonePopupActivityListenersBound = false;
+
+function startZonePopupAutoCloseTimer() {
+  clearTimeout(zonePopupAutoCloseTimer);
+  zonePopupAutoCloseTimer = setTimeout(() => {
+    closeZonePopup();
+  }, 10000);
+}
+
+function resetZonePopupAutoCloseTimer() {
+  if (zonePopup) {
+    clearTimeout(zonePopupAutoCloseTimer);
+    zonePopupAutoCloseTimer = setTimeout(() => {
+      closeZonePopup();
+    }, 10000);
+  }
+}
 
 function initMap() {
   map = new maplibregl.Map({
@@ -1360,6 +1378,10 @@ function initMap() {
 
     // Zone click popup (restored)
     wireZoneClickPopup();
+
+    document.addEventListener("pointerdown", resetInactivityTimer, { passive: true });
+    document.addEventListener("touchstart", resetInactivityTimer, { passive: true });
+    resetInactivityTimer();
 
     map.on("click", (e) => {
       const features = map.queryRenderedFeatures(e.point, { layers: ["zones-fill"] });
@@ -1797,6 +1819,8 @@ function closeZonePopup() {
     if (zonePopup) zonePopup.remove();
   } catch {}
   zonePopup = null;
+  clearTimeout(zonePopupAutoCloseTimer);
+  zonePopupAutoCloseTimer = null;
 }
 
 function wireZoneClickPopup() {
@@ -1827,15 +1851,23 @@ function wireZoneClickPopup() {
       zonePopup = new maplibregl.Popup({
         closeButton: true,
         closeOnClick: true,
-        maxWidth: "340px",
+        maxWidth: "238px",
       })
         .setLngLat([lngLat.lng, lngLat.lat])
         .setHTML(html)
         .addTo(map);
+
+      startZonePopupAutoCloseTimer();
     } catch (err) {
       console.warn("zone popup failed:", err);
     }
   });
+
+  if (!zonePopupActivityListenersBound) {
+    document.addEventListener("pointerdown", resetZonePopupAutoCloseTimer, { passive: true });
+    document.addEventListener("touchstart", resetZonePopupAutoCloseTimer, { passive: true });
+    zonePopupActivityListenersBound = true;
+  }
 }
 
 /* =========================================================
@@ -2281,6 +2313,20 @@ window.addEventListener("resize", () => {
    ========================================================= */
 const btnCenter = document.getElementById("btnCenter");
 let autoCenter = true;
+let inactivityTimer = null;
+
+function resetInactivityTimer() {
+  clearTimeout(inactivityTimer);
+  inactivityTimer = setTimeout(() => {
+    if (!autoCenter) {
+      autoCenter = true;
+      syncCenterButton();
+      if (typeof autoCenterAndAutoZoom === "function") {
+        autoCenterAndAutoZoom();
+      }
+    }
+  }, 30000);
+}
 
 let suppressAutoDisableUntil = 0;
 function suppressAutoDisableFor(ms, fn) {
@@ -2407,6 +2453,7 @@ function disableAutoCenterBecauseUserIsExploring() {
   if (!autoCenter) return;
   autoCenter = false;
   syncCenterButton();
+  resetInactivityTimer();
 }
 
 /* =========================================================
