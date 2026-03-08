@@ -25,6 +25,69 @@
   let chatLastSeen = null;
   let chatSeenKeys = new Set();
 
+  // Track whether the initial batch of chat messages has loaded.  We only
+  // show kill‑feed notifications after the initial load completes.
+  let initialChatLoaded = false;
+
+  // Create a kill feed container if one doesn’t already exist
+  let killFeedContainer = document.getElementById('killFeed');
+  if (!killFeedContainer) {
+    killFeedContainer = document.createElement('div');
+    killFeedContainer.id = 'killFeed';
+    killFeedContainer.className = 'killFeed';
+    document.body.appendChild(killFeedContainer);
+  }
+
+  // Lazily created audio context for the beep
+  let beepAudioContext = null;
+
+  // Play a short beep to signal a new message
+  function playBeep() {
+    try {
+      if (!beepAudioContext) {
+        const Ctor = window.AudioContext || window.webkitAudioContext;
+        beepAudioContext = new Ctor();
+      }
+      const ctx = beepAudioContext;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(880, ctx.currentTime);
+      gain.gain.setValueAtTime(0.1, ctx.currentTime);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.2);
+    } catch (err) {
+      console.warn('Beep failed:', err);
+    }
+  }
+
+  // Append new messages to the kill feed.  Keep only the last 4 and
+  // remove each after 30 seconds.
+  function showKillFeed(msgs) {
+    if (!Array.isArray(msgs)) return;
+    msgs.forEach((msg) => {
+      const who = msg.display_name || msg.user_name || msg.name || 'Driver';
+      const body = String(msg.text || msg.message || '').trim();
+      if (!body) return;
+      const div = document.createElement('div');
+      div.className = 'killFeedMsg';
+      div.textContent = `${who}: ${body}`;
+      killFeedContainer.appendChild(div);
+      // Trim to four messages
+      while (killFeedContainer.childNodes.length > 4) {
+        killFeedContainer.removeChild(killFeedContainer.firstChild);
+      }
+      // Remove this message after 30 seconds
+      setTimeout(() => {
+        if (div.parentNode) div.parentNode.removeChild(div);
+      }, 30000);
+      // Play the notification sound
+      playBeep();
+    });
+  }
+
   // Build panel HTML or a sign‑in prompt
   function chatPanelHTML() {
     if (typeof authHeaderOK === 'function' && !authHeaderOK()) {
@@ -161,23 +224,34 @@
 
   // Poll once and control polling
   async function chatPollOnce() {
+    // Only poll if the user is authenticated
     if (typeof authHeaderOK === 'function' && !authHeaderOK()) return;
-    if (typeof openPanelKey === 'undefined' || openPanelKey !== 'chat') return;
     try {
       const msgs = await chatFetchNew();
-      renderChatMessages(msgs);
+      // Update the in‑panel messages only when the chat panel is open
+      if (typeof openPanelKey !== 'undefined' && openPanelKey === 'chat') {
+        renderChatMessages(msgs);
+      }
+      // Display new messages in the kill feed (after the initial load)
+      if (initialChatLoaded && Array.isArray(msgs) && msgs.length) {
+        showKillFeed(msgs);
+      }
     } catch (e) {
       console.warn('chat poll failed:', e);
     }
   }
   function startChatPolling() {
-    if (chatPollTimer || (typeof authHeaderOK === 'function' && !authHeaderOK()) || openPanelKey !== 'chat') return;
+    if (chatPollTimer) return;
+    if (typeof authHeaderOK === 'function' && !authHeaderOK()) return;
     chatPollTimer = setInterval(chatPollOnce, CHAT_POLL_MS);
   }
   function stopChatPolling() { if (!chatPollTimer) return; clearInterval(chatPollTimer); chatPollTimer = null; }
   function syncChatPollingState() {
-    if (typeof authHeaderOK === 'function' && authHeaderOK() && openPanelKey === 'chat') startChatPolling();
-    else stopChatPolling();
+    if (typeof authHeaderOK === 'function' && authHeaderOK()) {
+      startChatPolling();
+    } else {
+      stopChatPolling();
+    }
   }
 
   // Wire up the chat panel: event handlers, initial load, polling
@@ -210,10 +284,15 @@
     chatSendBtn.addEventListener('click', (e) => { e.preventDefault(); sendNow(); });
     chatInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); sendNow(); } });
     chatResetState();
-    chatLoadInitial().then(() => chatPollOnce()).catch((e) => {
-      console.warn('chat initial load failed:', e);
-      setChatStatus('Chat unavailable right now.');
-    });
+    chatLoadInitial()
+      .then(() => {
+        initialChatLoaded = true;
+        return chatPollOnce();
+      })
+      .catch((e) => {
+        console.warn('chat initial load failed:', e);
+        setChatStatus('Chat unavailable right now.');
+      });
     syncChatPollingState();
   }
 
