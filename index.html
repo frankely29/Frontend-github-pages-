@@ -1182,7 +1182,6 @@
     .killFeed {
       position: fixed;
       left: 14px;
-      /* Raise the overlay above the auto‑center button; adjust as needed */
       bottom: calc(env(safe-area-inset-bottom, 0px) + 170px);
       z-index: 6500;
       display: flex;
@@ -1190,19 +1189,17 @@
       gap: 2px;
       pointer-events: none;
       align-items: flex-start;
-      max-width: 95vw; /* increased from 90vw */
+      max-width: 95vw;    /* increased width */
     }
 
     .killFeedMsg {
-      /* Increase font size and weight for better readability on small screens */
-      font-size: 14px;    /* increased from 13px */
-      font-weight: 950;  /* previously 900 */
+      font-size: 14px;     /* slightly larger text for readability */
+      font-weight: 950;
       color: #fff;
       text-shadow: 0 1px 2px rgba(0,0,0,0.8);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      max-width: 95%;    /* increased from 90% */
+      white-space: normal; /* allow wrapping across multiple lines */
+      word-break: break-word;
+      max-width: 95%;      /* match container width */
     }
 
   </style>
