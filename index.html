@@ -1194,12 +1194,11 @@
     }
 
     .killFeedMsg {
-      /* Larger text for readability and no background behind the letters */
       font-size: 16px !important;
       font-weight: 950;
-      color: inherit !important;        /* colour set in JS (red/yellow) */
-      background: none !important;      /* remove any coloured backdrop */
-      text-shadow: 0 2px 4px rgba(0,0,0,0.9); /* subtle shadow for legibility */
+      color: inherit !important;    /* JS sets red/yellow per sender */
+      background: none !important;  /* no backdrop */
+      text-shadow: none !important; /* remove drop shadow */
       white-space: normal;
       word-break: break-word;
       overflow: hidden;
