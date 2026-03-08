@@ -49,6 +49,8 @@ const HEADING_COMPASS_STALE_MS = 2500;
 const MAX_JUMP_MILES = 2.0;
 let lastMapBearingDeg = 0;
 let lastRotateTs = 0;
+// Track the last time we re-centered the map while auto-center is on.
+let lastAutoCenterTs = 0;
 
 const debugOnce = {
   frame: false,
@@ -2778,12 +2780,17 @@ function startLocationWatch() {
         lastRotateTs = Date.now();
       } else if (autoCenter && map) {
         const c = getSelfMapCenter() || { lng, lat };
-        // Only re-center if the location has moved more than ~15 m (0.0002°).
+        // Compare against the current map center. Only recenter if the
+        // difference exceeds ~0.0002 degrees (~15 m at NYC latitude).
         const curr = map.getCenter();
         const dx = c.lng - curr.lng;
         const dy = c.lat - curr.lat;
-        const threshold = 0.0002;  // latitude/longitude threshold
-        if (Math.abs(dx) > threshold || Math.abs(dy) > threshold) {
+        const threshold = 0.0002;
+        const nowTs = Date.now();
+        const movedEnough = Math.abs(dx) > threshold || Math.abs(dy) > threshold;
+        // Do not recenter more often than once every second.
+        if (movedEnough && nowTs - lastAutoCenterTs > 1000) {
+          lastAutoCenterTs = nowTs;
           suppressAutoDisableFor(700, () => map.easeTo({
             center: [c.lng, c.lat],
             zoom: map.getZoom(),

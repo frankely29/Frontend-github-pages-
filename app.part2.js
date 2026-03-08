@@ -235,18 +235,18 @@
       if (typeof openPanelKey !== 'undefined' && openPanelKey === 'chat') {
         renderChatMessages(msgs);
       }
-      // The first call to chatPollOnce() marks the chat as loaded; do
-      // not show old messages in the kill feed on the first poll.
+      // Toggle the overlay visibility based on whether the chat panel is open.
+      if (killFeedContainer) {
+        killFeedContainer.style.display =
+          (typeof openPanelKey !== "undefined" && openPanelKey === "chat") ? "none" : "flex";
+      }
+      // On the very first poll, mark the chat as loaded without showing old messages.
       if (!initialChatLoaded) {
         initialChatLoaded = true;
-      } else if (Array.isArray(msgs) && msgs.length) {
-        // Hide the feed when the chat drawer is open
-        if (typeof openPanelKey !== "undefined" && openPanelKey === "chat") {
-          if (killFeedContainer) killFeedContainer.style.display = "none";
-        } else {
-          if (killFeedContainer) killFeedContainer.style.display = "flex";
-          showKillFeed(msgs);
-        }
+      } else if (Array.isArray(msgs) && msgs.length &&
+                 (typeof openPanelKey === "undefined" || openPanelKey !== "chat")) {
+        // Show new messages in the feed only when the chat panel is closed.
+        showKillFeed(msgs);
       }
     } catch (e) {
       console.warn('chat poll failed:', e);
