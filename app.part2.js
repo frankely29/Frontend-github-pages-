@@ -110,12 +110,19 @@
       div.className = 'killFeedMsg';
       div.textContent = `${who}: ${body}`;
       // Colour code: yellow for your own messages, red for others
-      const selfId = typeof window !== 'undefined' && window.me ? String(window.me.id) : null;
-      const msgUserId = String(msg.user_id ?? msg.userId ?? msg.id ?? '');
-      if (selfId && selfId === msgUserId) {
-        div.style.color = '#ffd600';   // yellow for your messages
+      const selfId = (typeof window !== 'undefined' && window.me && window.me.id != null)
+        ? String(window.me.id)
+        : null;
+      // Only check sender user-id fields; never use msg.id (message id).
+      const msgUserId = msg.user_id != null
+        ? String(msg.user_id)
+        : (msg.userId != null ? String(msg.userId) : null);
+      if (selfId && msgUserId && selfId === msgUserId) {
+        // Message from this driver: use bright yellow.
+        div.style.color = '#ffd600';
       } else {
-        div.style.color = '#e53935';   // red for other drivers
+        // Message from another driver: use bright red.
+        div.style.color = '#e53935';
       }
       killFeedContainer.appendChild(div);
 

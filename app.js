@@ -3970,6 +3970,8 @@ async function pullPresenceAll() {
       let lat = Number(it.lat ?? it.latitude ?? NaN);
       let lng = Number(it.lng ?? it.longitude ?? NaN);
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+      // Do NOT round lat/lng. Use the exact coordinates returned by the backend
+      // so markers remain accurate even when many drivers share one location.
 
       const updated = Number(it.updated_at_unix ?? it.ts_unix ?? it.updated_at ?? NaN);
       if (Number.isFinite(updated)) {

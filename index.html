@@ -1194,15 +1194,14 @@
     }
 
     .killFeedMsg {
-      font-size: 16px !important; /* larger text for readability */
+      font-size: 16px !important;
       font-weight: 950;
-      color: inherit !important;  /* allow JS to set the colour */
-      /* Dark red backdrop with a subtle red glow instead of black */
-      background: rgba(100, 0, 0, 0.6);
-      text-shadow: 0 2px 4px rgba(255, 0, 0, 0.7);
+      color: inherit !important;   /* colour set in JS */
+      background: rgba(229, 57, 53, 0.8); /* red backdrop with slight opacity */
       padding: 4px 6px;
       border-radius: 6px;
-      white-space: normal;      /* wrap long messages onto the next line */
+      text-shadow: none;
+      white-space: normal;
       word-break: break-word;
       overflow: hidden;
       text-overflow: ellipsis;
