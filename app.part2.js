@@ -111,6 +111,14 @@
       const div = document.createElement('div');
       div.className = 'killFeedMsg';
       div.textContent = `${who}: ${body}`;
+      // Colour code: yellow for your own messages, red for others
+      const selfId = typeof window !== 'undefined' && window.me ? String(window.me.id) : null;
+      const msgUserId = String(msg.user_id ?? msg.userId ?? msg.id ?? '');
+      if (selfId && selfId === msgUserId) {
+        div.style.color = '#ffd600';   // yellow for your messages
+      } else {
+        div.style.color = '#e53935';   // red for other drivers
+      }
       killFeedContainer.appendChild(div);
 
       // Keep only the last four messages visible at any time.
