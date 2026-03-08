@@ -32,6 +32,10 @@
   // show kill‑feed notifications after the initial load completes.
   let initialChatLoaded = false;
 
+  // Remember which chat messages have been displayed in the kill feed.
+  // Once a message has been shown, it will never appear again, even after it expires.
+  const killFeedSeenKeys = new Set();
+
   // Create a kill feed container if one doesn’t already exist
   let killFeedContainer = document.getElementById('killFeed');
   if (!killFeedContainer) {
@@ -41,52 +45,64 @@
     document.body.appendChild(killFeedContainer);
   }
 
-  // Lazily created audio context for the beep
-  let beepAudioContext = null;
+  // Pre-create an AudioContext so the beep plays instantly.
+  const beepCtx = new (window.AudioContext || window.webkitAudioContext)();
 
-  // Play a short beep to signal a new message
+  // Play a short sine-wave beep with no noticeable delay.
   function playBeep() {
     try {
-      if (!beepAudioContext) {
-        const Ctor = window.AudioContext || window.webkitAudioContext;
-        beepAudioContext = new Ctor();
-      }
-      const ctx = beepAudioContext;
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
+      if (beepCtx.state === 'suspended') beepCtx.resume();
+      const osc = beepCtx.createOscillator();
+      const gain = beepCtx.createGain();
       osc.type = 'sine';
-      osc.frequency.setValueAtTime(880, ctx.currentTime);
-      gain.gain.setValueAtTime(0.1, ctx.currentTime);
+      osc.frequency.setValueAtTime(880, beepCtx.currentTime);
+      gain.gain.setValueAtTime(0.2, beepCtx.currentTime);
       osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start();
-      osc.stop(ctx.currentTime + 0.2);
+      gain.connect(beepCtx.destination);
+      const now = beepCtx.currentTime;
+      osc.start(now);
+      osc.stop(now + 0.15);
     } catch (err) {
-      console.warn('Beep failed:', err);
+      console.warn('beep failed:', err);
     }
   }
 
-  // Append new messages to the kill feed.  Keep only the last 4 and
+  // Append new messages to the kill feed. Keep only the last 4 and
   // remove each after 30 seconds.
   function showKillFeed(msgs) {
-    if (!Array.isArray(msgs)) return;
+    if (!Array.isArray(msgs) || !msgs.length) return;
+
     msgs.forEach((msg) => {
+      // Use chatMsgKey() if available to generate a stable key; fall back to a simple composite.
+      const key = (typeof chatMsgKey === 'function')
+        ? chatMsgKey(msg)
+        : `${msg.room || ''}|${msg.user_id || msg.userId || ''}|${msg.created_at || msg.ts || ''}`;
+
+      // Do not show messages that have already been displayed in the feed.
+      if (killFeedSeenKeys.has(key)) return;
+      killFeedSeenKeys.add(key);
+
       const who = msg.display_name || msg.user_name || msg.name || 'Driver';
       const body = String(msg.text || msg.message || '').trim();
       if (!body) return;
+
       const div = document.createElement('div');
       div.className = 'killFeedMsg';
       div.textContent = `${who}: ${body}`;
       killFeedContainer.appendChild(div);
-      // Trim to four messages
+
+      // Keep only the last four messages visible at any time.
       while (killFeedContainer.childNodes.length > 4) {
         killFeedContainer.removeChild(killFeedContainer.firstChild);
       }
-      // Remove this message after 30 seconds
+
+      // Remove this message from the DOM after 30 seconds. Do NOT remove it
+      // from killFeedSeenKeys, so duplicates are never displayed again.
       setTimeout(() => {
         if (div.parentNode) div.parentNode.removeChild(div);
       }, 30000);
-      // Play the notification sound
+
+      // Play the alert sound for each new message.
       playBeep();
     });
   }
@@ -227,27 +243,28 @@
 
   // Poll once and control polling
   async function chatPollOnce() {
-    // Only poll if the user is authenticated
+    // Only poll when authenticated.
     if (typeof authHeaderOK === 'function' && !authHeaderOK()) return;
+
     try {
       const msgs = await chatFetchNew();
-      // Update the in‑panel messages only when the chat panel is open
+
+      // Update the in-panel chat messages only if the chat panel is open.
       if (typeof openPanelKey !== 'undefined' && openPanelKey === 'chat') {
         renderChatMessages(msgs);
+
+        // Hide the kill feed when chat panel is open.
+        if (killFeedContainer) killFeedContainer.style.display = 'none';
+      } else {
+        // Show the kill feed container.
+        if (killFeedContainer) killFeedContainer.style.display = 'flex';
+
+        // After the initial load, display unseen messages in the feed.
+        if (initialChatLoaded) showKillFeed(msgs);
       }
-      // Toggle the overlay visibility based on whether the chat panel is open.
-      if (killFeedContainer) {
-        killFeedContainer.style.display =
-          (typeof openPanelKey !== "undefined" && openPanelKey === "chat") ? "none" : "flex";
-      }
-      // On the very first poll, mark the chat as loaded without showing old messages.
-      if (!initialChatLoaded) {
-        initialChatLoaded = true;
-      } else if (Array.isArray(msgs) && msgs.length &&
-                 (typeof openPanelKey === "undefined" || openPanelKey !== "chat")) {
-        // Show new messages in the feed only when the chat panel is closed.
-        showKillFeed(msgs);
-      }
+
+      // Mark the initial load complete after first call.
+      if (!initialChatLoaded) initialChatLoaded = true;
     } catch (e) {
       console.warn('chat poll failed:', e);
     }
