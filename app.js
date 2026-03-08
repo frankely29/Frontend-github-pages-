@@ -10,7 +10,20 @@
       - computed “inside polygon” label points (no floating outside zones)
    ========================================================= */
 
-const RAILWAY_BASE = "https://web-production-78f67.up.railway.app";
+/*
+ * Determine the API base dynamically.  Historically the frontend hard‑coded a particular
+ * Railway URL which often broke when the deployment moved to a new domain.  To make the
+ * chat and presence endpoints more robust we resolve the base from the current page’s
+ * origin.  When the app is served via Railway (e.g. https://teamjoseo.up.railway.app)
+ * the backend lives on the same domain, so using window.location.origin ensures all
+ * requests remain relative and CORS is not triggered.  If you wish to proxy to a
+ * completely different backend you can set window.API_BASE before this script loads.
+ */
+const RAILWAY_BASE = (typeof window !== "undefined" && window.API_BASE !== undefined)
+  ? String(window.API_BASE || "")
+  : (typeof window !== "undefined" && window.location && window.location.origin)
+    ? window.location.origin
+    : "";
 const BIN_MINUTES = 20;
 
 const REFRESH_MS = 5 * 60 * 1000;
@@ -3957,12 +3970,20 @@ async function pullPresenceAll() {
 
     const items = Array.isArray(list) ? list : list?.items || [];
     const seen = new Set();
-    const visibleDrivers = [];
 
+    /*
+     * The original implementation clustered nearby drivers together and then offset
+     * their labels to reduce visual overlap.  Although this made crowded areas
+     * more readable, it inadvertently shifted markers away from their true
+     * locations, which confused drivers when multiple cars were close together.
+     * A key requirement is that each driver marker always remains at the exact
+     * latitude/longitude that was reported by the backend.  To honor this,
+     * we remove the clustering logic entirely.  Each presence record is
+     * rendered individually at its real coordinates, with a default label side.
+     */
     for (const it of items) {
       const uid = String(it.user_id ?? it.userId ?? it.id ?? "");
       if (!uid) continue;
-
       if (me && String(me.id) === uid) continue;
 
       const lat = Number(it.lat ?? it.latitude ?? NaN);
@@ -3976,81 +3997,16 @@ async function pullPresenceAll() {
 
       const name = it.display_name || it.name || it.email || "Driver";
       const heading = Number(it.heading ?? it.bearing ?? NaN);
-      visibleDrivers.push({ uid, name, heading, lat, lng });
+
+      // Always render the marker at the provided lat/lng.  Use a consistent label side
+      // (right by default).  If you wish to improve label placement further, consider
+      // computing labelSide based on heading or alternating between left/right for
+      // successive markers.
+      upsertDriverMarker(uid, name, lat, lng, heading, "right", 0, 0);
       seen.add(uid);
     }
 
-    const selfPt = userLatLng ? projectToPoint(userLatLng.lng, userLatLng.lat) : null;
-
-    const driversWithPoints = visibleDrivers.map((drv) => ({
-      ...drv,
-      basePoint: projectToPoint(drv.lng, drv.lat),
-    }));
-
-    // Compute a zoom‑dependent collision radius: at zoom 10 it’s ~28 px, at zoom 12 it’s ~9 px.
-    // This keeps clusters tight when zoomed in, and wider when zoomed out.
-    const zoom = map?.getZoom?.() || 12;
-    const COLLISION_PX = Math.max(20, 28 / Math.max(zoom - 9, 1));
-    const clustered = new Set();
-    const collisionClusters = [];
-
-    for (let i = 0; i < driversWithPoints.length; i++) {
-      const start = driversWithPoints[i];
-      if (clustered.has(start.uid)) continue;
-
-      const cluster = [];
-      const queue = [start];
-      clustered.add(start.uid);
-
-      while (queue.length) {
-        const current = queue.pop();
-        cluster.push(current);
-
-        for (const candidate of driversWithPoints) {
-          if (clustered.has(candidate.uid)) continue;
-          if (pointDistance(current.basePoint, candidate.basePoint) > COLLISION_PX) continue;
-          clustered.add(candidate.uid);
-          queue.push(candidate);
-        }
-      }
-
-      cluster.sort((a, b) => a.uid.localeCompare(b.uid));
-      collisionClusters.push(cluster);
-    }
-
-    for (const group of collisionClusters) {
-      for (let idx = 0; idx < group.length; idx++) {
-        const drv = group[idx];
-        let labelSide = idx % 2 === 0 ? "right" : "left";
-
-        let labelDx = 0;
-        let labelDy = 0;
-
-        const basePoint = drv.basePoint;
-
-        if (selfPt) {
-          const distPx = pointDistance(basePoint, selfPt);
-          if (distPx < SELF_COLLISION_THRESHOLD_PX) {
-            labelDx = SELF_LABEL_SIDE === "right" ? -SELF_COLLISION_OFFSET_PX : SELF_COLLISION_OFFSET_PX;
-            labelDy = 0;
-            labelSide = sideFromOffsetX(labelDx, SELF_LABEL_SIDE === "left" ? "right" : "left");
-          }
-        }
-
-        if (group.length > 1 && labelDx === 0 && labelDy === 0) {
-          // Stack labels vertically so they don’t overlap.
-          // Offset all labels to the right of the marker.  Adjust dy to separate names.
-          const verticalSpacing = (map?.getZoom?.() || 12) <= 11 ? 14 : 18; // px between names
-          const mid = (group.length - 1) / 2;
-          labelDx = 44;               // always offset to the right of the marker
-          labelDy = (idx - mid) * verticalSpacing;
-          labelSide = sideFromOffsetX(labelDx, "right");
-        }
-
-        upsertDriverMarker(drv.uid, drv.name, drv.lat, drv.lng, drv.heading, labelSide, labelDx, labelDy);
-      }
-    }
-
+    // Remove markers for drivers that are no longer present.
     for (const uid of Array.from(otherMarkers.keys())) {
       if (!seen.has(uid)) {
         const mk = otherMarkers.get(uid);
