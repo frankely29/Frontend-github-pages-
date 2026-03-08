@@ -32,7 +32,8 @@
   // show kill‑feed notifications after the initial load completes.
   let initialChatLoaded = false;
 
-  // Remember which messages have been shown in the kill feed so they don’t reappear.
+  // Remember which chat messages have been displayed in the kill feed.
+  // Once a message has been shown, it will never appear again, even after it expires.
   const killFeedSeenKeys = new Set();
 
   // Create a kill feed container if one doesn’t already exist
@@ -99,12 +100,13 @@
       div.textContent = `${who}: ${body}`;
       killFeedContainer.appendChild(div);
 
-      // Remove oldest entries if there are more than 4
+      // Keep only the last four messages visible at any time.
       while (killFeedContainer.childNodes.length > 4) {
         killFeedContainer.removeChild(killFeedContainer.firstChild);
       }
 
-      // Schedule removal of this entry after 30 seconds
+      // Remove this message from the DOM after 30 seconds. Do NOT remove it
+      // from killFeedSeenKeys, so duplicates are never displayed again.
       setTimeout(() => {
         if (div.parentNode) div.parentNode.removeChild(div);
       }, 30000);
