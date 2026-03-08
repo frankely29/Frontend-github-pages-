@@ -911,15 +911,11 @@
       top: 0;
       display:flex;
       /*
-       * Align the arrow element vertically in the centre of its 40×40 container.
-       * The arrow is drawn as an isosceles triangle whose tip sits slightly
-       * below the vertical midpoint.  Centering the element keeps the tip
-       * consistently positioned relative to the marker, while a small
-       * downward offset is applied in JavaScript (see app.js) to ensure the
-       * tip is pinned to the exact latitude/longitude.  Using centre
-       * alignment here avoids distortions when zooming in/out.
+       * Position the arrow so its tip sits on the bottom edge of this 40×40 container.
+       * When centred, the tip was ~13px above the bottom, causing the marker to drift
+       * on zoom out. Aligning items to flex-end keeps the tip flush with the bottom.
        */
-      align-items: center;
+      align-items:flex-end;
       justify-content:center;
       transform-origin: 50% 50%;
     }
@@ -1106,8 +1102,7 @@
       top: auto;
       left: 50%;
       transform: translateX(-50%) translateY(18px);
-      /* Raise the music pop-up so it doesn’t overlap the record-trip button */
-      bottom: calc(env(safe-area-inset-bottom, 0px) + 170px); /* previously 110px */
+      bottom: calc(env(safe-area-inset-bottom, 0px) + 110px);
       width: min(92vw, 520px);
       max-height: 30vh;
       border-radius: 18px;
@@ -1122,18 +1117,17 @@
       top: auto;
       left: 50%;
       transform: translateX(-50%) translateY(18px);
-      /* Raise the chat pop-up to sit above the record-trip button */
-      bottom: calc(env(safe-area-inset-bottom, 0px) + 192px); /* previously 132px */
+      bottom: calc(env(safe-area-inset-bottom, 0px) + 132px);
       width: min(88vw, 420px);
       max-height: 250px;
       border-radius: 20px;
       overflow: hidden;
       z-index: 7000;
-      background: rgba(255, 255, 255, 0.12);
+      background: rgba(255,255,255,0.16);
       -webkit-backdrop-filter: blur(18px) saturate(145%);
       backdrop-filter: blur(18px) saturate(145%);
-      border: 1px solid rgba(255, 255, 255, 0.10);
-      box-shadow: 0 10px 20px rgba(0, 0, 0, 0.18);
+      border: 1px solid rgba(255,255,255,0.28);
+      box-shadow: 0 18px 42px rgba(0,0,0,0.24);
     }
     .dockDrawer.panelChat::before {
       content: "";
@@ -1142,9 +1136,10 @@
       pointer-events: none;
       background: linear-gradient(
         to bottom,
-        rgba(255, 255, 255, 0.0) 0%,
-        rgba(255, 255, 255, 0.05) 40%,
-        rgba(255, 255, 255, 0.22) 100%
+        rgba(255,255,255,0.04) 0%,
+        rgba(255,255,255,0.06) 48%,
+        rgba(255,255,255,0.18) 68%,
+        rgba(255,255,255,0.26) 100%
       );
       z-index: 0;
     }
