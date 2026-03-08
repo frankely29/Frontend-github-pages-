@@ -1129,11 +1129,11 @@
       border-radius: 20px;
       overflow: hidden;
       z-index: 7000;
-      background: rgba(255, 255, 255, 0.12);
+      background: rgba(255,255,255,0.16);
       -webkit-backdrop-filter: blur(18px) saturate(145%);
       backdrop-filter: blur(18px) saturate(145%);
-      border: 1px solid rgba(255, 255, 255, 0.10);
-      box-shadow: 0 10px 20px rgba(0, 0, 0, 0.18);
+      border: 1px solid rgba(255,255,255,0.28);
+      box-shadow: 0 18px 42px rgba(0,0,0,0.24);
     }
     .dockDrawer.panelChat::before {
       content: "";
@@ -1142,9 +1142,10 @@
       pointer-events: none;
       background: linear-gradient(
         to bottom,
-        rgba(255, 255, 255, 0.0) 0%,
-        rgba(255, 255, 255, 0.05) 40%,
-        rgba(255, 255, 255, 0.22) 100%
+        rgba(255,255,255,0.04) 0%,
+        rgba(255,255,255,0.06) 48%,
+        rgba(255,255,255,0.18) 68%,
+        rgba(255,255,255,0.26) 100%
       );
       z-index: 0;
     }
@@ -1167,42 +1168,6 @@
       padding: 8px 12px 12px 12px;
       max-height: 190px;
       overflow: hidden;
-    }
-
-    /* =========================================================
-       Kill feed overlay
-       ========================================================= */
-    /*
-     * The kill feed displays the most recent incoming chat messages as a
-     * floating overlay above the auto‑center button.  Each message
-     * appears as plain text with a subtle drop shadow to aid readability.
-     * The container uses pointer‑events: none so it does not intercept
-     * taps or clicks.  Adjust bottom offset as necessary for your layout.
-     */
-    .killFeed {
-      position: fixed;
-      left: 14px;
-      /* Raise the overlay above the auto‑center button; adjust as needed */
-      bottom: calc(env(safe-area-inset-bottom, 0px) + 170px);
-      z-index: 6500;
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-      pointer-events: none;
-      align-items: flex-start;
-      max-width: 95vw; /* increased from 90vw */
-    }
-
-    .killFeedMsg {
-      /* Increase font size and weight for better readability on small screens */
-      font-size: 14px;    /* increased from 13px */
-      font-weight: 950;  /* previously 900 */
-      color: #fff;
-      text-shadow: 0 1px 2px rgba(0,0,0,0.8);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      max-width: 95%;    /* increased from 90% */
     }
 
   </style>
