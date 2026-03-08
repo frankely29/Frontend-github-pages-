@@ -3913,6 +3913,44 @@ function upsertDriverMarker(userId, name, lat, lng, heading, labelSide, labelDx 
   applyDriverLabelZoomStyles();
 }
 
+function buildPresenceLabelPlacement(presenceRows) {
+  const KEY_PRECISION = 5;
+  const LABEL_RING_RADIUS_PX = 32;
+  const grouped = new Map();
+
+  for (const row of presenceRows) {
+    const latKey = row.lat.toFixed(KEY_PRECISION);
+    const lngKey = row.lng.toFixed(KEY_PRECISION);
+    const key = `${latKey},${lngKey}`;
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(row);
+  }
+
+  const placement = new Map();
+  for (const group of grouped.values()) {
+    if (!group.length) continue;
+
+    if (group.length === 1) {
+      placement.set(group[0].uid, { labelSide: "right", labelDx: 0, labelDy: 0 });
+      continue;
+    }
+
+    for (let i = 0; i < group.length; i++) {
+      const item = group[i];
+      const theta = (2 * Math.PI * i) / group.length;
+      const dx = Math.round(Math.cos(theta) * LABEL_RING_RADIUS_PX);
+      const dy = Math.round(Math.sin(theta) * LABEL_RING_RADIUS_PX);
+      placement.set(item.uid, {
+        labelSide: dx < 0 ? "left" : "right",
+        labelDx: dx,
+        labelDy: dy,
+      });
+    }
+  }
+
+  return placement;
+}
+
 async function pullPresenceAll() {
   if (!authHeaderOK() || !map) return;
 
@@ -3922,17 +3960,8 @@ async function pullPresenceAll() {
 
     const items = Array.isArray(list) ? list : list?.items || [];
     const seen = new Set();
+    const candidates = [];
 
-    /*
-     * The original implementation clustered nearby drivers together and then offset
-     * their labels to reduce visual overlap.  Although this made crowded areas
-     * more readable, it inadvertently shifted markers away from their true
-     * locations, which confused drivers when multiple cars were close together.
-     * A key requirement is that each driver marker always remains at the exact
-     * latitude/longitude that was reported by the backend.  To honor this,
-     * we remove the clustering logic entirely.  Each presence record is
-     * rendered individually at its real coordinates, with a default label side.
-     */
     for (const it of items) {
       const uid = String(it.user_id ?? it.userId ?? it.id ?? "");
       if (!uid) continue;
@@ -3952,15 +3981,20 @@ async function pullPresenceAll() {
         continue;
       }
 
-      const name = it.display_name || it.name || it.email || "Driver";
-      const heading = Number(it.heading ?? it.bearing ?? NaN);
+      candidates.push({
+        uid,
+        name: it.display_name || it.name || it.email || "Driver",
+        lat,
+        lng,
+        heading: Number(it.heading ?? it.bearing ?? NaN),
+      });
+    }
 
-      // Always render the marker at the provided lat/lng.  Use a consistent label side
-      // (right by default).  If you wish to improve label placement further, consider
-      // computing labelSide based on heading or alternating between left/right for
-      // successive markers.
-      upsertDriverMarker(uid, name, lat, lng, heading, "right", 0, 0);
-      seen.add(uid);
+    const placement = buildPresenceLabelPlacement(candidates);
+    for (const row of candidates) {
+      const pos = placement.get(row.uid) || { labelSide: "right", labelDx: 0, labelDy: 0 };
+      upsertDriverMarker(row.uid, row.name, row.lat, row.lng, row.heading, pos.labelSide, pos.labelDx, pos.labelDy);
+      seen.add(row.uid);
     }
 
     // Remove markers for drivers that are no longer present.
@@ -3970,6 +4004,11 @@ async function pullPresenceAll() {
         try { mk.remove(); } catch {}
         otherMarkers.delete(uid);
       }
+    }
+
+    if (!candidates.length) {
+      // Remove markers eagerly when there are no active candidates.
+      clearOtherDrivers();
     }
   } catch (e) {
     console.warn("presence/all failed:", e);
