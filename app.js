@@ -3868,13 +3868,9 @@ function applyDriverLabelZoomStyles() {
 function makeDriverIcon(name, headingDeg, avatarUrl = "", mode = "name") {
   const safe = (name || "Driver").trim() || "Driver";
   const rot = Number.isFinite(headingDeg) ? headingDeg : 0;
-  const labelSide = "right";
-  const labelDx = 0;
-  const labelDy = 0;
-
   const el = document.createElement("div");
   const driverLabelHTML = (typeof window !== "undefined" && typeof window.mapIdentityRenderDriverLabel === "function")
-    ? window.mapIdentityRenderDriverLabel({ name: safe, avatarUrl, mode, labelSide, labelDx, labelDy, zoom: map?.getZoom?.() })
+    ? window.mapIdentityRenderDriverLabel({ name: safe, avatarUrl, mode, zoom: map?.getZoom?.() })
     : `<div class="otherDrvName">${escapeHtml(safe)}</div>`;
   el.className = "otherDrvWrap";
   el.innerHTML = `

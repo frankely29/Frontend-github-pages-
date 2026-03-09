@@ -651,7 +651,7 @@
     return `<div class="selfIdentitySlot" data-map-identity-label="1"><div id="navMeName" class="meName" style="display:${safeName ? 'block' : 'none'};font-size:${cfg.fontPx}px;padding:${cfg.padY}px ${cfg.padX}px;">${escapeHtml(safeName)}</div></div>`;
   }
 
-  function mapIdentityRenderDriverLabel({ name, avatarUrl, mode, labelSide, labelDx, labelDy, zoom }) {
+  function mapIdentityRenderDriverLabel({ name, avatarUrl, mode, zoom }) {
     const safeName = (String(name || 'Driver').trim() || 'Driver');
     const safeAvatar = safeMapAvatarUrl(avatarUrl);
     const cfg = mapIdentityVisualConfig(zoom);
