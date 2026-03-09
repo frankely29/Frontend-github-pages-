@@ -121,6 +121,50 @@
 
   let chatAudioCtx = null;
   let chatAudioUnlocked = false;
+  let chatAudioUnlockBound = false;
+  let chatAudioUnlockInFlight = false;
+  let chatAudioPromptEl = null;
+  const chatAudioSkipLogAt = new Map();
+
+  function logChatAudioSkip(reason, extra = '') {
+    const now = Date.now();
+    const last = chatAudioSkipLogAt.get(reason) || 0;
+    if (now - last < 4000) return;
+    chatAudioSkipLogAt.set(reason, now);
+    console.debug(`chat beep skipped: ${reason}${extra ? ` (${extra})` : ''}`);
+  }
+
+  function ensureChatAudioPrompt() {
+    if (chatAudioPromptEl) return chatAudioPromptEl;
+    const el = document.createElement('div');
+    el.id = 'chatAudioUnlockPrompt';
+    el.textContent = 'Tap once to enable chat sound';
+    Object.assign(el.style, {
+      position: 'fixed',
+      left: '50%',
+      transform: 'translateX(-50%)',
+      bottom: 'calc(env(safe-area-inset-bottom, 0px) + 92px)',
+      zIndex: '6400',
+      padding: '6px 10px',
+      borderRadius: '999px',
+      font: '700 11px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial',
+      color: 'rgba(14,14,14,0.92)',
+      background: 'rgba(255,255,255,0.9)',
+      border: '1px solid rgba(0,0,0,0.12)',
+      boxShadow: '0 2px 10px rgba(0,0,0,0.12)',
+      pointerEvents: 'none',
+      opacity: '0',
+      transition: 'opacity 120ms ease'
+    });
+    document.body.appendChild(el);
+    chatAudioPromptEl = el;
+    return el;
+  }
+
+  function setChatAudioPromptVisible(visible) {
+    const el = ensureChatAudioPrompt();
+    el.style.opacity = visible ? '1' : '0';
+  }
 
   function ensureChatAudioContext() {
     if (chatAudioCtx) return chatAudioCtx;
@@ -130,24 +174,120 @@
     return chatAudioCtx;
   }
 
-  async function unlockChatAudio() {
+  function removeChatAudioUnlockListeners() {
+    if (!chatAudioUnlockBound) return;
+    ['pointerdown', 'touchstart', 'click', 'keydown'].forEach((evtName) => {
+      document.removeEventListener(evtName, onChatAudioUnlockInteraction, true);
+    });
+    chatAudioUnlockBound = false;
+  }
+
+  function bindChatAudioUnlockListeners() {
+    if (chatAudioUnlockBound) return;
+    ['pointerdown', 'touchstart', 'click', 'keydown'].forEach((evtName) => {
+      document.addEventListener(evtName, onChatAudioUnlockInteraction, { passive: true, capture: true });
+    });
+    chatAudioUnlockBound = true;
+  }
+
+  async function unlockChatAudio(trigger = 'interaction') {
+    if (chatAudioUnlockInFlight) return;
+    chatAudioUnlockInFlight = true;
     const ctx = ensureChatAudioContext();
-    if (!ctx) return;
+    if (!ctx) {
+      chatAudioUnlockInFlight = false;
+      return;
+    }
     try {
       if (ctx.state === 'suspended') await ctx.resume();
+      const now = ctx.currentTime;
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.00001, now);
+      gain.connect(ctx.destination);
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(880, now);
+      osc.connect(gain);
+      osc.start(now);
+      osc.stop(now + 0.018);
+
       chatAudioUnlocked = ctx.state === 'running';
-    } catch (_) {
+      if (chatAudioUnlocked) {
+        removeChatAudioUnlockListeners();
+        setChatAudioPromptVisible(false);
+      } else {
+        logChatAudioSkip('suspended', trigger);
+        bindChatAudioUnlockListeners();
+        setChatAudioPromptVisible(true);
+      }
+    } catch (err) {
       chatAudioUnlocked = false;
+      logChatAudioSkip('locked', trigger || err?.message || 'unlock-failed');
+      bindChatAudioUnlockListeners();
+      setChatAudioPromptVisible(true);
+    } finally {
+      chatAudioUnlockInFlight = false;
     }
   }
 
-  ['pointerdown', 'touchstart', 'keydown'].forEach((evtName) => {
-    document.addEventListener(evtName, () => { unlockChatAudio(); }, { passive: true });
+  function onChatAudioUnlockInteraction(evt) {
+    unlockChatAudio(evt?.type || 'interaction');
+  }
+
+  function bindChatAudioUnlockTarget(el) {
+    if (!el || el.dataset.chatAudioUnlockBound === '1') return;
+    el.dataset.chatAudioUnlockBound = '1';
+    ['pointerdown', 'touchstart', 'click', 'keydown'].forEach((evtName) => {
+      el.addEventListener(evtName, () => unlockChatAudio(`ui:${el.id || el.className || evtName}`), { passive: true });
+    });
+  }
+
+  function bindChatAudioUnlockTargets() {
+    [
+      'map',
+      'dock',
+      'dockChat',
+      'dockModes',
+      'dockColors',
+      'dockMusic',
+      'dockProfile',
+      'dockDrawerClose',
+      'btnLogin',
+      'btnSignup',
+      'btnAuth'
+    ].forEach((id) => bindChatAudioUnlockTarget(document.getElementById(id)));
+  }
+
+  function rearmChatAudioUnlock() {
+    chatAudioUnlocked = false;
+    bindChatAudioUnlockListeners();
+    setChatAudioPromptVisible(true);
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    if (!chatAudioCtx || chatAudioCtx.state !== 'running') rearmChatAudioUnlock();
   });
+  window.addEventListener('pageshow', () => {
+    if (!chatAudioCtx || chatAudioCtx.state !== 'running') rearmChatAudioUnlock();
+  });
+
+  bindChatAudioUnlockTargets();
+  rearmChatAudioUnlock();
 
   function playBeep() {
     const ctx = ensureChatAudioContext();
-    if (!ctx || !chatAudioUnlocked || ctx.state !== 'running') return;
+    if (!ctx) return;
+    if (!chatAudioUnlocked) {
+      logChatAudioSkip('locked');
+      return;
+    }
+    if (ctx.state !== 'running') {
+      chatAudioUnlocked = false;
+      rearmChatAudioUnlock();
+      logChatAudioSkip('suspended');
+      return;
+    }
     const now = ctx.currentTime;
     const gain = ctx.createGain();
     gain.gain.setValueAtTime(0.0001, now);
@@ -221,12 +361,25 @@
       }, 30000);
 
       // Determine if the chat panel is currently open
-      if (shouldCountUnread(msg) && !incomingNotifySeenKeys.has(key)) {
-        incomingNotifySeenKeys.add(key);
-        unreadChatCount += 1;
-        updateChatUnreadBadge();
-        playBeep();
+      if (incomingNotifySeenKeys.has(key)) {
+        logChatAudioSkip('duplicate');
+        return;
       }
+      if (isOwnMessage(msg)) {
+        logChatAudioSkip('own-message');
+        return;
+      }
+      if (isChatPanelOpen()) {
+        logChatAudioSkip('chat-open');
+        return;
+      }
+      const msgId = messageNumericId(msg);
+      if (msgId === null || chatLastReadId === null || msgId <= chatLastReadId) return;
+
+      incomingNotifySeenKeys.add(key);
+      unreadChatCount += 1;
+      updateChatUnreadBadge();
+      playBeep();
     });
   }
 
