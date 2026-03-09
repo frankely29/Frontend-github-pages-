@@ -621,11 +621,14 @@
   function mapIdentityVisualConfig(zoomValue) {
     const t = mapIdentityZoomT(zoomValue);
     return {
-      fontPx: +(11 + (14 - 11) * t).toFixed(2),
-      padY: +(2 + (3.5 - 2) * t).toFixed(2),
-      padX: +(4.5 + (7.5 - 4.5) * t).toFixed(2),
-      avatarPx: +(23 + (32 - 23) * t).toFixed(2),
-      maxWidthPx: +(112 + (164 - 112) * t).toFixed(2)
+      fontPx: +(10.5 + (14 - 10.5) * t).toFixed(2),
+      padY: +(1.75 + (3.5 - 1.75) * t).toFixed(2),
+      padX: +(4 + (7.5 - 4) * t).toFixed(2),
+      avatarPx: +(22 + (32 - 22) * t).toFixed(2),
+      maxWidthPx: +(110 + (164 - 110) * t).toFixed(2),
+      arrowBodyPx: +(18 + (27 - 18) * t).toFixed(2),
+      arrowLeftRightPx: +(4.5 + (7 - 4.5) * t).toFixed(2),
+      arrowAccentPx: +(10 + (14 - 10) * t).toFixed(2)
     };
   }
 
@@ -664,6 +667,12 @@
 
   function mapIdentityApplyZoomStyles(zoomValue) {
     const cfg = mapIdentityVisualConfig(zoomValue);
+    const rootStyle = document.documentElement?.style;
+    if (rootStyle) {
+      rootStyle.setProperty('--map-ident-arrow-body', `${cfg.arrowBodyPx}px`);
+      rootStyle.setProperty('--map-ident-arrow-left-right', `${cfg.arrowLeftRightPx}px`);
+      rootStyle.setProperty('--map-ident-arrow-accent', `${cfg.arrowAccentPx}px`);
+    }
     document.querySelectorAll('.otherDrvName, .meName').forEach((el) => {
       el.style.fontSize = `${cfg.fontPx}px`;
       el.style.padding = `${cfg.padY}px ${cfg.padX}px`;
