@@ -2885,6 +2885,24 @@ document.addEventListener("visibilitychange", () => {
    WEATHER BADGE + FX (unchanged from old)
    ========================================================= */
 const weatherBadge = document.getElementById("weatherBadge");
+
+/* =========================================================
+   ONLINE USERS BADGE
+   ========================================================= */
+// Grab the online users badge element.  This badge mirrors the weather badge
+// but sits on the left side of the screen.  It displays the number of drivers
+// currently online.  The count is updated in pullPresenceAll().
+const onlineBadge = document.getElementById("onlineBadge");
+function updateOnlineBadge(count) {
+  if (!onlineBadge) return;
+  // Constrain the count to a non-negative integer.
+  const n = Number(count);
+  const display = Number.isFinite(n) && n >= 0 ? n : 0;
+  const txtEl = onlineBadge.querySelector(".onlineTxt");
+  if (txtEl) txtEl.textContent = `${display} online`;
+  onlineBadge.title = `${display} online`;
+}
+
 const wxCanvas = document.getElementById("wxCanvas");
 const wxCtx = wxCanvas ? wxCanvas.getContext("2d") : null;
 
@@ -3957,6 +3975,18 @@ async function pullPresenceAll() {
   try {
     const list = await getJSONAuth("/presence/all", communityToken);
     const now = Date.now() / 1000;
+
+    // Update the online badge with the number of drivers currently online.
+    // The presence API returns either an array of user objects or an object with an `items` array.
+    try {
+      let count;
+      if (Array.isArray(list)) count = list.length;
+      else if (list && Array.isArray(list.items)) count = list.items.length;
+      else count = 0;
+      updateOnlineBadge(count);
+    } catch (e) {
+      // Ignore badge updates if anything goes wrong.
+    }
 
     const items = Array.isArray(list) ? list : list?.items || [];
     const seen = new Set();

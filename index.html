@@ -371,6 +371,39 @@
     .weatherBadge .wxTxt{ opacity: 0.9; }
 
     /* =========================================================
+       ONLINE USERS BADGE
+       ========================================================= */
+    /*
+     * Display a small pill showing how many drivers are online.  This
+     * badge mirrors the appearance of the weather badge but sits on the
+     * opposite side of the screen (top-left).  It shows an icon and the
+     * number of online drivers.  The count is updated dynamically in
+     * app.js via updateOnlineBadge().
+     */
+    .onlineBadge {
+      position: fixed;
+      top: calc(env(safe-area-inset-top) + 10px);
+      left: 12px;
+      z-index: 1400;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      border: 1px solid rgba(0,0,0,0.14);
+      background: rgba(255,255,255,0.80);
+      font-size: 11px;
+      font-weight: 900;
+      opacity: 0.95;
+      white-space: nowrap;
+      max-width: 52vw;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .onlineBadge .onlineIcon { font-size: 12px; }
+    .onlineBadge .onlineTxt { opacity: 0.9; }
+
+    /* =========================================================
        PRECISION SLIDER POPUP
        ========================================================= */
     .sliderTrackWrap{
@@ -1381,6 +1414,18 @@
   <div id="weatherBadge" class="weatherBadge" title="Local weather">
     <span class="wxIcon">⛅</span>
     <span class="wxTxt">Weather…</span>
+  </div>
+
+  <!--
+    Online users badge.  This small pill shows the number of drivers
+    currently online.  It appears on the opposite side of the map
+    relative to the weather badge.  The count is updated by app.js
+    via updateOnlineBadge().  Initially shows zero until presence data
+    is pulled.
+  -->
+  <div id="onlineBadge" class="onlineBadge" title="Drivers online">
+    <span class="onlineIcon">👥</span>
+    <span class="onlineTxt">0 online</span>
   </div>
 
   <div id="radioModal" class="radioModal" aria-hidden="true">
