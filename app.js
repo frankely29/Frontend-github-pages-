@@ -780,6 +780,7 @@ const dockChat = document.getElementById("dockChat");
 const dockGames = document.getElementById("dockGames");
 const dockMusic = document.getElementById("dockMusic");
 const dockProfile = document.getElementById("dockProfile");
+const dockLeaderboard = document.getElementById("dockLeaderboard");
 
 const dockDrawer = document.getElementById("dockDrawer");
 const dockDrawerTitle = document.getElementById("dockDrawerTitle");
@@ -832,13 +833,14 @@ function syncDrawerPanelPosition() {
 }
 
 function syncDockActiveButton() {
-  [dockColors, dockModes, dockChat, dockGames, dockMusic, dockProfile].forEach((b) => b && b.classList.remove("dockBtnActive"));
+  [dockColors, dockModes, dockChat, dockGames, dockMusic, dockProfile, dockLeaderboard].forEach((b) => b && b.classList.remove("dockBtnActive"));
   if (openPanelKey === "colors") dockColors?.classList.add("dockBtnActive");
   if (openPanelKey === "modes") dockModes?.classList.add("dockBtnActive");
   if (openPanelKey === "chat") dockChat?.classList.add("dockBtnActive");
   if (openPanelKey === "games") dockGames?.classList.add("dockBtnActive");
   if (openPanelKey === "music") dockMusic?.classList.add("dockBtnActive");
   if (openPanelKey === "profile") dockProfile?.classList.add("dockBtnActive");
+  if (openPanelKey === "leaderboard") dockLeaderboard?.classList.add("dockBtnActive");
 }
 
 function openDrawer(key, title, html) {
@@ -1238,6 +1240,16 @@ function applyDockIconModel() {
       <path d="M4 20a8 8 0 0 1 16 0v.2H4Z" fill="#5c6cf0"/>
       <path d="M4 20a8 8 0 0 1 16 0" fill="none" stroke="#3c47b8" stroke-width="1.6" stroke-linecap="round"/>
       <path d="M8.2 7.8c.4-2 2-3.4 3.8-3.4s3.4 1.5 3.8 3.4c-.8-.6-1.6-.9-2.7-.9h-2.2c-1 0-1.9.3-2.7.9Z" fill="#5d4037"/>
+    </svg>
+  `);
+
+  setIcon(dockLeaderboard, `
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false" style="display:block">
+      <path d="M4.2 20h15.6" stroke="#7a5313" stroke-width="1.4" stroke-linecap="round"/>
+      <rect x="5.2" y="11.2" width="3.3" height="6" rx="1" fill="#3f8cff"/>
+      <rect x="10.35" y="8.4" width="3.3" height="8.8" rx="1" fill="#2ecf73"/>
+      <rect x="15.5" y="5.5" width="3.3" height="11.7" rx="1" fill="#ffb300"/>
+      <path d="M12 2.5 13.2 5h2.7l-2.2 1.8.8 2.8L12 8.1 9.5 9.6l.8-2.8L8 5h2.7L12 2.5Z" fill="#ffcc2f" stroke="#b57f00" stroke-width="0.8"/>
     </svg>
   `);
 }
