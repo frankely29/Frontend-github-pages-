@@ -1227,18 +1227,23 @@
     }
 
     .killFeedMsg {
-      /* Larger text for readability; colours set dynamically in JS */
-      font-size: 16px !important;
+      font-size: 16px;
       font-weight: 950;
-      color: #ff2a2a !important;
-      background: none !important;
-      text-shadow: none !important;   /* no drop shadow */
+      color: #ff2a2a;
+      background: linear-gradient(90deg, rgba(255,42,42,0.14) 0%, rgba(255,42,42,0.08) 45%, rgba(255,42,42,0.00) 100%);
+      border-left: 1px solid rgba(255,42,42,0.26);
+      border-radius: 8px;
       white-space: normal;
       word-break: break-word;
       overflow: hidden;
       text-overflow: ellipsis;
       max-width: 100%;
-      padding: 0;
+      padding: 2px 8px 2px 6px;
+      transition: opacity 160ms ease, transform 160ms ease, background-color 160ms ease;
+    }
+
+    .killFeedText {
+      color: #ff2a2a;
     }
 
     /* Position the chat button relative so it can host a badge */
