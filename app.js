@@ -45,6 +45,8 @@ const GPS_ACCURACY_THRESHOLD = 50;
 const HEADING_MIN_SPEED_MPS = 0.8;
 const HEADING_DERIVE_MIN_MILES = 0.002;
 const HEADING_SMOOTHING = 0.42;
+const HEADING_NOISE_DEADBAND_DEG = 1.2;
+const HEADING_BIG_TURN_DEG = 12;
 const HEADING_COMPASS_STALE_MS = 2500;
 const MAX_JUMP_MILES = 2.0;
 let lastMapBearingDeg = 0;
@@ -2604,8 +2606,24 @@ function getFreshCompassHeading(now = Date.now()) {
 }
 function applyHeadingDeg(nextDeg, { source = "gps", ts = Date.now(), smooth = true, rotateMap = false, alpha = HEADING_SMOOTHING } = {}) {
   if (!Number.isFinite(nextDeg)) return lastHeadingDeg;
+  const prevDeg = Number.isFinite(lastHeadingDeg) ? normDeg(lastHeadingDeg) : normDeg(nextDeg);
   const target = normDeg(nextDeg);
-  const finalDeg = smooth ? blendAngleDeg(lastHeadingDeg, target, alpha) : target;
+  const smoothedDeg = smooth ? blendAngleDeg(prevDeg, target, alpha) : target;
+
+  const deadband = source === "compass"
+    ? HEADING_NOISE_DEADBAND_DEG
+    : source === "derived"
+      ? HEADING_NOISE_DEADBAND_DEG * 0.9
+      : HEADING_NOISE_DEADBAND_DEG * 0.8;
+  const delta = shortestAngleDelta(prevDeg, smoothedDeg);
+
+  let finalDeg = smoothedDeg;
+  if (Math.abs(delta) < deadband) {
+    finalDeg = prevDeg;
+  } else if (Math.abs(delta) < HEADING_BIG_TURN_DEG) {
+    finalDeg = normDeg(prevDeg + delta * 0.82);
+  }
+
   lastHeadingDeg = finalDeg;
   lastHeadingSource = source;
   lastHeadingTs = ts;
