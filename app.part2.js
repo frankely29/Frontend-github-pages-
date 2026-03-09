@@ -123,7 +123,6 @@
   let chatAudioUnlocked = false;
   let chatAudioUnlockBound = false;
   let chatAudioUnlockInFlight = false;
-  let chatAudioPromptEl = null;
   const chatAudioSkipLogAt = new Map();
 
   function logChatAudioSkip(reason, extra = '') {
@@ -132,38 +131,6 @@
     if (now - last < 4000) return;
     chatAudioSkipLogAt.set(reason, now);
     console.debug(`chat beep skipped: ${reason}${extra ? ` (${extra})` : ''}`);
-  }
-
-  function ensureChatAudioPrompt() {
-    if (chatAudioPromptEl) return chatAudioPromptEl;
-    const el = document.createElement('div');
-    el.id = 'chatAudioUnlockPrompt';
-    el.textContent = 'Tap once to enable chat sound';
-    Object.assign(el.style, {
-      position: 'fixed',
-      left: '50%',
-      transform: 'translateX(-50%)',
-      bottom: 'calc(env(safe-area-inset-bottom, 0px) + 92px)',
-      zIndex: '6400',
-      padding: '6px 10px',
-      borderRadius: '999px',
-      font: '700 11px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial',
-      color: 'rgba(14,14,14,0.92)',
-      background: 'rgba(255,255,255,0.9)',
-      border: '1px solid rgba(0,0,0,0.12)',
-      boxShadow: '0 2px 10px rgba(0,0,0,0.12)',
-      pointerEvents: 'none',
-      opacity: '0',
-      transition: 'opacity 120ms ease'
-    });
-    document.body.appendChild(el);
-    chatAudioPromptEl = el;
-    return el;
-  }
-
-  function setChatAudioPromptVisible(visible) {
-    const el = ensureChatAudioPrompt();
-    el.style.opacity = visible ? '1' : '0';
   }
 
   function ensureChatAudioContext() {
@@ -214,17 +181,14 @@
       chatAudioUnlocked = ctx.state === 'running';
       if (chatAudioUnlocked) {
         removeChatAudioUnlockListeners();
-        setChatAudioPromptVisible(false);
       } else {
         logChatAudioSkip('suspended', trigger);
         bindChatAudioUnlockListeners();
-        setChatAudioPromptVisible(true);
       }
     } catch (err) {
       chatAudioUnlocked = false;
       logChatAudioSkip('locked', trigger || err?.message || 'unlock-failed');
       bindChatAudioUnlockListeners();
-      setChatAudioPromptVisible(true);
     } finally {
       chatAudioUnlockInFlight = false;
     }
@@ -261,7 +225,6 @@
   function rearmChatAudioUnlock() {
     chatAudioUnlocked = false;
     bindChatAudioUnlockListeners();
-    setChatAudioPromptVisible(true);
   }
 
   document.addEventListener('visibilitychange', () => {
