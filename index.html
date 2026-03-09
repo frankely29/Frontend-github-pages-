@@ -1246,18 +1246,29 @@
       position: relative;
     }
 
-    /* Draw a red dot in the upper right corner when the button has class 'notify' */
-    #dockChat.notify::after {
-      content: "";
+    /* Tiny unread count badge for chat */
+    #dockChat::after {
+      content: attr(data-unread);
       position: absolute;
-      top: 6px;
-      right: 6px;
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      background: #e53935;
-      box-shadow: 0 0 0 2px rgba(255,255,255,0.85);
+      top: 4px;
+      right: 4px;
+      min-width: 15px;
+      height: 15px;
+      padding: 0 4px;
+      border-radius: 999px;
+      background: #ff2a2a;
+      color: #fff;
+      font-size: 10px;
+      font-weight: 900;
+      line-height: 15px;
+      text-align: center;
+      box-sizing: border-box;
       pointer-events: none;
+      display: none;
+    }
+
+    #dockChat[data-unread]::after {
+      display: block;
     }
 
   </style>
