@@ -237,25 +237,17 @@
       font-size: 11px;
       font-weight: 800;
     }
-    .legend .swatch {
+    .legend .swatchSvg {
       display: inline-block;
       width: 12px;
       height: 12px;
-      border-radius: 4px;
-      border: 1px solid rgba(0,0,0,0.15);
       flex: 0 0 12px;
       opacity: 1;
-      background-image: none;
+      vertical-align: middle;
       forced-color-adjust: none;
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
     }
-    .legend .swatch.swatch-green { background-color: #00b050; }
-    .legend .swatch.swatch-purple { background-color: #8000ff; }
-    .legend .swatch.swatch-blue { background-color: #0066ff; }
-    .legend .swatch.swatch-sky { background-color: #66ccff; }
-    .legend .swatch.swatch-yellow { background-color: #ffd400; }
-    .legend .swatch.swatch-red { background-color: #e60000; }
     .legend .sub {
       margin-top: 6px;
       font-size: 10px;
@@ -787,6 +779,9 @@
     .gamesStatus{ font: 800 11px/1.25 system-ui,-apple-system,Segoe UI,Roboto,Arial; opacity:0.85; }
     .gamesBoard{ display:grid; grid-template-columns:repeat(8,minmax(28px,1fr)); border:1px solid rgba(0,0,0,0.16); border-radius:12px; overflow:hidden; max-width:320px; }
     .gamesSq{ aspect-ratio:1/1; border:0; font-size:23px; font-weight:800; display:grid; place-items:center; padding:0; cursor:pointer; }
+    .chessPieceIcon{ width:84%; height:84%; display:block; }
+    .chessPieceStroke{ stroke: rgba(0,0,0,0.35); stroke-width: 1.6; }
+    .chessPieceLetter{ font:900 15px/1 system-ui,-apple-system,Segoe UI,Roboto,Arial; text-anchor:middle; dominant-baseline:middle; }
     .gamesSq.light{ background:#f0d9b5; }
     .gamesSq.dark{ background:#b58863; }
     .gamesSq.sel{ outline:3px solid rgba(0,160,255,0.9); outline-offset:-3px; }
@@ -800,6 +795,7 @@
     .gamesUnoCard.green{ background:#43a047; }
     .gamesUnoCard.blue{ background:#1e88e5; }
     .gamesUnoCard.wild{ background:#455a64; }
+    .gamesUnoBackTag{ font:900 11px/1 system-ui,-apple-system,Segoe UI,Roboto,Arial; letter-spacing:0.6px; color:#fff; }
     .gamesUnoRows{ display:flex; flex-direction:column; gap:8px; }
     .gamesUnoTop{ display:flex; align-items:flex-start; justify-content:space-between; gap:8px; flex-wrap:wrap; }
     .gamesUnoPile{ display:flex; align-items:center; gap:8px; }
@@ -1445,12 +1441,12 @@
       </div>
 
       <div class="legendBody">
-        <div class="row"><span class="swatch swatch-green" data-swatch-color="#00b050" style="background-color:#00b050"></span> Green = Highest</div>
-        <div class="row"><span class="swatch swatch-purple" data-swatch-color="#8000ff" style="background-color:#8000ff"></span> Purple = High</div>
-        <div class="row"><span class="swatch swatch-blue" data-swatch-color="#0066ff" style="background-color:#0066ff"></span> Blue = Medium</div>
-        <div class="row"><span class="swatch swatch-sky" data-swatch-color="#66ccff" style="background-color:#66ccff"></span> Sky = Normal</div>
-        <div class="row"><span class="swatch swatch-yellow" data-swatch-color="#ffd400" style="background-color:#ffd400"></span> Yellow = Below Normal</div>
-        <div class="row"><span class="swatch swatch-red" data-swatch-color="#e60000" style="background-color:#e60000"></span> Red = Very Low / Avoid</div>
+        <div class="row"><svg class="swatchSvg" viewBox="0 0 12 12" aria-hidden="true" focusable="false"><rect x="0.5" y="0.5" width="11" height="11" rx="3" fill="#00b050" stroke="rgba(0,0,0,0.15)"/></svg> Green = Highest</div>
+        <div class="row"><svg class="swatchSvg" viewBox="0 0 12 12" aria-hidden="true" focusable="false"><rect x="0.5" y="0.5" width="11" height="11" rx="3" fill="#8000ff" stroke="rgba(0,0,0,0.15)"/></svg> Purple = High</div>
+        <div class="row"><svg class="swatchSvg" viewBox="0 0 12 12" aria-hidden="true" focusable="false"><rect x="0.5" y="0.5" width="11" height="11" rx="3" fill="#0066ff" stroke="rgba(0,0,0,0.15)"/></svg> Blue = Medium</div>
+        <div class="row"><svg class="swatchSvg" viewBox="0 0 12 12" aria-hidden="true" focusable="false"><rect x="0.5" y="0.5" width="11" height="11" rx="3" fill="#66ccff" stroke="rgba(0,0,0,0.15)"/></svg> Sky = Normal</div>
+        <div class="row"><svg class="swatchSvg" viewBox="0 0 12 12" aria-hidden="true" focusable="false"><rect x="0.5" y="0.5" width="11" height="11" rx="3" fill="#ffd400" stroke="rgba(0,0,0,0.15)"/></svg> Yellow = Below Normal</div>
+        <div class="row"><svg class="swatchSvg" viewBox="0 0 12 12" aria-hidden="true" focusable="false"><rect x="0.5" y="0.5" width="11" height="11" rx="3" fill="#e60000" stroke="rgba(0,0,0,0.15)"/></svg> Red = Very Low / Avoid</div>
 
         <div id="modeNote" class="sub" style="margin-top:7px;">
           Colors come from rating (1–100) for the selected 20-minute window.<br/>

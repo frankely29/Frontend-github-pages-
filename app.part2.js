@@ -967,9 +967,9 @@
     if (fileInput) fileInput.value = '';
   }
 
-  const CHESS_PIECE_UNICODE = {
-    wP:'♙',wN:'♘',wB:'♗',wR:'♖',wQ:'♕',wK:'♔',
-    bP:'♟',bN:'♞',bB:'♝',bR:'♜',bQ:'♛',bK:'♚'
+  const CHESS_PIECE_LABEL = {
+    wP:'P',wN:'N',wB:'B',wR:'R',wQ:'Q',wK:'K',
+    bP:'P',bN:'N',bB:'B',bR:'R',bQ:'Q',bK:'K'
   };
   const UNO_COLORS = ['red','yellow','green','blue'];
   const UNO_ACTIONS = ['skip','reverse','draw2'];
@@ -1028,6 +1028,24 @@
     }
   }
 
+
+  function chessPieceName(type) {
+    if (type === 'P') return 'pawn';
+    if (type === 'N') return 'knight';
+    if (type === 'B') return 'bishop';
+    if (type === 'R') return 'rook';
+    if (type === 'Q') return 'queen';
+    if (type === 'K') return 'king';
+    return 'piece';
+  }
+
+  function chessPieceSvg(piece) {
+    const fill = piece[0] === 'w' ? '#f7f7f7' : '#161616';
+    const letter = CHESS_PIECE_LABEL[piece] || '?';
+    const textFill = piece[0] === 'w' ? '#151515' : '#f4f4f4';
+    return `<svg class="chessPieceIcon" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="50" r="34" fill="${fill}" class="chessPieceStroke"></circle><text x="50" y="52" fill="${textFill}" class="chessPieceLetter">${letter}</text></svg>`;
+  }
+
   function createInitialChessState() {
     return {
       board: [
@@ -1065,7 +1083,13 @@
         btn.className = `gamesSq ${(r + c) % 2 === 0 ? 'light' : 'dark'}`;
         if (s.selected && s.selected.r === r && s.selected.c === c) btn.classList.add('sel');
         if (legalSet.has(`${r},${c}`)) btn.classList.add('legal');
-        btn.textContent = piece ? CHESS_PIECE_UNICODE[piece] : '';
+        if (piece) {
+          btn.innerHTML = chessPieceSvg(piece);
+          btn.setAttribute('aria-label', `${piece[0] === 'w' ? 'White' : 'Black'} ${chessPieceName(piece[1])}`);
+        } else {
+          btn.textContent = '';
+          btn.removeAttribute('aria-label');
+        }
         btn.disabled = s.over || s.turn !== 'w';
         btn.addEventListener('click', () => onChessSquareClick(r, c));
         boardEl.appendChild(btn);
@@ -1306,8 +1330,8 @@
   function cardLabel(card) {
     if (!card) return '';
     if (card.type === 'num') return `${card.value}`;
-    if (card.type === 'skip') return '⛔';
-    if (card.type === 'reverse') return '↺';
+    if (card.type === 'skip') return 'SKIP';
+    if (card.type === 'reverse') return 'REV';
     if (card.type === 'draw2') return '+2';
     if (card.type === 'wild') return 'W';
     if (card.type === 'wild4') return '+4';
@@ -1351,7 +1375,7 @@
         <div class="gamesUnoTop">
           <div>
             <div class="gamesMiniLabel">CPU cards: ${s.cpu.length}</div>
-            <div class="gamesUnoHand">${s.cpu.slice(0, 6).map(() => '<div class="gamesUnoCard mini wild">🎴</div>').join('')}</div>
+            <div class="gamesUnoHand">${s.cpu.slice(0, 6).map(() => '<div class="gamesUnoCard mini wild"><span class="gamesUnoBackTag">UNO</span></div>').join('')}</div>
           </div>
           <div class="gamesUnoPile">
             <div>
