@@ -780,8 +780,8 @@
     .gamesBoard{ display:grid; grid-template-columns:repeat(8,minmax(28px,1fr)); border:1px solid rgba(0,0,0,0.16); border-radius:12px; overflow:hidden; max-width:320px; }
     .gamesSq{ aspect-ratio:1/1; border:0; font-size:23px; font-weight:800; display:grid; place-items:center; padding:0; cursor:pointer; }
     .chessPieceIcon{ width:84%; height:84%; display:block; }
-    .chessPieceStroke{ stroke: rgba(0,0,0,0.35); stroke-width: 1.6; }
-    .chessPieceLetter{ font:900 15px/1 system-ui,-apple-system,Segoe UI,Roboto,Arial; text-anchor:middle; dominant-baseline:middle; }
+    .chessPieceBase{ stroke: rgba(0,0,0,0.35); stroke-width: 1.6; }
+    .chessPieceMark{ opacity: 0.96; }
     .gamesSq.light{ background:#f0d9b5; }
     .gamesSq.dark{ background:#b58863; }
     .gamesSq.sel{ outline:3px solid rgba(0,160,255,0.9); outline-offset:-3px; }
@@ -795,7 +795,10 @@
     .gamesUnoCard.green{ background:#43a047; }
     .gamesUnoCard.blue{ background:#1e88e5; }
     .gamesUnoCard.wild{ background:#455a64; }
-    .gamesUnoBackTag{ font:900 11px/1 system-ui,-apple-system,Segoe UI,Roboto,Arial; letter-spacing:0.6px; color:#fff; }
+    .gamesUnoBackTag{ font:900 11px/1 system-ui,-apple-system,Segoe UI,Roboto,Arial; letter-spacing:0.6px; color:#fff; display:inline-flex; align-items:center; gap:4px; }
+    .gamesUnoBadge{ width:11px; height:11px; border-radius:999px; background:linear-gradient(135deg,#ff3b30 0 32%,#ffd400 32% 58%,#00b050 58% 78%,#1e88e5 78% 100%); border:1px solid rgba(255,255,255,0.7); box-sizing:border-box; display:inline-block; flex:0 0 11px; }
+    .gamesUnoFace{ display:inline-flex; align-items:center; justify-content:center; min-width:30px; }
+    .gamesUnoFaceWild{ gap:4px; }
     .gamesUnoRows{ display:flex; flex-direction:column; gap:8px; }
     .gamesUnoTop{ display:flex; align-items:flex-start; justify-content:space-between; gap:8px; flex-wrap:wrap; }
     .gamesUnoPile{ display:flex; align-items:center; gap:8px; }
@@ -1552,7 +1555,7 @@
   </div>
 
   <div id="weatherBadge" class="weatherBadge" title="Local weather">
-    <span class="wxIcon">⛅</span>
+    <span class="wxIcon" aria-hidden="true"><svg viewBox="0 0 24 24" width="12" height="12" focusable="false" style="display:block"><circle cx="9" cy="8" r="3" fill="currentColor" opacity="0.95"/><path d="M9 4.4v1.4M5.4 8H4M14 8h1.4M6.5 5.6l-1-1M11.5 5.6l1-1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M8.4 18.2h8a3.1 3.1 0 0 0 .1-6.2 4.4 4.4 0 0 0-8.2 1.7A2.4 2.4 0 0 0 8.4 18.2Z" fill="currentColor"/></svg></span>
     <span class="wxTxt">Weather…</span>
   </div>
 
@@ -1564,7 +1567,7 @@
     is pulled.
   -->
   <div id="onlineBadge" class="onlineBadge" title="Drivers online">
-    <span class="onlineIcon">👥</span>
+    <span class="onlineIcon" aria-hidden="true"><svg viewBox="0 0 24 24" width="12" height="12" focusable="false" style="display:block"><circle cx="8" cy="10" r="3.3" fill="currentColor"/><circle cx="16.3" cy="10.6" r="2.7" fill="currentColor" opacity="0.88"/><path d="M2.8 19a5.2 5.2 0 0 1 10.4 0M12 19a4.3 4.3 0 0 1 8.6 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></span>
     <span class="onlineTextWrap">
       <span class="onlineTxt">0 Online</span>
       <span class="onlineGhostTxt" hidden>0 Ghosted</span>

@@ -967,9 +967,13 @@
     if (fileInput) fileInput.value = '';
   }
 
-  const CHESS_PIECE_LABEL = {
-    wP:'P',wN:'N',wB:'B',wR:'R',wQ:'Q',wK:'K',
-    bP:'P',bN:'N',bB:'B',bR:'R',bQ:'Q',bK:'K'
+  const CHESS_PIECE_SVGS = {
+    P: '<path d="M50 22a10 10 0 1 1 0 20a10 10 0 0 1 0-20Zm0 23c-11 0-18 8-18 18h36c0-10-7-18-18-18Z"/>',
+    N: '<path d="M34 69h34v-4H50l11-11-6-12-11-8-8 6 6 8-8 12v9Z"/><circle cx="54" cy="43" r="2.5" fill="currentColor"/>',
+    B: '<path d="M50 22l7 7-7 7-7-7 7-7Zm0 17c-9 0-15 7-15 16h30c0-9-6-16-15-16Zm-18 27h36v5H32z"/>',
+    R: '<path d="M35 27h6v8h6v-8h6v8h6v-8h6v13H35V27Zm3 15h24l-2 23H40l-2-23Zm-6 23h36v5H32z"/>',
+    Q: '<path d="M35 33a4 4 0 1 1 0-8a4 4 0 0 1 0 8Zm15-3a4 4 0 1 1 0-8a4 4 0 0 1 0 8Zm15 3a4 4 0 1 1 0-8a4 4 0 0 1 0 8Z"/><path d="M33 36h34l-5 24H38l-5-24Zm-1 29h36v5H32z"/>',
+    K: '<path d="M48 22h4v7h7v4h-7v7h-4v-7h-7v-4h7v-7Zm-14 20h32l-4 22H38l-4-22Zm-2 23h36v5H32z"/>'
   };
   const UNO_COLORS = ['red','yellow','green','blue'];
   const UNO_ACTIONS = ['skip','reverse','draw2'];
@@ -1040,10 +1044,12 @@
   }
 
   function chessPieceSvg(piece) {
-    const fill = piece[0] === 'w' ? '#f7f7f7' : '#161616';
-    const letter = CHESS_PIECE_LABEL[piece] || '?';
-    const textFill = piece[0] === 'w' ? '#151515' : '#f4f4f4';
-    return `<svg class="chessPieceIcon" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="50" r="34" fill="${fill}" class="chessPieceStroke"></circle><text x="50" y="52" fill="${textFill}" class="chessPieceLetter">${letter}</text></svg>`;
+    const isWhite = piece[0] === 'w';
+    const type = piece[1];
+    const bodyFill = isWhite ? '#f8f8f8' : '#1c1c1c';
+    const bodyStroke = isWhite ? '#3a3a3a' : '#ececec';
+    const glyph = CHESS_PIECE_SVGS[type] || CHESS_PIECE_SVGS.P;
+    return `<svg class="chessPieceIcon" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="50" r="34" fill="${bodyFill}" class="chessPieceBase"></circle><g fill="${bodyStroke}" class="chessPieceMark">${glyph}</g></svg>`;
   }
 
   function createInitialChessState() {
@@ -1366,6 +1372,16 @@
     return c;
   }
 
+
+  function unoCardFaceMarkup(card) {
+    const label = cardLabel(card);
+    if (!card) return '';
+    if (card.color === 'wild') {
+      return `<span class="gamesUnoFace gamesUnoFaceWild"><span class="gamesUnoBadge" aria-hidden="true"></span><span>${escapeHtml(label)}</span></span>`;
+    }
+    return `<span class="gamesUnoFace"><span>${escapeHtml(label)}</span></span>`;
+  }
+
   function renderUnoContent(host) {
     const s = gamesState.uno;
     const top = s.discard[s.discard.length - 1];
@@ -1375,16 +1391,16 @@
         <div class="gamesUnoTop">
           <div>
             <div class="gamesMiniLabel">CPU cards: ${s.cpu.length}</div>
-            <div class="gamesUnoHand">${s.cpu.slice(0, 6).map(() => '<div class="gamesUnoCard mini wild"><span class="gamesUnoBackTag">UNO</span></div>').join('')}</div>
+            <div class="gamesUnoHand">${s.cpu.slice(0, 6).map(() => '<div class="gamesUnoCard mini wild"><span class="gamesUnoBackTag"><span class="gamesUnoBadge" aria-hidden="true"></span><span>UNO</span></span></div>').join('')}</div>
           </div>
           <div class="gamesUnoPile">
             <div>
               <div class="gamesMiniLabel">Draw (${s.draw.length})</div>
-              <button id="unoDrawBtn" class="gamesUnoCard mini wild" ${s.over || s.turn !== 'player' || gamesState.unoWaitingColor ? 'disabled' : ''}>Draw</button>
+              <button id="unoDrawBtn" class="gamesUnoCard mini wild" ${s.over || s.turn !== 'player' || gamesState.unoWaitingColor ? 'disabled' : ''}><span class="gamesUnoBackTag"><span class="gamesUnoBadge" aria-hidden="true"></span><span>Draw</span></span></button>
             </div>
             <div>
               <div class="gamesMiniLabel">Discard (${s.currentColor})</div>
-              <div class="gamesUnoCard ${top?.color || 'wild'}">${cardLabel(top)}</div>
+              <div class="gamesUnoCard ${top?.color || 'wild'}">${unoCardFaceMarkup(top)}</div>
             </div>
           </div>
         </div>
@@ -1400,7 +1416,7 @@
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = `gamesUnoCard ${card.color} ${playable ? '' : 'unplayable'}`;
-        btn.textContent = cardLabel(card);
+        btn.innerHTML = unoCardFaceMarkup(card);
         btn.disabled = !playable;
         btn.addEventListener('click', () => onUnoPlayerPlay(idx));
         handEl.appendChild(btn);
