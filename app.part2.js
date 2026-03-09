@@ -628,9 +628,7 @@
       selfOffsetX: +(16 + (28 - 16) * t).toFixed(2),
       selfOffsetY: -50,
       baseSideOffsetX: +(12 + (20 - 12) * t).toFixed(2),
-      baseOffsetY: +(-4 + (-8 + 4) * t).toFixed(2),
-      spreadScale: +(0.3 + (0.65 - 0.3) * t).toFixed(3),
-      extraOffsetCap: +(8 + (14 - 8) * t).toFixed(2)
+      baseOffsetY: +(-4 + (-8 + 4) * t).toFixed(2)
     };
   }
 
@@ -646,13 +644,9 @@
   function mapIdentityComputeDriverOffset({ labelSide, labelDx, labelDy, zoom }) {
     const cfg = mapIdentityVisualConfig(zoom);
     const sideSign = labelSide === 'left' ? -1 : 1;
-    const rawDx = Number.isFinite(labelDx) ? labelDx : 0;
-    const rawDy = Number.isFinite(labelDy) ? labelDy : 0;
-    const extraX = clampMapIdentity(rawDx * cfg.spreadScale, -cfg.extraOffsetCap, cfg.extraOffsetCap);
-    const extraY = clampMapIdentity(rawDy * cfg.spreadScale, -cfg.extraOffsetCap * 0.65, cfg.extraOffsetCap * 0.65);
     return {
-      x: +(sideSign * cfg.baseSideOffsetX + extraX).toFixed(2),
-      y: +(cfg.baseOffsetY + extraY).toFixed(2),
+      x: +(sideSign * cfg.baseSideOffsetX).toFixed(2),
+      y: +cfg.baseOffsetY.toFixed(2),
       cfg
     };
   }

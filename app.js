@@ -3934,40 +3934,11 @@ function upsertDriverMarker(userId, name, lat, lng, heading, labelSide, labelDx 
 }
 
 function buildPresenceLabelPlacement(presenceRows) {
-  const KEY_PRECISION = 5;
-  const LABEL_RING_RADIUS_PX = 32;
-  const grouped = new Map();
-
-  for (const row of presenceRows) {
-    const latKey = row.lat.toFixed(KEY_PRECISION);
-    const lngKey = row.lng.toFixed(KEY_PRECISION);
-    const key = `${latKey},${lngKey}`;
-    if (!grouped.has(key)) grouped.set(key, []);
-    grouped.get(key).push(row);
-  }
-
   const placement = new Map();
-  for (const group of grouped.values()) {
-    if (!group.length) continue;
-
-    if (group.length === 1) {
-      placement.set(group[0].uid, { labelSide: "right", labelDx: 0, labelDy: 0 });
-      continue;
-    }
-
-    for (let i = 0; i < group.length; i++) {
-      const item = group[i];
-      const theta = (2 * Math.PI * i) / group.length;
-      const dx = Math.round(Math.cos(theta) * LABEL_RING_RADIUS_PX);
-      const dy = Math.round(Math.sin(theta) * LABEL_RING_RADIUS_PX);
-      placement.set(item.uid, {
-        labelSide: dx < 0 ? "left" : "right",
-        labelDx: dx,
-        labelDy: dy,
-      });
-    }
+  for (const row of presenceRows) {
+    if (!row?.uid) continue;
+    placement.set(row.uid, { labelSide: "right", labelDx: 0, labelDy: 0 });
   }
-
   return placement;
 }
 
