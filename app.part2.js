@@ -45,6 +45,18 @@
     document.body.appendChild(killFeedContainer);
   }
 
+  (() => {
+    try {
+      const btn = document.getElementById('dockChat');
+      if (btn && !btn._notifyClickAttached) {
+        btn._notifyClickAttached = true;
+        btn.addEventListener('click', () => {
+          btn.classList.remove('notify');
+        });
+      }
+    } catch {}
+  })();
+
   // Preload a short beep sound as a data URI. The base64 string here
   // encodes a simple beep and avoids cross-origin or network delays.
   // (If you have your own .wav, you can convert it to base64.)
@@ -53,12 +65,21 @@
   );
   beepAudio.load();
 
-  function playBeep() {
+  // Resume the audio element on first user interaction
+  document.addEventListener('pointerdown', () => {
     try {
-      // Restart the sound from the beginning and play it.
+      beepAudio.play().catch(() => {});
       beepAudio.pause();
       beepAudio.currentTime = 0;
-      beepAudio.play().catch(() => {});
+    } catch {}
+  }, { once: true, passive: true });
+
+  function playBeep() {
+    try {
+      beepAudio.pause();
+      beepAudio.currentTime = 0;
+      const p = beepAudio.play();
+      if (p && typeof p.catch === 'function') p.catch(() => {});
     } catch (err) {
       console.warn('Beep failed:', err);
     }
@@ -87,14 +108,14 @@
       div.className = 'killFeedMsg';
       div.textContent = `${who}: ${body}`;
       // Colour code: yellow for your own messages, red for others
-      const selfId = (typeof window !== 'undefined' && window.me && window.me.id != null)
+      const selfIdForColor = (typeof window !== 'undefined' && window.me && window.me.id != null)
         ? String(window.me.id)
         : null;
       // Only check sender user-id fields; never use msg.id (message id).
-      const msgUserId = msg.user_id != null
+      const msgUserIdForColor = msg.user_id != null
         ? String(msg.user_id)
         : (msg.userId != null ? String(msg.userId) : null);
-      if (selfId && msgUserId && selfId === msgUserId) {
+      if (selfIdForColor && msgUserIdForColor && selfIdForColor === msgUserIdForColor) {
         // Message from this driver: use bright yellow.
         div.style.color = '#ffd600';
       } else {
@@ -114,19 +135,17 @@
         if (div.parentNode) div.parentNode.removeChild(div);
       }, 30000);
 
-      {
-        // Only beep if the chat drawer is closed and the message is from someone else
-        const panelIsOpen =
-          typeof openPanelKey !== 'undefined' && openPanelKey === 'chat';
-        const selfId = (typeof window !== 'undefined' && window.me && window.me.id != null)
-          ? String(window.me.id)
-          : null;
-        const msgUserId = msg.user_id != null
-          ? String(msg.user_id)
-          : (msg.userId != null ? String(msg.userId) : null);
-        if (!panelIsOpen && selfId && msgUserId && selfId !== msgUserId) {
-          playBeep();
-        }
+      // Determine if the chat panel is currently open
+      const panelIsOpen = (typeof openPanelKey !== 'undefined' && openPanelKey === 'chat');
+      // Determine if the message came from another user
+      const selfId = (typeof window !== 'undefined' && window.me && window.me.id != null) ? String(window.me.id) : null;
+      const msgUserId = msg.user_id != null ? String(msg.user_id) : (msg.userId != null ? String(msg.userId) : null);
+      const isFromOther = selfId && msgUserId && selfId !== msgUserId;
+
+      if (!panelIsOpen && isFromOther) {
+        playBeep();
+        const btn = document.getElementById('dockChat');
+        if (btn) btn.classList.add('notify');
       }
     });
   }
@@ -344,6 +363,12 @@
         setChatStatus('Chat unavailable right now.');
       });
     syncChatPollingState();
+
+    // Clear the notification badge whenever the chat panel opens
+    try {
+      const btn = document.getElementById('dockChat');
+      if (btn) btn.classList.remove('notify');
+    } catch {}
   }
 
   // Expose chat functions for app.js to call if needed
