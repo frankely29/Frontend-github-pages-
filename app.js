@@ -3209,7 +3209,7 @@ const HOT97_STREAM_URL = "https://26313.live.streamtheworld.com/WQHTFMAAC.aac";
 const MEGA979_STREAM_URL = "https://liveaudio.lamusica.com/NY_WSKQ_icy";
 const KQ945_STREAM_URL = "https://radio.yaservers.com:9990/stream?icy=http";
 const KQ945_SITE_URL = "https://kq94.net/";
-const ALOFOKE993_SITE_URL = "https://www.alofoke.fm/";
+const ALOFOKE993_STREAM_URL = "https://radiordomi.com:8566/stream";
 const Z100_STREAM_URL = "https://stream.revma.ihrhls.com/zc1469";
 
 const megaAudio = new Audio();
@@ -3226,6 +3226,11 @@ const kqAudio = new Audio();
 kqAudio.src = KQ945_STREAM_URL;
 kqAudio.preload = "none";
 kqAudio.crossOrigin = "anonymous";
+
+const alofoke993Audio = new Audio();
+alofoke993Audio.src = ALOFOKE993_STREAM_URL;
+alofoke993Audio.preload = "none";
+alofoke993Audio.crossOrigin = "anonymous";
 
 const z100Audio = new Audio();
 z100Audio.src = Z100_STREAM_URL;
@@ -3273,11 +3278,12 @@ function openStationWebModal(title, url) {
 
 function stopAlofokeSiteMode() {
   if (!alofoke993Playing) return;
+  try { alofoke993Audio.pause(); } catch {}
   alofoke993Playing = false;
   setBtnState(btnAlofoke993, false);
 }
 
-function toggleAlofoke993() {
+async function toggleAlofoke993() {
   if (hot97Playing) { hot97Audio.pause(); hot97Playing = false; setBtnState(btnHot97, false); }
   if (megaPlaying) { megaAudio.pause(); megaPlaying = false; setBtnState(btnMega979, false); }
   if (kqPlaying) { kqAudio.pause(); kqPlaying = false; setBtnState(btnKQ945, false); }
@@ -3297,9 +3303,16 @@ function toggleAlofoke993() {
   setBtnState(btnMega979, false);
   setBtnState(btnKQ945, false);
   setBtnState(btnZ100, false);
-  setRadioStatus("Radio: Alofoke 99.3 FM (official site)");
-
-  try { window.open(ALOFOKE993_SITE_URL, "_blank", "noopener"); } catch {}
+  try {
+    alofoke993Audio.src = ALOFOKE993_STREAM_URL;
+    await alofoke993Audio.play();
+    setRadioStatus("Radio: Alofoke 99.3 FM playing");
+  } catch (e) {
+    console.warn("Alofoke 99.3 FM play failed:", e);
+    stopAlofokeSiteMode();
+    setRadioStatus("Radio: Alofoke 99.3 FM failed to play");
+    alert("Alofoke 99.3 FM could not start. Turn volume up and try again.");
+  }
 }
 
 async function toggleMega() {
@@ -3568,6 +3581,16 @@ kqAudio.addEventListener("error", () => {
   kqPlaying = false;
   setBtnState(btnKQ945, false);
   setRadioStatus("Radio: KQ 94.5 FM stream error");
+});
+alofoke993Audio.addEventListener("ended", () => {
+  alofoke993Playing = false;
+  setBtnState(btnAlofoke993, false);
+  setRadioStatus("Radio: off");
+});
+alofoke993Audio.addEventListener("error", () => {
+  alofoke993Playing = false;
+  setBtnState(btnAlofoke993, false);
+  setRadioStatus("Radio: Alofoke 99.3 FM stream error");
 });
 z100Audio.addEventListener("ended", () => {
   z100Playing = false;
