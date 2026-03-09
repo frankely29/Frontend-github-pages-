@@ -900,7 +900,7 @@
       height: 34px;
       position: relative;
       transform-origin: 50% 50%;
-      will-change: transform, filter, box-shadow;
+      will-change: transform;
     }
     .navArrowRot{
       position: absolute;
@@ -918,7 +918,6 @@
       border-left: var(--map-ident-arrow-left-right, 6px) solid transparent;
       border-right: var(--map-ident-arrow-left-right, 6px) solid transparent;
       border-bottom: var(--map-ident-arrow-body, 26px) solid #111;
-      filter: drop-shadow(0 2px 2px rgba(0,0,0,0.35));
     }
     .navArrow::after{
       content:"";
@@ -933,22 +932,10 @@
       border-bottom: 14px solid rgba(255,255,255,0.25);
     }
     .navArrow::before{
-      content:"";
-      position:absolute;
-      left: 50%;
-      top: 23px;
-      width: 10px;
-      height: 6px;
-      transform: translateX(-50%);
-      border-radius: 999px;
-      background: rgba(0,0,0,0.25);
-      filter: blur(0.2px);
+      content: none;
     }
     .navMoving .navArrow{
-      filter:
-        drop-shadow(0 2px 2px rgba(0,0,0,0.35))
-        drop-shadow(0 0 6px rgba(0,160,255,0.95))
-        drop-shadow(0 0 12px rgba(0,160,255,0.75));
+      filter: none;
     }
 
     @keyframes pulseRing {
@@ -1066,7 +1053,6 @@
       border-left: var(--map-ident-arrow-left-right, 6px) solid transparent;
       border-right: var(--map-ident-arrow-left-right, 6px) solid transparent;
       border-bottom: var(--map-ident-arrow-accent, 14px) solid #111;
-      filter: drop-shadow(0 1px 1px rgba(0,0,0,0.35));
     }
     .otherDrvName{
       display: inline-block;
