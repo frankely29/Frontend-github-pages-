@@ -2488,7 +2488,7 @@ let lastMoveTs = 0;
 function makeNavIcon() {
   const myName = authHeaderOK() ? me?.display_name || "" : "";
   const navLabelHTML = (typeof window !== "undefined" && typeof window.mapIdentityRenderSelfLabel === "function")
-    ? window.mapIdentityRenderSelfLabel({ name: myName, avatarUrl: me?.avatar_url, mode: me?.map_identity_mode })
+    ? window.mapIdentityRenderSelfLabel({ name: myName, avatarUrl: me?.avatar_url, mode: me?.map_identity_mode, zoom: map?.getZoom?.() })
     : `<div id="navMeName" class="meName" style="display:${myName ? "block" : "none"}">${escapeHtml(myName)}</div>`;
   const el = document.createElement("div");
   el.innerHTML = `
@@ -2508,7 +2508,7 @@ function refreshNavNameLabel() {
     if (current) current.remove();
     wrap.insertAdjacentHTML(
       "beforeend",
-      window.mapIdentityRenderSelfLabel({ name: myName, avatarUrl: me?.avatar_url, mode: me?.map_identity_mode })
+      window.mapIdentityRenderSelfLabel({ name: myName, avatarUrl: me?.avatar_url, mode: me?.map_identity_mode, zoom: map?.getZoom?.() })
     );
   } else {
     const el = document.getElementById("navMeName");
@@ -3858,37 +3858,21 @@ if (btnDeleteAccount) {
 }
 
 // other drivers marker HTML
-function driverLabelFontPx() {
-  const z = map?.getZoom?.() || 12;
-  if (z >= 15) return 11;
-  if (z >= 14) return 10.5;
-  if (z >= 13) return 10;
-  if (z >= 12) return 9.5;
-  if (z >= 11) return 9;
-  if (z >= 10) return 8.5;
-  return 8;
-}
-
 function applyDriverLabelZoomStyles() {
-  const sizePx = driverLabelFontPx();
-  document.querySelectorAll(".otherDrvName, .meName").forEach((el) => {
-    el.style.fontSize = `${sizePx}px`;
-    el.style.padding = sizePx <= 8.5 ? "2px 6px" : "3px 7px";
-  });
+  const zoom = map?.getZoom?.();
+  if (typeof window !== "undefined" && typeof window.mapIdentityApplyZoomStyles === "function") {
+    window.mapIdentityApplyZoomStyles(zoom);
+  }
 }
 
 function makeDriverIcon(name, headingDeg, labelSide = "right", labelDx = 0, labelDy = 0, avatarUrl = "", mode = "name") {
   const safe = (name || "Driver").trim() || "Driver";
   const rot = Number.isFinite(headingDeg) ? headingDeg : 0;
-  const defaultLabelX = labelSide === "left" ? -28 : 28;
-  const labelTranslateX = Number.isFinite(labelDx) ? labelDx : defaultLabelX;
-  const labelTranslateY = Number.isFinite(labelDy) ? labelDy : -8;
-  const fontPx = driverLabelFontPx();
 
   const el = document.createElement("div");
   const driverLabelHTML = (typeof window !== "undefined" && typeof window.mapIdentityRenderDriverLabel === "function")
-    ? window.mapIdentityRenderDriverLabel({ name: safe, avatarUrl, mode, fontPx, labelTranslateX, labelTranslateY })
-    : `<div class="otherDrvName" style="font-size:${fontPx}px;transform:translate(${labelTranslateX}px, ${labelTranslateY}px);">${escapeHtml(safe)}</div>`;
+    ? window.mapIdentityRenderDriverLabel({ name: safe, avatarUrl, mode, labelSide, labelDx, labelDy, zoom: map?.getZoom?.() })
+    : `<div class="otherDrvName">${escapeHtml(safe)}</div>`;
   el.className = "otherDrvWrap";
   el.innerHTML = `
     <div class="otherArrowWrap otherPulse" style="transform:rotate(${rot}deg)">
