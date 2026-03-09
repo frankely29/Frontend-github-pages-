@@ -626,7 +626,7 @@
       fontPx: +(8.8 + (16.8 - 8.8) * emphasize).toFixed(2),
       padY: +(0.95 + (4.8 - 0.95) * emphasize).toFixed(2),
       padX: +(2.6 + (9.8 - 2.6) * emphasize).toFixed(2),
-      avatarPx: +(15 + (44 - 15) * emphasize).toFixed(2),
+      avatarPx: +(15 + (48 - 15) * emphasize).toFixed(2),
       maxWidthPx: +(88 + (190 - 88) * emphasize).toFixed(2),
       arrowBodyPx: +(18 + (27 - 18) * t).toFixed(2),
       arrowLeftRightPx: +(4.5 + (7 - 4.5) * t).toFixed(2),
