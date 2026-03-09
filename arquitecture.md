@@ -1,366 +1,670 @@
-# TLC Map System Architecture
+# NYC TLC Hotspot Map — Verified Architecture (Current State)
 
-## 1) Overview
+> Note: the repository currently spells this file `arquitecture.md`. I am preserving that naming convention in this updated version so it can be dropped into the repo without forcing an unrelated rename.
 
-The TLC map platform is a data-driven NYC hotspot system designed to help FHV/Uber drivers optimize earnings by showing where demand is strongest throughout the day.
+## 1. Purpose
 
-### Core product behavior
-- Uses **20-minute bins** as the default demand time window.
-- Aligns all map playback and selection to **NYC local time**.
-- Exposes a timeline slider so drivers can inspect historical/expected demand windows.
-- Colors zones by demand strength using the bucket scheme:
-  - **Green** (highest)
-  - **Purple**
-  - **Blue**
-  - **Sky**
-  - **Yellow**
-  - **Red** (lowest)
+This system is a data-driven NYC hotspot map for FHV/Uber drivers. The core job of the product is to help the driver decide **where to go next** by combining:
+
+- 20-minute hotspot frames generated from TLC parquet trip data
+- live driver location/presence
+- community event reporting (police + trip logs)
+- on-map navigation/recommendation helpers
+- chat and lightweight community tools
+
+The product is not just a static heatmap. It is a split system with a generated analytics layer plus a live community layer.
 
 ---
 
-## 2) Repository Split
+## 2. Verified deployment topology
 
-The system is intentionally split into two repositories with different runtime responsibilities:
+## Source control
 
-### Frontend repository (GitHub Pages)
-- Static application delivery.
-- Contains the browser client and interaction logic.
-- Confirmed files:
+There are **two GitHub repositories**:
+
+### Frontend repo
+- Repo name: `frankely29/Frontend-github-pages-`
+- Verified files:
   - `index.html`
   - `app.js`
+  - `app.part2.js`
+  - `arquitecture.md`
+  - `server.js`
+  - `package.json`
+  - `Procfile`
+  - `docs/kq-94-5-verification.md`
 
-### Backend repository (Railway)
-- API + compute services + community persistence.
-- Generates map frames from raw trip inputs.
-- Serves authenticated community endpoints and event/presence data.
-- Confirmed files:
+### Backend repo
+- Repo name: `frankely29/Backend-railway-`
+- Verified files:
   - `main.py`
   - `build_hotspot.py`
+  - `chat.py`
+  - `core.py`
+  - `db.py`
+  - `events.py`
+  - `models.py`
+  - `presence.py`
+  - `security.py`
+  - `users.py`
   - `requirements.txt`
   - `Procfile`
+  - plus `.python-version` and `.tool-versions`
 
-### Why this split exists
-- **Static hosting fit:** frontend is pure static assets and works well on GitHub Pages.
-- **Compute + storage fit:** backend needs CPU/data processing and persistent `/data` volume for parquet, zone geometry, generated frames, and SQLite DB.
-- **Operational separation:** UI deploys stay fast/simple while backend can evolve independently for data generation, auth, and API scaling.
+## Deployment model
+
+Despite the frontend repo name, the current verified deployment is **not “GitHub Pages frontend + Railway backend”**.
+
+The current live model is:
+
+### Frontend Railway environment
+- Separate Railway environment/project for the frontend
+- Service name shown in screenshots: `Frontend-github-pages-`
+- Public domain shown in screenshots: `teamjoseo.up.railway.app`
+- Port shown in screenshots: `8080`
+- Source repo connected to Railway: `frankely29/Frontend-github-pages-`
+- Branch connected to production: `main`
+- Service variable shown in screenshots: `API_BASE=https://web-production-78f67.up.railway.app/`
+
+### Backend Railway environment
+- Separate Railway environment/project for the backend
+- Service name shown in screenshots: `web`
+- Public domain shown in screenshots: `web-production-78f67.up.railway.app`
+- Source repo connected to Railway: `frankely29/Backend-railway-`
+- Branch connected to production: `main`
+- Backend is connected to:
+  - a **Postgres database service**
+  - a **persistent volume** (`web-volume`)
+
+### Database service
+- Railway Postgres is online
+- Screenshots show the following tables currently exist:
+  - `chat_messages`
+  - `events`
+  - `pickup_logs`
+  - `presence`
+  - `users`
+
+### Storage split (runtime truth)
+- **Volume** stores trip input data and generated artifacts
+- **Postgres** stores community and operational data
+
+This matches the user’s intended architecture:
+- parquet/data assets live on the volume
+- trip/community/auth/presence records live in Postgres
 
 ---
 
-## 3) Frontend Architecture (detailed)
+## 3. File inventory and size snapshot
 
-Backend base URL is configured in the frontend and should be treated as a placeholder such as:
-- `<RAILWAY_BASE_URL>`
+## Frontend repo inventory
+- File count: **8**
+- Main file sizes:
+  - `index.html` — 1467 lines / 3635 words / 42440 chars
+  - `app.js` — 4299 lines / 14723 words / 140201 chars
+  - `app.part2.js` — 391 lines / 1667 words / 15292 chars
+  - `arquitecture.md` — 367 lines / 1696 words / 12057 chars
+  - `server.js` — 27 lines
+  - `package.json` — 11 lines
 
-### `index.html` responsibilities
-- Defines the Leaflet map container and base CSS.
-- Provides legend layout and minimize/toggle behavior shell.
-- Hosts `lockedOverlay` sign-in UI with:
-  - Email
-  - Password
-  - Driver display name
-  - Ghost mode preference
-- Includes top-level control buttons and UI anchors for:
-  - Sign in / Sign out
-  - Navigate
-  - Staten Island Mode
-  - Manhattan Mode (button created and managed by JS)
-  - Ghost Mode
-  - Police
-  - Pickup
-- Defines bottom controls and status surfaces:
-  - Time slider
-  - Slider bubble/value indicator
-  - Weather badge
-  - Radio controls
+## Backend repo inventory
+- File count: **14**
+- Main file sizes:
+  - `main.py` — 1347 lines / 4183 words / 46227 chars
+  - `build_hotspot.py` — 352 lines / 1130 words / 11151 chars
+  - `chat.py` — 190 lines / 526 words / 5700 chars
+  - `core.py` — 176 lines / 489 words / 5240 chars
+  - supporting modules are smaller and mostly architectural leftovers / alternates
 
-### `app.js` responsibilities (major modules)
+Interpretation:
+- the **frontend runtime is concentrated in `app.js`**
+- the **backend runtime is concentrated in `main.py` + `build_hotspot.py` + `chat.py` + `core.py`**
 
-#### A) Timeline + frame loading
-- Calls `GET /timeline` to populate available bins and slider domain.
-- Calls `GET /frame/{idx}` to fetch polygon frame data for the selected index.
+---
 
-#### B) NYC time alignment + slider initialization
-- Converts/aligns available timeline values to NYC-local expectations.
-- Initializes slider defaults and behavior based on fetched timeline metadata.
+## 4. Frontend architecture
 
-#### C) Polygon rendering + labels
-- Renders zone polygons with fill colors from computed bucket values.
-- Draws per-zone labels with zoom-sensitive visibility rules.
-- Applies map/zoom event updates so labels remain legible.
+## 4.1 Runtime stack
 
-#### D) Staten Island Mode
-- Applies a **local percentile recolor strategy** specific to Staten Island context.
-- Helps avoid borough-scale compression effects where Staten Island can appear muted.
+The frontend is a browser-based **MapLibre GL JS** application.
 
-#### E) Manhattan Mode
-- Applies Manhattan-focused scoring adjustments.
-- Excludes core Manhattan regions where necessary for alternate recommendation behavior.
+### What loads it
+- `index.html` loads the map shell, UI, and script entrypoints
+- `server.js` serves the static files with Express
+- `Procfile` runs `npm start`
+- `package.json` defines the Railway start command
 
-#### F) Recommendation engine + Navigate
-- Produces recommendations weighted toward **Blue+ / Purple / Green** opportunities.
-- Drives target selection and navigation URL generation.
-- Integrates with the Navigate control for external routing handoff.
+So the frontend deployment is a **static-ish Node/Express wrapper** around a browser app.
 
-#### G) Auto-center behavior
-- Supports auto-centering on driver position.
-- Temporarily suppresses recenter during programmatic camera moves to prevent UX jitter.
+## 4.2 Frontend files and responsibilities
 
-#### H) GPS self marker + heading
-- Tracks the current driver location as a dedicated map marker.
-- Uses heading/bearing logic for directional UI (navigation arrow orientation + label context).
+### `index.html`
+This is the UI shell and DOM contract for the whole app.
 
-#### I) Weather + optional effects overlay
-- Fetches weather from Open-Meteo.
-- Updates weather badge/status in UI.
-- Supports optional FX canvas overlay when enabled.
+It contains:
+- the full-screen map container
+- weather effects canvas
+- sign-in overlay (`lockedOverlay`)
+- email/password/display-name/ghost-mode inputs
+- legend panel
+- modes panel
+- chat placeholder panel
+- music panel
+- dock drawer UI
+- dock buttons
+- floating `Record Trip` button
+- bottom slider and time label
+- weather badge
+- online-drivers badge
+- radio modal
+- debug panel
+- hardcoded `window.API_BASE`
+- script loading for `app.js` and `app.part2.js`
 
-#### J) Radio controls
-- Manages station/input controls wired from bottom UI.
+### `app.js`
+This is the main frontend brain. It currently owns almost everything except the newer room-based chat module.
 
-#### K) Community + auth
-- Persists client identity/session values in localStorage keys:
+Major responsibilities verified from code:
+
+#### A. API base and network helpers
+- defaults to `https://web-production-78f67.up.railway.app`
+- allows override via `window.API_BASE`
+- centralizes `fetchJSON`, `postJSON`, `getJSONAuth`
+
+#### B. Timeline logic
+- loads `/timeline`
+- aligns the slider to NYC local time
+- computes minute-of-week values
+- selects the closest frame to the current NYC time
+- loads `/frame/{idx}`
+
+#### C. Map initialization
+- creates a `maplibregl.Map`
+- uses a **CARTO Voyager raster basemap**
+- configures glyphs via MapLibre demo glyph endpoint
+- starts centered around NYC with zoom ≈ 10.2
+- adds sources/layers for:
+  - `zones`
+  - `zone-labels`
+  - `pickup-points`
+  - heatmap/circle layers for pickups
+
+#### D. Zone rendering
+- renders frame polygons into MapLibre GeoJSON sources
+- applies bucket/color-driven fill styling
+- adds outlines
+- restores zone click popups
+
+#### E. Zone labels
+- computes label points to keep labels inside polygons
+- uses zoom-based visibility rules
+- shrinks labels as zoom changes
+- tries to act more like major map apps instead of floating random labels
+
+#### F. Staten Island Mode
+- persisted in localStorage
+- re-scores Staten Island zones locally using percentile logic
+- avoids borough-wide compression making Staten Island look permanently weak
+
+#### G. Manhattan Mode
+- persisted in localStorage
+- applies a Manhattan-focused scoring/recommendation adjustment
+- gives an alternate local ranking view in core Manhattan
+
+#### H. Recommendation engine
+- scores reachable destination options using bucket/rating plus distance
+- favors Blue and better areas
+- updates the recommendation text
+- drives the external Navigate link target
+
+#### I. Drawer/dock system
+- single dock-driven UI for:
+  - Colors
+  - Modes
+  - Chat
+  - Music
+  - Profile
+- builds HTML for each panel dynamically
+- handles panel open/close and active button state
+
+#### J. Slider UX
+- renders the bottom time slider
+- shows slider bubble labels
+- formats time as NYC day/time
+
+#### K. Pickup overlay
+- fetches `/events/pickups/recent`
+- builds a pickup heatmap / circles overlay
+- stores aggregated zone stats client-side
+- shows community trip popups with zone, borough, age, and sample context
+
+#### L. Weather
+- manages a weather badge
+- applies optional night basemap effects and overlay effects
+- determines night/day visual state
+
+#### M. Geolocation and heading
+- tracks the driver’s true location
+- tracks heading / bearing / speed
+- attempts to reject obvious GPS spikes
+- keeps the self-arrow pinned to real coordinates
+- rotates the arrow based on actual heading rather than arbitrary map moves
+
+#### N. Auto-center / map following
+- auto-center can be toggled on/off
+- user exploration can disable auto-center
+- programmatic moves are guarded to reduce jitter
+
+#### O. Presence / other drivers
+- pushes own presence to `/presence/update`
+- pulls active drivers from `/presence/all`
+- filters stale users client-side
+- renders other-driver markers with labels
+- label collision is handled separately from marker anchor so marker coordinates stay truthful
+
+#### P. Auth / profile / ghost mode
+- uses localStorage keys:
   - `community_token_v1`
   - `community_email_v1`
   - `community_display_name_v1`
-- Signup/login flows:
-  - `POST /auth/signup`
-  - `POST /auth/login`
-- Profile flows:
-  - `GET /me`
-  - `POST /me/update` (display name + ghost mode)
-- Presence sync:
-  - periodic `POST /presence/update`
-  - periodic pull from `GET /presence/all`
+- supports signup/login
+- reads `/me`
+- updates display name / ghost mode through `/me/update`
+- includes change password and delete account UI flows
+
+#### Q. Community actions
+- reports police via `/events/police`
+- records pickups via `/events/pickup`
+- shows recent pickup overlay via `/events/pickups/recent`
+
+#### R. Radio
+- HOT 97
+- La Mega 97.9
+- KQ 94.5
+- Z100
+- dock buttons + radio modal iframe
+
+#### S. Debug support
+- hidden debug panel
+- exposes base URL, status, timeline, frame, bounds, layers, etc.
+
+### `app.part2.js`
+This is the newer chat module and is intentionally self-contained.
+
+Responsibilities:
+- owns chat UI rendering inside the dock drawer
+- reads JWT token from localStorage
+- polls room-based chat endpoints
+- sends messages to room-based endpoint
+- tracks last seen cursor
+- renders in-panel messages
+- renders kill-feed overlay
+- plays a beep for unseen messages from other users
+- adds notification dot to the dock chat button
+
+This file is important because it means the **chat system is already split away from `app.js`** even though most other features are not.
+
+### `server.js`
+- Express static server
+- serves repo root as static site
+- disables cache for critical files (`app.js`, `index.html`, `style.css`)
+- serves `index.html` for `/`
+
+This explains how the frontend runs inside Railway instead of pure GitHub Pages.
 
 ---
 
-## 4) Backend Architecture (detailed)
+## 5. Backend architecture
+
+## 5.1 Runtime stack
+
+The backend is a **FastAPI** application with a generated analytics/data layer and an operational/community layer.
+
+Main runtime modules:
+- `main.py`
+- `build_hotspot.py`
+- `chat.py`
+- `core.py`
+
+## 5.2 Backend files and responsibilities
 
 ### `main.py`
-Primary API service (FastAPI) with frame delivery, generation controls, auth/community, and event endpoints.
+`main.py` is the current runtime entrypoint.
 
-#### `/data` volume layout
-- Persistent data root is mounted at `/data`.
-- Frame artifacts live under `/data/frames`.
-- Timeline manifest is `/data/frames/timeline.json`.
+It does all of the following:
+- configures paths and environment defaults
+- configures FastAPI + CORS
+- manages frame generation state
+- initializes schema
+- optionally seeds an admin user
+- auto-detects existing frames on startup
+- auto-starts frame generation if data + zones exist but frames do not
+- serves frame/timeline/status routes
+- serves auth/profile routes
+- serves presence routes
+- serves police/pickup routes
+- serves admin routes
+- still contains **legacy chat endpoints**
+- also includes the **new room-based chat router** from `chat.py`
 
-#### Frame/data endpoints
+### `build_hotspot.py`
+This is the batch hotspot generator.
+
+Input expectations:
+- one or more `*.parquet` trip files in `/data`
+- `taxi_zones.geojson` in `/data`
+
+Processing model:
+- reads parquet through DuckDB
+- bins data into 20-minute windows (default)
+- computes a Mon-based day-of-week timeline
+- uses percentile-based ranking instead of naive min/max scaling
+- weights volume higher than pay
+- writes frame artifacts to `/data/frames`
+
+Output shape:
+- `/data/frames/timeline.json`
+- `/data/frames/frame_000000.json`, etc.
+
+Each polygon feature includes at least:
+- `LocationID`
+- `zone_name`
+- `borough`
+- `rating`
+- `bucket`
+- `pickups`
+- `avg_driver_pay`
+- `style.fillColor`
+
+### `core.py`
+This file provides shared runtime utilities used by `main.py` and `chat.py`.
+
+Responsibilities:
+- selects database backend
+  - Postgres when `DATABASE_URL` / `POSTGRES_URL` exists
+  - SQLite fallback otherwise
+- opens DB connections
+- adapts SQL placeholders for Postgres vs SQLite
+- issues DB queries and writes
+- implements JWT signing/verification
+- implements PBKDF2 password hashing
+- resolves the current user from bearer token
+
+### `chat.py`
+This is the **newer** room-based chat API.
+
+Routes:
+- `GET /chat/rooms/{room}`
+- `POST /chat/rooms/{room}`
+
+Features:
+- room names
+- `after` cursor support by id or ISO timestamp
+- rate limiting (2 seconds per user)
+- normalized output structure for the new frontend chat module
+
+### `db.py`, `models.py`, `users.py`, `presence.py`, `events.py`, `security.py`
+These files represent an alternate / older / parallel architecture based on SQLAlchemy-style models and modular routers.
+
+Important current-state note:
+- they are **present in the repo**
+- but `main.py` currently does **not** include these routers into the live app
+- the live runtime is still centered on `main.py` + `core.py` + `chat.py`
+
+That makes them documentation-relevant, but not the primary source of runtime truth.
+
+---
+
+## 6. Storage architecture
+
+## 6.1 Persistent volume
+
+The backend volume is the file-storage side of the system.
+
+Verified and code-confirmed volume responsibilities:
+- stores parquet inputs
+- stores `taxi_zones.geojson`
+- stores generated frames
+- stores `timeline.json`
+- stores temporary DuckDB spill directory (`duckdb_tmp`)
+- stores generation lock file (`.generate.lock`)
+
+Important directories/paths in code:
+- `DATA_DIR` default: `/data`
+- `FRAMES_DIR` default: `/data/frames`
+- timeline path: `/data/frames/timeline.json`
+
+## 6.2 Postgres database
+
+The Postgres database is the operational/community store in the live architecture.
+
+From screenshots and runtime schema code, it stores at least:
+- users
+- presence
+- events
+- pickup_logs
+- chat_messages
+
+Role separation:
+- **volume** = large raw inputs + generated frame artifacts
+- **Postgres** = user/community/operational data
+
+This is the correct separation for the current product.
+
+---
+
+## 7. Data pipeline and application flow
+
+## 7.1 Build/generation flow
+
+1. Backend starts.
+2. `startup()` creates `DATA_DIR` and `FRAMES_DIR`.
+3. Backend initializes schema.
+4. Backend checks if frames already exist.
+5. If frames exist, `/timeline` and `/frame/{idx}` are immediately usable.
+6. If frames do not exist, but zone geometry + parquet files are present, backend starts generation automatically.
+7. `build_hotspot.py` reads parquet files and zone geometry.
+8. DuckDB computes per-window hotspot metrics.
+9. Backend writes timeline + frame JSON files to the volume.
+10. Frontend can then consume them.
+
+## 7.2 Frontend boot flow
+
+1. Railway serves `index.html`.
+2. `index.html` sets `window.API_BASE`.
+3. `app.js` boots and configures the map.
+4. Frontend loads `/status` for sanity checks.
+5. Frontend loads `/timeline`.
+6. Frontend chooses the closest NYC-local frame to the current time.
+7. Frontend loads `/frame/{idx}`.
+8. Polygons + labels render.
+9. Weather, slider, dock, recommendation engine, and community features boot.
+10. If signed in, presence + pickup overlay + chat become active.
+
+## 7.3 Presence flow
+
+1. User signs in and receives bearer token.
+2. Frontend obtains geolocation.
+3. Frontend periodically sends `/presence/update`.
+4. Backend accepts updates even if ghost mode is enabled.
+5. `/presence/all` excludes ghosted users from shared results.
+6. Frontend renders visible drivers.
+
+## 7.4 Community trip flow
+
+1. Driver presses `Record Trip`.
+2. Frontend sends `/events/pickup` with location + zone context.
+3. Backend writes to `pickup_logs` and also writes an event row of type `pickup`.
+4. Frontend requests `/events/pickups/recent`.
+5. Overlay is rendered as heatmap + circles with popup details.
+
+## 7.5 Chat flow
+
+1. Frontend chat module reads JWT from localStorage.
+2. `app.part2.js` polls `GET /chat/rooms/global`.
+3. New messages are shown in panel or kill feed.
+4. Sending uses `POST /chat/rooms/global`.
+5. Backend rate-limits sends and stores messages in `chat_messages`.
+
+---
+
+## 8. API surface (current runtime)
+
+## Core/data endpoints
+- `GET /`
 - `GET /status`
-- `POST /generate`
+- `GET /generate`
 - `GET /generate_status`
 - `GET /timeline`
 - `GET /frame/{idx}`
-- `POST /upload_parquet`
 - `POST /upload_zones_geojson`
+- `POST /upload_parquet`
 
-#### Community/auth endpoints
+## Auth/profile endpoints
 - `POST /auth/signup`
 - `POST /auth/login`
 - `GET /me`
 - `POST /me/update`
+- `POST /me/change_password`
+- `POST /me/delete_account`
 
-#### Presence + event endpoints
+## Presence endpoints
 - `POST /presence/update`
 - `GET /presence/all`
-- `POST /events/police`
-- `POST /events/pickup`
 
-#### Admin endpoints
+## Events / community endpoints
+- `POST /events/police`
+- `GET /events/police`
+- `POST /events/pickup`
+- `GET /events/pickups/recent`
+
+## Chat endpoints
+### New room-based endpoints
+- `GET /chat/rooms/{room}`
+- `POST /chat/rooms/{room}`
+
+### Legacy endpoints still present in `main.py`
+- `POST /chat/send`
+- `GET /chat/recent`
+- `GET /chat/since`
+
+## Admin endpoints
 - `GET /admin/users`
 - `POST /admin/users/disable`
 - `POST /admin/users/reset_password`
 
-#### Community database
-- SQLite database path is controlled by `COMMUNITY_DB`.
-- Default location: `/data/community.db`.
-- Includes user, presence, and events persistence.
-- Relevant modeled attributes include **display_name** and **ghost_mode**.
+---
 
-#### Auth requirements
-- `JWT_SECRET` is required for token signing/validation.
-- `/presence/all` requires `Authorization: Bearer <token>`.
+## 9. Current runtime truths that matter
 
-### `build_hotspot.py`
-Batch frame generation pipeline for hotspot scoring.
+## 9.1 The frontend is currently Railway-served
+This is a major documentation correction.
 
-#### Inputs
-- Reads parquet inputs from `/data/*.parquet`.
-- Requires zone geometry file at `/data/taxi_zones.geojson`.
+The repo name still references GitHub Pages, but the actual deployed frontend currently runs through Railway using Express/Node.
 
-#### Processing
-- Uses DuckDB in-memory for analytic aggregation.
-- Uses a temp directory rooted under `/data` for intermediate processing when needed.
+## 9.2 The backend is currently Postgres-backed in production
+The code supports SQLite fallback, but the live Railway environment has a Postgres attachment and `DATABASE_URL` is present.
 
-#### Outputs
-- Writes `/data/frames/timeline.json`.
-- Writes `/data/frames/frame_*.json` payloads consumed by frontend timeline playback.
+So the production runtime truth is:
+- Postgres primary
+- SQLite fallback only
 
-#### Scoring + colors
-- Produces ratings in range **1–100**.
-- Bucket/color mapping:
-  - `>= 90` → Green
-  - `>= 80` → Purple
-  - `>= 65` → Blue
-  - `>= 45` → Sky
-  - `>= 25` → Yellow
-  - else → Red
-- Core scoring idea uses **percentile-based normalization** to remain robust against outliers.
+## 9.3 The volume is essential
+The map cannot produce hotspot frames without the volume because that is where parquet files and zone geometry live.
 
-### `requirements.txt`
-Declares runtime dependencies (major examples):
-- `fastapi`
-- `uvicorn`
-- `duckdb`
-- `geopandas`
-- plus related geospatial/data/auth utilities used by service code.
+## 9.4 `main.py` is still too large
+The current backend runtime works, but it is heavily centralized.
 
-### `Procfile`
-Defines process startup command (uvicorn entrypoint) for Railway runtime.
+## 9.5 There are parallel backend architectures in the repo
+The repo contains both:
+- the actual live `main.py`-centric runtime
+- a partial modular SQLAlchemy-style architecture that is not currently wired into the live app
+
+That creates documentation and maintenance confusion.
+
+## 9.6 Chat exists in two generations
+- old/legacy flat chat endpoints remain in `main.py`
+- new room-based chat endpoints live in `chat.py`
+- frontend chat uses the room-based version
+
+The product works best if the room-based system becomes the single source of truth.
 
 ---
 
-## 5) Data Flow Diagrams (text)
+## 10. Documentation drift and what was wrong in the old architecture file
 
-### A) Frontend runtime flow
-1. Browser requests static assets from GitHub Pages.
-2. GitHub Pages serves `index.html` + `app.js`.
-3. `app.js` initializes map, timeline controls, and auth/presence loops.
+The previous `arquitecture.md` is partially useful, but it is now outdated in several important ways.
 
-### B) Frame API flow
-1. `app.js` calls `GET <RAILWAY_BASE_URL>/timeline`.
-2. Response defines available timeline bins and slider options.
-3. On selection/playback, `app.js` calls `GET <RAILWAY_BASE_URL>/frame/{idx}`.
-4. Response polygons are rendered and recolored in Leaflet.
-
-### C) Data generation flow
-1. Backend reads input files from `/data`:
-   - parquet data
-   - `taxi_zones.geojson`
-2. Generation process computes normalized hotspot scores.
-3. Backend writes frame outputs to `/data/frames`.
-4. API serves timeline + frames directly from generated artifacts.
-
-### D) Community/auth flow
-1. User signs up/logs in via `/auth/signup` or `/auth/login`.
-2. Backend returns token; frontend stores local session keys.
-3. Frontend sends periodic `/presence/update` heartbeats.
-4. Frontend reads `/presence/all` (Bearer token required) to show active drivers.
+Incorrect or stale items in the old doc:
+- says frontend repo is only GitHub Pages
+- says `index.html` is Leaflet-based
+- says polygon rendering is Leaflet
+- says backend storage is SQLite-centered
+- omits `app.part2.js`
+- omits `server.js`, `package.json`, and frontend `Procfile`
+- does not reflect current Railway frontend deployment
+- does not explain the split between Postgres and volume
+- does not document the duplicate legacy/new chat systems
+- does not document the alternate unused backend modules clearly
 
 ---
 
-## 6) Marker Accuracy / Zoom Drift Incident Report
+## 11. Risks and technical debt
 
-### Symptom
-When zooming out, some other-driver markers appeared to “move” relative to true positions.
+## High-risk areas
+- `app.js` is large and change-sensitive
+- `main.py` is large and mixes many responsibilities
+- duplicate backend architecture files can cause confusion
+- duplicate chat generations increase maintenance risk
+- map correctness depends on the volume being healthy and frame generation succeeding
+- presence accuracy is a product-critical trust feature
 
-### Root causes (high-level)
-- Oversized `divIcon` bounds and/or non-centered anchors.
-- Coordinate-to-pixel offset conversions applied in ways that effectively displaced marker bodies.
-
-### Final rule enforced
-- **All driver marker bodies must stay pinned to true reported `lat/lng` at every zoom level.**
-- Collision handling is solved by shifting **labels only**, never the marker anchor position.
-
-### Current implementation summary
-- Other-driver icon uses **40x40** size with centered anchor.
-- Label is translated independently via CSS `transform: translate(...)`.
-- Collision logic computes `labelDx` / `labelDy` only.
-- Marker placement always uses raw `drv.lat` / `drv.lng`.
+## Product-critical invariants that should not be broken
+- real driver markers must stay pinned to true coordinates
+- ghost mode must hide the user from the map, not break their chat/event abilities
+- timeline must stay aligned to NYC time
+- 20-minute bin logic must stay consistent between backend generator and frontend slider assumptions
+- pickup overlay must reflect community data, not synthetic approximations
 
 ---
 
-## 7) Configuration & Security
+## 12. Suggested next documentation tasks
 
-### Environment variables (names only)
-- `DATA_DIR`
-- `FRAMES_DIR`
-- `COMMUNITY_DB`
-- `JWT_SECRET`
-- `ADMIN_EMAIL`
-- `ADMIN_PASSWORD`
-- `ADMIN_BOOTSTRAP_TOKEN`
-- `DEFAULT_BIN_MINUTES`
-- `DEFAULT_MIN_TRIPS_PER_WINDOW`
-- `TRIAL_DAYS`
-- `TOKEN_TTL_SECONDS`
-- `PRESENCE_STALE_SECONDS`
+## P0
+- Replace the current repo `arquitecture.md` with this updated version
+- Add a separate `API-CONTRACT.md` documenting every endpoint, payload, and response shape
+- Add a `DEPLOYMENT.md` with Railway env names, domains, variables, and volume/database responsibilities
 
-### Security notes
-- Never commit `JWT_SECRET` or any token values.
-- Frontend stores session token client-side (localStorage), not in repository code.
-- `/presence/all` requires `Authorization: Bearer <token>`.
-- Ghost mode privacy is enforced server-side by excluding hidden drivers from shared presence results.
+## P1
+- Add `DATA-PIPELINE.md` for parquet → DuckDB → frame JSON generation
+- Add `COMMUNITY-SYSTEM.md` for auth, presence, ghost mode, police, pickup logs, and chat
+- Add `FRONTEND-MODULES.md` describing which features live in `app.js` vs `app.part2.js`
+
+## P2
+- Add a small architecture decision record explaining why runtime is Railway + Postgres + volume instead of GitHub Pages-only
+- Add an explicit note about whether the repo should keep the filename `arquitecture.md` or rename it later to `architecture.md`
 
 ---
 
-## 8) Deployment / Ops Checklist
+## 13. Best current mental model
 
-### Frontend (GitHub Pages)
-- Push frontend branch to `main` (or configured Pages source branch).
-- GitHub Pages serves repository root static files.
+The simplest accurate mental model of this map is:
 
-### Backend (Railway)
-- Deploy backend service to Railway.
-- Attach persistent volume mounted at `/data`.
-- Ensure required inputs exist:
-  - `taxi_zones.geojson`
-  - one or more parquet files
-- If timeline is not present, call `POST /generate`.
+**Frontend Railway service**
+- serves static browser app
+- points to backend with `API_BASE`
+- renders MapLibre map, slider, presence, events, radio, chat UI
 
-### Troubleshooting quick guide
-- **Issue:** “timeline not ready”  
-  **Action:** call `POST /generate` and wait for `/generate_status` completion.
+**Backend Railway service**
+- serves FastAPI endpoints
+- generates hotspot frames from parquet + zone geometry
+- stores operational state in Postgres
+- stores data inputs and frame artifacts on the volume
 
-- **Issue:** “Missing Bearer token”  
-  **Action:** sign in again and verify token exists in localStorage.
+**Volume**
+- parquet + zone geojson + frames
 
-- **Issue:** cannot see other drivers  
-  **Action:** verify location permission, check ghost mode settings, and ensure peer presence is not stale.
+**Postgres**
+- users + presence + events + pickup logs + chat messages
 
----
-
-## File Trees (confirmed)
-
-### Frontend repo (`frankely29/Frontend-github-pages-`)
-```text
-.
-├── index.html
-├── app.js
-└── arquitecture.md
-```
-
-### Backend repo
-```text
-.
-├── main.py
-├── build_hotspot.py
-├── requirements.txt
-└── Procfile
-```
-
-## Incident: Railway frontend was not pulling backend polygons (teamjoseo)
-
-### Symptoms
-- GitHub Pages rendered polygons correctly, but Railway teamjoseo did not render polygons.
-- Backend health and data endpoints (`/status`, `/timeline`, `/frame/{idx}`) were responding correctly, so volume/data generation was not the issue.
-
-### Root cause
-- Railway frontend was serving a different JS build (or stale cached JS) than the intended frontend code.
-- The running JS lacked the correct backend base URL wiring, so it was not calling the real backend used for timeline/frame data.
-
-### Fix
-- Ensure `index.html` loads the correct `app.js` as the single source of truth and apply cache-busting on the script URL.
-- Add a temporary debug panel/logging path to verify timeline load, frame load, and `setData` execution.
-- After applying the correct script/build, teamjoseo resumed polygon rendering.
-
-### Regressions introduced
-- Manhattan Mode broke.
-- Staten Island Mode broke.
-- Ghost Mode (auth/profile toggle behavior) broke.
-- Self GPS/nav arrow behavior broke.
-
-### Restoration plan
-- Re-import the known-working feature blocks from `old_app.js` into current `app.js` with minimal diff.
-- Keep current polygon rendering pipeline and backend paths intact.
-- Restore only Manhattan/Staten/Ghost/Self GPS flows and verify they work without breaking teamjoseo polygon rendering.
-
+That is the current verified production architecture.
