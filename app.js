@@ -3865,9 +3865,12 @@ function applyDriverLabelZoomStyles() {
   }
 }
 
-function makeDriverIcon(name, headingDeg, labelSide = "right", labelDx = 0, labelDy = 0, avatarUrl = "", mode = "name") {
+function makeDriverIcon(name, headingDeg, avatarUrl = "", mode = "name") {
   const safe = (name || "Driver").trim() || "Driver";
   const rot = Number.isFinite(headingDeg) ? headingDeg : 0;
+  const labelSide = "right";
+  const labelDx = 0;
+  const labelDy = 0;
 
   const el = document.createElement("div");
   const driverLabelHTML = (typeof window !== "undefined" && typeof window.mapIdentityRenderDriverLabel === "function")
@@ -3890,7 +3893,7 @@ function clearOtherDrivers() {
   otherMarkers.clear();
 }
 
-function upsertDriverMarker(userId, name, lat, lng, heading, labelSide, labelDx = 0, labelDy = 0, avatarUrl = "", mode = "name") {
+function upsertDriverMarker(userId, name, lat, lng, heading, avatarUrl = "", mode = "name") {
   if (!Number.isFinite(lat) || !Number.isFinite(lng) || !map) return;
   if (!userId) return;
 
@@ -3898,12 +3901,12 @@ function upsertDriverMarker(userId, name, lat, lng, heading, labelSide, labelDx 
   if (existing) {
     existing.setLngLat([lng, lat]);
     const el = existing.getElement();
-    const newEl = makeDriverIcon(name || `Driver ${userId}`, heading, labelSide, labelDx, labelDy, avatarUrl, mode);
+    const newEl = makeDriverIcon(name || `Driver ${userId}`, heading, avatarUrl, mode);
     el.innerHTML = newEl.innerHTML;
     return;
   }
 
-  const el = makeDriverIcon(name || `Driver ${userId}`, heading, labelSide, labelDx, labelDy, avatarUrl, mode);
+  const el = makeDriverIcon(name || `Driver ${userId}`, heading, avatarUrl, mode);
   // A custom HTML marker's triangle arrow sits slightly below the centre of its
   // 40×40 container (the tip is ~7 px below the vertical midpoint). When the
   // marker is anchored at "center" without an offset, the geographic point
@@ -3931,15 +3934,6 @@ function upsertDriverMarker(userId, name, lat, lng, heading, labelSide, labelDx 
 
   otherMarkers.set(userId, mk);
   applyDriverLabelZoomStyles();
-}
-
-function buildPresenceLabelPlacement(presenceRows) {
-  const placement = new Map();
-  for (const row of presenceRows) {
-    if (!row?.uid) continue;
-    placement.set(row.uid, { labelSide: "right", labelDx: 0, labelDy: 0 });
-  }
-  return placement;
 }
 
 async function pullPresenceAll() {
@@ -3997,10 +3991,8 @@ async function pullPresenceAll() {
       });
     }
 
-    const placement = buildPresenceLabelPlacement(candidates);
     for (const row of candidates) {
-      const pos = placement.get(row.uid) || { labelSide: "right", labelDx: 0, labelDy: 0 };
-      upsertDriverMarker(row.uid, row.name, row.lat, row.lng, row.heading, pos.labelSide, pos.labelDx, pos.labelDy, row.avatarUrl, row.mode);
+      upsertDriverMarker(row.uid, row.name, row.lat, row.lng, row.heading, row.avatarUrl, row.mode);
       seen.add(row.uid);
     }
 
