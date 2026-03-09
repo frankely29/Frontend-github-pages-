@@ -806,6 +806,29 @@
     .gamesUnoColorPick{ display:flex; gap:6px; flex-wrap:wrap; margin-top:4px; }
     .gamesMiniLabel{ font:800 11px/1.2 system-ui; opacity:.8; }
 
+    .leaderboardPanelWrap{ display:flex; flex-direction:column; gap:10px; }
+    .leaderboardTabs{ display:flex; gap:6px; flex-wrap:wrap; }
+    .leaderboardList{ display:flex; flex-direction:column; gap:6px; margin-top:4px; }
+    .leaderboardRow{ display:grid; grid-template-columns: 30px 1fr auto auto; gap:6px; align-items:center; font: 800 11px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial; }
+    .leaderboardRank{ font-weight:950; opacity:0.85; }
+    .leaderboardName{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .leaderboardValue{ font-weight:900; }
+    .leaderboardEmpty{ font: 800 11px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial; opacity:0.7; }
+    .badgeChip{ display:inline-flex; align-items:center; gap:4px; border-radius:999px; padding:2px 6px; font:900 10px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial; border:1px solid transparent; }
+    .badge-crown{ background:rgba(255,215,0,0.22); border-color:rgba(184,138,0,0.35); color:#6d4f00; }
+    .badge-gold{ background:rgba(255,193,7,0.18); border-color:rgba(163,115,0,0.35); color:#7d5a00; }
+    .badge-silver{ background:rgba(176,190,197,0.26); border-color:rgba(84,110,122,0.3); color:#37474f; }
+    .badge-ruby{ background:rgba(244,67,54,0.16); border-color:rgba(198,40,40,0.35); color:#8e1c1c; }
+    .myRankCard{ background:rgba(255,255,255,0.62); border:1px solid rgba(0,0,0,0.08); border-radius:12px; padding:8px; display:flex; flex-direction:column; gap:6px; }
+    .myRankRow{ display:flex; justify-content:space-between; gap:8px; align-items:center; font: 800 11px/1.25 system-ui,-apple-system,Segoe UI,Roboto,Arial; }
+    .leaderboardLegend{ display:flex; flex-wrap:wrap; gap:5px; }
+    .leaderboardStatus{ min-height:14px; font:800 10px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial; opacity:0.85; }
+    .leaderboardStatus.ok{ color:#126b2f; }
+    .leaderboardStatus.err{ color:#a12525; }
+    .prefsGrid{ display:grid; gap:6px; }
+    .prefsRow{ display:flex; justify-content:space-between; align-items:center; gap:8px; font:800 11px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial; }
+    .prefsRow input[type="checkbox"]{ width:16px; height:16px; accent-color:#1d7cf2; }
+
     .mapIdentitySection{ margin-top: 8px; border-top: 1px solid rgba(0,0,0,0.08); padding-top: 10px; }
     .mapIdentityTitle{ font-weight: 800; margin-bottom: 8px; }
     .mapIdentityModes{ display:flex; gap:8px; flex-wrap: wrap; margin-bottom: 8px; }
@@ -1525,6 +1548,10 @@
       <span class="dockIcon">🎮</span>
     </button>
 
+    <button class="dockBtn dockBtnMain" id="dockLeaderboard" aria-label="Leaderboard">
+      <span class="dockIcon">🏆</span>
+    </button>
+
     <button class="dockBtn dockBtnMusic dockBtnMain" id="dockMusic" aria-label="Music">
       <span class="dockIcon">♪</span>
     </button>
@@ -1608,5 +1635,6 @@
   </script>
   <script src="./app.js?v=railway3"></script>
   <script src="./app.part2.js?v=railway3"></script>
+  <script src="./app.part3.js?v=railway3"></script>
 </body>
 </html>
