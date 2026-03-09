@@ -1214,9 +1214,11 @@ function applyTeslaDockIconCompatibility() {
   setIcon(dockGames, `
     <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false" style="display:block">
       <rect x="2.8" y="8" width="18.4" height="9.6" rx="4.8" fill="#1b5e20"/>
+      <rect x="3.8" y="9" width="16.4" height="7.6" rx="3.8" fill="#2e7d32"/>
       <path d="M8.3 11.1v3.4M6.6 12.8h3.4" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/>
-      <circle cx="15.8" cy="12" r="1.2" fill="#fff"/>
-      <circle cx="18.2" cy="14.2" r="1.2" fill="#fff"/>
+      <circle cx="15.8" cy="12" r="1.2" fill="#ff5252"/>
+      <circle cx="18.2" cy="14.2" r="1.2" fill="#42a5f5"/>
+      <circle cx="15.5" cy="14.5" r="0.95" fill="#ffd54f"/>
     </svg>
   `);
 
@@ -1228,8 +1230,10 @@ function applyTeslaDockIconCompatibility() {
 
   setIcon(dockProfile, `
     <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false" style="display:block">
-      <circle cx="12" cy="8" r="4" fill="#111"/>
-      <path d="M4 20a8 8 0 0 1 16 0" fill="none" stroke="#111" stroke-width="2.4" stroke-linecap="round"/>
+      <circle cx="12" cy="8" r="4" fill="#f4c7a1"/>
+      <path d="M4 20a8 8 0 0 1 16 0v.2H4Z" fill="#3f51b5"/>
+      <path d="M4 20a8 8 0 0 1 16 0" fill="none" stroke="#2a2f7f" stroke-width="1.6" stroke-linecap="round"/>
+      <path d="M8.2 7.8c.4-2 2-3.4 3.8-3.4s3.4 1.5 3.8 3.4c-.8-.6-1.6-.9-2.7-.9h-2.2c-1 0-1.9.3-2.7.9Z" fill="#5d4037"/>
     </svg>
   `);
 }
@@ -2981,19 +2985,19 @@ function applyTeslaBadgeIconCompatibility() {
   const onlineIconEl = onlineBadge?.querySelector?.(".onlineIcon");
   setIconMarkup(
     onlineIconEl,
-    `<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" focusable="false" style="display:block"><circle cx="8" cy="10" r="3.3" fill="currentColor"/><circle cx="16.3" cy="10.6" r="2.7" fill="currentColor" opacity="0.88"/><path d="M2.8 19a5.2 5.2 0 0 1 10.4 0M12 19a4.3 4.3 0 0 1 8.6 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`
+    `<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" focusable="false" style="display:block"><circle cx="8" cy="10" r="3.3" fill="#2ecf73"/><circle cx="16.3" cy="10.6" r="2.7" fill="#6be8a1"/><path d="M2.8 19a5.2 5.2 0 0 1 10.4 0M12 19a4.3 4.3 0 0 1 8.6 0" fill="none" stroke="#0c8f45" stroke-width="1.8" stroke-linecap="round"/></svg>`
   );
 
   const weatherIconEl = weatherBadge?.querySelector?.(".wxIcon");
   setIconMarkup(
     weatherIconEl,
-    `<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" focusable="false" style="display:block"><circle cx="9" cy="8" r="3" fill="currentColor" opacity="0.95"/><path d="M9 4.4v1.4M5.4 8H4M14 8h1.4M6.5 5.6l-1-1M11.5 5.6l1-1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M8.4 18.2h8a3.1 3.1 0 0 0 .1-6.2 4.4 4.4 0 0 0-8.2 1.7A2.4 2.4 0 0 0 8.4 18.2Z" fill="currentColor"/></svg>`
+    `<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" focusable="false" style="display:block"><circle cx="9" cy="8" r="3" fill="#ffc928"/><path d="M9 4.4v1.4M5.4 8H4M14 8h1.4M6.5 5.6l-1-1M11.5 5.6l1-1" stroke="#ff9f1a" stroke-width="1.2" stroke-linecap="round"/><path d="M8.4 18.2h8a3.1 3.1 0 0 0 .1-6.2 4.4 4.4 0 0 0-8.2 1.7A2.4 2.4 0 0 0 8.4 18.2Z" fill="#d7dde7" stroke="#aeb8c6" stroke-width="0.6"/></svg>`
   );
 
   const pickupIconEl = document.querySelector("#pickupFab .pickupFabIcon");
   setIconMarkup(
     pickupIconEl,
-    `<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" focusable="false" style="display:block"><circle cx="12" cy="12" r="9" fill="currentColor" opacity="0.16"/><path d="m7.4 12.3 3 3.1 6.2-6.1" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+    `<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" focusable="false" style="display:block"><circle cx="12" cy="12" r="9" fill="#20c65a" opacity="0.22"/><path d="m7.4 12.3 3 3.1 6.2-6.1" fill="none" stroke="#0b8e3d" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`
   );
 }
 
@@ -3067,12 +3071,12 @@ function applyNightBasemap(isNight) {
 }
 function getWeatherIconMarkup(icon) {
   const iconMap = {
-    "☀️": `<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" focusable="false" style="display:block"><circle cx="12" cy="12" r="4" fill="currentColor"/><path d="M12 2.2v2.4M12 19.4v2.4M2.2 12h2.4M19.4 12h2.4M4.9 4.9l1.7 1.7M17.4 17.4l1.7 1.7M4.9 19.1l1.7-1.7M17.4 6.6l1.7-1.7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>`,
-    "⛅": `<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" focusable="false" style="display:block"><circle cx="9" cy="8" r="3" fill="currentColor" opacity="0.95"/><path d="M9 4.4v1.4M5.4 8H4M14 8h1.4M6.5 5.6l-1-1M11.5 5.6l1-1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M8.4 18.2h8a3.1 3.1 0 0 0 .1-6.2 4.4 4.4 0 0 0-8.2 1.7A2.4 2.4 0 0 0 8.4 18.2Z" fill="currentColor"/></svg>`,
-    "🌫️": `<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" focusable="false" style="display:block"><path d="M3 8.5h18M2.5 12h15M5 15.5h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`,
-    "🌧️": `<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" focusable="false" style="display:block"><path d="M7.5 13.2h9a3.3 3.3 0 0 0 .1-6.6 4.7 4.7 0 0 0-8.8 1.8 2.8 2.8 0 0 0-.3 5.6Z" fill="currentColor"/><path d="M9 15.2l-1.1 2M12 15.8l-1.1 2M15 15.2l-1.1 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`,
-    "❄️": `<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" focusable="false" style="display:block"><path d="M12 4v16M5 8l14 8M19 8 5 16" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="12" cy="12" r="1.3" fill="currentColor"/></svg>`,
-    "⛈️": `<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" focusable="false" style="display:block"><path d="M7.5 12.8h9a3.3 3.3 0 0 0 .1-6.6 4.7 4.7 0 0 0-8.8 1.8 2.8 2.8 0 0 0-.3 5.6Z" fill="currentColor"/><path d="m12.2 13.2-1.6 3h1.5l-1 3 3-4h-1.8l1.3-2.4Z" fill="currentColor"/></svg>`,
+    "☀️": `<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" focusable="false" style="display:block"><circle cx="12" cy="12" r="4" fill="#ffc928"/><path d="M12 2.2v2.4M12 19.4v2.4M2.2 12h2.4M19.4 12h2.4M4.9 4.9l1.7 1.7M17.4 17.4l1.7 1.7M4.9 19.1l1.7-1.7M17.4 6.6l1.7-1.7" stroke="#ff9f1a" stroke-width="1.6" stroke-linecap="round"/></svg>`,
+    "⛅": `<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" focusable="false" style="display:block"><circle cx="9" cy="8" r="3" fill="#ffc928"/><path d="M9 4.4v1.4M5.4 8H4M14 8h1.4M6.5 5.6l-1-1M11.5 5.6l1-1" stroke="#ff9f1a" stroke-width="1.2" stroke-linecap="round"/><path d="M8.4 18.2h8a3.1 3.1 0 0 0 .1-6.2 4.4 4.4 0 0 0-8.2 1.7A2.4 2.4 0 0 0 8.4 18.2Z" fill="#d7dde7" stroke="#aeb8c6" stroke-width="0.6"/></svg>`,
+    "🌫️": `<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" focusable="false" style="display:block"><path d="M3 8.5h18M2.5 12h15M5 15.5h16" stroke="#b4c0cd" stroke-width="1.8" stroke-linecap="round"/></svg>`,
+    "🌧️": `<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" focusable="false" style="display:block"><path d="M7.5 13.2h9a3.3 3.3 0 0 0 .1-6.6 4.7 4.7 0 0 0-8.8 1.8 2.8 2.8 0 0 0-.3 5.6Z" fill="#98a6b6"/><path d="M9 15.2l-1.1 2M12 15.8l-1.1 2M15 15.2l-1.1 2" stroke="#3a8dff" stroke-width="1.5" stroke-linecap="round"/></svg>`,
+    "❄️": `<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" focusable="false" style="display:block"><path d="M12 4v16M5 8l14 8M19 8 5 16" stroke="#bfe8ff" stroke-width="1.6" stroke-linecap="round"/><circle cx="12" cy="12" r="1.3" fill="#eaf7ff"/></svg>`,
+    "⛈️": `<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" focusable="false" style="display:block"><path d="M7.5 12.8h9a3.3 3.3 0 0 0 .1-6.6 4.7 4.7 0 0 0-8.8 1.8 2.8 2.8 0 0 0-.3 5.6Z" fill="#6d7a8b"/><path d="m12.2 13.2-1.6 3h1.5l-1 3 3-4h-1.8l1.3-2.4Z" fill="#ffd447"/></svg>`,
   };
   return iconMap[icon] || icon;
 }
