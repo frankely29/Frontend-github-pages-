@@ -1243,17 +1243,6 @@ function applyTeslaDockIconCompatibility() {
 
 applyTeslaDockIconCompatibility();
 
-function hardenLegendSwatchColors() {
-  const swatches = document.querySelectorAll("#legend .swatch[data-swatch-color]");
-  swatches.forEach((swatch) => {
-    const color = swatch.getAttribute("data-swatch-color");
-    if (!color) return;
-    swatch.style.setProperty("background-color", color, "important");
-  });
-}
-
-hardenLegendSwatchColors();
-
 /* =========================================================
    Precision Slider Popup
    ========================================================= */
