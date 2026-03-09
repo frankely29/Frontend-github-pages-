@@ -1024,11 +1024,15 @@ function profilePanelHTML() {
         <button id="profileDeleteAccountBtn" class="chipBtn dangerBtn">Delete Account</button>
         <button id="profileSignOutBtn" class="chipBtn">${authHeaderOK() ? "Sign Out" : "Sign In"}</button>
       </div>
+      <div id="profileMapIdentitySection"></div>
     </div>
   `;
 }
 
 function wireProfilePanel() {
+  if (typeof window !== "undefined" && typeof window.initMapIdentityProfileControls === "function") {
+    window.initMapIdentityProfileControls();
+  }
   // Change password
   document.getElementById("profileChangePwdBtn")?.addEventListener("click", async (e) => {
     e.preventDefault();
@@ -2483,22 +2487,35 @@ let lastMoveTs = 0;
 
 function makeNavIcon() {
   const myName = authHeaderOK() ? me?.display_name || "" : "";
+  const navLabelHTML = (typeof window !== "undefined" && typeof window.mapIdentityRenderSelfLabel === "function")
+    ? window.mapIdentityRenderSelfLabel({ name: myName, avatarUrl: me?.avatar_url, mode: me?.map_identity_mode })
+    : `<div id="navMeName" class="meName" style="display:${myName ? "block" : "none"}">${escapeHtml(myName)}</div>`;
   const el = document.createElement("div");
   el.innerHTML = `
     <div id="navWrap" class="navArrowWrap navPulse">
       <div id="navArrowRot" class="navArrowRot"><div class="navArrow"></div></div>
-      <div id="navMeName" class="meName" style="display:${myName ? "block" : "none"}">${escapeHtml(myName)}</div>
+      ${navLabelHTML}
     </div>
   `;
   return el;
 }
 
 function refreshNavNameLabel() {
-  const el = document.getElementById("navMeName");
-  if (!el) return;
   const myName = authHeaderOK() ? me?.display_name || "" : "";
-  el.textContent = myName;
-  el.style.display = myName ? "block" : "none";
+  const wrap = document.getElementById("navWrap");
+  if (wrap && typeof window !== "undefined" && typeof window.mapIdentityRenderSelfLabel === "function") {
+    const current = wrap.querySelector("[data-map-identity-label='1']");
+    if (current) current.remove();
+    wrap.insertAdjacentHTML(
+      "beforeend",
+      window.mapIdentityRenderSelfLabel({ name: myName, avatarUrl: me?.avatar_url, mode: me?.map_identity_mode })
+    );
+  } else {
+    const el = document.getElementById("navMeName");
+    if (!el) return;
+    el.textContent = myName;
+    el.style.display = myName ? "block" : "none";
+  }
   applyDriverLabelZoomStyles();
 }
 
@@ -3860,7 +3877,7 @@ function applyDriverLabelZoomStyles() {
   });
 }
 
-function makeDriverIcon(name, headingDeg, labelSide = "right", labelDx = 0, labelDy = 0) {
+function makeDriverIcon(name, headingDeg, labelSide = "right", labelDx = 0, labelDy = 0, avatarUrl = "", mode = "name") {
   const safe = (name || "Driver").trim() || "Driver";
   const rot = Number.isFinite(headingDeg) ? headingDeg : 0;
   const defaultLabelX = labelSide === "left" ? -28 : 28;
@@ -3869,14 +3886,15 @@ function makeDriverIcon(name, headingDeg, labelSide = "right", labelDx = 0, labe
   const fontPx = driverLabelFontPx();
 
   const el = document.createElement("div");
+  const driverLabelHTML = (typeof window !== "undefined" && typeof window.mapIdentityRenderDriverLabel === "function")
+    ? window.mapIdentityRenderDriverLabel({ name: safe, avatarUrl, mode, fontPx, labelTranslateX, labelTranslateY })
+    : `<div class="otherDrvName" style="font-size:${fontPx}px;transform:translate(${labelTranslateX}px, ${labelTranslateY}px);">${escapeHtml(safe)}</div>`;
   el.className = "otherDrvWrap";
   el.innerHTML = `
     <div class="otherArrowWrap otherPulse" style="transform:rotate(${rot}deg)">
       <div class="otherArrow"></div>
     </div>
-    <div class="otherDrvName" style="font-size:${fontPx}px;transform:translate(${labelTranslateX}px, ${labelTranslateY}px);">
-      ${escapeHtml(safe)}
-    </div>
+    ${driverLabelHTML}
   `;
   return el;
 }
@@ -3888,7 +3906,7 @@ function clearOtherDrivers() {
   otherMarkers.clear();
 }
 
-function upsertDriverMarker(userId, name, lat, lng, heading, labelSide, labelDx = 0, labelDy = 0) {
+function upsertDriverMarker(userId, name, lat, lng, heading, labelSide, labelDx = 0, labelDy = 0, avatarUrl = "", mode = "name") {
   if (!Number.isFinite(lat) || !Number.isFinite(lng) || !map) return;
   if (!userId) return;
 
@@ -3896,12 +3914,12 @@ function upsertDriverMarker(userId, name, lat, lng, heading, labelSide, labelDx 
   if (existing) {
     existing.setLngLat([lng, lat]);
     const el = existing.getElement();
-    const newEl = makeDriverIcon(name || `Driver ${userId}`, heading, labelSide, labelDx, labelDy);
+    const newEl = makeDriverIcon(name || `Driver ${userId}`, heading, labelSide, labelDx, labelDy, avatarUrl, mode);
     el.innerHTML = newEl.innerHTML;
     return;
   }
 
-  const el = makeDriverIcon(name || `Driver ${userId}`, heading, labelSide, labelDx, labelDy);
+  const el = makeDriverIcon(name || `Driver ${userId}`, heading, labelSide, labelDx, labelDy, avatarUrl, mode);
   // A custom HTML marker's triangle arrow sits slightly below the centre of its
   // 40×40 container (the tip is ~7 px below the vertical midpoint). When the
   // marker is anchored at "center" without an offset, the geographic point
@@ -4016,6 +4034,8 @@ async function pullPresenceAll() {
       candidates.push({
         uid,
         name: it.display_name || it.name || it.email || "Driver",
+        avatarUrl: it.avatar_url || "",
+        mode: it.map_identity_mode || "name",
         lat,
         lng,
         heading: Number(it.heading ?? it.bearing ?? NaN),
@@ -4025,7 +4045,7 @@ async function pullPresenceAll() {
     const placement = buildPresenceLabelPlacement(candidates);
     for (const row of candidates) {
       const pos = placement.get(row.uid) || { labelSide: "right", labelDx: 0, labelDy: 0 };
-      upsertDriverMarker(row.uid, row.name, row.lat, row.lng, row.heading, pos.labelSide, pos.labelDx, pos.labelDy);
+      upsertDriverMarker(row.uid, row.name, row.lat, row.lng, row.heading, pos.labelSide, pos.labelDx, pos.labelDy, row.avatarUrl, row.mode);
       seen.add(row.uid);
     }
 
