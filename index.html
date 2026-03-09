@@ -977,6 +977,8 @@
       top: 50%;
       transform: translateY(-50%);
       pointer-events: none;
+      display: flex;
+      align-items: center;
     }
     .meAvatarBadge,
     .otherDrvAvatarBadge{
@@ -996,7 +998,7 @@
       object-fit: cover;
       display: block;
     }
-.meName{
+    .meName{
       font-size: 11px;
       font-weight: 950;
       padding: 3px 7px;
@@ -1079,6 +1081,7 @@
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      pointer-events: none;
     }
 
     .radioModal{
