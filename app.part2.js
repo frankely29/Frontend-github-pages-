@@ -27,7 +27,7 @@
   let chatPollTimer = null;
   let chatLastSeen = null;
   let chatLatestMessageId = null;
-  let chatLastReadId = null;
+  let chatLastReadId = loadChatLastReadId();
   let chatSeenKeys = new Set();
   let unreadChatCount = 0;
 
@@ -119,32 +119,67 @@
     return !!(selfId && senderId && selfId === senderId);
   }
 
-  // Preload a short beep sound as a data URI. The base64 string here
-  // encodes a simple beep and avoids cross-origin or network delays.
-  // (If you have your own .wav, you can convert it to base64.)
-  const beepAudio = new Audio(
-    'data:audio/wav;base64,//uQRAAAAWMSLwUIYAAsYkXgoQwAEaYLWfkWgAI0wWs/ItAAAGDgYtAgAyN+QWaAAihwMWm4G8QQRDiMcCBcH3Cc+CDv/7xA4Tvh9Rz/y8QADBwMWgQAZG/ILNAARQ4GLTcDeIIIhxGOBAuD7hOfBB3/94gcJ3w+o5/5eIAIAAAVwWgQAVQ2ORaIQwEMAJiDg95G4nQL7mQVWI6GwRcfsZAcsKkJvxgxEjzFUgfHoSQ9Qq7KNwqHwuB13MA4a1q/DmBrHgPcmjiGoh//EwC5nGPEmS4RcfkVKOhJf+WOgoxJclFz3kgn//dBA+ya1GhurNn8zb//9NNutNuhz31f////9vt///z+IdAEAAAK4LQIAKobHItEIYCGAExBwe8jcToF9zIKrEdDYIuP2MgOWFSE34wYiR5iqQPj0JIeoVdlG4VD4XA67mAcNa1fhzA1jwHuTRxDUQ//iYBczjHiTJcIuPyKlHQkv/LHQUYkuSi57yQT//uggfZNajQ3Vmz+Zt//+mm3Wm3Q576v////+32///5/EOgAAADVghQAAAAA'
-  );
-  beepAudio.load();
+  let chatAudioCtx = null;
+  let chatAudioUnlocked = false;
 
-  // Resume the audio element on first user interaction
-  document.addEventListener('pointerdown', () => {
+  function ensureChatAudioContext() {
+    if (chatAudioCtx) return chatAudioCtx;
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return null;
+    chatAudioCtx = new Ctx();
+    return chatAudioCtx;
+  }
+
+  async function unlockChatAudio() {
+    const ctx = ensureChatAudioContext();
+    if (!ctx) return;
     try {
-      beepAudio.play().catch(() => {});
-      beepAudio.pause();
-      beepAudio.currentTime = 0;
-    } catch {}
-  }, { once: true, passive: true });
+      if (ctx.state === 'suspended') await ctx.resume();
+      chatAudioUnlocked = ctx.state === 'running';
+    } catch (_) {
+      chatAudioUnlocked = false;
+    }
+  }
+
+  ['pointerdown', 'touchstart', 'keydown'].forEach((evtName) => {
+    document.addEventListener(evtName, () => { unlockChatAudio(); }, { passive: true });
+  });
 
   function playBeep() {
-    try {
-      const instance = beepAudio.cloneNode(true);
-      instance.currentTime = 0;
-      const p = instance.play();
-      if (p && typeof p.catch === 'function') p.catch(() => {});
-    } catch (err) {
-      console.warn('Beep failed:', err);
-    }
+    const ctx = ensureChatAudioContext();
+    if (!ctx || !chatAudioUnlocked || ctx.state !== 'running') return;
+    const now = ctx.currentTime;
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.08, now + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.22);
+    gain.connect(ctx.destination);
+
+    const osc1 = ctx.createOscillator();
+    osc1.type = 'sine';
+    osc1.frequency.setValueAtTime(740, now);
+    osc1.frequency.exponentialRampToValueAtTime(880, now + 0.1);
+    osc1.connect(gain);
+
+    const osc2 = ctx.createOscillator();
+    osc2.type = 'triangle';
+    osc2.frequency.setValueAtTime(660, now + 0.105);
+    osc2.frequency.exponentialRampToValueAtTime(990, now + 0.2);
+    osc2.connect(gain);
+
+    osc1.start(now);
+    osc1.stop(now + 0.11);
+    osc2.start(now + 0.105);
+    osc2.stop(now + 0.22);
+  }
+
+  function shouldCountUnread(msg, { ignoreOpenPanel = false } = {}) {
+    if (isOwnMessage(msg)) return false;
+    if (!ignoreOpenPanel && isChatPanelOpen()) return false;
+    const msgId = messageNumericId(msg);
+    if (msgId === null) return false;
+    if (chatLastReadId === null) return false;
+    return msgId > chatLastReadId;
   }
 
   // Append new messages to the kill feed. Keep only the last 4 and
@@ -168,7 +203,10 @@
 
       const div = document.createElement('div');
       div.className = 'killFeedMsg';
-      div.textContent = `${who}: ${body}`;
+      const text = document.createElement('span');
+      text.className = 'killFeedText';
+      text.textContent = `${who}: ${body}`;
+      div.appendChild(text);
       killFeedContainer.appendChild(div);
 
       // Keep only the last four messages visible at any time.
@@ -183,10 +221,7 @@
       }, 30000);
 
       // Determine if the chat panel is currently open
-      const panelIsOpen = isChatPanelOpen();
-      const msgId = messageNumericId(msg);
-      const isAfterReadMarker = msgId !== null && (chatLastReadId === null || msgId > chatLastReadId);
-      if (!panelIsOpen && !isOwnMessage(msg) && isAfterReadMarker && !incomingNotifySeenKeys.has(key)) {
+      if (shouldCountUnread(msg) && !incomingNotifySeenKeys.has(key)) {
         incomingNotifySeenKeys.add(key);
         unreadChatCount += 1;
         updateChatUnreadBadge();
@@ -331,7 +366,13 @@
     renderChatMessages(msgs, { replace: true });
     if (chatLastReadId === null && chatLatestMessageId !== null) {
       saveChatLastReadId(chatLatestMessageId);
+      clearChatUnreadBadge();
+      return;
     }
+
+    if (!Array.isArray(msgs) || !msgs.length) return;
+    unreadChatCount = msgs.reduce((acc, msg) => (shouldCountUnread(msg, { ignoreOpenPanel: true }) ? acc + 1 : acc), 0);
+    updateChatUnreadBadge();
   }
   async function chatFetchNew() { return chatFetchMessages({ after: chatLastSeen, limit: 50 }); }
 
