@@ -1127,27 +1127,20 @@ function wireProfilePanel() {
 /* wireChatPanel has been removed */
 
 function colorsPanelHTML() {
-  const teslaRows = `
-      <div style="display:flex;align-items:center;gap:8px;"><span style="display:inline-block;width:12px;height:12px;border-radius:4px;background-color:#00b050;border:1px solid rgba(0,0,0,0.15);flex:0 0 12px;opacity:1;background-image:none;forced-color-adjust:none;-webkit-print-color-adjust:exact;print-color-adjust:exact;"></span>Green = Highest</div>
-      <div style="display:flex;align-items:center;gap:8px;"><span style="display:inline-block;width:12px;height:12px;border-radius:4px;background-color:#8000ff;border:1px solid rgba(0,0,0,0.15);flex:0 0 12px;opacity:1;background-image:none;forced-color-adjust:none;-webkit-print-color-adjust:exact;print-color-adjust:exact;"></span>Purple = High</div>
-      <div style="display:flex;align-items:center;gap:8px;"><span style="display:inline-block;width:12px;height:12px;border-radius:4px;background-color:#0066ff;border:1px solid rgba(0,0,0,0.15);flex:0 0 12px;opacity:1;background-image:none;forced-color-adjust:none;-webkit-print-color-adjust:exact;print-color-adjust:exact;"></span>Blue = Medium</div>
-      <div style="display:flex;align-items:center;gap:8px;"><span style="display:inline-block;width:12px;height:12px;border-radius:4px;background-color:#66ccff;border:1px solid rgba(0,0,0,0.15);flex:0 0 12px;opacity:1;background-image:none;forced-color-adjust:none;-webkit-print-color-adjust:exact;print-color-adjust:exact;"></span>Sky = Normal</div>
-      <div style="display:flex;align-items:center;gap:8px;"><span style="display:inline-block;width:12px;height:12px;border-radius:4px;background-color:#ffd400;border:1px solid rgba(0,0,0,0.15);flex:0 0 12px;opacity:1;background-image:none;forced-color-adjust:none;-webkit-print-color-adjust:exact;print-color-adjust:exact;"></span>Yellow = Below Normal</div>
-      <div style="display:flex;align-items:center;gap:8px;"><span style="display:inline-block;width:12px;height:12px;border-radius:4px;background-color:#e60000;border:1px solid rgba(0,0,0,0.15);flex:0 0 12px;opacity:1;background-image:none;forced-color-adjust:none;-webkit-print-color-adjust:exact;print-color-adjust:exact;"></span>Red = Very Low / Avoid</div>
-  `;
-  const defaultRows = `
-      <div>🟩 Green = Highest</div>
-      <div>🟪 Purple = High</div>
-      <div>🟦 Blue = Medium</div>
-      <div>🟦 Sky = Normal</div>
-      <div>🟨 Yellow = Below Normal</div>
-      <div>🟥 Red = Very Low / Avoid</div>
+  const swatch = (fill) => `<svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true" focusable="false" style="display:inline-block;vertical-align:middle;flex:0 0 12px;forced-color-adjust:none;-webkit-print-color-adjust:exact;print-color-adjust:exact;"><rect x="0.5" y="0.5" width="11" height="11" rx="3" fill="${fill}" stroke="rgba(0,0,0,0.15)"/></svg>`;
+  const rows = `
+      <div style="display:flex;align-items:center;gap:8px;">${swatch("#00b050")}Green = Highest</div>
+      <div style="display:flex;align-items:center;gap:8px;">${swatch("#8000ff")}Purple = High</div>
+      <div style="display:flex;align-items:center;gap:8px;">${swatch("#0066ff")}Blue = Medium</div>
+      <div style="display:flex;align-items:center;gap:8px;">${swatch("#66ccff")}Sky = Normal</div>
+      <div style="display:flex;align-items:center;gap:8px;">${swatch("#ffd400")}Yellow = Below Normal</div>
+      <div style="display:flex;align-items:center;gap:8px;">${swatch("#e60000")}Red = Very Low / Avoid</div>
   `;
 
   return `
     <div class="panelBlock">
       <div style="font-weight:800;margin-bottom:8px;">Demand Colors</div>
-      ${IS_TESLA_BROWSER ? teslaRows : defaultRows}
+      ${rows}
       <div style="margin-top:10px;opacity:0.75;font-weight:600;">
         ${statenIslandMode
           ? "Staten Island Mode is ON: Staten Island colors are relative within Staten Island only. Other boroughs remain NYC-wide."
