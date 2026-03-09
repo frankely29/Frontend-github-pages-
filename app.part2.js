@@ -587,8 +587,16 @@
 
   const MAP_IDENTITY_MODE_NAME = 'name';
   const MAP_IDENTITY_MODE_AVATAR = 'avatar';
-  const MAP_IDENTITY_IMG_SIZE = 128;
+  const MAP_IDENTITY_IMG_SIZE = 160;
+  const MAP_IDENTITY_CROP_VIEW_SIZE = 220;
+  const MAP_IDENTITY_MIN_ZOOM = 10;
+  const MAP_IDENTITY_MAX_ZOOM = 16;
   let mapIdentityTempAvatarDataUrl = '';
+  let mapIdentityCropState = null;
+
+  function clampMapIdentity(v, min, max) {
+    return Math.max(min, Math.min(max, v));
+  }
 
   function normalizeMapIdentityMode(mode) {
     return mode === MAP_IDENTITY_MODE_AVATAR ? MAP_IDENTITY_MODE_AVATAR : MAP_IDENTITY_MODE_NAME;
@@ -602,6 +610,30 @@
     return '';
   }
 
+  function mapIdentityZoomT(zoomValue) {
+    const z = Number.isFinite(zoomValue)
+      ? zoomValue
+      : (Number.isFinite(window?.map?.getZoom?.()) ? window.map.getZoom() : 12);
+    const t = (z - MAP_IDENTITY_MIN_ZOOM) / (MAP_IDENTITY_MAX_ZOOM - MAP_IDENTITY_MIN_ZOOM);
+    return clampMapIdentity(t, 0, 1);
+  }
+
+  function mapIdentityVisualConfig(zoomValue) {
+    const t = mapIdentityZoomT(zoomValue);
+    return {
+      fontPx: +(8 + (11 - 8) * t).toFixed(2),
+      padY: +(2 + (3 - 2) * t).toFixed(2),
+      padX: +(5 + (7 - 5) * t).toFixed(2),
+      avatarPx: +(20 + (26 - 20) * t).toFixed(2),
+      selfOffsetX: +(16 + (28 - 16) * t).toFixed(2),
+      selfOffsetY: -50,
+      baseSideOffsetX: +(12 + (20 - 12) * t).toFixed(2),
+      baseOffsetY: +(-4 + (-8 + 4) * t).toFixed(2),
+      spreadScale: +(0.3 + (0.65 - 0.3) * t).toFixed(3),
+      extraOffsetCap: +(8 + (14 - 8) * t).toFixed(2)
+    };
+  }
+
   function shouldUseAvatarLabel(mode, avatarUrl) {
     return normalizeMapIdentityMode(mode) === MAP_IDENTITY_MODE_AVATAR && !!safeMapAvatarUrl(avatarUrl);
   }
@@ -611,55 +643,212 @@
     return `<div class="${className}" style="${styleText}" data-map-identity-label="1"><img src="${safeUrl}" alt="avatar" loading="lazy"></div>`;
   }
 
-  function mapIdentityRenderSelfLabel({ name, avatarUrl, mode }) {
-    const safeName = (String(name || 'Driver').trim() || 'Driver');
-    const safeAvatar = safeMapAvatarUrl(avatarUrl);
-    if (shouldUseAvatarLabel(mode, safeAvatar)) {
-      return mapIdentityAvatarLabelHTML(safeAvatar, 'meAvatarBadge', 'display:block;transform:translate(28px, -50%);');
-    }
-    return `<div id="navMeName" class="meName" style="display:${safeName ? 'block' : 'none'}" data-map-identity-label="1">${escapeHtml(safeName)}</div>`;
+  function mapIdentityComputeDriverOffset({ labelSide, labelDx, labelDy, zoom }) {
+    const cfg = mapIdentityVisualConfig(zoom);
+    const sideSign = labelSide === 'left' ? -1 : 1;
+    const rawDx = Number.isFinite(labelDx) ? labelDx : 0;
+    const rawDy = Number.isFinite(labelDy) ? labelDy : 0;
+    const extraX = clampMapIdentity(rawDx * cfg.spreadScale, -cfg.extraOffsetCap, cfg.extraOffsetCap);
+    const extraY = clampMapIdentity(rawDy * cfg.spreadScale, -cfg.extraOffsetCap * 0.65, cfg.extraOffsetCap * 0.65);
+    return {
+      x: +(sideSign * cfg.baseSideOffsetX + extraX).toFixed(2),
+      y: +(cfg.baseOffsetY + extraY).toFixed(2),
+      cfg
+    };
   }
 
-  function mapIdentityRenderDriverLabel({ name, avatarUrl, mode, fontPx, labelTranslateX, labelTranslateY }) {
+  function mapIdentityRenderSelfLabel({ name, avatarUrl, mode, zoom }) {
     const safeName = (String(name || 'Driver').trim() || 'Driver');
     const safeAvatar = safeMapAvatarUrl(avatarUrl);
+    const cfg = mapIdentityVisualConfig(zoom);
     if (shouldUseAvatarLabel(mode, safeAvatar)) {
-      return mapIdentityAvatarLabelHTML(safeAvatar, 'otherDrvAvatarBadge', `transform:translate(${labelTranslateX}px, ${labelTranslateY}px);`);
+      return mapIdentityAvatarLabelHTML(
+        safeAvatar,
+        'meAvatarBadge',
+        `display:block;width:${cfg.avatarPx}px;height:${cfg.avatarPx}px;transform:translate(${cfg.selfOffsetX}px, ${cfg.selfOffsetY}%);`
+      );
     }
-    return `<div class="otherDrvName" data-map-identity-label="1" style="font-size:${fontPx}px;transform:translate(${labelTranslateX}px, ${labelTranslateY}px);">${escapeHtml(safeName)}</div>`;
+    return `<div id="navMeName" class="meName" style="display:${safeName ? 'block' : 'none'};font-size:${cfg.fontPx}px;padding:${cfg.padY}px ${cfg.padX}px;transform:translate(${cfg.selfOffsetX}px, -50%);" data-map-identity-label="1">${escapeHtml(safeName)}</div>`;
   }
 
-  async function processMapIdentityImage(file) {
+  function mapIdentityRenderDriverLabel({ name, avatarUrl, mode, labelSide, labelDx, labelDy, zoom }) {
+    const safeName = (String(name || 'Driver').trim() || 'Driver');
+    const safeAvatar = safeMapAvatarUrl(avatarUrl);
+    const metrics = mapIdentityComputeDriverOffset({ labelSide, labelDx, labelDy, zoom });
+    const { cfg } = metrics;
+    if (shouldUseAvatarLabel(mode, safeAvatar)) {
+      return mapIdentityAvatarLabelHTML(safeAvatar, 'otherDrvAvatarBadge', `width:${cfg.avatarPx}px;height:${cfg.avatarPx}px;transform:translate(${metrics.x}px, ${metrics.y}px);`);
+    }
+    return `<div class="otherDrvName" data-map-identity-label="1" style="font-size:${cfg.fontPx}px;padding:${cfg.padY}px ${cfg.padX}px;transform:translate(${metrics.x}px, ${metrics.y}px);">${escapeHtml(safeName)}</div>`;
+  }
+
+  function mapIdentityApplyZoomStyles(zoomValue) {
+    const cfg = mapIdentityVisualConfig(zoomValue);
+    document.querySelectorAll('.otherDrvName, .meName').forEach((el) => {
+      el.style.fontSize = `${cfg.fontPx}px`;
+      el.style.padding = `${cfg.padY}px ${cfg.padX}px`;
+    });
+    document.querySelectorAll('.otherDrvAvatarBadge, .meAvatarBadge').forEach((el) => {
+      el.style.width = `${cfg.avatarPx}px`;
+      el.style.height = `${cfg.avatarPx}px`;
+    });
+  }
+
+  function readMapIdentityFile(file) {
     if (!file) throw new Error('No file selected');
-    const imgUrl = await new Promise((resolve, reject) => {
+    return new Promise((resolve, reject) => {
       const fr = new FileReader();
       fr.onload = () => resolve(fr.result);
       fr.onerror = () => reject(new Error('Could not read image'));
       fr.readAsDataURL(file);
     });
-    const img = await new Promise((resolve, reject) => {
+  }
+
+  async function loadMapIdentityImage(url) {
+    return new Promise((resolve, reject) => {
       const el = new Image();
       el.onload = () => resolve(el);
       el.onerror = () => reject(new Error('Could not decode image'));
-      el.src = imgUrl;
+      el.src = url;
     });
-    const side = Math.min(img.naturalWidth || img.width || 0, img.naturalHeight || img.height || 0);
-    if (!side) throw new Error('Invalid image');
-    const sx = Math.floor(((img.naturalWidth || img.width) - side) / 2);
-    const sy = Math.floor(((img.naturalHeight || img.height) - side) / 2);
+  }
+
+  function closeMapIdentityCropper() {
+    const modal = document.getElementById('mapIdentityCropModal');
+    if (modal) modal.remove();
+    mapIdentityCropState = null;
+  }
+
+  function applyMapIdentityCropTransform() {
+    if (!mapIdentityCropState) return;
+    const { imgEl, image, viewport, baseScale, zoom, tx, ty } = mapIdentityCropState;
+    const scale = baseScale * zoom;
+    const scaledW = (image.naturalWidth || image.width) * scale;
+    const scaledH = (image.naturalHeight || image.height) * scale;
+    const maxX = Math.max(0, (scaledW - viewport) / 2);
+    const maxY = Math.max(0, (scaledH - viewport) / 2);
+    mapIdentityCropState.tx = clampMapIdentity(tx, -maxX, maxX);
+    mapIdentityCropState.ty = clampMapIdentity(ty, -maxY, maxY);
+    imgEl.style.transform = `translate(-50%, -50%) translate(${mapIdentityCropState.tx}px, ${mapIdentityCropState.ty}px) scale(${scale})`;
+  }
+
+  async function exportMapIdentityCropDataUrl() {
+    if (!mapIdentityCropState) throw new Error('Crop state not ready');
+    const { image, viewport, baseScale, zoom, tx, ty } = mapIdentityCropState;
+    const scale = baseScale * zoom;
+    const iw = image.naturalWidth || image.width;
+    const ih = image.naturalHeight || image.height;
+    let sx = (iw / 2) + ((-viewport / 2) - tx) / scale;
+    let sy = (ih / 2) + ((-viewport / 2) - ty) / scale;
+    let sw = viewport / scale;
+    let sh = viewport / scale;
+    sw = Math.min(sw, iw);
+    sh = Math.min(sh, ih);
+    sx = clampMapIdentity(sx, 0, iw - sw);
+    sy = clampMapIdentity(sy, 0, ih - sh);
     const canvas = document.createElement('canvas');
     canvas.width = MAP_IDENTITY_IMG_SIZE;
     canvas.height = MAP_IDENTITY_IMG_SIZE;
     const ctx = canvas.getContext('2d');
-    ctx.drawImage(img, sx, sy, side, side, 0, 0, MAP_IDENTITY_IMG_SIZE, MAP_IDENTITY_IMG_SIZE);
-    return canvas.toDataURL('image/jpeg', 0.78);
+    ctx.drawImage(image, sx, sy, sw, sh, 0, 0, MAP_IDENTITY_IMG_SIZE, MAP_IDENTITY_IMG_SIZE);
+    return canvas.toDataURL('image/jpeg', 0.82);
+  }
+
+  async function openMapIdentityCropper(file) {
+    const imageUrl = await readMapIdentityFile(file);
+    const image = await loadMapIdentityImage(imageUrl);
+    closeMapIdentityCropper();
+    const modal = document.createElement('div');
+    modal.id = 'mapIdentityCropModal';
+    modal.className = 'mapIdentityCropModal';
+    modal.innerHTML = `
+      <div class="mapIdentityCropCard">
+        <div class="mapIdentityCropTitle">Crop photo</div>
+        <div class="mapIdentityCropViewport" id="mapIdentityCropViewport">
+          <img id="mapIdentityCropImage" alt="Crop preview">
+        </div>
+        <input id="mapIdentityCropZoom" class="mapIdentityCropZoom" type="range" min="1" max="3" step="0.01" value="1">
+        <div class="mapIdentityCropActions">
+          <button id="mapIdentityCropCancel" class="chipBtn">Cancel</button>
+          <button id="mapIdentityCropConfirm" class="chipBtn">Use Photo</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    const imgEl = modal.querySelector('#mapIdentityCropImage');
+    const zoomEl = modal.querySelector('#mapIdentityCropZoom');
+    const viewportEl = modal.querySelector('#mapIdentityCropViewport');
+    imgEl.src = imageUrl;
+    const baseScale = Math.max(
+      MAP_IDENTITY_CROP_VIEW_SIZE / (image.naturalWidth || image.width),
+      MAP_IDENTITY_CROP_VIEW_SIZE / (image.naturalHeight || image.height)
+    );
+    mapIdentityCropState = {
+      image,
+      imgEl,
+      zoomEl,
+      viewport: MAP_IDENTITY_CROP_VIEW_SIZE,
+      baseScale,
+      zoom: 1,
+      tx: 0,
+      ty: 0,
+      pointerId: null,
+      startX: 0,
+      startY: 0,
+      startTx: 0,
+      startTy: 0
+    };
+    applyMapIdentityCropTransform();
+
+    viewportEl.addEventListener('pointerdown', (evt) => {
+      if (!mapIdentityCropState) return;
+      mapIdentityCropState.pointerId = evt.pointerId;
+      mapIdentityCropState.startX = evt.clientX;
+      mapIdentityCropState.startY = evt.clientY;
+      mapIdentityCropState.startTx = mapIdentityCropState.tx;
+      mapIdentityCropState.startTy = mapIdentityCropState.ty;
+      viewportEl.setPointerCapture(evt.pointerId);
+    });
+    viewportEl.addEventListener('pointermove', (evt) => {
+      if (!mapIdentityCropState || mapIdentityCropState.pointerId !== evt.pointerId) return;
+      mapIdentityCropState.tx = mapIdentityCropState.startTx + (evt.clientX - mapIdentityCropState.startX);
+      mapIdentityCropState.ty = mapIdentityCropState.startTy + (evt.clientY - mapIdentityCropState.startY);
+      applyMapIdentityCropTransform();
+    });
+    const endDrag = (evt) => {
+      if (!mapIdentityCropState || mapIdentityCropState.pointerId !== evt.pointerId) return;
+      mapIdentityCropState.pointerId = null;
+    };
+    viewportEl.addEventListener('pointerup', endDrag);
+    viewportEl.addEventListener('pointercancel', endDrag);
+    zoomEl.addEventListener('input', () => {
+      if (!mapIdentityCropState) return;
+      mapIdentityCropState.zoom = clampMapIdentity(Number(zoomEl.value) || 1, 1, 3);
+      applyMapIdentityCropTransform();
+    });
+
+    modal.querySelector('#mapIdentityCropCancel')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      closeMapIdentityCropper();
+    });
+    modal.querySelector('#mapIdentityCropConfirm')?.addEventListener('click', async (e) => {
+      e.preventDefault();
+      try {
+        const processed = await exportMapIdentityCropDataUrl();
+        mapIdentityTempAvatarDataUrl = processed;
+        await saveMapIdentityUpdate({ avatar_url: processed, map_identity_mode: MAP_IDENTITY_MODE_AVATAR });
+        closeMapIdentityCropper();
+      } catch (err) {
+        alert(err?.message || 'Image processing failed.');
+      }
+    });
   }
 
   function mapIdentityCurrentState() {
     const meObj = (typeof window !== 'undefined' && window.me) ? window.me : {};
     return {
       mode: normalizeMapIdentityMode(meObj?.map_identity_mode),
-      avatarUrl: safeMapAvatarUrl(meObj?.avatar_url),
+      avatarUrl: safeMapAvatarUrl(meObj?.avatar_url) || mapIdentityTempAvatarDataUrl,
       name: meObj?.display_name || 'Driver'
     };
   }
@@ -720,6 +909,7 @@
     });
     document.getElementById('mapIdentityRemovePhoto')?.addEventListener('click', async (e) => {
       e.preventDefault();
+      if (!confirm('Remove your saved photo?')) return;
       mapIdentityTempAvatarDataUrl = '';
       await saveMapIdentityUpdate({ avatar_url: '', map_identity_mode: MAP_IDENTITY_MODE_NAME });
     });
@@ -727,9 +917,7 @@
       const f = fileInput.files && fileInput.files[0];
       if (!f) return;
       try {
-        const processed = await processMapIdentityImage(f);
-        mapIdentityTempAvatarDataUrl = processed;
-        await saveMapIdentityUpdate({ avatar_url: processed, map_identity_mode: MAP_IDENTITY_MODE_AVATAR });
+        await openMapIdentityCropper(f);
       } catch (err) {
         alert(err?.message || 'Image processing failed.');
       } finally {
@@ -753,6 +941,7 @@
   window.chatResetState = chatResetState;
   window.mapIdentityRenderSelfLabel = mapIdentityRenderSelfLabel;
   window.mapIdentityRenderDriverLabel = mapIdentityRenderDriverLabel;
+  window.mapIdentityApplyZoomStyles = mapIdentityApplyZoomStyles;
   window.initMapIdentityProfileControls = initMapIdentityProfileControls;
 
   // Bind the chat dock button using its ID
