@@ -3196,6 +3196,7 @@ function ensureWxAnimationRunning() {
 const btnHot97 = document.getElementById("btnHot97");
 const btnMega979 = document.getElementById("btnMega979");
 const btnKQ945 = document.getElementById("btnKQ945");
+const btnAlofoke993 = document.getElementById("btnAlofoke993");
 const btnZ100 = document.getElementById("btnZ100");
 const radioStatusEl = document.getElementById("radioStatus");
 
@@ -3208,6 +3209,7 @@ const HOT97_STREAM_URL = "https://26313.live.streamtheworld.com/WQHTFMAAC.aac";
 const MEGA979_STREAM_URL = "https://liveaudio.lamusica.com/NY_WSKQ_icy";
 const KQ945_STREAM_URL = "https://radio.yaservers.com:9990/stream?icy=http";
 const KQ945_SITE_URL = "https://kq94.net/";
+const ALOFOKE993_SITE_URL = "https://www.alofoke.fm/";
 const Z100_STREAM_URL = "https://stream.revma.ihrhls.com/zc1469";
 
 const megaAudio = new Audio();
@@ -3233,6 +3235,7 @@ z100Audio.crossOrigin = "anonymous";
 let megaPlaying = false;
 let hot97Playing = false;
 let kqPlaying = false;
+let alofoke993Playing = false;
 let z100Playing = false;
 
 function setRadioStatus(txt) {
@@ -3244,6 +3247,7 @@ function setBtnState(btn, on) {
   const base = btn === btnMega979 ? "La Mega 97.9"
              : btn === btnHot97 ? "HOT 97.1"
              : btn === btnKQ945 ? "KQ 94.5"
+             : btn === btnAlofoke993 ? "Alofoke 99.3 FM"
              : btn === btnZ100 ? "Z100"
              : "";
   btn.textContent = (on ? "⏸ " : "▶ ") + base;
@@ -3267,6 +3271,37 @@ function openStationWebModal(title, url) {
 }
 
 
+function stopAlofokeSiteMode() {
+  if (!alofoke993Playing) return;
+  alofoke993Playing = false;
+  setBtnState(btnAlofoke993, false);
+}
+
+function toggleAlofoke993() {
+  if (hot97Playing) { hot97Audio.pause(); hot97Playing = false; setBtnState(btnHot97, false); }
+  if (megaPlaying) { megaAudio.pause(); megaPlaying = false; setBtnState(btnMega979, false); }
+  if (kqPlaying) { kqAudio.pause(); kqPlaying = false; setBtnState(btnKQ945, false); }
+  if (z100Playing) { z100Audio.pause(); z100Playing = false; setBtnState(btnZ100, false); }
+
+  closeHot97Modal();
+
+  if (alofoke993Playing) {
+    stopAlofokeSiteMode();
+    setRadioStatus("Radio: off");
+    return;
+  }
+
+  alofoke993Playing = true;
+  setBtnState(btnAlofoke993, true);
+  setBtnState(btnHot97, false);
+  setBtnState(btnMega979, false);
+  setBtnState(btnKQ945, false);
+  setBtnState(btnZ100, false);
+  setRadioStatus("Radio: Alofoke 99.3 FM (official site)");
+
+  try { window.open(ALOFOKE993_SITE_URL, "_blank", "noopener"); } catch {}
+}
+
 async function toggleMega() {
   try {
     if (hot97Playing) {
@@ -3283,6 +3318,9 @@ async function toggleMega() {
       z100Audio.pause();
       z100Playing = false;
       setBtnState(btnZ100, false);
+    }
+    if (alofoke993Playing) {
+      stopAlofokeSiteMode();
     }
   } catch {}
 
@@ -3301,6 +3339,7 @@ async function toggleMega() {
     setBtnState(btnMega979, true);
     setBtnState(btnHot97, false);
     setBtnState(btnKQ945, false);
+    setBtnState(btnAlofoke993, false);
     setBtnState(btnZ100, false);
     setRadioStatus("Radio: La Mega 97.9 playing");
   } catch (e) {
@@ -3329,6 +3368,9 @@ async function toggleHot97() {
       z100Playing = false;
       setBtnState(btnZ100, false);
     }
+    if (alofoke993Playing) {
+      stopAlofokeSiteMode();
+    }
   } catch {}
 
   closeHot97Modal();
@@ -3352,6 +3394,7 @@ async function toggleHot97() {
     setBtnState(btnHot97, true);
     setBtnState(btnMega979, false);
     setBtnState(btnKQ945, false);
+    setBtnState(btnAlofoke993, false);
     setBtnState(btnZ100, false);
     setRadioStatus("Radio: HOT 97.1 playing");
   } catch (e) {
@@ -3375,6 +3418,7 @@ async function toggleKQ() {
   if (hot97Playing) { hot97Audio.pause(); hot97Playing = false; setBtnState(btnHot97, false); }
   if (megaPlaying) { megaAudio.pause(); megaPlaying = false; setBtnState(btnMega979, false); }
   if (z100Playing) { z100Audio.pause(); z100Playing = false; setBtnState(btnZ100, false); }
+  if (alofoke993Playing) { stopAlofokeSiteMode(); }
 
   closeHot97Modal();
 
@@ -3396,6 +3440,7 @@ async function toggleKQ() {
     setBtnState(btnKQ945, true);
     setBtnState(btnHot97, false);
     setBtnState(btnMega979, false);
+    setBtnState(btnAlofoke993, false);
     setBtnState(btnZ100, false);
     setRadioStatus("Radio: KQ 94.5 FM playing");
   } catch (e) {
@@ -3412,6 +3457,7 @@ async function toggleZ100() {
   if (hot97Playing) { hot97Audio.pause(); hot97Playing = false; setBtnState(btnHot97, false); }
   if (megaPlaying) { megaAudio.pause(); megaPlaying = false; setBtnState(btnMega979, false); }
   if (kqPlaying) { kqAudio.pause(); kqPlaying = false; setBtnState(btnKQ945, false); }
+  if (alofoke993Playing) { stopAlofokeSiteMode(); }
 
   if (z100Playing) {
     z100Audio.pause();
@@ -3428,6 +3474,7 @@ async function toggleZ100() {
     setBtnState(btnHot97, false);
     setBtnState(btnMega979, false);
     setBtnState(btnKQ945, false);
+    setBtnState(btnAlofoke993, false);
     setRadioStatus("Radio: Z100 playing");
   } catch (e) {
     z100Playing = false;
@@ -3460,6 +3507,14 @@ if (btnKQ945) {
     e.preventDefault();
     e.stopPropagation();
     toggleKQ();
+  });
+}
+if (btnAlofoke993) {
+  btnAlofoke993.addEventListener("pointerdown", (e) => e.stopPropagation());
+  btnAlofoke993.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    toggleAlofoke993();
   });
 }
 if (btnZ100) {
