@@ -620,12 +620,14 @@
 
   function mapIdentityVisualConfig(zoomValue) {
     const t = mapIdentityZoomT(zoomValue);
+    const smooth = t * t * (3 - 2 * t);
+    const emphasize = Math.pow(smooth, 1.15);
     return {
-      fontPx: +(10.5 + (14 - 10.5) * t).toFixed(2),
-      padY: +(1.75 + (3.5 - 1.75) * t).toFixed(2),
-      padX: +(4 + (7.5 - 4) * t).toFixed(2),
-      avatarPx: +(19 + (34 - 19) * t).toFixed(2),
-      maxWidthPx: +(110 + (164 - 110) * t).toFixed(2),
+      fontPx: +(9.4 + (16.4 - 9.4) * emphasize).toFixed(2),
+      padY: +(1.15 + (4.1 - 1.15) * emphasize).toFixed(2),
+      padX: +(3 + (8.4 - 3) * emphasize).toFixed(2),
+      avatarPx: +(17 + (36 - 17) * emphasize).toFixed(2),
+      maxWidthPx: +(96 + (176 - 96) * emphasize).toFixed(2),
       arrowBodyPx: +(18 + (27 - 18) * t).toFixed(2),
       arrowLeftRightPx: +(4.5 + (7 - 4.5) * t).toFixed(2),
       arrowAccentPx: +(10 + (14 - 10) * t).toFixed(2)
