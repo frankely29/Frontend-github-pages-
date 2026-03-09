@@ -948,8 +948,8 @@ function modesPanelHTML() {
       </div>
 
       <div style="display:flex;gap:10px;flex-wrap:wrap;">
-        <button id="dockPoliceBtn" class="chipBtn">🚨 Police</button>
-        <button id="dockPickupBtn" class="chipBtn">✅ Record Trip</button>
+        <button id="dockPoliceBtn" class="chipBtn"><span aria-hidden="true" style="display:inline-grid;place-items:center;line-height:1;vertical-align:middle;margin-right:6px;"><svg viewBox="0 0 24 24" width="12" height="12" focusable="false" style="display:block"><path d="M12 2.2 4.2 6v6.1c0 4.4 3 8.3 7.8 9.7 4.8-1.4 7.8-5.3 7.8-9.7V6L12 2.2Z" fill="currentColor"/><path d="M12 6.7v5.2" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="15.4" r="1.2" fill="#fff"/></svg></span>Police</button>
+        <button id="dockPickupBtn" class="chipBtn"><span aria-hidden="true" style="display:inline-grid;place-items:center;line-height:1;vertical-align:middle;margin-right:6px;"><svg viewBox="0 0 24 24" width="12" height="12" focusable="false" style="display:block"><circle cx="12" cy="12" r="9" fill="currentColor"/><path d="m8 12.4 2.5 2.6 5.5-5.6" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>Record Trip</button>
       </div>
 
       <div style="margin-top:10px;opacity:0.75;font-weight:600;">
@@ -1242,6 +1242,17 @@ function applyTeslaDockIconCompatibility() {
 }
 
 applyTeslaDockIconCompatibility();
+
+function hardenLegendSwatchColors() {
+  const swatches = document.querySelectorAll("#legend .swatch[data-swatch-color]");
+  swatches.forEach((swatch) => {
+    const color = swatch.getAttribute("data-swatch-color");
+    if (!color) return;
+    swatch.style.setProperty("background-color", color, "important");
+  });
+}
+
+hardenLegendSwatchColors();
 
 /* =========================================================
    Precision Slider Popup
@@ -2962,6 +2973,21 @@ function updateOnlineBadge(count, ghostedCount = 0) {
     : `${display} Online`;
 }
 
+function applyTeslaBadgeIconCompatibility() {
+  if (!IS_TESLA_BROWSER) return;
+
+  const onlineIconEl = onlineBadge?.querySelector?.(".onlineIcon");
+  if (onlineIconEl) {
+    onlineIconEl.innerHTML = `<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" focusable="false" style="display:block"><circle cx="8" cy="10" r="3.3" fill="currentColor"/><circle cx="16.3" cy="10.6" r="2.7" fill="currentColor" opacity="0.88"/><path d="M2.8 19a5.2 5.2 0 0 1 10.4 0M12 19a4.3 4.3 0 0 1 8.6 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`;
+    onlineIconEl.style.fontSize = "0";
+    onlineIconEl.style.display = "inline-grid";
+    onlineIconEl.style.placeItems = "center";
+    onlineIconEl.style.lineHeight = "1";
+  }
+}
+
+applyTeslaBadgeIconCompatibility();
+
 const wxCanvas = document.getElementById("wxCanvas");
 const wxCtx = wxCanvas ? wxCanvas.getContext("2d") : null;
 
@@ -3028,11 +3054,38 @@ function applyNightBasemap(isNight) {
     console.warn("applyNightBasemap failed:", e);
   }
 }
+function getWeatherIconMarkup(icon) {
+  const iconMap = {
+    "☀️": `<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" focusable="false" style="display:block"><circle cx="12" cy="12" r="4" fill="currentColor"/><path d="M12 2.2v2.4M12 19.4v2.4M2.2 12h2.4M19.4 12h2.4M4.9 4.9l1.7 1.7M17.4 17.4l1.7 1.7M4.9 19.1l1.7-1.7M17.4 6.6l1.7-1.7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>`,
+    "⛅": `<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" focusable="false" style="display:block"><circle cx="9" cy="8" r="3" fill="currentColor" opacity="0.95"/><path d="M9 4.4v1.4M5.4 8H4M14 8h1.4M6.5 5.6l-1-1M11.5 5.6l1-1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M8.4 18.2h8a3.1 3.1 0 0 0 .1-6.2 4.4 4.4 0 0 0-8.2 1.7A2.4 2.4 0 0 0 8.4 18.2Z" fill="currentColor"/></svg>`,
+    "🌫️": `<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" focusable="false" style="display:block"><path d="M3 8.5h18M2.5 12h15M5 15.5h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`,
+    "🌧️": `<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" focusable="false" style="display:block"><path d="M7.5 13.2h9a3.3 3.3 0 0 0 .1-6.6 4.7 4.7 0 0 0-8.8 1.8 2.8 2.8 0 0 0-.3 5.6Z" fill="currentColor"/><path d="M9 15.2l-1.1 2M12 15.8l-1.1 2M15 15.2l-1.1 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`,
+    "❄️": `<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" focusable="false" style="display:block"><path d="M12 4v16M5 8l14 8M19 8 5 16" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="12" cy="12" r="1.3" fill="currentColor"/></svg>`,
+    "⛈️": `<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" focusable="false" style="display:block"><path d="M7.5 12.8h9a3.3 3.3 0 0 0 .1-6.6 4.7 4.7 0 0 0-8.8 1.8 2.8 2.8 0 0 0-.3 5.6Z" fill="currentColor"/><path d="m12.2 13.2-1.6 3h1.5l-1 3 3-4h-1.8l1.3-2.4Z" fill="currentColor"/></svg>`,
+  };
+  return iconMap[icon] || icon;
+}
+
 function setWeatherBadge(icon, text) {
   if (!weatherBadge) return;
   const iconEl = weatherBadge.querySelector(".wxIcon");
   const txtEl = weatherBadge.querySelector(".wxTxt");
-  if (iconEl) iconEl.textContent = icon;
+  if (iconEl) {
+    const markup = getWeatherIconMarkup(icon);
+    if (typeof markup === "string" && markup.startsWith("<svg")) {
+      iconEl.innerHTML = markup;
+      iconEl.style.fontSize = "0";
+      iconEl.style.display = "inline-grid";
+      iconEl.style.placeItems = "center";
+      iconEl.style.lineHeight = "1";
+    } else {
+      iconEl.textContent = icon;
+      iconEl.style.removeProperty("font-size");
+      iconEl.style.removeProperty("display");
+      iconEl.style.removeProperty("place-items");
+      iconEl.style.removeProperty("line-height");
+    }
+  }
   if (txtEl) txtEl.textContent = text;
   weatherBadge.title = text;
 }
