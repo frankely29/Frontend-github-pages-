@@ -940,7 +940,7 @@ function modesPanelHTML() {
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
         <button id="dockStatenBtn" class="chipBtn">${statenIslandMode ? "Staten Island: ON" : "Staten Island: OFF"}</button>
         <button id="dockManhattanBtn" class="chipBtn">${manhattanMode ? "Manhattan: ON" : "Manhattan: OFF"}</button>
-        <button id="dockGhostBtn" class="chipBtn">${me?.ghost_mode ? "Ghost: ON" : "Ghost: OFF"}</button>
+        <button id="dockGhostBtn" class="chipBtn">${me?.ghost_mode ? "Ghost (Map Hidden): ON" : "Ghost (Map Hidden): OFF"}</button>
       </div>
 
       <div style="display:flex;gap:10px;flex-wrap:wrap;">
@@ -3537,7 +3537,7 @@ function sideFromOffsetX(dx, fallback = "right") {
 function syncGhostUI() {
   const ghostOn = !!me?.ghost_mode;
   if (btnGhostMode) {
-    btnGhostMode.textContent = ghostOn ? "Ghost Mode: ON" : "Ghost Mode: OFF";
+    btnGhostMode.textContent = ghostOn ? "Ghost Mode (Hide on Map): ON" : "Ghost Mode (Hide on Map): OFF";
     btnGhostMode.classList.toggle("on", ghostOn);
     btnGhostMode.classList.toggle("disabled", !authHeaderOK());
   }
@@ -3981,6 +3981,8 @@ async function pullPresenceAll() {
     try {
       let count;
       if (Array.isArray(list)) count = list.length;
+      else if (Number.isFinite(Number(list?.online_count))) count = Number(list.online_count);
+      else if (Number.isFinite(Number(list?.count))) count = Number(list.count);
       else if (list && Array.isArray(list.items)) count = list.items.length;
       else count = 0;
       updateOnlineBadge(count);
@@ -3996,6 +3998,7 @@ async function pullPresenceAll() {
       const uid = String(it.user_id ?? it.userId ?? it.id ?? "");
       if (!uid) continue;
       if (me && String(me.id) === uid) continue;
+      if (Boolean(it.ghost_mode ?? it.ghostMode)) continue;
 
       let lat = Number(it.lat ?? it.latitude ?? NaN);
       let lng = Number(it.lng ?? it.longitude ?? NaN);
