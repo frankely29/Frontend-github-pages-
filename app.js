@@ -1184,14 +1184,13 @@ function applyTeslaDockIconCompatibility() {
 
   setIcon(dockColors, `
     <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false" style="display:block">
-      <circle cx="12" cy="12" r="9.3" fill="#f8fbff"/>
-      <path d="M20.2 11.8a8.2 8.2 0 0 1-8.2 8.2H9.8a2.5 2.5 0 0 1 0-5h4.5a2.2 2.2 0 1 0 0-4.4H12A6.2 6.2 0 1 1 20.2 11.8Z" fill="#ffffff"/>
-      <circle cx="7.4" cy="8.3" r="2.45" fill="#2ecf73"/>
-      <circle cx="12.6" cy="6.8" r="2.1" fill="#9b5cff"/>
-      <circle cx="16.6" cy="10.5" r="2.2" fill="#2f7cff"/>
-      <circle cx="13.9" cy="15.6" r="2.2" fill="#ff5d6f"/>
-      <circle cx="8.6" cy="15.2" r="2.05" fill="#ffc928"/>
-      <path d="M20.2 11.8a8.2 8.2 0 0 1-8.2 8.2H9.8a2.5 2.5 0 0 1 0-5h4.5a2.2 2.2 0 1 0 0-4.4H12A6.2 6.2 0 1 1 20.2 11.8Z" fill="none" stroke="#2c4972" stroke-width="1.15"/>
+      <circle cx="12" cy="12" r="10" fill="#f2f8ff"/>
+      <path d="M12 2a10 10 0 0 1 8.7 5l-5.7 1.1-1.9-4.6Z" fill="#9b5cff"/>
+      <path d="M20.7 7a10 10 0 0 1 1.2 6.6l-5.8.8-1.1-6.3Z" fill="#2f7cff"/>
+      <path d="M21.9 13.6A10 10 0 0 1 17 20.7l-4.3-3.9 3.2-2.7Z" fill="#ff5d6f"/>
+      <path d="M17 20.7A10 10 0 0 1 7 20.5l1.5-5.7 4.2 1.9Z" fill="#ffc928"/>
+      <path d="M7 20.5A10 10 0 0 1 2 12.1l5.8-.9 1 3.7Z" fill="#2ecf73"/>
+      <circle cx="12" cy="12" r="10" fill="none" stroke="#2c4972" stroke-width="1.1"/>
     </svg>
   `);
 
@@ -1206,22 +1205,24 @@ function applyTeslaDockIconCompatibility() {
 
   setIcon(dockChat, `
     <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false" style="display:block">
-      <path d="M5 5.5h14a2.5 2.5 0 0 1 2.5 2.5v6.3a2.5 2.5 0 0 1-2.5 2.5H11l-4.8 3v-3H5A2.5 2.5 0 0 1 2.5 14.3V8A2.5 2.5 0 0 1 5 5.5Z" fill="#2f7cff"/>
-      <path d="M5 6.1h13.5a1.8 1.8 0 0 1 1.8 1.8v2.2H4V7.9A1.8 1.8 0 0 1 5.8 6.1Z" fill="#62a6ff" opacity="0.88"/>
+      <path d="M5 5.2h14a2.8 2.8 0 0 1 2.8 2.8v6.3a2.8 2.8 0 0 1-2.8 2.8h-7.8l-5.2 3.2v-3.2H5a2.8 2.8 0 0 1-2.8-2.8V8A2.8 2.8 0 0 1 5 5.2Z" fill="#2f7cff"/>
+      <path d="M5.5 6h13a1.9 1.9 0 0 1 1.9 1.9v2.4H3.6V7.9A1.9 1.9 0 0 1 5.5 6Z" fill="#74b4ff"/>
       <circle cx="8.3" cy="11.1" r="1.2" fill="#ffffff"/>
       <circle cx="12" cy="11.1" r="1.2" fill="#ffffff"/>
       <circle cx="15.7" cy="11.1" r="1.2" fill="#ffffff"/>
+      <path d="M5 5.2h14a2.8 2.8 0 0 1 2.8 2.8v6.3a2.8 2.8 0 0 1-2.8 2.8h-7.8l-5.2 3.2v-3.2H5a2.8 2.8 0 0 1-2.8-2.8V8A2.8 2.8 0 0 1 5 5.2Z" fill="none" stroke="#1f55d6" stroke-width="1"/>
     </svg>
   `);
 
   setIcon(dockGames, `
     <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false" style="display:block">
-      <rect x="2.6" y="7.8" width="18.8" height="9.9" rx="5" fill="#1f6f2f"/>
-      <rect x="3.6" y="8.8" width="16.8" height="7.9" rx="4" fill="#35a24a"/>
+      <rect x="2.3" y="7.3" width="19.4" height="10.6" rx="5.2" fill="#1f6f2f"/>
+      <rect x="3.3" y="8.3" width="17.4" height="8.6" rx="4.3" fill="#35a24a"/>
       <path d="M8.3 11.1v3.4M6.6 12.8h3.4" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/>
-      <circle cx="15.8" cy="12" r="1.2" fill="#ff5a5a"/>
-      <circle cx="18.2" cy="14.2" r="1.2" fill="#4ab2ff"/>
-      <circle cx="15.5" cy="14.5" r="0.95" fill="#ffd447"/>
+      <circle cx="15.8" cy="12" r="1.25" fill="#ff5a5a"/>
+      <circle cx="18.3" cy="14.3" r="1.25" fill="#4ab2ff"/>
+      <circle cx="15.5" cy="14.6" r="1.05" fill="#ffd447"/>
+      <path d="M2.3 12.7h19.4" stroke="#2a8a3d" stroke-width="0.9" opacity="0.35"/>
     </svg>
   `);
 
@@ -1233,9 +1234,10 @@ function applyTeslaDockIconCompatibility() {
 
   setIcon(dockProfile, `
     <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false" style="display:block">
+      <circle cx="12" cy="12" r="10" fill="#eef3ff"/>
       <circle cx="12" cy="8" r="4" fill="#f4c7a1"/>
-      <path d="M4 20a8 8 0 0 1 16 0v.2H4Z" fill="#3f51b5"/>
-      <path d="M4 20a8 8 0 0 1 16 0" fill="none" stroke="#2a2f7f" stroke-width="1.6" stroke-linecap="round"/>
+      <path d="M4 20a8 8 0 0 1 16 0v.2H4Z" fill="#5c6cf0"/>
+      <path d="M4 20a8 8 0 0 1 16 0" fill="none" stroke="#3c47b8" stroke-width="1.6" stroke-linecap="round"/>
       <path d="M8.2 7.8c.4-2 2-3.4 3.8-3.4s3.4 1.5 3.8 3.4c-.8-.6-1.6-.9-2.7-.9h-2.2c-1 0-1.9.3-2.7.9Z" fill="#5d4037"/>
     </svg>
   `);
@@ -2988,13 +2990,13 @@ function applyTeslaBadgeIconCompatibility() {
   const onlineIconEl = onlineBadge?.querySelector?.(".onlineIcon");
   setIconMarkup(
     onlineIconEl,
-    `<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" focusable="false" style="display:block"><circle cx="12" cy="12" r="10" fill="#e9fff3"/><circle cx="8" cy="10" r="3.3" fill="#29c96f"/><circle cx="16.3" cy="10.6" r="2.7" fill="#5ee59d"/><path d="M2.8 19a5.2 5.2 0 0 1 10.4 0M12 19a4.3 4.3 0 0 1 8.6 0" fill="none" stroke="#0d8e46" stroke-width="1.8" stroke-linecap="round"/></svg>`
+    `<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" focusable="false" style="display:block"><circle cx="12" cy="12" r="10" fill="#e9fff3"/><circle cx="8" cy="10" r="3.3" fill="#29c96f"/><circle cx="16.3" cy="10.6" r="2.7" fill="#5ee59d"/><path d="M2.8 19a5.2 5.2 0 0 1 10.4 0M12 19a4.3 4.3 0 0 1 8.6 0" fill="none" stroke="#0d8e46" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="12" r="10" fill="none" stroke="#9be8bd" stroke-width="0.9"/></svg>`
   );
 
   const weatherIconEl = weatherBadge?.querySelector?.(".wxIcon");
   setIconMarkup(
     weatherIconEl,
-    `<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" focusable="false" style="display:block"><circle cx="12" cy="12" r="10" fill="#f4f8ff"/><circle cx="9" cy="8" r="3" fill="#ffc928"/><path d="M9 4.4v1.4M5.4 8H4M14 8h1.4M6.5 5.6l-1-1M11.5 5.6l1-1" stroke="#ff9f1a" stroke-width="1.2" stroke-linecap="round"/><path d="M8.4 18.2h8a3.1 3.1 0 0 0 .1-6.2 4.4 4.4 0 0 0-8.2 1.7A2.4 2.4 0 0 0 8.4 18.2Z" fill="#cfd8e6" stroke="#aeb8c6" stroke-width="0.6"/></svg>`
+    `<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" focusable="false" style="display:block"><circle cx="12" cy="12" r="10" fill="#f4f8ff"/><circle cx="9" cy="8" r="3" fill="#ffc928"/><path d="M9 4.4v1.4M5.4 8H4M14 8h1.4M6.5 5.6l-1-1M11.5 5.6l1-1" stroke="#ff9f1a" stroke-width="1.2" stroke-linecap="round"/><path d="M8.4 18.2h8a3.1 3.1 0 0 0 .1-6.2 4.4 4.4 0 0 0-8.2 1.7A2.4 2.4 0 0 0 8.4 18.2Z" fill="#cfd8e6" stroke="#aeb8c6" stroke-width="0.6"/><circle cx="12" cy="12" r="10" fill="none" stroke="#d4e2ff" stroke-width="0.9"/></svg>`
   );
 
   const pickupIconEl = document.querySelector("#pickupFab .pickupFabIcon");
