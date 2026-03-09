@@ -3883,12 +3883,12 @@ function applyDriverLabelZoomStyles() {
   }
 }
 
-function makeDriverIcon(name, headingDeg, avatarUrl = "", mode = "name") {
+function makeDriverIcon(name, headingDeg, avatarUrl = "", mode = "name", orbitMeta = null) {
   const safe = (name || "Driver").trim() || "Driver";
   const rot = Number.isFinite(headingDeg) ? headingDeg : 0;
   const el = document.createElement("div");
   const driverLabelHTML = (typeof window !== "undefined" && typeof window.mapIdentityRenderDriverLabel === "function")
-    ? window.mapIdentityRenderDriverLabel({ name: safe, avatarUrl, mode, zoom: map?.getZoom?.() })
+    ? window.mapIdentityRenderDriverLabel({ name: safe, avatarUrl, mode, zoom: map?.getZoom?.(), orbitMeta })
     : `<div class="otherDrvName">${escapeHtml(safe)}</div>`;
   el.className = "otherDrvWrap";
   el.innerHTML = `
@@ -3907,7 +3907,7 @@ function clearOtherDrivers() {
   otherMarkers.clear();
 }
 
-function upsertDriverMarker(userId, name, lat, lng, heading, avatarUrl = "", mode = "name") {
+function upsertDriverMarker(userId, name, lat, lng, heading, avatarUrl = "", mode = "name", orbitMeta = null) {
   if (!Number.isFinite(lat) || !Number.isFinite(lng) || !map) return;
   if (!userId) return;
 
@@ -3915,12 +3915,12 @@ function upsertDriverMarker(userId, name, lat, lng, heading, avatarUrl = "", mod
   if (existing) {
     existing.setLngLat([lng, lat]);
     const el = existing.getElement();
-    const newEl = makeDriverIcon(name || `Driver ${userId}`, heading, avatarUrl, mode);
+    const newEl = makeDriverIcon(name || `Driver ${userId}`, heading, avatarUrl, mode, orbitMeta);
     el.innerHTML = newEl.innerHTML;
     return;
   }
 
-  const el = makeDriverIcon(name || `Driver ${userId}`, heading, avatarUrl, mode);
+  const el = makeDriverIcon(name || `Driver ${userId}`, heading, avatarUrl, mode, orbitMeta);
   // A custom HTML marker's triangle arrow sits slightly below the centre of its
   // 40×40 container (the tip is ~7 px below the vertical midpoint). When the
   // marker is anchored at "center" without an offset, the geographic point
@@ -4005,8 +4005,56 @@ async function pullPresenceAll() {
       });
     }
 
+    const overlapEps = 0.000035;
+    const groups = new Map();
+    const groupKey = (lat, lng) => `${Math.round(lat / overlapEps)}:${Math.round(lng / overlapEps)}`;
+
     for (const row of candidates) {
-      upsertDriverMarker(row.uid, row.name, row.lat, row.lng, row.heading, row.avatarUrl, row.mode);
+      const key = groupKey(row.lat, row.lng);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(row);
+    }
+
+    const selfPos = userLatLng && Number.isFinite(userLatLng.lat) && Number.isFinite(userLatLng.lng)
+      ? { lat: userLatLng.lat, lng: userLatLng.lng }
+      : null;
+    const selfGroupKey = selfPos ? groupKey(selfPos.lat, selfPos.lng) : null;
+    const selfUid = me && me.id != null ? String(me.id) : "self";
+
+    for (const [key, members] of groups.entries()) {
+      const includeSelf = !!(selfGroupKey && key === selfGroupKey);
+      const sortable = members.map((row) => ({ id: String(row.uid), row }));
+      if (includeSelf) sortable.push({ id: selfUid, row: null });
+      sortable.sort((a, b) => a.id.localeCompare(b.id));
+      const count = sortable.length;
+      if (count <= 1) {
+        members.forEach((row) => { row.orbitMeta = null; });
+        if (includeSelf && typeof window !== "undefined" && typeof window.mapIdentityApplySelfOrbit === "function") {
+          window.mapIdentityApplySelfOrbit(null);
+        }
+        continue;
+      }
+      sortable.forEach((entry, idx) => {
+        const orbitMeta = {
+          index: idx,
+          count,
+          angleDeg: -90 + (idx * 360) / count,
+          radiusPx: 11,
+        };
+        if (entry.row) {
+          entry.row.orbitMeta = orbitMeta;
+        } else if (typeof window !== "undefined" && typeof window.mapIdentityApplySelfOrbit === "function") {
+          window.mapIdentityApplySelfOrbit(orbitMeta);
+        }
+      });
+    }
+
+    if (!selfGroupKey && typeof window !== "undefined" && typeof window.mapIdentityApplySelfOrbit === "function") {
+      window.mapIdentityApplySelfOrbit(null);
+    }
+
+    for (const row of candidates) {
+      upsertDriverMarker(row.uid, row.name, row.lat, row.lng, row.heading, row.avatarUrl, row.mode, row.orbitMeta || null);
       seen.add(row.uid);
     }
 

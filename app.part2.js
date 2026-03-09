@@ -31,9 +31,11 @@
   let chatSeenKeys = new Set();
   let unreadChatCount = 0;
 
-  // Track whether the initial batch of chat messages has loaded.  We only
-  // show kill‑feed notifications after the initial load completes.
-  let initialChatLoaded = false;
+  // Kill-feed bootstrap guard.
+  // We seed startup history into seen-keys, then suppress feed replay until
+  // one post-bootstrap poll has been absorbed as history too.
+  let killFeedBootstrapReady = false;
+  let killFeedBootstrapPollConsumed = false;
 
   function chatLastReadStorageKey() {
     return `tlc_chat_last_read_${CHAT_ROOM}`;
@@ -403,6 +405,15 @@
     unreadChatCount = 0;
     updateChatUnreadBadge();
     incomingNotifySeenKeys.clear();
+    killFeedBootstrapReady = false;
+    killFeedBootstrapPollConsumed = false;
+  }
+
+  function seedKillFeedSeenKeys(msgs) {
+    if (!Array.isArray(msgs) || !msgs.length) return;
+    for (const msg of msgs) {
+      killFeedSeenKeys.add(chatMsgKey(msg));
+    }
   }
 
   // Render messages and manage scroll position
@@ -480,6 +491,9 @@
   async function chatLoadInitial() {
     const msgs = await chatFetchMessages({ limit: 60 });
     renderChatMessages(msgs, { replace: true });
+    // Initial history should never replay into kill feed notifications.
+    seedKillFeedSeenKeys(msgs);
+    killFeedBootstrapReady = true;
     if (chatLastReadId === null && chatLatestMessageId !== null) {
       saveChatLastReadId(chatLatestMessageId);
       clearChatUnreadBadge();
@@ -518,12 +532,15 @@
         // Show the kill feed container.
         if (killFeedContainer) killFeedContainer.style.display = 'flex';
 
-        // After the initial load, display unseen messages in the feed.
-        if (initialChatLoaded) showKillFeed(msgs);
+        // Guard against startup replay: absorb first post-bootstrap poll
+        // as already-seen history, then allow only later unseen arrivals.
+        if (killFeedBootstrapReady && !killFeedBootstrapPollConsumed) {
+          seedKillFeedSeenKeys(msgs);
+          killFeedBootstrapPollConsumed = true;
+        } else if (killFeedBootstrapReady && killFeedBootstrapPollConsumed) {
+          showKillFeed(msgs);
+        }
       }
-
-      // Mark the initial load complete after first call.
-      if (!initialChatLoaded) initialChatLoaded = true;
     } catch (e) {
       console.warn('chat poll failed:', e);
     }
@@ -657,14 +674,39 @@
     return `<div class="selfIdentitySlot" data-map-identity-label="1"><div id="navMeName" class="meName" style="display:${safeName ? 'block' : 'none'};font-size:${cfg.fontPx}px;padding:${cfg.padY}px ${cfg.padX}px;max-width:${cfg.maxWidthPx}px;">${escapeHtml(safeName)}</div></div>`;
   }
 
-  function mapIdentityRenderDriverLabel({ name, avatarUrl, mode, zoom }) {
+  function mapIdentityOrbitStyleText(orbitMeta) {
+    if (!orbitMeta || !Number.isFinite(Number(orbitMeta.count)) || Number(orbitMeta.count) <= 1) return '';
+    const angleRad = (Number(orbitMeta.angleDeg) || 0) * (Math.PI / 180);
+    const r = Math.max(0, Math.min(14, Number(orbitMeta.radiusPx) || 11));
+    const dx = +(10 + Math.cos(angleRad) * r).toFixed(2);
+    const dy = +(Math.sin(angleRad) * r).toFixed(2);
+    return `--identity-slot-x:${dx}px;--identity-slot-y:calc(-50% + ${dy}px);`;
+  }
+
+  function mapIdentityRenderDriverLabel({ name, avatarUrl, mode, zoom, orbitMeta = null }) {
     const safeName = (String(name || 'Driver').trim() || 'Driver');
     const safeAvatar = safeMapAvatarUrl(avatarUrl);
     const cfg = mapIdentityVisualConfig(zoom);
+    const orbitStyle = mapIdentityOrbitStyleText(orbitMeta);
     if (shouldUseAvatarLabel(mode, safeAvatar)) {
-      return `<div class="otherDrvIdentitySlot" data-map-identity-label="1">${mapIdentityAvatarLabelHTML(safeAvatar, 'otherDrvAvatarBadge', `width:${cfg.avatarPx}px;height:${cfg.avatarPx}px;`)}</div>`;
+      return `<div class="otherDrvIdentitySlot" data-map-identity-label="1" style="${orbitStyle}">${mapIdentityAvatarLabelHTML(safeAvatar, 'otherDrvAvatarBadge', `width:${cfg.avatarPx}px;height:${cfg.avatarPx}px;`)}</div>`;
     }
-    return `<div class="otherDrvIdentitySlot" data-map-identity-label="1"><div class="otherDrvName" style="font-size:${cfg.fontPx}px;padding:${cfg.padY}px ${cfg.padX}px;max-width:${cfg.maxWidthPx}px;">${escapeHtml(safeName)}</div></div>`;
+    return `<div class="otherDrvIdentitySlot" data-map-identity-label="1" style="${orbitStyle}"><div class="otherDrvName" style="font-size:${cfg.fontPx}px;padding:${cfg.padY}px ${cfg.padX}px;max-width:${cfg.maxWidthPx}px;">${escapeHtml(safeName)}</div></div>`;
+  }
+
+  function mapIdentityApplySelfOrbit(orbitMeta) {
+    const slot = document.querySelector('#navWrap .selfIdentitySlot[data-map-identity-label="1"]');
+    if (!slot) return;
+    const styleText = mapIdentityOrbitStyleText(orbitMeta);
+    if (!styleText) {
+      slot.style.removeProperty('--identity-slot-x');
+      slot.style.removeProperty('--identity-slot-y');
+      return;
+    }
+    styleText.split(';').forEach((pair) => {
+      const [k, v] = pair.split(':');
+      if (k && v) slot.style.setProperty(k.trim(), v.trim());
+    });
   }
 
   function mapIdentityApplyZoomStyles(zoomValue) {
@@ -934,6 +976,7 @@
   window.mapIdentityRenderSelfLabel = mapIdentityRenderSelfLabel;
   window.mapIdentityRenderDriverLabel = mapIdentityRenderDriverLabel;
   window.mapIdentityApplyZoomStyles = mapIdentityApplyZoomStyles;
+  window.mapIdentityApplySelfOrbit = mapIdentityApplySelfOrbit;
   window.initMapIdentityProfileControls = initMapIdentityProfileControls;
 
   // Bind the chat dock button using its ID
