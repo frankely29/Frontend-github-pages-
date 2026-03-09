@@ -27,6 +27,7 @@
   let chatPollTimer = null;
   let chatLastSeen = null;
   let chatSeenKeys = new Set();
+  let unreadChatCount = 0;
 
   // Track whether the initial batch of chat messages has loaded.  We only
   // show kill‑feed notifications after the initial load completes.
@@ -35,6 +36,7 @@
   // Remember which chat messages have been displayed in the kill feed.
   // Once a message has been shown, it will never appear again, even after it expires.
   const killFeedSeenKeys = new Set();
+  const incomingNotifySeenKeys = new Set();
 
   // Create a kill feed container if one doesn’t already exist
   let killFeedContainer = document.getElementById('killFeed');
@@ -45,17 +47,38 @@
     document.body.appendChild(killFeedContainer);
   }
 
-  (() => {
-    try {
-      const btn = document.getElementById('dockChat');
-      if (btn && !btn._notifyClickAttached) {
-        btn._notifyClickAttached = true;
-        btn.addEventListener('click', () => {
-          btn.classList.remove('notify');
-        });
-      }
-    } catch {}
-  })();
+  function updateChatUnreadBadge() {
+    const btn = document.getElementById('dockChat');
+    if (!btn) return;
+    if (unreadChatCount > 0) {
+      btn.dataset.unread = unreadChatCount > 99 ? '99+' : String(unreadChatCount);
+    } else {
+      delete btn.dataset.unread;
+    }
+  }
+
+  function clearChatUnreadBadge() {
+    unreadChatCount = 0;
+    updateChatUnreadBadge();
+  }
+
+  function isChatPanelOpen() {
+    return typeof openPanelKey !== 'undefined' && openPanelKey === 'chat';
+  }
+
+  function msgUserId(msg) {
+    if (msg?.user_id != null) return String(msg.user_id);
+    if (msg?.userId != null) return String(msg.userId);
+    return null;
+  }
+
+  function isOwnMessage(msg) {
+    const selfId = (typeof window !== 'undefined' && window.me && window.me.id != null)
+      ? String(window.me.id)
+      : null;
+    const senderId = msgUserId(msg);
+    return !!(selfId && senderId && selfId === senderId);
+  }
 
   // Preload a short beep sound as a data URI. The base64 string here
   // encodes a simple beep and avoids cross-origin or network delays.
@@ -76,9 +99,9 @@
 
   function playBeep() {
     try {
-      beepAudio.pause();
-      beepAudio.currentTime = 0;
-      const p = beepAudio.play();
+      const instance = beepAudio.cloneNode(true);
+      instance.currentTime = 0;
+      const p = instance.play();
       if (p && typeof p.catch === 'function') p.catch(() => {});
     } catch (err) {
       console.warn('Beep failed:', err);
@@ -107,21 +130,7 @@
       const div = document.createElement('div');
       div.className = 'killFeedMsg';
       div.textContent = `${who}: ${body}`;
-      // Colour code: yellow for your own messages, red for others
-      const selfIdForColor = (typeof window !== 'undefined' && window.me && window.me.id != null)
-        ? String(window.me.id)
-        : null;
-      // Only check sender user-id fields; never use msg.id (message id).
-      const msgUserIdForColor = msg.user_id != null
-        ? String(msg.user_id)
-        : (msg.userId != null ? String(msg.userId) : null);
-      if (selfIdForColor && msgUserIdForColor && selfIdForColor === msgUserIdForColor) {
-        // Message from this driver: use bright yellow.
-        div.style.color = '#ffd600';
-      } else {
-        // Message from another driver: use bright red.
-        div.style.color = '#e53935';
-      }
+      div.style.color = '#ff2a2a';
       killFeedContainer.appendChild(div);
 
       // Keep only the last four messages visible at any time.
@@ -136,16 +145,12 @@
       }, 30000);
 
       // Determine if the chat panel is currently open
-      const panelIsOpen = (typeof openPanelKey !== 'undefined' && openPanelKey === 'chat');
-      // Determine if the message came from another user
-      const selfId = (typeof window !== 'undefined' && window.me && window.me.id != null) ? String(window.me.id) : null;
-      const msgUserId = msg.user_id != null ? String(msg.user_id) : (msg.userId != null ? String(msg.userId) : null);
-      const isFromOther = selfId && msgUserId && selfId !== msgUserId;
-
-      if (!panelIsOpen && isFromOther) {
+      const panelIsOpen = isChatPanelOpen();
+      if (!panelIsOpen && !isOwnMessage(msg) && !incomingNotifySeenKeys.has(key)) {
+        incomingNotifySeenKeys.add(key);
+        unreadChatCount += 1;
+        updateChatUnreadBadge();
         playBeep();
-        const btn = document.getElementById('dockChat');
-        if (btn) btn.classList.add('notify');
       }
     });
   }
@@ -202,6 +207,9 @@
   function chatResetState() {
     chatLastSeen = null;
     chatSeenKeys = new Set();
+    unreadChatCount = 0;
+    updateChatUnreadBadge();
+    incomingNotifySeenKeys.clear();
   }
 
   // Render messages and manage scroll position
@@ -293,8 +301,9 @@
       const msgs = await chatFetchNew();
 
       // Update the in-panel chat messages only if the chat panel is open.
-      if (typeof openPanelKey !== 'undefined' && openPanelKey === 'chat') {
+      if (isChatPanelOpen()) {
         renderChatMessages(msgs);
+        clearChatUnreadBadge();
 
         // Hide the kill feed when chat panel is open.
         if (killFeedContainer) killFeedContainer.style.display = 'none';
@@ -364,11 +373,7 @@
       });
     syncChatPollingState();
 
-    // Clear the notification badge whenever the chat panel opens
-    try {
-      const btn = document.getElementById('dockChat');
-      if (btn) btn.classList.remove('notify');
-    } catch {}
+    clearChatUnreadBadge();
   }
 
   // Expose chat functions for app.js to call if needed
