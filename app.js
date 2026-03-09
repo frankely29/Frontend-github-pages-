@@ -2939,14 +2939,27 @@ const weatherBadge = document.getElementById("weatherBadge");
 // but sits on the left side of the screen.  It displays the number of drivers
 // currently online.  The count is updated in pullPresenceAll().
 const onlineBadge = document.getElementById("onlineBadge");
-function updateOnlineBadge(count) {
+function updateOnlineBadge(count, ghostedCount = 0) {
   if (!onlineBadge) return;
   // Constrain the count to a non-negative integer.
   const n = Number(count);
   const display = Number.isFinite(n) && n >= 0 ? n : 0;
+  const g = Number(ghostedCount);
+  const ghostedDisplay = Number.isFinite(g) && g >= 0 ? g : 0;
   const txtEl = onlineBadge.querySelector(".onlineTxt");
-  if (txtEl) txtEl.textContent = `${display} online`;
-  onlineBadge.title = `${display} online`;
+  if (txtEl) txtEl.textContent = `${display} Online`;
+  const ghostTxtEl = onlineBadge.querySelector(".onlineGhostTxt");
+  if (ghostTxtEl) {
+    if (ghostedDisplay > 0) {
+      ghostTxtEl.textContent = `${ghostedDisplay} Ghosted`;
+      ghostTxtEl.hidden = false;
+    } else {
+      ghostTxtEl.hidden = true;
+    }
+  }
+  onlineBadge.title = ghostedDisplay > 0
+    ? `${display} Online • ${ghostedDisplay} Ghosted`
+    : `${display} Online`;
 }
 
 const wxCanvas = document.getElementById("wxCanvas");
@@ -4046,14 +4059,15 @@ async function pullPresenceAll() {
     const list = await getJSONAuth("/presence/all", communityToken);
     const now = Date.now() / 1000;
 
-    // Update the online badge with the number of drivers currently online.
-    // The presence API returns either an array of user objects or an object with an `items` array.
+    // Update the online badge from backend aggregate counts so ghosted users
+    // remain hidden on the map but still count as online.
     try {
-      let count;
-      if (Array.isArray(list)) count = list.length;
-      else if (list && Array.isArray(list.items)) count = list.items.length;
-      else count = 0;
-      updateOnlineBadge(count);
+      const summary = await getJSONAuth("/presence/summary", communityToken);
+      const onlineCount = Number(summary?.online_count);
+      const ghostedCount = Number(summary?.ghosted_count);
+      if (Number.isFinite(onlineCount) && onlineCount >= 0) {
+        updateOnlineBadge(onlineCount, Number.isFinite(ghostedCount) ? ghostedCount : 0);
+      }
     } catch (e) {
       // Ignore badge updates if anything goes wrong.
     }
