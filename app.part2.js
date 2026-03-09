@@ -26,12 +26,46 @@
   // Chat state
   let chatPollTimer = null;
   let chatLastSeen = null;
+  let chatLatestMessageId = null;
+  let chatLastReadId = null;
   let chatSeenKeys = new Set();
   let unreadChatCount = 0;
 
   // Track whether the initial batch of chat messages has loaded.  We only
   // show kill‑feed notifications after the initial load completes.
   let initialChatLoaded = false;
+
+  function chatLastReadStorageKey() {
+    return `tlc_chat_last_read_${CHAT_ROOM}`;
+  }
+
+  function parseMessageId(value) {
+    if (value === null || value === undefined || value === '') return null;
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function messageNumericId(msg) {
+    return parseMessageId(msg?.id);
+  }
+
+  function loadChatLastReadId() {
+    try {
+      return parseMessageId(localStorage.getItem(chatLastReadStorageKey()));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function saveChatLastReadId(id) {
+    const parsed = parseMessageId(id);
+    if (parsed === null) return;
+    const next = chatLastReadId === null ? parsed : Math.max(chatLastReadId, parsed);
+    chatLastReadId = next;
+    try {
+      localStorage.setItem(chatLastReadStorageKey(), String(next));
+    } catch (_) {}
+  }
 
   // Remember which chat messages have been displayed in the kill feed.
   // Once a message has been shown, it will never appear again, even after it expires.
@@ -60,6 +94,11 @@
   function clearChatUnreadBadge() {
     unreadChatCount = 0;
     updateChatUnreadBadge();
+  }
+
+  function markChatReadThroughLatestLoaded() {
+    if (chatLatestMessageId !== null) saveChatLastReadId(chatLatestMessageId);
+    clearChatUnreadBadge();
   }
 
   function isChatPanelOpen() {
@@ -130,7 +169,6 @@
       const div = document.createElement('div');
       div.className = 'killFeedMsg';
       div.textContent = `${who}: ${body}`;
-      div.style.color = '#ff2a2a';
       killFeedContainer.appendChild(div);
 
       // Keep only the last four messages visible at any time.
@@ -146,7 +184,9 @@
 
       // Determine if the chat panel is currently open
       const panelIsOpen = isChatPanelOpen();
-      if (!panelIsOpen && !isOwnMessage(msg) && !incomingNotifySeenKeys.has(key)) {
+      const msgId = messageNumericId(msg);
+      const isAfterReadMarker = msgId !== null && (chatLastReadId === null || msgId > chatLastReadId);
+      if (!panelIsOpen && !isOwnMessage(msg) && isAfterReadMarker && !incomingNotifySeenKeys.has(key)) {
         incomingNotifySeenKeys.add(key);
         unreadChatCount += 1;
         updateChatUnreadBadge();
@@ -206,6 +246,8 @@
   }
   function chatResetState() {
     chatLastSeen = null;
+    chatLatestMessageId = null;
+    chatLastReadId = loadChatLastReadId();
     chatSeenKeys = new Set();
     unreadChatCount = 0;
     updateChatUnreadBadge();
@@ -251,6 +293,8 @@
       frag.appendChild(row);
       const cursor = chatMsgCursor(msg);
       if (cursor !== null && cursor !== undefined) chatLastSeen = cursor;
+      const id = messageNumericId(msg);
+      if (id !== null) chatLatestMessageId = chatLatestMessageId === null ? id : Math.max(chatLatestMessageId, id);
       appended += 1;
     }
     if (!appended) {
@@ -282,7 +326,13 @@
   }
 
   // Load initial and new messages
-  async function chatLoadInitial() { const msgs = await chatFetchMessages({ limit: 60 }); renderChatMessages(msgs, { replace: true }); }
+  async function chatLoadInitial() {
+    const msgs = await chatFetchMessages({ limit: 60 });
+    renderChatMessages(msgs, { replace: true });
+    if (chatLastReadId === null && chatLatestMessageId !== null) {
+      saveChatLastReadId(chatLatestMessageId);
+    }
+  }
   async function chatFetchNew() { return chatFetchMessages({ after: chatLastSeen, limit: 50 }); }
 
   // Send a message (requires token)
@@ -303,7 +353,7 @@
       // Update the in-panel chat messages only if the chat panel is open.
       if (isChatPanelOpen()) {
         renderChatMessages(msgs);
-        clearChatUnreadBadge();
+        markChatReadThroughLatestLoaded();
 
         // Hide the kill feed when chat panel is open.
         if (killFeedContainer) killFeedContainer.style.display = 'none';
@@ -373,7 +423,7 @@
       });
     syncChatPollingState();
 
-    clearChatUnreadBadge();
+    markChatReadThroughLatestLoaded();
   }
 
   // Expose chat functions for app.js to call if needed
