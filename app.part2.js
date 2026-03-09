@@ -621,10 +621,11 @@
   function mapIdentityVisualConfig(zoomValue) {
     const t = mapIdentityZoomT(zoomValue);
     return {
-      fontPx: +(8 + (11 - 8) * t).toFixed(2),
-      padY: +(2 + (3 - 2) * t).toFixed(2),
-      padX: +(5 + (7 - 5) * t).toFixed(2),
-      avatarPx: +(20 + (26 - 20) * t).toFixed(2)
+      fontPx: +(11 + (14 - 11) * t).toFixed(2),
+      padY: +(2 + (3.5 - 2) * t).toFixed(2),
+      padX: +(4.5 + (7.5 - 4.5) * t).toFixed(2),
+      avatarPx: +(23 + (32 - 23) * t).toFixed(2),
+      maxWidthPx: +(112 + (164 - 112) * t).toFixed(2)
     };
   }
 
@@ -648,7 +649,7 @@
         `display:block;width:${cfg.avatarPx}px;height:${cfg.avatarPx}px;`
       )}</div>`;
     }
-    return `<div class="selfIdentitySlot" data-map-identity-label="1"><div id="navMeName" class="meName" style="display:${safeName ? 'block' : 'none'};font-size:${cfg.fontPx}px;padding:${cfg.padY}px ${cfg.padX}px;">${escapeHtml(safeName)}</div></div>`;
+    return `<div class="selfIdentitySlot" data-map-identity-label="1"><div id="navMeName" class="meName" style="display:${safeName ? 'block' : 'none'};font-size:${cfg.fontPx}px;padding:${cfg.padY}px ${cfg.padX}px;max-width:${cfg.maxWidthPx}px;">${escapeHtml(safeName)}</div></div>`;
   }
 
   function mapIdentityRenderDriverLabel({ name, avatarUrl, mode, zoom }) {
@@ -658,7 +659,7 @@
     if (shouldUseAvatarLabel(mode, safeAvatar)) {
       return `<div class="otherDrvIdentitySlot" data-map-identity-label="1">${mapIdentityAvatarLabelHTML(safeAvatar, 'otherDrvAvatarBadge', `width:${cfg.avatarPx}px;height:${cfg.avatarPx}px;`)}</div>`;
     }
-    return `<div class="otherDrvIdentitySlot" data-map-identity-label="1"><div class="otherDrvName" style="font-size:${cfg.fontPx}px;padding:${cfg.padY}px ${cfg.padX}px;">${escapeHtml(safeName)}</div></div>`;
+    return `<div class="otherDrvIdentitySlot" data-map-identity-label="1"><div class="otherDrvName" style="font-size:${cfg.fontPx}px;padding:${cfg.padY}px ${cfg.padX}px;max-width:${cfg.maxWidthPx}px;">${escapeHtml(safeName)}</div></div>`;
   }
 
   function mapIdentityApplyZoomStyles(zoomValue) {
@@ -666,6 +667,7 @@
     document.querySelectorAll('.otherDrvName, .meName').forEach((el) => {
       el.style.fontSize = `${cfg.fontPx}px`;
       el.style.padding = `${cfg.padY}px ${cfg.padX}px`;
+      el.style.maxWidth = `${cfg.maxWidthPx}px`;
     });
     document.querySelectorAll('.otherDrvAvatarBadge, .meAvatarBadge').forEach((el) => {
       el.style.width = `${cfg.avatarPx}px`;
