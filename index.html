@@ -238,12 +238,24 @@
       font-weight: 800;
     }
     .legend .swatch {
+      display: inline-block;
       width: 12px;
       height: 12px;
       border-radius: 4px;
       border: 1px solid rgba(0,0,0,0.15);
       flex: 0 0 12px;
+      opacity: 1;
+      background-image: none;
+      forced-color-adjust: none;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
     }
+    .legend .swatch.swatch-green { background-color: #00b050; }
+    .legend .swatch.swatch-purple { background-color: #8000ff; }
+    .legend .swatch.swatch-blue { background-color: #0066ff; }
+    .legend .swatch.swatch-sky { background-color: #66ccff; }
+    .legend .swatch.swatch-yellow { background-color: #ffd400; }
+    .legend .swatch.swatch-red { background-color: #e60000; }
     .legend .sub {
       margin-top: 6px;
       font-size: 10px;
@@ -1433,12 +1445,12 @@
       </div>
 
       <div class="legendBody">
-        <div class="row"><span class="swatch" data-swatch-color="#00b050" style="background-color:#00b050"></span> Green = Highest</div>
-        <div class="row"><span class="swatch" data-swatch-color="#8000ff" style="background-color:#8000ff"></span> Purple = High</div>
-        <div class="row"><span class="swatch" data-swatch-color="#0066ff" style="background-color:#0066ff"></span> Blue = Medium</div>
-        <div class="row"><span class="swatch" data-swatch-color="#66ccff" style="background-color:#66ccff"></span> Sky = Normal</div>
-        <div class="row"><span class="swatch" data-swatch-color="#ffd400" style="background-color:#ffd400"></span> Yellow = Below Normal</div>
-        <div class="row"><span class="swatch" data-swatch-color="#e60000" style="background-color:#e60000"></span> Red = Very Low / Avoid</div>
+        <div class="row"><span class="swatch swatch-green" data-swatch-color="#00b050" style="background-color:#00b050"></span> Green = Highest</div>
+        <div class="row"><span class="swatch swatch-purple" data-swatch-color="#8000ff" style="background-color:#8000ff"></span> Purple = High</div>
+        <div class="row"><span class="swatch swatch-blue" data-swatch-color="#0066ff" style="background-color:#0066ff"></span> Blue = Medium</div>
+        <div class="row"><span class="swatch swatch-sky" data-swatch-color="#66ccff" style="background-color:#66ccff"></span> Sky = Normal</div>
+        <div class="row"><span class="swatch swatch-yellow" data-swatch-color="#ffd400" style="background-color:#ffd400"></span> Yellow = Below Normal</div>
+        <div class="row"><span class="swatch swatch-red" data-swatch-color="#e60000" style="background-color:#e60000"></span> Red = Very Low / Avoid</div>
 
         <div id="modeNote" class="sub" style="margin-top:7px;">
           Colors come from rating (1–100) for the selected 20-minute window.<br/>

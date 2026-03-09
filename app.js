@@ -1128,12 +1128,12 @@ function wireProfilePanel() {
 
 function colorsPanelHTML() {
   const teslaRows = `
-      <div style="display:flex;align-items:center;gap:8px;"><span style="display:inline-block;width:12px;height:12px;border-radius:4px;background:#00b050;border:1px solid rgba(0,0,0,0.15);flex:0 0 12px;"></span>Green = Highest</div>
-      <div style="display:flex;align-items:center;gap:8px;"><span style="display:inline-block;width:12px;height:12px;border-radius:4px;background:#8000ff;border:1px solid rgba(0,0,0,0.15);flex:0 0 12px;"></span>Purple = High</div>
-      <div style="display:flex;align-items:center;gap:8px;"><span style="display:inline-block;width:12px;height:12px;border-radius:4px;background:#0066ff;border:1px solid rgba(0,0,0,0.15);flex:0 0 12px;"></span>Blue = Medium</div>
-      <div style="display:flex;align-items:center;gap:8px;"><span style="display:inline-block;width:12px;height:12px;border-radius:4px;background:#66ccff;border:1px solid rgba(0,0,0,0.15);flex:0 0 12px;"></span>Sky = Normal</div>
-      <div style="display:flex;align-items:center;gap:8px;"><span style="display:inline-block;width:12px;height:12px;border-radius:4px;background:#ffd400;border:1px solid rgba(0,0,0,0.15);flex:0 0 12px;"></span>Yellow = Below Normal</div>
-      <div style="display:flex;align-items:center;gap:8px;"><span style="display:inline-block;width:12px;height:12px;border-radius:4px;background:#e60000;border:1px solid rgba(0,0,0,0.15);flex:0 0 12px;"></span>Red = Very Low / Avoid</div>
+      <div style="display:flex;align-items:center;gap:8px;"><span style="display:inline-block;width:12px;height:12px;border-radius:4px;background-color:#00b050;border:1px solid rgba(0,0,0,0.15);flex:0 0 12px;opacity:1;background-image:none;forced-color-adjust:none;-webkit-print-color-adjust:exact;print-color-adjust:exact;"></span>Green = Highest</div>
+      <div style="display:flex;align-items:center;gap:8px;"><span style="display:inline-block;width:12px;height:12px;border-radius:4px;background-color:#8000ff;border:1px solid rgba(0,0,0,0.15);flex:0 0 12px;opacity:1;background-image:none;forced-color-adjust:none;-webkit-print-color-adjust:exact;print-color-adjust:exact;"></span>Purple = High</div>
+      <div style="display:flex;align-items:center;gap:8px;"><span style="display:inline-block;width:12px;height:12px;border-radius:4px;background-color:#0066ff;border:1px solid rgba(0,0,0,0.15);flex:0 0 12px;opacity:1;background-image:none;forced-color-adjust:none;-webkit-print-color-adjust:exact;print-color-adjust:exact;"></span>Blue = Medium</div>
+      <div style="display:flex;align-items:center;gap:8px;"><span style="display:inline-block;width:12px;height:12px;border-radius:4px;background-color:#66ccff;border:1px solid rgba(0,0,0,0.15);flex:0 0 12px;opacity:1;background-image:none;forced-color-adjust:none;-webkit-print-color-adjust:exact;print-color-adjust:exact;"></span>Sky = Normal</div>
+      <div style="display:flex;align-items:center;gap:8px;"><span style="display:inline-block;width:12px;height:12px;border-radius:4px;background-color:#ffd400;border:1px solid rgba(0,0,0,0.15);flex:0 0 12px;opacity:1;background-image:none;forced-color-adjust:none;-webkit-print-color-adjust:exact;print-color-adjust:exact;"></span>Yellow = Below Normal</div>
+      <div style="display:flex;align-items:center;gap:8px;"><span style="display:inline-block;width:12px;height:12px;border-radius:4px;background-color:#e60000;border:1px solid rgba(0,0,0,0.15);flex:0 0 12px;opacity:1;background-image:none;forced-color-adjust:none;-webkit-print-color-adjust:exact;print-color-adjust:exact;"></span>Red = Very Low / Avoid</div>
   `;
   const defaultRows = `
       <div>🟩 Green = Highest</div>
@@ -2987,14 +2987,32 @@ function updateOnlineBadge(count, ghostedCount = 0) {
 function applyTeslaBadgeIconCompatibility() {
   if (!IS_TESLA_BROWSER) return;
 
+  const setIconMarkup = (iconEl, svgMarkup) => {
+    if (!iconEl) return;
+    iconEl.innerHTML = svgMarkup;
+    iconEl.style.fontSize = "0";
+    iconEl.style.display = "inline-grid";
+    iconEl.style.placeItems = "center";
+    iconEl.style.lineHeight = "1";
+  };
+
   const onlineIconEl = onlineBadge?.querySelector?.(".onlineIcon");
-  if (onlineIconEl) {
-    onlineIconEl.innerHTML = `<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" focusable="false" style="display:block"><circle cx="8" cy="10" r="3.3" fill="currentColor"/><circle cx="16.3" cy="10.6" r="2.7" fill="currentColor" opacity="0.88"/><path d="M2.8 19a5.2 5.2 0 0 1 10.4 0M12 19a4.3 4.3 0 0 1 8.6 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`;
-    onlineIconEl.style.fontSize = "0";
-    onlineIconEl.style.display = "inline-grid";
-    onlineIconEl.style.placeItems = "center";
-    onlineIconEl.style.lineHeight = "1";
-  }
+  setIconMarkup(
+    onlineIconEl,
+    `<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" focusable="false" style="display:block"><circle cx="8" cy="10" r="3.3" fill="currentColor"/><circle cx="16.3" cy="10.6" r="2.7" fill="currentColor" opacity="0.88"/><path d="M2.8 19a5.2 5.2 0 0 1 10.4 0M12 19a4.3 4.3 0 0 1 8.6 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`
+  );
+
+  const weatherIconEl = weatherBadge?.querySelector?.(".wxIcon");
+  setIconMarkup(
+    weatherIconEl,
+    `<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" focusable="false" style="display:block"><circle cx="9" cy="8" r="3" fill="currentColor" opacity="0.95"/><path d="M9 4.4v1.4M5.4 8H4M14 8h1.4M6.5 5.6l-1-1M11.5 5.6l1-1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M8.4 18.2h8a3.1 3.1 0 0 0 .1-6.2 4.4 4.4 0 0 0-8.2 1.7A2.4 2.4 0 0 0 8.4 18.2Z" fill="currentColor"/></svg>`
+  );
+
+  const pickupIconEl = document.querySelector("#pickupFab .pickupFabIcon");
+  setIconMarkup(
+    pickupIconEl,
+    `<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" focusable="false" style="display:block"><circle cx="12" cy="12" r="9" fill="currentColor" opacity="0.16"/><path d="m7.4 12.3 3 3.1 6.2-6.1" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+  );
 }
 
 applyTeslaBadgeIconCompatibility();
