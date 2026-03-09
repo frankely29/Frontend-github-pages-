@@ -213,6 +213,7 @@
       'map',
       'dock',
       'dockChat',
+      'dockGames',
       'dockModes',
       'dockColors',
       'dockMusic',
@@ -966,6 +967,538 @@
     if (fileInput) fileInput.value = '';
   }
 
+  const CHESS_PIECE_UNICODE = {
+    wP:'♙',wN:'♘',wB:'♗',wR:'♖',wQ:'♕',wK:'♔',
+    bP:'♟',bN:'♞',bB:'♝',bR:'♜',bQ:'♛',bK:'♚'
+  };
+  const UNO_COLORS = ['red','yellow','green','blue'];
+  const UNO_ACTIONS = ['skip','reverse','draw2'];
+
+  const gamesState = {
+    activeTab: 'chess',
+    chess: createInitialChessState(),
+    uno: createInitialUnoState(),
+    unoWaitingColor: false
+  };
+
+  function gamesPanelHTML() {
+    return `
+      <div class="panelBlock gamesPanelWrap">
+        <div class="gamesTabs">
+          <button id="gamesTabChess" class="chipBtn gamesTabBtn ${gamesState.activeTab === 'chess' ? 'active' : ''}">Chess vs CPU</button>
+          <button id="gamesTabUno" class="chipBtn gamesTabBtn ${gamesState.activeTab === 'uno' ? 'active' : ''}">UNO vs CPU</button>
+          <button id="gamesResetBtn" class="chipBtn">New Game</button>
+        </div>
+        <div id="gamesContent"></div>
+      </div>
+    `;
+  }
+
+  function wireGamesPanel() {
+    document.getElementById('gamesTabChess')?.addEventListener('click', (e) => { e.preventDefault(); gamesState.activeTab = 'chess'; rerenderGamesPanel(); });
+    document.getElementById('gamesTabUno')?.addEventListener('click', (e) => { e.preventDefault(); gamesState.activeTab = 'uno'; rerenderGamesPanel(); });
+    document.getElementById('gamesResetBtn')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (gamesState.activeTab === 'chess') gamesState.chess = createInitialChessState();
+      else {
+        gamesState.uno = createInitialUnoState();
+        gamesState.unoWaitingColor = false;
+      }
+      rerenderGamesPanel();
+      if (gamesState.activeTab === 'uno') maybeRunUnoCpuTurn();
+    });
+    renderGamesContent();
+  }
+
+  function rerenderGamesPanel() {
+    if (typeof openPanelKey === 'undefined' || openPanelKey !== 'games') return;
+    const body = document.getElementById('dockDrawerBody');
+    if (!body) return;
+    body.innerHTML = gamesPanelHTML();
+    wireGamesPanel();
+  }
+
+  function renderGamesContent() {
+    const host = document.getElementById('gamesContent');
+    if (!host) return;
+    if (gamesState.activeTab === 'chess') {
+      renderChessContent(host);
+    } else {
+      renderUnoContent(host);
+    }
+  }
+
+  function createInitialChessState() {
+    return {
+      board: [
+        ['bR','bN','bB','bQ','bK','bB','bN','bR'],
+        ['bP','bP','bP','bP','bP','bP','bP','bP'],
+        [null,null,null,null,null,null,null,null],
+        [null,null,null,null,null,null,null,null],
+        [null,null,null,null,null,null,null,null],
+        [null,null,null,null,null,null,null,null],
+        ['wP','wP','wP','wP','wP','wP','wP','wP'],
+        ['wR','wN','wB','wQ','wK','wB','wN','wR']
+      ],
+      turn: 'w',
+      selected: null,
+      legalTargets: [],
+      over: false,
+      message: 'Your turn (White)'
+    };
+  }
+
+  function renderChessContent(host) {
+    const s = gamesState.chess;
+    const legalSet = new Set(s.legalTargets.map((m) => `${m.r},${m.c}`));
+    host.innerHTML = `
+      <div class="gamesStatus">${escapeHtml(s.message)}</div>
+      <div class="gamesBoard" id="gamesChessBoard"></div>
+    `;
+    const boardEl = document.getElementById('gamesChessBoard');
+    if (!boardEl) return;
+    for (let r = 0; r < 8; r += 1) {
+      for (let c = 0; c < 8; c += 1) {
+        const piece = s.board[r][c];
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = `gamesSq ${(r + c) % 2 === 0 ? 'light' : 'dark'}`;
+        if (s.selected && s.selected.r === r && s.selected.c === c) btn.classList.add('sel');
+        if (legalSet.has(`${r},${c}`)) btn.classList.add('legal');
+        btn.textContent = piece ? CHESS_PIECE_UNICODE[piece] : '';
+        btn.disabled = s.over || s.turn !== 'w';
+        btn.addEventListener('click', () => onChessSquareClick(r, c));
+        boardEl.appendChild(btn);
+      }
+    }
+  }
+
+  function onChessSquareClick(r, c) {
+    const s = gamesState.chess;
+    if (s.over || s.turn !== 'w') return;
+    const p = s.board[r][c];
+    if (s.selected) {
+      const target = s.legalTargets.find((m) => m.r === r && m.c === c);
+      if (target) {
+        applyChessMove(s, target);
+        s.selected = null;
+        s.legalTargets = [];
+        updateChessStatus();
+        rerenderGamesPanel();
+        if (!s.over && s.turn === 'b') setTimeout(runChessCpuTurn, 240);
+        return;
+      }
+    }
+    if (p && p[0] === 'w') {
+      s.selected = { r, c };
+      s.legalTargets = legalChessMovesForPiece(s, r, c);
+    } else {
+      s.selected = null;
+      s.legalTargets = [];
+    }
+    rerenderGamesPanel();
+  }
+
+  function runChessCpuTurn() {
+    const s = gamesState.chess;
+    if (s.over || s.turn !== 'b') return;
+    const moves = legalChessMoves(s, 'b');
+    if (!moves.length) {
+      updateChessStatus();
+      rerenderGamesPanel();
+      return;
+    }
+    let best = [];
+    let bestScore = -1e9;
+    for (const mv of moves) {
+      let score = 0;
+      if (mv.capture) score += pieceValue(mv.capture) * 10 - pieceValue(mv.piece);
+      if (mv.promotion) score += 8;
+      score += Math.random() * 0.2;
+      if (score > bestScore) { bestScore = score; best = [mv]; }
+      else if (Math.abs(score - bestScore) < 0.001) best.push(mv);
+    }
+    const pick = best[Math.floor(Math.random() * best.length)] || moves[0];
+    applyChessMove(s, pick);
+    updateChessStatus();
+    rerenderGamesPanel();
+  }
+
+  function pieceValue(piece) {
+    if (!piece) return 0;
+    const t = piece[1];
+    if (t === 'P') return 1;
+    if (t === 'N' || t === 'B') return 3;
+    if (t === 'R') return 5;
+    if (t === 'Q') return 9;
+    if (t === 'K') return 100;
+    return 0;
+  }
+
+  function cloneBoard(board) { return board.map((row) => row.slice()); }
+
+  function applyChessMove(state, move) {
+    const b = state.board;
+    const piece = b[move.from.r][move.from.c];
+    b[move.from.r][move.from.c] = null;
+    b[move.r][move.c] = move.promotion ? `${piece[0]}Q` : piece;
+    state.turn = state.turn === 'w' ? 'b' : 'w';
+  }
+
+  function inBounds(r, c) { return r >= 0 && r < 8 && c >= 0 && c < 8; }
+
+  function legalChessMovesForPiece(state, r, c) {
+    const p = state.board[r][c];
+    if (!p) return [];
+    const all = legalChessMoves(state, p[0]);
+    return all.filter((m) => m.from.r === r && m.from.c === c);
+  }
+
+  function legalChessMoves(state, color) {
+    const raw = [];
+    for (let r = 0; r < 8; r += 1) {
+      for (let c = 0; c < 8; c += 1) {
+        const p = state.board[r][c];
+        if (!p || p[0] !== color) continue;
+        raw.push(...pieceMoves(state.board, r, c, p));
+      }
+    }
+    return raw.filter((mv) => {
+      const b = cloneBoard(state.board);
+      const piece = b[mv.from.r][mv.from.c];
+      b[mv.from.r][mv.from.c] = null;
+      b[mv.r][mv.c] = mv.promotion ? `${piece[0]}Q` : piece;
+      return !isKingInCheck(b, color);
+    });
+  }
+
+  function pieceMoves(board, r, c, piece) {
+    const color = piece[0];
+    const type = piece[1];
+    const enemy = color === 'w' ? 'b' : 'w';
+    const out = [];
+    const push = (nr, nc, opts = {}) => {
+      if (!inBounds(nr, nc)) return;
+      const target = board[nr][nc];
+      if (target && target[0] === color) return;
+      out.push({ from: { r, c }, r: nr, c: nc, piece, capture: target || null, promotion: !!opts.promotion });
+    };
+
+    if (type === 'P') {
+      const dir = color === 'w' ? -1 : 1;
+      const start = color === 'w' ? 6 : 1;
+      const promoRow = color === 'w' ? 0 : 7;
+      const nr = r + dir;
+      if (inBounds(nr, c) && !board[nr][c]) {
+        push(nr, c, { promotion: nr === promoRow });
+        const nr2 = r + dir * 2;
+        if (r === start && !board[nr2][c]) push(nr2, c);
+      }
+      for (const dc of [-1, 1]) {
+        const nc = c + dc;
+        if (!inBounds(nr, nc)) continue;
+        const t = board[nr][nc];
+        if (t && t[0] === enemy) push(nr, nc, { promotion: nr === promoRow });
+      }
+      return out;
+    }
+
+    if (type === 'N') {
+      [[1,2],[2,1],[-1,2],[-2,1],[1,-2],[2,-1],[-1,-2],[-2,-1]].forEach(([dr,dc]) => push(r+dr,c+dc));
+      return out;
+    }
+
+    if (type === 'K') {
+      for (let dr=-1; dr<=1; dr+=1) for (let dc=-1; dc<=1; dc+=1) if (dr||dc) push(r+dr,c+dc);
+      return out;
+    }
+
+    const dirs = type === 'B' ? [[1,1],[1,-1],[-1,1],[-1,-1]] : type === 'R' ? [[1,0],[-1,0],[0,1],[0,-1]] : [[1,1],[1,-1],[-1,1],[-1,-1],[1,0],[-1,0],[0,1],[0,-1]];
+    for (const [dr,dc] of dirs) {
+      let nr = r + dr;
+      let nc = c + dc;
+      while (inBounds(nr,nc)) {
+        const t = board[nr][nc];
+        if (!t) {
+          out.push({ from:{r,c}, r:nr, c:nc, piece, capture:null, promotion:false });
+        } else {
+          if (t[0] !== color) out.push({ from:{r,c}, r:nr, c:nc, piece, capture:t, promotion:false });
+          break;
+        }
+        nr += dr;
+        nc += dc;
+      }
+    }
+    return out;
+  }
+
+  function isKingInCheck(board, color) {
+    let kr = -1; let kc = -1;
+    for (let r = 0; r < 8; r += 1) for (let c = 0; c < 8; c += 1) if (board[r][c] === `${color}K`) { kr = r; kc = c; }
+    if (kr < 0) return true;
+    const enemy = color === 'w' ? 'b' : 'w';
+    for (let r = 0; r < 8; r += 1) {
+      for (let c = 0; c < 8; c += 1) {
+        const p = board[r][c];
+        if (!p || p[0] !== enemy) continue;
+        const moves = pieceMoves(board, r, c, p);
+        if (moves.some((m) => m.r === kr && m.c === kc)) return true;
+      }
+    }
+    return false;
+  }
+
+  function updateChessStatus() {
+    const s = gamesState.chess;
+    const legal = legalChessMoves(s, s.turn);
+    const inCheck = isKingInCheck(s.board, s.turn);
+    if (!legal.length) {
+      s.over = true;
+      if (inCheck) s.message = s.turn === 'w' ? 'Checkmate. CPU wins.' : 'Checkmate. You win!';
+      else s.message = 'Stalemate.';
+      return;
+    }
+    s.over = false;
+    if (s.turn === 'w') s.message = inCheck ? 'Your turn (White) - Check!' : 'Your turn (White)';
+    else s.message = inCheck ? 'CPU turn (Black) - Check!' : 'CPU turn (Black)';
+  }
+
+  function createUnoDeck() {
+    const deck = [];
+    for (const color of UNO_COLORS) {
+      deck.push({ color, type: 'num', value: 0 });
+      for (let n = 1; n <= 9; n += 1) {
+        deck.push({ color, type: 'num', value: n });
+        deck.push({ color, type: 'num', value: n });
+      }
+      for (const action of UNO_ACTIONS) {
+        deck.push({ color, type: action });
+        deck.push({ color, type: action });
+      }
+    }
+    for (let i = 0; i < 4; i += 1) deck.push({ color: 'wild', type: 'wild' });
+    for (let i = 0; i < 4; i += 1) deck.push({ color: 'wild', type: 'wild4' });
+    for (let i = deck.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const t = deck[i]; deck[i] = deck[j]; deck[j] = t;
+    }
+    return deck;
+  }
+
+  function createInitialUnoState() {
+    const deck = createUnoDeck();
+    const player = []; const cpu = [];
+    for (let i = 0; i < 7; i += 1) { player.push(deck.pop()); cpu.push(deck.pop()); }
+    let first = deck.pop();
+    while (first && first.color === 'wild') { deck.unshift(first); first = deck.pop(); }
+    return {
+      player,
+      cpu,
+      draw: deck,
+      discard: [first],
+      turn: 'player',
+      currentColor: first?.color || 'red',
+      over: false,
+      message: 'Your turn'
+    };
+  }
+
+  function cardLabel(card) {
+    if (!card) return '';
+    if (card.type === 'num') return `${card.value}`;
+    if (card.type === 'skip') return '⛔';
+    if (card.type === 'reverse') return '↺';
+    if (card.type === 'draw2') return '+2';
+    if (card.type === 'wild') return 'W';
+    if (card.type === 'wild4') return '+4';
+    return '?';
+  }
+
+  function isUnoPlayable(card, top, color) {
+    if (!card || !top) return false;
+    if (card.color === 'wild') return true;
+    if (card.color === color) return true;
+    if (card.type === 'num' && top.type === 'num' && card.value === top.value) return true;
+    return card.type === top.type;
+  }
+
+  function ensureUnoDraw(state) {
+    if (state.draw.length) return;
+    if (state.discard.length <= 1) return;
+    const top = state.discard.pop();
+    state.draw = state.discard;
+    state.discard = [top];
+    for (let i = state.draw.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const t = state.draw[i]; state.draw[i] = state.draw[j]; state.draw[j] = t;
+    }
+  }
+
+  function drawUnoCard(state, hand) {
+    ensureUnoDraw(state);
+    if (!state.draw.length) return null;
+    const c = state.draw.pop();
+    hand.push(c);
+    return c;
+  }
+
+  function renderUnoContent(host) {
+    const s = gamesState.uno;
+    const top = s.discard[s.discard.length - 1];
+    host.innerHTML = `
+      <div class="gamesUnoRows">
+        <div class="gamesStatus">${escapeHtml(s.message)}${s.over ? '' : s.turn === 'player' ? '' : ' (CPU thinking...)'}</div>
+        <div class="gamesUnoTop">
+          <div>
+            <div class="gamesMiniLabel">CPU cards: ${s.cpu.length}</div>
+            <div class="gamesUnoHand">${s.cpu.slice(0, 6).map(() => '<div class="gamesUnoCard mini wild">🎴</div>').join('')}</div>
+          </div>
+          <div class="gamesUnoPile">
+            <div>
+              <div class="gamesMiniLabel">Draw (${s.draw.length})</div>
+              <button id="unoDrawBtn" class="gamesUnoCard mini wild" ${s.over || s.turn !== 'player' || gamesState.unoWaitingColor ? 'disabled' : ''}>Draw</button>
+            </div>
+            <div>
+              <div class="gamesMiniLabel">Discard (${s.currentColor})</div>
+              <div class="gamesUnoCard ${top?.color || 'wild'}">${cardLabel(top)}</div>
+            </div>
+          </div>
+        </div>
+        <div class="gamesMiniLabel">Your hand</div>
+        <div id="unoPlayerHand" class="gamesUnoHand"></div>
+        <div id="unoColorPick" class="gamesUnoColorPick"></div>
+      </div>
+    `;
+    const handEl = document.getElementById('unoPlayerHand');
+    if (handEl) {
+      s.player.forEach((card, idx) => {
+        const playable = !s.over && s.turn === 'player' && !gamesState.unoWaitingColor && isUnoPlayable(card, top, s.currentColor);
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = `gamesUnoCard ${card.color} ${playable ? '' : 'unplayable'}`;
+        btn.textContent = cardLabel(card);
+        btn.disabled = !playable;
+        btn.addEventListener('click', () => onUnoPlayerPlay(idx));
+        handEl.appendChild(btn);
+      });
+    }
+    document.getElementById('unoDrawBtn')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (s.over || s.turn !== 'player' || gamesState.unoWaitingColor) return;
+      const drawn = drawUnoCard(s, s.player);
+      if (drawn && isUnoPlayable(drawn, top, s.currentColor)) {
+        s.message = 'You drew a playable card.';
+      } else {
+        s.turn = 'cpu';
+        s.message = 'CPU turn';
+        rerenderGamesPanel();
+        setTimeout(maybeRunUnoCpuTurn, 420);
+      }
+      rerenderGamesPanel();
+    });
+    renderUnoColorPicker();
+  }
+
+  function renderUnoColorPicker() {
+    const holder = document.getElementById('unoColorPick');
+    if (!holder) return;
+    if (!gamesState.unoWaitingColor) { holder.innerHTML = ''; return; }
+    holder.innerHTML = '<div class="gamesMiniLabel" style="width:100%;">Choose color:</div>';
+    UNO_COLORS.forEach((color) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `gamesUnoCard mini ${color}`;
+      btn.textContent = color[0].toUpperCase();
+      btn.addEventListener('click', () => {
+        const s = gamesState.uno;
+        s.currentColor = color;
+        gamesState.unoWaitingColor = false;
+        finalizeUnoTurnAfterCard();
+      });
+      holder.appendChild(btn);
+    });
+  }
+
+  function onUnoPlayerPlay(index) {
+    const s = gamesState.uno;
+    if (s.over || s.turn !== 'player') return;
+    const top = s.discard[s.discard.length - 1];
+    const card = s.player[index];
+    if (!isUnoPlayable(card, top, s.currentColor)) return;
+    s.player.splice(index, 1);
+    s.discard.push(card);
+    if (card.color !== 'wild') s.currentColor = card.color;
+    if (s.player.length === 0) { s.over = true; s.message = 'You win!'; rerenderGamesPanel(); return; }
+    if (card.color === 'wild') { gamesState.unoWaitingColor = true; rerenderGamesPanel(); return; }
+    finalizeUnoTurnAfterCard();
+  }
+
+  function finalizeUnoTurnAfterCard() {
+    const s = gamesState.uno;
+    const card = s.discard[s.discard.length - 1];
+    let cpuExtraDraw = 0;
+    let skipCpu = false;
+    if (card.type === 'skip') skipCpu = true;
+    if (card.type === 'reverse') skipCpu = true;
+    if (card.type === 'draw2') cpuExtraDraw = 2;
+    if (card.type === 'wild4') cpuExtraDraw = 4;
+    for (let i = 0; i < cpuExtraDraw; i += 1) drawUnoCard(s, s.cpu);
+    if (skipCpu) {
+      s.turn = 'player';
+      s.message = 'CPU skipped. Your turn.';
+      rerenderGamesPanel();
+      return;
+    }
+    s.turn = 'cpu';
+    s.message = 'CPU turn';
+    rerenderGamesPanel();
+    setTimeout(maybeRunUnoCpuTurn, 420);
+  }
+
+  function maybeRunUnoCpuTurn() {
+    const s = gamesState.uno;
+    if (s.over || s.turn !== 'cpu') return;
+    const top = s.discard[s.discard.length - 1];
+    let idx = s.cpu.findIndex((card) => isUnoPlayable(card, top, s.currentColor));
+    if (idx < 0) {
+      drawUnoCard(s, s.cpu);
+      idx = s.cpu.findIndex((card) => isUnoPlayable(card, top, s.currentColor));
+      if (idx < 0) {
+        s.turn = 'player';
+        s.message = 'Your turn';
+        rerenderGamesPanel();
+        return;
+      }
+    }
+    const card = s.cpu.splice(idx, 1)[0];
+    s.discard.push(card);
+    if (card.color === 'wild') {
+      const counts = { red:0, yellow:0, green:0, blue:0 };
+      s.cpu.forEach((c) => { if (counts[c.color] != null) counts[c.color] += 1; });
+      s.currentColor = UNO_COLORS.sort((a,b) => counts[b]-counts[a])[0] || 'red';
+    } else {
+      s.currentColor = card.color;
+    }
+    if (s.cpu.length === 0) { s.over = true; s.message = 'CPU wins.'; rerenderGamesPanel(); return; }
+    let playerDraw = 0;
+    let skipPlayer = false;
+    if (card.type === 'skip') skipPlayer = true;
+    if (card.type === 'reverse') skipPlayer = true;
+    if (card.type === 'draw2') playerDraw = 2;
+    if (card.type === 'wild4') playerDraw = 4;
+    for (let i = 0; i < playerDraw; i += 1) drawUnoCard(s, s.player);
+    if (skipPlayer) {
+      s.turn = 'cpu';
+      s.message = 'You were skipped.';
+      rerenderGamesPanel();
+      setTimeout(maybeRunUnoCpuTurn, 420);
+      return;
+    }
+    s.turn = 'player';
+    s.message = 'Your turn';
+    rerenderGamesPanel();
+  }
+
   // Expose chat functions for app.js to call if needed
   window.chatPanelHTML = chatPanelHTML;
   window.wireChatPanel = wireChatPanel;
@@ -983,6 +1516,8 @@
   if (typeof bindDockToggle === 'function') {
     const chatBtn = document.getElementById('dockChat');
     if (chatBtn) { bindDockToggle(chatBtn, 'chat', 'Chat', chatPanelHTML, wireChatPanel); }
+    const gamesBtn = document.getElementById('dockGames');
+    if (gamesBtn) { bindDockToggle(gamesBtn, 'games', 'Games', gamesPanelHTML, wireGamesPanel); }
   }
 
   // Example night mode toggle (optional)

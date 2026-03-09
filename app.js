@@ -777,6 +777,7 @@ const dbgReloadFrame = document.getElementById("dbgReloadFrame");
 const dockColors = document.getElementById("dockColors");
 const dockModes = document.getElementById("dockModes");
 const dockChat = document.getElementById("dockChat");
+const dockGames = document.getElementById("dockGames");
 const dockMusic = document.getElementById("dockMusic");
 const dockProfile = document.getElementById("dockProfile");
 
@@ -831,10 +832,11 @@ function syncDrawerPanelPosition() {
 }
 
 function syncDockActiveButton() {
-  [dockColors, dockModes, dockChat, dockMusic, dockProfile].forEach((b) => b && b.classList.remove("dockBtnActive"));
+  [dockColors, dockModes, dockChat, dockGames, dockMusic, dockProfile].forEach((b) => b && b.classList.remove("dockBtnActive"));
   if (openPanelKey === "colors") dockColors?.classList.add("dockBtnActive");
   if (openPanelKey === "modes") dockModes?.classList.add("dockBtnActive");
   if (openPanelKey === "chat") dockChat?.classList.add("dockBtnActive");
+  if (openPanelKey === "games") dockGames?.classList.add("dockBtnActive");
   if (openPanelKey === "music") dockMusic?.classList.add("dockBtnActive");
   if (openPanelKey === "profile") dockProfile?.classList.add("dockBtnActive");
 }
@@ -1213,6 +1215,15 @@ function applyTeslaDockIconCompatibility() {
       <circle cx="8.3" cy="11.1" r="1.2" fill="#ffffff"/>
       <circle cx="12" cy="11.1" r="1.2" fill="#ffffff"/>
       <circle cx="15.7" cy="11.1" r="1.2" fill="#ffffff"/>
+    </svg>
+  `);
+
+  setIcon(dockGames, `
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false" style="display:block">
+      <rect x="2.8" y="8" width="18.4" height="9.6" rx="4.8" fill="#1b5e20"/>
+      <path d="M8.3 11.1v3.4M6.6 12.8h3.4" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/>
+      <circle cx="15.8" cy="12" r="1.2" fill="#fff"/>
+      <circle cx="18.2" cy="14.2" r="1.2" fill="#fff"/>
     </svg>
   `);
 
