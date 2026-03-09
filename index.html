@@ -960,9 +960,11 @@
     .selfIdentitySlot,
     .otherDrvIdentitySlot{
       position: absolute;
-      left: calc(50% + 10px);
+      left: 50%;
       top: 50%;
-      transform: translateY(-50%);
+      --identity-slot-x: 10px;
+      --identity-slot-y: -50%;
+      transform: translate(var(--identity-slot-x), var(--identity-slot-y));
       pointer-events: none;
       display: flex;
       align-items: center;
