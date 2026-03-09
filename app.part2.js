@@ -583,6 +583,167 @@
     markChatReadThroughLatestLoaded();
   }
 
+
+
+  const MAP_IDENTITY_MODE_NAME = 'name';
+  const MAP_IDENTITY_MODE_AVATAR = 'avatar';
+  const MAP_IDENTITY_IMG_SIZE = 128;
+  let mapIdentityTempAvatarDataUrl = '';
+
+  function normalizeMapIdentityMode(mode) {
+    return mode === MAP_IDENTITY_MODE_AVATAR ? MAP_IDENTITY_MODE_AVATAR : MAP_IDENTITY_MODE_NAME;
+  }
+
+  function safeMapAvatarUrl(url) {
+    if (typeof url !== 'string') return '';
+    const trimmed = url.trim();
+    if (!trimmed) return '';
+    if (trimmed.startsWith('data:image/')) return trimmed;
+    return '';
+  }
+
+  function shouldUseAvatarLabel(mode, avatarUrl) {
+    return normalizeMapIdentityMode(mode) === MAP_IDENTITY_MODE_AVATAR && !!safeMapAvatarUrl(avatarUrl);
+  }
+
+  function mapIdentityAvatarLabelHTML(avatarUrl, className, styleText) {
+    const safeUrl = escapeHtml(avatarUrl);
+    return `<div class="${className}" style="${styleText}" data-map-identity-label="1"><img src="${safeUrl}" alt="avatar" loading="lazy"></div>`;
+  }
+
+  function mapIdentityRenderSelfLabel({ name, avatarUrl, mode }) {
+    const safeName = (String(name || 'Driver').trim() || 'Driver');
+    const safeAvatar = safeMapAvatarUrl(avatarUrl);
+    if (shouldUseAvatarLabel(mode, safeAvatar)) {
+      return mapIdentityAvatarLabelHTML(safeAvatar, 'meAvatarBadge', 'display:block;transform:translate(28px, -50%);');
+    }
+    return `<div id="navMeName" class="meName" style="display:${safeName ? 'block' : 'none'}" data-map-identity-label="1">${escapeHtml(safeName)}</div>`;
+  }
+
+  function mapIdentityRenderDriverLabel({ name, avatarUrl, mode, fontPx, labelTranslateX, labelTranslateY }) {
+    const safeName = (String(name || 'Driver').trim() || 'Driver');
+    const safeAvatar = safeMapAvatarUrl(avatarUrl);
+    if (shouldUseAvatarLabel(mode, safeAvatar)) {
+      return mapIdentityAvatarLabelHTML(safeAvatar, 'otherDrvAvatarBadge', `transform:translate(${labelTranslateX}px, ${labelTranslateY}px);`);
+    }
+    return `<div class="otherDrvName" data-map-identity-label="1" style="font-size:${fontPx}px;transform:translate(${labelTranslateX}px, ${labelTranslateY}px);">${escapeHtml(safeName)}</div>`;
+  }
+
+  async function processMapIdentityImage(file) {
+    if (!file) throw new Error('No file selected');
+    const imgUrl = await new Promise((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => resolve(fr.result);
+      fr.onerror = () => reject(new Error('Could not read image'));
+      fr.readAsDataURL(file);
+    });
+    const img = await new Promise((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error('Could not decode image'));
+      el.src = imgUrl;
+    });
+    const side = Math.min(img.naturalWidth || img.width || 0, img.naturalHeight || img.height || 0);
+    if (!side) throw new Error('Invalid image');
+    const sx = Math.floor(((img.naturalWidth || img.width) - side) / 2);
+    const sy = Math.floor(((img.naturalHeight || img.height) - side) / 2);
+    const canvas = document.createElement('canvas');
+    canvas.width = MAP_IDENTITY_IMG_SIZE;
+    canvas.height = MAP_IDENTITY_IMG_SIZE;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, sx, sy, side, side, 0, 0, MAP_IDENTITY_IMG_SIZE, MAP_IDENTITY_IMG_SIZE);
+    return canvas.toDataURL('image/jpeg', 0.78);
+  }
+
+  function mapIdentityCurrentState() {
+    const meObj = (typeof window !== 'undefined' && window.me) ? window.me : {};
+    return {
+      mode: normalizeMapIdentityMode(meObj?.map_identity_mode),
+      avatarUrl: safeMapAvatarUrl(meObj?.avatar_url),
+      name: meObj?.display_name || 'Driver'
+    };
+  }
+
+  function renderMapIdentityProfileSection() {
+    const host = document.getElementById('profileMapIdentitySection');
+    if (!host) return;
+    const state = mapIdentityCurrentState();
+    const hasAvatar = !!state.avatarUrl;
+    host.innerHTML = `
+      <div class="mapIdentitySection">
+        <div class="mapIdentityTitle">Map Identity</div>
+        <div class="mapIdentityModes">
+          <button id="mapIdentityModeName" class="chipBtn ${state.mode === 'name' ? 'active' : ''}">Show Name</button>
+          <button id="mapIdentityModeAvatar" class="chipBtn ${state.mode === 'avatar' ? 'active' : ''}">Show Photo</button>
+        </div>
+        <div class="mapIdentityAvatarRow">
+          <div class="mapIdentityPreviewWrap">
+            ${hasAvatar ? `<img id="mapIdentityPreview" class="mapIdentityPreview" src="${escapeHtml(state.avatarUrl)}" alt="Profile preview">` : `<div id="mapIdentityPreview" class="mapIdentityPreview mapIdentityPreviewFallback">${escapeHtml((state.name || 'D')[0].toUpperCase())}</div>`}
+          </div>
+          <div class="mapIdentityActions">
+            <button id="mapIdentityChoosePhoto" class="chipBtn">Choose Photo</button>
+            <button id="mapIdentityRemovePhoto" class="chipBtn">Remove Photo</button>
+          </div>
+        </div>
+        <input id="mapIdentityFileInput" type="file" accept="image/*" hidden>
+      </div>
+    `;
+  }
+
+  async function saveMapIdentityUpdate(updates) {
+    if (typeof authHeaderOK === 'function' && !authHeaderOK()) return;
+    if (typeof updateMeProfile !== 'function') return;
+    await updateMeProfile(updates);
+    if (typeof refreshNavNameLabel === 'function') refreshNavNameLabel();
+    renderMapIdentityProfileSection();
+  }
+
+  function initMapIdentityProfileControls() {
+    renderMapIdentityProfileSection();
+    const fileInput = document.getElementById('mapIdentityFileInput');
+    document.getElementById('mapIdentityModeName')?.addEventListener('click', async (e) => {
+      e.preventDefault();
+      await saveMapIdentityUpdate({ map_identity_mode: MAP_IDENTITY_MODE_NAME });
+    });
+    document.getElementById('mapIdentityModeAvatar')?.addEventListener('click', async (e) => {
+      e.preventDefault();
+      const state = mapIdentityCurrentState();
+      if (!state.avatarUrl) {
+        alert('Choose a photo first.');
+        return;
+      }
+      await saveMapIdentityUpdate({ map_identity_mode: MAP_IDENTITY_MODE_AVATAR });
+    });
+    document.getElementById('mapIdentityChoosePhoto')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      fileInput?.click();
+    });
+    document.getElementById('mapIdentityRemovePhoto')?.addEventListener('click', async (e) => {
+      e.preventDefault();
+      mapIdentityTempAvatarDataUrl = '';
+      await saveMapIdentityUpdate({ avatar_url: '', map_identity_mode: MAP_IDENTITY_MODE_NAME });
+    });
+    fileInput?.addEventListener('change', async () => {
+      const f = fileInput.files && fileInput.files[0];
+      if (!f) return;
+      try {
+        const processed = await processMapIdentityImage(f);
+        mapIdentityTempAvatarDataUrl = processed;
+        await saveMapIdentityUpdate({ avatar_url: processed, map_identity_mode: MAP_IDENTITY_MODE_AVATAR });
+      } catch (err) {
+        alert(err?.message || 'Image processing failed.');
+      } finally {
+        fileInput.value = '';
+      }
+    });
+  }
+
+  function clearMapIdentityTempState() {
+    mapIdentityTempAvatarDataUrl = '';
+    const fileInput = document.getElementById('mapIdentityFileInput');
+    if (fileInput) fileInput.value = '';
+  }
+
   // Expose chat functions for app.js to call if needed
   window.chatPanelHTML = chatPanelHTML;
   window.wireChatPanel = wireChatPanel;
@@ -590,6 +751,9 @@
   window.stopChatPolling = stopChatPolling;
   window.startChatPolling = startChatPolling;
   window.chatResetState = chatResetState;
+  window.mapIdentityRenderSelfLabel = mapIdentityRenderSelfLabel;
+  window.mapIdentityRenderDriverLabel = mapIdentityRenderDriverLabel;
+  window.initMapIdentityProfileControls = initMapIdentityProfileControls;
 
   // Bind the chat dock button using its ID
   if (typeof bindDockToggle === 'function') {
@@ -600,4 +764,8 @@
   // Example night mode toggle (optional)
   function toggleNightMode() { document.body.classList.toggle('night'); }
   window.toggleNightMode = toggleNightMode;
+
+  setInterval(() => {
+    if (typeof authHeaderOK === 'function' && !authHeaderOK()) clearMapIdentityTempState();
+  }, 1500);
 })();

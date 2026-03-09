@@ -754,6 +754,17 @@
     }
     .chipBtn.disabled{ opacity: 0.45; pointer-events: none; }
 
+    .chipBtn.active{ background: rgba(0,102,255,0.16); border: 1px solid rgba(0,102,255,0.35); }
+
+    .mapIdentitySection{ margin-top: 8px; border-top: 1px solid rgba(0,0,0,0.08); padding-top: 10px; }
+    .mapIdentityTitle{ font-weight: 800; margin-bottom: 8px; }
+    .mapIdentityModes{ display:flex; gap:8px; flex-wrap: wrap; margin-bottom: 8px; }
+    .mapIdentityAvatarRow{ display:flex; gap:10px; align-items:center; flex-wrap: wrap; }
+    .mapIdentityPreviewWrap{ width: 44px; height: 44px; }
+    .mapIdentityPreview{ width:44px; height:44px; border-radius:999px; object-fit:cover; border:1px solid rgba(0,0,0,0.18); background:#fff; }
+    .mapIdentityPreviewFallback{ display:flex; align-items:center; justify-content:center; font-weight:900; color:#333; background:rgba(0,0,0,0.08); }
+    .mapIdentityActions{ display:flex; gap:8px; flex-wrap:wrap; }
+
     .chatPanelWrap{
       display: flex;
       flex-direction: column;
@@ -906,7 +917,33 @@
       animation: pulseRing 1.5s ease-out infinite;
       pointer-events:none;
     }
-    .meName{
+    
+    .meAvatarBadge,
+    .otherDrvAvatarBadge{
+      position: absolute;
+      left: 20px;
+      top: 20px;
+      width: 26px;
+      height: 26px;
+      border-radius: 999px;
+      border: 1px solid rgba(0,0,0,0.2);
+      background: rgba(255,255,255,0.96);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.16);
+      overflow: hidden;
+      will-change: transform;
+    }
+    .meAvatarBadge img,
+    .otherDrvAvatarBadge img{
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    .meAvatarBadge{
+      left: 28px;
+      top: 50%;
+    }
+.meName{
       position: absolute;
       left: 28px;
       top: 50%;
