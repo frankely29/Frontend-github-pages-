@@ -2957,8 +2957,19 @@ function updateOnlineBadge(count, ghostedCount = 0) {
   const display = Number.isFinite(n) && n >= 0 ? n : 0;
   const g = Number(ghostedCount);
   const ghostedDisplay = Number.isFinite(g) && g >= 0 ? g : 0;
-  const txtEl = onlineBadge.querySelector(".onlineTxt");
-  if (txtEl) txtEl.textContent = `${display} Online`;
+  const mainLine = `${display} online`;
+  const txtEl = onlineBadge.querySelector(".onlineTxt") || onlineBadge.querySelector("#onlineTxt");
+  if (txtEl) {
+    txtEl.textContent = mainLine;
+  } else {
+    // Compatibility fallback for older single-line badge markup.
+    const textWrapEl = onlineBadge.querySelector(".onlineTextWrap");
+    if (textWrapEl) {
+      textWrapEl.textContent = mainLine;
+    } else {
+      onlineBadge.textContent = mainLine;
+    }
+  }
   const ghostTxtEl = onlineBadge.querySelector(".onlineGhostTxt");
   if (ghostTxtEl) {
     if (ghostedDisplay > 0) {
@@ -2969,8 +2980,8 @@ function updateOnlineBadge(count, ghostedCount = 0) {
     }
   }
   onlineBadge.title = ghostedDisplay > 0
-    ? `${display} Online • ${ghostedDisplay} Ghosted`
-    : `${display} Online`;
+    ? `${display} online • ${ghostedDisplay} ghosted`
+    : `${display} online`;
 }
 
 function applyTeslaBadgeIconCompatibility() {
@@ -4111,6 +4122,9 @@ async function pullPresenceAll() {
   try {
     const list = await getJSONAuth("/presence/all", communityToken);
     const now = Date.now() / 1000;
+    const items = Array.isArray(list) ? list : list?.items || [];
+    const fallbackVisibleCount = Array.isArray(items) ? items.length : 0;
+    let badgeUpdatedFromSummary = false;
 
     // Update the online badge from backend aggregate counts so ghosted users
     // remain hidden on the map but still count as online.
@@ -4120,12 +4134,14 @@ async function pullPresenceAll() {
       const ghostedCount = Number(summary?.ghosted_count);
       if (Number.isFinite(onlineCount) && onlineCount >= 0) {
         updateOnlineBadge(onlineCount, Number.isFinite(ghostedCount) ? ghostedCount : 0);
+        badgeUpdatedFromSummary = true;
       }
     } catch (e) {
       // Ignore badge updates if anything goes wrong.
     }
-
-    const items = Array.isArray(list) ? list : list?.items || [];
+    if (!badgeUpdatedFromSummary) {
+      updateOnlineBadge(fallbackVisibleCount, 0);
+    }
     const seen = new Set();
     const candidates = [];
 
