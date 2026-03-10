@@ -51,28 +51,34 @@
     return fetchJSON(`${apiBase()}${path}`, { headers });
   }
 
-  function inferBadge(rank, badgeCode) {
+  function inferBadge(rank, badgeCode, hasCrown) {
     const badge = String(badgeCode || '').toLowerCase();
-    if (badge.includes('crown')) return 'crown';
-    if (badge.includes('gold')) return 'gold';
-    if (badge.includes('silver')) return 'silver';
-    if (badge.includes('ruby')) return 'ruby';
-    if (rank === 1) return 'crown';
-    if (rank === 2) return 'gold';
-    if (rank === 3) return 'silver';
-    return '';
+    const crown = !!hasCrown || badge.includes('crown') || Number(rank) === 1;
+    let code = '';
+    if (badge.includes('gold')) code = 'gold';
+    else if (badge.includes('silver')) code = 'silver';
+    else if (badge.includes('bronze') || badge.includes('ruby')) code = 'bronze';
+    else if (Number(rank) === 1) code = 'gold';
+    else if (Number(rank) === 2) code = 'silver';
+    else if (Number(rank) === 3) code = 'bronze';
+    return { code, crown: crown && code === 'gold' };
   }
 
-  function badgeChip(badge) {
-    if (!badge) return '';
+  function badgeChip(badgeMeta) {
+    if (!badgeMeta) return '';
+    if (typeof badgeMeta === 'string') badgeMeta = { code: badgeMeta, crown: false };
+    const badge = String(badgeMeta.code || '').toLowerCase();
     const meta = {
-      crown: { label: '👑 Crown', cls: 'badge-crown' },
-      gold: { label: '🥇 Gold', cls: 'badge-gold' },
-      silver: { label: '🥈 Silver', cls: 'badge-silver' },
-      ruby: { label: '♦ Ruby', cls: 'badge-ruby' },
+      crown: { label: 'Crown', cls: 'badge-crown' },
+      gold: { label: 'Gold', cls: 'badge-gold' },
+      silver: { label: 'Silver', cls: 'badge-silver' },
+      bronze: { label: 'Bronze', cls: 'badge-bronze' },
     }[badge];
     if (!meta) return '';
-    return `<span class="badgeChip ${meta.cls}">${meta.label}</span>`;
+    const crown = badgeMeta.crown && badge === 'gold'
+      ? '<span class="badgeCrownTiny" aria-label="Crown">👑</span>'
+      : '';
+    return `<span class="badgeChip ${meta.cls}">${crown}${meta.label}</span>`;
   }
 
   function formatMetric(value, metric = state.metric) {
@@ -84,11 +90,15 @@
   function selectedMyBadge() {
     const badgeList = Array.isArray(state.badges) ? state.badges : [];
     const exact = badgeList.find((b) => b?.metric === state.metric && b?.period === state.period);
-    if (exact) return inferBadge(Number(exact.rank_position || 0), exact.badge_code);
+    if (exact) return inferBadge(Number(exact.rank_position || 0), exact.badge_code, exact.has_crown || exact.leaderboard_has_crown);
     if (state.myRow?.badge_code || state.myRow?.rank_position) {
-      return inferBadge(Number(state.myRow?.rank_position || 0), state.myRow?.badge_code);
+      return inferBadge(
+        Number(state.myRow?.rank_position || 0),
+        state.myRow?.badge_code || state.myRow?.leaderboard_badge_code,
+        state.myRow?.has_crown || state.myRow?.leaderboard_has_crown
+      );
     }
-    return '';
+    return null;
   }
 
   function renderOverview() {
@@ -116,7 +126,7 @@
       const rank = Number(row?.rank_position || idx + 1);
       const name = row?.display_name || row?.name || row?.user_name || `Driver ${rank}`;
       const value = row?.metric_value;
-      const badge = inferBadge(rank, row?.badge_code);
+      const badge = inferBadge(rank, row?.badge_code || row?.leaderboard_badge_code, row?.has_crown || row?.leaderboard_has_crown);
       return `<div class="leaderboardRow">
         <span class="leaderboardRank">#${rank}</span>
         <span class="leaderboardName" title="${esc(name)}">${esc(name)}</span>
@@ -150,7 +160,7 @@
 
         <div>
           <div style="font:900 11px/1.2 system-ui;margin-bottom:5px;">Badge legend</div>
-          <div class="leaderboardLegend">${badgeChip('crown')}${badgeChip('gold')}${badgeChip('silver')}${badgeChip('ruby')}</div>
+          <div class="leaderboardLegend">${badgeChip('crown')}${badgeChip('gold')}${badgeChip('silver')}${badgeChip('bronze')}</div>
         </div>
 
         <div id="lbStatus" class="leaderboardStatus ${state.statusType}">${esc(state.status || '')}</div>
