@@ -62,13 +62,15 @@
   function badgeChip(badgeCode) {
     const badge = strictBadgeCode(badgeCode);
     if (!badge) return '';
+    if (badge === 'crown') {
+      return '<span class="badgeChip badge-crown" aria-label="Crown">👑</span>';
+    }
     const meta = {
-      crown: { label: 'Crown', cls: 'badge-crown', icon: '👑' },
-      silver: { label: 'Silver', cls: 'badge-silver', icon: '🥈' },
-      bronze: { label: 'Bronze', cls: 'badge-bronze', icon: '🥉' },
+      silver: { label: 'Silver', cls: 'badgeIcon badge-medal-silver', svg: '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 2h4l1 6H9z" fill="#9aa5ae"></path><path d="M13 2h4l-2 6h-3z" fill="#6f7d88"></path><circle cx="12" cy="15" r="6" fill="#dfe5ea" stroke="#8a98a3" stroke-width="1.2"></circle><circle cx="12" cy="15" r="3.2" fill="#f7fafc" opacity="0.8"></circle></svg>' },
+      bronze: { label: 'Bronze', cls: 'badgeIcon badge-medal-bronze', svg: '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 2h4l1 6H9z" fill="#b46c3e"></path><path d="M13 2h4l-2 6h-3z" fill="#8f4f2b"></path><circle cx="12" cy="15" r="6" fill="#d08a55" stroke="#8f4f2b" stroke-width="1.2"></circle><circle cx="12" cy="15" r="3.2" fill="#efb27e" opacity="0.8"></circle></svg>' },
     }[badge];
     if (!meta) return '';
-    return `<span class="badgeChip ${meta.cls}" aria-label="${meta.label}">${meta.icon}</span>`;
+    return `<span class="${meta.cls}" aria-label="${meta.label} medal">${meta.svg}</span>`;
   }
 
   function formatMetric(value, metric = state.metric) {
