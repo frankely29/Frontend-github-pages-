@@ -51,7 +51,7 @@
     return fetchJSON(`${apiBase()}${path}`, { headers });
   }
 
-  function inferBadge(_rank, badgeCode, _hasCrown) {
+  function inferBadge(badgeCode) {
     const badge = String(badgeCode || '').trim().toLowerCase();
     if (badge === 'crown') return { code: 'crown' };
     if (badge === 'silver') return { code: 'silver' };
@@ -81,13 +81,9 @@
   function selectedMyBadge() {
     const badgeList = Array.isArray(state.badges) ? state.badges : [];
     const exact = badgeList.find((b) => b?.metric === state.metric && b?.period === state.period);
-    if (exact) return inferBadge(Number(exact.rank_position || 0), exact.badge_code, exact.has_crown || exact.leaderboard_has_crown);
+    if (exact) return inferBadge(exact.badge_code);
     if (state.myRow?.badge_code || state.myRow?.rank_position) {
-      return inferBadge(
-        Number(state.myRow?.rank_position || 0),
-        state.myRow?.badge_code || state.myRow?.leaderboard_badge_code,
-        state.myRow?.has_crown || state.myRow?.leaderboard_has_crown
-      );
+      return inferBadge(state.myRow?.badge_code || state.myRow?.leaderboard_badge_code);
     }
     return null;
   }
@@ -117,7 +113,7 @@
       const rank = Number(row?.rank_position || idx + 1);
       const name = row?.display_name || row?.name || row?.user_name || `Driver ${rank}`;
       const value = row?.metric_value;
-      const badge = inferBadge(rank, row?.badge_code || row?.leaderboard_badge_code, row?.has_crown || row?.leaderboard_has_crown);
+      const badge = inferBadge(row?.badge_code || row?.leaderboard_badge_code);
       return `<div class="leaderboardRow">
         <span class="leaderboardRank">#${rank}</span>
         <span class="leaderboardName" title="${esc(name)}">${esc(name)}</span>
