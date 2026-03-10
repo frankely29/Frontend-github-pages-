@@ -664,18 +664,28 @@
     return '';
   }
 
-  function mapIdentityBadgeHTML({ badgeCode, hasCrown }) {
+  function mapIdentityBadgeOverlayHTML({ badgeCode }) {
     const badge = normalizeLeaderboardBadge(badgeCode);
     if (!badge) return '';
-    const crown = hasCrown && badge === 'gold'
-      ? '<span class="mapIdentityBadgeCrown" aria-label="Crown">👑</span>'
-      : '';
-    return `<span class="mapIdentityBadgeOverlay badge-${badge}">${crown}<span>${escapeHtml(badge)}</span></span>`;
+    return `<span class="mapIdentityBadgeOverlay badge-${badge}"><span>${escapeHtml(badge)}</span></span>`;
+  }
+
+  function mapIdentityCrownOverlayHTML({ badgeCode, hasCrown }) {
+    const badge = normalizeLeaderboardBadge(badgeCode);
+    if (!(hasCrown && badge === 'gold')) return '';
+    return '<span class="mapIdentityCrownOverlay" aria-label="Crown">👑</span>';
+  }
+
+  function mapIdentityOverlayWrapHTML(coreHTML, badgeMeta = {}) {
+    return `<div class="mapIdentityWrap"><div class="mapIdentityCore">${coreHTML}</div>${mapIdentityBadgeOverlayHTML(badgeMeta)}${mapIdentityCrownOverlayHTML(badgeMeta)}</div>`;
   }
 
   function mapIdentityAvatarLabelHTML(avatarUrl, className, styleText, badgeMeta = {}) {
     const safeUrl = escapeHtml(avatarUrl);
-    return `<div class="${className}" style="${styleText}" data-map-identity-label="1"><img src="${safeUrl}" alt="avatar" loading="lazy">${mapIdentityBadgeHTML(badgeMeta)}</div>`;
+    return mapIdentityOverlayWrapHTML(
+      `<div class="${className}" style="${styleText}" data-map-identity-label="1"><img src="${safeUrl}" alt="avatar" loading="lazy"></div>`,
+      badgeMeta
+    );
   }
 
   function mapIdentityRenderSelfLabel({ name, avatarUrl, mode, zoom, leaderboardBadgeCode, leaderboardHasCrown }) {
@@ -690,7 +700,7 @@
         { badgeCode: leaderboardBadgeCode, hasCrown: leaderboardHasCrown }
       )}</div>`;
     }
-    return `<div class="selfIdentitySlot" data-map-identity-label="1"><div id="navMeName" class="meName" style="display:${safeName ? 'block' : 'none'};font-size:${cfg.fontPx}px;padding:${cfg.padY}px ${cfg.padX}px;max-width:${cfg.maxWidthPx}px;">${escapeHtml(safeName)}${mapIdentityBadgeHTML({ badgeCode: leaderboardBadgeCode, hasCrown: leaderboardHasCrown })}</div></div>`;
+    return `<div class="selfIdentitySlot" data-map-identity-label="1">${mapIdentityOverlayWrapHTML(`<div id="navMeName" class="meName" style="display:${safeName ? 'block' : 'none'};font-size:${cfg.fontPx}px;padding:${cfg.padY}px ${cfg.padX}px;max-width:${cfg.maxWidthPx}px;">${escapeHtml(safeName)}</div>`, { badgeCode: leaderboardBadgeCode, hasCrown: leaderboardHasCrown })}</div>`;
   }
 
   function mapIdentityOrbitStyleText(orbitMeta) {
@@ -710,7 +720,7 @@
     if (shouldUseAvatarLabel(mode, safeAvatar)) {
       return `<div class="otherDrvIdentitySlot" data-map-identity-label="1" style="${orbitStyle}">${mapIdentityAvatarLabelHTML(safeAvatar, 'otherDrvAvatarBadge', `width:${cfg.avatarPx}px;height:${cfg.avatarPx}px;`, { badgeCode: leaderboardBadgeCode, hasCrown: leaderboardHasCrown })}</div>`;
     }
-    return `<div class="otherDrvIdentitySlot" data-map-identity-label="1" style="${orbitStyle}"><div class="otherDrvName" style="font-size:${cfg.fontPx}px;padding:${cfg.padY}px ${cfg.padX}px;max-width:${cfg.maxWidthPx}px;">${escapeHtml(safeName)}${mapIdentityBadgeHTML({ badgeCode: leaderboardBadgeCode, hasCrown: leaderboardHasCrown })}</div></div>`;
+    return `<div class="otherDrvIdentitySlot" data-map-identity-label="1" style="${orbitStyle}">${mapIdentityOverlayWrapHTML(`<div class="otherDrvName" style="font-size:${cfg.fontPx}px;padding:${cfg.padY}px ${cfg.padX}px;max-width:${cfg.maxWidthPx}px;">${escapeHtml(safeName)}</div>`, { badgeCode: leaderboardBadgeCode, hasCrown: leaderboardHasCrown })}</div>`;
   }
 
   function mapIdentityApplySelfOrbit(orbitMeta) {
