@@ -1539,6 +1539,49 @@
     rerenderGamesPanel();
   }
 
+  function updateDockScrollHints() {
+    const dock = document.getElementById('dock');
+    const viewport = document.getElementById('dockViewport');
+    if (!dock || !viewport) return;
+    const maxScroll = Math.max(0, viewport.scrollWidth - viewport.clientWidth);
+    const leftVisible = viewport.scrollLeft > 2;
+    const rightVisible = viewport.scrollLeft < (maxScroll - 2);
+    dock.classList.toggle('dock-can-scroll-left', leftVisible);
+    dock.classList.toggle('dock-can-scroll-right', rightVisible);
+  }
+
+  function scrollDockByStep(direction) {
+    const viewport = document.getElementById('dockViewport');
+    if (!viewport) return;
+    const step = Math.max(120, Math.round(viewport.clientWidth * 0.62));
+    viewport.scrollBy({ left: direction * step, behavior: 'smooth' });
+  }
+
+  function initDockScroller() {
+    const viewport = document.getElementById('dockViewport');
+    const leftHint = document.getElementById('dockScrollHintLeft');
+    const rightHint = document.getElementById('dockScrollHintRight');
+    if (!viewport) return;
+
+    let rafId = 0;
+    const scheduleHintUpdate = () => {
+      if (rafId) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = 0;
+        updateDockScrollHints();
+      });
+    };
+
+    viewport.addEventListener('scroll', scheduleHintUpdate, { passive: true });
+    window.addEventListener('resize', scheduleHintUpdate);
+
+    leftHint?.addEventListener('click', () => scrollDockByStep(-1));
+    rightHint?.addEventListener('click', () => scrollDockByStep(1));
+
+    scheduleHintUpdate();
+    setTimeout(scheduleHintUpdate, 120);
+  }
+
   // Expose chat functions for app.js to call if needed
   window.chatPanelHTML = chatPanelHTML;
   window.wireChatPanel = wireChatPanel;
@@ -1551,6 +1594,9 @@
   window.mapIdentityApplyZoomStyles = mapIdentityApplyZoomStyles;
   window.mapIdentityApplySelfOrbit = mapIdentityApplySelfOrbit;
   window.initMapIdentityProfileControls = initMapIdentityProfileControls;
+  window.initDockScroller = initDockScroller;
+  window.updateDockScrollHints = updateDockScrollHints;
+  window.scrollDockByStep = scrollDockByStep;
 
   // Bind the chat dock button using its ID
   if (typeof bindDockToggle === 'function') {
@@ -1563,6 +1609,8 @@
   // Example night mode toggle (optional)
   function toggleNightMode() { document.body.classList.toggle('night'); }
   window.toggleNightMode = toggleNightMode;
+
+  initDockScroller();
 
   setInterval(() => {
     if (typeof authHeaderOK === 'function' && !authHeaderOK()) clearMapIdentityTempState();

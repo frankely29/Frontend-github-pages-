@@ -620,12 +620,78 @@
       left: 50%;
       transform: translateX(-50%);
       bottom: calc(env(safe-area-inset-bottom, 0px) + 38px);
-      display: flex;
-      gap: 14px;
-      align-items: center;
+      width: min(100vw - 20px, 430px);
       z-index: 3000 !important;
       pointer-events: auto;
     }
+    .dockViewport {
+      position: relative;
+      display: block;
+      width: 100%;
+      overflow-x: auto;
+      overflow-y: hidden;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+      scroll-behavior: smooth;
+      touch-action: pan-x;
+    }
+    .dockViewport::-webkit-scrollbar { display: none; }
+    .dockTrack {
+      display: inline-flex;
+      gap: 14px;
+      align-items: center;
+      padding: 2px 0;
+    }
+    .dockEdgeFade {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 24px;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 180ms ease;
+      z-index: 2;
+    }
+    .dockEdgeFade.left {
+      left: 0;
+      background: linear-gradient(to right, rgba(255,255,255,0.85), rgba(255,255,255,0));
+    }
+    .dockEdgeFade.right {
+      right: 0;
+      background: linear-gradient(to left, rgba(255,255,255,0.85), rgba(255,255,255,0));
+    }
+    #dock.dock-can-scroll-left .dockEdgeFade.left,
+    #dock.dock-can-scroll-right .dockEdgeFade.right {
+      opacity: 1;
+    }
+    .dockScrollHint {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 18px;
+      height: 18px;
+      border: 0;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.24);
+      color: rgba(35,35,35,0.55);
+      display: grid;
+      place-items: center;
+      z-index: 3;
+      cursor: pointer;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 180ms ease, background-color 180ms ease;
+      -webkit-backdrop-filter: blur(4px);
+      backdrop-filter: blur(4px);
+    }
+    .dockScrollHint.left { left: 4px; }
+    .dockScrollHint.right { right: 4px; }
+    #dock.dock-can-scroll-left .dockScrollHint.left,
+    #dock.dock-can-scroll-right .dockScrollHint.right {
+      opacity: 0.9;
+      pointer-events: auto;
+    }
+    .dockScrollHint:active { background: rgba(255,255,255,0.4); }
     .dock, #dockBar, .iconRow{
       z-index: 3000 !important;
     }
@@ -654,6 +720,16 @@
     body.night .dockBtn,
     body.night .toggleBtnSmall{
       background: rgba(255,255,255,0.85);
+    }
+    body.night .dockEdgeFade.left {
+      background: linear-gradient(to right, rgba(18,18,18,0.72), rgba(18,18,18,0));
+    }
+    body.night .dockEdgeFade.right {
+      background: linear-gradient(to left, rgba(18,18,18,0.72), rgba(18,18,18,0));
+    }
+    body.night .dockScrollHint {
+      background: rgba(30,30,30,0.32);
+      color: rgba(255,255,255,0.7);
     }
     body.night .dock,
     body.night .dock *,
@@ -1529,33 +1605,41 @@
   </div>
 
   <div id="dock">
-    <button class="dockBtn" id="dockColors" aria-label="Colors">
-      <span class="dockIcon">🎨</span>
-    </button>
+    <button class="dockScrollHint left" id="dockScrollHintLeft" type="button" aria-label="Scroll dock left">‹</button>
+    <div class="dockViewport" id="dockViewport">
+      <div class="dockTrack" id="dockTrack">
+        <button class="dockBtn" id="dockColors" aria-label="Colors">
+          <span class="dockIcon">🎨</span>
+        </button>
 
-    <button class="dockBtn dockBtnMain" id="dockModes" aria-label="Modes">
-      <span class="dockIcon">⚙️</span>
-    </button>
+        <button class="dockBtn dockBtnMain" id="dockModes" aria-label="Modes">
+          <span class="dockIcon">⚙️</span>
+        </button>
 
-    <button class="dockBtn dockBtnMain" id="dockChat" aria-label="Chat">
-      <span class="dockIcon">💬</span>
-    </button>
+        <button class="dockBtn dockBtnMain" id="dockChat" aria-label="Chat">
+          <span class="dockIcon">💬</span>
+        </button>
 
-    <button class="dockBtn dockBtnMain" id="dockGames" aria-label="Games">
-      <span class="dockIcon">🎮</span>
-    </button>
+        <button class="dockBtn dockBtnMain" id="dockGames" aria-label="Games">
+          <span class="dockIcon">🎮</span>
+        </button>
 
-    <button class="dockBtn dockBtnMain" id="dockLeaderboard" aria-label="Leaderboard">
-      <span class="dockIcon">🏆</span>
-    </button>
+        <button class="dockBtn dockBtnMain" id="dockLeaderboard" aria-label="Leaderboard">
+          <span class="dockIcon">🏆</span>
+        </button>
 
-    <button class="dockBtn dockBtnMusic dockBtnMain" id="dockMusic" aria-label="Music">
-      <span class="dockIcon">♪</span>
-    </button>
+        <button class="dockBtn dockBtnMusic dockBtnMain" id="dockMusic" aria-label="Music">
+          <span class="dockIcon">♪</span>
+        </button>
 
-    <button class="dockBtn dockBtnMain" id="dockProfile" aria-label="Profile">
-      <span class="dockIcon">👤</span>
-    </button>
+        <button class="dockBtn dockBtnMain" id="dockProfile" aria-label="Profile">
+          <span class="dockIcon">👤</span>
+        </button>
+      </div>
+      <span class="dockEdgeFade left" aria-hidden="true"></span>
+      <span class="dockEdgeFade right" aria-hidden="true"></span>
+    </div>
+    <button class="dockScrollHint right" id="dockScrollHintRight" type="button" aria-label="Scroll dock right">›</button>
   </div>
 
   <button id="pickupFab" class="pickupFab" type="button" aria-label="Record trip">
