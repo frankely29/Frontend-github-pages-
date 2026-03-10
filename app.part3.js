@@ -53,32 +53,27 @@
 
   function inferBadge(rank, badgeCode, hasCrown) {
     const badge = String(badgeCode || '').toLowerCase();
-    const crown = !!hasCrown || badge.includes('crown') || Number(rank) === 1;
     let code = '';
-    if (badge.includes('gold')) code = 'gold';
+    if (hasCrown || badge.includes('crown') || badge.includes('gold')) code = 'crown';
     else if (badge.includes('silver')) code = 'silver';
     else if (badge.includes('bronze') || badge.includes('ruby')) code = 'bronze';
-    else if (Number(rank) === 1) code = 'gold';
+    else if (Number(rank) === 1) code = 'crown';
     else if (Number(rank) === 2) code = 'silver';
     else if (Number(rank) === 3) code = 'bronze';
-    return { code, crown: crown && code === 'gold' };
+    return { code };
   }
 
   function badgeChip(badgeMeta) {
     if (!badgeMeta) return '';
-    if (typeof badgeMeta === 'string') badgeMeta = { code: badgeMeta, crown: false };
+    if (typeof badgeMeta === 'string') badgeMeta = { code: badgeMeta };
     const badge = String(badgeMeta.code || '').toLowerCase();
     const meta = {
-      crown: { label: 'Crown', cls: 'badge-crown' },
-      gold: { label: 'Gold', cls: 'badge-gold' },
-      silver: { label: 'Silver', cls: 'badge-silver' },
-      bronze: { label: 'Bronze', cls: 'badge-bronze' },
+      crown: { label: 'Crown', cls: 'badge-crown', icon: '👑' },
+      silver: { label: 'Silver', cls: 'badge-silver', icon: '🥈' },
+      bronze: { label: 'Bronze', cls: 'badge-bronze', icon: '🥉' },
     }[badge];
     if (!meta) return '';
-    const crown = badgeMeta.crown && badge === 'gold'
-      ? '<span class="badgeCrownTiny" aria-label="Crown">👑</span>'
-      : '';
-    return `<span class="badgeChip ${meta.cls}">${crown}${meta.label}</span>`;
+    return `<span class="badgeChip ${meta.cls}" aria-label="${meta.label}">${meta.icon}</span>`;
   }
 
   function formatMetric(value, metric = state.metric) {
@@ -160,7 +155,7 @@
 
         <div>
           <div style="font:900 11px/1.2 system-ui;margin-bottom:5px;">Badge legend</div>
-          <div class="leaderboardLegend">${badgeChip('crown')}${badgeChip('gold')}${badgeChip('silver')}${badgeChip('bronze')}</div>
+          <div class="leaderboardLegend">${badgeChip('crown')}${badgeChip('silver')}${badgeChip('bronze')}</div>
         </div>
 
         <div id="lbStatus" class="leaderboardStatus ${state.statusType}">${esc(state.status || '')}</div>
