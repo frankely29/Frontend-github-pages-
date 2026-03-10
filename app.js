@@ -2514,7 +2514,14 @@ let lastMoveTs = 0;
 function makeNavIcon() {
   const myName = authHeaderOK() ? me?.display_name || "" : "";
   const navLabelHTML = (typeof window !== "undefined" && typeof window.mapIdentityRenderSelfLabel === "function")
-    ? window.mapIdentityRenderSelfLabel({ name: myName, avatarUrl: me?.avatar_url, mode: me?.map_identity_mode, zoom: map?.getZoom?.() })
+    ? window.mapIdentityRenderSelfLabel({
+      name: myName,
+      avatarUrl: me?.avatar_url,
+      mode: me?.map_identity_mode,
+      zoom: map?.getZoom?.(),
+      leaderboardBadgeCode: me?.leaderboard_badge_code,
+      leaderboardHasCrown: !!me?.leaderboard_has_crown
+    })
     : `<div id="navMeName" class="meName" style="display:${myName ? "block" : "none"}">${escapeHtml(myName)}</div>`;
   const el = document.createElement("div");
   el.innerHTML = `
@@ -2534,7 +2541,14 @@ function refreshNavNameLabel() {
     if (current) current.remove();
     wrap.insertAdjacentHTML(
       "beforeend",
-      window.mapIdentityRenderSelfLabel({ name: myName, avatarUrl: me?.avatar_url, mode: me?.map_identity_mode, zoom: map?.getZoom?.() })
+      window.mapIdentityRenderSelfLabel({
+        name: myName,
+        avatarUrl: me?.avatar_url,
+        mode: me?.map_identity_mode,
+        zoom: map?.getZoom?.(),
+        leaderboardBadgeCode: me?.leaderboard_badge_code,
+        leaderboardHasCrown: !!me?.leaderboard_has_crown
+      })
     );
   } else {
     const el = document.getElementById("navMeName");
@@ -4068,12 +4082,12 @@ function applyDriverLabelZoomStyles() {
   }
 }
 
-function makeDriverIcon(name, headingDeg, avatarUrl = "", mode = "name", orbitMeta = null) {
+function makeDriverIcon(name, headingDeg, avatarUrl = "", mode = "name", orbitMeta = null, leaderboardBadgeCode = '', leaderboardHasCrown = false) {
   const safe = (name || "Driver").trim() || "Driver";
   const rot = Number.isFinite(headingDeg) ? headingDeg : 0;
   const el = document.createElement("div");
   const driverLabelHTML = (typeof window !== "undefined" && typeof window.mapIdentityRenderDriverLabel === "function")
-    ? window.mapIdentityRenderDriverLabel({ name: safe, avatarUrl, mode, zoom: map?.getZoom?.(), orbitMeta })
+    ? window.mapIdentityRenderDriverLabel({ name: safe, avatarUrl, mode, zoom: map?.getZoom?.(), orbitMeta, leaderboardBadgeCode, leaderboardHasCrown })
     : `<div class="otherDrvName">${escapeHtml(safe)}</div>`;
   el.className = "otherDrvWrap";
   el.innerHTML = `
@@ -4092,7 +4106,7 @@ function clearOtherDrivers() {
   otherMarkers.clear();
 }
 
-function upsertDriverMarker(userId, name, lat, lng, heading, avatarUrl = "", mode = "name", orbitMeta = null) {
+function upsertDriverMarker(userId, name, lat, lng, heading, avatarUrl = "", mode = "name", orbitMeta = null, leaderboardBadgeCode = '', leaderboardHasCrown = false) {
   if (!Number.isFinite(lat) || !Number.isFinite(lng) || !map) return;
   if (!userId) return;
 
@@ -4100,12 +4114,12 @@ function upsertDriverMarker(userId, name, lat, lng, heading, avatarUrl = "", mod
   if (existing) {
     existing.setLngLat([lng, lat]);
     const el = existing.getElement();
-    const newEl = makeDriverIcon(name || `Driver ${userId}`, heading, avatarUrl, mode, orbitMeta);
+    const newEl = makeDriverIcon(name || `Driver ${userId}`, heading, avatarUrl, mode, orbitMeta, leaderboardBadgeCode, leaderboardHasCrown);
     el.innerHTML = newEl.innerHTML;
     return;
   }
 
-  const el = makeDriverIcon(name || `Driver ${userId}`, heading, avatarUrl, mode, orbitMeta);
+  const el = makeDriverIcon(name || `Driver ${userId}`, heading, avatarUrl, mode, orbitMeta, leaderboardBadgeCode, leaderboardHasCrown);
   // A custom HTML marker's triangle arrow sits slightly below the centre of its
   // 40×40 container (the tip is ~7 px below the vertical midpoint). When the
   // marker is anchored at "center" without an offset, the geographic point
@@ -4193,6 +4207,8 @@ async function pullPresenceAll() {
         lat,
         lng,
         heading: Number(it.heading ?? it.bearing ?? NaN),
+        leaderboardBadgeCode: it.leaderboard_badge_code || '',
+        leaderboardHasCrown: !!it.leaderboard_has_crown,
       });
     }
 
@@ -4245,7 +4261,18 @@ async function pullPresenceAll() {
     }
 
     for (const row of candidates) {
-      upsertDriverMarker(row.uid, row.name, row.lat, row.lng, row.heading, row.avatarUrl, row.mode, row.orbitMeta || null);
+      upsertDriverMarker(
+        row.uid,
+        row.name,
+        row.lat,
+        row.lng,
+        row.heading,
+        row.avatarUrl,
+        row.mode,
+        row.orbitMeta || null,
+        row.leaderboardBadgeCode || '',
+        !!row.leaderboardHasCrown
+      );
       seen.add(row.uid);
     }
 
