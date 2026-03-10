@@ -87,17 +87,12 @@
   }
 
   function currentUserBadge() {
-    const mb = state.myBadges || {};
-    const candidates = [
-      mb.current_badge,
-      mb[`${state.metric}_${state.period}`],
-      mb[state.metric],
-      mb[state.period],
-      mb.badge,
-    ].filter(Boolean);
-    const found = candidates.map((c) => inferBadge(0, c)).find(Boolean);
-    if (found) return found;
-    return inferBadge(Number(state.myRank?.rank || 0), state.myRank?.badge);
+    const badges = Array.isArray(state.myBadges) ? state.myBadges : [];
+    const exact = badges.find((b) => b?.metric === state.metric && b?.period === state.period);
+    const fallback = badges[0];
+    const selected = exact || fallback;
+    if (selected) return inferBadge(Number(selected.rank_position || 0), selected.badge_code);
+    return inferBadge(Number(state.myRank?.rank_position || 0), state.myRank?.badge_code);
   }
 
   function leaderboardPanelHTML() {
@@ -105,10 +100,10 @@
     const periodBtn = (p, label) => `<button class="chipBtn ${state.period === p ? 'active' : ''}" data-lb-period="${p}">${label}</button>`;
 
     const rows = (state.list || []).slice(0, 10).map((r, i) => {
-      const rank = Number(r.rank || i + 1);
+      const rank = Number(r.rank_position || r.rank || i + 1);
       const name = r.display_name || r.name || r.user_name || `Driver ${rank}`;
-      const value = r.value ?? r.metric_value ?? r.total ?? r[state.metric];
-      const badge = inferBadge(rank, r.badge);
+      const value = r.metric_value ?? r.value ?? r.total ?? r[state.metric];
+      const badge = inferBadge(rank, r.badge_code || r.badge);
       return `<div class="leaderboardRow">
         <span class="leaderboardRank">#${rank}</span>
         <span class="leaderboardName" title="${esc(name)}">${esc(name)}</span>
@@ -117,9 +112,9 @@
       </div>`;
     }).join('');
 
-    const meRank = Number(state.myRank?.rank || 0);
+    const meRank = Number(state.myRank?.rank_position || state.myRank?.rank || 0);
     const meName = state.myRank?.display_name || state.myRank?.name || (window.me && window.me.display_name) || 'You';
-    const meValue = state.myRank?.value ?? state.myRank?.metric_value ?? state.myRank?.total ?? state.myRank?.[state.metric];
+    const meValue = state.myRank?.metric_value ?? state.myRank?.value ?? state.myRank?.total ?? state.myRank?.[state.metric];
     const myBadge = currentUserBadge();
 
     return `
@@ -190,14 +185,14 @@
         getAuth('/leaderboard/email_prefs').catch(() => ({})),
       ]);
 
-      state.list = Array.isArray(lb) ? lb : (lb?.rows || lb?.items || []);
-      state.myRank = mine?.data || mine || null;
-      state.myBadges = badges?.data || badges || null;
-      const p = prefs?.data || prefs || {};
+      state.list = Array.isArray(lb?.rows) ? lb.rows : (Array.isArray(lb) ? lb : (lb?.items || []));
+      state.myRank = mine?.row || null;
+      state.myBadges = Array.isArray(badges?.badges) ? badges.badges : [];
+      const p = prefs || {};
       state.prefs = {
-        weekly: !!(p.weekly ?? p.weekly_reports ?? p.weekly_enabled),
-        monthly: !!(p.monthly ?? p.monthly_reports ?? p.monthly_enabled),
-        yearly: !!(p.yearly ?? p.yearly_reports ?? p.yearly_enabled),
+        weekly: !!p.weekly_enabled,
+        monthly: !!p.monthly_enabled,
+        yearly: !!p.yearly_enabled,
       };
       state.status = '';
       state.statusType = '';
@@ -216,12 +211,9 @@
     rerenderIfOpen();
 
     const payload = {
-      weekly: !!state.prefs.weekly,
-      monthly: !!state.prefs.monthly,
-      yearly: !!state.prefs.yearly,
-      weekly_reports: !!state.prefs.weekly,
-      monthly_reports: !!state.prefs.monthly,
-      yearly_reports: !!state.prefs.yearly,
+      weekly_enabled: !!state.prefs.weekly,
+      monthly_enabled: !!state.prefs.monthly,
+      yearly_enabled: !!state.prefs.yearly,
     };
 
     try {
