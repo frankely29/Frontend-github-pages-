@@ -30,6 +30,9 @@
   let chatLastReadId = loadChatLastReadId();
   let chatSeenKeys = new Set();
   let unreadChatCount = 0;
+  let chatInitialHistoryLoaded = false;
+  let chatInitialHistoryLoadAttempted = false;
+  let chatInitialHistoryRetryQueued = false;
 
   // Kill-feed bootstrap guard.
   // We seed startup history into seen-keys, then suppress feed replay until
@@ -590,7 +593,7 @@
   // Fetch messages. Only proceed if a token is present.
   async function chatFetchMessages({ after = null, limit = 50 } = {}) {
     const token = getCommunityToken();
-    if (!token) return { ok: true, messages: [] };
+    if (!token) return { ok: false, reason: 'not_ready' };
     const qs = new URLSearchParams();
     qs.set('limit', String(limit));
     if (after !== null && after !== undefined && String(after).trim() !== '') {
@@ -601,19 +604,26 @@
       return { ok: true, messages: Array.isArray(data) ? data : data?.messages || [] };
     } catch (err) {
       console.warn('chatFetchMessages failed', err);
-      return { ok: false, error: err, messages: [] };
+      return { ok: false, reason: 'failed', error: err };
     }
   }
 
   // Load initial and new messages
   async function chatLoadInitial() {
+    chatInitialHistoryLoadAttempted = true;
     const result = await chatFetchMessages({ limit: 60 });
     if (!result?.ok) {
-      setChatStatus('Loading chat...');
+      if (result?.reason === 'not_ready') {
+        setChatStatus('Loading chat...');
+      } else {
+        setChatStatus('Chat unavailable right now.');
+      }
       return { ok: false, messages: [] };
     }
     const msgs = Array.isArray(result.messages) ? result.messages : [];
     renderChatMessages(msgs, { replace: true });
+    chatInitialHistoryLoaded = true;
+    chatInitialHistoryRetryQueued = false;
     // Initial history should never replay into kill feed notifications.
     seedKillFeedSeenKeys(msgs);
     killFeedBootstrapReady = true;
@@ -639,15 +649,21 @@
     try {
       const msgs = await chatFetchNew();
       if (!msgs?.ok) {
-        if (isChatPanelOpen() && chatLastSeen === null) {
-          setChatStatus('Chat unavailable right now.');
+        if (isChatPanelOpen() && !chatInitialHistoryLoaded) {
+          if (msgs?.reason === 'not_ready') {
+            setChatStatus('Loading chat...');
+          } else {
+            setChatStatus('Chat unavailable right now.');
+          }
         }
         return;
       }
       const loadedMsgs = Array.isArray(msgs.messages) ? msgs.messages : [];
-      const needsInitialRecovery = chatLastSeen === null;
+      const needsInitialRecovery = !chatInitialHistoryLoaded;
 
       if (needsInitialRecovery) {
+        chatInitialHistoryLoaded = true;
+        chatInitialHistoryRetryQueued = false;
         if (!killFeedBootstrapReady) {
           seedKillFeedSeenKeys(loadedMsgs);
           killFeedBootstrapReady = true;
@@ -691,6 +707,17 @@
   function syncChatPollingState() {
     if (typeof authHeaderOK === 'function' && authHeaderOK()) {
       startChatPolling();
+      if (isChatPanelOpen() && chatInitialHistoryLoadAttempted && !chatInitialHistoryLoaded && !chatInitialHistoryRetryQueued) {
+        chatInitialHistoryRetryQueued = true;
+        chatLoadInitial()
+          .catch((e) => {
+            console.warn('chat initial retry failed:', e);
+            setChatStatus('Chat unavailable right now.');
+          })
+          .finally(() => {
+            chatInitialHistoryRetryQueued = false;
+          });
+      }
     } else {
       stopChatPolling();
     }
