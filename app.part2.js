@@ -656,28 +656,23 @@
     return normalizeMapIdentityMode(mode) === MAP_IDENTITY_MODE_AVATAR && !!safeMapAvatarUrl(avatarUrl);
   }
 
-  function normalizeLeaderboardBadge(code) {
+  function normalizeLeaderboardBadge(code, hasCrown) {
     const badge = String(code || '').toLowerCase();
-    if (badge.includes('gold')) return 'gold';
+    if (hasCrown || badge.includes('crown') || badge.includes('gold')) return 'crown';
     if (badge.includes('silver')) return 'silver';
     if (badge.includes('bronze') || badge.includes('ruby')) return 'bronze';
     return '';
   }
 
-  function mapIdentityBadgeOverlayHTML({ badgeCode }) {
-    const badge = normalizeLeaderboardBadge(badgeCode);
+  function mapIdentityBadgeOverlayHTML({ badgeCode, hasCrown }) {
+    const badge = normalizeLeaderboardBadge(badgeCode, hasCrown);
     if (!badge) return '';
-    return `<span class="mapIdentityBadgeOverlay badge-${badge}"><span>${escapeHtml(badge)}</span></span>`;
-  }
-
-  function mapIdentityCrownOverlayHTML({ badgeCode, hasCrown }) {
-    const badge = normalizeLeaderboardBadge(badgeCode);
-    if (!(hasCrown && badge === 'gold')) return '';
-    return '<span class="mapIdentityCrownOverlay" aria-label="Crown">👑</span>';
+    const icon = { crown: '👑', silver: '🥈', bronze: '🥉' }[badge] || '';
+    return `<span class="mapIdentityBadgeOverlay badge-${badge}" aria-label="${escapeHtml(badge)}">${icon}</span>`;
   }
 
   function mapIdentityOverlayWrapHTML(coreHTML, badgeMeta = {}) {
-    return `<div class="mapIdentityWrap"><div class="mapIdentityCore">${coreHTML}</div>${mapIdentityBadgeOverlayHTML(badgeMeta)}${mapIdentityCrownOverlayHTML(badgeMeta)}</div>`;
+    return `<div class="mapIdentityWrap"><div class="mapIdentityCore">${coreHTML}</div>${mapIdentityBadgeOverlayHTML(badgeMeta)}</div>`;
   }
 
   function mapIdentityAvatarLabelHTML(avatarUrl, className, styleText, badgeMeta = {}) {
