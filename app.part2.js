@@ -41,6 +41,10 @@
     return `tlc_chat_last_read_${CHAT_ROOM}`;
   }
 
+  function chatReadBaselineStorageKey() {
+    return `tlc_chat_read_baseline_${CHAT_ROOM}`;
+  }
+
   function parseMessageId(value) {
     if (value === null || value === undefined || value === '') return null;
     const n = Number(value);
@@ -67,6 +71,30 @@
     try {
       localStorage.setItem(chatLastReadStorageKey(), String(next));
     } catch (_) {}
+  }
+
+  function hasChatReadBaseline() {
+    try {
+      return localStorage.getItem(chatReadBaselineStorageKey()) === '1';
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function markChatReadBaselineDone() {
+    try {
+      localStorage.setItem(chatReadBaselineStorageKey(), '1');
+    } catch (_) {}
+  }
+
+  function maybeInitializeChatReadBaseline() {
+    if (chatLastReadId !== null) return false;
+    if (hasChatReadBaseline()) return false;
+    if (chatLatestMessageId === null) return false;
+    saveChatLastReadId(chatLatestMessageId);
+    markChatReadBaselineDone();
+    clearChatUnreadBadge();
+    return true;
   }
 
   // Remember which chat messages have been displayed in the kill feed.
@@ -242,10 +270,7 @@
       killFeedBootstrapReady = true;
       killFeedBootstrapPollConsumed = false;
 
-      if (chatLastReadId === null && chatLatestMessageId !== null) {
-        saveChatLastReadId(chatLatestMessageId);
-        clearChatUnreadBadge();
-      } else {
+      if (!maybeInitializeChatReadBaseline()) {
         rebuildUnreadBadgeFromMessages(msgs);
       }
 
@@ -583,13 +608,7 @@
     // Initial history should never replay into kill feed notifications.
     seedKillFeedSeenKeys(msgs);
     killFeedBootstrapReady = true;
-    if (chatLastReadId === null && chatLatestMessageId !== null) {
-      saveChatLastReadId(chatLatestMessageId);
-      clearChatUnreadBadge();
-      return;
-    }
-
-    if (!Array.isArray(msgs) || !msgs.length) return;
+    if (maybeInitializeChatReadBaseline()) return;
     rebuildUnreadBadgeFromMessages(msgs);
   }
   async function chatFetchNew() { return chatFetchMessages({ after: chatLastSeen, limit: 50 }); }
