@@ -638,9 +638,9 @@
     .dockViewport::-webkit-scrollbar { display: none; }
     .dockTrack {
       display: inline-flex;
-      gap: 11px;
+      gap: 9px;
       align-items: center;
-      padding: 2px 0;
+      padding: 2px 4px;
     }
     .dockEdgeFade {
       position: absolute;
@@ -654,11 +654,11 @@
     }
     .dockEdgeFade.left {
       left: 0;
-      background: linear-gradient(to right, rgba(238,238,238,0.88), rgba(238,238,238,0));
+      background: linear-gradient(to right, rgba(246,246,246,0.94), rgba(246,246,246,0));
     }
     .dockEdgeFade.right {
       right: 0;
-      background: linear-gradient(to left, rgba(238,238,238,0.88), rgba(238,238,238,0));
+      background: linear-gradient(to left, rgba(246,246,246,0.94), rgba(246,246,246,0));
     }
     #dock.dock-can-scroll-left .dockEdgeFade.left,
     #dock.dock-can-scroll-right .dockEdgeFade.right {
@@ -668,13 +668,13 @@
       position: absolute;
       top: 50%;
       transform: translateY(-50%);
-      width: 22px;
-      height: 22px;
+      width: 26px;
+      height: 26px;
       border: 0;
       border-radius: 999px;
       background: rgba(255,255,255,0.24);
       color: rgba(35,35,35,0.55);
-      font-size: 17px;
+      font-size: 20px;
       line-height: 1;
       display: grid;
       place-items: center;
@@ -724,10 +724,10 @@
       background: rgba(255,255,255,0.85);
     }
     body.night .dockEdgeFade.left {
-      background: linear-gradient(to right, rgba(210,210,210,0.36), rgba(210,210,210,0));
+      background: linear-gradient(to right, rgba(228,228,228,0.48), rgba(228,228,228,0));
     }
     body.night .dockEdgeFade.right {
-      background: linear-gradient(to left, rgba(210,210,210,0.36), rgba(210,210,210,0));
+      background: linear-gradient(to left, rgba(228,228,228,0.48), rgba(228,228,228,0));
     }
     body.night .dockScrollHint {
       background: rgba(30,30,30,0.32);
@@ -1607,7 +1607,6 @@
   </div>
 
   <div id="dock">
-    <button class="dockScrollHint left" id="dockScrollHintLeft" type="button" aria-label="Scroll dock left">‹</button>
     <div class="dockViewport" id="dockViewport">
       <div class="dockTrack" id="dockTrack">
         <button class="dockBtn" id="dockColors" aria-label="Colors">
@@ -1638,10 +1637,11 @@
           <span class="dockIcon">👤</span>
         </button>
       </div>
+      <span class="dockEdgeFade left" aria-hidden="true"></span>
+      <span class="dockEdgeFade right" aria-hidden="true"></span>
+      <button class="dockScrollHint left" id="dockScrollHintLeft" type="button" aria-label="Scroll dock left">‹</button>
+      <button class="dockScrollHint right" id="dockScrollHintRight" type="button" aria-label="Scroll dock right">›</button>
     </div>
-    <span class="dockEdgeFade left" aria-hidden="true"></span>
-    <span class="dockEdgeFade right" aria-hidden="true"></span>
-    <button class="dockScrollHint right" id="dockScrollHintRight" type="button" aria-label="Scroll dock right">›</button>
   </div>
 
   <button id="pickupFab" class="pickupFab" type="button" aria-label="Record trip">
