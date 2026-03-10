@@ -82,9 +82,13 @@
   }
 
   function selectedMyBadge() {
-    const exact = state.badges.find((b) => b?.metric === state.metric && b?.period === state.period);
+    const badgeList = Array.isArray(state.badges) ? state.badges : [];
+    const exact = badgeList.find((b) => b?.metric === state.metric && b?.period === state.period);
     if (exact) return inferBadge(Number(exact.rank_position || 0), exact.badge_code);
-    return inferBadge(Number(state.myRow?.rank_position || 0), state.myRow?.badge_code);
+    if (state.myRow?.badge_code || state.myRow?.rank_position) {
+      return inferBadge(Number(state.myRow?.rank_position || 0), state.myRow?.badge_code);
+    }
+    return '';
   }
 
   function renderOverview() {
@@ -196,6 +200,8 @@
     } catch (err) {
       state.rows = [];
       state.myRow = null;
+      state.badges = [];
+      state.overview = null;
       state.status = `Unable to load leaderboard: ${String(err?.message || err)}`;
       state.statusType = 'err';
     }
