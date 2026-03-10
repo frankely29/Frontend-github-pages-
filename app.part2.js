@@ -691,7 +691,7 @@
     );
   }
 
-  function mapIdentityRenderSelfLabel({ name, avatarUrl, mode, zoom, leaderboardBadgeCode, leaderboardHasCrown }) {
+  function mapIdentityRenderSelfLabel({ name, avatarUrl, mode, zoom, leaderboardBadgeCode }) {
     const safeName = (String(name || 'Driver').trim() || 'Driver');
     const safeAvatar = safeMapAvatarUrl(avatarUrl);
     const cfg = mapIdentityVisualConfig(zoom);
@@ -700,10 +700,10 @@
         safeAvatar,
         'meAvatarBadge',
         `display:block;width:${cfg.avatarPx}px;height:${cfg.avatarPx}px;`,
-        { badgeCode: leaderboardBadgeCode, hasCrown: leaderboardHasCrown }
+        { badgeCode: leaderboardBadgeCode }
       )}</div>`;
     }
-    return `<div class="selfIdentitySlot" data-map-identity-label="1">${mapIdentityOverlayWrapHTML(`<div id="navMeName" class="meName" style="display:${safeName ? 'block' : 'none'};font-size:${cfg.fontPx}px;padding:${cfg.padY}px ${cfg.padX}px;max-width:${cfg.maxWidthPx}px;">${escapeHtml(safeName)}</div>`, { badgeCode: leaderboardBadgeCode, hasCrown: leaderboardHasCrown })}</div>`;
+    return `<div class="selfIdentitySlot" data-map-identity-label="1">${mapIdentityOverlayWrapHTML(`<div id="navMeName" class="meName" style="display:${safeName ? 'block' : 'none'};font-size:${cfg.fontPx}px;padding:${cfg.padY}px ${cfg.padX}px;max-width:${cfg.maxWidthPx}px;">${escapeHtml(safeName)}</div>`, { badgeCode: leaderboardBadgeCode })}</div>`;
   }
 
   function mapIdentityOrbitStyleText(orbitMeta) {
@@ -715,15 +715,15 @@
     return `--identity-slot-x:${dx}px;--identity-slot-y:calc(-50% + ${dy}px);`;
   }
 
-  function mapIdentityRenderDriverLabel({ name, avatarUrl, mode, zoom, orbitMeta = null, leaderboardBadgeCode, leaderboardHasCrown }) {
+  function mapIdentityRenderDriverLabel({ name, avatarUrl, mode, zoom, orbitMeta = null, leaderboardBadgeCode }) {
     const safeName = (String(name || 'Driver').trim() || 'Driver');
     const safeAvatar = safeMapAvatarUrl(avatarUrl);
     const cfg = mapIdentityVisualConfig(zoom);
     const orbitStyle = mapIdentityOrbitStyleText(orbitMeta);
     if (shouldUseAvatarLabel(mode, safeAvatar)) {
-      return `<div class="otherDrvIdentitySlot" data-map-identity-label="1" style="${orbitStyle}">${mapIdentityAvatarLabelHTML(safeAvatar, 'otherDrvAvatarBadge', `width:${cfg.avatarPx}px;height:${cfg.avatarPx}px;`, { badgeCode: leaderboardBadgeCode, hasCrown: leaderboardHasCrown })}</div>`;
+      return `<div class="otherDrvIdentitySlot" data-map-identity-label="1" style="${orbitStyle}">${mapIdentityAvatarLabelHTML(safeAvatar, 'otherDrvAvatarBadge', `width:${cfg.avatarPx}px;height:${cfg.avatarPx}px;`, { badgeCode: leaderboardBadgeCode })}</div>`;
     }
-    return `<div class="otherDrvIdentitySlot" data-map-identity-label="1" style="${orbitStyle}">${mapIdentityOverlayWrapHTML(`<div class="otherDrvName" style="font-size:${cfg.fontPx}px;padding:${cfg.padY}px ${cfg.padX}px;max-width:${cfg.maxWidthPx}px;">${escapeHtml(safeName)}</div>`, { badgeCode: leaderboardBadgeCode, hasCrown: leaderboardHasCrown })}</div>`;
+    return `<div class="otherDrvIdentitySlot" data-map-identity-label="1" style="${orbitStyle}">${mapIdentityOverlayWrapHTML(`<div class="otherDrvName" style="font-size:${cfg.fontPx}px;padding:${cfg.padY}px ${cfg.padX}px;max-width:${cfg.maxWidthPx}px;">${escapeHtml(safeName)}</div>`, { badgeCode: leaderboardBadgeCode })}</div>`;
   }
 
   function mapIdentityApplySelfOrbit(orbitMeta) {
