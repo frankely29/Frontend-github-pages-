@@ -539,6 +539,11 @@
     const listEl = document.getElementById('chatList');
     if (!listEl) return;
     if (replace) {
+      // Reset the per-panel dedupe cache when rebuilding the chat list.
+      // The notification bootstrap seeds chatSeenKeys so we do not replay
+      // alerts, but that should not suppress initial message rendering after
+      // a page refresh.
+      chatSeenKeys = new Set();
       listEl.innerHTML = '';
       listEl.dataset.hasMessages = '0';
     }
