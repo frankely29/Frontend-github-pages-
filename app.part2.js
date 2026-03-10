@@ -125,8 +125,9 @@
   let chatAudioUnlocked = false;
   let chatAudioUnlockBound = false;
   let chatAudioUnlockInFlight = false;
-  let chatNotificationsUnlocked = false;
-  let chatNotificationsUnlockInFlight = false;
+  let chatNotificationsBootstrapped = false;
+  let chatNotificationsBootstrapInFlight = false;
+  let chatFirstInteractionBound = false;
   const chatAudioSkipLogAt = new Map();
 
   function logChatAudioSkip(reason, extra = '') {
@@ -212,16 +213,16 @@
     }
   }
 
-  async function ensureChatNotificationsUnlocked(trigger = 'interaction') {
-    if (chatNotificationsUnlocked || chatNotificationsUnlockInFlight) return;
-    chatNotificationsUnlockInFlight = true;
+  async function ensureChatNotificationsBootstrapped(trigger = 'interaction') {
+    if (chatNotificationsBootstrapped || chatNotificationsBootstrapInFlight) return chatNotificationsBootstrapped;
+    chatNotificationsBootstrapInFlight = true;
     try {
-      await unlockChatAudio(trigger);
       if (typeof authHeaderOK === 'function' && !authHeaderOK()) {
-        chatNotificationsUnlocked = true;
-        return;
+        chatNotificationsBootstrapped = true;
+        return true;
       }
 
+      chatResetState();
       const msgs = await chatFetchMessages({ limit: 60 });
       hydrateChatStateFromMessages(msgs);
       seedKillFeedSeenKeys(msgs);
@@ -234,11 +235,14 @@
       }
 
       syncChatPollingState();
-      chatNotificationsUnlocked = true;
+      await chatPollOnce();
+      chatNotificationsBootstrapped = true;
+      return true;
     } catch (err) {
-      console.warn('ensureChatNotificationsUnlocked failed', err);
+      console.warn('ensureChatNotificationsBootstrapped failed', err);
+      return false;
     } finally {
-      chatNotificationsUnlockInFlight = false;
+      chatNotificationsBootstrapInFlight = false;
     }
   }
 
@@ -246,8 +250,26 @@
     unlockChatAudio(evt?.type || 'interaction');
   }
 
-  function onChatNotificationsUnlockInteraction(evt) {
-    ensureChatNotificationsUnlocked(evt?.type || 'interaction');
+  async function onChatFirstInteraction(evt) {
+    await unlockChatAudio(evt?.type || 'interaction');
+    const ok = await ensureChatNotificationsBootstrapped(evt?.type || 'interaction');
+    if (ok) removeChatFirstInteractionListeners();
+  }
+
+  function removeChatFirstInteractionListeners() {
+    if (!chatFirstInteractionBound) return;
+    ['pointerdown', 'touchstart', 'click', 'keydown'].forEach((evtName) => {
+      document.removeEventListener(evtName, onChatFirstInteraction, true);
+    });
+    chatFirstInteractionBound = false;
+  }
+
+  function bindChatFirstInteractionListeners() {
+    if (chatFirstInteractionBound) return;
+    ['pointerdown', 'touchstart', 'click', 'keydown'].forEach((evtName) => {
+      document.addEventListener(evtName, onChatFirstInteraction, { passive: true, capture: true });
+    });
+    chatFirstInteractionBound = true;
   }
 
   function bindChatAudioUnlockTarget(el) {
@@ -290,13 +312,7 @@
 
   bindChatAudioUnlockTargets();
   rearmChatAudioUnlock();
-  ['pointerdown', 'touchstart', 'click', 'keydown'].forEach((evtName) => {
-    document.addEventListener(evtName, onChatNotificationsUnlockInteraction, {
-      passive: true,
-      capture: true,
-      once: true,
-    });
-  });
+  bindChatFirstInteractionListeners();
 
   function playBeep() {
     const ctx = ensureChatAudioContext();
@@ -619,7 +635,7 @@
 
   // Wire up the chat panel: event handlers, initial load, polling
   function wireChatPanel() {
-    ensureChatNotificationsUnlocked('chat-panel-open');
+    ensureChatNotificationsBootstrapped('chat-panel-open');
     const chatInput = document.getElementById('chatInput');
     const chatSendBtn = document.getElementById('chatSendBtn');
     if (!chatInput || !chatSendBtn) return;
@@ -645,9 +661,14 @@
         chatSendBtn.disabled = false;
       }
     };
-    chatSendBtn.addEventListener('click', (e) => { e.preventDefault(); sendNow(); });
-    chatInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); sendNow(); } });
-    chatResetState();
+    if (chatSendBtn.dataset.chatSendBound !== '1') {
+      chatSendBtn.dataset.chatSendBound = '1';
+      chatSendBtn.addEventListener('click', (e) => { e.preventDefault(); sendNow(); });
+    }
+    if (chatInput.dataset.chatEnterBound !== '1') {
+      chatInput.dataset.chatEnterBound = '1';
+      chatInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); sendNow(); } });
+    }
     chatLoadInitial()
       .then(() => chatPollOnce())
       .catch((e) => {
