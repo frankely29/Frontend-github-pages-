@@ -213,6 +213,19 @@
     }
   }
 
+  function rebuildUnreadBadgeFromMessages(messages) {
+    if (!Array.isArray(messages) || !messages.length) {
+      unreadChatCount = 0;
+      updateChatUnreadBadge();
+      return;
+    }
+    unreadChatCount = messages.reduce(
+      (acc, msg) => (shouldCountUnread(msg, { ignoreOpenPanel: true }) ? acc + 1 : acc),
+      0
+    );
+    updateChatUnreadBadge();
+  }
+
   async function ensureChatNotificationsBootstrapped(trigger = 'interaction') {
     if (chatNotificationsBootstrapped || chatNotificationsBootstrapInFlight) return chatNotificationsBootstrapped;
     chatNotificationsBootstrapInFlight = true;
@@ -232,6 +245,8 @@
       if (chatLastReadId === null && chatLatestMessageId !== null) {
         saveChatLastReadId(chatLatestMessageId);
         clearChatUnreadBadge();
+      } else {
+        rebuildUnreadBadgeFromMessages(msgs);
       }
 
       syncChatPollingState();
@@ -575,8 +590,7 @@
     }
 
     if (!Array.isArray(msgs) || !msgs.length) return;
-    unreadChatCount = msgs.reduce((acc, msg) => (shouldCountUnread(msg, { ignoreOpenPanel: true }) ? acc + 1 : acc), 0);
-    updateChatUnreadBadge();
+    rebuildUnreadBadgeFromMessages(msgs);
   }
   async function chatFetchNew() { return chatFetchMessages({ after: chatLastSeen, limit: 50 }); }
 
