@@ -125,6 +125,8 @@
   let chatAudioUnlocked = false;
   let chatAudioUnlockBound = false;
   let chatAudioUnlockInFlight = false;
+  let chatNotificationsUnlocked = false;
+  let chatNotificationsUnlockInFlight = false;
   const chatAudioSkipLogAt = new Map();
 
   function logChatAudioSkip(reason, extra = '') {
@@ -196,8 +198,56 @@
     }
   }
 
+  function hydrateChatStateFromMessages(messages) {
+    if (!Array.isArray(messages) || !messages.length) return;
+    for (const msg of messages) {
+      const key = chatMsgKey(msg);
+      chatSeenKeys.add(key);
+      const cursor = chatMsgCursor(msg);
+      if (cursor !== null && cursor !== undefined) chatLastSeen = cursor;
+      const id = messageNumericId(msg);
+      if (id !== null) {
+        chatLatestMessageId = chatLatestMessageId === null ? id : Math.max(chatLatestMessageId, id);
+      }
+    }
+  }
+
+  async function ensureChatNotificationsUnlocked(trigger = 'interaction') {
+    if (chatNotificationsUnlocked || chatNotificationsUnlockInFlight) return;
+    chatNotificationsUnlockInFlight = true;
+    try {
+      await unlockChatAudio(trigger);
+      if (typeof authHeaderOK === 'function' && !authHeaderOK()) {
+        chatNotificationsUnlocked = true;
+        return;
+      }
+
+      const msgs = await chatFetchMessages({ limit: 60 });
+      hydrateChatStateFromMessages(msgs);
+      seedKillFeedSeenKeys(msgs);
+      killFeedBootstrapReady = true;
+      killFeedBootstrapPollConsumed = false;
+
+      if (chatLastReadId === null && chatLatestMessageId !== null) {
+        saveChatLastReadId(chatLatestMessageId);
+        clearChatUnreadBadge();
+      }
+
+      syncChatPollingState();
+      chatNotificationsUnlocked = true;
+    } catch (err) {
+      console.warn('ensureChatNotificationsUnlocked failed', err);
+    } finally {
+      chatNotificationsUnlockInFlight = false;
+    }
+  }
+
   function onChatAudioUnlockInteraction(evt) {
     unlockChatAudio(evt?.type || 'interaction');
+  }
+
+  function onChatNotificationsUnlockInteraction(evt) {
+    ensureChatNotificationsUnlocked(evt?.type || 'interaction');
   }
 
   function bindChatAudioUnlockTarget(el) {
@@ -240,6 +290,13 @@
 
   bindChatAudioUnlockTargets();
   rearmChatAudioUnlock();
+  ['pointerdown', 'touchstart', 'click', 'keydown'].forEach((evtName) => {
+    document.addEventListener(evtName, onChatNotificationsUnlockInteraction, {
+      passive: true,
+      capture: true,
+      once: true,
+    });
+  });
 
   function playBeep() {
     const ctx = ensureChatAudioContext();
@@ -562,6 +619,7 @@
 
   // Wire up the chat panel: event handlers, initial load, polling
   function wireChatPanel() {
+    ensureChatNotificationsUnlocked('chat-panel-open');
     const chatInput = document.getElementById('chatInput');
     const chatSendBtn = document.getElementById('chatSendBtn');
     if (!chatInput || !chatSendBtn) return;
