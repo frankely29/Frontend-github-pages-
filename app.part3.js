@@ -51,18 +51,17 @@
     return fetchJSON(`${apiBase()}${path}`, { headers });
   }
 
-  function inferBadge(badgeCode) {
+  function strictBadgeCode(badgeCode) {
     const badge = String(badgeCode || '').trim().toLowerCase();
-    if (badge === 'crown') return { code: 'crown' };
-    if (badge === 'silver') return { code: 'silver' };
-    if (badge === 'bronze') return { code: 'bronze' };
-    return { code: '' };
+    if (badge === 'crown') return 'crown';
+    if (badge === 'silver') return 'silver';
+    if (badge === 'bronze') return 'bronze';
+    return null;
   }
 
-  function badgeChip(badgeMeta) {
-    if (!badgeMeta) return '';
-    if (typeof badgeMeta === 'string') badgeMeta = { code: badgeMeta };
-    const badge = String(badgeMeta.code || '').toLowerCase();
+  function badgeChip(badgeCode) {
+    const badge = strictBadgeCode(badgeCode);
+    if (!badge) return '';
     const meta = {
       crown: { label: 'Crown', cls: 'badge-crown', icon: '👑' },
       silver: { label: 'Silver', cls: 'badge-silver', icon: '🥈' },
@@ -81,11 +80,8 @@
   function selectedMyBadge() {
     const badgeList = Array.isArray(state.badges) ? state.badges : [];
     const exact = badgeList.find((b) => b?.metric === state.metric && b?.period === state.period);
-    if (exact) return inferBadge(exact.badge_code);
-    if (state.myRow?.badge_code || state.myRow?.rank_position) {
-      return inferBadge(state.myRow?.badge_code || state.myRow?.leaderboard_badge_code);
-    }
-    return null;
+    if (exact) return strictBadgeCode(exact.badge_code);
+    return strictBadgeCode(state.myRow?.badge_code);
   }
 
   function renderOverview() {
@@ -113,7 +109,7 @@
       const rank = Number(row?.rank_position || idx + 1);
       const name = row?.display_name || row?.name || row?.user_name || `Driver ${rank}`;
       const value = row?.metric_value;
-      const badge = inferBadge(row?.badge_code || row?.leaderboard_badge_code);
+      const badge = strictBadgeCode(row?.badge_code);
       return `<div class="leaderboardRow">
         <span class="leaderboardRank">#${rank}</span>
         <span class="leaderboardName" title="${esc(name)}">${esc(name)}</span>
