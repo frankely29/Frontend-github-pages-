@@ -791,6 +791,13 @@ const dockBackdrop = document.getElementById("dockBackdrop");
 const USER_AGENT = typeof navigator !== "undefined" ? navigator.userAgent || "" : "";
 const IS_TESLA_BROWSER = /\bTesla\//i.test(USER_AGENT);
 const DRAWER_AUTO_MINIMIZE_MS = 5000;
+const DRAWER_AUTO_MINIMIZE_MS_BY_PANEL = {
+  games: 60000,
+  chat: 60000,
+  leaderboard: 60000,
+  colors: 30000,
+  profile: 30000,
+};
 
 let openPanelKey = null;
 let drawerAutoMinimizeTimer = null;
@@ -807,11 +814,12 @@ function touchDrawerAutoMinimizeTimer() {
     clearDrawerAutoMinimizeTimer();
     return;
   }
+  const autoMinimizeMs = DRAWER_AUTO_MINIMIZE_MS_BY_PANEL[openPanelKey] ?? DRAWER_AUTO_MINIMIZE_MS;
   clearDrawerAutoMinimizeTimer();
   drawerAutoMinimizeTimer = setTimeout(() => {
     if (!openPanelKey) return;
     closeDrawer();
-  }, DRAWER_AUTO_MINIMIZE_MS);
+  }, autoMinimizeMs);
 }
 
 function bindDrawerAutoMinimizeActivity() {
