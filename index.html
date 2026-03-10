@@ -637,7 +637,11 @@
       width: min(100vw - 20px, 430px);
       z-index: 3000 !important;
       pointer-events: auto;
+      --dock-edge-fade-left: 0px;
+      --dock-edge-fade-right: 0px;
     }
+    #dock.dock-can-scroll-left { --dock-edge-fade-left: 34px; }
+    #dock.dock-can-scroll-right { --dock-edge-fade-right: 34px; }
     .dockViewport {
       position: relative;
       display: block;
@@ -648,6 +652,21 @@
       scrollbar-width: none;
       scroll-behavior: smooth;
       touch-action: pan-x;
+      -webkit-mask-image: linear-gradient(
+        to right,
+        transparent 0,
+        #000 var(--dock-edge-fade-left),
+        #000 calc(100% - var(--dock-edge-fade-right)),
+        transparent 100%
+      );
+      mask-image: linear-gradient(
+        to right,
+        transparent 0,
+        #000 var(--dock-edge-fade-left),
+        #000 calc(100% - var(--dock-edge-fade-right)),
+        transparent 100%
+      );
+      mask-mode: alpha;
     }
     .dockViewport::-webkit-scrollbar { display: none; }
     .dockTrack {
@@ -657,26 +676,7 @@
       padding: 2px 0;
     }
     .dockEdgeFade {
-      position: absolute;
-      top: 0;
-      bottom: 0;
-      width: 44px;
-      pointer-events: none;
-      opacity: 0;
-      transition: opacity 180ms ease;
-      z-index: 2;
-    }
-    .dockEdgeFade.left {
-      left: 0;
-      background: linear-gradient(to right, rgba(245,245,245,0.58) 0%, rgba(245,245,245,0.44) 20%, rgba(245,245,245,0.30) 42%, rgba(245,245,245,0.16) 68%, rgba(245,245,245,0.06) 86%, rgba(245,245,245,0) 100%);
-    }
-    .dockEdgeFade.right {
-      right: 0;
-      background: linear-gradient(to left, rgba(245,245,245,0.58) 0%, rgba(245,245,245,0.44) 20%, rgba(245,245,245,0.30) 42%, rgba(245,245,245,0.16) 68%, rgba(245,245,245,0.06) 86%, rgba(245,245,245,0) 100%);
-    }
-    #dock.dock-can-scroll-left .dockEdgeFade.left,
-    #dock.dock-can-scroll-right .dockEdgeFade.right {
-      opacity: 1;
+      display: none;
     }
     .dockScrollHint {
       position: absolute;
@@ -762,12 +762,6 @@
     body.night .dockBtn,
     body.night .toggleBtnSmall{
       background: rgba(255,255,255,0.85);
-    }
-    body.night .dockEdgeFade.left {
-      background: linear-gradient(to right, rgba(220,220,220,0.52) 0%, rgba(220,220,220,0.39) 20%, rgba(220,220,220,0.27) 42%, rgba(220,220,220,0.15) 68%, rgba(220,220,220,0.06) 86%, rgba(220,220,220,0) 100%);
-    }
-    body.night .dockEdgeFade.right {
-      background: linear-gradient(to left, rgba(220,220,220,0.52) 0%, rgba(220,220,220,0.39) 20%, rgba(220,220,220,0.27) 42%, rgba(220,220,220,0.15) 68%, rgba(220,220,220,0.06) 86%, rgba(220,220,220,0) 100%);
     }
     body.night .dockScrollHint {
       background: rgba(225,27,27,0.9);
