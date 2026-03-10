@@ -51,17 +51,12 @@
     return fetchJSON(`${apiBase()}${path}`, { headers });
   }
 
-  function inferBadge(rank, badgeCode, hasCrown) {
-    const badge = String(badgeCode || '').toLowerCase();
-    let code = '';
-    if (badge.includes('silver')) code = 'silver';
-    else if (badge.includes('bronze')) code = 'bronze';
-    else if (badge.includes('crown') || badge.includes('gold')) code = 'crown';
-    else if (hasCrown && Number(rank) !== 2 && Number(rank) !== 3) code = 'crown';
-    else if (Number(rank) === 1) code = 'crown';
-    else if (Number(rank) === 2) code = 'silver';
-    else if (Number(rank) === 3) code = 'bronze';
-    return { code };
+  function inferBadge(_rank, badgeCode, _hasCrown) {
+    const badge = String(badgeCode || '').trim().toLowerCase();
+    if (badge === 'crown') return { code: 'crown' };
+    if (badge === 'silver') return { code: 'silver' };
+    if (badge === 'bronze') return { code: 'bronze' };
+    return { code: '' };
   }
 
   function badgeChip(badgeMeta) {
