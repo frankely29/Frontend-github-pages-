@@ -1,6 +1,6 @@
 /*
  * app.part3.js
- * Leaderboard + badges + report preferences panel.
+ * Leaderboard panel (Miles/Hours + periods + badges + my rank + overview).
  */
 (function () {
   const LS_TOKEN = 'community_token_v1';
@@ -9,17 +9,26 @@
   const state = {
     metric: 'miles',
     period: 'weekly',
-    list: [],
-    myRank: null,
-    myBadges: null,
-    prefs: { weekly: false, monthly: false, yearly: false },
+    rows: [],
+    myRow: null,
+    badges: [],
+    overview: null,
     status: '',
     statusType: '',
-    loading: false,
   };
 
   function getToken() {
     try { return localStorage.getItem(LS_TOKEN) || ''; } catch (_) { return ''; }
+  }
+
+  function esc(v) {
+    if (typeof window.escapeHtml === 'function') return window.escapeHtml(v);
+    return String(v ?? '')
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#039;');
   }
 
   async function fetchJSON(url, opts = {}) {
@@ -42,32 +51,12 @@
     return fetchJSON(`${apiBase()}${path}`, { headers });
   }
 
-  async function postAuth(path, body) {
-    if (typeof window.postJSON === 'function') return window.postJSON(path, body, getToken());
-    const headers = { 'Content-Type': 'application/json' };
-    const token = getToken();
-    if (token) headers.Authorization = `Bearer ${token}`;
-    return fetchJSON(`${apiBase()}${path}`, { method: 'POST', headers, body: JSON.stringify(body || {}) });
-  }
-
-  function esc(v) {
-    if (typeof window.escapeHtml === 'function') return window.escapeHtml(v);
-    return String(v ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#039;');
-  }
-
-  function fmtValue(val) {
-    const num = Number(val);
-    if (!Number.isFinite(num)) return '—';
-    if (state.metric === 'hours') return `${num.toFixed(1)} h`;
-    return `${num.toFixed(1)} mi`;
-  }
-
-  function inferBadge(rank, rowBadge) {
-    const b = String(rowBadge || '').toLowerCase();
-    if (b.includes('crown')) return 'crown';
-    if (b.includes('gold')) return 'gold';
-    if (b.includes('silver')) return 'silver';
-    if (b.includes('ruby')) return 'ruby';
+  function inferBadge(rank, badgeCode) {
+    const badge = String(badgeCode || '').toLowerCase();
+    if (badge.includes('crown')) return 'crown';
+    if (badge.includes('gold')) return 'gold';
+    if (badge.includes('silver')) return 'silver';
+    if (badge.includes('ruby')) return 'ruby';
     if (rank === 1) return 'crown';
     if (rank === 2) return 'gold';
     if (rank === 3) return 'silver';
@@ -77,45 +66,64 @@
   function badgeChip(badge) {
     if (!badge) return '';
     const meta = {
-      crown: { txt: '👑 Crown', cls: 'badge-crown' },
-      gold: { txt: '🥇 Gold', cls: 'badge-gold' },
-      silver: { txt: '🥈 Silver', cls: 'badge-silver' },
-      ruby: { txt: '♦ Ruby', cls: 'badge-ruby' },
+      crown: { label: '👑 Crown', cls: 'badge-crown' },
+      gold: { label: '🥇 Gold', cls: 'badge-gold' },
+      silver: { label: '🥈 Silver', cls: 'badge-silver' },
+      ruby: { label: '♦ Ruby', cls: 'badge-ruby' },
     }[badge];
     if (!meta) return '';
-    return `<span class="badgeChip ${meta.cls}">${meta.txt}</span>`;
+    return `<span class="badgeChip ${meta.cls}">${meta.label}</span>`;
   }
 
-  function currentUserBadge() {
-    const badges = Array.isArray(state.myBadges) ? state.myBadges : [];
-    const exact = badges.find((b) => b?.metric === state.metric && b?.period === state.period);
-    const fallback = badges[0];
-    const selected = exact || fallback;
-    if (selected) return inferBadge(Number(selected.rank_position || 0), selected.badge_code);
-    return inferBadge(Number(state.myRank?.rank_position || 0), state.myRank?.badge_code);
+  function formatMetric(value, metric = state.metric) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return '—';
+    return metric === 'hours' ? `${n.toFixed(1)} h` : `${n.toFixed(1)} mi`;
+  }
+
+  function selectedMyBadge() {
+    const exact = state.badges.find((b) => b?.metric === state.metric && b?.period === state.period);
+    if (exact) return inferBadge(Number(exact.rank_position || 0), exact.badge_code);
+    return inferBadge(Number(state.myRow?.rank_position || 0), state.myRow?.badge_code);
+  }
+
+  function renderOverview() {
+    if (!state.overview || typeof state.overview !== 'object') return '';
+    const block = (periodLabel, periodKey) => {
+      const row = state.overview[periodKey] || {};
+      return `<div class="myRankRow"><span>${periodLabel}</span><span>${formatMetric(row[state.metric], state.metric)}</span></div>`;
+    };
+
+    return `
+      <div class="myRankCard">
+        <div style="font:900 11px/1.2 system-ui;">My Summary</div>
+        ${block('Today', 'today')}
+        ${block('Week', 'week')}
+        ${block('Month', 'month')}
+        ${block('Year', 'year')}
+      </div>`;
   }
 
   function leaderboardPanelHTML() {
     const metricBtn = (m, label) => `<button class="chipBtn ${state.metric === m ? 'active' : ''}" data-lb-metric="${m}">${label}</button>`;
     const periodBtn = (p, label) => `<button class="chipBtn ${state.period === p ? 'active' : ''}" data-lb-period="${p}">${label}</button>`;
 
-    const rows = (state.list || []).slice(0, 10).map((r, i) => {
-      const rank = Number(r.rank_position || r.rank || i + 1);
-      const name = r.display_name || r.name || r.user_name || `Driver ${rank}`;
-      const value = r.metric_value ?? r.value ?? r.total ?? r[state.metric];
-      const badge = inferBadge(rank, r.badge_code || r.badge);
+    const topRows = state.rows.slice(0, 10).map((row, idx) => {
+      const rank = Number(row?.rank_position || idx + 1);
+      const name = row?.display_name || row?.name || row?.user_name || `Driver ${rank}`;
+      const value = row?.metric_value;
+      const badge = inferBadge(rank, row?.badge_code);
       return `<div class="leaderboardRow">
         <span class="leaderboardRank">#${rank}</span>
         <span class="leaderboardName" title="${esc(name)}">${esc(name)}</span>
-        <span class="leaderboardValue">${fmtValue(value)}</span>
+        <span class="leaderboardValue">${formatMetric(value)}</span>
         ${badgeChip(badge)}
       </div>`;
     }).join('');
 
-    const meRank = Number(state.myRank?.rank_position || state.myRank?.rank || 0);
-    const meName = state.myRank?.display_name || state.myRank?.name || (window.me && window.me.display_name) || 'You';
-    const meValue = state.myRank?.metric_value ?? state.myRank?.value ?? state.myRank?.total ?? state.myRank?.[state.metric];
-    const myBadge = currentUserBadge();
+    const myRank = Number(state.myRow?.rank_position || 0);
+    const myName = state.myRow?.display_name || state.myRow?.name || (window.me && window.me.display_name) || 'You';
+    const myValue = state.myRow?.metric_value;
 
     return `
       <div class="panelBlock leaderboardPanelWrap">
@@ -124,31 +132,24 @@
 
         <div>
           <div style="font:900 11px/1.2 system-ui;margin-bottom:5px;">Top 10</div>
-          <div class="leaderboardList">${rows || '<div class="leaderboardEmpty">No entries yet.</div>'}</div>
+          <div class="leaderboardList">${topRows || '<div class="leaderboardEmpty">No entries yet.</div>'}</div>
         </div>
 
         <div class="myRankCard">
           <div style="font:900 11px/1.2 system-ui;">My Rank</div>
-          <div class="myRankRow"><span>${esc(meName)}</span><span>${meRank ? `#${meRank}` : 'Unranked'}</span></div>
-          <div class="myRankRow"><span>${state.metric === 'hours' ? 'Hours' : 'Miles'}</span><span>${fmtValue(meValue)}</span></div>
-          <div class="myRankRow"><span>Badge</span><span>${badgeChip(myBadge) || '—'}</span></div>
+          <div class="myRankRow"><span>${esc(myName)}</span><span>${myRank ? `#${myRank}` : 'Unranked'}</span></div>
+          <div class="myRankRow"><span>${state.metric === 'hours' ? 'Hours' : 'Miles'}</span><span>${formatMetric(myValue)}</span></div>
+          <div class="myRankRow"><span>Badge</span><span>${badgeChip(selectedMyBadge()) || '—'}</span></div>
         </div>
+
+        ${renderOverview()}
 
         <div>
           <div style="font:900 11px/1.2 system-ui;margin-bottom:5px;">Badge legend</div>
           <div class="leaderboardLegend">${badgeChip('crown')}${badgeChip('gold')}${badgeChip('silver')}${badgeChip('ruby')}</div>
         </div>
 
-        <div>
-          <div style="font:900 11px/1.2 system-ui;margin-bottom:6px;">Email report settings</div>
-          <div class="prefsGrid">
-            <label class="prefsRow"><span>Weekly reports</span><input id="lbPrefWeekly" type="checkbox" ${state.prefs.weekly ? 'checked' : ''}></label>
-            <label class="prefsRow"><span>Monthly reports</span><input id="lbPrefMonthly" type="checkbox" ${state.prefs.monthly ? 'checked' : ''}></label>
-            <label class="prefsRow"><span>Yearly reports</span><input id="lbPrefYearly" type="checkbox" ${state.prefs.yearly ? 'checked' : ''}></label>
-            <div style="display:flex;justify-content:flex-end;"><button id="lbSavePrefs" class="chipBtn">Save</button></div>
-          </div>
-          <div id="lbStatus" class="leaderboardStatus ${state.statusType}">${esc(state.status || '')}</div>
-        </div>
+        <div id="lbStatus" class="leaderboardStatus ${state.statusType}">${esc(state.status || '')}</div>
       </div>`;
   }
 
@@ -162,68 +163,43 @@
 
   async function loadAll() {
     if (!getToken()) {
-      state.list = [];
-      state.myRank = null;
-      state.myBadges = null;
+      state.rows = [];
+      state.myRow = null;
+      state.badges = [];
+      state.overview = null;
       state.status = 'Sign in to view leaderboard.';
       state.statusType = 'err';
       rerenderIfOpen();
       return;
     }
 
-    state.loading = true;
     state.status = 'Loading…';
     state.statusType = '';
     rerenderIfOpen();
 
-    const qs = `metric=${encodeURIComponent(state.metric)}&period=${encodeURIComponent(state.period)}&limit=10`;
+    const metric = encodeURIComponent(state.metric);
+    const period = encodeURIComponent(state.period);
     try {
-      const [lb, mine, badges, prefs] = await Promise.all([
-        getAuth(`/leaderboard?${qs}`),
-        getAuth(`/leaderboard/me?metric=${encodeURIComponent(state.metric)}&period=${encodeURIComponent(state.period)}`),
-        getAuth('/leaderboard/badges/me').catch(() => ({})),
-        getAuth('/leaderboard/email_prefs').catch(() => ({})),
+      const [boardRes, meRes, badgesRes, overviewRes] = await Promise.all([
+        getAuth(`/leaderboard?metric=${metric}&period=${period}&limit=10`),
+        getAuth(`/leaderboard/me?metric=${metric}&period=${period}`),
+        getAuth('/leaderboard/badges/me').catch(() => ({ badges: [] })),
+        getAuth('/leaderboard/overview/me').catch(() => null),
       ]);
 
-      state.list = Array.isArray(lb?.rows) ? lb.rows : (Array.isArray(lb) ? lb : (lb?.items || []));
-      state.myRank = mine?.row || null;
-      state.myBadges = Array.isArray(badges?.badges) ? badges.badges : [];
-      const p = prefs || {};
-      state.prefs = {
-        weekly: !!p.weekly_enabled,
-        monthly: !!p.monthly_enabled,
-        yearly: !!p.yearly_enabled,
-      };
+      state.rows = Array.isArray(boardRes?.rows) ? boardRes.rows : [];
+      state.myRow = meRes?.row || null;
+      state.badges = Array.isArray(badgesRes?.badges) ? badgesRes.badges : [];
+      state.overview = overviewRes && typeof overviewRes === 'object' ? overviewRes : null;
       state.status = '';
       state.statusType = '';
     } catch (err) {
-      state.status = `Unable to load leaderboard: ${String(err.message || err)}`;
-      state.statusType = 'err';
-    } finally {
-      state.loading = false;
-      rerenderIfOpen();
-    }
-  }
-
-  async function savePrefs() {
-    state.status = 'Saving…';
-    state.statusType = '';
-    rerenderIfOpen();
-
-    const payload = {
-      weekly_enabled: !!state.prefs.weekly,
-      monthly_enabled: !!state.prefs.monthly,
-      yearly_enabled: !!state.prefs.yearly,
-    };
-
-    try {
-      await postAuth('/leaderboard/email_prefs', payload);
-      state.status = 'Email report settings updated.';
-      state.statusType = 'ok';
-    } catch (err) {
-      state.status = `Save failed: ${String(err.message || err)}`;
+      state.rows = [];
+      state.myRow = null;
+      state.status = `Unable to load leaderboard: ${String(err?.message || err)}`;
       state.statusType = 'err';
     }
+
     rerenderIfOpen();
   }
 
@@ -231,9 +207,9 @@
     document.querySelectorAll('[data-lb-metric]').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         e.preventDefault();
-        const next = btn.getAttribute('data-lb-metric') || 'miles';
-        if (state.metric === next) return;
-        state.metric = next;
+        const nextMetric = btn.getAttribute('data-lb-metric') || 'miles';
+        if (state.metric === nextMetric) return;
+        state.metric = nextMetric;
         loadAll();
       });
     });
@@ -241,28 +217,18 @@
     document.querySelectorAll('[data-lb-period]').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         e.preventDefault();
-        const next = btn.getAttribute('data-lb-period') || 'weekly';
-        if (state.period === next) return;
-        state.period = next;
+        const nextPeriod = btn.getAttribute('data-lb-period') || 'weekly';
+        if (state.period === nextPeriod) return;
+        state.period = nextPeriod;
         loadAll();
       });
-    });
-
-    const weekly = document.getElementById('lbPrefWeekly');
-    const monthly = document.getElementById('lbPrefMonthly');
-    const yearly = document.getElementById('lbPrefYearly');
-    weekly?.addEventListener('change', () => { state.prefs.weekly = !!weekly.checked; });
-    monthly?.addEventListener('change', () => { state.prefs.monthly = !!monthly.checked; });
-    yearly?.addEventListener('change', () => { state.prefs.yearly = !!yearly.checked; });
-    document.getElementById('lbSavePrefs')?.addEventListener('click', (e) => {
-      e.preventDefault();
-      savePrefs();
     });
   }
 
   function init() {
     const btn = document.getElementById('dockLeaderboard');
     if (!btn || typeof bindDockToggle !== 'function') return;
+
     bindDockToggle(btn, PANEL_KEY, 'Leaderboard', leaderboardPanelHTML, () => {
       wireLeaderboardPanel();
       loadAll();
