@@ -660,7 +660,7 @@
       position: absolute;
       top: 0;
       bottom: 0;
-      width: 24px;
+      width: 30px;
       pointer-events: none;
       opacity: 0;
       transition: opacity 180ms ease;
@@ -668,11 +668,11 @@
     }
     .dockEdgeFade.left {
       left: 0;
-      background: linear-gradient(to right, rgba(238,238,238,0.88), rgba(238,238,238,0));
+      background: linear-gradient(to right, rgba(245,245,245,0.97) 0%, rgba(245,245,245,0.8) 34%, rgba(245,245,245,0.22) 74%, rgba(245,245,245,0) 100%);
     }
     .dockEdgeFade.right {
       right: 0;
-      background: linear-gradient(to left, rgba(238,238,238,0.88), rgba(238,238,238,0));
+      background: linear-gradient(to left, rgba(245,245,245,0.97) 0%, rgba(245,245,245,0.8) 34%, rgba(245,245,245,0.22) 74%, rgba(245,245,245,0) 100%);
     }
     #dock.dock-can-scroll-left .dockEdgeFade.left,
     #dock.dock-can-scroll-right .dockEdgeFade.right {
@@ -682,13 +682,13 @@
       position: absolute;
       top: 50%;
       transform: translateY(-50%);
-      width: 22px;
-      height: 22px;
+      width: 26px;
+      height: 26px;
       border: 0;
       border-radius: 999px;
       background: rgba(255,255,255,0.24);
       color: rgba(35,35,35,0.55);
-      font-size: 17px;
+      font-size: 20px;
       line-height: 1;
       display: grid;
       place-items: center;
@@ -702,10 +702,24 @@
     }
     .dockScrollHint.left { left: 4px; }
     .dockScrollHint.right { right: 4px; }
+    @keyframes dockHintPulseLeft {
+      0%, 100% { transform: translateY(-50%) translateX(0); opacity: 0.88; }
+      50% { transform: translateY(-50%) translateX(-2px); opacity: 1; }
+    }
+    @keyframes dockHintPulseRight {
+      0%, 100% { transform: translateY(-50%) translateX(0); opacity: 0.88; }
+      50% { transform: translateY(-50%) translateX(2px); opacity: 1; }
+    }
     #dock.dock-can-scroll-left .dockScrollHint.left,
     #dock.dock-can-scroll-right .dockScrollHint.right {
       opacity: 0.9;
       pointer-events: auto;
+    }
+    #dock.dock-can-scroll-left .dockScrollHint.left {
+      animation: dockHintPulseLeft 1.6s ease-in-out infinite;
+    }
+    #dock.dock-can-scroll-right .dockScrollHint.right {
+      animation: dockHintPulseRight 1.6s ease-in-out infinite;
     }
     .dockScrollHint:active { background: rgba(255,255,255,0.4); }
     .dock, #dockBar, .iconRow{
@@ -738,10 +752,10 @@
       background: rgba(255,255,255,0.85);
     }
     body.night .dockEdgeFade.left {
-      background: linear-gradient(to right, rgba(210,210,210,0.36), rgba(210,210,210,0));
+      background: linear-gradient(to right, rgba(220,220,220,0.6) 0%, rgba(220,220,220,0.42) 34%, rgba(220,220,220,0.16) 74%, rgba(220,220,220,0) 100%);
     }
     body.night .dockEdgeFade.right {
-      background: linear-gradient(to left, rgba(210,210,210,0.36), rgba(210,210,210,0));
+      background: linear-gradient(to left, rgba(220,220,220,0.6) 0%, rgba(220,220,220,0.42) 34%, rgba(220,220,220,0.16) 74%, rgba(220,220,220,0) 100%);
     }
     body.night .dockScrollHint {
       background: rgba(30,30,30,0.32);
