@@ -646,6 +646,11 @@
       padX: +(2.6 + (9.8 - 2.6) * emphasize).toFixed(2),
       avatarPx: +(15 + (48 - 15) * emphasize).toFixed(2),
       maxWidthPx: +(88 + (190 - 88) * emphasize).toFixed(2),
+      badgeMinWidthPx: +(12 + (22 - 12) * emphasize).toFixed(2),
+      badgePadYPx: +(0.8 + (1.8 - 0.8) * emphasize).toFixed(2),
+      badgePadXPx: +(2.4 + (5.2 - 2.4) * emphasize).toFixed(2),
+      badgeFontPx: +(7.2 + (10.8 - 7.2) * emphasize).toFixed(2),
+      crownFontPx: +(9 + (16 - 9) * emphasize).toFixed(2),
       arrowBodyPx: +(18 + (27 - 18) * t).toFixed(2),
       arrowLeftRightPx: +(4.5 + (7 - 4.5) * t).toFixed(2),
       arrowAccentPx: +(10 + (14 - 10) * t).toFixed(2)
@@ -656,19 +661,21 @@
     return normalizeMapIdentityMode(mode) === MAP_IDENTITY_MODE_AVATAR && !!safeMapAvatarUrl(avatarUrl);
   }
 
-  function normalizeLeaderboardBadge(code, hasCrown) {
-    const badge = String(code || '').toLowerCase();
-    if (badge.includes('silver')) return 'silver';
-    if (badge.includes('bronze')) return 'bronze';
-    if (badge.includes('crown') || badge.includes('gold')) return 'crown';
-    if (hasCrown) return 'crown';
+  function normalizeLeaderboardBadge(code) {
+    const badge = String(code || '').trim().toLowerCase();
+    if (badge === 'crown') return 'crown';
+    if (badge === 'silver') return 'silver';
+    if (badge === 'bronze') return 'bronze';
     return '';
   }
 
-  function mapIdentityBadgeOverlayHTML({ badgeCode, hasCrown }) {
-    const badge = normalizeLeaderboardBadge(badgeCode, hasCrown);
+  function mapIdentityBadgeOverlayHTML({ badgeCode }) {
+    const badge = normalizeLeaderboardBadge(badgeCode);
     if (!badge) return '';
-    const icon = { crown: '👑', silver: '🥈', bronze: '🥉' }[badge] || '';
+    if (badge === 'crown') {
+      return '<span class="mapIdentityCrownOverlay" aria-label="crown">👑</span>';
+    }
+    const icon = { silver: '🥈', bronze: '🥉' }[badge] || '';
     return `<span class="mapIdentityBadgeOverlay badge-${badge}" aria-label="${escapeHtml(badge)}">${icon}</span>`;
   }
 
@@ -741,6 +748,11 @@
       rootStyle.setProperty('--map-ident-arrow-body', `${cfg.arrowBodyPx}px`);
       rootStyle.setProperty('--map-ident-arrow-left-right', `${cfg.arrowLeftRightPx}px`);
       rootStyle.setProperty('--map-ident-arrow-accent', `${cfg.arrowAccentPx}px`);
+      rootStyle.setProperty('--map-ident-badge-min-width', `${cfg.badgeMinWidthPx}px`);
+      rootStyle.setProperty('--map-ident-badge-pad-y', `${cfg.badgePadYPx}px`);
+      rootStyle.setProperty('--map-ident-badge-pad-x', `${cfg.badgePadXPx}px`);
+      rootStyle.setProperty('--map-ident-badge-font', `${cfg.badgeFontPx}px`);
+      rootStyle.setProperty('--map-ident-crown-font', `${cfg.crownFontPx}px`);
     }
     document.querySelectorAll('.otherDrvName, .meName').forEach((el) => {
       el.style.fontSize = `${cfg.fontPx}px`;
