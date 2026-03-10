@@ -264,7 +264,8 @@
       }
 
       chatResetState();
-      const msgs = await chatFetchMessages({ limit: 60 });
+      const result = await chatFetchMessages({ limit: 60 });
+      const msgs = result?.ok && Array.isArray(result.messages) ? result.messages : [];
       hydrateChatStateFromMessages(msgs);
       seedKillFeedSeenKeys(msgs);
       killFeedBootstrapReady = true;
@@ -577,6 +578,9 @@
       if (replace) setChatStatus('No messages yet.');
       return;
     }
+    if (!replace && listEl.dataset.hasMessages !== '1') {
+      listEl.innerHTML = '';
+    }
     listEl.dataset.hasMessages = '1';
     if (replace) listEl.innerHTML = '';
     listEl.appendChild(frag);
@@ -586,7 +590,7 @@
   // Fetch messages. Only proceed if a token is present.
   async function chatFetchMessages({ after = null, limit = 50 } = {}) {
     const token = getCommunityToken();
-    if (!token) return [];
+    if (!token) return { ok: true, messages: [] };
     const qs = new URLSearchParams();
     qs.set('limit', String(limit));
     if (after !== null && after !== undefined && String(after).trim() !== '') {
@@ -594,22 +598,29 @@
     }
     try {
       const data = await getJSONAuth(`/chat/rooms/${CHAT_ROOM}?${qs.toString()}`, token);
-      return Array.isArray(data) ? data : data?.messages || [];
+      return { ok: true, messages: Array.isArray(data) ? data : data?.messages || [] };
     } catch (err) {
       console.warn('chatFetchMessages failed', err);
-      return [];
+      return { ok: false, error: err, messages: [] };
     }
   }
 
   // Load initial and new messages
   async function chatLoadInitial() {
-    const msgs = await chatFetchMessages({ limit: 60 });
+    const result = await chatFetchMessages({ limit: 60 });
+    if (!result?.ok) {
+      setChatStatus('Loading chat...');
+      return { ok: false, messages: [] };
+    }
+    const msgs = Array.isArray(result.messages) ? result.messages : [];
     renderChatMessages(msgs, { replace: true });
     // Initial history should never replay into kill feed notifications.
     seedKillFeedSeenKeys(msgs);
     killFeedBootstrapReady = true;
-    if (maybeInitializeChatReadBaseline()) return;
-    rebuildUnreadBadgeFromMessages(msgs);
+    if (!maybeInitializeChatReadBaseline()) {
+      rebuildUnreadBadgeFromMessages(msgs);
+    }
+    return { ok: true, messages: msgs };
   }
   async function chatFetchNew() { return chatFetchMessages({ after: chatLastSeen, limit: 50 }); }
 
@@ -627,10 +638,29 @@
 
     try {
       const msgs = await chatFetchNew();
+      if (!msgs?.ok) {
+        if (isChatPanelOpen() && chatLastSeen === null) {
+          setChatStatus('Chat unavailable right now.');
+        }
+        return;
+      }
+      const loadedMsgs = Array.isArray(msgs.messages) ? msgs.messages : [];
+      const needsInitialRecovery = chatLastSeen === null;
+
+      if (needsInitialRecovery) {
+        if (!killFeedBootstrapReady) {
+          seedKillFeedSeenKeys(loadedMsgs);
+          killFeedBootstrapReady = true;
+          killFeedBootstrapPollConsumed = true;
+        }
+        if (!maybeInitializeChatReadBaseline()) {
+          rebuildUnreadBadgeFromMessages(loadedMsgs);
+        }
+      }
 
       // Update the in-panel chat messages only if the chat panel is open.
       if (isChatPanelOpen()) {
-        renderChatMessages(msgs);
+        renderChatMessages(loadedMsgs, { replace: needsInitialRecovery });
         markChatReadThroughLatestLoaded();
 
         // Hide the kill feed when chat panel is open.
@@ -642,10 +672,10 @@
         // Guard against startup replay: absorb first post-bootstrap poll
         // as already-seen history, then allow only later unseen arrivals.
         if (killFeedBootstrapReady && !killFeedBootstrapPollConsumed) {
-          seedKillFeedSeenKeys(msgs);
+          seedKillFeedSeenKeys(loadedMsgs);
           killFeedBootstrapPollConsumed = true;
         } else if (killFeedBootstrapReady && killFeedBootstrapPollConsumed) {
-          showKillFeed(msgs);
+          showKillFeed(loadedMsgs);
         }
       }
     } catch (e) {
@@ -703,7 +733,10 @@
       chatInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); sendNow(); } });
     }
     chatLoadInitial()
-      .then(() => chatPollOnce())
+      .then((result) => {
+        if (result?.ok) return chatPollOnce();
+        return null;
+      })
       .catch((e) => {
         console.warn('chat initial load failed:', e);
         setChatStatus('Chat unavailable right now.');
