@@ -658,9 +658,10 @@
 
   function normalizeLeaderboardBadge(code, hasCrown) {
     const badge = String(code || '').toLowerCase();
-    if (hasCrown || badge.includes('crown') || badge.includes('gold')) return 'crown';
     if (badge.includes('silver')) return 'silver';
-    if (badge.includes('bronze') || badge.includes('ruby')) return 'bronze';
+    if (badge.includes('bronze')) return 'bronze';
+    if (badge.includes('crown') || badge.includes('gold')) return 'crown';
+    if (hasCrown) return 'crown';
     return '';
   }
 

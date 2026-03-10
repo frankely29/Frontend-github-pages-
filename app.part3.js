@@ -54,9 +54,10 @@
   function inferBadge(rank, badgeCode, hasCrown) {
     const badge = String(badgeCode || '').toLowerCase();
     let code = '';
-    if (hasCrown || badge.includes('crown') || badge.includes('gold')) code = 'crown';
-    else if (badge.includes('silver')) code = 'silver';
-    else if (badge.includes('bronze') || badge.includes('ruby')) code = 'bronze';
+    if (badge.includes('silver')) code = 'silver';
+    else if (badge.includes('bronze')) code = 'bronze';
+    else if (badge.includes('crown') || badge.includes('gold')) code = 'crown';
+    else if (hasCrown && Number(rank) !== 2 && Number(rank) !== 3) code = 'crown';
     else if (Number(rank) === 1) code = 'crown';
     else if (Number(rank) === 2) code = 'silver';
     else if (Number(rank) === 3) code = 'bronze';
@@ -155,7 +156,7 @@
 
         <div>
           <div style="font:900 11px/1.2 system-ui;margin-bottom:5px;">Badge legend</div>
-          <div class="leaderboardLegend">${badgeChip('crown')}${badgeChip('silver')}${badgeChip('bronze')}</div>
+          <div class="leaderboardLegend">${badgeChip('crown')} Crown 👑 ${badgeChip('silver')} Silver 🥈 ${badgeChip('bronze')} Bronze 🥉</div>
         </div>
 
         <div id="lbStatus" class="leaderboardStatus ${state.statusType}">${esc(state.status || '')}</div>
