@@ -99,6 +99,8 @@ let lastPickupFetchMs = 0;
 let lastPickupFetchKey = "";
 let pickupZoneStats = new Map();
 let pickupHotspotZoneIds = new Set();
+let pickupPointsSourceFingerprint = "";
+let pickupHotspotsSourceFingerprint = "";
 
 /* =========================================================
    MANHATTAN MODE — DEFAULT SETTINGS (SAFE TO EDIT)
@@ -1580,7 +1582,58 @@ function emptyGeojson() {
 function clearPickupOverlayCache() {
   pickupZoneStats = new Map();
   pickupHotspotZoneIds = new Set();
+  pickupPointsSourceFingerprint = "";
+  pickupHotspotsSourceFingerprint = "";
   lastPickupFetchKey = "";
+}
+
+function pickupHotspotsFingerprint(fc) {
+  if (!fc || fc.type !== "FeatureCollection" || !Array.isArray(fc.features) || !fc.features.length) {
+    return "";
+  }
+  const rows = [];
+  for (const feat of fc.features) {
+    const props = feat?.properties || {};
+    const zoneId = props?.zone_id;
+    if (zoneId == null) continue;
+    const sampleSize = Number(props?.sample_size ?? NaN);
+    const intensity = Number(props?.intensity ?? NaN);
+    const signature = props?.signature;
+    if (signature != null && signature !== "") {
+      rows.push([
+        String(zoneId),
+        String(signature),
+        Number.isFinite(sampleSize) ? String(sampleSize) : "",
+        Number.isFinite(intensity) ? String(intensity) : "",
+      ].join("|"));
+      continue;
+    }
+    const latestCreatedAt = Number(props?.latest_created_at ?? NaN);
+    rows.push([
+      String(zoneId),
+      "",
+      Number.isFinite(sampleSize) ? String(sampleSize) : "",
+      Number.isFinite(latestCreatedAt) ? String(latestCreatedAt) : "",
+    ].join("|"));
+  }
+  rows.sort();
+  return rows.join(";;");
+}
+
+function pickupPointsFingerprintFromFeatures(fc) {
+  if (!fc || fc.type !== "FeatureCollection" || !Array.isArray(fc.features) || !fc.features.length) {
+    return "";
+  }
+  const rows = [];
+  for (const feat of fc.features) {
+    const props = feat?.properties || {};
+    const id = props?.id ?? feat?.id ?? "";
+    const zoneId = props?.zone_id ?? "";
+    const createdAt = props?.created_at ?? props?.ts ?? "";
+    rows.push([String(id), String(zoneId), String(createdAt)].join("|"));
+  }
+  rows.sort();
+  return rows.join(";;");
 }
 
 function setPickupOverlayData(fc, items = [], zoneStats = [], zoneHotspots = emptyGeojson()) {
@@ -1633,18 +1686,20 @@ function setPickupOverlayData(fc, items = [], zoneStats = [], zoneHotspots = emp
     }
   }
 
-  const hotspotFc = (zoneHotspots && zoneHotspots.type === "FeatureCollection" && Array.isArray(zoneHotspots.features))
+  const validatedZoneHotspots = (zoneHotspots && zoneHotspots.type === "FeatureCollection" && Array.isArray(zoneHotspots.features))
     ? zoneHotspots
     : emptyGeojson();
 
-  for (const feat of hotspotFc.features) {
+  for (const feat of validatedZoneHotspots.features) {
     const zoneId = feat?.properties?.zone_id;
     if (zoneId != null) pickupHotspotZoneIds.add(String(zoneId));
   }
 
+  const hotspotFingerprint = pickupHotspotsFingerprint(validatedZoneHotspots);
   const hotspotSrc = map?.getSource?.("pickup-zone-hotspots");
-  if (hotspotSrc && typeof hotspotSrc.setData === "function") {
-    hotspotSrc.setData(hotspotFc);
+  if (hotspotSrc && typeof hotspotSrc.setData === "function" && hotspotFingerprint !== pickupHotspotsSourceFingerprint) {
+    hotspotSrc.setData(validatedZoneHotspots);
+    pickupHotspotsSourceFingerprint = hotspotFingerprint;
   }
 
   const filteredFeatures = Array.isArray(fc?.features)
@@ -1653,11 +1708,13 @@ function setPickupOverlayData(fc, items = [], zoneStats = [], zoneHotspots = emp
       return zoneId == null || !pickupHotspotZoneIds.has(String(zoneId));
     })
     : [];
-  const filteredFc = { type: "FeatureCollection", features: filteredFeatures };
+  const filteredPickupPointsFc = { type: "FeatureCollection", features: filteredFeatures };
+  const visiblePointsFingerprint = pickupPointsFingerprintFromFeatures(filteredPickupPointsFc);
 
   const src = map?.getSource?.("pickup-points");
-  if (src && typeof src.setData === "function") {
-    src.setData(filteredFc);
+  if (src && typeof src.setData === "function" && visiblePointsFingerprint !== pickupPointsSourceFingerprint) {
+    src.setData(filteredPickupPointsFc);
+    pickupPointsSourceFingerprint = visiblePointsFingerprint;
   }
 }
 
@@ -1725,19 +1782,31 @@ async function ensurePickupSourceAndLayers() {
         type: "fill",
         source: "pickup-zone-hotspots",
         paint: {
-          "fill-color": "#0bbf63",
+          "fill-color": [
+            "interpolate",
+            ["linear"],
+            ["coalesce", ["get", "intensity"], 0.35],
+            0.00,
+            "#ffbd59",
+            0.45,
+            "#ff9800",
+            0.75,
+            "#ff7a00",
+            1.00,
+            "#ff6d00",
+          ],
           "fill-opacity": [
             "interpolate",
             ["linear"],
             ["coalesce", ["get", "intensity"], 0.35],
-            0,
-            0.10,
-            0.40,
-            0.18,
-            0.70,
-            0.26,
-            1.00,
+            0.00,
+            0.16,
+            0.45,
+            0.24,
+            0.75,
             0.34,
+            1.00,
+            0.46,
           ],
         },
       },
@@ -1752,16 +1821,24 @@ async function ensurePickupSourceAndLayers() {
         type: "line",
         source: "pickup-zone-hotspots",
         paint: {
-          "line-color": "#07944c",
-          "line-opacity": 0.45,
+          "line-color": "#cc5a00",
+          "line-opacity": [
+            "interpolate",
+            ["linear"],
+            ["coalesce", ["get", "intensity"], 0.35],
+            0.00,
+            0.55,
+            1.00,
+            0.72,
+          ],
           "line-width": [
             "interpolate",
             ["linear"],
             ["coalesce", ["get", "intensity"], 0.35],
-            0,
-            0.8,
-            1,
-            1.6,
+            0.00,
+            1.0,
+            1.00,
+            1.8,
           ],
         },
       },
