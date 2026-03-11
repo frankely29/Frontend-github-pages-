@@ -1192,7 +1192,7 @@ function applyDockIconModel() {
   };
 
   setIcon(dockColors, `
-    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false" style="display:block">
+    <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" focusable="false" style="display:block">
       <circle cx="12" cy="12" r="10" fill="#f2f8ff"/>
       <path d="M12 2a10 10 0 0 1 8.7 5l-5.7 1.1-1.9-4.6Z" fill="#9b5cff"/>
       <path d="M20.7 7a10 10 0 0 1 1.2 6.6l-5.8.8-1.1-6.3Z" fill="#2f7cff"/>
@@ -1204,7 +1204,7 @@ function applyDockIconModel() {
   `);
 
   setIcon(dockModes, `
-    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false" style="display:block">
+    <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" focusable="false" style="display:block">
       <path d="M10.3 2h3.4l.5 2.2a8 8 0 0 1 1.8.8l1.9-1.2 2.4 2.4-1.2 1.9c.3.6.6 1.2.8 1.8L22 10.3v3.4l-2.2.5a8 8 0 0 1-.8 1.8l1.2 1.9-2.4 2.4-1.9-1.2a8 8 0 0 1-1.8.8l-.5 2.2h-3.4l-.5-2.2a8 8 0 0 1-1.8-.8l-1.9 1.2-2.4-2.4 1.2-1.9a8 8 0 0 1-.8-1.8L2 13.7v-3.4l2.2-.5c.2-.6.5-1.2.8-1.8L3.8 6.1l2.4-2.4 1.9 1.2a8 8 0 0 1 1.8-.8L10.3 2Z" fill="#4e78ff"/>
       <circle cx="12" cy="12" r="4.4" fill="#73d2ff"/>
       <circle cx="12" cy="12" r="2.45" fill="#ffffff"/>
@@ -1213,36 +1213,19 @@ function applyDockIconModel() {
   `);
 
   setIcon(dockChat, `
-    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false" style="display:block">
-      <path d="M5 5.2h14a2.8 2.8 0 0 1 2.8 2.8v6.3a2.8 2.8 0 0 1-2.8 2.8h-7.8l-5.2 3.2v-3.2H5a2.8 2.8 0 0 1-2.8-2.8V8A2.8 2.8 0 0 1 5 5.2Z" fill="#2f7cff"/>
-      <path d="M5.5 6h13a1.9 1.9 0 0 1 1.9 1.9v2.4H3.6V7.9A1.9 1.9 0 0 1 5.5 6Z" fill="#74b4ff"/>
-      <circle cx="8.3" cy="11.1" r="1.2" fill="#ffffff"/>
-      <circle cx="12" cy="11.1" r="1.2" fill="#ffffff"/>
-      <circle cx="15.7" cy="11.1" r="1.2" fill="#ffffff"/>
-      <path d="M5 5.2h14a2.8 2.8 0 0 1 2.8 2.8v6.3a2.8 2.8 0 0 1-2.8 2.8h-7.8l-5.2 3.2v-3.2H5a2.8 2.8 0 0 1-2.8-2.8V8A2.8 2.8 0 0 1 5 5.2Z" fill="none" stroke="#1f55d6" stroke-width="1"/>
-    </svg>
+    <span style="font-size:22px; line-height:1;">💬</span>
   `);
 
   setIcon(dockGames, `
-    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false" style="display:block">
-      <rect x="2.3" y="7.3" width="19.4" height="10.6" rx="5.2" fill="#1f6f2f"/>
-      <rect x="3.3" y="8.3" width="17.4" height="8.6" rx="4.3" fill="#35a24a"/>
-      <path d="M8.3 11.1v3.4M6.6 12.8h3.4" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/>
-      <circle cx="15.8" cy="12" r="1.25" fill="#ff5a5a"/>
-      <circle cx="18.3" cy="14.3" r="1.25" fill="#4ab2ff"/>
-      <circle cx="15.5" cy="14.6" r="1.05" fill="#ffd447"/>
-      <path d="M2.3 12.7h19.4" stroke="#2a8a3d" stroke-width="0.9" opacity="0.35"/>
-    </svg>
+    <span style="font-size:22px; line-height:1;">🎮</span>
   `);
 
   setIcon(dockMusic, `
-    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false" style="display:block">
-      <path d="M15.5 4v9.1a3.2 3.2 0 1 1-1.5-2.7V6.2l7-1.7v7a3.2 3.2 0 1 1-1.5-2.7V3L15.5 4Z" fill="#ffffff"/>
-    </svg>
+    <span style="font-size:22px; line-height:1;">🥁</span>
   `);
 
   setIcon(dockProfile, `
-    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false" style="display:block">
+    <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" focusable="false" style="display:block">
       <circle cx="12" cy="12" r="10" fill="#eef3ff"/>
       <circle cx="12" cy="8" r="4" fill="#f4c7a1"/>
       <path d="M4 20a8 8 0 0 1 16 0v.2H4Z" fill="#5c6cf0"/>
@@ -1252,7 +1235,7 @@ function applyDockIconModel() {
   `);
 
   setIcon(dockLeaderboard, `
-    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false" style="display:block">
+    <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" focusable="false" style="display:block">
       <path d="M4.2 20h15.6" stroke="#7a5313" stroke-width="1.4" stroke-linecap="round"/>
       <rect x="5.2" y="11.2" width="3.3" height="6" rx="1" fill="#3f8cff"/>
       <rect x="10.35" y="8.4" width="3.3" height="8.8" rx="1" fill="#2ecf73"/>
