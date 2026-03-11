@@ -4097,6 +4097,17 @@ function clearOtherDrivers() {
   otherMarkers.clear();
 }
 
+function bindDriverProfileMarkerClick(el, userId) {
+  if (!el || !userId) return;
+  el.style.pointerEvents = "auto";
+  el.style.cursor = "pointer";
+  el.onclick = (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    window.openDriverProfileModal?.({ userId });
+  };
+}
+
 function upsertDriverMarker(userId, name, lat, lng, heading, avatarUrl = "", mode = "name", orbitMeta = null, leaderboardBadgeCode = '', leaderboardHasCrown = false) {
   if (!Number.isFinite(lat) || !Number.isFinite(lng) || !map) return;
   if (!userId) return;
@@ -4105,12 +4116,14 @@ function upsertDriverMarker(userId, name, lat, lng, heading, avatarUrl = "", mod
   if (existing) {
     existing.setLngLat([lng, lat]);
     const el = existing.getElement();
+    bindDriverProfileMarkerClick(el, userId);
     const newEl = makeDriverIcon(name || `Driver ${userId}`, heading, avatarUrl, mode, orbitMeta, leaderboardBadgeCode, leaderboardHasCrown);
     el.innerHTML = newEl.innerHTML;
     return;
   }
 
   const el = makeDriverIcon(name || `Driver ${userId}`, heading, avatarUrl, mode, orbitMeta, leaderboardBadgeCode, leaderboardHasCrown);
+  bindDriverProfileMarkerClick(el, userId);
   // A custom HTML marker's triangle arrow sits slightly below the centre of its
   // 40×40 container (the tip is ~7 px below the vertical midpoint). When the
   // marker is anchored at "center" without an offset, the geographic point
