@@ -1861,9 +1861,14 @@
       .driverProfileScroll{overflow:auto;-webkit-overflow-scrolling:touch;padding:0 11px 10px;min-height:0}
       .driverProfileSectionTitle{font-size:12px;font-weight:700;color:#111827;margin:2px 0 6px}
       .driverProfileStats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin-bottom:9px}
-      .driverProfileStatCard{background:#f8fafc;border:1px solid #e2e8f0;border-radius:11px;padding:8px}
+      .driverProfileStatCard{background:#f8fafc;border:1px solid #e2e8f0;border-radius:11px;padding:7px}
+      .driverProfileStatPeriod{font-size:11px;font-weight:700;color:#0f172a;margin-bottom:4px}
+      .driverProfileStatRow{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-top:2px}
       .driverProfileStatLabel{font-size:11px;color:#475569}
-      .driverProfileStatValue{margin-top:2px;font-size:15px;font-weight:700;color:#0f172a}
+      .driverProfileStatValue{font-size:13px;font-weight:700;color:#0f172a}
+      .driverProfileDailyRanks{margin-top:5px;padding-top:4px;border-top:1px dashed #dbe4ee}
+      .driverProfileDailyRanks .driverProfileStatLabel{font-size:10px}
+      .driverProfileDailyRanks .driverProfileStatValue{font-size:11px}
       .driverProfileDmWrap{display:flex;flex-direction:column;border:1px solid #e2e8f0;border-radius:11px;background:#fff;min-height:130px}
       .driverProfileDmList{display:flex;flex-direction:column;gap:7px;overflow:auto;max-height:min(22vh,190px);padding:9px}
       .driverProfileDmBubble{max-width:86%;font-size:12px;line-height:1.3;white-space:pre-wrap;word-break:break-word;padding:7px 9px;border-radius:11px}
@@ -1972,6 +1977,15 @@
     const n = Number(value);
     if (!Number.isFinite(n)) return '0';
     return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  }
+
+  function renderDriverProfilePeriodCard(label, data, extraHtml = '') {
+    return `<div class="driverProfileStatCard">
+      <div class="driverProfileStatPeriod">${escapeHtml(label)}</div>
+      <div class="driverProfileStatRow"><div class="driverProfileStatLabel">Miles</div><div class="driverProfileStatValue">${escapeHtml(formatDriverProfileStat(data?.miles, 'value'))}</div></div>
+      <div class="driverProfileStatRow"><div class="driverProfileStatLabel">Hours</div><div class="driverProfileStatValue">${escapeHtml(formatDriverProfileStat(data?.hours, 'value'))}</div></div>
+      ${extraHtml}
+    </div>`;
   }
 
   async function fetchDriverProfile(userId) {
@@ -2121,8 +2135,16 @@
     const profilePayload = driverProfileState.profile || {};
     const profileUser = profilePayload.user || {};
     const daily = profilePayload.daily || {};
+    const weekly = profilePayload.weekly || {};
+    const monthly = profilePayload.monthly || {};
+    const yearly = profilePayload.yearly || {};
     const name = String(profileUser?.display_name || 'Driver').trim() || 'Driver';
     const selfMode = !!driverProfileState.isSelf;
+
+    const dailyRanksHtml = `<div class="driverProfileDailyRanks">
+      <div class="driverProfileStatRow"><div class="driverProfileStatLabel">Miles rank</div><div class="driverProfileStatValue">${escapeHtml(formatDriverProfileStat(daily?.miles_rank, 'rank'))}</div></div>
+      <div class="driverProfileStatRow"><div class="driverProfileStatLabel">Hours rank</div><div class="driverProfileStatValue">${escapeHtml(formatDriverProfileStat(daily?.hours_rank, 'rank'))}</div></div>
+    </div>`;
 
     const messages = normalizeDriverMessages(driverProfileState.messages);
     const dmHtml = messages.length
@@ -2156,12 +2178,12 @@
         <button class="driverProfileClose" id="driverProfileCloseBtn" type="button">Close</button>
       </div>
       <div class="driverProfileScroll">
-        <div class="driverProfileSectionTitle">Today</div>
+        <div class="driverProfileSectionTitle">Work stats</div>
         <div class="driverProfileStats">
-          <div class="driverProfileStatCard"><div class="driverProfileStatLabel">Miles</div><div class="driverProfileStatValue">${escapeHtml(formatDriverProfileStat(daily?.miles, 'value'))}</div></div>
-          <div class="driverProfileStatCard"><div class="driverProfileStatLabel">Hours</div><div class="driverProfileStatValue">${escapeHtml(formatDriverProfileStat(daily?.hours, 'value'))}</div></div>
-          <div class="driverProfileStatCard"><div class="driverProfileStatLabel">Miles rank</div><div class="driverProfileStatValue">${escapeHtml(formatDriverProfileStat(daily?.miles_rank, 'rank'))}</div></div>
-          <div class="driverProfileStatCard"><div class="driverProfileStatLabel">Hours rank</div><div class="driverProfileStatValue">${escapeHtml(formatDriverProfileStat(daily?.hours_rank, 'rank'))}</div></div>
+          ${renderDriverProfilePeriodCard('Daily', daily, dailyRanksHtml)}
+          ${renderDriverProfilePeriodCard('Weekly', weekly)}
+          ${renderDriverProfilePeriodCard('Monthly', monthly)}
+          ${renderDriverProfilePeriodCard('Yearly', yearly)}
         </div>
         ${selfMode ? accountActionsHtml : `
           <div class="driverProfileSectionTitle">Private messages</div>
