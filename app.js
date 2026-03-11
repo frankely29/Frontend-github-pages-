@@ -1787,31 +1787,142 @@ async function ensurePickupSourceAndLayers() {
             ["linear"],
             ["coalesce", ["get", "intensity"], 0.35],
             0.00,
-            "#ffbd59",
+            "#ffe66d",
             0.45,
-            "#ff9800",
+            "#ffd43b",
             0.75,
-            "#ff7a00",
+            "#ffc107",
             1.00,
-            "#ff6d00",
+            "#ffb300",
           ],
           "fill-opacity": [
             "interpolate",
             ["linear"],
             ["coalesce", ["get", "intensity"], 0.35],
             0.00,
-            0.16,
-            0.45,
             0.24,
-            0.75,
+            0.45,
             0.34,
+            0.75,
+            0.48,
             1.00,
-            0.46,
+            0.60,
           ],
         },
       },
       hotspotBeforeLayer
     );
+  } else {
+    map.setPaintProperty("pickup-zone-hotspots-fill", "fill-color", [
+      "interpolate",
+      ["linear"],
+      ["coalesce", ["get", "intensity"], 0.35],
+      0.00,
+      "#ffe66d",
+      0.45,
+      "#ffd43b",
+      0.75,
+      "#ffc107",
+      1.00,
+      "#ffb300",
+    ]);
+    map.setPaintProperty("pickup-zone-hotspots-fill", "fill-opacity", [
+      "interpolate",
+      ["linear"],
+      ["coalesce", ["get", "intensity"], 0.35],
+      0.00,
+      0.24,
+      0.45,
+      0.34,
+      0.75,
+      0.48,
+      1.00,
+      0.60,
+    ]);
+  }
+
+  const hotspotLineBeforeLayer = map.getLayer("pickup-zone-hotspots-line")
+    ? "pickup-zone-hotspots-line"
+    : hotspotBeforeLayer;
+
+  if (!map.getLayer("pickup-zone-hotspots-line-halo")) {
+    map.addLayer(
+      {
+        id: "pickup-zone-hotspots-line-halo",
+        type: "line",
+        source: "pickup-zone-hotspots",
+        paint: {
+          "line-color": [
+            "interpolate",
+            ["linear"],
+            ["coalesce", ["get", "intensity"], 0.35],
+            0.00,
+            "#fff8d6",
+            0.50,
+            "#fff4b0",
+            1.00,
+            "#ffef8a",
+          ],
+          "line-opacity": [
+            "interpolate",
+            ["linear"],
+            ["coalesce", ["get", "intensity"], 0.35],
+            0.00,
+            0.58,
+            0.50,
+            0.72,
+            1.00,
+            0.86,
+          ],
+          "line-width": [
+            "interpolate",
+            ["linear"],
+            ["coalesce", ["get", "intensity"], 0.35],
+            0.00,
+            2.2,
+            0.50,
+            3.0,
+            1.00,
+            3.8,
+          ],
+        },
+      },
+      hotspotLineBeforeLayer
+    );
+  } else {
+    map.setPaintProperty("pickup-zone-hotspots-line-halo", "line-color", [
+      "interpolate",
+      ["linear"],
+      ["coalesce", ["get", "intensity"], 0.35],
+      0.00,
+      "#fff8d6",
+      0.50,
+      "#fff4b0",
+      1.00,
+      "#ffef8a",
+    ]);
+    map.setPaintProperty("pickup-zone-hotspots-line-halo", "line-opacity", [
+      "interpolate",
+      ["linear"],
+      ["coalesce", ["get", "intensity"], 0.35],
+      0.00,
+      0.58,
+      0.50,
+      0.72,
+      1.00,
+      0.86,
+    ]);
+    map.setPaintProperty("pickup-zone-hotspots-line-halo", "line-width", [
+      "interpolate",
+      ["linear"],
+      ["coalesce", ["get", "intensity"], 0.35],
+      0.00,
+      2.2,
+      0.50,
+      3.0,
+      1.00,
+      3.8,
+    ]);
   }
 
   if (!map.getLayer("pickup-zone-hotspots-line")) {
@@ -1821,15 +1932,27 @@ async function ensurePickupSourceAndLayers() {
         type: "line",
         source: "pickup-zone-hotspots",
         paint: {
-          "line-color": "#cc5a00",
+          "line-color": [
+            "interpolate",
+            ["linear"],
+            ["coalesce", ["get", "intensity"], 0.35],
+            0.00,
+            "#ff9f1a",
+            0.50,
+            "#ff7a00",
+            1.00,
+            "#e85d04",
+          ],
           "line-opacity": [
             "interpolate",
             ["linear"],
             ["coalesce", ["get", "intensity"], 0.35],
             0.00,
-            0.55,
+            0.74,
+            0.50,
+            0.84,
             1.00,
-            0.72,
+            0.94,
           ],
           "line-width": [
             "interpolate",
@@ -1837,13 +1960,53 @@ async function ensurePickupSourceAndLayers() {
             ["coalesce", ["get", "intensity"], 0.35],
             0.00,
             1.0,
+            0.50,
+            1.5,
             1.00,
-            1.8,
+            2.1,
           ],
         },
       },
       hotspotBeforeLayer
     );
+  } else {
+    map.setPaintProperty("pickup-zone-hotspots-line", "line-color", [
+      "interpolate",
+      ["linear"],
+      ["coalesce", ["get", "intensity"], 0.35],
+      0.00,
+      "#ff9f1a",
+      0.50,
+      "#ff7a00",
+      1.00,
+      "#e85d04",
+    ]);
+    map.setPaintProperty("pickup-zone-hotspots-line", "line-opacity", [
+      "interpolate",
+      ["linear"],
+      ["coalesce", ["get", "intensity"], 0.35],
+      0.00,
+      0.74,
+      0.50,
+      0.84,
+      1.00,
+      0.94,
+    ]);
+    map.setPaintProperty("pickup-zone-hotspots-line", "line-width", [
+      "interpolate",
+      ["linear"],
+      ["coalesce", ["get", "intensity"], 0.35],
+      0.00,
+      1.0,
+      0.50,
+      1.5,
+      1.00,
+      2.1,
+    ]);
+  }
+
+  if (map.getLayer("pickup-zone-hotspots-line-halo") && map.getLayer("pickup-zone-hotspots-line")) {
+    map.moveLayer("pickup-zone-hotspots-line-halo", "pickup-zone-hotspots-line");
   }
 
   if (!map.getLayer("pickup-heat")) {
