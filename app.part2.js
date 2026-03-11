@@ -787,6 +787,7 @@
   const MAP_IDENTITY_MIN_ZOOM = 10;
   const MAP_IDENTITY_MAX_ZOOM = 16;
   let mapIdentityTempAvatarDataUrl = '';
+  let mapIdentitySavedAvatarDataUrl = '';
   let mapIdentityCropState = null;
 
   function clampMapIdentity(v, min, max) {
@@ -802,6 +803,15 @@
     const trimmed = url.trim();
     if (!trimmed) return '';
     if (trimmed.startsWith('data:image/')) return trimmed;
+    return '';
+  }
+
+  function syncMapIdentitySavedAvatarCache() {
+    const serverAvatar = safeMapAvatarUrl(window?.me?.avatar_url);
+    if (serverAvatar) {
+      mapIdentitySavedAvatarDataUrl = serverAvatar;
+      return serverAvatar;
+    }
     return '';
   }
 
@@ -1018,6 +1028,7 @@
     const modal = document.createElement('div');
     modal.id = 'mapIdentityCropModal';
     modal.className = 'mapIdentityCropModal';
+    modal.style.zIndex = '11050';
     modal.innerHTML = `
       <div class="mapIdentityCropCard">
         <div class="mapIdentityCropTitle">Crop photo</div>
@@ -1031,6 +1042,8 @@
         </div>
       </div>
     `;
+    const card = modal.querySelector('.mapIdentityCropCard');
+    if (card) card.style.zIndex = '11051';
     document.body.appendChild(modal);
     const imgEl = modal.querySelector('#mapIdentityCropImage');
     const zoomEl = modal.querySelector('#mapIdentityCropZoom');
@@ -1093,6 +1106,7 @@
       try {
         const processed = await exportMapIdentityCropDataUrl();
         mapIdentityTempAvatarDataUrl = processed;
+        mapIdentitySavedAvatarDataUrl = processed;
         await saveMapIdentityUpdate({ avatar_url: processed, map_identity_mode: MAP_IDENTITY_MODE_AVATAR });
         closeMapIdentityCropper();
       } catch (err) {
@@ -1103,9 +1117,10 @@
 
   function mapIdentityCurrentState() {
     const meObj = (typeof window !== 'undefined' && window.me) ? window.me : {};
+    const serverAvatar = syncMapIdentitySavedAvatarCache();
     return {
       mode: normalizeMapIdentityMode(meObj?.map_identity_mode),
-      avatarUrl: safeMapAvatarUrl(meObj?.avatar_url) || mapIdentityTempAvatarDataUrl,
+      avatarUrl: serverAvatar || mapIdentitySavedAvatarDataUrl || mapIdentityTempAvatarDataUrl,
       name: meObj?.display_name || 'Driver'
     };
   }
@@ -1167,6 +1182,7 @@
     document.getElementById('mapIdentityRemovePhoto')?.addEventListener('click', async (e) => {
       e.preventDefault();
       if (!confirm('Remove your saved photo?')) return;
+      mapIdentitySavedAvatarDataUrl = '';
       mapIdentityTempAvatarDataUrl = '';
       await saveMapIdentityUpdate({ avatar_url: '', map_identity_mode: MAP_IDENTITY_MODE_NAME });
     });
@@ -1184,7 +1200,7 @@
   }
 
   function clearMapIdentityTempState() {
-    mapIdentityTempAvatarDataUrl = '';
+    closeMapIdentityCropper();
     const fileInput = document.getElementById('mapIdentityFileInput');
     if (fileInput) fileInput.value = '';
   }
