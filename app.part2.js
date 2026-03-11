@@ -1820,16 +1820,19 @@
     status: "",
     sending: false
   };
+  let driverProfileLayoutBound = false;
+  let driverProfileLayoutTimer50 = null;
+  let driverProfileLayoutTimer180 = null;
 
   function injectDriverProfileStyles() {
     if (document.getElementById('driverProfileModalStyles')) return;
     const style = document.createElement('style');
     style.id = 'driverProfileModalStyles';
     style.textContent = `
-      #driverProfileModalRoot{position:fixed;inset:0;z-index:2100;display:none}
+      #driverProfileModalRoot{position:fixed;inset:0;z-index:9800;display:none}
       #driverProfileModalRoot.open{display:block}
-      .driverProfileBackdrop{position:absolute;inset:0;background:rgba(7,10,19,.42)}
-      .driverProfileSheet{position:absolute;left:50%;transform:translate(-50%,110%);bottom:max(8px,calc(env(safe-area-inset-bottom) + 6px));width:min(430px,calc(100vw - 16px));max-height:min(62vh,calc(100vh - 150px - env(safe-area-inset-top)));background:rgba(255,255,255,.985);border-radius:24px 24px 16px 16px;box-shadow:0 -12px 30px rgba(0,0,0,.2);display:flex;flex-direction:column;overflow:hidden;transition:transform .18s ease-out}
+      .driverProfileBackdrop{position:absolute;inset:0;background:rgba(7,10,19,.42);z-index:9800}
+      .driverProfileSheet{position:absolute;left:50%;transform:translate(-50%,110%);bottom:var(--driver-profile-bottom-offset, 16px);width:min(430px,calc(100vw - 16px));max-height:calc(100vh - var(--driver-profile-bottom-offset, 16px) - env(safe-area-inset-top) - 18px);background:rgba(255,255,255,.985);border-radius:24px 24px 16px 16px;box-shadow:0 -12px 30px rgba(0,0,0,.2);display:flex;flex-direction:column;overflow:hidden;transition:transform .18s ease-out;z-index:9801}
       #driverProfileModalRoot.open .driverProfileSheet{transform:translate(-50%,0)}
       .driverProfileBody{display:flex;flex-direction:column;min-height:0;height:100%}
       .driverProfileHeader{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;padding:10px 11px 7px}
@@ -1866,10 +1869,50 @@
     document.head.appendChild(style);
   }
 
+  function updateDriverProfileLayout() {
+    const root = document.getElementById('driverProfileModalRoot') || document.querySelector('[data-driver-profile-modal-root]');
+    if (!root) return;
+    const dock = document.getElementById('dock');
+    const sliderWrap = document.getElementById('sliderWrap');
+    const mapControlStack = document.querySelector('.mapControlStack');
+    void mapControlStack;
+
+    let bottomOffset = 16;
+    if (dock) {
+      bottomOffset = Math.max(bottomOffset, window.innerHeight - dock.getBoundingClientRect().top + 10);
+    }
+    if (sliderWrap) {
+      bottomOffset = Math.max(bottomOffset, window.innerHeight - sliderWrap.getBoundingClientRect().top + 8);
+    }
+    root.style.setProperty('--driver-profile-bottom-offset', `${Math.max(16, Math.round(bottomOffset))}px`);
+  }
+
+  function scheduleDriverProfileLayoutUpdate() {
+    updateDriverProfileLayout();
+    if (driverProfileLayoutTimer50) window.clearTimeout(driverProfileLayoutTimer50);
+    if (driverProfileLayoutTimer180) window.clearTimeout(driverProfileLayoutTimer180);
+    driverProfileLayoutTimer50 = window.setTimeout(updateDriverProfileLayout, 50);
+    driverProfileLayoutTimer180 = window.setTimeout(updateDriverProfileLayout, 180);
+  }
+
+  function bindDriverProfileLayoutEvents() {
+    if (driverProfileLayoutBound) return;
+    driverProfileLayoutBound = true;
+    window.addEventListener('resize', updateDriverProfileLayout);
+    window.addEventListener('orientationchange', updateDriverProfileLayout);
+    if (window.visualViewport && typeof window.visualViewport.addEventListener === 'function') {
+      window.visualViewport.addEventListener('resize', updateDriverProfileLayout);
+    }
+  }
+
   function ensureDriverProfileUI() {
     injectDriverProfileStyles();
+    bindDriverProfileLayoutEvents();
     let root = document.getElementById('driverProfileModalRoot');
-    if (root) return root;
+    if (root) {
+      updateDriverProfileLayout();
+      return root;
+    }
 
     root = document.createElement('div');
     root.id = 'driverProfileModalRoot';
@@ -1884,6 +1927,7 @@
     backdrop?.addEventListener('click', () => closeDriverProfileModal());
     sheet?.addEventListener('click', (ev) => ev.stopPropagation());
     document.body.appendChild(root);
+    updateDriverProfileLayout();
     return root;
   }
 
@@ -1973,6 +2017,8 @@
     driverProfileState.status = '';
     const root = ensureDriverProfileUI();
     root.classList.remove('open');
+    if (driverProfileLayoutTimer50) window.clearTimeout(driverProfileLayoutTimer50);
+    if (driverProfileLayoutTimer180) window.clearTimeout(driverProfileLayoutTimer180);
     renderDriverProfileModal();
   }
 
@@ -2032,9 +2078,11 @@
     }
 
     root.classList.add('open');
+    updateDriverProfileLayout();
 
     if (driverProfileState.loading) {
       body.innerHTML = '<div class="driverProfileLoading">Loading driver profile…</div>';
+      updateDriverProfileLayout();
       return;
     }
 
@@ -2050,6 +2098,7 @@
           openDriverProfileModal({ userId: driverProfileState.userId, isSelf: driverProfileState.isSelf, source: driverProfileState.source });
         }
       });
+      updateDriverProfileLayout();
       return;
     }
 
@@ -2117,6 +2166,7 @@
 
     if (selfMode) {
       bindSelfProfileActions();
+      updateDriverProfileLayout();
       return;
     }
 
@@ -2157,6 +2207,7 @@
 
     const dmList = document.getElementById('driverProfileDmList');
     if (dmList) dmList.scrollTop = dmList.scrollHeight;
+    updateDriverProfileLayout();
   }
 
   async function openDriverProfileModal({ userId, isSelf = false, source = '' } = {}) {
@@ -2177,6 +2228,7 @@
     driverProfileState.error = '';
     driverProfileState.status = '';
     driverProfileState.sending = false;
+    scheduleDriverProfileLayoutUpdate();
     renderDriverProfileModal();
 
     try {
@@ -2196,6 +2248,7 @@
       if (!driverProfileState.open || driverProfileState.userId !== nextUserId) return;
       driverProfileState.loading = false;
       renderDriverProfileModal();
+      scheduleDriverProfileLayoutUpdate();
       if (!selfMode) startDriverProfileDmPolling();
     }
   }
@@ -2252,6 +2305,7 @@
   window.sendDriverProfileDm = sendDriverProfileDm;
   window.startDriverProfileDmPolling = startDriverProfileDmPolling;
   window.stopDriverProfileDmPolling = stopDriverProfileDmPolling;
+  window.updateDriverProfileLayout = updateDriverProfileLayout;
 
   // Bind the chat dock button using its ID
   if (typeof bindDockToggle === 'function') {
