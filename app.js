@@ -98,6 +98,7 @@ let pickupLogBusy = false;
 let lastPickupFetchMs = 0;
 let lastPickupFetchKey = "";
 let pickupZoneStats = new Map();
+let pickupHotspotZoneIds = new Set();
 
 /* =========================================================
    MANHATTAN MODE — DEFAULT SETTINGS (SAFE TO EDIT)
@@ -1578,11 +1579,13 @@ function emptyGeojson() {
 
 function clearPickupOverlayCache() {
   pickupZoneStats = new Map();
+  pickupHotspotZoneIds = new Set();
   lastPickupFetchKey = "";
 }
 
-function setPickupOverlayData(fc, items = [], zoneStats = []) {
+function setPickupOverlayData(fc, items = [], zoneStats = [], zoneHotspots = emptyGeojson()) {
   pickupZoneStats = new Map();
+  pickupHotspotZoneIds = new Set();
 
   if (Array.isArray(zoneStats) && zoneStats.length) {
     for (const stat of zoneStats) {
@@ -1630,14 +1633,36 @@ function setPickupOverlayData(fc, items = [], zoneStats = []) {
     }
   }
 
+  const hotspotFc = (zoneHotspots && zoneHotspots.type === "FeatureCollection" && Array.isArray(zoneHotspots.features))
+    ? zoneHotspots
+    : emptyGeojson();
+
+  for (const feat of hotspotFc.features) {
+    const zoneId = feat?.properties?.zone_id;
+    if (zoneId != null) pickupHotspotZoneIds.add(String(zoneId));
+  }
+
+  const hotspotSrc = map?.getSource?.("pickup-zone-hotspots");
+  if (hotspotSrc && typeof hotspotSrc.setData === "function") {
+    hotspotSrc.setData(hotspotFc);
+  }
+
+  const filteredFeatures = Array.isArray(fc?.features)
+    ? fc.features.filter((feat) => {
+      const zoneId = feat?.properties?.zone_id;
+      return zoneId == null || !pickupHotspotZoneIds.has(String(zoneId));
+    })
+    : [];
+  const filteredFc = { type: "FeatureCollection", features: filteredFeatures };
+
   const src = map?.getSource?.("pickup-points");
   if (src && typeof src.setData === "function") {
-    src.setData(fc || emptyGeojson());
+    src.setData(filteredFc);
   }
 }
 
 function clearPickupOverlay() {
-  setPickupOverlayData(emptyGeojson(), []);
+  setPickupOverlayData(emptyGeojson(), [], [], emptyGeojson());
 }
 
 function formatRelativeAge(tsUnix) {
@@ -1683,6 +1708,65 @@ async function ensurePickupSourceAndLayers() {
 
   if (!map.getSource("pickup-points")) {
     map.addSource("pickup-points", { type: "geojson", data: emptyGeojson() });
+  }
+
+  if (!map.getSource("pickup-zone-hotspots")) {
+    map.addSource("pickup-zone-hotspots", { type: "geojson", data: emptyGeojson() });
+  }
+
+  const hotspotBeforeLayer = map.getLayer("zones-line")
+    ? "zones-line"
+    : (map.getLayer("zone-labels") ? "zone-labels" : undefined);
+
+  if (!map.getLayer("pickup-zone-hotspots-fill")) {
+    map.addLayer(
+      {
+        id: "pickup-zone-hotspots-fill",
+        type: "fill",
+        source: "pickup-zone-hotspots",
+        paint: {
+          "fill-color": "#0bbf63",
+          "fill-opacity": [
+            "interpolate",
+            ["linear"],
+            ["coalesce", ["get", "intensity"], 0.35],
+            0,
+            0.10,
+            0.40,
+            0.18,
+            0.70,
+            0.26,
+            1.00,
+            0.34,
+          ],
+        },
+      },
+      hotspotBeforeLayer
+    );
+  }
+
+  if (!map.getLayer("pickup-zone-hotspots-line")) {
+    map.addLayer(
+      {
+        id: "pickup-zone-hotspots-line",
+        type: "line",
+        source: "pickup-zone-hotspots",
+        paint: {
+          "line-color": "#07944c",
+          "line-opacity": 0.45,
+          "line-width": [
+            "interpolate",
+            ["linear"],
+            ["coalesce", ["get", "intensity"], 0.35],
+            0,
+            0.8,
+            1,
+            1.6,
+          ],
+        },
+      },
+      hotspotBeforeLayer
+    );
   }
 
   if (!map.getLayer("pickup-heat")) {
@@ -1798,6 +1882,39 @@ async function ensurePickupSourceAndLayers() {
         console.warn("pickup popup failed:", err);
       }
     });
+
+    map.on("mouseenter", "pickup-zone-hotspots-fill", () => {
+      try { map.getCanvas().style.cursor = "pointer"; } catch {}
+    });
+    map.on("mouseleave", "pickup-zone-hotspots-fill", () => {
+      try { map.getCanvas().style.cursor = ""; } catch {}
+    });
+    map.on("click", "pickup-zone-hotspots-fill", (e) => {
+      try {
+        const feat = e?.features?.[0];
+        if (!feat) return;
+        const props = feat.properties || {};
+        const zoneName = (props.zone_name || "").trim();
+        const borough = (props.borough || "").trim();
+        const sampleSize = Number(props.sample_size ?? NaN);
+        const safeSampleSize = Number.isFinite(sampleSize) ? sampleSize : 0;
+        new maplibregl.Popup({ closeButton: true, closeOnClick: true, maxWidth: "290px" })
+          .setLngLat(e.lngLat)
+          .setHTML(`
+            <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; font-size:13px;">
+              <div style="font-weight:900; margin-bottom:4px;">Community hotspot</div>
+              <div><b>Zone:</b> ${escapeHtml(zoneName || `Zone ${props.zone_id || ""}`)}</div>
+              ${borough ? `<div><b>Borough:</b> ${escapeHtml(borough)}</div>` : ""}
+              <div><b>Sample size:</b> ${safeSampleSize}</div>
+              <div style="margin-top:6px;">Community hotspot from recent recorded trips.</div>
+              <div style="opacity:0.8; margin-top:2px;">Dynamic hotspot from latest ${PICKUP_ZONE_SAMPLE_LIMIT} trips max.</div>
+            </div>
+          `)
+          .addTo(map);
+      } catch (err) {
+        console.warn("pickup hotspot popup failed:", err);
+      }
+    });
   }
 
   return true;
@@ -1849,8 +1966,11 @@ async function refreshPickupOverlay({ force = false } = {}) {
     const data = await getJSONAuth(path, communityToken);
     const items = Array.isArray(data) ? data : data?.items || [];
     const zoneStats = Array.isArray(data?.zone_stats) ? data.zone_stats : [];
+    const zoneHotspots = (data?.zone_hotspots && data.zone_hotspots.type === "FeatureCollection" && Array.isArray(data.zone_hotspots.features))
+      ? data.zone_hotspots
+      : emptyGeojson();
     const fc = buildPickupFeatureCollection(items);
-    setPickupOverlayData(fc, items, zoneStats);
+    setPickupOverlayData(fc, items, zoneStats, zoneHotspots);
   } catch (e) {
     console.warn("pickup overlay refresh failed:", e);
   } finally {
