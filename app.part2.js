@@ -227,7 +227,36 @@
     lastObservedIncomingId: null,
     dmLastObservedIncomingId: null,
     dmBaselineReady: false,
+    seenIncomingKeys: new Set(),
   };
+
+  const CHAT_AUDIO_SEEN_KEY_LIMIT = 800;
+
+  function chatAudioMsgKey(msg) {
+    const rawId = msg?.id;
+    if (rawId !== null && rawId !== undefined && String(rawId).trim() !== '') {
+      return `id:${String(rawId)}`;
+    }
+    const created = String(msg?.created_at || msg?.ts || msg?.timestamp || '');
+    const who = String(msg?.user_id || msg?.userId || msg?.display_name || msg?.user_name || msg?.name || '');
+    const body = String(msg?.text || msg?.message || '');
+    if (!created && !who && !body) return '';
+    return `fallback:${created}|${who}|${body}`;
+  }
+
+  function rememberSeenIncomingChatKey(msg) {
+    const key = chatAudioMsgKey(msg);
+    if (!key) return;
+    chatSoundRuntime.seenIncomingKeys.add(key);
+    if (chatSoundRuntime.seenIncomingKeys.size <= CHAT_AUDIO_SEEN_KEY_LIMIT) return;
+    const overflow = chatSoundRuntime.seenIncomingKeys.size - CHAT_AUDIO_SEEN_KEY_LIMIT;
+    let removed = 0;
+    for (const oldest of chatSoundRuntime.seenIncomingKeys) {
+      chatSoundRuntime.seenIncomingKeys.delete(oldest);
+      removed += 1;
+      if (removed >= overflow) break;
+    }
+  }
 
   const chatSoundState = {
     incomingPool: [],
@@ -650,6 +679,7 @@
     }
     let maxId = chatSoundRuntime.lastObservedIncomingId;
     for (const msg of messages) {
+      rememberSeenIncomingChatKey(msg);
       const id = messageNumericId(msg);
       if (id === null) continue;
       maxId = maxId === null ? id : Math.max(maxId, id);
@@ -667,11 +697,16 @@
     let maxId = chatSoundRuntime.lastObservedIncomingId;
     const baselineReady = chatSoundState.baselineReady;
     for (const msg of messages) {
+      const fallbackKey = chatAudioMsgKey(msg);
       const id = messageNumericId(msg);
-      if (id === null) continue;
-      const isFresh = baselineReady && (maxId === null || id > maxId);
+      const freshByNumericId = id !== null && baselineReady && (maxId === null || id > maxId);
+      const freshBySeenKey = id === null && baselineReady && !!fallbackKey && !chatSoundRuntime.seenIncomingKeys.has(fallbackKey);
+      const isFresh = freshByNumericId || freshBySeenKey;
       if (isFresh && !isOwnMessage(msg) && !isSuppressedOutgoingChatEcho(msg)) fresh.push(msg);
-      maxId = maxId === null ? id : Math.max(maxId, id);
+      if (id !== null) {
+        maxId = maxId === null ? id : Math.max(maxId, id);
+      }
+      rememberSeenIncomingChatKey(msg);
     }
     chatSoundRuntime.lastObservedIncomingId = maxId;
     chatSoundState.baselineReady = true;
@@ -901,6 +936,7 @@
     unreadChatCount = 0;
     updateChatUnreadBadge();
     chatSoundRuntime.lastObservedIncomingId = null;
+    chatSoundRuntime.seenIncomingKeys = new Set();
     chatSoundRuntime.dmBaselineReady = false;
     chatSoundState.baselineReady = false;
     killFeedBootstrapReady = false;
