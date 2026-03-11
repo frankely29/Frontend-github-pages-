@@ -1808,348 +1808,339 @@
   const DRIVER_PROFILE_DM_POLL_MS = 1500;
   const driverProfileState = {
     open: false,
-    userId: '',
+    userId: null,
     loading: false,
     profile: null,
     messages: [],
     latestMessageId: null,
     pollTimer: null,
-    status: '',
-    error: ''
+    error: "",
+    sending: false
   };
 
-  function safeDriverText(value) {
-    return String(value == null ? '' : value);
-  }
-
-  function parseDriverMessageId(msg) {
-    if (!msg) return null;
-    const raw = msg.id ?? msg.message_id ?? msg.messageId ?? msg.cursor ?? msg.created_at_unix ?? msg.ts_unix;
-    const n = Number(raw);
-    return Number.isFinite(n) ? n : null;
-  }
-
-  function parseDriverMessageTs(msg) {
-    if (!msg) return Number.POSITIVE_INFINITY;
-    const raw = msg.created_at_unix ?? msg.ts_unix ?? msg.createdAtUnix;
-    const n = Number(raw);
-    if (Number.isFinite(n)) return n;
-    const textTs = msg.created_at ?? msg.ts ?? msg.timestamp;
-    const t = Date.parse(String(textTs || ''));
-    return Number.isFinite(t) ? t : Number.POSITIVE_INFINITY;
-  }
-
-  function sortDriverMessages(messages) {
-    const arr = Array.isArray(messages) ? messages.slice() : [];
-    arr.sort((a, b) => {
-      const aid = parseDriverMessageId(a);
-      const bid = parseDriverMessageId(b);
-      if (aid !== null && bid !== null && aid !== bid) return aid - bid;
-      const ats = parseDriverMessageTs(a);
-      const bts = parseDriverMessageTs(b);
-      if (ats !== bts) return ats - bts;
-      return String(a?.id ?? '').localeCompare(String(b?.id ?? ''));
-    });
-    return arr;
-  }
-
-  function normalizeDriverBadge(code) {
-    const badge = String(code || '').trim().toLowerCase();
-    if (badge === 'crown') return '👑 Crown';
-    if (badge === 'silver') return '🥈 Silver';
-    if (badge === 'bronze') return '🥉 Bronze';
-    return '—';
-  }
-
-  function getDriverProfileDisplayName(profile) {
-    return safeDriverText(profile?.display_name || profile?.displayName || profile?.name || 'Driver').trim() || 'Driver';
-  }
-
-  function getDriverProfileAvatar(profile) {
-    const src = safeDriverText(profile?.avatar_url || profile?.avatarUrl || profile?.photo_url || profile?.photoUrl).trim();
-    return src;
-  }
-
-  function getDriverOwnId() {
-    if (window?.me?.id == null) return null;
-    return String(window.me.id);
-  }
-
-  function getDriverSenderId(msg) {
-    if (msg?.user_id != null) return String(msg.user_id);
-    if (msg?.userId != null) return String(msg.userId);
-    if (msg?.sender_id != null) return String(msg.sender_id);
-    if (msg?.senderId != null) return String(msg.senderId);
-    return null;
+  function injectDriverProfileStyles() {
+    if (document.getElementById('driverProfileModalStyles')) return;
+    const style = document.createElement('style');
+    style.id = 'driverProfileModalStyles';
+    style.textContent = `
+      #driverProfileModalRoot{position:fixed;inset:0;z-index:2100;display:none}
+      #driverProfileModalRoot.open{display:block}
+      .driverProfileBackdrop{position:absolute;inset:0;background:rgba(7,10,19,.45)}
+      .driverProfileSheet{position:absolute;left:0;right:0;bottom:0;max-height:min(86vh,760px);background:rgba(255,255,255,.98);border-radius:18px 18px 0 0;box-shadow:0 -10px 28px rgba(0,0,0,.22);display:flex;flex-direction:column;overflow:hidden;transform:translateY(100%);transition:transform .18s ease-out}
+      #driverProfileModalRoot.open .driverProfileSheet{transform:translateY(0)}
+      .driverProfileBody{display:flex;flex-direction:column;min-height:0}
+      .driverProfileHeader{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:14px 14px 10px}
+      .driverProfileIdentity{display:flex;gap:10px;align-items:center;min-width:0}
+      .driverProfileAvatar{width:54px;height:54px;border-radius:999px;flex:0 0 54px;object-fit:cover;background:#e8edf5}
+      .driverProfileName{font-size:17px;line-height:1.2;font-weight:700;color:#111827;word-break:break-word}
+      .driverProfileBadgeRow{display:flex;align-items:center;gap:6px;margin-top:5px;min-height:24px}
+      .driverProfileBadgeChip{display:inline-flex;align-items:center;font-size:12px;font-weight:600;color:#1f2937;background:#eef2ff;border:1px solid #dbe4ff;border-radius:999px;padding:4px 8px}
+      .driverProfileClose{border:0;background:#e5e7eb;color:#111827;border-radius:10px;padding:8px 10px;font-size:14px}
+      .driverProfileScroll{overflow:auto;-webkit-overflow-scrolling:touch;padding:0 14px 10px}
+      .driverProfileSectionTitle{font-size:13px;font-weight:700;color:#111827;margin:4px 0 8px}
+      .driverProfileStats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-bottom:12px}
+      .driverProfileStatCard{background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:10px}
+      .driverProfileStatLabel{font-size:12px;color:#475569}
+      .driverProfileStatValue{margin-top:2px;font-size:16px;font-weight:700;color:#0f172a}
+      .driverProfileDmWrap{display:flex;flex-direction:column;border:1px solid #e2e8f0;border-radius:12px;background:#fff;min-height:220px}
+      .driverProfileDmList{display:flex;flex-direction:column;gap:8px;overflow:auto;max-height:34vh;padding:10px}
+      .driverProfileDmBubble{max-width:84%;font-size:13px;line-height:1.35;white-space:pre-wrap;word-break:break-word;padding:8px 10px;border-radius:12px}
+      .driverProfileDmBubble.me{align-self:flex-end;background:#2563eb;color:#fff;border-bottom-right-radius:4px}
+      .driverProfileDmBubble.other{align-self:flex-start;background:#e2e8f0;color:#111827;border-bottom-left-radius:4px}
+      .driverProfileComposer{display:flex;gap:8px;padding:10px;border-top:1px solid #e2e8f0;padding-bottom:calc(10px + env(safe-area-inset-bottom))}
+      .driverProfileInput{flex:1;min-width:0;border:1px solid #cbd5e1;border-radius:10px;padding:10px;font-size:16px;color:#0f172a}
+      .driverProfileSendBtn{border:0;border-radius:10px;background:#1d4ed8;color:#fff;font-weight:600;padding:10px 12px}
+      .driverProfileSendBtn:disabled{opacity:.6}
+      .driverProfileStatus{font-size:12px;color:#64748b;padding:0 14px 10px}
+      .driverProfileError{font-size:13px;color:#b91c1c;background:#fee2e2;border:1px solid #fecaca;border-radius:10px;padding:10px;margin:4px 14px 10px}
+      .driverProfileLoading{padding:18px 14px;color:#334155;font-size:14px}
+    `;
+    document.head.appendChild(style);
   }
 
   function ensureDriverProfileUI() {
-    if (!document.getElementById('driverProfileStyle')) {
-      const style = document.createElement('style');
-      style.id = 'driverProfileStyle';
-      style.textContent = `
-        .driverProfileModal{position:fixed;inset:0;z-index:2100;display:none}
-        .driverProfileModal.open{display:block}
-        .driverProfileBackdrop{position:absolute;inset:0;background:rgba(12,18,32,.45)}
-        .driverProfileSheet{position:absolute;left:0;right:0;bottom:0;max-height:min(82vh,760px);background:rgba(255,255,255,.98);border-radius:18px 18px 0 0;box-shadow:0 -10px 30px rgba(0,0,0,.22);display:flex;flex-direction:column;padding:12px 14px calc(14px + env(safe-area-inset-bottom));transform:translateY(100%);transition:transform .2s ease}
-        .driverProfileModal.open .driverProfileSheet{transform:translateY(0)}
-        .driverProfileHeader{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:10px}
-        .driverProfileIdentity{display:flex;gap:10px;align-items:center;min-width:0}
-        .driverProfileAvatar{width:54px;height:54px;border-radius:999px;object-fit:cover;background:#eef2f7;flex:0 0 54px}
-        .driverProfileAvatarFallback{display:flex;align-items:center;justify-content:center;font-weight:700;color:#334155}
-        .driverProfileName{font-size:17px;font-weight:700;color:#0f172a;line-height:1.2;word-break:break-word}
-        .driverProfileBadge{font-size:13px;color:#334155;margin-top:3px}
-        .driverProfileClose{border:0;background:#e2e8f0;color:#0f172a;border-radius:10px;padding:6px 10px;font-size:14px}
-        .driverProfileScroll{overflow:auto;-webkit-overflow-scrolling:touch;padding-bottom:8px}
-        .driverProfileSectionTitle{font-size:14px;font-weight:700;color:#0f172a;margin:8px 0}
-        .driverProfileStats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-bottom:8px}
-        .driverProfileStatCard{border:1px solid #dbe3ef;background:#f8fbff;border-radius:12px;padding:9px}
-        .driverProfileStatLabel{font-size:12px;color:#475569}
-        .driverProfileStatValue{font-size:16px;font-weight:700;color:#0f172a;margin-top:2px}
-        .driverProfileDmWrap{border:1px solid #dbe3ef;border-radius:12px;background:#fff;display:flex;flex-direction:column;min-height:220px}
-        .driverProfileDmList{padding:10px;overflow:auto;max-height:38vh;display:flex;flex-direction:column;gap:7px}
-        .driverProfileDmRow{display:flex}
-        .driverProfileDmBubble{max-width:82%;padding:8px 10px;border-radius:12px;font-size:13px;line-height:1.3;word-break:break-word;white-space:pre-wrap}
-        .driverProfileDmRow.mine{justify-content:flex-end}
-        .driverProfileDmRow.mine .driverProfileDmBubble{background:#2563eb;color:#fff;border-bottom-right-radius:4px}
-        .driverProfileDmRow.theirs{justify-content:flex-start}
-        .driverProfileDmRow.theirs .driverProfileDmBubble{background:#e2e8f0;color:#0f172a;border-bottom-left-radius:4px}
-        .driverProfileDmMeta{font-size:11px;color:#64748b;margin-top:2px}
-        .driverProfileComposer{display:flex;gap:8px;padding:10px;border-top:1px solid #dbe3ef}
-        .driverProfileComposer input{flex:1;min-width:0;border:1px solid #cbd5e1;border-radius:10px;padding:10px;font-size:16px}
-        .driverProfileComposer button{border:0;background:#1d4ed8;color:#fff;border-radius:10px;padding:10px 12px;font-weight:600}
-        .driverProfileStatus{font-size:12px;color:#475569;margin:4px 0 0}
-      `;
-      document.head.appendChild(style);
-    }
+    injectDriverProfileStyles();
+    let root = document.getElementById('driverProfileModalRoot');
+    if (root) return root;
 
-    let root = document.getElementById('driverProfileModal');
-    if (!root) {
-      root = document.createElement('div');
-      root.id = 'driverProfileModal';
-      root.className = 'driverProfileModal';
-      root.innerHTML = `
-        <div class="driverProfileBackdrop" data-driver-profile-close="1"></div>
-        <section class="driverProfileSheet" role="dialog" aria-modal="true" aria-label="Driver profile">
-          <div id="driverProfileBody"></div>
-        </section>
-      `;
-      root.addEventListener('click', (e) => {
-        const closeEl = e.target && e.target.closest('[data-driver-profile-close="1"]');
-        if (closeEl) {
-          e.preventDefault();
-          e.stopPropagation();
-          closeDriverProfileModal();
-        }
-      });
-      document.body.appendChild(root);
-    }
+    root = document.createElement('div');
+    root.id = 'driverProfileModalRoot';
+    root.innerHTML = `
+      <div class="driverProfileBackdrop"></div>
+      <section class="driverProfileSheet" role="dialog" aria-modal="true" aria-label="Driver profile">
+        <div class="driverProfileBody" id="driverProfileBody"></div>
+      </section>
+    `;
+    const backdrop = root.querySelector('.driverProfileBackdrop');
+    const sheet = root.querySelector('.driverProfileSheet');
+    backdrop?.addEventListener('click', () => closeDriverProfileModal());
+    sheet?.addEventListener('click', (ev) => ev.stopPropagation());
+    document.body.appendChild(root);
     return root;
+  }
+
+  function driverProfileBadgeChip(code) {
+    const normalized = String(code || '').trim().toLowerCase();
+    if (normalized === 'crown') return '<span class="driverProfileBadgeChip">👑 Crown</span>';
+    if (normalized === 'silver') return '<span class="driverProfileBadgeChip">🥈 Silver</span>';
+    if (normalized === 'bronze') return '<span class="driverProfileBadgeChip">🥉 Bronze</span>';
+    return '<span class="driverProfileBadgeChip">No badge</span>';
+  }
+
+  function driverProfileAvatarHTML(profileUser) {
+    const name = String(profileUser?.display_name || 'Driver').trim() || 'Driver';
+    const avatarUrl = String(profileUser?.avatar_url || '').trim();
+    if (avatarUrl) {
+      return `<img class="driverProfileAvatar" src="${escapeHtml(avatarUrl)}" alt="${escapeHtml(name)} avatar">`;
+    }
+    return `<div class="driverProfileAvatar" style="display:flex;align-items:center;justify-content:center;font-weight:700;color:#334155;">${escapeHtml(name.slice(0, 1).toUpperCase())}</div>`;
+  }
+
+  function formatDriverProfileStat(value, kind) {
+    if (kind === 'rank') {
+      const n = Number(value);
+      return Number.isFinite(n) && n > 0 ? `#${n}` : '—';
+    }
+    const n = Number(value);
+    if (!Number.isFinite(n)) return '0';
+    return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
   }
 
   async function fetchDriverProfile(userId) {
     const token = getCommunityToken();
-    if (!token) throw new Error('Not signed in');
-    return getJSONAuth(`/drivers/${encodeURIComponent(userId)}/profile`, token);
+    return await getJSONAuth(`/drivers/${encodeURIComponent(userId)}/profile`, token);
   }
 
-  async function fetchDirectMessages(userId, { after = null, limit = 30 } = {}) {
+  async function fetchDriverProfileDmThread(userId, { after = null, limit = 30 } = {}) {
     const token = getCommunityToken();
-    if (!token) throw new Error('Not signed in');
     const qs = new URLSearchParams();
     qs.set('limit', String(limit));
-    if (after != null && String(after).trim() !== '') qs.set('after', String(after));
-    return getJSONAuth(`/chat/dm/${encodeURIComponent(userId)}?${qs.toString()}`, token);
+    if (after !== null && after !== undefined) qs.set('after', String(after));
+    return await getJSONAuth(`/chat/dm/${encodeURIComponent(userId)}?${qs.toString()}`, token);
   }
 
-  async function sendDirectMessage(userId, text) {
+  async function sendDriverProfileDm(userId, text) {
     const token = getCommunityToken();
-    if (!token) throw new Error('Not signed in');
-    return postJSON(`/chat/dm/${encodeURIComponent(userId)}`, { text }, token);
+    return await postJSON(`/chat/dm/${encodeURIComponent(userId)}`, { text }, token);
+  }
+
+  function parseDriverMsgId(msg) {
+    const id = Number(msg?.id);
+    return Number.isFinite(id) ? id : null;
+  }
+
+  function normalizeDriverMessages(payload) {
+    const list = Array.isArray(payload) ? payload : (Array.isArray(payload?.messages) ? payload.messages : []);
+    return list.slice().sort((a, b) => {
+      const aid = parseDriverMsgId(a);
+      const bid = parseDriverMsgId(b);
+      if (aid !== null && bid !== null && aid !== bid) return aid - bid;
+      return String(a?.created_at || '').localeCompare(String(b?.created_at || ''));
+    });
+  }
+
+  function appendDriverProfileMessages(messages) {
+    const base = Array.isArray(driverProfileState.messages) ? driverProfileState.messages : [];
+    const merged = base.concat(Array.isArray(messages) ? messages : []);
+    const byId = new Map();
+    merged.forEach((msg) => {
+      const id = parseDriverMsgId(msg);
+      const key = id === null ? `${msg?.created_at || ''}:${msg?.text || ''}` : String(id);
+      byId.set(key, msg);
+    });
+    driverProfileState.messages = normalizeDriverMessages(Array.from(byId.values()));
+    let latest = null;
+    driverProfileState.messages.forEach((msg) => {
+      const id = parseDriverMsgId(msg);
+      if (id !== null) latest = latest === null ? id : Math.max(latest, id);
+    });
+    driverProfileState.latestMessageId = latest;
   }
 
   function closeDriverProfileModal() {
     stopDriverProfileDmPolling();
     driverProfileState.open = false;
+    driverProfileState.userId = null;
     const root = ensureDriverProfileUI();
     root.classList.remove('open');
+    renderDriverProfileModal();
   }
 
   function renderDriverProfileModal() {
     const root = ensureDriverProfileUI();
     const body = document.getElementById('driverProfileBody');
     if (!body) return;
-    const profile = driverProfileState.profile || {};
-    const displayName = getDriverProfileDisplayName(profile);
-    const badgeText = normalizeDriverBadge(profile?.leaderboard_badge || profile?.leaderboardBadge || profile?.badge);
-    const avatar = getDriverProfileAvatar(profile);
-    const miles = profile?.today_miles ?? profile?.todayMiles ?? '—';
-    const hours = profile?.today_hours ?? profile?.todayHours ?? '—';
-    const milesRank = profile?.today_miles_rank ?? profile?.todayMilesRank ?? '—';
-    const hoursRank = profile?.today_hours_rank ?? profile?.todayHoursRank ?? '—';
-    const msgs = sortDriverMessages(driverProfileState.messages);
-    const msgRows = msgs.length ? msgs.map((msg) => {
-      const mine = getDriverSenderId(msg) === getDriverOwnId();
-      const rowClass = mine ? 'mine' : 'theirs';
-      const who = mine ? 'You' : displayName;
-      return `<div class="driverProfileDmRow ${rowClass}"><div><div class="driverProfileDmBubble">${escapeHtml(safeDriverText(msg?.text || msg?.message || ''))}</div><div class="driverProfileDmMeta">${escapeHtml(who)} · ${escapeHtml(formatChatTime(msg?.created_at || msg?.ts || msg?.timestamp))}</div></div></div>`;
-    }).join('') : '<div class="driverProfileStatus">No private messages yet.</div>';
+
+    if (!driverProfileState.open) {
+      root.classList.remove('open');
+      body.innerHTML = '';
+      return;
+    }
+
+    root.classList.add('open');
+
+    if (driverProfileState.loading) {
+      body.innerHTML = '<div class="driverProfileLoading">Loading driver profile…</div>';
+      return;
+    }
+
+    if (driverProfileState.error && !driverProfileState.profile) {
+      body.innerHTML = `
+        <div class="driverProfileHeader"><button class="driverProfileClose" id="driverProfileCloseBtn" type="button">Close</button></div>
+        <div class="driverProfileError">${escapeHtml(driverProfileState.error)}</div>
+        <div class="driverProfileStatus"><button class="driverProfileClose" id="driverProfileRetryBtn" type="button">Retry</button></div>
+      `;
+      document.getElementById('driverProfileCloseBtn')?.addEventListener('click', closeDriverProfileModal);
+      document.getElementById('driverProfileRetryBtn')?.addEventListener('click', () => {
+        if (driverProfileState.userId != null) openDriverProfileModal({ userId: driverProfileState.userId });
+      });
+      return;
+    }
+
+    const profilePayload = driverProfileState.profile || {};
+    const profileUser = profilePayload.user || {};
+    const daily = profilePayload.daily || {};
+    const name = String(profileUser?.display_name || 'Driver').trim() || 'Driver';
+    const messages = normalizeDriverMessages(driverProfileState.messages);
+    const dmHtml = messages.length
+      ? messages.map((msg) => {
+          const other = Number(msg?.user_id) === Number(driverProfileState.userId);
+          const klass = other ? 'other' : 'me';
+          return `<div class="driverProfileDmBubble ${klass}">${escapeHtml(String(msg?.text || ''))}</div>`;
+        }).join('')
+      : '<div class="driverProfileStatus">No private messages yet.</div>';
 
     body.innerHTML = `
       <div class="driverProfileHeader">
         <div class="driverProfileIdentity">
-          ${avatar ? `<img class="driverProfileAvatar" src="${escapeHtml(avatar)}" alt="${escapeHtml(displayName)} avatar">` : `<div class="driverProfileAvatar driverProfileAvatarFallback">${escapeHtml(displayName.slice(0,1).toUpperCase())}</div>`}
+          ${driverProfileAvatarHTML(profileUser)}
           <div>
-            <div class="driverProfileName">${escapeHtml(displayName)}</div>
-            <div class="driverProfileBadge">Current badge: ${escapeHtml(badgeText)}</div>
+            <div class="driverProfileName">${escapeHtml(name)}</div>
+            <div class="driverProfileBadgeRow">${driverProfileBadgeChip(profileUser?.leaderboard_badge_code)}</div>
           </div>
         </div>
-        <button class="driverProfileClose" data-driver-profile-close="1">Close</button>
+        <button class="driverProfileClose" id="driverProfileCloseBtn" type="button">Close</button>
       </div>
       <div class="driverProfileScroll">
         <div class="driverProfileSectionTitle">Today</div>
         <div class="driverProfileStats">
-          <div class="driverProfileStatCard"><div class="driverProfileStatLabel">Miles</div><div class="driverProfileStatValue">${escapeHtml(String(miles))}</div></div>
-          <div class="driverProfileStatCard"><div class="driverProfileStatLabel">Hours</div><div class="driverProfileStatValue">${escapeHtml(String(hours))}</div></div>
-          <div class="driverProfileStatCard"><div class="driverProfileStatLabel">Miles rank</div><div class="driverProfileStatValue">${escapeHtml(String(milesRank))}</div></div>
-          <div class="driverProfileStatCard"><div class="driverProfileStatLabel">Hours rank</div><div class="driverProfileStatValue">${escapeHtml(String(hoursRank))}</div></div>
+          <div class="driverProfileStatCard"><div class="driverProfileStatLabel">Miles</div><div class="driverProfileStatValue">${escapeHtml(formatDriverProfileStat(daily?.miles, 'value'))}</div></div>
+          <div class="driverProfileStatCard"><div class="driverProfileStatLabel">Hours</div><div class="driverProfileStatValue">${escapeHtml(formatDriverProfileStat(daily?.hours, 'value'))}</div></div>
+          <div class="driverProfileStatCard"><div class="driverProfileStatLabel">Miles rank</div><div class="driverProfileStatValue">${escapeHtml(formatDriverProfileStat(daily?.miles_rank, 'rank'))}</div></div>
+          <div class="driverProfileStatCard"><div class="driverProfileStatLabel">Hours rank</div><div class="driverProfileStatValue">${escapeHtml(formatDriverProfileStat(daily?.hours_rank, 'rank'))}</div></div>
         </div>
-        <div class="driverProfileSectionTitle">Private message</div>
+        <div class="driverProfileSectionTitle">Private messages</div>
         <div class="driverProfileDmWrap">
-          <div class="driverProfileDmList" id="driverProfileDmList">${msgRows}</div>
+          <div class="driverProfileDmList" id="driverProfileDmList">${dmHtml}</div>
           <div class="driverProfileComposer">
-            <input id="driverProfileDmInput" type="text" placeholder="Type a private message">
-            <button id="driverProfileDmSend" type="button">Send</button>
+            <input class="driverProfileInput" id="driverProfileInput" type="text" placeholder="Type a private message">
+            <button class="driverProfileSendBtn" id="driverProfileSendBtn" type="button" ${driverProfileState.sending ? 'disabled' : ''}>Send</button>
           </div>
         </div>
-        ${driverProfileState.status ? `<div class="driverProfileStatus">${escapeHtml(driverProfileState.status)}</div>` : ''}
-        ${driverProfileState.error ? `<div class="driverProfileStatus">${escapeHtml(driverProfileState.error)}</div>` : ''}
       </div>
+      ${driverProfileState.error ? `<div class="driverProfileError">${escapeHtml(driverProfileState.error)}</div>` : ''}
     `;
 
-    const list = document.getElementById('driverProfileDmList');
-    if (list) list.scrollTop = list.scrollHeight;
+    document.getElementById('driverProfileCloseBtn')?.addEventListener('click', closeDriverProfileModal);
+    const input = document.getElementById('driverProfileInput');
+    const sendBtn = document.getElementById('driverProfileSendBtn');
+    const submit = async () => {
+      if (driverProfileState.sending || !driverProfileState.userId) return;
+      const text = String(input?.value || '').trim();
+      if (!text) return;
+      driverProfileState.sending = true;
+      driverProfileState.error = '';
+      renderDriverProfileModal();
+      try {
+        const sent = await sendDriverProfileDm(driverProfileState.userId, text);
+        input.value = '';
+        const sentMessages = Array.isArray(sent?.messages) ? sent.messages : (sent?.message ? [sent.message] : []);
+        if (sentMessages.length) {
+          appendDriverProfileMessages(sentMessages);
+        } else {
+          const refreshed = await fetchDriverProfileDmThread(driverProfileState.userId, { limit: 30 });
+          driverProfileState.messages = normalizeDriverMessages(refreshed);
+          appendDriverProfileMessages([]);
+        }
+      } catch (err) {
+        driverProfileState.error = err?.message || 'Message failed to send.';
+      } finally {
+        driverProfileState.sending = false;
+        renderDriverProfileModal();
+      }
+    };
+    sendBtn?.addEventListener('click', (ev) => { ev.preventDefault(); submit(); });
+    input?.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' && !ev.shiftKey) {
+        ev.preventDefault();
+        submit();
+      }
+    });
 
-    const input = document.getElementById('driverProfileDmInput');
-    const sendBtn = document.getElementById('driverProfileDmSend');
-    if (input && sendBtn && sendBtn.dataset.bound !== '1') {
-      sendBtn.dataset.bound = '1';
-      const onSend = async () => {
-        const uid = driverProfileState.userId;
-        const text = String(input.value || '').trim();
-        if (!uid || !text) return;
-        sendBtn.disabled = true;
-        try {
-          const sent = await sendDirectMessage(uid, text);
-          input.value = '';
-          const sentMsgs = Array.isArray(sent) ? sent : (sent?.message ? [sent.message] : [sent]);
-          driverProfileState.messages = sortDriverMessages(driverProfileState.messages.concat(sentMsgs.filter(Boolean)));
-          for (const m of sentMsgs) {
-            const id = parseDriverMessageId(m);
-            if (id !== null) driverProfileState.latestMessageId = driverProfileState.latestMessageId === null ? id : Math.max(driverProfileState.latestMessageId, id);
-          }
-          renderDriverProfileModal();
-          await refreshDriverProfileDmOnce({ forceAfterSend: true });
-        } catch (err) {
-          driverProfileState.error = err?.message || 'Message failed to send.';
-          renderDriverProfileModal();
-        } finally {
-          sendBtn.disabled = false;
-        }
-      };
-      sendBtn.addEventListener('click', (e) => { e.preventDefault(); onSend(); });
-      input.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          onSend();
-        }
-      });
+    const dmList = document.getElementById('driverProfileDmList');
+    if (dmList) dmList.scrollTop = dmList.scrollHeight;
+  }
+
+  async function openDriverProfileModal({ userId }) {
+    const nextUserId = Number(userId);
+    if (!Number.isFinite(nextUserId)) return;
+    ensureDriverProfileUI();
+    stopDriverProfileDmPolling();
+    driverProfileState.open = true;
+    driverProfileState.userId = nextUserId;
+    driverProfileState.loading = true;
+    driverProfileState.profile = null;
+    driverProfileState.messages = [];
+    driverProfileState.latestMessageId = null;
+    driverProfileState.error = '';
+    driverProfileState.sending = false;
+    renderDriverProfileModal();
+
+    try {
+      const [profileRes, dmRes] = await Promise.all([
+        fetchDriverProfile(nextUserId),
+        fetchDriverProfileDmThread(nextUserId, { limit: 30 })
+      ]);
+      if (!driverProfileState.open || driverProfileState.userId !== nextUserId) return;
+      driverProfileState.profile = profileRes || {};
+      driverProfileState.messages = normalizeDriverMessages(dmRes);
+      appendDriverProfileMessages([]);
+    } catch (err) {
+      if (!driverProfileState.open || driverProfileState.userId !== nextUserId) return;
+      driverProfileState.error = err?.message || 'Unable to load driver profile.';
+    } finally {
+      if (!driverProfileState.open || driverProfileState.userId !== nextUserId) return;
+      driverProfileState.loading = false;
+      renderDriverProfileModal();
+      startDriverProfileDmPolling();
     }
   }
 
-  async function refreshDriverProfileDmOnce({ forceAfterSend = false } = {}) {
+  async function pollDriverProfileDmOnce() {
     if (!driverProfileState.open || !driverProfileState.userId) return;
-    const targetUserId = driverProfileState.userId;
     try {
-      const data = await fetchDirectMessages(targetUserId, {
-        after: forceAfterSend ? null : driverProfileState.latestMessageId,
+      const res = await fetchDriverProfileDmThread(driverProfileState.userId, {
+        after: driverProfileState.latestMessageId,
         limit: 30
       });
-      if (!driverProfileState.open || driverProfileState.userId !== targetUserId) return;
-      const incoming = Array.isArray(data) ? data : data?.messages || [];
+      const incoming = normalizeDriverMessages(res);
       if (!incoming.length) return;
-      if (forceAfterSend || driverProfileState.latestMessageId === null) {
-        driverProfileState.messages = sortDriverMessages(incoming);
-      } else {
-        driverProfileState.messages = sortDriverMessages(driverProfileState.messages.concat(incoming));
-      }
-      let nextLatest = driverProfileState.latestMessageId;
-      driverProfileState.messages.forEach((m) => {
-        const id = parseDriverMessageId(m);
-        if (id !== null) nextLatest = nextLatest === null ? id : Math.max(nextLatest, id);
-      });
-      driverProfileState.latestMessageId = nextLatest;
+      appendDriverProfileMessages(incoming);
       renderDriverProfileModal();
-    } catch (err) {
-      driverProfileState.error = err?.message || 'Could not refresh private messages.';
-      renderDriverProfileModal();
-    }
+    } catch (_) {}
   }
 
   function startDriverProfileDmPolling() {
     stopDriverProfileDmPolling();
-    driverProfileState.pollTimer = setInterval(() => {
-      refreshDriverProfileDmOnce();
+    driverProfileState.pollTimer = window.setInterval(() => {
+      pollDriverProfileDmOnce();
     }, DRIVER_PROFILE_DM_POLL_MS);
   }
 
   function stopDriverProfileDmPolling() {
     if (!driverProfileState.pollTimer) return;
-    clearInterval(driverProfileState.pollTimer);
+    window.clearInterval(driverProfileState.pollTimer);
     driverProfileState.pollTimer = null;
-  }
-
-  async function openDriverProfileModal({ userId }) {
-    const uid = String(userId || '').trim();
-    if (!uid) return;
-    stopDriverProfileDmPolling();
-    driverProfileState.open = true;
-    driverProfileState.userId = uid;
-    driverProfileState.loading = true;
-    driverProfileState.profile = null;
-    driverProfileState.messages = [];
-    driverProfileState.latestMessageId = null;
-    driverProfileState.status = 'Loading driver…';
-    driverProfileState.error = '';
-    const root = ensureDriverProfileUI();
-    root.classList.add('open');
-    renderDriverProfileModal();
-
-    try {
-      const [profileData, dmData] = await Promise.all([
-        fetchDriverProfile(uid),
-        fetchDirectMessages(uid, { limit: 30 })
-      ]);
-      if (!driverProfileState.open || driverProfileState.userId !== uid) return;
-      driverProfileState.profile = profileData || {};
-      const msgs = sortDriverMessages(Array.isArray(dmData) ? dmData : dmData?.messages || []);
-      driverProfileState.messages = msgs;
-      let latest = null;
-      msgs.forEach((m) => {
-        const id = parseDriverMessageId(m);
-        if (id !== null) latest = latest === null ? id : Math.max(latest, id);
-      });
-      driverProfileState.latestMessageId = latest;
-      driverProfileState.status = '';
-    } catch (err) {
-      driverProfileState.error = err?.message || 'Unable to load driver profile.';
-    } finally {
-      if (driverProfileState.open && driverProfileState.userId === uid) {
-        driverProfileState.loading = false;
-        renderDriverProfileModal();
-        startDriverProfileDmPolling();
-      }
-    }
   }
 
   // Expose chat functions for app.js to call if needed
@@ -2172,8 +2163,8 @@
   window.closeDriverProfileModal = closeDriverProfileModal;
   window.renderDriverProfileModal = renderDriverProfileModal;
   window.fetchDriverProfile = fetchDriverProfile;
-  window.fetchDirectMessages = fetchDirectMessages;
-  window.sendDirectMessage = sendDirectMessage;
+  window.fetchDriverProfileDmThread = fetchDriverProfileDmThread;
+  window.sendDriverProfileDm = sendDriverProfileDm;
   window.startDriverProfileDmPolling = startDriverProfileDmPolling;
   window.stopDriverProfileDmPolling = stopDriverProfileDmPolling;
 
