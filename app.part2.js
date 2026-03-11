@@ -154,6 +154,7 @@
 
   let chatAudioCtx = null;
   let chatAudioUnlocked = false;
+  let chatSoundArmed = false;
   let chatAudioUnlockBound = false;
   let chatAudioUnlockInFlight = false;
   let chatNotificationsBootstrapped = false;
@@ -216,13 +217,16 @@
 
       chatAudioUnlocked = ctx.state === 'running';
       if (chatAudioUnlocked) {
+        chatSoundArmed = true;
         removeChatAudioUnlockListeners();
       } else {
+        chatSoundArmed = false;
         logChatAudioSkip('suspended', trigger);
         bindChatAudioUnlockListeners();
       }
     } catch (err) {
       chatAudioUnlocked = false;
+      chatSoundArmed = false;
       logChatAudioSkip('locked', trigger || err?.message || 'unlock-failed');
       bindChatAudioUnlockListeners();
     } finally {
@@ -270,7 +274,7 @@
       const result = await chatFetchMessages({ limit: 60 });
       const msgs = result?.ok && Array.isArray(result.messages) ? result.messages : [];
       hydrateChatStateFromMessages(msgs);
-      collectNewIncomingMessages(msgs);
+      collectFreshIncomingMessages(msgs);
       seedKillFeedSeenKeys(msgs);
       killFeedBootstrapReady = true;
       killFeedBootstrapPollConsumed = false;
@@ -298,7 +302,12 @@
   async function onChatFirstInteraction(evt) {
     await unlockChatAudio(evt?.type || 'interaction');
     const ok = await ensureChatNotificationsBootstrapped(evt?.type || 'interaction');
-    if (ok) removeChatFirstInteractionListeners();
+    const ctx = ensureChatAudioContext();
+    const ready = Boolean(ok && chatAudioUnlocked && ctx && ctx.state === 'running');
+    if (ready) {
+      chatSoundArmed = true;
+      removeChatFirstInteractionListeners();
+    }
   }
 
   function removeChatFirstInteractionListeners() {
@@ -344,6 +353,7 @@
 
   function rearmChatAudioUnlock() {
     chatAudioUnlocked = false;
+    chatSoundArmed = false;
     bindChatAudioUnlockListeners();
   }
 
@@ -359,75 +369,79 @@
   rearmChatAudioUnlock();
   bindChatFirstInteractionListeners();
 
-  function playChatTone(kind = 'incoming') {
+  function canPlayChatTone() {
     const ctx = ensureChatAudioContext();
-    if (!ctx) return;
+    if (!ctx) return false;
     if (!chatAudioUnlocked) {
       logChatAudioSkip('locked');
-      return;
+      rearmChatAudioUnlock();
+      return false;
+    }
+    if (!chatSoundArmed) {
+      logChatAudioSkip('not-armed');
+      rearmChatAudioUnlock();
+      return false;
     }
     if (ctx.state !== 'running') {
-      chatAudioUnlocked = false;
       rearmChatAudioUnlock();
       logChatAudioSkip('suspended');
-      return;
+      return false;
     }
-    const now = ctx.currentTime;
-    const outgoing = kind === 'outgoing';
-    const gain = ctx.createGain();
-    gain.gain.setValueAtTime(0.0001, now);
-    if (outgoing) {
-      gain.gain.exponentialRampToValueAtTime(0.018, now + 0.01);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.085);
-    } else {
-      gain.gain.exponentialRampToValueAtTime(0.028, now + 0.012);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.145);
-    }
-    gain.connect(ctx.destination);
-
-    const osc1 = ctx.createOscillator();
-    osc1.type = 'sine';
-    if (outgoing) {
-      osc1.frequency.setValueAtTime(570, now);
-      osc1.frequency.exponentialRampToValueAtTime(680, now + 0.08);
-    } else {
-      osc1.frequency.setValueAtTime(710, now);
-      osc1.frequency.exponentialRampToValueAtTime(860, now + 0.13);
-    }
-    osc1.connect(gain);
-    osc1.start(now);
-    osc1.stop(outgoing ? now + 0.085 : now + 0.145);
-
-    if (!outgoing) {
-      const osc2 = ctx.createOscillator();
-      osc2.type = 'triangle';
-      osc2.frequency.setValueAtTime(760, now + 0.01);
-      osc2.frequency.exponentialRampToValueAtTime(900, now + 0.14);
-      const overlayGain = ctx.createGain();
-      overlayGain.gain.setValueAtTime(0.0001, now);
-      overlayGain.gain.exponentialRampToValueAtTime(0.006, now + 0.012);
-      overlayGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.145);
-      osc2.connect(overlayGain);
-      overlayGain.connect(ctx.destination);
-      osc2.start(now);
-      osc2.stop(now + 0.145);
-    }
+    return true;
   }
 
   function playIncomingSoftTone() {
-    playChatTone('incoming');
+    if (!canPlayChatTone()) return;
+    const ctx = ensureChatAudioContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.024, now + 0.012);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.12);
+    gain.connect(ctx.destination);
+
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(700, now);
+    osc.frequency.exponentialRampToValueAtTime(860, now + 0.12);
+    osc.connect(gain);
+    osc.start(now);
+    osc.stop(now + 0.12);
   }
 
   function playOutgoingSoftTone() {
-    playChatTone('outgoing');
+    if (!canPlayChatTone()) return;
+    const ctx = ensureChatAudioContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.016, now + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.08);
+    gain.connect(ctx.destination);
+
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(560, now);
+    osc.frequency.exponentialRampToValueAtTime(700, now + 0.08);
+    osc.connect(gain);
+    osc.start(now);
+    osc.stop(now + 0.08);
   }
 
-  function collectNewIncomingMessages(messages, { markSeen = true } = {}) {
+  function collectFreshIncomingMessages(messages, { markSeen = true } = {}) {
     if (!Array.isArray(messages) || !messages.length) return [];
+    if (!killFeedBootstrapReady || !killFeedBootstrapPollConsumed) return [];
     const fresh = [];
     for (const msg of messages) {
       const key = chatMsgKey(msg);
       if (incomingNotifySeenKeys.has(key)) continue;
+      const msgId = messageNumericId(msg);
+      if (msgId !== null && chatLastReadId !== null && msgId <= chatLastReadId) {
+        if (markSeen) incomingNotifySeenKeys.add(key);
+        continue;
+      }
       if (isOwnMessage(msg)) {
         if (markSeen) incomingNotifySeenKeys.add(key);
         continue;
@@ -484,25 +498,10 @@
       setTimeout(() => {
         if (div.parentNode) div.parentNode.removeChild(div);
       }, 30000);
-
-      // Determine if the chat panel is currently open
-      if (incomingNotifySeenKeys.has(key)) {
-        logChatAudioSkip('duplicate');
-        return;
+      if (shouldCountUnread(msg)) {
+        unreadChatCount += 1;
+        updateChatUnreadBadge();
       }
-      if (isOwnMessage(msg)) {
-        logChatAudioSkip('own-message');
-        return;
-      }
-      if (isChatPanelOpen()) {
-        logChatAudioSkip('chat-open');
-        return;
-      }
-      const msgId = messageNumericId(msg);
-      if (msgId === null || chatLastReadId === null || msgId <= chatLastReadId) return;
-
-      unreadChatCount += 1;
-      updateChatUnreadBadge();
     });
   }
 
@@ -666,7 +665,7 @@
       return { ok: false, messages: [] };
     }
     const msgs = Array.isArray(result.messages) ? result.messages : [];
-    collectNewIncomingMessages(msgs);
+    collectFreshIncomingMessages(msgs);
     renderChatMessages(msgs, { replace: true });
     chatInitialHistoryLoaded = true;
     chatInitialHistoryRetryQueued = false;
@@ -706,9 +705,12 @@
       }
       const loadedMsgs = Array.isArray(msgs.messages) ? msgs.messages : [];
       const needsInitialRecovery = !chatInitialHistoryLoaded;
-      const canNotifyIncoming = !needsInitialRecovery && chatNotificationsBootstrapped;
+      const canNotifyIncoming = !needsInitialRecovery
+        && chatNotificationsBootstrapped
+        && killFeedBootstrapReady
+        && killFeedBootstrapPollConsumed;
 
-      if (canNotifyIncoming && collectNewIncomingMessages(loadedMsgs).length > 0) {
+      if (canNotifyIncoming && collectFreshIncomingMessages(loadedMsgs).length > 0) {
         playIncomingSoftTone();
       }
 
@@ -791,6 +793,7 @@
       if (!text) return;
       chatSendBtn.disabled = true;
       try {
+        await unlockChatAudio('chat-send-click');
         const msg = await chatSend(text);
         chatInput.value = '';
         if (msg) renderChatMessages(Array.isArray(msg) ? msg : [msg]);
@@ -2288,6 +2291,7 @@
       driverProfileState.error = '';
       renderDriverProfileModal();
       try {
+        await unlockChatAudio('dm-send-click');
         const sent = await sendDriverProfileDm(driverProfileState.userId, text);
         input.value = '';
         const sentMessages = Array.isArray(sent?.messages) ? sent.messages : (sent?.message ? [sent.message] : []);
