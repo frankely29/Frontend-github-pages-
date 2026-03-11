@@ -1177,7 +1177,22 @@ bindDockToggle(dockModes, "modes", "Modes", modesPanelHTML, wireModesPanel);
 // in app.part2.js will call bindDockToggle(dockChat, ...) with its own
 // panel and wiring functions.
 bindDockToggle(dockColors, "colors", "Colors", colorsPanelHTML);
-bindDockToggle(dockProfile, "profile", "Profile", profilePanelHTML, wireProfilePanel);
+if (dockProfile) {
+  dockProfile.addEventListener("pointerdown", (e) => e.stopPropagation());
+  dockProfile.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!authHeaderOK()) {
+      toggleDrawer("modes", "Modes", modesPanelHTML());
+      wireModesPanel();
+      return;
+    }
+    closeDrawer();
+    const myId = Number(me?.id);
+    if (!Number.isFinite(myId)) return;
+    window.openDriverProfileModal?.({ userId: myId, isSelf: true, source: "dock-profile" });
+  });
+}
 
 function applyDockIconModel() {
 
@@ -2524,6 +2539,20 @@ function makeNavIcon() {
   return el;
 }
 
+function wireSelfProfileClick(el) {
+  if (!el || el.dataset.selfProfileWired === "1") return;
+  el.dataset.selfProfileWired = "1";
+  el.style.pointerEvents = "auto";
+  el.style.cursor = "pointer";
+  el.addEventListener("click", (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const myId = Number(me?.id);
+    if (!Number.isFinite(myId)) return;
+    window.openDriverProfileModal?.({ userId: myId, isSelf: true, source: "self-marker" });
+  });
+}
+
 function refreshNavNameLabel() {
   const myName = authHeaderOK() ? me?.display_name || "" : "";
   const wrap = document.getElementById("navWrap");
@@ -2746,8 +2775,10 @@ function startLocationWatch() {
   if (!map) return;
 
   if (!navMarker) {
+    const navEl = makeNavIcon();
+    wireSelfProfileClick(navEl);
     navMarker = new maplibregl.Marker({
-      element: makeNavIcon(),
+      element: navEl,
       anchor: "center",
       offset: [0, 0],
     })

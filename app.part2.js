@@ -1809,12 +1809,15 @@
   const driverProfileState = {
     open: false,
     userId: null,
+    isSelf: false,
+    source: '',
     loading: false,
     profile: null,
     messages: [],
     latestMessageId: null,
     pollTimer: null,
     error: "",
+    status: "",
     sending: false
   };
 
@@ -1825,35 +1828,40 @@
     style.textContent = `
       #driverProfileModalRoot{position:fixed;inset:0;z-index:2100;display:none}
       #driverProfileModalRoot.open{display:block}
-      .driverProfileBackdrop{position:absolute;inset:0;background:rgba(7,10,19,.45)}
-      .driverProfileSheet{position:absolute;left:0;right:0;bottom:0;max-height:min(86vh,760px);background:rgba(255,255,255,.98);border-radius:18px 18px 0 0;box-shadow:0 -10px 28px rgba(0,0,0,.22);display:flex;flex-direction:column;overflow:hidden;transform:translateY(100%);transition:transform .18s ease-out}
-      #driverProfileModalRoot.open .driverProfileSheet{transform:translateY(0)}
-      .driverProfileBody{display:flex;flex-direction:column;min-height:0}
-      .driverProfileHeader{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:14px 14px 10px}
-      .driverProfileIdentity{display:flex;gap:10px;align-items:center;min-width:0}
-      .driverProfileAvatar{width:54px;height:54px;border-radius:999px;flex:0 0 54px;object-fit:cover;background:#e8edf5}
-      .driverProfileName{font-size:17px;line-height:1.2;font-weight:700;color:#111827;word-break:break-word}
-      .driverProfileBadgeRow{display:flex;align-items:center;gap:6px;margin-top:5px;min-height:24px}
-      .driverProfileBadgeChip{display:inline-flex;align-items:center;font-size:12px;font-weight:600;color:#1f2937;background:#eef2ff;border:1px solid #dbe4ff;border-radius:999px;padding:4px 8px}
-      .driverProfileClose{border:0;background:#e5e7eb;color:#111827;border-radius:10px;padding:8px 10px;font-size:14px}
-      .driverProfileScroll{overflow:auto;-webkit-overflow-scrolling:touch;padding:0 14px 10px}
-      .driverProfileSectionTitle{font-size:13px;font-weight:700;color:#111827;margin:4px 0 8px}
-      .driverProfileStats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-bottom:12px}
-      .driverProfileStatCard{background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:10px}
-      .driverProfileStatLabel{font-size:12px;color:#475569}
-      .driverProfileStatValue{margin-top:2px;font-size:16px;font-weight:700;color:#0f172a}
-      .driverProfileDmWrap{display:flex;flex-direction:column;border:1px solid #e2e8f0;border-radius:12px;background:#fff;min-height:220px}
-      .driverProfileDmList{display:flex;flex-direction:column;gap:8px;overflow:auto;max-height:34vh;padding:10px}
-      .driverProfileDmBubble{max-width:84%;font-size:13px;line-height:1.35;white-space:pre-wrap;word-break:break-word;padding:8px 10px;border-radius:12px}
+      .driverProfileBackdrop{position:absolute;inset:0;background:rgba(7,10,19,.42)}
+      .driverProfileSheet{position:absolute;left:50%;transform:translate(-50%,110%);bottom:max(8px,calc(env(safe-area-inset-bottom) + 6px));width:min(430px,calc(100vw - 16px));max-height:min(62vh,calc(100vh - 150px - env(safe-area-inset-top)));background:rgba(255,255,255,.985);border-radius:24px 24px 16px 16px;box-shadow:0 -12px 30px rgba(0,0,0,.2);display:flex;flex-direction:column;overflow:hidden;transition:transform .18s ease-out}
+      #driverProfileModalRoot.open .driverProfileSheet{transform:translate(-50%,0)}
+      .driverProfileBody{display:flex;flex-direction:column;min-height:0;height:100%}
+      .driverProfileHeader{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;padding:10px 11px 7px}
+      .driverProfileIdentity{display:flex;gap:8px;align-items:center;min-width:0}
+      .driverProfileAvatar{width:44px;height:44px;border-radius:999px;flex:0 0 44px;object-fit:cover;background:#e8edf5}
+      .driverProfileName{font-size:15px;line-height:1.18;font-weight:700;color:#111827;word-break:break-word}
+      .driverProfileBadgeRow{display:flex;align-items:center;gap:5px;margin-top:3px;min-height:20px}
+      .driverProfileBadgeChip{display:inline-flex;align-items:center;font-size:11px;font-weight:600;color:#1f2937;background:#eef2ff;border:1px solid #dbe4ff;border-radius:999px;padding:3px 7px}
+      .driverProfileClose{border:0;background:#e5e7eb;color:#111827;border-radius:10px;padding:7px 9px;font-size:13px}
+      .driverProfileScroll{overflow:auto;-webkit-overflow-scrolling:touch;padding:0 11px 10px;min-height:0}
+      .driverProfileSectionTitle{font-size:12px;font-weight:700;color:#111827;margin:2px 0 6px}
+      .driverProfileStats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin-bottom:9px}
+      .driverProfileStatCard{background:#f8fafc;border:1px solid #e2e8f0;border-radius:11px;padding:8px}
+      .driverProfileStatLabel{font-size:11px;color:#475569}
+      .driverProfileStatValue{margin-top:2px;font-size:15px;font-weight:700;color:#0f172a}
+      .driverProfileDmWrap{display:flex;flex-direction:column;border:1px solid #e2e8f0;border-radius:11px;background:#fff;min-height:130px}
+      .driverProfileDmList{display:flex;flex-direction:column;gap:7px;overflow:auto;max-height:min(22vh,190px);padding:9px}
+      .driverProfileDmBubble{max-width:86%;font-size:12px;line-height:1.3;white-space:pre-wrap;word-break:break-word;padding:7px 9px;border-radius:11px}
       .driverProfileDmBubble.me{align-self:flex-end;background:#2563eb;color:#fff;border-bottom-right-radius:4px}
       .driverProfileDmBubble.other{align-self:flex-start;background:#e2e8f0;color:#111827;border-bottom-left-radius:4px}
-      .driverProfileComposer{display:flex;gap:8px;padding:10px;border-top:1px solid #e2e8f0;padding-bottom:calc(10px + env(safe-area-inset-bottom))}
-      .driverProfileInput{flex:1;min-width:0;border:1px solid #cbd5e1;border-radius:10px;padding:10px;font-size:16px;color:#0f172a}
-      .driverProfileSendBtn{border:0;border-radius:10px;background:#1d4ed8;color:#fff;font-weight:600;padding:10px 12px}
+      .driverProfileComposer{display:flex;gap:7px;padding:8px;border-top:1px solid #e2e8f0;padding-bottom:calc(8px + env(safe-area-inset-bottom))}
+      .driverProfileInput{flex:1;min-width:0;border:1px solid #cbd5e1;border-radius:10px;padding:9px;font-size:16px;color:#0f172a}
+      .driverProfileSendBtn{border:0;border-radius:10px;background:#1d4ed8;color:#fff;font-weight:600;padding:9px 11px}
       .driverProfileSendBtn:disabled{opacity:.6}
-      .driverProfileStatus{font-size:12px;color:#64748b;padding:0 14px 10px}
-      .driverProfileError{font-size:13px;color:#b91c1c;background:#fee2e2;border:1px solid #fecaca;border-radius:10px;padding:10px;margin:4px 14px 10px}
-      .driverProfileLoading{padding:18px 14px;color:#334155;font-size:14px}
+      .driverProfileStatus{font-size:12px;color:#64748b;padding:0 11px 8px}
+      .driverProfileError{font-size:12px;color:#b91c1c;background:#fee2e2;border:1px solid #fecaca;border-radius:10px;padding:8px;margin:3px 11px 8px}
+      .driverProfileLoading{padding:16px 11px;color:#334155;font-size:13px}
+      .driverProfileActions{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:8px}
+      .driverProfileActionBtn{border:1px solid #cbd5e1;background:#f8fafc;color:#0f172a;border-radius:10px;padding:8px 10px;font-size:13px;font-weight:600}
+      .driverProfileActionBtn.danger{border-color:#fecaca;background:#fff1f2;color:#b91c1c}
+      .driverProfileMapIdentity{border:1px solid #e2e8f0;border-radius:11px;padding:8px;background:#fff}
+      .driverProfileMapIdentity #profileMapIdentitySection{margin:0}
     `;
     document.head.appendChild(style);
   }
@@ -1896,7 +1904,7 @@
     return `<div class="driverProfileAvatar" style="display:flex;align-items:center;justify-content:center;font-weight:700;color:#334155;">${escapeHtml(name.slice(0, 1).toUpperCase())}</div>`;
   }
 
-  function formatDriverProfileStat(value, kind) {
+  function formatDriverProfileStat(value, kind = 'value') {
     if (kind === 'rank') {
       const n = Number(value);
       return Number.isFinite(n) && n > 0 ? `#${n}` : '—';
@@ -1961,9 +1969,55 @@
     stopDriverProfileDmPolling();
     driverProfileState.open = false;
     driverProfileState.userId = null;
+    driverProfileState.isSelf = false;
+    driverProfileState.status = '';
     const root = ensureDriverProfileUI();
     root.classList.remove('open');
     renderDriverProfileModal();
+  }
+
+  function bindSelfProfileActions() {
+    document.getElementById('driverProfileChangePwdBtn')?.addEventListener('click', async (e) => {
+      e.preventDefault();
+      const signedIn = typeof window.authHeaderOK === 'function' ? window.authHeaderOK() : !!getCommunityToken();
+      if (!signedIn) return;
+      const oldPwd = prompt('Enter your current password:');
+      if (oldPwd === null) return;
+      const newPwd = prompt('Enter your new password:');
+      if (newPwd === null) return;
+      try {
+        await postJSON('/me/change_password', { old_password: oldPwd, new_password: newPwd }, getCommunityToken());
+        alert('Password changed successfully.');
+      } catch (err) {
+        alert(err?.detail || 'Error changing password.');
+      }
+    });
+
+    document.getElementById('driverProfileDeleteAccountBtn')?.addEventListener('click', async (e) => {
+      e.preventDefault();
+      const signedIn = typeof window.authHeaderOK === 'function' ? window.authHeaderOK() : !!getCommunityToken();
+      if (!signedIn) return;
+      if (!confirm('Are you sure you want to delete your account? This cannot be undone.')) return;
+      try {
+        await postJSON('/me/delete_account', {}, getCommunityToken());
+        if (typeof window.clearAuth === 'function') window.clearAuth();
+        alert('Account deleted successfully.');
+        location.reload();
+      } catch (err) {
+        alert(err?.detail || 'Error deleting account.');
+      }
+    });
+
+    document.getElementById('driverProfileSignOutBtn')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (typeof window.signOutNow === 'function') {
+        window.signOutNow({ reload: true });
+      }
+    });
+
+    if (typeof window.initMapIdentityProfileControls === 'function') {
+      window.initMapIdentityProfileControls();
+    }
   }
 
   function renderDriverProfileModal() {
@@ -1992,7 +2046,9 @@
       `;
       document.getElementById('driverProfileCloseBtn')?.addEventListener('click', closeDriverProfileModal);
       document.getElementById('driverProfileRetryBtn')?.addEventListener('click', () => {
-        if (driverProfileState.userId != null) openDriverProfileModal({ userId: driverProfileState.userId });
+        if (driverProfileState.userId != null) {
+          openDriverProfileModal({ userId: driverProfileState.userId, isSelf: driverProfileState.isSelf, source: driverProfileState.source });
+        }
       });
       return;
     }
@@ -2001,6 +2057,8 @@
     const profileUser = profilePayload.user || {};
     const daily = profilePayload.daily || {};
     const name = String(profileUser?.display_name || 'Driver').trim() || 'Driver';
+    const selfMode = !!driverProfileState.isSelf;
+
     const messages = normalizeDriverMessages(driverProfileState.messages);
     const dmHtml = messages.length
       ? messages.map((msg) => {
@@ -2009,6 +2067,17 @@
           return `<div class="driverProfileDmBubble ${klass}">${escapeHtml(String(msg?.text || ''))}</div>`;
         }).join('')
       : '<div class="driverProfileStatus">No private messages yet.</div>';
+
+    const accountActionsHtml = `
+      <div class="driverProfileSectionTitle">Account actions</div>
+      <div class="driverProfileActions">
+        <button class="driverProfileActionBtn" id="driverProfileChangePwdBtn" type="button">Change Password</button>
+        <button class="driverProfileActionBtn danger" id="driverProfileDeleteAccountBtn" type="button">Delete Account</button>
+        <button class="driverProfileActionBtn" id="driverProfileSignOutBtn" type="button">Sign Out</button>
+      </div>
+      <div class="driverProfileSectionTitle">Map identity</div>
+      <div class="driverProfileMapIdentity"><div id="profileMapIdentitySection"></div></div>
+    `;
 
     body.innerHTML = `
       <div class="driverProfileHeader">
@@ -2029,23 +2098,32 @@
           <div class="driverProfileStatCard"><div class="driverProfileStatLabel">Miles rank</div><div class="driverProfileStatValue">${escapeHtml(formatDriverProfileStat(daily?.miles_rank, 'rank'))}</div></div>
           <div class="driverProfileStatCard"><div class="driverProfileStatLabel">Hours rank</div><div class="driverProfileStatValue">${escapeHtml(formatDriverProfileStat(daily?.hours_rank, 'rank'))}</div></div>
         </div>
-        <div class="driverProfileSectionTitle">Private messages</div>
-        <div class="driverProfileDmWrap">
-          <div class="driverProfileDmList" id="driverProfileDmList">${dmHtml}</div>
-          <div class="driverProfileComposer">
-            <input class="driverProfileInput" id="driverProfileInput" type="text" placeholder="Type a private message">
-            <button class="driverProfileSendBtn" id="driverProfileSendBtn" type="button" ${driverProfileState.sending ? 'disabled' : ''}>Send</button>
+        ${selfMode ? accountActionsHtml : `
+          <div class="driverProfileSectionTitle">Private messages</div>
+          <div class="driverProfileDmWrap">
+            <div class="driverProfileDmList" id="driverProfileDmList">${dmHtml}</div>
+            <div class="driverProfileComposer">
+              <input class="driverProfileInput" id="driverProfileInput" type="text" placeholder="Type a private message">
+              <button class="driverProfileSendBtn" id="driverProfileSendBtn" type="button" ${driverProfileState.sending ? 'disabled' : ''}>Send</button>
+            </div>
           </div>
-        </div>
+        `}
       </div>
       ${driverProfileState.error ? `<div class="driverProfileError">${escapeHtml(driverProfileState.error)}</div>` : ''}
+      ${driverProfileState.status ? `<div class="driverProfileStatus">${escapeHtml(driverProfileState.status)}</div>` : ''}
     `;
 
     document.getElementById('driverProfileCloseBtn')?.addEventListener('click', closeDriverProfileModal);
+
+    if (selfMode) {
+      bindSelfProfileActions();
+      return;
+    }
+
     const input = document.getElementById('driverProfileInput');
     const sendBtn = document.getElementById('driverProfileSendBtn');
     const submit = async () => {
-      if (driverProfileState.sending || !driverProfileState.userId) return;
+      if (driverProfileState.sending || !driverProfileState.userId || driverProfileState.isSelf) return;
       const text = String(input?.value || '').trim();
       if (!text) return;
       driverProfileState.sending = true;
@@ -2081,30 +2159,36 @@
     if (dmList) dmList.scrollTop = dmList.scrollHeight;
   }
 
-  async function openDriverProfileModal({ userId }) {
+  async function openDriverProfileModal({ userId, isSelf = false, source = '' } = {}) {
     const nextUserId = Number(userId);
     if (!Number.isFinite(nextUserId)) return;
+    const meId = Number(window?.me?.id);
+    const selfMode = Boolean(isSelf) || (Number.isFinite(meId) && meId === nextUserId);
     ensureDriverProfileUI();
     stopDriverProfileDmPolling();
     driverProfileState.open = true;
     driverProfileState.userId = nextUserId;
+    driverProfileState.isSelf = selfMode;
+    driverProfileState.source = String(source || '');
     driverProfileState.loading = true;
     driverProfileState.profile = null;
     driverProfileState.messages = [];
     driverProfileState.latestMessageId = null;
     driverProfileState.error = '';
+    driverProfileState.status = '';
     driverProfileState.sending = false;
     renderDriverProfileModal();
 
     try {
-      const [profileRes, dmRes] = await Promise.all([
-        fetchDriverProfile(nextUserId),
-        fetchDriverProfileDmThread(nextUserId, { limit: 30 })
-      ]);
+      const profileRes = await fetchDriverProfile(nextUserId);
       if (!driverProfileState.open || driverProfileState.userId !== nextUserId) return;
       driverProfileState.profile = profileRes || {};
-      driverProfileState.messages = normalizeDriverMessages(dmRes);
-      appendDriverProfileMessages([]);
+      if (!selfMode) {
+        const dmRes = await fetchDriverProfileDmThread(nextUserId, { limit: 30 });
+        if (!driverProfileState.open || driverProfileState.userId !== nextUserId) return;
+        driverProfileState.messages = normalizeDriverMessages(dmRes);
+        appendDriverProfileMessages([]);
+      }
     } catch (err) {
       if (!driverProfileState.open || driverProfileState.userId !== nextUserId) return;
       driverProfileState.error = err?.message || 'Unable to load driver profile.';
@@ -2112,12 +2196,12 @@
       if (!driverProfileState.open || driverProfileState.userId !== nextUserId) return;
       driverProfileState.loading = false;
       renderDriverProfileModal();
-      startDriverProfileDmPolling();
+      if (!selfMode) startDriverProfileDmPolling();
     }
   }
 
   async function pollDriverProfileDmOnce() {
-    if (!driverProfileState.open || !driverProfileState.userId) return;
+    if (!driverProfileState.open || !driverProfileState.userId || driverProfileState.isSelf) return;
     try {
       const res = await fetchDriverProfileDmThread(driverProfileState.userId, {
         after: driverProfileState.latestMessageId,
@@ -2131,6 +2215,7 @@
   }
 
   function startDriverProfileDmPolling() {
+    if (driverProfileState.isSelf) return;
     stopDriverProfileDmPolling();
     driverProfileState.pollTimer = window.setInterval(() => {
       pollDriverProfileDmOnce();
