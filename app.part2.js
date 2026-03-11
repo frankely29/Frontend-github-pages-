@@ -1775,7 +1775,7 @@
   function scrollDockByStep(direction) {
     const viewport = document.getElementById('dockViewport');
     if (!viewport) return;
-    const step = Math.max(120, Math.round(viewport.clientWidth * 1.20));
+    const step = Math.max(120, Math.round(viewport.clientWidth * 5));
     viewport.scrollBy({ left: direction * step, behavior: 'smooth' });
   }
 
