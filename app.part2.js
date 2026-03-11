@@ -151,6 +151,71 @@
     return !!(selfId && senderId && selfId === senderId);
   }
 
+  const CHAT_OUTGOING_ECHO_SUPPRESS_MS = 8000;
+  const recentOutgoingChatEchoes = new Map();
+
+  function currentChatSelfUserId() {
+    return (window && window.me && window.me.id != null) ? String(window.me.id) : '';
+  }
+
+  function normalizeEchoText(value) {
+    return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  }
+
+  function makeOutgoingEchoFingerprint(text, userId = currentChatSelfUserId()) {
+    const normalized = normalizeEchoText(text);
+    if (!normalized || !userId) return '';
+    return `${userId}|${normalized}`;
+  }
+
+  function pruneOutgoingEchoMap(mapRef) {
+    const now = Date.now();
+    for (const [key, expiresAt] of mapRef.entries()) {
+      if (expiresAt <= now) mapRef.delete(key);
+    }
+  }
+
+  function rememberOutgoingChatEcho(textOrMsg) {
+    pruneOutgoingEchoMap(recentOutgoingChatEchoes);
+    const text = typeof textOrMsg === 'string'
+      ? textOrMsg
+      : (textOrMsg?.text || textOrMsg?.message || '');
+    const userId = typeof textOrMsg === 'string'
+      ? currentChatSelfUserId()
+      : (msgUserId(textOrMsg) || currentChatSelfUserId());
+    const fp = makeOutgoingEchoFingerprint(text, userId);
+    if (!fp) return;
+    recentOutgoingChatEchoes.set(fp, Date.now() + CHAT_OUTGOING_ECHO_SUPPRESS_MS);
+  }
+
+  function isSuppressedOutgoingChatEcho(msg) {
+    pruneOutgoingEchoMap(recentOutgoingChatEchoes);
+    const fp = makeOutgoingEchoFingerprint(
+      msg?.text || msg?.message || '',
+      msgUserId(msg) || currentChatSelfUserId()
+    );
+    return !!(fp && recentOutgoingChatEchoes.has(fp));
+  }
+
+  function getChatAudioSession() {
+    try {
+      return navigator && navigator.audioSession ? navigator.audioSession : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function applyChatAudioSessionAmbient(reason = 'chat') {
+    const session = getChatAudioSession();
+    if (!session) return false;
+    try {
+      if (session.type !== 'ambient') session.type = 'ambient';
+      return session.type === 'ambient';
+    } catch (_) {
+      return false;
+    }
+  }
+
   const chatSoundState = {
     ctx: null,
     webAudioReady: false,
@@ -178,6 +243,7 @@
   let chatFirstInteractionBound = false;
 
   function ensureChatSoundContext() {
+    applyChatAudioSessionAmbient('ensure-context');
     if (chatSoundState.ctx && chatSoundState.ctx.state !== 'closed') return chatSoundState.ctx;
     const Ctx = window.AudioContext || window.webkitAudioContext;
     if (!Ctx) {
@@ -312,6 +378,7 @@
   async function primeChatSoundSystem(trigger = 'interaction') {
     if (chatSoundState.primeInFlight) return chatSoundState.userPrimed;
     chatSoundState.primeInFlight = true;
+    applyChatAudioSessionAmbient(trigger);
     chatSoundState.lastPrimeAt = Date.now();
     ensureChatHtmlAudioPools();
     attachChatSoundStateHandlers();
@@ -334,16 +401,6 @@
         if (ctx.state === 'suspended' || ctx.state === 'interrupted') await ctx.resume();
       } catch (_) {}
       if (ctx.state === 'running') {
-        const now = ctx.currentTime;
-        const gain = ctx.createGain();
-        gain.gain.setValueAtTime(0.00001, now);
-        gain.connect(ctx.destination);
-        const osc = ctx.createOscillator();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(440, now);
-        osc.connect(gain);
-        osc.start(now);
-        osc.stop(now + 0.01);
         webReady = true;
       } else {
         webReady = false;
@@ -373,6 +430,8 @@
   }
 
   async function playChatTone(kind) {
+    if (kind === 'incoming') applyChatAudioSessionAmbient('incoming-tone');
+    if (kind === 'outgoing') applyChatAudioSessionAmbient('outgoing-tone');
     ensureChatHtmlAudioPools();
     ensureChatSoundContext();
     if (!canPlayChatSound()) {
@@ -430,14 +489,17 @@
     if (!chatSoundState.handlersAttached) {
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState !== 'visible') return;
+        applyChatAudioSessionAmbient('visibility-visible');
         const ctx = chatSoundState.ctx;
         if (!ctx || ctx.state !== 'running') markChatSoundNeedsPrime('visibility');
       });
       window.addEventListener('pageshow', () => {
+        applyChatAudioSessionAmbient('pageshow');
         const ctx = chatSoundState.ctx;
         if (!ctx || ctx.state !== 'running') markChatSoundNeedsPrime('pageshow');
       });
       window.addEventListener('focus', () => {
+        applyChatAudioSessionAmbient('focus');
         const ctx = chatSoundState.ctx;
         if (!ctx || ctx.state !== 'running') markChatSoundNeedsPrime('focus');
       });
@@ -475,7 +537,7 @@
     for (const msg of messages) {
       const id = messageNumericId(msg);
       if (id === null) continue;
-      if (maxId !== null && id > maxId && !isOwnMessage(msg)) fresh.push(msg);
+      if (maxId !== null && id > maxId && !isOwnMessage(msg) && !isSuppressedOutgoingChatEcho(msg)) fresh.push(msg);
       maxId = maxId === null ? id : Math.max(maxId, id);
     }
     chatSoundState.lastObservedIncomingId = maxId;
@@ -936,6 +998,12 @@
         await primeChatSoundSystem('chat-send-click');
         await ensureChatNotificationsBootstrapped('chat-send-click');
         const msg = await chatSend(text);
+        rememberOutgoingChatEcho(text);
+        const sentMessages = Array.isArray(msg) ? msg : (msg ? [msg] : []);
+        if (sentMessages.length > 0) {
+          sentMessages.forEach(rememberOutgoingChatEcho);
+          seedChatIncomingAudioBaseline(sentMessages);
+        }
         chatInput.value = '';
         if (msg) renderChatMessages(Array.isArray(msg) ? msg : [msg]);
         await playChatTone('outgoing');
@@ -2029,6 +2097,7 @@
     sending: false
   };
   let driverProfileDmLastObservedIncomingId = null;
+  const recentOutgoingDmEchoes = new Map();
   let driverProfileLayoutBound = false;
   let driverProfileLayoutTimer50 = null;
   let driverProfileLayoutTimer180 = null;
@@ -2229,7 +2298,7 @@
         continue;
       }
 
-      if (id > maxId && !isOwnMessage(msg)) {
+      if (id > maxId && !isOwnMessage(msg) && !isSuppressedOutgoingDmEcho(msg)) {
         fresh.push(msg);
       }
 
@@ -2266,6 +2335,35 @@
       if (id !== null) latest = latest === null ? id : Math.max(latest, id);
     });
     driverProfileState.latestMessageId = latest;
+  }
+
+  function currentDriverProfileDmScope() {
+    return driverProfileState && driverProfileState.userId
+      ? `dm:${driverProfileState.userId}`
+      : 'dm:unknown';
+  }
+
+  function rememberOutgoingDmEcho(textOrMsg) {
+    pruneOutgoingEchoMap(recentOutgoingDmEchoes);
+    const text = typeof textOrMsg === 'string'
+      ? textOrMsg
+      : (textOrMsg?.text || textOrMsg?.message || '');
+    const userId = typeof textOrMsg === 'string'
+      ? currentChatSelfUserId()
+      : (msgUserId(textOrMsg) || currentChatSelfUserId());
+    const fp = makeOutgoingEchoFingerprint(text, userId);
+    if (!fp) return;
+    recentOutgoingDmEchoes.set(`${currentDriverProfileDmScope()}|${fp}`, Date.now() + CHAT_OUTGOING_ECHO_SUPPRESS_MS);
+  }
+
+  function isSuppressedOutgoingDmEcho(msg) {
+    pruneOutgoingEchoMap(recentOutgoingDmEchoes);
+    const fp = makeOutgoingEchoFingerprint(
+      msg?.text || msg?.message || '',
+      msgUserId(msg) || currentChatSelfUserId()
+    );
+    if (!fp) return false;
+    return recentOutgoingDmEchoes.has(`${currentDriverProfileDmScope()}|${fp}`);
   }
 
   function closeDriverProfileModal() {
@@ -2451,9 +2549,12 @@
       try {
         await primeChatSoundSystem('dm-send-click');
         const sent = await sendDriverProfileDm(driverProfileState.userId, text);
+        rememberOutgoingDmEcho(text);
         input.value = '';
         const sentMessages = Array.isArray(sent?.messages) ? sent.messages : (sent?.message ? [sent.message] : []);
         if (sentMessages.length) {
+          sentMessages.forEach(rememberOutgoingDmEcho);
+          seedDriverProfileDmAudioBaseline(sentMessages);
           appendDriverProfileMessages(sentMessages);
         } else {
           const refreshed = await fetchDriverProfileDmThread(driverProfileState.userId, { limit: 30 });
@@ -2628,6 +2729,23 @@
       pendingIncoming: chatSoundState.pendingIncoming,
       pendingOutgoing: chatSoundState.pendingOutgoing,
       lastObservedIncomingId: chatSoundState.lastObservedIncomingId
+    };
+  };
+
+  window.getChatAudioDebugState = function () {
+    let audioSessionType = null;
+    try {
+      audioSessionType = navigator && navigator.audioSession ? navigator.audioSession.type : null;
+    } catch (_) {
+      audioSessionType = null;
+    }
+    return {
+      chatAudioUnlocked: chatSoundState.userPrimed,
+      chatAudioReady: chatSoundState.userPrimed,
+      ctxState: chatSoundState.ctx ? chatSoundState.ctx.state : null,
+      audioSessionType,
+      recentOutgoingChatEchoes: recentOutgoingChatEchoes.size,
+      recentOutgoingDmEchoes: typeof recentOutgoingDmEchoes !== 'undefined' ? recentOutgoingDmEchoes.size : 0,
     };
   };
 })();
