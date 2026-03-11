@@ -2539,17 +2539,39 @@ function makeNavIcon() {
   return el;
 }
 
-function wireSelfProfileClick(el) {
-  if (!el || el.dataset.selfProfileWired === "1") return;
-  el.dataset.selfProfileWired = "1";
-  el.style.pointerEvents = "auto";
-  el.style.cursor = "pointer";
-  el.addEventListener("click", (ev) => {
+function wireProfileOpenTargets(rootEl, userId, options = {}) {
+  if (!rootEl || !userId) return;
+  const normalizedUserId = Number(userId);
+  if (!Number.isFinite(normalizedUserId)) return;
+  const isSelf = !!options?.isSelf;
+  const selectorList = isSelf
+    ? ["#navWrap", ".selfIdentitySlot", ".meAvatarBadge", ".meName", ".mapIdentityWrap", ".mapIdentityCore"]
+    : [".otherDrvWrap", ".otherDrvIdentitySlot", ".otherDrvAvatarBadge", ".otherDrvName", ".mapIdentityWrap", ".mapIdentityCore"];
+  const clickHandler = (ev) => {
     ev.preventDefault();
     ev.stopPropagation();
-    const myId = Number(me?.id);
-    if (!Number.isFinite(myId)) return;
-    window.openDriverProfileModal?.({ userId: myId, isSelf: true, source: "self-marker" });
+    if (isSelf) {
+      window.openDriverProfileModal?.({ userId: normalizedUserId, isSelf: true, source: "self-marker" });
+      return;
+    }
+    window.openDriverProfileModal?.({ userId: normalizedUserId, isSelf: false, source: "driver-marker" });
+  };
+  const targets = new Set([rootEl]);
+  selectorList.forEach((selector) => {
+    rootEl.querySelectorAll(selector).forEach((el) => targets.add(el));
+  });
+  targets.forEach((el) => {
+    if (!el) return;
+    const wiredFlag = isSelf ? 'selfProfileWired' : 'driverProfileWired';
+    const wiredUserFlag = isSelf ? 'selfProfileUserId' : 'driverProfileUserId';
+    const userIdText = String(normalizedUserId);
+    if (el.dataset[wiredFlag] === '1' && el.dataset[wiredUserFlag] === userIdText) return;
+    el.dataset[wiredFlag] = '1';
+    el.dataset[wiredUserFlag] = userIdText;
+    el.style.pointerEvents = 'auto';
+    el.style.cursor = 'pointer';
+    el.style.touchAction = 'manipulation';
+    el.addEventListener('click', clickHandler);
   });
 }
 
@@ -2576,6 +2598,8 @@ function refreshNavNameLabel() {
     el.textContent = myName;
     el.style.display = myName ? "block" : "none";
   }
+  const navWrap = document.getElementById("navWrap");
+  if (navWrap) wireProfileOpenTargets(navWrap, me?.id, { isSelf: true });
   applyDriverLabelZoomStyles();
 }
 
@@ -2776,7 +2800,7 @@ function startLocationWatch() {
 
   if (!navMarker) {
     const navEl = makeNavIcon();
-    wireSelfProfileClick(navEl);
+    wireProfileOpenTargets(navEl, me?.id, { isSelf: true });
     navMarker = new maplibregl.Marker({
       element: navEl,
       anchor: "center",
@@ -4128,24 +4152,6 @@ function clearOtherDrivers() {
   otherMarkers.clear();
 }
 
-function wireDriverProfileClick(el, userId) {
-  if (!el || !userId) return;
-  const normalizedUserId = Number(userId);
-  if (!Number.isFinite(normalizedUserId)) return;
-  const userIdText = String(normalizedUserId);
-  if (el.dataset.driverProfileUserId === userIdText && typeof el.onclick === "function") return;
-  el.style.pointerEvents = "auto";
-  el.style.cursor = "pointer";
-  el.dataset.driverProfileUserId = userIdText;
-  el.onclick = (ev) => {
-    ev.preventDefault();
-    ev.stopPropagation();
-    if (typeof window.openDriverProfileModal === "function") {
-      window.openDriverProfileModal({ userId: normalizedUserId });
-    }
-  };
-}
-
 function upsertDriverMarker(userId, name, lat, lng, heading, avatarUrl = "", mode = "name", orbitMeta = null, leaderboardBadgeCode = '', leaderboardHasCrown = false) {
   if (!Number.isFinite(lat) || !Number.isFinite(lng) || !map) return;
   if (!userId) return;
@@ -4156,12 +4162,12 @@ function upsertDriverMarker(userId, name, lat, lng, heading, avatarUrl = "", mod
     const el = existing.getElement();
     const newEl = makeDriverIcon(name || `Driver ${userId}`, heading, avatarUrl, mode, orbitMeta, leaderboardBadgeCode, leaderboardHasCrown);
     el.innerHTML = newEl.innerHTML;
-    wireDriverProfileClick(el, userId);
+    wireProfileOpenTargets(el, userId, { isSelf: false });
     return;
   }
 
   const el = makeDriverIcon(name || `Driver ${userId}`, heading, avatarUrl, mode, orbitMeta, leaderboardBadgeCode, leaderboardHasCrown);
-  wireDriverProfileClick(el, userId);
+  wireProfileOpenTargets(el, userId, { isSelf: false });
   // A custom HTML marker's triangle arrow sits slightly below the centre of its
   // 40×40 container (the tip is ~7 px below the vertical midpoint). When the
   // marker is anchored at "center" without an offset, the geographic point
