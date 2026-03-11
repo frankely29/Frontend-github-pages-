@@ -170,6 +170,13 @@ function formatNYCLabel(iso) {
   const mm = String(m).padStart(2, "0");
   return `${names[dow_m]} ${hr12}:${mm} ${ampm}`;
 }
+function formatNYCTimeOnlyLabel(iso) {
+  const { h, m } = parseIsoNoTz(iso);
+  const hr12 = ((h + 11) % 12) + 1;
+  const ampm = h >= 12 ? "PM" : "AM";
+  const mm = String(m).padStart(2, "0");
+  return `${hr12}:${mm} ${ampm}`;
+}
 function getNowNYCMinuteOfWeekRounded() {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/New_York",
@@ -2296,7 +2303,7 @@ async function renderFrame(frame) {
   if (debugEnabled) dbg("dbgFit", didFitToZonesOnce);
 
   if (timeLabel && currentFrame?.time) {
-    timeLabel.textContent = `Next 20 min • ${formatNYCLabel(currentFrame.time)}`;
+    timeLabel.textContent = `Showing Demand At ${formatNYCTimeOnlyLabel(currentFrame.time)}`;
   }
   updateRecommendation(currentFrame);
 }
