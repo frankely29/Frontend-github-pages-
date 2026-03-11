@@ -189,6 +189,14 @@
     );
   }
 
+  function isChatAuthReady() {
+    const hasToken = !!getCommunityToken();
+    if (typeof authHeaderOK === 'function') {
+      return hasToken && authHeaderOK();
+    }
+    return hasToken;
+  }
+
   function removeChatAudioUnlockListeners() {
     if (!chatAudioUnlockBound) return;
     ['pointerdown', 'touchstart', 'click', 'keydown'].forEach((evtName) => {
@@ -275,7 +283,7 @@
     if (chatNotificationsBootstrapped || chatNotificationsBootstrapInFlight) return chatNotificationsBootstrapped;
     chatNotificationsBootstrapInFlight = true;
     try {
-      if (typeof authHeaderOK === 'function' && !authHeaderOK()) {
+      if (!isChatAuthReady()) {
         chatNotificationsBootstrapped = false;
         syncChatSoundArmedState();
         return false;
@@ -283,6 +291,11 @@
 
       chatResetState();
       const result = await chatFetchMessages({ limit: 60 });
+      if (!result?.ok) {
+        chatNotificationsBootstrapped = false;
+        syncChatSoundArmedState();
+        return false;
+      }
       const msgs = result?.ok && Array.isArray(result.messages) ? result.messages : [];
       hydrateChatStateFromMessages(msgs);
       collectFreshIncomingMessages(msgs);
