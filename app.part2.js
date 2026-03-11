@@ -720,6 +720,9 @@
         rebuildUnreadBadgeFromMessages(msgs);
       }
 
+      chatInitialHistoryLoaded = true;
+      chatInitialHistoryRetryQueued = false;
+
       syncChatPollingState();
       await chatPollOnce();
       chatNotificationsBootstrapped = true;
@@ -734,6 +737,7 @@
   }
 
   async function onChatFirstInteraction(evt) {
+    await primeChatSoundSystem(evt?.type || 'interaction');
     await ensureChatNotificationsBootstrapped(evt?.type || 'interaction');
   }
 
@@ -1030,25 +1034,36 @@
       }
       const loadedMsgs = Array.isArray(msgs.messages) ? msgs.messages : [];
       const needsInitialRecovery = !chatInitialHistoryLoaded;
+      const hadIncomingAudioBaseline = chatSoundRuntime.lastNotifiedIncomingId !== null;
+
+      // If we already have an audio baseline, this batch may contain truly new messages
+      // even if the UI still considers itself in an initial recovery path.
+      const freshIncoming = hadIncomingAudioBaseline
+        ? collectFreshIncomingMessagesForAudio(loadedMsgs)
+        : [];
+
+      if (freshIncoming.length > 0) {
+        void playChatTone('incoming');
+      }
 
       if (needsInitialRecovery) {
         chatInitialHistoryLoaded = true;
         chatInitialHistoryRetryQueued = false;
-        seedChatIncomingAudioBaseline(loadedMsgs);
+
+        // Only seed the audio baseline here if we truly had no baseline yet.
+        if (!hadIncomingAudioBaseline) {
+          seedChatIncomingAudioBaseline(loadedMsgs);
+        }
+
         if (!killFeedBootstrapReady) {
           seedKillFeedSeenKeys(loadedMsgs);
           killFeedBootstrapReady = true;
           killFeedBootstrapPollConsumed = true;
         }
+
         if (!maybeInitializeChatReadBaseline()) {
           rebuildUnreadBadgeFromMessages(loadedMsgs);
         }
-      }
-
-
-      const freshIncomingForAudio = collectFreshIncomingMessagesForAudio(loadedMsgs);
-      if (!needsInitialRecovery && freshIncomingForAudio.length > 0) {
-        void playChatTone('incoming');
       }
 
       // Update the in-panel chat messages only if the chat panel is open.
