@@ -4097,14 +4097,21 @@ function clearOtherDrivers() {
   otherMarkers.clear();
 }
 
-function bindDriverProfileMarkerClick(el, userId) {
+function wireDriverProfileClick(el, userId) {
   if (!el || !userId) return;
+  const normalizedUserId = Number(userId);
+  if (!Number.isFinite(normalizedUserId)) return;
+  const userIdText = String(normalizedUserId);
+  if (el.dataset.driverProfileUserId === userIdText && typeof el.onclick === "function") return;
   el.style.pointerEvents = "auto";
   el.style.cursor = "pointer";
+  el.dataset.driverProfileUserId = userIdText;
   el.onclick = (ev) => {
     ev.preventDefault();
     ev.stopPropagation();
-    window.openDriverProfileModal?.({ userId });
+    if (typeof window.openDriverProfileModal === "function") {
+      window.openDriverProfileModal({ userId: normalizedUserId });
+    }
   };
 }
 
@@ -4116,14 +4123,14 @@ function upsertDriverMarker(userId, name, lat, lng, heading, avatarUrl = "", mod
   if (existing) {
     existing.setLngLat([lng, lat]);
     const el = existing.getElement();
-    bindDriverProfileMarkerClick(el, userId);
     const newEl = makeDriverIcon(name || `Driver ${userId}`, heading, avatarUrl, mode, orbitMeta, leaderboardBadgeCode, leaderboardHasCrown);
     el.innerHTML = newEl.innerHTML;
+    wireDriverProfileClick(el, userId);
     return;
   }
 
   const el = makeDriverIcon(name || `Driver ${userId}`, heading, avatarUrl, mode, orbitMeta, leaderboardBadgeCode, leaderboardHasCrown);
-  bindDriverProfileMarkerClick(el, userId);
+  wireDriverProfileClick(el, userId);
   // A custom HTML marker's triangle arrow sits slightly below the centre of its
   // 40×40 container (the tip is ~7 px below the vertical midpoint). When the
   // marker is anchored at "center" without an offset, the geographic point
