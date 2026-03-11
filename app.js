@@ -191,6 +191,16 @@ function getNowNYCMinuteOfWeekRounded() {
   const total = dow_m * 1440 + hour * 60 + minute;
   return Math.floor(total / BIN_MINUTES) * BIN_MINUTES;
 }
+function addMinutesOfWeek(minuteOfWeek, deltaMinutes) {
+  const mod = 7 * 1440;
+  let out = (Number(minuteOfWeek) + Number(deltaMinutes)) % mod;
+  if (out < 0) out += mod;
+  return out;
+}
+function getNextBinNowNYCMinuteOfWeek() {
+  const currentBinStart = getNowNYCMinuteOfWeekRounded();
+  return addMinutesOfWeek(currentBinStart, BIN_MINUTES);
+}
 function cyclicDiff(a, b, mod) {
   const d = Math.abs(a - b);
   return Math.min(d, mod - d);
@@ -2285,7 +2295,9 @@ async function renderFrame(frame) {
   }
   if (debugEnabled) dbg("dbgFit", didFitToZonesOnce);
 
-  if (timeLabel && currentFrame?.time) timeLabel.textContent = formatNYCLabel(currentFrame.time);
+  if (timeLabel && currentFrame?.time) {
+    timeLabel.textContent = `Next 20 min • ${formatNYCLabel(currentFrame.time)}`;
+  }
   updateRecommendation(currentFrame);
 }
 
@@ -2320,8 +2332,8 @@ async function loadTimeline() {
   slider.max = String(timeline.length - 1);
   slider.step = "1";
 
-  const nowMinWeek = getNowNYCMinuteOfWeekRounded();
-  const idx = pickClosestIndex(minutesOfWeek, nowMinWeek);
+  const targetMinWeek = getNextBinNowNYCMinuteOfWeek();
+  const idx = pickClosestIndex(minutesOfWeek, targetMinWeek);
   slider.value = String(idx);
 
   bubbleUpdateNow();
@@ -2976,8 +2988,8 @@ async function tickNYCClockAndAdvanceIfNeeded() {
     if (Date.now() - lastUserSliderTs < USER_SLIDER_GRACE_MS) return;
     if (!timeline.length || !minutesOfWeek.length) return;
 
-    const nowMinWeek = getNowNYCMinuteOfWeekRounded();
-    const bestIdx = pickClosestIndex(minutesOfWeek, nowMinWeek);
+    const targetMinWeek = getNextBinNowNYCMinuteOfWeek();
+    const bestIdx = pickClosestIndex(minutesOfWeek, targetMinWeek);
 
     const curIdx = Number(slider.value || "0");
     if (bestIdx === curIdx) return;
