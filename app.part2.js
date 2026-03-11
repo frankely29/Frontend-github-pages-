@@ -270,6 +270,7 @@
       const result = await chatFetchMessages({ limit: 60 });
       const msgs = result?.ok && Array.isArray(result.messages) ? result.messages : [];
       hydrateChatStateFromMessages(msgs);
+      collectNewIncomingMessages(msgs);
       seedKillFeedSeenKeys(msgs);
       killFeedBootstrapReady = true;
       killFeedBootstrapPollConsumed = false;
@@ -358,7 +359,7 @@
   rearmChatAudioUnlock();
   bindChatFirstInteractionListeners();
 
-  function playBeep() {
+  function playChatTone(kind = 'incoming') {
     const ctx = ensureChatAudioContext();
     if (!ctx) return;
     if (!chatAudioUnlocked) {
@@ -372,28 +373,69 @@
       return;
     }
     const now = ctx.currentTime;
+    const outgoing = kind === 'outgoing';
     const gain = ctx.createGain();
     gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(0.08, now + 0.015);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.22);
+    if (outgoing) {
+      gain.gain.exponentialRampToValueAtTime(0.018, now + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.085);
+    } else {
+      gain.gain.exponentialRampToValueAtTime(0.028, now + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.145);
+    }
     gain.connect(ctx.destination);
 
     const osc1 = ctx.createOscillator();
     osc1.type = 'sine';
-    osc1.frequency.setValueAtTime(740, now);
-    osc1.frequency.exponentialRampToValueAtTime(880, now + 0.1);
+    if (outgoing) {
+      osc1.frequency.setValueAtTime(570, now);
+      osc1.frequency.exponentialRampToValueAtTime(680, now + 0.08);
+    } else {
+      osc1.frequency.setValueAtTime(710, now);
+      osc1.frequency.exponentialRampToValueAtTime(860, now + 0.13);
+    }
     osc1.connect(gain);
-
-    const osc2 = ctx.createOscillator();
-    osc2.type = 'triangle';
-    osc2.frequency.setValueAtTime(660, now + 0.105);
-    osc2.frequency.exponentialRampToValueAtTime(990, now + 0.2);
-    osc2.connect(gain);
-
     osc1.start(now);
-    osc1.stop(now + 0.11);
-    osc2.start(now + 0.105);
-    osc2.stop(now + 0.22);
+    osc1.stop(outgoing ? now + 0.085 : now + 0.145);
+
+    if (!outgoing) {
+      const osc2 = ctx.createOscillator();
+      osc2.type = 'triangle';
+      osc2.frequency.setValueAtTime(760, now + 0.01);
+      osc2.frequency.exponentialRampToValueAtTime(900, now + 0.14);
+      const overlayGain = ctx.createGain();
+      overlayGain.gain.setValueAtTime(0.0001, now);
+      overlayGain.gain.exponentialRampToValueAtTime(0.006, now + 0.012);
+      overlayGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.145);
+      osc2.connect(overlayGain);
+      overlayGain.connect(ctx.destination);
+      osc2.start(now);
+      osc2.stop(now + 0.145);
+    }
+  }
+
+  function playIncomingSoftTone() {
+    playChatTone('incoming');
+  }
+
+  function playOutgoingSoftTone() {
+    playChatTone('outgoing');
+  }
+
+  function collectNewIncomingMessages(messages, { markSeen = true } = {}) {
+    if (!Array.isArray(messages) || !messages.length) return [];
+    const fresh = [];
+    for (const msg of messages) {
+      const key = chatMsgKey(msg);
+      if (incomingNotifySeenKeys.has(key)) continue;
+      if (isOwnMessage(msg)) {
+        if (markSeen) incomingNotifySeenKeys.add(key);
+        continue;
+      }
+      if (markSeen) incomingNotifySeenKeys.add(key);
+      fresh.push(msg);
+    }
+    return fresh;
   }
 
   function shouldCountUnread(msg, { ignoreOpenPanel = false } = {}) {
@@ -459,10 +501,8 @@
       const msgId = messageNumericId(msg);
       if (msgId === null || chatLastReadId === null || msgId <= chatLastReadId) return;
 
-      incomingNotifySeenKeys.add(key);
       unreadChatCount += 1;
       updateChatUnreadBadge();
-      playBeep();
     });
   }
 
@@ -626,6 +666,7 @@
       return { ok: false, messages: [] };
     }
     const msgs = Array.isArray(result.messages) ? result.messages : [];
+    collectNewIncomingMessages(msgs);
     renderChatMessages(msgs, { replace: true });
     chatInitialHistoryLoaded = true;
     chatInitialHistoryRetryQueued = false;
@@ -665,6 +706,11 @@
       }
       const loadedMsgs = Array.isArray(msgs.messages) ? msgs.messages : [];
       const needsInitialRecovery = !chatInitialHistoryLoaded;
+      const canNotifyIncoming = !needsInitialRecovery && chatNotificationsBootstrapped;
+
+      if (canNotifyIncoming && collectNewIncomingMessages(loadedMsgs).length > 0) {
+        playIncomingSoftTone();
+      }
 
       if (needsInitialRecovery) {
         chatInitialHistoryLoaded = true;
@@ -748,6 +794,7 @@
         const msg = await chatSend(text);
         chatInput.value = '';
         if (msg) renderChatMessages(Array.isArray(msg) ? msg : [msg]);
+        playOutgoingSoftTone();
         await chatPollOnce();
       } catch (e) {
         console.warn('chat send failed:', e);
@@ -1831,6 +1878,8 @@
     profile: null,
     messages: [],
     latestMessageId: null,
+    seenMessageKeys: new Set(),
+    dmInitialLoadComplete: false,
     pollTimer: null,
     error: "",
     status: "",
@@ -2011,6 +2060,25 @@
     return Number.isFinite(id) ? id : null;
   }
 
+  function driverProfileMsgKey(msg) {
+    const id = parseDriverMsgId(msg);
+    if (id !== null) return `id:${id}`;
+    return `${msgUserId(msg) || ''}|${msg?.created_at || ''}|${msg?.text || msg?.message || ''}`;
+  }
+
+  function collectNewIncomingDmMessages(messages, { markSeen = true } = {}) {
+    if (!Array.isArray(messages) || !messages.length) return [];
+    const fresh = [];
+    for (const msg of messages) {
+      const key = driverProfileMsgKey(msg);
+      if (driverProfileState.seenMessageKeys.has(key)) continue;
+      if (markSeen) driverProfileState.seenMessageKeys.add(key);
+      if (isOwnMessage(msg)) continue;
+      fresh.push(msg);
+    }
+    return fresh;
+  }
+
   function normalizeDriverMessages(payload) {
     const list = Array.isArray(payload) ? payload : (Array.isArray(payload?.messages) ? payload.messages : []);
     return list.slice().sort((a, b) => {
@@ -2045,6 +2113,8 @@
     driverProfileState.userId = null;
     driverProfileState.isSelf = false;
     driverProfileState.status = '';
+    driverProfileState.seenMessageKeys = new Set();
+    driverProfileState.dmInitialLoadComplete = false;
     const root = ensureDriverProfileUI();
     root.classList.remove('open');
     if (driverProfileLayoutTimer50) window.clearTimeout(driverProfileLayoutTimer50);
@@ -2222,12 +2292,15 @@
         input.value = '';
         const sentMessages = Array.isArray(sent?.messages) ? sent.messages : (sent?.message ? [sent.message] : []);
         if (sentMessages.length) {
+          collectNewIncomingDmMessages(sentMessages);
           appendDriverProfileMessages(sentMessages);
         } else {
           const refreshed = await fetchDriverProfileDmThread(driverProfileState.userId, { limit: 30 });
           driverProfileState.messages = normalizeDriverMessages(refreshed);
+          collectNewIncomingDmMessages(driverProfileState.messages);
           appendDriverProfileMessages([]);
         }
+        playOutgoingSoftTone();
       } catch (err) {
         driverProfileState.error = err?.message || 'Message failed to send.';
       } finally {
@@ -2263,6 +2336,8 @@
     driverProfileState.profile = null;
     driverProfileState.messages = [];
     driverProfileState.latestMessageId = null;
+    driverProfileState.seenMessageKeys = new Set();
+    driverProfileState.dmInitialLoadComplete = false;
     driverProfileState.error = '';
     driverProfileState.status = '';
     driverProfileState.sending = false;
@@ -2277,6 +2352,8 @@
         const dmRes = await fetchDriverProfileDmThread(nextUserId, { limit: 30 });
         if (!driverProfileState.open || driverProfileState.userId !== nextUserId) return;
         driverProfileState.messages = normalizeDriverMessages(dmRes);
+        collectNewIncomingDmMessages(driverProfileState.messages);
+        driverProfileState.dmInitialLoadComplete = true;
         appendDriverProfileMessages([]);
       }
     } catch (err) {
@@ -2300,7 +2377,10 @@
       });
       const incoming = normalizeDriverMessages(res);
       if (!incoming.length) return;
+      const hasIncomingFromOther = driverProfileState.dmInitialLoadComplete
+        && collectNewIncomingDmMessages(incoming).length > 0;
       appendDriverProfileMessages(incoming);
+      if (hasIncomingFromOther) playIncomingSoftTone();
       renderDriverProfileModal();
     } catch (_) {}
   }
