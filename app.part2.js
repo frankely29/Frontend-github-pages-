@@ -344,9 +344,9 @@
   function makeChatToneDataUrl(kind) {
     const sampleRate = 22050;
     const spec = kind === 'incoming'
-      ? { duration: 0.16, startFreq: 720, endFreq: 900, peak: 0.05 }
+      ? { duration: 0.16, startFreq: 720, endFreq: 900, peak: 0.18 }
       : kind === 'outgoing'
-        ? { duration: 0.095, startFreq: 560, endFreq: 720, peak: 0.03 }
+        ? { duration: 0.095, startFreq: 560, endFreq: 720, peak: 0.14 }
         : { duration: 0.02, startFreq: 440, endFreq: 440, peak: 0 };
     const total = Math.max(1, Math.floor(sampleRate * spec.duration));
     const attack = Math.max(1, Math.floor(total * 0.15));
@@ -416,6 +416,8 @@
     if (!el) return false;
     el.pause();
     try { el.currentTime = 0; } catch (_) {}
+    el.muted = false;
+    el.volume = 1;
     try {
       await el.play();
       chatSoundRuntime.htmlAudioReady = true;
@@ -439,7 +441,7 @@
     const incoming = kind === 'incoming';
     const gain = ctx.createGain();
     gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(incoming ? 0.05 : 0.03, now + (incoming ? 0.016 : 0.01));
+    gain.gain.exponentialRampToValueAtTime(incoming ? 0.16 : 0.12, now + (incoming ? 0.016 : 0.01));
     gain.gain.exponentialRampToValueAtTime(0.0001, now + (incoming ? 0.16 : 0.095));
     gain.connect(ctx.destination);
     const osc = ctx.createOscillator();
@@ -1034,7 +1036,7 @@
       }
       const loadedMsgs = Array.isArray(msgs.messages) ? msgs.messages : [];
       const needsInitialRecovery = !chatInitialHistoryLoaded;
-      const hadIncomingAudioBaseline = chatSoundRuntime.lastNotifiedIncomingId !== null;
+      const hadIncomingAudioBaseline = chatSoundRuntime.lastObservedIncomingId !== null;
 
       // If we already have an audio baseline, this batch may contain truly new messages
       // even if the UI still considers itself in an initial recovery path.
