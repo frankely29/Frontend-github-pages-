@@ -226,6 +226,7 @@
     lastLifecycleResetAt: 0,
     lastObservedIncomingId: null,
     dmLastObservedIncomingId: null,
+    dmBaselineReady: false,
   };
 
   const chatSoundState = {
@@ -643,7 +644,10 @@
   reconcileChatSoundRuntime('module-init');
 
   function seedChatIncomingAudioBaseline(messages) {
-    if (!Array.isArray(messages) || !messages.length) return;
+    if (!Array.isArray(messages) || !messages.length) {
+      chatSoundState.baselineReady = true;
+      return;
+    }
     let maxId = chatSoundRuntime.lastObservedIncomingId;
     for (const msg of messages) {
       const id = messageNumericId(msg);
@@ -655,13 +659,18 @@
   }
 
   function collectFreshIncomingMessagesForAudio(messages) {
-    if (!Array.isArray(messages) || !messages.length) return [];
+    if (!Array.isArray(messages) || !messages.length) {
+      chatSoundState.baselineReady = true;
+      return [];
+    }
     const fresh = [];
     let maxId = chatSoundRuntime.lastObservedIncomingId;
+    const baselineReady = chatSoundState.baselineReady;
     for (const msg of messages) {
       const id = messageNumericId(msg);
       if (id === null) continue;
-      if (maxId !== null && id > maxId && !isOwnMessage(msg) && !isSuppressedOutgoingChatEcho(msg)) fresh.push(msg);
+      const isFresh = baselineReady && (maxId === null || id > maxId);
+      if (isFresh && !isOwnMessage(msg) && !isSuppressedOutgoingChatEcho(msg)) fresh.push(msg);
       maxId = maxId === null ? id : Math.max(maxId, id);
     }
     chatSoundRuntime.lastObservedIncomingId = maxId;
@@ -892,6 +901,7 @@
     unreadChatCount = 0;
     updateChatUnreadBadge();
     chatSoundRuntime.lastObservedIncomingId = null;
+    chatSoundRuntime.dmBaselineReady = false;
     chatSoundState.baselineReady = false;
     killFeedBootstrapReady = false;
     killFeedBootstrapPollConsumed = false;
@@ -1036,7 +1046,7 @@
       }
       const loadedMsgs = Array.isArray(msgs.messages) ? msgs.messages : [];
       const needsInitialRecovery = !chatInitialHistoryLoaded;
-      const hadIncomingAudioBaseline = chatSoundRuntime.lastObservedIncomingId !== null;
+      const hadIncomingAudioBaseline = chatSoundState.baselineReady;
 
       // If we already have an audio baseline, this batch may contain truly new messages
       // even if the UI still considers itself in an initial recovery path.
@@ -2413,7 +2423,10 @@
   }
 
   function seedDriverProfileDmAudioBaseline(messages) {
-    if (!Array.isArray(messages) || !messages.length) return;
+    if (!Array.isArray(messages) || !messages.length) {
+      chatSoundRuntime.dmBaselineReady = true;
+      return;
+    }
     let maxId = chatSoundRuntime.dmLastObservedIncomingId;
     for (const msg of messages) {
       const id = parseDriverMsgId(msg);
@@ -2421,30 +2434,29 @@
       maxId = maxId === null ? id : Math.max(maxId, id);
     }
     chatSoundRuntime.dmLastObservedIncomingId = maxId;
+    chatSoundRuntime.dmBaselineReady = true;
   }
 
   function collectFreshIncomingDriverProfileDm(messages) {
     if (!Array.isArray(messages) || !messages.length) return [];
     const fresh = [];
     let maxId = chatSoundRuntime.dmLastObservedIncomingId;
+    const baselineReady = chatSoundRuntime.dmBaselineReady === true;
 
     for (const msg of messages) {
       const id = parseDriverMsgId(msg);
       if (id === null) continue;
 
-      if (maxId === null) {
-        maxId = id;
-        continue;
-      }
-
-      if (id > maxId && !isOwnMessage(msg) && !isSuppressedOutgoingDmEcho(msg)) {
+      const isFresh = baselineReady && (maxId === null || id > maxId);
+      if (isFresh && !isOwnMessage(msg) && !isSuppressedOutgoingDmEcho(msg)) {
         fresh.push(msg);
       }
 
-      maxId = Math.max(maxId, id);
+      maxId = maxId === null ? id : Math.max(maxId, id);
     }
 
     chatSoundRuntime.dmLastObservedIncomingId = maxId;
+    chatSoundRuntime.dmBaselineReady = true;
     return fresh;
   }
 
@@ -2512,6 +2524,7 @@
     driverProfileState.isSelf = false;
     driverProfileState.status = '';
     chatSoundRuntime.dmLastObservedIncomingId = null;
+    chatSoundRuntime.dmBaselineReady = false;
     driverProfileState.dmInitialLoadComplete = false;
     const root = ensureDriverProfileUI();
     root.classList.remove('open');
@@ -2738,6 +2751,7 @@
     driverProfileState.messages = [];
     driverProfileState.latestMessageId = null;
     chatSoundRuntime.dmLastObservedIncomingId = null;
+    chatSoundRuntime.dmBaselineReady = false;
     driverProfileState.dmInitialLoadComplete = false;
     driverProfileState.error = '';
     driverProfileState.status = '';
