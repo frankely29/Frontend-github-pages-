@@ -306,14 +306,15 @@
   }
 
   function resetChatSoundLifecycle(reason = 'unknown') {
+    const keepHtmlReady = !!chatSoundRuntime?.htmlAudioReady;
     chatAudioUnlocked = false;
-    chatAudioReady = false;
+    chatAudioReady = keepHtmlReady;
 
     if (typeof chatSoundRuntime !== 'undefined' && chatSoundRuntime) {
-      chatSoundRuntime.userPrimed = false;
+      chatSoundRuntime.userPrimed = keepHtmlReady;
       chatSoundRuntime.webAudioReady = false;
-      chatSoundRuntime.htmlAudioReady = false;
-      chatSoundRuntime.lastPrimeAt = 0;
+      chatSoundRuntime.htmlAudioReady = keepHtmlReady;
+      if (!keepHtmlReady) chatSoundRuntime.lastPrimeAt = 0;
       chatSoundRuntime.lastLifecycleResetAt = Date.now();
     }
 
@@ -605,11 +606,12 @@
   }
 
   function markChatSoundNeedsPrime(reason) {
+    const keepHtmlReady = !!chatSoundRuntime?.htmlAudioReady;
     chatAudioUnlocked = false;
-    chatAudioReady = false;
-    chatSoundRuntime.userPrimed = false;
+    chatAudioReady = keepHtmlReady;
+    chatSoundRuntime.userPrimed = keepHtmlReady;
     chatSoundRuntime.webAudioReady = false;
-    chatSoundRuntime.htmlAudioReady = false;
+    chatSoundRuntime.htmlAudioReady = keepHtmlReady;
     bindChatSoundPrimeListeners();
     bindChatAudioUnlockListeners();
   }
