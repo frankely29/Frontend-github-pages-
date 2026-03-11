@@ -151,22 +151,42 @@
     return !!(selfId && senderId && selfId === senderId);
   }
 
-  let chatAudioCtx = null;
-  let chatAudioUnlocked = false;
-  let chatAudioReady = false;
-  let chatLastNotifiedIncomingId = null;
+  const chatSoundState = {
+    ctx: null,
+    webAudioReady: false,
+    htmlAudioReady: false,
+    userPrimed: false,
+    incomingPool: [],
+    outgoingPool: [],
+    incomingPoolIndex: 0,
+    outgoingPoolIndex: 0,
+    pendingIncoming: 0,
+    pendingOutgoing: 0,
+    baselineReady: false,
+    lastObservedIncomingId: null,
+    lastPrimeAt: 0,
+    primeListenersBound: false,
+    primeInFlight: false,
+    handlersAttached: false,
+    incomingToneDataUrl: '',
+    outgoingToneDataUrl: '',
+    silentToneDataUrl: ''
+  };
   let lastObservedChatAuthReady = null;
-  let chatAudioUnlockBound = false;
-  let chatAudioUnlockInFlight = false;
   let chatNotificationsBootstrapped = false;
   let chatNotificationsBootstrapInFlight = false;
   let chatFirstInteractionBound = false;
-  function ensureChatAudioContext() {
-    if (chatAudioCtx) return chatAudioCtx;
+
+  function ensureChatSoundContext() {
+    if (chatSoundState.ctx && chatSoundState.ctx.state !== 'closed') return chatSoundState.ctx;
     const Ctx = window.AudioContext || window.webkitAudioContext;
-    if (!Ctx) return null;
-    chatAudioCtx = new Ctx();
-    return chatAudioCtx;
+    if (!Ctx) {
+      chatSoundState.ctx = null;
+      return null;
+    }
+    chatSoundState.ctx = new Ctx();
+    attachChatSoundStateHandlers();
+    return chatSoundState.ctx;
   }
 
   function isChatAuthReady() {
@@ -177,61 +197,290 @@
     return hasToken;
   }
 
-  function removeChatAudioUnlockListeners() {
-    if (!chatAudioUnlockBound) return;
-    ['pointerdown', 'touchstart', 'click', 'keydown'].forEach((evtName) => {
-      document.removeEventListener(evtName, onChatAudioUnlockInteraction, true);
-    });
-    chatAudioUnlockBound = false;
-  }
-
-  function bindChatAudioUnlockListeners() {
-    if (chatAudioUnlockBound) return;
-    ['pointerdown', 'touchstart', 'click', 'keydown'].forEach((evtName) => {
-      document.addEventListener(evtName, onChatAudioUnlockInteraction, { passive: true, capture: true });
-    });
-    chatAudioUnlockBound = true;
-  }
-
-  async function primeChatAudio(trigger = 'interaction') {
-    if (chatAudioUnlockInFlight) return;
-    chatAudioUnlockInFlight = true;
-    const ctx = ensureChatAudioContext();
-    if (!ctx) {
-      chatAudioUnlocked = false;
-      chatAudioReady = false;
-      chatAudioUnlockInFlight = false;
-      return false;
+  function makeChatToneDataUrl(kind) {
+    const sampleRate = 22050;
+    const spec = kind === 'incoming'
+      ? { duration: 0.16, startFreq: 720, endFreq: 900, peak: 0.05 }
+      : kind === 'outgoing'
+        ? { duration: 0.095, startFreq: 560, endFreq: 720, peak: 0.03 }
+        : { duration: 0.02, startFreq: 440, endFreq: 440, peak: 0 };
+    const total = Math.max(1, Math.floor(sampleRate * spec.duration));
+    const attack = Math.max(1, Math.floor(total * 0.15));
+    const releaseStart = Math.floor(total * 0.55);
+    const pcm = new Int16Array(total);
+    let phase = 0;
+    for (let i = 0; i < total; i += 1) {
+      const t = total <= 1 ? 0 : i / (total - 1);
+      const freq = spec.startFreq + ((spec.endFreq - spec.startFreq) * t);
+      phase += (2 * Math.PI * freq) / sampleRate;
+      let env = 1;
+      if (i < attack) env = i / attack;
+      else if (i > releaseStart) env = Math.max(0, 1 - ((i - releaseStart) / Math.max(1, total - releaseStart)));
+      const sample = Math.sin(phase) * spec.peak * env;
+      pcm[i] = Math.max(-32768, Math.min(32767, Math.floor(sample * 32767)));
     }
-    try {
-      if (ctx.state === 'suspended') await ctx.resume();
-      const now = ctx.currentTime;
-      const gain = ctx.createGain();
-      gain.gain.setValueAtTime(0.00001, now);
-      gain.connect(ctx.destination);
-      const osc = ctx.createOscillator();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(440, now);
-      osc.connect(gain);
-      osc.start(now);
-      osc.stop(now + 0.01);
+    const dataSize = pcm.length * 2;
+    const wav = new Uint8Array(44 + dataSize);
+    const view = new DataView(wav.buffer);
+    const write = (offset, text) => { for (let i = 0; i < text.length; i += 1) wav[offset + i] = text.charCodeAt(i); };
+    write(0, 'RIFF');
+    view.setUint32(4, 36 + dataSize, true);
+    write(8, 'WAVE');
+    write(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    write(36, 'data');
+    view.setUint32(40, dataSize, true);
+    for (let i = 0; i < pcm.length; i += 1) {
+      view.setInt16(44 + (i * 2), pcm[i], true);
+    }
+    let binary = '';
+    for (let i = 0; i < wav.length; i += 1) binary += String.fromCharCode(wav[i]);
+    return `data:audio/wav;base64,${btoa(binary)}`;
+  }
 
-      chatAudioUnlocked = ctx.state === 'running';
-      chatAudioReady = chatAudioUnlocked;
-      if (chatAudioReady) {
-        removeChatAudioUnlockListeners();
-      } else {
-        bindChatAudioUnlockListeners();
+  function ensureChatHtmlAudioPools() {
+    if (!chatSoundState.incomingToneDataUrl) chatSoundState.incomingToneDataUrl = makeChatToneDataUrl('incoming');
+    if (!chatSoundState.outgoingToneDataUrl) chatSoundState.outgoingToneDataUrl = makeChatToneDataUrl('outgoing');
+    if (!chatSoundState.silentToneDataUrl) chatSoundState.silentToneDataUrl = makeChatToneDataUrl('silent');
+    const ensurePool = (pool, size, src) => {
+      while (pool.length < size) {
+        const el = new Audio(src);
+        el.preload = 'auto';
+        el.playsInline = true;
+        pool.push(el);
       }
-      return chatAudioReady;
-    } catch (err) {
-      chatAudioUnlocked = false;
-      chatAudioReady = false;
-      bindChatAudioUnlockListeners();
+    };
+    ensurePool(chatSoundState.incomingPool, 4, chatSoundState.incomingToneDataUrl);
+    ensurePool(chatSoundState.outgoingPool, 4, chatSoundState.outgoingToneDataUrl);
+  }
+
+  async function tryPlayChatToneHtml(kind) {
+    ensureChatHtmlAudioPools();
+    const isIncoming = kind === 'incoming';
+    const pool = isIncoming ? chatSoundState.incomingPool : chatSoundState.outgoingPool;
+    if (!pool.length) return false;
+    const idxKey = isIncoming ? 'incomingPoolIndex' : 'outgoingPoolIndex';
+    const idx = chatSoundState[idxKey] % pool.length;
+    chatSoundState[idxKey] = (chatSoundState[idxKey] + 1) % pool.length;
+    const el = pool[idx];
+    if (!el) return false;
+    el.pause();
+    try { el.currentTime = 0; } catch (_) {}
+    try {
+      await el.play();
+      chatSoundState.htmlAudioReady = true;
+      return true;
+    } catch (_) {
       return false;
-    } finally {
-      chatAudioUnlockInFlight = false;
     }
+  }
+
+  async function tryPlayChatToneWebAudio(kind) {
+    const ctx = ensureChatSoundContext();
+    if (!ctx) return false;
+    try {
+      if (ctx.state === 'suspended' || ctx.state === 'interrupted') await ctx.resume();
+    } catch (_) {}
+    if (ctx.state !== 'running') {
+      chatSoundState.webAudioReady = false;
+      return false;
+    }
+    const now = ctx.currentTime;
+    const incoming = kind === 'incoming';
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(incoming ? 0.05 : 0.03, now + (incoming ? 0.016 : 0.01));
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + (incoming ? 0.16 : 0.095));
+    gain.connect(ctx.destination);
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(incoming ? 720 : 560, now);
+    osc.frequency.exponentialRampToValueAtTime(incoming ? 900 : 720, now + (incoming ? 0.14 : 0.09));
+    osc.connect(gain);
+    osc.start(now);
+    osc.stop(now + (incoming ? 0.16 : 0.095));
+    chatSoundState.webAudioReady = true;
+    return true;
+  }
+
+  async function primeChatSoundSystem(trigger = 'interaction') {
+    if (chatSoundState.primeInFlight) return chatSoundState.userPrimed;
+    chatSoundState.primeInFlight = true;
+    chatSoundState.lastPrimeAt = Date.now();
+    ensureChatHtmlAudioPools();
+    attachChatSoundStateHandlers();
+    let htmlReady = chatSoundState.htmlAudioReady;
+    let webReady = chatSoundState.webAudioReady;
+    try {
+      const primer = new Audio(chatSoundState.silentToneDataUrl || makeChatToneDataUrl('silent'));
+      primer.preload = 'auto';
+      primer.playsInline = true;
+      primer.muted = true;
+      await primer.play();
+      primer.pause();
+      try { primer.currentTime = 0; } catch (_) {}
+      htmlReady = true;
+    } catch (_) {}
+
+    const ctx = ensureChatSoundContext();
+    if (ctx) {
+      try {
+        if (ctx.state === 'suspended' || ctx.state === 'interrupted') await ctx.resume();
+      } catch (_) {}
+      if (ctx.state === 'running') {
+        const now = ctx.currentTime;
+        const gain = ctx.createGain();
+        gain.gain.setValueAtTime(0.00001, now);
+        gain.connect(ctx.destination);
+        const osc = ctx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(440, now);
+        osc.connect(gain);
+        osc.start(now);
+        osc.stop(now + 0.01);
+        webReady = true;
+      } else {
+        webReady = false;
+      }
+    } else {
+      webReady = false;
+    }
+
+    chatSoundState.htmlAudioReady = htmlReady;
+    chatSoundState.webAudioReady = webReady;
+    chatSoundState.userPrimed = htmlReady || webReady;
+    if (chatSoundState.userPrimed) {
+      removeChatSoundPrimeListeners();
+      await flushPendingChatTones();
+    } else {
+      bindChatSoundPrimeListeners();
+    }
+    chatSoundState.primeInFlight = false;
+    return chatSoundState.userPrimed;
+  }
+
+  function canPlayChatSound() {
+    if (!chatSoundState.userPrimed) return false;
+    const ctx = chatSoundState.ctx;
+    if (ctx && ctx.state !== 'running') chatSoundState.webAudioReady = false;
+    return chatSoundState.htmlAudioReady || chatSoundState.webAudioReady;
+  }
+
+  async function playChatTone(kind) {
+    ensureChatHtmlAudioPools();
+    ensureChatSoundContext();
+    if (!canPlayChatSound()) {
+      if (kind === 'incoming') chatSoundState.pendingIncoming += 1;
+      else chatSoundState.pendingOutgoing += 1;
+      bindChatSoundPrimeListeners();
+      return false;
+    }
+    if (await tryPlayChatToneHtml(kind)) return true;
+    if (await tryPlayChatToneWebAudio(kind)) return true;
+    if (kind === 'incoming') chatSoundState.pendingIncoming += 1;
+    else chatSoundState.pendingOutgoing += 1;
+    markChatSoundNeedsPrime('play-failed');
+    return false;
+  }
+
+  async function flushPendingChatTones() {
+    if (!canPlayChatSound()) return;
+    const incomingPending = chatSoundState.pendingIncoming > 0;
+    const outgoingPending = chatSoundState.pendingOutgoing > 0;
+    chatSoundState.pendingIncoming = 0;
+    chatSoundState.pendingOutgoing = 0;
+    if (incomingPending) await playChatTone('incoming');
+    if (outgoingPending) await playChatTone('outgoing');
+  }
+
+  function onChatSoundPrimeInteraction(evt) {
+    void primeChatSoundSystem(evt?.type || 'interaction');
+  }
+
+  function removeChatSoundPrimeListeners() {
+    if (!chatSoundState.primeListenersBound) return;
+    ['pointerdown', 'touchstart', 'click', 'keydown'].forEach((evtName) => {
+      document.removeEventListener(evtName, onChatSoundPrimeInteraction, true);
+    });
+    chatSoundState.primeListenersBound = false;
+  }
+
+  function bindChatSoundPrimeListeners() {
+    if (chatSoundState.userPrimed || chatSoundState.primeListenersBound) return;
+    ['pointerdown', 'touchstart', 'click', 'keydown'].forEach((evtName) => {
+      document.addEventListener(evtName, onChatSoundPrimeInteraction, { passive: true, capture: true });
+    });
+    chatSoundState.primeListenersBound = true;
+  }
+
+  function markChatSoundNeedsPrime(reason) {
+    chatSoundState.userPrimed = false;
+    chatSoundState.webAudioReady = false;
+    chatSoundState.htmlAudioReady = false;
+    bindChatSoundPrimeListeners();
+  }
+
+  function attachChatSoundStateHandlers() {
+    if (!chatSoundState.handlersAttached) {
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState !== 'visible') return;
+        const ctx = chatSoundState.ctx;
+        if (!ctx || ctx.state !== 'running') markChatSoundNeedsPrime('visibility');
+      });
+      window.addEventListener('pageshow', () => {
+        const ctx = chatSoundState.ctx;
+        if (!ctx || ctx.state !== 'running') markChatSoundNeedsPrime('pageshow');
+      });
+      window.addEventListener('focus', () => {
+        const ctx = chatSoundState.ctx;
+        if (!ctx || ctx.state !== 'running') markChatSoundNeedsPrime('focus');
+      });
+      chatSoundState.handlersAttached = true;
+    }
+    const ctx = chatSoundState.ctx;
+    if (ctx) {
+      ctx.onstatechange = () => {
+        if (ctx.state === 'running') {
+          chatSoundState.webAudioReady = true;
+        } else if (ctx.state === 'suspended' || ctx.state === 'interrupted' || ctx.state === 'closed') {
+          chatSoundState.webAudioReady = false;
+          if (ctx.state !== 'closed') markChatSoundNeedsPrime(`ctx-${ctx.state}`);
+        }
+      };
+    }
+  }
+
+  function seedChatIncomingAudioBaseline(messages) {
+    if (!Array.isArray(messages) || !messages.length) return;
+    let maxId = chatSoundState.lastObservedIncomingId;
+    for (const msg of messages) {
+      const id = messageNumericId(msg);
+      if (id === null) continue;
+      maxId = maxId === null ? id : Math.max(maxId, id);
+    }
+    chatSoundState.lastObservedIncomingId = maxId;
+    chatSoundState.baselineReady = true;
+  }
+
+  function collectFreshIncomingMessagesForAudio(messages) {
+    if (!Array.isArray(messages) || !messages.length) return [];
+    const fresh = [];
+    let maxId = chatSoundState.lastObservedIncomingId;
+    for (const msg of messages) {
+      const id = messageNumericId(msg);
+      if (id === null) continue;
+      if (maxId !== null && id > maxId && !isOwnMessage(msg)) fresh.push(msg);
+      maxId = maxId === null ? id : Math.max(maxId, id);
+    }
+    chatSoundState.lastObservedIncomingId = maxId;
+    chatSoundState.baselineReady = true;
+    return fresh;
   }
 
   function hydrateChatStateFromMessages(messages) {
@@ -278,7 +527,7 @@
       }
       const msgs = result?.ok && Array.isArray(result.messages) ? result.messages : [];
       hydrateChatStateFromMessages(msgs);
-      seedIncomingAudioBaseline(msgs);
+      seedChatIncomingAudioBaseline(msgs);
       seedKillFeedSeenKeys(msgs);
       killFeedBootstrapReady = true;
       killFeedBootstrapPollConsumed = false;
@@ -298,10 +547,6 @@
     } finally {
       chatNotificationsBootstrapInFlight = false;
     }
-  }
-
-  function onChatAudioUnlockInteraction(evt) {
-    primeChatAudio(evt?.type || 'interaction');
   }
 
   async function onChatFirstInteraction(evt) {
@@ -324,37 +569,6 @@
     chatFirstInteractionBound = true;
   }
 
-  function bindChatAudioUnlockTarget(el) {
-    if (!el || el.dataset.chatAudioUnlockBound === '1') return;
-    el.dataset.chatAudioUnlockBound = '1';
-    ['pointerdown', 'touchstart', 'click', 'keydown'].forEach((evtName) => {
-      el.addEventListener(evtName, () => primeChatAudio(`ui:${el.id || el.className || evtName}`), { passive: true });
-    });
-  }
-
-  function bindChatAudioUnlockTargets() {
-    [
-      'map',
-      'dock',
-      'dockChat',
-      'dockGames',
-      'dockModes',
-      'dockColors',
-      'dockMusic',
-      'dockProfile',
-      'dockDrawerClose',
-      'btnLogin',
-      'btnSignup',
-      'btnAuth'
-    ].forEach((id) => bindChatAudioUnlockTarget(document.getElementById(id)));
-  }
-
-  function rearmChatAudioUnlock() {
-    chatAudioUnlocked = false;
-    chatAudioReady = false;
-    bindChatAudioUnlockListeners();
-  }
-
   function observeChatAuthState() {
     const authReady = typeof authHeaderOK === 'function' && authHeaderOK();
     if (lastObservedChatAuthReady === null) {
@@ -374,111 +588,9 @@
     }
   }
 
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState !== 'visible') return;
-    if (!chatAudioCtx || chatAudioCtx.state !== 'running') rearmChatAudioUnlock();
-  });
-  window.addEventListener('pageshow', () => {
-    if (!chatAudioCtx || chatAudioCtx.state !== 'running') rearmChatAudioUnlock();
-  });
-
-  bindChatAudioUnlockTargets();
-  rearmChatAudioUnlock();
+  attachChatSoundStateHandlers();
+  bindChatSoundPrimeListeners();
   bindChatFirstInteractionListeners();
-
-  function canPlayChatTone() {
-    const ctx = ensureChatAudioContext();
-    if (!ctx) return false;
-    if (!chatAudioUnlocked) {
-      return false;
-    }
-    if (!chatAudioReady) {
-      return false;
-    }
-    if (ctx.state !== 'running') {
-      chatAudioUnlocked = false;
-      chatAudioReady = false;
-      bindChatAudioUnlockListeners();
-      return false;
-    }
-    return true;
-  }
-
-  function playIncomingSoftTone() {
-    if (!canPlayChatTone()) return;
-    const ctx = chatAudioCtx;
-    const now = ctx.currentTime;
-
-    const gain = ctx.createGain();
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(0.05, now + 0.015);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
-    gain.connect(ctx.destination);
-
-    const osc = ctx.createOscillator();
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(720, now);
-    osc.frequency.exponentialRampToValueAtTime(900, now + 0.14);
-    osc.connect(gain);
-    osc.start(now);
-    osc.stop(now + 0.16);
-  }
-
-  function playOutgoingSoftTone() {
-    if (!canPlayChatTone()) return;
-    const ctx = chatAudioCtx;
-    const now = ctx.currentTime;
-
-    const gain = ctx.createGain();
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(0.03, now + 0.012);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.09);
-    gain.connect(ctx.destination);
-
-    const osc = ctx.createOscillator();
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(560, now);
-    osc.frequency.exponentialRampToValueAtTime(720, now + 0.08);
-    osc.connect(gain);
-    osc.start(now);
-    osc.stop(now + 0.09);
-  }
-
-  function seedIncomingAudioBaseline(messages) {
-    if (!Array.isArray(messages) || !messages.length) return;
-    let maxId = chatLastNotifiedIncomingId;
-    for (const msg of messages) {
-      const id = messageNumericId(msg);
-      if (id === null) continue;
-      maxId = maxId === null ? id : Math.max(maxId, id);
-    }
-    chatLastNotifiedIncomingId = maxId;
-  }
-
-  function collectFreshIncomingMessages(messages) {
-    if (!Array.isArray(messages) || !messages.length) return [];
-    const fresh = [];
-    let maxId = chatLastNotifiedIncomingId;
-
-    for (const msg of messages) {
-      const id = messageNumericId(msg);
-      if (id === null) continue;
-
-      if (maxId === null) {
-        maxId = id;
-        continue;
-      }
-
-      if (id > maxId && !isOwnMessage(msg)) {
-        fresh.push(msg);
-      }
-
-      maxId = Math.max(maxId, id);
-    }
-
-    chatLastNotifiedIncomingId = maxId;
-    return fresh;
-  }
 
   function shouldCountUnread(msg, { ignoreOpenPanel = false } = {}) {
     if (isOwnMessage(msg)) return false;
@@ -589,7 +701,8 @@
     chatSeenKeys = new Set();
     unreadChatCount = 0;
     updateChatUnreadBadge();
-    chatLastNotifiedIncomingId = null;
+    chatSoundState.lastObservedIncomingId = null;
+    chatSoundState.baselineReady = false;
     killFeedBootstrapReady = false;
     killFeedBootstrapPollConsumed = false;
   }
@@ -693,7 +806,7 @@
       return { ok: false, messages: [] };
     }
     const msgs = Array.isArray(result.messages) ? result.messages : [];
-    seedIncomingAudioBaseline(msgs);
+    seedChatIncomingAudioBaseline(msgs);
     renderChatMessages(msgs, { replace: true });
     chatInitialHistoryLoaded = true;
     chatInitialHistoryRetryQueued = false;
@@ -733,15 +846,11 @@
       }
       const loadedMsgs = Array.isArray(msgs.messages) ? msgs.messages : [];
       const needsInitialRecovery = !chatInitialHistoryLoaded;
-      const freshIncoming = needsInitialRecovery ? [] : collectFreshIncomingMessages(loadedMsgs);
-      if (freshIncoming.length > 0) {
-        playIncomingSoftTone();
-      }
 
       if (needsInitialRecovery) {
         chatInitialHistoryLoaded = true;
         chatInitialHistoryRetryQueued = false;
-        seedIncomingAudioBaseline(loadedMsgs);
+        seedChatIncomingAudioBaseline(loadedMsgs);
         if (!killFeedBootstrapReady) {
           seedKillFeedSeenKeys(loadedMsgs);
           killFeedBootstrapReady = true;
@@ -750,6 +859,12 @@
         if (!maybeInitializeChatReadBaseline()) {
           rebuildUnreadBadgeFromMessages(loadedMsgs);
         }
+      }
+
+
+      const freshIncomingForAudio = collectFreshIncomingMessagesForAudio(loadedMsgs);
+      if (!needsInitialRecovery && freshIncomingForAudio.length > 0) {
+        void playChatTone('incoming');
       }
 
       // Update the in-panel chat messages only if the chat panel is open.
@@ -818,12 +933,12 @@
       if (!text) return;
       chatSendBtn.disabled = true;
       try {
-        await primeChatAudio('chat-send-click');
+        await primeChatSoundSystem('chat-send-click');
         await ensureChatNotificationsBootstrapped('chat-send-click');
         const msg = await chatSend(text);
         chatInput.value = '';
         if (msg) renderChatMessages(Array.isArray(msg) ? msg : [msg]);
-        playOutgoingSoftTone();
+        await playChatTone('outgoing');
         await chatPollOnce();
       } catch (e) {
         console.warn('chat send failed:', e);
@@ -1913,7 +2028,7 @@
     status: "",
     sending: false
   };
-  let driverProfileDmLastNotifiedId = null;
+  let driverProfileDmLastObservedIncomingId = null;
   let driverProfileLayoutBound = false;
   let driverProfileLayoutTimer50 = null;
   let driverProfileLayoutTimer180 = null;
@@ -2091,19 +2206,19 @@
 
   function seedDriverProfileDmAudioBaseline(messages) {
     if (!Array.isArray(messages) || !messages.length) return;
-    let maxId = driverProfileDmLastNotifiedId;
+    let maxId = driverProfileDmLastObservedIncomingId;
     for (const msg of messages) {
       const id = parseDriverMsgId(msg);
       if (id === null) continue;
       maxId = maxId === null ? id : Math.max(maxId, id);
     }
-    driverProfileDmLastNotifiedId = maxId;
+    driverProfileDmLastObservedIncomingId = maxId;
   }
 
   function collectFreshIncomingDriverProfileDm(messages) {
     if (!Array.isArray(messages) || !messages.length) return [];
     const fresh = [];
-    let maxId = driverProfileDmLastNotifiedId;
+    let maxId = driverProfileDmLastObservedIncomingId;
 
     for (const msg of messages) {
       const id = parseDriverMsgId(msg);
@@ -2121,7 +2236,7 @@
       maxId = Math.max(maxId, id);
     }
 
-    driverProfileDmLastNotifiedId = maxId;
+    driverProfileDmLastObservedIncomingId = maxId;
     return fresh;
   }
 
@@ -2159,7 +2274,7 @@
     driverProfileState.userId = null;
     driverProfileState.isSelf = false;
     driverProfileState.status = '';
-    driverProfileDmLastNotifiedId = null;
+    driverProfileDmLastObservedIncomingId = null;
     driverProfileState.dmInitialLoadComplete = false;
     const root = ensureDriverProfileUI();
     root.classList.remove('open');
@@ -2334,7 +2449,7 @@
       driverProfileState.error = '';
       renderDriverProfileModal();
       try {
-        await primeChatAudio('dm-send-click');
+        await primeChatSoundSystem('dm-send-click');
         const sent = await sendDriverProfileDm(driverProfileState.userId, text);
         input.value = '';
         const sentMessages = Array.isArray(sent?.messages) ? sent.messages : (sent?.message ? [sent.message] : []);
@@ -2346,7 +2461,7 @@
           seedDriverProfileDmAudioBaseline(driverProfileState.messages);
           appendDriverProfileMessages([]);
         }
-        playOutgoingSoftTone();
+        await playChatTone('outgoing');
       } catch (err) {
         driverProfileState.error = err?.message || 'Message failed to send.';
       } finally {
@@ -2382,7 +2497,7 @@
     driverProfileState.profile = null;
     driverProfileState.messages = [];
     driverProfileState.latestMessageId = null;
-    driverProfileDmLastNotifiedId = null;
+    driverProfileDmLastObservedIncomingId = null;
     driverProfileState.dmInitialLoadComplete = false;
     driverProfileState.error = '';
     driverProfileState.status = '';
@@ -2426,7 +2541,7 @@
       const hasIncomingFromOther = driverProfileState.dmInitialLoadComplete
         && collectFreshIncomingDriverProfileDm(incoming).length > 0;
       appendDriverProfileMessages(incoming);
-      if (hasIncomingFromOther) playIncomingSoftTone();
+      if (hasIncomingFromOther) void playChatTone('incoming');
       renderDriverProfileModal();
     } catch (_) {}
   }
@@ -2495,12 +2610,24 @@
   }, 1500);
 
   window.testChatIncomingSound = async function () {
-    await primeChatAudio('manual-test-incoming');
-    playIncomingSoftTone();
+    await primeChatSoundSystem('manual-test-incoming');
+    return playChatTone('incoming');
   };
 
   window.testChatOutgoingSound = async function () {
-    await primeChatAudio('manual-test-outgoing');
-    playOutgoingSoftTone();
+    await primeChatSoundSystem('manual-test-outgoing');
+    return playChatTone('outgoing');
+  };
+
+  window.getChatSoundDebugState = function () {
+    return {
+      userPrimed: chatSoundState.userPrimed,
+      htmlAudioReady: chatSoundState.htmlAudioReady,
+      webAudioReady: chatSoundState.webAudioReady,
+      ctxState: chatSoundState.ctx ? chatSoundState.ctx.state : null,
+      pendingIncoming: chatSoundState.pendingIncoming,
+      pendingOutgoing: chatSoundState.pendingOutgoing,
+      lastObservedIncomingId: chatSoundState.lastObservedIncomingId
+    };
   };
 })();
