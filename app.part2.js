@@ -1304,10 +1304,10 @@
 
   function mapMedalIconSVG(kind) {
     if (kind === 'silver') {
-      return '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 2h4l1 6H9z" fill="#9aa5ae"></path><path d="M13 2h4l-2 6h-3z" fill="#6f7d88"></path><circle cx="12" cy="15" r="6" fill="#dfe5ea" stroke="#8a98a3" stroke-width="1.2"></circle><circle cx="12" cy="15" r="3.2" fill="#f7fafc" opacity="0.8"></circle></svg>';
+      return '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 2h4l1 6H9z" fill="#8d98a1"></path><path d="M13 2h4l-2 6h-3z" fill="#687680"></path><circle cx="12" cy="15" r="6" fill="#d7dfe6" stroke="#64737f" stroke-width="1.35"></circle><circle cx="12" cy="15" r="3.1" fill="#f7fafc" opacity="0.82"></circle></svg>';
     }
     if (kind === 'bronze') {
-      return '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 2h4l1 6H9z" fill="#b46c3e"></path><path d="M13 2h4l-2 6h-3z" fill="#8f4f2b"></path><circle cx="12" cy="15" r="6" fill="#d08a55" stroke="#8f4f2b" stroke-width="1.2"></circle><circle cx="12" cy="15" r="3.2" fill="#efb27e" opacity="0.8"></circle></svg>';
+      return '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 2h4l1 6H9z" fill="#ba7042"></path><path d="M13 2h4l-2 6h-3z" fill="#87502f"></path><circle cx="12" cy="15" r="6" fill="#c98553" stroke="#7d472b" stroke-width="1.35"></circle><circle cx="12" cy="15" r="3.1" fill="#f3bd8a" opacity="0.82"></circle></svg>';
     }
     return '';
   }
@@ -1316,9 +1316,9 @@
     const badge = normalizeLeaderboardBadge(badgeCode);
     if (!badge) return '';
     if (badge === 'crown') {
-      return '<span class="mapIdentityCrownOverlay" aria-label="crown">👑</span>';
+      return '<span class="badgeChip badgeChipPremium badge-map badge-crown mapIdentityBadgeOverlay" aria-label="Crown"><span class="badgeGlyph">👑</span></span>';
     }
-    return `<span class="mapIdentityMedalOverlay mapIdentityMedal-${badge}" aria-label="${escapeHtml(badge)} medal">${mapMedalIconSVG(badge)}</span>`;
+    return `<span class="badgeChip badgeChipPremium badge-map badge-${badge} mapIdentityBadgeOverlay" aria-label="${escapeHtml(badge)} medal"><span class="badgeIcon">${mapMedalIconSVG(badge)}</span></span>`;
   }
 
   function mapIdentityOverlayWrapHTML(coreHTML, badgeMeta = {}) {
@@ -2304,8 +2304,8 @@
       .driverProfileIdentity{display:flex;gap:8px;align-items:center;min-width:0}
       .driverProfileAvatar{width:44px;height:44px;border-radius:999px;flex:0 0 44px;object-fit:cover;background:#e8edf5}
       .driverProfileName{font-size:15px;line-height:1.18;font-weight:700;color:#111827;word-break:break-word}
-      .driverProfileBadgeRow{display:flex;align-items:center;gap:5px;margin-top:3px;min-height:20px}
-      .driverProfileBadgeChip{display:inline-flex;align-items:center;font-size:11px;font-weight:600;color:#1f2937;background:#eef2ff;border:1px solid #dbe4ff;border-radius:999px;padding:3px 7px}
+      .driverProfileBadgeRow{display:flex;align-items:center;gap:7px;margin-top:4px;min-height:24px}
+      .driverProfileBadgeChipWrap{display:inline-flex;align-items:center;gap:7px}.driverProfileBadgeLabel{font-size:11px;font-weight:700;color:#334155;letter-spacing:.15px}
       .driverProfileClose{border:0;background:#e5e7eb;color:#111827;border-radius:10px;padding:7px 9px;font-size:13px}
       .driverProfileScroll{overflow:auto;-webkit-overflow-scrolling:touch;padding:0 11px 10px;min-height:0}
       .driverProfileSectionTitle{font-size:12px;font-weight:700;color:#111827;margin:2px 0 6px}
@@ -2402,11 +2402,17 @@
   }
 
   function driverProfileBadgeChip(code) {
-    const normalized = String(code || '').trim().toLowerCase();
-    if (normalized === 'crown') return '<span class="driverProfileBadgeChip">👑 Crown</span>';
-    if (normalized === 'silver') return '<span class="driverProfileBadgeChip">🥈 Silver</span>';
-    if (normalized === 'bronze') return '<span class="driverProfileBadgeChip">🥉 Bronze</span>';
-    return '<span class="driverProfileBadgeChip">No badge</span>';
+    const normalized = normalizeLeaderboardBadge(code);
+    if (!normalized) return '<span class="driverProfileBadgeLabel">No badge yet</span>';
+    const profileLabel = {
+      crown: 'Daily Miles Leader',
+      silver: 'Silver Tier',
+      bronze: 'Bronze Tier'
+    }[normalized] || 'Leaderboard Badge';
+    if (normalized === 'crown') {
+      return `<span class="driverProfileBadgeChipWrap"><span class="badgeChip badgeChipPremium badge-profile badge-crown" aria-label="Crown"><span class="badgeGlyph">👑</span><span class="badgeText">Crown</span></span><span class="driverProfileBadgeLabel">${escapeHtml(profileLabel)}</span></span>`;
+    }
+    return `<span class="driverProfileBadgeChipWrap"><span class="badgeChip badgeChipPremium badge-profile badge-${normalized}" aria-label="${escapeHtml(normalized)} medal"><span class="badgeIcon">${mapMedalIconSVG(normalized)}</span><span class="badgeText">${escapeHtml(normalized[0].toUpperCase() + normalized.slice(1))}</span></span><span class="driverProfileBadgeLabel">${escapeHtml(profileLabel)}</span></span>`;
   }
 
   function driverProfileAvatarHTML(profileUser) {
