@@ -1558,26 +1558,11 @@ async function ensureZonesSourceAndLayers() {
         "symbol-placement": "point",
         "text-field": ["coalesce", ["get", "label_text_multiline"], ["get", "label_text"], ""],
         "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
-        "text-size": [
-          "*",
-          ["coalesce", ["to-number", ["get", "font_scale"]], 1],
-          [
-            "interpolate",
-            ["linear"],
-            ["zoom"],
-            10, 6,
-            11, 7,
-            12, 8,
-            13, 10,
-            14, 12,
-            15, 13,
-            16, 15
-          ]
-        ],
-        "text-max-width": ["/", ["coalesce", ["to-number", ["get", "max_width"]], 120], 12],
-        "text-anchor": ["coalesce", ["get", "anchor"], "center"],
+        "text-size": ["interpolate", ["linear"], ["zoom"], 10, 8, 12, 10, 14, 12, 16, 14],
+        "text-max-width": 10,
+        "text-anchor": "center",
         "text-justify": "center",
-        "text-offset": ["coalesce", ["get", "text_offset"], ["literal", [0, 0]]],
+        "text-offset": [0, 0],
         "text-allow-overlap": false,
         "text-ignore-placement": false,
         "text-padding": 1.5,
@@ -1588,11 +1573,8 @@ async function ensureZonesSourceAndLayers() {
         "text-halo-width": 1.8,
         "text-halo-blur": 0.6,
       },
-      filter: [
-        "all",
-        ["!=", ["coalesce", ["get", "hide"], false], true],
-        [">=", ["zoom"], ["coalesce", ["to-number", ["get", "min_zoom"]], 10]],
-      ],
+      filter: ["!=", "hide", true],
+      minzoom: LABEL_ZOOM_MIN,
     });
   }
 
