@@ -281,6 +281,38 @@ function shortenLabel(text, maxChars) {
   if (t.length <= maxChars) return t;
   return t.slice(0, maxChars - 1) + "…";
 }
+
+const ZONE_LABEL_SHORT_NAMES = {
+  "13": "Battery Pk",
+  "74": "East Harlem",
+  "75": "East Harlem",
+  "87": "FiDi",
+  "88": "FiDi",
+  "107": "Gramercy",
+  "120": "Hamilton",
+  "138": "LaGuardia",
+  "141": "LIC",
+  "151": "Morningside",
+  "186": "Penn Sta",
+  "230": "Times Sq",
+  "236": "Upper East",
+  "237": "Upper East",
+  "238": "Upper West",
+  "239": "Upper West",
+  "246": "Chelsea\nYards",
+  "264": "Washington\nHeights",
+  "265": "Washington\nHeights",
+};
+
+const ZONE_LABEL_OVERRIDES = {
+  "138": { size: 11.6, maxWidth: 5.8, letterSpacing: 0.01 },
+  "230": { label: "Times Sq", size: 10.8, maxWidth: 4.4, letterSpacing: 0.015 },
+  "264": { rotate: 90, size: 10.3, maxWidth: 3.9, letterSpacing: 0.012 },
+  "265": { rotate: 90, size: 10.2, maxWidth: 3.8, letterSpacing: 0.012, dy: -0.00035 },
+};
+
+let zoneLabelLayoutCache = new Map();
+
 function escapeHtml(s) {
   return String(s)
     .replaceAll("&", "&amp;")
@@ -1546,30 +1578,22 @@ async function ensureZonesSourceAndLayers() {
         "symbol-placement": "point",
         "text-field": ["coalesce", ["get", "label"], ""],
         "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
-        "text-size": [
-          "interpolate",
-          ["linear"],
-          ["zoom"],
-          10, 6,
-          11, 7,
-          12, 8,
-          13, 10,
-          14, 12,
-          15, 13,
-          16, 15
-        ],
-        "text-max-width": 7,
+        "text-size": ["coalesce", ["get", "textSize"], 10.4],
+        "text-max-width": ["coalesce", ["get", "textMaxWidth"], 4.6],
+        "text-letter-spacing": ["coalesce", ["get", "letterSpacing"], 0.015],
+        "text-rotate": ["coalesce", ["get", "textRotate"], 0],
+        "symbol-sort-key": ["coalesce", ["get", "sortKey"], 0],
         "text-anchor": "center",
         "text-justify": "center",
-        "text-allow-overlap": false,
-        "text-ignore-placement": false,
+        "text-allow-overlap": true,
+        "text-ignore-placement": true,
         "text-padding": 1.5,
       },
       paint: {
-        "text-color": "#111111",
-        "text-halo-color": "rgba(255,255,255,0.90)",
-        "text-halo-width": 1.8,
-        "text-halo-blur": 0.6,
+        "text-color": "#1f262e",
+        "text-halo-color": "rgba(255,255,255,0.82)",
+        "text-halo-width": 0.9,
+        "text-halo-blur": 0.2,
       },
       minzoom: LABEL_ZOOM_MIN,
     });
@@ -2432,6 +2456,186 @@ function findInteriorPointForGeometry(geom) {
   return { lng: cx, lat: cy };
 }
 
+function normalizeZoneLabelBaseName(name) {
+  let base = String(name || "").trim();
+  if (!base) return "";
+
+  base = base.replace(/\s*\([^)]*\)\s*/g, " ").replace(/\s+/g, " ").trim();
+  base = base
+    .replace(/\b(North|South|East|West)\b$/i, "")
+    .replace(/\b(District|Airport|Station)\b$/i, "")
+    .replace(/\bPark City\b/i, "Park")
+    .replace(/\bSquare\b/gi, "Sq")
+    .replace(/\bHeights\b/gi, "Heights")
+    .replace(/\bTheatre\b/gi, "Theatre")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+  if (base.length > 18 && !base.includes("\n")) {
+    const words = base.split(" ");
+    if (words.length >= 2) {
+      const splitAt = Math.ceil(words.length / 2);
+      base = `${words.slice(0, splitAt).join(" ")}\n${words.slice(splitAt).join(" ")}`;
+    }
+  }
+
+  return base;
+}
+
+function getPrimaryPolygonForLabel(geom) {
+  if (!geom) return null;
+  if (geom.type === "Polygon") return geom.coordinates;
+  if (geom.type === "MultiPolygon") return pickLargestPolygonFromMulti(geom.coordinates);
+  return null;
+}
+
+function ringBBox(ring) {
+  if (!Array.isArray(ring) || !ring.length) return null;
+  let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
+  for (const pt of ring) {
+    if (!Array.isArray(pt) || pt.length < 2) continue;
+    const lng = Number(pt[0]);
+    const lat = Number(pt[1]);
+    if (!Number.isFinite(lng) || !Number.isFinite(lat)) continue;
+    if (lng < minLng) minLng = lng;
+    if (lat < minLat) minLat = lat;
+    if (lng > maxLng) maxLng = lng;
+    if (lat > maxLat) maxLat = lat;
+  }
+  if (!Number.isFinite(minLng) || !Number.isFinite(minLat) || !Number.isFinite(maxLng) || !Number.isFinite(maxLat)) return null;
+  return { minLng, minLat, maxLng, maxLat, width: maxLng - minLng, height: maxLat - minLat };
+}
+
+function estimatePolygonOrientationDegrees(poly) {
+  const outer = Array.isArray(poly) ? poly[0] : null;
+  const bb = ringBBox(outer);
+  if (!outer || !bb) return 0;
+
+  if (bb.height > bb.width * 1.65) return 90;
+  if (bb.width > bb.height * 1.65) return 0;
+
+  let bestLen2 = 0;
+  let bestAngle = 0;
+  for (let i = 1; i < outer.length; i++) {
+    const a = outer[i - 1];
+    const b = outer[i];
+    if (!a || !b) continue;
+    const dx = Number(b[0]) - Number(a[0]);
+    const dy = Number(b[1]) - Number(a[1]);
+    if (!Number.isFinite(dx) || !Number.isFinite(dy)) continue;
+    const len2 = dx * dx + dy * dy;
+    if (len2 > bestLen2) {
+      bestLen2 = len2;
+      bestAngle = (Math.atan2(dy, dx) * 180) / Math.PI;
+    }
+  }
+
+  const normalized = ((bestAngle + 180) % 360) - 180;
+  const candidates = [0, 90, 45, -45];
+  let snapped = 0;
+  let bestDiff = Infinity;
+  for (const c of candidates) {
+    const d = Math.min(Math.abs(normalized - c), Math.abs(normalized - (c + 180)), Math.abs(normalized - (c - 180)));
+    if (d < bestDiff) {
+      bestDiff = d;
+      snapped = c;
+    }
+  }
+  if (bestDiff > 28) return 0;
+  return snapped;
+}
+
+function estimateZoneLabelSizeBucket(poly) {
+  const outer = Array.isArray(poly) ? poly[0] : null;
+  const bb = ringBBox(outer);
+  if (!bb) return "sm";
+  const area = bb.width * bb.height;
+  if (area < 0.00007) return "xs";
+  if (area < 0.0002) return "sm";
+  if (area < 0.0006) return "md";
+  return "lg";
+}
+
+function splitLabelForZoneShape(label, orientation, sizeBucket) {
+  const raw = String(label || "").trim();
+  if (!raw) return "";
+  if (raw.includes("\n")) return raw;
+
+  const words = raw.split(/\s+/).filter(Boolean);
+  if (words.length < 2) return raw;
+  if (orientation === 90 || sizeBucket === "xs") {
+    return `${words[0]}\n${words.slice(1).join(" ")}`;
+  }
+  if (sizeBucket === "sm" && raw.length > 11) {
+    const idx = Math.ceil(words.length / 2);
+    return `${words.slice(0, idx).join(" ")}\n${words.slice(idx).join(" ")}`;
+  }
+  return raw;
+}
+
+function getZoneLabelSignature(feature) {
+  const props = feature?.properties || {};
+  const id = String(props.LocationID ?? "");
+  const name = String(props.zone_name || "").trim();
+  const geom = feature?.geometry;
+  const poly = getPrimaryPolygonForLabel(geom);
+  const outer = Array.isArray(poly) ? poly[0] : null;
+  const bb = ringBBox(outer);
+  const w = bb ? bb.width.toFixed(6) : "0";
+  const h = bb ? bb.height.toFixed(6) : "0";
+  return `${id}|${name}|${geom?.type || ""}|${w}|${h}`;
+}
+
+function buildZoneLabelLayoutFeature(feature) {
+  const props = feature?.properties || {};
+  const locationId = String(props.LocationID ?? "");
+  const zoneName = String(props.zone_name || "").trim();
+  if (!locationId || !zoneName) return null;
+
+  const override = ZONE_LABEL_OVERRIDES[locationId] || null;
+  const poly = getPrimaryPolygonForLabel(feature?.geometry);
+  const orientation = Number.isFinite(Number(override?.rotate)) ? Number(override.rotate) : estimatePolygonOrientationDegrees(poly);
+  const sizeBucket = estimateZoneLabelSizeBucket(poly);
+
+  const shortName = override?.label || ZONE_LABEL_SHORT_NAMES[locationId] || normalizeZoneLabelBaseName(zoneName);
+  const label = splitLabelForZoneShape(shortName, orientation, sizeBucket);
+
+  const interior = findInteriorPointForGeometry(feature?.geometry);
+  if (!interior) return null;
+
+  let lng = Number(interior.lng);
+  let lat = Number(interior.lat);
+  if (Number.isFinite(Number(override?.anchorLng)) && Number.isFinite(Number(override?.anchorLat))) {
+    lng = Number(override.anchorLng);
+    lat = Number(override.anchorLat);
+  } else {
+    if (Number.isFinite(Number(override?.dx))) lng += Number(override.dx);
+    if (Number.isFinite(Number(override?.dy))) lat += Number(override.dy);
+  }
+
+  const sizeByBucket = { xs: 9.2, sm: 10, md: 10.8, lg: 11.8 };
+  const widthByBucket = { xs: 3.0, sm: 4.2, md: 5.0, lg: 6.0 };
+  const spacingByBucket = { xs: 0.01, sm: 0.015, md: 0.02, lg: 0.025 };
+  const textSize = Number.isFinite(Number(override?.size)) ? Number(override.size) : sizeByBucket[sizeBucket] || 10;
+  const textMaxWidth = Number.isFinite(Number(override?.maxWidth)) ? Number(override.maxWidth) : widthByBucket[sizeBucket] || 4.2;
+  const letterSpacing = Number.isFinite(Number(override?.letterSpacing)) ? Number(override.letterSpacing) : spacingByBucket[sizeBucket] || 0.015;
+  const sortKey = sizeBucket === "lg" ? 3 : sizeBucket === "md" ? 2 : 1;
+
+  return {
+    type: "Feature",
+    geometry: { type: "Point", coordinates: [lng, lat] },
+    properties: {
+      LocationID: props.LocationID,
+      label,
+      textRotate: orientation,
+      textSize,
+      textMaxWidth,
+      letterSpacing,
+      sortKey,
+    },
+  };
+}
+
 /* =========================================================
    Timeline / frames
    ========================================================= */
@@ -2566,36 +2770,22 @@ function getFeatureCollectionBounds(fc) {
 function buildZoneLabelsFeatureCollection(frame) {
   const feats = frame?.polygons?.features || [];
   const out = [];
-
-  // “Major map app style”: show labels always (>= LABEL_ZOOM_MIN), but still avoid empty names.
   for (const f of feats) {
-    const props = f?.properties || {};
-    const name = (props.zone_name || "").trim();
-    if (!name) continue;
+    const signature = getZoneLabelSignature(f);
+    const locationId = String(f?.properties?.LocationID ?? "");
+    if (!locationId) continue;
 
-    const z = map ? Math.round(map.getZoom()) : 12;
+    const cacheKey = `${locationId}|${signature}`;
+    const cached = zoneLabelLayoutCache.get(cacheKey);
+    if (cached) {
+      out.push(cached);
+      continue;
+    }
 
-    // More aggressive truncation when zoomed out to keep labels compact and inside zones
-    let maxChars = name.length;
-    if (z <= 10) maxChars = 9;
-    else if (z === 11) maxChars = 11;
-    else if (z === 12) maxChars = 13;
-    else if (z === 13) maxChars = 16;
-    else maxChars = 28;
-
-    const label = shortenLabel(name, maxChars);
-
-    const pt = findInteriorPointForGeometry(f.geometry);
-    if (!pt) continue;
-
-    out.push({
-      type: "Feature",
-      geometry: { type: "Point", coordinates: [pt.lng, pt.lat] },
-      properties: {
-        LocationID: props.LocationID,
-        label,
-      },
-    });
+    const built = buildZoneLabelLayoutFeature(f);
+    if (!built) continue;
+    zoneLabelLayoutCache.set(cacheKey, built);
+    out.push(built);
   }
 
   return { type: "FeatureCollection", features: out };
