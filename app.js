@@ -1586,7 +1586,7 @@ async function ensureZonesSourceAndLayers() {
           08, 00,
           09, 00,
           10, 00,
-          11, 06,
+          11, 00,
           12, 13,
           13, 19,
         ],
