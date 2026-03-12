@@ -2594,6 +2594,8 @@ function warnZoneLabelConfigOnce(key, message, extra = null) {
 function normalizeZoneLabelConfig(cfg, zoneName = "") {
   const safeName = String(zoneName || "").trim();
   const src = (cfg && typeof cfg === "object") ? cfg : {};
+  const SAFE_MIN_ZOOM_DEFAULT = 10;
+  const SAFE_MIN_ZOOM_MAX = 16;
 
   const out = {
     text: String(src.text ?? "").trim() || safeName || "",
@@ -2616,10 +2618,15 @@ function normalizeZoneLabelConfig(cfg, zoneName = "") {
   if (!Number.isFinite(out.dx)) out.dx = 0;
   if (!Number.isFinite(out.dy)) out.dy = 0;
   if (!Number.isFinite(out.maxWidth) || out.maxWidth <= 20) out.maxWidth = 120;
-  if (!Number.isFinite(out.minZoom) || out.minZoom < 0 || out.minZoom > 22) out.minZoom = 10;
+  if (!Number.isFinite(out.minZoom) || out.minZoom < 0 || out.minZoom > SAFE_MIN_ZOOM_MAX) out.minZoom = SAFE_MIN_ZOOM_DEFAULT;
   if (!out.text) out.text = safeName || "";
   if (!out.shortText) out.shortText = out.text || safeName || "";
-  if (!validAnchors.has(out.anchor)) out.anchor = "center";
+  if (!validAnchors.has(out.anchor)) {
+    if (src.anchor != null) {
+      warnZoneLabelConfigOnce(`anchor-invalid-${safeName || "unknown"}`, `Invalid zone label anchor \"${src.anchor}\"; falling back to center.`);
+    }
+    out.anchor = "center";
+  }
 
   return out;
 }
@@ -2658,7 +2665,7 @@ function applyZoneLabelOverride(baseConfig, zoneId, zoneProps = {}) {
   }
   if ("minZoom" in override) {
     const mz = Number(override.minZoom);
-    if (Number.isFinite(mz) && mz >= 0 && mz <= 22) merged.minZoom = mz;
+    if (Number.isFinite(mz) && mz >= 0 && mz <= 16) merged.minZoom = mz;
   }
   if ("anchor" in override) merged.anchor = String(override.anchor || "").trim().toLowerCase() || merged.anchor;
   if (override.hide === true) merged.hide = true;
@@ -2672,6 +2679,9 @@ function applyZoneLabelOverride(baseConfig, zoneId, zoneProps = {}) {
   }
   if (normalized.anchor !== merged.anchor && "anchor" in override) {
     warnZoneLabelConfigOnce(`anchor-${zoneId}`, `Invalid anchor override for zone ${zoneId}; using center.`, override);
+  }
+  if ("minZoom" in override && normalized.minZoom !== merged.minZoom) {
+    warnZoneLabelConfigOnce(`minZoom-${zoneId}`, `Invalid minZoom override for zone ${zoneId}; using ${normalized.minZoom}.`, override);
   }
   return normalized;
 }
@@ -2817,18 +2827,23 @@ function buildZoneLabelsFeatureCollection(frame) {
     else if (z === 13) maxChars = 16;
     else if (z >= 14) maxChars = Math.max(18, Math.round(finalCfg.maxWidth / 4.5));
 
-    let chosenText = String(finalCfg.text || "").trim();
-    if (!chosenText) chosenText = String(finalCfg.shortText || "").trim();
-    if (!chosenText) chosenText = name;
-    if (!chosenText) {
+    const overrideCfg = getZoneLabelOverride(zoneId);
+    const explicitOverrideText = String(overrideCfg?.text || "").trim();
+    const fallbackShortText = String(finalCfg.shortText || "").trim();
+    const originalZoneName = String(name || "").trim();
+
+    let finalText = explicitOverrideText || String(finalCfg.text || "").trim();
+    if (!finalText) finalText = fallbackShortText;
+    if (!finalText) finalText = originalZoneName;
+    if (!finalText) {
       warnZoneLabelConfigOnce(`text-${zoneId}`, `Skipping zone ${zoneId}: blank text after all fallbacks.`);
       continue;
     }
 
-    const maybeShort = String(finalCfg.shortText || chosenText).trim() || chosenText;
-    const baseText = chosenText.length > maxChars ? maybeShort : chosenText;
-    const labelText = shortenLabel(baseText, maxChars) || chosenText;
-    const labelTextMultiline = splitZoneLabelText(labelText, finalCfg).trim() || labelText;
+    const maybeShort = fallbackShortText || finalText;
+    const baseText = finalText.length > maxChars ? maybeShort : finalText;
+    const labelText = shortenLabel(baseText, maxChars) || finalText;
+    const labelTextMultiline = splitZoneLabelText(finalText, finalCfg).trim() || finalText;
     const safeFontScale = Number.isFinite(finalCfg.fontScale) && finalCfg.fontScale > 0.05 ? finalCfg.fontScale : 1;
     const anchorShift = zoneLabelAnchorToOffsets(finalCfg.anchor, finalCfg.maxWidth, 20 * safeFontScale) || { dx: 0, dy: 0 };
     const finalDx = (Number.isFinite(finalCfg.dx) ? Number(finalCfg.dx) : 0) + (Number.isFinite(anchorShift.dx) ? Number(anchorShift.dx) : 0);
