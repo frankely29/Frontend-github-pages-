@@ -59,18 +59,21 @@
     return null;
   }
 
-  function badgeChip(badgeCode) {
+  function badgeChip(badgeCode, options = {}) {
     const badge = strictBadgeCode(badgeCode);
     if (!badge) return '';
+    const sizeClass = options.size === 'profile' ? 'badge-profile' : (options.size === 'map' ? 'badge-map' : 'badge-leaderboard');
+    const textClass = options.withLabel ? ' badgeChipWithLabel' : '';
+    const label = badge === 'crown' ? 'Crown' : (badge === 'silver' ? 'Silver' : 'Bronze');
     if (badge === 'crown') {
-      return '<span class="badgeChip badge-crown" aria-label="Crown">👑</span>';
+      return `<span class="badgeChip badgeChipPremium ${sizeClass} badge-${badge}${textClass}" aria-label="${label}"><span class="badgeGlyph">👑</span>${options.withLabel ? `<span class="badgeText">${label}</span>` : ''}</span>`;
     }
     const meta = {
-      silver: { label: 'Silver', cls: 'badgeIcon badge-medal-silver', svg: '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 2h4l1 6H9z" fill="#9aa5ae"></path><path d="M13 2h4l-2 6h-3z" fill="#6f7d88"></path><circle cx="12" cy="15" r="6" fill="#dfe5ea" stroke="#8a98a3" stroke-width="1.2"></circle><circle cx="12" cy="15" r="3.2" fill="#f7fafc" opacity="0.8"></circle></svg>' },
-      bronze: { label: 'Bronze', cls: 'badgeIcon badge-medal-bronze', svg: '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 2h4l1 6H9z" fill="#b46c3e"></path><path d="M13 2h4l-2 6h-3z" fill="#8f4f2b"></path><circle cx="12" cy="15" r="6" fill="#d08a55" stroke="#8f4f2b" stroke-width="1.2"></circle><circle cx="12" cy="15" r="3.2" fill="#efb27e" opacity="0.8"></circle></svg>' },
+      silver: { label: 'Silver', svg: '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 2h4l1 6H9z" fill="#8d98a1"></path><path d="M13 2h4l-2 6h-3z" fill="#687680"></path><circle cx="12" cy="15" r="6" fill="#d7dfe6" stroke="#64737f" stroke-width="1.35"></circle><circle cx="12" cy="15" r="3.1" fill="#f7fafc" opacity="0.82"></circle></svg>' },
+      bronze: { label: 'Bronze', svg: '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 2h4l1 6H9z" fill="#ba7042"></path><path d="M13 2h4l-2 6h-3z" fill="#87502f"></path><circle cx="12" cy="15" r="6" fill="#c98553" stroke="#7d472b" stroke-width="1.35"></circle><circle cx="12" cy="15" r="3.1" fill="#f3bd8a" opacity="0.82"></circle></svg>' },
     }[badge];
     if (!meta) return '';
-    return `<span class="${meta.cls}" aria-label="${meta.label} medal">${meta.svg}</span>`;
+    return `<span class="badgeChip badgeChipPremium ${sizeClass} badge-${badge}${textClass}" aria-label="${meta.label} medal"><span class="badgeIcon">${meta.svg}</span>${options.withLabel ? `<span class="badgeText">${meta.label}</span>` : ''}</span>`;
   }
 
   function formatMetric(value, metric = state.metric) {
@@ -112,11 +115,12 @@
       const name = row?.display_name || row?.name || row?.user_name || `Driver ${rank}`;
       const value = row?.metric_value;
       const badge = strictBadgeCode(row?.badge_code);
-      return `<div class="leaderboardRow">
+      const rowClass = rank <= 3 ? ` leaderboardTop${rank}` : '';
+      return `<div class="leaderboardRow${rowClass}">
         <span class="leaderboardRank">#${rank}</span>
         <span class="leaderboardName" title="${esc(name)}">${esc(name)}</span>
         <span class="leaderboardValue">${formatMetric(value)}</span>
-        ${badgeChip(badge)}
+        <span class="leaderboardBadgeCell">${badgeChip(badge)}</span>
       </div>`;
     }).join('');
 
@@ -145,7 +149,7 @@
 
         <div>
           <div style="font:900 11px/1.2 system-ui;margin-bottom:5px;">Badge legend</div>
-          <div class="leaderboardLegend">${badgeChip('crown')} Crown 👑 ${badgeChip('silver')} Silver 🥈 ${badgeChip('bronze')} Bronze 🥉</div>
+          <div class="leaderboardLegend">${badgeChip('crown', { withLabel: true })} ${badgeChip('silver', { withLabel: true })} ${badgeChip('bronze', { withLabel: true })}</div>
         </div>
 
         <div id="lbStatus" class="leaderboardStatus ${state.statusType}">${esc(state.status || '')}</div>

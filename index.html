@@ -921,15 +921,31 @@
     .leaderboardPanelWrap{ display:flex; flex-direction:column; gap:10px; }
     .leaderboardTabs{ display:flex; gap:6px; flex-wrap:wrap; }
     .leaderboardList{ display:flex; flex-direction:column; gap:6px; margin-top:4px; }
-    .leaderboardRow{ display:grid; grid-template-columns: 30px 1fr auto auto; gap:6px; align-items:center; font: 800 11px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial; }
-    .leaderboardRank{ font-weight:950; opacity:0.85; }
+    .leaderboardRow{ display:grid; grid-template-columns: 30px 1fr auto auto; gap:8px; align-items:center; font: 800 11px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial; }
+    .leaderboardTop1 .leaderboardName,.leaderboardTop1 .leaderboardRank{ color:#5f4200; }
+    .leaderboardTop2 .leaderboardName,.leaderboardTop2 .leaderboardRank{ color:#37424d; }
+    .leaderboardTop3 .leaderboardName,.leaderboardTop3 .leaderboardRank{ color:#5a351f; }
+    .leaderboardRank{ font-weight:950; opacity:0.9; }
     .leaderboardName{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .leaderboardValue{ font-weight:900; }
+    .leaderboardBadgeCell{ display:inline-flex; align-items:center; justify-content:flex-end; }
     .leaderboardEmpty{ font: 800 11px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial; opacity:0.7; }
-    .badgeChip{ display:inline-flex; align-items:center; gap:4px; border-radius:999px; padding:2px 6px; font:900 10px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial; border:1px solid transparent; }
-    .badge-crown{ background:linear-gradient(135deg, rgba(255,236,166,0.95), rgba(255,210,89,0.88)); border-color:rgba(153,106,7,0.45); color:#5d3f00; }
+    .badgeChip{ --badge-shadow: 0 1px 2px rgba(0,0,0,.18); --badge-inset: inset 0 1px 0 rgba(255,255,255,.48); display:inline-flex; align-items:center; justify-content:center; gap:5px; border-radius:999px; padding:2px 7px; font:900 10px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial; border:1px solid transparent; line-height:1; box-shadow:var(--badge-shadow),var(--badge-inset); text-shadow:0 1px 0 rgba(255,255,255,.35); }
+    .badgeChipPremium{ position:relative; }
+    .badge-leaderboard{ min-height:19px; min-width:21px; }
+    .badge-leaderboard.badge-crown{ min-height:21px; min-width:23px; box-shadow:0 1px 3px rgba(111,77,0,.3),0 0 0 1px rgba(255,205,83,.22),inset 0 1px 0 rgba(255,255,255,.62); }
+    .badge-profile{ min-height:25px; min-width:29px; padding:4px 10px; font-size:12px; gap:6px; box-shadow:0 3px 10px rgba(0,0,0,.2), inset 0 1px 0 rgba(255,255,255,.52); }
+    .badge-map{ min-height:var(--map-ident-badge-min-width, 18px); min-width:var(--map-ident-badge-min-width, 18px); padding:var(--map-ident-badge-pad-y, 1.1px) var(--map-ident-badge-pad-x, 3.6px); font-size:var(--map-ident-badge-font, 8.5px); box-shadow:0 1px 2px rgba(0,0,0,.24), inset 0 1px 0 rgba(255,255,255,.5); }
+    .badgeChipWithLabel{ padding-right:9px; }
+    .badgeText{ font-weight:900; letter-spacing:.12px; }
+    .badgeGlyph{ font-size:1.08em; line-height:1; }
     .badgeIcon{ display:inline-flex; width:16px; height:16px; line-height:1; vertical-align:middle; }
+    .badge-map .badgeIcon{ width:12px; height:12px; }
+    .badge-profile .badgeIcon{ width:18px; height:18px; }
     .badgeIcon svg{ width:100%; height:100%; display:block; }
+    .badge-crown{ color:#5d3c00; border-color:rgba(125,88,6,.68); background:linear-gradient(160deg,rgba(255,249,219,.98) 0%,rgba(255,230,141,.96) 36%,rgba(232,170,31,.94) 100%); box-shadow:0 1px 2px rgba(101,68,0,.28),0 0 0 1px rgba(255,208,86,.2),inset 0 1px 0 rgba(255,255,255,.62); }
+    .badge-silver{ color:#2f3b46; border-color:rgba(84,97,109,.68); background:linear-gradient(160deg,rgba(249,252,255,.98) 0%,rgba(210,220,230,.95) 42%,rgba(153,167,181,.93) 100%); box-shadow:0 1px 2px rgba(44,58,70,.2), inset 0 1px 0 rgba(255,255,255,.65); }
+    .badge-bronze{ color:#4f2f1c; border-color:rgba(114,63,35,.72); background:linear-gradient(160deg,rgba(252,226,201,.98) 0%,rgba(212,143,90,.95) 45%,rgba(155,92,55,.92) 100%); box-shadow:0 1px 2px rgba(68,40,22,.22), inset 0 1px 0 rgba(255,240,223,.45); }
     .myRankCard{ background:rgba(255,255,255,0.62); border:1px solid rgba(0,0,0,0.08); border-radius:12px; padding:8px; display:flex; flex-direction:column; gap:6px; }
     .myRankRow{ display:flex; justify-content:space-between; gap:8px; align-items:center; font: 800 11px/1.25 system-ui,-apple-system,Segoe UI,Roboto,Arial; }
     .leaderboardLegend{ display:flex; flex-wrap:wrap; gap:5px; }
@@ -1187,33 +1203,17 @@
       align-items: center;
       overflow: visible;
     }
-    .mapIdentityMedalOverlay{
+    .mapIdentityBadgeOverlay{
       position:absolute;
       right:0;
       top:0;
-      transform: translate(35%, -35%);
-      width:var(--map-ident-badge-min-width, 18px);
-      height:var(--map-ident-badge-min-width, 18px);
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
+      transform: translate(36%, -36%);
       pointer-events:none;
       z-index: 3;
     }
-    .mapIdentityMedalOverlay svg{
-      width:100%;
-      height:100%;
-      display:block;
-    }
-    .mapIdentityCrownOverlay{
-      position: absolute;
-      left: 50%;
-      top: 0;
-      transform: translate(-50%, -70%);
-      font-size: var(--map-ident-crown-font, 11px);
-      line-height: 1;
-      z-index: 4;
-      pointer-events: none;
+    .mapIdentityBadgeOverlay.badge-crown{
+      transform: translate(32%, -42%);
+      box-shadow:0 1px 3px rgba(111,77,0,.34), inset 0 1px 0 rgba(255,255,255,.56);
     }
     .meName{
       font-size: 11px;
