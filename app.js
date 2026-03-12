@@ -131,7 +131,7 @@ if (legendEl && legendToggleBtn) {
    Label visibility rules (kept, but NEW labels are "major map app style")
    ========================================================= */
 const LABEL_ZOOM_MIN = 10;
-const BOROUGH_ZOOM_SHOW = 15;
+const BOROUGH_ZOOM_SHOW = 9;
 const LABEL_MAX_CHARS_MID = 14;
 
 const ZONE_LABEL_OVERRIDES = {
@@ -1544,6 +1544,10 @@ async function ensureZonesSourceAndLayers() {
     map.addSource("zone-labels", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
   }
 
+  if (!map.getSource("borough-labels")) {
+    map.addSource("borough-labels", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+  }
+
   // Labels layer (clean, professional, fun)
   if (!map.getLayer("zone-labels")) {
     map.addLayer({
@@ -1586,6 +1590,50 @@ async function ensureZonesSourceAndLayers() {
       },
       filter: ["!=", ["coalesce", ["get", "hide"], false], true],
       minzoom: LABEL_ZOOM_MIN,
+    });
+  }
+
+  if (!map.getLayer("borough-labels")) {
+    map.addLayer({
+      id: "borough-labels",
+      type: "symbol",
+      source: "borough-labels",
+      layout: {
+        "symbol-placement": "point",
+        "text-field": ["coalesce", ["get", "label_text"], ""],
+        "text-font": ["Open Sans Semibold", "Open Sans Regular", "Arial Unicode MS Regular"],
+        "text-size": [
+          "*",
+          ["coalesce", ["to-number", ["get", "font_scale"]], 1],
+          [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            9, 12,
+            10, 14,
+            11, 16,
+            12, 18,
+            13, 20,
+            14, 22,
+            15, 24,
+            16, 26
+          ]
+        ],
+        "text-anchor": "center",
+        "text-justify": "center",
+        "text-offset": ["coalesce", ["get", "text_offset"], ["literal", [0, 0]]],
+        "text-allow-overlap": false,
+        "text-ignore-placement": false,
+        "text-padding": 2,
+      },
+      paint: {
+        "text-color": "#f4f6fb",
+        "text-halo-color": "rgba(0,0,0,0.55)",
+        "text-halo-width": 1.4,
+        "text-halo-blur": 0.4,
+      },
+      filter: ["!=", ["coalesce", ["get", "hide"], false], true],
+      minzoom: BOROUGH_ZOOM_SHOW,
     });
   }
 
@@ -2631,6 +2679,36 @@ function normalizeZoneLabelConfig(cfg, zoneName = "") {
   return out;
 }
 
+function getBoroughLabelText(featureOrProps) {
+  const src = (featureOrProps && typeof featureOrProps === "object") ? featureOrProps : {};
+  const props = (src.properties && typeof src.properties === "object") ? src.properties : src;
+  const raw = props?.borough_label
+    ?? props?.borough
+    ?? props?.Borough
+    ?? props?.boro_name
+    ?? props?.name
+    ?? "";
+  return String(raw || "").replace(/\s+/g, " ").trim();
+}
+
+function normalizeBoroughLabelConfig(cfg, boroughName = "") {
+  const safeName = String(boroughName || "").replace(/\s+/g, " ").trim();
+  const src = (cfg && typeof cfg === "object") ? cfg : {};
+  const parsedFontScale = Number(src.fontScale);
+  const parsedDx = Number(src.dx);
+  const parsedDy = Number(src.dy);
+  const parsedMinZoom = Number(src.minZoom);
+  const textFromCfg = String(src.text ?? "").replace(/\s+/g, " ").trim();
+  return {
+    text: textFromCfg || safeName || "",
+    fontScale: Number.isFinite(parsedFontScale) && parsedFontScale > 0 ? parsedFontScale : 1,
+    dx: Number.isFinite(parsedDx) ? parsedDx : 0,
+    dy: Number.isFinite(parsedDy) ? parsedDy : 0,
+    minZoom: Number.isFinite(parsedMinZoom) ? parsedMinZoom : BOROUGH_ZOOM_SHOW,
+    hide: src.hide === true,
+  };
+}
+
 function applyZoneLabelOverride(baseConfig, zoneId, zoneProps = {}) {
   const zoneName = String(zoneProps?.zone_name || baseConfig?.text || "").trim();
   const base = normalizeZoneLabelConfig(baseConfig, zoneName);
@@ -2906,6 +2984,84 @@ function buildZoneLabelsFeatureCollection(frame) {
   return { type: "FeatureCollection", features: out };
 }
 
+function buildBoroughLabelsFeatureCollection(frame) {
+  const feats = frame?.polygons?.features || [];
+  const byBorough = new Map();
+  const out = [];
+
+  const considerFeature = (feature, preferLargest = true) => {
+    if (!feature) return;
+    const boroughName = getBoroughLabelText(feature);
+    if (!boroughName) return;
+    const pt = findInteriorPointForGeometry(feature.geometry) || geometryCenter(feature.geometry);
+    if (!pt || !Number.isFinite(pt.lng) || !Number.isFinite(pt.lat)) return;
+    const bb = bboxFromCoords(feature?.geometry?.coordinates);
+    const area = bb ? Math.abs((bb.maxLng - bb.minLng) * (bb.maxLat - bb.minLat)) : 0;
+    const cfg = normalizeBoroughLabelConfig({}, boroughName);
+    if (cfg.hide === true || !cfg.text) return;
+
+    const existing = byBorough.get(boroughName);
+    if (!existing || !preferLargest || area > existing.area) {
+      byBorough.set(boroughName, {
+        name: boroughName,
+        point: pt,
+        area,
+        cfg,
+      });
+    }
+  };
+
+  for (const f of feats) considerFeature(f, true);
+
+  if (!byBorough.size && feats.length) {
+    for (const f of feats) considerFeature(f, false);
+  }
+
+  for (const borough of byBorough.values()) {
+    const cfg = normalizeBoroughLabelConfig(borough.cfg, borough.name);
+    if (cfg.hide === true || !cfg.text) continue;
+    out.push({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [borough.point.lng, borough.point.lat] },
+      properties: {
+        label_text: cfg.text,
+        font_scale: cfg.fontScale,
+        dx: cfg.dx,
+        dy: cfg.dy,
+        text_offset: [cfg.dx / 12, -cfg.dy / 12],
+        min_zoom: cfg.minZoom,
+        hide: cfg.hide === true,
+      },
+    });
+  }
+
+  if (!out.length && feats.length) {
+    for (const f of feats) {
+      const boroughName = getBoroughLabelText(f);
+      if (!boroughName) continue;
+      const pt = findInteriorPointForGeometry(f.geometry) || geometryCenter(f.geometry);
+      if (!pt || !Number.isFinite(pt.lng) || !Number.isFinite(pt.lat)) continue;
+      const cfg = normalizeBoroughLabelConfig({ text: boroughName, dx: 0, dy: 0, minZoom: BOROUGH_ZOOM_SHOW, fontScale: 1, hide: false }, boroughName);
+      if (!cfg.text) continue;
+      out.push({
+        type: "Feature",
+        geometry: { type: "Point", coordinates: [pt.lng, pt.lat] },
+        properties: {
+          label_text: cfg.text,
+          font_scale: cfg.fontScale,
+          dx: cfg.dx,
+          dy: cfg.dy,
+          text_offset: [0, 0],
+          min_zoom: cfg.minZoom,
+          hide: false,
+        },
+      });
+    }
+  }
+
+  return { type: "FeatureCollection", features: out };
+}
+
 function refreshZoneLabels(frame) {
   if (!map || !mapReady) return;
   if (!frame) return;
@@ -2913,6 +3069,15 @@ function refreshZoneLabels(frame) {
   if (!src) return;
 
   const fc = buildZoneLabelsFeatureCollection(frame);
+  src.setData(fc);
+}
+
+function refreshBoroughLabels(frame) {
+  if (!map || !mapReady) return;
+  if (!frame) return;
+  const src = map.getSource("borough-labels");
+  if (!src) return;
+  const fc = buildBoroughLabelsFeatureCollection(frame);
   src.setData(fc);
 }
 
@@ -2955,6 +3120,7 @@ async function renderFrame(frame) {
 
   // Labels update (points inside polygons)
   refreshZoneLabels(frame);
+  refreshBoroughLabels(frame);
 
   if (debugEnabled) {
     dbg("dbgSetData", `OK features=${fc.features.length}`);
