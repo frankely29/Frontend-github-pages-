@@ -62,22 +62,10 @@
   function badgeChip(badgeCode, options = {}) {
     const badge = strictBadgeCode(badgeCode);
     if (!badge) return '';
-    const sizeClass = options.size === 'profile' ? 'badge-profile' : (options.size === 'map' ? 'badge-map' : 'badge-leaderboard');
-    const textClass = options.withLabel ? ' badgeChipWithLabel' : '';
+    const badgeClass = badge === 'crown' ? 'badgeEmojiCrown' : (badge === 'silver' ? 'badgeEmojiSilver' : 'badgeEmojiBronze');
     const label = badge === 'crown' ? 'Crown' : (badge === 'silver' ? 'Silver' : 'Bronze');
-    if (sizeClass === 'badge-leaderboard') {
-      const icon = badge === 'crown' ? '👑' : (badge === 'silver' ? '🥈' : '🥉');
-      return `<span class="leaderboardPremiumBadge" aria-label="${label}"><span class="leaderboardPremiumBadgeIcon">${icon}</span>${options.withLabel ? `<span class="badgeText">${label}</span>` : ''}</span>`;
-    }
-    if (badge === 'crown') {
-      return `<span class="badgeChip badgeChipPremium ${sizeClass} badge-${badge}${textClass}" aria-label="${label}"><span class="badgeGlyph">👑</span>${options.withLabel ? `<span class="badgeText">${label}</span>` : ''}</span>`;
-    }
-    const meta = {
-      silver: { label: 'Silver', svg: '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 2h4l1 6H9z" fill="#8d98a1"></path><path d="M13 2h4l-2 6h-3z" fill="#687680"></path><circle cx="12" cy="15" r="6" fill="#d7dfe6" stroke="#64737f" stroke-width="1.35"></circle><circle cx="12" cy="15" r="3.1" fill="#f7fafc" opacity="0.82"></circle></svg>' },
-      bronze: { label: 'Bronze', svg: '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 2h4l1 6H9z" fill="#ba7042"></path><path d="M13 2h4l-2 6h-3z" fill="#87502f"></path><circle cx="12" cy="15" r="6" fill="#c98553" stroke="#7d472b" stroke-width="1.35"></circle><circle cx="12" cy="15" r="3.1" fill="#f3bd8a" opacity="0.82"></circle></svg>' },
-    }[badge];
-    if (!meta) return '';
-    return `<span class="badgeChip badgeChipPremium ${sizeClass} badge-${badge}${textClass}" aria-label="${meta.label} medal"><span class="badgeIcon">${meta.svg}</span>${options.withLabel ? `<span class="badgeText">${meta.label}</span>` : ''}</span>`;
+    const icon = badge === 'crown' ? '👑' : (badge === 'silver' ? '🥈' : '🥉');
+    return `<span class="badgeEmoji ${badgeClass}" aria-label="${label}">${icon}</span>${options.withLabel ? `<span class="badgeText">${label}</span>` : ''}`;
   }
 
   function formatMetric(value, metric = state.metric) {
