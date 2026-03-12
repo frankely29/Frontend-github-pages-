@@ -98,7 +98,7 @@
     const n = Number(level);
     const safeLevel = Number.isFinite(n) && n > 0 ? Math.floor(n) : 1;
     const safeTitle = normalizeTierTitle(title);
-    return `<span class="leaderboardTierLine">L${safeLevel} <span class="${tierClassName(safeTitle)}">${esc(safeTitle)}</span></span>`;
+    return `<span class="leaderboardTierLine">Level ${safeLevel} <span class="${tierClassName(safeTitle)}">${esc(safeTitle)}</span></span>`;
   }
 
   function selectedMyBadge() {
@@ -126,7 +126,7 @@
   }
 
   function leaderboardPanelHTML() {
-    const metricBtn = (m, label) => `<button class="chipBtn ${state.metric === m ? 'active' : ''}" data-lb-metric="${m}">${label}</button>`;
+    const metricBtn = (m, label) => `<button class="chipBtn ${(state.view !== 'all' && state.metric === m) ? 'active' : ''}" data-lb-metric="${m}">${label}</button>`;
     const periodBtn = (p, label) => `<button class="chipBtn ${state.period === p ? 'active' : ''}" data-lb-period="${p}">${label}</button>`;
     const viewBtn = (v, label) => `<button class="chipBtn ${state.view === v ? 'active' : ''}" data-lb-view="${v}">${label}</button>`;
 
@@ -181,16 +181,15 @@
         <div class="myRankRow"><span>${state.metric === 'hours' ? 'Hours' : 'Miles'}</span><span>${formatMetric(myValue)}</span></div>
       </div>
       <div>
-        <div class="leaderboardSectionTitle">All Users</div>
+        <div class="leaderboardSectionTitle">See All Users</div>
         <div class="leaderboardList leaderboardAllList">${allRows || '<div class="leaderboardEmpty">No entries yet.</div>'}</div>
       </div>`;
 
     return `
       <div class="panelBlock leaderboardPanelWrap">
         <div class="leaderboardPanelControls">
-          <div class="leaderboardTabs">${metricBtn('miles', 'Miles')}${metricBtn('hours', 'Hours')}</div>
+          <div class="leaderboardTabs">${metricBtn('miles', 'Miles')}${metricBtn('hours', 'Hours')}${viewBtn('all', 'See All Users')}</div>
           <div class="leaderboardTabs">${periodBtn('daily', 'Daily')}${periodBtn('weekly', 'Weekly')}${periodBtn('monthly', 'Monthly')}${periodBtn('yearly', 'Yearly')}</div>
-          <div class="leaderboardTabs leaderboardViewTabs">${viewBtn('top', 'Top')}${viewBtn('all', 'All')}</div>
         </div>
         <div class="leaderboardPanelBody">
           ${state.view === 'all' ? allView : topView}
@@ -261,6 +260,7 @@
         const nextMetric = btn.getAttribute('data-lb-metric') || 'miles';
         if (state.metric === nextMetric) return;
         state.metric = nextMetric;
+        state.view = 'top';
         loadAll();
       });
     });
@@ -293,9 +293,11 @@
     style.textContent = `
       .leaderboardNameWrap{display:flex;flex-direction:column;min-width:0}
       .leaderboardTierLine{font-size:11px;font-weight:700;color:#475569;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-      .leaderboardPanelWrap{gap:7px;max-height:min(64vh,560px);overflow:hidden;padding:8px}
+      #dockDrawer:has(.leaderboardPanelWrap){top:50%;max-height:min(62vh,520px)}
+      #dockDrawer:has(.leaderboardPanelWrap).open{transform:translateX(0) translateY(-50%)}
+      .leaderboardPanelWrap{gap:7px;max-height:min(60vh,480px);overflow:hidden;padding:8px}
       .leaderboardPanelControls{display:flex;flex-direction:column;gap:5px;flex:0 0 auto}
-      .leaderboardViewTabs .chipBtn{min-width:52px;justify-content:center}
+      .leaderboardTabs .chipBtn{justify-content:center}
       .leaderboardPanelBody{display:flex;flex-direction:column;gap:7px;min-height:0;overflow-y:auto;padding-right:2px}
       .leaderboardPanelBody>div{flex:0 0 auto}
       .leaderboardSectionTitle{font:900 11px/1.2 system-ui;margin-bottom:4px}
