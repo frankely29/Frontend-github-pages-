@@ -9,6 +9,7 @@
   const state = {
     metric: 'miles',
     period: 'weekly',
+    view: 'top',
     rows: [],
     myRow: null,
     badges: [],
@@ -127,13 +128,14 @@
   function leaderboardPanelHTML() {
     const metricBtn = (m, label) => `<button class="chipBtn ${state.metric === m ? 'active' : ''}" data-lb-metric="${m}">${label}</button>`;
     const periodBtn = (p, label) => `<button class="chipBtn ${state.period === p ? 'active' : ''}" data-lb-period="${p}">${label}</button>`;
+    const viewBtn = (v, label) => `<button class="chipBtn ${state.view === v ? 'active' : ''}" data-lb-view="${v}">${label}</button>`;
 
-    const topRows = state.rows.slice(0, 10).map((row, idx) => {
+    const renderRows = (rows, options = {}) => rows.map((row, idx) => {
       const rank = Number(row?.rank_position || idx + 1);
       const name = row?.display_name || row?.name || row?.user_name || `Driver ${rank}`;
       const value = row?.metric_value;
       const badge = strictBadgeCode(row?.badge_code);
-      const rowClass = rank <= 3 ? ` leaderboardTop${rank}` : '';
+      const rowClass = rank <= 3 && !options.compact ? ` leaderboardTop${rank}` : '';
       return `<div class="leaderboardRow${rowClass}">
         <span class="leaderboardRank">#${rank}</span>
         <span class="leaderboardNameWrap">
@@ -145,33 +147,53 @@
       </div>`;
     }).join('');
 
+    const topRows = renderRows(state.rows.slice(0, 10));
+    const allRows = renderRows(state.rows, { compact: true });
+
     const myRank = Number(state.myRow?.rank_position || 0);
     const myName = state.myRow?.display_name || state.myRow?.name || (window.me && window.me.display_name) || 'You';
     const myValue = state.myRow?.metric_value;
+    const topView = `
+      <div>
+        <div class="leaderboardSectionTitle">Top 10</div>
+        <div class="leaderboardList">${topRows || '<div class="leaderboardEmpty">No entries yet.</div>'}</div>
+      </div>
+
+      <div class="myRankCard">
+        <div class="leaderboardSectionTitle">My Rank</div>
+        <div class="myRankRow"><span>${esc(myName)}</span><span>${myRank ? `#${myRank}` : 'Unranked'}</span></div>
+        <div class="myRankRow"><span>Progression</span><span>${levelTitleLine(state.myRow?.level, state.myRow?.title)}</span></div>
+        <div class="myRankRow"><span>${state.metric === 'hours' ? 'Hours' : 'Miles'}</span><span>${formatMetric(myValue)}</span></div>
+        <div class="myRankRow"><span>Badge</span><span>${badgeChip(selectedMyBadge()) || '—'}</span></div>
+      </div>
+
+      ${renderOverview()}
+
+      <div>
+        <div class="leaderboardSectionTitle">Badge legend</div>
+        <div class="leaderboardLegend">${badgeChip('crown', { withLabel: true })} ${badgeChip('silver', { withLabel: true })} ${badgeChip('bronze', { withLabel: true })}</div>
+      </div>`;
+
+    const allView = `
+      <div class="myRankCard leaderboardMyRankCompact">
+        <div class="leaderboardSectionTitle">My Rank</div>
+        <div class="myRankRow"><span>${esc(myName)}</span><span>${myRank ? `#${myRank}` : 'Unranked'}</span></div>
+        <div class="myRankRow"><span>${state.metric === 'hours' ? 'Hours' : 'Miles'}</span><span>${formatMetric(myValue)}</span></div>
+      </div>
+      <div>
+        <div class="leaderboardSectionTitle">All Users</div>
+        <div class="leaderboardList leaderboardAllList">${allRows || '<div class="leaderboardEmpty">No entries yet.</div>'}</div>
+      </div>`;
 
     return `
       <div class="panelBlock leaderboardPanelWrap">
-        <div class="leaderboardTabs">${metricBtn('miles', 'Miles')}${metricBtn('hours', 'Hours')}</div>
-        <div class="leaderboardTabs">${periodBtn('daily', 'Daily')}${periodBtn('weekly', 'Weekly')}${periodBtn('monthly', 'Monthly')}${periodBtn('yearly', 'Yearly')}</div>
-
-        <div>
-          <div style="font:900 11px/1.2 system-ui;margin-bottom:5px;">Top 10</div>
-          <div class="leaderboardList">${topRows || '<div class="leaderboardEmpty">No entries yet.</div>'}</div>
+        <div class="leaderboardPanelControls">
+          <div class="leaderboardTabs">${metricBtn('miles', 'Miles')}${metricBtn('hours', 'Hours')}</div>
+          <div class="leaderboardTabs">${periodBtn('daily', 'Daily')}${periodBtn('weekly', 'Weekly')}${periodBtn('monthly', 'Monthly')}${periodBtn('yearly', 'Yearly')}</div>
+          <div class="leaderboardTabs leaderboardViewTabs">${viewBtn('top', 'Top')}${viewBtn('all', 'All')}</div>
         </div>
-
-        <div class="myRankCard">
-          <div style="font:900 11px/1.2 system-ui;">My Rank</div>
-          <div class="myRankRow"><span>${esc(myName)}</span><span>${myRank ? `#${myRank}` : 'Unranked'}</span></div>
-          <div class="myRankRow"><span>Progression</span><span>${levelTitleLine(state.myRow?.level, state.myRow?.title)}</span></div>
-          <div class="myRankRow"><span>${state.metric === 'hours' ? 'Hours' : 'Miles'}</span><span>${formatMetric(myValue)}</span></div>
-          <div class="myRankRow"><span>Badge</span><span>${badgeChip(selectedMyBadge()) || '—'}</span></div>
-        </div>
-
-        ${renderOverview()}
-
-        <div>
-          <div style="font:900 11px/1.2 system-ui;margin-bottom:5px;">Badge legend</div>
-          <div class="leaderboardLegend">${badgeChip('crown', { withLabel: true })} ${badgeChip('silver', { withLabel: true })} ${badgeChip('bronze', { withLabel: true })}</div>
+        <div class="leaderboardPanelBody">
+          ${state.view === 'all' ? allView : topView}
         </div>
 
         <div id="lbStatus" class="leaderboardStatus ${state.statusType}">${esc(state.status || '')}</div>
@@ -205,8 +227,10 @@
     const metric = encodeURIComponent(state.metric);
     const period = encodeURIComponent(state.period);
     try {
+      const boardPromise = getAuth(`/leaderboard?metric=${metric}&period=${period}`)
+        .catch(() => getAuth(`/leaderboard?metric=${metric}&period=${period}&limit=10`));
       const [boardRes, meRes, badgesRes, overviewRes] = await Promise.all([
-        getAuth(`/leaderboard?metric=${metric}&period=${period}&limit=10`),
+        boardPromise,
         getAuth(`/leaderboard/me?metric=${metric}&period=${period}`),
         getAuth('/leaderboard/badges/me').catch(() => ({ badges: [] })),
         getAuth('/leaderboard/overview/me').catch(() => null),
@@ -250,6 +274,16 @@
         loadAll();
       });
     });
+
+    document.querySelectorAll('[data-lb-view]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        const nextView = btn.getAttribute('data-lb-view') || 'top';
+        if (state.view === nextView) return;
+        state.view = nextView === 'all' ? 'all' : 'top';
+        rerenderIfOpen();
+      });
+    });
   }
 
   function injectLeaderboardProgressionStyles() {
@@ -259,6 +293,19 @@
     style.textContent = `
       .leaderboardNameWrap{display:flex;flex-direction:column;min-width:0}
       .leaderboardTierLine{font-size:11px;font-weight:700;color:#475569;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .leaderboardPanelWrap{gap:7px;max-height:min(64vh,560px);overflow:hidden;padding:8px}
+      .leaderboardPanelControls{display:flex;flex-direction:column;gap:5px;flex:0 0 auto}
+      .leaderboardViewTabs .chipBtn{min-width:52px;justify-content:center}
+      .leaderboardPanelBody{display:flex;flex-direction:column;gap:7px;min-height:0;overflow-y:auto;padding-right:2px}
+      .leaderboardPanelBody>div{flex:0 0 auto}
+      .leaderboardSectionTitle{font:900 11px/1.2 system-ui;margin-bottom:4px}
+      .leaderboardList{gap:4px;margin-top:2px}
+      .leaderboardRow{gap:7px}
+      .myRankCard{padding:7px;gap:4px}
+      .myRankRow{line-height:1.2}
+      .leaderboardLegend{gap:5px}
+      .leaderboardAllList{max-height:100%;overflow-y:auto;padding-right:2px}
+      .leaderboardMyRankCompact{margin-bottom:1px}
       .driverTierRookie{color:#64748b}
       .driverTierDriver{color:#2563eb}
       .driverTierPro{color:#16a34a}
