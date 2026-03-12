@@ -1602,7 +1602,7 @@ async function ensureZonesSourceAndLayers() {
       },
       paint: {
         "text-color": "#1f262e",
-        "text-halo-color": "rgba(255,255,255,0),
+        "text-halo-color": "rgba(255,255,255,0)",
         "text-halo-width": 0,
         "text-halo-blur": 0,
       },
