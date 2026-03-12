@@ -1579,16 +1579,24 @@ async function ensureZonesSourceAndLayers() {
         "text-field": ["coalesce", ["get", "label"], ""],
         "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
         "text-size": [
-          "interpolate",
-          ["linear"],
-          ["zoom"],
-          10, 7,
-          11, 8,
-          12, 9,
-          13, 10,
-          14, 11,
-          15, 12,
-          16, 13,
+          "max",
+          6.5,
+          [
+            "*",
+            ["coalesce", ["get", "textSize"], 10],
+            [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              10, 0.70,
+              11, 0.76,
+              12, 0.82,
+              13, 0.88,
+              14, 0.94,
+              15, 1.00,
+              16, 1.04
+            ]
+          ]
         ],
         "text-max-width": ["coalesce", ["get", "textMaxWidth"], 4],
         "text-letter-spacing": ["coalesce", ["get", "letterSpacing"], 0],
