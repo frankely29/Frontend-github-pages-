@@ -101,6 +101,7 @@ let pickupZoneStats = new Map();
 let pickupHotspotZoneIds = new Set();
 let pickupPointsSourceFingerprint = "";
 let pickupHotspotsSourceFingerprint = "";
+let mapPageIsVisible = !document.hidden;
 
 /* =========================================================
    MANHATTAN MODE — DEFAULT SETTINGS (SAFE TO EDIT)
@@ -1920,6 +1921,7 @@ async function ensurePickupSourceAndLayers() {
         id: "pickup-zone-hotspots-line",
         type: "line",
         source: "pickup-zone-hotspots",
+        minzoom: 10.8,
         paint: {
           "line-color": [
             "interpolate",
@@ -2022,6 +2024,7 @@ async function ensurePickupSourceAndLayers() {
         id: "pickup-heat",
         type: "heatmap",
         source: "pickup-points",
+        minzoom: 10.8,
         paint: {
           "heatmap-weight": ["interpolate", ["linear"], ["coalesce", ["get", "recency_score"], 0.2], 0, 0.2, 1, 1],
           "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 9, 0.6, 12, 0.95, 15, 1.25],
@@ -2056,7 +2059,7 @@ async function ensurePickupSourceAndLayers() {
         id: "pickup-circles-glow",
         type: "circle",
         source: "pickup-points",
-        minzoom: 10,
+        minzoom: 12.0,
         paint: {
           "circle-radius": ["interpolate", ["linear"], ["zoom"], 12, 7, 16, 14],
           "circle-color": "rgba(0,176,80,0.28)",
@@ -2074,7 +2077,7 @@ async function ensurePickupSourceAndLayers() {
         id: "pickup-circles",
         type: "circle",
         source: "pickup-points",
-        minzoom: 10,
+        minzoom: 12.0,
         paint: {
           "circle-radius": ["interpolate", ["linear"], ["zoom"], 12, 3.5, 16, 6],
           "circle-color": "rgba(255,255,255,0.92)",
@@ -2189,6 +2192,7 @@ function pickupOverlayQueryPath(limit = PICKUP_RECENT_LIMIT) {
 }
 
 async function refreshPickupOverlay({ force = false } = {}) {
+  if (!mapPageIsVisible) return;
   if (!map || !mapReady) return;
   const ready = await ensurePickupSourceAndLayers();
   if (!ready) return;
@@ -3378,10 +3382,13 @@ async function tickNYCClockAndAdvanceIfNeeded() {
 setInterval(tickNYCClockAndAdvanceIfNeeded, NYC_CLOCK_TICK_MS);
 
 document.addEventListener("visibilitychange", () => {
+  mapPageIsVisible = !document.hidden;
   if (document.visibilityState === "visible") {
     refreshCurrentFrame().catch(() => {});
     tickNYCClockAndAdvanceIfNeeded().catch(() => {});
     updateWeatherNow().catch(() => {});
+    refreshPickupOverlay({ force: true }).catch(() => {});
+    pullPresenceAll().catch(() => {});
     if (timeline.length) bubbleUpdateNow();
   }
 });
@@ -4178,6 +4185,7 @@ let lastGpsAccuracyM = null;
 
 // other drivers markers
 const otherMarkers = new Map(); // user_id -> marker
+const driverMarkerVisualSignature = new Map();
 
 const LABEL_OFFSETS = [
   [44, 0],
@@ -4536,19 +4544,55 @@ function clearOtherDrivers() {
     try { m.remove(); } catch {}
   }
   otherMarkers.clear();
+  driverMarkerVisualSignature.clear();
+}
+
+function buildDriverMarkerVisualSignature(userId, name, avatarUrl = "", mode = "name", orbitMeta = null, leaderboardBadgeCode = '', leaderboardHasCrown = false) {
+  const orbitIndex = Number.isFinite(orbitMeta?.index) ? orbitMeta.index : "";
+  const orbitCount = Number.isFinite(orbitMeta?.count) ? orbitMeta.count : "";
+  return [
+    String(userId ?? ""),
+    String(name ?? ""),
+    String(avatarUrl ?? ""),
+    String(mode ?? "name"),
+    String(leaderboardBadgeCode ?? ""),
+    leaderboardHasCrown ? "1" : "0",
+    String(orbitIndex),
+    String(orbitCount),
+  ].join("|");
 }
 
 function upsertDriverMarker(userId, name, lat, lng, heading, avatarUrl = "", mode = "name", orbitMeta = null, leaderboardBadgeCode = '', leaderboardHasCrown = false) {
   if (!Number.isFinite(lat) || !Number.isFinite(lng) || !map) return;
   if (!userId) return;
 
+  const visualSig = buildDriverMarkerVisualSignature(
+    userId,
+    name,
+    avatarUrl,
+    mode,
+    orbitMeta,
+    leaderboardBadgeCode,
+    leaderboardHasCrown
+  );
+
   const existing = otherMarkers.get(userId);
   if (existing) {
     existing.setLngLat([lng, lat]);
-    const el = existing.getElement();
-    const newEl = makeDriverIcon(name || `Driver ${userId}`, heading, avatarUrl, mode, orbitMeta, leaderboardBadgeCode, leaderboardHasCrown);
-    el.innerHTML = newEl.innerHTML;
-    wireProfileOpenTargets(el, userId, { isSelf: false });
+    const previousVisualSig = driverMarkerVisualSignature.get(userId) || "";
+    if (visualSig !== previousVisualSig) {
+      const el = existing.getElement();
+      const newEl = makeDriverIcon(name || `Driver ${userId}`, heading, avatarUrl, mode, orbitMeta, leaderboardBadgeCode, leaderboardHasCrown);
+      el.innerHTML = newEl.innerHTML;
+      wireProfileOpenTargets(el, userId, { isSelf: false });
+      driverMarkerVisualSignature.set(userId, visualSig);
+    } else {
+      const arrowWrap = existing.getElement()?.querySelector?.(".otherArrowWrap");
+      if (arrowWrap) {
+        const rot = Number.isFinite(heading) ? heading : 0;
+        arrowWrap.style.transform = `rotate(${rot}deg)`;
+      }
+    }
     return;
   }
 
@@ -4580,11 +4624,13 @@ function upsertDriverMarker(userId, name, lat, lng, heading, avatarUrl = "", mod
   }
 
   otherMarkers.set(userId, mk);
+  driverMarkerVisualSignature.set(userId, visualSig);
   applyDriverLabelZoomStyles();
 }
 
 async function pullPresenceAll() {
   if (!authHeaderOK() || !map) return;
+  if (!mapPageIsVisible) return;
 
   try {
     const list = await getJSONAuth("/presence/all", communityToken);
@@ -4716,6 +4762,7 @@ async function pullPresenceAll() {
         const mk = otherMarkers.get(uid);
         try { mk.remove(); } catch {}
         otherMarkers.delete(uid);
+        driverMarkerVisualSignature.delete(uid);
       }
     }
 
