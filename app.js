@@ -138,7 +138,6 @@ const ZONE_LABEL_OVERRIDES = {
   // Examples only; tune these over time as needed.
   // 236: { shortText: "Sunset Park East", fontScale: 0.92, dx: 4, dy: -2, maxWidth: 108 },
   // 237: { shortText: "Sunset Park West", fontScale: 0.92, dx: -3, dy: 1, maxWidth: 108 },
-  // 130: { shortText: "Kew Gardens", forceTwoLine: true, fontScale: 0.88, dy: -2 },
 };
 
 function shouldShowLabel(bucket, zoom) {
@@ -2887,6 +2886,227 @@ function buildAutomaticZoneLabelConfig(zoneFeature, labelPoint, zoom = null) {
   }
 }
 
+function getZoneFeatureBBox(zoneFeature) {
+  const geometry = zoneFeature?.geometry;
+  const type = geometry?.type;
+  const coords = geometry?.coordinates;
+  if (!geometry || !Array.isArray(coords)) return null;
+  if (type !== "Polygon" && type !== "MultiPolygon") return null;
+
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  const visit = (arr) => {
+    if (!Array.isArray(arr)) return;
+    if (arr.length >= 2 && Number.isFinite(arr[0]) && Number.isFinite(arr[1])) {
+      const x = Number(arr[0]);
+      const y = Number(arr[1]);
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+      return;
+    }
+    for (const child of arr) visit(child);
+  };
+
+  visit(coords);
+  if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
+    return null;
+  }
+  return {
+    minX,
+    minY,
+    maxX,
+    maxY,
+    width: maxX - minX,
+    height: maxY - minY,
+  };
+}
+
+function classifyZoneLabelShape(zoneFeature) {
+  const bbox = getZoneFeatureBBox(zoneFeature);
+  if (!bbox) {
+    return {
+      areaLike: 0,
+      aspect: 1,
+      isTiny: false,
+      isNarrow: false,
+      isWide: false,
+      isTall: false,
+    };
+  }
+
+  const width = Math.max(Number(bbox.width) || 0, 0);
+  const height = Math.max(Number(bbox.height) || 0, 0);
+  const areaLike = width * height;
+  const aspect = height > 0 ? width / height : 1;
+  return {
+    areaLike,
+    aspect,
+    isTiny: areaLike < 0.000045,
+    isNarrow: aspect < 0.62,
+    isWide: aspect > 1.65,
+    isTall: aspect < 0.62,
+  };
+}
+
+function getAutoShortZoneName(name, shapeInfo) {
+  const raw = String(name || "").replace(/\s+/g, " ").trim();
+  if (!raw) return "";
+  if (!shapeInfo?.isTiny && !shapeInfo?.isNarrow) return raw;
+
+  const shortened = raw
+    .replace(/\bHeights\b/g, "Hts")
+    .replace(/\bGardens\b/g, "Gdns")
+    .replace(/\bVillage\b/g, "Vlg")
+    .replace(/\s+/g, " ")
+    .trim();
+  return shortened || raw;
+}
+
+function splitZoneNameForFit(text, shapeInfo) {
+  const raw = String(text || "").replace(/\s+/g, " ").trim();
+  if (!raw) return "";
+  if (raw.includes("\n")) return raw;
+  if (!shapeInfo?.isTiny && !shapeInfo?.isNarrow) return raw;
+
+  const words = raw.split(" ").filter(Boolean);
+  if (words.length < 2) return raw;
+  const mid = Math.floor(words.length / 2);
+  if (mid <= 0 || mid >= words.length) return raw;
+  const left = words.slice(0, mid).join(" ").trim();
+  const right = words.slice(mid).join(" ").trim();
+  if (!left || !right) return raw;
+  if (left.length < 3 || right.length < 3) return raw;
+  return `${left}\n${right}`;
+}
+
+function enhanceZoneLabelFeatureByShape(zoneFeature, labelFeature, currentZoom = null) {
+  try {
+    if (!labelFeature || typeof labelFeature !== "object") return labelFeature;
+    const baseProps = (labelFeature.properties && typeof labelFeature.properties === "object") ? labelFeature.properties : {};
+    const baseText = String(baseProps.label_text || baseProps.label || "").replace(/\s+/g, " ").trim();
+    const safe = {
+      ...labelFeature,
+      geometry: labelFeature.geometry || null,
+      properties: { ...baseProps },
+    };
+
+    const shapeInfo = classifyZoneLabelShape(zoneFeature);
+    const zoom = Number.isFinite(Number(currentZoom)) ? Number(currentZoom) : null;
+
+    let fontScale = Number(baseProps.font_scale);
+    let dx = Number(baseProps.dx);
+    let dy = Number(baseProps.dy);
+    let maxWidth = Number(baseProps.max_width);
+    let minZoom = Number(baseProps.min_zoom);
+    let labelText = baseText || getZoneLabelText(zoneFeature);
+
+    if (!Number.isFinite(fontScale) || fontScale <= 0.05) fontScale = 1;
+    if (!Number.isFinite(dx)) dx = 0;
+    if (!Number.isFinite(dy)) dy = 0;
+    if (!Number.isFinite(maxWidth) || maxWidth <= 20) maxWidth = 120;
+    if (!Number.isFinite(minZoom) || minZoom < 0) minZoom = LABEL_ZOOM_MIN;
+
+    if (shapeInfo.isTiny) {
+      fontScale = Math.max(0.82, Math.min(fontScale * 0.9, 0.9));
+      minZoom = Math.max(minZoom, zoom != null && zoom > 10.8 ? 11 : 10.6);
+      maxWidth = Math.min(maxWidth, 96);
+      labelText = getAutoShortZoneName(labelText, shapeInfo) || labelText;
+    } else if (shapeInfo.isNarrow || shapeInfo.isTall) {
+      fontScale = Math.max(0.86, Math.min(fontScale * 0.92, 0.96));
+      maxWidth = Math.min(maxWidth, 98);
+      dy -= 3;
+      labelText = getAutoShortZoneName(labelText, shapeInfo) || labelText;
+    } else if (shapeInfo.isWide) {
+      fontScale = Math.min(fontScale * 1.03, 1.06);
+      maxWidth = Math.max(maxWidth, 132);
+    }
+
+    labelText = String(labelText || baseText || "").replace(/\s+/g, " ").trim() || baseText;
+    const multi = splitZoneNameForFit(labelText, shapeInfo);
+
+    safe.properties.font_scale = Number.isFinite(fontScale) && fontScale > 0.05 ? fontScale : (Number(baseProps.font_scale) || 1);
+    safe.properties.dx = Number.isFinite(dx) ? dx : (Number(baseProps.dx) || 0);
+    safe.properties.dy = Number.isFinite(dy) ? dy : (Number(baseProps.dy) || 0);
+    safe.properties.max_width = Number.isFinite(maxWidth) && maxWidth > 20 ? maxWidth : (Number(baseProps.max_width) || 120);
+    safe.properties.min_zoom = Number.isFinite(minZoom) && minZoom >= 0 ? minZoom : (Number(baseProps.min_zoom) || LABEL_ZOOM_MIN);
+    safe.properties.label_text = labelText || baseText;
+    safe.properties.label = safe.properties.label_text;
+    safe.properties.label_text_multiline = String(multi || safe.properties.label_text || baseText || "").trim() || safe.properties.label_text || baseText;
+    return safe;
+  } catch (err) {
+    warnZoneLabelConfigOnce("enhance-failed", "Zone label enhancement failed; using baseline feature.", err);
+    return labelFeature;
+  }
+}
+
+function applySafeZoneLabelOverride(labelFeature, zoneFeature) {
+  const zoneProps = zoneFeature?.properties || {};
+  const zoneId = zoneProps.LocationID ?? zoneProps.location_id ?? zoneProps.zone_id;
+  const override = getZoneLabelOverride(zoneId);
+  if (!override || typeof override !== "object") return labelFeature;
+  if (!labelFeature || typeof labelFeature !== "object") return labelFeature;
+
+  const next = {
+    ...labelFeature,
+    geometry: labelFeature.geometry || null,
+    properties: { ...(labelFeature.properties || {}) },
+  };
+  const p = next.properties;
+  const baselineText = String(p.label_text || p.label || getZoneLabelText(zoneFeature) || "").replace(/\s+/g, " ").trim();
+  const shapeInfo = classifyZoneLabelShape(zoneFeature);
+
+  const invalid = (key, reason) => warnZoneLabelConfigOnce(`override-invalid-${zoneId}-${key}`, `Zone ${zoneId} override ${key} ignored: ${reason}.`);
+  if ("text" in override) {
+    const txt = String(override.text || "").replace(/\s+/g, " ").trim();
+    if (txt) p.label_text = txt;
+    else invalid("text", "blank");
+  }
+  if ("shortText" in override) {
+    const shortTxt = String(override.shortText || "").replace(/\s+/g, " ").trim();
+    if (shortTxt) p.label_text = shortTxt;
+    else invalid("shortText", "blank");
+  }
+  if ("fontScale" in override) {
+    const fs = Number(override.fontScale);
+    if (Number.isFinite(fs) && fs >= 0.65 && fs <= 1.5) p.font_scale = fs;
+    else invalid("fontScale", "out of safe range");
+  }
+  if ("dx" in override) {
+    const dx = Number(override.dx);
+    if (Number.isFinite(dx) && Math.abs(dx) <= 40) p.dx = dx;
+    else invalid("dx", "not finite or too large");
+  }
+  if ("dy" in override) {
+    const dy = Number(override.dy);
+    if (Number.isFinite(dy) && Math.abs(dy) <= 40) p.dy = dy;
+    else invalid("dy", "not finite or too large");
+  }
+  if ("maxWidth" in override) {
+    const mw = Number(override.maxWidth);
+    if (Number.isFinite(mw) && mw >= 60 && mw <= 240) p.max_width = mw;
+    else invalid("maxWidth", "out of safe range");
+  }
+  if ("minZoom" in override) {
+    const mz = Number(override.minZoom);
+    if (Number.isFinite(mz) && mz >= 0 && mz <= 22) p.min_zoom = mz;
+    else invalid("minZoom", "out of safe range");
+  }
+  if (override.forceTwoLine === true) {
+    p.label_text_multiline = splitZoneNameForFit(String(p.label_text || baselineText), { ...shapeInfo, isTiny: true, isNarrow: true });
+  }
+  if (override.hide === true) p.hide = true;
+
+  p.label_text = String(p.label_text || baselineText).replace(/\s+/g, " ").trim() || baselineText;
+  p.label = p.label_text;
+  p.label_text_multiline = String(p.label_text_multiline || p.label_text || baselineText).trim() || p.label_text || baselineText;
+  return next;
+}
+
 function buildZoneLabelsFeatureCollection(frame) {
   const feats = frame?.polygons?.features || [];
   const out = [];
@@ -2907,9 +3127,7 @@ function buildZoneLabelsFeatureCollection(frame) {
     if (!pt) continue;
 
     let finalCfg = buildAutomaticZoneLabelConfig(f, pt, z);
-    finalCfg = applyZoneLabelOverride(finalCfg, zoneId, props);
     finalCfg = normalizeZoneLabelConfig(finalCfg, zoneName);
-    if (finalCfg.hide === true) continue;
 
     const minZoomRaw = Number(finalCfg.minZoom);
     const minZoom = Number.isFinite(minZoomRaw) && minZoomRaw >= 0 ? minZoomRaw : 10;
@@ -2939,7 +3157,7 @@ function buildZoneLabelsFeatureCollection(frame) {
     const finalDx = (Number.isFinite(finalCfg.dx) ? Number(finalCfg.dx) : 0) + (Number.isFinite(anchorShift.dx) ? Number(anchorShift.dx) : 0);
     const finalDy = (Number.isFinite(finalCfg.dy) ? Number(finalCfg.dy) : 0) + (Number.isFinite(anchorShift.dy) ? Number(anchorShift.dy) : 0);
 
-    out.push({
+    const baselineFeature = {
       type: "Feature",
       geometry: { type: "Point", coordinates: [pt.lng, pt.lat] },
       properties: {
@@ -2954,11 +3172,39 @@ function buildZoneLabelsFeatureCollection(frame) {
         text_offset: [finalDx / 12, -finalDy / 12],
         max_width: Number.isFinite(finalCfg.maxWidth) && finalCfg.maxWidth > 20 ? finalCfg.maxWidth : 120,
         min_zoom: minZoom,
-        hide: !!finalCfg.hide,
+        hide: false,
         class_name: String(finalCfg.className || "").trim(),
         anchor: String(finalCfg.anchor || "center"),
       },
-    });
+    };
+
+    const enhancedFeature = enhanceZoneLabelFeatureByShape(f, baselineFeature, z) || baselineFeature;
+    const overriddenFeature = applySafeZoneLabelOverride(enhancedFeature, f) || enhancedFeature;
+    const finalFeature = {
+      ...baselineFeature,
+      ...overriddenFeature,
+      geometry: overriddenFeature?.geometry || baselineFeature.geometry,
+      properties: {
+        ...baselineFeature.properties,
+        ...(overriddenFeature?.properties || {}),
+      },
+    };
+    const fp = finalFeature.properties || {};
+    const baselineText = String(baselineFeature.properties?.label_text || "").trim();
+    const resolvedText = String(fp.label_text || fp.label || "").replace(/\s+/g, " ").trim() || baselineText;
+    if (!resolvedText) continue;
+    fp.label_text = resolvedText;
+    fp.label = resolvedText;
+    fp.label_text_multiline = String(fp.label_text_multiline || resolvedText).trim() || resolvedText;
+    fp.font_scale = Number.isFinite(Number(fp.font_scale)) && Number(fp.font_scale) > 0.05 ? Number(fp.font_scale) : 1;
+    fp.dx = Number.isFinite(Number(fp.dx)) ? Number(fp.dx) : 0;
+    fp.dy = Number.isFinite(Number(fp.dy)) ? Number(fp.dy) : 0;
+    fp.max_width = Number.isFinite(Number(fp.max_width)) && Number(fp.max_width) > 20 ? Number(fp.max_width) : Number(baselineFeature.properties.max_width) || 120;
+    fp.min_zoom = Number.isFinite(Number(fp.min_zoom)) && Number(fp.min_zoom) >= 0 ? Number(fp.min_zoom) : Number(baselineFeature.properties.min_zoom) || 10;
+    fp.hide = fp.hide === true;
+    fp.text_offset = [fp.dx / 12, -fp.dy / 12];
+    if (fp.hide === true) continue;
+    out.push(finalFeature);
   }
 
   if (!out.length && feats.length) {
