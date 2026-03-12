@@ -65,6 +65,10 @@
     const sizeClass = options.size === 'profile' ? 'badge-profile' : (options.size === 'map' ? 'badge-map' : 'badge-leaderboard');
     const textClass = options.withLabel ? ' badgeChipWithLabel' : '';
     const label = badge === 'crown' ? 'Crown' : (badge === 'silver' ? 'Silver' : 'Bronze');
+    if (sizeClass === 'badge-leaderboard') {
+      const icon = badge === 'crown' ? '👑' : (badge === 'silver' ? '🥈' : '🥉');
+      return `<span class="leaderboardPremiumBadge" aria-label="${label}"><span class="leaderboardPremiumBadgeIcon">${icon}</span>${options.withLabel ? `<span class="badgeText">${label}</span>` : ''}</span>`;
+    }
     if (badge === 'crown') {
       return `<span class="badgeChip badgeChipPremium ${sizeClass} badge-${badge}${textClass}" aria-label="${label}"><span class="badgeGlyph">👑</span>${options.withLabel ? `<span class="badgeText">${label}</span>` : ''}</span>`;
     }
