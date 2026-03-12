@@ -2948,10 +2948,10 @@ function buildZoneLabelsFeatureCollection(frame) {
     }
 
     const maybeShort = String(finalCfg.shortText || "").replace(/\s+/g, " ").trim() || finalText;
-    const baseText = finalText.length > maxChars ? maybeShort : finalText;
-    const labelText = shortenLabel(baseText, maxChars) || finalText;
-    let labelTextMultiline = String(splitZoneLabelText(finalText, finalCfg) || "").trim();
-    if (!labelTextMultiline) labelTextMultiline = finalText;
+    const chosenText = finalText.length > maxChars ? maybeShort : finalText;
+    const labelText = shortenLabel(chosenText, maxChars) || chosenText || finalText;
+    let labelTextMultiline = String(splitZoneLabelText(chosenText, finalCfg) || "").trim();
+    if (!labelTextMultiline) labelTextMultiline = chosenText || finalText;
     const safeFontScale = Number.isFinite(finalCfg.fontScale) && finalCfg.fontScale > 0.05 ? finalCfg.fontScale : 1;
     const anchorShift = zoneLabelAnchorToOffsets(finalCfg.anchor, finalCfg.maxWidth, 20 * safeFontScale) || { dx: 0, dy: 0 };
     const finalDx = (Number.isFinite(finalCfg.dx) ? Number(finalCfg.dx) : 0) + (Number.isFinite(anchorShift.dx) ? Number(anchorShift.dx) : 0);
