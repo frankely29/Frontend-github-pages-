@@ -134,6 +134,13 @@ const LABEL_ZOOM_MIN = 10;
 const BOROUGH_ZOOM_SHOW = 15;
 const LABEL_MAX_CHARS_MID = 14;
 
+const ZONE_LABEL_OVERRIDES = {
+  // Examples only; tune these over time as needed.
+  // 236: { shortText: "Sunset Park East", fontScale: 0.92, dx: 4, dy: -2, maxWidth: 108 },
+  // 237: { shortText: "Sunset Park West", fontScale: 0.92, dx: -3, dy: 1, maxWidth: 108 },
+  // 130: { shortText: "Kew Gardens", forceTwoLine: true, fontScale: 0.88, dy: -2 },
+};
+
 function shouldShowLabel(bucket, zoom) {
   if (zoom < LABEL_ZOOM_MIN) return false;
   const b = (bucket || "").trim();
@@ -1429,6 +1436,7 @@ function initMap() {
         scheduleAdaptivePresenceRender();
         schedulePickupOverlayRefresh();
       }
+      if (currentFrame) refreshZoneLabels(currentFrame);
       applyDriverLabelZoomStyles();
     });
     map.on("rotateend", () => {
@@ -1544,23 +1552,28 @@ async function ensureZonesSourceAndLayers() {
       source: "zone-labels",
       layout: {
         "symbol-placement": "point",
-        "text-field": ["coalesce", ["get", "label"], ""],
+        "text-field": ["coalesce", ["get", "label_text_multiline"], ["get", "label_text"], ""],
         "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
         "text-size": [
-          "interpolate",
-          ["linear"],
-          ["zoom"],
-          10, 6,
-          11, 7,
-          12, 8,
-          13, 10,
-          14, 12,
-          15, 13,
-          16, 15
+          "*",
+          ["coalesce", ["to-number", ["get", "font_scale"]], 1],
+          [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            10, 6,
+            11, 7,
+            12, 8,
+            13, 10,
+            14, 12,
+            15, 13,
+            16, 15
+          ]
         ],
-        "text-max-width": 7,
-        "text-anchor": "center",
+        "text-max-width": ["/", ["coalesce", ["to-number", ["get", "max_width"]], 120], 12],
+        "text-anchor": ["coalesce", ["get", "anchor"], "center"],
         "text-justify": "center",
+        "text-offset": ["coalesce", ["get", "text_offset"], ["literal", [0, 0]]],
         "text-allow-overlap": false,
         "text-ignore-placement": false,
         "text-padding": 1.5,
@@ -1571,6 +1584,7 @@ async function ensureZonesSourceAndLayers() {
         "text-halo-width": 1.8,
         "text-halo-blur": 0.6,
       },
+      filter: ["!=", ["coalesce", ["get", "hide"], false], true],
       minzoom: LABEL_ZOOM_MIN,
     });
   }
@@ -2563,6 +2577,153 @@ function getFeatureCollectionBounds(fc) {
 /* =========================================================
    Label refresh (MapLibre symbol layer)
    ========================================================= */
+function getZoneLabelOverride(zoneId) {
+  if (zoneId == null) return null;
+  return ZONE_LABEL_OVERRIDES[zoneId] || ZONE_LABEL_OVERRIDES[String(zoneId)] || null;
+}
+
+function applyZoneLabelOverride(baseConfig, zoneId, zoneProps = {}) {
+  const override = getZoneLabelOverride(zoneId);
+  const merged = {
+    text: String(baseConfig?.text || "").trim(),
+    shortText: String(baseConfig?.shortText || baseConfig?.text || "").trim(),
+    dx: Number(baseConfig?.dx || 0),
+    dy: Number(baseConfig?.dy || 0),
+    fontScale: Number(baseConfig?.fontScale || 1),
+    maxWidth: Number(baseConfig?.maxWidth || 120),
+    minZoom: Number(baseConfig?.minZoom ?? LABEL_ZOOM_MIN),
+    anchor: String(baseConfig?.anchor || "center"),
+    hide: Boolean(baseConfig?.hide),
+    forceTwoLine: Boolean(baseConfig?.forceTwoLine),
+    lineBreakAfter: baseConfig?.lineBreakAfter || null,
+    className: baseConfig?.className || "",
+  };
+  if (!override) return merged;
+
+  const numOr = (v, fallback) => (Number.isFinite(Number(v)) ? Number(v) : fallback);
+  if (override.text != null) merged.text = String(override.text).trim();
+  if (override.shortText != null) merged.shortText = String(override.shortText).trim();
+  merged.dx = numOr(override.dx, merged.dx);
+  merged.dy = numOr(override.dy, merged.dy);
+  merged.fontScale = numOr(override.fontScale, merged.fontScale);
+  merged.maxWidth = numOr(override.maxWidth, merged.maxWidth);
+  merged.minZoom = numOr(override.minZoom, merged.minZoom);
+  if (override.anchor) merged.anchor = String(override.anchor);
+  if (typeof override.hide === "boolean") merged.hide = override.hide;
+  if (typeof override.forceTwoLine === "boolean") merged.forceTwoLine = override.forceTwoLine;
+  if (override.lineBreakAfter != null) merged.lineBreakAfter = String(override.lineBreakAfter);
+  if (override.className != null) merged.className = String(override.className);
+
+  if (!merged.shortText) merged.shortText = merged.text || String(zoneProps?.zone_name || "").trim();
+  return merged;
+}
+
+function splitZoneLabelText(text, override = null) {
+  const raw = String(text || "").trim();
+  if (!raw) return "";
+  if (raw.includes("\n")) return raw;
+  if (!override?.forceTwoLine) return raw;
+
+  const token = String(override?.lineBreakAfter || "").trim();
+  if (token) {
+    const idx = raw.indexOf(token);
+    if (idx >= 0) {
+      const splitAt = idx + token.length;
+      const left = raw.slice(0, splitAt).trim();
+      const right = raw.slice(splitAt).trim();
+      if (left && right) return `${left}\n${right}`;
+    }
+  }
+
+  const words = raw.split(/\s+/).filter(Boolean);
+  if (words.length < 2) return raw;
+  const mid = Math.max(1, Math.round(words.length / 2));
+  return `${words.slice(0, mid).join(" ")}\n${words.slice(mid).join(" ")}`;
+}
+
+function zoneLabelAnchorToOffsets(anchor, widthHint = 0, heightHint = 0) {
+  const a = String(anchor || "center").toLowerCase();
+  const hdx = Number(widthHint) * 0.18;
+  const hdy = Number(heightHint) * 0.25;
+  switch (a) {
+    case "top": return { dx: 0, dy: -hdy };
+    case "bottom": return { dx: 0, dy: hdy };
+    case "left": return { dx: -hdx, dy: 0 };
+    case "right": return { dx: hdx, dy: 0 };
+    case "top-left": return { dx: -hdx, dy: -hdy };
+    case "top-right": return { dx: hdx, dy: -hdy };
+    case "bottom-left": return { dx: -hdx, dy: hdy };
+    case "bottom-right": return { dx: hdx, dy: hdy };
+    default: return { dx: 0, dy: 0 };
+  }
+}
+
+function getDefaultZoneShortText(name) {
+  const raw = String(name || "").replace(/\s+/g, " ").trim();
+  if (!raw) return "";
+  let out = raw
+    .replace(/\s*\((?:Manhattan|Brooklyn|Queens|Bronx|Staten Island)\)\s*$/i, "")
+    .replace(/\s+-\s+(?:Manhattan|Brooklyn|Queens|Bronx|Staten Island)\s*$/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (out.length > 16) {
+    out = out
+      .replace(/\bHeights\b/g, "Hts")
+      .replace(/\bGardens\b/g, "Gdns")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+  return out || raw;
+}
+
+function buildAutomaticZoneLabelConfig(zoneFeature, labelPoint, zoom = null) {
+  const props = zoneFeature?.properties || {};
+  const name = String(props.zone_name || "").trim();
+  const bb = bboxFromCoords(zoneFeature?.geometry?.coordinates);
+
+  let fontScale = 1;
+  let maxWidth = 120;
+  let minZoom = LABEL_ZOOM_MIN;
+  let dx = 0;
+  let dy = 0;
+  let anchor = "center";
+
+  if (bb) {
+    const w = Math.max(bb.maxLng - bb.minLng, 1e-9);
+    const h = Math.max(bb.maxLat - bb.minLat, 1e-9);
+    const area = w * h;
+    const aspect = w / h;
+
+    if (area < 1.0e-5) {
+      fontScale *= 0.82;
+      maxWidth = 92;
+      minZoom = Math.max(minZoom, 11);
+    }
+    if (aspect < 0.62 || aspect > 1.8) {
+      fontScale *= 0.88;
+      maxWidth = Math.min(maxWidth, 90);
+    } else if (aspect > 1.35) {
+      maxWidth = 132;
+    }
+  }
+
+  return {
+    text: name,
+    shortText: getDefaultZoneShortText(name),
+    fontScale,
+    maxWidth,
+    minZoom,
+    dx,
+    dy,
+    anchor,
+    hide: false,
+    forceTwoLine: false,
+    lineBreakAfter: null,
+    className: "",
+  };
+}
+
 function buildZoneLabelsFeatureCollection(frame) {
   const feats = frame?.polygons?.features || [];
   const out = [];
@@ -2570,30 +2731,55 @@ function buildZoneLabelsFeatureCollection(frame) {
   // “Major map app style”: show labels always (>= LABEL_ZOOM_MIN), but still avoid empty names.
   for (const f of feats) {
     const props = f?.properties || {};
+    const zoneId = props.LocationID ?? props.location_id ?? props.zone_id;
     const name = (props.zone_name || "").trim();
     if (!name) continue;
 
     const z = map ? Math.round(map.getZoom()) : 12;
 
-    // More aggressive truncation when zoomed out to keep labels compact and inside zones
-    let maxChars = name.length;
+    const pt = findInteriorPointForGeometry(f.geometry);
+    if (!pt) continue;
+
+    const autoCfg = buildAutomaticZoneLabelConfig(f, pt, z);
+    const finalCfg = applyZoneLabelOverride(autoCfg, zoneId, props);
+    if (finalCfg.hide) continue;
+    if (z < Number(finalCfg.minZoom ?? LABEL_ZOOM_MIN)) continue;
+
+    // More aggressive truncation when zoomed out to keep labels compact and inside zones.
+    let maxChars = finalCfg.maxWidth >= 130 ? 28 : name.length;
     if (z <= 10) maxChars = 9;
     else if (z === 11) maxChars = 11;
     else if (z === 12) maxChars = 13;
     else if (z === 13) maxChars = 16;
-    else maxChars = 28;
+    else if (z >= 14) maxChars = Math.max(18, Math.round(finalCfg.maxWidth / 4.5));
 
-    const label = shortenLabel(name, maxChars);
-
-    const pt = findInteriorPointForGeometry(f.geometry);
-    if (!pt) continue;
+    const chosenText = String(finalCfg.text || name).trim();
+    const maybeShort = String(finalCfg.shortText || chosenText).trim() || chosenText;
+    const baseText = chosenText.length > maxChars ? maybeShort : chosenText;
+    const labelText = shortenLabel(baseText, maxChars);
+    const labelTextMultiline = splitZoneLabelText(labelText, finalCfg);
+    const anchorShift = zoneLabelAnchorToOffsets(finalCfg.anchor, finalCfg.maxWidth, 20 * finalCfg.fontScale);
+    const finalDx = (Number(finalCfg.dx) || 0) + (Number(anchorShift.dx) || 0);
+    const finalDy = (Number(finalCfg.dy) || 0) + (Number(anchorShift.dy) || 0);
 
     out.push({
       type: "Feature",
       geometry: { type: "Point", coordinates: [pt.lng, pt.lat] },
       properties: {
         LocationID: props.LocationID,
-        label,
+        zone_id: zoneId,
+        label: labelText,
+        label_text: labelText,
+        label_text_multiline: labelTextMultiline,
+        font_scale: Number.isFinite(finalCfg.fontScale) ? finalCfg.fontScale : 1,
+        dx: finalDx,
+        dy: finalDy,
+        text_offset: [finalDx / 12, -finalDy / 12],
+        max_width: Number.isFinite(finalCfg.maxWidth) ? finalCfg.maxWidth : 120,
+        min_zoom: Number.isFinite(finalCfg.minZoom) ? finalCfg.minZoom : LABEL_ZOOM_MIN,
+        hide: !!finalCfg.hide,
+        class_name: String(finalCfg.className || "").trim(),
+        anchor: String(finalCfg.anchor || "center"),
       },
     });
   }
