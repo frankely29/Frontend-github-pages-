@@ -1587,7 +1587,7 @@ async function ensureZonesSourceAndLayers() {
           09, 00,
           10, 00,
           11, 05,
-          12, 11,
+          12, 09,
           13, 16,
         ],
         "text-max-width": ["coalesce", ["get", "textMaxWidth"], 4],
