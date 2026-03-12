@@ -1279,11 +1279,7 @@
       padX: +(2.6 + (9.8 - 2.6) * emphasize).toFixed(2),
       avatarPx: +(15 + (54 - 15) * emphasize).toFixed(2),
       maxWidthPx: +(88 + (190 - 88) * emphasize).toFixed(2),
-      badgeMinWidthPx: +(13 + (24 - 13) * emphasize).toFixed(2),
-      badgePadYPx: +(0.8 + (1.8 - 0.8) * emphasize).toFixed(2),
-      badgePadXPx: +(2.4 + (5.2 - 2.4) * emphasize).toFixed(2),
-      badgeFontPx: +(7.2 + (10.8 - 7.2) * emphasize).toFixed(2),
-      crownFontPx: +(10 + (18 - 10) * emphasize).toFixed(2),
+      badgeFontPx: +(15 + (17 - 15) * emphasize).toFixed(2),
       arrowBodyPx: +(18 + (27 - 18) * t).toFixed(2),
       arrowLeftRightPx: +(4.5 + (7 - 4.5) * t).toFixed(2),
       arrowAccentPx: +(10 + (14 - 10) * t).toFixed(2)
@@ -1302,23 +1298,13 @@
     return '';
   }
 
-  function mapMedalIconSVG(kind) {
-    if (kind === 'silver') {
-      return '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 2h4l1 6H9z" fill="#8d98a1"></path><path d="M13 2h4l-2 6h-3z" fill="#687680"></path><circle cx="12" cy="15" r="6" fill="#d7dfe6" stroke="#64737f" stroke-width="1.35"></circle><circle cx="12" cy="15" r="3.1" fill="#f7fafc" opacity="0.82"></circle></svg>';
-    }
-    if (kind === 'bronze') {
-      return '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 2h4l1 6H9z" fill="#ba7042"></path><path d="M13 2h4l-2 6h-3z" fill="#87502f"></path><circle cx="12" cy="15" r="6" fill="#c98553" stroke="#7d472b" stroke-width="1.35"></circle><circle cx="12" cy="15" r="3.1" fill="#f3bd8a" opacity="0.82"></circle></svg>';
-    }
-    return '';
-  }
-
   function mapIdentityBadgeOverlayHTML({ badgeCode }) {
     const badge = normalizeLeaderboardBadge(badgeCode);
     if (!badge) return '';
-    if (badge === 'crown') {
-      return '<span class="badgeChip badgeChipPremium badge-map badge-crown mapIdentityBadgeOverlay" aria-label="Crown"><span class="badgeGlyph">👑</span></span>';
-    }
-    return `<span class="badgeChip badgeChipPremium badge-map badge-${badge} mapIdentityBadgeOverlay" aria-label="${escapeHtml(badge)} medal"><span class="badgeIcon">${mapMedalIconSVG(badge)}</span></span>`;
+    const icon = badge === 'crown' ? '👑' : (badge === 'silver' ? '🥈' : '🥉');
+    const label = badge === 'crown' ? 'Crown' : (badge === 'silver' ? 'Silver' : 'Bronze');
+    const badgeClass = badge === 'crown' ? 'badgeEmojiCrown' : (badge === 'silver' ? 'badgeEmojiSilver' : 'badgeEmojiBronze');
+    return `<span class="mapIdentityBadgeOverlay badgeEmoji badgeEmojiMap ${badgeClass}" aria-label="${label}">${icon}</span>`;
   }
 
   function mapIdentityOverlayWrapHTML(coreHTML, badgeMeta = {}) {
@@ -1390,11 +1376,7 @@
       rootStyle.setProperty('--map-ident-arrow-body', `${cfg.arrowBodyPx}px`);
       rootStyle.setProperty('--map-ident-arrow-left-right', `${cfg.arrowLeftRightPx}px`);
       rootStyle.setProperty('--map-ident-arrow-accent', `${cfg.arrowAccentPx}px`);
-      rootStyle.setProperty('--map-ident-badge-min-width', `${cfg.badgeMinWidthPx}px`);
-      rootStyle.setProperty('--map-ident-badge-pad-y', `${cfg.badgePadYPx}px`);
-      rootStyle.setProperty('--map-ident-badge-pad-x', `${cfg.badgePadXPx}px`);
       rootStyle.setProperty('--map-ident-badge-font', `${cfg.badgeFontPx}px`);
-      rootStyle.setProperty('--map-ident-crown-font', `${cfg.crownFontPx}px`);
     }
     document.querySelectorAll('.otherDrvName, .meName').forEach((el) => {
       el.style.fontSize = `${cfg.fontPx}px`;
@@ -2409,10 +2391,10 @@
       silver: 'Silver Tier',
       bronze: 'Bronze Tier'
     }[normalized] || 'Leaderboard Badge';
-    if (normalized === 'crown') {
-      return `<span class="driverProfileBadgeChipWrap"><span class="badgeChip badgeChipPremium badge-profile badge-crown" aria-label="Crown"><span class="badgeGlyph">👑</span><span class="badgeText">Crown</span></span><span class="driverProfileBadgeLabel">${escapeHtml(profileLabel)}</span></span>`;
-    }
-    return `<span class="driverProfileBadgeChipWrap"><span class="badgeChip badgeChipPremium badge-profile badge-${normalized}" aria-label="${escapeHtml(normalized)} medal"><span class="badgeIcon">${mapMedalIconSVG(normalized)}</span><span class="badgeText">${escapeHtml(normalized[0].toUpperCase() + normalized.slice(1))}</span></span><span class="driverProfileBadgeLabel">${escapeHtml(profileLabel)}</span></span>`;
+    const icon = normalized === 'crown' ? '👑' : (normalized === 'silver' ? '🥈' : '🥉');
+    const label = normalized === 'crown' ? 'Crown' : (normalized === 'silver' ? 'Silver' : 'Bronze');
+    const badgeClass = normalized === 'crown' ? 'badgeEmojiCrown' : (normalized === 'silver' ? 'badgeEmojiSilver' : 'badgeEmojiBronze');
+    return `<span class="driverProfileBadgeChipWrap"><span class="badgeEmoji badgeEmojiProfile ${badgeClass}" aria-label="${label}">${icon}</span><span class="driverProfileBadgeLabel">${escapeHtml(profileLabel)}</span></span>`;
   }
 
   function driverProfileAvatarHTML(profileUser) {
