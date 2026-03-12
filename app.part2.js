@@ -2288,6 +2288,17 @@
       .driverProfileName{font-size:15px;line-height:1.18;font-weight:700;color:#111827;word-break:break-word}
       .driverProfileBadgeRow{display:flex;align-items:center;gap:7px;margin-top:4px;min-height:24px}
       .driverProfileBadgeChipWrap{display:inline-flex;align-items:center;gap:7px}.driverProfileBadgeLabel{font-size:11px;font-weight:700;color:#334155;letter-spacing:.15px}
+      .driverProfileProgressWrap{background:#f8fafc;border:1px solid #e2e8f0;border-radius:11px;padding:8px;margin-bottom:9px}
+      .driverProfileProgressHead{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}
+      .driverProfileProgressLine{font-size:12px;font-weight:700;color:#0f172a;display:flex;align-items:center;gap:5px;min-width:0;flex-wrap:wrap}
+      .driverProfileProgressMeta{font-size:11px;color:#475569;line-height:1.35}
+      .driverProfileProgressBar{height:7px;border-radius:999px;background:#e2e8f0;overflow:hidden;margin:5px 0 6px}
+      .driverProfileProgressFill{height:100%;background:linear-gradient(90deg,#2563eb,#22c55e);border-radius:999px;transition:width .2s ease-out}
+      .driverTierRookie{color:#64748b}
+      .driverTierDriver{color:#2563eb}
+      .driverTierPro{color:#16a34a}
+      .driverTierVeteran{color:#7c3aed}
+      .driverTierLegend{color:#b45309}
       .driverProfileClose{border:0;background:#e5e7eb;color:#111827;border-radius:10px;padding:7px 9px;font-size:13px}
       .driverProfileScroll{overflow:auto;-webkit-overflow-scrolling:touch;padding:0 11px 10px;min-height:0}
       .driverProfileSectionTitle{font-size:12px;font-weight:700;color:#111827;margin:2px 0 6px}
@@ -2414,6 +2425,71 @@
     const n = Number(value);
     if (!Number.isFinite(n)) return '0';
     return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  }
+
+  function normalizeDriverTier(title) {
+    const normalized = String(title || '').trim().toLowerCase();
+    if (normalized === 'rookie') return 'Rookie';
+    if (normalized === 'driver') return 'Driver';
+    if (normalized === 'pro') return 'Pro';
+    if (normalized === 'veteran') return 'Veteran';
+    if (normalized === 'legend') return 'Legend';
+    return String(title || 'Rookie').trim() || 'Rookie';
+  }
+
+  function driverTierClass(title) {
+    const tier = normalizeDriverTier(title).toLowerCase();
+    if (tier === 'driver') return 'driverTierDriver';
+    if (tier === 'pro') return 'driverTierPro';
+    if (tier === 'veteran') return 'driverTierVeteran';
+    if (tier === 'legend') return 'driverTierLegend';
+    return 'driverTierRookie';
+  }
+
+  function formatProgressMiles(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return '0';
+    return n.toLocaleString(undefined, { maximumFractionDigits: 1 });
+  }
+
+  function renderDriverProgressionSection(progression) {
+    const level = Number(progression?.level);
+    const safeLevel = Number.isFinite(level) && level > 0 ? Math.floor(level) : 1;
+    const title = normalizeDriverTier(progression?.title);
+    const tierClass = driverTierClass(title);
+    const lifetimeMiles = Number(progression?.lifetime_miles);
+    const currentLevelMiles = Number(progression?.current_level_miles);
+    const nextLevelMiles = Number(progression?.next_level_miles);
+    const milesToNextLevel = Number(progression?.miles_to_next_level);
+    const maxLevelReached = progression?.max_level_reached === true;
+
+    let progressPct = 1;
+    if (!maxLevelReached) {
+      const denom = nextLevelMiles - currentLevelMiles;
+      if (Number.isFinite(denom) && denom > 0 && Number.isFinite(lifetimeMiles)) {
+        progressPct = (lifetimeMiles - currentLevelMiles) / denom;
+      } else {
+        progressPct = 0;
+      }
+    }
+    const clampedPct = Math.max(0, Math.min(1, progressPct));
+
+    const nextLevelLabel = maxLevelReached
+      ? 'MAX LEVEL'
+      : `Next Level: ${safeLevel + 1} at ${formatProgressMiles(nextLevelMiles)} miles`;
+    const milesToNextLabel = maxLevelReached
+      ? ''
+      : `<div class="driverProfileProgressMeta">Miles to Next Level: ${escapeHtml(formatProgressMiles(milesToNextLevel))}</div>`;
+
+    return `<div class="driverProfileProgressWrap">
+      <div class="driverProfileProgressHead">
+        <div class="driverProfileProgressLine">Level ${safeLevel} • <span class="${tierClass}">${escapeHtml(title)}</span></div>
+      </div>
+      <div class="driverProfileProgressMeta">Lifetime Miles: ${escapeHtml(formatProgressMiles(lifetimeMiles))}</div>
+      <div class="driverProfileProgressBar" aria-hidden="true"><div class="driverProfileProgressFill" style="width:${(clampedPct * 100).toFixed(1)}%"></div></div>
+      <div class="driverProfileProgressMeta">${escapeHtml(nextLevelLabel)}</div>
+      ${milesToNextLabel}
+    </div>`;
   }
 
   function renderDriverProfilePeriodCard(label, data, extraHtml = '') {
@@ -2645,6 +2721,7 @@
     const weekly = profilePayload.weekly || {};
     const monthly = profilePayload.monthly || {};
     const yearly = profilePayload.yearly || {};
+    const progression = profilePayload.progression || {};
     const name = String(profileUser?.display_name || 'Driver').trim() || 'Driver';
     const selfMode = !!driverProfileState.isSelf;
 
@@ -2685,6 +2762,7 @@
         <button class="driverProfileClose" id="driverProfileCloseBtn" type="button">Close</button>
       </div>
       <div class="driverProfileScroll">
+        ${renderDriverProgressionSection(progression)}
         <div class="driverProfileSectionTitle">Work stats</div>
         <div class="driverProfileStats">
           ${renderDriverProfilePeriodCard('Daily', daily, dailyRanksHtml)}

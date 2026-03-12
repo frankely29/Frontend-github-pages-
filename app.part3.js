@@ -74,6 +74,32 @@
     return metric === 'hours' ? `${n.toFixed(1)} h` : `${n.toFixed(1)} mi`;
   }
 
+  function normalizeTierTitle(title) {
+    const normalized = String(title || '').trim().toLowerCase();
+    if (normalized === 'rookie') return 'Rookie';
+    if (normalized === 'driver') return 'Driver';
+    if (normalized === 'pro') return 'Pro';
+    if (normalized === 'veteran') return 'Veteran';
+    if (normalized === 'legend') return 'Legend';
+    return String(title || 'Rookie').trim() || 'Rookie';
+  }
+
+  function tierClassName(title) {
+    const tier = normalizeTierTitle(title).toLowerCase();
+    if (tier === 'driver') return 'driverTierDriver';
+    if (tier === 'pro') return 'driverTierPro';
+    if (tier === 'veteran') return 'driverTierVeteran';
+    if (tier === 'legend') return 'driverTierLegend';
+    return 'driverTierRookie';
+  }
+
+  function levelTitleLine(level, title) {
+    const n = Number(level);
+    const safeLevel = Number.isFinite(n) && n > 0 ? Math.floor(n) : 1;
+    const safeTitle = normalizeTierTitle(title);
+    return `<span class="leaderboardTierLine">L${safeLevel} <span class="${tierClassName(safeTitle)}">${esc(safeTitle)}</span></span>`;
+  }
+
   function selectedMyBadge() {
     const badgeList = Array.isArray(state.badges) ? state.badges : [];
     const exact = badgeList.find((b) => b?.metric === state.metric && b?.period === state.period);
@@ -110,7 +136,10 @@
       const rowClass = rank <= 3 ? ` leaderboardTop${rank}` : '';
       return `<div class="leaderboardRow${rowClass}">
         <span class="leaderboardRank">#${rank}</span>
-        <span class="leaderboardName" title="${esc(name)}">${esc(name)}</span>
+        <span class="leaderboardNameWrap">
+          <span class="leaderboardName" title="${esc(name)}">${esc(name)}</span>
+          ${levelTitleLine(row?.level, row?.title)}
+        </span>
         <span class="leaderboardValue">${formatMetric(value)}</span>
         <span class="leaderboardBadgeCell">${badgeChip(badge)}</span>
       </div>`;
@@ -133,6 +162,7 @@
         <div class="myRankCard">
           <div style="font:900 11px/1.2 system-ui;">My Rank</div>
           <div class="myRankRow"><span>${esc(myName)}</span><span>${myRank ? `#${myRank}` : 'Unranked'}</span></div>
+          <div class="myRankRow"><span>Progression</span><span>${levelTitleLine(state.myRow?.level, state.myRow?.title)}</span></div>
           <div class="myRankRow"><span>${state.metric === 'hours' ? 'Hours' : 'Miles'}</span><span>${formatMetric(myValue)}</span></div>
           <div class="myRankRow"><span>Badge</span><span>${badgeChip(selectedMyBadge()) || '—'}</span></div>
         </div>
@@ -222,7 +252,24 @@
     });
   }
 
+  function injectLeaderboardProgressionStyles() {
+    if (document.getElementById('leaderboardProgressionStyles')) return;
+    const style = document.createElement('style');
+    style.id = 'leaderboardProgressionStyles';
+    style.textContent = `
+      .leaderboardNameWrap{display:flex;flex-direction:column;min-width:0}
+      .leaderboardTierLine{font-size:11px;font-weight:700;color:#475569;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .driverTierRookie{color:#64748b}
+      .driverTierDriver{color:#2563eb}
+      .driverTierPro{color:#16a34a}
+      .driverTierVeteran{color:#7c3aed}
+      .driverTierLegend{color:#b45309}
+    `;
+    document.head.appendChild(style);
+  }
+
   function init() {
+    injectLeaderboardProgressionStyles();
     const btn = document.getElementById('dockLeaderboard');
     if (!btn || typeof bindDockToggle !== 'function') return;
 
