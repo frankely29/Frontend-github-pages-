@@ -135,9 +135,9 @@ const BOROUGH_ZOOM_SHOW = 9;
 const LABEL_MAX_CHARS_MID = 14;
 
 const ZONE_LABEL_OVERRIDES = {
-  // Examples only; tune these over time as needed.
-  // 236: { shortText: "Sunset Park East", fontScale: 0.92, dx: 4, dy: -2, maxWidth: 108 },
-  // 237: { shortText: "Sunset Park West", fontScale: 0.92, dx: -3, dy: 1, maxWidth: 108 },
+  // Keep mostly empty. Use only for true outlier/problem zones.
+  // 236: { shortText: "Sunset Park E", fontScale: 0.86, maxWidth: 88, minZoom: 11.4 },
+  // 237: { shortText: "Sunset Park W", fontScale: 0.86, maxWidth: 88, minZoom: 11.4 },
 };
 
 function shouldShowLabel(bucket, zoom) {
@@ -1556,23 +1556,29 @@ async function ensureZonesSourceAndLayers() {
       layout: {
         "symbol-placement": "point",
         "text-field": ["coalesce", ["get", "label_text_multiline"], ["get", "label_text"], ""],
-        "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
-        "text-size": ["interpolate", ["linear"], ["zoom"], 10, 8, 12, 10, 14, 12, 16, 14],
-        "text-max-width": 10,
+        "text-font": ["Open Sans Semibold", "Open Sans Regular", "Arial Unicode MS Regular"],
+        "text-size": [
+          "*",
+          ["coalesce", ["to-number", ["get", "font_scale"]], 0.92],
+          ["interpolate", ["linear"], ["zoom"], 10, 7.6, 12, 9.0, 14, 10.6, 16, 12.0]
+        ],
+        "text-max-width": ["coalesce", ["/", ["to-number", ["get", "max_width"]], 12], 8.6],
         "text-anchor": "center",
         "text-justify": "center",
-        "text-offset": [0, 0],
+        "text-variable-anchor": ["center"],
+        "text-radial-offset": 0,
+        "text-offset": ["coalesce", ["get", "text_offset"], ["literal", [0, 0]]],
         "text-allow-overlap": false,
         "text-ignore-placement": false,
-        "text-padding": 1.5,
+        "text-padding": 1.0,
       },
       paint: {
-        "text-color": "#111111",
-        "text-halo-color": "rgba(255,255,255,0.90)",
-        "text-halo-width": 1.8,
-        "text-halo-blur": 0.6,
+        "text-color": "#2f343b",
+        "text-halo-color": "rgba(255,255,255,0.55)",
+        "text-halo-width": 0.9,
+        "text-halo-blur": 0.35,
       },
-      filter: ["!=", "hide", true],
+      filter: ["!=", ["coalesce", ["get", "hide"], false], true],
       minzoom: LABEL_ZOOM_MIN,
     });
   }
@@ -2830,9 +2836,10 @@ function buildAutomaticZoneLabelConfig(zoneFeature, labelPoint, zoom = null) {
   try {
     const bb = bboxFromCoords(zoneFeature?.geometry?.coordinates);
 
-    let fontScale = 1;
-    let maxWidth = 120;
-    let minZoom = LABEL_ZOOM_MIN;
+    const density = getZoneLabelDensityRules(zoom);
+    let fontScale = density.fontScaleBase;
+    let maxWidth = density.maxWidthBase;
+    let minZoom = density.baseMinZoom;
     const dx = 0;
     const dy = 0;
     const anchor = "center";
@@ -2844,15 +2851,16 @@ function buildAutomaticZoneLabelConfig(zoneFeature, labelPoint, zoom = null) {
       const aspect = w / h;
 
       if (area < 1.0e-5) {
-        fontScale *= 0.82;
-        maxWidth = 92;
-        minZoom = Math.max(minZoom, 11);
+        fontScale = Math.min(fontScale, density.fontScaleTiny);
+        maxWidth = Math.min(maxWidth, density.maxWidthTiny);
+        minZoom = Math.max(minZoom, density.tinyZoneMinZoom);
       }
       if (aspect < 0.62 || aspect > 1.8) {
-        fontScale *= 0.88;
-        maxWidth = Math.min(maxWidth, 90);
+        fontScale = Math.min(fontScale, density.fontScaleNarrow);
+        maxWidth = Math.min(maxWidth, density.maxWidthNarrow);
+        minZoom = Math.max(minZoom, density.narrowZoneMinZoom);
       } else if (aspect > 1.35) {
-        maxWidth = 132;
+        maxWidth = Math.min(116, Math.max(maxWidth, 110));
       }
     }
 
@@ -2875,11 +2883,11 @@ function buildAutomaticZoneLabelConfig(zoneFeature, labelPoint, zoom = null) {
     return normalizeZoneLabelConfig({
       text: name,
       shortText: name,
-      fontScale: 1,
+      fontScale: 0.92,
       dx: 0,
       dy: 0,
-      maxWidth: 120,
-      minZoom: 10,
+      maxWidth: 104,
+      minZoom: 10.4,
       anchor: "center",
       hide: false,
     }, name);
@@ -2967,21 +2975,82 @@ function getAutoShortZoneName(name, shapeInfo) {
   return shortened || raw;
 }
 
+function getZoneLabelDensityRules(currentZoom = 10) {
+  const zoom = Number.isFinite(Number(currentZoom)) ? Number(currentZoom) : 10;
+  let baseMinZoom = 10.4;
+  let tinyZoneMinZoom = 11.4;
+  let narrowZoneMinZoom = 11.0;
+  let fontScaleBase = 0.92;
+  let fontScaleTiny = 0.78;
+  let fontScaleNarrow = 0.84;
+  let maxWidthBase = 104;
+  let maxWidthTiny = 82;
+  let maxWidthNarrow = 88;
+
+  if (zoom <= 10.2) {
+    baseMinZoom = 10.5;
+    narrowZoneMinZoom = 11.1;
+    tinyZoneMinZoom = 11.5;
+  } else if (zoom >= 13.5) {
+    fontScaleBase = 0.94;
+    fontScaleTiny = 0.8;
+    fontScaleNarrow = 0.86;
+    maxWidthBase = 108;
+    maxWidthTiny = 84;
+    maxWidthNarrow = 90;
+  }
+
+  return {
+    baseMinZoom,
+    tinyZoneMinZoom,
+    narrowZoneMinZoom,
+    fontScaleBase,
+    fontScaleTiny,
+    fontScaleNarrow,
+    maxWidthBase,
+    maxWidthTiny,
+    maxWidthNarrow,
+  };
+}
+
 function splitZoneNameForFit(text, shapeInfo) {
   const raw = String(text || "").replace(/\s+/g, " ").trim();
   if (!raw) return "";
   if (raw.includes("\n")) return raw;
-  if (!shapeInfo?.isTiny && !shapeInfo?.isNarrow) return raw;
 
   const words = raw.split(" ").filter(Boolean);
   if (words.length < 2) return raw;
+
+  const isTiny = !!shapeInfo?.isTiny;
+  const isNarrow = !!shapeInfo?.isNarrow || !!shapeInfo?.isTall;
+  const isWideOrNeutral = !isTiny && !isNarrow;
+  const isLongMultiWord = raw.length >= 16 && words.length >= 3;
+
+  if (isWideOrNeutral && !isLongMultiWord) return raw;
+  if (!isTiny && !isNarrow && !isLongMultiWord) return raw;
+
   const mid = Math.floor(words.length / 2);
   if (mid <= 0 || mid >= words.length) return raw;
+
   const left = words.slice(0, mid).join(" ").trim();
   const right = words.slice(mid).join(" ").trim();
   if (!left || !right) return raw;
+
   if (left.length < 3 || right.length < 3) return raw;
+  if (left.length > 14 || right.length > 14) return raw;
+
   return `${left}\n${right}`;
+}
+
+function shouldSuppressZoneLabelForCrowding(zoneFeature, labelFeature, currentZoom = null) {
+  const zoom = Number.isFinite(Number(currentZoom))
+    ? Number(currentZoom)
+    : (map ? Number(map.getZoom()) : 12);
+  const shapeInfo = classifyZoneLabelShape(zoneFeature);
+  const rules = getZoneLabelDensityRules(zoom);
+  if (shapeInfo.isTiny && zoom < rules.tinyZoneMinZoom) return true;
+  if ((shapeInfo.isNarrow || shapeInfo.isTall) && zoom < rules.narrowZoneMinZoom) return true;
+  return false;
 }
 
 function enhanceZoneLabelFeatureByShape(zoneFeature, labelFeature, currentZoom = null) {
@@ -2996,7 +3065,8 @@ function enhanceZoneLabelFeatureByShape(zoneFeature, labelFeature, currentZoom =
     };
 
     const shapeInfo = classifyZoneLabelShape(zoneFeature);
-    const zoom = Number.isFinite(Number(currentZoom)) ? Number(currentZoom) : null;
+    const zoom = Number.isFinite(Number(currentZoom)) ? Number(currentZoom) : (map ? Number(map.getZoom()) : 12);
+    const density = getZoneLabelDensityRules(zoom);
 
     let fontScale = Number(baseProps.font_scale);
     let dx = Number(baseProps.dx);
@@ -3005,35 +3075,53 @@ function enhanceZoneLabelFeatureByShape(zoneFeature, labelFeature, currentZoom =
     let minZoom = Number(baseProps.min_zoom);
     let labelText = baseText || getZoneLabelText(zoneFeature);
 
-    if (!Number.isFinite(fontScale) || fontScale <= 0.05) fontScale = 1;
+    if (!Number.isFinite(fontScale) || fontScale <= 0.05) fontScale = density.fontScaleBase;
     if (!Number.isFinite(dx)) dx = 0;
     if (!Number.isFinite(dy)) dy = 0;
-    if (!Number.isFinite(maxWidth) || maxWidth <= 20) maxWidth = 120;
-    if (!Number.isFinite(minZoom) || minZoom < 0) minZoom = LABEL_ZOOM_MIN;
+    if (!Number.isFinite(maxWidth) || maxWidth <= 20) maxWidth = density.maxWidthBase;
+    if (!Number.isFinite(minZoom) || minZoom < 0) minZoom = density.baseMinZoom;
+
+    fontScale = Math.min(fontScale, density.fontScaleBase);
+    maxWidth = Math.min(maxWidth, density.maxWidthBase);
+    minZoom = Math.max(minZoom, density.baseMinZoom);
+    dx *= 0.35;
+    dy *= 0.35;
 
     if (shapeInfo.isTiny) {
-      fontScale = Math.max(0.82, Math.min(fontScale * 0.9, 0.9));
-      minZoom = Math.max(minZoom, zoom != null && zoom > 10.8 ? 11 : 10.6);
-      maxWidth = Math.min(maxWidth, 96);
+      fontScale = Math.min(fontScale, density.fontScaleTiny);
+      minZoom = Math.max(minZoom, density.tinyZoneMinZoom);
+      maxWidth = Math.min(maxWidth, density.maxWidthTiny);
       labelText = getAutoShortZoneName(labelText, shapeInfo) || labelText;
+      dx = Math.max(-1.5, Math.min(1.5, dx));
+      dy = Math.max(-1.5, Math.min(1.5, dy));
     } else if (shapeInfo.isNarrow || shapeInfo.isTall) {
-      fontScale = Math.max(0.86, Math.min(fontScale * 0.92, 0.96));
-      maxWidth = Math.min(maxWidth, 98);
-      dy -= 3;
+      fontScale = Math.min(fontScale, density.fontScaleNarrow);
+      minZoom = Math.max(minZoom, density.narrowZoneMinZoom);
+      maxWidth = Math.min(maxWidth, density.maxWidthNarrow);
       labelText = getAutoShortZoneName(labelText, shapeInfo) || labelText;
+      dx = Math.max(-2, Math.min(2, dx));
+      dy = Math.max(-2, Math.min(2, dy));
     } else if (shapeInfo.isWide) {
-      fontScale = Math.min(fontScale * 1.03, 1.06);
-      maxWidth = Math.max(maxWidth, 132);
+      fontScale = Math.min(fontScale, 0.95);
+      maxWidth = Math.max(maxWidth, 112);
+      maxWidth = Math.min(maxWidth, 118);
+      dx = Math.max(-1.5, Math.min(1.5, dx));
+      dy = Math.max(-1.5, Math.min(1.5, dy));
+    } else {
+      fontScale = Math.min(fontScale, density.fontScaleBase);
+      maxWidth = Math.min(maxWidth, density.maxWidthBase);
+      dx = Math.max(-1.25, Math.min(1.25, dx));
+      dy = Math.max(-1.25, Math.min(1.25, dy));
     }
 
     labelText = String(labelText || baseText || "").replace(/\s+/g, " ").trim() || baseText;
     const multi = splitZoneNameForFit(labelText, shapeInfo);
 
-    safe.properties.font_scale = Number.isFinite(fontScale) && fontScale > 0.05 ? fontScale : (Number(baseProps.font_scale) || 1);
+    safe.properties.font_scale = Number.isFinite(fontScale) && fontScale > 0.05 ? fontScale : (Number(baseProps.font_scale) || density.fontScaleBase);
     safe.properties.dx = Number.isFinite(dx) ? dx : (Number(baseProps.dx) || 0);
     safe.properties.dy = Number.isFinite(dy) ? dy : (Number(baseProps.dy) || 0);
-    safe.properties.max_width = Number.isFinite(maxWidth) && maxWidth > 20 ? maxWidth : (Number(baseProps.max_width) || 120);
-    safe.properties.min_zoom = Number.isFinite(minZoom) && minZoom >= 0 ? minZoom : (Number(baseProps.min_zoom) || LABEL_ZOOM_MIN);
+    safe.properties.max_width = Number.isFinite(maxWidth) && maxWidth > 20 ? maxWidth : (Number(baseProps.max_width) || density.maxWidthBase);
+    safe.properties.min_zoom = Number.isFinite(minZoom) && minZoom >= 0 ? minZoom : (Number(baseProps.min_zoom) || density.baseMinZoom);
     safe.properties.label_text = labelText || baseText;
     safe.properties.label = safe.properties.label_text;
     safe.properties.label_text_multiline = String(multi || safe.properties.label_text || baseText || "").trim() || safe.properties.label_text || baseText;
@@ -3199,11 +3287,13 @@ function buildZoneLabelsFeatureCollection(frame) {
     fp.font_scale = Number.isFinite(Number(fp.font_scale)) && Number(fp.font_scale) > 0.05 ? Number(fp.font_scale) : 1;
     fp.dx = Number.isFinite(Number(fp.dx)) ? Number(fp.dx) : 0;
     fp.dy = Number.isFinite(Number(fp.dy)) ? Number(fp.dy) : 0;
-    fp.max_width = Number.isFinite(Number(fp.max_width)) && Number(fp.max_width) > 20 ? Number(fp.max_width) : Number(baselineFeature.properties.max_width) || 120;
-    fp.min_zoom = Number.isFinite(Number(fp.min_zoom)) && Number(fp.min_zoom) >= 0 ? Number(fp.min_zoom) : Number(baselineFeature.properties.min_zoom) || 10;
+    fp.max_width = Number.isFinite(Number(fp.max_width)) && Number(fp.max_width) > 20 ? Number(fp.max_width) : Number(baselineFeature.properties.max_width) || 104;
+    fp.min_zoom = Number.isFinite(Number(fp.min_zoom)) && Number(fp.min_zoom) >= 0 ? Number(fp.min_zoom) : Number(baselineFeature.properties.min_zoom) || 10.4;
     fp.hide = fp.hide === true;
     fp.text_offset = [fp.dx / 12, -fp.dy / 12];
     if (fp.hide === true) continue;
+    if (shouldSuppressZoneLabelForCrowding(f, finalFeature, z)) continue;
+    if (z < fp.min_zoom) continue;
     out.push(finalFeature);
   }
 
@@ -3225,12 +3315,12 @@ function buildZoneLabelsFeatureCollection(frame) {
           label: zoneName,
           label_text: zoneName,
           label_text_multiline: zoneName,
-          font_scale: 1,
+          font_scale: 0.92,
           dx: 0,
           dy: 0,
           text_offset: [0, 0],
-          max_width: 120,
-          min_zoom: 10,
+          max_width: 104,
+          min_zoom: 10.4,
           hide: false,
           class_name: "",
           anchor: "center",
