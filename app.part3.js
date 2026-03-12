@@ -98,7 +98,7 @@
     const n = Number(level);
     const safeLevel = Number.isFinite(n) && n > 0 ? Math.floor(n) : 1;
     const safeTitle = normalizeTierTitle(title);
-    return `<span class="leaderboardTierLine">L${safeLevel} <span class="${tierClassName(safeTitle)}">${esc(safeTitle)}</span></span>`;
+    return `<span class="leaderboardTierLine">Level ${safeLevel} <span class="${tierClassName(safeTitle)}">${esc(safeTitle)}</span></span>`;
   }
 
   function selectedMyBadge() {
@@ -128,7 +128,7 @@
   function leaderboardPanelHTML() {
     const metricBtn = (m, label) => `<button class="chipBtn ${state.metric === m ? 'active' : ''}" data-lb-metric="${m}">${label}</button>`;
     const periodBtn = (p, label) => `<button class="chipBtn ${state.period === p ? 'active' : ''}" data-lb-period="${p}">${label}</button>`;
-    const viewBtn = (v, label) => `<button class="chipBtn ${state.view === v ? 'active' : ''}" data-lb-view="${v}">${label}</button>`;
+    const seeAllBtn = `<button class="chipBtn ${state.view === 'all' ? 'active' : ''}" data-lb-view="all">See All Users</button>`;
 
     const renderRows = (rows, options = {}) => rows.map((row, idx) => {
       const rank = Number(row?.rank_position || idx + 1);
@@ -188,9 +188,8 @@
     return `
       <div class="panelBlock leaderboardPanelWrap">
         <div class="leaderboardPanelControls">
-          <div class="leaderboardTabs">${metricBtn('miles', 'Miles')}${metricBtn('hours', 'Hours')}</div>
+          <div class="leaderboardTabs">${metricBtn('miles', 'Miles')}${metricBtn('hours', 'Hours')}${seeAllBtn}</div>
           <div class="leaderboardTabs">${periodBtn('daily', 'Daily')}${periodBtn('weekly', 'Weekly')}${periodBtn('monthly', 'Monthly')}${periodBtn('yearly', 'Yearly')}</div>
-          <div class="leaderboardTabs leaderboardViewTabs">${viewBtn('top', 'Top')}${viewBtn('all', 'All')}</div>
         </div>
         <div class="leaderboardPanelBody">
           ${state.view === 'all' ? allView : topView}
@@ -259,8 +258,15 @@
       btn.addEventListener('click', (e) => {
         e.preventDefault();
         const nextMetric = btn.getAttribute('data-lb-metric') || 'miles';
-        if (state.metric === nextMetric) return;
+        if (state.metric === nextMetric) {
+          if (state.view !== 'top') {
+            state.view = 'top';
+            rerenderIfOpen();
+          }
+          return;
+        }
         state.metric = nextMetric;
+        state.view = 'top';
         loadAll();
       });
     });
@@ -278,12 +284,21 @@
     document.querySelectorAll('[data-lb-view]').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         e.preventDefault();
-        const nextView = btn.getAttribute('data-lb-view') || 'top';
-        if (state.view === nextView) return;
-        state.view = nextView === 'all' ? 'all' : 'top';
+        const nextView = btn.getAttribute('data-lb-view') || 'all';
+        state.view = state.view === 'all' || nextView !== 'all' ? 'top' : 'all';
         rerenderIfOpen();
       });
     });
+  }
+
+  function syncLeaderboardDrawerClass() {
+    const drawer = document.getElementById('dockDrawer');
+    if (!drawer) return;
+    if (typeof openPanelKey !== 'undefined' && openPanelKey === PANEL_KEY) {
+      drawer.classList.add('panelLeaderboard');
+    } else {
+      drawer.classList.remove('panelLeaderboard');
+    }
   }
 
   function injectLeaderboardProgressionStyles() {
@@ -293,9 +308,11 @@
     style.textContent = `
       .leaderboardNameWrap{display:flex;flex-direction:column;min-width:0}
       .leaderboardTierLine{font-size:11px;font-weight:700;color:#475569;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-      .leaderboardPanelWrap{gap:7px;max-height:min(64vh,560px);overflow:hidden;padding:8px}
+      .leaderboardPanelWrap{gap:7px;max-height:min(60vh,520px);overflow:hidden;padding:8px}
+      .dockDrawer.panelLeaderboard{top:50%;transform:translate(-2px,-50%)}
+      .dockDrawer.panelLeaderboard.open{transform:translate(0,-50%)}
+      .dockDrawer.panelLeaderboard .dockDrawerBody{max-height:min(60vh,520px)}
       .leaderboardPanelControls{display:flex;flex-direction:column;gap:5px;flex:0 0 auto}
-      .leaderboardViewTabs .chipBtn{min-width:52px;justify-content:center}
       .leaderboardPanelBody{display:flex;flex-direction:column;gap:7px;min-height:0;overflow-y:auto;padding-right:2px}
       .leaderboardPanelBody>div{flex:0 0 auto}
       .leaderboardSectionTitle{font:900 11px/1.2 system-ui;margin-bottom:4px}
@@ -321,9 +338,16 @@
     if (!btn || typeof bindDockToggle !== 'function') return;
 
     bindDockToggle(btn, PANEL_KEY, 'Leaderboard', leaderboardPanelHTML, () => {
+      syncLeaderboardDrawerClass();
       wireLeaderboardPanel();
       loadAll();
     });
+
+    const drawer = document.getElementById('dockDrawer');
+    if (drawer && typeof MutationObserver !== 'undefined') {
+      const observer = new MutationObserver(() => syncLeaderboardDrawerClass());
+      observer.observe(drawer, { attributes: true, attributeFilter: ['class', 'aria-hidden'] });
+    }
   }
 
   init();
