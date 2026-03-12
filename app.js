@@ -1588,8 +1588,11 @@ async function ensureZonesSourceAndLayers() {
         "text-halo-width": 1.8,
         "text-halo-blur": 0.6,
       },
-      filter: ["!=", ["coalesce", ["get", "hide"], false], true],
-      minzoom: LABEL_ZOOM_MIN,
+      filter: [
+        "all",
+        ["!=", ["coalesce", ["get", "hide"], false], true],
+        [">=", ["zoom"], ["coalesce", ["to-number", ["get", "min_zoom"]], 10]],
+      ],
     });
   }
 
@@ -2639,15 +2642,27 @@ function warnZoneLabelConfigOnce(key, message, extra = null) {
   else console.warn(`[zone-label] ${message}`);
 }
 
+function getZoneLabelText(featureOrProps) {
+  const src = (featureOrProps && typeof featureOrProps === "object") ? featureOrProps : {};
+  const props = (src.properties && typeof src.properties === "object") ? src.properties : src;
+  const raw = props?.zone_label
+    ?? props?.zone_name
+    ?? props?.Zone
+    ?? props?.zone
+    ?? props?.name
+    ?? props?.display_name
+    ?? "";
+  return String(raw || "").replace(/\s+/g, " ").trim();
+}
+
 function normalizeZoneLabelConfig(cfg, zoneName = "") {
-  const safeName = String(zoneName || "").trim();
+  const safeName = String(zoneName || "").replace(/\s+/g, " ").trim();
   const src = (cfg && typeof cfg === "object") ? cfg : {};
   const SAFE_MIN_ZOOM_DEFAULT = 10;
-  const SAFE_MIN_ZOOM_MAX = 16;
 
   const out = {
-    text: String(src.text ?? "").trim() || safeName || "",
-    shortText: String(src.shortText ?? "").trim(),
+    text: String(src.text ?? "").replace(/\s+/g, " ").trim() || safeName || "",
+    shortText: String(src.shortText ?? "").replace(/\s+/g, " ").trim(),
     fontScale: Number(src.fontScale),
     dx: Number(src.dx),
     dy: Number(src.dy),
@@ -2666,7 +2681,7 @@ function normalizeZoneLabelConfig(cfg, zoneName = "") {
   if (!Number.isFinite(out.dx)) out.dx = 0;
   if (!Number.isFinite(out.dy)) out.dy = 0;
   if (!Number.isFinite(out.maxWidth) || out.maxWidth <= 20) out.maxWidth = 120;
-  if (!Number.isFinite(out.minZoom) || out.minZoom < 0 || out.minZoom > SAFE_MIN_ZOOM_MAX) out.minZoom = SAFE_MIN_ZOOM_DEFAULT;
+  if (!Number.isFinite(out.minZoom) || out.minZoom < 0) out.minZoom = SAFE_MIN_ZOOM_DEFAULT;
   if (!out.text) out.text = safeName || "";
   if (!out.shortText) out.shortText = out.text || safeName || "";
   if (!validAnchors.has(out.anchor)) {
@@ -2710,12 +2725,13 @@ function normalizeBoroughLabelConfig(cfg, boroughName = "") {
 }
 
 function applyZoneLabelOverride(baseConfig, zoneId, zoneProps = {}) {
-  const zoneName = String(zoneProps?.zone_name || baseConfig?.text || "").trim();
+  const zoneName = getZoneLabelText(zoneProps) || String(baseConfig?.text || "").replace(/\s+/g, " ").trim();
   const base = normalizeZoneLabelConfig(baseConfig, zoneName);
   const override = getZoneLabelOverride(zoneId);
   if (!override || typeof override !== "object") return base;
 
   const merged = { ...base };
+  const knownKeys = new Set(["text", "shortText", "fontScale", "dx", "dy", "maxWidth", "minZoom", "anchor", "hide", "forceTwoLine", "lineBreakAfter", "className"]);
   const setFinite = (k) => {
     if (!(k in override)) return;
     const n = Number(override[k]);
@@ -2752,6 +2768,10 @@ function applyZoneLabelOverride(baseConfig, zoneId, zoneProps = {}) {
   if ("className" in override) merged.className = String(override.className || "").trim();
 
   const normalized = normalizeZoneLabelConfig(merged, zoneName);
+  const hasUnknownOverrideKeys = Object.keys(override).some((key) => !knownKeys.has(key));
+  if (hasUnknownOverrideKeys) {
+    warnZoneLabelConfigOnce(`override-unknown-${zoneId}`, `Zone ${zoneId} override contains unknown keys that were ignored.`);
+  }
   if (normalized.fontScale !== merged.fontScale && "fontScale" in override) {
     warnZoneLabelConfigOnce(`fontScale-${zoneId}`, `Invalid fontScale override for zone ${zoneId}; using ${normalized.fontScale}.`, override);
   }
@@ -2825,7 +2845,7 @@ function getDefaultZoneShortText(name) {
 
 function buildAutomaticZoneLabelConfig(zoneFeature, labelPoint, zoom = null) {
   const props = zoneFeature?.properties || {};
-  const name = String(props.zone_name || "").trim();
+  const name = getZoneLabelText(zoneFeature);
   try {
     const bb = bboxFromCoords(zoneFeature?.geometry?.coordinates);
 
@@ -2871,7 +2891,17 @@ function buildAutomaticZoneLabelConfig(zoneFeature, labelPoint, zoom = null) {
     }, name);
   } catch (err) {
     warnZoneLabelConfigOnce(`auto-${props.LocationID ?? props.zone_id ?? name}`, "Automatic zone label config failed; using safe defaults.", err);
-    return normalizeZoneLabelConfig({ text: name, shortText: name }, name);
+    return normalizeZoneLabelConfig({
+      text: name,
+      shortText: name,
+      fontScale: 1,
+      dx: 0,
+      dy: 0,
+      maxWidth: 120,
+      minZoom: 10,
+      anchor: "center",
+      hide: false,
+    }, name);
   }
 }
 
@@ -2883,45 +2913,45 @@ function buildZoneLabelsFeatureCollection(frame) {
   for (const f of feats) {
     const props = f?.properties || {};
     const zoneId = props.LocationID ?? props.location_id ?? props.zone_id;
-    const name = (props.zone_name || "").trim();
+    const zoneName = getZoneLabelText(f || props);
+    if (!zoneName) {
+      warnZoneLabelConfigOnce(`missing-name-${zoneId ?? "unknown"}`, `Zone ${zoneId ?? "unknown"} has no usable zone name; skipping label.`);
+      continue;
+    }
 
-    const z = map ? Math.round(map.getZoom()) : 12;
+    const z = map ? Number(map.getZoom()) : 12;
 
-    const pt = findInteriorPointForGeometry(f.geometry);
+    const pt = findInteriorPointForGeometry(f.geometry) || geometryCenter(f.geometry);
     if (!pt) continue;
 
-    const autoCfg = buildAutomaticZoneLabelConfig(f, pt, z);
-    const finalCfg = applyZoneLabelOverride(autoCfg, zoneId, props);
+    let finalCfg = buildAutomaticZoneLabelConfig(f, pt, z);
+    finalCfg = applyZoneLabelOverride(finalCfg, zoneId, props);
+    finalCfg = normalizeZoneLabelConfig(finalCfg, zoneName);
     if (finalCfg.hide === true) continue;
 
-    const minZoom = Number.isFinite(Number(finalCfg.minZoom)) ? Number(finalCfg.minZoom) : 10;
-    if (z < minZoom) continue;
+    const minZoomRaw = Number(finalCfg.minZoom);
+    const minZoom = Number.isFinite(minZoomRaw) && minZoomRaw >= 0 ? minZoomRaw : 10;
 
     // More aggressive truncation when zoomed out to keep labels compact and inside zones.
-    let maxChars = finalCfg.maxWidth >= 130 ? 28 : (name.length || 24);
+    let maxChars = finalCfg.maxWidth >= 130 ? 28 : (zoneName.length || 24);
     if (z <= 10) maxChars = 9;
     else if (z === 11) maxChars = 11;
     else if (z === 12) maxChars = 13;
     else if (z === 13) maxChars = 16;
     else if (z >= 14) maxChars = Math.max(18, Math.round(finalCfg.maxWidth / 4.5));
 
-    const overrideCfg = getZoneLabelOverride(zoneId);
-    const explicitOverrideText = String(overrideCfg?.text || "").trim();
-    const fallbackShortText = String(finalCfg.shortText || "").trim();
-    const originalZoneName = String(name || "").trim();
-
-    let finalText = explicitOverrideText || String(finalCfg.text || "").trim();
-    if (!finalText) finalText = fallbackShortText;
-    if (!finalText) finalText = originalZoneName;
+    let finalText = String(finalCfg.text || finalCfg.shortText || zoneName || "").replace(/\s+/g, " ").trim();
+    if (!finalText) finalText = zoneName;
     if (!finalText) {
       warnZoneLabelConfigOnce(`text-${zoneId}`, `Skipping zone ${zoneId}: blank text after all fallbacks.`);
       continue;
     }
 
-    const maybeShort = fallbackShortText || finalText;
+    const maybeShort = String(finalCfg.shortText || "").replace(/\s+/g, " ").trim() || finalText;
     const baseText = finalText.length > maxChars ? maybeShort : finalText;
     const labelText = shortenLabel(baseText, maxChars) || finalText;
-    const labelTextMultiline = splitZoneLabelText(finalText, finalCfg).trim() || finalText;
+    let labelTextMultiline = String(splitZoneLabelText(finalText, finalCfg) || "").trim();
+    if (!labelTextMultiline) labelTextMultiline = finalText;
     const safeFontScale = Number.isFinite(finalCfg.fontScale) && finalCfg.fontScale > 0.05 ? finalCfg.fontScale : 1;
     const anchorShift = zoneLabelAnchorToOffsets(finalCfg.anchor, finalCfg.maxWidth, 20 * safeFontScale) || { dx: 0, dy: 0 };
     const finalDx = (Number.isFinite(finalCfg.dx) ? Number(finalCfg.dx) : 0) + (Number.isFinite(anchorShift.dx) ? Number(anchorShift.dx) : 0);
@@ -2954,9 +2984,9 @@ function buildZoneLabelsFeatureCollection(frame) {
     for (const f of feats) {
       const props = f?.properties || {};
       const zoneId = props.LocationID ?? props.location_id ?? props.zone_id;
-      const zoneName = String(props.zone_name || "").trim();
+      const zoneName = getZoneLabelText(f || props);
       if (!zoneName) continue;
-      const pt = findInteriorPointForGeometry(f.geometry);
+      const pt = findInteriorPointForGeometry(f.geometry) || geometryCenter(f.geometry);
       if (!pt) continue;
       out.push({
         type: "Feature",
