@@ -1579,26 +1579,16 @@ async function ensureZonesSourceAndLayers() {
         "text-field": ["coalesce", ["get", "label"], ""],
         "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
         "text-size": [
-          "max",
-          7,
-          [
-            "*",
-            ["coalesce", ["get", "textSize"], 10],
-            [
-              "interpolate",
-              ["linear"],
-              ["zoom"],
-              8, 0.55,
-              9, 0.60,
-              10, 0.66,
-              11, 0.74,
-              12, 0.82,
-              13, 0.90,
-              14, 0.96,
-              15, 1.00,
-              16, 1.00
-            ]
-          ]
+          "interpolate",
+          ["linear"],
+          ["zoom"],
+          10, 7,
+          11, 8,
+          12, 9,
+          13, 10,
+          14, 11,
+          15, 12,
+          16, 13,
         ],
         "text-max-width": ["coalesce", ["get", "textMaxWidth"], 4],
         "text-letter-spacing": ["coalesce", ["get", "letterSpacing"], 0],
@@ -1611,10 +1601,10 @@ async function ensureZonesSourceAndLayers() {
         "text-padding": 1.5,
       },
       paint: {
-        "text-color": "#111111",
-        "text-halo-color": "rgba(255,255,255,0)",
-        "text-halo-width": 0,
-        "text-halo-blur": 0,
+        "text-color": "#1f262e",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 1,
+        "text-halo-blur": 0.3,
       },
       minzoom: LABEL_ZOOM_MIN,
     });
