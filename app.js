@@ -1904,7 +1904,7 @@ function setPickupOverlayData(fc, items = [], zoneStats = [], zoneHotspots = emp
   window.__pickupDebug = {
     zoneHotspotCount: validatedZoneHotspots.features.length,
     microHotspotCount: validatedMicroHotspots.features.length,
-    hotspotCoveredZoneIds: [...hotspotCoveredZoneIds],
+    hotspotCoveredZoneIds: Array.from(hotspotCoveredZoneIds || []),
     visiblePickupDotCount: filteredPickupPointsFc.features.length,
   };
   setPickupPointLayerVisibility(hasVisiblePickupPoints);
@@ -2264,7 +2264,7 @@ async function ensurePickupSourceAndLayers() {
       id: "pickup-micro-hotspots-ring",
       type: "circle",
       source: "pickup-micro-hotspots",
-      minzoom: PICKUP_MICRO_HOTSPOT_MIN_ZOOM,
+      minzoom: 11.0,
       paint: {
         "circle-radius": [
           "interpolate", ["linear"], ["zoom"],
@@ -2522,8 +2522,15 @@ async function refreshPickupOverlay({ force = false } = {}) {
     const microHotspots = usingTopLevelMicroHotspots
       ? topLevelMicroHotspots
       : fallbackNestedMicroHotspots;
+    const zoneHotspotCount = zoneHotspots?.features?.length ?? 0;
+    const normalizedMicroHotspotCount = microHotspots?.features?.length ?? 0;
     const fc = buildPickupFeatureCollection(items);
     setPickupOverlayData(fc, items, zoneStats, zoneHotspots, microHotspots);
+    const coveredZonesCount = window.__pickupDebug?.hotspotCoveredZoneIds?.length ?? 0;
+    const visibleDotsCount = window.__pickupDebug?.visiblePickupDotCount ?? 0;
+    console.log(
+      `[pickup overlay] zoneHotspots=${zoneHotspotCount} microHotspots=${normalizedMicroHotspotCount} coveredZones=${coveredZonesCount} visibleDots=${visibleDotsCount}`
+    );
   } catch (e) {
     console.warn("pickup overlay refresh failed:", e);
   } finally {
