@@ -85,6 +85,7 @@ const PICKUP_RECENT_LIMIT = 30;
 const PICKUP_ZONE_SAMPLE_LIMIT = 100;
 const PICKUP_REFRESH_DEBOUNCE_MS = 350;
 const PICKUP_FETCH_COOLDOWN_MS = 1200;
+const PICKUP_MICRO_HOTSPOT_MIN_ZOOM = 11.8;
 
 // Chat state variables were used by the built‑in chat implementation.  They have
 // been migrated to app.part2.js.  Leaving these commented prevents undefined
@@ -101,6 +102,8 @@ let pickupZoneStats = new Map();
 let pickupHotspotZoneIds = new Set();
 let pickupPointsSourceFingerprint = "";
 let pickupHotspotsSourceFingerprint = "";
+let pickupMicroHotspotsSourceFingerprint = "";
+let pickupHasMicroHotspots = false;
 let mapPageIsVisible = !document.hidden;
 
 /* =========================================================
@@ -1621,7 +1624,81 @@ function clearPickupOverlayCache() {
   pickupHotspotZoneIds = new Set();
   pickupPointsSourceFingerprint = "";
   pickupHotspotsSourceFingerprint = "";
+  pickupMicroHotspotsSourceFingerprint = "";
+  pickupHasMicroHotspots = false;
   lastPickupFetchKey = "";
+}
+
+function normalizePickupMicroHotspots(rawInput) {
+  const out = [];
+  const rows = Array.isArray(rawInput)
+    ? rawInput
+    : (Array.isArray(rawInput?.items)
+      ? rawInput.items
+      : (Array.isArray(rawInput?.clusters)
+        ? rawInput.clusters
+        : (Array.isArray(rawInput?.micro_hotspots) ? rawInput.micro_hotspots : [])));
+
+  for (const row of rows) {
+    if (!row || typeof row !== "object") continue;
+    const lat = Number(row.center_lat ?? row.lat ?? row.latitude ?? NaN);
+    const lng = Number(row.center_lng ?? row.lng ?? row.lon ?? row.longitude ?? NaN);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+    const intensityRaw = Number(row.intensity ?? row.live_strength ?? row.final_score ?? row.hotspot_score ?? NaN);
+    const confidenceRaw = Number(row.confidence ?? NaN);
+    const radiusRaw = Number(row.radius_m ?? row.radius ?? row.radius_meters ?? NaN);
+    out.push({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [lng, lat] },
+      properties: {
+        zone_id: row.zone_id ?? null,
+        zone_name: row.zone_name ?? "",
+        borough: row.borough ?? "",
+        intensity: Number.isFinite(intensityRaw) ? intensityRaw : 0.4,
+        confidence: Number.isFinite(confidenceRaw) ? confidenceRaw : null,
+        recommended: !!row.recommended,
+        radius_m: Number.isFinite(radiusRaw) ? radiusRaw : 120,
+        hotspot_score: Number(row.hotspot_score ?? NaN),
+        final_score: Number(row.final_score ?? NaN),
+        live_strength: Number(row.live_strength ?? NaN),
+        density_penalty: Number(row.density_penalty ?? NaN),
+      },
+    });
+  }
+
+  return { type: "FeatureCollection", features: out };
+}
+
+function pickupMicroHotspotsFingerprint(fc) {
+  if (!fc || fc.type !== "FeatureCollection" || !Array.isArray(fc.features) || !fc.features.length) {
+    return "";
+  }
+  const rows = [];
+  for (const feat of fc.features) {
+    const props = feat?.properties || {};
+    const coords = feat?.geometry?.coordinates || [];
+    rows.push([
+      String(props.zone_id ?? ""),
+      String(Number(coords?.[0] ?? NaN)),
+      String(Number(coords?.[1] ?? NaN)),
+      String(Number(props.intensity ?? NaN)),
+      String(Number(props.confidence ?? NaN)),
+      String(Number(props.radius_m ?? NaN)),
+      props.recommended ? "1" : "0",
+    ].join("|"));
+  }
+  rows.sort();
+  return rows.join(";;");
+}
+
+function setPickupPointLayerVisibility(visible) {
+  if (!map) return;
+  const value = visible ? "visible" : "none";
+  for (const layerId of ["pickup-heat", "pickup-circles-glow", "pickup-circles"]) {
+    if (map.getLayer(layerId)) {
+      try { map.setLayoutProperty(layerId, "visibility", value); } catch {}
+    }
+  }
 }
 
 function pickupHotspotsFingerprint(fc) {
@@ -1673,7 +1750,7 @@ function pickupPointsFingerprintFromFeatures(fc) {
   return rows.join(";;");
 }
 
-function setPickupOverlayData(fc, items = [], zoneStats = [], zoneHotspots = emptyGeojson()) {
+function setPickupOverlayData(fc, items = [], zoneStats = [], zoneHotspots = emptyGeojson(), microHotspots = emptyGeojson()) {
   pickupZoneStats = new Map();
   pickupHotspotZoneIds = new Set();
 
@@ -1739,9 +1816,22 @@ function setPickupOverlayData(fc, items = [], zoneStats = [], zoneHotspots = emp
     pickupHotspotsSourceFingerprint = hotspotFingerprint;
   }
 
+  const validatedMicroHotspots = (microHotspots && microHotspots.type === "FeatureCollection" && Array.isArray(microHotspots.features))
+    ? microHotspots
+    : emptyGeojson();
+  const microFingerprint = pickupMicroHotspotsFingerprint(validatedMicroHotspots);
+  const microSrc = map?.getSource?.("pickup-micro-hotspots");
+  if (microSrc && typeof microSrc.setData === "function" && microFingerprint !== pickupMicroHotspotsSourceFingerprint) {
+    microSrc.setData(validatedMicroHotspots);
+    pickupMicroHotspotsSourceFingerprint = microFingerprint;
+  }
+  pickupHasMicroHotspots = !!validatedMicroHotspots.features.length;
+  setPickupPointLayerVisibility(!pickupHasMicroHotspots);
+
   const filteredFeatures = Array.isArray(fc?.features)
     ? fc.features.filter((feat) => {
       const zoneId = feat?.properties?.zone_id;
+      if (pickupHasMicroHotspots) return false;
       return zoneId == null || !pickupHotspotZoneIds.has(String(zoneId));
     })
     : [];
@@ -1756,7 +1846,7 @@ function setPickupOverlayData(fc, items = [], zoneStats = [], zoneHotspots = emp
 }
 
 function clearPickupOverlay() {
-  setPickupOverlayData(emptyGeojson(), [], [], emptyGeojson());
+  setPickupOverlayData(emptyGeojson(), [], [], emptyGeojson(), emptyGeojson());
 }
 
 function formatRelativeAge(tsUnix) {
@@ -1806,6 +1896,10 @@ async function ensurePickupSourceAndLayers() {
 
   if (!map.getSource("pickup-zone-hotspots")) {
     map.addSource("pickup-zone-hotspots", { type: "geojson", data: emptyGeojson() });
+  }
+
+  if (!map.getSource("pickup-micro-hotspots")) {
+    map.addSource("pickup-micro-hotspots", { type: "geojson", data: emptyGeojson() });
   }
 
   const hotspotBeforeLayer = map.getLayer("zones-line")
@@ -2054,6 +2148,65 @@ async function ensurePickupSourceAndLayers() {
     map.moveLayer("pickup-zone-hotspots-line", hotspotBeforeLayer);
   }
 
+  if (!map.getLayer("pickup-micro-hotspots-glow")) {
+    map.addLayer({
+      id: "pickup-micro-hotspots-glow",
+      type: "circle",
+      source: "pickup-micro-hotspots",
+      minzoom: PICKUP_MICRO_HOTSPOT_MIN_ZOOM,
+      paint: {
+        "circle-radius": [
+          "interpolate", ["linear"], ["zoom"],
+          PICKUP_MICRO_HOTSPOT_MIN_ZOOM, ["+", ["*", ["coalesce", ["get", "intensity"], 0.4], 8], 8],
+          16, ["+", ["*", ["coalesce", ["get", "intensity"], 0.4], 14], 13]
+        ],
+        "circle-color": "rgba(0,194,216,0.30)",
+        "circle-opacity": ["case", ["coalesce", ["get", "recommended"], false], 0.42, 0.30],
+        "circle-blur": 0.85,
+      },
+    }, "zone-labels");
+  }
+
+  if (!map.getLayer("pickup-micro-hotspots-core")) {
+    map.addLayer({
+      id: "pickup-micro-hotspots-core",
+      type: "circle",
+      source: "pickup-micro-hotspots",
+      minzoom: PICKUP_MICRO_HOTSPOT_MIN_ZOOM,
+      paint: {
+        "circle-radius": [
+          "interpolate", ["linear"], ["zoom"],
+          PICKUP_MICRO_HOTSPOT_MIN_ZOOM, ["+", ["*", ["coalesce", ["get", "intensity"], 0.4], 2.6], 2.4],
+          16, ["+", ["*", ["coalesce", ["get", "intensity"], 0.4], 4.6], 4.6]
+        ],
+        "circle-color": ["case", ["coalesce", ["get", "recommended"], false], "rgba(255,255,255,0.95)", "rgba(222,251,255,0.85)"],
+        "circle-opacity": ["interpolate", ["linear"], ["zoom"], PICKUP_MICRO_HOTSPOT_MIN_ZOOM, 0.70, 16, 0.88],
+        "circle-stroke-color": ["case", ["coalesce", ["get", "recommended"], false], "rgba(0,194,216,1)", "rgba(0,194,216,0.68)"],
+        "circle-stroke-width": ["case", ["coalesce", ["get", "recommended"], false], 1.6, 1.0],
+      },
+    }, "zone-labels");
+  }
+
+  if (!map.getLayer("pickup-micro-hotspots-ring")) {
+    map.addLayer({
+      id: "pickup-micro-hotspots-ring",
+      type: "circle",
+      source: "pickup-micro-hotspots",
+      minzoom: 12.6,
+      paint: {
+        "circle-radius": [
+          "interpolate", ["linear"], ["zoom"],
+          12.6, ["max", 6, ["*", ["coalesce", ["get", "radius_m"], 120], 0.030]],
+          16, ["max", 10, ["*", ["coalesce", ["get", "radius_m"], 120], 0.050]]
+        ],
+        "circle-color": "rgba(0,0,0,0)",
+        "circle-stroke-color": ["case", ["coalesce", ["get", "recommended"], false], "rgba(0,194,216,0.70)", "rgba(0,194,216,0.35)"],
+        "circle-stroke-width": ["case", ["coalesce", ["get", "recommended"], false], 1.1, 0.7],
+        "circle-opacity": ["interpolate", ["linear"], ["zoom"], 12.6, 0.22, 16, 0.34],
+      },
+    }, "zone-labels");
+  }
+
   if (!map.getLayer("pickup-heat")) {
     map.addLayer(
       {
@@ -2201,6 +2354,37 @@ async function ensurePickupSourceAndLayers() {
         console.warn("pickup hotspot popup failed:", err);
       }
     });
+
+    map.on("mouseenter", "pickup-micro-hotspots-core", () => {
+      try { map.getCanvas().style.cursor = "pointer"; } catch {}
+    });
+    map.on("mouseleave", "pickup-micro-hotspots-core", () => {
+      try { map.getCanvas().style.cursor = ""; } catch {}
+    });
+    map.on("click", "pickup-micro-hotspots-core", (e) => {
+      try {
+        const feat = e?.features?.[0];
+        if (!feat) return;
+        const props = feat.properties || {};
+        const zoneName = (props.zone_name || "").trim();
+        const confidence = Number(props.confidence ?? NaN);
+        const confidenceLine = Number.isFinite(confidence) ? `<div><b>Confidence:</b> ${(Math.max(0, Math.min(1, confidence)) * 100).toFixed(0)}%</div>` : "";
+        const recLine = props.recommended ? `<div><b>Status:</b> Recommended micro-hotspot</div>` : "";
+        new maplibregl.Popup({ closeButton: true, closeOnClick: true, maxWidth: "300px" })
+          .setLngLat(e.lngLat)
+          .setHTML(`
+            <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; font-size:13px;">
+              <div style="font-weight:900; margin-bottom:4px;">Micro-hotspot</div>
+              <div><b>Zone:</b> ${escapeHtml(zoneName || `Zone ${props.zone_id || ""}`)}</div>
+              ${recLine}
+              ${confidenceLine}
+            </div>
+          `)
+          .addTo(map);
+      } catch (err) {
+        console.warn("pickup micro-hotspot popup failed:", err);
+      }
+    });
   }
 
   return true;
@@ -2256,8 +2440,12 @@ async function refreshPickupOverlay({ force = false } = {}) {
     const zoneHotspots = (data?.zone_hotspots && data.zone_hotspots.type === "FeatureCollection" && Array.isArray(data.zone_hotspots.features))
       ? data.zone_hotspots
       : emptyGeojson();
+    const microHotspotPayload = data?.micro_hotspots ?? data?.micro_hotspot_clusters ?? data?.hotspot_micro_clusters ?? null;
+    const microHotspots = (microHotspotPayload && microHotspotPayload.type === "FeatureCollection" && Array.isArray(microHotspotPayload.features))
+      ? microHotspotPayload
+      : normalizePickupMicroHotspots(microHotspotPayload);
     const fc = buildPickupFeatureCollection(items);
-    setPickupOverlayData(fc, items, zoneStats, zoneHotspots);
+    setPickupOverlayData(fc, items, zoneStats, zoneHotspots, microHotspots);
   } catch (e) {
     console.warn("pickup overlay refresh failed:", e);
   } finally {
