@@ -27,6 +27,13 @@
     return badge(value ? yes : no, value ? 'yes' : 'no');
   }
 
+  function statusBadge(status) {
+    const normalized = String(status || 'pending').toLowerCase();
+    if (normalized === 'pass') return badge('Pass', 'yes');
+    if (normalized === 'fail') return badge('Fail', 'no');
+    return badge('Pending', 'warn');
+  }
+
   function formatValue(value) {
     if (value === null || value === undefined || value === '') return '—';
     if (typeof value === 'boolean') return boolText(value);
@@ -73,6 +80,7 @@
     formatValue,
     keyValueRows,
     statCard,
+    statusBadge,
     toLabel,
   };
 })();
