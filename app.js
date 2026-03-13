@@ -307,8 +307,6 @@ const ZONE_LABEL_SHORT_NAMES = {
 const ZONE_LABEL_OVERRIDES = {
   "138": { size: 11.6, maxWidth: 5.8, letterSpacing: 0.01 },
   "230": { label: "Times Sq", size: 10.8, maxWidth: 4.4, letterSpacing: 0.015 },
-  "264": { rotate: 90, size: 10.3, maxWidth: 3.9, letterSpacing: 0.012 },
-  "265": { rotate: 90, size: 10.2, maxWidth: 3.8, letterSpacing: 0.012, dy: -0.00035 },
 };
 
 let zoneLabelLayoutCache = new Map();
