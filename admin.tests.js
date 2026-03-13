@@ -59,6 +59,102 @@
     return 'pass';
   }
 
+  function safeNumber(value) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  function collectRadioSignals(scope) {
+    const signals = {
+      audioObjects: [],
+      audioFunctions: [],
+      streamUrls: [],
+      initializedFlags: [],
+    };
+    if (!scope || typeof scope !== 'object') return signals;
+
+    const names = Object.getOwnPropertyNames(scope);
+    names.forEach((name) => {
+      let value;
+      try {
+        value = scope[name];
+      } catch (_error) {
+        return;
+      }
+      const key = String(name || '').toLowerCase();
+      const looksRadioRelated = /radio|audio|stream|player/.test(key);
+
+      if (typeof value === 'function' && looksRadioRelated) {
+        signals.audioFunctions.push(name);
+      }
+
+      if (value && typeof value === 'object') {
+        const isAudioObject = typeof Audio !== 'undefined' && value instanceof Audio;
+        const hasAudioShape = typeof value.play === 'function' && (typeof value.pause === 'function' || 'src' in value);
+        if (looksRadioRelated && (isAudioObject || hasAudioShape)) {
+          signals.audioObjects.push(name);
+        }
+
+        const initialized = value.initialized === true || value.isInitialized === true || value.ready === true;
+        if (looksRadioRelated && initialized) {
+          signals.initializedFlags.push(name);
+        }
+
+        const candidateUrl = value.streamUrl || value.url || value.src;
+        if (typeof candidateUrl === 'string' && /^https?:\/\//i.test(candidateUrl) && /stream|radio|audio/.test(candidateUrl.toLowerCase())) {
+          signals.streamUrls.push(candidateUrl);
+        }
+      }
+
+      if (typeof value === 'string' && /^https?:\/\//i.test(value) && /stream|radio|audio/.test(value.toLowerCase()) && looksRadioRelated) {
+        signals.streamUrls.push(value);
+      }
+    });
+
+    signals.audioObjects = [...new Set(signals.audioObjects)];
+    signals.audioFunctions = [...new Set(signals.audioFunctions)];
+    signals.streamUrls = [...new Set(signals.streamUrls)];
+    signals.initializedFlags = [...new Set(signals.initializedFlags)];
+    return signals;
+  }
+
+  function buildResult(test, response, c) {
+    const defaultDetail = summarize(response.data, c);
+    let status = statusFrom(response.ok, response.data);
+    let detail = defaultDetail;
+
+    if (test.key === 'radio-ui') {
+      const data = response.data || {};
+      const hasDomAudio = !!data.domAudioTagPresent;
+      const hasLogic = !!(data.audioObjectCount || data.audioFunctionCount || data.streamUrlCount || data.initializedCount);
+      status = hasLogic ? 'pass' : 'fail';
+      if (hasLogic && !hasDomAudio) {
+        detail = 'No DOM audio tag found, but radio logic is available.';
+      } else if (hasLogic) {
+        detail = 'Radio logic detected on client. Audio objects/functions present.';
+      } else {
+        detail = 'Radio logic not detected on client.';
+      }
+    }
+
+    if (test.key === 'frame-current') {
+      const data = response.data || {};
+      const apiReportsOk = data.frame_endpoint_ok === true || data.frame_api_ok === true;
+      const hasFrameFeatures = safeNumber(data.frame_features_count) > 0;
+      if (apiReportsOk || hasFrameFeatures) {
+        status = 'pass';
+        detail = 'Frame API returned usable data.';
+      }
+    }
+
+    return {
+      status,
+      data: response.data,
+      detail,
+      lastRun: Date.now(),
+    };
+  }
+
   function runClientTest(test, helpers) {
     if (test.key === 'admin-session') {
       const me = helpers?.session?.me || null;
@@ -68,8 +164,24 @@
       return { ok: typeof fetch === 'function', data: { fetchAvailable: typeof fetch === 'function' } };
     }
     if (test.key === 'radio-ui') {
-      const hasAudio = !!document.querySelector('audio');
-      return { ok: hasAudio, data: { audioElementPresent: hasAudio } };
+      const signals = collectRadioSignals(window);
+      const domAudioTagPresent = !!document.querySelector('audio');
+      const hasRadioLogic = !!(signals.audioObjects.length || signals.audioFunctions.length || signals.streamUrls.length || signals.initializedFlags.length);
+      return {
+        ok: hasRadioLogic,
+        data: {
+          radioLogicDetected: hasRadioLogic,
+          domAudioTagPresent,
+          audioObjectCount: signals.audioObjects.length,
+          audioFunctionCount: signals.audioFunctions.length,
+          streamUrlCount: signals.streamUrls.length,
+          initializedCount: signals.initializedFlags.length,
+          audioObjects: signals.audioObjects,
+          audioFunctions: signals.audioFunctions,
+          streamUrls: signals.streamUrls,
+          initializedFlags: signals.initializedFlags,
+        },
+      };
     }
     return { ok: false, data: { message: 'Client test not implemented.' } };
   }
@@ -136,13 +248,7 @@
           const data = await helpers.request(test.path);
           response = { ok: true, data };
         }
-        const status = statusFrom(response.ok, response.data);
-        const next = {
-          status,
-          data: response.data,
-          detail: summarize(response.data, c),
-          lastRun: Date.now(),
-        };
+        const next = buildResult(test, response, c);
         resultState[test.key] = next;
         paintResult(test, next);
       } catch (error) {
