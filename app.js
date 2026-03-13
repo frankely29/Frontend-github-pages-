@@ -2661,7 +2661,7 @@ async function refreshPickupOverlay({ force = false } = {}) {
       `[pickup overlay] zoneHotspots=${zoneHotspotCount} microHotspots=${normalizedMicroHotspotCount} coveredZones=${coveredZonesCount} visibleDots=${visibleDotsCount}`
     );
   } catch (e) {
-    console.warn("pickup overlay refresh failed:", e);
+    console.warn(`/events/pickups/recent failed (${path}):`, e);
   } finally {
     pickupRefreshInFlight = false;
   }
@@ -2671,7 +2671,7 @@ function schedulePickupOverlayRefresh({ force = false } = {}) {
   if (pickupRefreshTimer) clearTimeout(pickupRefreshTimer);
   pickupRefreshTimer = setTimeout(() => {
     pickupRefreshTimer = null;
-    refreshPickupOverlay({ force }).catch((e) => console.warn("pickup overlay refresh failed:", e));
+    refreshPickupOverlay({ force }).catch((e) => console.warn("/events/pickups/recent refresh scheduler failed:", e));
   }, force ? 0 : PICKUP_REFRESH_DEBOUNCE_MS);
 }
 
@@ -4988,6 +4988,8 @@ async function doLogin(email, password, desiredGhostMode) {
   await loadMe();
   await applyPostAuthPreferences({ email, forceGhostSync: true, desiredGhostMode });
   setAuthUI(true, `Status: signed in as ${me?.display_name || me?.email || email}`);
+  pullPresenceAll().catch((e) => console.warn("/presence/all post-login bootstrap failed:", e));
+  schedulePickupOverlayRefresh({ force: true });
   syncAdminPortalSession();
 }
 
@@ -5003,6 +5005,8 @@ async function doSignup(email, password, desiredGhostMode) {
   await loadMe();
   await applyPostAuthPreferences({ email, forceGhostSync: true, desiredGhostMode });
   setAuthUI(true, `Status: account created • signed in as ${me?.display_name || me?.email || email}`);
+  pullPresenceAll().catch((e) => console.warn("/presence/all post-signup bootstrap failed:", e));
+  schedulePickupOverlayRefresh({ force: true });
   syncAdminPortalSession();
 }
 
@@ -5552,7 +5556,7 @@ async function pullPresenceAll() {
         badgeUpdatedFromSummary = true;
       }
     } catch (e) {
-      // Ignore badge updates if anything goes wrong.
+      console.warn("/presence/summary failed:", e);
     }
     if (!badgeUpdatedFromSummary) {
       updateOnlineBadge(fallbackVisibleCount, 0);
@@ -5645,7 +5649,7 @@ async function pullPresenceAll() {
     cachedPresenceRows = candidates;
     scheduleAdaptivePresenceRender();
   } catch (e) {
-    console.warn("presence/all failed:", e);
+    console.warn("/presence/all failed:", e);
   }
 }
 
