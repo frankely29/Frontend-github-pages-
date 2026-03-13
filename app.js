@@ -1627,6 +1627,13 @@ function clearPickupOverlayCache() {
   lastPickupFetchKey = "";
 }
 
+function normalizePickupZoneId(value) {
+  if (value == null || value === "") return null;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  return String(n);
+}
+
 function normalizePickupMicroHotspots(rawInput) {
   if (rawInput?.type === "FeatureCollection" && Array.isArray(rawInput.features)) {
     const features = [];
@@ -1641,7 +1648,7 @@ function normalizePickupMicroHotspots(rawInput) {
         type: "Feature",
         geometry: { type: "Point", coordinates: [lng, lat] },
         properties: {
-          zone_id: props.zone_id ?? null,
+          zone_id: normalizePickupZoneId(props.zone_id ?? props.zoneId ?? props.location_id ?? props.LocationID),
           intensity: Number.isFinite(Number(props.intensity ?? NaN)) ? Number(props.intensity) : 0.4,
           confidence: Number.isFinite(Number(props.confidence ?? NaN)) ? Number(props.confidence) : null,
           radius_m: Number.isFinite(Number(props.radius_m ?? NaN)) ? Number(props.radius_m) : 120,
@@ -1678,7 +1685,7 @@ function normalizePickupMicroHotspots(rawInput) {
       type: "Feature",
       geometry: { type: "Point", coordinates: [lng, lat] },
       properties: {
-        zone_id: props.zone_id ?? null,
+        zone_id: normalizePickupZoneId(props.zone_id ?? props.zoneId ?? props.location_id ?? props.LocationID ?? row?.zone_id ?? row?.zoneId ?? row?.location_id ?? row?.LocationID),
         intensity: Number.isFinite(intensityRaw) ? intensityRaw : 0.4,
         confidence: Number.isFinite(confidenceRaw) ? confidenceRaw : null,
         radius_m: Number.isFinite(radiusRaw) ? radiusRaw : 120,
@@ -1700,10 +1707,20 @@ function extractNestedPickupMicroHotspots(zoneHotspots) {
 
   const nested = [];
   for (const feat of zoneHotspots.features) {
+    const parentZoneId = normalizePickupZoneId(feat?.properties?.zone_id ?? feat?.properties?.zoneId ?? feat?.properties?.location_id ?? feat?.properties?.LocationID);
     const microHotspots = feat?.properties?.micro_hotspots;
     if (!Array.isArray(microHotspots)) continue;
     for (const entry of microHotspots) {
       if (!entry || typeof entry !== "object") continue;
+      const props = (entry?.properties && typeof entry.properties === "object") ? entry.properties : null;
+      const entryZoneId = normalizePickupZoneId(
+        props?.zone_id ?? props?.zoneId ?? props?.location_id ?? props?.LocationID
+        ?? entry?.zone_id ?? entry?.zoneId ?? entry?.location_id ?? entry?.LocationID
+      );
+      if (!entryZoneId && parentZoneId) {
+        if (props) props.zone_id = parentZoneId;
+        else entry.zone_id = parentZoneId;
+      }
       nested.push(entry);
     }
   }
@@ -1858,8 +1875,8 @@ function setPickupOverlayData(fc, items = [], zoneStats = [], zoneHotspots = emp
     : emptyGeojson();
 
   for (const feat of validatedZoneHotspots.features) {
-    const zoneId = feat?.properties?.zone_id;
-    if (zoneId != null) pickupHotspotZoneIds.add(String(zoneId));
+    const zoneId = normalizePickupZoneId(feat?.properties?.zone_id ?? feat?.properties?.zoneId ?? feat?.properties?.location_id ?? feat?.properties?.LocationID);
+    if (zoneId != null) pickupHotspotZoneIds.add(zoneId);
   }
 
   const hotspotFingerprint = pickupHotspotsFingerprint(validatedZoneHotspots);
@@ -1879,32 +1896,58 @@ function setPickupOverlayData(fc, items = [], zoneStats = [], zoneHotspots = emp
     pickupMicroHotspotsSourceFingerprint = microFingerprint;
   }
   const hotspotCoveredZoneIds = new Set();
+  const zoneHotspotZoneIds = new Set();
+  const microHotspotZoneIds = new Set();
+
   for (const feat of validatedZoneHotspots.features) {
-    const zoneId = feat?.properties?.zone_id;
-    if (zoneId != null) hotspotCoveredZoneIds.add(String(zoneId));
-  }
-  for (const feat of validatedMicroHotspots.features) {
-    const zoneId = feat?.properties?.zone_id;
-    if (zoneId != null) {
-      const zoneKey = String(zoneId);
-      hotspotCoveredZoneIds.add(zoneKey);
-      pickupHotspotZoneIds.add(zoneKey);
-    }
+    const zoneId = normalizePickupZoneId(feat?.properties?.zone_id ?? feat?.properties?.zoneId ?? feat?.properties?.location_id ?? feat?.properties?.LocationID);
+    if (zoneId == null) continue;
+    hotspotCoveredZoneIds.add(zoneId);
+    zoneHotspotZoneIds.add(zoneId);
   }
 
-  const filteredFeatures = Array.isArray(fc?.features)
-    ? fc.features.filter((feat) => {
-      const zoneId = feat?.properties?.zone_id;
-      if (zoneId == null) return true;
-      return !hotspotCoveredZoneIds.has(String(zoneId));
-    })
-    : [];
+  const nestedMicroHotspotRows = extractNestedPickupMicroHotspots(validatedZoneHotspots);
+  for (const row of nestedMicroHotspotRows) {
+    const props = (row?.properties && typeof row.properties === "object") ? row.properties : row;
+    const zoneId = normalizePickupZoneId(
+      props?.zone_id ?? props?.zoneId ?? props?.location_id ?? props?.LocationID
+      ?? row?.zone_id ?? row?.zoneId ?? row?.location_id ?? row?.LocationID
+    );
+    if (zoneId == null) continue;
+    hotspotCoveredZoneIds.add(zoneId);
+    microHotspotZoneIds.add(zoneId);
+    pickupHotspotZoneIds.add(zoneId);
+  }
+
+  for (const feat of validatedMicroHotspots.features) {
+    const zoneId = normalizePickupZoneId(feat?.properties?.zone_id ?? feat?.properties?.zoneId ?? feat?.properties?.location_id ?? feat?.properties?.LocationID);
+    if (zoneId == null) continue;
+    hotspotCoveredZoneIds.add(zoneId);
+    microHotspotZoneIds.add(zoneId);
+    pickupHotspotZoneIds.add(zoneId);
+  }
+
+  const inputPickupFeatures = Array.isArray(fc?.features) ? fc.features : [];
+  const totalInputPickupDotCount = inputPickupFeatures.length;
+  const filteredFeatures = inputPickupFeatures.filter((feat) => {
+    const zoneId = normalizePickupZoneId(feat?.properties?.zone_id ?? feat?.properties?.zoneId ?? feat?.properties?.location_id ?? feat?.properties?.LocationID);
+    if (zoneId == null) return true;
+    return !hotspotCoveredZoneIds.has(zoneId);
+  });
   const filteredPickupPointsFc = { type: "FeatureCollection", features: filteredFeatures };
   const hasVisiblePickupPoints = filteredPickupPointsFc.features.length > 0;
+  const remainingPickupDotCount = filteredPickupPointsFc.features.length;
+  const suppressedPickupDotCount = Math.max(0, totalInputPickupDotCount - remainingPickupDotCount);
   window.__pickupDebug = {
     zoneHotspotCount: validatedZoneHotspots.features.length,
     microHotspotCount: validatedMicroHotspots.features.length,
     hotspotCoveredZoneIds: Array.from(hotspotCoveredZoneIds || []),
+    suppressedZoneIds: Array.from(hotspotCoveredZoneIds || []),
+    totalInputPickupDotCount,
+    suppressedPickupDotCount,
+    remainingPickupDotCount,
+    zoneHotspotZoneIds: Array.from(zoneHotspotZoneIds || []),
+    microHotspotZoneIds: Array.from(microHotspotZoneIds || []),
     visiblePickupDotCount: filteredPickupPointsFc.features.length,
   };
   setPickupPointLayerVisibility(hasVisiblePickupPoints);
