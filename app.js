@@ -1965,13 +1965,13 @@ async function ensurePickupSourceAndLayers() {
             ["linear"],
             ["coalesce", ["get", "intensity"], 0.35],
             0.00,
-            0.28,
+            0.30,
             0.45,
-            0.36,
+            0.40,
             0.75,
-            0.46,
+            0.52,
             1.00,
-            0.56,
+            0.64,
           ],
         },
       },
@@ -1996,13 +1996,13 @@ async function ensurePickupSourceAndLayers() {
       ["linear"],
       ["coalesce", ["get", "intensity"], 0.35],
       0.00,
-      0.28,
+      0.30,
       0.45,
-      0.36,
+      0.40,
       0.75,
-      0.46,
+      0.52,
       1.00,
-      0.56,
+      0.64,
     ]);
   }
 
@@ -2031,13 +2031,13 @@ async function ensurePickupSourceAndLayers() {
             ["linear"],
             ["coalesce", ["get", "intensity"], 0.35],
             0.00,
-            0.34,
+            0.38,
             0.45,
-            0.46,
+            0.50,
             0.75,
-            0.58,
+            0.64,
             1.00,
-            0.70,
+            0.78,
           ],
         },
       },
@@ -2062,13 +2062,13 @@ async function ensurePickupSourceAndLayers() {
       ["linear"],
       ["coalesce", ["get", "intensity"], 0.35],
       0.00,
-      0.34,
+      0.38,
       0.45,
-      0.46,
+      0.50,
       0.75,
-      0.58,
+      0.64,
       1.00,
-      0.70,
+      0.78,
     ]);
   }
 
@@ -2111,13 +2111,13 @@ async function ensurePickupSourceAndLayers() {
             ["linear"],
             ["coalesce", ["get", "intensity"], 0.35],
             0.00,
-            2.4,
+            2.6,
             0.45,
-            3.0,
+            3.4,
             0.75,
-            3.8,
+            4.4,
             1.00,
-            4.6,
+            5.2,
           ],
         },
       },
@@ -2155,13 +2155,13 @@ async function ensurePickupSourceAndLayers() {
       ["linear"],
       ["coalesce", ["get", "intensity"], 0.35],
       0.00,
-      2.4,
+      2.6,
       0.45,
-      3.0,
+      3.4,
       0.75,
-      3.8,
+      4.4,
       1.00,
-      4.6,
+      5.2,
     ]);
   }
 
@@ -2188,7 +2188,7 @@ async function ensurePickupSourceAndLayers() {
           16, ["+", ["*", ["coalesce", ["get", "intensity"], 0.4], 14], 13]
         ],
         "circle-color": "rgba(0,194,216,0.30)",
-        "circle-opacity": ["case", ["coalesce", ["get", "recommended"], false], 0.58, 0.42],
+        "circle-opacity": ["case", ["coalesce", ["get", "recommended"], false], 0.68, 0.50],
         "circle-blur": 0.85,
       },
     }, "zone-labels");
@@ -2207,7 +2207,7 @@ async function ensurePickupSourceAndLayers() {
           16, ["+", ["*", ["coalesce", ["get", "intensity"], 0.4], 4.6], 4.6]
         ],
         "circle-color": ["case", ["coalesce", ["get", "recommended"], false], "rgba(255,255,255,0.95)", "rgba(222,251,255,0.85)"],
-        "circle-opacity": ["interpolate", ["linear"], ["zoom"], PICKUP_MICRO_HOTSPOT_MIN_ZOOM, 0.82, 16, 0.92],
+        "circle-opacity": ["interpolate", ["linear"], ["zoom"], PICKUP_MICRO_HOTSPOT_MIN_ZOOM, 0.86, 16, 0.92],
         "circle-stroke-color": ["case", ["coalesce", ["get", "recommended"], false], "rgba(0,194,216,1)", "rgba(0,194,216,0.68)"],
         "circle-stroke-width": ["case", ["coalesce", ["get", "recommended"], false], 1.6, 1.0],
       },
@@ -4210,27 +4210,22 @@ const Z100_STREAM_URL = "https://stream.revma.ihrhls.com/zc1469";
 const megaAudio = new Audio();
 megaAudio.src = MEGA979_STREAM_URL;
 megaAudio.preload = "none";
-megaAudio.crossOrigin = "anonymous";
 
 const hot97Audio = new Audio();
 hot97Audio.src = HOT97_STREAM_URL;
 hot97Audio.preload = "none";
-hot97Audio.crossOrigin = "anonymous";
 
 const kqAudio = new Audio();
 kqAudio.src = KQ945_STREAM_URL;
 kqAudio.preload = "none";
-kqAudio.crossOrigin = "anonymous";
 
 const alofoke993Audio = new Audio();
 alofoke993Audio.src = ALOFOKE993_STREAM_URL;
 alofoke993Audio.preload = "none";
-alofoke993Audio.crossOrigin = "anonymous";
 
 const z100Audio = new Audio();
 z100Audio.src = Z100_STREAM_URL;
 z100Audio.preload = "none";
-z100Audio.crossOrigin = "anonymous";
 
 let megaPlaying = false;
 let hot97Playing = false;
@@ -4270,6 +4265,16 @@ function openStationWebModal(title, url) {
   radioModal.setAttribute("aria-hidden", "false");
 }
 
+async function prepareAndPlayStream(audioEl, streamUrl) {
+  try { audioEl.pause(); } catch {}
+  audioEl.src = streamUrl;
+  audioEl.volume = 1;
+  audioEl.preload = "none";
+  if ("playsInline" in audioEl) audioEl.playsInline = true;
+  audioEl.load();
+  const p = audioEl.play();
+  if (p && typeof p.then === "function") await p;
+}
 
 function stopAlofokeSiteMode() {
   if (!alofoke993Playing) return;
@@ -4299,8 +4304,7 @@ async function toggleAlofoke993() {
   setBtnState(btnKQ945, false);
   setBtnState(btnZ100, false);
   try {
-    alofoke993Audio.src = ALOFOKE993_STREAM_URL;
-    await alofoke993Audio.play();
+    await prepareAndPlayStream(alofoke993Audio, ALOFOKE993_STREAM_URL);
     setRadioStatus("Radio: Alofoke 99.3 FM playing");
   } catch (e) {
     console.warn("Alofoke 99.3 FM play failed:", e);
@@ -4341,7 +4345,7 @@ async function toggleMega() {
       return;
     }
 
-    await megaAudio.play();
+    await prepareAndPlayStream(megaAudio, MEGA979_STREAM_URL);
     megaPlaying = true;
 
     setBtnState(btnMega979, true);
@@ -4392,11 +4396,7 @@ async function toggleHot97() {
   }
 
   try {
-    hot97Audio.src = HOT97_STREAM_URL;
-    hot97Audio.volume = 1;
-
-    const p = hot97Audio.play();
-    if (p && typeof p.then === "function") await p;
+    await prepareAndPlayStream(hot97Audio, HOT97_STREAM_URL);
 
     hot97Playing = true;
     setBtnState(btnHot97, true);
@@ -4439,10 +4439,7 @@ async function toggleKQ() {
   }
 
   try {
-    kqAudio.src = KQ945_STREAM_URL;
-    kqAudio.volume = 1;
-    const p = kqAudio.play();
-    if (p && typeof p.then === "function") await p;
+    await prepareAndPlayStream(kqAudio, KQ945_STREAM_URL);
 
     kqPlaying = true;
     setBtnState(btnKQ945, true);
@@ -4475,8 +4472,7 @@ async function toggleZ100() {
     return;
   }
   try {
-    z100Audio.src = Z100_STREAM_URL;
-    await z100Audio.play();
+    await prepareAndPlayStream(z100Audio, Z100_STREAM_URL);
     z100Playing = true;
     setBtnState(btnZ100, true);
     setBtnState(btnHot97, false);
