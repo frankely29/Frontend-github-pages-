@@ -103,7 +103,6 @@ let pickupHotspotZoneIds = new Set();
 let pickupPointsSourceFingerprint = "";
 let pickupHotspotsSourceFingerprint = "";
 let pickupMicroHotspotsSourceFingerprint = "";
-let pickupHasMicroHotspots = false;
 let mapPageIsVisible = !document.hidden;
 
 /* =========================================================
@@ -1625,7 +1624,6 @@ function clearPickupOverlayCache() {
   pickupPointsSourceFingerprint = "";
   pickupHotspotsSourceFingerprint = "";
   pickupMicroHotspotsSourceFingerprint = "";
-  pickupHasMicroHotspots = false;
   lastPickupFetchKey = "";
 }
 
@@ -1880,8 +1878,6 @@ function setPickupOverlayData(fc, items = [], zoneStats = [], zoneHotspots = emp
     microSrc.setData(validatedMicroHotspots);
     pickupMicroHotspotsSourceFingerprint = microFingerprint;
   }
-  pickupHasMicroHotspots = !!validatedMicroHotspots.features.length;
-
   const hotspotCoveredZoneIds = new Set();
   for (const feat of validatedZoneHotspots.features) {
     const zoneId = feat?.properties?.zone_id;
