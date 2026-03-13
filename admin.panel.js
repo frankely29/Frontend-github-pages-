@@ -1,4 +1,6 @@
 (function () {
+  const components = () => window.AdminComponents || {};
+
   const state = {
     me: null,
     token: '',
@@ -6,6 +8,7 @@
     activeTab: 'dashboard',
     tabCache: {},
     loadingTab: null,
+    actions: null,
   };
 
   const tabs = [
@@ -23,11 +26,11 @@
   let titleEl;
 
   function esc(value) {
-    return String(value ?? '')
+    return (components().esc || String)(value ?? '').toString()
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
+      .replace(/\"/g, '&quot;')
       .replace(/'/g, '&#39;');
   }
 
@@ -35,25 +38,31 @@
     return !!state?.me?.is_admin;
   }
 
-  function authFetch(path) {
-  const headers = { 'Accept': 'application/json' };
-  if (state.token) headers.Authorization = `Bearer ${state.token}`;
+  function authRequest(path, options = {}) {
+    const headers = { Accept: 'application/json', ...(options.headers || {}) };
+    if (state.token) headers.Authorization = `Bearer ${state.token}`;
+    if (options.body !== undefined) headers['Content-Type'] = 'application/json';
 
-  const base =
-    (typeof window !== 'undefined' && window.API_BASE)
+    const base = (typeof window !== 'undefined' && window.API_BASE)
       ? String(window.API_BASE).replace(/\/+$/, '')
       : window.location.origin;
 
-  const url = `${base}${path.startsWith('/') ? path : `/${path}`}`;
+    const url = `${base}${path.startsWith('/') ? path : `/${path}`}`;
 
-  return fetch(url, { headers }).then(async (res) => {
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      throw new Error(`HTTP ${res.status}${text ? `: ${text}` : ''}`);
-    }
-    return res.json();
-  });
-}
+    return fetch(url, {
+      method: options.method || 'GET',
+      headers,
+      body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+    }).then(async (res) => {
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(`HTTP ${res.status}${text ? `: ${text}` : ''}`);
+      }
+      const type = res.headers.get('content-type') || '';
+      if (type.includes('application/json')) return res.json();
+      return null;
+    });
+  }
 
   function ensureDom() {
     if (root && launcher) return;
@@ -129,31 +138,41 @@
   }
 
   function renderDashboard(data) {
+    const c = components();
     const d = data || {};
-    const cards = [
-      ['Total Users', d.total_users],
-      ['Online Users', d.online_users],
-      ['Ghosted Online', d.ghosted_online_users],
-      ['Police Reports', d.police_reports_count],
-      ['Pickup Logs', d.pickup_logs_count],
-      ['Admins', d.admins_count],
-      ['Leaderboard', d.leaderboard_status || d.leaderboard?.status || '—'],
-      ['Timeline / Frame', `${d.timeline_ready ?? '—'} / ${d.frame_ready ?? d.frame_status ?? '—'}`],
-    ];
+    const leaderboard = d.leaderboard_status || d.leaderboard;
+    const leaderboardLines = typeof leaderboard === 'object' && leaderboard
+      ? c.keyValueRows(leaderboard)
+      : `<div class="adminKV"><span>Status</span><strong>${esc(c.formatValue ? c.formatValue(leaderboard) : leaderboard || '—')}</strong></div>`;
 
     bodyEl.innerHTML = `
       <div class="adminGrid">
-        ${cards
-          .map(
-            ([k, v]) => `<div class="adminCard"><div class="adminCardLabel">${esc(k)}</div><div class="adminCardValue">${esc(v ?? '—')}</div></div>`
-          )
-          .join('')}
+        ${(c.statCard ? c.statCard('Total Users', d.total_users) : '')}
+        ${(c.statCard ? c.statCard('Online Users', d.online_users) : '')}
+        ${(c.statCard ? c.statCard('Ghosted Online', d.ghosted_online_users) : '')}
+        ${(c.statCard ? c.statCard('Police Reports', d.police_reports_count) : '')}
+        ${(c.statCard ? c.statCard('Pickup Logs', d.pickup_logs_count) : '')}
+        ${(c.statCard ? c.statCard('Admins', d.admins_count) : '')}
+        ${(c.statCard ? c.statCard('Timeline Ready', c.boolText ? c.boolText(!!d.timeline_ready, 'Ready', 'Not Ready') : d.timeline_ready) : '')}
+        ${(c.statCard ? c.statCard('Frame Status', d.frame_count || d.frame_status || d.frame_ready || '—') : '')}
       </div>
       <div class="adminSection">
-        <h4>Raw Summary</h4>
-        <pre class="adminPre">${esc(JSON.stringify(d, null, 2))}</pre>
+        <h4>Leaderboard Status</h4>
+        ${leaderboardLines}
       </div>
+      ${(c.collapsible ? c.collapsible('Advanced Diagnostics', `<pre class="adminPre">${esc(JSON.stringify(d, null, 2))}</pre>`) : '')}
     `;
+  }
+
+  function helpers() {
+    return {
+      request: authRequest,
+      actions: state.actions,
+      components: window.AdminComponents,
+      onMutate: () => {
+        state.tabCache = {};
+      },
+    };
   }
 
   async function renderActiveTab({ force }) {
@@ -174,17 +193,17 @@
     try {
       setBodyLoading(key);
       let payload;
-      if (key === 'dashboard') payload = await authFetch('/admin/summary');
-      if (key === 'users') payload = await authFetch('/admin/users');
-      if (key === 'live') payload = await authFetch('/admin/live');
+      if (key === 'dashboard') payload = await authRequest('/admin/summary');
+      if (key === 'users') payload = await authRequest('/admin/users');
+      if (key === 'live') payload = await authRequest('/admin/live');
       if (key === 'reports') {
         const [police, pickups] = await Promise.all([
-          authFetch('/admin/reports/police'),
-          authFetch('/admin/reports/pickups'),
+          authRequest('/admin/reports/police'),
+          authRequest('/admin/reports/pickups'),
         ]);
         payload = { police, pickups };
       }
-      if (key === 'system') payload = await authFetch('/admin/system');
+      if (key === 'system') payload = await authRequest('/admin/system');
 
       state.tabCache[key] = payload;
       paintTab(key, payload);
@@ -196,46 +215,15 @@
   }
 
   function paintTab(key, payload) {
+    const h = helpers();
     if (key === 'dashboard') {
       renderDashboard(payload);
       return;
     }
-
-    if (key === 'users') {
-      if (window.AdminUsers?.renderAdminUsers) {
-        window.AdminUsers.renderAdminUsers(bodyEl, payload, {});
-      } else {
-        setBodyError('Admin users module failed to load.');
-      }
-      return;
-    }
-
-    if (key === 'live') {
-      if (window.AdminLive?.renderAdminLive) {
-        window.AdminLive.renderAdminLive(bodyEl, payload, {});
-      } else {
-        setBodyError('Admin live module failed to load.');
-      }
-      return;
-    }
-
-    if (key === 'reports') {
-      if (window.AdminReports?.renderAdminReports) {
-        window.AdminReports.renderAdminReports(bodyEl, payload?.police, payload?.pickups, {});
-      } else {
-        setBodyError('Admin reports module failed to load.');
-      }
-      return;
-    }
-
-    if (key === 'system') {
-      if (window.AdminSystem?.renderAdminSystem) {
-        window.AdminSystem.renderAdminSystem(bodyEl, payload, {});
-      } else {
-        setBodyError('Admin system module failed to load.');
-      }
-      return;
-    }
+    if (key === 'users') return window.AdminUsers?.renderAdminUsers ? window.AdminUsers.renderAdminUsers(bodyEl, payload, h) : setBodyError('Admin users module failed to load.');
+    if (key === 'live') return window.AdminLive?.renderAdminLive ? window.AdminLive.renderAdminLive(bodyEl, payload, h) : setBodyError('Admin live module failed to load.');
+    if (key === 'reports') return window.AdminReports?.renderAdminReports ? window.AdminReports.renderAdminReports(bodyEl, payload?.police, payload?.pickups, h) : setBodyError('Admin reports module failed to load.');
+    if (key === 'system') return window.AdminSystem?.renderAdminSystem ? window.AdminSystem.renderAdminSystem(bodyEl, payload, h) : setBodyError('Admin system module failed to load.');
 
     setBodyEmpty('Unknown tab.');
   }
@@ -272,6 +260,7 @@
   function setSession(next) {
     state.me = next?.me || null;
     state.token = next?.token || '';
+    state.actions = window.AdminActions?.createAdminActions(authRequest) || null;
     refreshVisibility();
     if (state.isOpen) {
       if (!isAdmin()) {
@@ -291,6 +280,7 @@
 
   function init(initialSession) {
     ensureDom();
+    state.actions = window.AdminActions?.createAdminActions(authRequest) || null;
     if (initialSession) setSession(initialSession);
     refreshVisibility();
   }
