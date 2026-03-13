@@ -1592,7 +1592,7 @@ async function ensureZonesSourceAndLayers() {
         ],
         "text-max-width": ["coalesce", ["get", "textMaxWidth"], 4],
         "text-letter-spacing": ["coalesce", ["get", "letterSpacing"], 0],
-        "text-rotate": 0,
+        "text-rotate": ["coalesce", ["get", "textRotate"], 0],
         "symbol-sort-key": ["coalesce", ["get", "sortKey"], 0],
         "text-anchor": "center",
         "text-justify": "center",
