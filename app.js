@@ -1630,6 +1630,33 @@ function clearPickupOverlayCache() {
 }
 
 function normalizePickupMicroHotspots(rawInput) {
+  if (rawInput?.type === "FeatureCollection" && Array.isArray(rawInput.features)) {
+    const features = [];
+    for (const feat of rawInput.features) {
+      if (!feat || feat.type !== "Feature") continue;
+      const coords = Array.isArray(feat?.geometry?.coordinates) ? feat.geometry.coordinates : [];
+      const lng = Number(coords?.[0] ?? NaN);
+      const lat = Number(coords?.[1] ?? NaN);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+      const props = (feat?.properties && typeof feat.properties === "object") ? feat.properties : {};
+      features.push({
+        type: "Feature",
+        geometry: { type: "Point", coordinates: [lng, lat] },
+        properties: {
+          zone_id: props.zone_id ?? null,
+          intensity: Number.isFinite(Number(props.intensity ?? NaN)) ? Number(props.intensity) : 0.4,
+          confidence: Number.isFinite(Number(props.confidence ?? NaN)) ? Number(props.confidence) : null,
+          radius_m: Number.isFinite(Number(props.radius_m ?? NaN)) ? Number(props.radius_m) : 120,
+          event_count: Number.isFinite(Number(props.event_count ?? NaN)) ? Number(props.event_count) : null,
+          recommended: !!props.recommended,
+          zone_name: props.zone_name ?? "",
+          borough: props.borough ?? "",
+        },
+      });
+    }
+    return { type: "FeatureCollection", features };
+  }
+
   const out = [];
   const rows = Array.isArray(rawInput)
     ? rawInput
@@ -1654,16 +1681,13 @@ function normalizePickupMicroHotspots(rawInput) {
       geometry: { type: "Point", coordinates: [lng, lat] },
       properties: {
         zone_id: props.zone_id ?? null,
-        zone_name: props.zone_name ?? "",
-        borough: props.borough ?? "",
         intensity: Number.isFinite(intensityRaw) ? intensityRaw : 0.4,
         confidence: Number.isFinite(confidenceRaw) ? confidenceRaw : null,
-        recommended: !!props.recommended,
         radius_m: Number.isFinite(radiusRaw) ? radiusRaw : 120,
-        hotspot_score: Number(props.hotspot_score ?? NaN),
-        final_score: Number(props.final_score ?? NaN),
-        live_strength: Number(props.live_strength ?? NaN),
-        density_penalty: Number(props.density_penalty ?? NaN),
+        event_count: Number.isFinite(Number(props.event_count ?? props.count ?? NaN)) ? Number(props.event_count ?? props.count) : null,
+        recommended: !!props.recommended,
+        zone_name: props.zone_name ?? "",
+        borough: props.borough ?? "",
       },
     });
   }
@@ -1865,7 +1889,11 @@ function setPickupOverlayData(fc, items = [], zoneStats = [], zoneHotspots = emp
   }
   for (const feat of validatedMicroHotspots.features) {
     const zoneId = feat?.properties?.zone_id;
-    if (zoneId != null) hotspotCoveredZoneIds.add(String(zoneId));
+    if (zoneId != null) {
+      const zoneKey = String(zoneId);
+      hotspotCoveredZoneIds.add(zoneKey);
+      pickupHotspotZoneIds.add(zoneKey);
+    }
   }
 
   const filteredFeatures = Array.isArray(fc?.features)
@@ -1877,6 +1905,12 @@ function setPickupOverlayData(fc, items = [], zoneStats = [], zoneHotspots = emp
     : [];
   const filteredPickupPointsFc = { type: "FeatureCollection", features: filteredFeatures };
   const hasVisiblePickupPoints = filteredPickupPointsFc.features.length > 0;
+  window.__pickupDebug = {
+    zoneHotspotCount: validatedZoneHotspots.features.length,
+    microHotspotCount: validatedMicroHotspots.features.length,
+    hotspotCoveredZoneIds: [...hotspotCoveredZoneIds],
+    visiblePickupDotCount: filteredPickupPointsFc.features.length,
+  };
   setPickupPointLayerVisibility(hasVisiblePickupPoints);
   const visiblePointsFingerprint = pickupPointsFingerprintFromFeatures(filteredPickupPointsFc);
 
@@ -2234,17 +2268,17 @@ async function ensurePickupSourceAndLayers() {
       id: "pickup-micro-hotspots-ring",
       type: "circle",
       source: "pickup-micro-hotspots",
-      minzoom: 12.6,
+      minzoom: PICKUP_MICRO_HOTSPOT_MIN_ZOOM,
       paint: {
         "circle-radius": [
           "interpolate", ["linear"], ["zoom"],
-          12.6, ["max", 6, ["*", ["coalesce", ["get", "radius_m"], 120], 0.030]],
+          PICKUP_MICRO_HOTSPOT_MIN_ZOOM, ["max", 6, ["*", ["coalesce", ["get", "radius_m"], 120], 0.030]],
           16, ["max", 10, ["*", ["coalesce", ["get", "radius_m"], 120], 0.050]]
         ],
         "circle-color": "rgba(0,0,0,0)",
         "circle-stroke-color": ["case", ["coalesce", ["get", "recommended"], false], "rgba(0,194,216,0.70)", "rgba(0,194,216,0.35)"],
         "circle-stroke-width": ["case", ["coalesce", ["get", "recommended"], false], 1.1, 0.7],
-        "circle-opacity": ["interpolate", ["linear"], ["zoom"], 12.6, 0.22, 16, 0.34],
+        "circle-opacity": ["interpolate", ["linear"], ["zoom"], PICKUP_MICRO_HOTSPOT_MIN_ZOOM, 0.28, 16, 0.40],
       },
     }, "zone-labels");
   }
@@ -2492,16 +2526,6 @@ async function refreshPickupOverlay({ force = false } = {}) {
     const microHotspots = usingTopLevelMicroHotspots
       ? topLevelMicroHotspots
       : fallbackNestedMicroHotspots;
-    const zoneHotspotCount = Array.isArray(zoneHotspots?.features) ? zoneHotspots.features.length : 0;
-    const microHotspotCount = microHotspots?.features?.length ?? 0;
-    const usingMicroHotspots = microHotspotCount > 0;
-    window.__pickupDebug = {
-      zoneHotspotCount,
-      microHotspotCount,
-      usingMicroHotspots,
-      backendMicroDebug: data?.micro_hotspot_debug || null,
-    };
-    console.debug(`[pickup overlay] zoneHotspots=${zoneHotspotCount} microHotspots=${microHotspotCount} usingMicro=${usingMicroHotspots}`);
     const fc = buildPickupFeatureCollection(items);
     setPickupOverlayData(fc, items, zoneStats, zoneHotspots, microHotspots);
   } catch (e) {
