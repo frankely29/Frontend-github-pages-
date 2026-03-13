@@ -85,7 +85,7 @@ const PICKUP_RECENT_LIMIT = 30;
 const PICKUP_ZONE_SAMPLE_LIMIT = 100;
 const PICKUP_REFRESH_DEBOUNCE_MS = 350;
 const PICKUP_FETCH_COOLDOWN_MS = 1200;
-const PICKUP_MICRO_HOTSPOT_MIN_ZOOM = 11.0;
+const PICKUP_MICRO_HOTSPOT_MIN_ZOOM = 10.8;
 
 // Chat state variables were used by the built‑in chat implementation.  They have
 // been migrated to app.part2.js.  Leaving these commented prevents undefined
@@ -1965,13 +1965,13 @@ async function ensurePickupSourceAndLayers() {
             ["linear"],
             ["coalesce", ["get", "intensity"], 0.35],
             0.00,
-            0.18,
-            0.45,
             0.24,
-            0.75,
+            0.45,
             0.30,
+            0.75,
+            0.38,
             1.00,
-            0.36,
+            0.46,
           ],
         },
       },
@@ -1996,13 +1996,13 @@ async function ensurePickupSourceAndLayers() {
       ["linear"],
       ["coalesce", ["get", "intensity"], 0.35],
       0.00,
-      0.18,
-      0.45,
       0.24,
-      0.75,
+      0.45,
       0.30,
+      0.75,
+      0.38,
       1.00,
-      0.36,
+      0.46,
     ]);
   }
 
@@ -2031,13 +2031,13 @@ async function ensurePickupSourceAndLayers() {
             ["linear"],
             ["coalesce", ["get", "intensity"], 0.35],
             0.00,
-            0.18,
+            0.26,
             0.45,
-            0.28,
+            0.36,
             0.75,
-            0.38,
+            0.48,
             1.00,
-            0.50,
+            0.62,
           ],
         },
       },
@@ -2062,13 +2062,13 @@ async function ensurePickupSourceAndLayers() {
       ["linear"],
       ["coalesce", ["get", "intensity"], 0.35],
       0.00,
-      0.18,
+      0.26,
       0.45,
-      0.28,
+      0.36,
       0.75,
-      0.38,
+      0.48,
       1.00,
-      0.50,
+      0.62,
     ]);
   }
 
@@ -2111,13 +2111,13 @@ async function ensurePickupSourceAndLayers() {
             ["linear"],
             ["coalesce", ["get", "intensity"], 0.35],
             0.00,
-            1.8,
+            2.0,
             0.45,
-            2.4,
+            2.8,
             0.75,
-            3.0,
+            3.4,
             1.00,
-            3.6,
+            4.0,
           ],
         },
       },
@@ -2155,13 +2155,13 @@ async function ensurePickupSourceAndLayers() {
       ["linear"],
       ["coalesce", ["get", "intensity"], 0.35],
       0.00,
-      1.8,
+      2.0,
       0.45,
-      2.4,
+      2.8,
       0.75,
-      3.0,
+      3.4,
       1.00,
-      3.6,
+      4.0,
     ]);
   }
 
@@ -2188,7 +2188,7 @@ async function ensurePickupSourceAndLayers() {
           16, ["+", ["*", ["coalesce", ["get", "intensity"], 0.4], 14], 13]
         ],
         "circle-color": "rgba(0,194,216,0.30)",
-        "circle-opacity": ["case", ["coalesce", ["get", "recommended"], false], 0.42, 0.30],
+        "circle-opacity": ["case", ["coalesce", ["get", "recommended"], false], 0.48, 0.36],
         "circle-blur": 0.85,
       },
     }, "zone-labels");
@@ -2207,7 +2207,7 @@ async function ensurePickupSourceAndLayers() {
           16, ["+", ["*", ["coalesce", ["get", "intensity"], 0.4], 4.6], 4.6]
         ],
         "circle-color": ["case", ["coalesce", ["get", "recommended"], false], "rgba(255,255,255,0.95)", "rgba(222,251,255,0.85)"],
-        "circle-opacity": ["interpolate", ["linear"], ["zoom"], PICKUP_MICRO_HOTSPOT_MIN_ZOOM, 0.70, 16, 0.88],
+        "circle-opacity": ["interpolate", ["linear"], ["zoom"], PICKUP_MICRO_HOTSPOT_MIN_ZOOM, 0.76, 16, 0.92],
         "circle-stroke-color": ["case", ["coalesce", ["get", "recommended"], false], "rgba(0,194,216,1)", "rgba(0,194,216,0.68)"],
         "circle-stroke-width": ["case", ["coalesce", ["get", "recommended"], false], 1.6, 1.0],
       },
@@ -2478,19 +2478,15 @@ async function refreshPickupOverlay({ force = false } = {}) {
       ? topLevelMicroHotspots
       : fallbackNestedMicroHotspots;
     const zoneHotspotCount = Array.isArray(zoneHotspots?.features) ? zoneHotspots.features.length : 0;
-    const nestedMicroHotspotCount = nestedMicroHotspotRows.length;
-    const topLevelMicroHotspotCount = countPickupMicroHotspotRows(topLevelMicroHotspotPayload);
-    const normalizedMicroHotspotCount = microHotspots?.features?.length ?? 0;
-    const usingMicroHotspots = normalizedMicroHotspotCount > 0;
+    const microHotspotCount = microHotspots?.features?.length ?? 0;
+    const usingMicroHotspots = microHotspotCount > 0;
     window.__pickupDebug = {
       zoneHotspotCount,
-      nestedMicroHotspotCount,
-      topLevelMicroHotspotCount,
-      normalizedMicroHotspotCount,
+      microHotspotCount,
       usingMicroHotspots,
       backendMicroDebug: data?.micro_hotspot_debug || null,
     };
-    console.debug(`[pickup overlay] zones=${zoneHotspotCount} nested=${nestedMicroHotspotCount} top=${topLevelMicroHotspotCount} normalized=${normalizedMicroHotspotCount} usingMicro=${usingMicroHotspots}`);
+    console.debug(`[pickup overlay] zoneHotspots=${zoneHotspotCount} microHotspots=${microHotspotCount} usingMicro=${usingMicroHotspots}`);
     const fc = buildPickupFeatureCollection(items);
     setPickupOverlayData(fc, items, zoneStats, zoneHotspots, microHotspots);
   } catch (e) {
