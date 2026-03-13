@@ -1671,7 +1671,7 @@ function normalizePickupMicroHotspots(rawInput) {
   return { type: "FeatureCollection", features: out };
 }
 
-function extractNestedMicroHotspotsFromZoneHotspots(zoneHotspots) {
+function extractNestedPickupMicroHotspots(zoneHotspots) {
   if (!zoneHotspots || zoneHotspots.type !== "FeatureCollection" || !Array.isArray(zoneHotspots.features)) {
     return [];
   }
@@ -2459,15 +2459,26 @@ async function refreshPickupOverlay({ force = false } = {}) {
     const topLevelMicroHotspots = (topLevelMicroHotspotPayload && topLevelMicroHotspotPayload.type === "FeatureCollection" && Array.isArray(topLevelMicroHotspotPayload.features))
       ? topLevelMicroHotspotPayload
       : normalizePickupMicroHotspots(topLevelMicroHotspotPayload);
-    const nestedMicroHotspotRows = extractNestedMicroHotspotsFromZoneHotspots(zoneHotspots);
-    const microHotspots = (topLevelMicroHotspots?.features?.length > 0)
+    const nestedMicroHotspotRows = extractNestedPickupMicroHotspots(zoneHotspots);
+    const fallbackNestedMicroHotspots = normalizePickupMicroHotspots(nestedMicroHotspotRows);
+    const usingTopLevelMicroHotspots = (topLevelMicroHotspots?.features?.length ?? 0) > 0;
+    const microHotspots = usingTopLevelMicroHotspots
       ? topLevelMicroHotspots
-      : normalizePickupMicroHotspots(nestedMicroHotspotRows);
-    console.debug("pickup micro-hotspots refresh", {
-      topLevelFound: !!topLevelMicroHotspots?.features?.length,
-      nestedFound: nestedMicroHotspotRows.length > 0,
-      normalizedCount: microHotspots.features.length,
-    });
+      : fallbackNestedMicroHotspots;
+    const zoneHotspotCount = Array.isArray(zoneHotspots?.features) ? zoneHotspots.features.length : 0;
+    const nestedMicroHotspotCount = nestedMicroHotspotRows.length;
+    const topLevelMicroHotspotCount = topLevelMicroHotspots?.features?.length ?? 0;
+    const normalizedMicroHotspotCount = microHotspots?.features?.length ?? 0;
+    const usingMicroHotspots = normalizedMicroHotspotCount > 0;
+    window.__pickupDebug = {
+      zoneHotspotCount,
+      nestedMicroHotspotCount,
+      topLevelMicroHotspotCount,
+      normalizedMicroHotspotCount,
+      usingMicroHotspots,
+      backendMicroDebug: data?.micro_hotspot_debug || null,
+    };
+    console.debug(`[pickup overlay] zones=${zoneHotspotCount} nested=${nestedMicroHotspotCount} top=${topLevelMicroHotspotCount} normalized=${normalizedMicroHotspotCount} usingMicro=${usingMicroHotspots}`);
     const fc = buildPickupFeatureCollection(items);
     setPickupOverlayData(fc, items, zoneStats, zoneHotspots, microHotspots);
   } catch (e) {
