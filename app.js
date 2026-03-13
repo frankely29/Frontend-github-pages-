@@ -85,7 +85,7 @@ const PICKUP_RECENT_LIMIT = 30;
 const PICKUP_ZONE_SAMPLE_LIMIT = 100;
 const PICKUP_REFRESH_DEBOUNCE_MS = 350;
 const PICKUP_FETCH_COOLDOWN_MS = 1200;
-const PICKUP_MICRO_HOTSPOT_MIN_ZOOM = 11.8;
+const PICKUP_MICRO_HOTSPOT_MIN_ZOOM = 11.0;
 
 // Chat state variables were used by the built‑in chat implementation.  They have
 // been migrated to app.part2.js.  Leaving these commented prevents undefined
@@ -1848,11 +1848,7 @@ function setPickupOverlayData(fc, items = [], zoneStats = [], zoneHotspots = emp
   setPickupPointLayerVisibility(!pickupHasMicroHotspots);
 
   const filteredFeatures = Array.isArray(fc?.features)
-    ? fc.features.filter((feat) => {
-      const zoneId = feat?.properties?.zone_id;
-      if (pickupHasMicroHotspots) return false;
-      return zoneId == null || !pickupHotspotZoneIds.has(String(zoneId));
-    })
+    ? fc.features.filter(() => !pickupHasMicroHotspots)
     : [];
   const filteredPickupPointsFc = { type: "FeatureCollection", features: filteredFeatures };
   const visiblePointsFingerprint = pickupPointsFingerprintFromFeatures(filteredPickupPointsFc);
@@ -2464,10 +2460,9 @@ async function refreshPickupOverlay({ force = false } = {}) {
       ? topLevelMicroHotspotPayload
       : normalizePickupMicroHotspots(topLevelMicroHotspotPayload);
     const nestedMicroHotspotRows = extractNestedMicroHotspotsFromZoneHotspots(zoneHotspots);
-    const microHotspotPayloadToUse = (topLevelMicroHotspots?.features?.length > 0)
-      ? topLevelMicroHotspotPayload
-      : nestedMicroHotspotRows;
-    const microHotspots = normalizePickupMicroHotspots(microHotspotPayloadToUse);
+    const microHotspots = (topLevelMicroHotspots?.features?.length > 0)
+      ? topLevelMicroHotspots
+      : normalizePickupMicroHotspots(nestedMicroHotspotRows);
     console.debug("pickup micro-hotspots refresh", {
       topLevelFound: !!topLevelMicroHotspots?.features?.length,
       nestedFound: nestedMicroHotspotRows.length > 0,
