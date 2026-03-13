@@ -36,16 +36,24 @@
   }
 
   function authFetch(path) {
-    const headers = { 'Accept': 'application/json' };
-    if (state.token) headers.Authorization = `Bearer ${state.token}`;
-    return fetch(path, { headers }).then(async (res) => {
-      if (!res.ok) {
-        const text = await res.text().catch(() => '');
-        throw new Error(`HTTP ${res.status}${text ? `: ${text}` : ''}`);
-      }
-      return res.json();
-    });
-  }
+  const headers = { 'Accept': 'application/json' };
+  if (state.token) headers.Authorization = `Bearer ${state.token}`;
+
+  const base =
+    (typeof window !== 'undefined' && window.API_BASE)
+      ? String(window.API_BASE).replace(/\/+$/, '')
+      : window.location.origin;
+
+  const url = `${base}${path.startsWith('/') ? path : `/${path}`}`;
+
+  return fetch(url, { headers }).then(async (res) => {
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`HTTP ${res.status}${text ? `: ${text}` : ''}`);
+    }
+    return res.json();
+  });
+}
 
   function ensureDom() {
     if (root && launcher) return;
