@@ -1857,12 +1857,27 @@ function setPickupOverlayData(fc, items = [], zoneStats = [], zoneHotspots = emp
     pickupMicroHotspotsSourceFingerprint = microFingerprint;
   }
   pickupHasMicroHotspots = !!validatedMicroHotspots.features.length;
-  setPickupPointLayerVisibility(!pickupHasMicroHotspots);
+
+  const hotspotCoveredZoneIds = new Set();
+  for (const feat of validatedZoneHotspots.features) {
+    const zoneId = feat?.properties?.zone_id;
+    if (zoneId != null) hotspotCoveredZoneIds.add(String(zoneId));
+  }
+  for (const feat of validatedMicroHotspots.features) {
+    const zoneId = feat?.properties?.zone_id;
+    if (zoneId != null) hotspotCoveredZoneIds.add(String(zoneId));
+  }
 
   const filteredFeatures = Array.isArray(fc?.features)
-    ? fc.features.filter(() => !pickupHasMicroHotspots)
+    ? fc.features.filter((feat) => {
+      const zoneId = feat?.properties?.zone_id;
+      if (zoneId == null) return true;
+      return !hotspotCoveredZoneIds.has(String(zoneId));
+    })
     : [];
   const filteredPickupPointsFc = { type: "FeatureCollection", features: filteredFeatures };
+  const hasVisiblePickupPoints = filteredPickupPointsFc.features.length > 0;
+  setPickupPointLayerVisibility(hasVisiblePickupPoints);
   const visiblePointsFingerprint = pickupPointsFingerprintFromFeatures(filteredPickupPointsFc);
 
   const src = map?.getSource?.("pickup-points");
@@ -1965,13 +1980,13 @@ async function ensurePickupSourceAndLayers() {
             ["linear"],
             ["coalesce", ["get", "intensity"], 0.35],
             0.00,
-            0.30,
+            0.34,
             0.45,
-            0.40,
+            0.44,
             0.75,
-            0.52,
+            0.56,
             1.00,
-            0.64,
+            0.68,
           ],
         },
       },
@@ -1996,13 +2011,13 @@ async function ensurePickupSourceAndLayers() {
       ["linear"],
       ["coalesce", ["get", "intensity"], 0.35],
       0.00,
-      0.30,
+      0.34,
       0.45,
-      0.40,
+      0.44,
       0.75,
-      0.52,
+      0.56,
       1.00,
-      0.64,
+      0.68,
     ]);
   }
 
@@ -2031,13 +2046,13 @@ async function ensurePickupSourceAndLayers() {
             ["linear"],
             ["coalesce", ["get", "intensity"], 0.35],
             0.00,
-            0.38,
+            0.46,
             0.45,
-            0.50,
+            0.58,
             0.75,
-            0.64,
+            0.70,
             1.00,
-            0.78,
+            0.82,
           ],
         },
       },
@@ -2062,13 +2077,13 @@ async function ensurePickupSourceAndLayers() {
       ["linear"],
       ["coalesce", ["get", "intensity"], 0.35],
       0.00,
-      0.38,
+      0.46,
       0.45,
-      0.50,
+      0.58,
       0.75,
-      0.64,
+      0.70,
       1.00,
-      0.78,
+      0.82,
     ]);
   }
 
@@ -2111,13 +2126,13 @@ async function ensurePickupSourceAndLayers() {
             ["linear"],
             ["coalesce", ["get", "intensity"], 0.35],
             0.00,
-            2.6,
+            2.8,
             0.45,
-            3.4,
+            3.6,
             0.75,
-            4.4,
+            4.6,
             1.00,
-            5.2,
+            5.6,
           ],
         },
       },
@@ -2155,13 +2170,13 @@ async function ensurePickupSourceAndLayers() {
       ["linear"],
       ["coalesce", ["get", "intensity"], 0.35],
       0.00,
-      2.6,
+      2.8,
       0.45,
-      3.4,
+      3.6,
       0.75,
-      4.4,
+      4.6,
       1.00,
-      5.2,
+      5.6,
     ]);
   }
 
@@ -2188,7 +2203,7 @@ async function ensurePickupSourceAndLayers() {
           16, ["+", ["*", ["coalesce", ["get", "intensity"], 0.4], 14], 13]
         ],
         "circle-color": "rgba(0,194,216,0.30)",
-        "circle-opacity": ["case", ["coalesce", ["get", "recommended"], false], 0.68, 0.50],
+        "circle-opacity": ["case", ["coalesce", ["get", "recommended"], false], 0.78, 0.60],
         "circle-blur": 0.85,
       },
     }, "zone-labels");
@@ -2207,7 +2222,7 @@ async function ensurePickupSourceAndLayers() {
           16, ["+", ["*", ["coalesce", ["get", "intensity"], 0.4], 4.6], 4.6]
         ],
         "circle-color": ["case", ["coalesce", ["get", "recommended"], false], "rgba(255,255,255,0.95)", "rgba(222,251,255,0.85)"],
-        "circle-opacity": ["interpolate", ["linear"], ["zoom"], PICKUP_MICRO_HOTSPOT_MIN_ZOOM, 0.86, 16, 0.92],
+        "circle-opacity": ["interpolate", ["linear"], ["zoom"], PICKUP_MICRO_HOTSPOT_MIN_ZOOM, 0.90, 16, 0.92],
         "circle-stroke-color": ["case", ["coalesce", ["get", "recommended"], false], "rgba(0,194,216,1)", "rgba(0,194,216,0.68)"],
         "circle-stroke-width": ["case", ["coalesce", ["get", "recommended"], false], 1.6, 1.0],
       },
