@@ -2605,7 +2605,7 @@ function buildZoneLabelLayoutFeature(feature) {
 
   const override = ZONE_LABEL_OVERRIDES[locationId] || null;
   const poly = getPrimaryPolygonForLabel(feature?.geometry);
-  const orientation = Number.isFinite(Number(override?.rotate)) ? Number(override.rotate) : estimatePolygonOrientationDegrees(poly);
+  const orientation = 0;
   const sizeBucket = estimateZoneLabelSizeBucket(poly);
 
   const shortName = override?.label || ZONE_LABEL_SHORT_NAMES[locationId] || normalizeZoneLabelBaseName(zoneName);
