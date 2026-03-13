@@ -4387,6 +4387,12 @@ let communityToken = localStorage.getItem(LS_TOKEN) || "";
 let me = null;
 let lastGpsAccuracyM = null;
 
+function syncAdminPortalSession() {
+  if (typeof window === 'undefined' || !window.AdminPortal) return;
+  window.AdminPortal.setSession?.({ me, token: communityToken });
+  window.AdminPortal.refreshVisibility?.();
+}
+
 // other drivers markers
 const otherMarkers = new Map(); // user_id -> marker
 const driverMarkerVisualSignature = new Map();
@@ -4508,6 +4514,7 @@ function clearAuth() {
   if (authPass) authPass.value = "";
   if (authGhost) authGhost.checked = false;
   setAuthUI(false, "Status: signed out");
+  syncAdminPortalSession();
 }
 
 function authHeaderOK() {
@@ -4528,6 +4535,7 @@ async function loadMe() {
     if (me?.display_name) localStorage.setItem(LS_DISPLAY_NAME, me.display_name);
     syncGhostUI();
     refreshNavNameLabel();
+    syncAdminPortalSession();
     return me;
   } catch (e) {
     console.warn("/me failed:", e);
@@ -4582,6 +4590,7 @@ async function doLogin(email, password, desiredGhostMode) {
   await loadMe();
   await applyPostAuthPreferences({ email, forceGhostSync: true, desiredGhostMode });
   setAuthUI(true, `Status: signed in as ${me?.display_name || me?.email || email}`);
+  syncAdminPortalSession();
 }
 
 async function doSignup(email, password, desiredGhostMode) {
@@ -4596,6 +4605,7 @@ async function doSignup(email, password, desiredGhostMode) {
   await loadMe();
   await applyPostAuthPreferences({ email, forceGhostSync: true, desiredGhostMode });
   setAuthUI(true, `Status: account created • signed in as ${me?.display_name || me?.email || email}`);
+  syncAdminPortalSession();
 }
 
 async function changePassword(oldPwd, newPwd) {
@@ -5482,6 +5492,8 @@ setNavDestination(null);
   } else {
     setAuthUI(false, "Status: signed out");
   }
+
+  syncAdminPortalSession();
 
   // Start GPS AFTER map exists
   startLocationWatch();

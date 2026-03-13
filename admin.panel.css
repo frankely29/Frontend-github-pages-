@@ -1,0 +1,117 @@
+.adminPortalLauncher{
+  position: fixed;
+  right: 16px;
+  bottom: calc(86px + env(safe-area-inset-bottom));
+  z-index: 920;
+  border: 1px solid rgba(15,23,42,0.25);
+  background: #fff;
+  color: #0f172a;
+  border-radius: 999px;
+  padding: 9px 12px;
+  font: 900 12px/1.1 system-ui,-apple-system,Segoe UI,Roboto,Arial;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.22);
+  cursor: pointer;
+}
+
+.adminPortal{
+  position: fixed;
+  inset: 0;
+  z-index: 2100;
+  background: rgba(2,6,23,0.4);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
+}
+.adminPortal.open{ display:flex; }
+
+.adminPanel{
+  width: min(1120px, 96vw);
+  max-height: min(86vh, 900px);
+  overflow: hidden;
+  background: #f8fafc;
+  border-radius: 14px;
+  border: 1px solid rgba(15,23,42,0.18);
+  box-shadow: 0 20px 50px rgba(15,23,42,0.4);
+  display:flex;
+  flex-direction: column;
+}
+
+.adminPanelHeader{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(15,23,42,0.12);
+  background: #fff;
+}
+.adminPanelHeader h2{ margin:0; font-size:16px; }
+.adminHeaderActions{ display:flex; gap:8px; }
+.adminBtn{
+  border:1px solid rgba(15,23,42,0.2);
+  border-radius:10px;
+  background:#fff;
+  padding: 6px 10px;
+  font-weight: 800;
+  cursor:pointer;
+}
+
+.adminTabs{
+  display:flex;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(15,23,42,0.12);
+  overflow-x: auto;
+  background:#fff;
+}
+.adminTabBtn{
+  border:1px solid rgba(15,23,42,0.2);
+  background:#fff;
+  border-radius:999px;
+  padding: 6px 10px;
+  font-weight:800;
+  cursor:pointer;
+  white-space: nowrap;
+}
+.adminTabBtn.active{ background:#0ea5e9; color:#fff; border-color:#0284c7; }
+
+.adminPanelBody{
+  overflow:auto;
+  padding: 12px;
+  color:#0f172a;
+}
+.adminGrid{ display:grid; grid-template-columns: repeat(auto-fit,minmax(170px,1fr)); gap:10px; margin-bottom: 12px; }
+.adminGrid.two{ grid-template-columns: repeat(auto-fit,minmax(280px,1fr)); }
+.adminCard{
+  background:#fff;
+  border:1px solid rgba(15,23,42,0.12);
+  border-radius:12px;
+  padding:10px;
+}
+.adminCardLabel{ font-size:12px; opacity:.8; font-weight:700; }
+.adminCardValue{ margin-top:3px; font-size:20px; font-weight:900; }
+
+.adminSection{ background:#fff; border:1px solid rgba(15,23,42,0.12); border-radius:12px; padding:10px; margin-bottom:10px; }
+.adminSectionHead{ display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:6px; }
+.adminSection h3,.adminSection h4{ margin:0 0 8px 0; }
+.adminInput{ border:1px solid rgba(15,23,42,0.2); border-radius:10px; padding:7px 9px; min-width:230px; }
+.adminMuted{ font-size:12px; opacity:.7; font-weight:700; }
+
+.adminTableWrap{ overflow:auto; border:1px solid rgba(15,23,42,0.1); border-radius:10px; }
+.adminTable{ width:100%; border-collapse:collapse; font-size:12px; }
+.adminTable th, .adminTable td{ border-bottom:1px solid rgba(15,23,42,0.08); padding:7px 8px; text-align:left; white-space: nowrap; }
+.adminTable th{ background:#f1f5f9; font-size:11px; text-transform:uppercase; letter-spacing:.02em; }
+
+.adminPill{ border-radius:999px; padding:2px 7px; font-size:11px; font-weight:800; display:inline-block; }
+.adminPill.yes{ background:rgba(16,185,129,0.18); color:#065f46; }
+.adminPill.no{ background:rgba(148,163,184,0.2); color:#334155; }
+
+.adminKV{ display:flex; justify-content:space-between; gap:8px; border-bottom:1px dashed rgba(15,23,42,0.15); padding:5px 0; font-size:12px; }
+.adminDot{ width:10px; height:10px; border-radius:999px; display:inline-block; background:#cbd5e1; }
+.adminDot.on{ background:#10b981; }
+
+.adminLoading,.adminError,.adminEmpty{ background:#fff; border:1px solid rgba(15,23,42,0.12); border-radius:12px; padding:16px; font-weight:700; }
+.adminError{ border-color: rgba(220,38,38,0.35); color:#991b1b; background:#fff1f2; }
+.adminPre{ margin:0; white-space:pre-wrap; word-break:break-word; font-size:11px; line-height:1.35; }
