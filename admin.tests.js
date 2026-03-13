@@ -24,6 +24,7 @@
         { key: 'trips-recent', label: 'Test Recent Trips', path: '/admin/tests/trips-recent' },
         { key: 'police-reports', label: 'Test Police Reports', path: '/admin/tests/police-reports' },
         { key: 'pickup-reports', label: 'Test Pickup Reports', path: '/admin/tests/pickup-reports' },
+        { key: 'pickup-hotspots-live', label: 'Test Pickup Hotspot Generation', path: '/events/pickups/recent?limit=200&zone_sample_limit=100&debug=1' },
       ],
     },
     {
@@ -62,6 +63,77 @@
   function safeNumber(value) {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  function parsePickupHotspotResult(response) {
+    const data = response?.data || {};
+    const debug = data.pickup_hotspot_debug || {};
+    const zones = Array.isArray(debug.zone_debug) ? debug.zone_debug : [];
+
+    const qualifiedZones = zones.filter((zone) => {
+      const pointCount = safeNumber(zone?.point_count);
+      const minThreshold = safeNumber(zone?.min_points_threshold);
+      return pointCount >= minThreshold && minThreshold > 0;
+    });
+
+    const renderedQualifiedZones = qualifiedZones.filter((zone) => {
+      const zoneHotspotCount = safeNumber(zone?.hotspot_feature_count);
+      const zoneMicroCount = safeNumber(zone?.micro_hotspot_count);
+      return zoneHotspotCount > 0 || zoneMicroCount > 0 || zone?.feature_emitted === true;
+    });
+
+    const zoneHotspotCount = zones.reduce((total, zone) => total + safeNumber(zone?.hotspot_feature_count), 0);
+    const topLevelMicroCount = Array.isArray(debug.micro_hotspots)
+      ? debug.micro_hotspots.length
+      : safeNumber(debug.micro_hotspot_count);
+
+    const emittedMicroFromZones = zones.reduce((total, zone) => total + safeNumber(zone?.micro_hotspot_count), 0);
+    const orphanMicroCount = Math.max(topLevelMicroCount - emittedMicroFromZones, 0);
+
+    const qualifiedZoneIds = qualifiedZones.map((zone) => zone?.zone_id).filter((id) => id !== undefined && id !== null);
+    const renderedZoneIds = renderedQualifiedZones.map((zone) => zone?.zone_id).filter((id) => id !== undefined && id !== null);
+
+    const globalErrors = Array.isArray(debug.global_errors) ? debug.global_errors : [];
+    const zoneErrors = zones
+      .filter((zone) => Array.isArray(zone?.errors) && zone.errors.length)
+      .map((zone) => `${zone.zone_id}: ${zone.errors.join('; ')}`);
+
+    const zone14 = zones.find((zone) => safeNumber(zone?.zone_id) === 14);
+    const zone14Line = zone14
+      ? `Zone 14: qualified=${safeNumber(zone14?.point_count) >= safeNumber(zone14?.min_points_threshold) && safeNumber(zone14?.min_points_threshold) > 0} feature_emitted=${zone14?.feature_emitted === true} method=${zone14?.render_method || zone14?.method || 'n/a'}`
+      : 'Zone 14: no debug data';
+
+    let status = 'pass';
+    let reason = '';
+
+    if (!qualifiedZones.length) {
+      status = 'pass';
+      reason = 'No zones currently meet the threshold.';
+    } else if (renderedQualifiedZones.length) {
+      status = 'pass';
+      reason = 'Qualified zone hotspot output detected.';
+    } else {
+      status = 'fail';
+      reason = 'Qualified zones found but no hotspot output emitted for them.';
+    }
+
+    const detailParts = [
+      reason,
+      `Qualified zones: ${qualifiedZoneIds.length ? qualifiedZoneIds.join(', ') : 'none'}`,
+      `Rendered zones: ${renderedZoneIds.length ? renderedZoneIds.join(', ') : 'none'}`,
+      `Zone hotspots: ${zoneHotspotCount}`,
+      `Micro hotspots: ${topLevelMicroCount}`,
+      `Orphan micro hotspots: ${orphanMicroCount}`,
+      zone14Line,
+    ];
+
+    if (globalErrors.length) detailParts.push(`Global errors: ${globalErrors.join(' | ')}`);
+    if (zoneErrors.length) detailParts.push(`Zone errors: ${zoneErrors.join(' • ')}`);
+
+    return {
+      status,
+      detail: detailParts.join(' • '),
+    };
   }
 
   function collectRadioSignals(scope) {
@@ -145,6 +217,12 @@
         status = 'pass';
         detail = 'Frame API returned usable data.';
       }
+    }
+
+    if (test.key === 'pickup-hotspots-live') {
+      const parsed = parsePickupHotspotResult(response);
+      status = parsed.status;
+      detail = parsed.detail;
     }
 
     return {
