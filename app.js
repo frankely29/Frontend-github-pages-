@@ -85,7 +85,7 @@ const PICKUP_RECENT_LIMIT = 30;
 const PICKUP_ZONE_SAMPLE_LIMIT = 100;
 const PICKUP_REFRESH_DEBOUNCE_MS = 350;
 const PICKUP_FETCH_COOLDOWN_MS = 1200;
-const PICKUP_MICRO_HOTSPOT_MIN_ZOOM = 10.4;
+const PICKUP_MICRO_HOTSPOT_MIN_ZOOM = 10.2;
 
 // Chat state variables were used by the built‑in chat implementation.  They have
 // been migrated to app.part2.js.  Leaving these commented prevents undefined
@@ -1980,13 +1980,13 @@ async function ensurePickupSourceAndLayers() {
             ["linear"],
             ["coalesce", ["get", "intensity"], 0.35],
             0.00,
-            0.34,
+            0.38,
             0.45,
-            0.44,
+            0.50,
             0.75,
-            0.56,
+            0.62,
             1.00,
-            0.68,
+            0.74,
           ],
         },
       },
@@ -2011,13 +2011,13 @@ async function ensurePickupSourceAndLayers() {
       ["linear"],
       ["coalesce", ["get", "intensity"], 0.35],
       0.00,
-      0.34,
+      0.38,
       0.45,
-      0.44,
+      0.50,
       0.75,
-      0.56,
+      0.62,
       1.00,
-      0.68,
+      0.74,
     ]);
   }
 
@@ -2046,13 +2046,13 @@ async function ensurePickupSourceAndLayers() {
             ["linear"],
             ["coalesce", ["get", "intensity"], 0.35],
             0.00,
-            0.46,
+            0.54,
             0.45,
-            0.58,
+            0.66,
             0.75,
-            0.70,
+            0.78,
             1.00,
-            0.82,
+            0.88,
           ],
         },
       },
@@ -2077,13 +2077,13 @@ async function ensurePickupSourceAndLayers() {
       ["linear"],
       ["coalesce", ["get", "intensity"], 0.35],
       0.00,
-      0.46,
+      0.54,
       0.45,
-      0.58,
+      0.66,
       0.75,
-      0.70,
+      0.78,
       1.00,
-      0.82,
+      0.88,
     ]);
   }
 
@@ -2126,13 +2126,13 @@ async function ensurePickupSourceAndLayers() {
             ["linear"],
             ["coalesce", ["get", "intensity"], 0.35],
             0.00,
-            2.8,
+            3.0,
             0.45,
-            3.6,
+            4.0,
             0.75,
-            4.6,
+            5.0,
             1.00,
-            5.6,
+            6.0,
           ],
         },
       },
@@ -2170,13 +2170,13 @@ async function ensurePickupSourceAndLayers() {
       ["linear"],
       ["coalesce", ["get", "intensity"], 0.35],
       0.00,
-      2.8,
+      3.0,
       0.45,
-      3.6,
+      4.0,
       0.75,
-      4.6,
+      5.0,
       1.00,
-      5.6,
+      6.0,
     ]);
   }
 
@@ -2203,7 +2203,7 @@ async function ensurePickupSourceAndLayers() {
           16, ["+", ["*", ["coalesce", ["get", "intensity"], 0.4], 14], 13]
         ],
         "circle-color": "rgba(0,194,216,0.30)",
-        "circle-opacity": ["case", ["coalesce", ["get", "recommended"], false], 0.78, 0.60],
+        "circle-opacity": ["case", ["coalesce", ["get", "recommended"], false], 0.85, 0.68],
         "circle-blur": 0.85,
       },
     }, "zone-labels");
@@ -2222,7 +2222,7 @@ async function ensurePickupSourceAndLayers() {
           16, ["+", ["*", ["coalesce", ["get", "intensity"], 0.4], 4.6], 4.6]
         ],
         "circle-color": ["case", ["coalesce", ["get", "recommended"], false], "rgba(255,255,255,0.95)", "rgba(222,251,255,0.85)"],
-        "circle-opacity": ["interpolate", ["linear"], ["zoom"], PICKUP_MICRO_HOTSPOT_MIN_ZOOM, 0.90, 16, 0.92],
+        "circle-opacity": ["interpolate", ["linear"], ["zoom"], PICKUP_MICRO_HOTSPOT_MIN_ZOOM, 0.95, 16, 0.92],
         "circle-stroke-color": ["case", ["coalesce", ["get", "recommended"], false], "rgba(0,194,216,1)", "rgba(0,194,216,0.68)"],
         "circle-stroke-width": ["case", ["coalesce", ["get", "recommended"], false], 1.6, 1.0],
       },
