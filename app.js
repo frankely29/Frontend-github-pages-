@@ -1688,6 +1688,18 @@ function extractNestedPickupMicroHotspots(zoneHotspots) {
   return nested;
 }
 
+function countPickupMicroHotspotRows(rawInput) {
+  if (rawInput == null) return 0;
+  if (rawInput?.type === "FeatureCollection" && Array.isArray(rawInput.features)) {
+    return rawInput.features.length;
+  }
+  if (Array.isArray(rawInput)) return rawInput.length;
+  if (Array.isArray(rawInput?.items)) return rawInput.items.length;
+  if (Array.isArray(rawInput?.clusters)) return rawInput.clusters.length;
+  if (Array.isArray(rawInput?.micro_hotspots)) return rawInput.micro_hotspots.length;
+  return 0;
+}
+
 function pickupMicroHotspotsFingerprint(fc) {
   if (!fc || fc.type !== "FeatureCollection" || !Array.isArray(fc.features) || !fc.features.length) {
     return "";
@@ -2467,7 +2479,7 @@ async function refreshPickupOverlay({ force = false } = {}) {
       : fallbackNestedMicroHotspots;
     const zoneHotspotCount = Array.isArray(zoneHotspots?.features) ? zoneHotspots.features.length : 0;
     const nestedMicroHotspotCount = nestedMicroHotspotRows.length;
-    const topLevelMicroHotspotCount = topLevelMicroHotspots?.features?.length ?? 0;
+    const topLevelMicroHotspotCount = countPickupMicroHotspotRows(topLevelMicroHotspotPayload);
     const normalizedMicroHotspotCount = microHotspots?.features?.length ?? 0;
     const usingMicroHotspots = normalizedMicroHotspotCount > 0;
     window.__pickupDebug = {
