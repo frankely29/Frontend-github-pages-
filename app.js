@@ -85,6 +85,7 @@ const PICKUP_RECENT_LIMIT = 30;
 const PICKUP_ZONE_SAMPLE_LIMIT = 100;
 const PICKUP_REFRESH_DEBOUNCE_MS = 350;
 const PICKUP_FETCH_COOLDOWN_MS = 1200;
+const PICKUP_MICRO_HOTSPOT_MIN_ZOOM = 10.2;
 
 // Chat state variables were used by the built‑in chat implementation.  They have
 // been migrated to app.part2.js.  Leaving these commented prevents undefined
@@ -101,6 +102,7 @@ let pickupZoneStats = new Map();
 let pickupHotspotZoneIds = new Set();
 let pickupPointsSourceFingerprint = "";
 let pickupHotspotsSourceFingerprint = "";
+let pickupMicroHotspotsSourceFingerprint = "";
 let mapPageIsVisible = !document.hidden;
 
 /* =========================================================
@@ -1621,7 +1623,206 @@ function clearPickupOverlayCache() {
   pickupHotspotZoneIds = new Set();
   pickupPointsSourceFingerprint = "";
   pickupHotspotsSourceFingerprint = "";
+  pickupMicroHotspotsSourceFingerprint = "";
   lastPickupFetchKey = "";
+}
+
+function normalizePickupZoneId(value) {
+  if (value == null || value === "") return null;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  return String(n);
+}
+
+function normalizePickupHotspotId(value) {
+  if (value == null || value === "") return "";
+  return String(value);
+}
+
+function normalizePickupHotspotIndex(value) {
+  if (value == null || value === "") return "";
+  const n = Number(value);
+  if (Number.isFinite(n)) return String(n);
+  return String(value);
+}
+
+function pickupHotspotKeyFromParts(zoneId, hotspotId, hotspotIndex) {
+  return [zoneId || "", hotspotId || "", hotspotIndex || ""].join("|");
+}
+
+function pickupHotspotKeyFromProps(props = {}) {
+  const zoneId = normalizePickupZoneId(props.zone_id ?? props.zoneId ?? props.location_id ?? props.LocationID);
+  const hotspotId = normalizePickupHotspotId(props.hotspot_id ?? props.hotspotId ?? props.pickup_hotspot_id);
+  const hotspotIndex = normalizePickupHotspotIndex(props.hotspot_index ?? props.hotspotIndex ?? props.pickup_hotspot_index);
+  return pickupHotspotKeyFromParts(zoneId, hotspotId, hotspotIndex);
+}
+
+function normalizePickupMicroHotspots(rawInput, allowedZoneIds = null) {
+  const shouldKeepZone = (zoneId) => {
+    if (!(allowedZoneIds instanceof Set) || allowedZoneIds.size === 0) return true;
+    return zoneId != null && allowedZoneIds.has(zoneId);
+  };
+
+  if (rawInput?.type === "FeatureCollection" && Array.isArray(rawInput.features)) {
+    const features = [];
+    for (const feat of rawInput.features) {
+      if (!feat || feat.type !== "Feature") continue;
+      const coords = Array.isArray(feat?.geometry?.coordinates) ? feat.geometry.coordinates : [];
+      const lng = Number(coords?.[0] ?? NaN);
+      const lat = Number(coords?.[1] ?? NaN);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+      const props = (feat?.properties && typeof feat.properties === "object") ? feat.properties : {};
+      const zoneId = normalizePickupZoneId(props.zone_id ?? props.zoneId ?? props.location_id ?? props.LocationID);
+      if (!shouldKeepZone(zoneId)) continue;
+      features.push({
+        type: "Feature",
+        geometry: { type: "Point", coordinates: [lng, lat] },
+        properties: {
+          zone_id: zoneId,
+          hotspot_id: normalizePickupHotspotId(props.hotspot_id ?? props.hotspotId ?? props.pickup_hotspot_id),
+          hotspot_index: normalizePickupHotspotIndex(props.hotspot_index ?? props.hotspotIndex ?? props.pickup_hotspot_index),
+          intensity: Number.isFinite(Number(props.intensity ?? NaN)) ? Number(props.intensity) : 0.4,
+          confidence: Number.isFinite(Number(props.confidence ?? NaN)) ? Number(props.confidence) : null,
+          radius_m: Number.isFinite(Number(props.radius_m ?? NaN)) ? Number(props.radius_m) : 120,
+          event_count: Number.isFinite(Number(props.event_count ?? NaN)) ? Number(props.event_count) : null,
+          recommended: !!props.recommended,
+          zone_name: props.zone_name ?? "",
+          borough: props.borough ?? "",
+        },
+      });
+    }
+    return { type: "FeatureCollection", features };
+  }
+
+  const out = [];
+  const rows = Array.isArray(rawInput)
+    ? rawInput
+    : (Array.isArray(rawInput?.items)
+      ? rawInput.items
+      : (Array.isArray(rawInput?.clusters)
+        ? rawInput.clusters
+        : (Array.isArray(rawInput?.micro_hotspots) ? rawInput.micro_hotspots : [])));
+
+  for (const row of rows) {
+    if (!row || typeof row !== "object") continue;
+    const props = (row?.properties && typeof row.properties === "object") ? row.properties : row;
+    const coords = Array.isArray(row?.geometry?.coordinates) ? row.geometry.coordinates : [];
+    const lat = Number(props.center_lat ?? props.lat ?? props.latitude ?? coords?.[1] ?? NaN);
+    const lng = Number(props.center_lng ?? props.lng ?? props.lon ?? props.longitude ?? coords?.[0] ?? NaN);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+    const intensityRaw = Number(props.intensity ?? props.live_strength ?? props.final_score ?? props.hotspot_score ?? NaN);
+    const confidenceRaw = Number(props.confidence ?? NaN);
+    const radiusRaw = Number(props.radius_m ?? props.radius ?? props.radius_meters ?? NaN);
+    const zoneId = normalizePickupZoneId(props.zone_id ?? props.zoneId ?? props.location_id ?? props.LocationID ?? row?.zone_id ?? row?.zoneId ?? row?.location_id ?? row?.LocationID);
+    if (!shouldKeepZone(zoneId)) continue;
+    out.push({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [lng, lat] },
+      properties: {
+        zone_id: zoneId,
+        hotspot_id: normalizePickupHotspotId(props.hotspot_id ?? props.hotspotId ?? props.pickup_hotspot_id ?? row?.hotspot_id ?? row?.hotspotId),
+        hotspot_index: normalizePickupHotspotIndex(props.hotspot_index ?? props.hotspotIndex ?? props.pickup_hotspot_index ?? row?.hotspot_index ?? row?.hotspotIndex),
+        intensity: Number.isFinite(intensityRaw) ? intensityRaw : 0.4,
+        confidence: Number.isFinite(confidenceRaw) ? confidenceRaw : null,
+        radius_m: Number.isFinite(radiusRaw) ? radiusRaw : 120,
+        event_count: Number.isFinite(Number(props.event_count ?? props.count ?? NaN)) ? Number(props.event_count ?? props.count) : null,
+        recommended: !!props.recommended,
+        zone_name: props.zone_name ?? "",
+        borough: props.borough ?? "",
+      },
+    });
+  }
+
+  return { type: "FeatureCollection", features: out };
+}
+
+function extractNestedPickupMicroHotspots(zoneHotspots, allowedZoneIds = null) {
+  if (!zoneHotspots || zoneHotspots.type !== "FeatureCollection" || !Array.isArray(zoneHotspots.features)) {
+    return [];
+  }
+
+  const shouldKeepZone = (zoneId) => {
+    if (!(allowedZoneIds instanceof Set) || allowedZoneIds.size === 0) return true;
+    return zoneId != null && allowedZoneIds.has(zoneId);
+  };
+
+  const nested = [];
+  for (const feat of zoneHotspots.features) {
+    const parentZoneId = normalizePickupZoneId(feat?.properties?.zone_id ?? feat?.properties?.zoneId ?? feat?.properties?.location_id ?? feat?.properties?.LocationID);
+    const parentHotspotId = normalizePickupHotspotId(feat?.properties?.hotspot_id ?? feat?.properties?.hotspotId ?? feat?.properties?.pickup_hotspot_id);
+    const parentHotspotIndex = normalizePickupHotspotIndex(feat?.properties?.hotspot_index ?? feat?.properties?.hotspotIndex ?? feat?.properties?.pickup_hotspot_index);
+    const microHotspots = feat?.properties?.micro_hotspots;
+    if (!Array.isArray(microHotspots)) continue;
+    for (const entry of microHotspots) {
+      if (!entry || typeof entry !== "object") continue;
+      const props = (entry?.properties && typeof entry.properties === "object") ? entry.properties : null;
+      const entryZoneId = normalizePickupZoneId(
+        props?.zone_id ?? props?.zoneId ?? props?.location_id ?? props?.LocationID
+        ?? entry?.zone_id ?? entry?.zoneId ?? entry?.location_id ?? entry?.LocationID
+      );
+      if (!entryZoneId && parentZoneId) {
+        if (props) props.zone_id = parentZoneId;
+        else entry.zone_id = parentZoneId;
+      }
+      const resolvedZoneId = entryZoneId || parentZoneId;
+      if (!shouldKeepZone(resolvedZoneId)) continue;
+      if (props) {
+        if (props.hotspot_id == null || props.hotspot_id === "") props.hotspot_id = parentHotspotId;
+        if (props.hotspot_index == null || props.hotspot_index === "") props.hotspot_index = parentHotspotIndex;
+      } else {
+        if (entry.hotspot_id == null || entry.hotspot_id === "") entry.hotspot_id = parentHotspotId;
+        if (entry.hotspot_index == null || entry.hotspot_index === "") entry.hotspot_index = parentHotspotIndex;
+      }
+      nested.push(entry);
+    }
+  }
+  return nested;
+}
+
+function countPickupMicroHotspotRows(rawInput) {
+  if (rawInput == null) return 0;
+  if (rawInput?.type === "FeatureCollection" && Array.isArray(rawInput.features)) {
+    return rawInput.features.length;
+  }
+  if (Array.isArray(rawInput)) return rawInput.length;
+  if (Array.isArray(rawInput?.items)) return rawInput.items.length;
+  if (Array.isArray(rawInput?.clusters)) return rawInput.clusters.length;
+  if (Array.isArray(rawInput?.micro_hotspots)) return rawInput.micro_hotspots.length;
+  return 0;
+}
+
+function pickupMicroHotspotsFingerprint(fc) {
+  if (!fc || fc.type !== "FeatureCollection" || !Array.isArray(fc.features) || !fc.features.length) {
+    return "";
+  }
+  const rows = [];
+  for (const feat of fc.features) {
+    const props = feat?.properties || {};
+    const coords = feat?.geometry?.coordinates || [];
+    rows.push([
+      String(props.zone_id ?? ""),
+      String(props.hotspot_id ?? ""),
+      String(props.hotspot_index ?? ""),
+      String(Number(coords?.[0] ?? NaN)),
+      String(Number(coords?.[1] ?? NaN)),
+      String(Number(props.intensity ?? NaN)),
+      String(Number(props.confidence ?? NaN)),
+      String(Number(props.radius_m ?? NaN)),
+      props.recommended ? "1" : "0",
+    ].join("|"));
+  }
+  rows.sort();
+  return rows.join(";;");
+}
+
+function setPickupPointLayerVisibility(visible) {
+  if (!map) return;
+  const value = visible ? "visible" : "none";
+  for (const layerId of ["pickup-heat", "pickup-circles-glow", "pickup-circles"]) {
+    if (map.getLayer(layerId)) {
+      try { map.setLayoutProperty(layerId, "visibility", value); } catch {}
+    }
+  }
 }
 
 function pickupHotspotsFingerprint(fc) {
@@ -1635,10 +1836,14 @@ function pickupHotspotsFingerprint(fc) {
     if (zoneId == null) continue;
     const sampleSize = Number(props?.sample_size ?? NaN);
     const intensity = Number(props?.intensity ?? NaN);
+    const hotspotId = normalizePickupHotspotId(props?.hotspot_id ?? props?.hotspotId ?? props?.pickup_hotspot_id);
+    const hotspotIndex = normalizePickupHotspotIndex(props?.hotspot_index ?? props?.hotspotIndex ?? props?.pickup_hotspot_index);
     const signature = props?.signature;
     if (signature != null && signature !== "") {
       rows.push([
         String(zoneId),
+        hotspotId,
+        hotspotIndex,
         String(signature),
         Number.isFinite(sampleSize) ? String(sampleSize) : "",
         Number.isFinite(intensity) ? String(intensity) : "",
@@ -1648,6 +1853,8 @@ function pickupHotspotsFingerprint(fc) {
     const latestCreatedAt = Number(props?.latest_created_at ?? NaN);
     rows.push([
       String(zoneId),
+      hotspotId,
+      hotspotIndex,
       "",
       Number.isFinite(sampleSize) ? String(sampleSize) : "",
       Number.isFinite(latestCreatedAt) ? String(latestCreatedAt) : "",
@@ -1673,7 +1880,7 @@ function pickupPointsFingerprintFromFeatures(fc) {
   return rows.join(";;");
 }
 
-function setPickupOverlayData(fc, items = [], zoneStats = [], zoneHotspots = emptyGeojson()) {
+function setPickupOverlayData(fc, items = [], zoneStats = [], zoneHotspots = emptyGeojson(), microHotspots = emptyGeojson()) {
   pickupZoneStats = new Map();
   pickupHotspotZoneIds = new Set();
 
@@ -1727,9 +1934,23 @@ function setPickupOverlayData(fc, items = [], zoneStats = [], zoneHotspots = emp
     ? zoneHotspots
     : emptyGeojson();
 
+  const hotspotCoveredZoneIds = new Set();
+  const zoneHotspotZoneIds = new Set();
+  const visibleHotspotKeys = new Set();
+  const hotspotIds = new Set();
+  const perZoneHotspotCounts = {};
   for (const feat of validatedZoneHotspots.features) {
-    const zoneId = feat?.properties?.zone_id;
-    if (zoneId != null) pickupHotspotZoneIds.add(String(zoneId));
+    const props = feat?.properties || {};
+    const zoneId = normalizePickupZoneId(props.zone_id ?? props.zoneId ?? props.location_id ?? props.LocationID);
+    if (zoneId == null) continue;
+    const hotspotId = normalizePickupHotspotId(props.hotspot_id ?? props.hotspotId ?? props.pickup_hotspot_id);
+    const hotspotIndex = normalizePickupHotspotIndex(props.hotspot_index ?? props.hotspotIndex ?? props.pickup_hotspot_index);
+    hotspotCoveredZoneIds.add(zoneId);
+    zoneHotspotZoneIds.add(zoneId);
+    pickupHotspotZoneIds.add(zoneId);
+    visibleHotspotKeys.add(pickupHotspotKeyFromParts(zoneId, hotspotId, hotspotIndex));
+    if (hotspotId) hotspotIds.add(hotspotId);
+    perZoneHotspotCounts[zoneId] = (perZoneHotspotCounts[zoneId] || 0) + 1;
   }
 
   const hotspotFingerprint = pickupHotspotsFingerprint(validatedZoneHotspots);
@@ -1739,13 +1960,61 @@ function setPickupOverlayData(fc, items = [], zoneStats = [], zoneHotspots = emp
     pickupHotspotsSourceFingerprint = hotspotFingerprint;
   }
 
-  const filteredFeatures = Array.isArray(fc?.features)
-    ? fc.features.filter((feat) => {
-      const zoneId = feat?.properties?.zone_id;
-      return zoneId == null || !pickupHotspotZoneIds.has(String(zoneId));
-    })
-    : [];
+  const rawMicroHotspots = (microHotspots && microHotspots.type === "FeatureCollection" && Array.isArray(microHotspots.features))
+    ? microHotspots
+    : emptyGeojson();
+  const normalizedMicroHotspots = normalizePickupMicroHotspots(rawMicroHotspots, hotspotCoveredZoneIds);
+  const validatedMicroHotspots = {
+    type: "FeatureCollection",
+    features: (normalizedMicroHotspots.features || []).filter((feat) => {
+      const key = pickupHotspotKeyFromProps(feat?.properties || {});
+      return visibleHotspotKeys.has(key);
+    }),
+  };
+
+  const microFingerprint = pickupMicroHotspotsFingerprint(validatedMicroHotspots);
+  const microSrc = map?.getSource?.("pickup-micro-hotspots");
+  if (microSrc && typeof microSrc.setData === "function" && microFingerprint !== pickupMicroHotspotsSourceFingerprint) {
+    microSrc.setData(validatedMicroHotspots);
+    pickupMicroHotspotsSourceFingerprint = microFingerprint;
+  }
+  const microHotspotZoneIds = new Set();
+
+  for (const feat of validatedMicroHotspots.features) {
+    const zoneId = normalizePickupZoneId(feat?.properties?.zone_id ?? feat?.properties?.zoneId ?? feat?.properties?.location_id ?? feat?.properties?.LocationID);
+    if (zoneId == null) continue;
+    microHotspotZoneIds.add(zoneId);
+    pickupHotspotZoneIds.add(zoneId);
+  }
+
+  const inputPickupFeatures = Array.isArray(fc?.features) ? fc.features : [];
+  const totalInputPickupDotCount = inputPickupFeatures.length;
+  const filteredFeatures = inputPickupFeatures.filter((feat) => {
+    const zoneId = normalizePickupZoneId(feat?.properties?.zone_id ?? feat?.properties?.zoneId ?? feat?.properties?.location_id ?? feat?.properties?.LocationID);
+    if (zoneId == null) return true;
+    return !hotspotCoveredZoneIds.has(zoneId);
+  });
   const filteredPickupPointsFc = { type: "FeatureCollection", features: filteredFeatures };
+  const hasVisiblePickupPoints = filteredPickupPointsFc.features.length > 0;
+  const remainingPickupDotCount = filteredPickupPointsFc.features.length;
+  const suppressedPickupDotCount = Math.max(0, totalInputPickupDotCount - remainingPickupDotCount);
+  window.__pickupDebug = {
+    coveredZones: Array.from(hotspotCoveredZoneIds || []),
+    zoneHotspotCount: validatedZoneHotspots.features.length,
+    distinctCoveredZoneCount: hotspotCoveredZoneIds.size,
+    hotspotIds: Array.from(hotspotIds),
+    perZoneHotspotCounts,
+    microHotspotCount: validatedMicroHotspots.features.length,
+    hotspotCoveredZoneIds: Array.from(hotspotCoveredZoneIds || []),
+    suppressedZoneIds: Array.from(hotspotCoveredZoneIds || []),
+    totalInputPickupDotCount,
+    suppressedPickupDotCount,
+    remainingPickupDotCount,
+    zoneHotspotZoneIds: Array.from(zoneHotspotZoneIds || []),
+    microHotspotZoneIds: Array.from(microHotspotZoneIds || []),
+    visiblePickupDotCount: filteredPickupPointsFc.features.length,
+  };
+  setPickupPointLayerVisibility(hasVisiblePickupPoints);
   const visiblePointsFingerprint = pickupPointsFingerprintFromFeatures(filteredPickupPointsFc);
 
   const src = map?.getSource?.("pickup-points");
@@ -1756,7 +2025,7 @@ function setPickupOverlayData(fc, items = [], zoneStats = [], zoneHotspots = emp
 }
 
 function clearPickupOverlay() {
-  setPickupOverlayData(emptyGeojson(), [], [], emptyGeojson());
+  setPickupOverlayData(emptyGeojson(), [], [], emptyGeojson(), emptyGeojson());
 }
 
 function formatRelativeAge(tsUnix) {
@@ -1808,6 +2077,10 @@ async function ensurePickupSourceAndLayers() {
     map.addSource("pickup-zone-hotspots", { type: "geojson", data: emptyGeojson() });
   }
 
+  if (!map.getSource("pickup-micro-hotspots")) {
+    map.addSource("pickup-micro-hotspots", { type: "geojson", data: emptyGeojson() });
+  }
+
   const hotspotBeforeLayer = map.getLayer("zones-line")
     ? "zones-line"
     : (map.getLayer("zone-labels") ? "zone-labels" : undefined);
@@ -1831,26 +2104,26 @@ async function ensurePickupSourceAndLayers() {
             ["linear"],
             ["coalesce", ["get", "intensity"], 0.35],
             0.00,
-            "#fffdf3",
+            "#fffef8",
             0.45,
-            "#fff9de",
+            "#fff9df",
             0.75,
-            "#fff6cf",
+            "#fff4c9",
             1.00,
-            "#fff3c2",
+            "#ffeeb6",
           ],
           "fill-opacity": [
             "interpolate",
             ["linear"],
             ["coalesce", ["get", "intensity"], 0.35],
             0.00,
-            0.18,
+            0.52,
             0.45,
-            0.24,
+            0.64,
             0.75,
-            0.30,
+            0.74,
             1.00,
-            0.36,
+            0.84,
           ],
         },
       },
@@ -1862,26 +2135,26 @@ async function ensurePickupSourceAndLayers() {
       ["linear"],
       ["coalesce", ["get", "intensity"], 0.35],
       0.00,
-      "#fffdf3",
+      "#fffef8",
       0.45,
-      "#fff9de",
+      "#fff9df",
       0.75,
-      "#fff6cf",
+      "#fff4c9",
       1.00,
-      "#fff3c2",
+      "#ffeeb6",
     ]);
     map.setPaintProperty("pickup-zone-hotspots-underpaint", "fill-opacity", [
       "interpolate",
       ["linear"],
       ["coalesce", ["get", "intensity"], 0.35],
       0.00,
-      0.18,
+      0.52,
       0.45,
-      0.24,
+      0.64,
       0.75,
-      0.30,
+      0.74,
       1.00,
-      0.36,
+      0.84,
     ]);
   }
 
@@ -1897,26 +2170,26 @@ async function ensurePickupSourceAndLayers() {
             ["linear"],
             ["coalesce", ["get", "intensity"], 0.35],
             0.00,
-            "#8df4ff",
+            "#fff7bd",
             0.45,
-            "#4ce4f2",
+            "#ffe781",
             0.75,
-            "#17d3e6",
+            "#ffd94d",
             1.00,
-            "#00c2d8",
+            "#ffc92b",
           ],
           "fill-opacity": [
             "interpolate",
             ["linear"],
             ["coalesce", ["get", "intensity"], 0.35],
             0.00,
-            0.18,
+            0.46,
             0.45,
-            0.28,
+            0.58,
             0.75,
-            0.38,
+            0.70,
             1.00,
-            0.50,
+            0.80,
           ],
         },
       },
@@ -1928,26 +2201,26 @@ async function ensurePickupSourceAndLayers() {
       ["linear"],
       ["coalesce", ["get", "intensity"], 0.35],
       0.00,
-      "#8df4ff",
+      "#fff7bd",
       0.45,
-      "#4ce4f2",
+      "#ffe781",
       0.75,
-      "#17d3e6",
+      "#ffd94d",
       1.00,
-      "#00c2d8",
+      "#ffc92b",
     ]);
     map.setPaintProperty("pickup-zone-hotspots-fill", "fill-opacity", [
       "interpolate",
       ["linear"],
       ["coalesce", ["get", "intensity"], 0.35],
       0.00,
-      0.18,
+      0.46,
       0.45,
-      0.28,
+      0.58,
       0.75,
-      0.38,
+      0.70,
       1.00,
-      0.50,
+      0.80,
     ]);
   }
 
@@ -1964,39 +2237,39 @@ async function ensurePickupSourceAndLayers() {
             ["linear"],
             ["coalesce", ["get", "intensity"], 0.35],
             0.00,
-            "#f8ffff",
+            "#fffbe0",
             0.45,
-            "#dfffff",
+            "#ffef9c",
             0.75,
-            "#b8fbff",
+            "#ffe16e",
             1.00,
-            "#8df4ff",
+            "#ffd03e",
           ],
           "line-opacity": [
             "interpolate",
             ["linear"],
             ["coalesce", ["get", "intensity"], 0.35],
             0.00,
-            0.72,
+            0.88,
             0.45,
-            0.82,
+            0.94,
             0.75,
-            0.90,
+            0.97,
             1.00,
-            0.96,
+            0.99,
           ],
           "line-width": [
             "interpolate",
             ["linear"],
             ["coalesce", ["get", "intensity"], 0.35],
             0.00,
-            1.8,
-            0.45,
-            2.4,
-            0.75,
-            3.0,
-            1.00,
             3.6,
+            0.45,
+            4.8,
+            0.75,
+            6.4,
+            1.00,
+            7.6,
           ],
         },
       },
@@ -2008,39 +2281,39 @@ async function ensurePickupSourceAndLayers() {
       ["linear"],
       ["coalesce", ["get", "intensity"], 0.35],
       0.00,
-      "#f8ffff",
+      "#fffbe0",
       0.45,
-      "#dfffff",
+      "#ffef9c",
       0.75,
-      "#b8fbff",
+      "#ffe16e",
       1.00,
-      "#8df4ff",
+      "#ffd03e",
     ]);
     map.setPaintProperty("pickup-zone-hotspots-line", "line-opacity", [
       "interpolate",
       ["linear"],
       ["coalesce", ["get", "intensity"], 0.35],
       0.00,
-      0.72,
+      0.88,
       0.45,
-      0.82,
+      0.94,
       0.75,
-      0.90,
+      0.97,
       1.00,
-      0.96,
+      0.99,
     ]);
     map.setPaintProperty("pickup-zone-hotspots-line", "line-width", [
       "interpolate",
       ["linear"],
       ["coalesce", ["get", "intensity"], 0.35],
       0.00,
-      1.8,
-      0.45,
-      2.4,
-      0.75,
-      3.0,
-      1.00,
       3.6,
+      0.45,
+      4.8,
+      0.75,
+      6.4,
+      1.00,
+      7.6,
     ]);
   }
 
@@ -2052,6 +2325,65 @@ async function ensurePickupSourceAndLayers() {
   }
   if (map.getLayer("pickup-zone-hotspots-line")) {
     map.moveLayer("pickup-zone-hotspots-line", hotspotBeforeLayer);
+  }
+
+  if (!map.getLayer("pickup-micro-hotspots-glow")) {
+    map.addLayer({
+      id: "pickup-micro-hotspots-glow",
+      type: "circle",
+      source: "pickup-micro-hotspots",
+      minzoom: PICKUP_MICRO_HOTSPOT_MIN_ZOOM,
+      paint: {
+        "circle-radius": [
+          "interpolate", ["linear"], ["zoom"],
+          PICKUP_MICRO_HOTSPOT_MIN_ZOOM, ["case", ["coalesce", ["get", "recommended"], false], 5.8, 4.0],
+          16, ["case", ["coalesce", ["get", "recommended"], false], 8.0, 5.2]
+        ],
+        "circle-color": ["case", ["coalesce", ["get", "recommended"], false], "rgba(255,215,79,0.16)", "rgba(255,215,79,0.06)"],
+        "circle-opacity": ["case", ["coalesce", ["get", "recommended"], false], 0.56, 0.20],
+        "circle-blur": 0.7,
+      },
+    }, "zone-labels");
+  }
+
+  if (!map.getLayer("pickup-micro-hotspots-core")) {
+    map.addLayer({
+      id: "pickup-micro-hotspots-core",
+      type: "circle",
+      source: "pickup-micro-hotspots",
+      minzoom: PICKUP_MICRO_HOTSPOT_MIN_ZOOM,
+      paint: {
+        "circle-radius": [
+          "interpolate", ["linear"], ["zoom"],
+          PICKUP_MICRO_HOTSPOT_MIN_ZOOM, ["case", ["coalesce", ["get", "recommended"], false], 2.8, 1.7],
+          16, ["case", ["coalesce", ["get", "recommended"], false], 4.2, 2.4]
+        ],
+        "circle-color": ["case", ["coalesce", ["get", "recommended"], false], "rgba(255,255,255,0.98)", "rgba(255,243,199,0.62)"],
+        "circle-opacity": ["case", ["coalesce", ["get", "recommended"], false], 0.98, 0.36],
+        "circle-stroke-color": ["case", ["coalesce", ["get", "recommended"], false], "rgba(255,190,46,1)", "rgba(255,190,46,0.45)"],
+        "circle-stroke-width": ["case", ["coalesce", ["get", "recommended"], false], 1.0, 0.6],
+      },
+    }, "zone-labels");
+  }
+
+  if (!map.getLayer("pickup-micro-hotspots-ring")) {
+    map.addLayer({
+      id: "pickup-micro-hotspots-ring",
+      type: "circle",
+      source: "pickup-micro-hotspots",
+      minzoom: 11.0,
+      paint: {
+        "circle-radius": [
+          "interpolate", ["linear"], ["zoom"],
+          PICKUP_MICRO_HOTSPOT_MIN_ZOOM, ["case", ["coalesce", ["get", "recommended"], false], 6.8, 5.0],
+          16, ["case", ["coalesce", ["get", "recommended"], false], 9.6, 6.8]
+        ],
+        "circle-color": "rgba(0,0,0,0)",
+        "circle-stroke-color": ["case", ["coalesce", ["get", "recommended"], false], "rgba(255,201,64,0.72)", "rgba(255,201,64,0.34)"],
+        "circle-stroke-width": ["case", ["coalesce", ["get", "recommended"], false], 1.0, 0.6],
+        "circle-opacity": ["case", ["coalesce", ["get", "recommended"], false], 0.46, 0.22],
+      },
+    }, "zone-labels");
   }
 
   if (!map.getLayer("pickup-heat")) {
@@ -2155,7 +2487,7 @@ async function ensurePickupSourceAndLayers() {
           .setLngLat(e.lngLat)
           .setHTML(`
             <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; font-size:13px;">
-              <div style="font-weight:900; margin-bottom:4px;">Community trip</div>
+              <div style="font-weight:900; margin-bottom:4px;">Recorded trip report</div>
               <div><b>Zone:</b> ${escapeHtml(zoneName || `Zone ${props.zone_id || ""}`)}</div>
               ${borough ? `<div><b>Borough:</b> ${escapeHtml(borough)}</div>` : ""}
               <div><b>When:</b> ${escapeHtml(when)}</div>
@@ -2184,21 +2516,65 @@ async function ensurePickupSourceAndLayers() {
         const borough = (props.borough || "").trim();
         const sampleSize = Number(props.sample_size ?? NaN);
         const safeSampleSize = Number.isFinite(sampleSize) ? sampleSize : 0;
+        const hotspotIndexRaw = Number(props.hotspot_index ?? props.hotspotIndex ?? NaN);
+        const hotspotLabel = Number.isFinite(hotspotIndexRaw) ? `Hotspot #${Math.max(1, Math.round(hotspotIndexRaw) + 1)}` : "Hotspot";
+        const mergedCount = Number(
+          props.merged_component_count
+          ?? props.merged_components_count
+          ?? props.merged_candidates_count
+          ?? props.merged_count
+          ?? NaN
+        );
+        const merged = !!(props.merged || props.was_merged || props.is_merged || (Number.isFinite(mergedCount) && mergedCount > 1));
+        const mergeLine = `<div><b>Merge:</b> ${merged ? "Merged from multiple candidate components" : "Single candidate component"}</div>`;
         new maplibregl.Popup({ closeButton: true, closeOnClick: true, maxWidth: "290px" })
           .setLngLat(e.lngLat)
           .setHTML(`
             <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; font-size:13px;">
-              <div style="font-weight:900; margin-bottom:4px;">Community hotspot</div>
+              <div style="font-weight:900; margin-bottom:4px;">Live hotspot area</div>
               <div><b>Zone:</b> ${escapeHtml(zoneName || `Zone ${props.zone_id || ""}`)}</div>
               ${borough ? `<div><b>Borough:</b> ${escapeHtml(borough)}</div>` : ""}
+              <div><b>${escapeHtml(hotspotLabel)}</b></div>
               <div><b>Sample size:</b> ${safeSampleSize}</div>
-              <div style="margin-top:6px;">Community hotspot from recent recorded trips.</div>
+              ${mergeLine}
+              <div style="margin-top:6px;">Live hotspot area from recent recorded trips.</div>
               <div style="opacity:0.8; margin-top:2px;">Dynamic hotspot from latest ${PICKUP_ZONE_SAMPLE_LIMIT} trips max.</div>
             </div>
           `)
           .addTo(map);
       } catch (err) {
         console.warn("pickup hotspot popup failed:", err);
+      }
+    });
+
+    map.on("mouseenter", "pickup-micro-hotspots-core", () => {
+      try { map.getCanvas().style.cursor = "pointer"; } catch {}
+    });
+    map.on("mouseleave", "pickup-micro-hotspots-core", () => {
+      try { map.getCanvas().style.cursor = ""; } catch {}
+    });
+    map.on("click", "pickup-micro-hotspots-core", (e) => {
+      try {
+        const feat = e?.features?.[0];
+        if (!feat) return;
+        const props = feat.properties || {};
+        const zoneName = (props.zone_name || "").trim();
+        const confidence = Number(props.confidence ?? NaN);
+        const confidenceLine = Number.isFinite(confidence) ? `<div><b>Confidence:</b> ${(Math.max(0, Math.min(1, confidence)) * 100).toFixed(0)}%</div>` : "";
+        const recLine = props.recommended ? `<div><b>Status:</b> Recommended micro-hotspot</div>` : "";
+        new maplibregl.Popup({ closeButton: true, closeOnClick: true, maxWidth: "300px" })
+          .setLngLat(e.lngLat)
+          .setHTML(`
+            <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; font-size:13px;">
+              <div style="font-weight:900; margin-bottom:4px;">Best wait point</div>
+              <div><b>Zone:</b> ${escapeHtml(zoneName || `Zone ${props.zone_id || ""}`)}</div>
+              ${recLine}
+              ${confidenceLine}
+            </div>
+          `)
+          .addTo(map);
+      } catch (err) {
+        console.warn("pickup micro-hotspot popup failed:", err);
       }
     });
   }
@@ -2256,10 +2632,36 @@ async function refreshPickupOverlay({ force = false } = {}) {
     const zoneHotspots = (data?.zone_hotspots && data.zone_hotspots.type === "FeatureCollection" && Array.isArray(data.zone_hotspots.features))
       ? data.zone_hotspots
       : emptyGeojson();
+    const hotspotPolygonZoneIds = new Set();
+    for (const feat of zoneHotspots.features || []) {
+      const zoneId = normalizePickupZoneId(feat?.properties?.zone_id ?? feat?.properties?.zoneId ?? feat?.properties?.location_id ?? feat?.properties?.LocationID);
+      if (zoneId != null) hotspotPolygonZoneIds.add(zoneId);
+    }
+    const topLevelMicroHotspotPayload = data?.micro_hotspots ?? data?.micro_hotspot_clusters ?? data?.hotspot_micro_clusters ?? null;
+    const topLevelMicroHotspots = normalizePickupMicroHotspots(topLevelMicroHotspotPayload, hotspotPolygonZoneIds);
+    const nestedMicroHotspotRows = extractNestedPickupMicroHotspots(zoneHotspots, hotspotPolygonZoneIds);
+    const fallbackNestedMicroHotspots = normalizePickupMicroHotspots(nestedMicroHotspotRows, hotspotPolygonZoneIds);
+    const mergedMicroByKey = new Map();
+    for (const feat of [...(topLevelMicroHotspots.features || []), ...(fallbackNestedMicroHotspots.features || [])]) {
+      const key = [
+        String(feat?.properties?.zone_id ?? ""),
+        String(feat?.properties?.hotspot_id ?? ""),
+        String(feat?.properties?.hotspot_index ?? ""),
+      ].join("|");
+      if (!mergedMicroByKey.has(key)) mergedMicroByKey.set(key, feat);
+    }
+    const microHotspots = { type: "FeatureCollection", features: Array.from(mergedMicroByKey.values()) };
+    const zoneHotspotCount = zoneHotspots?.features?.length ?? 0;
+    const normalizedMicroHotspotCount = microHotspots?.features?.length ?? 0;
     const fc = buildPickupFeatureCollection(items);
-    setPickupOverlayData(fc, items, zoneStats, zoneHotspots);
+    setPickupOverlayData(fc, items, zoneStats, zoneHotspots, microHotspots);
+    const coveredZonesCount = window.__pickupDebug?.hotspotCoveredZoneIds?.length ?? 0;
+    const visibleDotsCount = window.__pickupDebug?.visiblePickupDotCount ?? 0;
+    console.log(
+      `[pickup overlay] zoneHotspots=${zoneHotspotCount} microHotspots=${normalizedMicroHotspotCount} coveredZones=${coveredZonesCount} visibleDots=${visibleDotsCount}`
+    );
   } catch (e) {
-    console.warn("pickup overlay refresh failed:", e);
+    console.warn(`/events/pickups/recent failed (${path}):`, e);
   } finally {
     pickupRefreshInFlight = false;
   }
@@ -2269,9 +2671,87 @@ function schedulePickupOverlayRefresh({ force = false } = {}) {
   if (pickupRefreshTimer) clearTimeout(pickupRefreshTimer);
   pickupRefreshTimer = setTimeout(() => {
     pickupRefreshTimer = null;
-    refreshPickupOverlay({ force }).catch((e) => console.warn("pickup overlay refresh failed:", e));
+    refreshPickupOverlay({ force }).catch((e) => console.warn("/events/pickups/recent refresh scheduler failed:", e));
   }, force ? 0 : PICKUP_REFRESH_DEBOUNCE_MS);
 }
+
+window.runCommunityVisibilitySmokeTest = async function () {
+  const result = {
+    signed_in: !!communityToken,
+    me_id: null,
+    me_is_admin: false,
+    presence_all_ok: false,
+    presence_all_count: 0,
+    presence_summary_ok: false,
+    online_count: 0,
+    ghosted_count: 0,
+    pickup_overlay_ok: false,
+    pickup_items_count: 0,
+    pickup_zone_hotspot_count: 0,
+    pickup_micro_hotspot_count: 0,
+    errors: [],
+  };
+
+  const token = communityToken;
+  if (!token) {
+    result.errors.push("Not signed in.");
+    window.__communityVisibilitySmokeTest = result;
+    return result;
+  }
+
+  try {
+    const meData = await getJSONAuth("/me", token);
+    result.me_id = meData?.id ?? null;
+    result.me_is_admin = !!meData?.is_admin;
+  } catch (e) {
+    console.warn("/me smoke test failed:", e);
+    result.errors.push(`/me: ${e?.message || String(e)}`);
+  }
+
+  try {
+    const presenceAll = await getJSONAuth("/presence/all", token);
+    const items = Array.isArray(presenceAll) ? presenceAll : (Array.isArray(presenceAll?.items) ? presenceAll.items : []);
+    result.presence_all_ok = true;
+    result.presence_all_count = items.length;
+  } catch (e) {
+    console.warn("/presence/all smoke test failed:", e);
+    result.errors.push(`/presence/all: ${e?.message || String(e)}`);
+  }
+
+  try {
+    const summary = await getJSONAuth("/presence/summary", token);
+    result.presence_summary_ok = true;
+    result.online_count = Number(summary?.online_count) || 0;
+    result.ghosted_count = Number(summary?.ghosted_count) || 0;
+  } catch (e) {
+    console.warn("/presence/summary smoke test failed:", e);
+    result.errors.push(`/presence/summary: ${e?.message || String(e)}`);
+  }
+
+  try {
+    const path = pickupOverlayQueryPath(PICKUP_RECENT_LIMIT);
+    if (!path) {
+      throw new Error("Pickup overlay query path unavailable.");
+    }
+    const overlay = await getJSONAuth(path, token);
+    const items = Array.isArray(overlay) ? overlay : (Array.isArray(overlay?.items) ? overlay.items : []);
+    const zoneHotspots = (overlay?.zone_hotspots && overlay.zone_hotspots.type === "FeatureCollection" && Array.isArray(overlay.zone_hotspots.features))
+      ? overlay.zone_hotspots.features
+      : [];
+    const topLevelMicroHotspotPayload = overlay?.micro_hotspots ?? overlay?.micro_hotspot_clusters ?? overlay?.hotspot_micro_clusters ?? null;
+    const microHotspots = normalizePickupMicroHotspots(topLevelMicroHotspotPayload, new Set());
+    result.pickup_overlay_ok = true;
+    result.pickup_items_count = items.length;
+    result.pickup_zone_hotspot_count = zoneHotspots.length;
+    result.pickup_micro_hotspot_count = Array.isArray(microHotspots?.features) ? microHotspots.features.length : 0;
+  } catch (e) {
+    console.warn("/events/pickups/recent smoke test failed:", e);
+    result.errors.push(`/events/pickups/recent: ${e?.message || String(e)}`);
+  }
+
+  window.__communityVisibilitySmokeTest = result;
+  return result;
+};
 
 /* =========================================================
    Zone click popup (restored like Leaflet bindPopup)
@@ -3979,27 +4459,22 @@ const Z100_STREAM_URL = "https://stream.revma.ihrhls.com/zc1469";
 const megaAudio = new Audio();
 megaAudio.src = MEGA979_STREAM_URL;
 megaAudio.preload = "none";
-megaAudio.crossOrigin = "anonymous";
 
 const hot97Audio = new Audio();
 hot97Audio.src = HOT97_STREAM_URL;
 hot97Audio.preload = "none";
-hot97Audio.crossOrigin = "anonymous";
 
 const kqAudio = new Audio();
 kqAudio.src = KQ945_STREAM_URL;
 kqAudio.preload = "none";
-kqAudio.crossOrigin = "anonymous";
 
 const alofoke993Audio = new Audio();
 alofoke993Audio.src = ALOFOKE993_STREAM_URL;
 alofoke993Audio.preload = "none";
-alofoke993Audio.crossOrigin = "anonymous";
 
 const z100Audio = new Audio();
 z100Audio.src = Z100_STREAM_URL;
 z100Audio.preload = "none";
-z100Audio.crossOrigin = "anonymous";
 
 let megaPlaying = false;
 let hot97Playing = false;
@@ -4039,6 +4514,16 @@ function openStationWebModal(title, url) {
   radioModal.setAttribute("aria-hidden", "false");
 }
 
+async function prepareAndPlayStream(audioEl, streamUrl) {
+  try { audioEl.pause(); } catch {}
+  audioEl.src = streamUrl;
+  audioEl.volume = 1;
+  audioEl.preload = "none";
+  if ("playsInline" in audioEl) audioEl.playsInline = true;
+  audioEl.load();
+  const p = audioEl.play();
+  if (p && typeof p.then === "function") await p;
+}
 
 function stopAlofokeSiteMode() {
   if (!alofoke993Playing) return;
@@ -4068,8 +4553,7 @@ async function toggleAlofoke993() {
   setBtnState(btnKQ945, false);
   setBtnState(btnZ100, false);
   try {
-    alofoke993Audio.src = ALOFOKE993_STREAM_URL;
-    await alofoke993Audio.play();
+    await prepareAndPlayStream(alofoke993Audio, ALOFOKE993_STREAM_URL);
     setRadioStatus("Radio: Alofoke 99.3 FM playing");
   } catch (e) {
     console.warn("Alofoke 99.3 FM play failed:", e);
@@ -4110,7 +4594,7 @@ async function toggleMega() {
       return;
     }
 
-    await megaAudio.play();
+    await prepareAndPlayStream(megaAudio, MEGA979_STREAM_URL);
     megaPlaying = true;
 
     setBtnState(btnMega979, true);
@@ -4161,11 +4645,7 @@ async function toggleHot97() {
   }
 
   try {
-    hot97Audio.src = HOT97_STREAM_URL;
-    hot97Audio.volume = 1;
-
-    const p = hot97Audio.play();
-    if (p && typeof p.then === "function") await p;
+    await prepareAndPlayStream(hot97Audio, HOT97_STREAM_URL);
 
     hot97Playing = true;
     setBtnState(btnHot97, true);
@@ -4208,10 +4688,7 @@ async function toggleKQ() {
   }
 
   try {
-    kqAudio.src = KQ945_STREAM_URL;
-    kqAudio.volume = 1;
-    const p = kqAudio.play();
-    if (p && typeof p.then === "function") await p;
+    await prepareAndPlayStream(kqAudio, KQ945_STREAM_URL);
 
     kqPlaying = true;
     setBtnState(btnKQ945, true);
@@ -4244,8 +4721,7 @@ async function toggleZ100() {
     return;
   }
   try {
-    z100Audio.src = Z100_STREAM_URL;
-    await z100Audio.play();
+    await prepareAndPlayStream(z100Audio, Z100_STREAM_URL);
     z100Playing = true;
     setBtnState(btnZ100, true);
     setBtnState(btnHot97, false);
@@ -4590,6 +5066,8 @@ async function doLogin(email, password, desiredGhostMode) {
   await loadMe();
   await applyPostAuthPreferences({ email, forceGhostSync: true, desiredGhostMode });
   setAuthUI(true, `Status: signed in as ${me?.display_name || me?.email || email}`);
+  pullPresenceAll().catch((e) => console.warn("/presence/all post-login bootstrap failed:", e));
+  schedulePickupOverlayRefresh({ force: true });
   syncAdminPortalSession();
 }
 
@@ -4605,6 +5083,8 @@ async function doSignup(email, password, desiredGhostMode) {
   await loadMe();
   await applyPostAuthPreferences({ email, forceGhostSync: true, desiredGhostMode });
   setAuthUI(true, `Status: account created • signed in as ${me?.display_name || me?.email || email}`);
+  pullPresenceAll().catch((e) => console.warn("/presence/all post-signup bootstrap failed:", e));
+  schedulePickupOverlayRefresh({ force: true });
   syncAdminPortalSession();
 }
 
@@ -5154,7 +5634,7 @@ async function pullPresenceAll() {
         badgeUpdatedFromSummary = true;
       }
     } catch (e) {
-      // Ignore badge updates if anything goes wrong.
+      console.warn("/presence/summary failed:", e);
     }
     if (!badgeUpdatedFromSummary) {
       updateOnlineBadge(fallbackVisibleCount, 0);
@@ -5247,7 +5727,7 @@ async function pullPresenceAll() {
     cachedPresenceRows = candidates;
     scheduleAdaptivePresenceRender();
   } catch (e) {
-    console.warn("presence/all failed:", e);
+    console.warn("/presence/all failed:", e);
   }
 }
 
