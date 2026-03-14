@@ -5766,6 +5766,7 @@ async function pullPresenceAll() {
     const selfGroupKey = selfPos ? groupKey(selfPos.lat, selfPos.lng) : null;
     const selfUid = me && me.id != null ? String(me.id) : "self";
 
+    let selfOrbitHandled = false;
     for (const [key, members] of groups.entries()) {
       const includeSelf = !!(selfGroupKey && key === selfGroupKey);
       const sortable = members.map((row) => ({ id: String(row.uid), row }));
@@ -5775,6 +5776,7 @@ async function pullPresenceAll() {
       if (count <= 1) {
         members.forEach((row) => { row.orbitMeta = null; });
         if (includeSelf && typeof window !== "undefined" && typeof window.mapIdentityApplySelfOrbit === "function") {
+          selfOrbitHandled = true;
           lastSelfOrbitMeta = null;
           window.mapIdentityApplySelfOrbit(null);
         }
@@ -5790,13 +5792,14 @@ async function pullPresenceAll() {
         if (entry.row) {
           entry.row.orbitMeta = orbitMeta;
         } else if (typeof window !== "undefined" && typeof window.mapIdentityApplySelfOrbit === "function") {
+          selfOrbitHandled = true;
           lastSelfOrbitMeta = { ...orbitMeta };
           window.mapIdentityApplySelfOrbit(lastSelfOrbitMeta);
         }
       });
     }
 
-    if (!selfGroupKey && typeof window !== "undefined" && typeof window.mapIdentityApplySelfOrbit === "function") {
+    if (!selfOrbitHandled && typeof window !== "undefined" && typeof window.mapIdentityApplySelfOrbit === "function") {
       lastSelfOrbitMeta = null;
       window.mapIdentityApplySelfOrbit(null);
     }
