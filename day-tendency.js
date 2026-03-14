@@ -47,7 +47,7 @@
         position: fixed;
         top: 56px;
         left: 12px;
-        width: 76px;
+        width: 30px;
         padding: 8px 8px 9px;
         border-radius: 12px;
         border: 1px solid rgba(0, 0, 0, 0.14);
