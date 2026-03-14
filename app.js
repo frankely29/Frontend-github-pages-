@@ -1507,6 +1507,45 @@ function initMap() {
   map.on("error", (e) => console.error("MapLibre error:", e));
 }
 
+function preventBrowserZoomUI() {
+  if (typeof window === "undefined" || typeof document === "undefined") return;
+
+  const isMapEventTarget = (target) => {
+    if (!(target instanceof Element)) return false;
+    return !!target.closest("#map");
+  };
+
+  document.addEventListener("keydown", (e) => {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    const key = String(e.key || "").toLowerCase();
+    if (key === "+" || key === "=" || key === "-" || key === "0") {
+      e.preventDefault();
+    }
+  });
+
+  document.addEventListener(
+    "wheel",
+    (e) => {
+      if (e.ctrlKey && !isMapEventTarget(e.target)) {
+        e.preventDefault();
+      }
+    },
+    { passive: false }
+  );
+
+  ["gesturestart", "gesturechange", "gestureend"].forEach((evt) => {
+    document.addEventListener(
+      evt,
+      (e) => {
+        if (!isMapEventTarget(e.target)) {
+          e.preventDefault();
+        }
+      },
+      { passive: false }
+    );
+  });
+}
+
 async function waitForStyleReady(timeoutMs = 5000) {
   if (!map) return false;
   if (map.isStyleLoaded()) return true;
@@ -5994,6 +6033,7 @@ setNavDestination(null);
     if (l) l.style.display = "none";
   }, 7000);
 
+  preventBrowserZoomUI();
   initMap();
   await loadTimeline();
 
