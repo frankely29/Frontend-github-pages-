@@ -118,6 +118,11 @@ const MANHATTAN_GLOBAL_PENALTY = 0.98;
 const MANHATTAN_MIN_ZONES = 40;
 const MANHATTAN_CORE_MAX_LAT = 40.795;
 
+const BRONX_WASH_HEIGHTS_TRIP_FREQUENCY_WEIGHT = 0.55;
+const BRONX_WASH_HEIGHTS_FOLLOWUP_WEIGHT = 0.20;
+const BRONX_WASH_HEIGHTS_LOCAL_MOMENTUM_WEIGHT = 0.15;
+const BRONX_WASH_HEIGHTS_PROXIMITY_WEIGHT = 0.10;
+
 const BRONX_WASH_HEIGHTS_MANHATTAN_ZONE_IDS = new Set([
   "41", "42", "74", "75", "116", "127", "128", "151", "152", "166", "243", "244",
 ]);
@@ -358,18 +363,19 @@ function isManhattanFeature(props) {
   return b.includes("manhattan");
 }
 
-function isBronxFeature(props) {
+function isBronxWashHeightsBorough(props) {
   const b = (props?.borough || "").toString().toLowerCase();
   return b.includes("bronx");
 }
 
-function isUpperManhattanCorridorZone(props) {
-  if (!isManhattanFeature(props)) return false;
+function isBronxWashHeightsCorridorZone(props) {
+  const b = (props?.borough || "").toString().toLowerCase();
+  if (!b.includes("manhattan")) return false;
   return BRONX_WASH_HEIGHTS_MANHATTAN_ZONE_IDS.has(String(props?.LocationID ?? "").trim());
 }
 
 function isBronxWashHeightsModeZone(props) {
-  return isBronxFeature(props) || isUpperManhattanCorridorZone(props);
+  return isBronxWashHeightsBorough(props) || isBronxWashHeightsCorridorZone(props);
 }
 
 function enforceSpecialModeExclusivity() {
@@ -773,10 +779,10 @@ function applyBronxWashHeightsLocalView(frame) {
     const proximityStrength = 1;
 
     let modeScore =
-      (0.55 * tripFrequencyStrength) +
-      (0.20 * followupTripStrength) +
-      (0.15 * localMomentumStrength) +
-      (0.10 * proximityStrength);
+      (BRONX_WASH_HEIGHTS_TRIP_FREQUENCY_WEIGHT * tripFrequencyStrength) +
+      (BRONX_WASH_HEIGHTS_FOLLOWUP_WEIGHT * followupTripStrength) +
+      (BRONX_WASH_HEIGHTS_LOCAL_MOMENTUM_WEIGHT * localMomentumStrength) +
+      (BRONX_WASH_HEIGHTS_PROXIMITY_WEIGHT * proximityStrength);
 
     modeScore = Math.max(0, Math.min(1, modeScore));
     const localRating = 1 + 99 * modeScore;
