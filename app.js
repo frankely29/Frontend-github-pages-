@@ -1461,6 +1461,9 @@ function initMap() {
       }
       applyDriverLabelZoomStyles();
     });
+    map.on("zoom", () => {
+      applyDriverLabelZoomStyles();
+    });
     map.on("zoomend", () => {
       if (authHeaderOK()) {
         scheduleAdaptivePresenceRender();
@@ -5587,9 +5590,9 @@ function presenceLiteFingerprint(fc) {
     const lng = Number(coords[0]);
     const lat = Number(coords[1]);
     const heading = Number(feature?.properties?.heading ?? 0);
-    const lngRounded = Number.isFinite(lng) ? lng.toFixed(5) : 'nan';
-    const latRounded = Number.isFinite(lat) ? lat.toFixed(5) : 'nan';
-    const headingRounded = Number.isFinite(heading) ? Math.round(heading) : 0;
+    const lngRounded = Number.isFinite(lng) ? lng.toFixed(6) : 'nan';
+    const latRounded = Number.isFinite(lat) ? lat.toFixed(6) : 'nan';
+    const headingRounded = Number.isFinite(heading) ? Number(heading).toFixed(1) : '0.0';
     return `${userId}|${latRounded}|${lngRounded}|${headingRounded}`;
   });
   rows.sort();
@@ -5743,9 +5746,9 @@ async function pullPresenceAll() {
       });
     }
 
-    const overlapEps = 0.000035;
+    const overlapPrecision = 6; // ~0.11m precision; only group practically identical coordinates
     const groups = new Map();
-    const groupKey = (lat, lng) => `${Math.round(lat / overlapEps)}:${Math.round(lng / overlapEps)}`;
+    const groupKey = (lat, lng) => `${Number(lat).toFixed(overlapPrecision)}:${Number(lng).toFixed(overlapPrecision)}`;
 
     for (const row of candidates) {
       const key = groupKey(row.lat, row.lng);
