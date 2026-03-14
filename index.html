@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
   <title>NYC TLC Hotspot Map</title>
 
   <!-- MapLibre GL JS (no Leaflet) -->
@@ -646,12 +646,12 @@
       position: relative;
       display: block;
       width: 100%;
-      overflow-x: auto;
+      overflow-x: hidden;
       overflow-y: hidden;
       -webkit-overflow-scrolling: touch;
       scrollbar-width: none;
       scroll-behavior: smooth;
-      touch-action: pan-x;
+      touch-action: none;
       -webkit-mask-image: linear-gradient(
         to right,
         transparent 0,
@@ -671,8 +671,10 @@
     .dockViewport::-webkit-scrollbar { display: none; }
     .dockTrack {
       display: inline-flex;
-      gap: 11px;
+      gap: 8px;
       align-items: center;
+      justify-content: space-between;
+      width: 100%;
       padding: 2px 0;
     }
     .dockEdgeFade {
