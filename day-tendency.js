@@ -1,6 +1,8 @@
 (() => {
   const DAY_TENDENCY_REFRESH_MS = 30 * 60 * 1000;
   const DAY_TENDENCY_RETRY_MS = 10 * 1000;
+  const DAY_TENDENCY_MOVE_CHECK_MS = 60 * 1000;
+  const DAY_TENDENCY_MATERIAL_MOVE_METERS = 1200;
 
   const STATE = {
     root: null,
@@ -12,7 +14,14 @@
     resizeObserver: null,
     mutationObserver: null,
     positionPollTimer: null,
+    movementCheckTimer: null,
     isRefreshing: false,
+    borough: null,
+    lastQueryLat: null,
+    lastQueryLng: null,
+    lastQueryAt: 0,
+    geolocationFallback: null,
+    geolocationFetchedAt: 0,
   };
 
   function apiBase() {
@@ -47,65 +56,55 @@
         position: fixed;
         top: 56px;
         left: 12px;
-        padding: 8px 10px;
-        border-radius: 999px;
-        border: 1px solid rgba(0, 0, 0, 0.14);
-        background: rgba(255, 255, 255, 0.88);
-        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.12);
-        backdrop-filter: blur(4px);
-        -webkit-backdrop-filter: blur(4px);
+        padding: 0;
+        border: 0;
+        background: transparent;
+        box-shadow: none;
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
         z-index: 1100;
         color: #111;
         font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        pointer-events: none;
         user-select: none;
-        max-width: min(calc(100vw - 24px), 360px);
       }
       .dayTendencyInner {
         display: flex;
-        align-items: center;
-        gap: 9px;
+        align-items: flex-end;
+        gap: 7px;
       }
-      .dayTendencyTextCol {
+      .dayTendencyLabelCol {
         display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        line-height: 1.05;
-        min-width: 72px;
+        align-items: flex-end;
       }
-      .dayTendencyTitle {
-        font-size: 11px;
-        line-height: 1.1;
+      .dayTendencyLabel {
+        writing-mode: vertical-rl;
+        transform: rotate(180deg);
+        font-size: 13px;
+        line-height: 1;
         font-weight: 800;
         letter-spacing: 0.01em;
+        color: #111;
+        text-shadow: 0 1px 3px rgba(255, 255, 255, 0.9), 0 0 2px rgba(255, 255, 255, 0.75);
       }
-      .dayTendencySub {
-        margin-top: 2px;
-        font-size: 10px;
-        line-height: 1.1;
-        opacity: 0.76;
-        font-weight: 600;
-      }
-      .dayTendencyGaugeWrap {
+      .dayTendencyMeterCol {
         display: flex;
         align-items: center;
       }
-      .dayTendencyGauge {
+      .dayTendencyScale {
         position: relative;
-        width: 88px;
-        height: 13px;
+        width: 13px;
+        height: 118px;
         border-radius: 999px;
-        border: 1px solid rgba(0, 0, 0, 0.16);
-        background: linear-gradient(to right, #e60000 0%, #ffd400 50%, #00b050 100%);
+        border: 1px solid rgba(0, 0, 0, 0.18);
+        background: linear-gradient(to top, #e60000 0%, #ffd400 50%, #00b050 100%);
         overflow: hidden;
       }
       .dayTendencyMarker {
         position: absolute;
-        top: -1px;
-        bottom: -1px;
-        width: 2px;
-        left: 0%;
-        background: #fff;
+        left: -1px;
+        width: calc(100% + 2px);
+        border-top: 2px solid #fff;
         box-shadow: 0 0 2px rgba(0, 0, 0, 0.55);
         pointer-events: none;
       }
@@ -113,21 +112,31 @@
         display: flex;
         flex-direction: column;
         align-items: flex-start;
-        justify-content: center;
+        justify-content: flex-end;
         line-height: 1.05;
-        min-width: 44px;
+        min-height: 118px;
+        gap: 2px;
       }
       .dayTendencyScore {
-        font-size: 18px;
+        font-size: 22px;
         font-weight: 800;
         line-height: 1;
+        color: #111;
+        text-shadow: 0 1px 3px rgba(255, 255, 255, 0.9), 0 0 2px rgba(255, 255, 255, 0.75);
       }
       .dayTendencyBand {
-        margin-top: 2px;
-        font-size: 11px;
+        font-size: 12px;
         line-height: 1.1;
-        opacity: 0.9;
         font-weight: 700;
+        color: #111;
+        text-shadow: 0 1px 3px rgba(255, 255, 255, 0.9), 0 0 2px rgba(255, 255, 255, 0.75);
+      }
+      .dayTendencyBorough {
+        font-size: 10px;
+        line-height: 1.1;
+        font-weight: 700;
+        color: #222;
+        text-shadow: 0 1px 3px rgba(255, 255, 255, 0.9), 0 0 2px rgba(255, 255, 255, 0.75);
       }
     `;
     document.head.appendChild(style);
@@ -146,18 +155,18 @@
       root.setAttribute('aria-live', 'polite');
       root.innerHTML = `
         <div class="dayTendencyInner">
-          <div class="dayTendencyTextCol">
-            <div class="dayTendencyTitle">Tendency Now</div>
-            <div class="dayTendencySub">Expected</div>
+          <div class="dayTendencyLabelCol">
+            <div class="dayTendencyLabel">Tendency</div>
           </div>
-          <div class="dayTendencyGaugeWrap">
-            <div class="dayTendencyGauge">
+          <div class="dayTendencyMeterCol">
+            <div class="dayTendencyScale">
               <div class="dayTendencyMarker"></div>
             </div>
           </div>
           <div class="dayTendencyValueCol">
             <div class="dayTendencyScore">--</div>
             <div class="dayTendencyBand">--</div>
+            <div class="dayTendencyBorough" hidden></div>
           </div>
         </div>
       `;
@@ -168,6 +177,7 @@
     STATE.marker = root.querySelector('.dayTendencyMarker');
     STATE.score = root.querySelector('.dayTendencyScore');
     STATE.band = root.querySelector('.dayTendencyBand');
+    STATE.borough = root.querySelector('.dayTendencyBorough');
     return root;
   }
 
@@ -185,8 +195,8 @@
       left = rect.left;
     }
 
-    const meterHeight = root.offsetHeight || 44;
-    const meterWidth = root.offsetWidth || 280;
+    const meterHeight = root.offsetHeight || 140;
+    const meterWidth = root.offsetWidth || 80;
     const minTop = 8;
     const minLeft = 8;
     const maxTop = Math.max(minTop, window.innerHeight - meterHeight - 8);
@@ -210,6 +220,79 @@
     const n = Number(score);
     if (!Number.isFinite(n)) return null;
     return Math.max(0, Math.min(100, n));
+  }
+
+  function isFiniteCoordPair(lat, lng) {
+    return Number.isFinite(Number(lat)) && Number.isFinite(Number(lng));
+  }
+
+  function normalizeLatLng(input) {
+    if (!input || typeof input !== 'object') return null;
+    const lat = Number(input.lat);
+    const lng = Number(input.lng);
+    if (!isFiniteCoordPair(lat, lng)) return null;
+    return { lat, lng };
+  }
+
+  async function getCurrentTendencyLatLng() {
+    try {
+      if (typeof window.getCurrentTendencyLatLng === 'function') {
+        const fromStable = normalizeLatLng(window.getCurrentTendencyLatLng());
+        if (fromStable) return fromStable;
+      }
+    } catch (_) {}
+
+    try {
+      if (typeof window.getSelfMapCenter === 'function') {
+        const fromMap = normalizeLatLng(window.getSelfMapCenter());
+        if (fromMap) return fromMap;
+      }
+    } catch (_) {}
+
+    if (!navigator?.geolocation) return null;
+
+    const now = Date.now();
+    if (STATE.geolocationFallback && (now - STATE.geolocationFetchedAt) < 60 * 1000) {
+      return STATE.geolocationFallback;
+    }
+
+    try {
+      const fallback = await new Promise((resolve) => {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => resolve(normalizeLatLng({ lat: pos?.coords?.latitude, lng: pos?.coords?.longitude })),
+          () => resolve(null),
+          { enableHighAccuracy: false, timeout: 2500, maximumAge: 60 * 1000 }
+        );
+      });
+      if (fallback) {
+        STATE.geolocationFallback = fallback;
+        STATE.geolocationFetchedAt = now;
+      }
+      return fallback;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function haversineMeters(a, b) {
+    const toRad = (x) => (x * Math.PI) / 180;
+    const R = 6371000;
+    const dLat = toRad(b.lat - a.lat);
+    const dLng = toRad(b.lng - a.lng);
+    const lat1 = toRad(a.lat);
+    const lat2 = toRad(b.lat);
+    const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+    return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+  }
+
+  function movedMateriallyFromLastQuery(latLng) {
+    if (!latLng) return false;
+    if (!isFiniteCoordPair(STATE.lastQueryLat, STATE.lastQueryLng)) return true;
+    const meters = haversineMeters(
+      { lat: Number(STATE.lastQueryLat), lng: Number(STATE.lastQueryLng) },
+      { lat: latLng.lat, lng: latLng.lng }
+    );
+    return meters > DAY_TENDENCY_MATERIAL_MOVE_METERS;
   }
 
   function applyDayTendencyPayload(payload) {
@@ -245,12 +328,25 @@
 
     if (STATE.score) STATE.score.textContent = roundedScore;
     if (STATE.band) STATE.band.textContent = label;
-    if (STATE.marker) STATE.marker.style.left = `${pct}%`;
+    if (STATE.marker) STATE.marker.style.bottom = `${pct}%`;
 
-    root.title = `${label} • Score ${numericScore}/100 • Confidence ${confidencePct}% • ${timeBlockContext}${explain}`;
+    const borough = String(payload?.borough || '').trim();
+    if (STATE.borough) {
+      if (borough) {
+        STATE.borough.textContent = borough;
+        STATE.borough.hidden = false;
+      } else {
+        STATE.borough.textContent = '';
+        STATE.borough.hidden = true;
+      }
+    }
+
+    root.title = `${label} • Score ${numericScore}/100${borough ? ` • Borough ${borough}` : ''} • Confidence ${confidencePct}% • ${timeBlockContext}${explain}`;
     root.setAttribute(
       'aria-label',
-      `Current time block tendency expected ${String(label).toLowerCase()}, score ${roundedScore} out of 100, confidence ${confidencePct} percent${
+      `Current time block tendency expected ${String(label).toLowerCase()}, score ${roundedScore} out of 100${
+        borough ? `, borough ${borough}` : ''
+      }, confidence ${confidencePct} percent${
         localTimeLabel ? ` for ${localTimeLabel}` : ''
       }`
     );
@@ -275,11 +371,20 @@
     STATE.isRefreshing = true;
     let payload = null;
     let hadError = false;
+    const latLng = await getCurrentTendencyLatLng();
 
     try {
       const base = apiBase();
       if (!base) throw new Error('API base missing');
-      payload = await fetchJSONWithTimeout(`${base}/day_tendency/today`, 10000);
+      const query = latLng
+        ? `?lat=${encodeURIComponent(String(latLng.lat))}&lng=${encodeURIComponent(String(latLng.lng))}`
+        : '';
+      payload = await fetchJSONWithTimeout(`${base}/day_tendency/today${query}`, 10000);
+      if (latLng) {
+        STATE.lastQueryLat = latLng.lat;
+        STATE.lastQueryLng = latLng.lng;
+      }
+      STATE.lastQueryAt = Date.now();
       applyDayTendencyPayload(payload);
     } catch (_) {
       hadError = true;
@@ -323,6 +428,14 @@
     });
 
     STATE.positionPollTimer = window.setInterval(positionDayTendencyRoot, 5000);
+    STATE.movementCheckTimer = window.setInterval(() => {
+      getCurrentTendencyLatLng().then((latLng) => {
+        if (!latLng) return;
+        if (!movedMateriallyFromLastQuery(latLng)) return;
+        if (STATE.isRefreshing) return;
+        refreshDayTendencyMeter();
+      });
+    }, DAY_TENDENCY_MOVE_CHECK_MS);
     STATE.refreshTimer = window.setInterval(refreshDayTendencyMeter, DAY_TENDENCY_REFRESH_MS);
 
     refreshDayTendencyMeter();

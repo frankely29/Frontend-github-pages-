@@ -3762,6 +3762,14 @@ function blendAngleDeg(from, to, alpha = HEADING_SMOOTHING) {
   const a = clamp(alpha, 0, 1);
   return normDeg(from + shortestAngleDelta(from, to) * a);
 }
+function getCurrentTendencyLatLng() {
+  if (userLatLng && Number.isFinite(userLatLng.lat) && Number.isFinite(userLatLng.lng)) {
+    return { lat: userLatLng.lat, lng: userLatLng.lng };
+  }
+  return null;
+}
+window.getCurrentTendencyLatLng = getCurrentTendencyLatLng;
+
 function getSelfMapCenter() {
   if (navMarker && typeof navMarker.getLngLat === "function") {
     const p = navMarker.getLngLat();
