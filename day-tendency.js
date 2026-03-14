@@ -47,8 +47,8 @@
         position: fixed;
         top: 56px;
         left: 12px;
-        width: 30px;
-        padding: 8px 8px 9px;
+        width: 102px;
+        padding: 8px;
         border-radius: 12px;
         border: 1px solid rgba(0, 0, 0, 0.14);
         background: rgba(255, 255, 255, 0.84);
@@ -73,15 +73,18 @@
         opacity: 0.78;
         font-weight: 600;
       }
-      .dayTendencyBarWrap {
-        margin-top: 6px;
+      .dayTendencyInner {
         display: flex;
-        align-items: flex-end;
-        gap: 7px;
+        align-items: stretch;
+        gap: 8px;
+      }
+      .dayTendencyScaleCol {
+        display: flex;
+        align-items: center;
       }
       .dayTendencyScale {
         position: relative;
-        width: 16px;
+        width: 15px;
         height: 120px;
         border-radius: 10px;
         border: 1px solid rgba(0, 0, 0, 0.17);
@@ -97,24 +100,29 @@
         bottom: 0%;
         pointer-events: none;
       }
-      .dayTendencyLabels {
+      .dayTendencyTextCol {
         min-height: 120px;
         display: flex;
         flex-direction: column;
-        justify-content: flex-end;
+        justify-content: space-between;
         align-items: flex-start;
-        gap: 2px;
       }
       .dayTendencyScore {
-        font-size: 13px;
+        font-size: 22px;
         font-weight: 800;
         line-height: 1;
       }
       .dayTendencyBand {
-        font-size: 10px;
+        margin-top: 2px;
+        font-size: 12px;
         line-height: 1.1;
         opacity: 0.9;
         font-weight: 700;
+      }
+      .dayTendencyLower {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
       }
     `;
     document.head.appendChild(style);
@@ -132,15 +140,21 @@
       root.setAttribute('role', 'status');
       root.setAttribute('aria-live', 'polite');
       root.innerHTML = `
-        <div class="dayTendencyTitle">Tendency Now</div>
-        <div class="dayTendencySub">Expected</div>
-        <div class="dayTendencyBarWrap">
-          <div class="dayTendencyScale">
-            <div class="dayTendencyMarker"></div>
+        <div class="dayTendencyInner">
+          <div class="dayTendencyScaleCol">
+            <div class="dayTendencyScale">
+              <div class="dayTendencyMarker"></div>
+            </div>
           </div>
-          <div class="dayTendencyLabels">
-            <div class="dayTendencyScore">--</div>
-            <div class="dayTendencyBand">--</div>
+          <div class="dayTendencyTextCol">
+            <div>
+              <div class="dayTendencyTitle">Tendency Now</div>
+              <div class="dayTendencySub">Expected</div>
+            </div>
+            <div class="dayTendencyLower">
+              <div class="dayTendencyScore">--</div>
+              <div class="dayTendencyBand">--</div>
+            </div>
           </div>
         </div>
       `;
