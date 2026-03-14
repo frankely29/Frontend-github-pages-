@@ -1334,10 +1334,13 @@
     return `<div class="selfIdentitySlot" data-map-identity-label="1">${mapIdentityOverlayWrapHTML(`<div id="navMeName" class="meName" style="display:${safeName ? 'block' : 'none'};font-size:${cfg.fontPx}px;padding:${cfg.padY}px ${cfg.padX}px;max-width:${cfg.maxWidthPx}px;">${escapeHtml(safeName)}</div>`, { badgeCode: leaderboardBadgeCode })}</div>`;
   }
 
-  function mapIdentityOrbitStyleText(orbitMeta) {
+  function mapIdentityOrbitStyleText(orbitMeta, zoomValue) {
     if (!orbitMeta || !Number.isFinite(Number(orbitMeta.count)) || Number(orbitMeta.count) <= 1) return '';
     const angleRad = (Number(orbitMeta.angleDeg) || 0) * (Math.PI / 180);
-    const r = Math.max(0, Math.min(14, Number(orbitMeta.radiusPx) || 11));
+    const baseRadiusPx = Math.max(0, Math.min(14, Number(orbitMeta.radiusPx) || 11));
+    const zoomT = mapIdentityZoomT(zoomValue);
+    const zoomRadiusScale = Math.pow(zoomT, 1.35);
+    const r = +(baseRadiusPx * zoomRadiusScale).toFixed(2);
     const dx = +(10 + Math.cos(angleRad) * r).toFixed(2);
     const dy = +(Math.sin(angleRad) * r).toFixed(2);
     return `--identity-slot-x:${dx}px;--identity-slot-y:calc(-50% + ${dy}px);`;
@@ -1347,7 +1350,7 @@
     const safeName = (String(name || 'Driver').trim() || 'Driver');
     const safeAvatar = safeMapAvatarUrl(avatarUrl);
     const cfg = mapIdentityVisualConfig(zoom);
-    const orbitStyle = mapIdentityOrbitStyleText(orbitMeta);
+    const orbitStyle = mapIdentityOrbitStyleText(orbitMeta, zoom);
     if (shouldUseAvatarLabel(mode, safeAvatar)) {
       return `<div class="otherDrvIdentitySlot" data-map-identity-label="1" style="${orbitStyle}">${mapIdentityAvatarLabelHTML(safeAvatar, 'otherDrvAvatarBadge', `width:${cfg.avatarPx}px;height:${cfg.avatarPx}px;`, { badgeCode: leaderboardBadgeCode })}</div>`;
     }
@@ -1357,7 +1360,8 @@
   function mapIdentityApplySelfOrbit(orbitMeta) {
     const slot = document.querySelector('#navWrap .selfIdentitySlot[data-map-identity-label="1"]');
     if (!slot) return;
-    const styleText = mapIdentityOrbitStyleText(orbitMeta);
+    const zoom = Number.isFinite(window?.map?.getZoom?.()) ? window.map.getZoom() : undefined;
+    const styleText = mapIdentityOrbitStyleText(orbitMeta, zoom);
     if (!styleText) {
       slot.style.removeProperty('--identity-slot-x');
       slot.style.removeProperty('--identity-slot-y');
