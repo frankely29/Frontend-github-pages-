@@ -3727,6 +3727,9 @@ function refreshNavNameLabel() {
   const navWrap = document.getElementById("navWrap");
   if (navWrap) wireProfileOpenTargets(navWrap, me?.id, { isSelf: true });
   applyDriverLabelZoomStyles();
+  if (typeof window !== "undefined" && typeof window.mapIdentityApplySelfOrbit === "function") {
+    window.mapIdentityApplySelfOrbit(lastSelfOrbitMeta);
+  }
 }
 
 function setNavVisual(isMoving) {
@@ -4929,6 +4932,7 @@ let presenceRenderMode = 'full';
 let presenceFocusedUserId = null;
 let presenceLiteSourceFingerprint = '';
 let presenceAdaptiveRenderRaf = 0;
+let lastSelfOrbitMeta = null;
 
 const PRESENCE_FULL_MAX_VISIBLE = 50;
 const PRESENCE_MEDIUM_MAX_VISIBLE = 100;
@@ -5771,6 +5775,7 @@ async function pullPresenceAll() {
       if (count <= 1) {
         members.forEach((row) => { row.orbitMeta = null; });
         if (includeSelf && typeof window !== "undefined" && typeof window.mapIdentityApplySelfOrbit === "function") {
+          lastSelfOrbitMeta = null;
           window.mapIdentityApplySelfOrbit(null);
         }
         continue;
@@ -5785,12 +5790,14 @@ async function pullPresenceAll() {
         if (entry.row) {
           entry.row.orbitMeta = orbitMeta;
         } else if (typeof window !== "undefined" && typeof window.mapIdentityApplySelfOrbit === "function") {
-          window.mapIdentityApplySelfOrbit(orbitMeta);
+          lastSelfOrbitMeta = { ...orbitMeta };
+          window.mapIdentityApplySelfOrbit(lastSelfOrbitMeta);
         }
       });
     }
 
     if (!selfGroupKey && typeof window !== "undefined" && typeof window.mapIdentityApplySelfOrbit === "function") {
+      lastSelfOrbitMeta = null;
       window.mapIdentityApplySelfOrbit(null);
     }
 
