@@ -1338,9 +1338,9 @@
     if (!orbitMeta || !Number.isFinite(Number(orbitMeta.count)) || Number(orbitMeta.count) <= 1) return '';
     const angleRad = (Number(orbitMeta.angleDeg) || 0) * (Math.PI / 180);
     const baseRadiusPx = Math.max(0, Math.min(14, Number(orbitMeta.radiusPx) || 11));
-    const zoomT = mapIdentityZoomT(zoomValue);
-    const zoomRadiusScale = Math.pow(zoomT, 1.35);
-    const r = +(baseRadiusPx * zoomRadiusScale).toFixed(2);
+    // Keep overlap orbit offsets stable across zoom levels so users stay
+    // visually locked to their true map coordinates when zooming in/out.
+    const r = +baseRadiusPx.toFixed(2);
     const dx = +(10 + Math.cos(angleRad) * r).toFixed(2);
     const dy = +(Math.sin(angleRad) * r).toFixed(2);
     return `--identity-slot-x:${dx}px;--identity-slot-y:calc(-50% + ${dy}px);`;
