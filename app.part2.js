@@ -2218,8 +2218,10 @@
     const viewport = document.getElementById('dockViewport');
     if (!dock || !viewport) return;
     const maxScroll = Math.max(0, viewport.scrollWidth - viewport.clientWidth);
-    const leftVisible = viewport.scrollLeft > 2;
-    const rightVisible = viewport.scrollLeft < (maxScroll - 2);
+    const scrollLeft = Math.min(maxScroll, Math.max(0, viewport.scrollLeft));
+    const edgeTolerance = 6;
+    const leftVisible = scrollLeft > edgeTolerance;
+    const rightVisible = (maxScroll - scrollLeft) > edgeTolerance;
     dock.classList.toggle('dock-can-scroll-left', leftVisible);
     dock.classList.toggle('dock-can-scroll-right', rightVisible);
   }
@@ -2237,6 +2239,21 @@
     const rightHint = document.getElementById('dockScrollHintRight');
     if (!viewport) return;
 
+    let idleCenterTimer = null;
+    const IDLE_CENTER_MS = 10 * 1000;
+
+    const centerDockViewport = () => {
+      const maxScroll = Math.max(0, viewport.scrollWidth - viewport.clientWidth);
+      if (maxScroll <= 0) return;
+      viewport.scrollTo({ left: Math.round(maxScroll / 2), behavior: 'smooth' });
+      scheduleHintUpdate();
+    };
+
+    const scheduleIdleCenter = () => {
+      if (idleCenterTimer) clearTimeout(idleCenterTimer);
+      idleCenterTimer = setTimeout(centerDockViewport, IDLE_CENTER_MS);
+    };
+
     let rafId = 0;
     const scheduleHintUpdate = () => {
       if (rafId) return;
@@ -2246,14 +2263,30 @@
       });
     };
 
-    viewport.addEventListener('scroll', scheduleHintUpdate, { passive: true });
-    window.addEventListener('resize', scheduleHintUpdate);
+    viewport.addEventListener('scroll', () => {
+      scheduleHintUpdate();
+      scheduleIdleCenter();
+    }, { passive: true });
+    viewport.addEventListener('pointerdown', scheduleIdleCenter, { passive: true });
+    viewport.addEventListener('wheel', scheduleIdleCenter, { passive: true });
+    viewport.addEventListener('touchstart', scheduleIdleCenter, { passive: true });
+    window.addEventListener('resize', () => {
+      scheduleHintUpdate();
+      scheduleIdleCenter();
+    });
 
-    leftHint?.addEventListener('click', () => scrollDockByStep(-1));
-    rightHint?.addEventListener('click', () => scrollDockByStep(1));
+    leftHint?.addEventListener('click', () => {
+      scrollDockByStep(-1);
+      scheduleIdleCenter();
+    });
+    rightHint?.addEventListener('click', () => {
+      scrollDockByStep(1);
+      scheduleIdleCenter();
+    });
 
     scheduleHintUpdate();
     setTimeout(scheduleHintUpdate, 120);
+    scheduleIdleCenter();
   }
 
 
