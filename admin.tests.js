@@ -14,6 +14,7 @@
       tests: [
         { key: 'presence-summary', label: 'Test Presence Summary', path: '/admin/tests/presence-summary' },
         { key: 'presence-live', label: 'Test Presence Live Feed', path: '/admin/tests/presence-live' },
+        { key: 'presence-endpoint', label: 'Test Shared Presence Endpoint', path: '/admin/tests/presence-endpoint' },
         { key: 'me', label: 'Test My Session / Me Endpoint', path: '/admin/tests/me' },
       ],
     },
@@ -25,6 +26,7 @@
         { key: 'police-reports', label: 'Test Police Reports', path: '/admin/tests/police-reports' },
         { key: 'pickup-reports', label: 'Test Pickup Reports', path: '/admin/tests/pickup-reports' },
         { key: 'pickup-hotspots-live', label: 'Test Pickup Hotspot Generation', path: '/events/pickups/recent?limit=200&zone_sample_limit=100&debug=1' },
+        { key: 'pickup-overlay-endpoint', label: 'Test Shared Pickup Overlay Endpoint', path: '/admin/tests/pickup-overlay-endpoint' },
       ],
     },
     {
@@ -33,6 +35,7 @@
         { key: 'weather-api', label: 'Test Weather API request', type: 'client' },
         { key: 'radio-ui', label: 'Test radio/audio availability only at the UI/client level if already feasible without changing app behavior', type: 'client' },
         { key: 'admin-session', label: 'Test local admin session state', type: 'client' },
+        { key: 'client-community-smoke', label: 'Test Client Community Smoke', type: 'client' },
       ],
     },
   ];
@@ -225,6 +228,35 @@
       detail = parsed.detail;
     }
 
+    if (test.key === 'presence-endpoint') {
+      const data = response.data || {};
+      const visibleCount = safeNumber(data.visible_count ?? data.presence_all_count ?? data.count);
+      const onlineCount = safeNumber(data.online_count);
+      const ghostedCount = safeNumber(data.ghosted_count);
+      const backendType = data.backend_type || data.storage_backend || 'n/a';
+      const sqlMode = data.sql_mode || data.mode || 'n/a';
+      detail = `Visible: ${visibleCount} • Online: ${onlineCount} • Ghosted: ${ghostedCount} • Backend: ${backendType} • SQL mode: ${sqlMode}`;
+      status = statusFrom(response.ok, data);
+    }
+
+    if (test.key === 'pickup-overlay-endpoint') {
+      const data = response.data || {};
+      const pickupItemCount = safeNumber(data.pickup_item_count ?? data.items_count ?? data.count);
+      const zoneStatsCount = safeNumber(data.zone_stats_count ?? data.zone_count);
+      const hotspotCount = safeNumber(data.hotspot_count ?? data.zone_hotspot_count);
+      const microHotspotCount = safeNumber(data.micro_hotspot_count ?? data.pickup_micro_hotspot_count);
+      const sampledZoneIds = Array.isArray(data.sampled_zone_ids) ? data.sampled_zone_ids.slice(0, 8).join(', ') : 'none';
+      detail = `Pickup items: ${pickupItemCount} • Zone stats: ${zoneStatsCount} • Hotspots: ${hotspotCount} • Micro hotspots: ${microHotspotCount} • Sampled zones: ${sampledZoneIds || 'none'}`;
+      status = statusFrom(response.ok, data);
+    }
+
+    if (test.key === 'client-community-smoke') {
+      const data = response.data || {};
+      const allSharedOk = !!(data.presence_all_ok && data.presence_summary_ok && data.pickup_overlay_ok);
+      status = allSharedOk ? 'pass' : 'fail';
+      detail = `Me: ${data.me_id ?? 'n/a'} • Admin: ${!!data.me_is_admin} • Presence all: ${safeNumber(data.presence_all_count)} • Online: ${safeNumber(data.online_count)} • Ghosted: ${safeNumber(data.ghosted_count)} • Zone hotspots: ${safeNumber(data.pickup_zone_hotspot_count)} • Micro hotspots: ${safeNumber(data.pickup_micro_hotspot_count)}`;
+    }
+
     return {
       status,
       data: response.data,
@@ -260,6 +292,18 @@
           initializedFlags: signals.initializedFlags,
         },
       };
+    }
+
+    if (test.key === 'client-community-smoke') {
+      if (typeof window.runCommunityVisibilitySmokeTest !== 'function') {
+        return { ok: false, data: { error: 'window.runCommunityVisibilitySmokeTest is not available.' } };
+      }
+      return window.runCommunityVisibilitySmokeTest()
+        .then((data) => ({
+          ok: !!(data?.presence_all_ok && data?.presence_summary_ok && data?.pickup_overlay_ok),
+          data: data || {},
+        }))
+        .catch((error) => ({ ok: false, data: { error: error?.message || 'Smoke test failed.' } }));
     }
     return { ok: false, data: { message: 'Client test not implemented.' } };
   }
@@ -321,7 +365,7 @@
       try {
         let response;
         if (test.type === 'client') {
-          response = runClientTest(test, helpers);
+          response = await Promise.resolve(runClientTest(test, helpers));
         } else {
           const data = await helpers.request(test.path);
           response = { ok: true, data };

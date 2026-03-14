@@ -2675,6 +2675,84 @@ function schedulePickupOverlayRefresh({ force = false } = {}) {
   }, force ? 0 : PICKUP_REFRESH_DEBOUNCE_MS);
 }
 
+window.runCommunityVisibilitySmokeTest = async function () {
+  const result = {
+    signed_in: !!communityToken,
+    me_id: null,
+    me_is_admin: false,
+    presence_all_ok: false,
+    presence_all_count: 0,
+    presence_summary_ok: false,
+    online_count: 0,
+    ghosted_count: 0,
+    pickup_overlay_ok: false,
+    pickup_items_count: 0,
+    pickup_zone_hotspot_count: 0,
+    pickup_micro_hotspot_count: 0,
+    errors: [],
+  };
+
+  const token = communityToken;
+  if (!token) {
+    result.errors.push("Not signed in.");
+    window.__communityVisibilitySmokeTest = result;
+    return result;
+  }
+
+  try {
+    const meData = await getJSONAuth("/me", token);
+    result.me_id = meData?.id ?? null;
+    result.me_is_admin = !!meData?.is_admin;
+  } catch (e) {
+    console.warn("/me smoke test failed:", e);
+    result.errors.push(`/me: ${e?.message || String(e)}`);
+  }
+
+  try {
+    const presenceAll = await getJSONAuth("/presence/all", token);
+    const items = Array.isArray(presenceAll) ? presenceAll : (Array.isArray(presenceAll?.items) ? presenceAll.items : []);
+    result.presence_all_ok = true;
+    result.presence_all_count = items.length;
+  } catch (e) {
+    console.warn("/presence/all smoke test failed:", e);
+    result.errors.push(`/presence/all: ${e?.message || String(e)}`);
+  }
+
+  try {
+    const summary = await getJSONAuth("/presence/summary", token);
+    result.presence_summary_ok = true;
+    result.online_count = Number(summary?.online_count) || 0;
+    result.ghosted_count = Number(summary?.ghosted_count) || 0;
+  } catch (e) {
+    console.warn("/presence/summary smoke test failed:", e);
+    result.errors.push(`/presence/summary: ${e?.message || String(e)}`);
+  }
+
+  try {
+    const path = pickupOverlayQueryPath(PICKUP_RECENT_LIMIT);
+    if (!path) {
+      throw new Error("Pickup overlay query path unavailable.");
+    }
+    const overlay = await getJSONAuth(path, token);
+    const items = Array.isArray(overlay) ? overlay : (Array.isArray(overlay?.items) ? overlay.items : []);
+    const zoneHotspots = (overlay?.zone_hotspots && overlay.zone_hotspots.type === "FeatureCollection" && Array.isArray(overlay.zone_hotspots.features))
+      ? overlay.zone_hotspots.features
+      : [];
+    const topLevelMicroHotspotPayload = overlay?.micro_hotspots ?? overlay?.micro_hotspot_clusters ?? overlay?.hotspot_micro_clusters ?? null;
+    const microHotspots = normalizePickupMicroHotspots(topLevelMicroHotspotPayload, new Set());
+    result.pickup_overlay_ok = true;
+    result.pickup_items_count = items.length;
+    result.pickup_zone_hotspot_count = zoneHotspots.length;
+    result.pickup_micro_hotspot_count = Array.isArray(microHotspots?.features) ? microHotspots.features.length : 0;
+  } catch (e) {
+    console.warn("/events/pickups/recent smoke test failed:", e);
+    result.errors.push(`/events/pickups/recent: ${e?.message || String(e)}`);
+  }
+
+  window.__communityVisibilitySmokeTest = result;
+  return result;
+};
+
 /* =========================================================
    Zone click popup (restored like Leaflet bindPopup)
    ========================================================= */
