@@ -1341,7 +1341,9 @@
     // Keep overlap orbit offsets stable across zoom levels so users stay
     // visually locked to their true map coordinates when zooming in/out.
     const r = +baseRadiusPx.toFixed(2);
-    const dx = +(10 + Math.cos(angleRad) * r).toFixed(2);
+    // Orbit around the true marker center (0px) so overlap handling never
+    // shifts the whole group away from the real backend coordinates.
+    const dx = +(Math.cos(angleRad) * r).toFixed(2);
     const dy = +(Math.sin(angleRad) * r).toFixed(2);
     return `--identity-slot-x:${dx}px;--identity-slot-y:calc(-50% + ${dy}px);`;
   }
