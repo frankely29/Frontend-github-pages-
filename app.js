@@ -2666,6 +2666,11 @@ async function refreshPickupOverlay({ force = false } = {}) {
       `[pickup overlay] zoneHotspots=${zoneHotspotCount} microHotspots=${normalizedMicroHotspotCount} coveredZones=${coveredZonesCount} visibleDots=${visibleDotsCount}`
     );
   } catch (e) {
+    const status = Number(e?.status ?? NaN);
+    if (status === 401) {
+      clearAuth();
+      return;
+    }
     console.warn(`/events/pickups/recent failed (${path}):`, e);
   } finally {
     pickupRefreshInFlight = false;
@@ -5021,7 +5026,9 @@ async function loadMe() {
   } catch (e) {
     console.warn("/me failed:", e);
     const status = Number(e?.status ?? NaN);
-    if (status === 401 || status === 403) {
+    // A 403 can be caused by a backend role-gating regression.
+    // Do not force-log users out for that case.
+    if (status === 401) {
       clearAuth();
       return null;
     }
@@ -5748,6 +5755,11 @@ async function pullPresenceAll() {
     cachedPresenceRows = candidates;
     scheduleAdaptivePresenceRender();
   } catch (e) {
+    const status = Number(e?.status ?? NaN);
+    if (status === 401) {
+      clearAuth();
+      return;
+    }
     console.warn("/presence/all failed:", e);
   }
 }
@@ -5918,6 +5930,11 @@ async function sendPickupLog() {
 
     showRecordTripToast();
   } catch (e) {
+    const status = Number(e?.status ?? NaN);
+    if (status === 401) {
+      clearAuth();
+      return;
+    }
     alert(`Trip record failed: ${e.message || e}`);
   } finally {
     pickupLogBusy = false;
