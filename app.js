@@ -237,7 +237,12 @@ function pickClosestIndex(minutesOfWeekArr, target) {
 async function fetchJSON(url, opts = {}) {
   const res = await fetch(url, { cache: "no-store", mode: "cors", ...opts });
   const text = await res.text();
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText} @ ${url} :: ${text.slice(0, 120)}`);
+  if (!res.ok) {
+    const err = new Error(`${res.status} ${res.statusText} @ ${url} :: ${text.slice(0, 120)}`);
+    err.status = res.status;
+    err.url = url;
+    throw err;
+  }
   try {
     return JSON.parse(text);
   } catch {
@@ -4994,7 +4999,7 @@ function clearAuth() {
 }
 
 function authHeaderOK() {
-  return communityToken && communityToken.length > 10;
+  return typeof communityToken === "string" && communityToken.trim().length > 0;
 }
 
 function requireCommunityToken(actionLabel = "perform this action") {
@@ -5015,8 +5020,24 @@ async function loadMe() {
     return me;
   } catch (e) {
     console.warn("/me failed:", e);
-    clearAuth();
-    return null;
+    const status = Number(e?.status ?? NaN);
+    if (status === 401 || status === 403) {
+      clearAuth();
+      return null;
+    }
+
+    const fallbackDisplayName = (localStorage.getItem(LS_DISPLAY_NAME) || "").trim();
+    const fallbackEmail = (localStorage.getItem(LS_EMAIL) || "").trim();
+    me = {
+      ...(me || {}),
+      display_name: fallbackDisplayName || me?.display_name || fallbackEmail.split("@")[0] || "Driver",
+      email: me?.email || fallbackEmail || null,
+      is_admin: !!me?.is_admin,
+    };
+    refreshNavNameLabel();
+    syncGhostUI();
+    syncAdminPortalSession();
+    return me;
   }
 }
 
