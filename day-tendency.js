@@ -132,7 +132,7 @@
       root.setAttribute('role', 'status');
       root.setAttribute('aria-live', 'polite');
       root.innerHTML = `
-        <div class="dayTendencyTitle">Day Tendency</div>
+        <div class="dayTendencyTitle">Tendency Now</div>
         <div class="dayTendencySub">Expected</div>
         <div class="dayTendencyBarWrap">
           <div class="dayTendencyScale">
@@ -231,16 +231,22 @@
     const confidencePct = Number.isFinite(Number(payload?.confidence))
       ? Math.round(Number(payload.confidence) * 100)
       : 0;
+    const localTimeLabel = String(payload?.local_time_label || '').trim();
+    const timeBlockContext = localTimeLabel
+      ? `Typical ${localTimeLabel} time blocks in this dataset`
+      : 'Typical time blocks in this dataset';
     const explain = payload.explain ? ` • ${payload.explain}` : '';
 
     if (STATE.score) STATE.score.textContent = roundedScore;
     if (STATE.band) STATE.band.textContent = label;
     if (STATE.marker) STATE.marker.style.bottom = `${pct}%`;
 
-    root.title = `${label} • Score ${numericScore}/100 • Confidence ${confidencePct}%${explain}`;
+    root.title = `${label} • Score ${numericScore}/100 • Confidence ${confidencePct}% • ${timeBlockContext}${explain}`;
     root.setAttribute(
       'aria-label',
-      `Day tendency expected ${String(label).toLowerCase()}, score ${roundedScore} out of 100, confidence ${confidencePct} percent`
+      `Current time block tendency expected ${String(label).toLowerCase()}, score ${roundedScore} out of 100, confidence ${confidencePct} percent${
+        localTimeLabel ? ` for ${localTimeLabel}` : ''
+      }`
     );
     root.hidden = false;
     positionDayTendencyRoot();
