@@ -47,18 +47,31 @@
         position: fixed;
         top: 56px;
         left: 12px;
-        width: 102px;
-        padding: 8px;
-        border-radius: 12px;
+        padding: 8px 10px;
+        border-radius: 999px;
         border: 1px solid rgba(0, 0, 0, 0.14);
-        background: rgba(255, 255, 255, 0.84);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.14);
-        backdrop-filter: blur(2px);
-        -webkit-backdrop-filter: blur(2px);
-        z-index: 1199;
+        background: rgba(255, 255, 255, 0.88);
+        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.12);
+        backdrop-filter: blur(4px);
+        -webkit-backdrop-filter: blur(4px);
+        z-index: 1100;
         color: #111;
         font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
         user-select: none;
+        max-width: min(calc(100vw - 24px), 360px);
+      }
+      .dayTendencyInner {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+      }
+      .dayTendencyTextCol {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        line-height: 1.05;
+        min-width: 72px;
       }
       .dayTendencyTitle {
         font-size: 11px;
@@ -70,59 +83,51 @@
         margin-top: 2px;
         font-size: 10px;
         line-height: 1.1;
-        opacity: 0.78;
+        opacity: 0.76;
         font-weight: 600;
       }
-      .dayTendencyInner {
-        display: flex;
-        align-items: stretch;
-        gap: 8px;
-      }
-      .dayTendencyScaleCol {
+      .dayTendencyGaugeWrap {
         display: flex;
         align-items: center;
       }
-      .dayTendencyScale {
+      .dayTendencyGauge {
         position: relative;
-        width: 15px;
-        height: 120px;
-        border-radius: 10px;
-        border: 1px solid rgba(0, 0, 0, 0.17);
-        background: linear-gradient(to top, #e60000 0%, #ffd400 50%, #00b050 100%);
+        width: 88px;
+        height: 13px;
+        border-radius: 999px;
+        border: 1px solid rgba(0, 0, 0, 0.16);
+        background: linear-gradient(to right, #e60000 0%, #ffd400 50%, #00b050 100%);
         overflow: hidden;
       }
       .dayTendencyMarker {
         position: absolute;
-        left: -1px;
-        width: calc(100% + 2px);
-        border-top: 2px solid #fff;
-        box-shadow: 0 0 2px rgba(0, 0, 0, 0.6);
-        bottom: 0%;
+        top: -1px;
+        bottom: -1px;
+        width: 2px;
+        left: 0%;
+        background: #fff;
+        box-shadow: 0 0 2px rgba(0, 0, 0, 0.55);
         pointer-events: none;
       }
-      .dayTendencyTextCol {
-        min-height: 120px;
+      .dayTendencyValueCol {
         display: flex;
         flex-direction: column;
-        justify-content: space-between;
         align-items: flex-start;
+        justify-content: center;
+        line-height: 1.05;
+        min-width: 44px;
       }
       .dayTendencyScore {
-        font-size: 22px;
+        font-size: 18px;
         font-weight: 800;
         line-height: 1;
       }
       .dayTendencyBand {
         margin-top: 2px;
-        font-size: 12px;
+        font-size: 11px;
         line-height: 1.1;
         opacity: 0.9;
         font-weight: 700;
-      }
-      .dayTendencyLower {
-        display: flex;
-        flex-direction: column;
-        align-items: flex-start;
       }
     `;
     document.head.appendChild(style);
@@ -141,20 +146,18 @@
       root.setAttribute('aria-live', 'polite');
       root.innerHTML = `
         <div class="dayTendencyInner">
-          <div class="dayTendencyScaleCol">
-            <div class="dayTendencyScale">
+          <div class="dayTendencyTextCol">
+            <div class="dayTendencyTitle">Tendency Now</div>
+            <div class="dayTendencySub">Expected</div>
+          </div>
+          <div class="dayTendencyGaugeWrap">
+            <div class="dayTendencyGauge">
               <div class="dayTendencyMarker"></div>
             </div>
           </div>
-          <div class="dayTendencyTextCol">
-            <div>
-              <div class="dayTendencyTitle">Tendency Now</div>
-              <div class="dayTendencySub">Expected</div>
-            </div>
-            <div class="dayTendencyLower">
-              <div class="dayTendencyScore">--</div>
-              <div class="dayTendencyBand">--</div>
-            </div>
+          <div class="dayTendencyValueCol">
+            <div class="dayTendencyScore">--</div>
+            <div class="dayTendencyBand">--</div>
           </div>
         </div>
       `;
@@ -182,26 +185,15 @@
       left = rect.left;
     }
 
-    const sliderWrap = document.getElementById('sliderWrap');
-    const dock = document.getElementById('dock');
-    const meterHeight = root.offsetHeight || 180;
-    const safetyBottom = 8;
-    let maxTop = window.innerHeight - meterHeight - safetyBottom;
-
-    if (sliderWrap) {
-      const sliderTop = sliderWrap.getBoundingClientRect().top;
-      maxTop = Math.min(maxTop, sliderTop - meterHeight - 8);
-    }
-    if (dock) {
-      const dockTop = dock.getBoundingClientRect().top;
-      maxTop = Math.min(maxTop, dockTop - meterHeight - 8);
-    }
-
+    const meterHeight = root.offsetHeight || 44;
+    const meterWidth = root.offsetWidth || 280;
     const minTop = 8;
-    if (Number.isFinite(maxTop)) {
-      top = Math.min(top, maxTop);
-    }
-    top = Math.max(minTop, top);
+    const minLeft = 8;
+    const maxTop = Math.max(minTop, window.innerHeight - meterHeight - 8);
+    const maxLeft = Math.max(minLeft, window.innerWidth - meterWidth - 8);
+
+    top = Math.max(minTop, Math.min(top, maxTop));
+    left = Math.max(minLeft, Math.min(left, maxLeft));
 
     root.style.top = `${Math.round(top)}px`;
     root.style.left = `${Math.round(left)}px`;
@@ -253,7 +245,7 @@
 
     if (STATE.score) STATE.score.textContent = roundedScore;
     if (STATE.band) STATE.band.textContent = label;
-    if (STATE.marker) STATE.marker.style.bottom = `${pct}%`;
+    if (STATE.marker) STATE.marker.style.left = `${pct}%`;
 
     root.title = `${label} • Score ${numericScore}/100 • Confidence ${confidencePct}% • ${timeBlockContext}${explain}`;
     root.setAttribute(
