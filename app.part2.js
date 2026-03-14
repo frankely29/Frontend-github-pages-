@@ -1338,9 +1338,11 @@
     if (!orbitMeta || !Number.isFinite(Number(orbitMeta.count)) || Number(orbitMeta.count) <= 1) return '';
     const angleRad = (Number(orbitMeta.angleDeg) || 0) * (Math.PI / 180);
     const baseRadiusPx = Math.max(0, Math.min(14, Number(orbitMeta.radiusPx) || 11));
-    // Keep overlap orbit offsets stable across zoom levels so users stay
-    // visually locked to their true map coordinates when zooming in/out.
-    const r = +baseRadiusPx.toFixed(2);
+    // Scale overlap offsets down as the map zooms out so users remain pinned
+    // to their true coordinates and only the visual marker size changes.
+    const zoomT = mapIdentityZoomT(zoomValue);
+    const zoomFactor = zoomT * zoomT;
+    const r = +(baseRadiusPx * zoomFactor).toFixed(2);
     // Orbit around the true marker center (0px) so overlap handling never
     // shifts the whole group away from the real backend coordinates.
     const dx = +(Math.cos(angleRad) * r).toFixed(2);
