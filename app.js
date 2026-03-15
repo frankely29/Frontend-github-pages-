@@ -6602,7 +6602,7 @@ async function sendPickupLog() {
     const near = nearestZoneToUser(currentFrame, userLatLng);
     const zoneId = near?.location_id ?? null;
 
-    await postJSON(
+    const pickupRes = await postJSON(
       "/events/pickup",
       {
         lat: userLatLng.lat,
@@ -6620,6 +6620,13 @@ async function sendPickupLog() {
     schedulePickupOverlayRefresh({ force: true });
 
     showRecordTripToast();
+
+    if (window && typeof window.handlePickupProgressionDelta === "function") {
+      window.handlePickupProgressionDelta(pickupRes || {});
+    }
+    if (window && typeof window.syncMyProgression === "function") {
+      window.syncMyProgression({ forcePopupCheck: true });
+    }
   } catch (e) {
     const status = Number(e?.status ?? NaN);
     if (status === 401) {

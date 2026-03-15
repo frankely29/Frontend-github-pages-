@@ -76,13 +76,7 @@
   }
 
   function normalizeTierTitle(title) {
-    const normalized = String(title || '').trim().toLowerCase();
-    if (normalized === 'rookie') return 'Rookie';
-    if (normalized === 'driver') return 'Driver';
-    if (normalized === 'pro') return 'Pro';
-    if (normalized === 'veteran') return 'Veteran';
-    if (normalized === 'legend') return 'Legend';
-    return String(title || 'Rookie').trim() || 'Rookie';
+    return String(title || '').trim() || 'Recruit';
   }
 
   function tierClassName(title) {
@@ -140,7 +134,7 @@
         <span class="leaderboardRank">#${rank}</span>
         <span class="leaderboardNameWrap">
           <span class="leaderboardName" title="${esc(name)}">${esc(name)}</span>
-          ${levelTitleLine(row?.level, row?.title)}
+          ${levelTitleLine(row?.level, row?.rank_name || row?.title)}
         </span>
         <span class="leaderboardValue">${formatMetric(value)}</span>
         <span class="leaderboardBadgeCell">${badgeChip(badge)}</span>
@@ -162,7 +156,7 @@
       <div class="myRankCard">
         <div class="leaderboardSectionTitle">My Rank</div>
         <div class="myRankRow"><span>${esc(myName)}</span><span>${myRank ? `#${myRank}` : 'Unranked'}</span></div>
-        <div class="myRankRow"><span>Progression</span><span>${levelTitleLine(state.myRow?.level, state.myRow?.title)}</span></div>
+        <div class="myRankRow"><span>Progression</span><span>${levelTitleLine(state.myRow?.level, state.myRow?.rank_name || state.myRow?.title)}</span></div>
         <div class="myRankRow"><span>${state.metric === 'hours' ? 'Hours' : 'Miles'}</span><span>${formatMetric(myValue)}</span></div>
         <div class="myRankRow"><span>Badge</span><span>${badgeChip(selectedMyBadge()) || '—'}</span></div>
       </div>
