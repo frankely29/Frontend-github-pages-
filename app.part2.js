@@ -330,17 +330,19 @@
       ctxState = null;
     }
 
+    const anyAudioReady = !!(chatSoundRuntime?.webAudioReady || chatSoundRuntime?.htmlAudioReady);
+
     if (!chatAudioCtx || ctxState === 'closed') {
       chatAudioCtx = null;
-      chatAudioUnlocked = false;
-      chatAudioReady = false;
+      chatAudioUnlocked = anyAudioReady;
+      chatAudioReady = anyAudioReady;
       if (typeof chatSoundRuntime !== 'undefined' && chatSoundRuntime) {
         chatSoundRuntime.webAudioReady = false;
         chatSoundRuntime.userPrimed = !!chatSoundRuntime.htmlAudioReady;
       }
       bindChatSoundPrimeListeners?.();
       bindChatAudioUnlockListeners?.();
-      return false;
+      return chatAudioReady;
     }
 
     if (ctxState === 'running') {
@@ -349,19 +351,20 @@
         chatSoundRuntime.webAudioReady = true;
         chatSoundRuntime.userPrimed = !!(chatSoundRuntime.webAudioReady || chatSoundRuntime.htmlAudioReady);
       }
-      chatAudioReady = !!(chatSoundRuntime?.userPrimed);
+      chatAudioReady = !!(chatSoundRuntime?.webAudioReady || chatSoundRuntime?.htmlAudioReady);
       return chatAudioReady;
     }
 
-    chatAudioUnlocked = false;
-    chatAudioReady = false;
+    const htmlReady = !!chatSoundRuntime?.htmlAudioReady;
+    chatAudioUnlocked = htmlReady;
+    chatAudioReady = htmlReady;
     if (typeof chatSoundRuntime !== 'undefined' && chatSoundRuntime) {
       chatSoundRuntime.webAudioReady = false;
-      chatSoundRuntime.userPrimed = !!chatSoundRuntime.htmlAudioReady;
+      chatSoundRuntime.userPrimed = htmlReady;
     }
     bindChatSoundPrimeListeners?.();
     bindChatAudioUnlockListeners?.();
-    return false;
+    return chatAudioReady;
   }
 
   function isChatAuthReady() {
@@ -729,6 +732,18 @@
     }
   }
 
+  function advanceChatWatermarksFromMessages(messages) {
+    if (!Array.isArray(messages) || !messages.length) return;
+    for (const msg of messages) {
+      const cursor = chatMsgCursor(msg);
+      if (cursor !== null && cursor !== undefined) chatLastSeen = cursor;
+      const id = messageNumericId(msg);
+      if (id !== null) {
+        chatLatestMessageId = chatLatestMessageId === null ? id : Math.max(chatLatestMessageId, id);
+      }
+    }
+  }
+
   function rebuildUnreadBadgeFromMessages(messages) {
     if (!Array.isArray(messages) || !messages.length) {
       unreadChatCount = 0;
@@ -1083,6 +1098,7 @@
         return;
       }
       const loadedMsgs = Array.isArray(msgs.messages) ? msgs.messages : [];
+      advanceChatWatermarksFromMessages(loadedMsgs);
       const needsInitialRecovery = !chatInitialHistoryLoaded;
       const hadIncomingAudioBaseline = chatSoundState.baselineReady;
 
