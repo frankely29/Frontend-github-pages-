@@ -305,16 +305,24 @@ async function postJSONDetailed(path, body, token) {
   }
 
   if (!res.ok) {
-    const detail =
-      (payload && typeof payload === "object" && (payload.detail || payload.message || payload.error))
-      || text
-      || `${res.status} ${res.statusText}`;
-    const err = new Error(`${res.status} ${res.statusText} @ ${url} :: ${String(detail).slice(0, 180)}`);
+    const payloadObj = payload && typeof payload === "object" ? payload : null;
+    const detailObj = payloadObj && typeof payloadObj.detail === "object" ? payloadObj.detail : null;
+    const detail = payloadObj ? (payloadObj.detail ?? payloadObj.message ?? payloadObj.error) : text;
+    const message =
+      (typeof detailObj?.detail === "string" && detailObj.detail.trim())
+      || (typeof detailObj?.message === "string" && detailObj.message.trim())
+      || (typeof payloadObj?.message === "string" && payloadObj.message.trim())
+      || (typeof res.statusText === "string" && res.statusText.trim())
+      || "Request failed";
+    const err = new Error(message);
     err.status = res.status;
     err.url = url;
     err.payload = payload;
-    err.code = payload && typeof payload === "object" ? (payload.code || payload.error_code) : undefined;
-    err.detail = payload && typeof payload === "object" ? (payload.detail || payload.message || payload.error) : undefined;
+    err.detail = payloadObj ? (payloadObj.detail ?? payloadObj.message ?? payloadObj.error ?? null) : null;
+    err.code =
+      (detailObj && typeof detailObj.code === "string" && detailObj.code.trim())
+      || (payloadObj && typeof payloadObj.code === "string" && payloadObj.code.trim())
+      || null;
     throw err;
   }
 
@@ -6646,10 +6654,14 @@ async function sendPickupLog() {
     }
   } catch (e) {
     const status = Number(e?.status ?? NaN);
-    const guardCode = String(e?.code || e?.payload?.code || "").trim();
-    const guardDetail = String(e?.detail || e?.payload?.detail || "").trim();
-    const guardSeconds = Number(e?.payload?.cooldown_seconds ?? e?.payload?.retry_after_seconds ?? NaN);
-    const guardUntilUnix = Number(e?.payload?.cooldown_until_unix ?? NaN);
+    const payload = e?.payload;
+    const detailObj = e?.detail ?? payload?.detail ?? null;
+    const code =
+      e?.code
+      || payload?.code
+      || (detailObj && typeof detailObj === "object" ? detailObj.code : null);
+    const guardSeconds = Number(payload?.cooldown_seconds ?? payload?.retry_after_seconds ?? NaN);
+    const guardUntilUnix = Number(payload?.cooldown_until_unix ?? NaN);
     if (Number.isFinite(guardUntilUnix) && guardUntilUnix > 0) {
       pickupSaveCooldownUntilMs = Math.max(pickupSaveCooldownUntilMs, guardUntilUnix * 1000);
     } else if (Number.isFinite(guardSeconds) && guardSeconds > 0) {
@@ -6659,50 +6671,47 @@ async function sendPickupLog() {
       clearAuth();
       return;
     }
-    if (guardCode === "pickup_cooldown_active") {
-      const nowMs = Date.now();
-      const remaining = formatPickupCooldownRemaining(Math.max(0, pickupSaveCooldownUntilMs - nowMs));
-      if (window && typeof window.showPickupGuardNotice === "function") {
-        window.showPickupGuardNotice({
-          title: "Save button cooling off",
-          message: `Wait ${remaining} before saving another trip.`,
-          tone: "warning",
-        });
-      }
-      return;
-    }
-    if (guardCode === "pickup_same_position") {
-      if (window && typeof window.showPickupGuardNotice === "function") {
-        window.showPickupGuardNotice({
-          title: "Trip not saved",
-          message: "Same position detected. Move to a new location or keep driving before saving another trip.",
-          tone: "danger",
-        });
-      }
-      return;
-    }
-    if (guardCode === "pickup_needs_recent_driving") {
-      if (window && typeof window.showPickupGuardNotice === "function") {
-        window.showPickupGuardNotice({
-          title: "Trip not saved",
-          message: "Drive at least 6 minutes or move to a new location before saving this trip.",
-          tone: "danger",
-        });
-      }
-      return;
-    }
-    if (guardDetail && window && typeof window.showPickupGuardNotice === "function") {
-      window.showPickupGuardNotice({
-        title: "Trip not saved",
-        message: guardDetail,
+    if (code === "pickup_cooldown_active") {
+      window.showPickupGuardNotice?.({
+        title: "Save button cooling off",
+        message: extractPickupErrorMessage(e),
         tone: "warning",
       });
       return;
     }
-    alert(`Trip record failed: ${e.message || e}`);
+
+    if (code === "pickup_same_position" || code === "pickup_needs_recent_driving") {
+      window.showPickupGuardNotice?.({
+        title: "Trip not saved",
+        message: extractPickupErrorMessage(e),
+        tone: "danger",
+      });
+      return;
+    }
+
+    alert(`Trip record failed: ${extractPickupErrorMessage(e)}`);
   } finally {
     pickupLogBusy = false;
   }
+}
+
+function extractPickupErrorMessage(err) {
+  const payload = err?.payload;
+  const detail = err?.detail ?? payload?.detail ?? null;
+
+  if (typeof detail === "string" && detail.trim()) return detail;
+  if (typeof payload?.message === "string" && payload.message.trim()) return payload.message;
+  if (typeof payload?.title === "string" && payload.title.trim()) return payload.title;
+  if (typeof err?.message === "string" && err.message.trim() && err.message !== "[object Object]") return err.message;
+
+  if (detail && typeof detail === "object") {
+    if (typeof detail.detail === "string" && detail.detail.trim()) return detail.detail;
+    if (typeof detail.message === "string" && detail.message.trim()) return detail.message;
+    if (typeof detail.title === "string" && detail.title.trim()) return detail.title;
+    if (typeof detail.code === "string" && detail.code.trim()) return detail.code;
+  }
+
+  return "Trip not saved.";
 }
 
 if (btnPolice) {
