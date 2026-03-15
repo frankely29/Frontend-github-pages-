@@ -2374,6 +2374,12 @@
       .rankBadgeIconWrap.toneOfficer{background:linear-gradient(140deg,#7c3aed,#1e1b4b);color:#ede9fe}
       .rankBadgeIconWrap.toneGeneral{background:linear-gradient(140deg,#f59e0b,#7c2d12);color:#fef3c7}
       .rankBadgeIconWrap.toneLegend{background:linear-gradient(140deg,#22d3ee,#4f46e5);color:#ecfeff;box-shadow:0 0 0 1px rgba(255,255,255,.25),0 0 18px rgba(56,189,248,.5)}
+      #pickupGuardNotice{position:fixed;left:50%;bottom:calc(92px + env(safe-area-inset-bottom));transform:translateX(-50%) translateY(8px);z-index:9838;min-width:min(280px,calc(100vw - 28px));max-width:min(380px,calc(100vw - 24px));background:rgba(15,23,42,.94);color:#e2e8f0;border:1px solid rgba(148,163,184,.35);border-radius:12px;box-shadow:0 10px 28px rgba(2,6,23,.45);padding:10px 12px;opacity:0;pointer-events:none;transition:opacity .16s ease,transform .16s ease}
+      #pickupGuardNotice.show{opacity:1;transform:translateX(-50%) translateY(0)}
+      #pickupGuardNotice.pickupGuardWarning{border-color:rgba(250,204,21,.55);background:rgba(66,32,6,.94)}
+      #pickupGuardNotice.pickupGuardDanger{border-color:rgba(248,113,113,.55);background:rgba(69,10,10,.95)}
+      .pickupGuardTitle{font-size:13px;font-weight:800;line-height:1.2;color:#fff;margin-bottom:2px}
+      .pickupGuardMessage{font-size:12px;line-height:1.35;color:#e2e8f0}
       #levelUpOverlayRoot{position:fixed;inset:0;z-index:9845;display:none;pointer-events:none;align-items:center;justify-content:center;padding:18px}
       #levelUpOverlayRoot.open{display:flex}
       .levelUpOverlayCard{min-width:min(350px,calc(100vw - 30px));max-width:min(420px,calc(100vw - 24px));background:linear-gradient(155deg,rgba(15,23,42,.95),rgba(30,41,59,.9));border:1px solid rgba(148,163,184,.4);border-radius:18px;box-shadow:0 16px 44px rgba(15,23,42,.55),0 0 28px rgba(56,189,248,.25);padding:16px 14px;color:#e2e8f0;display:flex;align-items:center;gap:12px;opacity:0;transform:translateY(12px) scale(.92);transition:opacity .26s ease,transform .26s ease}
@@ -2770,6 +2776,39 @@
       el.setAttribute('aria-hidden', 'true');
       showPickupProgressReward._timer = null;
     }, 2800);
+  }
+
+
+  function ensurePickupGuardNotice() {
+    let el = document.getElementById('pickupGuardNotice');
+    if (el) return el;
+    el = document.createElement('div');
+    el.id = 'pickupGuardNotice';
+    el.setAttribute('role', 'status');
+    el.setAttribute('aria-live', 'polite');
+    el.setAttribute('aria-hidden', 'true');
+    el.innerHTML = '<div class="pickupGuardTitle" id="pickupGuardNoticeTitle"></div><div class="pickupGuardMessage" id="pickupGuardNoticeMessage"></div>';
+    document.body.appendChild(el);
+    return el;
+  }
+
+  function showPickupGuardNotice({ title = 'Trip not saved', message = '', tone = 'warning' } = {}) {
+    const el = ensurePickupGuardNotice();
+    const titleEl = document.getElementById('pickupGuardNoticeTitle');
+    const msgEl = document.getElementById('pickupGuardNoticeMessage');
+    if (!titleEl || !msgEl) return;
+    titleEl.textContent = String(title || 'Trip not saved');
+    msgEl.textContent = String(message || 'Please wait and try again.');
+    el.classList.remove('pickupGuardWarning', 'pickupGuardDanger');
+    el.classList.add(tone === 'danger' ? 'pickupGuardDanger' : 'pickupGuardWarning');
+    el.classList.add('show');
+    el.setAttribute('aria-hidden', 'false');
+    if (showPickupGuardNotice._timer) window.clearTimeout(showPickupGuardNotice._timer);
+    showPickupGuardNotice._timer = window.setTimeout(() => {
+      el.classList.remove('show');
+      el.setAttribute('aria-hidden', 'true');
+      showPickupGuardNotice._timer = null;
+    }, 2500);
   }
 
   function ensureLevelUpOverlay() {
@@ -3323,6 +3362,7 @@
   window.showLevelUpOverlay = showLevelUpOverlay;
   window.syncMyProgression = syncMyProgression;
   window.handlePickupProgressionDelta = handlePickupProgressionDelta;
+  window.showPickupGuardNotice = showPickupGuardNotice;
 
   // Bind the chat dock button using its ID
   if (typeof bindDockToggle === 'function') {

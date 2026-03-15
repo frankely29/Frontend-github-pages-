@@ -96,6 +96,7 @@ const PICKUP_MICRO_HOTSPOT_MIN_ZOOM = 10.2;
 let pickupRefreshTimer = null;
 let pickupRefreshInFlight = false;
 let pickupLogBusy = false;
+let pickupSaveCooldownUntilMs = 0;
 let lastPickupFetchMs = 0;
 let lastPickupFetchKey = "";
 let pickupZoneStats = new Map();
@@ -281,10 +282,59 @@ async function postJSON(path, body, token) {
     body: JSON.stringify(body || {}),
   });
 }
+async function postJSONDetailed(path, body, token) {
+  const headers = { "Content-Type": "application/json" };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const url = `${RAILWAY_BASE}${path}`;
+  const res = await fetch(url, {
+    cache: "no-store",
+    mode: "cors",
+    method: "POST",
+    headers,
+    body: JSON.stringify(body || {}),
+  });
+
+  const text = await res.text();
+  let payload = null;
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      payload = null;
+    }
+  }
+
+  if (!res.ok) {
+    const detail =
+      (payload && typeof payload === "object" && (payload.detail || payload.message || payload.error))
+      || text
+      || `${res.status} ${res.statusText}`;
+    const err = new Error(`${res.status} ${res.statusText} @ ${url} :: ${String(detail).slice(0, 180)}`);
+    err.status = res.status;
+    err.url = url;
+    err.payload = payload;
+    err.code = payload && typeof payload === "object" ? (payload.code || payload.error_code) : undefined;
+    err.detail = payload && typeof payload === "object" ? (payload.detail || payload.message || payload.error) : undefined;
+    throw err;
+  }
+
+  if (payload !== null) return payload;
+  return {};
+}
 async function getJSONAuth(path, token) {
   const headers = {};
   if (token) headers["Authorization"] = `Bearer ${token}`;
   return fetchJSON(`${RAILWAY_BASE}${path}`, { headers });
+}
+
+function formatPickupCooldownRemaining(ms) {
+  const safeMs = Math.max(0, Number(ms) || 0);
+  const totalSeconds = Math.max(1, Math.ceil(safeMs / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes <= 0) return `${seconds}s`;
+  if (seconds <= 0) return `${minutes}m`;
+  return `${minutes}m ${seconds}s`;
 }
 
 /* =========================================================
@@ -6542,13 +6592,28 @@ async function sendPickupLog() {
     return;
   }
 
+  const nowMs = Date.now();
+  if (nowMs < pickupSaveCooldownUntilMs) {
+    const remaining = formatPickupCooldownRemaining(pickupSaveCooldownUntilMs - nowMs);
+    if (window && typeof window.showPickupGuardNotice === "function") {
+      window.showPickupGuardNotice({
+        title: "Save button cooling off",
+        message: `Wait ${remaining} before saving another trip.`,
+        tone: "warning",
+      });
+    } else {
+      alert(`Wait ${remaining} before saving another trip.`);
+    }
+    return;
+  }
+
   pickupLogBusy = true;
   try {
     const ts_unix = Math.floor(Date.now() / 1000);
     const near = nearestZoneToUser(currentFrame, userLatLng);
     const zoneId = near?.location_id ?? null;
 
-    const pickupRes = await postJSON(
+    const pickupRes = await postJSONDetailed(
       "/events/pickup",
       {
         lat: userLatLng.lat,
@@ -6563,6 +6628,13 @@ async function sendPickupLog() {
       communityToken
     );
 
+    if (pickupRes && pickupRes.cooldown_until_unix) {
+      const cooldownUntilUnix = Number(pickupRes.cooldown_until_unix);
+      if (Number.isFinite(cooldownUntilUnix) && cooldownUntilUnix > 0) {
+        pickupSaveCooldownUntilMs = cooldownUntilUnix * 1000;
+      }
+    }
+
     schedulePickupOverlayRefresh({ force: true });
 
 
@@ -6574,8 +6646,57 @@ async function sendPickupLog() {
     }
   } catch (e) {
     const status = Number(e?.status ?? NaN);
+    const guardCode = String(e?.code || e?.payload?.code || "").trim();
+    const guardDetail = String(e?.detail || e?.payload?.detail || "").trim();
+    const guardSeconds = Number(e?.payload?.cooldown_seconds ?? e?.payload?.retry_after_seconds ?? NaN);
+    const guardUntilUnix = Number(e?.payload?.cooldown_until_unix ?? NaN);
+    if (Number.isFinite(guardUntilUnix) && guardUntilUnix > 0) {
+      pickupSaveCooldownUntilMs = Math.max(pickupSaveCooldownUntilMs, guardUntilUnix * 1000);
+    } else if (Number.isFinite(guardSeconds) && guardSeconds > 0) {
+      pickupSaveCooldownUntilMs = Math.max(pickupSaveCooldownUntilMs, Date.now() + (guardSeconds * 1000));
+    }
     if (status === 401) {
       clearAuth();
+      return;
+    }
+    if (guardCode === "pickup_cooldown_active") {
+      const nowMs = Date.now();
+      const remaining = formatPickupCooldownRemaining(Math.max(0, pickupSaveCooldownUntilMs - nowMs));
+      if (window && typeof window.showPickupGuardNotice === "function") {
+        window.showPickupGuardNotice({
+          title: "Save button cooling off",
+          message: `Wait ${remaining} before saving another trip.`,
+          tone: "warning",
+        });
+      }
+      return;
+    }
+    if (guardCode === "pickup_same_position") {
+      if (window && typeof window.showPickupGuardNotice === "function") {
+        window.showPickupGuardNotice({
+          title: "Trip not saved",
+          message: "Same position detected. Move to a new location or keep driving before saving another trip.",
+          tone: "danger",
+        });
+      }
+      return;
+    }
+    if (guardCode === "pickup_needs_recent_driving") {
+      if (window && typeof window.showPickupGuardNotice === "function") {
+        window.showPickupGuardNotice({
+          title: "Trip not saved",
+          message: "Drive at least 6 minutes or move to a new location before saving this trip.",
+          tone: "danger",
+        });
+      }
+      return;
+    }
+    if (guardDetail && window && typeof window.showPickupGuardNotice === "function") {
+      window.showPickupGuardNotice({
+        title: "Trip not saved",
+        message: guardDetail,
+        tone: "warning",
+      });
       return;
     }
     alert(`Trip record failed: ${e.message || e}`);
