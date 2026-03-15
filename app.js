@@ -112,8 +112,10 @@ const LS_KEY_MANHATTAN = "manhattan_mode_enabled";
 const LS_KEY_BRONX_WASH_HEIGHTS = "bronx_wash_heights_mode";
 const LS_KEY_QUEENS = "queens_mode_enabled";
 
-const MANHATTAN_PAY_WEIGHT = 0.55;
-const MANHATTAN_VOL_WEIGHT = 0.45;
+const MANHATTAN_PICKUP_WEIGHT = 0.40;
+const MANHATTAN_NEXT_BIN_WEIGHT = 0.35;
+const MANHATTAN_PAY_WEIGHT = 0.25;
+const MANHATTAN_FADE_PENALTY_WEIGHT = 0.15;
 const MANHATTAN_GLOBAL_PENALTY = 0.98;
 
 const MANHATTAN_MIN_ZONES = 40;
@@ -656,30 +658,45 @@ function applyManhattanLocalView(frame) {
   if (!feats.length) return frame;
 
   const mPickups = [];
+  const mNextBinPickups = [];
   const mPay = [];
+
+  const clearManhattanLocalProps = (props) => {
+    props.mh_local_score = null;
+    props.mh_local_rating = null;
+    props.mh_local_bucket = null;
+    props.mh_local_color = null;
+    props.mh_pickup_strength = null;
+    props.mh_next_bin_strength = null;
+    props.mh_pay_strength = null;
+    props.mh_fade_penalty = null;
+  };
 
   for (const f of feats) {
     const props = f.properties || {};
     if (!isManhattanModeZone(props, f.geometry)) continue;
 
     const pu = Number(props.pickups ?? NaN);
+    const nextPu = Number(nextFramePickupsById.get(String(props.LocationID ?? "")) ?? NaN);
     const pay = Number(props.avg_driver_pay ?? NaN);
 
     if (Number.isFinite(pu)) mPickups.push(pu);
+    if (Number.isFinite(nextPu)) mNextBinPickups.push(nextPu);
     if (Number.isFinite(pay)) mPay.push(pay);
   }
 
   if (mPickups.length < MANHATTAN_MIN_ZONES || mPay.length < MANHATTAN_MIN_ZONES) {
     for (const f of feats) {
       const props = f.properties || {};
-      props.mh_local_rating = null;
-      props.mh_local_bucket = null;
-      props.mh_local_color = null;
+      clearManhattanLocalProps(props);
     }
     return frame;
   }
 
   const pickSorted = mPickups.slice().sort((a, b) => a - b);
+  const nextBinSorted = mNextBinPickups.length >= MANHATTAN_MIN_ZONES
+    ? mNextBinPickups.slice().sort((a, b) => a - b)
+    : null;
   const paySorted = mPay.slice().sort((a, b) => a - b);
 
   function percentileFromSorted(sorted, v) {
@@ -698,36 +715,47 @@ function applyManhattanLocalView(frame) {
     const props = f.properties || {};
 
     if (!isManhattanModeZone(props, f.geometry)) {
-      props.mh_local_rating = null;
-      props.mh_local_bucket = null;
-      props.mh_local_color = null;
+      clearManhattanLocalProps(props);
       continue;
     }
 
     const pu = Number(props.pickups ?? NaN);
+    const nextPuRaw = Number(nextFramePickupsById.get(String(props.LocationID ?? "")) ?? NaN);
     const pay = Number(props.avg_driver_pay ?? NaN);
 
     if (!Number.isFinite(pu) || !Number.isFinite(pay)) {
-      props.mh_local_rating = null;
-      props.mh_local_bucket = null;
-      props.mh_local_color = null;
+      clearManhattanLocalProps(props);
       continue;
     }
 
-    const volP = percentileFromSorted(pickSorted, pu);
-    const payP = percentileFromSorted(paySorted, pay);
+    const pickupStrength = percentileFromSorted(pickSorted, pu);
+    const nextBinStrength = (nextBinSorted && Number.isFinite(nextPuRaw))
+      ? percentileFromSorted(nextBinSorted, nextPuRaw)
+      : pickupStrength;
+    const payStrength = percentileFromSorted(paySorted, pay);
+    const fadePenalty = Math.max(0, pickupStrength - nextBinStrength);
 
-    let score = MANHATTAN_PAY_WEIGHT * payP + MANHATTAN_VOL_WEIGHT * volP;
-    score = Math.max(0, Math.min(1, score));
+    let modeScore =
+      (MANHATTAN_PICKUP_WEIGHT * pickupStrength) +
+      (MANHATTAN_NEXT_BIN_WEIGHT * nextBinStrength) +
+      (MANHATTAN_PAY_WEIGHT * payStrength) -
+      (MANHATTAN_FADE_PENALTY_WEIGHT * fadePenalty);
 
-    let localRating = 1 + 99 * score;
+    modeScore = Math.max(0, Math.min(1, modeScore));
+
+    let localRating = 1 + 99 * modeScore;
     localRating = localRating * MANHATTAN_GLOBAL_PENALTY;
     localRating = Math.max(1, Math.min(100, localRating));
 
     const { bucket, color } = colorFromLocalRating(localRating);
+    props.mh_local_score = modeScore;
     props.mh_local_rating = Math.round(localRating);
     props.mh_local_bucket = bucket;
     props.mh_local_color = color;
+    props.mh_pickup_strength = pickupStrength;
+    props.mh_next_bin_strength = nextBinStrength;
+    props.mh_pay_strength = payStrength;
+    props.mh_fade_penalty = fadePenalty;
   }
 
   return frame;
@@ -980,7 +1008,7 @@ function syncStatenIslandUI() {
     } else if (bronxWashHeightsMode) {
       modeNote.innerHTML = `Bronx/Wash Heights Mode is <b>ON</b>: trip-frequency prioritization for <b>Bronx + Manhattan 100th St and up corridor</b>.<br/>Pay average is ignored for this mode.`;
     } else if (manhattanMode) {
-      modeNote.innerHTML = `Manhattan Mode is <b>ON</b>: colors are <b>relative within core Manhattan only</b> and exclude Bronx/Wash Heights corridor zones.`;
+      modeNote.innerHTML = `Manhattan Mode is <b>ON</b>: core Manhattan anti-saturation proxy. Strong now + still strong next bin beats flash-in-the-pan zones. Bronx/Wash Heights corridor stays excluded.`;
     } else if (statenIslandMode) {
       modeNote.innerHTML = `Staten Island Mode is <b>ON</b>: Staten Island colors are <b>relative within Staten Island</b> only.<br/>Other boroughs remain NYC-wide.`;
     } else {
@@ -1232,7 +1260,7 @@ function updateRecommendation(frame) {
   } else if (best.usedBWH) {
     recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Best trip flow • Strong ride flow • Stay-busy area • Fast repeat-call area — ${distTxt}`;
   } else if (best.usedMH) {
-    recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Manhattan adjusted rating ${best.rating} — ${distTxt}`;
+    recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Manhattan anti-saturation rating ${best.rating} — ${distTxt}`;
   } else if (best.usedSI) {
     recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Staten Island local rating ${best.rating} — ${distTxt}`;
   } else {
@@ -3706,7 +3734,7 @@ function buildPopupHTML(props, geom) {
   }
 
   if (manhattanMode && isManhattanModeZone(props, geom) && Number.isFinite(Number(props.mh_local_rating))) {
-    extra += `<div style="margin-top:6px;"><b>Manhattan Adjusted:</b> ${props.mh_local_rating} (${prettyBucket(props.mh_local_bucket)})</div>`;
+    extra += `<div style="margin-top:6px;"><b>Manhattan Anti-Saturation:</b> ${props.mh_local_rating} (${prettyBucket(props.mh_local_bucket)})</div>`;
   }
 
   if (queensMode && isQueensModeZone(props) && Number.isFinite(Number(props.qn_local_rating))) {
