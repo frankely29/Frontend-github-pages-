@@ -54,7 +54,7 @@
         body: JSON.stringify(body || {}),
       });
     } catch (fetchErr) {
-      throw createErrorWithMeta(extractPickupErrorMessage(fetchErr), {});
+      throw createErrorWithMeta(toSafeString(fetchErr?.message, 'Network request failed'), {});
     }
 
     let payload = null;
@@ -106,21 +106,6 @@
     return payload || {};
   }
 
-  function removeIfExists(id) {
-    const node = document.getElementById(id);
-    if (node?.parentNode) node.parentNode.removeChild(node);
-  }
-
-  function rankIcon(iconKey) {
-    const map = {
-      recruit: '🪖', private: '🎖️', corporal: '🛡️', sergeant: '⭐', staff_sergeant: '🌟',
-      sergeant_first_class: '🏅', master_sergeant: '🏆', lieutenant: '🧭', captain: '⚔️',
-      major: '🦅', colonel: '🎯', brigadier: '🚀', major_general: '🛰️', lieutenant_general: '🔥',
-      general: '👑', commander: '🗽', road_legend: '🏁',
-    };
-    return map[String(iconKey || '').toLowerCase()] || '🏁';
-  }
-
   function ensurePickupGuardNotice() {
     let root = document.getElementById('pickupGuardNotice');
     if (!root) {
@@ -161,59 +146,15 @@
   }
 
   function showPickupReward(payload = {}) {
-    const p = payload.progression || payload;
-    const level = Number(p.level || 1);
-    const rankName = toSafeString(p.rank_name, 'Driver');
-    const xpAwarded = Number(payload.xp_awarded || 0);
-    const currentXP = Number(p.current_level_xp || 0);
-    const nextXP = Number(p.next_level_xp || 0);
-    const totalXP = Number(p.total_xp || 0);
-    const progressPct = nextXP > 0 ? Math.max(0, Math.min(100, Math.round((currentXP / nextXP) * 100))) : 100;
-    const toNext = Math.max(0, nextXP - currentXP);
-
-    removeIfExists('pickupRewardToast');
-    const card = document.createElement('div');
-    card.id = 'pickupRewardToast';
-    card.style.cssText = 'position:fixed;right:16px;bottom:110px;z-index:2501;width:min(92vw,340px);background:linear-gradient(145deg,#0a1628,#132d4b);color:#fff;border-radius:16px;padding:14px 14px 12px;box-shadow:0 12px 32px rgba(0,0,0,.35);font-family:system-ui;border:1px solid rgba(120,180,255,.35)';
-    card.innerHTML = `
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
-        <div><div style="font-size:12px;opacity:.86">XP Earned</div><div style="font-size:20px;font-weight:800"></div></div>
-        <div style="font-size:28px"></div>
-      </div>
-      <div data-rank style="margin-top:8px;font-weight:700"></div>
-      <div style="margin-top:8px;background:rgba(255,255,255,.2);height:8px;border-radius:999px;overflow:hidden"><div data-progress style="height:100%;background:linear-gradient(90deg,#53c4ff,#81f4a8)"></div></div>
-      <div data-footer style="margin-top:6px;font-size:12px;opacity:.9"></div>
-    `;
-    const xpEl = card.querySelector('div div div:nth-child(2)');
-    const iconEl = card.querySelector('div div:nth-child(2)');
-    const rankEl = card.querySelector('[data-rank]');
-    const progressEl = card.querySelector('[data-progress]');
-    const footerEl = card.querySelector('[data-footer]');
-    if (xpEl) xpEl.textContent = `+${xpAwarded}`;
-    if (iconEl) iconEl.textContent = rankIcon(p.rank_icon_key);
-    if (rankEl) rankEl.textContent = `Level ${level} • ${rankName}`;
-    if (progressEl) progressEl.style.width = `${progressPct}%`;
-    if (footerEl) footerEl.textContent = nextXP > 0 ? `+${xpAwarded} • ${toNext} XP to next level • Total XP ${totalXP}` : `MAX LEVEL • Total XP ${totalXP}`;
-
-    document.body.appendChild(card);
-    window.setTimeout(() => { if (card.parentNode) card.parentNode.removeChild(card); }, 4500);
+    if (typeof window.handlePickupProgressionDelta === 'function') {
+      window.handlePickupProgressionDelta(payload || {});
+    }
   }
 
   function showPickupLevelUp(payload = {}) {
-    const p = payload.progression || payload;
-    const level = Number(payload.new_level || p.level || 1);
-    const name = toSafeString(p.rank_name, 'Driver');
-    removeIfExists('pickupLevelUpOverlay');
-
-    const overlay = document.createElement('div');
-    overlay.id = 'pickupLevelUpOverlay';
-    overlay.style.cssText = 'position:fixed;inset:0;z-index:2600;background:rgba(3,8,18,.78);display:flex;align-items:center;justify-content:center;font-family:system-ui';
-    overlay.innerHTML = '<div style="background:#0f2139;color:#fff;padding:24px;border-radius:20px;box-shadow:0 20px 40px rgba(0,0,0,.5);text-align:center;max-width:420px;width:90%;border:1px solid rgba(140,190,255,.4)"><div data-icon style="font-size:44px"></div><div style="font-size:12px;opacity:.8">LEVEL UP</div><div data-level style="font-weight:900;font-size:30px;margin:6px 0"></div><div data-name style="font-size:18px"></div><button type="button" style="margin-top:14px;background:#55a8ff;color:#071324;border:0;border-radius:10px;padding:8px 14px;font-weight:700;cursor:pointer">Continue</button></div>';
-    overlay.querySelector('[data-icon]').textContent = rankIcon(p.rank_icon_key);
-    overlay.querySelector('[data-level]').textContent = `Level ${level}`;
-    overlay.querySelector('[data-name]').textContent = name;
-    overlay.querySelector('button')?.addEventListener('click', () => overlay.remove());
-    document.body.appendChild(overlay);
+    if (typeof window.showLevelUpOverlay === 'function') {
+      window.showLevelUpOverlay(payload?.progression || payload || {});
+    }
   }
 
   function formatCooldownWait(msLeft) {
@@ -269,8 +210,12 @@
       if (cooldownUnix > 0) pickupSaveCooldownUntilMs = cooldownUnix * 1000;
 
       ctx.schedulePickupOverlayRefresh?.({ force: true });
-      showPickupReward(res);
-      if (res?.leveled_up) showPickupLevelUp(res);
+      if (typeof window.handlePickupProgressionDelta === 'function') {
+        window.handlePickupProgressionDelta(res || {});
+      }
+      if (typeof window.syncMyProgression === 'function') {
+        window.syncMyProgression({ forcePopupCheck: true });
+      }
       return res;
     } catch (err) {
       const status = Number(err?.status || 0);
@@ -293,7 +238,7 @@
         return;
       }
 
-      alert(readable);
+      alert(`Trip record failed: ${readable}`);
     } finally {
       pickupSaveInFlight = false;
     }
@@ -385,14 +330,37 @@
     await run('active_filter', () => loadAdminRecentPickupTrips({ include_voided: false, limit: 20 }));
     await run('include_deleted_filter', () => loadAdminRecentPickupTrips({ include_voided: true, limit: 20 }));
     await run('structured_message_shape', async () => {
-      try {
-        await postJSONDetailed('/events/pickup', { lat: null }, token);
-      } catch (error) {
-        const msg = extractPickupErrorMessage(error);
-        if (!msg || msg === '[object Object]') throw new Error('Invalid message shape');
+      const result = await postJSONDetailed('/admin/pickup-recording/tests/simulate-save', {
+        user_id: ctx?.me?.id || 0,
+        lat: 40.7,
+        lng: -74.0,
+        zone_id: 1,
+        zone_name: 'Test Zone',
+        borough: 'Manhattan',
+        frame_time: null,
+      }, token);
+
+      const detail = result?.detail || {};
+      const hasErrorBlock = typeof detail.code === 'string' || typeof detail.title === 'string' || typeof detail.detail === 'string';
+      if (hasErrorBlock) {
+        if (typeof detail.code !== 'string' || typeof detail.title !== 'string' || typeof detail.detail !== 'string') {
+          throw new Error('Structured error contract missing string fields');
+        }
         return;
       }
-      throw new Error('Expected a guard error');
+
+      if (result?.would_save === true) {
+        const reward = result?.reward_contract || result?.progression || {};
+        const required = ['level', 'rank_name', 'rank_icon_key', 'total_xp', 'current_level_xp', 'next_level_xp', 'xp_to_next_level'];
+        for (const key of required) {
+          if (reward[key] === undefined || reward[key] === null) {
+            throw new Error(`Reward contract missing ${key}`);
+          }
+        }
+        return;
+      }
+
+      throw new Error('Structured contract did not return error block or would_save=true reward contract');
     });
   }
 
