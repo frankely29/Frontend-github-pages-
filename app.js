@@ -383,12 +383,9 @@ function isManhattanModeZone(props, geom) {
 }
 
 function enforceSpecialModeExclusivity() {
-  if (statenIslandMode) {
-    manhattanMode = false;
-    bronxWashHeightsMode = false;
-  } else if (bronxWashHeightsMode || manhattanMode) {
-    statenIslandMode = false;
-  }
+  statenIslandMode = !!statenIslandMode;
+  bronxWashHeightsMode = !!bronxWashHeightsMode;
+  manhattanMode = !!manhattanMode;
 }
 
 function persistSpecialModeState() {
@@ -546,9 +543,6 @@ if (btnManhattan) {
     e.preventDefault();
     e.stopPropagation();
     manhattanMode = !manhattanMode;
-    if (manhattanMode) {
-      statenIslandMode = false;
-    }
     persistSpecialModeState();
     syncManhattanUI();
     syncStatenIslandUI();
@@ -806,15 +800,23 @@ function syncStatenIslandUI() {
     btnStatenIsland.classList.toggle("on", !!statenIslandMode);
   }
   if (modeNote) {
-    modeNote.innerHTML = manhattanMode && bronxWashHeightsMode
-      ? `Manhattan Mode and Bronx/Wash Heights Mode are <b>ON</b>: each applies only to its own scope.`
-      : bronxWashHeightsMode
-        ? `Bronx/Wash Heights Mode is <b>ON</b>: trip-frequency prioritization for <b>Bronx + Manhattan 100th St and up corridor</b>.<br/>Pay average is ignored for this mode.`
-        : manhattanMode
-          ? `Manhattan Mode is <b>ON</b>: colors are <b>relative within core Manhattan only</b> and exclude Bronx/Wash Heights corridor zones.`
-          : statenIslandMode
-            ? `Staten Island Mode is <b>ON</b>: Staten Island colors are <b>relative within Staten Island</b> only.<br/>Other boroughs remain NYC-wide.`
-            : `Colors come from rating (1–100) for the selected 20-minute window.<br/>Time label is NYC time.`;
+    if (manhattanMode && statenIslandMode && bronxWashHeightsMode) {
+      modeNote.innerHTML = `Manhattan Mode, Staten Island Mode, and Bronx/Wash Heights Mode are <b>ON</b>: each applies only to its own scope.`;
+    } else if (manhattanMode && bronxWashHeightsMode) {
+      modeNote.innerHTML = `Manhattan Mode and Bronx/Wash Heights Mode are <b>ON</b>: each applies only to its own scope.`;
+    } else if (manhattanMode && statenIslandMode) {
+      modeNote.innerHTML = `Manhattan Mode and Staten Island Mode are <b>ON</b>: each applies only to its own scope.`;
+    } else if (statenIslandMode && bronxWashHeightsMode) {
+      modeNote.innerHTML = `Staten Island Mode and Bronx/Wash Heights Mode are <b>ON</b>: each applies only to its own scope.`;
+    } else if (bronxWashHeightsMode) {
+      modeNote.innerHTML = `Bronx/Wash Heights Mode is <b>ON</b>: trip-frequency prioritization for <b>Bronx + Manhattan 100th St and up corridor</b>.<br/>Pay average is ignored for this mode.`;
+    } else if (manhattanMode) {
+      modeNote.innerHTML = `Manhattan Mode is <b>ON</b>: colors are <b>relative within core Manhattan only</b> and exclude Bronx/Wash Heights corridor zones.`;
+    } else if (statenIslandMode) {
+      modeNote.innerHTML = `Staten Island Mode is <b>ON</b>: Staten Island colors are <b>relative within Staten Island</b> only.<br/>Other boroughs remain NYC-wide.`;
+    } else {
+      modeNote.innerHTML = `Colors come from rating (1–100) for the selected 20-minute window.<br/>Time label is NYC time.`;
+    }
   }
 }
 
@@ -836,10 +838,6 @@ if (btnStatenIsland) {
     e.preventDefault();
     e.stopPropagation();
     statenIslandMode = !statenIslandMode;
-    if (statenIslandMode) {
-      manhattanMode = false;
-      bronxWashHeightsMode = false;
-    }
     persistSpecialModeState();
     syncStatenIslandUI();
     syncManhattanUI();
@@ -856,9 +854,6 @@ if (btnBronxWashHeightsMode) {
     e.preventDefault();
     e.stopPropagation();
     bronxWashHeightsMode = !bronxWashHeightsMode;
-    if (bronxWashHeightsMode) {
-      statenIslandMode = false;
-    }
     persistSpecialModeState();
     syncBronxWashHeightsUI();
     syncStatenIslandUI();
@@ -1269,10 +1264,6 @@ function wireModesPanel() {
   document.getElementById("dockStatenBtn")?.addEventListener("click", (e) => {
     e.preventDefault();
     statenIslandMode = !statenIslandMode;
-    if (statenIslandMode) {
-      manhattanMode = false;
-      bronxWashHeightsMode = false;
-    }
     persistSpecialModeState();
     syncStatenIslandUI();
     syncManhattanUI();
@@ -1285,9 +1276,6 @@ function wireModesPanel() {
   document.getElementById("dockManhattanBtn")?.addEventListener("click", (e) => {
     e.preventDefault();
     manhattanMode = !manhattanMode;
-    if (manhattanMode) {
-      statenIslandMode = false;
-    }
     persistSpecialModeState();
     syncManhattanUI();
     syncStatenIslandUI();
@@ -1300,9 +1288,6 @@ function wireModesPanel() {
   document.getElementById("dockBronxWashHeightsBtn")?.addEventListener("click", (e) => {
     e.preventDefault();
     bronxWashHeightsMode = !bronxWashHeightsMode;
-    if (bronxWashHeightsMode) {
-      statenIslandMode = false;
-    }
     persistSpecialModeState();
     syncBronxWashHeightsUI();
     syncStatenIslandUI();
