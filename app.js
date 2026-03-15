@@ -6512,60 +6512,6 @@ function nearestZoneToUser(frame, latlng) {
   return best;
 }
 
-let recordTripToastTimer = null;
-function ensureRecordTripToast() {
-  let el = document.getElementById("recordTripToast");
-  if (el) return el;
-
-  el = document.createElement("div");
-  el.id = "recordTripToast";
-  el.setAttribute("aria-hidden", "true");
-  el.style.cssText = [
-    "position:fixed",
-    "left:50%",
-    "bottom:calc(env(safe-area-inset-bottom, 0px) + 182px)",
-    "transform:translate(-50%, 18px) scale(0.94)",
-    "opacity:0",
-    "pointer-events:none",
-    "z-index:9800",
-    "transition:opacity 220ms ease, transform 220ms ease",
-  ].join(";");
-  el.innerHTML = `
-    <div aria-label="Trip recorded" style="
-      width:72px;
-      height:72px;
-      border-radius:999px;
-      background:#18b45b;
-      display:grid;
-      place-items:center;
-      color:#fff;
-      font:900 36px/1 system-ui,-apple-system,Segoe UI,Roboto,Arial;
-      box-shadow:0 16px 34px rgba(0,0,0,0.24), 0 0 0 6px rgba(24,180,91,0.18);
-      user-select:none;
-    ">✔</div>
-  `;
-  document.body.appendChild(el);
-  return el;
-}
-function hideRecordTripToast() {
-  const el = document.getElementById("recordTripToast");
-  if (!el) return;
-  el.style.opacity = "0";
-  el.style.transform = "translate(-50%, 18px) scale(0.94)";
-  el.setAttribute("aria-hidden", "true");
-}
-function showRecordTripToast() {
-  const el = ensureRecordTripToast();
-  if (recordTripToastTimer) clearTimeout(recordTripToastTimer);
-  el.style.opacity = "1";
-  el.style.transform = "translate(-50%, 0) scale(1)";
-  el.setAttribute("aria-hidden", "false");
-  recordTripToastTimer = setTimeout(() => {
-    hideRecordTripToast();
-    recordTripToastTimer = null;
-  }, 3000);
-}
-
 async function sendPoliceReport() {
   if (!authHeaderOK()) {
     setAuthUI(false, "Sign in to report police.");

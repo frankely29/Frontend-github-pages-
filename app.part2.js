@@ -2383,14 +2383,25 @@
       .levelUpTitle{font-size:19px;font-weight:900;line-height:1.1;color:#fff}
       .levelUpSub{font-size:13px;font-weight:700;color:#cbd5e1}
       .levelUpXp{font-size:11px;color:#93c5fd}
-      .pickupProgressToastCard{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom, 0px) + 122px);width:min(250px,calc(100vw - 26px));transform:translate(-50%,12px);opacity:0;z-index:9802;pointer-events:none;background:rgba(248,250,252,.94);backdrop-filter:blur(5px);color:#0f172a;border:1px solid rgba(148,163,184,.34);padding:9px 10px;border-radius:12px;box-shadow:0 9px 24px rgba(15,23,42,.2);transition:opacity .2s ease,transform .2s ease}
-      .pickupProgressToastCard.show{opacity:1;transform:translate(-50%,0)}
-      .pickupProgressToastHead{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;line-height:1.2;font-weight:800}
-      .pickupProgressToastEarned{font-weight:900;color:#0369a1}
-      .pickupProgressToastRank{margin-top:3px;font-size:13px;line-height:1.25;font-weight:800;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-      .pickupProgressToastBar{margin-top:7px;height:6px;border-radius:999px;background:#dbe4ee;overflow:hidden}
-      .pickupProgressToastFill{height:100%;width:0;background:linear-gradient(90deg,#3b82f6,#22c55e);border-radius:999px;transition:width .25s ease-out}
-      .pickupProgressToastFoot{margin-top:6px;font-size:11px;line-height:1.2;color:#475569;font-weight:700}
+      .pickupProgressReward{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom, 0px) + 194px);width:min(248px,calc(100vw - 26px));transform:translate(-50%,20px) scale(.94);opacity:0;z-index:9802;pointer-events:none;display:flex;flex-direction:column;align-items:center;gap:5px;color:#e2e8f0;transition:opacity .34s ease,transform .34s cubic-bezier(.2,.75,.22,1.12);text-shadow:0 4px 18px rgba(2,6,23,.5),0 1px 1px rgba(2,6,23,.45)}
+      .pickupProgressReward.show{opacity:1;transform:translate(-50%,0) scale(1)}
+      .pickupProgressRewardLabel,.pickupProgressRewardLevel,.pickupProgressRewardRank,.pickupProgressRewardFoot{opacity:0;transform:translateY(6px);transition:opacity .24s ease,transform .24s ease}
+      .pickupProgressReward.show .pickupProgressRewardLabel{opacity:1;transform:translateY(0);transition-delay:.08s}
+      .pickupProgressReward.show .pickupProgressRewardLevel,.pickupProgressReward.show .pickupProgressRewardRank{opacity:1;transform:translateY(0);transition-delay:.18s}
+      .pickupProgressReward.show .pickupProgressRewardFoot{opacity:1;transform:translateY(0);transition-delay:.22s}
+      .pickupProgressRewardLabel{font-size:11px;font-weight:900;letter-spacing:.9px;text-transform:uppercase;color:#dbeafe}
+      .pickupProgressRewardIcon{position:relative;display:grid;place-items:center;opacity:0;transform:scale(.76)}
+      .pickupProgressReward.show .pickupProgressRewardIcon{opacity:1;animation:pickupProgressRewardIconPop .56s cubic-bezier(.2,.8,.2,1) .12s both}
+      .pickupProgressRewardIcon::before{content:'';position:absolute;inset:-9px;border-radius:999px;background:radial-gradient(circle,rgba(110,231,255,.42) 0%,rgba(56,189,248,.2) 45%,rgba(56,189,248,0) 72%);filter:blur(1px);opacity:0;transform:scale(.6)}
+      .pickupProgressReward.show .pickupProgressRewardIcon::before{animation:pickupProgressRewardGlow .62s ease-out .16s both}
+      .pickupProgressReward .rankBadgeIconWrap{box-shadow:inset 0 0 0 1px rgba(255,255,255,.38),0 0 0 1px rgba(15,23,42,.2),0 10px 24px rgba(2,6,23,.44),0 0 22px rgba(56,189,248,.33)}
+      .pickupProgressRewardLevel{font-size:14px;font-weight:900;line-height:1.08;color:#fff}
+      .pickupProgressRewardRank{margin-top:-2px;font-size:12px;font-weight:800;line-height:1.18;color:#bfdbfe;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .pickupProgressRewardBar{width:min(204px,100%);height:5px;border-radius:999px;background:rgba(148,163,184,.26);box-shadow:0 0 0 1px rgba(148,163,184,.22),0 0 14px rgba(59,130,246,.26);overflow:hidden}
+      .pickupProgressRewardFill{height:100%;width:0;background:linear-gradient(90deg,#38bdf8 0%,#3b82f6 52%,#22c55e 100%);border-radius:999px;transition:width .48s cubic-bezier(.2,.84,.2,1);transition-delay:.22s}
+      .pickupProgressRewardFoot{font-size:11px;line-height:1.18;font-weight:800;color:#dbeafe;text-align:center}
+      @keyframes pickupProgressRewardIconPop{0%{transform:scale(.72)}42%{transform:scale(1.14)}100%{transform:scale(1)}}
+      @keyframes pickupProgressRewardGlow{0%{opacity:0;transform:scale(.55)}36%{opacity:1;transform:scale(1.02)}100%{opacity:0;transform:scale(1.22)}}
       .driverProfileClose{border:0;background:#e5e7eb;color:#111827;border-radius:10px;padding:7px 9px;font-size:13px}
       .driverProfileScroll{overflow:auto;-webkit-overflow-scrolling:touch;padding:0 11px 10px;min-height:0}
       .driverProfileSectionTitle{font-size:12px;font-weight:700;color:#111827;margin:2px 0 6px}
@@ -2677,17 +2688,19 @@
     }
   }
 
-  function ensurePickupProgressToastCard() {
-    let el = document.getElementById('pickupProgressToastCard');
+  function ensurePickupProgressReward() {
+    let el = document.getElementById('pickupProgressReward');
     if (el) return el;
     el = document.createElement('div');
-    el.id = 'pickupProgressToastCard';
-    el.className = 'pickupProgressToastCard';
+    el.id = 'pickupProgressReward';
+    el.className = 'pickupProgressReward';
     el.setAttribute('aria-hidden', 'true');
-    el.innerHTML = `<div class="pickupProgressToastHead"><span id="pickupProgressToastLevel"></span><span class="pickupProgressToastEarned" id="pickupProgressToastEarned"></span></div>
-      <div class="pickupProgressToastRank" id="pickupProgressToastRank"></div>
-      <div class="pickupProgressToastBar"><div class="pickupProgressToastFill" id="pickupProgressToastFill"></div></div>
-      <div class="pickupProgressToastFoot" id="pickupProgressToastFoot"></div>`;
+    el.innerHTML = `<div class="pickupProgressRewardLabel">XP Earned</div>
+      <div class="pickupProgressRewardIcon" id="pickupProgressRewardIcon"></div>
+      <div class="pickupProgressRewardLevel" id="pickupProgressRewardLevel"></div>
+      <div class="pickupProgressRewardRank" id="pickupProgressRewardRank"></div>
+      <div class="pickupProgressRewardBar"><div class="pickupProgressRewardFill" id="pickupProgressRewardFill"></div></div>
+      <div class="pickupProgressRewardFoot" id="pickupProgressRewardFoot"></div>`;
     document.body.appendChild(el);
     return el;
   }
@@ -2707,51 +2720,56 @@
     return Math.min(1, Math.max(0, pct));
   }
 
-  function renderPickupProgressToastCard(payload = {}) {
+  function renderPickupProgressReward(payload = {}) {
     const progression = payload?.progression && typeof payload.progression === 'object' ? payload.progression : payload;
     if (!progression || typeof progression !== 'object') return false;
-    const el = ensurePickupProgressToastCard();
+    ensurePickupProgressReward();
     const level = Number(progression?.level);
     const safeLevel = Number.isFinite(level) && level > 0 ? Math.floor(level) : 1;
     const xpAwarded = Number(payload?.xp_awarded ?? progression?.xp_awarded);
-    const earnedLabel = Number.isFinite(xpAwarded) && xpAwarded > 0
-      ? `+${formatProgressNumber(xpAwarded, { maxFractionDigits: 0 })} XP`
-      : '+0 XP';
+    const earnedLabel = `+${formatProgressNumber(Number.isFinite(xpAwarded) && xpAwarded > 0 ? xpAwarded : 0, { maxFractionDigits: 0 })} XP`;
     const rankName = normalizeDriverTier(progression?.rank_name || progression?.title || 'Rookie');
     const xpToNext = Number(progression?.xp_to_next_level);
     const isMaxLevel = progression?.is_max_level === true
       || progression?.max_level_reached === true
       || (Number.isFinite(xpToNext) && xpToNext <= 0);
     const footer = isMaxLevel
-      ? 'MAX LEVEL'
-      : `${formatProgressNumber(Number.isFinite(xpToNext) && xpToNext > 0 ? xpToNext : 0, { maxFractionDigits: 0 })} XP to Level ${safeLevel + 1}`;
+      ? `${earnedLabel} • MAX LEVEL`
+      : `${earnedLabel} • ${formatProgressNumber(Number.isFinite(xpToNext) && xpToNext > 0 ? xpToNext : 0, { maxFractionDigits: 0 })} XP to Level ${safeLevel + 1}`;
     const pct = computeProgressRatio(progression);
-    const levelEl = document.getElementById('pickupProgressToastLevel');
-    const earnedEl = document.getElementById('pickupProgressToastEarned');
-    const rankEl = document.getElementById('pickupProgressToastRank');
-    const fillEl = document.getElementById('pickupProgressToastFill');
-    const footEl = document.getElementById('pickupProgressToastFoot');
-    if (!levelEl || !earnedEl || !rankEl || !fillEl || !footEl) return false;
+    const iconEl = document.getElementById('pickupProgressRewardIcon');
+    const levelEl = document.getElementById('pickupProgressRewardLevel');
+    const rankEl = document.getElementById('pickupProgressRewardRank');
+    const fillEl = document.getElementById('pickupProgressRewardFill');
+    const footEl = document.getElementById('pickupProgressRewardFoot');
+    if (!iconEl || !levelEl || !rankEl || !fillEl || !footEl) return false;
+    iconEl.innerHTML = renderRankBadgeIcon(progression?.rank_icon_key, { compact: true });
     levelEl.textContent = `Level ${safeLevel}`;
-    earnedEl.textContent = earnedLabel;
     rankEl.textContent = String(rankName || 'Rookie');
-    fillEl.style.width = `${Math.round(pct * 100)}%`;
+    fillEl.style.width = '0%';
     footEl.textContent = footer;
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        fillEl.style.width = `${Math.round(pct * 100)}%`;
+      });
+    });
     return true;
   }
 
-  function showPickupProgressToastCard(payload = {}) {
-    const rendered = renderPickupProgressToastCard(payload);
+  function showPickupProgressReward(payload = {}) {
+    const rendered = renderPickupProgressReward(payload);
     if (!rendered) return;
-    const el = ensurePickupProgressToastCard();
+    const el = ensurePickupProgressReward();
+    el.classList.remove('show');
+    void el.offsetWidth;
     el.classList.add('show');
     el.setAttribute('aria-hidden', 'false');
-    if (showPickupProgressToastCard._timer) window.clearTimeout(showPickupProgressToastCard._timer);
-    showPickupProgressToastCard._timer = window.setTimeout(() => {
+    if (showPickupProgressReward._timer) window.clearTimeout(showPickupProgressReward._timer);
+    showPickupProgressReward._timer = window.setTimeout(() => {
       el.classList.remove('show');
       el.setAttribute('aria-hidden', 'true');
-      showPickupProgressToastCard._timer = null;
-    }, 2600);
+      showPickupProgressReward._timer = null;
+    }, 2800);
   }
 
   function ensureLevelUpOverlay() {
@@ -2844,7 +2862,7 @@
   function handlePickupProgressionDelta(payload = {}) {
     const progressionPayload = payload?.progression && typeof payload.progression === 'object' ? payload.progression : payload;
     const leveledUp = payload?.leveled_up === true || progressionPayload?.leveled_up === true;
-    showPickupProgressToastCard(payload);
+    showPickupProgressReward(payload);
     const meId = Number(window?.me?.id);
     const nextLevel = Number(progressionPayload?.level);
     if (Number.isFinite(meId) && Number.isFinite(nextLevel) && nextLevel > 0) {
