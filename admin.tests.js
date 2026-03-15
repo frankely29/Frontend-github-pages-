@@ -341,7 +341,13 @@
         <div class="adminMuted">Manual read-only diagnostics. Tests run only when triggered.</div>
       </div>
       ${sections}
+      <div id="adminPickupRecordingSuiteMount"></div>
     `;
+
+    const pickupSuiteMount = container.querySelector("#adminPickupRecordingSuiteMount");
+    if (pickupSuiteMount && window.PickupRecordingFeature && typeof window.PickupRecordingFeature.mountAdminPickupRecordingTests === "function") {
+      window.PickupRecordingFeature.mountAdminPickupRecordingTests(pickupSuiteMount, helpers);
+    }
 
     function paintResult(test, result) {
       const card = container.querySelector(`[data-test-key="${CSS.escape(test.key)}"]`);
