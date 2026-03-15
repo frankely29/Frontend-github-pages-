@@ -111,6 +111,7 @@ let mapPageIsVisible = !document.hidden;
 const LS_KEY_MANHATTAN = "manhattan_mode_enabled";
 const LS_KEY_BRONX_WASH_HEIGHTS = "bronx_wash_heights_mode";
 const LS_KEY_QUEENS = "queens_mode_enabled";
+const LS_KEY_BROOKLYN = "brooklyn_mode_enabled";
 
 const MANHATTAN_PICKUP_WEIGHT = 0.40;
 const MANHATTAN_NEXT_BIN_WEIGHT = 0.35;
@@ -133,6 +134,7 @@ const QUEENS_PROXIMITY_WEIGHT = 0.10;
 const QUEENS_DEAD_ZONE_PENALTY_WEIGHT = 0.10;
 const QUEENS_MIN_ZONES = 8;
 const QUEENS_NEARBY_RADIUS_MI = 1.35;
+const BROOKLYN_MIN_ZONES = 3;
 
 const BRONX_WASH_HEIGHTS_MANHATTAN_ZONE_IDS = new Set([
   "41", "42", "74", "75", "116", "127", "128", "151", "152", "166", "243", "244",
@@ -354,12 +356,14 @@ function escapeHtml(s) {
 const btnStatenIsland = document.getElementById("btnStatenIsland");
 const btnBronxWashHeightsMode = document.getElementById("btnBronxWashHeightsMode");
 const btnQueensMode = document.getElementById("btnQueensMode");
+const btnBrooklynMode = document.getElementById("btnBrooklynMode");
 const modeNote = document.getElementById("modeNote");
 
 const LS_KEY_STATEN = "staten_island_mode_enabled";
 let statenIslandMode = (localStorage.getItem(LS_KEY_STATEN) || "0") === "1";
 let bronxWashHeightsMode = (localStorage.getItem(LS_KEY_BRONX_WASH_HEIGHTS) || "0") === "1";
 let queensMode = (localStorage.getItem(LS_KEY_QUEENS) || "0") === "1";
+let brooklynMode = (localStorage.getItem(LS_KEY_BROOKLYN) || "0") === "1";
 
 function isStatenIslandFeature(props) {
   const b = (props?.borough || "").toString().toLowerCase();
@@ -393,6 +397,15 @@ function isQueensModeZone(props) {
   return isQueensFeature(props) && !isAirportZone(props);
 }
 
+function isBrooklynFeature(props) {
+  const b = (props?.borough || "").toString().toLowerCase();
+  return b.includes("brooklyn");
+}
+
+function isBrooklynModeZone(props) {
+  return isBrooklynFeature(props);
+}
+
 function isBronxWashHeightsBorough(props) {
   const b = (props?.borough || "").toString().toLowerCase();
   return b.includes("bronx");
@@ -423,6 +436,7 @@ function persistSpecialModeState() {
   localStorage.setItem(LS_KEY_MANHATTAN, manhattanMode ? "1" : "0");
   localStorage.setItem(LS_KEY_STATEN, statenIslandMode ? "1" : "0");
   localStorage.setItem(LS_KEY_QUEENS, queensMode ? "1" : "0");
+  localStorage.setItem(LS_KEY_BROOKLYN, brooklynMode ? "1" : "0");
 }
 
 enforceSpecialModeExclusivity();
@@ -572,6 +586,12 @@ function syncQueensUI() {
   btnQueensMode.classList.toggle("on", !!queensMode);
 }
 syncQueensUI();
+
+function syncBrooklynUI() {
+  if (!btnBrooklynMode) return;
+  btnBrooklynMode.textContent = brooklynMode ? "Brooklyn Mode: ON" : "Brooklyn Mode: OFF";
+  btnBrooklynMode.classList.toggle("on", !!brooklynMode);
+}
 
 if (btnManhattan) {
   btnManhattan.addEventListener("pointerdown", (e) => e.stopPropagation());
@@ -986,6 +1006,77 @@ function applyQueensLocalView(frame) {
 }
 
 
+function applyBrooklynLocalView(frame) {
+  const feats = frame?.polygons?.features || [];
+  if (!feats.length) return frame;
+
+  const bkRatings = [];
+  for (const f of feats) {
+    const props = f.properties || {};
+    if (!isBrooklynModeZone(props)) continue;
+    const r = Number(props.rating ?? NaN);
+    if (!Number.isFinite(r)) continue;
+    bkRatings.push(r);
+  }
+
+  if (bkRatings.length < BROOKLYN_MIN_ZONES) {
+    for (const f of feats) {
+      const props = f.properties || {};
+      props.bk_local_rating = null;
+      props.bk_local_bucket = null;
+      props.bk_local_color = null;
+      props.bk_local_score = null;
+    }
+    return frame;
+  }
+
+  const sorted = bkRatings.slice().sort((a, b) => a - b);
+  const n = sorted.length;
+
+  function percentileOfRating(r) {
+    let lo = 0, hi = n - 1, ans = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (sorted[mid] <= r) { ans = mid; lo = mid + 1; }
+      else hi = mid - 1;
+    }
+    if (n <= 1) return 0;
+    return Math.max(0, Math.min(1, ans / (n - 1)));
+  }
+
+  for (const f of feats) {
+    const props = f.properties || {};
+    if (!isBrooklynModeZone(props)) {
+      props.bk_local_rating = null;
+      props.bk_local_bucket = null;
+      props.bk_local_color = null;
+      props.bk_local_score = null;
+      continue;
+    }
+
+    const r = Number(props.rating ?? NaN);
+    if (!Number.isFinite(r)) {
+      props.bk_local_rating = null;
+      props.bk_local_bucket = null;
+      props.bk_local_color = null;
+      props.bk_local_score = null;
+      continue;
+    }
+
+    const percentile = percentileOfRating(r);
+    const localRating = 1 + 99 * percentile;
+    const { bucket, color } = colorFromLocalRating(localRating);
+
+    props.bk_local_score = percentile;
+    props.bk_local_rating = Math.round(localRating);
+    props.bk_local_bucket = bucket;
+    props.bk_local_color = color;
+  }
+
+  return frame;
+}
+
+
 function syncStatenIslandUI() {
   if (btnStatenIsland) {
     btnStatenIsland.textContent = statenIslandMode ? "Staten Island Mode: ON" : "Staten Island Mode: OFF";
@@ -997,6 +1088,7 @@ function syncStatenIslandUI() {
     if (manhattanMode) activeLabels.push("Manhattan Mode");
     if (statenIslandMode) activeLabels.push("Staten Island Mode");
     if (bronxWashHeightsMode) activeLabels.push("Bronx/Wash Heights Mode");
+    if (brooklynMode) activeLabels.push("Brooklyn Mode");
 
     if (activeLabels.length > 1) {
       const joined = activeLabels.length === 2
@@ -1011,6 +1103,8 @@ function syncStatenIslandUI() {
       modeNote.innerHTML = `Manhattan Mode is <b>ON</b>: core Manhattan anti-saturation proxy. Strong now + still strong next bin beats flash-in-the-pan zones. Bronx/Wash Heights corridor stays excluded.`;
     } else if (statenIslandMode) {
       modeNote.innerHTML = `Staten Island Mode is <b>ON</b>: Staten Island colors are <b>relative within Staten Island</b> only.<br/>Other boroughs remain NYC-wide.`;
+    } else if (brooklynMode) {
+      modeNote.innerHTML = `Brooklyn Mode is <b>ON</b>: Brooklyn zones are ranked relative within Brooklyn only from best to worst.`;
     } else {
       modeNote.innerHTML = `Colors come from rating (1–100) for the selected 20-minute window.<br/>Time label is NYC time.`;
     }
@@ -1026,6 +1120,7 @@ function syncBronxWashHeightsUI() {
 }
 syncStatenIslandUI();
 syncBronxWashHeightsUI();
+syncBrooklynUI();
 
 if (btnStatenIsland) {
   btnStatenIsland.addEventListener("pointerdown", (e) => e.stopPropagation());
@@ -1060,6 +1155,24 @@ if (btnQueensMode) {
   });
 }
 
+if (btnBrooklynMode) {
+  btnBrooklynMode.addEventListener("pointerdown", (e) => e.stopPropagation());
+  btnBrooklynMode.addEventListener("touchstart", (e) => e.stopPropagation(), { passive: true });
+
+  btnBrooklynMode.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    brooklynMode = !brooklynMode;
+    persistSpecialModeState();
+    syncBrooklynUI();
+    syncQueensUI();
+    syncStatenIslandUI();
+    syncManhattanUI();
+    syncBronxWashHeightsUI();
+    if (currentFrame) renderFrame(currentFrame);
+  });
+}
+
 if (btnBronxWashHeightsMode) {
   btnBronxWashHeightsMode.addEventListener("pointerdown", (e) => e.stopPropagation());
   btnBronxWashHeightsMode.addEventListener("touchstart", (e) => e.stopPropagation(), { passive: true });
@@ -1081,6 +1194,7 @@ if (btnBronxWashHeightsMode) {
    ========================================================= */
 function effectiveBucket(props, geom) {
   if (queensMode && isQueensModeZone(props) && props.qn_local_bucket) return props.qn_local_bucket;
+  if (brooklynMode && isBrooklynModeZone(props) && props.bk_local_bucket) return props.bk_local_bucket;
   if (bronxWashHeightsMode && isBronxWashHeightsModeZone(props) && props.bwh_local_bucket) return props.bwh_local_bucket;
   if (statenIslandMode && isStatenIslandFeature(props) && props.si_local_bucket) return props.si_local_bucket;
   if (manhattanMode && isManhattanModeZone(props, geom) && props.mh_local_bucket) return props.mh_local_bucket;
@@ -1088,6 +1202,7 @@ function effectiveBucket(props, geom) {
 }
 function effectiveColor(props, geom) {
   if (queensMode && isQueensModeZone(props) && props.qn_local_color) return props.qn_local_color;
+  if (brooklynMode && isBrooklynModeZone(props) && props.bk_local_color) return props.bk_local_color;
   if (bronxWashHeightsMode && isBronxWashHeightsModeZone(props) && props.bwh_local_color) return props.bwh_local_color;
   if (statenIslandMode && isStatenIslandFeature(props) && props.si_local_color) return props.si_local_color;
   if (manhattanMode && isManhattanModeZone(props, geom) && props.mh_local_color) return props.mh_local_color;
@@ -1097,6 +1212,9 @@ function effectiveColor(props, geom) {
 function effectiveRating(props, geom) {
   if (queensMode && isQueensModeZone(props) && Number.isFinite(Number(props.qn_local_rating))) {
     return Number(props.qn_local_rating);
+  }
+  if (brooklynMode && isBrooklynModeZone(props) && Number.isFinite(Number(props.bk_local_rating))) {
+    return Number(props.bk_local_rating);
   }
   if (bronxWashHeightsMode && isBronxWashHeightsModeZone(props) && Number.isFinite(Number(props.bwh_local_rating))) {
     return Number(props.bwh_local_rating);
@@ -1112,6 +1230,7 @@ function effectiveRating(props, geom) {
 
 function getActiveSpecialModeTagForFeature(props, geom) {
   if (queensMode && isQueensModeZone(props)) return "queens";
+  if (brooklynMode && isBrooklynModeZone(props)) return "brooklyn";
   if (statenIslandMode && isStatenIslandFeature(props)) return "staten_island";
   if (bronxWashHeightsMode && isBronxWashHeightsModeZone(props)) return "bronx_wash_heights";
   if (manhattanMode && isManhattanModeZone(props, geom)) return "manhattan";
@@ -1195,7 +1314,7 @@ function updateRecommendation(frame) {
   const allowed = new Set(["blue", "purple", "green"]);
   const DIST_PENALTY_PER_MILE = 4.0;
   const BRONX_WASH_HEIGHTS_DIST_PENALTY_PER_MILE = 2.0;
-  const specialModesActive = queensMode || statenIslandMode || bronxWashHeightsMode || manhattanMode;
+  const specialModesActive = queensMode || brooklynMode || statenIslandMode || bronxWashHeightsMode || manhattanMode;
 
   let best = null;
 
@@ -1219,6 +1338,8 @@ function updateRecommendation(frame) {
     let score;
     if (modeTag === "queens") {
       score = (Number(props.qn_local_score ?? 0) * 100) - dMi * 5.0;
+    } else if (modeTag === "brooklyn") {
+      score = Number(props.bk_local_rating ?? NaN) - dMi * DIST_PENALTY_PER_MILE;
     } else if (modeTag === "bronx_wash_heights") {
       score = (Number(props.bwh_local_score ?? 0) * 100) - dMi * BRONX_WASH_HEIGHTS_DIST_PENALTY_PER_MILE;
     } else if (modeTag === "manhattan") {
@@ -1240,6 +1361,7 @@ function updateRecommendation(frame) {
         name: (props.zone_name || "").trim() || `Zone ${props.LocationID ?? ""}`,
         borough: (props.borough || "").trim(),
         usedQN: modeTag === "queens" && Number.isFinite(Number(props.qn_local_rating)),
+        usedBK: modeTag === "brooklyn" && Number.isFinite(Number(props.bk_local_rating)),
         usedSI: modeTag === "staten_island" && Number.isFinite(Number(props.si_local_rating)),
         usedMH: modeTag === "manhattan" && Number.isFinite(Number(props.mh_local_rating)),
         usedBWH: modeTag === "bronx_wash_heights" && Number.isFinite(Number(props.bwh_local_rating)),
@@ -1259,6 +1381,8 @@ function updateRecommendation(frame) {
     recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Best Queens flow • Non-airport pocket • Safer from dead spots • Strong repeat-call pocket — ${distTxt}`;
   } else if (best.usedBWH) {
     recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Best trip flow • Strong ride flow • Stay-busy area • Fast repeat-call area — ${distTxt}`;
+  } else if (best.usedBK) {
+    recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Brooklyn local rating ${best.rating} — ${distTxt}`;
   } else if (best.usedMH) {
     recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Manhattan anti-saturation rating ${best.rating} — ${distTxt}`;
   } else if (best.usedSI) {
@@ -1458,6 +1582,7 @@ function modesPanelHTML() {
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
         <button id="dockStatenBtn" class="chipBtn">${statenIslandMode ? "Staten Island: ON" : "Staten Island: OFF"}</button>
         <button id="dockQueensBtn" class="chipBtn">${queensMode ? "Queens: ON" : "Queens: OFF"}</button>
+        <button id="dockBrooklynBtn" class="chipBtn">${brooklynMode ? "Brooklyn: ON" : "Brooklyn: OFF"}</button>
         <button id="dockManhattanBtn" class="chipBtn">${manhattanMode ? "Manhattan: ON" : "Manhattan: OFF"}</button>
         <button id="dockBronxWashHeightsBtn" class="chipBtn">${bronxWashHeightsMode ? "Bronx/Wash Heights: ON" : "Bronx/Wash Heights: OFF"}</button>
         <button id="dockGhostBtn" class="chipBtn">${me?.ghost_mode ? "Ghost: ON" : "Ghost: OFF"}</button>
@@ -1503,6 +1628,20 @@ function wireModesPanel() {
     e.preventDefault();
     queensMode = !queensMode;
     persistSpecialModeState();
+    syncQueensUI();
+    syncStatenIslandUI();
+    syncManhattanUI();
+    syncBronxWashHeightsUI();
+    if (currentFrame) renderFrame(currentFrame);
+    openDrawer("modes", "Modes", modesPanelHTML());
+    wireModesPanel();
+  });
+
+  document.getElementById("dockBrooklynBtn")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    brooklynMode = !brooklynMode;
+    persistSpecialModeState();
+    syncBrooklynUI();
     syncQueensUI();
     syncStatenIslandUI();
     syncManhattanUI();
@@ -3741,6 +3880,10 @@ function buildPopupHTML(props, geom) {
     extra += `<div style="margin-top:6px;"><b>Queens Local Flow:</b> ${props.qn_local_rating} (${prettyBucket(props.qn_local_bucket)})</div>`;
   }
 
+  if (brooklynMode && isBrooklynModeZone(props) && Number.isFinite(Number(props.bk_local_rating))) {
+    extra += `<div style="margin-top:6px;"><b>Brooklyn Local Rating:</b> ${props.bk_local_rating} (${prettyBucket(props.bk_local_bucket)})</div>`;
+  }
+
   if (bronxWashHeightsMode && isBronxWashHeightsModeZone(props) && Number.isFinite(Number(props.bwh_local_rating))) {
     extra += `<div style="margin-top:6px;"><b>Bronx/Wash Heights Trip Flow:</b> ${props.bwh_local_rating} (${prettyBucket(props.bwh_local_bucket)})</div>`;
   }
@@ -3846,6 +3989,7 @@ async function renderFrame(frame) {
 
   // apply modes to mutate props (same as old)
   if (queensMode) applyQueensLocalView(frame);
+  if (brooklynMode) applyBrooklynLocalView(frame);
   if (bronxWashHeightsMode) applyBronxWashHeightsLocalView(frame);
   if (statenIslandMode) applyStatenLocalView(frame);
   if (manhattanMode) applyManhattanLocalView(frame);
