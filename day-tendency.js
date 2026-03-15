@@ -3,6 +3,7 @@
   const DAY_TENDENCY_RETRY_MS = 10 * 1000;
   const DAY_TENDENCY_MOVE_CHECK_MS = 60 * 1000;
   const DAY_TENDENCY_MATERIAL_MOVE_METERS = 1200;
+  const DAY_TENDENCY_FIRST_FIX_CHECK_MS = 1500;
 
   const STATE = {
     root: null,
@@ -20,8 +21,9 @@
     lastQueryLat: null,
     lastQueryLng: null,
     lastQueryAt: 0,
-    geolocationFallback: null,
-    geolocationFetchedAt: 0,
+    hasInitialGpsFix: false,
+    hasRenderedRealPayload: false,
+    firstFixTimer: null,
   };
 
   function apiBase() {
@@ -241,37 +243,7 @@
         if (fromStable) return fromStable;
       }
     } catch (_) {}
-
-    try {
-      if (typeof window.getSelfMapCenter === 'function') {
-        const fromMap = normalizeLatLng(window.getSelfMapCenter());
-        if (fromMap) return fromMap;
-      }
-    } catch (_) {}
-
-    if (!navigator?.geolocation) return null;
-
-    const now = Date.now();
-    if (STATE.geolocationFallback && (now - STATE.geolocationFetchedAt) < 60 * 1000) {
-      return STATE.geolocationFallback;
-    }
-
-    try {
-      const fallback = await new Promise((resolve) => {
-        navigator.geolocation.getCurrentPosition(
-          (pos) => resolve(normalizeLatLng({ lat: pos?.coords?.latitude, lng: pos?.coords?.longitude })),
-          () => resolve(null),
-          { enableHighAccuracy: false, timeout: 2500, maximumAge: 60 * 1000 }
-        );
-      });
-      if (fallback) {
-        STATE.geolocationFallback = fallback;
-        STATE.geolocationFetchedAt = now;
-      }
-      return fallback;
-    } catch (_) {
-      return null;
-    }
+    return null;
   }
 
   function haversineMeters(a, b) {
@@ -351,8 +323,25 @@
       }`
     );
     root.hidden = false;
+    STATE.hasRenderedRealPayload = true;
     positionDayTendencyRoot();
     return true;
+  }
+
+  function applyWaitingForGpsState() {
+    const root = ensureDayTendencyRoot();
+    if (!root) return;
+    if (STATE.score) STATE.score.textContent = '--';
+    if (STATE.band) STATE.band.textContent = 'Locating...';
+    if (STATE.marker) STATE.marker.style.bottom = '50%';
+    if (STATE.borough) {
+      STATE.borough.textContent = '';
+      STATE.borough.hidden = true;
+    }
+    root.title = 'Waiting for GPS location before loading tendency.';
+    root.setAttribute('aria-label', 'Waiting for GPS location before loading tendency.');
+    root.hidden = false;
+    positionDayTendencyRoot();
   }
 
   function scheduleRetryIfNeeded(payload, hadError) {
@@ -366,33 +355,60 @@
     }, DAY_TENDENCY_RETRY_MS);
   }
 
-  async function refreshDayTendencyMeter() {
+  async function refreshDayTendencyMeter({ force = false } = {}) {
     if (STATE.isRefreshing) return;
+    const latLng = await getCurrentTendencyLatLng();
+
+    if (!latLng) {
+      if (!STATE.hasInitialGpsFix && !STATE.hasRenderedRealPayload) {
+        applyWaitingForGpsState();
+      }
+      return;
+    }
+
+    STATE.hasInitialGpsFix = true;
+    if (!force && !movedMateriallyFromLastQuery(latLng) && STATE.lastQueryAt > 0) return;
+
     STATE.isRefreshing = true;
     let payload = null;
     let hadError = false;
-    const latLng = await getCurrentTendencyLatLng();
 
     try {
       const base = apiBase();
       if (!base) throw new Error('API base missing');
-      const query = latLng
-        ? `?lat=${encodeURIComponent(String(latLng.lat))}&lng=${encodeURIComponent(String(latLng.lng))}`
-        : '';
+      const query = `?lat=${encodeURIComponent(String(latLng.lat))}&lng=${encodeURIComponent(String(latLng.lng))}`;
       payload = await fetchJSONWithTimeout(`${base}/day_tendency/today${query}`, 10000);
-      if (latLng) {
-        STATE.lastQueryLat = latLng.lat;
-        STATE.lastQueryLng = latLng.lng;
-      }
+      STATE.lastQueryLat = latLng.lat;
+      STATE.lastQueryLng = latLng.lng;
       STATE.lastQueryAt = Date.now();
       applyDayTendencyPayload(payload);
     } catch (_) {
       hadError = true;
-      if (STATE.root) STATE.root.hidden = true;
+      if (!STATE.hasRenderedRealPayload && STATE.root) STATE.root.hidden = true;
     } finally {
       scheduleRetryIfNeeded(payload, hadError);
       STATE.isRefreshing = false;
     }
+  }
+
+  function startFirstFixWatcher() {
+    if (STATE.firstFixTimer) return;
+    STATE.firstFixTimer = window.setInterval(async () => {
+      if (STATE.hasInitialGpsFix) {
+        window.clearInterval(STATE.firstFixTimer);
+        STATE.firstFixTimer = null;
+        return;
+      }
+      const latLng = await getCurrentTendencyLatLng();
+      if (!latLng) {
+        if (!STATE.hasRenderedRealPayload) applyWaitingForGpsState();
+        return;
+      }
+      STATE.hasInitialGpsFix = true;
+      window.clearInterval(STATE.firstFixTimer);
+      STATE.firstFixTimer = null;
+      refreshDayTendencyMeter({ force: true });
+    }, DAY_TENDENCY_FIRST_FIX_CHECK_MS);
   }
 
   function startDayTendencyMeter() {
@@ -423,7 +439,7 @@
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
         positionDayTendencyRoot();
-        refreshDayTendencyMeter();
+        refreshDayTendencyMeter({ force: true });
       }
     });
 
@@ -433,12 +449,17 @@
         if (!latLng) return;
         if (!movedMateriallyFromLastQuery(latLng)) return;
         if (STATE.isRefreshing) return;
-        refreshDayTendencyMeter();
+        refreshDayTendencyMeter({ force: true });
       });
     }, DAY_TENDENCY_MOVE_CHECK_MS);
-    STATE.refreshTimer = window.setInterval(refreshDayTendencyMeter, DAY_TENDENCY_REFRESH_MS);
+    STATE.refreshTimer = window.setInterval(() => {
+      refreshDayTendencyMeter({ force: true });
+    }, DAY_TENDENCY_REFRESH_MS);
 
-    refreshDayTendencyMeter();
+    applyWaitingForGpsState();
+    startFirstFixWatcher();
+
+    refreshDayTendencyMeter({ force: true });
   }
 
   if (document.readyState === 'loading') {
