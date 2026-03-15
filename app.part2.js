@@ -2327,6 +2327,7 @@
     source: '',
     loading: false,
     profile: null,
+    myProgression: null,
     messages: [],
     latestMessageId: null,
     dmInitialLoadComplete: false,
@@ -2363,12 +2364,27 @@
       .driverProfileProgressLine{font-size:12px;font-weight:700;color:#0f172a;display:flex;align-items:center;gap:5px;min-width:0;flex-wrap:wrap}
       .driverProfileProgressMeta{font-size:11px;color:#475569;line-height:1.35}
       .driverProfileProgressBar{height:7px;border-radius:999px;background:#e2e8f0;overflow:hidden;margin:5px 0 6px}
-      .driverProfileProgressFill{height:100%;background:linear-gradient(90deg,#2563eb,#22c55e);border-radius:999px;transition:width .2s ease-out}
-      .driverTierRookie{color:#64748b}
-      .driverTierDriver{color:#2563eb}
-      .driverTierPro{color:#16a34a}
-      .driverTierVeteran{color:#7c3aed}
-      .driverTierLegend{color:#b45309}
+      .driverProfileProgressFill{height:100%;background:linear-gradient(90deg,#3b82f6,#22c55e);border-radius:999px;transition:width .2s ease-out}
+      .driverProfileRankName{color:#0f172a;font-weight:800}
+      .driverProfileBreakdownGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px 10px;margin-top:6px;padding-top:6px;border-top:1px dashed #dbe4ee}
+      .rankBadgeIconWrap{width:56px;height:56px;display:grid;place-items:center;border-radius:999px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.35),0 5px 14px rgba(2,6,23,.2)}
+      .rankBadgeIconWrap.compact{width:44px;height:44px}
+      .rankBadgeIconWrap.toneRecruit{background:linear-gradient(140deg,#64748b,#334155);color:#e2e8f0}
+      .rankBadgeIconWrap.toneEnlisted{background:linear-gradient(140deg,#2563eb,#0f172a);color:#dbeafe}
+      .rankBadgeIconWrap.toneOfficer{background:linear-gradient(140deg,#7c3aed,#1e1b4b);color:#ede9fe}
+      .rankBadgeIconWrap.toneGeneral{background:linear-gradient(140deg,#f59e0b,#7c2d12);color:#fef3c7}
+      .rankBadgeIconWrap.toneLegend{background:linear-gradient(140deg,#22d3ee,#4f46e5);color:#ecfeff;box-shadow:0 0 0 1px rgba(255,255,255,.25),0 0 18px rgba(56,189,248,.5)}
+      #levelUpOverlayRoot{position:fixed;inset:0;z-index:9845;display:none;pointer-events:none;align-items:center;justify-content:center;padding:18px}
+      #levelUpOverlayRoot.open{display:flex}
+      .levelUpOverlayCard{min-width:min(350px,calc(100vw - 30px));max-width:min(420px,calc(100vw - 24px));background:linear-gradient(155deg,rgba(15,23,42,.95),rgba(30,41,59,.9));border:1px solid rgba(148,163,184,.4);border-radius:18px;box-shadow:0 16px 44px rgba(15,23,42,.55),0 0 28px rgba(56,189,248,.25);padding:16px 14px;color:#e2e8f0;display:flex;align-items:center;gap:12px;opacity:0;transform:translateY(12px) scale(.92);transition:opacity .26s ease,transform .26s ease}
+      #levelUpOverlayRoot.open .levelUpOverlayCard{opacity:1;transform:translateY(0) scale(1)}
+      .levelUpOverlayText{min-width:0;display:flex;flex-direction:column;gap:2px}
+      .levelUpTag{font-size:11px;font-weight:900;letter-spacing:.8px;text-transform:uppercase;color:#67e8f9}
+      .levelUpTitle{font-size:19px;font-weight:900;line-height:1.1;color:#fff}
+      .levelUpSub{font-size:13px;font-weight:700;color:#cbd5e1}
+      .levelUpXp{font-size:11px;color:#93c5fd}
+      .pickupXpToast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom, 0px) + 136px);transform:translate(-50%, 10px) scale(.94);opacity:0;z-index:9802;pointer-events:none;background:linear-gradient(120deg,#0f172a,#1e3a8a);color:#dbeafe;border:1px solid rgba(147,197,253,.36);padding:8px 12px;border-radius:999px;font:800 13px/1.1 system-ui,-apple-system,Segoe UI,Roboto,Arial;box-shadow:0 9px 24px rgba(15,23,42,.38);transition:opacity .2s ease, transform .2s ease}
+      .pickupXpToast.show{opacity:1;transform:translate(-50%, 0) scale(1)}
       .driverProfileClose{border:0;background:#e5e7eb;color:#111827;border-radius:10px;padding:7px 9px;font-size:13px}
       .driverProfileScroll{overflow:auto;-webkit-overflow-scrolling:touch;padding:0 11px 10px;min-height:0}
       .driverProfileSectionTitle{font-size:12px;font-weight:700;color:#111827;margin:2px 0 6px}
@@ -2498,46 +2514,72 @@
   }
 
   function normalizeDriverTier(title) {
-    const normalized = String(title || '').trim().toLowerCase();
-    if (normalized === 'rookie') return 'Rookie';
-    if (normalized === 'driver') return 'Driver';
-    if (normalized === 'pro') return 'Pro';
-    if (normalized === 'veteran') return 'Veteran';
-    if (normalized === 'legend') return 'Legend';
-    return String(title || 'Rookie').trim() || 'Rookie';
+    return String(title || '').trim() || 'Recruit';
   }
 
-  function driverTierClass(title) {
-    const tier = normalizeDriverTier(title).toLowerCase();
-    if (tier === 'driver') return 'driverTierDriver';
-    if (tier === 'pro') return 'driverTierPro';
-    if (tier === 'veteran') return 'driverTierVeteran';
-    if (tier === 'legend') return 'driverTierLegend';
-    return 'driverTierRookie';
-  }
-
-  function formatProgressMiles(value) {
+  function formatProgressNumber(value, { maxFractionDigits = 1 } = {}) {
     const n = Number(value);
     if (!Number.isFinite(n)) return '0';
-    return n.toLocaleString(undefined, { maximumFractionDigits: 1 });
+    return n.toLocaleString(undefined, { maximumFractionDigits: maxFractionDigits });
+  }
+
+  function resolveRankIconTone(rankIconKey) {
+    const key = String(rankIconKey || '').trim().toLowerCase();
+    if (!key) return 'toneRecruit';
+    if (/legend|mythic|immortal/.test(key)) return 'toneLegend';
+    if (/general|brigadier/.test(key)) return 'toneGeneral';
+    if (/colonel|major|captain|lieutenant/.test(key)) return 'toneOfficer';
+    if (/sergeant|corporal|private|recruit/.test(key)) return 'toneEnlisted';
+    return 'toneRecruit';
+  }
+
+  function renderRankBadgeIcon(rankIconKey, { compact = false } = {}) {
+    const key = String(rankIconKey || '').trim().toLowerCase();
+    const toneClass = resolveRankIconTone(key);
+    const size = compact ? 54 : 68;
+    const innerSize = compact ? 34 : 42;
+    let motif = `<path d="M7 29h28v6H7z" fill="currentColor"/><path d="M8 21l13-9 13 9v4H8z" fill="currentColor" opacity=".85"/>`;
+    if (/private|corporal|sergeant/.test(key)) {
+      motif = `<path d="M7 29h28v6H7z" fill="currentColor"/><path d="M8 20l13-8 13 8v4H8z" fill="currentColor" opacity=".9"/><path d="M8 14l13-8 13 8v3H8z" fill="currentColor" opacity=".72"/>`;
+    } else if (/lieutenant|captain|major|colonel/.test(key)) {
+      motif = `<rect x="6" y="9" width="30" height="6" rx="2" fill="currentColor"/><rect x="6" y="19" width="30" height="6" rx="2" fill="currentColor" opacity=".86"/><path d="M21 30l7 6-7 6-7-6z" fill="currentColor" opacity=".8"/>`;
+    } else if (/brigadier|general/.test(key)) {
+      motif = `<path d="M21 5l4.8 9.8 10.8 1.6-7.8 7.6 1.8 10.8L21 30l-9.6 5.8 1.8-10.8-7.8-7.6 10.8-1.6z" fill="currentColor"/><circle cx="21" cy="18" r="4" fill="rgba(15,23,42,.28)"/>`;
+    } else if (/road_legend|legend/.test(key)) {
+      motif = `<path d="M21 4l11 5v11c0 8-5.6 13.4-11 16-5.4-2.6-11-8-11-16V9z" fill="currentColor"/><path d="M13 21h16v3H13z" fill="rgba(15,23,42,.34)"/><path d="M21 10l3.2 6.8 7.2 1.1-5.2 5 1.2 7.1L21 26.6l-6.4 3.4 1.2-7.1-5.2-5 7.2-1.1z" fill="rgba(255,255,255,.85)"/>`;
+    }
+    return `<div class="rankBadgeIconWrap ${toneClass}${compact ? ' compact' : ''}" aria-hidden="true">
+      <svg viewBox="0 0 48 48" width="${size}" height="${size}" role="presentation" focusable="false">
+        <defs>
+          <linearGradient id="rbg-${toneClass}" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="rgba(255,255,255,.92)"/><stop offset="100%" stop-color="rgba(255,255,255,.2)"/></linearGradient>
+        </defs>
+        <circle cx="24" cy="24" r="21" fill="url(#rbg-${toneClass})" opacity=".26"/>
+        <g transform="translate(3 3) scale(${innerSize / 42})">${motif}</g>
+      </svg>
+    </div>`;
   }
 
   function renderDriverProgressionSection(progression) {
     const level = Number(progression?.level);
     const safeLevel = Number.isFinite(level) && level > 0 ? Math.floor(level) : 1;
-    const title = normalizeDriverTier(progression?.title);
-    const tierClass = driverTierClass(title);
-    const lifetimeMiles = Number(progression?.lifetime_miles);
-    const currentLevelMiles = Number(progression?.current_level_miles);
-    const nextLevelMiles = Number(progression?.next_level_miles);
-    const milesToNextLevel = Number(progression?.miles_to_next_level);
+    const title = normalizeDriverTier(progression?.rank_name || progression?.title);
+    const totalXp = Number(progression?.total_xp);
+    const currentLevelXp = Number(progression?.current_level_xp);
+    const nextLevelXp = Number(progression?.next_level_xp);
+    const xpToNextLevel = Number(progression?.xp_to_next_level);
     const maxLevelReached = progression?.max_level_reached === true;
+    const lifetimeMiles = Number(progression?.lifetime_miles);
+    const lifetimeHours = Number(progression?.lifetime_hours);
+    const lifetimePickups = Number(progression?.lifetime_pickups_recorded);
+    const milesXp = Number(progression?.xp_breakdown?.miles_xp);
+    const hoursXp = Number(progression?.xp_breakdown?.hours_xp);
+    const reportXp = Number(progression?.xp_breakdown?.report_xp);
 
     let progressPct = 1;
     if (!maxLevelReached) {
-      const denom = nextLevelMiles - currentLevelMiles;
-      if (Number.isFinite(denom) && denom > 0 && Number.isFinite(lifetimeMiles)) {
-        progressPct = (lifetimeMiles - currentLevelMiles) / denom;
+      const denom = nextLevelXp - currentLevelXp;
+      if (Number.isFinite(denom) && denom > 0 && Number.isFinite(totalXp)) {
+        progressPct = (totalXp - currentLevelXp) / denom;
       } else {
         progressPct = 0;
       }
@@ -2546,27 +2588,41 @@
 
     const nextLevelLabel = maxLevelReached
       ? 'MAX LEVEL'
-      : `Next Level: ${safeLevel + 1} at ${formatProgressMiles(nextLevelMiles)} miles`;
-    const milesToNextLabel = maxLevelReached
+      : `Next Level: ${safeLevel + 1} at ${formatProgressNumber(nextLevelXp, { maxFractionDigits: 0 })} XP`;
+    const xpToNextLabel = maxLevelReached
       ? ''
-      : `<div class="driverProfileProgressMeta">Miles to Next Level: ${escapeHtml(formatProgressMiles(milesToNextLevel))}</div>`;
+      : `<div class="driverProfileProgressMeta">XP to Next Level: ${escapeHtml(formatProgressNumber(xpToNextLevel, { maxFractionDigits: 0 }))}</div>`;
 
     return `<div class="driverProfileProgressWrap">
       <div class="driverProfileProgressHead">
-        <div class="driverProfileProgressLine">Level ${safeLevel} • <span class="${tierClass}">${escapeHtml(title)}</span></div>
+        <div class="driverProfileProgressLine">Level ${safeLevel} • <span class="driverProfileRankName">${escapeHtml(title)}</span></div>
+        ${renderRankBadgeIcon(progression?.rank_icon_key, { compact: true })}
       </div>
-      <div class="driverProfileProgressMeta">Lifetime Miles: ${escapeHtml(formatProgressMiles(lifetimeMiles))}</div>
+      <div class="driverProfileProgressMeta">Total XP: ${escapeHtml(formatProgressNumber(totalXp, { maxFractionDigits: 0 }))}</div>
       <div class="driverProfileProgressBar" aria-hidden="true"><div class="driverProfileProgressFill" style="width:${(clampedPct * 100).toFixed(1)}%"></div></div>
       <div class="driverProfileProgressMeta">${escapeHtml(nextLevelLabel)}</div>
-      ${milesToNextLabel}
+      ${xpToNextLabel}
+      <div class="driverProfileBreakdownGrid">
+        <div class="driverProfileProgressMeta">Miles: ${escapeHtml(formatProgressNumber(lifetimeMiles))}</div>
+        <div class="driverProfileProgressMeta">Hours: ${escapeHtml(formatProgressNumber(lifetimeHours))}</div>
+        <div class="driverProfileProgressMeta">Reported Trips: ${escapeHtml(formatProgressNumber(lifetimePickups, { maxFractionDigits: 0 }))}</div>
+        <div class="driverProfileProgressMeta">Miles XP: ${escapeHtml(formatProgressNumber(milesXp, { maxFractionDigits: 0 }))}</div>
+        <div class="driverProfileProgressMeta">Hours XP: ${escapeHtml(formatProgressNumber(hoursXp, { maxFractionDigits: 0 }))}</div>
+        <div class="driverProfileProgressMeta">Report XP: ${escapeHtml(formatProgressNumber(reportXp, { maxFractionDigits: 0 }))}</div>
+      </div>
     </div>`;
   }
 
   function renderDriverProfilePeriodCard(label, data, extraHtml = '') {
+    const pickups = Number(data?.pickups ?? data?.pickup_count ?? data?.reported_trips);
+    const pickupLine = Number.isFinite(pickups)
+      ? `<div class="driverProfileStatRow"><div class="driverProfileStatLabel">Pickups</div><div class="driverProfileStatValue">${escapeHtml(formatDriverProfileStat(pickups, 'value'))}</div></div>`
+      : '';
     return `<div class="driverProfileStatCard">
       <div class="driverProfileStatPeriod">${escapeHtml(label)}</div>
       <div class="driverProfileStatRow"><div class="driverProfileStatLabel">Miles</div><div class="driverProfileStatValue">${escapeHtml(formatDriverProfileStat(data?.miles, 'value'))}</div></div>
       <div class="driverProfileStatRow"><div class="driverProfileStatLabel">Hours</div><div class="driverProfileStatValue">${escapeHtml(formatDriverProfileStat(data?.hours, 'value'))}</div></div>
+      ${pickupLine}
       ${extraHtml}
     </div>`;
   }
@@ -2583,6 +2639,179 @@
     if (after !== null && after !== undefined) qs.set('after', String(after));
     return await getJSONAuth(`/chat/dm/${encodeURIComponent(userId)}?${qs.toString()}`, token);
   }
+
+  const PROGRESSION_SYNC_INTERVAL_MS = 90000;
+  let progressionSyncTimer = null;
+  let progressionSyncInFlight = false;
+  let levelUpOverlayHideTimer = null;
+
+  function progressionLastSeenStorageKey(userId) {
+    return `progression_last_seen_level_v1_${String(userId || '').trim()}`;
+  }
+
+  function readStoredProgressionLevel(userId) {
+    const key = progressionLastSeenStorageKey(userId);
+    if (!key.endsWith('_')) {
+      try {
+        const raw = localStorage.getItem(key);
+        const parsed = Number(raw);
+        return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : null;
+      } catch (_) {
+        return null;
+      }
+    }
+    return null;
+  }
+
+  function writeStoredProgressionLevel(userId, level) {
+    const key = progressionLastSeenStorageKey(userId);
+    const safeLevel = Number(level);
+    if (!key.endsWith('_') && Number.isFinite(safeLevel) && safeLevel > 0) {
+      try { localStorage.setItem(key, String(Math.floor(safeLevel))); } catch (_) {}
+    }
+  }
+
+  function ensurePickupXpToast() {
+    let el = document.getElementById('pickupXpToast');
+    if (el) return el;
+    el = document.createElement('div');
+    el.id = 'pickupXpToast';
+    el.className = 'pickupXpToast';
+    el.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(el);
+    return el;
+  }
+
+  function showPickupXpToast(text) {
+    const line = String(text || '').trim();
+    if (!line) return;
+    const el = ensurePickupXpToast();
+    el.textContent = line;
+    el.classList.add('show');
+    el.setAttribute('aria-hidden', 'false');
+    if (showPickupXpToast._timer) window.clearTimeout(showPickupXpToast._timer);
+    showPickupXpToast._timer = window.setTimeout(() => {
+      el.classList.remove('show');
+      el.setAttribute('aria-hidden', 'true');
+      showPickupXpToast._timer = null;
+    }, 1800);
+  }
+
+  function ensureLevelUpOverlay() {
+    let root = document.getElementById('levelUpOverlayRoot');
+    if (root) return root;
+    root = document.createElement('div');
+    root.id = 'levelUpOverlayRoot';
+    root.setAttribute('aria-hidden', 'true');
+    root.innerHTML = '<div class="levelUpOverlayCard" id="levelUpOverlayCard"></div>';
+    document.body.appendChild(root);
+    return root;
+  }
+
+  function showLevelUpOverlay(payload = {}) {
+    const root = ensureLevelUpOverlay();
+    const card = document.getElementById('levelUpOverlayCard');
+    if (!card) return;
+    const level = Number(payload?.level);
+    const safeLevel = Number.isFinite(level) && level > 0 ? Math.floor(level) : 1;
+    const rankName = normalizeDriverTier(payload?.rank_name || payload?.title || 'New Rank Reached');
+    const xpAwarded = Number(payload?.xp_awarded);
+    const xpLine = Number.isFinite(xpAwarded) && xpAwarded > 0
+      ? `<div class="levelUpXp">+${escapeHtml(formatProgressNumber(xpAwarded, { maxFractionDigits: 0 }))} XP</div>`
+      : '';
+    card.innerHTML = `${renderRankBadgeIcon(payload?.rank_icon_key, { compact: false })}
+      <div class="levelUpOverlayText">
+        <div class="levelUpTag">Rank Promoted</div>
+        <div class="levelUpTitle">Level Up</div>
+        <div class="levelUpSub">${escapeHtml(rankName)} • Level ${safeLevel}</div>
+        ${xpLine}
+      </div>`;
+    root.classList.add('open');
+    root.setAttribute('aria-hidden', 'false');
+    if (levelUpOverlayHideTimer) window.clearTimeout(levelUpOverlayHideTimer);
+    levelUpOverlayHideTimer = window.setTimeout(() => {
+      root.classList.remove('open');
+      root.setAttribute('aria-hidden', 'true');
+      levelUpOverlayHideTimer = null;
+    }, 3000);
+  }
+
+  async function fetchMyProgression() {
+    const token = getCommunityToken();
+    if (!token) return null;
+    return await getJSONAuth('/leaderboard/progression/me', token);
+  }
+
+  async function syncMyProgression({ forcePopupCheck = false } = {}) {
+    if (progressionSyncInFlight) return null;
+    if (typeof authHeaderOK === 'function' && !authHeaderOK()) return null;
+    progressionSyncInFlight = true;
+    try {
+      const payload = await fetchMyProgression();
+      const progression = payload?.progression || payload || null;
+      const userId = Number(window?.me?.id);
+      const level = Number(progression?.level);
+      const safeLevel = Number.isFinite(level) && level > 0 ? Math.floor(level) : null;
+      if (!Number.isFinite(userId) || !safeLevel) return progression;
+      const prev = readStoredProgressionLevel(userId);
+      if (prev === null) {
+        writeStoredProgressionLevel(userId, safeLevel);
+        return progression;
+      }
+      if ((forcePopupCheck || prev !== null) && safeLevel > prev) {
+        showLevelUpOverlay(progression);
+      }
+      writeStoredProgressionLevel(userId, safeLevel);
+      return progression;
+    } catch (err) {
+      console.warn('syncMyProgression failed', err);
+      return null;
+    } finally {
+      progressionSyncInFlight = false;
+    }
+  }
+
+  function startProgressionSyncInterval() {
+    if (progressionSyncTimer) return;
+    progressionSyncTimer = window.setInterval(() => {
+      syncMyProgression({ forcePopupCheck: true });
+    }, PROGRESSION_SYNC_INTERVAL_MS);
+  }
+
+  function stopProgressionSyncInterval() {
+    if (!progressionSyncTimer) return;
+    window.clearInterval(progressionSyncTimer);
+    progressionSyncTimer = null;
+  }
+
+  function handlePickupProgressionDelta(payload = {}) {
+    const progressionPayload = payload?.progression && typeof payload.progression === 'object' ? payload.progression : payload;
+    const leveledUp = payload?.leveled_up === true || progressionPayload?.leveled_up === true;
+    const xpAwarded = Number(payload?.xp_awarded ?? progressionPayload?.xp_awarded);
+    if (leveledUp) {
+      showLevelUpOverlay(progressionPayload);
+      const meId = Number(window?.me?.id);
+      const nextLevel = Number(progressionPayload?.level);
+      if (Number.isFinite(meId) && Number.isFinite(nextLevel) && nextLevel > 0) {
+        writeStoredProgressionLevel(meId, Math.floor(nextLevel));
+      }
+      return;
+    }
+    if (Number.isFinite(xpAwarded) && xpAwarded > 0) {
+      showPickupXpToast(`+${formatProgressNumber(xpAwarded, { maxFractionDigits: 0 })} XP`);
+    }
+  }
+
+  async function maybeSyncProgressionOnSignInState() {
+    if (typeof authHeaderOK !== 'function') return;
+    if (authHeaderOK()) {
+      startProgressionSyncInterval();
+      await syncMyProgression({ forcePopupCheck: false });
+    } else {
+      stopProgressionSyncInterval();
+    }
+  }
+
 
   async function sendDriverProfileDm(userId, text) {
     const token = getCommunityToken();
@@ -2791,9 +3020,9 @@
     const weekly = profilePayload.weekly || {};
     const monthly = profilePayload.monthly || {};
     const yearly = profilePayload.yearly || {};
-    const progression = profilePayload.progression || {};
-    const name = String(profileUser?.display_name || 'Driver').trim() || 'Driver';
     const selfMode = !!driverProfileState.isSelf;
+    const progression = (selfMode && driverProfileState.myProgression) ? driverProfileState.myProgression : (profilePayload.progression || {});
+    const name = String(profileUser?.display_name || 'Driver').trim() || 'Driver';
 
     const dailyRanksHtml = `<div class="driverProfileDailyRanks">
       <div class="driverProfileStatRow"><div class="driverProfileStatLabel">Miles rank</div><div class="driverProfileStatValue">${escapeHtml(formatDriverProfileStat(daily?.miles_rank, 'rank'))}</div></div>
@@ -2922,6 +3151,7 @@
     driverProfileState.source = String(source || '');
     driverProfileState.loading = true;
     driverProfileState.profile = null;
+    driverProfileState.myProgression = null;
     driverProfileState.messages = [];
     driverProfileState.latestMessageId = null;
     chatSoundRuntime.dmLastObservedIncomingId = null;
@@ -2937,6 +3167,12 @@
       const profileRes = await fetchDriverProfile(nextUserId);
       if (!driverProfileState.open || driverProfileState.userId !== nextUserId) return;
       driverProfileState.profile = profileRes || {};
+      if (selfMode) {
+        const latestProgression = await syncMyProgression({ forcePopupCheck: false });
+        if (latestProgression && driverProfileState.open && driverProfileState.userId === nextUserId) {
+          driverProfileState.myProgression = latestProgression;
+        }
+      }
       if (!selfMode) {
         const dmRes = await fetchDriverProfileDmThread(nextUserId, { limit: 30 });
         if (!driverProfileState.open || driverProfileState.userId !== nextUserId) return;
@@ -3013,6 +3249,9 @@
   window.startDriverProfileDmPolling = startDriverProfileDmPolling;
   window.stopDriverProfileDmPolling = stopDriverProfileDmPolling;
   window.updateDriverProfileLayout = updateDriverProfileLayout;
+  window.showLevelUpOverlay = showLevelUpOverlay;
+  window.syncMyProgression = syncMyProgression;
+  window.handlePickupProgressionDelta = handlePickupProgressionDelta;
 
   // Bind the chat dock button using its ID
   if (typeof bindDockToggle === 'function') {
@@ -3028,9 +3267,17 @@
 
   initDockScroller();
   ensureDriverProfileUI();
+  ensureLevelUpOverlay();
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && typeof authHeaderOK === 'function' && authHeaderOK()) {
+      syncMyProgression({ forcePopupCheck: true });
+    }
+  });
 
   setInterval(() => {
     observeChatAuthState();
+    maybeSyncProgressionOnSignInState();
   }, 1200);
 
   setInterval(() => {
