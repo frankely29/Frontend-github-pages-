@@ -6512,6 +6512,20 @@ function nearestZoneToUser(frame, latlng) {
   return best;
 }
 
+window.getPickupRecordingContext = function getPickupRecordingContext() {
+  return {
+    authHeaderOK,
+    setAuthUI,
+    clearAuth,
+    communityToken,
+    userLatLng,
+    currentFrame,
+    nearestZoneToUser,
+    schedulePickupOverlayRefresh,
+    me,
+  };
+};
+
 async function sendPoliceReport() {
   if (!authHeaderOK()) {
     setAuthUI(false, "Sign in to report police.");
@@ -6532,6 +6546,10 @@ async function sendPoliceReport() {
 }
 
 async function sendPickupLog() {
+  if (window.PickupRecordingFeature && typeof window.PickupRecordingFeature.sendPickupLog === "function") {
+    return window.PickupRecordingFeature.sendPickupLog();
+  }
+
   if (pickupLogBusy) return;
   if (!authHeaderOK()) {
     setAuthUI(false, "Sign in to record trips.");
