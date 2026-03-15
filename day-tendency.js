@@ -4,6 +4,13 @@
   const DAY_TENDENCY_MOVE_CHECK_MS = 60 * 1000;
   const DAY_TENDENCY_MATERIAL_MOVE_METERS = 1200;
   const DAY_TENDENCY_FIRST_FIX_CHECK_MS = 1500;
+  const MODE_FLAG_KEYS = {
+    manhattan_mode: 'manhattan_mode_enabled',
+    staten_island_mode: 'staten_island_mode_enabled',
+    bronx_wash_heights_mode: 'bronx_wash_heights_mode',
+    queens_mode: 'queens_mode_enabled',
+    brooklyn_mode: 'brooklyn_mode_enabled',
+  };
 
   const STATE = {
     root: null,
@@ -72,26 +79,13 @@
       }
       .dayTendencyInner {
         display: flex;
-        align-items: flex-end;
-        gap: 7px;
+        align-items: flex-start;
+        gap: 5px;
       }
-      .dayTendencyLabelCol {
+      .dayTendencyBarWrap {
         display: flex;
-        align-items: flex-end;
-      }
-      .dayTendencyLabel {
-        writing-mode: vertical-rl;
-        transform: rotate(180deg);
-        font-size: 13px;
-        line-height: 1;
-        font-weight: 800;
-        letter-spacing: 0.01em;
-        color: #111;
-        text-shadow: 0 1px 3px rgba(255, 255, 255, 0.9), 0 0 2px rgba(255, 255, 255, 0.75);
-      }
-      .dayTendencyMeterCol {
-        display: flex;
-        align-items: center;
+        align-items: flex-start;
+        gap: 5px;
       }
       .dayTendencyScale {
         position: relative;
@@ -110,13 +104,31 @@
         box-shadow: 0 0 2px rgba(0, 0, 0, 0.55);
         pointer-events: none;
       }
-      .dayTendencyValueCol {
+      .dayTendencyInfoCol {
         display: flex;
         flex-direction: column;
         align-items: flex-start;
-        justify-content: flex-end;
+        justify-content: flex-start;
         line-height: 1.05;
         min-height: 118px;
+        gap: 2px;
+      }
+      .dayTendencyLabelVertical {
+        writing-mode: vertical-rl;
+        text-orientation: upright;
+        transform: none;
+        font-size: 13px;
+        line-height: 1;
+        font-weight: 800;
+        letter-spacing: 0.01em;
+        color: #111;
+        text-shadow: 0 1px 3px rgba(255, 255, 255, 0.9), 0 0 2px rgba(255, 255, 255, 0.75);
+      }
+      .dayTendencyValueStack {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        justify-content: flex-start;
         gap: 2px;
       }
       .dayTendencyScore {
@@ -157,18 +169,18 @@
       root.setAttribute('aria-live', 'polite');
       root.innerHTML = `
         <div class="dayTendencyInner">
-          <div class="dayTendencyLabelCol">
-            <div class="dayTendencyLabel">Tendency</div>
-          </div>
-          <div class="dayTendencyMeterCol">
+          <div class="dayTendencyBarWrap">
             <div class="dayTendencyScale">
               <div class="dayTendencyMarker"></div>
             </div>
-          </div>
-          <div class="dayTendencyValueCol">
-            <div class="dayTendencyScore">--</div>
-            <div class="dayTendencyBand">--</div>
-            <div class="dayTendencyBorough" hidden></div>
+            <div class="dayTendencyInfoCol">
+              <div class="dayTendencyLabelVertical">Tendency</div>
+              <div class="dayTendencyValueStack">
+                <div class="dayTendencyScore">--</div>
+                <div class="dayTendencyBand">--</div>
+                <div class="dayTendencyBorough" hidden></div>
+              </div>
+            </div>
           </div>
         </div>
       `;
@@ -246,6 +258,24 @@
     return null;
   }
 
+  function readModeFlagValue(storageKey) {
+    try {
+      return (localStorage.getItem(storageKey) || '0') === '1' ? 1 : 0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  function getCurrentModeFlags() {
+    return {
+      manhattan_mode: readModeFlagValue(MODE_FLAG_KEYS.manhattan_mode),
+      staten_island_mode: readModeFlagValue(MODE_FLAG_KEYS.staten_island_mode),
+      bronx_wash_heights_mode: readModeFlagValue(MODE_FLAG_KEYS.bronx_wash_heights_mode),
+      queens_mode: readModeFlagValue(MODE_FLAG_KEYS.queens_mode),
+      brooklyn_mode: readModeFlagValue(MODE_FLAG_KEYS.brooklyn_mode),
+    };
+  }
+
   function haversineMeters(a, b) {
     const toRad = (x) => (x * Math.PI) / 180;
     const R = 6371000;
@@ -303,6 +333,10 @@
     if (STATE.marker) STATE.marker.style.bottom = `${pct}%`;
 
     const borough = String(payload?.borough || '').trim();
+    const scope = String(payload?.scope || '').trim();
+    const scopeLabel = String(payload?.scope_label || '').trim();
+    const sourceBorough = String(payload?.source_borough || '').trim();
+    const sourceMode = String(payload?.source_mode || '').trim();
     if (STATE.borough) {
       if (borough) {
         STATE.borough.textContent = borough;
@@ -313,7 +347,7 @@
       }
     }
 
-    root.title = `${label} • Score ${numericScore}/100${borough ? ` • Borough ${borough}` : ''} • Confidence ${confidencePct}% • ${timeBlockContext}${explain}`;
+    root.title = `${label} • Score ${numericScore}/100${borough ? ` • Borough ${borough}` : ''}${scopeLabel ? ` • Scope ${scopeLabel}` : ''}${scope ? ` • Scope key ${scope}` : ''}${sourceBorough ? ` • Source borough ${sourceBorough}` : ''}${sourceMode ? ` • Source mode ${sourceMode}` : ''} • Confidence ${confidencePct}% • ${timeBlockContext}${explain}`;
     root.setAttribute(
       'aria-label',
       `Current time block tendency expected ${String(label).toLowerCase()}, score ${roundedScore} out of 100${
@@ -376,7 +410,17 @@
     try {
       const base = apiBase();
       if (!base) throw new Error('API base missing');
-      const query = `?lat=${encodeURIComponent(String(latLng.lat))}&lng=${encodeURIComponent(String(latLng.lng))}`;
+      const modeFlags = getCurrentModeFlags();
+      const params = new URLSearchParams({
+        lat: String(latLng.lat),
+        lng: String(latLng.lng),
+        manhattan_mode: String(modeFlags.manhattan_mode),
+        staten_island_mode: String(modeFlags.staten_island_mode),
+        bronx_wash_heights_mode: String(modeFlags.bronx_wash_heights_mode),
+        queens_mode: String(modeFlags.queens_mode),
+        brooklyn_mode: String(modeFlags.brooklyn_mode),
+      });
+      const query = `?${params.toString()}`;
       payload = await fetchJSONWithTimeout(`${base}/day_tendency/today${query}`, 10000);
       STATE.lastQueryLat = latLng.lat;
       STATE.lastQueryLng = latLng.lng;
