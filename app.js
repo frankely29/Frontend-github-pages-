@@ -6619,7 +6619,6 @@ async function sendPickupLog() {
 
     schedulePickupOverlayRefresh({ force: true });
 
-    showRecordTripToast();
 
     if (window && typeof window.handlePickupProgressionDelta === "function") {
       window.handlePickupProgressionDelta(pickupRes || {});

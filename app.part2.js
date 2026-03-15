@@ -2383,8 +2383,14 @@
       .levelUpTitle{font-size:19px;font-weight:900;line-height:1.1;color:#fff}
       .levelUpSub{font-size:13px;font-weight:700;color:#cbd5e1}
       .levelUpXp{font-size:11px;color:#93c5fd}
-      .pickupXpToast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom, 0px) + 136px);transform:translate(-50%, 10px) scale(.94);opacity:0;z-index:9802;pointer-events:none;background:linear-gradient(120deg,#0f172a,#1e3a8a);color:#dbeafe;border:1px solid rgba(147,197,253,.36);padding:8px 12px;border-radius:999px;font:800 13px/1.1 system-ui,-apple-system,Segoe UI,Roboto,Arial;box-shadow:0 9px 24px rgba(15,23,42,.38);transition:opacity .2s ease, transform .2s ease}
-      .pickupXpToast.show{opacity:1;transform:translate(-50%, 0) scale(1)}
+      .pickupProgressToastCard{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom, 0px) + 122px);width:min(250px,calc(100vw - 26px));transform:translate(-50%,12px);opacity:0;z-index:9802;pointer-events:none;background:rgba(248,250,252,.94);backdrop-filter:blur(5px);color:#0f172a;border:1px solid rgba(148,163,184,.34);padding:9px 10px;border-radius:12px;box-shadow:0 9px 24px rgba(15,23,42,.2);transition:opacity .2s ease,transform .2s ease}
+      .pickupProgressToastCard.show{opacity:1;transform:translate(-50%,0)}
+      .pickupProgressToastHead{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;line-height:1.2;font-weight:800}
+      .pickupProgressToastEarned{font-weight:900;color:#0369a1}
+      .pickupProgressToastRank{margin-top:3px;font-size:13px;line-height:1.25;font-weight:800;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .pickupProgressToastBar{margin-top:7px;height:6px;border-radius:999px;background:#dbe4ee;overflow:hidden}
+      .pickupProgressToastFill{height:100%;width:0;background:linear-gradient(90deg,#3b82f6,#22c55e);border-radius:999px;transition:width .25s ease-out}
+      .pickupProgressToastFoot{margin-top:6px;font-size:11px;line-height:1.2;color:#475569;font-weight:700}
       .driverProfileClose{border:0;background:#e5e7eb;color:#111827;border-radius:10px;padding:7px 9px;font-size:13px}
       .driverProfileScroll{overflow:auto;-webkit-overflow-scrolling:touch;padding:0 11px 10px;min-height:0}
       .driverProfileSectionTitle{font-size:12px;font-weight:700;color:#111827;margin:2px 0 6px}
@@ -2671,30 +2677,81 @@
     }
   }
 
-  function ensurePickupXpToast() {
-    let el = document.getElementById('pickupXpToast');
+  function ensurePickupProgressToastCard() {
+    let el = document.getElementById('pickupProgressToastCard');
     if (el) return el;
     el = document.createElement('div');
-    el.id = 'pickupXpToast';
-    el.className = 'pickupXpToast';
+    el.id = 'pickupProgressToastCard';
+    el.className = 'pickupProgressToastCard';
     el.setAttribute('aria-hidden', 'true');
+    el.innerHTML = `<div class="pickupProgressToastHead"><span id="pickupProgressToastLevel"></span><span class="pickupProgressToastEarned" id="pickupProgressToastEarned"></span></div>
+      <div class="pickupProgressToastRank" id="pickupProgressToastRank"></div>
+      <div class="pickupProgressToastBar"><div class="pickupProgressToastFill" id="pickupProgressToastFill"></div></div>
+      <div class="pickupProgressToastFoot" id="pickupProgressToastFoot"></div>`;
     document.body.appendChild(el);
     return el;
   }
 
-  function showPickupXpToast(text) {
-    const line = String(text || '').trim();
-    if (!line) return;
-    const el = ensurePickupXpToast();
-    el.textContent = line;
+  function computeProgressRatio(progression = {}) {
+    const level = Number(progression?.level);
+    const totalXp = Number(progression?.total_xp);
+    const currentLevelXp = Number(progression?.current_level_xp);
+    const nextLevelXp = Number(progression?.next_level_xp);
+    const isMaxLevel = progression?.is_max_level === true
+      || progression?.max_level_reached === true
+      || progression?.xp_to_next_level === 0
+      || (Number.isFinite(level) && Number.isFinite(nextLevelXp) && Number.isFinite(currentLevelXp) && nextLevelXp <= currentLevelXp);
+    if (isMaxLevel) return 1;
+    if (!Number.isFinite(totalXp) || !Number.isFinite(currentLevelXp) || !Number.isFinite(nextLevelXp) || nextLevelXp <= currentLevelXp) return 0;
+    const pct = (totalXp - currentLevelXp) / (nextLevelXp - currentLevelXp);
+    return Math.min(1, Math.max(0, pct));
+  }
+
+  function renderPickupProgressToastCard(payload = {}) {
+    const progression = payload?.progression && typeof payload.progression === 'object' ? payload.progression : payload;
+    if (!progression || typeof progression !== 'object') return false;
+    const el = ensurePickupProgressToastCard();
+    const level = Number(progression?.level);
+    const safeLevel = Number.isFinite(level) && level > 0 ? Math.floor(level) : 1;
+    const xpAwarded = Number(payload?.xp_awarded ?? progression?.xp_awarded);
+    const earnedLabel = Number.isFinite(xpAwarded) && xpAwarded > 0
+      ? `+${formatProgressNumber(xpAwarded, { maxFractionDigits: 0 })} XP`
+      : '+0 XP';
+    const rankName = normalizeDriverTier(progression?.rank_name || progression?.title || 'Rookie');
+    const xpToNext = Number(progression?.xp_to_next_level);
+    const isMaxLevel = progression?.is_max_level === true
+      || progression?.max_level_reached === true
+      || (Number.isFinite(xpToNext) && xpToNext <= 0);
+    const footer = isMaxLevel
+      ? 'MAX LEVEL'
+      : `${formatProgressNumber(Number.isFinite(xpToNext) && xpToNext > 0 ? xpToNext : 0, { maxFractionDigits: 0 })} XP to Level ${safeLevel + 1}`;
+    const pct = computeProgressRatio(progression);
+    const levelEl = document.getElementById('pickupProgressToastLevel');
+    const earnedEl = document.getElementById('pickupProgressToastEarned');
+    const rankEl = document.getElementById('pickupProgressToastRank');
+    const fillEl = document.getElementById('pickupProgressToastFill');
+    const footEl = document.getElementById('pickupProgressToastFoot');
+    if (!levelEl || !earnedEl || !rankEl || !fillEl || !footEl) return false;
+    levelEl.textContent = `Level ${safeLevel}`;
+    earnedEl.textContent = earnedLabel;
+    rankEl.textContent = String(rankName || 'Rookie');
+    fillEl.style.width = `${Math.round(pct * 100)}%`;
+    footEl.textContent = footer;
+    return true;
+  }
+
+  function showPickupProgressToastCard(payload = {}) {
+    const rendered = renderPickupProgressToastCard(payload);
+    if (!rendered) return;
+    const el = ensurePickupProgressToastCard();
     el.classList.add('show');
     el.setAttribute('aria-hidden', 'false');
-    if (showPickupXpToast._timer) window.clearTimeout(showPickupXpToast._timer);
-    showPickupXpToast._timer = window.setTimeout(() => {
+    if (showPickupProgressToastCard._timer) window.clearTimeout(showPickupProgressToastCard._timer);
+    showPickupProgressToastCard._timer = window.setTimeout(() => {
       el.classList.remove('show');
       el.setAttribute('aria-hidden', 'true');
-      showPickupXpToast._timer = null;
-    }, 1800);
+      showPickupProgressToastCard._timer = null;
+    }, 2600);
   }
 
   function ensureLevelUpOverlay() {
@@ -2787,18 +2844,14 @@
   function handlePickupProgressionDelta(payload = {}) {
     const progressionPayload = payload?.progression && typeof payload.progression === 'object' ? payload.progression : payload;
     const leveledUp = payload?.leveled_up === true || progressionPayload?.leveled_up === true;
-    const xpAwarded = Number(payload?.xp_awarded ?? progressionPayload?.xp_awarded);
+    showPickupProgressToastCard(payload);
+    const meId = Number(window?.me?.id);
+    const nextLevel = Number(progressionPayload?.level);
+    if (Number.isFinite(meId) && Number.isFinite(nextLevel) && nextLevel > 0) {
+      writeStoredProgressionLevel(meId, Math.floor(nextLevel));
+    }
     if (leveledUp) {
       showLevelUpOverlay(progressionPayload);
-      const meId = Number(window?.me?.id);
-      const nextLevel = Number(progressionPayload?.level);
-      if (Number.isFinite(meId) && Number.isFinite(nextLevel) && nextLevel > 0) {
-        writeStoredProgressionLevel(meId, Math.floor(nextLevel));
-      }
-      return;
-    }
-    if (Number.isFinite(xpAwarded) && xpAwarded > 0) {
-      showPickupXpToast(`+${formatProgressNumber(xpAwarded, { maxFractionDigits: 0 })} XP`);
     }
   }
 
