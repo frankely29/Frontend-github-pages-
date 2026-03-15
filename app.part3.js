@@ -75,24 +75,31 @@
     return metric === 'hours' ? `${n.toFixed(1)} h` : `${n.toFixed(1)} mi`;
   }
 
-  function normalizeTierTitle(title) {
+  function safeRankName(title) {
     return String(title || '').trim() || 'Recruit';
   }
 
-  function tierClassName(title) {
-    const tier = normalizeTierTitle(title).toLowerCase();
-    if (tier === 'driver') return 'driverTierDriver';
-    if (tier === 'pro') return 'driverTierPro';
-    if (tier === 'veteran') return 'driverTierVeteran';
-    if (tier === 'legend') return 'driverTierLegend';
-    return 'driverTierRookie';
+  function fallbackRankIcon(rankIconKey) {
+    const key = String(rankIconKey || '').trim().toLowerCase();
+    if (/legend|mythic|immortal/.test(key)) return '🌟';
+    if (/general|brigadier/.test(key)) return '⭐';
+    if (/colonel|major|captain|lieutenant/.test(key)) return '🎖️';
+    if (/sergeant|corporal|private|recruit/.test(key)) return '🛡️';
+    return '🏅';
   }
 
-  function levelTitleLine(level, title) {
+  function renderRankIcon(rankIconKey) {
+    if (typeof window.renderRankBadgeIcon === 'function') {
+      return window.renderRankBadgeIcon(rankIconKey, { compact: true });
+    }
+    return `<span class="leaderboardRankIconFallback" aria-hidden="true">${fallbackRankIcon(rankIconKey)}</span>`;
+  }
+
+  function levelTitleLine(level, title, rankIconKey) {
     const n = Number(level);
     const safeLevel = Number.isFinite(n) && n > 0 ? Math.floor(n) : 1;
-    const safeTitle = normalizeTierTitle(title);
-    return `<span class="leaderboardTierLine">Level ${safeLevel} <span class="${tierClassName(safeTitle)}">${esc(safeTitle)}</span></span>`;
+    const safeTitle = safeRankName(title);
+    return `<span class="leaderboardTierLine">${renderRankIcon(rankIconKey)}<span>Level ${safeLevel} <span class="leaderboardRankName">${esc(safeTitle)}</span></span></span>`;
   }
 
   function selectedMyBadge() {
@@ -112,10 +119,10 @@
     return `
       <div class="myRankCard">
         <div style="font:900 11px/1.2 system-ui;">My Summary</div>
-        ${block('Today', 'today')}
-        ${block('Week', 'week')}
-        ${block('Month', 'month')}
-        ${block('Year', 'year')}
+        ${block('Today', 'daily')}
+        ${block('Week', 'weekly')}
+        ${block('Month', 'monthly')}
+        ${block('Year', 'yearly')}
       </div>`;
   }
 
@@ -134,7 +141,7 @@
         <span class="leaderboardRank">#${rank}</span>
         <span class="leaderboardNameWrap">
           <span class="leaderboardName" title="${esc(name)}">${esc(name)}</span>
-          ${levelTitleLine(row?.level, row?.rank_name || row?.title)}
+          ${levelTitleLine(row?.level, row?.rank_name || row?.title, row?.rank_icon_key)}
         </span>
         <span class="leaderboardValue">${formatMetric(value)}</span>
         <span class="leaderboardBadgeCell">${badgeChip(badge)}</span>
@@ -156,7 +163,7 @@
       <div class="myRankCard">
         <div class="leaderboardSectionTitle">My Rank</div>
         <div class="myRankRow"><span>${esc(myName)}</span><span>${myRank ? `#${myRank}` : 'Unranked'}</span></div>
-        <div class="myRankRow"><span>Progression</span><span>${levelTitleLine(state.myRow?.level, state.myRow?.rank_name || state.myRow?.title)}</span></div>
+        <div class="myRankRow"><span>Progression</span><span>${levelTitleLine(state.myRow?.level, state.myRow?.rank_name || state.myRow?.title, state.myRow?.rank_icon_key)}</span></div>
         <div class="myRankRow"><span>${state.metric === 'hours' ? 'Hours' : 'Miles'}</span><span>${formatMetric(myValue)}</span></div>
         <div class="myRankRow"><span>Badge</span><span>${badgeChip(selectedMyBadge()) || '—'}</span></div>
       </div>
@@ -286,7 +293,11 @@
     style.id = 'leaderboardProgressionStyles';
     style.textContent = `
       .leaderboardNameWrap{display:flex;flex-direction:column;min-width:0}
-      .leaderboardTierLine{font-size:11px;font-weight:700;color:#475569;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .leaderboardTierLine{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:700;color:#475569;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .leaderboardRankName{color:#334155}
+      .leaderboardRankIconFallback{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;font-size:13px;line-height:1}
+      .leaderboardTierLine .rankBadgeIconWrap.compact{width:18px;height:18px;flex:0 0 auto;box-shadow:inset 0 0 0 1px rgba(255,255,255,.35),0 1px 4px rgba(2,6,23,.2)}
+      .leaderboardTierLine .rankBadgeIconWrap.compact svg{width:16px;height:16px}
       #dockDrawer:has(.leaderboardPanelWrap){top:50%;max-height:min(62vh,520px)}
       #dockDrawer:has(.leaderboardPanelWrap).open{transform:translateX(0) translateY(-50%)}
       .leaderboardPanelWrap{gap:7px;max-height:min(60vh,480px);overflow:hidden;padding:8px}
@@ -302,11 +313,6 @@
       .leaderboardLegend{gap:5px}
       .leaderboardAllList{max-height:100%;overflow-y:auto;padding-right:2px}
       .leaderboardMyRankCompact{margin-bottom:1px}
-      .driverTierRookie{color:#64748b}
-      .driverTierDriver{color:#2563eb}
-      .driverTierPro{color:#16a34a}
-      .driverTierVeteran{color:#7c3aed}
-      .driverTierLegend{color:#b45309}
     `;
     document.head.appendChild(style);
   }
