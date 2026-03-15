@@ -378,11 +378,15 @@ function isBronxWashHeightsModeZone(props) {
   return isBronxWashHeightsBorough(props) || isBronxWashHeightsCorridorZone(props);
 }
 
+function isManhattanModeZone(props, geom) {
+  return isCoreManhattan(props, geom) && !isBronxWashHeightsModeZone(props);
+}
+
 function enforceSpecialModeExclusivity() {
-  if (bronxWashHeightsMode) {
+  if (statenIslandMode) {
     manhattanMode = false;
-    statenIslandMode = false;
-  } else if (manhattanMode) {
+    bronxWashHeightsMode = false;
+  } else if (bronxWashHeightsMode || manhattanMode) {
     statenIslandMode = false;
   }
 }
@@ -544,7 +548,6 @@ if (btnManhattan) {
     manhattanMode = !manhattanMode;
     if (manhattanMode) {
       statenIslandMode = false;
-      bronxWashHeightsMode = false;
     }
     persistSpecialModeState();
     syncManhattanUI();
@@ -627,7 +630,7 @@ function applyManhattanLocalView(frame) {
 
   for (const f of feats) {
     const props = f.properties || {};
-    if (!isCoreManhattan(props, f.geometry)) continue;
+    if (!isManhattanModeZone(props, f.geometry)) continue;
 
     const pu = Number(props.pickups ?? NaN);
     const pay = Number(props.avg_driver_pay ?? NaN);
@@ -664,7 +667,7 @@ function applyManhattanLocalView(frame) {
   for (const f of feats) {
     const props = f.properties || {};
 
-    if (!isCoreManhattan(props, f.geometry)) {
+    if (!isManhattanModeZone(props, f.geometry)) {
       props.mh_local_rating = null;
       props.mh_local_bucket = null;
       props.mh_local_color = null;
@@ -803,11 +806,15 @@ function syncStatenIslandUI() {
     btnStatenIsland.classList.toggle("on", !!statenIslandMode);
   }
   if (modeNote) {
-    modeNote.innerHTML = bronxWashHeightsMode
-      ? `Bronx/Wash Heights Mode is <b>ON</b>: trip-frequency prioritization for <b>Bronx + Manhattan 100th St and up corridor</b>.<br/>Pay average is ignored for this mode.`
-      : statenIslandMode
-        ? `Staten Island Mode is <b>ON</b>: Staten Island colors are <b>relative within Staten Island</b> only.<br/>Other boroughs remain NYC-wide.`
-        : `Colors come from rating (1–100) for the selected 20-minute window.<br/>Time label is NYC time.`;
+    modeNote.innerHTML = manhattanMode && bronxWashHeightsMode
+      ? `Manhattan Mode and Bronx/Wash Heights Mode are <b>ON</b>: each applies only to its own scope.`
+      : bronxWashHeightsMode
+        ? `Bronx/Wash Heights Mode is <b>ON</b>: trip-frequency prioritization for <b>Bronx + Manhattan 100th St and up corridor</b>.<br/>Pay average is ignored for this mode.`
+        : manhattanMode
+          ? `Manhattan Mode is <b>ON</b>: colors are <b>relative within core Manhattan only</b> and exclude Bronx/Wash Heights corridor zones.`
+          : statenIslandMode
+            ? `Staten Island Mode is <b>ON</b>: Staten Island colors are <b>relative within Staten Island</b> only.<br/>Other boroughs remain NYC-wide.`
+            : `Colors come from rating (1–100) for the selected 20-minute window.<br/>Time label is NYC time.`;
   }
 }
 
@@ -850,7 +857,6 @@ if (btnBronxWashHeightsMode) {
     e.stopPropagation();
     bronxWashHeightsMode = !bronxWashHeightsMode;
     if (bronxWashHeightsMode) {
-      manhattanMode = false;
       statenIslandMode = false;
     }
     persistSpecialModeState();
@@ -867,13 +873,13 @@ if (btnBronxWashHeightsMode) {
 function effectiveBucket(props, geom) {
   if (bronxWashHeightsMode && isBronxWashHeightsModeZone(props) && props.bwh_local_bucket) return props.bwh_local_bucket;
   if (statenIslandMode && isStatenIslandFeature(props) && props.si_local_bucket) return props.si_local_bucket;
-  if (manhattanMode && isCoreManhattan(props, geom) && props.mh_local_bucket) return props.mh_local_bucket;
+  if (manhattanMode && isManhattanModeZone(props, geom) && props.mh_local_bucket) return props.mh_local_bucket;
   return (props.bucket || "").trim();
 }
 function effectiveColor(props, geom) {
   if (bronxWashHeightsMode && isBronxWashHeightsModeZone(props) && props.bwh_local_color) return props.bwh_local_color;
   if (statenIslandMode && isStatenIslandFeature(props) && props.si_local_color) return props.si_local_color;
-  if (manhattanMode && isCoreManhattan(props, geom) && props.mh_local_color) return props.mh_local_color;
+  if (manhattanMode && isManhattanModeZone(props, geom) && props.mh_local_color) return props.mh_local_color;
   const st = props?.style || {};
   return st.fillColor || st.color || "#000";
 }
@@ -884,10 +890,17 @@ function effectiveRating(props, geom) {
   if (statenIslandMode && isStatenIslandFeature(props) && Number.isFinite(Number(props.si_local_rating))) {
     return Number(props.si_local_rating);
   }
-  if (manhattanMode && isCoreManhattan(props, geom) && Number.isFinite(Number(props.mh_local_rating))) {
+  if (manhattanMode && isManhattanModeZone(props, geom) && Number.isFinite(Number(props.mh_local_rating))) {
     return Number(props.mh_local_rating);
   }
   return Number(props.rating ?? NaN);
+}
+
+function getActiveSpecialModeTagForFeature(props, geom) {
+  if (statenIslandMode && isStatenIslandFeature(props)) return "staten_island";
+  if (bronxWashHeightsMode && isBronxWashHeightsModeZone(props)) return "bronx_wash_heights";
+  if (manhattanMode && isManhattanModeZone(props, geom)) return "manhattan";
+  return null;
 }
 
 /* =========================================================
@@ -967,14 +980,16 @@ function updateRecommendation(frame) {
   const allowed = new Set(["blue", "purple", "green"]);
   const DIST_PENALTY_PER_MILE = 4.0;
   const BRONX_WASH_HEIGHTS_DIST_PENALTY_PER_MILE = 2.0;
+  const specialModesActive = statenIslandMode || bronxWashHeightsMode || manhattanMode;
 
   let best = null;
 
   for (const f of feats) {
     const props = f.properties || {};
     const geom = f.geometry;
+    const modeTag = getActiveSpecialModeTagForFeature(props, geom);
 
-    if (bronxWashHeightsMode && !isBronxWashHeightsModeZone(props)) continue;
+    if (specialModesActive && modeTag == null) continue;
 
     const b = effectiveBucket(props, geom);
     if (!allowed.has(b)) continue;
@@ -986,9 +1001,17 @@ function updateRecommendation(frame) {
     if (!center) continue;
 
     const dMi = haversineMiles(userLatLng, center);
-    const score = bronxWashHeightsMode
-      ? (Number(props.bwh_local_score ?? 0) * 100) - dMi * BRONX_WASH_HEIGHTS_DIST_PENALTY_PER_MILE
-      : rating - dMi * DIST_PENALTY_PER_MILE;
+    let score;
+    if (modeTag === "bronx_wash_heights") {
+      score = (Number(props.bwh_local_score ?? 0) * 100) - dMi * BRONX_WASH_HEIGHTS_DIST_PENALTY_PER_MILE;
+    } else if (modeTag === "manhattan") {
+      score = Number(props.mh_local_rating ?? NaN) - dMi * DIST_PENALTY_PER_MILE;
+    } else if (modeTag === "staten_island") {
+      score = Number(props.si_local_rating ?? NaN) - dMi * DIST_PENALTY_PER_MILE;
+    } else {
+      score = rating - dMi * DIST_PENALTY_PER_MILE;
+    }
+    if (!Number.isFinite(score)) continue;
 
     if (!best || score > best.score) {
       best = {
@@ -999,9 +1022,9 @@ function updateRecommendation(frame) {
         lng: center.lng,
         name: (props.zone_name || "").trim() || `Zone ${props.LocationID ?? ""}`,
         borough: (props.borough || "").trim(),
-        usedSI: statenIslandMode && isStatenIslandFeature(props) && Number.isFinite(Number(props.si_local_rating)),
-        usedMH: manhattanMode && isCoreManhattan(props, geom) && Number.isFinite(Number(props.mh_local_rating)),
-        usedBWH: bronxWashHeightsMode && isBronxWashHeightsModeZone(props) && Number.isFinite(Number(props.bwh_local_rating)),
+        usedSI: modeTag === "staten_island" && Number.isFinite(Number(props.si_local_rating)),
+        usedMH: modeTag === "manhattan" && Number.isFinite(Number(props.mh_local_rating)),
+        usedBWH: modeTag === "bronx_wash_heights" && Number.isFinite(Number(props.bwh_local_rating)),
       };
     }
   }
@@ -1016,9 +1039,12 @@ function updateRecommendation(frame) {
   const bTxt = best.borough ? ` (${best.borough})` : "";
   if (best.usedBWH) {
     recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Best trip flow • Strong ride flow • Stay-busy area • Fast repeat-call area — ${distTxt}`;
+  } else if (best.usedMH) {
+    recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Manhattan adjusted rating ${best.rating} — ${distTxt}`;
+  } else if (best.usedSI) {
+    recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Staten Island local rating ${best.rating} — ${distTxt}`;
   } else {
-    const modeTag = best.usedSI ? " (SI-local)" : best.usedMH ? " (Manhattan-adjusted)" : "";
-    recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Rating ${best.rating}${modeTag} — ${distTxt}`;
+    recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Rating ${best.rating} — ${distTxt}`;
   }
 
   setNavDestination({ lat: best.lat, lng: best.lng });
@@ -1261,7 +1287,6 @@ function wireModesPanel() {
     manhattanMode = !manhattanMode;
     if (manhattanMode) {
       statenIslandMode = false;
-      bronxWashHeightsMode = false;
     }
     persistSpecialModeState();
     syncManhattanUI();
@@ -1276,7 +1301,6 @@ function wireModesPanel() {
     e.preventDefault();
     bronxWashHeightsMode = !bronxWashHeightsMode;
     if (bronxWashHeightsMode) {
-      manhattanMode = false;
       statenIslandMode = false;
     }
     persistSpecialModeState();
@@ -3485,7 +3509,7 @@ function buildPopupHTML(props, geom) {
     extra += `<div style="margin-top:6px;"><b>Staten Local Rating:</b> ${props.si_local_rating} (${prettyBucket(props.si_local_bucket)})</div>`;
   }
 
-  if (manhattanMode && isCoreManhattan(props, geom) && Number.isFinite(Number(props.mh_local_rating))) {
+  if (manhattanMode && isManhattanModeZone(props, geom) && Number.isFinite(Number(props.mh_local_rating))) {
     extra += `<div style="margin-top:6px;"><b>Manhattan Adjusted:</b> ${props.mh_local_rating} (${prettyBucket(props.mh_local_bucket)})</div>`;
   }
 
