@@ -23,8 +23,22 @@
     return fallback;
   }
 
+  function isVoidedTrip(row) {
+    return row?.is_voided === true || row?.is_voided === 1 || row?.voided_at;
+  }
+
+  function showAdminSuccessNotice(message) {
+    const text = String(message || 'Trip updated successfully.');
+    if (window.AdminComponents?.toast) {
+      window.AdminComponents.toast(text, 'success');
+      return;
+    }
+    alert(text);
+  }
+
   function renderAdminTrips(container, payload, helpers) {
     const c = helpers?.components || window.AdminComponents;
+    const actions = helpers?.actions;
     const summary = payload?.summary && typeof payload.summary === 'object' ? payload.summary : {};
     const rows = normalizeRows(payload?.recent)
       .slice()
@@ -58,20 +72,59 @@
       return;
     }
 
-    listEl.innerHTML = rows.map((row) => `
+    listEl.innerHTML = rows.map((row) => {
+      const tripId = pick(row, ['id', 'trip_id', 'log_id'], 'N/A');
+      const isVoided = isVoidedTrip(row);
+      const voidReason = pick(row, ['void_reason'], '');
+      const voidedAt = pick(row, ['voided_at'], '');
+      return `
       <article class="adminUserCard">
         <div class="adminRowBetween">
-          <strong>Trip #${c.esc(String(pick(row, ['id', 'trip_id', 'log_id'], 'N/A')))}</strong>
+          <strong>Trip #${c.esc(String(tripId))}</strong>
           ${c.badge(c.formatDateTime(pick(row, ['created_at', 'recorded_at', 'timestamp'], 'N/A')), 'muted')}
         </div>
+        ${isVoided ? `<div class="adminRowBetween" style="margin:6px 0 2px;">${c.badge('Deleted / Voided', 'danger')}${voidedAt ? c.badge(`Voided ${c.formatDateTime(voidedAt)}`, 'muted') : ''}</div>` : ''}
         <div class="adminKV"><span>User ID</span><strong>${c.esc(c.formatValue(pick(row, ['user_id'], 'Unknown')))}</strong></div>
         <div class="adminKV"><span>Display Name</span><strong>${c.esc(c.formatValue(pick(row, ['display_name', 'name', 'username'], '—')))}</strong></div>
         <div class="adminKV"><span>Zone</span><strong>${c.esc(`${c.formatValue(pick(row, ['zone_id'], 'N/A'))} • ${c.formatValue(pick(row, ['zone_name'], 'Unknown'))}`)}</strong></div>
         <div class="adminKV"><span>Borough</span><strong>${c.esc(c.formatValue(pick(row, ['borough'], 'Unknown')))}</strong></div>
         <div class="adminKV"><span>Frame Time</span><strong>${c.esc(c.formatValue(pick(row, ['frame_time', 'frame_timestamp'], 'N/A')))}</strong></div>
         <div class="adminKV"><span>Lat/Lng</span><strong>${c.esc(`${c.formatValue(pick(row, ['lat', 'latitude'], 'N/A'))}, ${c.formatValue(pick(row, ['lng', 'lon', 'longitude'], 'N/A'))}`)}</strong></div>
+        ${isVoided && voidReason ? `<div class="adminKV"><span>Void Reason</span><strong>${c.esc(c.formatValue(voidReason))}</strong></div>` : ''}
+        ${!isVoided ? `<button type="button" class="adminBtn danger" data-void-trip-id="${c.esc(String(tripId))}">Delete Fake Trip</button>` : ''}
       </article>
-    `).join('');
+    `;
+    }).join('');
+
+    listEl.querySelectorAll('[data-void-trip-id]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const tripId = String(btn.dataset.voidTripId || '').trim();
+        if (!tripId || !actions?.voidRecordedTrip) return;
+        const reasonRaw = prompt('Enter reason for deleting this fake trip:');
+        if (reasonRaw === null) return;
+        const reason = String(reasonRaw || '').trim();
+        if (!reason) {
+          alert('A reason is required to delete a fake trip.');
+          return;
+        }
+        const ok = window.confirm('This will soft-delete the recorded trip from active data but preserve the audit row. Continue?');
+        if (!ok) return;
+
+        btn.disabled = true;
+        try {
+          await actions.voidRecordedTrip(tripId, reason);
+          helpers?.onMutate?.();
+          if (window.AdminPanel?.refreshAll) {
+            window.AdminPanel.refreshAll();
+          }
+          showAdminSuccessNotice('Recorded trip soft-deleted successfully.');
+        } catch (err) {
+          alert(err?.message || 'Failed to delete fake trip.');
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    });
   }
 
   window.AdminTrips = { renderAdminTrips };
