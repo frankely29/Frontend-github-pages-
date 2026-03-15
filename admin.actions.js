@@ -23,12 +23,6 @@
           method: 'POST',
         });
       },
-      voidRecordedTrip(tripId, reason) {
-        return request(`/admin/trips/${encodeURIComponent(tripId)}/void`, {
-          method: 'POST',
-          body: { reason },
-        });
-      },
       fetchUserDetail(userId) {
         return request(`/admin/users/${encodeURIComponent(userId)}`);
       },
