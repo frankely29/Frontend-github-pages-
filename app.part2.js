@@ -1289,15 +1289,15 @@
     const t = mapIdentityZoomT(zoomValue);
     const smooth = t * t * (3 - 2 * t);
     const emphasize = Math.pow(smooth, 0.9);
+    const avatarPx = +(18 + (52 - 18) * emphasize).toFixed(2);
+    const tipSizePx = +(4 + (8 - 4) * emphasize).toFixed(2);
     return {
-      fontPx: +(8.8 + (16.8 - 8.8) * emphasize).toFixed(2),
-      padY: +(0.95 + (4.8 - 0.95) * emphasize).toFixed(2),
-      padX: +(2.6 + (9.8 - 2.6) * emphasize).toFixed(2),
-      avatarPx: +(15 + (54 - 15) * emphasize).toFixed(2),
-      tipSizePx: +(5 + (9 - 5) * emphasize).toFixed(2),
-      tipOffsetPx: +(4 + (8 - 4) * emphasize).toFixed(2),
-      maxWidthPx: +(88 + (190 - 88) * emphasize).toFixed(2),
-      badgeFontPx: +(15 + (17 - 15) * emphasize).toFixed(2),
+      avatarPx,
+      rootPx: +(30 + (66 - 30) * emphasize).toFixed(2),
+      tipSizePx,
+      tipOrbitPx: +((avatarPx * 0.5) - 1 + (tipSizePx * 0.1)).toFixed(2),
+      initialsFontPx: +(8 + (18 - 8) * emphasize).toFixed(2),
+      badgeFontPx: +(13 + (17 - 13) * emphasize).toFixed(2),
       arrowBodyPx: +(18 + (27 - 18) * t).toFixed(2),
       arrowLeftRightPx: +(4.5 + (7 - 4.5) * t).toFixed(2),
       arrowAccentPx: +(10 + (14 - 10) * t).toFixed(2)
@@ -1325,7 +1325,7 @@
     return `<span class="mapIdentityBadgeOverlay badgeEmoji badgeEmojiMap ${badgeClass}" aria-label="${label}">${icon}</span>`;
   }
 
-  function mapIdentityInitialsFromName(name) {
+  function mapIdentityInitials(name) {
     const safe = String(name || '').trim();
     if (!safe) return 'D';
     const parts = safe.split(/\s+/).filter(Boolean);
@@ -1334,21 +1334,24 @@
     return (compact.slice(0, 2) || safe.slice(0, 2) || 'D').toUpperCase();
   }
 
-  function mapIdentityPresenceCoreHTML({ markerClass, name, avatarUrl, cfg, leaderboardBadgeCode, directionId = '' }) {
+  function mapIdentityPresenceCoreHTML({ markerClass, name, avatarUrl, cfg, leaderboardBadgeCode, orbitMeta = null, directionId = '' }) {
     const safeAvatar = safeMapAvatarUrl(avatarUrl);
     const avatarHTML = safeAvatar
       ? `<div class="mapPresenceAvatar"><img src="${escapeHtml(safeAvatar)}" alt="avatar" loading="lazy"></div>`
-      : `<div class="mapPresenceInitials">${escapeHtml(mapIdentityInitialsFromName(name))}</div>`;
+      : `<div class="mapPresenceInitials">${escapeHtml(mapIdentityInitials(name))}</div>`;
     const dirAttr = directionId ? ` id="${escapeHtml(directionId)}"` : '';
+    const orbitAttrs = mapIdentityOrbitDataAttrs(orbitMeta);
     return `
-      <div class="mapPresenceOrbit ${markerClass}" data-map-identity-label="1">
-        <div class="mapPresenceDirectionRot"${dirAttr} aria-hidden="true">
+      <div class="mapPresenceOrbit ${markerClass}" data-map-identity-label="1" data-map-presence-orbit="1" ${orbitAttrs}>
+        <div class="mapPresenceRoot">
+          <div class="mapPresenceDirectionRot"${dirAttr} aria-hidden="true">
           <span class="mapPresenceDirectionTip"></span>
+          </div>
+          <div class="mapPresenceShell" style="width:${cfg.avatarPx}px;height:${cfg.avatarPx}px;">
+            ${avatarHTML}
+          </div>
+          <span class="mapPresenceBadgeOverlay">${mapIdentityBadgeOverlayHTML({ badgeCode: leaderboardBadgeCode })}</span>
         </div>
-        <div class="mapPresenceShell" style="width:${cfg.avatarPx}px;height:${cfg.avatarPx}px;">
-          ${avatarHTML}
-        </div>
-        <span class="mapPresenceBadgeWrap">${mapIdentityBadgeOverlayHTML({ badgeCode: leaderboardBadgeCode })}</span>
       </div>
     `;
   }
@@ -1381,12 +1384,10 @@
     const effectiveOrbitMeta = orbitMeta || overlapMeta || null;
     const slotSide = String(effectiveOrbitMeta?.side || '').trim();
     const sideClass = slotSide ? ` slot-${slotSide}` : '';
-    const visualKind = 'avatar';
-    const orbitStyle = mapIdentityOrbitStyleText(effectiveOrbitMeta, zoom, visualKind);
-    return `<div class="selfIdentitySlot${sideClass}" data-map-identity-label="1" style="${orbitStyle}">${mapIdentityPresenceCoreHTML({ markerClass: 'mapPresenceSelf', name: safeName, avatarUrl, cfg, leaderboardBadgeCode, directionId: 'navPresenceDirectionRot' })}</div>`;
+    return `<div class="selfIdentitySlot${sideClass}" data-map-identity-label="1">${mapIdentityPresenceCoreHTML({ markerClass: 'mapPresenceSelf', name: safeName, avatarUrl, cfg, leaderboardBadgeCode, directionId: 'navPresenceDirectionRot', orbitMeta: effectiveOrbitMeta })}</div>`;
   }
 
-  function mapIdentityOrbitStyleText(orbitMeta, zoomValue, visualKind = 'name') {
+  function mapIdentityOrbitStyleText(orbitMeta, zoomValue) {
     const count = Number(orbitMeta?.count);
     if (!Number.isFinite(count) || count <= 1) return '';
 
@@ -1394,13 +1395,8 @@
     const cfg = mapIdentityVisualConfig(zoomValue);
     const ring = Math.max(0, Number(orbitMeta?.ring) || 0);
 
-    const baseRadiusPx = visualKind === 'avatar'
-      ? Math.max(22, cfg.avatarPx * 0.9)
-      : Math.max(44, Math.min(92, cfg.maxWidthPx * 0.55));
-
-    const ringGapPx = visualKind === 'avatar'
-      ? Math.max(16, cfg.avatarPx * 0.6)
-      : Math.max(22, cfg.fontPx * 2.0);
+    const baseRadiusPx = Math.max(16, (cfg.rootPx * 0.54));
+    const ringGapPx = Math.max(12, cfg.rootPx * 0.42);
 
     const radius = baseRadiusPx + (ring * ringGapPx);
     const dx = +(Math.cos(angleRad) * radius).toFixed(2);
@@ -1409,27 +1405,52 @@
     return `--marker-slot-x:${dx}px;--marker-slot-y:${dy}px;`;
   }
 
-  function mapIdentityOrbitDataAttrs() {
-    return '';
+  function mapIdentityOrbitDataAttrs(orbitMeta) {
+    const idx = Number(orbitMeta?.index);
+    const count = Number(orbitMeta?.count);
+    const angle = Number(orbitMeta?.angleDeg);
+    const ring = Number(orbitMeta?.ring);
+    return [
+      `data-orbit-index="${Number.isFinite(idx) ? Math.round(idx) : 0}"`,
+      `data-orbit-count="${Number.isFinite(count) ? Math.round(count) : 1}"`,
+      `data-orbit-angle="${Number.isFinite(angle) ? +angle.toFixed(2) : 0}"`,
+      `data-orbit-ring="${Number.isFinite(ring) ? Math.max(0, Math.round(ring)) : 0}"`
+    ].join(' ');
   }
 
-  function mapIdentityReadOrbitMeta() {
-    return null;
+  function mapIdentityReadOrbitMeta(slot) {
+    if (!slot?.dataset) return null;
+    return {
+      index: Number(slot.dataset.orbitIndex) || 0,
+      count: Number(slot.dataset.orbitCount) || 1,
+      angleDeg: Number(slot.dataset.orbitAngle) || 0,
+      ring: Number(slot.dataset.orbitRing) || 0
+    };
   }
 
   function mapIdentityApplyOrbitStyleToSlot(slot) {
     if (!slot) return;
-    delete slot.dataset.orbitIndex;
-    delete slot.dataset.orbitCount;
-    delete slot.dataset.orbitAngle;
-    delete slot.dataset.orbitRadius;
+    const orbitMeta = mapIdentityReadOrbitMeta(slot);
+    const orbitStyle = mapIdentityOrbitStyleText(orbitMeta, map?.getZoom?.());
     slot.style.removeProperty('--identity-slot-x');
     slot.style.removeProperty('--identity-slot-y');
-    slot.style.removeProperty('--marker-slot-x');
-    slot.style.removeProperty('--marker-slot-y');
+    if (!orbitStyle) {
+      slot.style.removeProperty('--marker-slot-x');
+      slot.style.removeProperty('--marker-slot-y');
+      return;
+    }
+    orbitStyle.split(';').forEach((chunk) => {
+      const [prop, value] = chunk.split(':');
+      if (!prop || !value) return;
+      slot.style.setProperty(prop.trim(), value.trim());
+    });
   }
 
-  function mapIdentityRefreshOrbitSlots() {}
+  function mapIdentityRefreshOrbitSlots() {
+    document.querySelectorAll('.mapPresenceOrbit[data-map-presence-orbit="1"]').forEach((slot) => {
+      mapIdentityApplyOrbitStyleToSlot(slot);
+    });
+  }
 
   function mapIdentityRenderDriverLabel({ name, avatarUrl, mode, zoom, orbitMeta = null, overlapMeta = null, leaderboardBadgeCode }) {
 
@@ -1438,24 +1459,24 @@
     const cfg = mapIdentityVisualConfig(zoom);
     const slotSide = String(effectiveOrbitMeta?.side || '').trim();
     const sideClass = slotSide ? ` slot-${slotSide}` : '';
-    const visualKind = 'avatar';
-    const orbitStyle = mapIdentityOrbitStyleText(effectiveOrbitMeta, zoom, visualKind);
-    return `<div class="otherDrvIdentitySlot${sideClass}" data-map-identity-label="1" style="${orbitStyle}">${mapIdentityPresenceCoreHTML({ markerClass: 'mapPresenceOther', name: safeName, avatarUrl, cfg, leaderboardBadgeCode })}</div>`;
+    return `<div class="otherDrvIdentitySlot${sideClass}" data-map-identity-label="1">${mapIdentityPresenceCoreHTML({ markerClass: 'mapPresenceOther', name: safeName, avatarUrl, cfg, leaderboardBadgeCode, orbitMeta: effectiveOrbitMeta })}</div>`;
   }
 
   function mapIdentityApplySelfOrbit(orbitMeta) {
-    const slot = document.querySelector('#navWrap .selfIdentitySlot[data-map-identity-label="1"]');
+    const slot = document.querySelector('#navWrap .mapPresenceOrbit[data-map-presence-orbit="1"]');
     if (!slot) return;
     const sideClasses = ['slot-E', 'slot-W', 'slot-N', 'slot-S', 'slot-NE', 'slot-NW', 'slot-SE', 'slot-SW'];
-    sideClasses.forEach((cls) => slot.classList.remove(cls));
+    const slotHost = slot.closest('.selfIdentitySlot');
+    sideClasses.forEach((cls) => slotHost?.classList.remove(cls));
 
     const slotSide = String(orbitMeta?.side || '').trim();
-    const visualKind = 'avatar';
-    const orbitStyle = mapIdentityOrbitStyleText(orbitMeta, map?.getZoom?.(), visualKind);
+    const orbitStyle = mapIdentityOrbitStyleText(orbitMeta, map?.getZoom?.());
+    slot.setAttribute('data-orbit-index', Number.isFinite(orbitMeta?.index) ? `${Math.round(orbitMeta.index)}` : '0');
+    slot.setAttribute('data-orbit-count', Number.isFinite(orbitMeta?.count) ? `${Math.round(orbitMeta.count)}` : '1');
+    slot.setAttribute('data-orbit-angle', Number.isFinite(orbitMeta?.angleDeg) ? `${+orbitMeta.angleDeg.toFixed(2)}` : '0');
+    slot.setAttribute('data-orbit-ring', Number.isFinite(orbitMeta?.ring) ? `${Math.max(0, Math.round(orbitMeta.ring))}` : '0');
 
     if (!orbitStyle) {
-      slot.style.removeProperty('--identity-slot-x');
-      slot.style.removeProperty('--identity-slot-y');
       slot.style.removeProperty('--marker-slot-x');
       slot.style.removeProperty('--marker-slot-y');
       return;
@@ -1467,7 +1488,7 @@
       slot.style.setProperty(prop.trim(), value.trim());
     });
 
-    if (slotSide) slot.classList.add(`slot-${slotSide}`);
+    if (slotSide) slotHost?.classList.add(`slot-${slotSide}`);
   }
 
   function mapIdentityApplyZoomStyles(zoomValue) {
@@ -1478,11 +1499,22 @@
       rootStyle.setProperty('--map-ident-arrow-left-right', `${cfg.arrowLeftRightPx}px`);
       rootStyle.setProperty('--map-ident-arrow-accent', `${cfg.arrowAccentPx}px`);
       rootStyle.setProperty('--map-ident-badge-font', `${cfg.badgeFontPx}px`);
+      rootStyle.setProperty('--map-presence-root-px', `${cfg.rootPx}px`);
       rootStyle.setProperty('--map-presence-avatar', `${cfg.avatarPx}px`);
+      rootStyle.setProperty('--map-presence-initials-font', `${cfg.initialsFontPx}px`);
       rootStyle.setProperty('--map-presence-tip-size', `${cfg.tipSizePx}px`);
-      rootStyle.setProperty('--map-presence-tip-offset', `${cfg.tipOffsetPx}px`);
-      rootStyle.setProperty('--map-presence-badge-scale', `${(cfg.avatarPx / 36).toFixed(3)}`);
+      rootStyle.setProperty('--map-presence-tip-orbit', `${cfg.tipOrbitPx}px`);
+      rootStyle.setProperty('--map-presence-badge-font', `${cfg.badgeFontPx}px`);
+      rootStyle.setProperty('--map-presence-badge-scale', `${(cfg.rootPx / 54).toFixed(3)}`);
     }
+    document.querySelectorAll('#navWrap, .otherDrvWrap').forEach((el) => {
+      el.style.width = `${cfg.rootPx}px`;
+      el.style.height = `${cfg.rootPx}px`;
+    });
+    document.querySelectorAll('.mapPresenceRoot').forEach((el) => {
+      el.style.width = `${cfg.rootPx}px`;
+      el.style.height = `${cfg.rootPx}px`;
+    });
     document.querySelectorAll('.mapPresenceShell').forEach((el) => {
       el.style.width = `${cfg.avatarPx}px`;
       el.style.height = `${cfg.avatarPx}px`;
