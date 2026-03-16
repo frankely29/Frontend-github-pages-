@@ -2078,7 +2078,8 @@ function initMap() {
       applyDriverLabelZoomStyles();
     });
     map.on("zoom", () => {
-      schedulePresenceZoomStyleRefresh();
+      if (authHeaderOK()) scheduleAdaptivePresenceRender();
+      applyDriverLabelZoomStyles();
     });
     map.on("zoomend", () => {
       if (authHeaderOK()) {
@@ -5573,7 +5574,6 @@ let presenceRenderMode = 'full';
 let presenceFocusedUserId = null;
 let presenceLiteSourceFingerprint = '';
 let presenceAdaptiveRenderRaf = 0;
-let presenceZoomStyleRaf = 0;
 let lastSelfOrbitMeta = null;
 
 const PRESENCE_FULL_MAX_VISIBLE = 50;
@@ -5588,17 +5588,15 @@ const PRESENCE_VIEWPORT_BUFFER_RATIO = 0.18;
 
 const PRESENCE_LABEL_COLLISION_PX = 30;
 const PRESENCE_SLOT_SEQUENCE = [
-  { side: 'E',  dx: 18,  dy: 0 },
-  { side: 'W',  dx: -18, dy: 0 },
-  { side: 'N',  dx: 0,   dy: -18 },
-  { side: 'S',  dx: 0,   dy: 18 },
-  { side: 'NE', dx: 13,  dy: -13 },
-  { side: 'NW', dx: -13, dy: -13 },
-  { side: 'SE', dx: 13,  dy: 13 },
-  { side: 'SW', dx: -13, dy: 13 },
+  { angleDeg: 0 },
+  { angleDeg: 180 },
+  { angleDeg: -90 },
+  { angleDeg: 90 },
+  { angleDeg: -45 },
+  { angleDeg: -135 },
+  { angleDeg: 45 },
+  { angleDeg: 135 },
 ];
-const PRESENCE_SLOT_RING_GAP_PX = 12;
-const PRESENCE_MAX_VISIBLE_OVERLAP_IDENTITIES = 8;
 
 function syncGhostUI() {
   const ghostOn = !!me?.ghost_mode;
@@ -5979,10 +5977,6 @@ function buildDriverMarkerVisualSignature(userId, name, avatarUrl = "", mode = "
   const overlapSlotIndex = Number.isFinite(orbitMeta?.slotIndex) ? orbitMeta.slotIndex : "";
   const overlapRing = Number.isFinite(orbitMeta?.ring) ? orbitMeta.ring : "";
   const overlapAngle = Number.isFinite(orbitMeta?.angleDeg) ? orbitMeta.angleDeg : "";
-  const overlapSide = orbitMeta?.side || '';
-  const overlapDx = Number.isFinite(orbitMeta?.dx) ? orbitMeta.dx : '';
-  const overlapDy = Number.isFinite(orbitMeta?.dy) ? orbitMeta.dy : '';
-  const overlapCompact = orbitMeta?.compact ? '1' : '';
   return [
     String(userId ?? ""),
     String(name ?? ""),
@@ -5996,10 +5990,6 @@ function buildDriverMarkerVisualSignature(userId, name, avatarUrl = "", mode = "
     String(overlapSlotIndex),
     String(overlapRing),
     String(overlapAngle),
-    String(overlapSide),
-    String(overlapDx),
-    String(overlapDy),
-    String(overlapCompact),
   ].join("|");
 }
 
@@ -6066,6 +6056,7 @@ function upsertDriverMarker(userId, name, lat, lng, heading, avatarUrl = "", mod
 
   otherMarkers.set(userId, mk);
   driverMarkerVisualSignature.set(userId, visualSig);
+  applyDriverLabelZoomStyles();
 }
 
 
@@ -6248,7 +6239,6 @@ function assignPresenceSlotMeta(richRows) {
   if (nodes.length === 0) return;
 
   const clusters = buildPresenceScreenClusters(nodes, PRESENCE_LABEL_COLLISION_PX);
-  const zoomNow = Number.isFinite(map?.getZoom?.()) ? map.getZoom() : 12;
 
   for (const cluster of clusters) {
     const ordered = cluster
@@ -6258,30 +6248,33 @@ function assignPresenceSlotMeta(richRows) {
         return String(a.uid).localeCompare(String(b.uid));
       });
 
-    if (ordered.length <= 1) {
+    const count = ordered.length;
+
+    if (count <= 1) {
       const only = ordered[0];
-      if (only.kind === "self") lastSelfOrbitMeta = null;
-      else only.row.overlapMeta = null;
+      const soloMeta = {
+        count: 1,
+        leader: true,
+        suppressLabel: false,
+        slotIndex: 0,
+        ring: 0,
+        angleDeg: 0,
+      };
+      if (only.kind === "self") lastSelfOrbitMeta = soloMeta;
+      else only.row.overlapMeta = soloMeta;
       continue;
     }
 
     ordered.forEach((node, idx) => {
-      const visible = idx < PRESENCE_MAX_VISIBLE_OVERLAP_IDENTITIES;
       const slot = PRESENCE_SLOT_SEQUENCE[idx % PRESENCE_SLOT_SEQUENCE.length];
       const ring = Math.floor(idx / PRESENCE_SLOT_SEQUENCE.length);
-      const ringDx = slot.dx === 0 ? 0 : Math.sign(slot.dx) * (ring * PRESENCE_SLOT_RING_GAP_PX);
-      const ringDy = slot.dy === 0 ? 0 : Math.sign(slot.dy) * (ring * PRESENCE_SLOT_RING_GAP_PX);
-      const compact = ordered.length >= 5 || zoomNow < 12.25;
       const meta = {
-        count: ordered.length,
+        count,
         leader: idx === 0,
-        suppressLabel: !visible,
+        suppressLabel: false,
         slotIndex: idx,
         ring,
-        side: slot.side,
-        dx: slot.dx + ringDx,
-        dy: slot.dy + ringDy,
-        compact,
+        angleDeg: slot.angleDeg,
       };
       if (node.kind === "self") lastSelfOrbitMeta = meta;
       else node.row.overlapMeta = meta;
@@ -6383,14 +6376,6 @@ function scheduleAdaptivePresenceRender() {
   presenceAdaptiveRenderRaf = window.requestAnimationFrame(() => {
     presenceAdaptiveRenderRaf = 0;
     renderAdaptivePresenceFromCache();
-  });
-}
-
-function schedulePresenceZoomStyleRefresh() {
-  if (presenceZoomStyleRaf) return;
-  presenceZoomStyleRaf = window.requestAnimationFrame(() => {
-    presenceZoomStyleRaf = 0;
-    applyDriverLabelZoomStyles();
   });
 }
 
