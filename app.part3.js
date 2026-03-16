@@ -85,10 +85,11 @@
   function badgeChip(badgeCode, options = {}) {
     const badge = strictBadgeCode(badgeCode);
     if (!badge) return '';
-    const badgeClass = badge === 'crown' ? 'badgeEmojiCrown' : (badge === 'silver' ? 'badgeEmojiSilver' : 'badgeEmojiBronze');
     const label = badge === 'crown' ? 'Crown' : (badge === 'silver' ? 'Silver' : 'Bronze');
-    const icon = badge === 'crown' ? '👑' : (badge === 'silver' ? '🥈' : '🥉');
-    return `<span class="badgeEmoji ${badgeClass}" aria-label="${label}">${icon}</span>${options.withLabel ? `<span class="badgeText">${label}</span>` : ''}`;
+    const svg = typeof window.renderLeaderboardBadgeSvg === 'function'
+      ? window.renderLeaderboardBadgeSvg(badge, { size: options.withLabel ? 19 : 18, compact: true })
+      : `<svg class="leaderboardBadgeSvg is-fallback" viewBox="0 0 24 24" width="18" height="18" role="img" aria-label="${esc(label)}"><circle cx="12" cy="12" r="9" fill="#cbd5e1" stroke="#475569" stroke-width="1.4"/></svg>`;
+    return `<span class="badgeChipSvgWrap">${svg}</span>${options.withLabel ? `<span class="badgeText">${label}</span>` : ''}`;
   }
 
   function formatMetric(value, metric = state.metric) {
