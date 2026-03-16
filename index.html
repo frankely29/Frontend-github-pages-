@@ -301,30 +301,7 @@
       pointer-events: auto;
     }
 
-    .pickupFab{
-      position: static;
-      border: none;
-      border-radius: 999px;
-      padding: 10px 12px;
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
-      font-size: 13px;
-      font-weight: 950;
-      color: #fff;
-      background: linear-gradient(180deg, rgba(14,190,96,0.98), rgba(0,150,74,0.98));
-      box-shadow:
-        0 14px 28px rgba(0,0,0,0.22),
-        0 0 0 4px rgba(14,190,96,0.16);
-      -webkit-tap-highlight-color: transparent;
-      touch-action: manipulation;
-    }
-    .pickupFab:active{
-      transform: scale(0.98);
-    }
-    .pickupFab.disabled{ opacity: 0.58; }
-    .pickupFabIcon{ font-size: 15px; line-height: 1; }
+    .pickupFabIcon{ line-height: 1; }
     .pickupFabText{ line-height: 1; }
 
     /* =========================================================
@@ -673,8 +650,9 @@
       display: inline-flex;
       gap: 8px;
       align-items: center;
-      justify-content: space-between;
-      width: 100%;
+      justify-content: flex-start;
+      width: max-content;
+      min-width: 100%;
       padding: 2px 0;
     }
     .dockEdgeFade {
@@ -750,6 +728,34 @@
       place-items: center;
     }
     .dockBtnMain { width: 56px; height: 56px; }
+    .dockBtnSave {
+      display: inline-flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      gap: 2px;
+      color: #fff;
+      background: linear-gradient(180deg, #31db7d 0%, #10a74f 100%);
+      box-shadow:
+        0 12px 26px rgba(0,0,0,0.24),
+        0 0 0 4px rgba(49,219,125,0.25);
+      transform: scale(0.97);
+    }
+    .dockBtnSaveMain { width: 70px; height: 70px; }
+    .dockBtnSave .pickupFabIcon {
+      display: inline-grid;
+      place-items: center;
+      line-height: 1;
+      font-size: 0;
+    }
+    .dockBtnSave .pickupFabText {
+      line-height: 1;
+      font-size: 10px;
+      font-weight: 900;
+      letter-spacing: 0.01em;
+      color: #fff;
+    }
+    #pickupFab.disabled { opacity: .56; }
     .dockBtnMusic { background: rgba(235,60,60,0.95); color: white; }
     .dockBtnActive { outline: 2px solid rgba(0,0,0,0.15); }
     .dockIcon { font-size: 20px; }
@@ -764,6 +770,13 @@
     body.night .dockBtn,
     body.night .toggleBtnSmall{
       background: rgba(255,255,255,0.85);
+    }
+    body.night .dockBtnSave{
+      color: #fff;
+      background: linear-gradient(180deg, #25c56e 0%, #0f9446 100%);
+      box-shadow:
+        0 12px 26px rgba(0,0,0,0.32),
+        0 0 0 4px rgba(37,197,110,0.28);
     }
     body.night .dockScrollHint {
       background: rgba(225,27,27,0.9);
@@ -1531,8 +1544,7 @@
       top: auto;
       left: 50%;
       transform: translateX(-50%) translateY(18px);
-      /* Raise the music pop-up so it doesn’t overlap the record-trip button */
-      bottom: calc(env(safe-area-inset-bottom, 0px) + 170px); /* previously 110px */
+      bottom: calc(env(safe-area-inset-bottom, 0px) + 154px);
       width: min(92vw, 520px);
       max-height: 30vh;
       border-radius: 18px;
@@ -1547,8 +1559,7 @@
       top: auto;
       left: 50%;
       transform: translateX(-50%) translateY(18px);
-      /* Raise the chat pop-up to sit above the record-trip button */
-      bottom: calc(env(safe-area-inset-bottom, 0px) + 192px); /* previously 132px */
+      bottom: calc(env(safe-area-inset-bottom, 0px) + 176px);
       width: min(88vw, 420px);
       max-height: 250px;
       border-radius: 20px;
@@ -1750,7 +1761,7 @@
       <button id="btnGhostMode" class="modeBtn" type="button">Ghost Mode: OFF</button>
 
       <button id="btnPolice" class="dangerBtn" type="button">🚨 Police</button>
-      <button id="btnPickup" class="okBtn" type="button">✅ Record Trip</button>
+      <button id="btnPickup" class="okBtn" type="button">✅ Save</button>
     </div>
 
     <div id="communityNote" class="sub" style="margin-top:7px;">
@@ -1802,6 +1813,11 @@
           <span class="dockIcon">💬</span>
         </button>
 
+        <button id="pickupFab" class="dockBtn dockBtnSave dockBtnSaveMain" type="button" aria-label="Save">
+          <span class="pickupFabIcon" aria-hidden="true"></span>
+          <span class="pickupFabText">Save</span>
+        </button>
+
         <button class="dockBtn dockBtnMain" id="dockGames" aria-label="Games">
           <span class="dockIcon">🎮</span>
         </button>
@@ -1833,11 +1849,6 @@
           <path d="M12 3.2V6M12 18V20.8M3.2 12H6M18 12H20.8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
         </svg>
       </span>
-    </button>
-
-    <button id="pickupFab" class="pickupFab" type="button" aria-label="Record">
-      <span class="pickupFabIcon">✅</span>
-      <span class="pickupFabText">Record</span>
     </button>
   </div>
 
