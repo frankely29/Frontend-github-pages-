@@ -35,17 +35,32 @@
 
     async function clearRow(type, id) {
       if (!actions) return;
-      const ok = window.confirm(`Clear this ${type} report?`);
-      if (!ok) return;
       if (type === 'police') {
+        const ok = window.confirm('Clear this police report?');
+        if (!ok) return;
         await actions.clearPoliceReport(id);
         state.policeRows = state.policeRows.filter((r) => String(r.id) !== String(id));
-      } else {
-        await actions.clearPickupLog(id);
-        state.pickupRows = state.pickupRows.filter((r) => String(r.id) !== String(id));
+        helpers?.onMutate?.();
+        draw();
+        return;
       }
+
+      if (!actions.voidRecordedTrip) return;
+      const reasonRaw = prompt('Enter reason for deleting this fake trip:');
+      if (reasonRaw === null) return;
+      const reason = String(reasonRaw || '').trim();
+      if (reason.length < 5) {
+        alert('Please enter at least 5 characters for the delete reason.');
+        return;
+      }
+      const ok = window.confirm('This will soft-delete the recorded trip from active data but preserve the audit row. Continue?');
+      if (!ok) return;
+
+      await actions.voidRecordedTrip(id, reason);
+      state.pickupRows = state.pickupRows.filter((r) => String(r.id) !== String(id));
       helpers?.onMutate?.();
       draw();
+      if (c?.toast) c.toast('Recorded trip soft-deleted successfully.', 'success');
     }
 
     function draw() {
@@ -64,14 +79,25 @@
           <div class="adminKV"><span>User</span><strong>${c.esc(c.formatValue(r?.user_id))}</strong></div>
           <div class="adminKV"><span>Location</span><strong>${c.esc(`${c.formatValue(r?.lat)}, ${c.formatValue(r?.lng)}`)}</strong></div>
           ${state.tab === 'pickups' ? `<div class="adminKV"><span>Zone</span><strong>${c.esc(c.formatValue(r?.zone_name || r?.zone_id))}</strong></div>` : ''}
-          <button type="button" class="adminBtn danger" data-clear-type="${state.tab}" data-clear-id="${c.esc(r?.id ?? '')}">${state.tab === 'police' ? 'Clear Report' : 'Clear Pickup Log'}</button>
+          <button type="button" class="adminBtn danger" data-clear-type="${state.tab}" data-clear-id="${c.esc(r?.id ?? '')}">${state.tab === 'police' ? 'Clear Report' : 'Delete Fake Trip'}</button>
         </article>
       `).join('');
 
       listEl.querySelectorAll('[data-clear-id]').forEach((btn) => {
         btn.addEventListener('click', async () => {
           btn.disabled = true;
-          try { await clearRow(btn.dataset.clearType, btn.dataset.clearId); } finally { btn.disabled = false; }
+          try {
+            await clearRow(btn.dataset.clearType, btn.dataset.clearId);
+          } catch (err) {
+            const type = btn.dataset.clearType;
+            if (type === 'pickups') {
+              alert(err?.message || 'Failed to delete fake trip.');
+            } else {
+              alert(err?.message || 'Failed to clear report.');
+            }
+          } finally {
+            btn.disabled = false;
+          }
         });
       });
     }

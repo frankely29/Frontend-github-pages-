@@ -5944,12 +5944,12 @@ function applyDriverLabelZoomStyles() {
   }
 }
 
-function makeDriverIcon(name, headingDeg, avatarUrl = "", mode = "name", orbitMeta = null, leaderboardBadgeCode = '', leaderboardHasCrown = false) {
+function makeDriverIcon(name, headingDeg, avatarUrl = "", mode = "name", overlapMeta = null, leaderboardBadgeCode = '', leaderboardHasCrown = false) {
   const safe = (name || "Driver").trim() || "Driver";
   const rot = Number.isFinite(headingDeg) ? headingDeg : 0;
   const el = document.createElement("div");
   const driverLabelHTML = (typeof window !== "undefined" && typeof window.mapIdentityRenderDriverLabel === "function")
-    ? window.mapIdentityRenderDriverLabel({ name: safe, avatarUrl, mode, zoom: map?.getZoom?.(), orbitMeta, leaderboardBadgeCode, leaderboardHasCrown })
+    ? window.mapIdentityRenderDriverLabel({ name: safe, avatarUrl, mode, zoom: map?.getZoom?.(), overlapMeta, leaderboardBadgeCode, leaderboardHasCrown })
     : `<div class="otherDrvName">${escapeHtml(safe)}</div>`;
   el.className = "otherDrvWrap";
   el.innerHTML = `
@@ -5976,9 +5976,10 @@ function clearOtherDrivers() {
   presenceLiteSourceFingerprint = '';
 }
 
-function buildDriverMarkerVisualSignature(userId, name, avatarUrl = "", mode = "name", orbitMeta = null, leaderboardBadgeCode = '', leaderboardHasCrown = false) {
-  const orbitIndex = Number.isFinite(orbitMeta?.index) ? orbitMeta.index : "";
-  const orbitCount = Number.isFinite(orbitMeta?.count) ? orbitMeta.count : "";
+function buildDriverMarkerVisualSignature(userId, name, avatarUrl = "", mode = "name", overlapMeta = null, leaderboardBadgeCode = '', leaderboardHasCrown = false) {
+  const overlapCount = Number.isFinite(overlapMeta?.count) ? overlapMeta.count : "";
+  const overlapLeader = overlapMeta?.leader ? "1" : "0";
+  const overlapSuppressLabel = overlapMeta?.suppressLabel ? "1" : "0";
   return [
     String(userId ?? ""),
     String(name ?? ""),
@@ -5986,12 +5987,13 @@ function buildDriverMarkerVisualSignature(userId, name, avatarUrl = "", mode = "
     String(mode ?? "name"),
     String(leaderboardBadgeCode ?? ""),
     leaderboardHasCrown ? "1" : "0",
-    String(orbitIndex),
-    String(orbitCount),
+    String(overlapCount),
+    String(overlapLeader),
+    String(overlapSuppressLabel),
   ].join("|");
 }
 
-function upsertDriverMarker(userId, name, lat, lng, heading, avatarUrl = "", mode = "name", orbitMeta = null, leaderboardBadgeCode = '', leaderboardHasCrown = false) {
+function upsertDriverMarker(userId, name, lat, lng, heading, avatarUrl = "", mode = "name", overlapMeta = null, leaderboardBadgeCode = '', leaderboardHasCrown = false) {
   if (!Number.isFinite(lat) || !Number.isFinite(lng) || !map) return;
   if (!userId) return;
 
@@ -6000,7 +6002,7 @@ function upsertDriverMarker(userId, name, lat, lng, heading, avatarUrl = "", mod
     name,
     avatarUrl,
     mode,
-    orbitMeta,
+    overlapMeta,
     leaderboardBadgeCode,
     leaderboardHasCrown
   );
@@ -6011,7 +6013,7 @@ function upsertDriverMarker(userId, name, lat, lng, heading, avatarUrl = "", mod
     const previousVisualSig = driverMarkerVisualSignature.get(userId) || "";
     if (visualSig !== previousVisualSig) {
       const el = existing.getElement();
-      const newEl = makeDriverIcon(name || `Driver ${userId}`, heading, avatarUrl, mode, orbitMeta, leaderboardBadgeCode, leaderboardHasCrown);
+      const newEl = makeDriverIcon(name || `Driver ${userId}`, heading, avatarUrl, mode, overlapMeta, leaderboardBadgeCode, leaderboardHasCrown);
       el.innerHTML = newEl.innerHTML;
       wireProfileOpenTargets(el, userId, { isSelf: false });
       driverMarkerVisualSignature.set(userId, visualSig);
@@ -6025,7 +6027,7 @@ function upsertDriverMarker(userId, name, lat, lng, heading, avatarUrl = "", mod
     return;
   }
 
-  const el = makeDriverIcon(name || `Driver ${userId}`, heading, avatarUrl, mode, orbitMeta, leaderboardBadgeCode, leaderboardHasCrown);
+  const el = makeDriverIcon(name || `Driver ${userId}`, heading, avatarUrl, mode, overlapMeta, leaderboardBadgeCode, leaderboardHasCrown);
   wireProfileOpenTargets(el, userId, { isSelf: false });
   // A custom HTML marker's triangle arrow sits slightly below the centre of its
   // 40×40 container (the tip is ~7 px below the vertical midpoint). When the
@@ -6280,7 +6282,7 @@ function renderAdaptivePresenceFromCache() {
       row.heading,
       row.avatarUrl,
       row.mode,
-      row.orbitMeta || null,
+      row.overlapMeta || null,
       row.leaderboardBadgeCode || '',
       !!row.leaderboardHasCrown
     );
@@ -6399,46 +6401,32 @@ async function pullPresenceAll() {
       groups.get(key).push(row);
     }
 
-    const selfPos = userLatLng && Number.isFinite(userLatLng.lat) && Number.isFinite(userLatLng.lng)
-      ? { lat: userLatLng.lat, lng: userLatLng.lng }
-      : null;
-    const selfGroupKey = selfPos ? groupKey(selfPos.lat, selfPos.lng) : null;
-    const selfUid = me && me.id != null ? String(me.id) : "self";
-
-    let selfOrbitHandled = false;
-    for (const [key, members] of groups.entries()) {
-      const includeSelf = !!(selfGroupKey && key === selfGroupKey);
-      const sortable = members.map((row) => ({ id: String(row.uid), row }));
-      if (includeSelf) sortable.push({ id: selfUid, row: null });
-      sortable.sort((a, b) => a.id.localeCompare(b.id));
+    for (const members of groups.values()) {
+      const sortable = members
+        .map((row) => ({ id: String(row.uid), row }))
+        .sort((a, b) => a.id.localeCompare(b.id));
       const count = sortable.length;
       if (count <= 1) {
-        members.forEach((row) => { row.orbitMeta = null; });
-        if (includeSelf && typeof window !== "undefined" && typeof window.mapIdentityApplySelfOrbit === "function") {
-          selfOrbitHandled = true;
-          lastSelfOrbitMeta = null;
-          window.mapIdentityApplySelfOrbit(null);
-        }
+        members.forEach((row) => {
+          row.overlapMeta = {
+            count: 1,
+            leader: true,
+            suppressLabel: false,
+          };
+        });
         continue;
       }
+
       sortable.forEach((entry, idx) => {
-        const orbitMeta = {
-          index: idx,
+        entry.row.overlapMeta = {
           count,
-          angleDeg: -90 + (idx * 360) / count,
-          radiusPx: 11,
+          leader: idx === 0,
+          suppressLabel: idx !== 0,
         };
-        if (entry.row) {
-          entry.row.orbitMeta = orbitMeta;
-        } else if (typeof window !== "undefined" && typeof window.mapIdentityApplySelfOrbit === "function") {
-          selfOrbitHandled = true;
-          lastSelfOrbitMeta = { ...orbitMeta };
-          window.mapIdentityApplySelfOrbit(lastSelfOrbitMeta);
-        }
       });
     }
 
-    if (!selfOrbitHandled && typeof window !== "undefined" && typeof window.mapIdentityApplySelfOrbit === "function") {
+    if (typeof window !== "undefined" && typeof window.mapIdentityApplySelfOrbit === "function") {
       lastSelfOrbitMeta = null;
       window.mapIdentityApplySelfOrbit(null);
     }

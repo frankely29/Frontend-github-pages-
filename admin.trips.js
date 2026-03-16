@@ -40,6 +40,7 @@
     const c = helpers?.components || window.AdminComponents;
     const actions = helpers?.actions;
     const summary = payload?.summary && typeof payload.summary === 'object' ? payload.summary : {};
+    const hasVoidAction = typeof actions?.voidRecordedTrip === 'function';
     const rows = normalizeRows(payload?.recent)
       .slice()
       .sort((a, b) => parseTime(pick(b, ['created_at', 'recorded_at', 'frame_time', 'timestamp'], 0)) - parseTime(pick(a, ['created_at', 'recorded_at', 'frame_time', 'timestamp'], 0)));
@@ -77,6 +78,8 @@
       const isVoided = isVoidedTrip(row);
       const voidReason = pick(row, ['void_reason'], '');
       const voidedAt = pick(row, ['voided_at'], '');
+      const guardReason = pick(row, ['guard_reason'], '');
+      const countedForPickupStats = row?.counted_for_pickup_stats;
       return `
       <article class="adminUserCard">
         <div class="adminRowBetween">
@@ -90,8 +93,12 @@
         <div class="adminKV"><span>Borough</span><strong>${c.esc(c.formatValue(pick(row, ['borough'], 'Unknown')))}</strong></div>
         <div class="adminKV"><span>Frame Time</span><strong>${c.esc(c.formatValue(pick(row, ['frame_time', 'frame_timestamp'], 'N/A')))}</strong></div>
         <div class="adminKV"><span>Lat/Lng</span><strong>${c.esc(`${c.formatValue(pick(row, ['lat', 'latitude'], 'N/A'))}, ${c.formatValue(pick(row, ['lng', 'lon', 'longitude'], 'N/A'))}`)}</strong></div>
+        ${row?.is_voided !== undefined ? `<div class="adminMuted" style="margin-top:6px;">is_voided: ${c.esc(c.formatValue(row?.is_voided))}</div>` : ''}
+        ${voidedAt && voidedAt !== '—' ? `<div class="adminMuted" style="margin-top:4px;">voided_at: ${c.esc(c.formatValue(voidedAt))}</div>` : ''}
         ${isVoided && voidReason ? `<div class="adminKV"><span>Void Reason</span><strong>${c.esc(c.formatValue(voidReason))}</strong></div>` : ''}
-        ${!isVoided ? `<button type="button" class="adminBtn danger" data-void-trip-id="${c.esc(String(tripId))}">Delete Fake Trip</button>` : ''}
+        ${guardReason && guardReason !== '—' ? `<div class="adminMuted" style="margin-top:6px;">Guard reason: ${c.esc(c.formatValue(guardReason))}</div>` : ''}
+        ${typeof countedForPickupStats === 'boolean' ? `<div class="adminMuted" style="margin-top:4px;">Counted for pickup stats: ${countedForPickupStats ? 'yes' : 'no'}</div>` : ''}
+        ${!isVoided && hasVoidAction ? `<button type="button" class="adminBtn danger" data-void-trip-id="${c.esc(String(tripId))}">Delete Fake Trip</button>` : ''}
       </article>
     `;
     }).join('');
@@ -103,8 +110,8 @@
         const reasonRaw = prompt('Enter reason for deleting this fake trip:');
         if (reasonRaw === null) return;
         const reason = String(reasonRaw || '').trim();
-        if (!reason) {
-          alert('A reason is required to delete a fake trip.');
+        if (reason.length < 5) {
+          alert('Please enter at least 5 characters for the delete reason.');
           return;
         }
         const ok = window.confirm('This will soft-delete the recorded trip from active data but preserve the audit row. Continue?');

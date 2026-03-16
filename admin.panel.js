@@ -209,7 +209,7 @@
       if (key === 'trips') {
         const [summary, recent] = await Promise.all([
           authRequest('/admin/trips/summary'),
-          authRequest('/admin/trips/recent?limit=20'),
+          authRequest('/admin/trips/recent?limit=20&include_voided=1'),
         ]);
         payload = { summary, recent };
       }
