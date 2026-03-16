@@ -1350,19 +1350,19 @@
     const safeAvatar = safeMapAvatarUrl(avatarUrl);
     const cfg = mapIdentityVisualConfig(zoom);
     const effectiveOrbitMeta = orbitMeta || overlapMeta || null;
-    const slotSide = String(effectiveOrbitMeta?.side || '').trim();
-    const sideClass = slotSide ? ` slot-${slotSide}` : '';
     const visualKind = shouldUseAvatarLabel(mode, safeAvatar) ? 'avatar' : 'name';
+    const orbitAttrs = mapIdentityOrbitDataAttrs(effectiveOrbitMeta);
     const orbitStyle = mapIdentityOrbitStyleText(effectiveOrbitMeta, zoom, visualKind);
+    if (effectiveOrbitMeta?.suppressLabel) return '';
     if (shouldUseAvatarLabel(mode, safeAvatar)) {
-      return `<div class="selfIdentitySlot${sideClass}" data-map-identity-label="1" style="${orbitStyle}">${mapIdentityAvatarLabelHTML(
+      return `<div class="selfIdentitySlot" data-map-identity-label="1" data-visual-kind="${visualKind}" ${orbitAttrs} style="${orbitStyle}">${mapIdentityAvatarLabelHTML(
         safeAvatar,
         'meAvatarBadge',
         `display:block;width:${cfg.avatarPx}px;height:${cfg.avatarPx}px;`,
         { badgeCode: leaderboardBadgeCode }
       )}${mapIdentityOverlapBadgeHTML(effectiveOrbitMeta)}</div>`;
     }
-    return `<div class="selfIdentitySlot${sideClass}" data-map-identity-label="1" style="${orbitStyle}">${mapIdentityOverlayWrapHTML(`<div id="navMeName" class="meName" style="display:${safeName ? 'block' : 'none'};font-size:${cfg.fontPx}px;padding:${cfg.padY}px ${cfg.padX}px;max-width:${cfg.maxWidthPx}px;">${escapeHtml(safeName)}</div>`, { badgeCode: leaderboardBadgeCode })}${mapIdentityOverlapBadgeHTML(effectiveOrbitMeta)}</div>`;
+    return `<div class="selfIdentitySlot" data-map-identity-label="1" data-visual-kind="${visualKind}" ${orbitAttrs} style="${orbitStyle}">${mapIdentityOverlayWrapHTML(`<div id="navMeName" class="meName" style="display:${safeName ? 'block' : 'none'};font-size:${cfg.fontPx}px;padding:${cfg.padY}px ${cfg.padX}px;max-width:${cfg.maxWidthPx}px;">${escapeHtml(safeName)}</div>`, { badgeCode: leaderboardBadgeCode })}${mapIdentityOverlapBadgeHTML(effectiveOrbitMeta)}</div>`;
   }
 
   function mapIdentityOrbitStyleText(orbitMeta, zoomValue, visualKind = 'name') {
@@ -1370,43 +1370,97 @@
     if (!Number.isFinite(count) || count <= 1) return '';
 
     const angleRad = (Number(orbitMeta?.angleDeg) || 0) * (Math.PI / 180);
-    const cfg = mapIdentityVisualConfig(zoomValue);
     const ring = Math.max(0, Number(orbitMeta?.ring) || 0);
+    const cfg = mapIdentityVisualConfig(zoomValue);
 
-    const baseRadiusPx = visualKind === 'avatar'
-      ? Math.max(22, cfg.avatarPx * 0.9)
-      : Math.max(44, Math.min(92, cfg.maxWidthPx * 0.55));
+    const visualWidth =
+      visualKind === 'avatar'
+        ? cfg.avatarPx
+        : cfg.maxWidthPx;
 
-    const ringGapPx = visualKind === 'avatar'
-      ? Math.max(16, cfg.avatarPx * 0.6)
-      : Math.max(22, cfg.fontPx * 2.0);
+    const visualHeight =
+      visualKind === 'avatar'
+        ? cfg.avatarPx
+        : Math.max(24, cfg.fontPx + (cfg.padY * 2) + 8);
 
-    const radius = baseRadiusPx + (ring * ringGapPx);
+    const clearance = visualKind === 'avatar' ? 16 : 18;
+    const baseRadius = Math.hypot(visualWidth / 2, visualHeight / 2) + clearance;
+
+    const ringGap = Math.max(
+      visualKind === 'avatar' ? cfg.avatarPx + 12 : Math.min(110, visualWidth * 0.65),
+      22
+    );
+
+    const radius = baseRadius + (ring * ringGap);
+
     const dx = +(Math.cos(angleRad) * radius).toFixed(2);
     const dy = +(Math.sin(angleRad) * radius).toFixed(2);
 
     return `--identity-slot-x:${dx}px;--identity-slot-y:${dy}px;`;
   }
 
-  function mapIdentityOrbitDataAttrs() {
-    return '';
+  function mapIdentityOrbitDataAttrs(orbitMeta) {
+    const count = Number(orbitMeta?.count);
+    if (!Number.isFinite(count) || count <= 1) return '';
+    const slotIndex = Number(orbitMeta?.slotIndex);
+    const ring = Number(orbitMeta?.ring);
+    const angleDeg = Number(orbitMeta?.angleDeg);
+    return [
+      Number.isFinite(slotIndex) ? `data-orbit-index="${slotIndex}"` : '',
+      Number.isFinite(count) ? `data-orbit-count="${count}"` : '',
+      Number.isFinite(ring) ? `data-orbit-ring="${ring}"` : '',
+      Number.isFinite(angleDeg) ? `data-orbit-angle="${angleDeg}"` : '',
+    ].filter(Boolean).join(' ');
   }
 
-  function mapIdentityReadOrbitMeta() {
-    return null;
+  function mapIdentityReadOrbitMeta(slot) {
+    if (!slot) return null;
+    const count = Number(slot.dataset.orbitCount);
+    if (!Number.isFinite(count) || count <= 1) return null;
+    const slotIndex = Number(slot.dataset.orbitIndex);
+    const ring = Number(slot.dataset.orbitRing);
+    const angleDeg = Number(slot.dataset.orbitAngle);
+    return {
+      count,
+      slotIndex: Number.isFinite(slotIndex) ? slotIndex : 0,
+      ring: Number.isFinite(ring) ? ring : 0,
+      angleDeg: Number.isFinite(angleDeg) ? angleDeg : 0,
+    };
   }
 
-  function mapIdentityApplyOrbitStyleToSlot(slot) {
+  function mapIdentityApplyOrbitStyleToSlot(slot, orbitMeta = null, zoomValue = null) {
     if (!slot) return;
-    delete slot.dataset.orbitIndex;
-    delete slot.dataset.orbitCount;
-    delete slot.dataset.orbitAngle;
-    delete slot.dataset.orbitRadius;
-    slot.style.removeProperty('--identity-slot-x');
-    slot.style.removeProperty('--identity-slot-y');
+
+    const styleText = mapIdentityOrbitStyleText(orbitMeta, zoomValue, slot.dataset.visualKind || 'name');
+
+    if (!styleText) {
+      delete slot.dataset.orbitIndex;
+      delete slot.dataset.orbitCount;
+      delete slot.dataset.orbitRing;
+      delete slot.dataset.orbitAngle;
+      slot.style.removeProperty('--identity-slot-x');
+      slot.style.removeProperty('--identity-slot-y');
+      return;
+    }
+
+    if (Number.isFinite(orbitMeta?.slotIndex)) slot.dataset.orbitIndex = String(orbitMeta.slotIndex);
+    if (Number.isFinite(orbitMeta?.count)) slot.dataset.orbitCount = String(orbitMeta.count);
+    if (Number.isFinite(orbitMeta?.ring)) slot.dataset.orbitRing = String(orbitMeta.ring);
+    if (Number.isFinite(orbitMeta?.angleDeg)) slot.dataset.orbitAngle = String(orbitMeta.angleDeg);
+
+    styleText.split(';').forEach((pair) => {
+      const [k, v] = pair.split(':');
+      if (k && v) slot.style.setProperty(k.trim(), v.trim());
+    });
   }
 
-  function mapIdentityRefreshOrbitSlots() {}
+  function mapIdentityRefreshOrbitSlots(zoomValue) {
+    document
+      .querySelectorAll('.otherDrvIdentitySlot, .selfIdentitySlot')
+      .forEach((slot) => {
+        mapIdentityApplyOrbitStyleToSlot(slot, mapIdentityReadOrbitMeta(slot), zoomValue);
+      });
+  }
 
   function mapIdentityRenderDriverLabel({ name, avatarUrl, mode, zoom, orbitMeta = null, overlapMeta = null, leaderboardBadgeCode }) {
 
@@ -1414,39 +1468,20 @@
     const safeName = (String(name || 'Driver').trim() || 'Driver');
     const safeAvatar = safeMapAvatarUrl(avatarUrl);
     const cfg = mapIdentityVisualConfig(zoom);
-    const slotSide = String(effectiveOrbitMeta?.side || '').trim();
-    const sideClass = slotSide ? ` slot-${slotSide}` : '';
     const visualKind = shouldUseAvatarLabel(mode, safeAvatar) ? 'avatar' : 'name';
+    const orbitAttrs = mapIdentityOrbitDataAttrs(effectiveOrbitMeta);
     const orbitStyle = mapIdentityOrbitStyleText(effectiveOrbitMeta, zoom, visualKind);
+    if (effectiveOrbitMeta?.suppressLabel) return '';
     if (shouldUseAvatarLabel(mode, safeAvatar)) {
-      return `<div class="otherDrvIdentitySlot${sideClass}" data-map-identity-label="1" style="${orbitStyle}">${mapIdentityAvatarLabelHTML(safeAvatar, 'otherDrvAvatarBadge', `width:${cfg.avatarPx}px;height:${cfg.avatarPx}px;`, { badgeCode: leaderboardBadgeCode })}${mapIdentityOverlapBadgeHTML(effectiveOrbitMeta)}</div>`;
+      return `<div class="otherDrvIdentitySlot" data-map-identity-label="1" data-visual-kind="${visualKind}" ${orbitAttrs} style="${orbitStyle}">${mapIdentityAvatarLabelHTML(safeAvatar, 'otherDrvAvatarBadge', `width:${cfg.avatarPx}px;height:${cfg.avatarPx}px;`, { badgeCode: leaderboardBadgeCode })}${mapIdentityOverlapBadgeHTML(effectiveOrbitMeta)}</div>`;
     }
-    return `<div class="otherDrvIdentitySlot${sideClass}" data-map-identity-label="1" style="${orbitStyle}">${mapIdentityOverlayWrapHTML(`<div class="otherDrvName" style="font-size:${cfg.fontPx}px;padding:${cfg.padY}px ${cfg.padX}px;max-width:${cfg.maxWidthPx}px;">${escapeHtml(safeName)}</div>`, { badgeCode: leaderboardBadgeCode })}${mapIdentityOverlapBadgeHTML(effectiveOrbitMeta)}</div>`;
+    return `<div class="otherDrvIdentitySlot" data-map-identity-label="1" data-visual-kind="${visualKind}" ${orbitAttrs} style="${orbitStyle}">${mapIdentityOverlayWrapHTML(`<div class="otherDrvName" style="font-size:${cfg.fontPx}px;padding:${cfg.padY}px ${cfg.padX}px;max-width:${cfg.maxWidthPx}px;">${escapeHtml(safeName)}</div>`, { badgeCode: leaderboardBadgeCode })}${mapIdentityOverlapBadgeHTML(effectiveOrbitMeta)}</div>`;
   }
 
   function mapIdentityApplySelfOrbit(orbitMeta) {
     const slot = document.querySelector('#navWrap .selfIdentitySlot[data-map-identity-label="1"]');
     if (!slot) return;
-    const sideClasses = ['slot-E', 'slot-W', 'slot-N', 'slot-S', 'slot-NE', 'slot-NW', 'slot-SE', 'slot-SW'];
-    sideClasses.forEach((cls) => slot.classList.remove(cls));
-
-    const slotSide = String(orbitMeta?.side || '').trim();
-    const visualKind = slot.querySelector('.meAvatarBadge') ? 'avatar' : 'name';
-    const orbitStyle = mapIdentityOrbitStyleText(orbitMeta, map?.getZoom?.(), visualKind);
-
-    if (!orbitStyle) {
-      slot.style.removeProperty('--identity-slot-x');
-      slot.style.removeProperty('--identity-slot-y');
-      return;
-    }
-
-    orbitStyle.split(';').forEach((chunk) => {
-      const [prop, value] = chunk.split(':');
-      if (!prop || !value) return;
-      slot.style.setProperty(prop.trim(), value.trim());
-    });
-
-    if (slotSide) slot.classList.add(`slot-${slotSide}`);
+    mapIdentityApplyOrbitStyleToSlot(slot, orbitMeta, Number.isFinite(window?.map?.getZoom?.()) ? window.map.getZoom() : null);
   }
 
   function mapIdentityApplyZoomStyles(zoomValue) {
@@ -1467,7 +1502,7 @@
       el.style.width = `${cfg.avatarPx}px`;
       el.style.height = `${cfg.avatarPx}px`;
     });
-    mapIdentityRefreshOrbitSlots();
+    mapIdentityRefreshOrbitSlots(zoom);
   }
 
   function readMapIdentityFile(file) {
