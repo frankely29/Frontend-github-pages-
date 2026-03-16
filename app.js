@@ -2078,8 +2078,7 @@ function initMap() {
       applyDriverLabelZoomStyles();
     });
     map.on("zoom", () => {
-      if (authHeaderOK()) scheduleAdaptivePresenceRender();
-      applyDriverLabelZoomStyles();
+      schedulePresenceZoomStyleRefresh();
     });
     map.on("zoomend", () => {
       if (authHeaderOK()) {
@@ -5574,6 +5573,7 @@ let presenceRenderMode = 'full';
 let presenceFocusedUserId = null;
 let presenceLiteSourceFingerprint = '';
 let presenceAdaptiveRenderRaf = 0;
+let presenceZoomStyleRaf = 0;
 let lastSelfOrbitMeta = null;
 
 const PRESENCE_FULL_MAX_VISIBLE = 50;
@@ -6066,7 +6066,6 @@ function upsertDriverMarker(userId, name, lat, lng, heading, avatarUrl = "", mod
 
   otherMarkers.set(userId, mk);
   driverMarkerVisualSignature.set(userId, visualSig);
-  applyDriverLabelZoomStyles();
 }
 
 
@@ -6384,6 +6383,14 @@ function scheduleAdaptivePresenceRender() {
   presenceAdaptiveRenderRaf = window.requestAnimationFrame(() => {
     presenceAdaptiveRenderRaf = 0;
     renderAdaptivePresenceFromCache();
+  });
+}
+
+function schedulePresenceZoomStyleRefresh() {
+  if (presenceZoomStyleRaf) return;
+  presenceZoomStyleRaf = window.requestAnimationFrame(() => {
+    presenceZoomStyleRaf = 0;
+    applyDriverLabelZoomStyles();
   });
 }
 
