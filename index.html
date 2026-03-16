@@ -1158,7 +1158,7 @@
       position: absolute;
       left: 50%;
       top: 50%;
-      --identity-slot-x: 10px;
+      --identity-slot-x: 14px;
       --identity-slot-y: 0px;
       transform: translate3d(
         calc(-50% + var(--identity-slot-x)),
@@ -1169,6 +1169,7 @@
       pointer-events: none;
       display: flex;
       align-items: center;
+      will-change: transform;
     }
     .meAvatarBadge,
     .otherDrvAvatarBadge{
@@ -1199,7 +1200,24 @@
       align-items: center;
       overflow: visible;
       pointer-events: none;
+      will-change: transform;
     }
+    .selfIdentitySlot.slot-E .mapIdentityWrap,
+    .otherDrvIdentitySlot.slot-E .mapIdentityWrap { transform: translateX(50%); }
+    .selfIdentitySlot.slot-W .mapIdentityWrap,
+    .otherDrvIdentitySlot.slot-W .mapIdentityWrap { transform: translateX(-50%); }
+    .selfIdentitySlot.slot-N .mapIdentityWrap,
+    .otherDrvIdentitySlot.slot-N .mapIdentityWrap { transform: translateY(-50%); }
+    .selfIdentitySlot.slot-S .mapIdentityWrap,
+    .otherDrvIdentitySlot.slot-S .mapIdentityWrap { transform: translateY(50%); }
+    .selfIdentitySlot.slot-NE .mapIdentityWrap,
+    .otherDrvIdentitySlot.slot-NE .mapIdentityWrap { transform: translate(35%, -35%); }
+    .selfIdentitySlot.slot-NW .mapIdentityWrap,
+    .otherDrvIdentitySlot.slot-NW .mapIdentityWrap { transform: translate(-35%, -35%); }
+    .selfIdentitySlot.slot-SE .mapIdentityWrap,
+    .otherDrvIdentitySlot.slot-SE .mapIdentityWrap { transform: translate(35%, 35%); }
+    .selfIdentitySlot.slot-SW .mapIdentityWrap,
+    .otherDrvIdentitySlot.slot-SW .mapIdentityWrap { transform: translate(-35%, 35%); }
     .mapIdentityCore{
       position: relative;
       display: inline-flex;
