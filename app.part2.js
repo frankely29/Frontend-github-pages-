@@ -1290,9 +1290,15 @@
     const smooth = t * t * (3 - 2 * t);
     const emphasize = Math.pow(smooth, 0.9);
     const avatarPx = +(18 + (52 - 18) * emphasize).toFixed(2);
+    const crownPx = clampMapIdentity(Math.round(avatarPx * 0.72), 20, 38);
+    const silverBronzePx = clampMapIdentity(Math.round(avatarPx * 0.48), 14, 24);
+    const badgePx = Math.max(crownPx, silverBronzePx);
     const tipSizePx = +(4 + (8 - 4) * emphasize).toFixed(2);
     return {
       avatarPx,
+      crownPx,
+      badgePx,
+      silverBronzePx,
       rootPx: +(30 + (66 - 30) * emphasize).toFixed(2),
       tipSizePx,
       tipOrbitPx: +((avatarPx * 0.5) - 1 + (tipSizePx * 0.1)).toFixed(2),
@@ -1404,7 +1410,8 @@
   function mapIdentityBadgeOverlayHTML({ badgeCode }) {
     const meta = leaderboardBadgeMeta(badgeCode);
     if (!meta.code) return '';
-    const size = meta.code === 'crown' ? 32 : 20;
+    const badgeVar = meta.code === 'crown' ? 'var(--map-crown-size,32)' : 'var(--map-podium-size,20)';
+    const size = `calc(${badgeVar} * 1px)`;
     return `<span class="mapIdentityBadgeOverlay mapBadgeWearable ${meta.toneClass}" aria-label="${escapeHtml(meta.label)}">${renderLeaderboardBadgeSvg(meta.code, { size, mapWearable: true, compact: true })}</span>`;
   }
 
@@ -1584,6 +1591,9 @@
       rootStyle.setProperty('--map-ident-badge-font', `${cfg.badgeFontPx}px`);
       rootStyle.setProperty('--map-presence-root-px', `${cfg.rootPx}px`);
       rootStyle.setProperty('--map-presence-avatar', `${cfg.avatarPx}px`);
+      rootStyle.setProperty('--map-avatar-size', `${cfg.avatarPx}px`);
+      rootStyle.setProperty('--map-crown-size', `${cfg.crownPx}px`);
+      rootStyle.setProperty('--map-podium-size', `${cfg.silverBronzePx}px`);
       rootStyle.setProperty('--map-presence-initials-font', `${cfg.initialsFontPx}px`);
       rootStyle.setProperty('--map-presence-tip-size', `${cfg.tipSizePx}px`);
       rootStyle.setProperty('--map-presence-tip-orbit', `${cfg.tipOrbitPx}px`);
@@ -2446,6 +2456,14 @@
     if (!viewport) return;
 
     let rafId = 0;
+    let autoCenterTimer = null;
+    let pointerActive = false;
+    let settleTimer = null;
+    let lastScrollLeft = viewport.scrollLeft || 0;
+    let lastScrollTimestamp = performance.now();
+    const AUTO_CENTER_IDLE_MS = 10000;
+    const INERTIA_SETTLE_MS = 180;
+
     const scheduleHintUpdate = () => {
       if (rafId) return;
       rafId = requestAnimationFrame(() => {
@@ -2454,14 +2472,90 @@
       });
     };
 
-    viewport.addEventListener('scroll', scheduleHintUpdate, { passive: true });
+    const getDockCenterLeft = () => {
+      const maxScroll = Math.max(0, viewport.scrollWidth - viewport.clientWidth);
+      return Math.max(0, Math.min(maxScroll, (viewport.scrollWidth - viewport.clientWidth) / 2));
+    };
+
+    const recenterDockToDefaultPosition = () => {
+      if (pointerActive) return;
+      viewport.scrollTo({ left: getDockCenterLeft(), behavior: 'smooth' });
+    };
+
+    const cancelDockAutoCenter = () => {
+      if (!autoCenterTimer) return;
+      clearTimeout(autoCenterTimer);
+      autoCenterTimer = null;
+    };
+
+    const scheduleDockAutoCenter = () => {
+      cancelDockAutoCenter();
+      autoCenterTimer = window.setTimeout(() => {
+        autoCenterTimer = null;
+        if (pointerActive) return;
+        const now = performance.now();
+        const moving = Math.abs((viewport.scrollLeft || 0) - lastScrollLeft) > 0.5 && (now - lastScrollTimestamp) < INERTIA_SETTLE_MS;
+        if (moving) {
+          scheduleDockAutoCenter();
+          return;
+        }
+        recenterDockToDefaultPosition();
+      }, AUTO_CENTER_IDLE_MS);
+    };
+
+    const markDockInteraction = () => {
+      lastScrollLeft = viewport.scrollLeft || 0;
+      lastScrollTimestamp = performance.now();
+      scheduleDockAutoCenter();
+    };
+
+    viewport.addEventListener('scroll', () => {
+      const nextLeft = viewport.scrollLeft || 0;
+      if (Math.abs(nextLeft - lastScrollLeft) > 0.4) lastScrollLeft = nextLeft;
+      lastScrollTimestamp = performance.now();
+      scheduleHintUpdate();
+      if (!pointerActive) {
+        if (settleTimer) clearTimeout(settleTimer);
+        settleTimer = window.setTimeout(() => {
+          settleTimer = null;
+          scheduleDockAutoCenter();
+        }, INERTIA_SETTLE_MS);
+      }
+    }, { passive: true });
     window.addEventListener('resize', scheduleHintUpdate);
 
-    leftHint?.addEventListener('click', () => scrollDockByStep(-1));
-    rightHint?.addEventListener('click', () => scrollDockByStep(1));
+    viewport.addEventListener('pointerdown', () => {
+      pointerActive = true;
+      cancelDockAutoCenter();
+    }, { passive: true });
+    window.addEventListener('pointerup', () => {
+      if (!pointerActive) return;
+      pointerActive = false;
+      markDockInteraction();
+    }, { passive: true });
+    window.addEventListener('pointercancel', () => {
+      if (!pointerActive) return;
+      pointerActive = false;
+      markDockInteraction();
+    }, { passive: true });
+
+    ['pointermove', 'touchstart', 'touchmove', 'wheel', 'click'].forEach((eventName) => {
+      viewport.addEventListener(eventName, markDockInteraction, { passive: true });
+    });
+    document.getElementById('dockTrack')?.addEventListener('click', markDockInteraction, { passive: true });
+
+    leftHint?.addEventListener('click', () => {
+      markDockInteraction();
+      scrollDockByStep(-1);
+    });
+    rightHint?.addEventListener('click', () => {
+      markDockInteraction();
+      scrollDockByStep(1);
+    });
 
     scheduleHintUpdate();
     setTimeout(scheduleHintUpdate, 120);
+    setTimeout(scheduleDockAutoCenter, 120);
   }
 
 
