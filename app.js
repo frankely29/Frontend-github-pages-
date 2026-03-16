@@ -4285,14 +4285,28 @@ function makeNavIcon() {
       leaderboardHasCrown: !!me?.leaderboard_has_crown,
       orbitMeta: lastSelfOrbitMeta
     })
-    : `<div id="navMeName" class="meName" style="display:${myName ? "block" : "none"}">${escapeHtml(myName)}</div>`;
+    : `<div id="navMeName" class="mapPresenceInitials" style="display:${myName ? "flex" : "none"}">${escapeHtml((myName || 'D').slice(0, 2).toUpperCase())}</div>`;
   const el = document.createElement("div");
   el.innerHTML = `
-    <div id="navWrap" class="navArrowWrap navPulse">
+    <div id="navWrap" class="navPulse mapPresenceHost">
       ${navLabelHTML}
     </div>
   `;
   return el;
+}
+
+function setPresenceDirection(rootEl, headingDeg, isSelf = false) {
+  if (!rootEl) return;
+  const directionEl = isSelf
+    ? rootEl.querySelector('#navPresenceDirectionRot')
+    : rootEl.querySelector('.mapPresenceDirectionRot');
+  if (!directionEl) return;
+  let relative = Number.isFinite(headingDeg) ? headingDeg : 0;
+  if (isSelf && map && typeof map.getBearing === 'function') {
+    const bearing = Number(map.getBearing()) || 0;
+    relative = normDeg(relative - bearing);
+  }
+  directionEl.style.transform = `rotate(${relative}deg)`;
 }
 
 function wireProfileOpenTargets(rootEl, userId, options = {}) {
@@ -4301,8 +4315,8 @@ function wireProfileOpenTargets(rootEl, userId, options = {}) {
   if (!Number.isFinite(normalizedUserId)) return;
   const isSelf = !!options?.isSelf;
   const selectorList = isSelf
-    ? ["#navWrap", ".selfIdentitySlot", ".mapPresenceOrbit", ".mapPresenceShell", ".mapPresenceAvatar", ".mapPresenceInitials", ".mapPresenceDirectionRot", ".mapPresenceDirectionTip", ".mapPresenceBadgeWrap"]
-    : [".otherDrvWrap", ".otherDrvIdentitySlot", ".mapPresenceOrbit", ".mapPresenceShell", ".mapPresenceAvatar", ".mapPresenceInitials", ".mapPresenceDirectionRot", ".mapPresenceDirectionTip", ".mapPresenceBadgeWrap"];
+    ? ["#navWrap", ".selfIdentitySlot", ".mapPresenceOrbit", ".mapPresenceRoot", ".mapPresenceShell", ".mapPresenceAvatar", ".mapPresenceInitials", ".mapPresenceDirectionRot", ".mapPresenceDirectionTip", ".mapPresenceBadgeOverlay"]
+    : [".otherDrvWrap", ".otherDrvIdentitySlot", ".mapPresenceOrbit", ".mapPresenceRoot", ".mapPresenceShell", ".mapPresenceAvatar", ".mapPresenceInitials", ".mapPresenceDirectionRot", ".mapPresenceDirectionTip", ".mapPresenceBadgeOverlay"];
   const clickHandler = (ev) => {
     ev.preventDefault();
     ev.stopPropagation();
@@ -4337,20 +4351,15 @@ function refreshNavNameLabel() {
   const myName = authHeaderOK() ? me?.display_name || "" : "";
   const wrap = document.getElementById("navWrap");
   if (wrap && typeof window !== "undefined" && typeof window.mapIdentityRenderSelfLabel === "function") {
-    const current = wrap.querySelector("[data-map-identity-label='1']");
-    if (current) current.remove();
-    wrap.insertAdjacentHTML(
-      "beforeend",
-      window.mapIdentityRenderSelfLabel({
-        name: myName,
-        avatarUrl: me?.avatar_url,
-        mode: me?.map_identity_mode,
-        zoom: map?.getZoom?.(),
-        leaderboardBadgeCode: me?.leaderboard_badge_code,
-        leaderboardHasCrown: !!me?.leaderboard_has_crown,
-        orbitMeta: lastSelfOrbitMeta
-      })
-    );
+    wrap.innerHTML = window.mapIdentityRenderSelfLabel({
+      name: myName,
+      avatarUrl: me?.avatar_url,
+      mode: me?.map_identity_mode,
+      zoom: map?.getZoom?.(),
+      leaderboardBadgeCode: me?.leaderboard_badge_code,
+      leaderboardHasCrown: !!me?.leaderboard_has_crown,
+      orbitMeta: lastSelfOrbitMeta
+    });
   } else {
     const el = document.getElementById("navMeName");
     if (!el) return;
@@ -4363,6 +4372,7 @@ function refreshNavNameLabel() {
   if (typeof window !== "undefined" && typeof window.mapIdentityApplySelfOrbit === "function") {
     window.mapIdentityApplySelfOrbit(lastSelfOrbitMeta);
   }
+  setNavRotation(lastHeadingDeg);
 }
 
 function setNavVisual(isMoving) {
@@ -4372,14 +4382,8 @@ function setNavVisual(isMoving) {
   el.classList.toggle("navPulse", !isMoving);
 }
 function setNavRotation(deg) {
-  const el = document.getElementById("navPresenceDirectionRot");
-  if (!el) return;
-  let relative = deg;
-  if (map && typeof map.getBearing === "function") {
-    const bearing = Number(map.getBearing()) || 0;
-    relative = normDeg(deg - bearing);
-  }
-  el.style.transform = `rotate(${relative}deg)`;
+  const navWrap = document.getElementById("navWrap");
+  setPresenceDirection(navWrap, deg, true);
 }
 function normDeg(d) {
   return ((d % 360) + 360) % 360;
@@ -5956,13 +5960,12 @@ function makeDriverIcon(name, headingDeg, avatarUrl = "", mode = "name", orbitMe
   const el = document.createElement("div");
   const driverLabelHTML = (typeof window !== "undefined" && typeof window.mapIdentityRenderDriverLabel === "function")
     ? window.mapIdentityRenderDriverLabel({ name: safe, avatarUrl, mode, zoom: map?.getZoom?.(), orbitMeta, leaderboardBadgeCode, leaderboardHasCrown })
-    : `<div class="otherDrvName">${escapeHtml(safe)}</div>`;
+    : `<div class="mapPresenceInitials">${escapeHtml((safe || 'D').slice(0, 2).toUpperCase())}</div>`;
   el.className = "otherDrvWrap";
   el.innerHTML = `
     ${driverLabelHTML}
   `;
-  const directionEl = el.querySelector('.mapPresenceDirectionRot');
-  if (directionEl) directionEl.style.transform = `rotate(${rot}deg)`;
+  setPresenceDirection(el, rot, false);
   return el;
 }
 
@@ -6027,11 +6030,8 @@ function upsertDriverMarker(userId, name, lat, lng, heading, avatarUrl = "", mod
       wireProfileOpenTargets(el, userId, { isSelf: false });
       driverMarkerVisualSignature.set(userId, visualSig);
     } else {
-      const directionEl = existing.getElement()?.querySelector?.(".mapPresenceDirectionRot");
-      if (directionEl) {
-        const rot = Number.isFinite(heading) ? heading : 0;
-        directionEl.style.transform = `rotate(${rot}deg)`;
-      }
+      const rot = Number.isFinite(heading) ? heading : 0;
+      setPresenceDirection(existing.getElement(), rot, false);
     }
     return;
   }

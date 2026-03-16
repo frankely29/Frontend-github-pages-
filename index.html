@@ -1104,10 +1104,15 @@
 
     .maplibregl-marker { z-index: 800; }
 
-    .navArrowWrap{
-      width: 34px;
-      height: 34px;
+    #navWrap,
+    .otherDrvWrap{
+      width: var(--map-presence-root-px, 48px);
+      height: var(--map-presence-root-px, 48px);
       position: relative;
+      overflow: visible;
+      display:flex;
+      align-items:center;
+      justify-content:center;
       transform-origin: 50% 50%;
       will-change: transform;
     }
@@ -1168,6 +1173,12 @@
     
     .selfIdentitySlot,
     .otherDrvIdentitySlot{
+      position: relative;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+    .mapPresenceOrbit{
       position: absolute;
       left: 50%;
       top: 50%;
@@ -1179,7 +1190,6 @@
         0
       );
       transform-origin: 50% 50%;
-      pointer-events: none;
       display: flex;
       align-items: center;
       will-change: transform;
@@ -1248,15 +1258,21 @@
     .mapPresenceOrbit{
       --map-presence-avatar: 28px;
       --map-presence-tip-size: 7px;
-      --map-presence-tip-offset: 6px;
+      --map-presence-tip-orbit: 13px;
       --map-presence-badge-scale: 1;
-      position: relative;
-      width: var(--map-presence-avatar);
-      height: var(--map-presence-avatar);
+      width: var(--map-presence-root-px, 48px);
+      height: var(--map-presence-root-px, 48px);
       display: inline-flex;
       align-items: center;
       justify-content: center;
       pointer-events: none;
+    }
+    .mapPresenceRoot{
+      position: relative;
+      width: var(--map-presence-root-px, 48px);
+      height: var(--map-presence-root-px, 48px);
+      pointer-events: auto;
+      will-change: transform;
     }
     .mapPresenceShell{
       width: var(--map-presence-avatar);
@@ -1266,7 +1282,10 @@
       border: 2px solid rgba(255,255,255,0.95);
       box-shadow: 0 7px 18px rgba(0,0,0,0.22);
       background: rgba(255,255,255,0.96);
-      position: relative;
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
       z-index: 2;
     }
     .mapPresenceAvatar,
@@ -1277,6 +1296,7 @@
       align-items: center;
       justify-content: center;
     }
+    .mapPresenceAvatar,
     .mapPresenceAvatar img{
       width: 100%;
       height: 100%;
@@ -1284,7 +1304,7 @@
       display: block;
     }
     .mapPresenceInitials{
-      font-size: calc(var(--map-presence-avatar) * 0.38);
+      font-size: var(--map-presence-initials-font, 12px);
       font-weight: 950;
       color: #1d2730;
       letter-spacing: 0.02em;
@@ -1300,16 +1320,16 @@
     .mapPresenceDirectionTip{
       position: absolute;
       left: 50%;
-      top: calc(-1 * (var(--map-presence-tip-size) + var(--map-presence-tip-offset)));
+      top: 50%;
       width: 0;
       height: 0;
-      transform: translateX(-50%);
+      transform: translate(-50%, calc(-1 * var(--map-presence-tip-orbit, 13px)));
       border-left: var(--map-presence-tip-size) solid transparent;
       border-right: var(--map-presence-tip-size) solid transparent;
       border-bottom: calc(var(--map-presence-tip-size) * 1.5) solid #0a1118;
       filter: drop-shadow(0 2px 3px rgba(0,0,0,0.28));
     }
-    .mapPresenceBadgeWrap{
+    .mapPresenceBadgeOverlay{
       position: absolute;
       right: 0;
       top: 0;
@@ -1335,17 +1355,7 @@
       pointer-events: none;
     }
 
-    .otherDrvWrap{
-      position: relative;
-      width: 40px;
-      height: 40px;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      gap:6px;
-      overflow: visible;
-      pointer-events: none;
-    }
+    .otherDrvWrap{ pointer-events: none; }
     .otherArrowWrap{
       width: 40px;
       height: 40px;
