@@ -1293,8 +1293,8 @@
       fontPx: +(8.8 + (16.8 - 8.8) * emphasize).toFixed(2),
       padY: +(0.95 + (4.8 - 0.95) * emphasize).toFixed(2),
       padX: +(2.6 + (9.8 - 2.6) * emphasize).toFixed(2),
-      avatarPx: +(15 + (54 - 15) * emphasize).toFixed(2),
-      maxWidthPx: +(88 + (190 - 88) * emphasize).toFixed(2),
+      avatarPx: +(14 + (54 - 14) * emphasize).toFixed(2),
+      maxWidthPx: +(84 + (190 - 84) * emphasize).toFixed(2),
       badgeFontPx: +(15 + (17 - 15) * emphasize).toFixed(2),
       arrowBodyPx: +(18 + (27 - 18) * t).toFixed(2),
       arrowLeftRightPx: +(4.5 + (7 - 4.5) * t).toFixed(2),
@@ -2433,7 +2433,7 @@
       .levelUpTitle{font-size:19px;font-weight:900;line-height:1.1;color:#fff}
       .levelUpSub{font-size:13px;font-weight:700;color:#cbd5e1}
       .levelUpXp{font-size:11px;color:#93c5fd}
-      .pickupProgressReward{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom, 0px) + 194px);width:min(248px,calc(100vw - 26px));transform:translate(-50%,20px) scale(.94);opacity:0;z-index:9802;pointer-events:none;display:flex;flex-direction:column;align-items:center;gap:5px;color:#e2e8f0;transition:opacity .34s ease,transform .34s cubic-bezier(.2,.75,.22,1.12);text-shadow:0 4px 18px rgba(2,6,23,.5),0 1px 1px rgba(2,6,23,.45)}
+      .pickupProgressReward{position:fixed;left:50%;bottom:calc(var(--ui-chat-drawer-bottom) + 2px);width:min(248px,calc(100vw - 26px));transform:translate(-50%,20px) scale(.94);opacity:0;z-index:9802;pointer-events:none;display:flex;flex-direction:column;align-items:center;gap:5px;color:#e2e8f0;transition:opacity .34s ease,transform .34s cubic-bezier(.2,.75,.22,1.12);text-shadow:0 4px 18px rgba(2,6,23,.5),0 1px 1px rgba(2,6,23,.45)}
       .pickupProgressReward.show{opacity:1;transform:translate(-50%,0) scale(1)}
       .pickupProgressRewardLabel,.pickupProgressRewardLevel,.pickupProgressRewardRank,.pickupProgressRewardFoot{opacity:0;transform:translateY(6px);transition:opacity .24s ease,transform .24s ease}
       .pickupProgressReward.show .pickupProgressRewardLabel{opacity:1;transform:translateY(0);transition-delay:.08s}
@@ -2486,6 +2486,9 @@
   }
 
   function updateDriverProfileLayout() {
+    if (typeof window.updateResponsiveLayoutVars === 'function') {
+      window.updateResponsiveLayoutVars();
+    }
     const root = document.getElementById('driverProfileModalRoot') || document.querySelector('[data-driver-profile-modal-root]');
     if (!root) return;
     const dock = document.getElementById('dock');

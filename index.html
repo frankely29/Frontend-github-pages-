@@ -25,6 +25,54 @@
       width: 100vw;
     }
 
+    :root{
+      --ui-safe-top: env(safe-area-inset-top, 0px);
+      --ui-safe-bottom: env(safe-area-inset-bottom, 0px);
+
+      --ui-dock-size: clamp(46px, 11vw, 56px);
+      --ui-dock-main-size: clamp(52px, 13vw, 60px);
+      --ui-dock-gap: clamp(6px, 2vw, 10px);
+      --ui-dock-width: min(calc(100vw - 20px), 430px);
+
+      --ui-panel-width: min(92vw, 420px);
+      --ui-drawer-width: min(330px, 86vw);
+
+      --ui-badge-font: clamp(10px, 2.6vw, 12px);
+      --ui-badge-pad-y: clamp(3px, 1vw, 4px);
+      --ui-badge-pad-x: clamp(8px, 2vw, 10px);
+
+      --ui-slider-pad-x: clamp(10px, 3vw, 14px);
+      --ui-slider-bottom: calc(var(--ui-safe-bottom) + 0px);
+
+      --ui-control-stack-bottom: calc(var(--ui-safe-bottom) + clamp(96px, 15vw, 116px));
+
+      --ui-record-font: clamp(12px, 3vw, 13px);
+      --ui-record-pad-y: clamp(9px, 2.5vw, 10px);
+      --ui-record-pad-x: clamp(11px, 3vw, 12px);
+
+      --ui-weather-top: calc(var(--ui-safe-top) + 10px);
+      --ui-weather-right: 12px;
+      --ui-online-top: calc(var(--ui-safe-top) + 10px);
+      --ui-online-left: 12px;
+
+      --ui-time-label-left: 14px;
+      --ui-time-label-bottom: calc(var(--ui-safe-bottom) + 20px);
+
+      --ui-live-dock-height: 56px;
+      --ui-live-slider-height: 48px;
+      --ui-live-map-controls-height: 92px;
+
+      --ui-chat-drawer-bottom: calc(var(--ui-safe-bottom) + 192px);
+      --ui-music-drawer-bottom: calc(var(--ui-safe-bottom) + 170px);
+
+      --ui-control-left: 10px;
+      --ui-top-left: 12px;
+      --ui-top-right: 12px;
+
+      --ui-tendency-left: 10px;
+      --ui-tendency-top: calc(var(--ui-safe-top) + 56px);
+    }
+
     /* =========================================================
        LOCKED OVERLAY (SIGNED OUT)
        ========================================================= */
@@ -287,8 +335,8 @@
 
     .mapControlStack{
       position: fixed;
-      left: 10px;
-      bottom: calc(env(safe-area-inset-bottom, 0px) + 104px);
+      left: var(--ui-control-left);
+      bottom: var(--ui-control-stack-bottom);
       z-index: 9200;
       display: inline-flex;
       flex-direction: column;
@@ -305,12 +353,12 @@
       position: static;
       border: none;
       border-radius: 999px;
-      padding: 10px 12px;
+      padding: var(--ui-record-pad-y) var(--ui-record-pad-x);
       display: inline-flex;
       align-items: center;
       gap: 8px;
       font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
-      font-size: 13px;
+      font-size: var(--ui-record-font);
       font-weight: 950;
       color: #fff;
       background: linear-gradient(180deg, rgba(14,190,96,0.98), rgba(0,150,74,0.98));
@@ -334,12 +382,12 @@
       position: fixed;
       left: 0;
       right: 0;
-      bottom: calc(env(safe-area-inset-bottom, 0px) + 0px);
+      bottom: var(--ui-slider-bottom);
       z-index: 1200;
       background: transparent;
       backdrop-filter: none;
       border-radius: 0;
-      padding: 8px 14px 10px 14px;
+      padding: 8px var(--ui-slider-pad-x) 10px var(--ui-slider-pad-x);
       font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
     }
 
@@ -353,8 +401,8 @@
 
     #timeLabel, .timeLabel {
       position: fixed !important;
-      left: 14px !important;
-      bottom: calc(env(safe-area-inset-bottom, 0px) + 20px) !important;
+      left: var(--ui-time-label-left) !important;
+      bottom: var(--ui-time-label-bottom) !important;
       z-index: 1700 !important;
       font-size: 12px !important;
       line-height: 1 !important;
@@ -365,17 +413,17 @@
 
     .weatherBadge{
       position: fixed;
-      top: calc(env(safe-area-inset-top) + 10px);
-      right: 12px;
+      top: var(--ui-weather-top);
+      right: var(--ui-top-right);
       z-index: 1400;
       display:inline-flex;
       align-items:center;
       gap:6px;
-      padding: 3px 8px;
+      padding: var(--ui-badge-pad-y) var(--ui-badge-pad-x);
       border-radius: 999px;
       border: 1px solid rgba(0,0,0,0.14);
       background: rgba(255,255,255,0.80);
-      font-size: 11px;
+      font-size: var(--ui-badge-font);
       font-weight: 900;
       opacity: 0.95;
       white-space: nowrap;
@@ -398,17 +446,17 @@
      */
     .onlineBadge {
       position: fixed;
-      top: calc(env(safe-area-inset-top) + 10px);
-      left: 12px;
+      top: var(--ui-online-top);
+      left: var(--ui-top-left);
       z-index: 1400;
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      padding: 3px 8px;
+      padding: var(--ui-badge-pad-y) var(--ui-badge-pad-x);
       border-radius: 999px;
       border: 1px solid rgba(0,0,0,0.14);
       background: rgba(255,255,255,0.80);
-      font-size: 11px;
+      font-size: var(--ui-badge-font);
       font-weight: 900;
       opacity: 0.95;
       white-space: nowrap;
@@ -633,8 +681,8 @@
       position: fixed !important;
       left: 50%;
       transform: translateX(-50%);
-      bottom: calc(env(safe-area-inset-bottom, 0px) + 38px);
-      width: min(100vw - 20px, 430px);
+      bottom: calc(var(--ui-safe-bottom) + 38px);
+      width: var(--ui-dock-width);
       z-index: 3000 !important;
       pointer-events: auto;
       --dock-edge-fade-left: 0px;
@@ -671,7 +719,7 @@
     .dockViewport::-webkit-scrollbar { display: none; }
     .dockTrack {
       display: inline-flex;
-      gap: 8px;
+      gap: var(--ui-dock-gap);
       align-items: center;
       justify-content: space-between;
       width: 100%;
@@ -740,8 +788,8 @@
       z-index: 3000 !important;
     }
     .dockBtn {
-      width: 46px;
-      height: 46px;
+      width: var(--ui-dock-size);
+      height: var(--ui-dock-size);
       border-radius: 999px;
       border: 0;
       background: rgba(240,240,240,0.95);
@@ -749,7 +797,7 @@
       display: grid;
       place-items: center;
     }
-    .dockBtnMain { width: 56px; height: 56px; }
+    .dockBtnMain { width: var(--ui-dock-main-size); height: var(--ui-dock-main-size); }
     .dockBtnMusic { background: rgba(235,60,60,0.95); color: white; }
     .dockBtnActive { outline: 2px solid rgba(0,0,0,0.15); }
     .dockIcon { font-size: 20px; }
@@ -824,7 +872,7 @@
       position: fixed;
       top: 72px;
       left: 12px;
-      width: min(330px, 86vw);
+      width: var(--ui-drawer-width);
       max-height: calc(100vh - 190px);
       border-radius: 18px;
       background: rgba(255,255,255,0.72);
@@ -1457,7 +1505,7 @@
       left: 50%;
       transform: translateX(-50%) translateY(18px);
       /* Raise the music pop-up so it doesn’t overlap the record-trip button */
-      bottom: calc(env(safe-area-inset-bottom, 0px) + 170px); /* previously 110px */
+      bottom: var(--ui-music-drawer-bottom); /* previously 110px */
       width: min(92vw, 520px);
       max-height: 30vh;
       border-radius: 18px;
@@ -1473,7 +1521,7 @@
       left: 50%;
       transform: translateX(-50%) translateY(18px);
       /* Raise the chat pop-up to sit above the record-trip button */
-      bottom: calc(env(safe-area-inset-bottom, 0px) + 192px); /* previously 132px */
+      bottom: var(--ui-chat-drawer-bottom); /* previously 132px */
       width: min(88vw, 420px);
       max-height: 250px;
       border-radius: 20px;
@@ -1543,6 +1591,99 @@
       align-items: center;
       text-align: center;
       width: min(86vw, 560px);
+    }
+
+    @media (max-width: 390px), (max-height: 760px) {
+      :root{
+        --ui-dock-size: 42px;
+        --ui-dock-main-size: 50px;
+        --ui-dock-gap: 6px;
+        --ui-dock-width: min(calc(100vw - 14px), 392px);
+
+        --ui-badge-font: 10px;
+        --ui-badge-pad-y: 3px;
+        --ui-badge-pad-x: 7px;
+
+        --ui-record-font: 12px;
+        --ui-record-pad-y: 9px;
+        --ui-record-pad-x: 11px;
+
+        --ui-slider-pad-x: 10px;
+        --ui-control-stack-bottom: calc(var(--ui-safe-bottom) + 94px);
+
+        --ui-chat-drawer-bottom: calc(var(--ui-safe-bottom) + 176px);
+        --ui-music-drawer-bottom: calc(var(--ui-safe-bottom) + 158px);
+
+        --ui-time-label-left: 10px;
+        --ui-time-label-bottom: calc(var(--ui-safe-bottom) + 16px);
+
+        --ui-tendency-left: 8px;
+        --ui-tendency-top: calc(var(--ui-safe-top) + 54px);
+      }
+
+      .dockDrawer{
+        border-radius: 16px;
+      }
+
+      .dockDrawer.panelChat{
+        width: min(92vw, 390px);
+        max-height: 235px;
+      }
+
+      .dockDrawer.panelMusic{
+        width: min(94vw, 420px);
+      }
+
+      .weatherBadge,
+      .onlineBadge{
+        max-width: 46vw;
+      }
+
+      .legend,
+      .dockDrawerBody,
+      .dockDrawerHeader{
+        font-size: 12px;
+      }
+    }
+
+    @media (min-width: 768px) {
+      :root{
+        --ui-dock-size: 52px;
+        --ui-dock-main-size: 60px;
+        --ui-dock-gap: 10px;
+        --ui-dock-width: min(calc(100vw - 32px), 560px);
+
+        --ui-drawer-width: min(420px, 42vw);
+        --ui-panel-width: min(420px, 42vw);
+
+        --ui-badge-font: 12px;
+        --ui-record-font: 13px;
+        --ui-slider-pad-x: 18px;
+
+        --ui-control-left: 18px;
+        --ui-top-left: 18px;
+        --ui-top-right: 18px;
+        --ui-tendency-left: 14px;
+        --ui-tendency-top: calc(var(--ui-safe-top) + 62px);
+      }
+
+      .dockDrawer{
+        max-height: calc(100vh - 220px);
+      }
+
+      .dockDrawer.panelChat{
+        width: min(440px, 36vw);
+        max-height: 280px;
+      }
+
+      .dockDrawer.panelMusic{
+        width: min(560px, 48vw);
+      }
+
+      .weatherBadge,
+      .onlineBadge{
+        max-width: 26vw;
+      }
     }
 
     .killFeedMsg {
