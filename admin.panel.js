@@ -142,6 +142,10 @@
   function renderDashboard(data) {
     const c = components();
     const d = data || {};
+    const adminCount = d.admin_users ?? d.admins_count ?? 0;
+    const policeRecentCount = d.police_reports_recent_count ?? d.police_reports_count ?? 0;
+    const pickupRecentCount = d.pickup_logs_recent_count ?? d.pickup_logs_count ?? 0;
+    const voidedPickupRecentCount = d.pickup_logs_voided_recent_count ?? null;
     const leaderboard = d.leaderboard_status || d.leaderboard;
     const leaderboardLines = typeof leaderboard === 'object' && leaderboard
       ? c.keyValueRows(leaderboard)
@@ -152,9 +156,10 @@
         ${(c.statCard ? c.statCard('Total Users', d.total_users) : '')}
         ${(c.statCard ? c.statCard('Online Users', d.online_users) : '')}
         ${(c.statCard ? c.statCard('Ghosted Online', d.ghosted_online_users) : '')}
-        ${(c.statCard ? c.statCard('Police Reports', d.police_reports_count) : '')}
-        ${(c.statCard ? c.statCard('Pickup Logs', d.pickup_logs_count) : '')}
-        ${(c.statCard ? c.statCard('Admins', d.admins_count) : '')}
+        ${(c.statCard ? c.statCard('Recent Police Reports', policeRecentCount) : '')}
+        ${(c.statCard ? c.statCard('Active Pickup Logs', pickupRecentCount) : '')}
+        ${(c.statCard ? c.statCard('Admins', adminCount) : '')}
+        ${(voidedPickupRecentCount !== null && c.statCard ? c.statCard('Voided Pickup Logs', voidedPickupRecentCount) : '')}
         ${(c.statCard ? c.statCard('Timeline Ready', c.boolText ? c.boolText(!!d.timeline_ready, 'Ready', 'Not Ready') : d.timeline_ready) : '')}
         ${(c.statCard ? c.statCard('Frame Status', d.frame_count || d.frame_status || d.frame_ready || '—') : '')}
       </div>

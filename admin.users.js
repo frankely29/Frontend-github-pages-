@@ -66,10 +66,21 @@
       target.innerHTML = '<div class="adminMuted">Loading detail...</div>';
       try {
         const detail = await actions.fetchUserDetail(userId);
+        const record = detail || row;
+        const hasPickupCount = record?.pickup_count !== undefined && record?.pickup_count !== null;
+        const hasVoidedPickupCount = record?.voided_pickup_count !== undefined && record?.voided_pickup_count !== null;
+        const pickupSummary = (hasPickupCount || hasVoidedPickupCount)
+          ? `
+            <div class="adminKV"><span>Active pickup logs</span><strong>${c.esc(hasPickupCount ? record.pickup_count : '—')}</strong></div>
+            <div class="adminKV"><span>Voided pickup logs</span><strong>${c.esc(hasVoidedPickupCount ? record.voided_pickup_count : '—')}</strong></div>
+          `
+          : '';
+
         target.innerHTML = `
           <div class="adminCard compact">
-            ${c.keyValueRows(detail || row)}
-            ${c.collapsible('Raw JSON', `<pre class="adminPre">${c.esc(JSON.stringify(detail || row, null, 2))}</pre>`)}
+            ${pickupSummary}
+            ${c.keyValueRows(record)}
+            ${c.collapsible('Raw JSON', `<pre class="adminPre">${c.esc(JSON.stringify(record, null, 2))}</pre>`)}
           </div>
         `;
       } catch (err) {
