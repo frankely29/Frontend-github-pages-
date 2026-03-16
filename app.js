@@ -1590,7 +1590,7 @@ function modesPanelHTML() {
 
       <div style="display:flex;gap:10px;flex-wrap:wrap;">
         <button id="dockPoliceBtn" class="chipBtn"><span aria-hidden="true" style="display:inline-grid;place-items:center;line-height:1;vertical-align:middle;margin-right:6px;"><svg viewBox="0 0 24 24" width="12" height="12" focusable="false" style="display:block"><path d="M12 2.2 4.2 6v6.1c0 4.4 3 8.3 7.8 9.7 4.8-1.4 7.8-5.3 7.8-9.7V6L12 2.2Z" fill="currentColor"/><path d="M12 6.7v5.2" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="15.4" r="1.2" fill="#fff"/></svg></span>Police</button>
-        <button id="dockPickupBtn" class="chipBtn"><span aria-hidden="true" style="display:inline-grid;place-items:center;line-height:1;vertical-align:middle;margin-right:6px;"><svg viewBox="0 0 24 24" width="12" height="12" focusable="false" style="display:block"><circle cx="12" cy="12" r="9" fill="currentColor"/><path d="m8 12.4 2.5 2.6 5.5-5.6" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>Record Trip</button>
+        <button id="dockPickupBtn" class="chipBtn"><span aria-hidden="true" style="display:inline-grid;place-items:center;line-height:1;vertical-align:middle;margin-right:6px;"><svg viewBox="0 0 24 24" width="12" height="12" focusable="false" style="display:block"><circle cx="12" cy="12" r="9" fill="currentColor"/><path d="m8 12.4 2.5 2.6 5.5-5.6" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>Save</button>
       </div>
 
       <div style="margin-top:10px;opacity:0.75;font-weight:600;">
@@ -4845,7 +4845,7 @@ function applyBadgeIconModel() {
   const pickupIconEl = document.querySelector("#pickupFab .pickupFabIcon");
   setIconMarkup(
     pickupIconEl,
-    `<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" focusable="false" style="display:block"><circle cx="12" cy="12" r="9" fill="#24c862"/><path d="m7.4 12.3 3 3.1 6.2-6.1" fill="none" stroke="#ffffff" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+    `<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" style="display:block"><path d="m6.5 12.4 3.6 3.6 7.4-7.4" fill="none" stroke="currentColor" stroke-width="2.9" stroke-linecap="round" stroke-linejoin="round"/></svg>`
   );
 }
 
