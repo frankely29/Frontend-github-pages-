@@ -1902,11 +1902,23 @@ function applyDockIconModel() {
   `);
 
   setIcon(dockChat, `
-    <span style="font-size:22px; line-height:1;">💬</span>
+    <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" focusable="false" style="display:block">
+      <path d="M4.8 5.5h14.4a2.8 2.8 0 0 1 2.8 2.8v7.1a2.8 2.8 0 0 1-2.8 2.8H11l-4.2 3.3c-.9.7-2.2 0-2.1-1.2l.3-2.1A2.8 2.8 0 0 1 2 15.4V8.3a2.8 2.8 0 0 1 2.8-2.8Z" fill="#5865f2" stroke="#22337f" stroke-width="1.3" stroke-linejoin="round"/>
+      <circle cx="8.3" cy="11.8" r="1.2" fill="#fff"/>
+      <circle cx="12" cy="11.8" r="1.2" fill="#fff"/>
+      <circle cx="15.7" cy="11.8" r="1.2" fill="#fff"/>
+    </svg>
   `);
 
   setIcon(dockGames, `
-    <span style="font-size:22px; line-height:1;">🎮</span>
+    <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" focusable="false" style="display:block">
+      <path d="M8.2 8.4h7.6c2.1 0 3.9 1.3 4.7 3.2l1 2.4c.9 2.2-.8 4.7-3.2 4.7-1 0-1.9-.4-2.5-1.1l-1.4-1.6h-4.8l-1.4 1.6c-.6.7-1.6 1.1-2.5 1.1-2.4 0-4.1-2.5-3.2-4.7l1-2.4c.8-1.9 2.6-3.2 4.7-3.2Z" fill="#334155" stroke="#0f172a" stroke-width="1.2"/>
+      <path d="M8 12.1h3.5M9.75 10.35v3.5" stroke="#e2e8f0" stroke-width="1.4" stroke-linecap="round"/>
+      <circle cx="15.7" cy="11.2" r="1" fill="#60a5fa"/>
+      <circle cx="17.7" cy="12.8" r="1" fill="#facc15"/>
+      <circle cx="15.3" cy="14.4" r="1" fill="#34d399"/>
+      <circle cx="13.6" cy="12.8" r="1" fill="#f87171"/>
+    </svg>
   `);
 
   setIcon(dockMusic, `

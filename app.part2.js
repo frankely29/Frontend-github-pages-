@@ -1316,13 +1316,96 @@
     return '';
   }
 
+  function leaderboardBadgePriority(code) {
+    const normalized = normalizeLeaderboardBadge(code);
+    if (normalized === 'crown') return 3;
+    if (normalized === 'silver') return 2;
+    if (normalized === 'bronze') return 1;
+    return 0;
+  }
+
+  function leaderboardBadgeMeta(code) {
+    const normalized = normalizeLeaderboardBadge(code);
+    if (!normalized) {
+      return {
+        code: '',
+        label: '',
+        rewardTitle: '',
+        profileLabel: '',
+        toneClass: ''
+      };
+    }
+    if (normalized === 'crown') {
+      return {
+        code: 'crown',
+        label: 'Crown',
+        rewardTitle: '1st Place',
+        profileLabel: 'Daily Miles Leader',
+        toneClass: 'is-crown'
+      };
+    }
+    if (normalized === 'silver') {
+      return {
+        code: 'silver',
+        label: 'Silver',
+        rewardTitle: '2nd Place',
+        profileLabel: 'Silver Tier',
+        toneClass: 'is-silver'
+      };
+    }
+    return {
+      code: 'bronze',
+      label: 'Bronze',
+      rewardTitle: '3rd Place',
+      profileLabel: 'Bronze Tier',
+      toneClass: 'is-bronze'
+    };
+  }
+
+  function renderLeaderboardBadgeSvg(code, options = {}) {
+    const meta = leaderboardBadgeMeta(code);
+    if (!meta.code) return '';
+    const size = Math.max(12, Number(options?.size) || (options?.compact ? 18 : 20));
+    const classes = ['leaderboardBadgeSvg', meta.toneClass, options?.mapWearable ? 'is-map' : '', options?.compact ? 'is-compact' : '']
+      .filter(Boolean)
+      .join(' ');
+    const title = escapeHtml(meta.label);
+    let svg = '';
+    if (meta.code === 'crown') {
+      svg = `<svg class="${classes}" viewBox="0 0 64 52" width="${size}" height="${size}" role="img" aria-label="${title}" focusable="false">
+        <path d="M6 41.5h52L53.8 15 40 26.2 32 8 24 26.2 10.2 15 6 41.5Z" fill="#f7c746" stroke="#6f4c0d" stroke-width="3" stroke-linejoin="round"/>
+        <path d="M11 41h42v7.5H11z" fill="#d08a1f" stroke="#6f4c0d" stroke-width="3"/>
+        <circle cx="32" cy="30" r="4.8" fill="#fff0b8" stroke="#8e5f11" stroke-width="2"/>
+        <circle cx="18" cy="27.2" r="3.5" fill="#ffed9e" stroke="#8e5f11" stroke-width="1.8"/>
+        <circle cx="46" cy="27.2" r="3.5" fill="#ffed9e" stroke="#8e5f11" stroke-width="1.8"/>
+        <path d="M13 39c5.5-3.1 32.5-3.1 38 0" fill="none" stroke="rgba(255,255,255,.42)" stroke-width="2" stroke-linecap="round"/>
+      </svg>`;
+    } else if (meta.code === 'silver') {
+      svg = `<svg class="${classes}" viewBox="0 0 64 64" width="${size}" height="${size}" role="img" aria-label="${title}" focusable="false">
+        <path d="M22 6h20l-2.4 14H24.4L22 6Z" fill="#e2e8f0" stroke="#475569" stroke-width="2.2"/>
+        <path d="M24.5 20h15L35 29.5h-6L24.5 20Z" fill="#cbd5e1" stroke="#475569" stroke-width="2"/>
+        <path d="M32 30 47 18v16c0 10.8-6.3 18.2-15 22-8.7-3.8-15-11.2-15-22V18L32 30Z" fill="#d1d9e6" stroke="#475569" stroke-width="2.8" stroke-linejoin="round"/>
+        <circle cx="32" cy="36" r="8" fill="#f8fafc" stroke="#64748b" stroke-width="2.2"/>
+        <path d="m28.4 36.2 2.3 2.5 4.8-5" fill="none" stroke="#64748b" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>`;
+    } else {
+      svg = `<svg class="${classes}" viewBox="0 0 64 64" width="${size}" height="${size}" role="img" aria-label="${title}" focusable="false">
+        <path d="M22 6h20l-2.4 14H24.4L22 6Z" fill="#f8d0a2" stroke="#6b3f1f" stroke-width="2.2"/>
+        <path d="M24.5 20h15L35 29.5h-6L24.5 20Z" fill="#d89051" stroke="#6b3f1f" stroke-width="2"/>
+        <path d="M32 30 47 18v16c0 10.8-6.3 18.2-15 22-8.7-3.8-15-11.2-15-22V18L32 30Z" fill="#ce8a51" stroke="#6b3f1f" stroke-width="2.8" stroke-linejoin="round"/>
+        <circle cx="32" cy="36" r="8" fill="#f6cfaa" stroke="#7b4b27" stroke-width="2.2"/>
+        <path d="M32 31v10M27 36h10" fill="none" stroke="#7b4b27" stroke-width="2.2" stroke-linecap="round"/>
+      </svg>`;
+    }
+    if (!options?.withLabel) return svg;
+    return `<span class="badgeSvgLabelWrap">${svg}<span class="badgeText">${escapeHtml(meta.label)}</span></span>`;
+  }
+
   function mapIdentityBadgeOverlayHTML({ badgeCode }) {
-    const badge = normalizeLeaderboardBadge(badgeCode);
-    if (!badge) return '';
-    const icon = badge === 'crown' ? '👑' : (badge === 'silver' ? '🥈' : '🥉');
-    const label = badge === 'crown' ? 'Crown' : (badge === 'silver' ? 'Silver' : 'Bronze');
-    const badgeClass = badge === 'crown' ? 'badgeEmojiCrown' : (badge === 'silver' ? 'badgeEmojiSilver' : 'badgeEmojiBronze');
-    return `<span class="mapIdentityBadgeOverlay badgeEmoji badgeEmojiMap ${badgeClass}" aria-label="${label}">${icon}</span>`;
+    const meta = leaderboardBadgeMeta(badgeCode);
+    if (!meta.code) return '';
+    const size = meta.code === 'crown' ? 32 : 20;
+    return `<span class="mapIdentityBadgeOverlay mapBadgeWearable ${meta.toneClass}" aria-label="${escapeHtml(meta.label)}">${renderLeaderboardBadgeSvg(meta.code, { size, mapWearable: true, compact: true })}</span>`;
   }
 
   function mapIdentityInitials(name) {
@@ -2571,17 +2654,9 @@
   }
 
   function driverProfileBadgeChip(code) {
-    const normalized = normalizeLeaderboardBadge(code);
-    if (!normalized) return '<span class="driverProfileBadgeLabel">No badge yet</span>';
-    const profileLabel = {
-      crown: 'Daily Miles Leader',
-      silver: 'Silver Tier',
-      bronze: 'Bronze Tier'
-    }[normalized] || 'Leaderboard Badge';
-    const icon = normalized === 'crown' ? '👑' : (normalized === 'silver' ? '🥈' : '🥉');
-    const label = normalized === 'crown' ? 'Crown' : (normalized === 'silver' ? 'Silver' : 'Bronze');
-    const badgeClass = normalized === 'crown' ? 'badgeEmojiCrown' : (normalized === 'silver' ? 'badgeEmojiSilver' : 'badgeEmojiBronze');
-    return `<span class="driverProfileBadgeChipWrap"><span class="badgeEmoji badgeEmojiProfile ${badgeClass}" aria-label="${label}">${icon}</span><span class="driverProfileBadgeLabel">${escapeHtml(profileLabel)}</span></span>`;
+    const meta = leaderboardBadgeMeta(code);
+    if (!meta.code) return '<span class="driverProfileBadgeLabel">No badge yet</span>';
+    return `<span class="driverProfileBadgeChipWrap"><span class="badgeSvgWrap">${renderLeaderboardBadgeSvg(meta.code, { size: 30 })}</span><span class="driverProfileBadgeLabel">${escapeHtml(meta.profileLabel)}</span></span>`;
   }
 
   function driverProfileAvatarHTML(profileUser) {
@@ -2736,6 +2811,9 @@
   let levelUpOverlayHideTimer = null;
   let lastLevelUpPopupKey = '';
   let lastLevelUpPopupAt = 0;
+  let leaderboardBadgeRewardHideTimer = null;
+  let lastBadgeRewardPopupKey = '';
+  let lastBadgeRewardPopupAt = 0;
 
   function progressionLastSeenStorageKey(userId) {
     return `progression_last_seen_level_v1_${String(userId || '').trim()}`;
@@ -2835,6 +2913,7 @@
     const progression = payload?.progression && typeof payload.progression === 'object' ? payload.progression : payload;
     if (!progression || typeof progression !== 'object') return false;
     ensurePickupProgressReward();
+    ensureLeaderboardBadgeRewardOverlay();
     const level = Number(progression?.level);
     const safeLevel = Number.isFinite(level) && level > 0 ? Math.floor(level) : 1;
     const xpAwarded = Number(payload?.xp_awarded ?? progression?.xp_awarded);
@@ -2945,6 +3024,147 @@
     }, 3900);
   }
 
+  function ensureLeaderboardBadgeRewardOverlay() {
+    let root = document.getElementById('leaderboardBadgeRewardRoot');
+    if (root) return root;
+    root = document.createElement('div');
+    root.id = 'leaderboardBadgeRewardRoot';
+    root.setAttribute('aria-hidden', 'true');
+    root.innerHTML = `<div class="leaderboardBadgeRewardCard" id="leaderboardBadgeRewardCard">
+      <div class="leaderboardBadgeRewardIcon" id="leaderboardBadgeRewardIcon"></div>
+      <div class="leaderboardBadgeRewardTag">Podium Badge Earned</div>
+      <div class="leaderboardBadgeRewardTitle" id="leaderboardBadgeRewardTitle"></div>
+      <div class="leaderboardBadgeRewardSub" id="leaderboardBadgeRewardSub"></div>
+    </div>`;
+    document.body.appendChild(root);
+    return root;
+  }
+
+  function getBestCurrentLeaderboardBadgeRow(rows) {
+    const list = Array.isArray(rows) ? rows : [];
+    let best = null;
+    for (const row of list) {
+      const code = normalizeLeaderboardBadge(row?.badge_code);
+      const rank = Number(row?.rank_position);
+      if (!code) continue;
+      if (!Number.isFinite(rank) || rank < 1 || rank > 3) continue;
+      if (!best || rank < Number(best.rank_position || 99)) best = row;
+    }
+    return best || null;
+  }
+
+  function leaderboardBadgeRewardStorageKey(userId) {
+    return `leaderboard_badge_reward_seen_v2_${userId}`;
+  }
+
+  function readStoredLeaderboardBadgeRewardState(userId) {
+    if (!Number.isFinite(Number(userId))) return null;
+    try {
+      const raw = localStorage.getItem(leaderboardBadgeRewardStorageKey(Math.floor(Number(userId))));
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return null;
+      return {
+        badge_code: normalizeLeaderboardBadge(parsed.badge_code),
+        rank_position: Number(parsed.rank_position),
+        metric: String(parsed.metric || ''),
+        period: String(parsed.period || ''),
+        period_key: String(parsed.period_key || '')
+      };
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function writeStoredLeaderboardBadgeRewardState(userId, state) {
+    if (!Number.isFinite(Number(userId)) || !state) return;
+    const payload = {
+      badge_code: normalizeLeaderboardBadge(state.badge_code),
+      rank_position: Number(state.rank_position),
+      metric: String(state.metric || ''),
+      period: String(state.period || ''),
+      period_key: String(state.period_key || '')
+    };
+    try {
+      localStorage.setItem(leaderboardBadgeRewardStorageKey(Math.floor(Number(userId))), JSON.stringify(payload));
+    } catch (_) {}
+  }
+
+  function showLeaderboardBadgeRewardOverlay(badgeRowOrMeta, options = {}) {
+    const meta = leaderboardBadgeMeta(badgeRowOrMeta?.badge_code || badgeRowOrMeta?.code);
+    if (!meta.code) return false;
+    const periodKey = String(badgeRowOrMeta?.period_key || options?.period_key || '');
+    const popupKey = [meta.code, String(badgeRowOrMeta?.rank_position || ''), String(badgeRowOrMeta?.metric || ''), String(badgeRowOrMeta?.period || ''), periodKey].join(':');
+    const now = Date.now();
+    if (popupKey && popupKey === lastBadgeRewardPopupKey && (now - lastBadgeRewardPopupAt) < 3200) return false;
+    lastBadgeRewardPopupKey = popupKey;
+    lastBadgeRewardPopupAt = now;
+    const root = ensureLeaderboardBadgeRewardOverlay();
+    const icon = document.getElementById('leaderboardBadgeRewardIcon');
+    const title = document.getElementById('leaderboardBadgeRewardTitle');
+    const sub = document.getElementById('leaderboardBadgeRewardSub');
+    if (!icon || !title || !sub) return false;
+    icon.innerHTML = renderLeaderboardBadgeSvg(meta.code, { size: 88, compact: false });
+    title.textContent = meta.rewardTitle || 'Podium Badge';
+    sub.textContent = meta.code === 'crown' ? 'Daily Miles Leader' : 'Top 3 Daily Miles';
+    root.classList.add('open');
+    root.setAttribute('aria-hidden', 'false');
+    if (leaderboardBadgeRewardHideTimer) window.clearTimeout(leaderboardBadgeRewardHideTimer);
+    leaderboardBadgeRewardHideTimer = window.setTimeout(() => {
+      root.classList.remove('open');
+      root.setAttribute('aria-hidden', 'true');
+      leaderboardBadgeRewardHideTimer = null;
+    }, 3800);
+    return true;
+  }
+
+  function shouldShowLeaderboardBadgeReward(prevState, nextState) {
+    const prevCode = normalizeLeaderboardBadge(prevState?.badge_code);
+    const nextCode = normalizeLeaderboardBadge(nextState?.badge_code);
+    if (!nextCode) return false;
+    if (!prevCode) return true;
+    const prevPriority = leaderboardBadgePriority(prevCode);
+    const nextPriority = leaderboardBadgePriority(nextCode);
+    if (nextPriority > prevPriority) return true;
+    if (nextPriority < prevPriority) return false;
+    const prevPeriod = String(prevState?.period_key || '');
+    const nextPeriod = String(nextState?.period_key || '');
+    if (!prevPeriod || !nextPeriod || prevPeriod === nextPeriod) return false;
+    return false;
+  }
+
+  async function syncLeaderboardBadgeRewards(options = {}) {
+    const token = getCommunityToken();
+    const userId = Number(window?.me?.id);
+    if (!token || !Number.isFinite(userId)) return null;
+    try {
+      const payload = await getJSONAuth('/leaderboard/badges/me', token);
+      const rows = Array.isArray(payload?.badges) ? payload.badges : [];
+      const best = getBestCurrentLeaderboardBadgeRow(rows);
+      const nextState = best ? {
+        badge_code: normalizeLeaderboardBadge(best.badge_code),
+        rank_position: Number(best.rank_position),
+        metric: String(best.metric || ''),
+        period: String(best.period || ''),
+        period_key: String(best.period_key || '')
+      } : null;
+      const prevState = readStoredLeaderboardBadgeRewardState(userId);
+      if (!prevState) {
+        if (nextState) writeStoredLeaderboardBadgeRewardState(userId, nextState);
+        return nextState;
+      }
+      if (nextState && !options?.suppressInitialPopup && shouldShowLeaderboardBadgeReward(prevState, nextState)) {
+        showLeaderboardBadgeRewardOverlay(nextState, options);
+      }
+      if (nextState) writeStoredLeaderboardBadgeRewardState(userId, nextState);
+      return nextState;
+    } catch (err) {
+      console.warn('syncLeaderboardBadgeRewards failed', err);
+      return null;
+    }
+  }
+
+
   async function fetchMyProgression() {
     const token = getCommunityToken();
     if (!token) return null;
@@ -2976,6 +3196,7 @@
         });
       }
       writeStoredProgressionLevel(userId, safeLevel);
+      await syncLeaderboardBadgeRewards({ suppressInitialPopup: false });
       return progression;
     } catch (err) {
       console.warn('syncMyProgression failed', err);
@@ -3016,6 +3237,7 @@
         leveled_up: true,
       });
     }
+    syncLeaderboardBadgeRewards({ suppressInitialPopup: false });
   }
 
   async function maybeSyncProgressionOnSignInState() {
@@ -3023,6 +3245,7 @@
     if (authHeaderOK()) {
       startProgressionSyncInterval();
       await syncMyProgression({ forcePopupCheck: false });
+      await syncLeaderboardBadgeRewards({ suppressInitialPopup: true });
     } else {
       stopProgressionSyncInterval();
     }
@@ -3468,6 +3691,8 @@
   window.showLevelUpOverlay = showLevelUpOverlay;
   window.syncMyProgression = syncMyProgression;
   window.handlePickupProgressionDelta = handlePickupProgressionDelta;
+  window.renderLeaderboardBadgeSvg = renderLeaderboardBadgeSvg;
+  window.syncLeaderboardBadgeRewards = syncLeaderboardBadgeRewards;
 
   // Bind the chat dock button using its ID
   if (typeof bindDockToggle === 'function') {
