@@ -4283,7 +4283,7 @@ function makeNavIcon() {
       zoom: map?.getZoom?.(),
       leaderboardBadgeCode: me?.leaderboard_badge_code,
       leaderboardHasCrown: !!me?.leaderboard_has_crown,
-      overlapMeta: lastSelfOrbitMeta
+      orbitMeta: lastSelfOrbitMeta
     })
     : `<div id="navMeName" class="meName" style="display:${myName ? "block" : "none"}">${escapeHtml(myName)}</div>`;
   const el = document.createElement("div");
@@ -4349,7 +4349,7 @@ function refreshNavNameLabel() {
         zoom: map?.getZoom?.(),
         leaderboardBadgeCode: me?.leaderboard_badge_code,
         leaderboardHasCrown: !!me?.leaderboard_has_crown,
-        overlapMeta: lastSelfOrbitMeta
+        orbitMeta: lastSelfOrbitMeta
       })
     );
   } else {
@@ -5586,16 +5586,16 @@ const PRESENCE_MEDIUM_RICH_LIMIT = 24;
 const PRESENCE_HEAVY_RICH_LIMIT = 10;
 const PRESENCE_VIEWPORT_BUFFER_RATIO = 0.18;
 
-const PRESENCE_LABEL_COLLISION_PX = 30;
+const PRESENCE_LABEL_COLLISION_PX = 28;
 const PRESENCE_SLOT_SEQUENCE = [
-  { angleDeg: 0 },
-  { angleDeg: 180 },
-  { angleDeg: -90 },
-  { angleDeg: 90 },
-  { angleDeg: -45 },
-  { angleDeg: -135 },
-  { angleDeg: 45 },
-  { angleDeg: 135 },
+  { side: "E", angleDeg: 0 },
+  { side: "W", angleDeg: 180 },
+  { side: "N", angleDeg: -90 },
+  { side: "S", angleDeg: 90 },
+  { side: "NE", angleDeg: -45 },
+  { side: "NW", angleDeg: -135 },
+  { side: "SE", angleDeg: 45 },
+  { side: "SW", angleDeg: 135 },
 ];
 
 function syncGhostUI() {
@@ -5971,12 +5971,11 @@ function clearOtherDrivers() {
 }
 
 function buildDriverMarkerVisualSignature(userId, name, avatarUrl = "", mode = "name", orbitMeta = null, leaderboardBadgeCode = '', leaderboardHasCrown = false) {
-  const overlapCount = Number.isFinite(orbitMeta?.count) ? orbitMeta.count : "";
-  const overlapLeader = orbitMeta?.leader ? "1" : "";
-  const overlapSuppressLabel = orbitMeta?.suppressLabel ? "1" : "";
-  const overlapSlotIndex = Number.isFinite(orbitMeta?.slotIndex) ? orbitMeta.slotIndex : "";
-  const overlapRing = Number.isFinite(orbitMeta?.ring) ? orbitMeta.ring : "";
-  const overlapAngle = Number.isFinite(orbitMeta?.angleDeg) ? orbitMeta.angleDeg : "";
+  const orbitIndex = Number.isFinite(orbitMeta?.index) ? orbitMeta.index : "";
+  const orbitCount = Number.isFinite(orbitMeta?.count) ? orbitMeta.count : "";
+  const orbitAngle = Number.isFinite(orbitMeta?.angleDeg) ? orbitMeta.angleDeg : "";
+  const orbitSide = orbitMeta?.side || "";
+  const orbitRing = Number.isFinite(orbitMeta?.ring) ? orbitMeta.ring : "";
   return [
     String(userId ?? ""),
     String(name ?? ""),
@@ -5984,12 +5983,11 @@ function buildDriverMarkerVisualSignature(userId, name, avatarUrl = "", mode = "
     String(mode ?? "name"),
     String(leaderboardBadgeCode ?? ""),
     leaderboardHasCrown ? "1" : "0",
-    String(overlapCount),
-    String(overlapLeader),
-    String(overlapSuppressLabel),
-    String(overlapSlotIndex),
-    String(overlapRing),
-    String(overlapAngle),
+    String(orbitIndex),
+    String(orbitCount),
+    String(orbitAngle),
+    String(orbitSide),
+    String(orbitRing),
   ].join("|");
 }
 
@@ -6155,129 +6153,79 @@ function chooseRichPresenceUserIds(rows, mode) {
   return new Set(sorted.slice(0, maxRich).map((row) => String(row.uid)));
 }
 
-function projectPresenceNode(lng, lat) {
-  if (!map || !Number.isFinite(lng) || !Number.isFinite(lat)) return null;
-  try {
-    const p = map.project([lng, lat]);
-    if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y)) return null;
-    return { x: p.x, y: p.y };
-  } catch (_) {
-    return null;
-  }
-}
+function clusterPresenceByScreenPosition(rows, selfPos) {
+  const richRows = Array.isArray(rows) ? rows : [];
+  const nodes = [];
 
-function buildPresenceScreenClusters(nodes, thresholdPx) {
-  const used = new Set();
-  const clusters = [];
+  for (const row of richRows) {
+    const lat = Number(row?.lat);
+    const lng = Number(row?.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+    const point = map?.project?.([lng, lat]);
+    if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) continue;
+    nodes.push({ kind: 'row', row, id: String(row?.uid ?? ''), x: point.x, y: point.y });
+  }
+
+  const selfLat = Number(selfPos?.lat);
+  const selfLng = Number(selfPos?.lng);
+  if (Number.isFinite(selfLat) && Number.isFinite(selfLng)) {
+    const point = map?.project?.([selfLng, selfLat]);
+    if (point && Number.isFinite(point.x) && Number.isFinite(point.y)) {
+      const selfId = String(me?.id ?? '__self__');
+      nodes.push({ kind: 'self', id: selfId, x: point.x, y: point.y });
+    }
+  }
+
+  for (const row of richRows) row.orbitMeta = null;
+  lastSelfOrbitMeta = null;
+
+  if (!nodes.length) return;
+
+  const thresholdSq = PRESENCE_LABEL_COLLISION_PX * PRESENCE_LABEL_COLLISION_PX;
+  const visited = new Set();
 
   for (let i = 0; i < nodes.length; i += 1) {
-    if (used.has(i)) continue;
+    if (visited.has(i)) continue;
     const queue = [i];
+    visited.add(i);
     const memberIndexes = [];
-    used.add(i);
 
     while (queue.length) {
       const idx = queue.shift();
       memberIndexes.push(idx);
       const a = nodes[idx];
       for (let j = 0; j < nodes.length; j += 1) {
-        if (used.has(j)) continue;
+        if (visited.has(j)) continue;
         const b = nodes[j];
-        const dx = a.screen.x - b.screen.x;
-        const dy = a.screen.y - b.screen.y;
-        const dist = Math.hypot(dx, dy);
-        if (dist <= thresholdPx) {
-          used.add(j);
+        const dx = a.x - b.x;
+        const dy = a.y - b.y;
+        if ((dx * dx) + (dy * dy) <= thresholdSq) {
+          visited.add(j);
           queue.push(j);
         }
       }
     }
 
-    clusters.push(memberIndexes.map((idx) => nodes[idx]));
-  }
+    const members = memberIndexes.map((idx) => nodes[idx]).sort((a, b) => a.id.localeCompare(b.id));
+    const count = members.length;
+    if (count <= 1) continue;
 
-  return clusters;
-}
-
-function assignPresenceSlotMeta(richRows) {
-  const nodes = [];
-
-  for (const row of richRows) {
-    const screen = projectPresenceNode(row.lng, row.lat);
-    if (!screen) continue;
-    nodes.push({
-      kind: "other",
-      uid: String(row.uid),
-      row,
-      screen,
-    });
-  }
-
-  const selfAvailable =
-    authHeaderOK() &&
-    userLatLng &&
-    Number.isFinite(userLatLng.lat) &&
-    Number.isFinite(userLatLng.lng) &&
-    me &&
-    me.id != null;
-
-  if (selfAvailable) {
-    const selfScreen = projectPresenceNode(userLatLng.lng, userLatLng.lat);
-    if (selfScreen) {
-      nodes.push({
-        kind: "self",
-        uid: String(me.id),
-        row: null,
-        screen: selfScreen,
-      });
-    }
-  }
-
-  for (const row of richRows) row.overlapMeta = null;
-  lastSelfOrbitMeta = null;
-
-  if (nodes.length === 0) return;
-
-  const clusters = buildPresenceScreenClusters(nodes, PRESENCE_LABEL_COLLISION_PX);
-
-  for (const cluster of clusters) {
-    const ordered = cluster
-      .slice()
-      .sort((a, b) => {
-        if (a.kind !== b.kind) return a.kind === "self" ? -1 : 1;
-        return String(a.uid).localeCompare(String(b.uid));
-      });
-
-    const count = ordered.length;
-
-    if (count <= 1) {
-      const only = ordered[0];
-      const soloMeta = {
-        count: 1,
-        leader: true,
-        suppressLabel: false,
-        slotIndex: 0,
-        ring: 0,
-        angleDeg: 0,
-      };
-      if (only.kind === "self") lastSelfOrbitMeta = soloMeta;
-      else only.row.overlapMeta = soloMeta;
-      continue;
-    }
-
-    ordered.forEach((node, idx) => {
-      const slot = PRESENCE_SLOT_SEQUENCE[idx % PRESENCE_SLOT_SEQUENCE.length];
-      const ring = Math.floor(idx / PRESENCE_SLOT_SEQUENCE.length);
+    members.forEach((member, slotIndex) => {
+      const seqIndex = slotIndex % PRESENCE_SLOT_SEQUENCE.length;
+      const seq = PRESENCE_SLOT_SEQUENCE[seqIndex];
+      const ring = Math.floor(slotIndex / PRESENCE_SLOT_SEQUENCE.length);
       const meta = {
+        index: slotIndex,
         count,
-        leader: idx === 0,
-        suppressLabel: false,
-        slotIndex: idx,
+        side: seq.side,
+        angleDeg: seq.angleDeg,
         ring,
-        angleDeg: slot.angleDeg,
       };
-      if (node.kind === "self") lastSelfOrbitMeta = meta;
-      else node.row.overlapMeta = meta;
+      if (member.kind === 'row') {
+        member.row.orbitMeta = meta;
+      } else {
+        lastSelfOrbitMeta = meta;
+      }
     });
   }
 }
@@ -6400,7 +6348,10 @@ function renderAdaptivePresenceFromCache() {
     }
   }
 
-  assignPresenceSlotMeta(richRows);
+  const selfPos = (userLatLng && Number.isFinite(userLatLng.lat) && Number.isFinite(userLatLng.lng))
+    ? { lat: userLatLng.lat, lng: userLatLng.lng }
+    : null;
+  clusterPresenceByScreenPosition(richRows, selfPos);
 
   for (const row of richRows) {
     upsertDriverMarker(
@@ -6411,7 +6362,7 @@ function renderAdaptivePresenceFromCache() {
       row.heading,
       row.avatarUrl,
       row.mode,
-      row.overlapMeta || null,
+      row.orbitMeta || null,
       row.leaderboardBadgeCode || '',
       !!row.leaderboardHasCrown
     );
