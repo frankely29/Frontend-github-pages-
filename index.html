@@ -1159,8 +1159,13 @@
       left: 50%;
       top: 50%;
       --identity-slot-x: 10px;
-      --identity-slot-y: -50%;
-      transform: translate(var(--identity-slot-x), var(--identity-slot-y));
+      --identity-slot-y: 0px;
+      transform: translate3d(
+        calc(-50% + var(--identity-slot-x)),
+        calc(-50% + var(--identity-slot-y)),
+        0
+      );
+      transform-origin: 50% 50%;
       pointer-events: none;
       display: flex;
       align-items: center;
