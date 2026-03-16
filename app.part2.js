@@ -1485,7 +1485,11 @@
   }
 
   function mapIdentityApplyZoomStyles(zoomValue) {
-    const cfg = mapIdentityVisualConfig(zoomValue);
+    const safeZoom = Number.isFinite(zoomValue)
+      ? zoomValue
+      : (Number.isFinite(window?.map?.getZoom?.()) ? window.map.getZoom() : 12);
+
+    const cfg = mapIdentityVisualConfig(safeZoom);
     const rootStyle = document.documentElement?.style;
     if (rootStyle) {
       rootStyle.setProperty('--map-ident-arrow-body', `${cfg.arrowBodyPx}px`);
@@ -1502,7 +1506,7 @@
       el.style.width = `${cfg.avatarPx}px`;
       el.style.height = `${cfg.avatarPx}px`;
     });
-    mapIdentityRefreshOrbitSlots(zoom);
+    mapIdentityRefreshOrbitSlots(safeZoom);
   }
 
   function readMapIdentityFile(file) {
