@@ -2437,34 +2437,44 @@
       .rankBadgeIconWrap.toneOfficer{background:linear-gradient(140deg,#7c3aed,#1e1b4b);color:#ede9fe}
       .rankBadgeIconWrap.toneGeneral{background:linear-gradient(140deg,#f59e0b,#7c2d12);color:#fef3c7}
       .rankBadgeIconWrap.toneLegend{background:linear-gradient(140deg,#22d3ee,#4f46e5);color:#ecfeff;box-shadow:0 0 0 1px rgba(255,255,255,.25),0 0 18px rgba(56,189,248,.5)}
-      #levelUpOverlayRoot{position:fixed;inset:0;z-index:9845;display:none;pointer-events:none;align-items:center;justify-content:center;padding:18px}
+      #levelUpOverlayRoot{position:fixed;inset:0;z-index:9845;display:none;pointer-events:none;align-items:center;justify-content:center;padding:20px}
       #levelUpOverlayRoot.open{display:flex}
-      .levelUpOverlayCard{min-width:min(350px,calc(100vw - 30px));max-width:min(420px,calc(100vw - 24px));background:linear-gradient(155deg,rgba(15,23,42,.95),rgba(30,41,59,.9));border:1px solid rgba(148,163,184,.4);border-radius:18px;box-shadow:0 16px 44px rgba(15,23,42,.55),0 0 28px rgba(56,189,248,.25);padding:16px 14px;color:#e2e8f0;display:flex;align-items:center;gap:12px;opacity:0;transform:translateY(12px) scale(.92);transition:opacity .26s ease,transform .26s ease}
+      .levelUpOverlayCard{position:relative;isolation:isolate;min-width:min(390px,calc(100vw - 24px));max-width:min(460px,calc(100vw - 20px));background:linear-gradient(150deg,rgba(7,12,24,.97),rgba(15,23,42,.94) 46%,rgba(30,64,175,.28) 100%);border:1px solid rgba(125,211,252,.44);border-radius:24px;box-shadow:0 22px 58px rgba(2,6,23,.68),0 0 44px rgba(56,189,248,.33),inset 0 0 0 1px rgba(255,255,255,.05);padding:22px 20px;color:#e2e8f0;display:flex;align-items:center;gap:16px;opacity:0;transform:translateY(16px) scale(.9);transition:opacity .32s ease,transform .42s cubic-bezier(.18,.85,.24,1.2)}
+      .levelUpOverlayCard::before{content:'';position:absolute;inset:-18%;z-index:-1;background:radial-gradient(circle,rgba(56,189,248,.26) 0%,rgba(59,130,246,.16) 40%,rgba(14,116,144,0) 72%);opacity:0;transform:scale(.86)}
       #levelUpOverlayRoot.open .levelUpOverlayCard{opacity:1;transform:translateY(0) scale(1)}
-      .levelUpOverlayText{min-width:0;display:flex;flex-direction:column;gap:2px}
-      .levelUpTag{font-size:11px;font-weight:900;letter-spacing:.8px;text-transform:uppercase;color:#67e8f9}
-      .levelUpTitle{font-size:19px;font-weight:900;line-height:1.1;color:#fff}
-      .levelUpSub{font-size:13px;font-weight:700;color:#cbd5e1}
-      .levelUpXp{font-size:11px;color:#93c5fd}
-      .pickupProgressReward{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom, 0px) + 194px);width:min(248px,calc(100vw - 26px));transform:translate(-50%,20px) scale(.94);opacity:0;z-index:9802;pointer-events:none;display:flex;flex-direction:column;align-items:center;gap:5px;color:#e2e8f0;transition:opacity .34s ease,transform .34s cubic-bezier(.2,.75,.22,1.12);text-shadow:0 4px 18px rgba(2,6,23,.5),0 1px 1px rgba(2,6,23,.45)}
+      #levelUpOverlayRoot.open .levelUpOverlayCard::before{animation:levelUpOverlayBurst .9s ease-out .1s both}
+      .levelUpOverlayCard .rankBadgeIconWrap{width:74px;height:74px;flex:0 0 74px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.42),0 12px 26px rgba(2,6,23,.5),0 0 30px rgba(56,189,248,.34)}
+      .levelUpOverlayCard .rankBadgeIconWrap svg{width:42px;height:42px}
+      .levelUpOverlayText{min-width:0;display:flex;flex-direction:column;gap:4px}
+      .levelUpTag{font-size:12px;font-weight:900;letter-spacing:1px;text-transform:uppercase;color:#67e8f9}
+      .levelUpTitle{font-size:24px;font-weight:900;line-height:1.04;color:#fff}
+      .levelUpSub{font-size:15px;font-weight:800;color:#c7d2fe}
+      .levelUpXp{font-size:13px;font-weight:800;color:#93c5fd}
+      .pickupProgressReward{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom, 0px) + var(--pickup-reward-bottom, 240px));width:min(320px,calc(100vw - 22px));transform:translate(-50%,26px) scale(.9);opacity:0;z-index:9802;pointer-events:none;display:block;color:#e2e8f0;transition:opacity .42s ease,transform .42s cubic-bezier(.16,.82,.24,1.18);text-shadow:0 4px 20px rgba(2,6,23,.62),0 1px 1px rgba(2,6,23,.45)}
+      .pickupProgressRewardCard{position:relative;overflow:hidden;border-radius:22px;padding:14px 14px 13px;background:linear-gradient(160deg,rgba(2,6,23,.94) 0%,rgba(15,23,42,.92) 50%,rgba(30,64,175,.44) 100%);border:1px solid rgba(125,211,252,.34);box-shadow:0 20px 46px rgba(2,6,23,.56),0 0 34px rgba(56,189,248,.28),inset 0 1px 0 rgba(255,255,255,.1);display:flex;flex-direction:column;align-items:center;gap:7px}
+      .pickupProgressRewardCard::before{content:'';position:absolute;inset:-24% -12% auto -12%;height:86%;background:radial-gradient(circle at top,rgba(125,211,252,.28) 0%,rgba(56,189,248,0) 65%);opacity:.7;pointer-events:none}
       .pickupProgressReward.show{opacity:1;transform:translate(-50%,0) scale(1)}
-      .pickupProgressRewardLabel,.pickupProgressRewardLevel,.pickupProgressRewardRank,.pickupProgressRewardFoot{opacity:0;transform:translateY(6px);transition:opacity .24s ease,transform .24s ease}
-      .pickupProgressReward.show .pickupProgressRewardLabel{opacity:1;transform:translateY(0);transition-delay:.08s}
+      .pickupProgressRewardKicker,.pickupProgressRewardXp,.pickupProgressRewardLevel,.pickupProgressRewardRank,.pickupProgressRewardFoot{opacity:0;transform:translateY(7px);transition:opacity .24s ease,transform .24s ease}
+      .pickupProgressReward.show .pickupProgressRewardKicker{opacity:1;transform:translateY(0);transition-delay:.05s}
+      .pickupProgressReward.show .pickupProgressRewardXp{opacity:1;transform:translateY(0);transition-delay:.11s}
       .pickupProgressReward.show .pickupProgressRewardLevel,.pickupProgressReward.show .pickupProgressRewardRank{opacity:1;transform:translateY(0);transition-delay:.18s}
-      .pickupProgressReward.show .pickupProgressRewardFoot{opacity:1;transform:translateY(0);transition-delay:.22s}
-      .pickupProgressRewardLabel{font-size:11px;font-weight:900;letter-spacing:.9px;text-transform:uppercase;color:#dbeafe}
-      .pickupProgressRewardIcon{position:relative;display:grid;place-items:center;opacity:0;transform:scale(.76)}
-      .pickupProgressReward.show .pickupProgressRewardIcon{opacity:1;animation:pickupProgressRewardIconPop .56s cubic-bezier(.2,.8,.2,1) .12s both}
-      .pickupProgressRewardIcon::before{content:'';position:absolute;inset:-9px;border-radius:999px;background:radial-gradient(circle,rgba(110,231,255,.42) 0%,rgba(56,189,248,.2) 45%,rgba(56,189,248,0) 72%);filter:blur(1px);opacity:0;transform:scale(.6)}
-      .pickupProgressReward.show .pickupProgressRewardIcon::before{animation:pickupProgressRewardGlow .62s ease-out .16s both}
-      .pickupProgressReward .rankBadgeIconWrap{box-shadow:inset 0 0 0 1px rgba(255,255,255,.38),0 0 0 1px rgba(15,23,42,.2),0 10px 24px rgba(2,6,23,.44),0 0 22px rgba(56,189,248,.33)}
-      .pickupProgressRewardLevel{font-size:14px;font-weight:900;line-height:1.08;color:#fff}
-      .pickupProgressRewardRank{margin-top:-2px;font-size:12px;font-weight:800;line-height:1.18;color:#bfdbfe;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-      .pickupProgressRewardBar{width:min(204px,100%);height:5px;border-radius:999px;background:rgba(148,163,184,.26);box-shadow:0 0 0 1px rgba(148,163,184,.22),0 0 14px rgba(59,130,246,.26);overflow:hidden}
-      .pickupProgressRewardFill{height:100%;width:0;background:linear-gradient(90deg,#38bdf8 0%,#3b82f6 52%,#22c55e 100%);border-radius:999px;transition:width .48s cubic-bezier(.2,.84,.2,1);transition-delay:.22s}
-      .pickupProgressRewardFoot{font-size:11px;line-height:1.18;font-weight:800;color:#dbeafe;text-align:center}
-      @keyframes pickupProgressRewardIconPop{0%{transform:scale(.72)}42%{transform:scale(1.14)}100%{transform:scale(1)}}
-      @keyframes pickupProgressRewardGlow{0%{opacity:0;transform:scale(.55)}36%{opacity:1;transform:scale(1.02)}100%{opacity:0;transform:scale(1.22)}}
+      .pickupProgressReward.show .pickupProgressRewardFoot{opacity:1;transform:translateY(0);transition-delay:.25s}
+      .pickupProgressRewardKicker{font-size:12px;font-weight:900;letter-spacing:1px;text-transform:uppercase;color:#dbeafe}
+      .pickupProgressRewardXp{font-size:16px;font-weight:900;line-height:1;color:#67e8f9}
+      .pickupProgressRewardIcon{position:relative;display:grid;place-items:center;opacity:0;transform:scale(.74)}
+      .pickupProgressReward.show .pickupProgressRewardIcon{opacity:1;animation:pickupProgressRewardIconPop .62s cubic-bezier(.2,.8,.2,1) .1s both}
+      .pickupProgressRewardIcon::before{content:'';position:absolute;inset:-13px;border-radius:999px;background:radial-gradient(circle,rgba(110,231,255,.5) 0%,rgba(56,189,248,.24) 46%,rgba(56,189,248,0) 72%);filter:blur(1px);opacity:0;transform:scale(.58)}
+      .pickupProgressReward.show .pickupProgressRewardIcon::before{animation:pickupProgressRewardGlow .76s ease-out .14s both}
+      .pickupProgressReward .rankBadgeIconWrap{width:70px;height:70px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.44),0 0 0 1px rgba(15,23,42,.2),0 14px 30px rgba(2,6,23,.52),0 0 26px rgba(56,189,248,.35)}
+      .pickupProgressReward .rankBadgeIconWrap svg{width:40px;height:40px}
+      .pickupProgressRewardLevel{font-size:22px;font-weight:900;line-height:1.08;color:#fff}
+      .pickupProgressRewardRank{margin-top:-1px;font-size:16px;font-weight:800;line-height:1.18;color:#bfdbfe;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .pickupProgressRewardBar{width:min(248px,100%);height:9px;border-radius:999px;background:rgba(148,163,184,.3);box-shadow:0 0 0 1px rgba(148,163,184,.25),0 0 16px rgba(59,130,246,.3);overflow:hidden}
+      .pickupProgressRewardFill{height:100%;width:0;background:linear-gradient(90deg,#22d3ee 0%,#3b82f6 56%,#22c55e 100%);border-radius:999px;transition:width .62s cubic-bezier(.2,.84,.2,1);transition-delay:.2s}
+      .pickupProgressRewardFoot{font-size:12px;line-height:1.22;font-weight:800;color:#dbeafe;text-align:center}
+      @keyframes pickupProgressRewardIconPop{0%{transform:scale(.68)}40%{transform:scale(1.18)}100%{transform:scale(1)}}
+      @keyframes pickupProgressRewardGlow{0%{opacity:0;transform:scale(.5)}34%{opacity:1;transform:scale(1.04)}100%{opacity:0;transform:scale(1.3)}}
+      @keyframes levelUpOverlayBurst{0%{opacity:0;transform:scale(.82)}38%{opacity:1;transform:scale(1.02)}100%{opacity:0;transform:scale(1.24)}}
       .driverProfileClose{border:0;background:#e5e7eb;color:#111827;border-radius:10px;padding:7px 9px;font-size:13px}
       .driverProfileScroll{overflow:auto;-webkit-overflow-scrolling:touch;padding:0 11px 10px;min-height:0}
       .driverProfileSectionTitle{font-size:12px;font-weight:700;color:#111827;margin:2px 0 6px}
@@ -2724,6 +2734,8 @@
   let progressionSyncTimer = null;
   let progressionSyncInFlight = false;
   let levelUpOverlayHideTimer = null;
+  let lastLevelUpPopupKey = '';
+  let lastLevelUpPopupAt = 0;
 
   function progressionLastSeenStorageKey(userId) {
     return `progression_last_seen_level_v1_${String(userId || '').trim()}`;
@@ -2751,20 +2763,56 @@
     }
   }
 
+  function updatePickupRewardLayout() {
+    const root = document.documentElement;
+    const viewportHeight = Number(window.visualViewport?.height) || window.innerHeight || 0;
+    const floorBottom = 240;
+    const clearance = 28;
+    const tops = [];
+    const pushTop = (sel) => {
+      const node = document.querySelector(sel);
+      if (!node || typeof node.getBoundingClientRect !== 'function') return;
+      const rect = node.getBoundingClientRect();
+      if (Number.isFinite(rect?.top)) tops.push(rect.top);
+    };
+    pushTop('#dock');
+    pushTop('#sliderWrap');
+    pushTop('#pickupFab');
+    document.querySelectorAll('.dockDrawer.open,.dockDrawer[open],#dockDrawer.open,#dockDrawer[open]').forEach((node) => {
+      if (!node || typeof node.getBoundingClientRect !== 'function') return;
+      const rect = node.getBoundingClientRect();
+      if (Number.isFinite(rect?.top)) tops.push(rect.top);
+    });
+    const clusterTop = tops.length ? Math.min(...tops) : null;
+    let bottom = floorBottom;
+    if (Number.isFinite(viewportHeight) && viewportHeight > 0 && Number.isFinite(clusterTop)) {
+      bottom = Math.max(floorBottom, Math.round((viewportHeight - clusterTop) + clearance));
+    }
+    root.style.setProperty('--pickup-reward-bottom', `${bottom}px`);
+    return bottom;
+  }
+
   function ensurePickupProgressReward() {
     let el = document.getElementById('pickupProgressReward');
-    if (el) return el;
+    if (el) {
+      updatePickupRewardLayout();
+      return el;
+    }
     el = document.createElement('div');
     el.id = 'pickupProgressReward';
     el.className = 'pickupProgressReward';
     el.setAttribute('aria-hidden', 'true');
-    el.innerHTML = `<div class="pickupProgressRewardLabel">XP Earned</div>
+    el.innerHTML = `<div class="pickupProgressRewardCard">
+      <div class="pickupProgressRewardKicker" id="pickupProgressRewardKicker">Trip Saved</div>
       <div class="pickupProgressRewardIcon" id="pickupProgressRewardIcon"></div>
+      <div class="pickupProgressRewardXp" id="pickupProgressRewardXp"></div>
       <div class="pickupProgressRewardLevel" id="pickupProgressRewardLevel"></div>
       <div class="pickupProgressRewardRank" id="pickupProgressRewardRank"></div>
       <div class="pickupProgressRewardBar"><div class="pickupProgressRewardFill" id="pickupProgressRewardFill"></div></div>
-      <div class="pickupProgressRewardFoot" id="pickupProgressRewardFoot"></div>`;
+      <div class="pickupProgressRewardFoot" id="pickupProgressRewardFoot"></div>
+    </div>`;
     document.body.appendChild(el);
+    updatePickupRewardLayout();
     return el;
   }
 
@@ -2797,16 +2845,20 @@
       || progression?.max_level_reached === true
       || (Number.isFinite(xpToNext) && xpToNext <= 0);
     const footer = isMaxLevel
-      ? `${earnedLabel} • MAX LEVEL`
-      : `${earnedLabel} • ${formatProgressNumber(Number.isFinite(xpToNext) && xpToNext > 0 ? xpToNext : 0, { maxFractionDigits: 0 })} XP to Level ${safeLevel + 1}`;
+      ? 'MAX LEVEL'
+      : `${formatProgressNumber(Number.isFinite(xpToNext) && xpToNext > 0 ? xpToNext : 0, { maxFractionDigits: 0 })} XP to Level ${safeLevel + 1}`;
     const pct = computeProgressRatio(progression);
+    const kickerEl = document.getElementById('pickupProgressRewardKicker');
     const iconEl = document.getElementById('pickupProgressRewardIcon');
+    const xpEl = document.getElementById('pickupProgressRewardXp');
     const levelEl = document.getElementById('pickupProgressRewardLevel');
     const rankEl = document.getElementById('pickupProgressRewardRank');
     const fillEl = document.getElementById('pickupProgressRewardFill');
     const footEl = document.getElementById('pickupProgressRewardFoot');
-    if (!iconEl || !levelEl || !rankEl || !fillEl || !footEl) return false;
-    iconEl.innerHTML = renderRankBadgeIcon(progression?.rank_icon_key, { compact: true });
+    if (!kickerEl || !iconEl || !xpEl || !levelEl || !rankEl || !fillEl || !footEl) return false;
+    kickerEl.textContent = 'Trip Saved';
+    iconEl.innerHTML = renderRankBadgeIcon(progression?.rank_icon_key, { compact: false });
+    xpEl.textContent = earnedLabel;
     levelEl.textContent = `Level ${safeLevel}`;
     rankEl.textContent = String(rankName || 'Rookie');
     fillEl.style.width = '0%';
@@ -2822,6 +2874,7 @@
   function showPickupProgressReward(payload = {}) {
     const rendered = renderPickupProgressReward(payload);
     if (!rendered) return;
+    updatePickupRewardLayout();
     const el = ensurePickupProgressReward();
     el.classList.remove('show');
     void el.offsetWidth;
@@ -2832,7 +2885,7 @@
       el.classList.remove('show');
       el.setAttribute('aria-hidden', 'true');
       showPickupProgressReward._timer = null;
-    }, 2800);
+    }, 3600);
   }
 
   function ensureLevelUpOverlay() {
@@ -2846,12 +2899,30 @@
     return root;
   }
 
+  function shouldSkipLevelUpPopup(payload = {}) {
+    const safeLevel = Number(payload?.new_level ?? payload?.level);
+    const userId = Number(window?.me?.id);
+    if (!Number.isFinite(safeLevel) || safeLevel <= 0) return false;
+    const key = `${Number.isFinite(userId) ? userId : 'anon'}:${Math.floor(safeLevel)}`;
+    const now = Date.now();
+    if (key === lastLevelUpPopupKey && (now - lastLevelUpPopupAt) < 3000) return true;
+    lastLevelUpPopupKey = key;
+    lastLevelUpPopupAt = now;
+    return false;
+  }
+
   function showLevelUpOverlay(payload = {}) {
+    if (shouldSkipLevelUpPopup(payload)) return;
     const root = ensureLevelUpOverlay();
     const card = document.getElementById('levelUpOverlayCard');
     if (!card) return;
-    const level = Number(payload?.level);
+    const level = Number(payload?.new_level ?? payload?.level);
+    const previousLevel = Number(payload?.previous_level);
     const safeLevel = Number.isFinite(level) && level > 0 ? Math.floor(level) : 1;
+    const safePrevLevel = Number.isFinite(previousLevel) && previousLevel > 0 ? Math.floor(previousLevel) : null;
+    const transitionLabel = (safePrevLevel && safePrevLevel !== safeLevel)
+      ? `Level ${safePrevLevel} → ${safeLevel}`
+      : `Level ${safeLevel}`;
     const rankName = normalizeDriverTier(payload?.rank_name || payload?.title || 'New Rank Reached');
     const xpAwarded = Number(payload?.xp_awarded);
     const xpLine = Number.isFinite(xpAwarded) && xpAwarded > 0
@@ -2859,9 +2930,9 @@
       : '';
     card.innerHTML = `${renderRankBadgeIcon(payload?.rank_icon_key, { compact: false })}
       <div class="levelUpOverlayText">
-        <div class="levelUpTag">Rank Promoted</div>
-        <div class="levelUpTitle">Level Up</div>
-        <div class="levelUpSub">${escapeHtml(rankName)} • Level ${safeLevel}</div>
+        <div class="levelUpTag">Level Up</div>
+        <div class="levelUpTitle">Promotion Unlocked</div>
+        <div class="levelUpSub">${escapeHtml(rankName)} • ${escapeHtml(transitionLabel)}</div>
         ${xpLine}
       </div>`;
     root.classList.add('open');
@@ -2871,7 +2942,7 @@
       root.classList.remove('open');
       root.setAttribute('aria-hidden', 'true');
       levelUpOverlayHideTimer = null;
-    }, 3000);
+    }, 3900);
   }
 
   async function fetchMyProgression() {
@@ -2897,7 +2968,12 @@
         return progression;
       }
       if ((forcePopupCheck || prev !== null) && safeLevel > prev) {
-        showLevelUpOverlay(progression);
+        showLevelUpOverlay({
+          ...progression,
+          previous_level: prev,
+          new_level: safeLevel,
+          leveled_up: true,
+        });
       }
       writeStoredProgressionLevel(userId, safeLevel);
       return progression;
@@ -2932,7 +3008,13 @@
       writeStoredProgressionLevel(meId, Math.floor(nextLevel));
     }
     if (leveledUp) {
-      showLevelUpOverlay(progressionPayload);
+      showLevelUpOverlay({
+        ...progressionPayload,
+        previous_level: Number(payload?.previous_level),
+        new_level: Number(payload?.new_level ?? progressionPayload?.level),
+        xp_awarded: payload?.xp_awarded ?? progressionPayload?.xp_awarded,
+        leveled_up: true,
+      });
     }
   }
 
@@ -3402,6 +3484,10 @@
   initDockScroller();
   ensureDriverProfileUI();
   ensureLevelUpOverlay();
+  ensurePickupProgressReward();
+  window.addEventListener('resize', updatePickupRewardLayout);
+  window.addEventListener('orientationchange', updatePickupRewardLayout);
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', updatePickupRewardLayout);
 
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible' && typeof authHeaderOK === 'function' && authHeaderOK()) {
