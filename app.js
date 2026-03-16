@@ -2078,6 +2078,7 @@ function initMap() {
       applyDriverLabelZoomStyles();
     });
     map.on("zoom", () => {
+      if (authHeaderOK()) scheduleAdaptivePresenceRender();
       applyDriverLabelZoomStyles();
     });
     map.on("zoomend", () => {
@@ -4281,7 +4282,8 @@ function makeNavIcon() {
       mode: me?.map_identity_mode,
       zoom: map?.getZoom?.(),
       leaderboardBadgeCode: me?.leaderboard_badge_code,
-      leaderboardHasCrown: !!me?.leaderboard_has_crown
+      leaderboardHasCrown: !!me?.leaderboard_has_crown,
+      orbitMeta: lastSelfOrbitMeta
     })
     : `<div id="navMeName" class="meName" style="display:${myName ? "block" : "none"}">${escapeHtml(myName)}</div>`;
   const el = document.createElement("div");
@@ -4346,7 +4348,8 @@ function refreshNavNameLabel() {
         mode: me?.map_identity_mode,
         zoom: map?.getZoom?.(),
         leaderboardBadgeCode: me?.leaderboard_badge_code,
-        leaderboardHasCrown: !!me?.leaderboard_has_crown
+        leaderboardHasCrown: !!me?.leaderboard_has_crown,
+        orbitMeta: lastSelfOrbitMeta
       })
     );
   } else {
@@ -5583,26 +5586,17 @@ const PRESENCE_MEDIUM_RICH_LIMIT = 24;
 const PRESENCE_HEAVY_RICH_LIMIT = 10;
 const PRESENCE_VIEWPORT_BUFFER_RATIO = 0.18;
 
-const LABEL_OFFSETS = [
-  [44, 0],
-  [-44, 0],
-  [0, 30],
-  [0, -30],
-  [34, 20],
-  [-34, 20],
-  [34, -20],
-  [-34, -20],
+const PRESENCE_LABEL_COLLISION_PX = 28;
+const PRESENCE_SLOT_SEQUENCE = [
+  { side: "E", angleDeg: 0 },
+  { side: "W", angleDeg: 180 },
+  { side: "N", angleDeg: -90 },
+  { side: "S", angleDeg: 90 },
+  { side: "NE", angleDeg: -45 },
+  { side: "NW", angleDeg: -135 },
+  { side: "SE", angleDeg: 45 },
+  { side: "SW", angleDeg: 135 },
 ];
-
-const SELF_COLLISION_THRESHOLD_PX = 44;
-const SELF_COLLISION_OFFSET_PX = 64;
-const SELF_LABEL_SIDE = "right";
-
-function sideFromOffsetX(dx, fallback = "right") {
-  if (dx > 0) return "right";
-  if (dx < 0) return "left";
-  return fallback;
-}
 
 function syncGhostUI() {
   const ghostOn = !!me?.ghost_mode;
@@ -5944,12 +5938,12 @@ function applyDriverLabelZoomStyles() {
   }
 }
 
-function makeDriverIcon(name, headingDeg, avatarUrl = "", mode = "name", overlapMeta = null, leaderboardBadgeCode = '', leaderboardHasCrown = false) {
+function makeDriverIcon(name, headingDeg, avatarUrl = "", mode = "name", orbitMeta = null, leaderboardBadgeCode = '', leaderboardHasCrown = false) {
   const safe = (name || "Driver").trim() || "Driver";
   const rot = Number.isFinite(headingDeg) ? headingDeg : 0;
   const el = document.createElement("div");
   const driverLabelHTML = (typeof window !== "undefined" && typeof window.mapIdentityRenderDriverLabel === "function")
-    ? window.mapIdentityRenderDriverLabel({ name: safe, avatarUrl, mode, zoom: map?.getZoom?.(), overlapMeta, leaderboardBadgeCode, leaderboardHasCrown })
+    ? window.mapIdentityRenderDriverLabel({ name: safe, avatarUrl, mode, zoom: map?.getZoom?.(), orbitMeta, leaderboardBadgeCode, leaderboardHasCrown })
     : `<div class="otherDrvName">${escapeHtml(safe)}</div>`;
   el.className = "otherDrvWrap";
   el.innerHTML = `
@@ -5976,10 +5970,12 @@ function clearOtherDrivers() {
   presenceLiteSourceFingerprint = '';
 }
 
-function buildDriverMarkerVisualSignature(userId, name, avatarUrl = "", mode = "name", overlapMeta = null, leaderboardBadgeCode = '', leaderboardHasCrown = false) {
-  const overlapCount = Number.isFinite(overlapMeta?.count) ? overlapMeta.count : "";
-  const overlapLeader = overlapMeta?.leader ? "1" : "0";
-  const overlapSuppressLabel = overlapMeta?.suppressLabel ? "1" : "0";
+function buildDriverMarkerVisualSignature(userId, name, avatarUrl = "", mode = "name", orbitMeta = null, leaderboardBadgeCode = '', leaderboardHasCrown = false) {
+  const orbitIndex = Number.isFinite(orbitMeta?.index) ? orbitMeta.index : "";
+  const orbitCount = Number.isFinite(orbitMeta?.count) ? orbitMeta.count : "";
+  const orbitAngle = Number.isFinite(orbitMeta?.angleDeg) ? orbitMeta.angleDeg : "";
+  const orbitSide = orbitMeta?.side || "";
+  const orbitRing = Number.isFinite(orbitMeta?.ring) ? orbitMeta.ring : "";
   return [
     String(userId ?? ""),
     String(name ?? ""),
@@ -5987,13 +5983,15 @@ function buildDriverMarkerVisualSignature(userId, name, avatarUrl = "", mode = "
     String(mode ?? "name"),
     String(leaderboardBadgeCode ?? ""),
     leaderboardHasCrown ? "1" : "0",
-    String(overlapCount),
-    String(overlapLeader),
-    String(overlapSuppressLabel),
+    String(orbitIndex),
+    String(orbitCount),
+    String(orbitAngle),
+    String(orbitSide),
+    String(orbitRing),
   ].join("|");
 }
 
-function upsertDriverMarker(userId, name, lat, lng, heading, avatarUrl = "", mode = "name", overlapMeta = null, leaderboardBadgeCode = '', leaderboardHasCrown = false) {
+function upsertDriverMarker(userId, name, lat, lng, heading, avatarUrl = "", mode = "name", orbitMeta = null, leaderboardBadgeCode = '', leaderboardHasCrown = false) {
   if (!Number.isFinite(lat) || !Number.isFinite(lng) || !map) return;
   if (!userId) return;
 
@@ -6002,7 +6000,7 @@ function upsertDriverMarker(userId, name, lat, lng, heading, avatarUrl = "", mod
     name,
     avatarUrl,
     mode,
-    overlapMeta,
+    orbitMeta,
     leaderboardBadgeCode,
     leaderboardHasCrown
   );
@@ -6013,7 +6011,7 @@ function upsertDriverMarker(userId, name, lat, lng, heading, avatarUrl = "", mod
     const previousVisualSig = driverMarkerVisualSignature.get(userId) || "";
     if (visualSig !== previousVisualSig) {
       const el = existing.getElement();
-      const newEl = makeDriverIcon(name || `Driver ${userId}`, heading, avatarUrl, mode, overlapMeta, leaderboardBadgeCode, leaderboardHasCrown);
+      const newEl = makeDriverIcon(name || `Driver ${userId}`, heading, avatarUrl, mode, orbitMeta, leaderboardBadgeCode, leaderboardHasCrown);
       el.innerHTML = newEl.innerHTML;
       wireProfileOpenTargets(el, userId, { isSelf: false });
       driverMarkerVisualSignature.set(userId, visualSig);
@@ -6027,7 +6025,7 @@ function upsertDriverMarker(userId, name, lat, lng, heading, avatarUrl = "", mod
     return;
   }
 
-  const el = makeDriverIcon(name || `Driver ${userId}`, heading, avatarUrl, mode, overlapMeta, leaderboardBadgeCode, leaderboardHasCrown);
+  const el = makeDriverIcon(name || `Driver ${userId}`, heading, avatarUrl, mode, orbitMeta, leaderboardBadgeCode, leaderboardHasCrown);
   wireProfileOpenTargets(el, userId, { isSelf: false });
   // A custom HTML marker's triangle arrow sits slightly below the centre of its
   // 40×40 container (the tip is ~7 px below the vertical midpoint). When the
@@ -6155,6 +6153,83 @@ function chooseRichPresenceUserIds(rows, mode) {
   return new Set(sorted.slice(0, maxRich).map((row) => String(row.uid)));
 }
 
+function clusterPresenceByScreenPosition(rows, selfPos) {
+  const richRows = Array.isArray(rows) ? rows : [];
+  const nodes = [];
+
+  for (const row of richRows) {
+    const lat = Number(row?.lat);
+    const lng = Number(row?.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+    const point = map?.project?.([lng, lat]);
+    if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) continue;
+    nodes.push({ kind: 'row', row, id: String(row?.uid ?? ''), x: point.x, y: point.y });
+  }
+
+  const selfLat = Number(selfPos?.lat);
+  const selfLng = Number(selfPos?.lng);
+  if (Number.isFinite(selfLat) && Number.isFinite(selfLng)) {
+    const point = map?.project?.([selfLng, selfLat]);
+    if (point && Number.isFinite(point.x) && Number.isFinite(point.y)) {
+      const selfId = String(me?.id ?? '__self__');
+      nodes.push({ kind: 'self', id: selfId, x: point.x, y: point.y });
+    }
+  }
+
+  for (const row of richRows) row.orbitMeta = null;
+  lastSelfOrbitMeta = null;
+
+  if (!nodes.length) return;
+
+  const thresholdSq = PRESENCE_LABEL_COLLISION_PX * PRESENCE_LABEL_COLLISION_PX;
+  const visited = new Set();
+
+  for (let i = 0; i < nodes.length; i += 1) {
+    if (visited.has(i)) continue;
+    const queue = [i];
+    visited.add(i);
+    const memberIndexes = [];
+
+    while (queue.length) {
+      const idx = queue.shift();
+      memberIndexes.push(idx);
+      const a = nodes[idx];
+      for (let j = 0; j < nodes.length; j += 1) {
+        if (visited.has(j)) continue;
+        const b = nodes[j];
+        const dx = a.x - b.x;
+        const dy = a.y - b.y;
+        if ((dx * dx) + (dy * dy) <= thresholdSq) {
+          visited.add(j);
+          queue.push(j);
+        }
+      }
+    }
+
+    const members = memberIndexes.map((idx) => nodes[idx]).sort((a, b) => a.id.localeCompare(b.id));
+    const count = members.length;
+    if (count <= 1) continue;
+
+    members.forEach((member, slotIndex) => {
+      const seqIndex = slotIndex % PRESENCE_SLOT_SEQUENCE.length;
+      const seq = PRESENCE_SLOT_SEQUENCE[seqIndex];
+      const ring = Math.floor(slotIndex / PRESENCE_SLOT_SEQUENCE.length);
+      const meta = {
+        index: slotIndex,
+        count,
+        side: seq.side,
+        angleDeg: seq.angleDeg,
+        ring,
+      };
+      if (member.kind === 'row') {
+        member.row.orbitMeta = meta;
+      } else {
+        lastSelfOrbitMeta = meta;
+      }
+    });
+  }
+}
+
 function ensurePresenceLiteSourceAndLayers() {
   if (!map || !mapReady) return;
   if (!map.getSource('presence-lite')) {
@@ -6273,6 +6348,11 @@ function renderAdaptivePresenceFromCache() {
     }
   }
 
+  const selfPos = (userLatLng && Number.isFinite(userLatLng.lat) && Number.isFinite(userLatLng.lng))
+    ? { lat: userLatLng.lat, lng: userLatLng.lng }
+    : null;
+  clusterPresenceByScreenPosition(richRows, selfPos);
+
   for (const row of richRows) {
     upsertDriverMarker(
       row.uid,
@@ -6282,7 +6362,7 @@ function renderAdaptivePresenceFromCache() {
       row.heading,
       row.avatarUrl,
       row.mode,
-      row.overlapMeta || null,
+      row.orbitMeta || null,
       row.leaderboardBadgeCode || '',
       !!row.leaderboardHasCrown
     );
@@ -6322,6 +6402,10 @@ function renderAdaptivePresenceFromCache() {
       source.setData(liteFc);
       presenceLiteSourceFingerprint = nextFingerprint;
     }
+  }
+
+  if (typeof window !== "undefined" && typeof window.mapIdentityApplySelfOrbit === "function") {
+    window.mapIdentityApplySelfOrbit(lastSelfOrbitMeta);
   }
 
   applyDriverLabelZoomStyles();
@@ -6389,46 +6473,6 @@ async function pullPresenceAll() {
         leaderboardHasCrown: !!it.leaderboard_has_crown,
         updatedAt: it.updated_at ?? it.updated_at_unix ?? it.ts_unix ?? null,
       });
-    }
-
-    const overlapPrecision = 6; // ~0.11m precision; only group practically identical coordinates
-    const groups = new Map();
-    const groupKey = (lat, lng) => `${Number(lat).toFixed(overlapPrecision)}:${Number(lng).toFixed(overlapPrecision)}`;
-
-    for (const row of candidates) {
-      const key = groupKey(row.lat, row.lng);
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(row);
-    }
-
-    for (const members of groups.values()) {
-      const sortable = members
-        .map((row) => ({ id: String(row.uid), row }))
-        .sort((a, b) => a.id.localeCompare(b.id));
-      const count = sortable.length;
-      if (count <= 1) {
-        members.forEach((row) => {
-          row.overlapMeta = {
-            count: 1,
-            leader: true,
-            suppressLabel: false,
-          };
-        });
-        continue;
-      }
-
-      sortable.forEach((entry, idx) => {
-        entry.row.overlapMeta = {
-          count,
-          leader: idx === 0,
-          suppressLabel: idx !== 0,
-        };
-      });
-    }
-
-    if (typeof window !== "undefined" && typeof window.mapIdentityApplySelfOrbit === "function") {
-      lastSelfOrbitMeta = null;
-      window.mapIdentityApplySelfOrbit(null);
     }
 
     cachedPresenceRows = candidates;
