@@ -1416,6 +1416,49 @@ const dockDrawerBody = document.getElementById("dockDrawerBody");
 const dockDrawerClose = document.getElementById("dockDrawerClose");
 const dockBackdrop = document.getElementById("dockBackdrop");
 
+
+function updateResponsiveLayoutVars() {
+  const root = document.documentElement;
+  if (!root) return;
+
+  const dock = document.getElementById('dock');
+  const slider = document.getElementById('sliderWrap');
+  const controlStack = document.querySelector('.mapControlStack');
+  const weather = document.getElementById('weatherBadge');
+  const online = document.getElementById('onlineBadge');
+  const tendencyMeter = document.getElementById('dayTendencyMeter');
+
+  const dockHeight = dock ? Math.round(dock.getBoundingClientRect().height) : 0;
+  const sliderHeight = slider ? Math.round(slider.getBoundingClientRect().height) : 0;
+  const controlHeight = controlStack ? Math.round(controlStack.getBoundingClientRect().height) : 0;
+  const weatherHeight = weather ? Math.round(weather.getBoundingClientRect().height) : 0;
+  const onlineHeight = online ? Math.round(online.getBoundingClientRect().height) : 0;
+
+  root.style.setProperty('--ui-live-dock-height', `${dockHeight}px`);
+  root.style.setProperty('--ui-live-slider-height', `${sliderHeight}px`);
+  root.style.setProperty('--ui-live-map-controls-height', `${controlHeight}px`);
+
+  const stackBottom = `calc(var(--ui-safe-bottom) + ${Math.max(92, dockHeight + 18)}px)`;
+  root.style.setProperty('--ui-control-stack-bottom', stackBottom);
+
+  const chatBottom = `calc(var(--ui-safe-bottom) + ${Math.max(176, dockHeight + sliderHeight + 42)}px)`;
+  const musicBottom = `calc(var(--ui-safe-bottom) + ${Math.max(154, dockHeight + sliderHeight + 20)}px)`;
+  root.style.setProperty('--ui-chat-drawer-bottom', chatBottom);
+  root.style.setProperty('--ui-music-drawer-bottom', musicBottom);
+
+  const topBadgeStack = Math.max(weatherHeight, onlineHeight);
+  root.style.setProperty('--ui-tendency-top', `calc(var(--ui-safe-top) + ${Math.max(54, topBadgeStack + 18)}px)`);
+
+  if (tendencyMeter) {
+    tendencyMeter.style.left = 'var(--ui-tendency-left)';
+    tendencyMeter.style.top = 'var(--ui-tendency-top)';
+  }
+}
+
+if (typeof window !== 'undefined') {
+  window.updateResponsiveLayoutVars = updateResponsiveLayoutVars;
+}
+
 const USER_AGENT = typeof navigator !== "undefined" ? navigator.userAgent || "" : "";
 const IS_TESLA_BROWSER = /\bTesla\//i.test(USER_AGENT);
 const DRAWER_AUTO_MINIMIZE_MS = 5000;
@@ -1494,6 +1537,7 @@ function openDrawer(key, title, html) {
     window.syncChatPollingState();
   }
   touchDrawerAutoMinimizeTimer();
+  updateResponsiveLayoutVars();
 }
 
 function closeDrawer() {
@@ -1509,6 +1553,7 @@ function closeDrawer() {
   if (typeof window !== "undefined" && typeof window.syncChatPollingState === "function") {
     window.syncChatPollingState();
   }
+  updateResponsiveLayoutVars();
 }
 
 function toggleDrawer(key, title, html) {
@@ -2116,6 +2161,7 @@ function initMap() {
     setTimeout(() => map.triggerRepaint(), 800);
 
     applyDriverLabelZoomStyles();
+    updateResponsiveLayoutVars();
 
     if (pendingFrame) {
       renderFrame(pendingFrame);
@@ -4768,6 +4814,7 @@ document.addEventListener("visibilitychange", () => {
     refreshCurrentFrame().catch(() => {});
     tickNYCClockAndAdvanceIfNeeded().catch(() => {});
     updateWeatherNow().catch(() => {});
+    updateResponsiveLayoutVars();
     refreshPickupOverlay({ force: true }).catch(() => {});
     pullPresenceAll().catch(() => {});
     if (timeline.length) bubbleUpdateNow();
@@ -4963,6 +5010,7 @@ function scheduleWeatherUpdateSoon() {
   wxNextUpdateTimer = setTimeout(() => {
     wxNextUpdateTimer = null;
     updateWeatherNow().catch(() => {});
+    updateResponsiveLayoutVars();
   }, 2500);
 }
 async function updateWeatherNow() {
@@ -5006,6 +5054,7 @@ async function updateWeatherNow() {
 }
 setInterval(() => {
   updateWeatherNow().catch(() => {});
+  updateResponsiveLayoutVars();
 }, 10 * 60 * 1000);
 
 function updateWxParticlesForState() {
@@ -6713,10 +6762,19 @@ setInterval(() => {
   pullPresenceAll().catch(() => {});
 }, PRESENCE_PULL_MS);
 
+window.addEventListener('resize', updateResponsiveLayoutVars);
+window.addEventListener('orientationchange', updateResponsiveLayoutVars);
+if (window.visualViewport && typeof window.visualViewport.addEventListener === 'function') {
+  window.visualViewport.addEventListener('resize', updateResponsiveLayoutVars);
+}
+
 /* =========================================================
    Boot
    ========================================================= */
 setNavDestination(null);
+updateResponsiveLayoutVars();
+setTimeout(updateResponsiveLayoutVars, 80);
+setTimeout(updateResponsiveLayoutVars, 250);
 
 (async () => {
   if (debugEnabled) {
@@ -6737,6 +6795,7 @@ setNavDestination(null);
   }, 7000);
 
   preventBrowserZoomUI();
+  updateResponsiveLayoutVars();
   initMap();
   await loadTimeline();
 
@@ -6759,6 +6818,7 @@ setNavDestination(null);
   // Start GPS AFTER map exists
   startLocationWatch();
   updateWeatherNow().catch(() => {});
+  updateResponsiveLayoutVars();
 })().catch((err) => {
   console.error(err);
   if (timeLabel) timeLabel.textContent = `Error: ${err?.message || err}`;
