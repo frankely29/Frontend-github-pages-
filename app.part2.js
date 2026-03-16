@@ -1294,6 +1294,8 @@
       padY: +(0.95 + (4.8 - 0.95) * emphasize).toFixed(2),
       padX: +(2.6 + (9.8 - 2.6) * emphasize).toFixed(2),
       avatarPx: +(15 + (54 - 15) * emphasize).toFixed(2),
+      tipSizePx: +(5 + (9 - 5) * emphasize).toFixed(2),
+      tipOffsetPx: +(4 + (8 - 4) * emphasize).toFixed(2),
       maxWidthPx: +(88 + (190 - 88) * emphasize).toFixed(2),
       badgeFontPx: +(15 + (17 - 15) * emphasize).toFixed(2),
       arrowBodyPx: +(18 + (27 - 18) * t).toFixed(2),
@@ -1323,6 +1325,34 @@
     return `<span class="mapIdentityBadgeOverlay badgeEmoji badgeEmojiMap ${badgeClass}" aria-label="${label}">${icon}</span>`;
   }
 
+  function mapIdentityInitialsFromName(name) {
+    const safe = String(name || '').trim();
+    if (!safe) return 'D';
+    const parts = safe.split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) return `${parts[0][0] || ''}${parts[1][0] || ''}`.toUpperCase();
+    const compact = safe.replace(/[^\p{L}\p{N}]/gu, '');
+    return (compact.slice(0, 2) || safe.slice(0, 2) || 'D').toUpperCase();
+  }
+
+  function mapIdentityPresenceCoreHTML({ markerClass, name, avatarUrl, cfg, leaderboardBadgeCode, directionId = '' }) {
+    const safeAvatar = safeMapAvatarUrl(avatarUrl);
+    const avatarHTML = safeAvatar
+      ? `<div class="mapPresenceAvatar"><img src="${escapeHtml(safeAvatar)}" alt="avatar" loading="lazy"></div>`
+      : `<div class="mapPresenceInitials">${escapeHtml(mapIdentityInitialsFromName(name))}</div>`;
+    const dirAttr = directionId ? ` id="${escapeHtml(directionId)}"` : '';
+    return `
+      <div class="mapPresenceOrbit ${markerClass}" data-map-identity-label="1">
+        <div class="mapPresenceDirectionRot"${dirAttr} aria-hidden="true">
+          <span class="mapPresenceDirectionTip"></span>
+        </div>
+        <div class="mapPresenceShell" style="width:${cfg.avatarPx}px;height:${cfg.avatarPx}px;">
+          ${avatarHTML}
+        </div>
+        <span class="mapPresenceBadgeWrap">${mapIdentityBadgeOverlayHTML({ badgeCode: leaderboardBadgeCode })}</span>
+      </div>
+    `;
+  }
+
   function mapIdentityOverlayWrapHTML(coreHTML, badgeMeta = {}) {
     return `<div class="mapIdentityWrap"><div class="mapIdentityCore">${coreHTML}</div>${mapIdentityBadgeOverlayHTML(badgeMeta)}</div>`;
   }
@@ -1347,22 +1377,13 @@
 
   function mapIdentityRenderSelfLabel({ name, avatarUrl, mode, zoom, leaderboardBadgeCode, orbitMeta = null, overlapMeta = null }) {
     const safeName = (String(name || 'Driver').trim() || 'Driver');
-    const safeAvatar = safeMapAvatarUrl(avatarUrl);
     const cfg = mapIdentityVisualConfig(zoom);
     const effectiveOrbitMeta = orbitMeta || overlapMeta || null;
     const slotSide = String(effectiveOrbitMeta?.side || '').trim();
     const sideClass = slotSide ? ` slot-${slotSide}` : '';
-    const visualKind = shouldUseAvatarLabel(mode, safeAvatar) ? 'avatar' : 'name';
+    const visualKind = 'avatar';
     const orbitStyle = mapIdentityOrbitStyleText(effectiveOrbitMeta, zoom, visualKind);
-    if (shouldUseAvatarLabel(mode, safeAvatar)) {
-      return `<div class="selfIdentitySlot${sideClass}" data-map-identity-label="1" style="${orbitStyle}">${mapIdentityAvatarLabelHTML(
-        safeAvatar,
-        'meAvatarBadge',
-        `display:block;width:${cfg.avatarPx}px;height:${cfg.avatarPx}px;`,
-        { badgeCode: leaderboardBadgeCode }
-      )}${mapIdentityOverlapBadgeHTML(effectiveOrbitMeta)}</div>`;
-    }
-    return `<div class="selfIdentitySlot${sideClass}" data-map-identity-label="1" style="${orbitStyle}">${mapIdentityOverlayWrapHTML(`<div id="navMeName" class="meName" style="display:${safeName ? 'block' : 'none'};font-size:${cfg.fontPx}px;padding:${cfg.padY}px ${cfg.padX}px;max-width:${cfg.maxWidthPx}px;">${escapeHtml(safeName)}</div>`, { badgeCode: leaderboardBadgeCode })}${mapIdentityOverlapBadgeHTML(effectiveOrbitMeta)}</div>`;
+    return `<div class="selfIdentitySlot${sideClass}" data-map-identity-label="1" style="${orbitStyle}">${mapIdentityPresenceCoreHTML({ markerClass: 'mapPresenceSelf', name: safeName, avatarUrl, cfg, leaderboardBadgeCode, directionId: 'navPresenceDirectionRot' })}</div>`;
   }
 
   function mapIdentityOrbitStyleText(orbitMeta, zoomValue, visualKind = 'name') {
@@ -1385,7 +1406,7 @@
     const dx = +(Math.cos(angleRad) * radius).toFixed(2);
     const dy = +(Math.sin(angleRad) * radius).toFixed(2);
 
-    return `--identity-slot-x:${dx}px;--identity-slot-y:${dy}px;`;
+    return `--marker-slot-x:${dx}px;--marker-slot-y:${dy}px;`;
   }
 
   function mapIdentityOrbitDataAttrs() {
@@ -1404,6 +1425,8 @@
     delete slot.dataset.orbitRadius;
     slot.style.removeProperty('--identity-slot-x');
     slot.style.removeProperty('--identity-slot-y');
+    slot.style.removeProperty('--marker-slot-x');
+    slot.style.removeProperty('--marker-slot-y');
   }
 
   function mapIdentityRefreshOrbitSlots() {}
@@ -1412,16 +1435,12 @@
 
     const effectiveOrbitMeta = orbitMeta || overlapMeta || null;
     const safeName = (String(name || 'Driver').trim() || 'Driver');
-    const safeAvatar = safeMapAvatarUrl(avatarUrl);
     const cfg = mapIdentityVisualConfig(zoom);
     const slotSide = String(effectiveOrbitMeta?.side || '').trim();
     const sideClass = slotSide ? ` slot-${slotSide}` : '';
-    const visualKind = shouldUseAvatarLabel(mode, safeAvatar) ? 'avatar' : 'name';
+    const visualKind = 'avatar';
     const orbitStyle = mapIdentityOrbitStyleText(effectiveOrbitMeta, zoom, visualKind);
-    if (shouldUseAvatarLabel(mode, safeAvatar)) {
-      return `<div class="otherDrvIdentitySlot${sideClass}" data-map-identity-label="1" style="${orbitStyle}">${mapIdentityAvatarLabelHTML(safeAvatar, 'otherDrvAvatarBadge', `width:${cfg.avatarPx}px;height:${cfg.avatarPx}px;`, { badgeCode: leaderboardBadgeCode })}${mapIdentityOverlapBadgeHTML(effectiveOrbitMeta)}</div>`;
-    }
-    return `<div class="otherDrvIdentitySlot${sideClass}" data-map-identity-label="1" style="${orbitStyle}">${mapIdentityOverlayWrapHTML(`<div class="otherDrvName" style="font-size:${cfg.fontPx}px;padding:${cfg.padY}px ${cfg.padX}px;max-width:${cfg.maxWidthPx}px;">${escapeHtml(safeName)}</div>`, { badgeCode: leaderboardBadgeCode })}${mapIdentityOverlapBadgeHTML(effectiveOrbitMeta)}</div>`;
+    return `<div class="otherDrvIdentitySlot${sideClass}" data-map-identity-label="1" style="${orbitStyle}">${mapIdentityPresenceCoreHTML({ markerClass: 'mapPresenceOther', name: safeName, avatarUrl, cfg, leaderboardBadgeCode })}</div>`;
   }
 
   function mapIdentityApplySelfOrbit(orbitMeta) {
@@ -1431,12 +1450,14 @@
     sideClasses.forEach((cls) => slot.classList.remove(cls));
 
     const slotSide = String(orbitMeta?.side || '').trim();
-    const visualKind = slot.querySelector('.meAvatarBadge') ? 'avatar' : 'name';
+    const visualKind = 'avatar';
     const orbitStyle = mapIdentityOrbitStyleText(orbitMeta, map?.getZoom?.(), visualKind);
 
     if (!orbitStyle) {
       slot.style.removeProperty('--identity-slot-x');
       slot.style.removeProperty('--identity-slot-y');
+      slot.style.removeProperty('--marker-slot-x');
+      slot.style.removeProperty('--marker-slot-y');
       return;
     }
 
@@ -1457,13 +1478,12 @@
       rootStyle.setProperty('--map-ident-arrow-left-right', `${cfg.arrowLeftRightPx}px`);
       rootStyle.setProperty('--map-ident-arrow-accent', `${cfg.arrowAccentPx}px`);
       rootStyle.setProperty('--map-ident-badge-font', `${cfg.badgeFontPx}px`);
+      rootStyle.setProperty('--map-presence-avatar', `${cfg.avatarPx}px`);
+      rootStyle.setProperty('--map-presence-tip-size', `${cfg.tipSizePx}px`);
+      rootStyle.setProperty('--map-presence-tip-offset', `${cfg.tipOffsetPx}px`);
+      rootStyle.setProperty('--map-presence-badge-scale', `${(cfg.avatarPx / 36).toFixed(3)}`);
     }
-    document.querySelectorAll('.otherDrvName, .meName').forEach((el) => {
-      el.style.fontSize = `${cfg.fontPx}px`;
-      el.style.padding = `${cfg.padY}px ${cfg.padX}px`;
-      el.style.maxWidth = `${cfg.maxWidthPx}px`;
-    });
-    document.querySelectorAll('.otherDrvAvatarBadge, .meAvatarBadge').forEach((el) => {
+    document.querySelectorAll('.mapPresenceShell').forEach((el) => {
       el.style.width = `${cfg.avatarPx}px`;
       el.style.height = `${cfg.avatarPx}px`;
     });

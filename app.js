@@ -4289,7 +4289,6 @@ function makeNavIcon() {
   const el = document.createElement("div");
   el.innerHTML = `
     <div id="navWrap" class="navArrowWrap navPulse">
-      <div id="navArrowRot" class="navArrowRot"><div class="navArrow"></div></div>
       ${navLabelHTML}
     </div>
   `;
@@ -4302,8 +4301,8 @@ function wireProfileOpenTargets(rootEl, userId, options = {}) {
   if (!Number.isFinite(normalizedUserId)) return;
   const isSelf = !!options?.isSelf;
   const selectorList = isSelf
-    ? ["#navWrap", ".selfIdentitySlot", ".meAvatarBadge", ".meName", ".mapIdentityWrap", ".mapIdentityCore"]
-    : [".otherDrvWrap", ".otherDrvIdentitySlot", ".otherDrvAvatarBadge", ".otherDrvName", ".mapIdentityWrap", ".mapIdentityCore"];
+    ? ["#navWrap", ".selfIdentitySlot", ".mapPresenceOrbit", ".mapPresenceShell", ".mapPresenceAvatar", ".mapPresenceInitials", ".mapPresenceDirectionRot", ".mapPresenceDirectionTip", ".mapPresenceBadgeWrap"]
+    : [".otherDrvWrap", ".otherDrvIdentitySlot", ".mapPresenceOrbit", ".mapPresenceShell", ".mapPresenceAvatar", ".mapPresenceInitials", ".mapPresenceDirectionRot", ".mapPresenceDirectionTip", ".mapPresenceBadgeWrap"];
   const clickHandler = (ev) => {
     ev.preventDefault();
     ev.stopPropagation();
@@ -4373,7 +4372,7 @@ function setNavVisual(isMoving) {
   el.classList.toggle("navPulse", !isMoving);
 }
 function setNavRotation(deg) {
-  const el = document.getElementById("navArrowRot");
+  const el = document.getElementById("navPresenceDirectionRot");
   if (!el) return;
   let relative = deg;
   if (map && typeof map.getBearing === "function") {
@@ -5692,6 +5691,12 @@ function requireCommunityToken(actionLabel = "perform this action") {
   return false;
 }
 
+function authSuspensionMessage(errLike) {
+  const text = String(errLike?.detail || errLike?.message || errLike || '').trim();
+  if (/account\s+suspended/i.test(text)) return "Account suspended. Contact admin.";
+  return '';
+}
+
 async function loadMe() {
   if (!authHeaderOK()) return null;
   try {
@@ -5705,6 +5710,12 @@ async function loadMe() {
   } catch (e) {
     console.warn("/me failed:", e);
     const status = Number(e?.status ?? NaN);
+    const suspendedText = authSuspensionMessage(e);
+    if (status === 403 && suspendedText) {
+      clearAuth();
+      setAuthUI(false, suspendedText);
+      return null;
+    }
     // A 403 can be caused by a backend role-gating regression.
     // Do not force-log users out for that case.
     if (status === 401) {
@@ -5861,7 +5872,8 @@ if (btnLogin) {
       setAuthUI(false, "Signing in…");
       await doLogin(email, password, desiredGhostMode);
     } catch (e) {
-      setAuthUI(false, `Sign in failed: ${e.message || e}`);
+      const suspendedText = authSuspensionMessage(e);
+      setAuthUI(false, suspendedText || `Sign in failed: ${e.message || e}`);
     }
   });
 }
@@ -5947,11 +5959,10 @@ function makeDriverIcon(name, headingDeg, avatarUrl = "", mode = "name", orbitMe
     : `<div class="otherDrvName">${escapeHtml(safe)}</div>`;
   el.className = "otherDrvWrap";
   el.innerHTML = `
-    <div class="otherArrowWrap otherPulse" style="transform:rotate(${rot}deg)">
-      <div class="otherArrow"></div>
-    </div>
     ${driverLabelHTML}
   `;
+  const directionEl = el.querySelector('.mapPresenceDirectionRot');
+  if (directionEl) directionEl.style.transform = `rotate(${rot}deg)`;
   return el;
 }
 
@@ -5980,7 +5991,7 @@ function buildDriverMarkerVisualSignature(userId, name, avatarUrl = "", mode = "
     String(userId ?? ""),
     String(name ?? ""),
     String(avatarUrl ?? ""),
-    String(mode ?? "name"),
+    "avatar",
     String(leaderboardBadgeCode ?? ""),
     leaderboardHasCrown ? "1" : "0",
     String(orbitIndex),
@@ -6016,10 +6027,10 @@ function upsertDriverMarker(userId, name, lat, lng, heading, avatarUrl = "", mod
       wireProfileOpenTargets(el, userId, { isSelf: false });
       driverMarkerVisualSignature.set(userId, visualSig);
     } else {
-      const arrowWrap = existing.getElement()?.querySelector?.(".otherArrowWrap");
-      if (arrowWrap) {
+      const directionEl = existing.getElement()?.querySelector?.(".mapPresenceDirectionRot");
+      if (directionEl) {
         const rot = Number.isFinite(heading) ? heading : 0;
-        arrowWrap.style.transform = `rotate(${rot}deg)`;
+        directionEl.style.transform = `rotate(${rot}deg)`;
       }
     }
     return;
@@ -6027,16 +6038,7 @@ function upsertDriverMarker(userId, name, lat, lng, heading, avatarUrl = "", mod
 
   const el = makeDriverIcon(name || `Driver ${userId}`, heading, avatarUrl, mode, orbitMeta, leaderboardBadgeCode, leaderboardHasCrown);
   wireProfileOpenTargets(el, userId, { isSelf: false });
-  // A custom HTML marker's triangle arrow sits slightly below the centre of its
-  // 40×40 container (the tip is ~7 px below the vertical midpoint). When the
-  // marker is anchored at "center" without an offset, the geographic point
-  // corresponds to the centre of the container, causing the arrow tip to
-  // hover ~7 px above the true location. To pin the arrow tip to the exact
-  // latitude/longitude, we anchor the marker at the centre and apply a
-  // downward offset equal to that vertical difference. Positive y offsets
-  // move the marker downwards relative to its anchor; see MapLibre docs.
-  const arrowOffsetY = 7; // pixels the arrow tip sits below the centre
-  const mk = new maplibregl.Marker({ element: el, anchor: "center", offset: [0, arrowOffsetY] })
+  const mk = new maplibregl.Marker({ element: el, anchor: "center", offset: [0, 0] })
     .setLngLat([lng, lat])
     .addTo(map);
 
