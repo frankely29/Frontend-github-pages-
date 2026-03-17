@@ -4191,7 +4191,6 @@ let autoCenter = true;
 let inactivityTimer = null;
 const AUTO_FOCUS_INACTIVITY_MS = 20000;
 const AUTO_FOCUS_RETURN_ZOOM = 13.0;
-const AUTO_FOCUS_RETURN_ZOOM_THRESHOLD = 0.35;
 
 function cancelAutoFocusInactivityTimer() {
   if (inactivityTimer) clearTimeout(inactivityTimer);
@@ -4316,15 +4315,14 @@ function syncCenterButton() {
   btnCenter.classList.toggle("on", !!autoCenter);
 }
 
-function refreshAutoCenterCamera({ restoreZoom = false } = {}) {
+function refreshAutoCenterCamera({ forceZoom = false } = {}) {
   if (!map || !autoCenter) return;
   const c = getSelfCenterLngLat();
   if (!c) return;
   const currentZoom = Number(map.getZoom?.());
-  const shouldRaiseZoom = restoreZoom
-    && Number.isFinite(currentZoom)
-    && currentZoom < (AUTO_FOCUS_RETURN_ZOOM - AUTO_FOCUS_RETURN_ZOOM_THRESHOLD);
-  const targetZoom = shouldRaiseZoom ? AUTO_FOCUS_RETURN_ZOOM : currentZoom;
+  const targetZoom = forceZoom
+    ? AUTO_FOCUS_RETURN_ZOOM
+    : (Number.isFinite(currentZoom) ? currentZoom : AUTO_FOCUS_RETURN_ZOOM);
 
   suppressAutoDisableFor(900, () => {
     map.flyTo({
@@ -4349,7 +4347,7 @@ function setAutoCenterEnabled(next, reason = "manual") {
   }
 
   if (autoCenter && (changed || reason === "inactive-timeout")) {
-    refreshAutoCenterCamera({ restoreZoom: reason === "inactive-timeout" });
+    refreshAutoCenterCamera({ forceZoom: reason === "inactive-timeout" });
   }
   return changed;
 }
@@ -4357,7 +4355,10 @@ function setAutoCenterEnabled(next, reason = "manual") {
 function handleAutoFocusInactivityTimeout() {
   if (!map || !mapReady) return;
   if (!getSelfCenterLngLat()) return;
-  if (autoCenter) return;
+  if (autoCenter) {
+    refreshAutoCenterCamera({ forceZoom: true });
+    return;
+  }
   setAutoCenterEnabled(true, "inactive-timeout");
 }
 
