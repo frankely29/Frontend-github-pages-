@@ -1389,46 +1389,53 @@
     const title = escapeHtml(meta.label);
     let svg = '';
     if (meta.code === 'crown') {
-      svg = `<svg class="${classes}" viewBox="0 0 64 52" width="${size}" height="${size}" role="img" aria-label="${title}" focusable="false">
+      svg = `<svg class="${classes}" viewBox="0 0 72 56" width="${size}" height="${size}" role="img" aria-label="${title}" focusable="false">
         <defs>
-          <linearGradient id="crownGoldBody" x1="7" y1="8" x2="55" y2="48" gradientUnits="userSpaceOnUse">
-            <stop offset="0" stop-color="#fff8cf"/>
-            <stop offset="0.34" stop-color="#f4ca58"/>
-            <stop offset="0.7" stop-color="#d49b24"/>
-            <stop offset="1" stop-color="#9b6510"/>
+          <linearGradient id="crownGoldBody" x1="8" y1="8" x2="62" y2="50" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#fff4c8"/>
+            <stop offset="0.32" stop-color="#f4c758"/>
+            <stop offset="0.7" stop-color="#cd921f"/>
+            <stop offset="1" stop-color="#89550d"/>
           </linearGradient>
-          <linearGradient id="crownBandGold" x1="11" y1="40" x2="53" y2="49" gradientUnits="userSpaceOnUse">
-            <stop offset="0" stop-color="#f8dd7d"/>
-            <stop offset="0.55" stop-color="#d49a25"/>
-            <stop offset="1" stop-color="#8c560f"/>
+          <linearGradient id="crownBandGold" x1="13" y1="40" x2="59" y2="53" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#f8df8b"/>
+            <stop offset="0.5" stop-color="#d89b26"/>
+            <stop offset="1" stop-color="#7f4b0c"/>
           </linearGradient>
-          <linearGradient id="crownRubyCore" x1="32" y1="24" x2="32" y2="35" gradientUnits="userSpaceOnUse">
-            <stop offset="0" stop-color="#ff6d8d"/>
-            <stop offset="0.48" stop-color="#c91f4c"/>
-            <stop offset="1" stop-color="#751028"/>
+          <linearGradient id="crownBlueGem" x1="36" y1="26" x2="36" y2="39" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#9be7ff"/>
+            <stop offset="0.45" stop-color="#2e9bff"/>
+            <stop offset="1" stop-color="#1651af"/>
           </linearGradient>
-          <linearGradient id="crownDiamondCore" x1="18" y1="23" x2="18" y2="31" gradientUnits="userSpaceOnUse">
-            <stop offset="0" stop-color="#ffffff"/>
-            <stop offset="0.5" stop-color="#dbe8f7"/>
-            <stop offset="1" stop-color="#bccfe5"/>
+          <linearGradient id="crownRedGem" x1="26" y1="28" x2="26" y2="38" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#ff8d8d"/>
+            <stop offset="0.5" stop-color="#d41f33"/>
+            <stop offset="1" stop-color="#790f1b"/>
           </linearGradient>
-          <linearGradient id="crownRubySide" x1="46" y1="23" x2="46" y2="31" gradientUnits="userSpaceOnUse">
-            <stop offset="0" stop-color="#ff88a0"/>
-            <stop offset="0.5" stop-color="#be2148"/>
-            <stop offset="1" stop-color="#700f24"/>
+          <linearGradient id="crownTealGem" x1="17" y1="31" x2="17" y2="39" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#9ef4ec"/>
+            <stop offset="0.55" stop-color="#2ab8aa"/>
+            <stop offset="1" stop-color="#187f74"/>
           </linearGradient>
         </defs>
-        <path d="M6 41.5h52L53.8 15 40 26.2 32 8 24 26.2 10.2 15 6 41.5Z" fill="url(#crownGoldBody)" stroke="#7b4a09" stroke-width="3" stroke-linejoin="round"/>
-        <path d="M11 41h42v7.5H11z" fill="url(#crownBandGold)" stroke="#73450b" stroke-width="3"/>
-        <path d="M11 20.4c5.9 4 12.1 4.6 18.7 1.8 1.4-.6 2.9-.6 4.3 0 6.6 2.8 12.8 2.2 18.7-1.8" fill="none" stroke="rgba(255,246,201,.72)" stroke-width="1.8" stroke-linecap="round"/>
-        <path d="M14 31.4c5.1-1.8 9.5-1.8 13.4 0M36.6 31.4c4-1.8 8.3-1.8 13.4 0" fill="none" stroke="rgba(255,224,132,.42)" stroke-width="1.6" stroke-linecap="round"/>
-        <path d="M13 39c5.5-3.1 32.5-3.1 38 0" fill="none" stroke="rgba(255,255,255,.45)" stroke-width="1.9" stroke-linecap="round"/>
-        <circle cx="32" cy="29.8" r="5.3" fill="url(#crownRubyCore)" stroke="#631124" stroke-width="1.8"/>
-        <circle cx="30.8" cy="28.5" r="1.2" fill="rgba(255,231,238,.88)"/>
-        <path d="M18 23.7l3.3 3.3-3.3 3.3-3.3-3.3z" fill="url(#crownDiamondCore)" stroke="#8b9cb4" stroke-width="1.4"/>
-        <path d="M17.9 25.4 19.6 27l-1.7 1.6" fill="none" stroke="rgba(255,255,255,.78)" stroke-width="0.8" stroke-linecap="round"/>
-        <circle cx="46" cy="27" r="3.5" fill="url(#crownRubySide)" stroke="#621126" stroke-width="1.5"/>
-        <circle cx="45.1" cy="26" r="0.9" fill="rgba(255,228,235,.9)"/>
+        <path d="M10 43.3c0-11.3 7.6-21.8 26-21.8s26 10.5 26 21.8H10Z" fill="url(#crownGoldBody)" stroke="#7b4a09" stroke-width="2.3"/>
+        <path d="M10.8 43.3h50.4v8.5H10.8z" rx="4" fill="url(#crownBandGold)" stroke="#6f420b" stroke-width="2.3"/>
+        <path d="M10.8 42.8c6.5-2.3 11.7-7.2 13.7-13.8 2.8 5.8 6.5 9.2 11.5 10.3 4.8-1.1 8.8-4.6 11.5-10.3 2 6.7 7.1 11.5 13.7 13.8" fill="none" stroke="#8b540d" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M14 42.7c4.8-1.3 9.8-3.4 12.5-8.4M35.9 39.7c4.4-1.8 7.7-4.8 9.7-9.2m10.5 12.2c-4.8-1.3-9.8-3.4-12.5-8.4" fill="none" stroke="rgba(255,242,183,.45)" stroke-width="1.5" stroke-linecap="round"/>
+        <path d="M35.9 15.2 38.3 19l4.4.1-3.3 3 1 4.4-3.5-2.3-3.5 2.3 1-4.4-3.3-3 4.3-.1z" fill="url(#crownGoldBody)" stroke="#734308" stroke-width="1.4" stroke-linejoin="round"/>
+        <path d="M35.9 20.2v11.5m-3.9 0c1.2-2.9 2.4-4.6 3.9-4.6s2.7 1.7 3.9 4.6" fill="none" stroke="#7d4a0c" stroke-width="1.7" stroke-linecap="round"/>
+        <path d="M31.3 26.4c1.1 2.6 2.8 4.2 4.6 4.2s3.5-1.6 4.6-4.2" fill="none" stroke="rgba(255,234,161,.7)" stroke-width="1.1" stroke-linecap="round"/>
+        <path d="M20 22.3v12m-2.8-2.4c1.2-4.6 2.2-7 2.8-7s1.6 2.4 2.8 7m-6-4.8h6.3" fill="none" stroke="#7a470b" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M51.8 22.3v12M49 31.9c1.2-4.6 2.2-7 2.8-7s1.6 2.4 2.8 7m-6-4.8h6.3" fill="none" stroke="#7a470b" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M21.8 26.5c2.2-1.7 4-2.6 5.5-2.6 2 0 3.6 1.2 5.1 3.4m6.9 0c1.5-2.2 3.1-3.4 5.1-3.4 1.5 0 3.3.9 5.5 2.6" fill="none" stroke="rgba(255,244,194,.65)" stroke-width="1.2" stroke-linecap="round"/>
+        <path d="M35.9 28.5 41.4 33l-5.5 5.5-5.5-5.5z" fill="url(#crownBlueGem)" stroke="#1f3f86" stroke-width="1.4"/>
+        <path d="M35.9 29.5v8.2m-3.7-4.3h7.4" fill="none" stroke="rgba(225,246,255,.75)" stroke-width="0.95" stroke-linecap="round"/>
+        <path d="M25.4 30.8 28.8 34l-3.4 3.2-3.4-3.2z" fill="url(#crownRedGem)" stroke="#65111f" stroke-width="1.2"/>
+        <path d="M46.4 30.8 49.8 34l-3.4 3.2-3.4-3.2z" fill="url(#crownRedGem)" stroke="#65111f" stroke-width="1.2"/>
+        <ellipse cx="16.8" cy="35.1" rx="2.9" ry="2.3" fill="url(#crownTealGem)" stroke="#0f5f57" stroke-width="1.1"/>
+        <ellipse cx="55" cy="35.1" rx="2.9" ry="2.3" fill="url(#crownTealGem)" stroke="#0f5f57" stroke-width="1.1"/>
+        <path d="M15.9 34.3h1.7m36.5 0h1.7" stroke="rgba(232,255,250,.72)" stroke-width="0.85" stroke-linecap="round"/>
+        <path d="M13.5 46.2c10.2-3.2 35.3-3.2 44.8 0" fill="none" stroke="rgba(255,250,227,.48)" stroke-width="1.5" stroke-linecap="round"/>
       </svg>`;
     } else if (meta.code === 'silver') {
       svg = `<svg class="${classes}" viewBox="0 0 64 64" width="${size}" height="${size}" role="img" aria-label="${title}" focusable="false">
