@@ -623,12 +623,13 @@
       position: relative;
       display: block;
       width: 100%;
-      overflow-x: hidden;
+      overflow-x: auto;
       overflow-y: hidden;
       -webkit-overflow-scrolling: touch;
       scrollbar-width: none;
+      -ms-overflow-style: none;
       scroll-behavior: smooth;
-      touch-action: none;
+      touch-action: pan-x;
       -webkit-mask-image: linear-gradient(
         to right,
         transparent 0,
@@ -651,6 +652,7 @@
       gap: 8px;
       align-items: center;
       justify-content: flex-start;
+      flex-wrap: nowrap;
       width: max-content;
       min-width: 100%;
       padding: 2px 0;
