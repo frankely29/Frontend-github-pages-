@@ -1391,51 +1391,86 @@
     if (meta.code === 'crown') {
       svg = `<svg class="${classes}" viewBox="0 0 72 56" width="${size}" height="${size}" role="img" aria-label="${title}" focusable="false">
         <defs>
-          <linearGradient id="crownGoldBody" x1="8" y1="8" x2="62" y2="50" gradientUnits="userSpaceOnUse">
-            <stop offset="0" stop-color="#fff4c8"/>
-            <stop offset="0.32" stop-color="#f4c758"/>
-            <stop offset="0.7" stop-color="#cd921f"/>
-            <stop offset="1" stop-color="#89550d"/>
+          <linearGradient id="crownGoldMain" x1="10" y1="12" x2="61" y2="51" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#fff5c8"/>
+            <stop offset="0.33" stop-color="#f2be4a"/>
+            <stop offset="0.68" stop-color="#cb8f21"/>
+            <stop offset="1" stop-color="#8a510f"/>
           </linearGradient>
-          <linearGradient id="crownBandGold" x1="13" y1="40" x2="59" y2="53" gradientUnits="userSpaceOnUse">
-            <stop offset="0" stop-color="#f8df8b"/>
-            <stop offset="0.5" stop-color="#d89b26"/>
-            <stop offset="1" stop-color="#7f4b0c"/>
+          <linearGradient id="crownGoldShadow" x1="15" y1="20" x2="59" y2="43" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#8f5a15" stop-opacity="0.08"/>
+            <stop offset="0.56" stop-color="#6f3d09" stop-opacity="0.34"/>
+            <stop offset="1" stop-color="#4d2503" stop-opacity="0.42"/>
           </linearGradient>
-          <linearGradient id="crownBlueGem" x1="36" y1="26" x2="36" y2="39" gradientUnits="userSpaceOnUse">
-            <stop offset="0" stop-color="#9be7ff"/>
-            <stop offset="0.45" stop-color="#2e9bff"/>
-            <stop offset="1" stop-color="#1651af"/>
+          <linearGradient id="crownBandGold" x1="12" y1="44" x2="60" y2="54" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#f5df91"/>
+            <stop offset="0.55" stop-color="#cf9022"/>
+            <stop offset="1" stop-color="#7a460a"/>
           </linearGradient>
-          <linearGradient id="crownRedGem" x1="26" y1="28" x2="26" y2="38" gradientUnits="userSpaceOnUse">
-            <stop offset="0" stop-color="#ff8d8d"/>
-            <stop offset="0.5" stop-color="#d41f33"/>
-            <stop offset="1" stop-color="#790f1b"/>
+          <linearGradient id="crownBlueDiamond" x1="36" y1="30" x2="36" y2="47" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#91e5ff"/>
+            <stop offset="0.42" stop-color="#2b97ff"/>
+            <stop offset="1" stop-color="#1650b5"/>
           </linearGradient>
-          <linearGradient id="crownTealGem" x1="17" y1="31" x2="17" y2="39" gradientUnits="userSpaceOnUse">
-            <stop offset="0" stop-color="#9ef4ec"/>
-            <stop offset="0.55" stop-color="#2ab8aa"/>
-            <stop offset="1" stop-color="#187f74"/>
+          <linearGradient id="crownRuby" x1="25" y1="36" x2="25" y2="42" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#ff7e95"/>
+            <stop offset="0.48" stop-color="#df1338"/>
+            <stop offset="1" stop-color="#8a0d22"/>
+          </linearGradient>
+          <linearGradient id="crownTeal" x1="16" y1="34" x2="16" y2="42" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#97f4ef"/>
+            <stop offset="0.45" stop-color="#2abeb1"/>
+            <stop offset="1" stop-color="#117f75"/>
           </linearGradient>
         </defs>
-        <path d="M10 43.3c0-11.3 7.6-21.8 26-21.8s26 10.5 26 21.8H10Z" fill="url(#crownGoldBody)" stroke="#7b4a09" stroke-width="2.3"/>
-        <path d="M10.8 43.3h50.4v8.5H10.8z" rx="4" fill="url(#crownBandGold)" stroke="#6f420b" stroke-width="2.3"/>
-        <path d="M10.8 42.8c6.5-2.3 11.7-7.2 13.7-13.8 2.8 5.8 6.5 9.2 11.5 10.3 4.8-1.1 8.8-4.6 11.5-10.3 2 6.7 7.1 11.5 13.7 13.8" fill="none" stroke="#8b540d" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>
-        <path d="M14 42.7c4.8-1.3 9.8-3.4 12.5-8.4M35.9 39.7c4.4-1.8 7.7-4.8 9.7-9.2m10.5 12.2c-4.8-1.3-9.8-3.4-12.5-8.4" fill="none" stroke="rgba(255,242,183,.45)" stroke-width="1.5" stroke-linecap="round"/>
-        <path d="M35.9 15.2 38.3 19l4.4.1-3.3 3 1 4.4-3.5-2.3-3.5 2.3 1-4.4-3.3-3 4.3-.1z" fill="url(#crownGoldBody)" stroke="#734308" stroke-width="1.4" stroke-linejoin="round"/>
-        <path d="M35.9 20.2v11.5m-3.9 0c1.2-2.9 2.4-4.6 3.9-4.6s2.7 1.7 3.9 4.6" fill="none" stroke="#7d4a0c" stroke-width="1.7" stroke-linecap="round"/>
-        <path d="M31.3 26.4c1.1 2.6 2.8 4.2 4.6 4.2s3.5-1.6 4.6-4.2" fill="none" stroke="rgba(255,234,161,.7)" stroke-width="1.1" stroke-linecap="round"/>
-        <path d="M20 22.3v12m-2.8-2.4c1.2-4.6 2.2-7 2.8-7s1.6 2.4 2.8 7m-6-4.8h6.3" fill="none" stroke="#7a470b" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
-        <path d="M51.8 22.3v12M49 31.9c1.2-4.6 2.2-7 2.8-7s1.6 2.4 2.8 7m-6-4.8h6.3" fill="none" stroke="#7a470b" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
-        <path d="M21.8 26.5c2.2-1.7 4-2.6 5.5-2.6 2 0 3.6 1.2 5.1 3.4m6.9 0c1.5-2.2 3.1-3.4 5.1-3.4 1.5 0 3.3.9 5.5 2.6" fill="none" stroke="rgba(255,244,194,.65)" stroke-width="1.2" stroke-linecap="round"/>
-        <path d="M35.9 28.5 41.4 33l-5.5 5.5-5.5-5.5z" fill="url(#crownBlueGem)" stroke="#1f3f86" stroke-width="1.4"/>
-        <path d="M35.9 29.5v8.2m-3.7-4.3h7.4" fill="none" stroke="rgba(225,246,255,.75)" stroke-width="0.95" stroke-linecap="round"/>
-        <path d="M25.4 30.8 28.8 34l-3.4 3.2-3.4-3.2z" fill="url(#crownRedGem)" stroke="#65111f" stroke-width="1.2"/>
-        <path d="M46.4 30.8 49.8 34l-3.4 3.2-3.4-3.2z" fill="url(#crownRedGem)" stroke="#65111f" stroke-width="1.2"/>
-        <ellipse cx="16.8" cy="35.1" rx="2.9" ry="2.3" fill="url(#crownTealGem)" stroke="#0f5f57" stroke-width="1.1"/>
-        <ellipse cx="55" cy="35.1" rx="2.9" ry="2.3" fill="url(#crownTealGem)" stroke="#0f5f57" stroke-width="1.1"/>
-        <path d="M15.9 34.3h1.7m36.5 0h1.7" stroke="rgba(232,255,250,.72)" stroke-width="0.85" stroke-linecap="round"/>
-        <path d="M13.5 46.2c10.2-3.2 35.3-3.2 44.8 0" fill="none" stroke="rgba(255,250,227,.48)" stroke-width="1.5" stroke-linecap="round"/>
+        <g id="crownBody">
+          <path d="M11.2 43.8c1.5-10.5 6.4-20.8 12.8-21.8 1.8-.3 3.2.4 4.5 1.8L36 30.5l7.5-6.7c1.3-1.4 2.7-2.1 4.5-1.8 6.4 1 11.3 11.3 12.8 21.8H11.2Z" fill="url(#crownGoldMain)" stroke="#754208" stroke-width="2.1" stroke-linejoin="round"/>
+          <path d="M13 43c4.2-1.2 8.2-5.9 10.5-13.4M59 43c-4.2-1.2-8.2-5.9-10.5-13.4" fill="none" stroke="rgba(255,242,176,.52)" stroke-width="1.5" stroke-linecap="round"/>
+          <path d="M24.2 23c-.8 4.7.4 10.5 3.3 13.8h17c2.9-3.3 4.1-9.1 3.3-13.8" fill="url(#crownGoldShadow)"/>
+        </g>
+        <g id="crownBaseRim">
+          <path d="M10.5 43.6h51a0 0 0 0 1 0 0v5.1c0 2.4-1.9 4.3-4.3 4.3H14.8c-2.4 0-4.3-1.9-4.3-4.3v-5.1a0 0 0 0 1 0 0Z" fill="url(#crownBandGold)" stroke="#6d3f08" stroke-width="2.2"/>
+          <path d="M13.8 45.5c10.2-2.7 34.2-2.7 44.4 0" fill="none" stroke="rgba(255,248,216,.48)" stroke-width="1.4" stroke-linecap="round"/>
+        </g>
+        <g id="fleurDeLisGroup">
+          <path d="M36 6.3c4.3 5 6.1 8.1 6.1 11.2 0 3.5-1.6 6.1-6.1 10.7-4.5-4.6-6.1-7.2-6.1-10.7 0-3.1 1.8-6.2 6.1-11.2Z" fill="url(#crownGoldMain)" stroke="#6f3d08" stroke-width="1.5"/>
+          <path d="M35.9 27.6c-.2-4.8-.3-9.6.1-14.4" fill="none" stroke="rgba(255,241,176,.6)" stroke-width="1.2" stroke-linecap="round"/>
+          <path d="M31.8 13.4c-4.2.3-7.1 2.5-9.2 7 4.2.3 7 1.7 8.8 4.8 2.2-3.3 2.6-7.3.4-11.8Z" fill="url(#crownGoldMain)" stroke="#6f3d08" stroke-width="1.4"/>
+          <path d="M40.2 13.4c4.2.3 7.1 2.5 9.2 7-4.2.3-7 1.7-8.8 4.8-2.2-3.3-2.6-7.3-.4-11.8Z" fill="url(#crownGoldMain)" stroke="#6f3d08" stroke-width="1.4"/>
+          <path d="M30.8 25.1c-1.5 2.3-1.4 4.4.2 6.7 2 .2 3.5-.4 4.8-2-.3-1.7-1.1-3.2-2.8-4.7h-2.2Z" fill="url(#crownGoldMain)" stroke="#764509" stroke-width="1.2"/>
+          <path d="M41.2 25.1c1.5 2.3 1.4 4.4-.2 6.7-2 .2-3.5-.4-4.8-2 .3-1.7 1.1-3.2 2.8-4.7h2.2Z" fill="url(#crownGoldMain)" stroke="#764509" stroke-width="1.2"/>
+          <path d="M36 25.6c1.5 1.5 2.1 3.2 1.8 5.6-.6 1-1.2 1.7-1.8 2.1-.6-.4-1.2-1.1-1.8-2.1-.3-2.4.3-4.1 1.8-5.6Z" fill="url(#crownGoldMain)" stroke="#764509" stroke-width="1.2"/>
+          <path d="M31.4 23.8h9.2" stroke="#734308" stroke-width="1.1" stroke-linecap="round"/>
+          <ellipse cx="32.9" cy="23.8" rx="1" ry="0.65" fill="#f4cb62"/><ellipse cx="35.2" cy="23.8" rx="1" ry="0.65" fill="#f4cb62"/><ellipse cx="37.4" cy="23.8" rx="1" ry="0.65" fill="#f4cb62"/><ellipse cx="39.1" cy="23.8" rx="1" ry="0.65" fill="#f4cb62"/>
+        </g>
+        <g id="leftTridentGroup">
+          <path d="M16.2 16.5c.8 1.1.9 2.6.1 4.2-1.1.8-2 .8-2.8 0 1.4-2.3 1.8-3.7 2.7-4.2Zm3.1 0c-.4 2.5-.2 4.9.1 7.2m0-7.2c1.3.9 1.9 2.3 2.5 4.2-.8.8-1.7.8-2.8 0-.8-1.6-.7-3.1.3-4.2Z" fill="url(#crownGoldMain)" stroke="#6f3e08" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M16.3 20.8c.4 1.4 1.6 1.9 3.1 1.9s2.7-.5 3.1-1.9" fill="none" stroke="#734208" stroke-width="1"/>
+          <path d="M19.4 22.6c1.3 1.4 1.7 4.7 1.2 9.6" fill="none" stroke="#714109" stroke-width="1.2" stroke-linecap="round"/>
+        </g>
+        <g id="rightTridentGroup">
+          <path d="M55.8 16.5c-.8 1.1-.9 2.6-.1 4.2 1.1.8 2 .8 2.8 0-1.4-2.3-1.8-3.7-2.7-4.2Zm-3.1 0c.4 2.5.2 4.9-.1 7.2m0-7.2c-1.3.9-1.9 2.3-2.5 4.2.8.8 1.7.8 2.8 0 .8-1.6.7-3.1-.3-4.2Z" fill="url(#crownGoldMain)" stroke="#6f3e08" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M55.7 20.8c-.4 1.4-1.6 1.9-3.1 1.9s-2.7-.5-3.1-1.9" fill="none" stroke="#734208" stroke-width="1"/>
+          <path d="M52.6 22.6c-1.3 1.4-1.7 4.7-1.2 9.6" fill="none" stroke="#714109" stroke-width="1.2" stroke-linecap="round"/>
+        </g>
+        <g id="centerBlueDiamond">
+          <path d="M28 34.4 31.8 29h8.4l3.8 5.4-8 8.9-8-8.9Z" fill="url(#crownBlueDiamond)" stroke="#1d46a6" stroke-width="1.4" stroke-linejoin="round"/>
+          <path d="M31.8 29 36 34.4 40.2 29m-12.2 5.4h16m-8 0v8.9" fill="none" stroke="rgba(212,242,255,.7)" stroke-width="1" stroke-linecap="round"/>
+        </g>
+        <g id="leftRedDiamond">
+          <path d="M22.5 37.6 25 34.6l2.5 3-2.5 3.1-2.5-3.1Z" fill="url(#crownRuby)" stroke="#781022" stroke-width="1.1"/>
+        </g>
+        <g id="rightRedDiamond">
+          <path d="M44.5 37.6 47 34.6l2.5 3-2.5 3.1-2.5-3.1Z" fill="url(#crownRuby)" stroke="#781022" stroke-width="1.1"/>
+        </g>
+        <g id="leftTealGem">
+          <ellipse cx="16.5" cy="37.1" rx="2.15" ry="3" fill="url(#crownTeal)" stroke="#0f635a" stroke-width="1.1"/>
+          <path d="M15.6 35.8c.5-.2.9-.2 1.5 0" stroke="rgba(218,255,250,.7)" stroke-width="0.8" stroke-linecap="round"/>
+        </g>
+        <g id="rightTealGem">
+          <ellipse cx="55.5" cy="37.1" rx="2.15" ry="3" fill="url(#crownTeal)" stroke="#0f635a" stroke-width="1.1"/>
+          <path d="M54.6 35.8c.5-.2.9-.2 1.5 0" stroke="rgba(218,255,250,.7)" stroke-width="0.8" stroke-linecap="round"/>
+        </g>
       </svg>`;
     } else if (meta.code === 'silver') {
       svg = `<svg class="${classes}" viewBox="0 0 64 64" width="${size}" height="${size}" role="img" aria-label="${title}" focusable="false">
