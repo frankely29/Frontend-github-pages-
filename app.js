@@ -1409,6 +1409,7 @@ const dockGames = document.getElementById("dockGames");
 const dockMusic = document.getElementById("dockMusic");
 const dockProfile = document.getElementById("dockProfile");
 const dockLeaderboard = document.getElementById("dockLeaderboard");
+const dockAdmin = document.getElementById("dockAdmin");
 
 const dockDrawer = document.getElementById("dockDrawer");
 const dockDrawerTitle = document.getElementById("dockDrawerTitle");
@@ -1469,7 +1470,7 @@ function syncDrawerPanelPosition() {
 }
 
 function syncDockActiveButton() {
-  [dockColors, dockModes, dockChat, dockGames, dockMusic, dockProfile, dockLeaderboard].forEach((b) => b && b.classList.remove("dockBtnActive"));
+  [dockColors, dockModes, dockChat, dockGames, dockMusic, dockProfile, dockLeaderboard, dockAdmin].forEach((b) => b && b.classList.remove("dockBtnActive"));
   if (openPanelKey === "colors") dockColors?.classList.add("dockBtnActive");
   if (openPanelKey === "modes") dockModes?.classList.add("dockBtnActive");
   if (openPanelKey === "chat") dockChat?.classList.add("dockBtnActive");
@@ -1851,6 +1852,14 @@ bindDockToggle(dockModes, "modes", "Modes", modesPanelHTML, wireModesPanel);
 // in app.part2.js will call bindDockToggle(dockChat, ...) with its own
 // panel and wiring functions.
 bindDockToggle(dockColors, "colors", "Colors", colorsPanelHTML);
+if (dockAdmin) {
+  dockAdmin.addEventListener("pointerdown", (e) => e.stopPropagation());
+  dockAdmin.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    window.AdminPortal?.open?.();
+  });
+}
 if (dockProfile) {
   dockProfile.addEventListener("pointerdown", (e) => e.stopPropagation());
   dockProfile.addEventListener("click", (e) => {
@@ -1950,6 +1959,13 @@ function applyDockIconModel() {
     </svg>
   `);
 
+  setIcon(dockAdmin, `
+    <svg class="dockIconSvg dockIconSvg--admin" viewBox="0 0 24 24" width="29" height="29" aria-hidden="true" focusable="false" style="display:block">
+      <path d="M12 2.8 4.4 6.5V12c0 4.3 2.9 8.1 7.6 9.5 4.7-1.4 7.6-5.2 7.6-9.5V6.5L12 2.8Z" fill="#334155" stroke="#0f172a" stroke-width="1.1"/>
+      <path d="M12 8.1a2.4 2.4 0 1 1 0 4.8 2.4 2.4 0 0 1 0-4.8Zm0 5.8c-2.2 0-4 .9-4.7 2.2h9.4c-.7-1.3-2.5-2.2-4.7-2.2Z" fill="#f8fafc"/>
+    </svg>
+  `);
+
   const pickupIconEl = document.querySelector('#pickupFab .pickupFabIcon');
   if (pickupIconEl) {
     pickupIconEl.innerHTML = `<svg class="dockIconSvg dockIconSvg--save" viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" focusable="false" style="display:block"><path d="m6.6 12.4 3.4 3.5 7.5-7.7" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
@@ -1961,6 +1977,50 @@ function applyDockIconModel() {
 }
 
 applyDockIconModel();
+
+function layoutDockByAvailableWidth() {
+  const dock = document.getElementById("dock");
+  const saveBtn = document.getElementById("pickupFab");
+  if (!dock || !saveBtn) return;
+
+  const leftOrder = [dockColors, dockModes, dockChat];
+  const rightOrder = [dockGames, dockLeaderboard, dockAdmin, dockProfile, dockMusic];
+  const all = [...leftOrder, ...rightOrder];
+  all.forEach((btn) => btn?.classList.add("dockBtnHidden"));
+
+  const dockStyle = window.getComputedStyle(dock);
+  const gap = Number.parseFloat(dockStyle.columnGap || dockStyle.gap || "11") || 11;
+  const available = dock.clientWidth;
+  const saveWidth = saveBtn.getBoundingClientRect().width || 70;
+  const sideBudget = Math.max(0, Math.floor((available - saveWidth - (gap * 2)) / 2));
+
+  let usedLeft = 0;
+  leftOrder.forEach((btn) => {
+    if (!btn) return;
+    const w = btn.getBoundingClientRect().width || 56;
+    const next = usedLeft === 0 ? w : (usedLeft + gap + w);
+    if (next <= sideBudget) {
+      btn.classList.remove("dockBtnHidden");
+      usedLeft = next;
+    }
+  });
+
+  let usedRight = 0;
+  rightOrder.forEach((btn) => {
+    if (!btn) return;
+    const w = btn.getBoundingClientRect().width || 56;
+    const next = usedRight === 0 ? w : (usedRight + gap + w);
+    if (next <= sideBudget) {
+      btn.classList.remove("dockBtnHidden");
+      usedRight = next;
+    }
+  });
+}
+
+layoutDockByAvailableWidth();
+window.layoutDockByAvailableWidth = layoutDockByAvailableWidth;
+window.addEventListener("resize", layoutDockByAvailableWidth, { passive: true });
+window.addEventListener("orientationchange", layoutDockByAvailableWidth, { passive: true });
 
 /* =========================================================
    Precision Slider Popup
@@ -5589,11 +5649,19 @@ let communityToken = localStorage.getItem(LS_TOKEN) || "";
 let me = null;
 let lastGpsAccuracyM = null;
 
+function syncDockAdminVisibility() {
+  if (!dockAdmin) return;
+  dockAdmin.hidden = !me?.is_admin;
+}
+
 function syncAdminPortalSession() {
+  syncDockAdminVisibility();
   if (typeof window === 'undefined' || !window.AdminPortal) return;
   window.AdminPortal.setSession?.({ me, token: communityToken });
   window.AdminPortal.refreshVisibility?.();
 }
+
+syncDockAdminVisibility();
 
 // other drivers markers
 const otherMarkers = new Map(); // user_id -> marker
