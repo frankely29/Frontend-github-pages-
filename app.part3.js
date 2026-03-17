@@ -396,9 +396,21 @@
       .leaderboardRankIconFallback{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;font-size:13px;line-height:1}
       .leaderboardTierLine .rankBadgeIconWrap.compact{width:18px;height:18px;flex:0 0 auto;box-shadow:inset 0 0 0 1px rgba(255,255,255,.35),0 1px 4px rgba(2,6,23,.2)}
       .leaderboardTierLine .rankBadgeIconWrap.compact svg{width:16px;height:16px}
-      #dockDrawer:has(.leaderboardPanelWrap){top:50%;max-height:min(62vh,520px)}
-      #dockDrawer:has(.leaderboardPanelWrap).open{transform:translateX(0) translateY(-50%)}
-      .leaderboardPanelWrap{gap:7px;max-height:min(60vh,480px);overflow:hidden;padding:8px}
+      body:has(#dockDrawer .leaderboardPanelWrap) #dockBackdrop{z-index:9050;background:rgba(0,0,0,.12)}
+      #dockDrawer:has(.leaderboardPanelWrap){
+        left:50%;
+        top:clamp(54px,8dvh,86px);
+        bottom:calc(env(safe-area-inset-bottom,0px) + 108px);
+        width:min(363px,94vw);
+        max-height:none;
+        height:auto;
+        z-index:9100;
+        transform:translate(-50%,16px);
+        opacity:0;
+        pointer-events:none;
+      }
+      #dockDrawer:has(.leaderboardPanelWrap).open{transform:translate(-50%,0);opacity:1;pointer-events:auto}
+      .leaderboardPanelWrap{gap:7px;max-height:min(69vh,552px);overflow:hidden;padding:8px}
       .leaderboardPanelControls{display:flex;flex-direction:column;gap:5px;flex:0 0 auto}
       .leaderboardTabs .chipBtn{justify-content:center}
       .leaderboardPanelBody{display:flex;flex-direction:column;gap:7px;min-height:0;overflow-y:auto;padding-right:2px}
