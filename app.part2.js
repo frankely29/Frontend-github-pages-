@@ -2475,9 +2475,21 @@
     rerenderGamesPanel();
   }
 
+  function getDockViewport() {
+    return document.getElementById('dockViewport');
+  }
+
+  function getDockTrack() {
+    return document.getElementById('dockTrack');
+  }
+
+  function getDockSaveButton() {
+    return document.getElementById('pickupFab');
+  }
+
   function updateDockScrollHints() {
     const dock = document.getElementById('dock');
-    const viewport = document.getElementById('dockViewport');
+    const viewport = getDockViewport();
     if (!dock || !viewport) return;
     const maxScroll = Math.max(0, viewport.scrollWidth - viewport.clientWidth);
     const leftVisible = viewport.scrollLeft > 2;
@@ -2486,15 +2498,45 @@
     dock.classList.toggle('dock-can-scroll-right', rightVisible);
   }
 
+  function centerDockOnSave({ behavior = 'smooth' } = {}) {
+    const viewport = getDockViewport();
+    const track = getDockTrack();
+    const saveBtn = getDockSaveButton();
+    if (!viewport || !track || !saveBtn) return;
+
+    const viewportWidth = viewport.clientWidth;
+    const targetLeft = saveBtn.offsetLeft + (saveBtn.offsetWidth / 2) - (viewportWidth / 2);
+    const maxScroll = Math.max(0, track.scrollWidth - viewportWidth);
+    const clampedLeft = Math.max(0, Math.min(maxScroll, targetLeft));
+    viewport.scrollTo({ left: clampedLeft, behavior });
+  }
+
+  let dockAutoCenterTimer = 0;
+
+  function cancelDockAutoCenter() {
+    if (!dockAutoCenterTimer) return;
+    clearTimeout(dockAutoCenterTimer);
+    dockAutoCenterTimer = 0;
+  }
+
+  function scheduleDockAutoCenter() {
+    cancelDockAutoCenter();
+    dockAutoCenterTimer = setTimeout(() => {
+      dockAutoCenterTimer = 0;
+      centerDockOnSave({ behavior: 'smooth' });
+    }, 10000);
+  }
+
   function scrollDockByStep(direction) {
-    const viewport = document.getElementById('dockViewport');
+    const viewport = getDockViewport();
     if (!viewport) return;
     const step = Math.max(120, Math.round(viewport.clientWidth * 1.2));
     viewport.scrollBy({ left: direction * step, behavior: 'smooth' });
+    scheduleDockAutoCenter();
   }
 
   function initDockScroller() {
-    const viewport = document.getElementById('dockViewport');
+    const viewport = getDockViewport();
     const leftHint = document.getElementById('dockScrollHintLeft');
     const rightHint = document.getElementById('dockScrollHintRight');
     if (!viewport) return;
@@ -2508,14 +2550,32 @@
       });
     };
 
-    viewport.addEventListener('scroll', scheduleHintUpdate, { passive: true });
-    window.addEventListener('resize', scheduleHintUpdate);
+    const handleDockInteraction = () => {
+      cancelDockAutoCenter();
+      scheduleHintUpdate();
+      scheduleDockAutoCenter();
+    };
+
+    viewport.addEventListener('scroll', handleDockInteraction, { passive: true });
+    viewport.addEventListener('pointerdown', handleDockInteraction, { passive: true });
+    viewport.addEventListener('touchstart', handleDockInteraction, { passive: true });
+    viewport.addEventListener('wheel', handleDockInteraction, { passive: true });
+    window.addEventListener('resize', () => {
+      centerDockOnSave({ behavior: 'auto' });
+      scheduleHintUpdate();
+      scheduleDockAutoCenter();
+    });
 
     leftHint?.addEventListener('click', () => scrollDockByStep(-1));
     rightHint?.addEventListener('click', () => scrollDockByStep(1));
 
+    centerDockOnSave({ behavior: 'auto' });
     scheduleHintUpdate();
-    setTimeout(scheduleHintUpdate, 120);
+    scheduleDockAutoCenter();
+    setTimeout(() => {
+      centerDockOnSave({ behavior: 'auto' });
+      scheduleHintUpdate();
+    }, 120);
   }
 
 
