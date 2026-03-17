@@ -30,6 +30,7 @@
   let chatLastReadId = loadChatLastReadId();
   let chatSeenKeys = new Set();
   let unreadChatCount = 0;
+  let unreadPrivateCount = 0;
   let chatInitialHistoryLoaded = false;
   let chatInitialHistoryLoadAttempted = false;
   let chatInitialHistoryRetryQueued = false;
@@ -39,6 +40,15 @@
   // one post-bootstrap poll has been absorbed as history too.
   let killFeedBootstrapReady = false;
   let killFeedBootstrapPollConsumed = false;
+
+  let activeChatTab = 'public';
+  let privateThreads = [];
+  let privateActiveUserId = null;
+  let privateActiveDisplayName = '';
+  let privateMessagesByUserId = Object.create(null);
+  let privateUnreadByUserId = Object.create(null);
+  let privateLastMessageIdByUserId = Object.create(null);
+  let privateThreadPollTimer = null;
 
   function chatLastReadStorageKey() {
     return `tlc_chat_last_read_${CHAT_ROOM}`;
@@ -116,8 +126,10 @@
   function updateChatUnreadBadge() {
     const btn = document.getElementById('dockChat');
     if (!btn) return;
-    if (unreadChatCount > 0) {
-      btn.dataset.unread = unreadChatCount > 99 ? '99+' : String(unreadChatCount);
+    unreadPrivateCount = Object.values(privateUnreadByUserId).reduce((acc, n) => acc + (Number(n) || 0), 0);
+    const totalUnread = unreadChatCount + unreadPrivateCount;
+    if (totalUnread > 0) {
+      btn.dataset.unread = totalUnread > 99 ? '99+' : String(totalUnread);
     } else {
       delete btn.dataset.unread;
     }
@@ -907,10 +919,20 @@
     }
     return `
       <div class="panelBlock chatPanelWrap">
-        <div id="chatList" class="chatList" aria-live="polite"></div>
-        <div class="chatComposer">
-          <input id="chatInput" type="text" class="chatInput" placeholder="Message drivers…" maxlength="600" />
-          <button id="chatSendBtn" class="chipBtn" type="button">Send</button>
+        <div class="chatTabs" role="tablist" aria-label="Chat tabs">
+          <button id="chatTabPublic" class="chatTabBtn ${activeChatTab === 'public' ? 'active' : ''}" type="button" role="tab" aria-selected="${activeChatTab === 'public'}">Public</button>
+          <button id="chatTabPrivate" class="chatTabBtn ${activeChatTab === 'private' ? 'active' : ''}" type="button" role="tab" aria-selected="${activeChatTab === 'private'}">Private<span id="chatPrivateTabUnread" class="chatPrivateTabUnread"></span></button>
+          <div class="chatTabIndicator"></div>
+        </div>
+        <div id="chatPublicView" class="chatTabContent ${activeChatTab === 'public' ? '' : 'hidden'}">
+          <div id="chatList" class="chatList" aria-live="polite"></div>
+          <div class="chatComposer">
+            <input id="chatInput" type="text" class="chatInput" placeholder="Message drivers…" maxlength="600" />
+            <button id="chatSendBtn" class="chipBtn" type="button">Send</button>
+          </div>
+        </div>
+        <div id="chatPrivateView" class="chatTabContent ${activeChatTab === 'private' ? '' : 'hidden'}">
+          <div id="chatPrivateWrap" class="chatPrivateWrap"></div>
         </div>
       </div>
     `;
@@ -945,12 +967,302 @@
       listEl.textContent = text;
     }
   }
+
+
+  function privateThreadUserId(thread) {
+    const id = thread?.other_user_id ?? thread?.otherUserId ?? thread?.user_id ?? thread?.userId;
+    return id == null ? null : String(id);
+  }
+
+  function privateThreadName(thread) {
+    return String(thread?.display_name || thread?.name || thread?.user_name || 'Driver').trim() || 'Driver';
+  }
+
+  function privateThreadPreview(thread) {
+    return String(thread?.last_text || thread?.text || thread?.last_message || '').trim();
+  }
+
+  function privateThreadTime(thread) {
+    return thread?.last_created_at || thread?.created_at || thread?.ts || thread?.timestamp || '';
+  }
+
+  function privateThreadUnreadCount(thread) {
+    const uid = privateThreadUserId(thread);
+    if (!uid) return 0;
+    const serverUnread = Number(thread?.unread_count);
+    const localUnread = Number(privateUnreadByUserId[uid] || 0);
+    if (Number.isFinite(serverUnread)) return Math.max(localUnread, serverUnread);
+    return localUnread;
+  }
+
+  function privateUpsertThreadFromMessages(otherUserId, messages = []) {
+    const uid = String(otherUserId || '');
+    if (!uid || !Array.isArray(messages) || !messages.length) return;
+    const latest = messages[messages.length - 1] || {};
+    const existing = privateThreads.find((t) => privateThreadUserId(t) === uid) || {};
+    const next = {
+      ...existing,
+      other_user_id: uid,
+      display_name: privateActiveUserId === uid && privateActiveDisplayName ? privateActiveDisplayName : privateThreadName(existing || latest),
+      last_text: String(latest?.text || latest?.message || existing?.last_text || '').trim(),
+      last_created_at: latest?.created_at || latest?.ts || latest?.timestamp || existing?.last_created_at || null,
+      unread_count: privateUnreadByUserId[uid] || 0,
+    };
+    privateThreads = [next, ...privateThreads.filter((t) => privateThreadUserId(t) !== uid)];
+  }
+
+  async function chatFetchPrivateThreads() {
+    const token = getCommunityToken();
+    if (!token) return [];
+    try {
+      const data = await getJSONAuth('/chat/private/threads', token);
+      const list = Array.isArray(data) ? data : (Array.isArray(data?.threads) ? data.threads : []);
+      return list;
+    } catch (_) {
+      try {
+        const fallback = await getJSONAuth('/chat/dm/threads', token);
+        return Array.isArray(fallback) ? fallback : (Array.isArray(fallback?.threads) ? fallback.threads : []);
+      } catch (err) {
+        console.warn('chatFetchPrivateThreads failed', err);
+        return [];
+      }
+    }
+  }
+
+  async function chatFetchPrivateMessages(otherUserId, { limit = 50 } = {}) {
+    const token = getCommunityToken();
+    if (!token || !otherUserId) return [];
+    const uid = encodeURIComponent(String(otherUserId));
+    const qs = new URLSearchParams();
+    qs.set('limit', String(limit));
+    try {
+      const data = await getJSONAuth(`/chat/private/${uid}?${qs.toString()}`, token);
+      return Array.isArray(data) ? data : (Array.isArray(data?.messages) ? data.messages : []);
+    } catch (_) {
+      const fallback = await getJSONAuth(`/chat/dm/${uid}?${qs.toString()}`, token);
+      return Array.isArray(fallback) ? fallback : (Array.isArray(fallback?.messages) ? fallback.messages : []);
+    }
+  }
+
+  async function chatSendPrivateMessage(otherUserId, text) {
+    const token = getCommunityToken();
+    if (!token || !otherUserId) throw new Error('Private chat unavailable');
+    const uid = encodeURIComponent(String(otherUserId));
+    try {
+      return await postJSON(`/chat/private/${uid}`, { text }, token);
+    } catch (_) {
+      return await postJSON(`/chat/dm/${uid}`, { text }, token);
+    }
+  }
+
+  function renderPrivateThreadList() {
+    const wrap = document.getElementById('chatPrivateWrap');
+    if (!wrap) return;
+    const sorted = privateThreads.slice().sort((a, b) => String(privateThreadTime(b)).localeCompare(String(privateThreadTime(a))));
+    const rows = sorted.map((thread) => {
+      const uid = privateThreadUserId(thread);
+      const name = privateThreadName(thread);
+      const preview = privateThreadPreview(thread) || 'No messages yet';
+      const unread = privateThreadUnreadCount(thread);
+      const ts = formatChatTime(privateThreadTime(thread));
+      const initials = name.slice(0, 2).toUpperCase();
+      return `<button type="button" class="chatPrivateThreadRow" data-private-thread="${uid || ''}"><span class="chatPrivateThreadAvatar">${escapeHtml(initials)}</span><span class="chatPrivateThreadBody"><span class="chatPrivateThreadName">${escapeHtml(name)}</span><span class="chatPrivateThreadPreview">${escapeHtml(preview)}</span></span><span class="chatPrivateThreadMeta"><span class="chatPrivateThreadTime">${escapeHtml(ts)}</span>${unread > 0 ? `<span class="chatPrivateThreadUnread">${unread > 99 ? '99+' : unread}</span>` : ''}</span></button>`;
+    }).join('');
+
+    wrap.innerHTML = `<div class="chatPrivateThreadList"><div class="chatPrivateThreadToolbar"><button id="chatPrivateNewMessageBtn" class="chipBtn" type="button">New Message</button></div>${rows || '<div class="chatEmpty">No private conversations yet</div>'}</div>`;
+
+    wrap.querySelectorAll('[data-private-thread]').forEach((btn) => {
+      btn.addEventListener('click', () => openPrivateConversation(btn.getAttribute('data-private-thread')));
+    });
+    const newBtn = document.getElementById('chatPrivateNewMessageBtn');
+    if (newBtn) newBtn.addEventListener('click', promptNewPrivateMessageThread);
+  }
+
+  function renderPrivateConversationMessages(messages) {
+    return (messages || []).map((msg) => {
+      const own = isOwnMessage(msg);
+      const cls = own ? 'chatBubbleSelf' : 'chatBubbleOther';
+      const txt = escapeHtml(String(msg?.text || msg?.message || ''));
+      const t = escapeHtml(formatChatTime(msg?.created_at || msg?.ts || msg?.timestamp));
+      return `<div class="chatPrivateMsgRow ${own ? 'self' : 'other'}"><div class="${cls}">${txt}</div><div class="chatMsgTime">${t}</div></div>`;
+    }).join('');
+  }
+
+  function renderPrivateConversation() {
+    const wrap = document.getElementById('chatPrivateWrap');
+    if (!wrap || !privateActiveUserId) return;
+    const messages = privateMessagesByUserId[privateActiveUserId] || [];
+    wrap.innerHTML = `<div class="chatPrivateConversation"><div class="chatPrivateHeader"><button id="chatPrivateBackBtn" class="chatPrivateBackBtn" type="button">Back</button><div class="chatPrivateTitle">${escapeHtml(privateActiveDisplayName || 'Private chat')}</div></div><div id="chatPrivateConversationList" class="chatList">${messages.length ? renderPrivateConversationMessages(messages) : '<div class="chatEmpty">No messages yet.</div>'}</div><div class="chatComposer chatComposerPrivate"><input id="chatPrivateInput" type="text" class="chatInput" placeholder="Message privately…" maxlength="600"><button id="chatPrivateSendBtn" class="chipBtn" type="button">Send</button></div></div>`;
+    const list = document.getElementById('chatPrivateConversationList');
+    if (list) list.scrollTop = list.scrollHeight;
+    const backBtn = document.getElementById('chatPrivateBackBtn');
+    if (backBtn) backBtn.addEventListener('click', () => {
+      privateActiveUserId = null;
+      privateActiveDisplayName = '';
+      renderPrivateThreadList();
+    });
+    const sendBtn = document.getElementById('chatPrivateSendBtn');
+    const input = document.getElementById('chatPrivateInput');
+    const sendNow = async () => {
+      const text = String(input?.value || '').trim();
+      if (!text || !privateActiveUserId) return;
+      sendBtn.disabled = true;
+      try {
+        await chatSendPrivateMessage(privateActiveUserId, text);
+        input.value = '';
+        await chatPollPrivateActiveThread();
+      } catch (err) {
+        console.warn('private send failed', err);
+      } finally {
+        sendBtn.disabled = false;
+      }
+    };
+    if (sendBtn) sendBtn.addEventListener('click', sendNow);
+    if (input) input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); sendNow(); } });
+  }
+
+  async function openPrivateConversation(userId, displayName = '') {
+    if (!userId) return;
+    privateActiveUserId = String(userId);
+    privateActiveDisplayName = displayName || privateActiveDisplayName || 'Driver';
+    privateUnreadByUserId[privateActiveUserId] = 0;
+    updateChatUnreadBadge();
+    const msgs = await chatFetchPrivateMessages(privateActiveUserId, { limit: 60 });
+    privateMessagesByUserId[privateActiveUserId] = Array.isArray(msgs) ? msgs : [];
+    privateUpsertThreadFromMessages(privateActiveUserId, privateMessagesByUserId[privateActiveUserId]);
+    renderPrivateConversation();
+    renderPrivateTabUnread();
+  }
+
+  async function chatRefreshPrivateThreads() {
+    const threads = await chatFetchPrivateThreads();
+    privateThreads = Array.isArray(threads) ? threads : [];
+    privateThreads.forEach((thread) => {
+      const uid = privateThreadUserId(thread);
+      if (!uid) return;
+      const serverUnread = Number(thread?.unread_count);
+      if (Number.isFinite(serverUnread) && serverUnread >= 0) {
+        privateUnreadByUserId[uid] = Math.max(Number(privateUnreadByUserId[uid] || 0), serverUnread);
+      }
+    });
+    renderPrivateTabUnread();
+    if (activeChatTab === 'private' && !privateActiveUserId) renderPrivateThreadList();
+    updateChatUnreadBadge();
+  }
+
+  async function chatPollPrivateActiveThread() {
+    if (!privateActiveUserId) return;
+    const uid = privateActiveUserId;
+    const msgs = await chatFetchPrivateMessages(uid, { limit: 60 });
+    const list = Array.isArray(msgs) ? msgs : [];
+    const lastKnown = Number(privateLastMessageIdByUserId[uid] || 0);
+    let nextLast = lastKnown;
+    for (const msg of list) {
+      const id = Number(msg?.id);
+      if (Number.isFinite(id)) nextLast = Math.max(nextLast, id);
+    }
+    if (nextLast > lastKnown && activeChatTab !== 'private') {
+      privateUnreadByUserId[uid] = Number(privateUnreadByUserId[uid] || 0) + 1;
+    }
+    privateLastMessageIdByUserId[uid] = nextLast;
+    privateMessagesByUserId[uid] = list;
+    privateUnreadByUserId[uid] = 0;
+    privateUpsertThreadFromMessages(uid, list);
+    if (activeChatTab === 'private' && privateActiveUserId === uid) renderPrivateConversation();
+    renderPrivateTabUnread();
+    updateChatUnreadBadge();
+  }
+
+  function renderPrivateTabUnread() {
+    const tabUnread = document.getElementById('chatPrivateTabUnread');
+    const count = Object.values(privateUnreadByUserId).reduce((acc, n) => acc + (Number(n) || 0), 0);
+    if (tabUnread) {
+      tabUnread.textContent = count > 0 ? (count > 99 ? '99+' : String(count)) : '';
+      tabUnread.classList.toggle('show', count > 0);
+    }
+  }
+
+  function switchChatTab(nextTab) {
+    activeChatTab = nextTab === 'private' ? 'private' : 'public';
+    const publicView = document.getElementById('chatPublicView');
+    const privateView = document.getElementById('chatPrivateView');
+    const publicBtn = document.getElementById('chatTabPublic');
+    const privateBtn = document.getElementById('chatTabPrivate');
+    if (publicView) publicView.classList.toggle('hidden', activeChatTab !== 'public');
+    if (privateView) privateView.classList.toggle('hidden', activeChatTab !== 'private');
+    if (publicBtn) {
+      publicBtn.classList.toggle('active', activeChatTab === 'public');
+      publicBtn.setAttribute('aria-selected', String(activeChatTab === 'public'));
+    }
+    if (privateBtn) {
+      privateBtn.classList.toggle('active', activeChatTab === 'private');
+      privateBtn.setAttribute('aria-selected', String(activeChatTab === 'private'));
+    }
+    if (activeChatTab === 'private') {
+      if (privateActiveUserId) renderPrivateConversation();
+      else renderPrivateThreadList();
+      chatRefreshPrivateThreads();
+    }
+    renderPrivateTabUnread();
+  }
+
+  function promptNewPrivateMessageThread() {
+    const known = [];
+    if (Array.isArray(window.lastDrivers) && window.lastDrivers.length) known.push(...window.lastDrivers);
+    if (Array.isArray(window.visibleDrivers) && window.visibleDrivers.length) known.push(...window.visibleDrivers);
+    if (Array.isArray(window.drivers) && window.drivers.length) known.push(...window.drivers);
+    const meId = window?.me?.id != null ? String(window.me.id) : '';
+    const candidates = [];
+    const seen = new Set();
+    for (const drv of known) {
+      const id = drv?.id != null ? String(drv.id) : '';
+      if (!id || id === meId || seen.has(id)) continue;
+      seen.add(id);
+      candidates.push({ id, name: String(drv?.display_name || drv?.name || `Driver ${id}`).trim() || `Driver ${id}` });
+    }
+    if (!candidates.length) {
+      alert('No active drivers available yet.');
+      return;
+    }
+    const sample = candidates.slice(0, 12).map((c, i) => `${i + 1}. ${c.name}`).join('\n');
+    const input = window.prompt(`Start a new message with\n${sample}\n\nEnter number or user ID:`);
+    if (!input) return;
+    const trimmed = String(input).trim();
+    const idx = Number(trimmed);
+    const picked = Number.isFinite(idx) && idx >= 1 && idx <= candidates.length
+      ? candidates[idx - 1]
+      : candidates.find((c) => c.id === trimmed);
+    if (!picked) return;
+    privateActiveDisplayName = picked.name;
+    openPrivateConversation(picked.id, picked.name);
+  }
+
+  function startPrivatePolling() {
+    if (privateThreadPollTimer) return;
+    privateThreadPollTimer = setInterval(async () => {
+      if (!isChatAuthReady()) return;
+      await chatRefreshPrivateThreads();
+      if (privateActiveUserId) await chatPollPrivateActiveThread();
+    }, 3000);
+  }
+
+  function stopPrivatePolling() {
+    if (!privateThreadPollTimer) return;
+    clearInterval(privateThreadPollTimer);
+    privateThreadPollTimer = null;
+  }
   function chatResetState() {
     chatLastSeen = null;
     chatLatestMessageId = null;
     chatLastReadId = loadChatLastReadId();
     chatSeenKeys = new Set();
     unreadChatCount = 0;
+    privateThreads = [];
+    privateActiveUserId = null;
+    privateActiveDisplayName = '';
+    privateMessagesByUserId = Object.create(null);
+    privateUnreadByUserId = Object.create(null);
+    privateLastMessageIdByUserId = Object.create(null);
     updateChatUnreadBadge();
     chatSoundRuntime.lastObservedIncomingId = null;
     chatSoundRuntime.seenIncomingKeys = new Set();
@@ -1165,6 +1477,7 @@
   function syncChatPollingState() {
     if (typeof authHeaderOK === 'function' && authHeaderOK()) {
       startChatPolling();
+      startPrivatePolling();
       if (isChatPanelOpen() && chatInitialHistoryLoadAttempted && !chatInitialHistoryLoaded && !chatInitialHistoryRetryQueued) {
         chatInitialHistoryRetryQueued = true;
         chatLoadInitial()
@@ -1178,12 +1491,24 @@
       }
     } else {
       stopChatPolling();
+      stopPrivatePolling();
     }
   }
 
   // Wire up the chat panel: event handlers, initial load, polling
   function wireChatPanel() {
     ensureChatNotificationsBootstrapped('chat-panel-open');
+    const tabPublic = document.getElementById('chatTabPublic');
+    const tabPrivate = document.getElementById('chatTabPrivate');
+    if (tabPublic && tabPublic.dataset.bound !== '1') {
+      tabPublic.dataset.bound = '1';
+      tabPublic.addEventListener('click', () => switchChatTab('public'));
+    }
+    if (tabPrivate && tabPrivate.dataset.bound !== '1') {
+      tabPrivate.dataset.bound = '1';
+      tabPrivate.addEventListener('click', () => switchChatTab('private'));
+    }
+
     const chatInput = document.getElementById('chatInput');
     const chatSendBtn = document.getElementById('chatSendBtn');
     if (!chatInput || !chatSendBtn) return;
@@ -1236,6 +1561,9 @@
         setChatStatus('Chat unavailable right now.');
       });
     syncChatPollingState();
+    startPrivatePolling();
+    chatRefreshPrivateThreads();
+    switchChatTab(activeChatTab);
 
     markChatReadThroughLatestLoaded();
   }
@@ -3619,6 +3947,10 @@
         <div class="driverProfileStatus"><button class="driverProfileClose" id="driverProfileRetryBtn" type="button">Retry</button></div>
       `;
       document.getElementById('driverProfileCloseBtn')?.addEventListener('click', closeDriverProfileModal);
+    document.getElementById('driverProfileOpenInboxBtn')?.addEventListener('click', () => {
+      openPrivateChatWithUser(driverProfileState.userId, name);
+      closeDriverProfileModal();
+    });
       document.getElementById('driverProfileRetryBtn')?.addEventListener('click', () => {
         if (driverProfileState.userId != null) {
           openDriverProfileModal({ userId: driverProfileState.userId, isSelf: driverProfileState.isSelf, source: driverProfileState.source });
@@ -3672,7 +4004,10 @@
             <div class="driverProfileBadgeRow">${driverProfileBadgeChip(profileUser?.leaderboard_badge_code)}</div>
           </div>
         </div>
-        <button class="driverProfileClose" id="driverProfileCloseBtn" type="button">Close</button>
+        <div class="driverProfileHeaderActions">
+          ${selfMode ? '' : '<button class="driverProfileActionBtn" id="driverProfileOpenInboxBtn" type="button">Message</button>'}
+          <button class="driverProfileClose" id="driverProfileCloseBtn" type="button">Close</button>
+        </div>
       </div>
       <div class="driverProfileScroll">
         ${renderDriverProgressionSection(progression)}
@@ -3699,6 +4034,10 @@
     `;
 
     document.getElementById('driverProfileCloseBtn')?.addEventListener('click', closeDriverProfileModal);
+    document.getElementById('driverProfileOpenInboxBtn')?.addEventListener('click', () => {
+      openPrivateChatWithUser(driverProfileState.userId, name);
+      closeDriverProfileModal();
+    });
 
     if (selfMode) {
       bindSelfProfileActions();
@@ -3838,6 +4177,19 @@
     driverProfileState.pollTimer = null;
   }
 
+  function openPrivateChatWithUser(userId, displayName = '') {
+    if (!userId) return;
+    if (typeof openPanel === 'function') {
+      openPanel('chat', 'Chat', chatPanelHTML(), wireChatPanel);
+    }
+    activeChatTab = 'private';
+    if (displayName) privateActiveDisplayName = String(displayName);
+    setTimeout(() => {
+      switchChatTab('private');
+      openPrivateConversation(String(userId), displayName);
+    }, 0);
+  }
+
   // Expose chat functions for app.js to call if needed
   window.chatPanelHTML = chatPanelHTML;
   window.wireChatPanel = wireChatPanel;
@@ -3862,6 +4214,7 @@
   window.sendDriverProfileDm = sendDriverProfileDm;
   window.startDriverProfileDmPolling = startDriverProfileDmPolling;
   window.stopDriverProfileDmPolling = stopDriverProfileDmPolling;
+  window.openPrivateChatWithUser = openPrivateChatWithUser;
   window.updateDriverProfileLayout = updateDriverProfileLayout;
   window.showLevelUpOverlay = showLevelUpOverlay;
   window.syncMyProgression = syncMyProgression;
