@@ -919,6 +919,7 @@
     }
     return `
       <div class="panelBlock chatPanelWrap">
+        <div class="chatHeader">Community chat</div>
         <div class="chatTabs" role="tablist" aria-label="Chat tabs">
           <button id="chatTabPublic" class="chatTabBtn ${activeChatTab === 'public' ? 'active' : ''}" type="button" role="tab" aria-selected="${activeChatTab === 'public'}">Public</button>
           <button id="chatTabPrivate" class="chatTabBtn ${activeChatTab === 'private' ? 'active' : ''}" type="button" role="tab" aria-selected="${activeChatTab === 'private'}">Private<span id="chatPrivateTabUnread" class="chatPrivateTabUnread"></span></button>
