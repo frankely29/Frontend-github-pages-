@@ -997,8 +997,8 @@
     .leaderboardBadgeSvg.is-crown{filter:drop-shadow(0 2px 6px rgba(120,85,0,.44));}
     .leaderboardBadgeSvg.is-silver{filter:drop-shadow(0 2px 5px rgba(51,65,85,.35));}
     .leaderboardBadgeSvg.is-bronze{filter:drop-shadow(0 2px 5px rgba(120,65,30,.35));}
-    .mapBadgeWearable .leaderboardBadgeSvg{width:20px;height:20px;}
-    .mapBadgeWearable.is-crown .leaderboardBadgeSvg{width:var(--map-crown-size,32px);height:var(--map-crown-size,32px);}
+    .mapBadgeWearable .leaderboardBadgeSvg{width:var(--map-podium-size,16px);height:var(--map-podium-size,16px);}
+    .mapBadgeWearable.is-crown .leaderboardBadgeSvg{width:var(--map-crown-size,18px);height:var(--map-crown-size,18px);}
     .driverProfileBadgeChipWrap .leaderboardBadgeSvg{width:30px;height:30px;}
     .leaderboardLegend{ display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
     .myRankCard{ background:rgba(255,255,255,0.62); border:1px solid rgba(0,0,0,0.08); border-radius:12px; padding:8px; display:flex; flex-direction:column; gap:6px; }
@@ -1317,7 +1317,7 @@
       left:50%;
       right:auto;
       top:0;
-      transform:translate(-50%,-68%);
+      transform:translate(-50%,calc(-1 * var(--map-crown-lift, 7px)));
       transform-origin:50% 100%;
     }
     .mapPresenceOrbit{

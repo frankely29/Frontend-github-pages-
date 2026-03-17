@@ -1291,8 +1291,13 @@
     const emphasize = Math.pow(smooth, 0.9);
     const avatarPx = +(18 + (52 - 18) * emphasize).toFixed(2);
     const tipSizePx = +(4 + (8 - 4) * emphasize).toFixed(2);
+    const crownPx = clampMapIdentity(Math.round(avatarPx * 0.58), 15, 25);
+    const podiumPx = clampMapIdentity(Math.round(avatarPx * 0.40), 12, 18);
     return {
       avatarPx,
+      crownPx,
+      podiumPx,
+      crownLiftPx: Math.round(crownPx * 0.38),
       rootPx: +(30 + (66 - 30) * emphasize).toFixed(2),
       tipSizePx,
       tipOrbitPx: +((avatarPx * 0.5) - 1 + (tipSizePx * 0.1)).toFixed(2),
@@ -1301,6 +1306,18 @@
       arrowBodyPx: +(18 + (27 - 18) * t).toFixed(2),
       arrowLeftRightPx: +(4.5 + (7 - 4.5) * t).toFixed(2),
       arrowAccentPx: +(10 + (14 - 10) * t).toFixed(2)
+    };
+  }
+
+  function mapIdentityBadgeSizeConfig(avatarPx) {
+    const baseAvatar = Number(avatarPx);
+    const safeAvatarPx = Number.isFinite(baseAvatar) ? baseAvatar : 28;
+    const crownPx = clampMapIdentity(Math.round(safeAvatarPx * 0.58), 15, 25);
+    const podiumPx = clampMapIdentity(Math.round(safeAvatarPx * 0.40), 12, 18);
+    return {
+      crownPx,
+      podiumPx,
+      crownLiftPx: Math.round(crownPx * 0.38)
     };
   }
 
@@ -1401,10 +1418,11 @@
     return `<span class="badgeSvgLabelWrap">${svg}<span class="badgeText">${escapeHtml(meta.label)}</span></span>`;
   }
 
-  function mapIdentityBadgeOverlayHTML({ badgeCode }) {
-    const meta = leaderboardBadgeMeta(badgeCode);
+  function mapIdentityBadgeOverlayHTML({ badgeCode, avatarPx, code }) {
+    const meta = leaderboardBadgeMeta(badgeCode || code);
     if (!meta.code) return '';
-    const size = meta.code === 'crown' ? 32 : 20;
+    const badgeSizeCfg = mapIdentityBadgeSizeConfig(avatarPx);
+    const size = meta.code === 'crown' ? badgeSizeCfg.crownPx : badgeSizeCfg.podiumPx;
     return `<span class="mapIdentityBadgeOverlay mapBadgeWearable ${meta.toneClass}" aria-label="${escapeHtml(meta.label)}">${renderLeaderboardBadgeSvg(meta.code, { size, mapWearable: true, compact: true })}</span>`;
   }
 
@@ -1433,7 +1451,7 @@
           <div class="mapPresenceShell" style="width:${cfg.avatarPx}px;height:${cfg.avatarPx}px;">
             ${avatarHTML}
           </div>
-          <span class="mapPresenceBadgeOverlay">${mapIdentityBadgeOverlayHTML({ badgeCode: leaderboardBadgeCode })}</span>
+          <span class="mapPresenceBadgeOverlay">${mapIdentityBadgeOverlayHTML({ badgeCode: leaderboardBadgeCode, avatarPx: cfg.avatarPx })}</span>
         </div>
       </div>
     `;
@@ -1589,6 +1607,9 @@
       rootStyle.setProperty('--map-presence-tip-orbit', `${cfg.tipOrbitPx}px`);
       rootStyle.setProperty('--map-presence-badge-font', `${cfg.badgeFontPx}px`);
       rootStyle.setProperty('--map-presence-badge-scale', `${(cfg.rootPx / 54).toFixed(3)}`);
+      rootStyle.setProperty('--map-crown-size', `${cfg.crownPx}px`);
+      rootStyle.setProperty('--map-podium-size', `${cfg.podiumPx}px`);
+      rootStyle.setProperty('--map-crown-lift', `${cfg.crownLiftPx}px`);
     }
     document.querySelectorAll('#navWrap, .otherDrvWrap').forEach((el) => {
       el.style.width = `${cfg.rootPx}px`;
