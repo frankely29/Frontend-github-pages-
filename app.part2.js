@@ -2629,23 +2629,23 @@
       #driverProfileModalRoot{position:fixed;inset:0;z-index:9800;display:none}
       #driverProfileModalRoot.open{display:block}
       .driverProfileBackdrop{position:absolute;inset:0;background:rgba(7,10,19,.42);z-index:9800}
-      .driverProfileSheet{position:absolute;left:50%;transform:translate(-50%,110%);bottom:var(--driver-profile-bottom-offset, 16px);width:min(430px,calc(100vw - 16px));max-height:calc(100vh - var(--driver-profile-bottom-offset, 16px) - env(safe-area-inset-top) - 8px);background:rgba(255,255,255,.985);border-radius:24px 24px 16px 16px;box-shadow:0 -12px 30px rgba(0,0,0,.2);display:flex;flex-direction:column;overflow:hidden;transition:transform .18s ease-out;z-index:9801}
+      .driverProfileSheet{position:absolute;left:50%;transform:translate(-50%,110%);bottom:var(--driver-profile-bottom-offset, 14px);width:min(430px,calc(100vw - 16px));max-height:calc(100dvh - var(--driver-profile-bottom-offset, 14px) - env(safe-area-inset-top) - 6px);background:rgba(255,255,255,.985);border-radius:24px 24px 16px 16px;box-shadow:0 -12px 30px rgba(0,0,0,.2);display:flex;flex-direction:column;overflow:hidden;transition:transform .18s ease-out;z-index:9801}
       #driverProfileModalRoot.open .driverProfileSheet{transform:translate(-50%,0)}
       .driverProfileBody{display:flex;flex-direction:column;min-height:0;height:100%}
-      .driverProfileHeader{display:flex;align-items:flex-start;justify-content:space-between;gap:6px;padding:8px 10px 5px}
+      .driverProfileHeader{display:flex;align-items:flex-start;justify-content:space-between;gap:5px;padding:7px 10px 4px}
       .driverProfileIdentity{display:flex;gap:6px;align-items:center;min-width:0}
       .driverProfileAvatar{width:44px;height:44px;border-radius:999px;flex:0 0 44px;object-fit:cover;background:#e8edf5}
       .driverProfileName{font-size:15px;line-height:1.18;font-weight:700;color:#111827;word-break:break-word}
-      .driverProfileBadgeRow{display:flex;align-items:center;gap:5px;margin-top:2px;min-height:22px}
+      .driverProfileBadgeRow{display:flex;align-items:center;gap:5px;margin-top:1px;min-height:20px}
       .driverProfileBadgeChipWrap{display:inline-flex;align-items:center;gap:7px}.driverProfileBadgeLabel{font-size:11px;font-weight:700;color:#334155;letter-spacing:.15px}
-      .driverProfileProgressWrap{background:#f8fafc;border:1px solid #e2e8f0;border-radius:11px;padding:6px;margin-bottom:7px}
-      .driverProfileProgressHead{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:4px}
+      .driverProfileProgressWrap{background:#f8fafc;border:1px solid #e2e8f0;border-radius:11px;padding:5px;margin-bottom:6px}
+      .driverProfileProgressHead{display:flex;align-items:center;justify-content:space-between;gap:5px;margin-bottom:3px}
       .driverProfileProgressLine{font-size:12px;font-weight:700;color:#0f172a;display:flex;align-items:center;gap:5px;min-width:0;flex-wrap:wrap}
       .driverProfileProgressMeta{font-size:11px;color:#475569;line-height:1.3}
-      .driverProfileProgressBar{height:7px;border-radius:999px;background:#e2e8f0;overflow:hidden;margin:3px 0 4px}
+      .driverProfileProgressBar{height:7px;border-radius:999px;background:#e2e8f0;overflow:hidden;margin:2px 0 3px}
       .driverProfileProgressFill{height:100%;background:linear-gradient(90deg,#3b82f6,#22c55e);border-radius:999px;transition:width .2s ease-out}
       .driverProfileRankName{color:#0f172a;font-weight:800}
-      .driverProfileBreakdownGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:2px 8px;margin-top:4px;padding-top:4px;border-top:1px dashed #dbe4ee}
+      .driverProfileBreakdownGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:2px 7px;margin-top:3px;padding-top:3px;border-top:1px dashed #dbe4ee}
       .rankBadgeIconWrap{width:56px;height:56px;display:grid;place-items:center;border-radius:999px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.35),0 5px 14px rgba(2,6,23,.2)}
       .rankBadgeIconWrap.compact{width:44px;height:44px}
       .rankBadgeIconWrap.toneRecruit{background:linear-gradient(140deg,#64748b,#334155);color:#e2e8f0}
@@ -2692,12 +2692,12 @@
       @keyframes pickupProgressRewardGlow{0%{opacity:0;transform:scale(.5)}34%{opacity:1;transform:scale(1.04)}100%{opacity:0;transform:scale(1.3)}}
       @keyframes levelUpOverlayBurst{0%{opacity:0;transform:scale(.82)}38%{opacity:1;transform:scale(1.02)}100%{opacity:0;transform:scale(1.24)}}
       .driverProfileClose{border:0;background:#e5e7eb;color:#111827;border-radius:10px;padding:7px 9px;font-size:13px}
-      .driverProfileScroll{overflow:auto;-webkit-overflow-scrolling:touch;padding:0 10px 7px;min-height:0}
-      .driverProfileSectionTitle{font-size:12px;font-weight:700;color:#111827;margin:1px 0 4px}
-      .driverProfileStats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px;margin-bottom:7px}
-      .driverProfileStatCard{background:#f8fafc;border:1px solid #e2e8f0;border-radius:11px;padding:5px}
+      .driverProfileScroll{overflow:auto;-webkit-overflow-scrolling:touch;padding:0 10px 6px;min-height:0}
+      .driverProfileSectionTitle{font-size:12px;font-weight:700;color:#111827;margin:1px 0 3px}
+      .driverProfileStats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:3px;margin-bottom:6px}
+      .driverProfileStatCard{background:#f8fafc;border:1px solid #e2e8f0;border-radius:11px;padding:4px 5px}
       .driverProfileStatPeriod{font-size:11px;font-weight:700;color:#0f172a;margin-bottom:2px}
-      .driverProfileStatRow{display:flex;align-items:center;justify-content:space-between;gap:4px;margin-top:1px}
+      .driverProfileStatRow{display:flex;align-items:center;justify-content:space-between;gap:4px;margin-top:0}
       .driverProfileStatLabel{font-size:11px;color:#475569}
       .driverProfileStatValue{font-size:13px;font-weight:700;color:#0f172a}
       .driverProfileDailyRanks{margin-top:3px;padding-top:2px;border-top:1px dashed #dbe4ee}
@@ -2715,10 +2715,10 @@
       .driverProfileStatus{font-size:12px;color:#64748b;padding:0 10px 7px}
       .driverProfileError{font-size:12px;color:#b91c1c;background:#fee2e2;border:1px solid #fecaca;border-radius:10px;padding:8px;margin:2px 10px 7px}
       .driverProfileLoading{padding:14px 10px;color:#334155;font-size:13px}
-      .driverProfileActions{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:6px}
+      .driverProfileActions{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:5px}
       .driverProfileActionBtn{border:1px solid #cbd5e1;background:#f8fafc;color:#0f172a;border-radius:10px;padding:8px 10px;font-size:13px;font-weight:600}
       .driverProfileActionBtn.danger{border-color:#fecaca;background:#fff1f2;color:#b91c1c}
-      .driverProfileMapIdentity{border:1px solid #e2e8f0;border-radius:11px;padding:6px;background:#fff}
+      .driverProfileMapIdentity{border:1px solid #e2e8f0;border-radius:11px;padding:5px;background:#fff}
       .driverProfileMapIdentity #profileMapIdentitySection{margin:0}
     `;
     document.head.appendChild(style);
