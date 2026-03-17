@@ -1868,6 +1868,20 @@ if (dockProfile) {
   });
 }
 
+function enforceSaveButtonTheme() {
+  const saveBtn = document.getElementById("pickupFab");
+  if (!saveBtn) return;
+  saveBtn.classList.add("dockBtn", "dockBtnSave", "dockBtnSaveMain");
+  saveBtn.style.removeProperty("background");
+  saveBtn.style.removeProperty("color");
+  saveBtn.style.removeProperty("filter");
+  saveBtn.style.removeProperty("opacity");
+  const iconEl = saveBtn.querySelector(".pickupFabIcon");
+  if (iconEl && !iconEl.querySelector("svg")) {
+    iconEl.innerHTML = `<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" style="display:block"><path d="m6.5 12.4 3.6 3.6 7.4-7.4" fill="none" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  }
+}
+
 function applyDockIconModel() {
 
   const setIcon = (button, svgMarkup) => {
@@ -1944,6 +1958,17 @@ function applyDockIconModel() {
       <path d="M12 2.5 13.2 5h2.7l-2.2 1.8.8 2.8L12 8.1 9.5 9.6l.8-2.8L8 5h2.7L12 2.5Z" fill="#ffcc2f" stroke="#b57f00" stroke-width="0.8"/>
     </svg>
   `);
+
+  const pickupIconEl = document.querySelector("#pickupFab .pickupFabIcon");
+  if (pickupIconEl) {
+    pickupIconEl.innerHTML = `<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" style="display:block"><path d="m6.5 12.4 3.6 3.6 7.4-7.4" fill="none" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    pickupIconEl.style.fontSize = "0";
+    pickupIconEl.style.display = "inline-grid";
+    pickupIconEl.style.placeItems = "center";
+    pickupIconEl.style.lineHeight = "1";
+  }
+
+  enforceSaveButtonTheme();
 }
 
 applyDockIconModel();
@@ -2065,6 +2090,7 @@ function initMap() {
   });
 
   map.on("load", () => {
+    enforceSaveButtonTheme();
     mapReady = true;
     map.resize();
     applyNightBasemap(!!wxState?.isNight);
@@ -4112,7 +4138,9 @@ slider?.addEventListener("input", () => {
 
 window.addEventListener("resize", () => {
   if (timeline.length) setSliderBubbleTextAndPos();
+  enforceSaveButtonTheme();
 });
+window.addEventListener("orientationchange", () => enforceSaveButtonTheme());
 
 /* =========================================================
    Auto-center
@@ -4861,8 +4889,10 @@ function applyBadgeIconModel() {
   const pickupIconEl = document.querySelector("#pickupFab .pickupFabIcon");
   setIconMarkup(
     pickupIconEl,
-    `<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" style="display:block"><path d="m6.5 12.4 3.6 3.6 7.4-7.4" fill="none" stroke="currentColor" stroke-width="2.9" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+    `<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" style="display:block"><path d="m6.5 12.4 3.6 3.6 7.4-7.4" fill="none" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`
   );
+
+  enforceSaveButtonTheme();
 }
 
 applyBadgeIconModel();
@@ -4920,6 +4950,7 @@ function setBodyTheme({ isNight, isSunny }) {
   document.body.classList.toggle("night", !!isNight);
   document.body.classList.toggle("sunny", !!isSunny && !isNight);
   applyNightBasemap(!!isNight);
+  enforceSaveButtonTheme();
 }
 
 function applyNightBasemap(isNight) {
@@ -5650,6 +5681,7 @@ function setAuthUI(signedIn, note) {
   if (btnPolice) btnPolice.classList.toggle("disabled", !signedIn);
   if (btnPickup) btnPickup.classList.toggle("disabled", !signedIn);
   if (pickupFab) pickupFab.classList.toggle("disabled", !signedIn);
+  enforceSaveButtonTheme();
   if (btnGhostMode) btnGhostMode.classList.toggle("disabled", !signedIn);
   if (btnChangePassword) btnChangePassword.classList.toggle("disabled", !signedIn);
   if (btnDeleteAccount) btnDeleteAccount.classList.toggle("disabled", !signedIn);
