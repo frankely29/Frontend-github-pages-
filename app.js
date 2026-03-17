@@ -2156,9 +2156,30 @@ function initMap() {
     // Zone click popup (restored)
     wireZoneClickPopup();
 
-    document.addEventListener("pointerdown", resetInactivityTimer, { passive: true });
-    document.addEventListener("touchstart", resetInactivityTimer, { passive: true });
-    resetInactivityTimer();
+    document.addEventListener("pointerdown", markUserActivity, { passive: true });
+    document.addEventListener("touchstart", markUserActivity, { passive: true });
+    document.addEventListener("touchmove", markUserActivity, { passive: true });
+    document.addEventListener("wheel", markUserActivity, { passive: true });
+    document.addEventListener("keydown", markUserActivity);
+    document.addEventListener("click", markUserActivity, { passive: true });
+
+    map.on("dragstart", markUserActivity);
+    map.on("drag", markUserActivity);
+    map.on("dragend", markUserActivity);
+    map.on("zoomstart", markUserActivity);
+    map.on("zoom", markUserActivity);
+    map.on("zoomend", markUserActivity);
+    map.on("rotatestart", markUserActivity);
+    map.on("rotate", markUserActivity);
+    map.on("rotateend", markUserActivity);
+    map.on("pitchstart", markUserActivity);
+    map.on("pitch", markUserActivity);
+    map.on("pitchend", markUserActivity);
+    map.on("movestart", markUserActivity);
+    map.on("move", markUserActivity);
+    map.on("moveend", markUserActivity);
+
+    scheduleAutoFocusFromInactivity();
 
     map.on("click", (e) => {
       const features = map.queryRenderedFeatures(e.point, { layers: ["zones-fill"] });
@@ -4168,18 +4189,38 @@ window.addEventListener("orientationchange", () => enforceSaveButtonTheme());
 const btnCenter = document.getElementById("btnCenter");
 let autoCenter = true;
 let inactivityTimer = null;
+const AUTO_FOCUS_INACTIVITY_MS = 20000;
+const AUTO_FOCUS_RETURN_ZOOM = 13.0;
+const AUTO_FOCUS_RETURN_ZOOM_THRESHOLD = 0.35;
 
-function resetInactivityTimer() {
-  clearTimeout(inactivityTimer);
+function cancelAutoFocusInactivityTimer() {
+  if (inactivityTimer) clearTimeout(inactivityTimer);
+  inactivityTimer = null;
+}
+
+function scheduleAutoFocusFromInactivity() {
+  cancelAutoFocusInactivityTimer();
   inactivityTimer = setTimeout(() => {
-    if (!autoCenter) {
-      autoCenter = true;
-      syncCenterButton();
-      if (typeof autoCenterAndAutoZoom === "function") {
-        autoCenterAndAutoZoom();
-      }
-    }
-  }, 30000);
+    inactivityTimer = null;
+    handleAutoFocusInactivityTimeout();
+  }, AUTO_FOCUS_INACTIVITY_MS);
+}
+
+function markUserActivity() {
+  // Ignore movement/zoom/rotate events caused by our own map animations.
+  if (Date.now() < suppressAutoDisableUntil) return;
+  scheduleAutoFocusFromInactivity();
+}
+
+function getSelfCenterLngLat() {
+  if (navMarker && typeof navMarker.getLngLat === "function") {
+    const p = navMarker.getLngLat();
+    if (p && Number.isFinite(p.lng) && Number.isFinite(p.lat)) return { lng: p.lng, lat: p.lat };
+  }
+  if (userLatLng && Number.isFinite(userLatLng.lng) && Number.isFinite(userLatLng.lat)) {
+    return { lng: userLatLng.lng, lat: userLatLng.lat };
+  }
+  return null;
 }
 
 let suppressAutoDisableUntil = 0;
@@ -4274,54 +4315,71 @@ function syncCenterButton() {
   if (!btnCenter) return;
   btnCenter.classList.toggle("on", !!autoCenter);
 }
+
+function refreshAutoCenterCamera({ restoreZoom = false } = {}) {
+  if (!map || !autoCenter) return;
+  const c = getSelfCenterLngLat();
+  if (!c) return;
+  const currentZoom = Number(map.getZoom?.());
+  const shouldRaiseZoom = restoreZoom
+    && Number.isFinite(currentZoom)
+    && currentZoom < (AUTO_FOCUS_RETURN_ZOOM - AUTO_FOCUS_RETURN_ZOOM_THRESHOLD);
+  const targetZoom = shouldRaiseZoom ? AUTO_FOCUS_RETURN_ZOOM : currentZoom;
+
+  suppressAutoDisableFor(900, () => {
+    map.flyTo({
+      center: [c.lng, c.lat],
+      zoom: Number.isFinite(targetZoom) ? targetZoom : AUTO_FOCUS_RETURN_ZOOM,
+      bearing: Number.isFinite(lastHeadingDeg) ? normDeg(lastHeadingDeg) : map.getBearing(),
+      duration: 650,
+      essential: true,
+    });
+  });
+}
+
+function setAutoCenterEnabled(next, reason = "manual") {
+  const enabled = !!next;
+  const changed = autoCenter !== enabled;
+  autoCenter = enabled;
+  syncCenterButton();
+
+  if (!autoCenter && map && mapReady) {
+    const b = map.getBearing ? map.getBearing() : 0;
+    lastMapBearingDeg = normDeg(b);
+  }
+
+  if (autoCenter && (changed || reason === "inactive-timeout")) {
+    refreshAutoCenterCamera({ restoreZoom: reason === "inactive-timeout" });
+  }
+  return changed;
+}
+
+function handleAutoFocusInactivityTimeout() {
+  if (!map || !mapReady) return;
+  if (!getSelfCenterLngLat()) return;
+  if (autoCenter) return;
+  setAutoCenterEnabled(true, "inactive-timeout");
+}
+
 syncCenterButton();
 
 if (btnCenter) {
   btnCenter.addEventListener("pointerdown", (e) => e.stopPropagation());
   btnCenter.addEventListener("touchstart", (e) => e.stopPropagation(), { passive: true });
 
-  // --- center helper: always use the navMarker's real position (arrow) ---
-  function getSelfCenterLngLat() {
-    if (navMarker && typeof navMarker.getLngLat === "function") {
-      const p = navMarker.getLngLat();
-      if (p && Number.isFinite(p.lng) && Number.isFinite(p.lat)) return { lng: p.lng, lat: p.lat };
-    }
-    if (userLatLng && Number.isFinite(userLatLng.lng) && Number.isFinite(userLatLng.lat)) return { lng: userLatLng.lng, lat: userLatLng.lat };
-    return null;
-  }
-
   btnCenter.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
-
-    autoCenter = !autoCenter;
-    syncCenterButton();
-
-    if (autoCenter && map) {
-      const c = getSelfCenterLngLat();
-      if (c) {
-        suppressAutoDisableFor(900, () => {
-          map.flyTo({
-            center: [c.lng, c.lat],
-            zoom: Math.max(map.getZoom(), 13.0),
-            bearing: Number.isFinite(lastHeadingDeg) ? normDeg(lastHeadingDeg) : map.getBearing(),
-            duration: 600
-          });
-        });
-      }
-    } else if (map && mapReady) {
-      const b = map.getBearing ? map.getBearing() : 0;
-      lastMapBearingDeg = normDeg(b);
-    }
+    markUserActivity();
+    setAutoCenterEnabled(!autoCenter, "manual");
   });
 }
 
 function disableAutoCenterBecauseUserIsExploring() {
   if (Date.now() < suppressAutoDisableUntil) return;
   if (!autoCenter) return;
-  autoCenter = false;
-  syncCenterButton();
-  resetInactivityTimer();
+  setAutoCenterEnabled(false, "manual");
+  markUserActivity();
 }
 
 /* =========================================================
