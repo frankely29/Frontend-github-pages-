@@ -1435,7 +1435,6 @@
       <div class="mapPresenceOrbit ${markerClass}" data-map-identity-label="1" data-map-presence-orbit="1" ${orbitAttrs}>
         <div class="mapPresenceRoot">
           <div class="mapPresenceDirectionRot"${dirAttr} aria-hidden="true">
-          <span class="mapPresenceDirectionTip"></span>
           </div>
           <div class="mapPresenceShell" style="width:${cfg.avatarPx}px;height:${cfg.avatarPx}px;">
             ${avatarHTML}

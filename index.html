@@ -611,7 +611,7 @@
       left: 50%;
       transform: translateX(-50%);
       bottom: calc(env(safe-area-inset-bottom, 0px) + 38px);
-      width: min(100vw - 20px, 430px);
+      width: min(100vw - 16px, 446px);
       z-index: 3000 !important;
       pointer-events: auto;
       --dock-edge-fade-left: 0px;
@@ -648,7 +648,7 @@
     .dockViewport::-webkit-scrollbar { display: none; }
     .dockTrack {
       display: inline-flex;
-      gap: 8px;
+      gap: 11px;
       align-items: center;
       justify-content: flex-start;
       width: max-content;
@@ -753,15 +753,7 @@
       color: #fff;
       margin: 0 auto;
     }
-    .dockBtnSave .pickupFabIcon svg{display:block;width:22px;height:22px;}
-    .dockBtnSave .pickupFabText {
-      text-align: center;
-      line-height: 1;
-      font-size: 10px;
-      font-weight: 900;
-      letter-spacing: 0.01em;
-      color: #fff;
-    }
+    .dockBtnSave .pickupFabIcon svg{display:block;width:24px;height:24px;}
     #pickupFab.disabled { opacity: .56; }
     .dockBtnMusic { background: rgba(235,60,60,0.95); color: white; }
     .dockBtnActive { outline: 2px solid rgba(0,0,0,0.15); }
@@ -835,7 +827,7 @@
     .dockBtnMain .dockIcon svg { width: 28px; height: 28px; }
     #dockGames .dockIcon svg { width: 31px; height: 31px; }
     #dockChat .dockIcon svg { width: 29px; height: 29px; }
-    .dayTendencyValueStack { margin-left: -7px; align-items: center; }
+    .dayTendencyValueStack { margin-left: -16px; align-items: flex-start; }
 
     .sidePanel { display: none; }
     .panelTitle {
@@ -1870,7 +1862,6 @@
 
         <button id="pickupFab" class="dockBtn dockBtnSave dockBtnSaveMain" type="button" aria-label="Save">
           <span class="pickupFabIcon" aria-hidden="true"></span>
-          <span class="pickupFabText">Save</span>
         </button>
 
         <button class="dockBtn dockBtnMain" id="dockGames" aria-label="Games">
