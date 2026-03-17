@@ -1290,15 +1290,9 @@
     const smooth = t * t * (3 - 2 * t);
     const emphasize = Math.pow(smooth, 0.9);
     const avatarPx = +(18 + (52 - 18) * emphasize).toFixed(2);
-    const crownPx = clampMapIdentity(Math.round(avatarPx * 0.72), 20, 38);
-    const silverBronzePx = clampMapIdentity(Math.round(avatarPx * 0.48), 14, 24);
-    const badgePx = Math.max(crownPx, silverBronzePx);
     const tipSizePx = +(4 + (8 - 4) * emphasize).toFixed(2);
     return {
       avatarPx,
-      crownPx,
-      badgePx,
-      silverBronzePx,
       rootPx: +(30 + (66 - 30) * emphasize).toFixed(2),
       tipSizePx,
       tipOrbitPx: +((avatarPx * 0.5) - 1 + (tipSizePx * 0.1)).toFixed(2),
@@ -1410,8 +1404,7 @@
   function mapIdentityBadgeOverlayHTML({ badgeCode }) {
     const meta = leaderboardBadgeMeta(badgeCode);
     if (!meta.code) return '';
-    const badgeVar = meta.code === 'crown' ? 'var(--map-crown-size,32)' : 'var(--map-podium-size,20)';
-    const size = `calc(${badgeVar} * 1px)`;
+    const size = meta.code === 'crown' ? 32 : 20;
     return `<span class="mapIdentityBadgeOverlay mapBadgeWearable ${meta.toneClass}" aria-label="${escapeHtml(meta.label)}">${renderLeaderboardBadgeSvg(meta.code, { size, mapWearable: true, compact: true })}</span>`;
   }
 
@@ -1435,6 +1428,7 @@
       <div class="mapPresenceOrbit ${markerClass}" data-map-identity-label="1" data-map-presence-orbit="1" ${orbitAttrs}>
         <div class="mapPresenceRoot">
           <div class="mapPresenceDirectionRot"${dirAttr} aria-hidden="true">
+          <span class="mapPresenceDirectionTip"></span>
           </div>
           <div class="mapPresenceShell" style="width:${cfg.avatarPx}px;height:${cfg.avatarPx}px;">
             ${avatarHTML}
@@ -1590,9 +1584,6 @@
       rootStyle.setProperty('--map-ident-badge-font', `${cfg.badgeFontPx}px`);
       rootStyle.setProperty('--map-presence-root-px', `${cfg.rootPx}px`);
       rootStyle.setProperty('--map-presence-avatar', `${cfg.avatarPx}px`);
-      rootStyle.setProperty('--map-avatar-size', `${cfg.avatarPx}px`);
-      rootStyle.setProperty('--map-crown-size', `${cfg.crownPx}px`);
-      rootStyle.setProperty('--map-podium-size', `${cfg.silverBronzePx}px`);
       rootStyle.setProperty('--map-presence-initials-font', `${cfg.initialsFontPx}px`);
       rootStyle.setProperty('--map-presence-tip-size', `${cfg.tipSizePx}px`);
       rootStyle.setProperty('--map-presence-tip-orbit', `${cfg.tipOrbitPx}px`);
@@ -2430,12 +2421,47 @@
     rerenderGamesPanel();
   }
 
-  function updateDockScrollHints() {}
-  function scrollDockByStep() {}
+  function updateDockScrollHints() {
+    const dock = document.getElementById('dock');
+    const viewport = document.getElementById('dockViewport');
+    if (!dock || !viewport) return;
+    const maxScroll = Math.max(0, viewport.scrollWidth - viewport.clientWidth);
+    const leftVisible = viewport.scrollLeft > 2;
+    const rightVisible = viewport.scrollLeft < (maxScroll - 2);
+    dock.classList.toggle('dock-can-scroll-left', leftVisible);
+    dock.classList.toggle('dock-can-scroll-right', rightVisible);
+  }
+
+  function scrollDockByStep(direction) {
+    const viewport = document.getElementById('dockViewport');
+    if (!viewport) return;
+    const step = Math.max(120, Math.round(viewport.clientWidth * 1.2));
+    viewport.scrollBy({ left: direction * step, behavior: 'smooth' });
+  }
+
   function initDockScroller() {
-    if (typeof window.layoutDockByAvailableWidth === 'function') {
-      window.layoutDockByAvailableWidth();
-    }
+    const viewport = document.getElementById('dockViewport');
+    const leftHint = document.getElementById('dockScrollHintLeft');
+    const rightHint = document.getElementById('dockScrollHintRight');
+    if (!viewport) return;
+
+    let rafId = 0;
+    const scheduleHintUpdate = () => {
+      if (rafId) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = 0;
+        updateDockScrollHints();
+      });
+    };
+
+    viewport.addEventListener('scroll', scheduleHintUpdate, { passive: true });
+    window.addEventListener('resize', scheduleHintUpdate);
+
+    leftHint?.addEventListener('click', () => scrollDockByStep(-1));
+    rightHint?.addEventListener('click', () => scrollDockByStep(1));
+
+    scheduleHintUpdate();
+    setTimeout(scheduleHintUpdate, 120);
   }
 
 
