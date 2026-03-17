@@ -1291,7 +1291,7 @@
     const emphasize = Math.pow(smooth, 0.9);
     const avatarPx = +(18 + (52 - 18) * emphasize).toFixed(2);
     const tipSizePx = +(4 + (8 - 4) * emphasize).toFixed(2);
-    const crownPx = clampMapIdentity(Math.round(avatarPx * 0.64), 16, 27);
+    const crownPx = clampMapIdentity(Math.round(avatarPx * 0.69), 17, 29);
     const podiumPx = clampMapIdentity(Math.round(avatarPx * 0.40), 12, 18);
     return {
       avatarPx,
@@ -1312,7 +1312,7 @@
   function mapIdentityBadgeSizeConfig(avatarPx) {
     const baseAvatar = Number(avatarPx);
     const safeAvatarPx = Number.isFinite(baseAvatar) ? baseAvatar : 28;
-    const crownPx = clampMapIdentity(Math.round(safeAvatarPx * 0.64), 16, 27);
+    const crownPx = clampMapIdentity(Math.round(safeAvatarPx * 0.69), 17, 29);
     const podiumPx = clampMapIdentity(Math.round(safeAvatarPx * 0.40), 12, 18);
     return {
       crownPx,
@@ -1391,28 +1391,44 @@
     if (meta.code === 'crown') {
       svg = `<svg class="${classes}" viewBox="0 0 64 52" width="${size}" height="${size}" role="img" aria-label="${title}" focusable="false">
         <defs>
-          <linearGradient id="crownGoldBody" x1="0" y1="8" x2="0" y2="49" gradientUnits="userSpaceOnUse">
-            <stop offset="0" stop-color="#fff3ae"/>
-            <stop offset="0.44" stop-color="#f5bf33"/>
-            <stop offset="1" stop-color="#c98715"/>
+          <linearGradient id="crownGoldBody" x1="7" y1="8" x2="55" y2="48" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#fff8cf"/>
+            <stop offset="0.34" stop-color="#f4ca58"/>
+            <stop offset="0.7" stop-color="#d49b24"/>
+            <stop offset="1" stop-color="#9b6510"/>
           </linearGradient>
-          <linearGradient id="crownBandGold" x1="0" y1="40" x2="0" y2="49" gradientUnits="userSpaceOnUse">
-            <stop offset="0" stop-color="#f2c14a"/>
-            <stop offset="1" stop-color="#ad6d0d"/>
+          <linearGradient id="crownBandGold" x1="11" y1="40" x2="53" y2="49" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#f8dd7d"/>
+            <stop offset="0.55" stop-color="#d49a25"/>
+            <stop offset="1" stop-color="#8c560f"/>
           </linearGradient>
-          <linearGradient id="crownJewelCore" x1="32" y1="24" x2="32" y2="36" gradientUnits="userSpaceOnUse">
-            <stop offset="0" stop-color="#fffce2"/>
-            <stop offset="1" stop-color="#ffe08a"/>
+          <linearGradient id="crownRubyCore" x1="32" y1="24" x2="32" y2="35" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#ff6d8d"/>
+            <stop offset="0.48" stop-color="#c91f4c"/>
+            <stop offset="1" stop-color="#751028"/>
+          </linearGradient>
+          <linearGradient id="crownDiamondCore" x1="18" y1="23" x2="18" y2="31" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#ffffff"/>
+            <stop offset="0.5" stop-color="#dbe8f7"/>
+            <stop offset="1" stop-color="#bccfe5"/>
+          </linearGradient>
+          <linearGradient id="crownRubySide" x1="46" y1="23" x2="46" y2="31" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#ff88a0"/>
+            <stop offset="0.5" stop-color="#be2148"/>
+            <stop offset="1" stop-color="#700f24"/>
           </linearGradient>
         </defs>
-        <path d="M6 41.5h52L53.8 15 40 26.2 32 8 24 26.2 10.2 15 6 41.5Z" fill="url(#crownGoldBody)" stroke="#7a4b08" stroke-width="3" stroke-linejoin="round"/>
-        <path d="M11 41h42v7.5H11z" fill="url(#crownBandGold)" stroke="#7a4b08" stroke-width="3"/>
-        <path d="M11 20.4c5.9 4 12.1 4.6 18.7 1.8 1.4-.6 2.9-.6 4.3 0 6.6 2.8 12.8 2.2 18.7-1.8" fill="none" stroke="rgba(255,248,210,.66)" stroke-width="2" stroke-linecap="round"/>
-        <path d="M13 39c5.5-3.1 32.5-3.1 38 0" fill="none" stroke="rgba(255,255,255,.5)" stroke-width="2" stroke-linecap="round"/>
-        <circle cx="32" cy="30" r="5" fill="url(#crownJewelCore)" stroke="#8f5f10" stroke-width="2"/>
-        <circle cx="32" cy="29" r="1.2" fill="rgba(255,255,255,.8)"/>
-        <circle cx="18" cy="27.2" r="3.6" fill="#ffdaa0" stroke="#8f5f10" stroke-width="1.8"/>
-        <circle cx="46" cy="27.2" r="3.6" fill="#ffcfa0" stroke="#8f5f10" stroke-width="1.8"/>
+        <path d="M6 41.5h52L53.8 15 40 26.2 32 8 24 26.2 10.2 15 6 41.5Z" fill="url(#crownGoldBody)" stroke="#7b4a09" stroke-width="3" stroke-linejoin="round"/>
+        <path d="M11 41h42v7.5H11z" fill="url(#crownBandGold)" stroke="#73450b" stroke-width="3"/>
+        <path d="M11 20.4c5.9 4 12.1 4.6 18.7 1.8 1.4-.6 2.9-.6 4.3 0 6.6 2.8 12.8 2.2 18.7-1.8" fill="none" stroke="rgba(255,246,201,.72)" stroke-width="1.8" stroke-linecap="round"/>
+        <path d="M14 31.4c5.1-1.8 9.5-1.8 13.4 0M36.6 31.4c4-1.8 8.3-1.8 13.4 0" fill="none" stroke="rgba(255,224,132,.42)" stroke-width="1.6" stroke-linecap="round"/>
+        <path d="M13 39c5.5-3.1 32.5-3.1 38 0" fill="none" stroke="rgba(255,255,255,.45)" stroke-width="1.9" stroke-linecap="round"/>
+        <circle cx="32" cy="29.8" r="5.3" fill="url(#crownRubyCore)" stroke="#631124" stroke-width="1.8"/>
+        <circle cx="30.8" cy="28.5" r="1.2" fill="rgba(255,231,238,.88)"/>
+        <path d="M18 23.7l3.3 3.3-3.3 3.3-3.3-3.3z" fill="url(#crownDiamondCore)" stroke="#8b9cb4" stroke-width="1.4"/>
+        <path d="M17.9 25.4 19.6 27l-1.7 1.6" fill="none" stroke="rgba(255,255,255,.78)" stroke-width="0.8" stroke-linecap="round"/>
+        <circle cx="46" cy="27" r="3.5" fill="url(#crownRubySide)" stroke="#621126" stroke-width="1.5"/>
+        <circle cx="45.1" cy="26" r="0.9" fill="rgba(255,228,235,.9)"/>
       </svg>`;
     } else if (meta.code === 'silver') {
       svg = `<svg class="${classes}" viewBox="0 0 64 64" width="${size}" height="${size}" role="img" aria-label="${title}" focusable="false">
