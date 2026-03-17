@@ -2500,18 +2500,18 @@
 
   function centerDockOnSave({ behavior = 'smooth' } = {}) {
     const viewport = getDockViewport();
-    const track = getDockTrack();
     const saveBtn = getDockSaveButton();
-    if (!viewport || !track || !saveBtn) return;
+    if (!viewport || !saveBtn) return;
 
     const viewportWidth = viewport.clientWidth;
     const targetLeft = saveBtn.offsetLeft + (saveBtn.offsetWidth / 2) - (viewportWidth / 2);
-    const maxScroll = Math.max(0, track.scrollWidth - viewportWidth);
+    const maxScroll = Math.max(0, viewport.scrollWidth - viewportWidth);
     const clampedLeft = Math.max(0, Math.min(maxScroll, targetLeft));
     viewport.scrollTo({ left: clampedLeft, behavior });
   }
 
   let dockAutoCenterTimer = 0;
+  let dockPointerIsDown = false;
 
   function cancelDockAutoCenter() {
     if (!dockAutoCenterTimer) return;
@@ -2522,6 +2522,10 @@
   function scheduleDockAutoCenter() {
     cancelDockAutoCenter();
     dockAutoCenterTimer = setTimeout(() => {
+      if (dockPointerIsDown) {
+        scheduleDockAutoCenter();
+        return;
+      }
       dockAutoCenterTimer = 0;
       centerDockOnSave({ behavior: 'smooth' });
     }, 10000);
@@ -2556,10 +2560,25 @@
       scheduleDockAutoCenter();
     };
 
+    const beginDockDrag = () => {
+      dockPointerIsDown = true;
+      handleDockInteraction();
+    };
+
+    const endDockDrag = () => {
+      if (!dockPointerIsDown) return;
+      dockPointerIsDown = false;
+      scheduleDockAutoCenter();
+    };
+
     viewport.addEventListener('scroll', handleDockInteraction, { passive: true });
-    viewport.addEventListener('pointerdown', handleDockInteraction, { passive: true });
-    viewport.addEventListener('touchstart', handleDockInteraction, { passive: true });
+    viewport.addEventListener('pointerdown', beginDockDrag, { passive: true });
+    viewport.addEventListener('touchstart', beginDockDrag, { passive: true });
     viewport.addEventListener('wheel', handleDockInteraction, { passive: true });
+    window.addEventListener('pointerup', endDockDrag, { passive: true });
+    window.addEventListener('pointercancel', endDockDrag, { passive: true });
+    window.addEventListener('touchend', endDockDrag, { passive: true });
+    window.addEventListener('touchcancel', endDockDrag, { passive: true });
     window.addEventListener('resize', () => {
       centerDockOnSave({ behavior: 'auto' });
       scheduleHintUpdate();
