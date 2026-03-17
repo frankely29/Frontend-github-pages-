@@ -896,7 +896,7 @@
     @supports not ((-webkit-backdrop-filter: blur(12px)) or (backdrop-filter: blur(12px))) {
       .dockDrawer { background: rgba(255,255,255,0.92); }
     }
-    :root{ --chat-max-panel-height:min(70dvh,620px); --chat-composer-safe-bottom:0px; }
+    :root{ --chat-max-panel-height:min(70dvh,620px); --chat-keyboard-offset:0px; }
     .dockDrawer.open{ transform: translateX(0); }
     .dockDrawerHeader{
       display: flex;
@@ -1135,7 +1135,7 @@
     .chatTabContent{ display:flex; flex-direction:column; flex:1; min-height:0; overflow:hidden; }
     .chatTabContent.hidden{ display:none; }
     .chatComposerRegion{ flex-shrink:0; min-height:0; }
-    .chatComposerWrap{ flex-shrink:0; background:#fff; border-top:1px solid rgba(15,23,42,0.10); padding:8px 8px calc(8px + env(safe-area-inset-bottom, 0px) + var(--chat-composer-safe-bottom)); }
+    .chatComposerWrap{ flex-shrink:0; background:#fff; border-top:1px solid rgba(15,23,42,0.10); padding:8px 8px calc(8px + env(safe-area-inset-bottom, 0px)); }
     .chatComposerWrap.hidden{ display:none; }
     .chatPrivateTabUnread{ margin-left:6px; display:none; min-width:16px; height:16px; line-height:16px; border-radius:999px; background:#d91f33; color:#fff; font-size:10px; font-weight:900; padding:0 4px; }
     .chatPrivateTabUnread.show{ display:inline-block; }
@@ -1178,6 +1178,9 @@
       font-size: 10px;
       opacity: 0.68;
     }
+    .chatMsgVoice audio{ width:min(260px,100%); margin-top:4px; }
+    .chatVoiceStatus{ font:700 11px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial; color:#334155; padding:6px 2px 0; }
+    .chatPrivateThreadAvatarImg{ width:100%; height:100%; border-radius:50%; object-fit:cover; display:block; }
     .chatComposer{
       display: flex;
       align-items: center;
@@ -1707,7 +1710,7 @@
       top: auto;
       left: 50%;
       transform: translateX(-50%) translateY(18px);
-      bottom: calc(env(safe-area-inset-bottom, 0px) + 122px);
+      bottom: calc(env(safe-area-inset-bottom, 0px) + 122px + var(--chat-keyboard-offset, 0px));
       width: min(92vw, 430px);
       height: min(var(--chat-max-panel-height), 620px);
       max-height: min(var(--chat-max-panel-height), 620px);
