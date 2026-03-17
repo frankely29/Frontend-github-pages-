@@ -924,15 +924,19 @@
           <button id="chatTabPrivate" class="chatTabBtn ${activeChatTab === 'private' ? 'active' : ''}" type="button" role="tab" aria-selected="${activeChatTab === 'private'}">Private<span id="chatPrivateTabUnread" class="chatPrivateTabUnread"></span></button>
           <div class="chatTabIndicator"></div>
         </div>
-        <div id="chatPublicView" class="chatTabContent ${activeChatTab === 'public' ? '' : 'hidden'}">
-          <div id="chatList" class="chatList" aria-live="polite"></div>
-          <div class="chatComposer">
+        <div class="chatBody">
+          <div id="chatPublicView" class="chatTabContent ${activeChatTab === 'public' ? '' : 'hidden'}">
+            <div id="chatList" class="chatList" aria-live="polite"></div>
+          </div>
+          <div id="chatPublicComposer" class="chatComposerWrap ${activeChatTab === 'public' ? '' : 'hidden'}">
+            <div class="chatComposer">
             <input id="chatInput" type="text" class="chatInput" placeholder="Message drivers…" maxlength="600" />
             <button id="chatSendBtn" class="chipBtn" type="button">Send</button>
+            </div>
           </div>
-        </div>
-        <div id="chatPrivateView" class="chatTabContent ${activeChatTab === 'private' ? '' : 'hidden'}">
-          <div id="chatPrivateWrap" class="chatPrivateWrap"></div>
+          <div id="chatPrivateView" class="chatTabContent ${activeChatTab === 'private' ? '' : 'hidden'}">
+            <div id="chatPrivateWrap" class="chatPrivateWrap"></div>
+          </div>
         </div>
       </div>
     `;
@@ -1185,10 +1189,12 @@
   function switchChatTab(nextTab) {
     activeChatTab = nextTab === 'private' ? 'private' : 'public';
     const publicView = document.getElementById('chatPublicView');
+    const publicComposer = document.getElementById('chatPublicComposer');
     const privateView = document.getElementById('chatPrivateView');
     const publicBtn = document.getElementById('chatTabPublic');
     const privateBtn = document.getElementById('chatTabPrivate');
     if (publicView) publicView.classList.toggle('hidden', activeChatTab !== 'public');
+    if (publicComposer) publicComposer.classList.toggle('hidden', activeChatTab !== 'public');
     if (privateView) privateView.classList.toggle('hidden', activeChatTab !== 'private');
     if (publicBtn) {
       publicBtn.classList.toggle('active', activeChatTab === 'public');
