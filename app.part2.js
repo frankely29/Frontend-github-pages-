@@ -1291,13 +1291,13 @@
     const emphasize = Math.pow(smooth, 0.9);
     const avatarPx = +(18 + (52 - 18) * emphasize).toFixed(2);
     const tipSizePx = +(4 + (8 - 4) * emphasize).toFixed(2);
-    const crownPx = clampMapIdentity(Math.round(avatarPx * 0.69), 17, 29);
+    const crownPx = clampMapIdentity(Math.round(avatarPx * 0.76), 18, 32);
     const podiumPx = clampMapIdentity(Math.round(avatarPx * 0.40), 12, 18);
     return {
       avatarPx,
       crownPx,
       podiumPx,
-      crownLiftPx: Math.round(crownPx * 0.38),
+      crownLiftPx: Math.round(crownPx * 0.36),
       rootPx: +(30 + (66 - 30) * emphasize).toFixed(2),
       tipSizePx,
       tipOrbitPx: +((avatarPx * 0.5) - 1 + (tipSizePx * 0.1)).toFixed(2),
@@ -1312,12 +1312,12 @@
   function mapIdentityBadgeSizeConfig(avatarPx) {
     const baseAvatar = Number(avatarPx);
     const safeAvatarPx = Number.isFinite(baseAvatar) ? baseAvatar : 28;
-    const crownPx = clampMapIdentity(Math.round(safeAvatarPx * 0.69), 17, 29);
+    const crownPx = clampMapIdentity(Math.round(safeAvatarPx * 0.76), 18, 32);
     const podiumPx = clampMapIdentity(Math.round(safeAvatarPx * 0.40), 12, 18);
     return {
       crownPx,
       podiumPx,
-      crownLiftPx: Math.round(crownPx * 0.38)
+      crownLiftPx: Math.round(crownPx * 0.36)
     };
   }
 

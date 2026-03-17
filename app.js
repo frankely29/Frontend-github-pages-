@@ -1409,6 +1409,7 @@ const dockGames = document.getElementById("dockGames");
 const dockMusic = document.getElementById("dockMusic");
 const dockProfile = document.getElementById("dockProfile");
 const dockLeaderboard = document.getElementById("dockLeaderboard");
+const dockAdmin = document.getElementById("dockAdmin");
 
 const dockDrawer = document.getElementById("dockDrawer");
 const dockDrawerTitle = document.getElementById("dockDrawerTitle");
@@ -1469,7 +1470,7 @@ function syncDrawerPanelPosition() {
 }
 
 function syncDockActiveButton() {
-  [dockColors, dockModes, dockChat, dockGames, dockMusic, dockProfile, dockLeaderboard].forEach((b) => b && b.classList.remove("dockBtnActive"));
+  [dockColors, dockModes, dockChat, dockGames, dockMusic, dockProfile, dockLeaderboard, dockAdmin].forEach((b) => b && b.classList.remove("dockBtnActive"));
   if (openPanelKey === "colors") dockColors?.classList.add("dockBtnActive");
   if (openPanelKey === "modes") dockModes?.classList.add("dockBtnActive");
   if (openPanelKey === "chat") dockChat?.classList.add("dockBtnActive");
@@ -1477,6 +1478,7 @@ function syncDockActiveButton() {
   if (openPanelKey === "music") dockMusic?.classList.add("dockBtnActive");
   if (openPanelKey === "profile") dockProfile?.classList.add("dockBtnActive");
   if (openPanelKey === "leaderboard") dockLeaderboard?.classList.add("dockBtnActive");
+  if (openPanelKey === "admin") dockAdmin?.classList.add("dockBtnActive");
 }
 
 function openDrawer(key, title, html) {
@@ -1868,6 +1870,16 @@ if (dockProfile) {
   });
 }
 
+if (dockAdmin) {
+  dockAdmin.addEventListener("pointerdown", (e) => e.stopPropagation());
+  dockAdmin.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    closeDrawer();
+    window.AdminPortal?.open?.();
+  });
+}
+
 function enforceSaveButtonTheme() {
   const saveBtn = document.getElementById("pickupFab");
   if (!saveBtn) return;
@@ -1956,6 +1968,14 @@ function applyDockIconModel() {
       <rect x="10.35" y="8.4" width="3.3" height="8.8" rx="1" fill="#2ecf73"/>
       <rect x="15.5" y="5.5" width="3.3" height="11.7" rx="1" fill="#ffb300"/>
       <path d="M12 2.5 13.2 5h2.7l-2.2 1.8.8 2.8L12 8.1 9.5 9.6l.8-2.8L8 5h2.7L12 2.5Z" fill="#ffcc2f" stroke="#b57f00" stroke-width="0.8"/>
+    </svg>
+  `);
+
+  setIcon(dockAdmin, `
+    <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" focusable="false" style="display:block">
+      <path d="M12 2.4 19.3 5v5.5c0 4.9-2.7 8.5-7.3 11.1-4.6-2.6-7.3-6.2-7.3-11.1V5L12 2.4Z" fill="#eaf1ff" stroke="#1e3a8a" stroke-width="1.35" stroke-linejoin="round"/>
+      <path d="M8 9h8M8 12h8M8 15h5.2" stroke="#1f2937" stroke-width="1.45" stroke-linecap="round"/>
+      <circle cx="16.8" cy="15" r="1.4" fill="#4f46e5" stroke="#312e81" stroke-width="0.7"/>
     </svg>
   `);
 
@@ -5610,6 +5630,19 @@ function syncAdminPortalSession() {
   if (typeof window === 'undefined' || !window.AdminPortal) return;
   window.AdminPortal.setSession?.({ me, token: communityToken });
   window.AdminPortal.refreshVisibility?.();
+
+  const isAdminUser = !!me?.is_admin;
+  if (dockAdmin) {
+    dockAdmin.hidden = !isAdminUser;
+    dockAdmin.setAttribute("aria-hidden", isAdminUser ? "false" : "true");
+  }
+
+  const floatingAdminLauncher = document.getElementById("adminPortalLauncher");
+  if (floatingAdminLauncher) {
+    floatingAdminLauncher.hidden = true;
+    floatingAdminLauncher.style.display = "none";
+    floatingAdminLauncher.setAttribute("aria-hidden", "true");
+  }
 }
 
 // other drivers markers
