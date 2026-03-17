@@ -2430,35 +2430,44 @@
     rerenderGamesPanel();
   }
 
-  function updateDockScrollHints() {
-    const dock = document.getElementById('dock');
-    const viewport = document.getElementById('dockViewport');
-    if (!dock || !viewport) return;
+  function getDockLaneDefaults(viewport, direction) {
     const maxScroll = Math.max(0, viewport.scrollWidth - viewport.clientWidth);
-    const leftVisible = viewport.scrollLeft > 2;
-    const rightVisible = viewport.scrollLeft < (maxScroll - 2);
-    dock.classList.toggle('dock-can-scroll-left', leftVisible);
-    dock.classList.toggle('dock-can-scroll-right', rightVisible);
+    if (maxScroll <= 0) return { maxScroll, targetLeft: 0 };
+    const edgeBias = Math.min(maxScroll, Math.max(8, Math.round(viewport.clientWidth * 0.16)));
+    return { maxScroll, targetLeft: direction < 0 ? maxScroll - edgeBias : edgeBias };
   }
 
-  function scrollDockByStep(direction) {
-    const viewport = document.getElementById('dockViewport');
+  function updateDockScrollHints() {
+    const dock = document.getElementById('dock');
+    const leftViewport = document.getElementById('dockLeftViewport');
+    const rightViewport = document.getElementById('dockRightViewport');
+    if (!dock || !leftViewport || !rightViewport) return;
+    const leftMax = Math.max(0, leftViewport.scrollWidth - leftViewport.clientWidth);
+    const rightMax = Math.max(0, rightViewport.scrollWidth - rightViewport.clientWidth);
+    dock.classList.toggle('dock-can-scroll-left', leftMax > 2 && leftViewport.scrollLeft > 2);
+    dock.classList.toggle('dock-can-scroll-right', rightMax > 2 && rightViewport.scrollLeft < (rightMax - 2));
+  }
+
+  function scrollDockByStep(viewport, direction) {
     if (!viewport) return;
-    const step = Math.max(120, Math.round(viewport.clientWidth * 1.2));
+    const step = Math.max(100, Math.round(viewport.clientWidth * 0.9));
     viewport.scrollBy({ left: direction * step, behavior: 'smooth' });
   }
 
   function initDockScroller() {
-    const viewport = document.getElementById('dockViewport');
+    const leftViewport = document.getElementById('dockLeftViewport');
+    const rightViewport = document.getElementById('dockRightViewport');
     const leftHint = document.getElementById('dockScrollHintLeft');
     const rightHint = document.getElementById('dockScrollHintRight');
-    if (!viewport) return;
+    if (!leftViewport || !rightViewport) return;
 
     let rafId = 0;
     let autoCenterTimer = null;
-    let pointerActive = false;
+    let leftPointerActive = false;
+    let rightPointerActive = false;
     let settleTimer = null;
-    let lastScrollLeft = viewport.scrollLeft || 0;
+    let lastLeftScroll = leftViewport.scrollLeft || 0;
+    let lastRightScroll = rightViewport.scrollLeft || 0;
     let lastScrollTimestamp = performance.now();
     const AUTO_CENTER_IDLE_MS = 10000;
     const INERTIA_SETTLE_MS = 180;
@@ -2471,90 +2480,115 @@
       });
     };
 
-    const getDockCenterLeft = () => {
-      const maxScroll = Math.max(0, viewport.scrollWidth - viewport.clientWidth);
-      return Math.max(0, Math.min(maxScroll, (viewport.scrollWidth - viewport.clientWidth) / 2));
+    const recenterDockLanes = () => {
+      if (leftPointerActive || rightPointerActive) return;
+      const leftDefaults = getDockLaneDefaults(leftViewport, -1);
+      const rightDefaults = getDockLaneDefaults(rightViewport, 1);
+      if (leftDefaults.maxScroll > 0) {
+        leftViewport.scrollTo({ left: leftDefaults.targetLeft, behavior: 'smooth' });
+      }
+      if (rightDefaults.maxScroll > 0) {
+        rightViewport.scrollTo({ left: rightDefaults.targetLeft, behavior: 'smooth' });
+      }
     };
 
-    const recenterDockToDefaultPosition = () => {
-      if (pointerActive) return;
-      viewport.scrollTo({ left: getDockCenterLeft(), behavior: 'smooth' });
-    };
-
-    const cancelDockAutoCenter = () => {
+    const cancelDockLaneAutoCenter = () => {
       if (!autoCenterTimer) return;
       clearTimeout(autoCenterTimer);
       autoCenterTimer = null;
     };
 
-    const scheduleDockAutoCenter = () => {
-      cancelDockAutoCenter();
+    const scheduleDockLaneAutoCenter = () => {
+      cancelDockLaneAutoCenter();
       autoCenterTimer = window.setTimeout(() => {
         autoCenterTimer = null;
-        if (pointerActive) return;
+        if (leftPointerActive || rightPointerActive) return;
         const now = performance.now();
-        const moving = Math.abs((viewport.scrollLeft || 0) - lastScrollLeft) > 0.5 && (now - lastScrollTimestamp) < INERTIA_SETTLE_MS;
+        const moving = (
+          Math.abs((leftViewport.scrollLeft || 0) - lastLeftScroll) > 0.5 ||
+          Math.abs((rightViewport.scrollLeft || 0) - lastRightScroll) > 0.5
+        ) && (now - lastScrollTimestamp) < INERTIA_SETTLE_MS;
         if (moving) {
-          scheduleDockAutoCenter();
+          scheduleDockLaneAutoCenter();
           return;
         }
-        recenterDockToDefaultPosition();
+        recenterDockLanes();
       }, AUTO_CENTER_IDLE_MS);
     };
 
     const markDockInteraction = () => {
-      lastScrollLeft = viewport.scrollLeft || 0;
+      lastLeftScroll = leftViewport.scrollLeft || 0;
+      lastRightScroll = rightViewport.scrollLeft || 0;
       lastScrollTimestamp = performance.now();
-      scheduleDockAutoCenter();
+      scheduleDockLaneAutoCenter();
     };
 
-    viewport.addEventListener('scroll', () => {
+    const onViewportScroll = (viewport, isLeft) => {
       const nextLeft = viewport.scrollLeft || 0;
-      if (Math.abs(nextLeft - lastScrollLeft) > 0.4) lastScrollLeft = nextLeft;
+      if (isLeft) {
+        if (Math.abs(nextLeft - lastLeftScroll) > 0.4) lastLeftScroll = nextLeft;
+      } else if (Math.abs(nextLeft - lastRightScroll) > 0.4) {
+        lastRightScroll = nextLeft;
+      }
       lastScrollTimestamp = performance.now();
       scheduleHintUpdate();
-      if (!pointerActive) {
+      if (!leftPointerActive && !rightPointerActive) {
         if (settleTimer) clearTimeout(settleTimer);
         settleTimer = window.setTimeout(() => {
           settleTimer = null;
-          scheduleDockAutoCenter();
+          scheduleDockLaneAutoCenter();
         }, INERTIA_SETTLE_MS);
       }
-    }, { passive: true });
+    };
+
+    leftViewport.addEventListener('scroll', () => onViewportScroll(leftViewport, true), { passive: true });
+    rightViewport.addEventListener('scroll', () => onViewportScroll(rightViewport, false), { passive: true });
     window.addEventListener('resize', scheduleHintUpdate);
 
-    viewport.addEventListener('pointerdown', () => {
-      pointerActive = true;
-      cancelDockAutoCenter();
+    leftViewport.addEventListener('pointerdown', () => {
+      leftPointerActive = true;
+      cancelDockLaneAutoCenter();
+    }, { passive: true });
+    rightViewport.addEventListener('pointerdown', () => {
+      rightPointerActive = true;
+      cancelDockLaneAutoCenter();
     }, { passive: true });
     window.addEventListener('pointerup', () => {
-      if (!pointerActive) return;
-      pointerActive = false;
+      if (!leftPointerActive && !rightPointerActive) return;
+      leftPointerActive = false;
+      rightPointerActive = false;
       markDockInteraction();
     }, { passive: true });
     window.addEventListener('pointercancel', () => {
-      if (!pointerActive) return;
-      pointerActive = false;
+      if (!leftPointerActive && !rightPointerActive) return;
+      leftPointerActive = false;
+      rightPointerActive = false;
       markDockInteraction();
     }, { passive: true });
 
     ['pointermove', 'touchstart', 'touchmove', 'wheel', 'click'].forEach((eventName) => {
-      viewport.addEventListener(eventName, markDockInteraction, { passive: true });
+      leftViewport.addEventListener(eventName, markDockInteraction, { passive: true });
+      rightViewport.addEventListener(eventName, markDockInteraction, { passive: true });
     });
-    document.getElementById('dockTrack')?.addEventListener('click', markDockInteraction, { passive: true });
+    document.getElementById('dockLeftTrack')?.addEventListener('click', markDockInteraction, { passive: true });
+    document.getElementById('dockRightTrack')?.addEventListener('click', markDockInteraction, { passive: true });
 
     leftHint?.addEventListener('click', () => {
       markDockInteraction();
-      scrollDockByStep(-1);
+      scrollDockByStep(leftViewport, -1);
     });
     rightHint?.addEventListener('click', () => {
       markDockInteraction();
-      scrollDockByStep(1);
+      scrollDockByStep(rightViewport, 1);
     });
 
+    const leftDefaults = getDockLaneDefaults(leftViewport, -1);
+    const rightDefaults = getDockLaneDefaults(rightViewport, 1);
+    if (leftDefaults.maxScroll > 0) leftViewport.scrollLeft = leftDefaults.targetLeft;
+    if (rightDefaults.maxScroll > 0) rightViewport.scrollLeft = rightDefaults.targetLeft;
     scheduleHintUpdate();
     setTimeout(scheduleHintUpdate, 120);
-    setTimeout(scheduleDockAutoCenter, 120);
+    setTimeout(scheduleDockLaneAutoCenter, 120);
   }
 
 

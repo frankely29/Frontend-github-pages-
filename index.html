@@ -614,46 +614,51 @@
       width: min(100vw - 16px, 446px);
       z-index: 3000 !important;
       pointer-events: auto;
-      --dock-edge-fade-left: 0px;
-      --dock-edge-fade-right: 0px;
+      display: grid;
+      grid-template-columns: minmax(0,1fr) auto minmax(0,1fr);
+      align-items: center;
+      gap: 10px;
     }
-    #dock.dock-can-scroll-left { --dock-edge-fade-left: 34px; }
-    #dock.dock-can-scroll-right { --dock-edge-fade-right: 34px; }
-    .dockViewport {
+    .dockLaneViewport {
       position: relative;
       display: block;
       width: 100%;
-      overflow-x: hidden;
+      overflow-x: auto;
       overflow-y: hidden;
       -webkit-overflow-scrolling: touch;
       scrollbar-width: none;
       scroll-behavior: smooth;
-      touch-action: none;
-      -webkit-mask-image: linear-gradient(
-        to right,
-        transparent 0,
-        #000 var(--dock-edge-fade-left),
-        #000 calc(100% - var(--dock-edge-fade-right)),
-        transparent 100%
-      );
-      mask-image: linear-gradient(
-        to right,
-        transparent 0,
-        #000 var(--dock-edge-fade-left),
-        #000 calc(100% - var(--dock-edge-fade-right)),
-        transparent 100%
-      );
-      mask-mode: alpha;
+      touch-action: pan-x;
+      -ms-overflow-style: none;
     }
-    .dockViewport::-webkit-scrollbar { display: none; }
-    .dockTrack {
+    .dockLaneViewport::-webkit-scrollbar { display: none; }
+    #dockLeftViewport { justify-self: end; }
+    #dockRightViewport { justify-self: start; }
+    .dockLaneTrack {
       display: inline-flex;
       gap: 11px;
       align-items: center;
-      justify-content: flex-start;
-      width: max-content;
+      min-width: max-content;
+      padding: 2px 4px;
+    }
+    #dockLeftTrack {
+      justify-content: flex-end;
+      width: 100%;
       min-width: 100%;
-      padding: 2px 0;
+      padding-right: 2px;
+    }
+    #dockRightTrack {
+      justify-content: flex-start;
+      width: 100%;
+      min-width: 100%;
+      padding-left: 2px;
+    }
+    #dockCenterSlot {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      z-index: 2;
     }
     .dockEdgeFade {
       display: none;
@@ -823,6 +828,24 @@
       box-shadow:
         0 12px 26px rgba(0,0,0,0.24),
         0 0 0 4px rgba(49,219,125,0.25) !important;
+    }
+    #pickupFab,
+    body.dark #pickupFab,
+    body.night #pickupFab,
+    #pickupFab * {
+      filter: none !important;
+      mix-blend-mode: normal !important;
+      opacity: 1 !important;
+    }
+    #pickupFab .pickupFabIcon svg path {
+      stroke: #fff !important;
+    }
+    body.night #dock .dockIcon svg,
+    body.dark #dock .dockIcon svg,
+    body.night #dock .dockIcon svg *,
+    body.dark #dock .dockIcon svg * {
+      filter: none !important;
+      opacity: 1 !important;
     }
     .dockBtnMain .dockIcon svg { width: 28px; height: 28px; }
     #dockGames .dockIcon svg { width: 31px; height: 31px; }
@@ -1845,9 +1868,9 @@
   </div>
 
   <div id="dock">
-    <button class="dockScrollHint left" id="dockScrollHintLeft" type="button" aria-label="Scroll dock left"><svg class="dockScrollHintGlyph" viewBox="0 0 12 12" aria-hidden="true" focusable="false"><path d="M3 2.25 8.25 6 3 9.75"/></svg></button>
-    <div class="dockViewport" id="dockViewport">
-      <div class="dockTrack" id="dockTrack">
+    <div id="dockLeftViewport" class="dockLaneViewport">
+      <button class="dockScrollHint left" id="dockScrollHintLeft" type="button" aria-label="Scroll dock left"><svg class="dockScrollHintGlyph" viewBox="0 0 12 12" aria-hidden="true" focusable="false"><path d="M3 2.25 8.25 6 3 9.75"/></svg></button>
+      <div id="dockLeftTrack" class="dockLaneTrack">
         <button class="dockBtn" id="dockColors" aria-label="Colors">
           <span class="dockIcon">🎨</span>
         </button>
@@ -1859,11 +1882,17 @@
         <button class="dockBtn dockBtnMain" id="dockChat" aria-label="Chat">
           <span class="dockIcon" aria-hidden="true"></span>
         </button>
+      </div>
+    </div>
 
-        <button id="pickupFab" class="dockBtn dockBtnSave dockBtnSaveMain" type="button" aria-label="Save">
-          <span class="pickupFabIcon" aria-hidden="true"></span>
-        </button>
+    <div id="dockCenterSlot">
+      <button id="pickupFab" class="dockBtn dockBtnSave dockBtnSaveMain" type="button" aria-label="Save">
+        <span class="pickupFabIcon" aria-hidden="true"></span>
+      </button>
+    </div>
 
+    <div id="dockRightViewport" class="dockLaneViewport">
+      <div id="dockRightTrack" class="dockLaneTrack">
         <button class="dockBtn dockBtnMain" id="dockGames" aria-label="Games">
           <span class="dockIcon" aria-hidden="true"></span>
         </button>
@@ -1880,10 +1909,8 @@
           <span class="dockIcon">👤</span>
         </button>
       </div>
+      <button class="dockScrollHint right" id="dockScrollHintRight" type="button" aria-label="Scroll dock right"><svg class="dockScrollHintGlyph" viewBox="0 0 12 12" aria-hidden="true" focusable="false"><path d="M3 2.25 8.25 6 3 9.75"/></svg></button>
     </div>
-    <span class="dockEdgeFade left" aria-hidden="true"></span>
-    <span class="dockEdgeFade right" aria-hidden="true"></span>
-    <button class="dockScrollHint right" id="dockScrollHintRight" type="button" aria-label="Scroll dock right"><svg class="dockScrollHintGlyph" viewBox="0 0 12 12" aria-hidden="true" focusable="false"><path d="M3 2.25 8.25 6 3 9.75"/></svg></button>
   </div>
 
   <div class="mapControlStack" aria-label="Map controls">

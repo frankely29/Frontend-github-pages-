@@ -1881,7 +1881,7 @@ function applyDockIconModel() {
   };
 
   setIcon(dockColors, `
-    <svg viewBox="0 0 24 24" width="29" height="29" aria-hidden="true" focusable="false" style="display:block">
+    <svg class="dockIconSvg dockIconSvg--colors" viewBox="0 0 24 24" width="29" height="29" aria-hidden="true" focusable="false" style="display:block">
       <circle cx="12" cy="12" r="10" fill="#f2f8ff"/>
       <path d="M12 2a10 10 0 0 1 8.7 5l-5.7 1.1-1.9-4.6Z" fill="#9b5cff"/>
       <path d="M20.7 7a10 10 0 0 1 1.2 6.6l-5.8.8-1.1-6.3Z" fill="#2f7cff"/>
@@ -1893,7 +1893,7 @@ function applyDockIconModel() {
   `);
 
   setIcon(dockModes, `
-    <svg viewBox="0 0 24 24" width="29" height="29" aria-hidden="true" focusable="false" style="display:block">
+    <svg class="dockIconSvg dockIconSvg--modes" viewBox="0 0 24 24" width="29" height="29" aria-hidden="true" focusable="false" style="display:block">
       <path d="M10.3 2h3.4l.5 2.2a8 8 0 0 1 1.8.8l1.9-1.2 2.4 2.4-1.2 1.9c.3.6.6 1.2.8 1.8L22 10.3v3.4l-2.2.5a8 8 0 0 1-.8 1.8l1.2 1.9-2.4 2.4-1.9-1.2a8 8 0 0 1-1.8.8l-.5 2.2h-3.4l-.5-2.2a8 8 0 0 1-1.8-.8l-1.9 1.2-2.4-2.4 1.2-1.9a8 8 0 0 1-.8-1.8L2 13.7v-3.4l2.2-.5c.2-.6.5-1.2.8-1.8L3.8 6.1l2.4-2.4 1.9 1.2a8 8 0 0 1 1.8-.8L10.3 2Z" fill="#4e78ff"/>
       <circle cx="12" cy="12" r="4.4" fill="#73d2ff"/>
       <circle cx="12" cy="12" r="2.45" fill="#ffffff"/>
@@ -1902,7 +1902,7 @@ function applyDockIconModel() {
   `);
 
   setIcon(dockChat, `
-    <svg viewBox="0 0 24 24" width="31" height="31" aria-hidden="true" focusable="false" style="display:block">
+    <svg class="dockIconSvg dockIconSvg--chat" viewBox="0 0 24 24" width="31" height="31" aria-hidden="true" focusable="false" style="display:block">
       <path d="M4.8 5.5h14.4a2.8 2.8 0 0 1 2.8 2.8v7.1a2.8 2.8 0 0 1-2.8 2.8H11l-4.2 3.3c-.9.7-2.2 0-2.1-1.2l.3-2.1A2.8 2.8 0 0 1 2 15.4V8.3a2.8 2.8 0 0 1 2.8-2.8Z" fill="#5865f2" stroke="#22337f" stroke-width="1.3" stroke-linejoin="round"/>
       <circle cx="8.3" cy="11.8" r="1.2" fill="#fff"/>
       <circle cx="12" cy="11.8" r="1.2" fill="#fff"/>
@@ -1911,7 +1911,7 @@ function applyDockIconModel() {
   `);
 
   setIcon(dockGames, `
-    <svg viewBox="0 0 24 24" width="33" height="33" aria-hidden="true" focusable="false" style="display:block">
+    <svg class="dockIconSvg dockIconSvg--games" viewBox="0 0 24 24" width="33" height="33" aria-hidden="true" focusable="false" style="display:block">
       <path d="M8.2 8.4h7.6c2.1 0 3.9 1.3 4.7 3.2l1 2.4c.9 2.2-.8 4.7-3.2 4.7-1 0-1.9-.4-2.5-1.1l-1.4-1.6h-4.8l-1.4 1.6c-.6.7-1.6 1.1-2.5 1.1-2.4 0-4.1-2.5-3.2-4.7l1-2.4c.8-1.9 2.6-3.2 4.7-3.2Z" fill="#334155" stroke="#0f172a" stroke-width="1.2"/>
       <path d="M8 12.1h3.5M9.75 10.35v3.5" stroke="#e2e8f0" stroke-width="1.4" stroke-linecap="round"/>
       <circle cx="15.7" cy="11.2" r="1" fill="#60a5fa"/>
@@ -1922,11 +1922,16 @@ function applyDockIconModel() {
   `);
 
   setIcon(dockMusic, `
-    <span style="font-size:22px; line-height:1;">🥁</span>
+    <svg class="dockIconSvg dockIconSvg--music" viewBox="0 0 24 24" width="29" height="29" aria-hidden="true" focusable="false" style="display:block">
+      <rect x="6" y="4" width="10" height="13" rx="2" fill="#f4f4f5" stroke="#991b1b" stroke-width="1.1"/>
+      <path d="M16 7.2 20 6v9.8c0 1.7-1.4 3-3.1 3-1.4 0-2.5-.9-2.5-2.2 0-1.3 1-2.2 2.6-2.2.8 0 1.5.2 2 .5V7.6L16 8.3Z" fill="#fef08a" stroke="#7f1d1d" stroke-width="0.9" stroke-linejoin="round"/>
+      <circle cx="9" cy="10" r="1.3" fill="#ef4444"/>
+      <circle cx="13" cy="13" r="1.3" fill="#22c55e"/>
+    </svg>
   `);
 
   setIcon(dockProfile, `
-    <svg viewBox="0 0 24 24" width="29" height="29" aria-hidden="true" focusable="false" style="display:block">
+    <svg class="dockIconSvg dockIconSvg--profile" viewBox="0 0 24 24" width="29" height="29" aria-hidden="true" focusable="false" style="display:block">
       <circle cx="12" cy="12" r="10" fill="#eef3ff"/>
       <circle cx="12" cy="8" r="4" fill="#f4c7a1"/>
       <path d="M4 20a8 8 0 0 1 16 0v.2H4Z" fill="#5c6cf0"/>
@@ -1936,7 +1941,7 @@ function applyDockIconModel() {
   `);
 
   setIcon(dockLeaderboard, `
-    <svg viewBox="0 0 24 24" width="29" height="29" aria-hidden="true" focusable="false" style="display:block">
+    <svg class="dockIconSvg dockIconSvg--leaderboard" viewBox="0 0 24 24" width="29" height="29" aria-hidden="true" focusable="false" style="display:block">
       <path d="M4.2 20h15.6" stroke="#7a5313" stroke-width="1.4" stroke-linecap="round"/>
       <rect x="5.2" y="11.2" width="3.3" height="6" rx="1" fill="#3f8cff"/>
       <rect x="10.35" y="8.4" width="3.3" height="8.8" rx="1" fill="#2ecf73"/>
@@ -1947,7 +1952,7 @@ function applyDockIconModel() {
 
   const pickupIconEl = document.querySelector('#pickupFab .pickupFabIcon');
   if (pickupIconEl) {
-    pickupIconEl.innerHTML = `<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" focusable="false" style="display:block"><path d="m6.6 12.4 3.4 3.5 7.5-7.7" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    pickupIconEl.innerHTML = `<svg class="dockIconSvg dockIconSvg--save" viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" focusable="false" style="display:block"><path d="m6.6 12.4 3.4 3.5 7.5-7.7" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
     pickupIconEl.style.display = 'inline-grid';
     pickupIconEl.style.placeItems = 'center';
     pickupIconEl.style.lineHeight = '1';
