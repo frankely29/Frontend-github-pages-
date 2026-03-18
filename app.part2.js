@@ -54,7 +54,8 @@
     return postMultipartAuth(path, form, token);
   }
 
-  const VOICE_NOTE_MAX_MS = 90000;
+  const VOICE_NOTE_MAX_MS = 60000;
+  const CHAT_RETENTION_MS = 24 * 60 * 60 * 1000;
   const CHAT_VOICE_SCOPE_CONFIG = {
     public: { stateScope: 'public', domKey: 'public' },
     private: { stateScope: 'private', domKey: 'private' },
@@ -69,7 +70,8 @@
     'audio/ogg',
   ];
   const CHAT_VOICE_BUSY_PHASES = new Set(['preparing', 'requesting', 'recording', 'stopping', 'uploading']);
-  const CHAT_VOICE_IDLE_STATUS = 'Tap mic to record';
+  const CHAT_VOICE_IDLE_STATUS = 'Tap mic to record (max 1:00)';
+  const CHAT_VOICE_MAX_REACHED_STATUS = '1:00 max reached. Tap Send or Cancel.';
   const CHAT_VOICE_TEXT_LOCK_PLACEHOLDER = 'Send or cancel voice note first';
   const chatVoiceState = {
     phase: 'idle',
@@ -146,6 +148,7 @@
   let privateThreads = [];
   let privateActiveUserId = null;
   let privateActiveDisplayName = '';
+  let privateBackendThreadIds = new Set();
   let privateMessagesByUserId = Object.create(null);
   let privateUnreadByUserId = Object.create(null);
   let privateLastMessageIdByUserId = Object.create(null);
@@ -1238,7 +1241,7 @@
         </div>
       </div>
       <div class="chatVoiceDraft" id="${surface}VoiceDraft" hidden>
-        <div class="chatVoiceDraftTitle">Voice note ready</div>
+        <div class="chatVoiceDraftTitle">Voice note ready. Tap Send to send the voice note.</div>
         <div class="chatVoiceDraftMeta">
           <span class="chatVoiceDraftDuration" id="${surface}VoiceDraftDuration">0:00</span>
         </div>
@@ -1567,12 +1570,14 @@
 
   function renderPublicMessageRow(message) {
     const msg = normalizePublicChatMessage(message);
-    const time = escapeHtml(formatChatTime(msg.createdAt));
+    const own = !!msg?.isOwn;
     const safeName = escapeHtml(msg.displayName || 'Driver');
+    const time = escapeHtml(formatChatTime(msg.createdAt));
+    const bubbleClass = own ? 'chatBubbleSelf' : 'chatBubbleOther';
     const body = msg.messageType === 'voice'
       ? renderVoiceNotePlayer(msg, 'public')
-      : `<span class="chatMsgText">${escapeHtml(String(msg.text || ''))}</span>`;
-    return `<div class="chatMsgRow${msg.messageType === 'voice' ? ' chatMsgRowVoice' : ''}" data-chat-row="public" data-message-key="${escapeHtml(getVoiceMessageDomKey(msg))}" data-message-id="${escapeHtml(String(msg?.id ?? ''))}" data-message-scope="public" data-audio-url="${escapeHtml(String(msg?.audioUrl || ''))}"><div class="chatMsgLine"><strong class="chatMsgName">${safeName}: </strong>${body}</div><div class="chatMsgTime">${time}</div></div>`;
+      : `<div class="${bubbleClass} chatPublicTextBubble">${escapeHtml(String(msg.text || ''))}</div>`;
+    return `<div class="chatMsgRow chatMsgRowPublic ${own ? 'self' : 'other'}${msg.messageType === 'voice' ? ' chatMsgRowVoice' : ''}" data-chat-row="public" data-message-key="${escapeHtml(getVoiceMessageDomKey(msg))}" data-message-id="${escapeHtml(String(msg?.id ?? ''))}" data-message-scope="public" data-audio-url="${escapeHtml(String(msg?.audioUrl || ''))}"><div class="chatMsgMeta"><strong class="chatMsgName">${safeName}</strong></div><div class="chatMsgBubbleWrap">${body}</div><div class="chatMsgTime">${time}</div></div>`;
   }
 
   function renderPrivateConversationRow(message, scope = 'private') {
@@ -1960,7 +1965,7 @@
     if (statusEl) {
       if (isRecording) statusEl.textContent = 'Recording voice note…';
       else if (isDraftSending) statusEl.textContent = 'Uploading voice note…';
-      else if (isDraftReady) statusEl.textContent = 'Voice note ready';
+      else if (isDraftReady) statusEl.textContent = String(chatVoiceState.statusText || 'Voice note ready. Tap Send to send the voice note.').trim() || 'Voice note ready. Tap Send to send the voice note.';
       else if (!statusEl.textContent.trim()) statusEl.textContent = CHAT_VOICE_IDLE_STATUS;
     }
     if (errorEl) {
@@ -2190,7 +2195,7 @@
             userId: finalizeOptions.userId,
           });
           await restoreChatAudioAfterCapture('voice-stop-draft-ready');
-          setVoiceRecorderStatus(domTarget, 'Voice note ready', '');
+          setVoiceRecorderStatus(domTarget, safeDurationMs >= VOICE_NOTE_MAX_MS ? CHAT_VOICE_MAX_REACHED_STATUS : 'Voice note ready. Tap Send to send the voice note.', '');
           syncAllVoiceRecorderUis();
         })().catch((err) => {
           console.warn('voice note finish failed', err);
@@ -2199,10 +2204,12 @@
       chatVoiceState.recorder.start();
       chatVoiceState.timerId = window.setInterval(() => {
         const elapsed = Math.max(0, Date.now() - chatVoiceState.startedAt);
-        chatVoiceState.durationMs = elapsed;
+        const cappedElapsed = Math.min(elapsed, VOICE_NOTE_MAX_MS);
+        chatVoiceState.durationMs = cappedElapsed;
         setVoiceRecorderStatus(domScope, 'Recording voice note…', '');
         syncAllVoiceRecorderUis();
         if (elapsed >= VOICE_NOTE_MAX_MS && chatVoiceState.recorder?.state === 'recording') {
+          chatVoiceState.durationMs = VOICE_NOTE_MAX_MS;
           void stopChatVoiceRecording();
         }
       }, 250);
@@ -2437,6 +2444,132 @@
     return String(a?.createdAt || '').localeCompare(String(b?.createdAt || ''));
   }
 
+  function parseChatCreatedAtMs(value) {
+    if (value === null || value === undefined || value === '') return NaN;
+    if (value instanceof Date) return value.getTime();
+    if (typeof value === 'number') {
+      if (!Number.isFinite(value)) return NaN;
+      return value > 1e12 ? value : value * 1000;
+    }
+    const raw = String(value || '').trim();
+    if (!raw) return NaN;
+    if (/^-?\d+(?:\.\d+)?$/.test(raw)) {
+      const numeric = Number(raw);
+      if (!Number.isFinite(numeric)) return NaN;
+      return numeric > 1e12 ? numeric : numeric * 1000;
+    }
+    const parsed = new Date(raw).getTime();
+    return Number.isFinite(parsed) ? parsed : NaN;
+  }
+
+  function isMessageExpired(message, now = Date.now()) {
+    const createdAtMs = parseChatCreatedAtMs(message?.createdAt || message?.created_at || null);
+    if (!Number.isFinite(createdAtMs)) return false;
+    return createdAtMs <= (now - CHAT_RETENTION_MS);
+  }
+
+  function pruneExpiredMessageList(list, now = Date.now()) {
+    const source = Array.isArray(list) ? list : [];
+    const kept = [];
+    const removed = [];
+    source.forEach((message) => {
+      if (isMessageExpired(message, now)) removed.push(message);
+      else kept.push(message);
+    });
+    return { kept, removed };
+  }
+
+  function pruneExpiredVoiceAssets(removedMessages = []) {
+    const removed = Array.isArray(removedMessages) ? removedMessages : [];
+    if (!removed.length) return;
+    const removedIds = new Set();
+    removed.forEach((message) => {
+      const messageId = parseMessageId(message?.id);
+      const domKey = getVoiceMessageDomKey(message);
+      if (messageId !== null) removedIds.add(messageId);
+      if (domKey) {
+        const selector = `[data-message-key="${escapeCssValue(domKey)}"]`;
+        document.querySelectorAll?.(selector).forEach((row) => row.remove());
+      }
+    });
+    for (const messageId of removedIds) {
+      const isActiveMessage = parseMessageId(voicePlaybackRuntime.activeMessageId) === messageId;
+      for (const [key, entry] of Array.from(voiceAssetCache.entries())) {
+        if (!key.startsWith(`${messageId}::`)) continue;
+        const blobUrl = String(entry?.blobUrl || '').trim();
+        if (blobUrl && (!isActiveMessage || blobUrl !== voicePlaybackRuntime.activeBlobUrl)) {
+          try { URL.revokeObjectURL(blobUrl); } catch (_) {}
+        }
+        if (!isActiveMessage || blobUrl !== voicePlaybackRuntime.activeBlobUrl) voiceAssetCache.delete(key);
+      }
+    }
+    if (removedIds.size) syncAllVoicePlayers();
+  }
+
+  function pruneExpiredChatState() {
+    const now = Date.now();
+    const removedMessages = [];
+
+    const publicResult = pruneExpiredMessageList(publicChatMessages, now);
+    publicChatMessages = publicResult.kept;
+    removedMessages.push(...publicResult.removed);
+
+    const retainedThreadIds = new Set(privateBackendThreadIds || []);
+    const nextPrivateMessages = Object.create(null);
+    Object.entries(privateMessagesByUserId || {}).forEach(([uid, list]) => {
+      const result = pruneExpiredMessageList(list, now);
+      if (result.kept.length) nextPrivateMessages[uid] = result.kept;
+      removedMessages.push(...result.removed);
+      if (result.kept.length) {
+        const latestId = result.kept.reduce((max, msg) => Math.max(max, Number(msg?.id || 0)), 0);
+        if (latestId) privateLastMessageIdByUserId[uid] = latestId;
+        else delete privateLastMessageIdByUserId[uid];
+      } else {
+        delete privateLastMessageIdByUserId[uid];
+        if (!retainedThreadIds.has(uid)) delete privateUnreadByUserId[uid];
+      }
+    });
+    privateMessagesByUserId = nextPrivateMessages;
+
+    const nextThreads = [];
+    (Array.isArray(privateThreads) ? privateThreads : []).forEach((thread) => {
+      const uid = privateThreadUserId(thread);
+      if (!uid) return;
+      const messages = privateMessagesByUserId[uid] || [];
+      if (!messages.length && !retainedThreadIds.has(uid)) return;
+      if (!messages.length) {
+        nextThreads.push(thread);
+        return;
+      }
+      const latest = messages[messages.length - 1] || {};
+      nextThreads.push({
+        ...thread,
+        previewText: latest?.messageType === 'voice' ? '🎤 Voice note' : String(latest?.text || thread?.previewText || '').trim(),
+        lastAt: latest?.createdAt || thread?.lastAt || null,
+        lastSenderUserId: latest?.senderUserId || thread?.lastSenderUserId || null,
+        unreadCount: Number(privateUnreadByUserId[uid] || 0),
+      });
+    });
+    privateThreads = nextThreads.sort((a, b) => String(privateThreadTime(b)).localeCompare(String(privateThreadTime(a))));
+
+    if (driverProfileState && Array.isArray(driverProfileState.messages)) {
+      const driverResult = pruneExpiredMessageList(driverProfileState.messages, now);
+      driverProfileState.messages = driverResult.kept;
+      removedMessages.push(...driverResult.removed);
+      driverProfileState.latestMessageId = driverProfileState.messages.reduce((max, msg) => Math.max(max, Number(msg?.id || 0)), 0) || null;
+    }
+
+    pruneExpiredVoiceAssets(removedMessages);
+    pruneVoiceAssetCache();
+
+    const latestPublicId = publicChatMessages.reduce((max, msg) => Math.max(max, Number(msg?.id || 0)), 0) || null;
+    chatLatestMessageId = latestPublicId;
+    chatLastSeen = publicChatMessages.length ? chatMsgCursor(publicChatMessages[publicChatMessages.length - 1]) : null;
+    chatSeenKeys = new Set(publicChatMessages.map((msg) => chatMsgKey(msg)));
+    rebuildUnreadBadgeFromMessages(publicChatMessages);
+    renderPrivateTabUnread();
+  }
+
   function getMessageMergeKey(msg) {
     if (msg?.id != null) return `id:${msg.id}`;
     return `fallback:${msg?.createdAt || ''}|${msg?.senderUserId || msg?.userId || ''}|${msg?.recipientUserId || ''}|${msg?.text || ''}|${msg?.audioUrl || ''}`;
@@ -2503,12 +2636,14 @@
 
   function setPublicChatMessages(messages = []) {
     publicChatMessages = upsertChatMessages([], messages);
+    pruneExpiredChatState();
     pruneVoiceAssetCache();
     return publicChatMessages;
   }
 
   function upsertPublicChatMessages(messages = []) {
     publicChatMessages = upsertChatMessages(publicChatMessages, messages);
+    pruneExpiredChatState();
     pruneVoiceAssetCache();
     return publicChatMessages;
   }
@@ -2517,7 +2652,8 @@
     const uid = String(otherUserId || '');
     if (!uid) return [];
     privateMessagesByUserId[uid] = upsertChatMessages(privateMessagesByUserId[uid] || [], messages);
-    const merged = privateMessagesByUserId[uid];
+    pruneExpiredChatState();
+    const merged = privateMessagesByUserId[uid] || [];
     const latestId = merged.reduce((max, msg) => {
       const id = parseMessageId(msg?.id);
       return id === null ? max : Math.max(max, id);
@@ -2660,6 +2796,7 @@
       if (refreshed.length) appliedMessages = refreshed;
     }
     if (!appliedMessages.length) return [];
+    pruneExpiredChatState();
     if (scope === 'public') {
       const merged = upsertPublicChatMessages(appliedMessages);
       advanceChatWatermarksFromMessages(appliedMessages);
@@ -2679,6 +2816,7 @@
   }
 
   function renderPrivateThreadList() {
+    pruneExpiredChatState();
     const wrap = document.getElementById('chatPrivateWrap');
     if (!wrap) return;
     const sorted = privateThreads.slice().sort((a, b) => String(privateThreadTime(b)).localeCompare(String(privateThreadTime(a))));
@@ -2787,6 +2925,7 @@
     const prevList = document.getElementById('chatPrivateConversationList');
     const preserveScrollTop = prevList ? prevList.scrollTop : 0;
     const shouldStickToBottom = isChatNearBottom(prevList, 80);
+    pruneExpiredChatState();
     const messages = privateMessagesByUserId[privateActiveUserId] || [];
     if (!wrap.querySelector('.chatPrivateConversation')) {
       wrap.innerHTML = `<div class="chatPrivateConversation"><div class="chatPrivateHeader"><button id="chatPrivateBackBtn" class="chatPrivateBackBtn" type="button">Back</button><div class="chatPrivateTitle">${escapeHtml(privateActiveDisplayName || 'Private chat')}</div></div><div id="chatPrivateConversationList" class="chatList"></div><div class="chatComposer chatComposerPrivate"><input id="chatPrivateInput" type="text" class="chatInput" placeholder="Message privately…" maxlength="600"><button id="chatPrivateSendBtn" class="chipBtn" type="button">Send</button></div>${buildVoiceComposer('private', 'chatVoiceComposerPrivate')}</div>`;
@@ -2823,6 +2962,7 @@
   }
 
   function updateDriverProfileDmList(messages = driverProfileState.messages || []) {
+    pruneExpiredChatState();
     const dmList = document.getElementById('driverProfileDmList');
     if (!dmList) return false;
     const previousScrollTop = dmList.scrollTop;
@@ -2866,6 +3006,7 @@
 
   async function chatRefreshPrivateThreads() {
     const threads = await chatFetchPrivateThreads();
+    privateBackendThreadIds = new Set((Array.isArray(threads) ? threads : []).map((thread) => privateThreadUserId(thread)).filter(Boolean));
     const nextById = new Map();
     threads.forEach((thread) => {
       const uid = privateThreadUserId(thread);
@@ -2880,6 +3021,7 @@
       if (!nextById.has(uid)) nextById.set(uid, { ...thread, unreadCount: Number(privateUnreadByUserId[uid] || 0) });
     });
     privateThreads = Array.from(nextById.values()).sort((a, b) => String(privateThreadTime(b)).localeCompare(String(privateThreadTime(a))));
+    pruneExpiredChatState();
     renderPrivateTabUnread();
     if (activeChatTab === 'private' && !privateActiveUserId) renderPrivateThreadList();
     updateChatUnreadBadge();
@@ -2898,8 +3040,10 @@
     }
     const previousLast = Number(privateLastMessageIdByUserId[uid] || 0);
     const merged = forceFull ? incoming.slice() : mergePrivateMessages(uid, incoming);
+    pruneExpiredChatState();
     if (forceFull) {
       privateMessagesByUserId[uid] = upsertChatMessages([], merged);
+      pruneExpiredChatState();
       pruneVoiceAssetCache();
     }
     const latestId = (privateMessagesByUserId[uid] || merged || []).reduce((max, msg) => Math.max(max, Number(msg?.id || 0)), 0);
@@ -3018,6 +3162,7 @@
     chatSeenKeys = new Set();
     unreadChatCount = 0;
     privateThreads = [];
+    privateBackendThreadIds = new Set();
     privateActiveUserId = null;
     privateActiveDisplayName = '';
     privateMessagesByUserId = Object.create(null);
@@ -3041,6 +3186,7 @@
 
   // Render messages and manage scroll position
   function renderChatMessages(messages, { replace = false } = {}) {
+    pruneExpiredChatState();
     const listEl = document.getElementById('chatList');
     if (!listEl) return;
     const nextMessages = Array.isArray(messages) ? messages.map((msg) => normalizePublicChatMessage(msg)) : [];
@@ -3129,6 +3275,7 @@
       }
       const loadedMsgs = Array.isArray(msgs.messages) ? msgs.messages : [];
       const mergedMsgs = loadedMsgs.length ? upsertPublicChatMessages(loadedMsgs) : publicChatMessages;
+      pruneExpiredChatState();
       advanceChatWatermarksFromMessages(loadedMsgs);
       const needsInitialRecovery = !chatInitialHistoryLoaded;
       const hadIncomingAudioBaseline = chatSoundState.baselineReady;
@@ -3193,6 +3340,7 @@
 
   // Wire up the chat panel: event handlers, initial load, polling
   function wireChatPanel() {
+    pruneExpiredChatState();
     ensureChatNotificationsBootstrapped('chat-panel-open');
     const tabPublic = document.getElementById('chatTabPublic');
     const tabPrivate = document.getElementById('chatTabPrivate');
@@ -5532,8 +5680,10 @@
     if (!uid) return;
     const normalized = normalizeDriverMessages(messages);
     const next = replace ? upsertChatMessages([], normalized) : mergePrivateMessages(uid, normalized);
+    pruneExpiredChatState();
     if (replace) {
       privateMessagesByUserId[uid] = next;
+      pruneExpiredChatState();
       pruneVoiceAssetCache();
     }
     driverProfileState.messages = privateMessagesByUserId[uid] || next || [];
