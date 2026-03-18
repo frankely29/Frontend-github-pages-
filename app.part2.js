@@ -23,82 +23,6 @@
     try { return localStorage.getItem(LS_TOKEN) || ''; } catch (_) { return ''; }
   }
 
-
-  const DRIVER_PROFILE_CACHE_TTL_MS = 30 * 1000;
-  const fallbackDriverCaches = {
-    presenceIdentity: new Map(),
-    driverProfile: new Map(),
-  };
-
-  function getSharedDriverCaches() {
-    if (typeof window === 'undefined') return fallbackDriverCaches;
-    if (!window.__driverIdentityCache) window.__driverIdentityCache = fallbackDriverCaches;
-    return window.__driverIdentityCache;
-  }
-
-  function getCachedDriverIdentity(userId) {
-    const key = String(userId || '');
-    if (!key) return null;
-    const fn = window?.getCachedDriverIdentity;
-    if (typeof fn === 'function') return fn(key);
-    return getSharedDriverCaches().presenceIdentity.get(key) || null;
-  }
-
-  function setCachedDriverIdentity(userId, identity) {
-    const key = String(userId || '');
-    if (!key || !identity || typeof identity !== 'object') return;
-    const fn = window?.setCachedDriverIdentity;
-    if (typeof fn === 'function') {
-      fn(key, identity);
-      return;
-    }
-    getSharedDriverCaches().presenceIdentity.set(key, identity);
-  }
-
-  function getCachedDriverProfile(userId) {
-    const key = String(userId || '');
-    if (!key) return null;
-    const fn = window?.getCachedDriverProfile;
-    if (typeof fn === 'function') return fn(key);
-    const cached = getSharedDriverCaches().driverProfile.get(key);
-    if (!cached) return null;
-    const ageMs = Date.now() - Number(cached.cachedAt || 0);
-    if (!Number.isFinite(ageMs) || ageMs > DRIVER_PROFILE_CACHE_TTL_MS) return null;
-    return cached.payload || null;
-  }
-
-  function setCachedDriverProfile(userId, payload) {
-    const key = String(userId || '');
-    if (!key || !payload || typeof payload !== 'object') return;
-    const fn = window?.setCachedDriverProfile;
-    if (typeof fn === 'function') {
-      fn(key, payload);
-      return;
-    }
-    getSharedDriverCaches().driverProfile.set(key, { payload, cachedAt: Date.now() });
-  }
-
-  function resolveDriverDisplayName(args = {}) {
-    const fn = window?.resolveDriverDisplayName;
-    if (typeof fn === 'function') return fn(args);
-    const normalizedUserId = Number(args.userId);
-    const emailLocalPart = String(args.email || '').split('@')[0] || '';
-    const candidates = [
-      args.senderDisplayName,
-      args.displayName,
-      args.userName,
-      args.name,
-      args.profileUser?.display_name,
-      args.presenceIdentity?.display_name,
-      emailLocalPart,
-    ];
-    for (const value of candidates) {
-      const safe = String(value || '').trim();
-      if (safe) return safe;
-    }
-    return Number.isFinite(normalizedUserId) ? `User ${normalizedUserId}` : 'User';
-  }
-
   // Chat state
   let chatPollTimer = null;
   let chatLastSeen = null;
@@ -130,22 +54,6 @@
   let privateLastMessageIdByUserId = Object.create(null);
   let privateThreadPollTimer = null;
   let privateActivePollTimer = null;
-  let publicChatDraft = '';
-  let publicChatSelectionStart = null;
-  let publicChatSelectionEnd = null;
-  let publicChatHasFocus = false;
-  let privateChatDraftByUserId = Object.create(null);
-  let privateChatSelectionByUserId = Object.create(null);
-  let privateChatFocusedUserId = null;
-  let chatVoiceRecorder = null;
-  let chatVoiceChunks = [];
-  let chatVoiceRecordingScope = null;
-  let chatVoiceRecordingUserId = null;
-  let chatVoiceRecordingMimeType = '';
-  let chatVoiceRecordingStartedAt = 0;
-  let chatVoiceRecordingTimer = null;
-  let chatVoiceRecordingDeadline = 0;
-  let chatViewportScrollTimer = null;
 
   function chatLastReadStorageKey() {
     return `tlc_chat_last_read_${CHAT_ROOM}`;
@@ -249,8 +157,6 @@
   function msgUserId(msg) {
     if (msg?.user_id != null) return String(msg.user_id);
     if (msg?.userId != null) return String(msg.userId);
-    if (msg?.sender_user_id != null) return String(msg.sender_user_id);
-    if (msg?.senderUserId != null) return String(msg.senderUserId);
     return null;
   }
 
@@ -978,7 +884,7 @@
       if (killFeedSeenKeys.has(key)) return;
       killFeedSeenKeys.add(key);
 
-      const who = chatSenderName(msg, { fallbackUserId: msgUserId(msg), fallbackDisplayName: msg?.display_name });
+      const who = msg.display_name || msg.user_name || msg.name || 'Driver';
       const body = String(msg.text || msg.message || '').trim();
       if (!body) return;
 
@@ -1042,7 +948,7 @@
     const id = msg?.id;
     if (id !== undefined && id !== null) return `id:${id}`;
     const t = msg?.created_at || '';
-    const n = chatSenderName(msg, { fallbackUserId: msgUserId(msg), fallbackDisplayName: msg?.display_name });
+    const n = msg?.display_name || msg?.user_name || msg?.name || '';
     const body = msg?.text || msg?.message || '';
     return `fallback:${t}|${n}|${body}`;
   }
@@ -1073,46 +979,15 @@
   }
 
   function privateThreadName(thread) {
-    return resolveDriverDisplayName({
-      userId: privateThreadUserId(thread),
-      senderDisplayName: thread?.sender_display_name,
-      displayName: thread?.other_display_name || thread?.display_name,
-      userName: thread?.user_name,
-      name: thread?.name,
-      email: thread?.email,
-      presenceIdentity: getCachedDriverIdentity(privateThreadUserId(thread)),
-    });
-  }
-
-  function chatSenderName(msg, { fallbackUserId = null, fallbackDisplayName = '', profileUser = null } = {}) {
-    const senderId = msgUserId(msg) || (fallbackUserId == null ? null : String(fallbackUserId));
-    return resolveDriverDisplayName({
-      userId: senderId,
-      senderDisplayName: msg?.sender_display_name,
-      displayName: msg?.display_name || fallbackDisplayName,
-      userName: msg?.user_name,
-      name: msg?.name,
-      email: msg?.email,
-      profileUser,
-      presenceIdentity: getCachedDriverIdentity(senderId),
-    });
-  }
-
-  function normalizePublicMessage(msg) {
-    const senderId = msgUserId(msg);
-    return {
-      ...msg,
-      _senderDisplayName: chatSenderName(msg, { fallbackUserId: senderId, fallbackDisplayName: msg?.display_name }),
-    };
+    return String(thread?.display_name || thread?.name || thread?.user_name || 'Driver').trim() || 'Driver';
   }
 
   function privateThreadPreview(thread) {
-    if (String(thread?.message_kind || '').toLowerCase() === 'voice' || thread?.voice_url) return '[Voice message]';
-    return String(thread?.last_message_text || thread?.last_text || thread?.last_message || thread?.text || '').trim();
+    return String(thread?.last_text || thread?.text || thread?.last_message || '').trim();
   }
 
   function privateThreadTime(thread) {
-    return thread?.last_message_at || thread?.last_message_created_at || thread?.last_created_at || thread?.created_at || '';
+    return thread?.last_created_at || thread?.created_at || thread?.ts || thread?.timestamp || '';
   }
 
   function privateThreadUnreadCount(thread) {
@@ -1129,26 +1004,12 @@
     if (!uid || !Array.isArray(messages) || !messages.length) return;
     const latest = messages[messages.length - 1] || {};
     const existing = privateThreads.find((t) => privateThreadUserId(t) === uid) || {};
-    const normalizedLatest = normalizePrivateMessages([latest], uid)[0] || latest;
-    const latestText = String(normalizedLatest?.text || normalizedLatest?.message || '').trim();
-    const isVoice = String(normalizedLatest?.message_kind || '').toLowerCase() === 'voice' || !!normalizedLatest?.voice_url;
     const next = {
       ...existing,
       other_user_id: uid,
-      other_display_name: existing?.other_display_name || (!normalizedLatest?._isSelf ? normalizedLatest?._senderDisplayName : '') || privateActiveDisplayName,
-      other_avatar_url: existing?.other_avatar_url || normalizedLatest?._senderAvatarUrl || privateAvatarUrl(normalizedLatest),
-      avatar_url: existing?.avatar_url || privateAvatarUrl(normalizedLatest),
-      display_name: existing?.display_name || (privateActiveUserId === uid && privateActiveDisplayName ? privateActiveDisplayName : privateThreadName(existing || normalizedLatest)),
-      message_kind: normalizedLatest?.message_kind || existing?.message_kind || '',
-      voice_url: normalizedLatest?.voice_url || existing?.voice_url || '',
-      voice_duration_sec: normalizedLatest?.voice_duration_sec || existing?.voice_duration_sec || 0,
-      last_message_text: latestText || (isVoice ? '[Voice message]' : String(existing?.last_message_text || existing?.last_text || '').trim()),
-      last_text: latestText || (isVoice ? '[Voice message]' : String(existing?.last_text || '').trim()),
-      last_message_at: normalizedLatest?.created_at || normalizedLatest?.ts || normalizedLatest?.timestamp || existing?.last_message_at || existing?.last_created_at || null,
-      last_message_created_at: normalizedLatest?.created_at || normalizedLatest?.ts || normalizedLatest?.timestamp || existing?.last_message_created_at || existing?.last_created_at || null,
-      last_created_at: normalizedLatest?.created_at || normalizedLatest?.ts || normalizedLatest?.timestamp || existing?.last_created_at || null,
-      last_message_sender_user_id: msgUserId(normalizedLatest) || existing?.last_message_sender_user_id || null,
-      last_message_user_id: msgUserId(normalizedLatest) || existing?.last_message_user_id || null,
+      display_name: privateActiveUserId === uid && privateActiveDisplayName ? privateActiveDisplayName : privateThreadName(existing || latest),
+      last_text: String(latest?.text || latest?.message || existing?.last_text || '').trim(),
+      last_created_at: latest?.created_at || latest?.ts || latest?.timestamp || existing?.last_created_at || null,
       unread_count: privateUnreadByUserId[uid] || 0,
     };
     privateThreads = [next, ...privateThreads.filter((t) => privateThreadUserId(t) !== uid)];
@@ -1160,9 +1021,14 @@
     try {
       const data = await getJSONAuth('/chat/private/threads', token);
       return Array.isArray(data) ? data : (Array.isArray(data?.threads) ? data.threads : []);
-    } catch (err) {
-      console.warn('chatFetchPrivateThreads failed', err);
-      return [];
+    } catch (_) {
+      try {
+        const fallback = await getJSONAuth('/chat/dm/threads', token);
+        return Array.isArray(fallback) ? fallback : (Array.isArray(fallback?.threads) ? fallback.threads : []);
+      } catch (err) {
+        console.warn('chatFetchPrivateThreads failed', err);
+        return [];
+      }
     }
   }
 
@@ -1175,9 +1041,14 @@
     try {
       const data = await getJSONAuth(`/chat/private/users${suffix}`, token);
       return Array.isArray(data) ? data : (Array.isArray(data?.users) ? data.users : []);
-    } catch (err) {
-      console.warn('chatFetchPrivateUsers failed', err);
-      return [];
+    } catch (_) {
+      try {
+        const fallback = await getJSONAuth(`/chat/dm/users${suffix}`, token);
+        return Array.isArray(fallback) ? fallback : (Array.isArray(fallback?.users) ? fallback.users : []);
+      } catch (err) {
+        console.warn('chatFetchPrivateUsers failed', err);
+        return [];
+      }
     }
   }
 
@@ -1187,195 +1058,28 @@
     const uid = encodeURIComponent(String(otherUserId));
     const qs = new URLSearchParams();
     qs.set('limit', String(limit));
-    const data = await getJSONAuth(`/chat/private/${uid}?${qs.toString()}`, token);
-    return Array.isArray(data) ? data : (Array.isArray(data?.messages) ? data.messages : []);
+    try {
+      const data = await getJSONAuth(`/chat/private/${uid}?${qs.toString()}`, token);
+      return Array.isArray(data) ? data : (Array.isArray(data?.messages) ? data.messages : []);
+    } catch (_) {
+      const fallback = await getJSONAuth(`/chat/dm/${uid}?${qs.toString()}`, token);
+      return Array.isArray(fallback) ? fallback : (Array.isArray(fallback?.messages) ? fallback.messages : []);
+    }
   }
 
   async function chatSendPrivateMessage(otherUserId, text) {
     const token = getCommunityToken();
     if (!token || !otherUserId) throw new Error('Private chat unavailable');
     const uid = encodeURIComponent(String(otherUserId));
-    const route = `/chat/private/${uid}`;
     try {
-      return await postJSON(route, { text }, token);
-    } catch (err) {
-      console.warn('chatSendPrivateMessage failed', { route, error: err, body: { text } });
-      throw err;
+      return await postJSON(`/chat/private/${uid}`, { text }, token);
+    } catch (_) {
+      return await postJSON(`/chat/dm/${uid}`, { text }, token);
     }
-  }
-
-  function pickVoiceMimeType() {
-    const prefs = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/ogg;codecs=opus', 'audio/webm'];
-    const mr = window.MediaRecorder;
-    if (!mr || typeof mr.isTypeSupported !== 'function') return '';
-    for (const type of prefs) {
-      if (mr.isTypeSupported(type)) return type;
-    }
-    return '';
-  }
-
-  function setChatVoiceStatus(text = '', { busy = false } = {}) {
-    const el = document.getElementById('chatVoiceStatus');
-    if (!el) return;
-    if (!text) {
-      el.hidden = true;
-      el.textContent = '';
-      return;
-    }
-    el.hidden = false;
-    el.textContent = text;
-    el.classList.toggle('busy', !!busy);
-  }
-
-  async function uploadPublicVoiceMessage(blob, meta = {}) {
-    const token = getCommunityToken();
-    if (!token) throw new Error('Not signed in');
-    const form = new FormData();
-    const durationSec = Math.max(0, Math.min(10, Math.round(Number(meta?.durationSec ?? ((meta?.durationMs || 0) / 1000)) || 0)));
-    form.append('file', blob, `voice.${(meta?.ext || 'webm')}`);
-    form.append('duration_sec', String(durationSec));
-    const res = await fetch(`${RAILWAY_BASE}/chat/rooms/${CHAT_ROOM}/voice`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form });
-    const raw = await res.text();
-    if (!res.ok) {
-      console.warn('uploadPublicVoiceMessage failed', { status: res.status, route: `/chat/rooms/${CHAT_ROOM}/voice`, responseText: raw.slice(0, 600) });
-      throw new Error(`Voice upload failed (${res.status})`);
-    }
-    return raw ? JSON.parse(raw) : null;
-  }
-
-  async function uploadPrivateVoiceMessage(otherUserId, blob, meta = {}) {
-    const token = getCommunityToken();
-    if (!token || !otherUserId) throw new Error('Private chat unavailable');
-    const form = new FormData();
-    const durationSec = Math.max(0, Math.min(10, Math.round(Number(meta?.durationSec ?? ((meta?.durationMs || 0) / 1000)) || 0)));
-    form.append('file', blob, `voice.${(meta?.ext || 'webm')}`);
-    form.append('duration_sec', String(durationSec));
-    const uid = encodeURIComponent(String(otherUserId));
-    const route = `/chat/private/${uid}/voice`;
-    const res = await fetch(`${RAILWAY_BASE}${route}`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form });
-    const raw = await res.text();
-    if (!res.ok) {
-      console.warn('uploadPrivateVoiceMessage failed', { status: res.status, route, responseText: raw.slice(0, 600) });
-      throw new Error(`Voice upload failed (${res.status})`);
-    }
-    return raw ? JSON.parse(raw) : null;
-  }
-
-  function cancelChatVoiceRecording() {
-    if (chatVoiceRecordingTimer) {
-      clearInterval(chatVoiceRecordingTimer);
-      chatVoiceRecordingTimer = null;
-    }
-    chatVoiceRecorder = null;
-    chatVoiceChunks = [];
-    chatVoiceRecordingScope = null;
-    chatVoiceRecordingUserId = null;
-    chatVoiceRecordingMimeType = '';
-    chatVoiceRecordingStartedAt = 0;
-    chatVoiceRecordingDeadline = 0;
-    setChatVoiceStatus('');
-  }
-
-  async function stopChatVoiceRecording() {
-    if (!chatVoiceRecorder) return;
-    const recorder = chatVoiceRecorder;
-    if (recorder.state !== 'inactive') recorder.stop();
-  }
-
-  async function startChatVoiceRecording(scope) {
-    if (chatVoiceRecorder) {
-      stopChatVoiceRecording();
-      return;
-    }
-    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) return;
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const mimeType = pickVoiceMimeType();
-    chatVoiceRecordingScope = scope;
-    chatVoiceRecordingUserId = scope === 'private' ? privateActiveUserId : null;
-    chatVoiceRecordingMimeType = mimeType;
-    chatVoiceChunks = [];
-    chatVoiceRecordingStartedAt = Date.now();
-    chatVoiceRecordingDeadline = chatVoiceRecordingStartedAt + 10000;
-    chatVoiceRecorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
-    chatVoiceRecorder.addEventListener('dataavailable', (e) => { if (e?.data?.size) chatVoiceChunks.push(e.data); });
-    chatVoiceRecorder.addEventListener('stop', async () => {
-      if (chatVoiceRecordingTimer) {
-        clearInterval(chatVoiceRecordingTimer);
-        chatVoiceRecordingTimer = null;
-      }
-      stream.getTracks().forEach((t) => t.stop());
-      const durationMs = Math.max(0, Date.now() - chatVoiceRecordingStartedAt);
-      const blob = new Blob(chatVoiceChunks, { type: chatVoiceRecordingMimeType || chatVoiceChunks?.[0]?.type || 'audio/webm' });
-      const ext = (blob.type || 'audio/webm').includes('mp4') ? 'm4a' : 'webm';
-      const recordingScope = chatVoiceRecordingScope;
-      const recordingUserId = chatVoiceRecordingUserId;
-      cancelChatVoiceRecording();
-      setChatVoiceStatus('Uploading voice…', { busy: true });
-      try {
-        if (recordingScope === 'private' && recordingUserId) {
-          const msg = await uploadPrivateVoiceMessage(recordingUserId, blob, { durationMs, ext });
-          if (msg) {
-            privateMessagesByUserId[recordingUserId] = normalizePrivateMessages((privateMessagesByUserId[recordingUserId] || []).concat(Array.isArray(msg) ? msg : [msg]), recordingUserId);
-            privateUpsertThreadFromMessages(recordingUserId, privateMessagesByUserId[recordingUserId]);
-            if (privateActiveUserId === recordingUserId && privateView === 'conversation') patchPrivateConversationMessages(privateMessagesByUserId[recordingUserId]);
-          }
-        } else {
-          const msg = await uploadPublicVoiceMessage(blob, { durationMs, ext });
-          if (msg) renderChatMessages(Array.isArray(msg) ? msg : [msg]);
-        }
-      } catch (err) {
-        console.warn('voice upload failed', err);
-      } finally {
-        setChatVoiceStatus('');
-      }
-    });
-    chatVoiceRecorder.start();
-    chatVoiceRecordingTimer = window.setInterval(() => {
-      const remaining = Math.max(0, Math.ceil((chatVoiceRecordingDeadline - Date.now()) / 1000));
-      setChatVoiceStatus(`Recording… ${remaining}s`);
-      if (remaining <= 0) stopChatVoiceRecording();
-    }, 200);
   }
 
   function privateDisplayNameForUser(user) {
-    return resolveDriverDisplayName({
-      userId: user?.id,
-      senderDisplayName: user?.sender_display_name,
-      displayName: user?.other_display_name || user?.display_name,
-      userName: user?.user_name,
-      name: user?.name,
-      email: user?.email,
-      presenceIdentity: getCachedDriverIdentity(user?.id),
-    });
-  }
-
-  function privateAvatarUrl(threadOrMsg = {}) {
-    return String(threadOrMsg?.other_avatar_url || threadOrMsg?.avatar_url || threadOrMsg?.sender_avatar_url || '').trim();
-  }
-
-  function normalizePrivateMessages(messages = [], otherUserId = privateActiveUserId) {
-    const meId = currentChatSelfUserId();
-    const targetId = otherUserId == null ? '' : String(otherUserId);
-    return (Array.isArray(messages) ? messages : []).map((msg) => {
-      const senderId = msgUserId(msg);
-      const recipientId = msg?.recipient_user_id != null ? String(msg.recipient_user_id) : (msg?.recipientUserId != null ? String(msg.recipientUserId) : '');
-      const isSelf = !!(senderId && meId && senderId === meId);
-      const otherParticipantId = isSelf ? (recipientId || targetId) : (senderId || targetId);
-      const fallbackDisplayName = isSelf
-        ? (window?.me?.display_name || window?.me?.email || '')
-        : (privateActiveDisplayName || msg?.other_display_name || msg?.display_name || '');
-      const senderName = chatSenderName(msg, {
-        fallbackUserId: senderId || otherParticipantId,
-        fallbackDisplayName,
-        profileUser: isSelf ? window?.me : privateActiveUserProfile,
-      });
-      return {
-        ...msg,
-        _isSelf: isSelf,
-        _senderDisplayName: senderName,
-        _senderAvatarUrl: String(msg?.sender_avatar_url || privateAvatarUrl(msg) || getCachedDriverIdentity(senderId || otherParticipantId)?.avatar_url || ''),
-      };
-    });
+    return String(user?.display_name || user?.name || user?.user_name || `Driver ${user?.id || ''}`).trim() || 'Driver';
   }
 
   function renderPrivateThreadList() {
@@ -1390,11 +1094,7 @@
       const unread = privateThreadUnreadCount(thread);
       const ts = formatChatTime(privateThreadTime(thread));
       const initials = name.slice(0, 2).toUpperCase();
-      const avatar = privateAvatarUrl(thread);
-      const avatarHtml = avatar
-        ? `<img src="${escapeHtml(avatar)}" class="chatPrivateThreadAvatarImg" alt="">`
-        : escapeHtml(initials);
-      return `<button type="button" class="chatPrivateThreadRow" data-private-thread="${uid || ''}"><span class="chatPrivateThreadAvatar">${avatarHtml}</span><span class="chatPrivateThreadBody"><span class="chatPrivateThreadName">${escapeHtml(name)}</span><span class="chatPrivateThreadPreview">${escapeHtml(preview)}</span></span><span class="chatPrivateThreadMeta"><span class="chatPrivateThreadTime">${escapeHtml(ts)}</span>${unread > 0 ? `<span class="chatPrivateThreadUnread">${unread > 99 ? '99+' : unread}</span>` : ''}</span></button>`;
+      return `<button type="button" class="chatPrivateThreadRow" data-private-thread="${uid || ''}"><span class="chatPrivateThreadAvatar">${escapeHtml(initials)}</span><span class="chatPrivateThreadBody"><span class="chatPrivateThreadName">${escapeHtml(name)}</span><span class="chatPrivateThreadPreview">${escapeHtml(preview)}</span></span><span class="chatPrivateThreadMeta"><span class="chatPrivateThreadTime">${escapeHtml(ts)}</span>${unread > 0 ? `<span class="chatPrivateThreadUnread">${unread > 99 ? '99+' : unread}</span>` : ''}</span></button>`;
     }).join('');
     wrap.innerHTML = `<div class="chatPrivateThreadList"><div class="chatPrivateThreadToolbar"><button id="chatPrivateNewMessageBtn" class="chipBtn" type="button">New Message</button></div>${rows || '<div class="chatEmpty">No private conversations yet.</div>'}</div>`;
     wrap.querySelectorAll('[data-private-thread]').forEach((btn) => btn.addEventListener('click', () => {
@@ -1422,20 +1122,11 @@
       const uid = user?.id != null ? String(user.id) : '';
       const name = privateDisplayNameForUser(user);
       const initials = name.slice(0, 2).toUpperCase();
-      const avatar = privateAvatarUrl(user);
-      const avatarHtml = avatar ? `<img src="${escapeHtml(avatar)}" class="chatPrivateThreadAvatarImg" alt="">` : escapeHtml(initials);
-      const online = user?.is_online ? '<span class="chatPrivateUserOnline" aria-label="Online"></span>' : '';
-      const meta = user?.last_seen_at ? `Seen ${escapeHtml(formatChatTime(user.last_seen_at) || 'recently')}` : `@${escapeHtml(uid)}`;
-      return `<button type="button" class="chatPrivateThreadRow" data-private-user="${uid}"><span class="chatPrivateThreadAvatar">${avatarHtml}${online}</span><span class="chatPrivateThreadBody"><span class="chatPrivateThreadName">${escapeHtml(name)}</span><span class="chatPrivateThreadPreview">${meta}</span></span></button>`;
+      return `<button type="button" class="chatPrivateThreadRow" data-private-user="${uid}"><span class="chatPrivateThreadAvatar">${escapeHtml(initials)}</span><span class="chatPrivateThreadBody"><span class="chatPrivateThreadName">${escapeHtml(name)}</span><span class="chatPrivateThreadPreview">@${escapeHtml(uid)}</span></span></button>`;
     }).join('');
     wrap.innerHTML = `<div class="chatPrivateThreadList"><div class="chatPrivateThreadToolbar"><button id="chatPrivateInboxBtn" class="chipBtn" type="button">Inbox</button></div><div class="chatPrivatePickerSearch"><input id="chatPrivateUserSearch" type="search" class="chatInput" placeholder="Search users" value="${escapeHtml(privateUsersFilter)}"></div>${rows || '<div class="chatEmpty">No users available.</div>'}</div>`;
     document.getElementById('chatPrivateInboxBtn')?.addEventListener('click', renderPrivateThreadList);
-    const privateSearchInput = document.getElementById('chatPrivateUserSearch');
-    privateSearchInput?.addEventListener('focus', () => {
-      updateChatViewportMetrics();
-      scrollActiveChatInputIntoView();
-    });
-    privateSearchInput?.addEventListener('input', async (e) => {
+    document.getElementById('chatPrivateUserSearch')?.addEventListener('input', async (e) => {
       privateUsersFilter = String(e.target.value || '').trim();
       privateUsers = await chatFetchPrivateUsers(privateUsersFilter);
       renderPrivateUserPicker();
@@ -1449,125 +1140,71 @@
   }
 
   function renderPrivateConversationMessages(messages) {
-    return normalizePrivateMessages(messages, privateActiveUserId).map((msg) => {
-      const own = !!msg?._isSelf;
-      const senderName = msg?._senderDisplayName || chatSenderName(msg, { fallbackUserId: msgUserId(msg) });
+    return messages.map((msg) => {
+      const own = isOwnMessage(msg);
+      const text = String(msg?.text || msg?.message || '').trim() || '…';
       const ts = formatChatTime(msg?.created_at || msg?.ts || msg?.timestamp || '');
-      const isVoice = String(msg?.message_kind || '').toLowerCase() === 'voice';
-      const voiceUrl = String(msg?.voice_url || '').trim();
-      let contentHtml = '';
-      if (isVoice) {
-        contentHtml = voiceUrl
-          ? `<div class="${own ? 'chatBubbleSelf' : 'chatBubbleOther'}"><audio controls preload="metadata" src="${escapeHtml(voiceUrl)}"></audio></div>`
-          : `<div class="${own ? 'chatBubbleSelf' : 'chatBubbleOther'}">Voice message expired</div>`;
-      } else {
-        const text = String(msg?.text || msg?.message || '').trim() || '…';
-        contentHtml = `<div class="${own ? 'chatBubbleSelf' : 'chatBubbleOther'}">${escapeHtml(text)}</div>`;
-      }
-      return `<div class="chatPrivateMsgRow ${own ? 'self' : 'other'}"><div class="chatMsgSender">${escapeHtml(senderName)}</div>${contentHtml}<div class="chatMsgTime">${escapeHtml(ts)}</div></div>`;
+      return `<div class="chatPrivateMsgRow ${own ? 'self' : 'other'}"><div class="${own ? 'chatBubbleSelf' : 'chatBubbleOther'}">${escapeHtml(text)}</div><div class="chatMsgTime">${escapeHtml(ts)}</div></div>`;
     }).join('');
-  }
-
-  function renderPrivateConversationShell() {
-    privateView = 'conversation';
-    const wrap = document.getElementById('chatPrivateWrap');
-    if (!wrap || !privateActiveUserId) return;
-    wrap.innerHTML = `<div class="chatPrivateConversation" data-private-conversation-user="${escapeHtml(String(privateActiveUserId))}"><div class="chatPrivateHeader"><button id="chatPrivateBackBtn" class="chatPrivateBackBtn" type="button">Inbox</button><div id="chatPrivateConversationTitle" class="chatPrivateTitle">${escapeHtml(privateActiveDisplayName || 'Private chat')}</div></div><div id="chatPrivateConversationList" class="chatList"></div></div>`;
-    document.getElementById('chatPrivateBackBtn')?.addEventListener('click', () => {
-      capturePrivateComposerState();
-      privateActiveUserId = null;
-      privateActiveUserProfile = null;
-      privateChatFocusedUserId = null;
-      renderPrivateThreadList();
-    });
-  }
-
-  function patchPrivateConversationMessages(messages) {
-    const list = document.getElementById('chatPrivateConversationList');
-    if (!list) return;
-    const normalized = normalizePrivateMessages(Array.isArray(messages) ? messages : [], privateActiveUserId);
-    const nearBottom = isChatNearBottom(list, 80);
-    const priorBottomGap = Math.max(0, list.scrollHeight - list.scrollTop - list.clientHeight);
-    list.innerHTML = normalized.length ? renderPrivateConversationMessages(normalized) : '<div class="chatEmpty">No messages yet.</div>';
-    if (nearBottom) {
-      list.scrollTop = list.scrollHeight;
-    } else {
-      const nextTop = list.scrollHeight - list.clientHeight - priorBottomGap;
-      list.scrollTop = Math.max(0, nextTop);
-    }
-    const title = document.getElementById('chatPrivateConversationTitle');
-    if (title) title.textContent = privateActiveDisplayName || 'Private chat';
   }
 
   function renderPrivateConversation() {
     privateView = 'conversation';
     const wrap = document.getElementById('chatPrivateWrap');
     if (!wrap || !privateActiveUserId) return;
-    const shell = wrap.querySelector('[data-private-conversation-user]');
-    const shellUserId = shell?.getAttribute('data-private-conversation-user');
-    if (!shell || shellUserId !== String(privateActiveUserId)) {
-      renderPrivateConversationShell();
-    }
     const messages = privateMessagesByUserId[privateActiveUserId] || [];
-    patchPrivateConversationMessages(messages);
+    wrap.innerHTML = `<div class="chatPrivateConversation"><div class="chatPrivateHeader"><button id="chatPrivateBackBtn" class="chatPrivateBackBtn" type="button">Inbox</button><div class="chatPrivateTitle">${escapeHtml(privateActiveDisplayName || 'Private chat')}</div></div><div id="chatPrivateConversationList" class="chatList">${messages.length ? renderPrivateConversationMessages(messages) : '<div class="chatEmpty">No messages yet.</div>'}</div></div>`;
+    document.getElementById('chatPrivateBackBtn')?.addEventListener('click', () => {
+      privateActiveUserId = null;
+      privateActiveUserProfile = null;
+      renderPrivateThreadList();
+    });
+    const list = document.getElementById('chatPrivateConversationList');
+    if (list) list.scrollTop = list.scrollHeight;
     renderComposerRegion();
   }
 
   function renderComposerRegion() {
     const region = document.getElementById('chatComposerRegion');
     if (!region) return;
-
-    if (chatUiTab !== 'public') capturePublicComposerState();
-    if (!(privateView === 'conversation' && privateActiveUserId)) capturePrivateComposerState();
-
     if (chatUiTab === 'public') {
-      const publicComposer = document.getElementById('chatPublicComposer');
-      const existingInput = document.getElementById('chatInput');
-      if (publicComposer && existingInput) {
-        publicComposer.classList.remove('hidden');
-        restorePublicComposerState(existingInput);
-        return;
-      }
-      region.innerHTML = `<div id="chatPublicComposer" class="chatComposerWrap"><div class="chatComposer"><input id="chatInput" type="text" class="chatInput" placeholder="Message drivers…" maxlength="600" /><button id="chatVoiceBtnPublic" class="chipBtn" type="button">🎤</button><button id="chatSendBtn" class="chipBtn" type="button">Send</button></div><div id="chatVoiceStatus" class="chatVoiceStatus" hidden></div></div>`;
+      region.innerHTML = `<div id="chatPublicComposer" class="chatComposerWrap"><div class="chatComposer"><input id="chatInput" type="text" class="chatInput" placeholder="Message drivers…" maxlength="600" /><button id="chatSendBtn" class="chipBtn" type="button">Send</button></div></div>`;
       bindPublicComposer();
       return;
     }
-
     if (privateView === 'conversation' && privateActiveUserId) {
-      const composer = region.querySelector('[data-private-composer-user]');
-      const composerUserId = composer?.getAttribute('data-private-composer-user');
-      const existingInput = document.getElementById('chatPrivateInput');
-      if (composer && existingInput && composerUserId === String(privateActiveUserId)) {
-        composer.classList.remove('hidden');
-        restorePrivateComposerState(existingInput, privateActiveUserId);
-        return;
-      }
-      region.innerHTML = `<div class="chatComposerWrap" data-private-composer-user="${escapeHtml(String(privateActiveUserId))}"><div class="chatComposer chatComposerPrivate"><input id="chatPrivateInput" type="text" class="chatInput" placeholder="Message privately…" maxlength="600"><button id="chatVoiceBtnPrivate" class="chipBtn" type="button">🎤</button><button id="chatPrivateSendBtn" class="chipBtn" type="button">Send</button></div><div id="chatVoiceStatus" class="chatVoiceStatus" hidden></div></div>`;
-      bindPrivateComposer();
+      region.innerHTML = `<div class="chatComposerWrap"><div class="chatComposer chatComposerPrivate"><input id="chatPrivateInput" type="text" class="chatInput" placeholder="Message privately…" maxlength="600"><button id="chatPrivateSendBtn" class="chipBtn" type="button">Send</button></div></div>`;
+      const sendBtn = document.getElementById('chatPrivateSendBtn');
+      const input = document.getElementById('chatPrivateInput');
+      const sendNow = async () => {
+        const text = String(input?.value || '').trim();
+        if (!text || !privateActiveUserId) return;
+        sendBtn.disabled = true;
+        try {
+          await chatSendPrivateMessage(privateActiveUserId, text);
+          input.value = '';
+          await chatPollPrivateActiveThread();
+        } catch (err) {
+          console.warn('private send failed', err);
+        } finally {
+          sendBtn.disabled = false;
+        }
+      };
+      sendBtn?.addEventListener('click', sendNow);
+      input?.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); sendNow(); } });
       return;
     }
-
     region.innerHTML = '';
   }
 
   async function openPrivateChatForUser(otherUserId, options = {}) {
     if (!otherUserId) return;
-    capturePrivateComposerState();
     privateActiveUserId = String(otherUserId);
     privateActiveUserProfile = options.profile || null;
-    privateActiveDisplayName = resolveDriverDisplayName({
-      userId: privateActiveUserId,
-      senderDisplayName: options.senderDisplayName,
-      displayName: options.displayName || privateActiveUserProfile?.display_name,
-      userName: privateActiveUserProfile?.user_name,
-      name: privateActiveUserProfile?.name,
-      email: privateActiveUserProfile?.email,
-      profileUser: privateActiveUserProfile,
-      presenceIdentity: getCachedDriverIdentity(privateActiveUserId),
-    });
+    privateActiveDisplayName = String(options.displayName || privateActiveUserProfile?.display_name || privateActiveDisplayName || `Driver ${privateActiveUserId}`);
     privateUnreadByUserId[privateActiveUserId] = 0;
     const msgs = await chatFetchPrivateMessages(privateActiveUserId, { limit: 60 });
-    privateMessagesByUserId[privateActiveUserId] = normalizePrivateMessages(Array.isArray(msgs) ? msgs : [], privateActiveUserId);
+    privateMessagesByUserId[privateActiveUserId] = Array.isArray(msgs) ? msgs : [];
     privateUpsertThreadFromMessages(privateActiveUserId, privateMessagesByUserId[privateActiveUserId]);
     renderPrivateConversation();
     renderPrivateTabUnread();
@@ -1577,18 +1214,7 @@
 
   async function chatRefreshPrivateThreads() {
     const threads = await chatFetchPrivateThreads();
-    const incoming = Array.isArray(threads) ? threads : [];
-    const byUid = new Map();
-    privateThreads.forEach((thread) => {
-      const uid = privateThreadUserId(thread);
-      if (uid) byUid.set(uid, thread);
-    });
-    incoming.forEach((thread) => {
-      const uid = privateThreadUserId(thread);
-      if (!uid) return;
-      byUid.set(uid, { ...(byUid.get(uid) || {}), ...thread });
-    });
-    privateThreads = Array.from(byUid.values()).sort((a, b) => String(privateThreadTime(b)).localeCompare(String(privateThreadTime(a))));
+    privateThreads = Array.isArray(threads) ? threads : [];
     privateThreads.forEach((thread) => {
       const uid = privateThreadUserId(thread);
       if (!uid) return;
@@ -1604,7 +1230,7 @@
     if (!privateActiveUserId) return;
     const uid = privateActiveUserId;
     const msgs = await chatFetchPrivateMessages(uid, { limit: 60 });
-    const list = normalizePrivateMessages(Array.isArray(msgs) ? msgs : [], uid);
+    const list = Array.isArray(msgs) ? msgs : [];
     const lastKnown = Number(privateLastMessageIdByUserId[uid] || 0);
     let nextLast = lastKnown;
     for (const msg of list) {
@@ -1616,9 +1242,7 @@
     privateMessagesByUserId[uid] = list;
     privateUnreadByUserId[uid] = 0;
     privateUpsertThreadFromMessages(uid, list);
-    if (chatUiTab === 'private' && privateActiveUserId === uid && privateView === 'conversation') {
-      patchPrivateConversationMessages(list);
-    }
+    if (chatUiTab === 'private' && privateActiveUserId === uid && privateView === 'conversation') renderPrivateConversation();
     renderPrivateTabUnread();
     updateChatUnreadBadge();
   }
@@ -1695,13 +1319,6 @@
     privateMessagesByUserId = Object.create(null);
     privateUnreadByUserId = Object.create(null);
     privateLastMessageIdByUserId = Object.create(null);
-    publicChatDraft = '';
-    publicChatSelectionStart = null;
-    publicChatSelectionEnd = null;
-    publicChatHasFocus = false;
-    privateChatDraftByUserId = Object.create(null);
-    privateChatSelectionByUserId = Object.create(null);
-    privateChatFocusedUserId = null;
     updateChatUnreadBadge();
     chatSoundRuntime.lastObservedIncomingId = null;
     chatSoundRuntime.seenIncomingKeys = new Set();
@@ -1748,34 +1365,15 @@
       line.className = 'chatMsgLine';
       const who = document.createElement('strong');
       who.className = 'chatMsgName';
-      const normalized = normalizePublicMessage(msg);
-      who.textContent = `${normalized._senderDisplayName}: `;
-      const isVoice = String(msg?.message_kind || '').toLowerCase() === 'voice';
-      if (isVoice) {
-        const voiceUrl = String(msg?.voice_url || '').trim();
-        const body = document.createElement('div');
-        body.className = 'chatMsgVoice';
-        if (voiceUrl) {
-          const audio = document.createElement('audio');
-          audio.controls = true;
-          audio.preload = 'metadata';
-          audio.src = voiceUrl;
-          body.appendChild(audio);
-        } else {
-          body.textContent = 'Voice message expired';
-        }
-        line.appendChild(who);
-        line.appendChild(body);
-      } else {
-        const text = document.createElement('span');
-        text.className = 'chatMsgText';
-        text.textContent = String(msg?.text || msg?.message || '');
-        line.appendChild(who);
-        line.appendChild(text);
-      }
+      who.textContent = `${msg?.display_name || msg?.user_name || msg?.name || 'Driver'}: `;
+      const text = document.createElement('span');
+      text.className = 'chatMsgText';
+      text.textContent = String(msg?.text || msg?.message || '');
       const time = document.createElement('div');
       time.className = 'chatMsgTime';
       time.textContent = formatChatTime(msg?.created_at || msg?.ts || msg?.timestamp);
+      line.appendChild(who);
+      line.appendChild(text);
       row.appendChild(line);
       row.appendChild(time);
       frag.appendChild(row);
@@ -1807,28 +1405,11 @@
     if (after !== null && after !== undefined && String(after).trim() !== '') {
       qs.set('after', String(after));
     }
-    const route = `/chat/rooms/${CHAT_ROOM}?${qs.toString()}`;
     try {
-      const res = await fetch(`${RAILWAY_BASE}${route}`, {
-        headers: { Authorization: `Bearer ${token}` },
-        cache: 'no-store',
-        mode: 'cors',
-      });
-      const raw = await res.text();
-      if (!res.ok) {
-        console.warn('chatFetchMessages failed', { status: res.status, route, responseText: raw.slice(0, 600) });
-        return { ok: false, reason: 'failed', error: new Error(`Chat load failed (${res.status})`) };
-      }
-      let data = null;
-      try {
-        data = raw ? JSON.parse(raw) : [];
-      } catch (err) {
-        console.warn('chatFetchMessages invalid JSON', { route, responseText: raw.slice(0, 600), error: err });
-        return { ok: false, reason: 'failed', error: err };
-      }
+      const data = await getJSONAuth(`/chat/rooms/${CHAT_ROOM}?${qs.toString()}`, token);
       return { ok: true, messages: Array.isArray(data) ? data : data?.messages || [] };
     } catch (err) {
-      console.warn('chatFetchMessages failed', { route, error: err });
+      console.warn('chatFetchMessages failed', err);
       return { ok: false, reason: 'failed', error: err };
     }
   }
@@ -1864,13 +1445,7 @@
   async function chatSend(text) {
     const token = getCommunityToken();
     if (!token) { throw new Error('Not signed in'); }
-    const route = `/chat/rooms/${CHAT_ROOM}`;
-    try {
-      return await postJSON(route, { text }, token);
-    } catch (err) {
-      console.warn('chatSend failed', { route, error: err, body: { text } });
-      throw err;
-    }
+    return postJSON(`/chat/rooms/${CHAT_ROOM}`, { text }, token);
   }
 
   // Poll once and control polling
@@ -1977,147 +1552,16 @@
   }
 
   // Wire up the chat panel: event handlers, initial load, polling
-  function capturePublicComposerState() {
-    const chatInput = document.getElementById('chatInput');
-    if (!chatInput) return;
-    publicChatDraft = String(chatInput.value || '');
-    publicChatSelectionStart = Number.isFinite(Number(chatInput.selectionStart)) ? Number(chatInput.selectionStart) : null;
-    publicChatSelectionEnd = Number.isFinite(Number(chatInput.selectionEnd)) ? Number(chatInput.selectionEnd) : publicChatSelectionStart;
-    publicChatHasFocus = document.activeElement === chatInput;
-  }
-
-  function restorePublicComposerState(inputEl) {
-    if (!inputEl) return;
-    const draft = String(publicChatDraft || '');
-    if (inputEl.value !== draft) inputEl.value = draft;
-    const baseStart = publicChatSelectionStart == null ? draft.length : Number(publicChatSelectionStart);
-    const baseEnd = publicChatSelectionEnd == null ? baseStart : Number(publicChatSelectionEnd);
-    const restoreStart = Math.max(0, Math.min(draft.length, baseStart));
-    const restoreEnd = Math.max(restoreStart, Math.min(draft.length, baseEnd));
-    try { inputEl.setSelectionRange(restoreStart, restoreEnd); } catch (_) {}
-    if (publicChatHasFocus && document.activeElement !== inputEl) {
-      inputEl.focus({ preventScroll: false });
-      scrollActiveChatInputIntoView();
-    }
-  }
-
-  function capturePrivateComposerState() {
-    const input = document.getElementById('chatPrivateInput');
-    if (!input || !privateActiveUserId) return;
-    const uid = String(privateActiveUserId);
-    privateChatDraftByUserId[uid] = String(input.value || '');
-    privateChatSelectionByUserId[uid] = {
-      start: Number.isFinite(Number(input.selectionStart)) ? Number(input.selectionStart) : null,
-      end: Number.isFinite(Number(input.selectionEnd)) ? Number(input.selectionEnd) : null,
-    };
-    privateChatFocusedUserId = document.activeElement === input ? uid : privateChatFocusedUserId;
-  }
-
-  function restorePrivateComposerState(inputEl, userId) {
-    const uid = String(userId || '');
-    if (!inputEl || !uid) return;
-    const draft = String(privateChatDraftByUserId[uid] || '');
-    if (inputEl.value !== draft) inputEl.value = draft;
-    const selection = privateChatSelectionByUserId[uid] || null;
-    const baseStart = selection?.start == null ? draft.length : Number(selection.start);
-    const baseEnd = selection?.end == null ? baseStart : Number(selection.end);
-    const restoreStart = Math.max(0, Math.min(draft.length, baseStart));
-    const restoreEnd = Math.max(restoreStart, Math.min(draft.length, baseEnd));
-    try { inputEl.setSelectionRange(restoreStart, restoreEnd); } catch (_) {}
-    if (privateChatFocusedUserId === uid && document.activeElement !== inputEl) {
-      inputEl.focus({ preventScroll: false });
-      scrollActiveChatInputIntoView();
-    }
-  }
-
-  function scrollActiveChatInputIntoView() {
-    const active = document.activeElement;
-    if (!active) return;
-    const id = active.id;
-    if (id !== 'chatInput' && id !== 'chatPrivateInput' && id !== 'chatPrivateUserSearch') return;
-    window.requestAnimationFrame(() => {
-      window.setTimeout(() => {
-        try {
-          active.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-        } catch (_) {}
-      }, 30);
-    });
-  }
-
-  function bindPrivateComposer() {
-    const sendBtn = document.getElementById('chatPrivateSendBtn');
-    const input = document.getElementById('chatPrivateInput');
-    const voiceBtn = document.getElementById('chatVoiceBtnPrivate');
-    const uid = String(privateActiveUserId || '');
-    if (!sendBtn || !input || !voiceBtn || !uid) return;
-    input.style.fontSize = '16px';
-    input.setAttribute('autocapitalize', 'sentences');
-    input.setAttribute('autocomplete', 'off');
-    input.setAttribute('autocorrect', 'on');
-    input.setAttribute('spellcheck', 'true');
-    input.setAttribute('enterkeyhint', 'send');
-    restorePrivateComposerState(input, uid);
-
-    const syncDraft = () => {
-      privateChatDraftByUserId[uid] = String(input.value || '');
-      privateChatSelectionByUserId[uid] = {
-        start: Number.isFinite(Number(input.selectionStart)) ? Number(input.selectionStart) : null,
-        end: Number.isFinite(Number(input.selectionEnd)) ? Number(input.selectionEnd) : null,
-      };
-    };
-
-    const sendNow = async () => {
-      const text = String(input.value || '').trim();
-      if (!text || !privateActiveUserId) return;
-      sendBtn.disabled = true;
-      try {
-        await chatSendPrivateMessage(privateActiveUserId, text);
-        input.value = '';
-        privateChatDraftByUserId[uid] = '';
-        privateChatSelectionByUserId[uid] = { start: 0, end: 0 };
-        await chatPollPrivateActiveThread();
-      } catch (err) {
-        console.warn('private send failed', err);
-      } finally {
-        sendBtn.disabled = false;
-      }
-    };
-
-    sendBtn.addEventListener('click', (e) => { e.preventDefault(); sendNow(); });
-    voiceBtn.addEventListener('click', () => startChatVoiceRecording('private'));
-    input.addEventListener('input', syncDraft);
-    input.addEventListener('select', syncDraft);
-    input.addEventListener('keyup', syncDraft);
-    input.addEventListener('focus', () => {
-      privateChatFocusedUserId = uid;
-      updateChatViewportMetrics();
-      scrollActiveChatInputIntoView();
-      syncDraft();
-    });
-    input.addEventListener('blur', () => {
-      if (privateChatFocusedUserId === uid) privateChatFocusedUserId = null;
-      syncDraft();
-    });
-    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); sendNow(); } });
-  }
-
   function bindPublicComposer() {
     const chatInput = document.getElementById('chatInput');
     const chatSendBtn = document.getElementById('chatSendBtn');
-    const chatVoiceBtn = document.getElementById('chatVoiceBtnPublic');
-    if (!chatInput || !chatSendBtn || !chatVoiceBtn) return;
+    if (!chatInput || !chatSendBtn) return;
     chatInput.style.fontSize = '16px';
     chatInput.setAttribute('autocapitalize', 'sentences');
     chatInput.setAttribute('autocomplete', 'off');
     chatInput.setAttribute('autocorrect', 'on');
     chatInput.setAttribute('spellcheck', 'true');
     chatInput.setAttribute('enterkeyhint', 'send');
-    restorePublicComposerState(chatInput);
-    const syncDraft = () => {
-      publicChatDraft = String(chatInput.value || '');
-      publicChatSelectionStart = Number.isFinite(Number(chatInput.selectionStart)) ? Number(chatInput.selectionStart) : null;
-      publicChatSelectionEnd = Number.isFinite(Number(chatInput.selectionEnd)) ? Number(chatInput.selectionEnd) : publicChatSelectionStart;
-    };
     const sendNow = async () => {
       const text = String(chatInput.value || '').trim();
       if (!text) return;
@@ -2133,9 +1577,6 @@
           seedChatIncomingAudioBaseline(sentMessages);
         }
         chatInput.value = '';
-        publicChatDraft = '';
-        publicChatSelectionStart = 0;
-        publicChatSelectionEnd = 0;
         if (msg) renderChatMessages(Array.isArray(msg) ? msg : [msg]);
         await playChatTone('outgoing');
         await chatPollOnce();
@@ -2147,17 +1588,6 @@
       }
     };
     chatSendBtn.addEventListener('click', (e) => { e.preventDefault(); sendNow(); });
-    chatVoiceBtn.addEventListener('click', () => startChatVoiceRecording('public'));
-    chatInput.addEventListener('input', syncDraft);
-    chatInput.addEventListener('select', syncDraft);
-    chatInput.addEventListener('keyup', syncDraft);
-    chatInput.addEventListener('focus', () => {
-      publicChatHasFocus = true;
-      updateChatViewportMetrics();
-      scrollActiveChatInputIntoView();
-      syncDraft();
-    });
-    chatInput.addEventListener('blur', () => { publicChatHasFocus = false; syncDraft(); });
     chatInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); sendNow(); } });
   }
 
@@ -2180,6 +1610,7 @@
     syncChatPollingState();
     startPrivatePolling();
     chatRefreshPrivateThreads();
+    renderComposerRegion();
     switchChatTab(chatUiTab);
 
     markChatReadThroughLatestLoaded();
@@ -3692,11 +3123,6 @@
       .driverProfileDailyRanks .driverProfileStatValue{font-size:11px}
       .driverProfileDmWrap{display:flex;flex-direction:column;border:1px solid #e2e8f0;border-radius:11px;background:#fff;min-height:130px}
       .driverProfileDmList{display:flex;flex-direction:column;gap:7px;overflow:auto;max-height:min(22vh,190px);padding:9px}
-      .driverProfileDmMsg{display:flex;flex-direction:column;gap:2px}
-      .driverProfileDmMsg.me{align-items:flex-end}
-      .driverProfileDmMsg.other{align-items:flex-start}
-      .driverProfileDmSender{font-size:10px;font-weight:700;color:#334155}
-      .driverProfileDmTime{font-size:10px;color:#64748b}
       .driverProfileDmBubble{max-width:86%;font-size:12px;line-height:1.3;white-space:pre-wrap;word-break:break-word;padding:7px 9px;border-radius:11px}
       .driverProfileDmBubble.me{align-self:flex-end;background:#2563eb;color:#fff;border-bottom-right-radius:4px}
       .driverProfileDmBubble.other{align-self:flex-start;background:#e2e8f0;color:#111827;border-bottom-left-radius:4px}
@@ -3785,7 +3211,7 @@
   }
 
   function driverProfileAvatarHTML(profileUser) {
-    const name = resolveDriverDisplayName({ userId: driverProfileState.userId, displayName: profileUser?.display_name, userName: profileUser?.user_name, name: profileUser?.name, email: profileUser?.email, profileUser, presenceIdentity: getCachedDriverIdentity(driverProfileState.userId) });
+    const name = String(profileUser?.display_name || 'Driver').trim() || 'Driver';
     const avatarUrl = String(profileUser?.avatar_url || '').trim();
     if (avatarUrl) {
       return `<img class="driverProfileAvatar" src="${escapeHtml(avatarUrl)}" alt="${escapeHtml(name)} avatar">`;
@@ -3917,20 +3343,9 @@
     </div>`;
   }
 
-  async function fetchDriverProfile(userId, { force = false } = {}) {
+  async function fetchDriverProfile(userId) {
     const token = getCommunityToken();
-    const cached = !force ? getCachedDriverProfile(userId) : null;
-    if (cached) return cached;
-    const payload = await getJSONAuth(`/drivers/${encodeURIComponent(userId)}/profile`, token);
-    setCachedDriverProfile(userId, payload || {});
-    const profileUser = payload?.user || {};
-    setCachedDriverIdentity(userId, {
-      display_name: profileUser?.display_name || profileUser?.name || '',
-      avatar_url: profileUser?.avatar_url || '',
-      map_identity_mode: profileUser?.map_identity_mode || 'name',
-      updated_at: profileUser?.updated_at || Date.now(),
-    });
-    return payload;
+    return await getJSONAuth(`/drivers/${encodeURIComponent(userId)}/profile`, token);
   }
 
   async function fetchDriverProfileDmThread(userId, { after = null, limit = 30 } = {}) {
@@ -3938,13 +3353,7 @@
     const qs = new URLSearchParams();
     qs.set('limit', String(limit));
     if (after !== null && after !== undefined) qs.set('after', String(after));
-    const route = `/chat/private/${encodeURIComponent(userId)}?${qs.toString()}`;
-    try {
-      return await getJSONAuth(route, token);
-    } catch (err) {
-      console.warn('fetchDriverProfileDmThread failed', { route, error: err });
-      throw err;
-    }
+    return await getJSONAuth(`/chat/dm/${encodeURIComponent(userId)}?${qs.toString()}`, token);
   }
 
   const PROGRESSION_SYNC_INTERVAL_MS = 90000;
@@ -4397,7 +3806,7 @@
 
   async function sendDriverProfileDm(userId, text) {
     const token = getCommunityToken();
-    return await postJSON(`/chat/private/${encodeURIComponent(userId)}`, { text }, token);
+    return await postJSON(`/chat/dm/${encodeURIComponent(userId)}`, { text }, token);
   }
 
   function parseDriverMsgId(msg) {
@@ -4445,30 +3854,12 @@
 
   function normalizeDriverMessages(payload) {
     const list = Array.isArray(payload) ? payload : (Array.isArray(payload?.messages) ? payload.messages : []);
-    const meId = String(window?.me?.id || '');
-    const targetUserId = String(driverProfileState?.userId || '');
-    return list
-      .map((msg) => {
-        const senderId = msgUserId(msg);
-        const isSelf = !!(senderId && meId && senderId === meId);
-        const senderName = chatSenderName(msg, {
-          fallbackUserId: senderId || targetUserId,
-          fallbackDisplayName: isSelf ? window?.me?.display_name : (msg?.other_display_name || (senderId === targetUserId ? driverProfileState?.profile?.user?.display_name : msg?.display_name)),
-          profileUser: senderId === targetUserId ? driverProfileState?.profile?.user : (isSelf ? window?.me : null),
-        });
-        return {
-          ...msg,
-          _isSelf: isSelf,
-          _senderDisplayName: senderName,
-          _senderAvatarUrl: String(msg?.sender_avatar_url || msg?.avatar_url || getCachedDriverIdentity(senderId || targetUserId)?.avatar_url || ''),
-        };
-      })
-      .sort((a, b) => {
-        const aid = parseDriverMsgId(a);
-        const bid = parseDriverMsgId(b);
-        if (aid !== null && bid !== null && aid !== bid) return aid - bid;
-        return String(a?.created_at || '').localeCompare(String(b?.created_at || ''));
-      });
+    return list.slice().sort((a, b) => {
+      const aid = parseDriverMsgId(a);
+      const bid = parseDriverMsgId(b);
+      if (aid !== null && bid !== null && aid !== bid) return aid - bid;
+      return String(a?.created_at || '').localeCompare(String(b?.created_at || ''));
+    });
   }
 
   function appendDriverProfileMessages(messages) {
@@ -4487,29 +3878,6 @@
       if (id !== null) latest = latest === null ? id : Math.max(latest, id);
     });
     driverProfileState.latestMessageId = latest;
-  }
-
-
-  function renderDriverProfileDmList() {
-    const dmList = document.getElementById('driverProfileDmList');
-    if (!dmList) return;
-    const shouldStickBottom = isChatNearBottom(dmList, 72);
-    const messages = normalizeDriverMessages(driverProfileState.messages);
-    if (!messages.length) {
-      dmList.innerHTML = '<div class="driverProfileStatus">No private messages yet.</div>';
-      return;
-    }
-    dmList.innerHTML = messages.map((msg) => {
-      const klass = msg?._isSelf ? 'me' : 'other';
-      const ts = formatChatTime(msg?.created_at || msg?.ts || msg?.timestamp || '');
-      const isVoice = String(msg?.message_kind || '').toLowerCase() === 'voice';
-      const voiceUrl = String(msg?.voice_url || '').trim();
-      const body = isVoice
-        ? (voiceUrl ? `<audio controls preload="metadata" src="${escapeHtml(voiceUrl)}"></audio>` : 'Voice message expired')
-        : escapeHtml(String(msg?.text || msg?.message || ''));
-      return `<div class="driverProfileDmMsg ${klass}"><div class="driverProfileDmSender">${escapeHtml(msg?._senderDisplayName || `User ${msgUserId(msg) || ''}`.trim())}</div><div class="driverProfileDmBubble ${klass}">${body}</div><div class="driverProfileDmTime">${escapeHtml(ts)}</div></div>`;
-    }).join('');
-    if (shouldStickBottom) dmList.scrollTop = dmList.scrollHeight;
   }
 
   function currentDriverProfileDmScope() {
@@ -4615,8 +3983,11 @@
     root.classList.add('open');
     updateDriverProfileLayout();
 
-    const profilePayload = driverProfileState.profile || {};
-    const profileUser = profilePayload.user || {};
+    if (driverProfileState.loading) {
+      body.innerHTML = '<div class="driverProfileLoading">Loading driver profile…</div>';
+      updateDriverProfileLayout();
+      return;
+    }
 
     if (driverProfileState.error && !driverProfileState.profile) {
       body.innerHTML = `
@@ -4625,6 +3996,10 @@
         <div class="driverProfileStatus"><button class="driverProfileClose" id="driverProfileRetryBtn" type="button">Retry</button></div>
       `;
       document.getElementById('driverProfileCloseBtn')?.addEventListener('click', closeDriverProfileModal);
+    document.getElementById('driverProfileOpenInboxBtn')?.addEventListener('click', () => {
+      openPrivateChatWithUser(driverProfileState.userId, name);
+      closeDriverProfileModal();
+    });
       document.getElementById('driverProfileRetryBtn')?.addEventListener('click', () => {
         if (driverProfileState.userId != null) {
           openDriverProfileModal({ userId: driverProfileState.userId, isSelf: driverProfileState.isSelf, source: driverProfileState.source });
@@ -4634,18 +4009,29 @@
       return;
     }
 
+    const profilePayload = driverProfileState.profile || {};
+    const profileUser = profilePayload.user || {};
     const daily = profilePayload.daily || {};
     const weekly = profilePayload.weekly || {};
     const monthly = profilePayload.monthly || {};
     const yearly = profilePayload.yearly || {};
     const selfMode = !!driverProfileState.isSelf;
     const progression = (selfMode && driverProfileState.myProgression) ? driverProfileState.myProgression : (profilePayload.progression || {});
-    const name = resolveDriverDisplayName({ userId: driverProfileState.userId, displayName: profileUser?.display_name, userName: profileUser?.user_name, name: profileUser?.name, email: profileUser?.email, profileUser, presenceIdentity: getCachedDriverIdentity(driverProfileState.userId) });
+    const name = String(profileUser?.display_name || 'Driver').trim() || 'Driver';
 
     const dailyRanksHtml = `<div class="driverProfileDailyRanks">
       <div class="driverProfileStatRow"><div class="driverProfileStatLabel">Miles rank</div><div class="driverProfileStatValue">${escapeHtml(formatDriverProfileStat(daily?.miles_rank, 'rank'))}</div></div>
       <div class="driverProfileStatRow"><div class="driverProfileStatLabel">Hours rank</div><div class="driverProfileStatValue">${escapeHtml(formatDriverProfileStat(daily?.hours_rank, 'rank'))}</div></div>
     </div>`;
+
+    const messages = normalizeDriverMessages(driverProfileState.messages);
+    const dmHtml = messages.length
+      ? messages.map((msg) => {
+          const other = Number(msg?.user_id) === Number(driverProfileState.userId);
+          const klass = other ? 'other' : 'me';
+          return `<div class="driverProfileDmBubble ${klass}">${escapeHtml(String(msg?.text || ''))}</div>`;
+        }).join('')
+      : '<div class="driverProfileStatus">No private messages yet.</div>';
 
     const accountActionsHtml = `
       <div class="driverProfileSectionTitle">Account actions</div>
@@ -4661,7 +4047,7 @@
     body.innerHTML = `
       <div class="driverProfileHeader">
         <div class="driverProfileIdentity">
-          ${driverProfileAvatarHTML({ ...getCachedDriverIdentity(driverProfileState.userId), ...profileUser })}
+          ${driverProfileAvatarHTML(profileUser)}
           <div>
             <div class="driverProfileName">${escapeHtml(name)}</div>
             <div class="driverProfileBadgeRow">${driverProfileBadgeChip(profileUser?.leaderboard_badge_code)}</div>
@@ -4684,7 +4070,7 @@
         ${selfMode ? accountActionsHtml : `
           <div class="driverProfileSectionTitle">Private messages</div>
           <div class="driverProfileDmWrap">
-            <div class="driverProfileDmList" id="driverProfileDmList"></div>
+            <div class="driverProfileDmList" id="driverProfileDmList">${dmHtml}</div>
             <div class="driverProfileComposer">
               <input class="driverProfileInput" id="driverProfileInput" type="text" placeholder="Type a private message">
               <button class="driverProfileSendBtn" id="driverProfileSendBtn" type="button" ${driverProfileState.sending ? 'disabled' : ''}>Send</button>
@@ -4701,8 +4087,6 @@
       openPrivateChatWithUser(driverProfileState.userId, name);
       closeDriverProfileModal();
     });
-
-    renderDriverProfileDmList();
 
     if (selfMode) {
       bindSelfProfileActions();
@@ -4729,13 +4113,11 @@
           sentMessages.forEach(rememberOutgoingDmEcho);
           seedDriverProfileDmAudioBaseline(sentMessages);
           appendDriverProfileMessages(sentMessages);
-          renderDriverProfileDmList();
         } else {
           const refreshed = await fetchDriverProfileDmThread(driverProfileState.userId, { limit: 30 });
           driverProfileState.messages = normalizeDriverMessages(refreshed);
           seedDriverProfileDmAudioBaseline(driverProfileState.messages);
           appendDriverProfileMessages([]);
-          renderDriverProfileDmList();
         }
         await playChatTone('outgoing');
       } catch (err) {
@@ -4753,6 +4135,8 @@
       }
     });
 
+    const dmList = document.getElementById('driverProfileDmList');
+    if (dmList) dmList.scrollTop = dmList.scrollHeight;
     updateDriverProfileLayout();
   }
 
@@ -4763,16 +4147,12 @@
     const selfMode = Boolean(isSelf) || (Number.isFinite(meId) && meId === nextUserId);
     ensureDriverProfileUI();
     stopDriverProfileDmPolling();
-
-    const cachedIdentity = getCachedDriverIdentity(nextUserId) || {};
-    const cachedProfile = getCachedDriverProfile(nextUserId);
-
     driverProfileState.open = true;
     driverProfileState.userId = nextUserId;
     driverProfileState.isSelf = selfMode;
     driverProfileState.source = String(source || '');
     driverProfileState.loading = true;
-    driverProfileState.profile = cachedProfile || { user: { display_name: cachedIdentity.display_name || '', avatar_url: cachedIdentity.avatar_url || '' } };
+    driverProfileState.profile = null;
     driverProfileState.myProgression = null;
     driverProfileState.messages = [];
     driverProfileState.latestMessageId = null;
@@ -4785,46 +4165,35 @@
     scheduleDriverProfileLayoutUpdate();
     renderDriverProfileModal();
 
-    const profilePromise = fetchDriverProfile(nextUserId, { force: true });
-    const dmPromise = selfMode ? Promise.resolve([]) : fetchDriverProfileDmThread(nextUserId, { limit: 30 });
-    const [profileSettle, dmSettle] = await Promise.allSettled([profilePromise, dmPromise]);
-
-    if (!driverProfileState.open || driverProfileState.userId !== nextUserId) return;
-
-    if (profileSettle.status === 'fulfilled' && profileSettle.value) {
-      driverProfileState.profile = profileSettle.value || {};
-      const pUser = driverProfileState.profile?.user || {};
-      setCachedDriverIdentity(nextUserId, {
-        display_name: pUser.display_name || pUser.name || cachedIdentity.display_name || '',
-        avatar_url: pUser.avatar_url || cachedIdentity.avatar_url || '',
-        map_identity_mode: pUser.map_identity_mode || cachedIdentity.map_identity_mode || 'name',
-        updated_at: pUser.updated_at || Date.now(),
-      });
+    try {
+      const profileRes = await fetchDriverProfile(nextUserId);
+      if (!driverProfileState.open || driverProfileState.userId !== nextUserId) return;
+      driverProfileState.profile = profileRes || {};
       if (selfMode) {
         const latestProgression = await syncMyProgression({ forcePopupCheck: false });
         if (latestProgression && driverProfileState.open && driverProfileState.userId === nextUserId) {
           driverProfileState.myProgression = latestProgression;
         }
       }
+      if (!selfMode) {
+        const dmRes = await fetchDriverProfileDmThread(nextUserId, { limit: 30 });
+        if (!driverProfileState.open || driverProfileState.userId !== nextUserId) return;
+        driverProfileState.messages = normalizeDriverMessages(dmRes);
+        seedDriverProfileDmAudioBaseline(driverProfileState.messages);
+        driverProfileState.dmInitialLoadComplete = true;
+        appendDriverProfileMessages([]);
+      }
+    } catch (err) {
+      if (!driverProfileState.open || driverProfileState.userId !== nextUserId) return;
+      driverProfileState.error = err?.message || 'Unable to load driver profile.';
+    } finally {
+      if (!driverProfileState.open || driverProfileState.userId !== nextUserId) return;
+      driverProfileState.loading = false;
+      renderDriverProfileModal();
+      scheduleDriverProfileLayoutUpdate();
+      if (!selfMode) startDriverProfileDmPolling();
     }
-
-    if (dmSettle.status === 'fulfilled' && !selfMode) {
-      driverProfileState.messages = normalizeDriverMessages(dmSettle.value);
-      seedDriverProfileDmAudioBaseline(driverProfileState.messages);
-      driverProfileState.dmInitialLoadComplete = true;
-      renderDriverProfileDmList();
-    }
-
-    if (profileSettle.status === 'rejected' && !driverProfileState.profile?.user?.display_name) {
-      driverProfileState.error = profileSettle.reason?.message || 'Unable to load driver profile.';
-    }
-
-    driverProfileState.loading = false;
-    renderDriverProfileModal();
-    scheduleDriverProfileLayoutUpdate();
-    if (!selfMode) startDriverProfileDmPolling();
   }
-
 
   async function pollDriverProfileDmOnce() {
     if (!driverProfileState.open || !driverProfileState.userId || driverProfileState.isSelf) return;
@@ -4839,7 +4208,7 @@
         && collectFreshIncomingDriverProfileDm(incoming).length > 0;
       appendDriverProfileMessages(incoming);
       if (hasIncomingFromOther) void playChatTone('incoming');
-      renderDriverProfileDmList();
+      renderDriverProfileModal();
     } catch (_) {}
   }
 
@@ -4872,18 +4241,11 @@
     const root = document.documentElement;
     const vv = window.visualViewport;
     const viewportHeight = Number(vv?.height) || window.innerHeight || 0;
-    const viewportTop = Number(vv?.offsetTop) || 0;
-    const fullHeight = Math.max(window.innerHeight || 0, Number(vv?.height || 0) + Number(vv?.offsetTop || 0));
-    const keyboardOverlap = Math.max(0, fullHeight - (viewportHeight + viewportTop));
+    const fullHeight = window.innerHeight || viewportHeight;
+    const keyboard = Math.max(0, fullHeight - viewportHeight);
     const maxPanel = Math.max(260, Math.round(viewportHeight - 140));
     root.style.setProperty('--chat-max-panel-height', `${maxPanel}px`);
-    root.style.setProperty('--chat-keyboard-offset', `${Math.round(keyboardOverlap)}px`);
-    root.style.setProperty('--chat-composer-safe-bottom', '0px');
-    if (chatViewportScrollTimer) clearTimeout(chatViewportScrollTimer);
-    chatViewportScrollTimer = window.setTimeout(() => {
-      scrollActiveChatInputIntoView();
-      chatViewportScrollTimer = null;
-    }, 80);
+    root.style.setProperty('--chat-composer-safe-bottom', `${Math.max(0, keyboard)}px`);
   }
 
   // Expose chat functions for app.js to call if needed
@@ -4912,11 +4274,6 @@
   window.stopDriverProfileDmPolling = stopDriverProfileDmPolling;
   window.openPrivateChatWithUser = openPrivateChatWithUser;
   window.openPrivateChatForUser = openPrivateChatForUser;
-  window.startChatVoiceRecording = startChatVoiceRecording;
-  window.stopChatVoiceRecording = stopChatVoiceRecording;
-  window.cancelChatVoiceRecording = cancelChatVoiceRecording;
-  window.uploadPublicVoiceMessage = uploadPublicVoiceMessage;
-  window.uploadPrivateVoiceMessage = uploadPrivateVoiceMessage;
   window.updateDriverProfileLayout = updateDriverProfileLayout;
   window.showLevelUpOverlay = showLevelUpOverlay;
   window.syncMyProgression = syncMyProgression;
