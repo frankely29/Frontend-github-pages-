@@ -131,9 +131,12 @@
   let privateThreadPollTimer = null;
   let privateActivePollTimer = null;
   let publicChatDraft = '';
-  let publicChatSelectionStart = 0;
-  let publicChatSelectionEnd = 0;
+  let publicChatSelectionStart = null;
+  let publicChatSelectionEnd = null;
   let publicChatHasFocus = false;
+  let privateChatDraftByUserId = Object.create(null);
+  let privateChatSelectionByUserId = Object.create(null);
+  let privateChatFocusedUserId = null;
   let chatVoiceRecorder = null;
   let chatVoiceChunks = [];
   let chatVoiceRecordingScope = null;
@@ -1398,7 +1401,12 @@
     }).join('');
     wrap.innerHTML = `<div class="chatPrivateThreadList"><div class="chatPrivateThreadToolbar"><button id="chatPrivateInboxBtn" class="chipBtn" type="button">Inbox</button></div><div class="chatPrivatePickerSearch"><input id="chatPrivateUserSearch" type="search" class="chatInput" placeholder="Search users" value="${escapeHtml(privateUsersFilter)}"></div>${rows || '<div class="chatEmpty">No users available.</div>'}</div>`;
     document.getElementById('chatPrivateInboxBtn')?.addEventListener('click', renderPrivateThreadList);
-    document.getElementById('chatPrivateUserSearch')?.addEventListener('input', async (e) => {
+    const privateSearchInput = document.getElementById('chatPrivateUserSearch');
+    privateSearchInput?.addEventListener('focus', () => {
+      updateChatViewportMetrics();
+      scrollActiveChatInputIntoView();
+    });
+    privateSearchInput?.addEventListener('input', async (e) => {
       privateUsersFilter = String(e.target.value || '').trim();
       privateUsers = await chatFetchPrivateUsers(privateUsersFilter);
       renderPrivateUserPicker();
@@ -1431,69 +1439,91 @@
     }).join('');
   }
 
+  function renderPrivateConversationShell() {
+    privateView = 'conversation';
+    const wrap = document.getElementById('chatPrivateWrap');
+    if (!wrap || !privateActiveUserId) return;
+    wrap.innerHTML = `<div class="chatPrivateConversation" data-private-conversation-user="${escapeHtml(String(privateActiveUserId))}"><div class="chatPrivateHeader"><button id="chatPrivateBackBtn" class="chatPrivateBackBtn" type="button">Inbox</button><div id="chatPrivateConversationTitle" class="chatPrivateTitle">${escapeHtml(privateActiveDisplayName || 'Private chat')}</div></div><div id="chatPrivateConversationList" class="chatList"></div></div>`;
+    document.getElementById('chatPrivateBackBtn')?.addEventListener('click', () => {
+      capturePrivateComposerState();
+      privateActiveUserId = null;
+      privateActiveUserProfile = null;
+      privateChatFocusedUserId = null;
+      renderPrivateThreadList();
+    });
+  }
+
+  function patchPrivateConversationMessages(messages) {
+    const list = document.getElementById('chatPrivateConversationList');
+    if (!list) return;
+    const normalized = normalizePrivateMessages(Array.isArray(messages) ? messages : [], privateActiveUserId);
+    const nearBottom = isChatNearBottom(list, 80);
+    const priorBottomGap = Math.max(0, list.scrollHeight - list.scrollTop - list.clientHeight);
+    list.innerHTML = normalized.length ? renderPrivateConversationMessages(normalized) : '<div class="chatEmpty">No messages yet.</div>';
+    if (nearBottom) {
+      list.scrollTop = list.scrollHeight;
+    } else {
+      const nextTop = list.scrollHeight - list.clientHeight - priorBottomGap;
+      list.scrollTop = Math.max(0, nextTop);
+    }
+    const title = document.getElementById('chatPrivateConversationTitle');
+    if (title) title.textContent = privateActiveDisplayName || 'Private chat';
+  }
+
   function renderPrivateConversation() {
     privateView = 'conversation';
     const wrap = document.getElementById('chatPrivateWrap');
     if (!wrap || !privateActiveUserId) return;
+    const shell = wrap.querySelector('[data-private-conversation-user]');
+    const shellUserId = shell?.getAttribute('data-private-conversation-user');
+    if (!shell || shellUserId !== String(privateActiveUserId)) {
+      renderPrivateConversationShell();
+    }
     const messages = privateMessagesByUserId[privateActiveUserId] || [];
-    wrap.innerHTML = `<div class="chatPrivateConversation"><div class="chatPrivateHeader"><button id="chatPrivateBackBtn" class="chatPrivateBackBtn" type="button">Inbox</button><div class="chatPrivateTitle">${escapeHtml(privateActiveDisplayName || 'Private chat')}</div></div><div id="chatPrivateConversationList" class="chatList">${messages.length ? renderPrivateConversationMessages(messages) : '<div class="chatEmpty">No messages yet.</div>'}</div></div>`;
-    document.getElementById('chatPrivateBackBtn')?.addEventListener('click', () => {
-      privateActiveUserId = null;
-      privateActiveUserProfile = null;
-      renderPrivateThreadList();
-    });
-    const list = document.getElementById('chatPrivateConversationList');
-    if (list) list.scrollTop = list.scrollHeight;
+    patchPrivateConversationMessages(messages);
     renderComposerRegion();
   }
 
   function renderComposerRegion() {
     const region = document.getElementById('chatComposerRegion');
     if (!region) return;
+
+    if (chatUiTab !== 'public') capturePublicComposerState();
+    if (!(privateView === 'conversation' && privateActiveUserId)) capturePrivateComposerState();
+
     if (chatUiTab === 'public') {
+      const publicComposer = document.getElementById('chatPublicComposer');
       const existingInput = document.getElementById('chatInput');
-      const existingSend = document.getElementById('chatSendBtn');
-      const existingMic = document.getElementById('chatVoiceBtnPublic');
-      if (existingInput && existingSend && existingMic) {
+      if (publicComposer && existingInput) {
+        publicComposer.classList.remove('hidden');
+        restorePublicComposerState(existingInput);
         return;
       }
       region.innerHTML = `<div id="chatPublicComposer" class="chatComposerWrap"><div class="chatComposer"><input id="chatInput" type="text" class="chatInput" placeholder="Message drivers…" maxlength="600" /><button id="chatVoiceBtnPublic" class="chipBtn" type="button">🎤</button><button id="chatSendBtn" class="chipBtn" type="button">Send</button></div><div id="chatVoiceStatus" class="chatVoiceStatus" hidden></div></div>`;
       bindPublicComposer();
       return;
     }
+
     if (privateView === 'conversation' && privateActiveUserId) {
-      region.innerHTML = `<div class="chatComposerWrap"><div class="chatComposer chatComposerPrivate"><input id="chatPrivateInput" type="text" class="chatInput" placeholder="Message privately…" maxlength="600"><button id="chatVoiceBtnPrivate" class="chipBtn" type="button">🎤</button><button id="chatPrivateSendBtn" class="chipBtn" type="button">Send</button></div><div id="chatVoiceStatus" class="chatVoiceStatus" hidden></div></div>`;
-      const sendBtn = document.getElementById('chatPrivateSendBtn');
-      const input = document.getElementById('chatPrivateInput');
-      const voiceBtn = document.getElementById('chatVoiceBtnPrivate');
-      const sendNow = async () => {
-        const text = String(input?.value || '').trim();
-        if (!text || !privateActiveUserId) return;
-        sendBtn.disabled = true;
-        try {
-          await chatSendPrivateMessage(privateActiveUserId, text);
-          input.value = '';
-          await chatPollPrivateActiveThread();
-        } catch (err) {
-          console.warn('private send failed', err);
-        } finally {
-          sendBtn.disabled = false;
-        }
-      };
-      sendBtn?.addEventListener('click', sendNow);
-      voiceBtn?.addEventListener('click', () => startChatVoiceRecording('private'));
-      input?.addEventListener('focus', () => {
-        updateChatViewportMetrics();
-        window.setTimeout(() => input.scrollIntoView({ block: 'nearest' }), 120);
-      });
-      input?.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); sendNow(); } });
+      const composer = region.querySelector('[data-private-composer-user]');
+      const composerUserId = composer?.getAttribute('data-private-composer-user');
+      const existingInput = document.getElementById('chatPrivateInput');
+      if (composer && existingInput && composerUserId === String(privateActiveUserId)) {
+        composer.classList.remove('hidden');
+        restorePrivateComposerState(existingInput, privateActiveUserId);
+        return;
+      }
+      region.innerHTML = `<div class="chatComposerWrap" data-private-composer-user="${escapeHtml(String(privateActiveUserId))}"><div class="chatComposer chatComposerPrivate"><input id="chatPrivateInput" type="text" class="chatInput" placeholder="Message privately…" maxlength="600"><button id="chatVoiceBtnPrivate" class="chipBtn" type="button">🎤</button><button id="chatPrivateSendBtn" class="chipBtn" type="button">Send</button></div><div id="chatVoiceStatus" class="chatVoiceStatus" hidden></div></div>`;
+      bindPrivateComposer();
       return;
     }
+
     region.innerHTML = '';
   }
 
   async function openPrivateChatForUser(otherUserId, options = {}) {
     if (!otherUserId) return;
+    capturePrivateComposerState();
     privateActiveUserId = String(otherUserId);
     privateActiveUserProfile = options.profile || null;
     privateActiveDisplayName = resolveDriverDisplayName({
@@ -1557,7 +1587,10 @@
     privateMessagesByUserId[uid] = list;
     privateUnreadByUserId[uid] = 0;
     privateUpsertThreadFromMessages(uid, list);
-    if (chatUiTab === 'private' && privateActiveUserId === uid && privateView === 'conversation') renderPrivateConversation();
+    if (chatUiTab === 'private' && privateActiveUserId === uid && privateView === 'conversation') {
+      patchPrivateConversationMessages(list);
+      renderComposerRegion();
+    }
     renderPrivateTabUnread();
     updateChatUnreadBadge();
   }
@@ -1634,6 +1667,13 @@
     privateMessagesByUserId = Object.create(null);
     privateUnreadByUserId = Object.create(null);
     privateLastMessageIdByUserId = Object.create(null);
+    publicChatDraft = '';
+    publicChatSelectionStart = null;
+    publicChatSelectionEnd = null;
+    publicChatHasFocus = false;
+    privateChatDraftByUserId = Object.create(null);
+    privateChatSelectionByUserId = Object.create(null);
+    privateChatFocusedUserId = null;
     updateChatUnreadBadge();
     chatSoundRuntime.lastObservedIncomingId = null;
     chatSoundRuntime.seenIncomingKeys = new Set();
@@ -1894,6 +1934,128 @@
   }
 
   // Wire up the chat panel: event handlers, initial load, polling
+  function capturePublicComposerState() {
+    const chatInput = document.getElementById('chatInput');
+    if (!chatInput) return;
+    publicChatDraft = String(chatInput.value || '');
+    publicChatSelectionStart = Number.isFinite(Number(chatInput.selectionStart)) ? Number(chatInput.selectionStart) : null;
+    publicChatSelectionEnd = Number.isFinite(Number(chatInput.selectionEnd)) ? Number(chatInput.selectionEnd) : publicChatSelectionStart;
+  }
+
+  function restorePublicComposerState(inputEl) {
+    if (!inputEl) return;
+    const draft = String(publicChatDraft || '');
+    if (inputEl.value !== draft) inputEl.value = draft;
+    const baseStart = publicChatSelectionStart == null ? draft.length : Number(publicChatSelectionStart);
+    const baseEnd = publicChatSelectionEnd == null ? baseStart : Number(publicChatSelectionEnd);
+    const restoreStart = Math.max(0, Math.min(draft.length, baseStart));
+    const restoreEnd = Math.max(restoreStart, Math.min(draft.length, baseEnd));
+    try { inputEl.setSelectionRange(restoreStart, restoreEnd); } catch (_) {}
+    if (publicChatHasFocus && document.activeElement !== inputEl) {
+      inputEl.focus({ preventScroll: false });
+      scrollActiveChatInputIntoView();
+    }
+  }
+
+  function capturePrivateComposerState() {
+    const input = document.getElementById('chatPrivateInput');
+    if (!input || !privateActiveUserId) return;
+    const uid = String(privateActiveUserId);
+    privateChatDraftByUserId[uid] = String(input.value || '');
+    privateChatSelectionByUserId[uid] = {
+      start: Number.isFinite(Number(input.selectionStart)) ? Number(input.selectionStart) : null,
+      end: Number.isFinite(Number(input.selectionEnd)) ? Number(input.selectionEnd) : null,
+    };
+  }
+
+  function restorePrivateComposerState(inputEl, userId) {
+    const uid = String(userId || '');
+    if (!inputEl || !uid) return;
+    const draft = String(privateChatDraftByUserId[uid] || '');
+    if (inputEl.value !== draft) inputEl.value = draft;
+    const selection = privateChatSelectionByUserId[uid] || null;
+    const baseStart = selection?.start == null ? draft.length : Number(selection.start);
+    const baseEnd = selection?.end == null ? baseStart : Number(selection.end);
+    const restoreStart = Math.max(0, Math.min(draft.length, baseStart));
+    const restoreEnd = Math.max(restoreStart, Math.min(draft.length, baseEnd));
+    try { inputEl.setSelectionRange(restoreStart, restoreEnd); } catch (_) {}
+    if (privateChatFocusedUserId === uid && document.activeElement !== inputEl) {
+      inputEl.focus({ preventScroll: false });
+      scrollActiveChatInputIntoView();
+    }
+  }
+
+  function scrollActiveChatInputIntoView() {
+    const active = document.activeElement;
+    if (!active) return;
+    const id = active.id;
+    if (id !== 'chatInput' && id !== 'chatPrivateInput' && id !== 'chatPrivateUserSearch') return;
+    window.requestAnimationFrame(() => {
+      window.setTimeout(() => {
+        try {
+          active.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        } catch (_) {}
+      }, 30);
+    });
+  }
+
+  function bindPrivateComposer() {
+    const sendBtn = document.getElementById('chatPrivateSendBtn');
+    const input = document.getElementById('chatPrivateInput');
+    const voiceBtn = document.getElementById('chatVoiceBtnPrivate');
+    const uid = String(privateActiveUserId || '');
+    if (!sendBtn || !input || !voiceBtn || !uid) return;
+    input.style.fontSize = '16px';
+    input.setAttribute('autocapitalize', 'sentences');
+    input.setAttribute('autocomplete', 'off');
+    input.setAttribute('autocorrect', 'on');
+    input.setAttribute('spellcheck', 'true');
+    input.setAttribute('enterkeyhint', 'send');
+    restorePrivateComposerState(input, uid);
+
+    const syncDraft = () => {
+      privateChatDraftByUserId[uid] = String(input.value || '');
+      privateChatSelectionByUserId[uid] = {
+        start: Number.isFinite(Number(input.selectionStart)) ? Number(input.selectionStart) : null,
+        end: Number.isFinite(Number(input.selectionEnd)) ? Number(input.selectionEnd) : null,
+      };
+    };
+
+    const sendNow = async () => {
+      const text = String(input.value || '').trim();
+      if (!text || !privateActiveUserId) return;
+      sendBtn.disabled = true;
+      try {
+        await chatSendPrivateMessage(privateActiveUserId, text);
+        input.value = '';
+        privateChatDraftByUserId[uid] = '';
+        privateChatSelectionByUserId[uid] = { start: 0, end: 0 };
+        await chatPollPrivateActiveThread();
+      } catch (err) {
+        console.warn('private send failed', err);
+      } finally {
+        sendBtn.disabled = false;
+      }
+    };
+
+    sendBtn.addEventListener('click', (e) => { e.preventDefault(); sendNow(); });
+    voiceBtn.addEventListener('click', () => startChatVoiceRecording('private'));
+    input.addEventListener('input', syncDraft);
+    input.addEventListener('select', syncDraft);
+    input.addEventListener('keyup', syncDraft);
+    input.addEventListener('focus', () => {
+      privateChatFocusedUserId = uid;
+      updateChatViewportMetrics();
+      scrollActiveChatInputIntoView();
+      syncDraft();
+    });
+    input.addEventListener('blur', () => {
+      if (privateChatFocusedUserId === uid) privateChatFocusedUserId = null;
+      syncDraft();
+    });
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); sendNow(); } });
+  }
+
   function bindPublicComposer() {
     const chatInput = document.getElementById('chatInput');
     const chatSendBtn = document.getElementById('chatSendBtn');
@@ -1905,14 +2067,11 @@
     chatInput.setAttribute('autocorrect', 'on');
     chatInput.setAttribute('spellcheck', 'true');
     chatInput.setAttribute('enterkeyhint', 'send');
-    chatInput.value = publicChatDraft;
-    const restoreStart = Math.max(0, Math.min(chatInput.value.length, Number(publicChatSelectionStart || 0)));
-    const restoreEnd = Math.max(restoreStart, Math.min(chatInput.value.length, Number(publicChatSelectionEnd || restoreStart)));
-    try { chatInput.setSelectionRange(restoreStart, restoreEnd); } catch (_) {}
+    restorePublicComposerState(chatInput);
     const syncDraft = () => {
       publicChatDraft = String(chatInput.value || '');
-      publicChatSelectionStart = Number(chatInput.selectionStart || 0);
-      publicChatSelectionEnd = Number(chatInput.selectionEnd || publicChatSelectionStart);
+      publicChatSelectionStart = Number.isFinite(Number(chatInput.selectionStart)) ? Number(chatInput.selectionStart) : null;
+      publicChatSelectionEnd = Number.isFinite(Number(chatInput.selectionEnd)) ? Number(chatInput.selectionEnd) : publicChatSelectionStart;
     };
     const sendNow = async () => {
       const text = String(chatInput.value || '').trim();
@@ -1946,20 +2105,15 @@
     chatVoiceBtn.addEventListener('click', () => startChatVoiceRecording('public'));
     chatInput.addEventListener('input', syncDraft);
     chatInput.addEventListener('select', syncDraft);
+    chatInput.addEventListener('keyup', syncDraft);
     chatInput.addEventListener('focus', () => {
       publicChatHasFocus = true;
       updateChatViewportMetrics();
-      window.setTimeout(() => chatInput.scrollIntoView({ block: 'nearest' }), 120);
+      scrollActiveChatInputIntoView();
       syncDraft();
     });
     chatInput.addEventListener('blur', () => { publicChatHasFocus = false; syncDraft(); });
     chatInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); sendNow(); } });
-    if (publicChatHasFocus) {
-      chatInput.focus({ preventScroll: false });
-      window.setTimeout(() => {
-        try { chatInput.setSelectionRange(restoreStart, restoreEnd); } catch (_) {}
-      }, 0);
-    }
   }
 
   function wireChatPanel() {
@@ -1981,7 +2135,6 @@
     syncChatPollingState();
     startPrivatePolling();
     chatRefreshPrivateThreads();
-    renderComposerRegion();
     switchChatTab(chatUiTab);
 
     markChatReadThroughLatestLoaded();
@@ -4673,11 +4826,14 @@
     const root = document.documentElement;
     const vv = window.visualViewport;
     const viewportHeight = Number(vv?.height) || window.innerHeight || 0;
-    const fullHeight = Number(vv?.height && vv?.offsetTop != null ? vv.height + vv.offsetTop : window.innerHeight || viewportHeight);
-    const keyboard = Math.max(0, Math.round(fullHeight - viewportHeight));
-    const maxPanel = Math.max(260, Math.round(viewportHeight - 96));
+    const viewportTop = Number(vv?.offsetTop) || 0;
+    const fullHeight = window.innerHeight || viewportHeight;
+    const keyboardOverlap = Math.max(0, fullHeight - (viewportHeight + viewportTop));
+    const maxPanel = Math.max(260, Math.round(viewportHeight - 140));
     root.style.setProperty('--chat-max-panel-height', `${maxPanel}px`);
-    root.style.setProperty('--chat-keyboard-offset', `${keyboard}px`);
+    root.style.setProperty('--chat-keyboard-offset', `${Math.round(keyboardOverlap)}px`);
+    root.style.setProperty('--chat-composer-safe-bottom', '0px');
+    scrollActiveChatInputIntoView();
   }
 
   // Expose chat functions for app.js to call if needed
