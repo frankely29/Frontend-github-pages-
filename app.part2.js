@@ -978,7 +978,7 @@
       if (killFeedSeenKeys.has(key)) return;
       killFeedSeenKeys.add(key);
 
-      const who = resolveDriverDisplayName({ userId: msgUserId(msg), displayName: msg.display_name, userName: msg.user_name, name: msg.name, email: msg.email, presenceIdentity: getCachedDriverIdentity(msgUserId(msg)) });
+      const who = chatSenderName(msg, { fallbackUserId: msgUserId(msg), fallbackDisplayName: msg?.display_name });
       const body = String(msg.text || msg.message || '').trim();
       if (!body) return;
 
@@ -1042,7 +1042,7 @@
     const id = msg?.id;
     if (id !== undefined && id !== null) return `id:${id}`;
     const t = msg?.created_at || '';
-    const n = resolveDriverDisplayName({ userId: msgUserId(msg), displayName: msg?.display_name, userName: msg?.user_name, name: msg?.name, email: msg?.email, presenceIdentity: getCachedDriverIdentity(msgUserId(msg)) });
+    const n = chatSenderName(msg, { fallbackUserId: msgUserId(msg), fallbackDisplayName: msg?.display_name });
     const body = msg?.text || msg?.message || '';
     return `fallback:${t}|${n}|${body}`;
   }
@@ -1084,6 +1084,28 @@
     });
   }
 
+  function chatSenderName(msg, { fallbackUserId = null, fallbackDisplayName = '', profileUser = null } = {}) {
+    const senderId = msgUserId(msg) || (fallbackUserId == null ? null : String(fallbackUserId));
+    return resolveDriverDisplayName({
+      userId: senderId,
+      senderDisplayName: msg?.sender_display_name,
+      displayName: msg?.display_name || fallbackDisplayName,
+      userName: msg?.user_name,
+      name: msg?.name,
+      email: msg?.email,
+      profileUser,
+      presenceIdentity: getCachedDriverIdentity(senderId),
+    });
+  }
+
+  function normalizePublicMessage(msg) {
+    const senderId = msgUserId(msg);
+    return {
+      ...msg,
+      _senderDisplayName: chatSenderName(msg, { fallbackUserId: senderId, fallbackDisplayName: msg?.display_name }),
+    };
+  }
+
   function privateThreadPreview(thread) {
     if (String(thread?.message_kind || '').toLowerCase() === 'voice' || thread?.voice_url) return '[Voice message]';
     return String(thread?.last_message_text || thread?.last_text || thread?.last_message || thread?.text || '').trim();
@@ -1108,19 +1130,25 @@
     const latest = messages[messages.length - 1] || {};
     const existing = privateThreads.find((t) => privateThreadUserId(t) === uid) || {};
     const normalizedLatest = normalizePrivateMessages([latest], uid)[0] || latest;
+    const latestText = String(normalizedLatest?.text || normalizedLatest?.message || '').trim();
+    const isVoice = String(normalizedLatest?.message_kind || '').toLowerCase() === 'voice' || !!normalizedLatest?.voice_url;
     const next = {
       ...existing,
       other_user_id: uid,
       other_display_name: existing?.other_display_name || (!normalizedLatest?._isSelf ? normalizedLatest?._senderDisplayName : '') || privateActiveDisplayName,
       other_avatar_url: existing?.other_avatar_url || normalizedLatest?._senderAvatarUrl || privateAvatarUrl(normalizedLatest),
-      avatar_url: privateAvatarUrl(existing) || privateAvatarUrl(normalizedLatest),
-      display_name: privateActiveUserId === uid && privateActiveDisplayName ? privateActiveDisplayName : privateThreadName(existing || normalizedLatest),
+      avatar_url: existing?.avatar_url || privateAvatarUrl(normalizedLatest),
+      display_name: existing?.display_name || (privateActiveUserId === uid && privateActiveDisplayName ? privateActiveDisplayName : privateThreadName(existing || normalizedLatest)),
       message_kind: normalizedLatest?.message_kind || existing?.message_kind || '',
       voice_url: normalizedLatest?.voice_url || existing?.voice_url || '',
-      last_message_text: String(normalizedLatest?.text || normalizedLatest?.message || existing?.last_message_text || existing?.last_text || '').trim(),
-      last_text: String(normalizedLatest?.text || normalizedLatest?.message || existing?.last_text || '').trim(),
+      voice_duration_sec: normalizedLatest?.voice_duration_sec || existing?.voice_duration_sec || 0,
+      last_message_text: latestText || (isVoice ? '[Voice message]' : String(existing?.last_message_text || existing?.last_text || '').trim()),
+      last_text: latestText || (isVoice ? '[Voice message]' : String(existing?.last_text || '').trim()),
       last_message_at: normalizedLatest?.created_at || normalizedLatest?.ts || normalizedLatest?.timestamp || existing?.last_message_at || existing?.last_created_at || null,
+      last_message_created_at: normalizedLatest?.created_at || normalizedLatest?.ts || normalizedLatest?.timestamp || existing?.last_message_created_at || existing?.last_created_at || null,
       last_created_at: normalizedLatest?.created_at || normalizedLatest?.ts || normalizedLatest?.timestamp || existing?.last_created_at || null,
+      last_message_sender_user_id: msgUserId(normalizedLatest) || existing?.last_message_sender_user_id || null,
+      last_message_user_id: msgUserId(normalizedLatest) || existing?.last_message_user_id || null,
       unread_count: privateUnreadByUserId[uid] || 0,
     };
     privateThreads = [next, ...privateThreads.filter((t) => privateThreadUserId(t) !== uid)];
@@ -1167,7 +1195,13 @@
     const token = getCommunityToken();
     if (!token || !otherUserId) throw new Error('Private chat unavailable');
     const uid = encodeURIComponent(String(otherUserId));
-    return await postJSON(`/chat/private/${uid}`, { text }, token);
+    const route = `/chat/private/${uid}`;
+    try {
+      return await postJSON(route, { text }, token);
+    } catch (err) {
+      console.warn('chatSendPrivateMessage failed', { route, error: err, body: { text } });
+      throw err;
+    }
   }
 
   function pickVoiceMimeType() {
@@ -1197,23 +1231,34 @@
     const token = getCommunityToken();
     if (!token) throw new Error('Not signed in');
     const form = new FormData();
-    form.append('voice', blob, `voice.${(meta?.ext || 'webm')}`);
-    form.append('duration_ms', String(meta?.durationMs || 0));
+    const durationSec = Math.max(0, Math.min(10, Math.round(Number(meta?.durationSec ?? ((meta?.durationMs || 0) / 1000)) || 0)));
+    form.append('file', blob, `voice.${(meta?.ext || 'webm')}`);
+    form.append('duration_sec', String(durationSec));
     const res = await fetch(`${RAILWAY_BASE}/chat/rooms/${CHAT_ROOM}/voice`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form });
-    if (!res.ok) throw new Error('Voice upload failed');
-    return await res.json();
+    const raw = await res.text();
+    if (!res.ok) {
+      console.warn('uploadPublicVoiceMessage failed', { status: res.status, route: `/chat/rooms/${CHAT_ROOM}/voice`, responseText: raw.slice(0, 600) });
+      throw new Error(`Voice upload failed (${res.status})`);
+    }
+    return raw ? JSON.parse(raw) : null;
   }
 
   async function uploadPrivateVoiceMessage(otherUserId, blob, meta = {}) {
     const token = getCommunityToken();
     if (!token || !otherUserId) throw new Error('Private chat unavailable');
     const form = new FormData();
-    form.append('voice', blob, `voice.${(meta?.ext || 'webm')}`);
-    form.append('duration_ms', String(meta?.durationMs || 0));
+    const durationSec = Math.max(0, Math.min(10, Math.round(Number(meta?.durationSec ?? ((meta?.durationMs || 0) / 1000)) || 0)));
+    form.append('file', blob, `voice.${(meta?.ext || 'webm')}`);
+    form.append('duration_sec', String(durationSec));
     const uid = encodeURIComponent(String(otherUserId));
-    const res = await fetch(`${RAILWAY_BASE}/chat/private/${uid}/voice`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form });
-    if (!res.ok) throw new Error('Voice upload failed');
-    return await res.json();
+    const route = `/chat/private/${uid}/voice`;
+    const res = await fetch(`${RAILWAY_BASE}${route}`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form });
+    const raw = await res.text();
+    if (!res.ok) {
+      console.warn('uploadPrivateVoiceMessage failed', { status: res.status, route, responseText: raw.slice(0, 600) });
+      throw new Error(`Voice upload failed (${res.status})`);
+    }
+    return raw ? JSON.parse(raw) : null;
   }
 
   function cancelChatVoiceRecording() {
@@ -1305,7 +1350,7 @@
   }
 
   function privateAvatarUrl(threadOrMsg = {}) {
-    return String(threadOrMsg?.other_avatar_url || threadOrMsg?.sender_avatar_url || threadOrMsg?.avatar_url || '').trim();
+    return String(threadOrMsg?.other_avatar_url || threadOrMsg?.avatar_url || threadOrMsg?.sender_avatar_url || '').trim();
   }
 
   function normalizePrivateMessages(messages = [], otherUserId = privateActiveUserId) {
@@ -1313,22 +1358,22 @@
     const targetId = otherUserId == null ? '' : String(otherUserId);
     return (Array.isArray(messages) ? messages : []).map((msg) => {
       const senderId = msgUserId(msg);
+      const recipientId = msg?.recipient_user_id != null ? String(msg.recipient_user_id) : (msg?.recipientUserId != null ? String(msg.recipientUserId) : '');
       const isSelf = !!(senderId && meId && senderId === meId);
-      const senderName = resolveDriverDisplayName({
-        userId: senderId,
-        senderDisplayName: msg?.sender_display_name,
-        displayName: msg?.other_display_name || msg?.display_name || (!isSelf && senderId === targetId ? privateActiveDisplayName : window?.me?.display_name),
-        userName: msg?.user_name,
-        name: msg?.name,
-        email: msg?.email,
+      const otherParticipantId = isSelf ? (recipientId || targetId) : (senderId || targetId);
+      const fallbackDisplayName = isSelf
+        ? (window?.me?.display_name || window?.me?.email || '')
+        : (privateActiveDisplayName || msg?.other_display_name || msg?.display_name || '');
+      const senderName = chatSenderName(msg, {
+        fallbackUserId: senderId || otherParticipantId,
+        fallbackDisplayName,
         profileUser: isSelf ? window?.me : privateActiveUserProfile,
-        presenceIdentity: getCachedDriverIdentity(senderId),
       });
       return {
         ...msg,
         _isSelf: isSelf,
         _senderDisplayName: senderName,
-        _senderAvatarUrl: privateAvatarUrl(msg) || getCachedDriverIdentity(senderId)?.avatar_url || '',
+        _senderAvatarUrl: String(msg?.sender_avatar_url || privateAvatarUrl(msg) || getCachedDriverIdentity(senderId || otherParticipantId)?.avatar_url || ''),
       };
     });
   }
@@ -1379,7 +1424,9 @@
       const initials = name.slice(0, 2).toUpperCase();
       const avatar = privateAvatarUrl(user);
       const avatarHtml = avatar ? `<img src="${escapeHtml(avatar)}" class="chatPrivateThreadAvatarImg" alt="">` : escapeHtml(initials);
-      return `<button type="button" class="chatPrivateThreadRow" data-private-user="${uid}"><span class="chatPrivateThreadAvatar">${avatarHtml}</span><span class="chatPrivateThreadBody"><span class="chatPrivateThreadName">${escapeHtml(name)}</span><span class="chatPrivateThreadPreview">@${escapeHtml(uid)}</span></span></button>`;
+      const online = user?.is_online ? '<span class="chatPrivateUserOnline" aria-label="Online"></span>' : '';
+      const meta = user?.last_seen_at ? `Seen ${escapeHtml(formatChatTime(user.last_seen_at) || 'recently')}` : `@${escapeHtml(uid)}`;
+      return `<button type="button" class="chatPrivateThreadRow" data-private-user="${uid}"><span class="chatPrivateThreadAvatar">${avatarHtml}${online}</span><span class="chatPrivateThreadBody"><span class="chatPrivateThreadName">${escapeHtml(name)}</span><span class="chatPrivateThreadPreview">${meta}</span></span></button>`;
     }).join('');
     wrap.innerHTML = `<div class="chatPrivateThreadList"><div class="chatPrivateThreadToolbar"><button id="chatPrivateInboxBtn" class="chipBtn" type="button">Inbox</button></div><div class="chatPrivatePickerSearch"><input id="chatPrivateUserSearch" type="search" class="chatInput" placeholder="Search users" value="${escapeHtml(privateUsersFilter)}"></div>${rows || '<div class="chatEmpty">No users available.</div>'}</div>`;
     document.getElementById('chatPrivateInboxBtn')?.addEventListener('click', renderPrivateThreadList);
@@ -1404,7 +1451,7 @@
   function renderPrivateConversationMessages(messages) {
     return normalizePrivateMessages(messages, privateActiveUserId).map((msg) => {
       const own = !!msg?._isSelf;
-      const senderName = msg?._senderDisplayName || `User ${msgUserId(msg) || ''}`.trim();
+      const senderName = msg?._senderDisplayName || chatSenderName(msg, { fallbackUserId: msgUserId(msg) });
       const ts = formatChatTime(msg?.created_at || msg?.ts || msg?.timestamp || '');
       const isVoice = String(msg?.message_kind || '').toLowerCase() === 'voice';
       const voiceUrl = String(msg?.voice_url || '').trim();
@@ -1701,16 +1748,8 @@
       line.className = 'chatMsgLine';
       const who = document.createElement('strong');
       who.className = 'chatMsgName';
-      const senderName = resolveDriverDisplayName({
-        userId: msgUserId(msg),
-        senderDisplayName: msg?.sender_display_name,
-        displayName: msg?.display_name,
-        userName: msg?.user_name,
-        name: msg?.name,
-        email: msg?.email,
-        presenceIdentity: getCachedDriverIdentity(msgUserId(msg)),
-      });
-      who.textContent = `${senderName}: `;
+      const normalized = normalizePublicMessage(msg);
+      who.textContent = `${normalized._senderDisplayName}: `;
       const isVoice = String(msg?.message_kind || '').toLowerCase() === 'voice';
       if (isVoice) {
         const voiceUrl = String(msg?.voice_url || '').trim();
@@ -1768,11 +1807,28 @@
     if (after !== null && after !== undefined && String(after).trim() !== '') {
       qs.set('after', String(after));
     }
+    const route = `/chat/rooms/${CHAT_ROOM}?${qs.toString()}`;
     try {
-      const data = await getJSONAuth(`/chat/rooms/${CHAT_ROOM}?${qs.toString()}`, token);
+      const res = await fetch(`${RAILWAY_BASE}${route}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store',
+        mode: 'cors',
+      });
+      const raw = await res.text();
+      if (!res.ok) {
+        console.warn('chatFetchMessages failed', { status: res.status, route, responseText: raw.slice(0, 600) });
+        return { ok: false, reason: 'failed', error: new Error(`Chat load failed (${res.status})`) };
+      }
+      let data = null;
+      try {
+        data = raw ? JSON.parse(raw) : [];
+      } catch (err) {
+        console.warn('chatFetchMessages invalid JSON', { route, responseText: raw.slice(0, 600), error: err });
+        return { ok: false, reason: 'failed', error: err };
+      }
       return { ok: true, messages: Array.isArray(data) ? data : data?.messages || [] };
     } catch (err) {
-      console.warn('chatFetchMessages failed', err);
+      console.warn('chatFetchMessages failed', { route, error: err });
       return { ok: false, reason: 'failed', error: err };
     }
   }
@@ -1808,7 +1864,13 @@
   async function chatSend(text) {
     const token = getCommunityToken();
     if (!token) { throw new Error('Not signed in'); }
-    return postJSON(`/chat/rooms/${CHAT_ROOM}`, { text }, token);
+    const route = `/chat/rooms/${CHAT_ROOM}`;
+    try {
+      return await postJSON(route, { text }, token);
+    } catch (err) {
+      console.warn('chatSend failed', { route, error: err, body: { text } });
+      throw err;
+    }
   }
 
   // Poll once and control polling
@@ -3876,7 +3938,13 @@
     const qs = new URLSearchParams();
     qs.set('limit', String(limit));
     if (after !== null && after !== undefined) qs.set('after', String(after));
-    return await getJSONAuth(`/chat/private/${encodeURIComponent(userId)}?${qs.toString()}`, token);
+    const route = `/chat/private/${encodeURIComponent(userId)}?${qs.toString()}`;
+    try {
+      return await getJSONAuth(route, token);
+    } catch (err) {
+      console.warn('fetchDriverProfileDmThread failed', { route, error: err });
+      throw err;
+    }
   }
 
   const PROGRESSION_SYNC_INTERVAL_MS = 90000;
@@ -4383,21 +4451,16 @@
       .map((msg) => {
         const senderId = msgUserId(msg);
         const isSelf = !!(senderId && meId && senderId === meId);
-        const senderName = resolveDriverDisplayName({
-          userId: senderId,
-          senderDisplayName: msg?.sender_display_name,
-          displayName: isSelf ? window?.me?.display_name : (msg?.other_display_name || (senderId === targetUserId ? driverProfileState?.profile?.user?.display_name : msg?.display_name)),
-          userName: msg?.user_name,
-          name: msg?.name,
-          email: msg?.email,
+        const senderName = chatSenderName(msg, {
+          fallbackUserId: senderId || targetUserId,
+          fallbackDisplayName: isSelf ? window?.me?.display_name : (msg?.other_display_name || (senderId === targetUserId ? driverProfileState?.profile?.user?.display_name : msg?.display_name)),
           profileUser: senderId === targetUserId ? driverProfileState?.profile?.user : (isSelf ? window?.me : null),
-          presenceIdentity: getCachedDriverIdentity(senderId),
         });
         return {
           ...msg,
           _isSelf: isSelf,
           _senderDisplayName: senderName,
-          _senderAvatarUrl: String(msg?.sender_avatar_url || msg?.avatar_url || getCachedDriverIdentity(senderId)?.avatar_url || ''),
+          _senderAvatarUrl: String(msg?.sender_avatar_url || msg?.avatar_url || getCachedDriverIdentity(senderId || targetUserId)?.avatar_url || ''),
         };
       })
       .sort((a, b) => {
