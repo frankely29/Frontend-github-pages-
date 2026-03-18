@@ -5685,77 +5685,6 @@ let communityToken = localStorage.getItem(LS_TOKEN) || "";
 let me = null;
 let lastGpsAccuracyM = null;
 
-const DRIVER_PROFILE_CACHE_TTL_MS = 30 * 1000;
-const sharedDriverCache = (typeof window !== 'undefined' && window.__driverIdentityCache)
-  ? window.__driverIdentityCache
-  : {
-      presenceIdentity: new Map(),
-      driverProfile: new Map(),
-    };
-if (typeof window !== 'undefined') window.__driverIdentityCache = sharedDriverCache;
-
-function getCachedDriverIdentity(userId) {
-  const key = String(userId ?? '');
-  if (!key) return null;
-  return sharedDriverCache.presenceIdentity.get(key) || null;
-}
-
-function setCachedDriverIdentity(userId, identity) {
-  const key = String(userId ?? '');
-  if (!key || !identity || typeof identity !== 'object') return;
-  sharedDriverCache.presenceIdentity.set(key, {
-    display_name: String(identity.display_name || '').trim(),
-    avatar_url: String(identity.avatar_url || '').trim(),
-    map_identity_mode: String(identity.map_identity_mode || '').trim() || 'name',
-    updated_at: identity.updated_at ?? null,
-  });
-}
-
-function getCachedDriverProfile(userId) {
-  const key = String(userId ?? '');
-  if (!key) return null;
-  const cached = sharedDriverCache.driverProfile.get(key);
-  if (!cached) return null;
-  const ageMs = Date.now() - Number(cached.cachedAt || 0);
-  if (!Number.isFinite(ageMs) || ageMs > DRIVER_PROFILE_CACHE_TTL_MS) return null;
-  return cached.payload || null;
-}
-
-function setCachedDriverProfile(userId, payload) {
-  const key = String(userId ?? '');
-  if (!key || !payload || typeof payload !== 'object') return;
-  sharedDriverCache.driverProfile.set(key, { payload, cachedAt: Date.now() });
-}
-
-function resolveDriverDisplayName({ userId, displayName, senderDisplayName, userName, name, email, profileUser, presenceIdentity } = {}) {
-  const normalizedUserId = Number(userId);
-  const profileDisplayName = profileUser?.display_name || profileUser?.displayName || '';
-  const presenceDisplayName = presenceIdentity?.display_name || getCachedDriverIdentity(userId)?.display_name || '';
-  const emailLocalPart = String(email || profileUser?.email || '').split('@')[0] || '';
-  const candidates = [
-    senderDisplayName,
-    displayName,
-    userName,
-    name,
-    profileDisplayName,
-    presenceDisplayName,
-    emailLocalPart,
-  ];
-  for (const value of candidates) {
-    const safe = String(value || '').trim();
-    if (safe) return safe;
-  }
-  return Number.isFinite(normalizedUserId) ? `User ${normalizedUserId}` : 'User';
-}
-
-if (typeof window !== 'undefined') {
-  window.getCachedDriverIdentity = getCachedDriverIdentity;
-  window.setCachedDriverIdentity = setCachedDriverIdentity;
-  window.getCachedDriverProfile = getCachedDriverProfile;
-  window.setCachedDriverProfile = setCachedDriverProfile;
-  window.resolveDriverDisplayName = resolveDriverDisplayName;
-}
-
 function syncAdminPortalSession() {
   if (typeof window === 'undefined' || !window.AdminPortal) return;
   window.AdminPortal.setSession?.({ me, token: communityToken });
@@ -5784,17 +5713,14 @@ let presenceFocusedUserId = null;
 let presenceLiteSourceFingerprint = '';
 let presenceAdaptiveRenderRaf = 0;
 let lastSelfOrbitMeta = null;
-let lastPresenceRowsFingerprint = '';
-let presencePullInFlight = false;
-let lastDriverLabelZoomBucket = '';
 
-const PRESENCE_FULL_MAX_VISIBLE = 44;
-const PRESENCE_MEDIUM_MAX_VISIBLE = 88;
+const PRESENCE_FULL_MAX_VISIBLE = 50;
+const PRESENCE_MEDIUM_MAX_VISIBLE = 100;
 const PRESENCE_FULL_TO_MEDIUM_UP = 56;
 const PRESENCE_MEDIUM_TO_FULL_DOWN = 44;
 const PRESENCE_MEDIUM_TO_HEAVY_UP = 106;
 const PRESENCE_HEAVY_TO_MEDIUM_DOWN = 92;
-const PRESENCE_MEDIUM_RICH_LIMIT = 20;
+const PRESENCE_MEDIUM_RICH_LIMIT = 24;
 const PRESENCE_HEAVY_RICH_LIMIT = 10;
 const PRESENCE_VIEWPORT_BUFFER_RATIO = 0.18;
 
@@ -6159,18 +6085,13 @@ if (btnDeleteAccount) {
 // other drivers marker HTML
 function applyDriverLabelZoomStyles() {
   const zoom = map?.getZoom?.();
-  const zoomBucket = Number.isFinite(zoom) ? Math.floor(zoom * 2) / 2 : 'na';
-  if (zoomBucket === lastDriverLabelZoomBucket) return;
-  lastDriverLabelZoomBucket = zoomBucket;
   if (typeof window !== "undefined" && typeof window.mapIdentityApplyZoomStyles === "function") {
     window.mapIdentityApplyZoomStyles(zoom);
   }
 }
 
 function makeDriverIcon(name, headingDeg, avatarUrl = "", mode = "name", orbitMeta = null, leaderboardBadgeCode = '', leaderboardHasCrown = false) {
-  const safe = resolveDriverDisplayName({
-    displayName: name,
-  });
+  const safe = (name || "Driver").trim() || "Driver";
   const rot = Number.isFinite(headingDeg) ? headingDeg : 0;
   const el = document.createElement("div");
   const driverLabelHTML = (typeof window !== "undefined" && typeof window.mapIdentityRenderDriverLabel === "function")
@@ -6197,9 +6118,6 @@ function clearOtherDrivers() {
     presenceLiteSource.setData(emptyGeojson());
   }
   presenceLiteSourceFingerprint = '';
-  lastPresenceRowsFingerprint = '';
-  presencePullInFlight = false;
-  lastDriverLabelZoomBucket = '';
 }
 
 function buildDriverMarkerVisualSignature(userId, name, avatarUrl = "", mode = "name", orbitMeta = null, leaderboardBadgeCode = '', leaderboardHasCrown = false) {
@@ -6243,7 +6161,7 @@ function upsertDriverMarker(userId, name, lat, lng, heading, avatarUrl = "", mod
     const previousVisualSig = driverMarkerVisualSignature.get(userId) || "";
     if (visualSig !== previousVisualSig) {
       const el = existing.getElement();
-      const newEl = makeDriverIcon(name || `User ${userId}`, heading, avatarUrl, mode, orbitMeta, leaderboardBadgeCode, leaderboardHasCrown);
+      const newEl = makeDriverIcon(name || `Driver ${userId}`, heading, avatarUrl, mode, orbitMeta, leaderboardBadgeCode, leaderboardHasCrown);
       el.innerHTML = newEl.innerHTML;
       wireProfileOpenTargets(el, userId, { isSelf: false });
       driverMarkerVisualSignature.set(userId, visualSig);
@@ -6254,7 +6172,7 @@ function upsertDriverMarker(userId, name, lat, lng, heading, avatarUrl = "", mod
     return;
   }
 
-  const el = makeDriverIcon(name || `User ${userId}`, heading, avatarUrl, mode, orbitMeta, leaderboardBadgeCode, leaderboardHasCrown);
+  const el = makeDriverIcon(name || `Driver ${userId}`, heading, avatarUrl, mode, orbitMeta, leaderboardBadgeCode, leaderboardHasCrown);
   wireProfileOpenTargets(el, userId, { isSelf: false });
   const mk = new maplibregl.Marker({ element: el, anchor: "center", offset: [0, 0] })
     .setLngLat([lng, lat])
@@ -6553,10 +6471,8 @@ function renderAdaptivePresenceFromCache() {
   const rows = Array.isArray(cachedPresenceRows) ? cachedPresenceRows : [];
   const boundsObj = getPresenceRenderBounds();
   const viewportRows = boundsObj ? rows.filter((row) => rowInPresenceRenderBounds(row, boundsObj)) : rows.slice();
-  const prevMode = presenceRenderMode;
   const nextMode = computePresenceRenderMode(rows);
   presenceRenderMode = nextMode;
-  if (prevMode !== nextMode) lastDriverLabelZoomBucket = "";
   const richUserIds = chooseRichPresenceUserIds(viewportRows, nextMode);
   const richRows = [];
   const liteRows = [];
@@ -6633,39 +6549,31 @@ function renderAdaptivePresenceFromCache() {
   applyDriverLabelZoomStyles();
 }
 
-function presenceRowsFingerprint(rows) {
-  if (!Array.isArray(rows) || !rows.length) return '';
-  return rows
-    .map((it) => [
-      String(it?.uid ?? ''),
-      Number(it?.lat ?? NaN).toFixed(5),
-      Number(it?.lng ?? NaN).toFixed(5),
-      Number.isFinite(Number(it?.heading)) ? String(Math.round(Number(it.heading))) : '',
-      String(it?.updatedAt ?? ''),
-      String(it?.name ?? ''),
-      String(it?.avatarUrl ?? ''),
-      String(it?.leaderboardBadgeCode ?? ''),
-    ].join('|'))
-    .sort()
-    .join(';');
-}
-
 async function pullPresenceAll() {
   if (!authHeaderOK() || !map) return;
   if (!mapPageIsVisible) return;
-  if (presencePullInFlight) return;
-  presencePullInFlight = true;
 
   try {
     const list = await getJSONAuth("/presence/all", communityToken);
     const now = Date.now() / 1000;
     const items = Array.isArray(list) ? list : list?.items || [];
-    const onlineCount = Number(list?.online_count);
-    const ghostedCount = Number(list?.ghosted_count);
     const fallbackVisibleCount = Array.isArray(items) ? items.length : 0;
-    if (Number.isFinite(onlineCount) && onlineCount >= 0) {
-      updateOnlineBadge(onlineCount, Number.isFinite(ghostedCount) ? ghostedCount : 0);
-    } else {
+    let badgeUpdatedFromSummary = false;
+
+    // Update the online badge from backend aggregate counts so ghosted users
+    // remain hidden on the map but still count as online.
+    try {
+      const summary = await getJSONAuth("/presence/summary", communityToken);
+      const onlineCount = Number(summary?.online_count);
+      const ghostedCount = Number(summary?.ghosted_count);
+      if (Number.isFinite(onlineCount) && onlineCount >= 0) {
+        updateOnlineBadge(onlineCount, Number.isFinite(ghostedCount) ? ghostedCount : 0);
+        badgeUpdatedFromSummary = true;
+      }
+    } catch (e) {
+      console.warn("/presence/summary failed:", e);
+    }
+    if (!badgeUpdatedFromSummary) {
       updateOnlineBadge(fallbackVisibleCount, 0);
     }
     const candidates = [];
@@ -6673,19 +6581,13 @@ async function pullPresenceAll() {
     for (const it of items) {
       const uid = String(it.user_id ?? it.userId ?? it.id ?? "");
       if (!uid) continue;
-
-      setCachedDriverIdentity(uid, {
-        display_name: it.display_name || it.user_name || it.name || '',
-        avatar_url: it.avatar_url || '',
-        map_identity_mode: it.map_identity_mode || 'name',
-        updated_at: it.updated_at ?? it.updated_at_unix ?? it.ts_unix ?? null,
-      });
-
       if (me && String(me.id) === uid) continue;
 
       let lat = Number(it.lat ?? it.latitude ?? NaN);
       let lng = Number(it.lng ?? it.longitude ?? NaN);
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+      // Do NOT round lat/lng. Use the exact coordinates returned by the backend
+      // so markers remain accurate even when many drivers share one location.
 
       const updated = Number(it.updated_at_unix ?? it.ts_unix ?? it.updated_at ?? NaN);
       if (Number.isFinite(updated)) {
@@ -6697,18 +6599,10 @@ async function pullPresenceAll() {
         continue;
       }
 
-      const presenceIdentity = getCachedDriverIdentity(uid);
       candidates.push({
         uid,
-        name: resolveDriverDisplayName({
-          userId: uid,
-          displayName: it.display_name,
-          userName: it.user_name,
-          name: it.name,
-          email: it.email,
-          presenceIdentity,
-        }),
-        avatarUrl: it.avatar_url || '',
+        name: it.display_name || it.name || it.email || "Driver",
+        avatarUrl: it.avatar_url || "",
         mode: it.map_identity_mode || "name",
         lat,
         lng,
@@ -6719,9 +6613,6 @@ async function pullPresenceAll() {
       });
     }
 
-    const nextFingerprint = presenceRowsFingerprint(candidates);
-    if (nextFingerprint === lastPresenceRowsFingerprint) return;
-    lastPresenceRowsFingerprint = nextFingerprint;
     cachedPresenceRows = candidates;
     scheduleAdaptivePresenceRender();
   } catch (e) {
@@ -6731,11 +6622,8 @@ async function pullPresenceAll() {
       return;
     }
     console.warn("/presence/all failed:", e);
-  } finally {
-    presencePullInFlight = false;
   }
 }
-
 
 let lastPresencePushMs = 0;
 let lastPresenceSentLatLng = null;
