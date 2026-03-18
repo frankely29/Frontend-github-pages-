@@ -23,7 +23,7 @@
     try { return localStorage.getItem(LS_TOKEN) || ''; } catch (_) { return ''; }
   }
 
-  async function postFormAuth(path, formData, token) {
+  async function postMultipartAuth(path, formData, token) {
     const headers = {};
     if (token) headers.Authorization = `Bearer ${token}`;
     return fetchJSON(`${RAILWAY_BASE}${path}`, {
@@ -31,6 +31,27 @@
       headers,
       body: formData,
     });
+  }
+
+  function buildChatVoiceUploadFile(blob, selectedMimeType) {
+    const mime = String(blob?.type || selectedMimeType || 'audio/mp4').trim() || 'audio/mp4';
+    const loweredMime = mime.toLowerCase();
+    const ext = loweredMime.includes('mp4') || loweredMime.includes('m4a')
+      ? 'm4a'
+      : (loweredMime.includes('ogg')
+        ? 'ogg'
+        : (loweredMime.includes('mpeg') || loweredMime.includes('mp3')
+          ? 'mp3'
+          : 'webm'));
+    return new File([blob], `voice-${Date.now()}.${ext}`, { type: mime });
+  }
+
+  async function postChatVoiceMultipart(path, blob, durationMs, token, selectedMimeType) {
+    const file = buildChatVoiceUploadFile(blob, selectedMimeType);
+    const form = new FormData();
+    form.append('file', file, file.name);
+    form.append('duration_ms', String(Math.max(0, Math.round(durationMs || 0))));
+    return postMultipartAuth(path, form, token);
   }
 
   const VOICE_NOTE_MAX_MS = 90000;
@@ -1443,10 +1464,9 @@
             await restoreChatAudioAfterCapture('voice-stop-uploaded');
             setVoiceRecorderStatus(domTarget, 'Voice note sent', '');
           } catch (err) {
-            const message = err?.message || 'Voice note failed to send.';
+            console.warn('voice note upload failed', err);
             await restoreChatAudioAfterCapture('voice-stop-error');
-            setVoiceRecorderStatus(domTarget, CHAT_VOICE_IDLE_STATUS, message);
-            throw err;
+            setVoiceRecorderStatus(domTarget, CHAT_VOICE_IDLE_STATUS, 'Voice upload failed. Please try again.');
           }
         })().catch((err) => {
           console.warn('voice note finish failed', err);
@@ -1766,21 +1786,25 @@
   async function chatSendPublicVoiceNote(blob, durationMs, mimeType, room = CHAT_ROOM) {
     const token = getCommunityToken();
     if (!token) throw new Error('Not signed in');
-    const form = new FormData();
-    const extension = (mimeType || 'audio/webm').includes('mp4') ? 'm4a' : ((mimeType || '').includes('ogg') ? 'ogg' : 'webm');
-    form.append('audio', blob, `voice-note.${extension}`);
-    form.append('duration_ms', String(Math.round(durationMs || 0)));
-    return await postFormAuth(`/chat/rooms/${encodeURIComponent(String(room || CHAT_ROOM))}/voice`, form, token);
+    return await postChatVoiceMultipart(
+      `/chat/rooms/${encodeURIComponent(String(room || CHAT_ROOM))}/voice`,
+      blob,
+      durationMs,
+      token,
+      mimeType,
+    );
   }
 
   async function chatSendPrivateVoiceNote(otherUserId, blob, durationMs, mimeType) {
     const token = getCommunityToken();
     if (!token || !otherUserId) throw new Error('Private chat unavailable');
-    const form = new FormData();
-    const extension = (mimeType || 'audio/webm').includes('mp4') ? 'm4a' : ((mimeType || '').includes('ogg') ? 'ogg' : 'webm');
-    form.append('audio', blob, `voice-note.${extension}`);
-    form.append('duration_ms', String(Math.round(durationMs || 0)));
-    return await postFormAuth(`/chat/private/${encodeURIComponent(String(otherUserId))}/voice`, form, token);
+    return await postChatVoiceMultipart(
+      `/chat/private/${encodeURIComponent(String(otherUserId))}/voice`,
+      blob,
+      durationMs,
+      token,
+      mimeType,
+    );
   }
 
   function renderPrivateThreadList() {
@@ -1864,6 +1888,7 @@
         renderPrivateConversation();
         renderPrivateTabUnread();
         updateChatUnreadBadge();
+        await playChatTone('outgoing');
       },
     }));
   }
@@ -2327,6 +2352,7 @@
           seedChatIncomingAudioBaseline(sentMessages);
           renderChatMessages(sentMessages);
         }
+        await playChatTone('outgoing');
         await chatPollOnce();
       },
     }));
@@ -4862,6 +4888,7 @@
         privateUnreadByUserId[String(driverProfileState.userId)] = 0;
         renderPrivateTabUnread();
         updateChatUnreadBadge();
+        await playChatTone('outgoing');
         renderDriverProfileModal();
       },
     }));
