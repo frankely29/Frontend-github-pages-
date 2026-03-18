@@ -1181,6 +1181,21 @@
       gap: 6px;
     }
     .chatComposerWrap{ flex-shrink:0; background:#fff; border-top:1px solid rgba(15,23,42,0.10); padding:8px 8px calc(8px + env(safe-area-inset-bottom, 0px)); }
+    .chatVoiceComposer{ display:flex; align-items:center; gap:8px; padding-top:8px; }
+    .chatVoiceComposerPrivate{ padding:8px 8px calc(8px + env(safe-area-inset-bottom, 0px)); border-top:1px solid rgba(15,23,42,0.10); }
+    .chatVoiceBtn,.chatVoiceCancelBtn{ border:none; border-radius:999px; padding:8px 12px; font-size:12px; font-weight:900; }
+    .chatVoiceBtn{ background:rgba(37,99,235,0.12); color:#1d4ed8; }
+    .chatVoiceBtn.recording{ background:#dc2626; color:#fff; }
+    .chatVoiceCancelBtn{ background:rgba(15,23,42,0.08); color:#334155; }
+    .chatVoiceStatus{ min-width:0; flex:1; font-size:11px; color:#475569; font-weight:800; }
+    .chatVoicePlayer{ display:flex; align-items:center; gap:8px; min-width:0; }
+    .chatVoicePlayerBtn{ border:none; border-radius:999px; background:rgba(15,23,42,0.08); color:#0f172a; padding:6px 10px; font-size:11px; font-weight:900; }
+    .chatVoicePlayerMeta{ min-width:0; flex:1; display:flex; flex-direction:column; gap:4px; }
+    .chatVoicePlayerLabel{ font-size:11px; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .chatVoicePlayerBar{ position:relative; height:4px; border-radius:999px; background:rgba(148,163,184,0.35); overflow:hidden; }
+    .chatVoicePlayerProgress{ position:absolute; inset:0 auto 0 0; width:0; background:#2563eb; border-radius:999px; }
+    .chatVoicePlayerTime{ flex:0 0 auto; font-size:10px; color:#64748b; font-weight:800; }
+    .chatVoiceFallback{ font-size:11px; font-weight:800; color:#475569; }
     .chatPrivateWrap{ flex:1; min-height:0; max-height:none; overflow:hidden; border-radius:0; border:0; background:#fff; display:flex; flex-direction:column; }
     .chatPrivateThreadList{ flex:1; min-height:0; max-height:none; overflow:auto; -webkit-overflow-scrolling:touch; display:flex; flex-direction:column; }
     .chatPrivateThreadToolbar{ padding:8px; border-bottom:1px solid rgba(15,23,42,0.12); display:flex; justify-content:flex-end; background:#fff; }
