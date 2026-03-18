@@ -16,6 +16,11 @@
   const CHAT_POLL_MS = typeof window !== 'undefined' && window.CHAT_POLL_MS
     ? window.CHAT_POLL_MS
     : 800; // milliseconds
+  const CHAT_CLOSED_POLL_MS = 3500;
+  const CHAT_HIDDEN_POLL_MS = 7000;
+  const PRIVATE_CHAT_OPEN_POLL_MS = 3000;
+  const PRIVATE_CHAT_CLOSED_POLL_MS = 6000;
+  const PRIVATE_CHAT_HIDDEN_POLL_MS = 12000;
 
   // Token helper (matches LS_TOKEN in app.js)
   const LS_TOKEN = 'community_token_v1';
@@ -127,6 +132,7 @@
 
   // Chat state
   let chatPollTimer = null;
+  let chatPollInFlight = false;
   let publicChatMessages = [];
   let chatLastSeen = null;
   let chatLatestMessageId = null;
@@ -153,6 +159,7 @@
   let privateUnreadByUserId = Object.create(null);
   let privateLastMessageIdByUserId = Object.create(null);
   let privateThreadPollTimer = null;
+  let privateThreadPollInFlight = false;
 
   function chatLastReadStorageKey() {
     return `tlc_chat_last_read_${CHAT_ROOM}`;
@@ -3169,21 +3176,43 @@
     openPrivateConversation(picked.id, picked.name);
   }
 
-  function startPrivatePolling() {
-    if (privateThreadPollTimer) return;
-    privateThreadPollTimer = setInterval(async () => {
-      if (!isChatAuthReady()) return;
-      await chatRefreshPrivateThreads();
-      if (privateActiveUserId) {
-        const visible = activeChatTab === 'private' && isChatPanelOpen();
-        await chatPollPrivateActiveThread({ visible, forceFull: false });
+  function getPrivatePollIntervalMs() {
+    if (document.visibilityState === 'hidden') return PRIVATE_CHAT_HIDDEN_POLL_MS;
+    return isChatPanelOpen() ? PRIVATE_CHAT_OPEN_POLL_MS : PRIVATE_CHAT_CLOSED_POLL_MS;
+  }
+
+  function schedulePrivatePoll({ immediate = false } = {}) {
+    if (privateThreadPollTimer) clearTimeout(privateThreadPollTimer);
+    if (!isChatAuthReady()) {
+      privateThreadPollTimer = null;
+      return;
+    }
+    const delay = immediate ? 0 : getPrivatePollIntervalMs();
+    privateThreadPollTimer = setTimeout(async () => {
+      privateThreadPollTimer = null;
+      if (privateThreadPollInFlight) return;
+      privateThreadPollInFlight = true;
+      try {
+        if (!isChatAuthReady()) return;
+        await chatRefreshPrivateThreads();
+        if (privateActiveUserId) {
+          const visible = activeChatTab === 'private' && isChatPanelOpen();
+          await chatPollPrivateActiveThread({ visible, forceFull: false });
+        }
+      } finally {
+        privateThreadPollInFlight = false;
+        if (isChatAuthReady()) schedulePrivatePoll();
       }
-    }, 3000);
+    }, Math.max(0, delay));
+  }
+
+  function startPrivatePolling() {
+    schedulePrivatePoll({ immediate: true });
   }
 
   function stopPrivatePolling() {
     if (!privateThreadPollTimer) return;
-    clearInterval(privateThreadPollTimer);
+    clearTimeout(privateThreadPollTimer);
     privateThreadPollTimer = null;
   }
   function chatResetState() {
@@ -3301,7 +3330,9 @@
   }
 
   async function chatPollOnce() {
+    if (chatPollInFlight) return;
     if (typeof authHeaderOK === 'function' && !authHeaderOK()) return;
+    chatPollInFlight = true;
     try {
       const msgs = await chatFetchNew();
       if (!msgs?.ok) {
@@ -3342,14 +3373,32 @@
       }
     } catch (e) {
       console.warn('chat poll failed:', e);
+    } finally {
+      chatPollInFlight = false;
+      if (typeof authHeaderOK === 'function' && authHeaderOK()) scheduleChatPoll();
     }
   }
-  function startChatPolling() {
-    if (chatPollTimer) return;
-    if (typeof authHeaderOK === 'function' && !authHeaderOK()) return;
-    chatPollTimer = setInterval(chatPollOnce, CHAT_POLL_MS);
+  function getChatPollIntervalMs() {
+    if (document.visibilityState === 'hidden') return CHAT_HIDDEN_POLL_MS;
+    return isChatPanelOpen() ? CHAT_POLL_MS : CHAT_CLOSED_POLL_MS;
   }
-  function stopChatPolling() { if (!chatPollTimer) return; clearInterval(chatPollTimer); chatPollTimer = null; }
+  function scheduleChatPoll({ immediate = false } = {}) {
+    if (chatPollTimer) clearTimeout(chatPollTimer);
+    if (typeof authHeaderOK === 'function' && !authHeaderOK()) {
+      chatPollTimer = null;
+      return;
+    }
+    const delay = immediate ? 0 : getChatPollIntervalMs();
+    chatPollTimer = setTimeout(() => {
+      chatPollTimer = null;
+      chatPollOnce();
+    }, Math.max(0, delay));
+  }
+  function startChatPolling() {
+    if (typeof authHeaderOK === 'function' && !authHeaderOK()) return;
+    scheduleChatPoll({ immediate: true });
+  }
+  function stopChatPolling() { if (!chatPollTimer) return; clearTimeout(chatPollTimer); chatPollTimer = null; }
   function syncChatPollingState() {
     if (typeof authHeaderOK === 'function' && authHeaderOK()) {
       startChatPolling();
@@ -3377,6 +3426,8 @@
   function wireChatPanel() {
     pruneExpiredChatState();
     ensureChatNotificationsBootstrapped('chat-panel-open');
+    scheduleChatPoll({ immediate: true });
+    schedulePrivatePoll({ immediate: true });
     const tabPublic = document.getElementById('chatTabPublic');
     const tabPrivate = document.getElementById('chatTabPrivate');
     if (tabPublic && tabPublic.dataset.bound !== '1') {
@@ -6222,6 +6273,7 @@
     if (document.visibilityState === 'visible' && typeof authHeaderOK === 'function' && authHeaderOK()) {
       syncMyProgression({ forcePopupCheck: true });
     }
+    syncChatPollingState();
   });
 
   setInterval(() => {

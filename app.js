@@ -73,6 +73,11 @@ function dbg(id, text) {
 const PRESENCE_PUSH_MS = 8 * 1000; // send my location
 const PRESENCE_PULL_MS = 10 * 1000; // fetch all drivers
 const PRESENCE_STALE_SEC = 70; // hide if older than this
+const PRESENCE_HIDDEN_POLL_MS = 30 * 1000;
+const PRESENCE_IDLE_POLL_MS = 15 * 1000;
+const PRESENCE_ACTIVE_POLL_MS = 10 * 1000;
+const PRESENCE_BOOST_POLL_MS = 7 * 1000;
+const PRESENCE_BOOST_WINDOW_MS = 25 * 1000;
 
 const LS_TOKEN = "community_token_v1";
 const LS_EMAIL = "community_email_v1";
@@ -95,15 +100,37 @@ const PICKUP_MICRO_HOTSPOT_MIN_ZOOM = 10.2;
 // let chatSeenKeys = new Set();
 let pickupRefreshTimer = null;
 let pickupRefreshInFlight = false;
+let pickupOverlayAbortController = null;
 let pickupLogBusy = false;
 let lastPickupFetchMs = 0;
 let lastPickupFetchKey = "";
+let lastPickupViewportKey = "";
 let pickupZoneStats = new Map();
 let pickupHotspotZoneIds = new Set();
 let pickupPointsSourceFingerprint = "";
 let pickupHotspotsSourceFingerprint = "";
 let pickupMicroHotspotsSourceFingerprint = "";
 let mapPageIsVisible = !document.hidden;
+let lastPresenceInteractionBoostUntil = 0;
+let presencePollTimer = null;
+let presencePullAbortController = null;
+let presencePullInFlight = false;
+let presencePullLoopRunning = false;
+let cachedPresenceFingerprint = "";
+let renderedPresenceFingerprint = "";
+let lastRenderedFrameIndex = -1;
+let lastRenderedFrameSignature = "";
+const timelineCache = { data: null, loadedAt: 0 };
+const frameCache = new Map();
+const frameCacheOrder = [];
+const FRAME_CACHE_MAX = 6;
+const frontendPerfStats = {
+  presencePolls: 0,
+  pickupFetches: 0,
+  abortedRequests: 0,
+  frameCacheHits: 0,
+  frameCacheMisses: 0,
+};
 
 /* =========================================================
    MANHATTAN MODE — DEFAULT SETTINGS (SAFE TO EDIT)
@@ -257,8 +284,17 @@ function pickClosestIndex(minutesOfWeekArr, target) {
 /* =========================================================
    Network helper (+ auth support)
    ========================================================= */
+function shouldBypassBrowserCache(url) {
+  const text = String(url || "");
+  return /\/presence\/|\/events\/pickups\/recent|\/chat\//.test(text);
+}
+
 async function fetchJSON(url, opts = {}) {
-  const res = await fetch(url, { cache: "no-store", mode: "cors", ...opts });
+  const fetchOpts = { mode: "cors", ...opts };
+  if (fetchOpts.cache === undefined && shouldBypassBrowserCache(url)) {
+    fetchOpts.cache = "no-store";
+  }
+  const res = await fetch(url, fetchOpts);
   const text = await res.text();
   if (!res.ok) {
     const err = new Error(`${res.status} ${res.statusText} @ ${url} :: ${text.slice(0, 120)}`);
@@ -281,10 +317,10 @@ async function postJSON(path, body, token) {
     body: JSON.stringify(body || {}),
   });
 }
-async function getJSONAuth(path, token) {
+async function getJSONAuth(path, token, opts = {}) {
   const headers = {};
   if (token) headers["Authorization"] = `Bearer ${token}`;
-  return fetchJSON(`${RAILWAY_BASE}${path}`, { headers });
+  return fetchJSON(`${RAILWAY_BASE}${path}`, { ...opts, headers: { ...headers, ...(opts.headers || {}) } });
 }
 
 /* =========================================================
@@ -2049,7 +2085,7 @@ if (debugToggle && debugPanel) {
 if (dbgReloadFrame) {
   dbgReloadFrame.addEventListener("click", () => {
     const idx = Number(slider?.value || "0");
-    loadFrame(idx).catch(console.error);
+    loadFrame(idx, { force: true }).catch(console.error);
   });
 }
 
@@ -2130,8 +2166,10 @@ function initMap() {
     // Presence refresh on moves to keep label collision offsets stable
     map.on("moveend", () => {
       if (authHeaderOK()) {
+        notePresenceBoost();
         scheduleAdaptivePresenceRender();
         schedulePickupOverlayRefresh();
+        schedulePresencePoll({ immediate: true });
       }
       applyDriverLabelZoomStyles();
     });
@@ -2143,6 +2181,7 @@ function initMap() {
       if (authHeaderOK()) {
         scheduleAdaptivePresenceRender();
         schedulePickupOverlayRefresh();
+        schedulePresencePoll({ immediate: true });
       }
       applyDriverLabelZoomStyles();
     });
@@ -2368,6 +2407,12 @@ function clearPickupOverlayCache() {
   pickupHotspotsSourceFingerprint = "";
   pickupMicroHotspotsSourceFingerprint = "";
   lastPickupFetchKey = "";
+  lastPickupViewportKey = "";
+  if (pickupOverlayAbortController) {
+    pickupOverlayAbortController.abort();
+    pickupOverlayAbortController = null;
+  }
+  pickupRefreshInFlight = false;
 }
 
 function normalizePickupZoneId(value) {
@@ -3346,6 +3391,27 @@ function pickupOverlayQueryPath(limit = PICKUP_RECENT_LIMIT) {
   return `/events/pickups/recent?${qs.toString()}`;
 }
 
+function buildPickupViewportKey() {
+  if (!map) return "";
+  const b = map.getBounds?.();
+  if (!b) return "";
+  const zoom = Number(map.getZoom?.());
+  const west = Number(b.getWest?.());
+  const east = Number(b.getEast?.());
+  const south = Number(b.getSouth?.());
+  const north = Number(b.getNorth?.());
+  if (![west, east, south, north, zoom].every(Number.isFinite)) return "";
+  const roundCoord = (value) => Number(value).toFixed(3);
+  const zoomBucket = (Math.round(zoom * 2) / 2).toFixed(1);
+  return [
+    roundCoord(Math.min(west, east)),
+    roundCoord(Math.max(west, east)),
+    roundCoord(Math.min(south, north)),
+    roundCoord(Math.max(south, north)),
+    zoomBucket,
+  ].join("|");
+}
+
 async function refreshPickupOverlay({ force = false } = {}) {
   if (!mapPageIsVisible) return;
   if (!map || !mapReady) return;
@@ -3359,17 +3425,25 @@ async function refreshPickupOverlay({ force = false } = {}) {
 
   const path = pickupOverlayQueryPath(PICKUP_RECENT_LIMIT);
   if (!path) return;
+  const viewportKey = buildPickupViewportKey();
 
   const now = Date.now();
-  if (!force && pickupRefreshInFlight) return;
-  if (!force && path === lastPickupFetchKey && now - lastPickupFetchMs < PICKUP_FETCH_COOLDOWN_MS) return;
+  if (!force && path === lastPickupFetchKey && viewportKey === lastPickupViewportKey && now - lastPickupFetchMs < PICKUP_FETCH_COOLDOWN_MS) return;
+
+  if (pickupOverlayAbortController) {
+    pickupOverlayAbortController.abort();
+    frontendPerfStats.abortedRequests += 1;
+  }
+  pickupOverlayAbortController = new AbortController();
 
   pickupRefreshInFlight = true;
   lastPickupFetchKey = path;
+  lastPickupViewportKey = viewportKey;
   lastPickupFetchMs = now;
 
   try {
-    const data = await getJSONAuth(path, communityToken);
+    const data = await getJSONAuth(path, communityToken, { signal: pickupOverlayAbortController.signal });
+    frontendPerfStats.pickupFetches += 1;
     const items = Array.isArray(data) ? data : data?.items || [];
     const zoneStats = Array.isArray(data?.zone_stats) ? data.zone_stats : [];
     const zoneHotspots = (data?.zone_hotspots && data.zone_hotspots.type === "FeatureCollection" && Array.isArray(data.zone_hotspots.features))
@@ -3404,6 +3478,7 @@ async function refreshPickupOverlay({ force = false } = {}) {
       `[pickup overlay] zoneHotspots=${zoneHotspotCount} microHotspots=${normalizedMicroHotspotCount} coveredZones=${coveredZonesCount} visibleDots=${visibleDotsCount}`
     );
   } catch (e) {
+    if (e?.name === "AbortError") return;
     const status = Number(e?.status ?? NaN);
     if (status === 401) {
       clearAuth();
@@ -3412,10 +3487,15 @@ async function refreshPickupOverlay({ force = false } = {}) {
     console.warn(`/events/pickups/recent failed (${path}):`, e);
   } finally {
     pickupRefreshInFlight = false;
+    pickupOverlayAbortController = null;
   }
 }
 
 function schedulePickupOverlayRefresh({ force = false } = {}) {
+  if (!force) {
+    const nextViewportKey = buildPickupViewportKey();
+    if (nextViewportKey && nextViewportKey === lastPickupViewportKey) return;
+  }
   if (pickupRefreshTimer) clearTimeout(pickupRefreshTimer);
   pickupRefreshTimer = setTimeout(() => {
     pickupRefreshTimer = null;
@@ -3885,6 +3965,48 @@ let lastUserSliderTs = 0;
 let nextFramePickupsById = new Map();
 let nextFramePayById = new Map();
 
+function trackFrameCacheOrder(idx) {
+  const existing = frameCacheOrder.indexOf(idx);
+  if (existing >= 0) frameCacheOrder.splice(existing, 1);
+  frameCacheOrder.push(idx);
+  while (frameCacheOrder.length > FRAME_CACHE_MAX) {
+    const evictIdx = frameCacheOrder.shift();
+    frameCache.delete(evictIdx);
+  }
+}
+
+function rememberFrame(idx, frame) {
+  frameCache.set(idx, frame);
+  trackFrameCacheOrder(idx);
+  return frame;
+}
+
+function getCachedFrame(idx) {
+  if (!frameCache.has(idx)) return null;
+  const frame = frameCache.get(idx);
+  trackFrameCacheOrder(idx);
+  frontendPerfStats.frameCacheHits += 1;
+  return frame;
+}
+
+function frameSignature(frame) {
+  const featureCount = Number(frame?.polygons?.features?.length ?? 0);
+  return `${String(frame?.time ?? "")}|${featureCount}`;
+}
+
+function prefetchFrame(idx) {
+  const normalizedIdx = Number(idx);
+  if (!Number.isInteger(normalizedIdx) || normalizedIdx < 0 || normalizedIdx >= timeline.length) return;
+  if (frameCache.has(normalizedIdx)) return;
+  frontendPerfStats.frameCacheMisses += 1;
+  fetchJSON(`${RAILWAY_BASE}/frame/${normalizedIdx}`)
+    .then((frame) => rememberFrame(normalizedIdx, frame))
+    .catch((e) => {
+      if (e?.name === "AbortError") return;
+      console.warn(`Frame prefetch failed (${normalizedIdx}):`, e);
+    });
+}
+
 async function loadNextFramePickupsMap(curIdx) {
   try {
     if (!timeline.length) return;
@@ -3896,7 +4018,7 @@ async function loadNextFramePickupsMap(curIdx) {
       return;
     }
 
-    const frame = await fetchJSON(`${RAILWAY_BASE}/frame/${nextIdx}`);
+    const frame = getCachedFrame(nextIdx) || rememberFrame(nextIdx, await fetchJSON(`${RAILWAY_BASE}/frame/${nextIdx}`));
     const feats = frame?.polygons?.features || [];
 
     const puMap = new Map();
@@ -4066,6 +4188,7 @@ async function renderFrame(frame) {
   }
 
   currentFrame = frame;
+  lastRenderedFrameSignature = frameSignature(frame);
 
   // apply modes to mutate props (same as old)
   if (queensMode) applyQueensLocalView(frame);
@@ -4127,10 +4250,22 @@ async function renderFrame(frame) {
 /* =========================================================
    Load frame / timeline
    ========================================================= */
-async function loadFrame(idx) {
-  const frameUrl = `${RAILWAY_BASE}/frame/${idx}`;
+async function loadFrame(idx, { force = false } = {}) {
+  const normalizedIdx = Math.max(0, Number(idx) || 0);
+  const frameUrl = `${RAILWAY_BASE}/frame/${normalizedIdx}`;
+  const cachedFrame = !force ? getCachedFrame(normalizedIdx) : null;
+  if (!force && normalizedIdx === lastRenderedFrameIndex && cachedFrame && lastRenderedFrameSignature === frameSignature(cachedFrame)) {
+    prefetchFrame(normalizedIdx + 1);
+    prefetchFrame(normalizedIdx - 1);
+    return cachedFrame;
+  }
   loadNextFramePickupsMap(idx).catch(() => {});
-  const frame = await fetchJSON(frameUrl);
+  let frame = cachedFrame;
+  if (!frame) {
+    frontendPerfStats.frameCacheMisses += 1;
+    frame = await fetchJSON(frameUrl);
+    rememberFrame(normalizedIdx, frame);
+  }
 
   if (debugEnabled) {
     dbg("dbgFrame", `OK ${frameUrl}`);
@@ -4139,11 +4274,19 @@ async function loadFrame(idx) {
   }
 
   await renderFrame(frame);
+  lastRenderedFrameIndex = normalizedIdx;
+  prefetchFrame(normalizedIdx + 1);
+  prefetchFrame(normalizedIdx - 1);
+  return frame;
 }
 
-async function loadTimeline() {
+async function loadTimeline({ force = false } = {}) {
   const timelineUrl = `${RAILWAY_BASE}/timeline`;
-  const t = await fetchJSON(timelineUrl);
+  const t = (!force && timelineCache.data)
+    ? timelineCache.data
+    : await fetchJSON(timelineUrl);
+  timelineCache.data = t;
+  timelineCache.loadedAt = Date.now();
   timeline = Array.isArray(t) ? t : t.timeline || [];
   if (!timeline.length) throw new Error("Timeline empty. Run /generate once on Railway.");
 
@@ -4209,6 +4352,7 @@ function markUserActivity() {
   // Ignore movement/zoom/rotate events caused by our own map animations.
   if (Date.now() < suppressAutoDisableUntil) return;
   scheduleAutoFocusFromInactivity();
+  notePresenceBoost();
 }
 
 function getSelfCenterLngLat() {
@@ -4348,6 +4492,9 @@ function setAutoCenterEnabled(next, reason = "manual") {
 
   if (autoCenter && (changed || reason === "inactive-timeout")) {
     refreshAutoCenterCamera({ forceZoom: reason === "inactive-timeout" });
+  }
+  if (changed && authHeaderOK()) {
+    schedulePresencePoll({ immediate: true });
   }
   return changed;
 }
@@ -4856,6 +5003,7 @@ function startLocationWatch() {
    ========================================================= */
 async function refreshCurrentFrame() {
   try {
+    if (document.hidden) return;
     const idx = Number(slider.value || "0");
     await loadFrame(idx);
   } catch (e) {
@@ -4866,6 +5014,7 @@ setInterval(refreshCurrentFrame, REFRESH_MS);
 
 async function tickNYCClockAndAdvanceIfNeeded() {
   try {
+    if (document.hidden) return;
     if (Date.now() - lastUserSliderTs < USER_SLIDER_GRACE_MS) return;
     if (!timeline.length || !minutesOfWeek.length) return;
 
@@ -4891,8 +5040,12 @@ document.addEventListener("visibilitychange", () => {
     tickNYCClockAndAdvanceIfNeeded().catch(() => {});
     updateWeatherNow().catch(() => {});
     refreshPickupOverlay({ force: true }).catch(() => {});
-    pullPresenceAll().catch(() => {});
+    notePresenceBoost();
+    schedulePresencePoll({ immediate: true });
     if (timeline.length) bubbleUpdateNow();
+  } else {
+    clearPresencePollTimer();
+    schedulePresencePoll();
   }
 });
 
@@ -4988,6 +5141,7 @@ let wxState = {
   lastLat: null,
   lastLng: null,
 };
+let lastWeatherRefreshAt = 0;
 
 let wxParticles = [];
 let wxAnimRunning = false;
@@ -5084,6 +5238,12 @@ function getWeatherLatLng() {
   return { lat, lng };
 }
 function scheduleWeatherUpdateSoon() {
+  const { lat, lng } = getWeatherLatLng();
+  const lastLat = Number(wxState.lastLat);
+  const lastLng = Number(wxState.lastLng);
+  const lastPointValid = Number.isFinite(lastLat) && Number.isFinite(lastLng);
+  const movedMiles = lastPointValid ? haversineMiles({ lat: lastLat, lng: lastLng }, { lat, lng }) : Infinity;
+  if (lastPointValid && movedMiles < 0.85) return;
   if (wxNextUpdateTimer) return;
   wxNextUpdateTimer = setTimeout(() => {
     wxNextUpdateTimer = null;
@@ -5092,6 +5252,7 @@ function scheduleWeatherUpdateSoon() {
 }
 async function updateWeatherNow() {
   const { lat, lng } = getWeatherLatLng();
+  if (document.hidden && Date.now() - lastWeatherRefreshAt < 10 * 60 * 1000) return;
 
   wxState.lastLat = lat;
   wxState.lastLng = lng;
@@ -5125,6 +5286,7 @@ async function updateWeatherNow() {
 
     updateWxParticlesForState();
     ensureWxAnimationRunning();
+    lastWeatherRefreshAt = Date.now();
   } catch (e) {
     setWeatherBadge("⛅", "Weather unavailable");
   }
@@ -5132,6 +5294,19 @@ async function updateWeatherNow() {
 setInterval(() => {
   updateWeatherNow().catch(() => {});
 }, 10 * 60 * 1000);
+
+setInterval(() => {
+  const { presencePolls, pickupFetches, abortedRequests, frameCacheHits, frameCacheMisses } = frontendPerfStats;
+  if (!presencePolls && !pickupFetches && !abortedRequests && !frameCacheHits && !frameCacheMisses) return;
+  console.log(
+    `[perf] presence/min=${presencePolls} pickup/min=${pickupFetches} aborted=${abortedRequests} frameCache=${frameCacheHits}/${frameCacheMisses}`
+  );
+  frontendPerfStats.presencePolls = 0;
+  frontendPerfStats.pickupFetches = 0;
+  frontendPerfStats.abortedRequests = 0;
+  frontendPerfStats.frameCacheHits = 0;
+  frontendPerfStats.frameCacheMisses = 0;
+}, 60 * 1000);
 
 function updateWxParticlesForState() {
   if (!wxCanvas || !wxCtx) return;
@@ -5820,8 +5995,11 @@ function setAuthUI(signedIn, note) {
   }
 
   if (signedIn) {
+    notePresenceBoost();
+    schedulePresencePoll({ immediate: true });
     schedulePickupOverlayRefresh({ force: true });
   } else {
+    clearPresencePollTimer();
     clearPickupOverlay();
   }
 
@@ -5847,6 +6025,12 @@ function clearAuth() {
     if (typeof window.stopChatPolling === "function") window.stopChatPolling();
   }
   clearOtherDrivers();
+  clearPresencePollTimer();
+  if (presencePullAbortController) {
+    presencePullAbortController.abort();
+    presencePullAbortController = null;
+  }
+  presencePullInFlight = false;
   clearPickupOverlayCache();
   clearPickupOverlay();
   if (authPass) authPass.value = "";
@@ -6152,6 +6336,8 @@ function clearOtherDrivers() {
   otherMarkers.clear();
   driverMarkerVisualSignature.clear();
   cachedPresenceRows = [];
+  cachedPresenceFingerprint = '';
+  renderedPresenceFingerprint = '';
   presenceFocusedUserId = null;
   const presenceLiteSource = map?.getSource?.('presence-lite');
   if (presenceLiteSource && typeof presenceLiteSource.setData === 'function') {
@@ -6497,6 +6683,68 @@ function presenceLiteFingerprint(fc) {
   return rows.join('||');
 }
 
+function presenceRowsFingerprint(rows) {
+  return (Array.isArray(rows) ? rows : [])
+    .map((row) => [
+      String(row?.uid ?? ""),
+      String(row?.name ?? ""),
+      Number(row?.lat ?? NaN).toFixed(6),
+      Number(row?.lng ?? NaN).toFixed(6),
+      Number(row?.heading ?? 0).toFixed(1),
+      String(row?.avatarUrl ?? ""),
+      String(row?.mode ?? ""),
+      String(row?.leaderboardBadgeCode ?? ""),
+      row?.leaderboardHasCrown ? "1" : "0",
+    ].join("|"))
+    .sort()
+    .join("||");
+}
+
+function notePresenceBoost() {
+  lastPresenceInteractionBoostUntil = Date.now() + PRESENCE_BOOST_WINDOW_MS;
+}
+
+function getPresencePollIntervalMs() {
+  if (!authHeaderOK()) return 0;
+  if (document.hidden) return PRESENCE_HIDDEN_POLL_MS;
+  if (Date.now() < lastPresenceInteractionBoostUntil) return PRESENCE_BOOST_POLL_MS;
+  if (autoCenter) return PRESENCE_ACTIVE_POLL_MS;
+  return PRESENCE_IDLE_POLL_MS;
+}
+
+function clearPresencePollTimer() {
+  if (presencePollTimer) {
+    clearTimeout(presencePollTimer);
+    presencePollTimer = null;
+  }
+}
+
+function schedulePresencePoll({ immediate = false } = {}) {
+  clearPresencePollTimer();
+  const delay = immediate ? 0 : getPresencePollIntervalMs();
+  if (!delay && delay !== 0) return;
+  if (!authHeaderOK()) return;
+  presencePollTimer = setTimeout(() => {
+    presencePollTimer = null;
+    runPresencePollLoop().catch((e) => console.warn("presence poll loop failed:", e));
+  }, Math.max(0, delay));
+}
+
+async function runPresencePollLoop() {
+  if (!authHeaderOK()) {
+    clearPresencePollTimer();
+    return;
+  }
+  if (presencePullLoopRunning) return;
+  presencePullLoopRunning = true;
+  try {
+    await pullPresenceAll();
+  } finally {
+    presencePullLoopRunning = false;
+    if (authHeaderOK()) schedulePresencePoll();
+  }
+}
+
 function scheduleAdaptivePresenceRender() {
   if (presenceAdaptiveRenderRaf) return;
   presenceAdaptiveRenderRaf = window.requestAnimationFrame(() => {
@@ -6512,6 +6760,8 @@ function renderAdaptivePresenceFromCache() {
   const boundsObj = getPresenceRenderBounds();
   const viewportRows = boundsObj ? rows.filter((row) => rowInPresenceRenderBounds(row, boundsObj)) : rows.slice();
   const nextMode = computePresenceRenderMode(rows);
+  const nextRenderFingerprint = `${nextMode}::${presenceRowsFingerprint(viewportRows)}`;
+  if (renderedPresenceFingerprint === nextRenderFingerprint) return;
   presenceRenderMode = nextMode;
   const richUserIds = chooseRichPresenceUserIds(viewportRows, nextMode);
   const richRows = [];
@@ -6587,31 +6837,47 @@ function renderAdaptivePresenceFromCache() {
   }
 
   applyDriverLabelZoomStyles();
+  renderedPresenceFingerprint = nextRenderFingerprint;
 }
 
 async function pullPresenceAll() {
   if (!authHeaderOK() || !map) return;
-  if (!mapPageIsVisible) return;
+  if (presencePullInFlight && presencePullAbortController) {
+    presencePullAbortController.abort();
+    frontendPerfStats.abortedRequests += 1;
+  }
+  presencePullAbortController = new AbortController();
+  presencePullInFlight = true;
 
   try {
-    const list = await getJSONAuth("/presence/all", communityToken);
+    const list = await getJSONAuth("/presence/all", communityToken, { signal: presencePullAbortController.signal });
+    frontendPerfStats.presencePolls += 1;
     const now = Date.now() / 1000;
     const items = Array.isArray(list) ? list : list?.items || [];
     const fallbackVisibleCount = Array.isArray(items) ? items.length : 0;
     let badgeUpdatedFromSummary = false;
+    const listOnlineCount = Number(list?.online_count ?? list?.summary?.online_count ?? list?.counts?.online_count);
+    const listGhostedCount = Number(list?.ghosted_count ?? list?.summary?.ghosted_count ?? list?.counts?.ghosted_count);
 
     // Update the online badge from backend aggregate counts so ghosted users
     // remain hidden on the map but still count as online.
-    try {
-      const summary = await getJSONAuth("/presence/summary", communityToken);
-      const onlineCount = Number(summary?.online_count);
-      const ghostedCount = Number(summary?.ghosted_count);
-      if (Number.isFinite(onlineCount) && onlineCount >= 0) {
-        updateOnlineBadge(onlineCount, Number.isFinite(ghostedCount) ? ghostedCount : 0);
-        badgeUpdatedFromSummary = true;
+    if (Number.isFinite(listOnlineCount) && listOnlineCount >= 0) {
+      updateOnlineBadge(listOnlineCount, Number.isFinite(listGhostedCount) ? listGhostedCount : 0);
+      badgeUpdatedFromSummary = true;
+    } else {
+      try {
+        const summary = await getJSONAuth("/presence/summary", communityToken, { signal: presencePullAbortController.signal });
+        const onlineCount = Number(summary?.online_count);
+        const ghostedCount = Number(summary?.ghosted_count);
+        if (Number.isFinite(onlineCount) && onlineCount >= 0) {
+          updateOnlineBadge(onlineCount, Number.isFinite(ghostedCount) ? ghostedCount : 0);
+          badgeUpdatedFromSummary = true;
+        }
+      } catch (e) {
+        if (e?.name !== "AbortError") {
+          console.warn("/presence/summary failed:", e);
+        }
       }
-    } catch (e) {
-      console.warn("/presence/summary failed:", e);
     }
     if (!badgeUpdatedFromSummary) {
       updateOnlineBadge(fallbackVisibleCount, 0);
@@ -6653,15 +6919,23 @@ async function pullPresenceAll() {
       });
     }
 
+    const nextFingerprint = presenceRowsFingerprint(candidates);
     cachedPresenceRows = candidates;
-    scheduleAdaptivePresenceRender();
+    if (nextFingerprint !== cachedPresenceFingerprint) {
+      cachedPresenceFingerprint = nextFingerprint;
+      scheduleAdaptivePresenceRender();
+    }
   } catch (e) {
+    if (e?.name === "AbortError") return;
     const status = Number(e?.status ?? NaN);
     if (status === 401) {
       clearAuth();
       return;
     }
     console.warn("/presence/all failed:", e);
+  } finally {
+    presencePullInFlight = false;
+    presencePullAbortController = null;
   }
 }
 
@@ -6837,11 +7111,6 @@ if (pickupFab) {
   });
 }
 
-/* poll presence */
-setInterval(() => {
-  pullPresenceAll().catch(() => {});
-}, PRESENCE_PULL_MS);
-
 /* =========================================================
    Boot
    ========================================================= */
@@ -6874,7 +7143,8 @@ setNavDestination(null);
     await loadMe();
     if (authHeaderOK()) {
       setAuthUI(true, `Status: signed in as ${me?.display_name || me?.email || "Driver"}`);
-      pullPresenceAll().catch(() => {});
+      notePresenceBoost();
+      schedulePresencePoll({ immediate: true });
       schedulePickupOverlayRefresh({ force: true });
     } else {
       setAuthUI(false, "Status: signed out");
