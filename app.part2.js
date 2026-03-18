@@ -91,6 +91,20 @@
   };
   const voicePlaybackRegistry = new Map();
   const voiceAssetCache = new Map();
+  const voicePlaybackRuntime = {
+    activeMessageId: null,
+    activeScope: '',
+    activeAudioEl: null,
+    activeBlobUrl: '',
+    isPlaying: false,
+    isSeeking: false,
+    currentTime: 0,
+    startedAt: 0,
+    suppressTonesUntil: 0,
+    pendingRestore: null,
+    cleanupLocks: new Set(),
+    lastPauseReason: '',
+  };
 
   // Chat state
   let chatPollTimer = null;
@@ -422,7 +436,7 @@
   }
 
   function applyChatAudioSessionAmbient(reason = 'chat') {
-    if (isChatVoiceBusy()) return false;
+    if (isChatVoiceBusy() || isVoicePlaybackActive()) return false;
     if (setChatAudioSessionType('ambient')) return true;
     return setChatAudioSessionType('auto');
   }
@@ -541,7 +555,7 @@
   }
 
   function queuePendingChatTone(kind) {
-    if (isChatVoiceBusy()) {
+    if (isChatVoiceBusy() || isVoicePlaybackActive()) {
       if (kind === 'incoming') chatVoiceState.queuedIncomingTone = 1;
       else if (kind === 'outgoing') chatVoiceState.queuedOutgoingTone = 1;
       return;
@@ -805,7 +819,7 @@
   }
 
   async function playChatTone(kind) {
-    if (isChatVoiceBusy()) {
+    if (isChatVoiceBusy() || isVoicePlaybackActive() || Date.now() < Number(voicePlaybackRuntime.suppressTonesUntil || 0)) {
       queuePendingChatTone(kind);
       return false;
     }
@@ -828,7 +842,7 @@
   }
 
   async function flushPendingChatTones() {
-    if (isChatVoiceBusy()) return;
+    if (isChatVoiceBusy() || isVoicePlaybackActive()) return;
     reconcileChatSoundRuntime('flush-pending');
     if (!chatAudioReady) return;
     const incomingPending = chatSoundRuntime.pendingIncoming > 0;
@@ -1230,16 +1244,133 @@
     return `${messageId === null ? 'unknown' : messageId}::${audioUrl}`;
   }
 
-  function clearVoiceAssetForMessage(messageId) {
+  function getVoiceMessageDomKey(message) {
+    return getMessageMergeKey(message);
+  }
+
+  function isVoicePlaybackActive() {
+    const activeAudio = voicePlaybackRuntime.activeAudioEl;
+    return !!(voicePlaybackRuntime.isPlaying && activeAudio && !activeAudio.paused && !activeAudio.ended);
+  }
+
+  function isVoiceRowRendered(messageId, audioUrl = '') {
+    if (messageId === null || messageId === undefined || messageId === '') return false;
+    const selector = `[data-message-id="${String(messageId)}"]`;
+    const rows = document.querySelectorAll?.(selector);
+    if (!rows || !rows.length) return false;
+    if (!audioUrl) return true;
+    return Array.from(rows).some((row) => String(row?.dataset?.audioUrl || '').trim() === String(audioUrl).trim());
+  }
+
+  function releaseVoiceBlobUrl(messageId, reason = 'release') {
     const targetId = parseMessageId(messageId);
     if (targetId === null) return;
     for (const [key, entry] of voiceAssetCache.entries()) {
       if (!key.startsWith(`${targetId}::`)) continue;
-      if (entry?.blobUrl) {
-        try { URL.revokeObjectURL(entry.blobUrl); } catch (_) {}
+      const blobUrl = String(entry?.blobUrl || '').trim();
+      const audioUrl = String(key.split('::').slice(1).join('::') || '').trim();
+      const isProtected = (voicePlaybackRuntime.activeMessageId === targetId && voicePlaybackRuntime.activeBlobUrl === blobUrl)
+        || (voicePlaybackRuntime.pendingRestore && voicePlaybackRuntime.pendingRestore.messageId === targetId)
+        || isVoiceRowRendered(targetId, audioUrl);
+      if (isProtected) continue;
+      if (blobUrl) {
+        try { URL.revokeObjectURL(blobUrl); } catch (_) {}
       }
       voiceAssetCache.delete(key);
     }
+  }
+
+  function findVoiceAudioElement(messageId, scope) {
+    const normalizedScope = String(scope || '');
+    const selector = `[data-voice-player][data-message-id="${String(messageId)}"][data-message-scope="${escapeCssValue(normalizedScope)}"] audio`;
+    return document.querySelector(selector);
+  }
+
+  function snapshotActiveVoicePlayback() {
+    const audio = voicePlaybackRuntime.activeAudioEl;
+    const messageId = parseMessageId(voicePlaybackRuntime.activeMessageId);
+    if (!audio || messageId === null) return null;
+    const player = audio.closest?.('[data-voice-player]');
+    const scope = String(player?.dataset?.messageScope || voicePlaybackRuntime.activeScope || '').trim();
+    const snapshot = {
+      messageId,
+      scope,
+      currentTime: Number.isFinite(audio.currentTime) ? audio.currentTime : Number(voicePlaybackRuntime.currentTime || 0),
+      wasPlaying: !audio.paused && !audio.ended,
+      blobUrl: String(audio.currentSrc || audio.src || voicePlaybackRuntime.activeBlobUrl || '').trim(),
+      audioUrl: String(player?.dataset?.audioUrl || '').trim(),
+      isSeeking: !!voicePlaybackRuntime.isSeeking,
+    };
+    voicePlaybackRuntime.pendingRestore = snapshot;
+    return snapshot;
+  }
+
+  async function restoreActiveVoicePlayback(snapshot) {
+    if (!snapshot || parseMessageId(snapshot.messageId) === null) {
+      voicePlaybackRuntime.pendingRestore = null;
+      return false;
+    }
+    const audio = findVoiceAudioElement(snapshot.messageId, snapshot.scope);
+    if (!audio) {
+      voicePlaybackRuntime.pendingRestore = null;
+      return false;
+    }
+    const player = audio.closest?.('[data-voice-player]');
+    const nextSrc = String(snapshot.blobUrl || '').trim();
+    if (nextSrc && audio.src !== nextSrc) {
+      audio.src = nextSrc;
+    }
+    if (Number.isFinite(snapshot.currentTime) && snapshot.currentTime > 0) {
+      try {
+        audio.currentTime = snapshot.currentTime;
+      } catch (_) {}
+    }
+    voicePlaybackRuntime.activeMessageId = snapshot.messageId;
+    voicePlaybackRuntime.activeScope = snapshot.scope;
+    voicePlaybackRuntime.activeAudioEl = audio;
+    voicePlaybackRuntime.activeBlobUrl = nextSrc || String(audio.currentSrc || audio.src || '').trim();
+    voicePlaybackRuntime.currentTime = Number.isFinite(audio.currentTime) ? audio.currentTime : Number(snapshot.currentTime || 0);
+    voicePlaybackRuntime.isSeeking = !!snapshot.isSeeking;
+    voicePlaybackRuntime.lastPauseReason = snapshot.wasPlaying ? 'render-restore' : 'paused';
+    voicePlaybackRuntime.pendingRestore = null;
+    if (snapshot.wasPlaying) {
+      try { await audio.play(); } catch (_) {}
+    }
+    syncVoicePlayerUi(player);
+    return true;
+  }
+
+  async function preserveVoicePlaybackAcrossRender(renderFn) {
+    const snapshot = snapshotActiveVoicePlayback();
+    voicePlaybackRuntime.cleanupLocks.add('render');
+    try {
+      renderFn();
+    } finally {
+      voicePlaybackRuntime.cleanupLocks.delete('render');
+    }
+    if (snapshot) await restoreActiveVoicePlayback(snapshot);
+  }
+
+  function shouldReuseVoiceRow(oldMsg, newMsg) {
+    if (!oldMsg || !newMsg) return false;
+    if (normalizeMessageType(oldMsg?.messageType, oldMsg?.audioUrl ? 'voice' : 'text') !== 'voice') return false;
+    if (normalizeMessageType(newMsg?.messageType, newMsg?.audioUrl ? 'voice' : 'text') !== 'voice') return false;
+    return getVoiceMessageDomKey(oldMsg) === getVoiceMessageDomKey(newMsg)
+      && String(oldMsg?.audioUrl || '').trim() === String(newMsg?.audioUrl || '').trim()
+      && Number(oldMsg?.audioDurationMs || 0) === Number(newMsg?.audioDurationMs || 0)
+      && String(oldMsg?.text || '') === String(newMsg?.text || '');
+  }
+
+  function escapeCssValue(value) {
+    const raw = String(value || '');
+    if (window.CSS && typeof window.CSS.escape === 'function') return window.CSS.escape(raw);
+    return raw.replace(/["\\]/g, '\\$&');
+  }
+
+  function clearVoiceAssetForMessage(messageId) {
+    const targetId = parseMessageId(messageId);
+    if (targetId === null) return;
+    releaseVoiceBlobUrl(targetId, 'clear-message');
   }
 
   function clearVoiceAssetsForMessages(messages = []) {
@@ -1251,11 +1382,14 @@
 
   function revokeVoiceBlobUrls() {
     for (const entry of voiceAssetCache.values()) {
-      if (entry?.blobUrl) {
-        try { URL.revokeObjectURL(entry.blobUrl); } catch (_) {}
+      const blobUrl = String(entry?.blobUrl || '').trim();
+      if (blobUrl && blobUrl !== voicePlaybackRuntime.activeBlobUrl) {
+        try { URL.revokeObjectURL(blobUrl); } catch (_) {}
       }
     }
     voiceAssetCache.clear();
+    voicePlaybackRuntime.activeBlobUrl = '';
+    voicePlaybackRuntime.pendingRestore = null;
   }
 
   function collectTrackedVoiceMessages() {
@@ -1273,10 +1407,12 @@
       .filter((key) => !key.endsWith('::')));
     for (const [key, entry] of voiceAssetCache.entries()) {
       if (activeKeys.has(key)) continue;
-      if (entry?.blobUrl) {
+      const messageId = parseMessageId(key.split('::')[0]);
+      if (messageId !== null) releaseVoiceBlobUrl(messageId, 'prune');
+      else if (entry?.blobUrl) {
         try { URL.revokeObjectURL(entry.blobUrl); } catch (_) {}
+        voiceAssetCache.delete(key);
       }
-      voiceAssetCache.delete(key);
     }
   }
 
@@ -1315,10 +1451,11 @@
           error: '',
         };
         const previous = voiceAssetCache.get(key);
-        if (previous?.blobUrl && previous.blobUrl !== blobUrl) {
+        if (previous?.blobUrl && previous.blobUrl !== blobUrl && previous.blobUrl !== voicePlaybackRuntime.activeBlobUrl) {
           try { URL.revokeObjectURL(previous.blobUrl); } catch (_) {}
         }
         voiceAssetCache.set(key, next);
+        refreshVoicePlayersForMessage(message);
         return blobUrl;
       } catch (error) {
         console.warn('voice blob fetch failed', { message, error, attempt });
@@ -1342,6 +1479,7 @@
       error: '',
       promise,
     });
+    promise.finally(() => refreshVoicePlayersForMessage(message));
     return promise;
   }
 
@@ -1426,8 +1564,9 @@
   function renderVoiceNotePlayer(message, variant = 'chat') {
     const bubbleRole = message?.isOwn ? 'self' : 'other';
     const messageId = message?.id != null ? String(message.id) : `${variant}-${Math.random().toString(36).slice(2, 8)}`;
+    const messageScope = variant === 'private' ? 'private' : (variant === 'driverProfile' ? 'profile-dm' : 'public');
     const durationText = formatChatVoiceDuration(message?.audioDurationMs);
-    return `<div class="chatVoiceBubble ${bubbleRole} ${variant}" data-voice-player="${escapeHtml(messageId)}" data-message-id="${escapeHtml(messageId)}" data-audio-url="${escapeHtml(String(message?.audioUrl || ''))}" data-duration-ms="${escapeHtml(String(Number(message?.audioDurationMs || 0) || 0))}" data-audio-mime-type="${escapeHtml(String(message?.audioMimeType || ''))}" data-created-at="${escapeHtml(String(message?.createdAt || ''))}" data-display-name="${escapeHtml(String(message?.displayName || 'Driver'))}" data-voice-label="${escapeHtml(voiceNoteLabel(message))}" data-voice-own="${message?.isOwn ? '1' : '0'}" data-sender-user-id="${escapeHtml(String(message?.senderUserId || ''))}" data-recipient-user-id="${escapeHtml(String(message?.recipientUserId || ''))}">
+    return `<div class="chatVoiceBubble ${bubbleRole} ${variant}" data-voice-player="${escapeHtml(messageId)}" data-message-id="${escapeHtml(messageId)}" data-message-scope="${escapeHtml(messageScope)}" data-audio-url="${escapeHtml(String(message?.audioUrl || ''))}" data-duration-ms="${escapeHtml(String(Number(message?.audioDurationMs || 0) || 0))}" data-audio-mime-type="${escapeHtml(String(message?.audioMimeType || ''))}" data-created-at="${escapeHtml(String(message?.createdAt || ''))}" data-display-name="${escapeHtml(String(message?.displayName || 'Driver'))}" data-voice-label="${escapeHtml(voiceNoteLabel(message))}" data-voice-own="${message?.isOwn ? '1' : '0'}" data-sender-user-id="${escapeHtml(String(message?.senderUserId || ''))}" data-recipient-user-id="${escapeHtml(String(message?.recipientUserId || ''))}">
       <button class="chatVoiceBtn" type="button" data-voice-toggle aria-label="Play voice note">▶</button>
       <div class="chatVoiceMeta">
         <div class="chatVoiceTitle">🎤 Voice note</div>
@@ -1440,6 +1579,102 @@
     </div>`;
   }
 
+  function renderPublicMessageRow(message) {
+    const msg = normalizePublicChatMessage(message);
+    const time = escapeHtml(formatChatTime(msg.createdAt));
+    const safeName = escapeHtml(msg.displayName || 'Driver');
+    const body = msg.messageType === 'voice'
+      ? renderVoiceNotePlayer(msg, 'public')
+      : `<span class="chatMsgText">${escapeHtml(String(msg.text || ''))}</span>`;
+    return `<div class="chatMsgRow${msg.messageType === 'voice' ? ' chatMsgRowVoice' : ''}" data-chat-row="public" data-message-key="${escapeHtml(getVoiceMessageDomKey(msg))}" data-message-id="${escapeHtml(String(msg?.id ?? ''))}" data-message-scope="public" data-audio-url="${escapeHtml(String(msg?.audioUrl || ''))}"><div class="chatMsgLine"><strong class="chatMsgName">${safeName}: </strong>${body}</div><div class="chatMsgTime">${time}</div></div>`;
+  }
+
+  function renderPrivateConversationRow(message, scope = 'private') {
+    const msg = normalizePrivateChatMessage(message, currentChatSelfUserId());
+    const own = !!msg?.isOwn;
+    const cls = own ? 'chatBubbleSelf' : 'chatBubbleOther';
+    const body = msg?.messageType === 'voice'
+      ? renderVoiceNotePlayer(msg, scope === 'profile-dm' ? 'driverProfile' : 'private')
+      : `<div class="${cls}">${escapeHtml(String(msg?.text || ''))}</div>`;
+    const t = escapeHtml(formatChatTime(msg?.createdAt));
+    return `<div class="chatPrivateMsgRow ${own ? 'self' : 'other'}" data-chat-row="${escapeHtml(scope)}" data-message-key="${escapeHtml(getVoiceMessageDomKey(msg))}" data-message-id="${escapeHtml(String(msg?.id ?? ''))}" data-message-scope="${escapeHtml(scope)}" data-audio-url="${escapeHtml(String(msg?.audioUrl || ''))}">${body}<div class="chatMsgTime">${t}</div></div>`;
+  }
+
+  function createNodeFromHtml(html) {
+    const tpl = document.createElement('template');
+    tpl.innerHTML = String(html || '').trim();
+    return tpl.content.firstElementChild || null;
+  }
+
+  function refreshVoicePlayersForMessage(message) {
+    const messageId = parseMessageId(message?.id);
+    if (messageId === null) return;
+    document.querySelectorAll?.(`[data-voice-player][data-message-id="${String(messageId)}"]`).forEach((player) => {
+      const audio = player.querySelector('audio');
+      const entry = voiceAssetCache.get(getVoiceAssetCacheKey(buildVoicePlayerMessageFromDataset(player)));
+      const blobUrl = String(entry?.blobUrl || '').trim();
+      if (audio && blobUrl && audio.src !== blobUrl) {
+        audio.src = blobUrl;
+      }
+      syncVoicePlayerUi(player);
+    });
+  }
+
+  function reconcileMessageList(listEl, messages, { scope = 'public', rowRenderer, replace = false, emptyHtml = '' } = {}) {
+    if (!listEl) return false;
+    const nextMessages = Array.isArray(messages) ? messages : [];
+    const existingRows = new Map(Array.from(listEl.querySelectorAll?.('[data-message-key]') || []).map((row) => [row.dataset.messageKey, row]));
+    const nextRows = [];
+    let changed = false;
+    if (!nextMessages.length) {
+      if (replace || listEl.childElementCount > 0) {
+        listEl.innerHTML = emptyHtml;
+        changed = true;
+      }
+      listEl.dataset.hasMessages = '0';
+      return changed;
+    }
+    nextMessages.forEach((message) => {
+      const key = getVoiceMessageDomKey(message);
+      const existing = existingRows.get(key) || null;
+      const nextHtml = rowRenderer(message, scope);
+      let row = existing;
+      if (!row) {
+        row = createNodeFromHtml(nextHtml);
+        changed = true;
+      } else {
+        const nextAudioUrl = String(message?.audioUrl || '').trim();
+        const sameVoiceRow = shouldReuseVoiceRow(buildVoicePlayerMessageFromDataset(existing.querySelector?.('[data-voice-player]') || existing), message);
+        const sameTextRow = row.dataset.audioUrl === nextAudioUrl && row.outerHTML === nextHtml;
+        if (!sameVoiceRow && !sameTextRow) {
+          row = createNodeFromHtml(nextHtml);
+          changed = true;
+        }
+      }
+      if (row) nextRows.push(row);
+      existingRows.delete(key);
+    });
+    if (existingRows.size) changed = true;
+    let orderChanged = false;
+    let cursor = listEl.firstElementChild;
+    nextRows.forEach((row) => {
+      if (row === cursor) {
+        cursor = cursor ? cursor.nextElementSibling : null;
+        return;
+      }
+      orderChanged = true;
+      listEl.insertBefore(row, cursor || null);
+    });
+    while (cursor) {
+      const nextCursor = cursor.nextElementSibling;
+      listEl.removeChild(cursor);
+      cursor = nextCursor;
+      orderChanged = true;
+    }
+    listEl.dataset.hasMessages = '1';
+    return changed || orderChanged;
+  }
+
   function bindVoicePlayer(player) {
     if (!player || player.dataset.voiceBound === '1') return;
     player.dataset.voiceBound = '1';
@@ -1449,12 +1684,13 @@
     const key = player.getAttribute('data-voice-player') || `${Date.now()}`;
     voicePlaybackRegistry.set(key, audio);
     const message = buildVoicePlayerMessageFromDataset(player);
+    const messageId = parseMessageId(message?.id);
+    const scope = String(player.dataset.messageScope || 'public');
     const sync = () => syncVoicePlayerUi(player);
     const attachBlobIfReady = () => {
       const entry = voiceAssetCache.get(getVoiceAssetCacheKey(message));
       if (entry?.status === 'ready' && entry.blobUrl && audio.src !== entry.blobUrl) {
         audio.src = entry.blobUrl;
-        audio.load();
       }
       sync();
     };
@@ -1462,11 +1698,15 @@
       event.preventDefault();
       try {
         if (!audio.paused && !audio.ended) {
+          voicePlaybackRuntime.lastPauseReason = 'user';
           audio.pause();
           return;
         }
         for (const [otherKey, otherAudio] of voicePlaybackRegistry.entries()) {
-          if (otherKey !== key && otherAudio && !otherAudio.paused) otherAudio.pause();
+          if (otherKey !== key && otherAudio && !otherAudio.paused) {
+            voicePlaybackRuntime.lastPauseReason = 'switch';
+            otherAudio.pause();
+          }
         }
         updateVoicePlayerVisualState(player, {
           durationMs: Number(message?.audioDurationMs) || 0,
@@ -1482,8 +1722,12 @@
         }
         if (audio.src !== blobUrl) {
           audio.src = blobUrl;
-          audio.load();
         }
+        voicePlaybackRuntime.activeMessageId = messageId;
+        voicePlaybackRuntime.activeScope = scope;
+        voicePlaybackRuntime.activeAudioEl = audio;
+        voicePlaybackRuntime.activeBlobUrl = blobUrl;
+        voicePlaybackRuntime.lastPauseReason = 'play';
         await audio.play();
         sync();
       } catch (error) {
@@ -1498,14 +1742,65 @@
         sync();
       }
     });
-    audio.addEventListener('play', sync);
-    audio.addEventListener('pause', sync);
-    audio.addEventListener('ended', () => {
-      audio.currentTime = 0;
+    audio.addEventListener('play', () => {
+      voicePlaybackRuntime.activeMessageId = messageId;
+      voicePlaybackRuntime.activeScope = scope;
+      voicePlaybackRuntime.activeAudioEl = audio;
+      voicePlaybackRuntime.activeBlobUrl = String(audio.currentSrc || audio.src || '').trim();
+      voicePlaybackRuntime.isPlaying = true;
+      voicePlaybackRuntime.startedAt = Date.now();
+      voicePlaybackRuntime.suppressTonesUntil = Date.now() + 250;
       sync();
     });
-    audio.addEventListener('timeupdate', sync);
+    audio.addEventListener('pause', () => {
+      voicePlaybackRuntime.currentTime = Number.isFinite(audio.currentTime) ? audio.currentTime : voicePlaybackRuntime.currentTime;
+      const dueToRender = voicePlaybackRuntime.cleanupLocks.has('render') || !!voicePlaybackRuntime.pendingRestore;
+      if (!dueToRender && voicePlaybackRuntime.activeAudioEl === audio) {
+        voicePlaybackRuntime.isPlaying = false;
+        voicePlaybackRuntime.activeAudioEl = null;
+        if (voicePlaybackRuntime.lastPauseReason === 'user' || voicePlaybackRuntime.lastPauseReason === 'switch') {
+          void flushPendingChatTones();
+        }
+      }
+      sync();
+    });
+    audio.addEventListener('ended', () => {
+      audio.currentTime = 0;
+      if (voicePlaybackRuntime.activeAudioEl === audio) {
+        voicePlaybackRuntime.isPlaying = false;
+        voicePlaybackRuntime.activeAudioEl = null;
+        voicePlaybackRuntime.currentTime = 0;
+        voicePlaybackRuntime.lastPauseReason = 'ended';
+      }
+      void flushPendingChatTones();
+      sync();
+    });
+    audio.addEventListener('timeupdate', () => {
+      voicePlaybackRuntime.currentTime = Number.isFinite(audio.currentTime) ? audio.currentTime : voicePlaybackRuntime.currentTime;
+      sync();
+    });
+    audio.addEventListener('seeking', () => {
+      if (voicePlaybackRuntime.activeAudioEl === audio) voicePlaybackRuntime.isSeeking = true;
+    });
+    audio.addEventListener('seeked', () => {
+      if (voicePlaybackRuntime.activeAudioEl === audio) voicePlaybackRuntime.isSeeking = false;
+      sync();
+    });
     audio.addEventListener('loadedmetadata', sync);
+    audio.addEventListener('waiting', () => updateVoicePlayerVisualState(player, {
+      durationMs: Number(message?.audioDurationMs) || 0,
+      progressPct: audio.duration > 0 ? (audio.currentTime / audio.duration) * 100 : 0,
+      loading: true,
+      loadingText: 'Loading audio…',
+      errorText: '',
+    }));
+    audio.addEventListener('stalled', () => updateVoicePlayerVisualState(player, {
+      durationMs: Number(message?.audioDurationMs) || 0,
+      progressPct: audio.duration > 0 ? (audio.currentTime / audio.duration) * 100 : 0,
+      loading: true,
+      loadingText: 'Loading audio…',
+      errorText: '',
+    }));
     audio.addEventListener('error', (event) => {
       console.warn('voice player audio element error', { message, event });
       const cacheKey = getVoiceAssetCacheKey(message);
@@ -1517,6 +1812,9 @@
       });
       sync();
     });
+    player.addEventListener('DOMNodeRemovedFromDocument', () => {
+      if (voicePlaybackRegistry.get(key) === audio) voicePlaybackRegistry.delete(key);
+    }, { once: true });
     attachBlobIfReady();
   }
 
@@ -1823,6 +2121,11 @@
     const startBtn = document.getElementById(`${surface}VoiceStartBtn`);
     const stopBtn = document.getElementById(`${surface}VoiceStopBtn`);
     const cancelBtn = document.getElementById(`${surface}VoiceCancelBtn`);
+    if (startBtn?.dataset.voiceComposerBound === '1') {
+      syncVoiceRecorderUi(surface);
+      return;
+    }
+    if (startBtn) startBtn.dataset.voiceComposerBound = '1';
     startBtn?.addEventListener('click', async () => {
       const options = typeof optionsFactory === 'function' ? optionsFactory() : {};
       await startChatVoiceRecording(surface, options);
@@ -2208,20 +2511,15 @@
   }
 
   function renderPrivateConversationMessages(messages) {
-    return (messages || []).map((msg) => {
-      const own = !!msg?.isOwn;
-      const cls = own ? 'chatBubbleSelf' : 'chatBubbleOther';
-      const body = msg?.messageType === 'voice'
-        ? renderVoiceNotePlayer(msg, 'private')
-        : `<div class="${cls}">${escapeHtml(String(msg?.text || ''))}</div>`;
-      const t = escapeHtml(formatChatTime(msg?.createdAt));
-      return `<div class="chatPrivateMsgRow ${own ? 'self' : 'other'}">${body}<div class="chatMsgTime">${t}</div></div>`;
-    }).join('');
+    return (messages || []).map((msg) => renderPrivateConversationRow(msg, 'private')).join('');
   }
 
   function bindPrivateConversationComposer(userId) {
     const sendBtn = document.getElementById('chatPrivateSendBtn');
     const input = document.getElementById('chatPrivateInput');
+    if (sendBtn && sendBtn.dataset.boundUserId === String(userId || '')) return;
+    if (sendBtn) sendBtn.dataset.boundUserId = String(userId || '');
+    if (input) input.dataset.boundUserId = String(userId || '');
     const sendNow = async () => {
       const text = String(input?.value || '').trim();
       if (!text || !userId || !sendBtn) return;
@@ -2275,21 +2573,58 @@
     const preserveScrollTop = prevList ? prevList.scrollTop : 0;
     const shouldStickToBottom = isChatNearBottom(prevList, 80);
     const messages = privateMessagesByUserId[privateActiveUserId] || [];
-    wrap.innerHTML = `<div class="chatPrivateConversation"><div class="chatPrivateHeader"><button id="chatPrivateBackBtn" class="chatPrivateBackBtn" type="button">Back</button><div class="chatPrivateTitle">${escapeHtml(privateActiveDisplayName || 'Private chat')}</div></div><div id="chatPrivateConversationList" class="chatList">${messages.length ? renderPrivateConversationMessages(messages) : '<div class="chatEmpty">No messages yet.</div>'}</div><div class="chatComposer chatComposerPrivate"><input id="chatPrivateInput" type="text" class="chatInput" placeholder="Message privately…" maxlength="600"><button id="chatPrivateSendBtn" class="chipBtn" type="button">Send</button></div>${buildVoiceComposer('private', 'chatVoiceComposerPrivate')}</div>`;
+    if (!wrap.querySelector('.chatPrivateConversation')) {
+      wrap.innerHTML = `<div class="chatPrivateConversation"><div class="chatPrivateHeader"><button id="chatPrivateBackBtn" class="chatPrivateBackBtn" type="button">Back</button><div class="chatPrivateTitle">${escapeHtml(privateActiveDisplayName || 'Private chat')}</div></div><div id="chatPrivateConversationList" class="chatList"></div><div class="chatComposer chatComposerPrivate"><input id="chatPrivateInput" type="text" class="chatInput" placeholder="Message privately…" maxlength="600"><button id="chatPrivateSendBtn" class="chipBtn" type="button">Send</button></div>${buildVoiceComposer('private', 'chatVoiceComposerPrivate')}</div>`;
+    } else {
+      const titleEl = wrap.querySelector('.chatPrivateTitle');
+      if (titleEl) titleEl.textContent = privateActiveDisplayName || 'Private chat';
+    }
     const list = document.getElementById('chatPrivateConversationList');
+    void preserveVoicePlaybackAcrossRender(() => {
+      reconcileMessageList(list, messages, {
+        scope: 'private',
+        rowRenderer: renderPrivateConversationRow,
+        replace: true,
+        emptyHtml: '<div class="chatEmpty">No messages yet.</div>',
+      });
+    });
     if (list) {
       if (shouldStickToBottom || !prevList) list.scrollTop = list.scrollHeight;
       else list.scrollTop = preserveScrollTop;
     }
-    document.getElementById('chatPrivateBackBtn')?.addEventListener('click', () => {
-      if (chatVoiceState.scope === 'private') cancelChatVoiceRecording('Recording canceled');
-      privateActiveUserId = null;
-      privateActiveDisplayName = '';
-      renderPrivateThreadList();
-    });
+    const backBtn = document.getElementById('chatPrivateBackBtn');
+    if (backBtn && backBtn.dataset.bound !== '1') {
+      backBtn.dataset.bound = '1';
+      backBtn.addEventListener('click', () => {
+        if (chatVoiceState.scope === 'private') cancelChatVoiceRecording('Recording canceled');
+        privateActiveUserId = null;
+        privateActiveDisplayName = '';
+        renderPrivateThreadList();
+      });
+    }
     bindPrivateConversationComposer(privateActiveUserId);
     bindVoicePlayers(wrap);
     void prefetchVoiceBlobUrls(messages.filter((msg) => msg?.messageType === 'voice'));
+  }
+
+  function updateDriverProfileDmList(messages = driverProfileState.messages || []) {
+    const dmList = document.getElementById('driverProfileDmList');
+    if (!dmList) return false;
+    const previousScrollTop = dmList.scrollTop;
+    const nearBottom = isChatNearBottom(dmList, 80);
+    void preserveVoicePlaybackAcrossRender(() => {
+      reconcileMessageList(dmList, messages, {
+        scope: 'profile-dm',
+        rowRenderer: (message) => renderPrivateConversationRow(message, 'profile-dm'),
+        replace: true,
+        emptyHtml: '<div class="driverProfileStatus">No private messages yet.</div>',
+      });
+    });
+    bindVoicePlayers(dmList);
+    void prefetchVoiceBlobUrls((messages || []).filter((msg) => msg?.messageType === 'voice'));
+    if (nearBottom) dmList.scrollTop = dmList.scrollHeight;
+    else dmList.scrollTop = previousScrollTop;
+    return true;
   }
 
   async function openPrivateConversation(userId, displayName = '', options = {}) {
@@ -2493,26 +2828,24 @@
     const listEl = document.getElementById('chatList');
     if (!listEl) return;
     const nextMessages = Array.isArray(messages) ? messages.map((msg) => normalizePublicChatMessage(msg)) : [];
-    if (replace) {
-      chatSeenKeys = new Set();
-      listEl.innerHTML = '';
-      listEl.dataset.hasMessages = '0';
-    }
     if (!nextMessages.length) {
-      if (replace) setChatStatus('No messages yet.');
+      if (replace) {
+        chatSeenKeys = new Set();
+        listEl.innerHTML = '';
+        listEl.dataset.hasMessages = '0';
+        setChatStatus('No messages yet.');
+      }
       return;
     }
     const nearBottom = isChatNearBottom(listEl, 80);
-    const rowsHtml = nextMessages.map((msg) => {
-      const time = escapeHtml(formatChatTime(msg.createdAt));
-      const safeName = escapeHtml(msg.displayName || 'Driver');
-      const body = msg.messageType === 'voice'
-        ? renderVoiceNotePlayer(msg, 'public')
-        : `<span class="chatMsgText">${escapeHtml(String(msg.text || ''))}</span>`;
-      return `<div class="chatMsgRow${msg.messageType === 'voice' ? ' chatMsgRowVoice' : ''}"><div class="chatMsgLine"><strong class="chatMsgName">${safeName}: </strong>${body}</div><div class="chatMsgTime">${time}</div></div>`;
-    }).join('');
-    listEl.innerHTML = rowsHtml;
-    listEl.dataset.hasMessages = '1';
+    void preserveVoicePlaybackAcrossRender(() => {
+      if (replace) chatSeenKeys = new Set();
+      reconcileMessageList(listEl, nextMessages, {
+        scope: 'public',
+        rowRenderer: renderPublicMessageRow,
+        replace,
+      });
+    });
     nextMessages.forEach((msg) => {
       const key = chatMsgKey(msg);
       chatSeenKeys.add(key);
@@ -5121,7 +5454,7 @@
     const previousDmNearBottom = isChatNearBottom(previousDmList, 80);
     const messages = normalizeDriverMessages(driverProfileState.messages);
     const dmHtml = messages.length
-      ? renderPrivateConversationMessages(messages)
+      ? messages.map((msg) => renderPrivateConversationRow(msg, 'profile-dm')).join('')
       : '<div class="driverProfileStatus">No private messages yet.</div>';
 
     const accountActionsHtml = `
@@ -5194,7 +5527,7 @@
       if (!textValue) return;
       driverProfileState.sending = true;
       driverProfileState.error = '';
-      renderDriverProfileModal();
+      if (sendBtn) sendBtn.disabled = true;
       try {
         await primeChatSoundSystem('dm-send-click');
         const sent = await sendDriverProfileDm(driverProfileState.userId, { text: textValue });
@@ -5214,11 +5547,14 @@
         renderPrivateTabUnread();
         updateChatUnreadBadge();
         await playChatTone('outgoing');
+        updateDriverProfileDmList(driverProfileState.messages);
       } catch (err) {
         driverProfileState.error = err?.message || 'Message failed to send.';
+        const errorEl = body.querySelector('.driverProfileError');
+        if (errorEl) errorEl.textContent = driverProfileState.error;
       } finally {
         driverProfileState.sending = false;
-        renderDriverProfileModal();
+        if (sendBtn) sendBtn.disabled = false;
       }
     };
     sendBtn?.addEventListener('click', (ev) => { ev.preventDefault(); submit(); });
@@ -5246,7 +5582,7 @@
         renderPrivateTabUnread();
         updateChatUnreadBadge();
         await playChatTone('outgoing');
-        renderDriverProfileModal();
+        updateDriverProfileDmList(driverProfileState.messages);
       },
     }));
     bindVoicePlayers(document.getElementById('driverProfileDmList') || document);
@@ -5339,7 +5675,7 @@
       renderPrivateTabUnread();
       updateChatUnreadBadge();
       if (hasIncomingFromOther) void playChatTone('incoming');
-      renderDriverProfileModal();
+      updateDriverProfileDmList(driverProfileState.messages);
     } catch (_) {}
   }
 
