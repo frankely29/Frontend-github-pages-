@@ -1191,7 +1191,8 @@
     .chatPrivateThreadToolbar{ padding:8px; border-bottom:1px solid rgba(15,23,42,0.12); display:flex; justify-content:space-between; background:#fff; }
     .chatPrivatePickerSearch{ padding:8px; border-bottom:1px solid rgba(15,23,42,0.08); }
     .chatPrivateThreadRow{ width:100%; border:none; background:#fff; color:#0f172a; display:flex; align-items:center; gap:8px; padding:9px; border-bottom:1px solid rgba(15,23,42,0.08); text-align:left; }
-    .chatPrivateThreadAvatar{ width:28px; height:28px; border-radius:50%; background:linear-gradient(135deg,#1e45a6,#0d6ddf); display:grid; place-items:center; font-size:11px; font-weight:900; }
+    .chatPrivateThreadAvatar{ position:relative; width:28px; height:28px; border-radius:50%; background:linear-gradient(135deg,#1e45a6,#0d6ddf); display:grid; place-items:center; font-size:11px; font-weight:900; overflow:visible; }
+    .chatPrivateUserOnline{ position:absolute; right:-1px; bottom:-1px; width:8px; height:8px; border-radius:999px; background:#16a34a; box-shadow:0 0 0 2px #fff; }
     .chatPrivateThreadBody{ flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
     .chatPrivateThreadName{ font-size:12px; font-weight:900; }
     .chatPrivateThreadPreview{ font-size:11px; color:#475569; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
