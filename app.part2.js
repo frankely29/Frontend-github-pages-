@@ -41,27 +41,32 @@
     'profile-dm': { stateScope: 'profile-dm', domKey: 'driverProfile' },
   };
   const CHAT_VOICE_MIME_TYPES = [
+    'audio/mp4',
     'audio/webm;codecs=opus',
     'audio/webm',
-    'audio/mp4',
     'audio/ogg;codecs=opus',
     'audio/ogg',
   ];
+  const CHAT_VOICE_BUSY_PHASES = new Set(['preparing', 'requesting', 'recording', 'stopping', 'uploading']);
+  const CHAT_VOICE_IDLE_STATUS = 'Tap mic to record';
   const chatVoiceState = {
-    activeScope: '',
-    targetRoom: '',
-    targetUserId: '',
-    recorder: null,
+    phase: 'idle',
     stream: null,
+    recorder: null,
     chunks: [],
     startedAt: 0,
-    timer: null,
-    selectedMimeType: '',
-    isUploading: false,
-    isCancelling: false,
+    timerId: null,
+    mimeType: '',
+    queuedIncomingTone: 0,
+    queuedOutgoingTone: 0,
+    lastError: '',
+    scope: '',
+    room: '',
+    otherUserId: '',
     durationMs: 0,
-    statusText: 'Tap mic to record',
+    statusText: CHAT_VOICE_IDLE_STATUS,
     errorText: '',
+    cancelRequested: false,
   };
   const voicePlaybackRegistry = new Map();
 
@@ -358,15 +363,68 @@
     }
   }
 
-  function applyChatAudioSessionAmbient(reason = 'chat') {
+  function isChatVoiceBusy() {
+    return CHAT_VOICE_BUSY_PHASES.has(String(chatVoiceState.phase || 'idle'));
+  }
+
+  function setChatAudioSessionType(type) {
     const session = getChatAudioSession();
-    if (!session) return false;
+    if (!session || !type) return false;
     try {
-      if (session.type !== 'ambient') session.type = 'ambient';
-      return session.type === 'ambient';
+      if (session.type !== type) session.type = type;
+      return session.type === type;
     } catch (_) {
       return false;
     }
+  }
+
+  function pauseActiveChatVoicePlayback() {
+    try {
+      for (const audio of voicePlaybackRegistry.values()) {
+        if (audio && !audio.paused) audio.pause();
+      }
+    } catch (_) {}
+    document.querySelectorAll?.('audio').forEach?.((audio) => {
+      if (!audio) return;
+      try {
+        if (!audio.paused) audio.pause();
+      } catch (_) {}
+    });
+  }
+
+  function applyChatAudioSessionAmbient(reason = 'chat') {
+    if (isChatVoiceBusy()) return false;
+    if (setChatAudioSessionType('ambient')) return true;
+    return setChatAudioSessionType('auto');
+  }
+
+  async function prepareChatAudioForCapture(reason = 'voice-capture') {
+    pauseActiveChatVoicePlayback();
+    chatVoiceState.phase = 'preparing';
+    chatVoiceState.lastError = '';
+    if (!setChatAudioSessionType('play-and-record')) {
+      setChatAudioSessionType('auto');
+    }
+    chatVoiceState.phase = 'requesting';
+    return true;
+  }
+
+  async function restoreChatAudioAfterCapture(reason = 'voice-capture') {
+    stopChatVoiceTracks();
+    resetChatVoiceState();
+    chatVoiceState.phase = 'idle';
+    if (!setChatAudioSessionType('ambient')) {
+      setChatAudioSessionType('auto');
+    }
+    const queuedIncoming = chatVoiceState.queuedIncomingTone > 0;
+    const queuedOutgoing = chatVoiceState.queuedOutgoingTone > 0;
+    chatVoiceState.queuedIncomingTone = 0;
+    chatVoiceState.queuedOutgoingTone = 0;
+    if (queuedIncoming) queuePendingChatTone('incoming');
+    if (queuedOutgoing) queuePendingChatTone('outgoing');
+    await flushPendingChatTones();
+    syncAllVoiceRecorderUis();
+    return true;
   }
 
   const chatSoundRuntime = {
@@ -433,7 +491,7 @@
   let chatFirstInteractionBound = false;
 
   function ensureChatSoundContext() {
-    applyChatAudioSessionAmbient('ensure-context');
+    if (!isChatVoiceBusy()) applyChatAudioSessionAmbient('ensure-context');
     if (chatAudioCtx && chatAudioCtx.state !== 'closed') return chatAudioCtx;
     const Ctx = window.AudioContext || window.webkitAudioContext;
     if (!Ctx) {
@@ -454,6 +512,11 @@
   }
 
   function queuePendingChatTone(kind) {
+    if (isChatVoiceBusy()) {
+      if (kind === 'incoming') chatVoiceState.queuedIncomingTone = 1;
+      else if (kind === 'outgoing') chatVoiceState.queuedOutgoingTone = 1;
+      return;
+    }
     if (kind === 'incoming') chatSoundRuntime.pendingIncoming = 1;
     else if (kind === 'outgoing') chatSoundRuntime.pendingOutgoing = 1;
   }
@@ -644,6 +707,7 @@
 
   async function primeChatSoundSystem(trigger = 'interaction') {
     if (chatSoundState.primeInFlight) return chatAudioReady;
+    if (isChatVoiceBusy()) return false;
     chatSoundState.primeInFlight = true;
     applyChatAudioSessionAmbient(trigger);
     reconcileChatSoundRuntime('prime-start');
@@ -712,6 +776,10 @@
   }
 
   async function playChatTone(kind) {
+    if (isChatVoiceBusy()) {
+      queuePendingChatTone(kind);
+      return false;
+    }
     reconcileChatSoundRuntime(`play-${kind}-start`);
     if (kind === 'incoming') applyChatAudioSessionAmbient('incoming-tone');
     if (kind === 'outgoing') applyChatAudioSessionAmbient('outgoing-tone');
@@ -731,6 +799,7 @@
   }
 
   async function flushPendingChatTones() {
+    if (isChatVoiceBusy()) return;
     reconcileChatSoundRuntime('flush-pending');
     if (!chatAudioReady) return;
     const incomingPending = chatSoundRuntime.pendingIncoming > 0;
@@ -742,6 +811,8 @@
   }
 
   function onChatSoundPrimeInteraction(evt) {
+    const target = evt?.target;
+    if (target && typeof target.closest === 'function' && target.closest('[data-chat-voice-trigger]')) return;
     void primeChatSoundSystem(evt?.type || 'interaction');
   }
 
@@ -780,6 +851,7 @@
       });
 
       window.addEventListener('pagehide', () => {
+        void cancelChatVoiceRecording('Recording canceled');
         chatAudioUnlocked = false;
         chatAudioReady = false;
         if (typeof chatSoundRuntime !== 'undefined' && chatSoundRuntime) {
@@ -791,6 +863,10 @@
       });
 
       document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') {
+          void cancelChatVoiceRecording('Recording canceled');
+          return;
+        }
         if (document.visibilityState === 'visible') {
           reconcileChatSoundRuntime('visibility-visible');
           if (!chatAudioReady) {
@@ -953,6 +1029,8 @@
   }
 
   async function onChatFirstInteraction(evt) {
+    const target = evt?.target;
+    if (target && typeof target.closest === 'function' && target.closest('[data-chat-voice-trigger]')) return;
     await primeChatSoundSystem(evt?.type || 'interaction');
     await ensureChatNotificationsBootstrapped(evt?.type || 'interaction');
   }
@@ -1068,7 +1146,7 @@
     return !!(navigator?.mediaDevices?.getUserMedia && typeof window.MediaRecorder !== 'undefined');
   }
 
-  function chatPickVoiceMimeType() {
+  function chooseChatVoiceMimeType() {
     if (typeof window.MediaRecorder === 'undefined') return '';
     for (const type of CHAT_VOICE_MIME_TYPES) {
       try {
@@ -1080,16 +1158,16 @@
     return '';
   }
 
-  function chatFormatVoiceDuration(durationMs) {
+  function formatChatVoiceDuration(durationMs) {
     const totalSeconds = Math.max(0, Math.round((Number(durationMs) || 0) / 1000));
     const mins = Math.floor(totalSeconds / 60);
     const secs = totalSeconds % 60;
     return `${mins}:${String(secs).padStart(2, '0')}`;
   }
 
-  function formatVoiceNoteDuration(durationMs) {
-    return chatFormatVoiceDuration(durationMs);
-  }
+  function chatPickVoiceMimeType() { return chooseChatVoiceMimeType(); }
+  function chatFormatVoiceDuration(durationMs) { return formatChatVoiceDuration(durationMs); }
+  function formatVoiceNoteDuration(durationMs) { return formatChatVoiceDuration(durationMs); }
 
   function voiceNoteLabel(message) {
     return message?.text || 'Voice note';
@@ -1098,11 +1176,11 @@
   function buildVoiceComposer(surface, extraClass = '') {
     return `<div class="chatVoiceComposer ${extraClass}" data-voice-surface="${surface}">
       <div class="chatVoicePreview">
-        <button class="chatVoiceBtn" id="${surface}VoiceStartBtn" type="button" aria-label="Record voice note">🎤</button>
-        <button class="chatVoiceBtn recording" id="${surface}VoiceStopBtn" type="button" aria-label="Stop voice note" hidden>Stop</button>
-        <button class="chatVoiceBtn" id="${surface}VoiceCancelBtn" type="button" aria-label="Cancel voice note" hidden>Cancel</button>
+        <button class="chatVoiceBtn" id="${surface}VoiceStartBtn" type="button" aria-label="Record voice note" data-chat-voice-trigger="1">🎤</button>
+        <button class="chatVoiceBtn recording" id="${surface}VoiceStopBtn" type="button" aria-label="Stop voice note" hidden data-chat-voice-trigger="1">Stop</button>
+        <button class="chatVoiceBtn" id="${surface}VoiceCancelBtn" type="button" aria-label="Cancel voice note" hidden data-chat-voice-trigger="1">Cancel</button>
         <div class="chatVoiceMeta">
-          <div class="chatVoiceStatus" id="${surface}VoiceStatus" aria-live="polite">Tap mic to record</div>
+          <div class="chatVoiceStatus" id="${surface}VoiceStatus" aria-live="polite">${CHAT_VOICE_IDLE_STATUS}</div>
           <div class="chatVoiceTimer" id="${surface}VoiceTimer">0:00</div>
           <div class="chatVoiceStatus" id="${surface}VoiceUpload" hidden></div>
           <div class="chatVoiceError" id="${surface}VoiceError" hidden></div>
@@ -1113,7 +1191,7 @@
 
   function renderVoiceNotePlayer(message, variant = 'chat') {
     const audioUrl = String(message?.audioUrl || '').trim();
-    const durationText = chatFormatVoiceDuration(message?.audioDurationMs);
+    const durationText = formatChatVoiceDuration(message?.audioDurationMs);
     const fallback = escapeHtml(voiceNoteLabel(message));
     if (!audioUrl) {
       return `<div class="chatVoiceBubble ${variant}"><div class="chatVoiceError">Voice note unavailable.</div></div>`;
@@ -1137,7 +1215,7 @@
     const durationMs = Number.isFinite(audio.duration) && audio.duration > 0
       ? Math.round(audio.duration * 1000)
       : 0;
-    if (durationMs > 0) timeEl.textContent = chatFormatVoiceDuration(durationMs);
+    if (durationMs > 0) timeEl.textContent = formatChatVoiceDuration(durationMs);
   }
 
   function bindVoicePlayer(player) {
@@ -1165,7 +1243,7 @@
 
   function getVoiceRecorderState(scope) {
     const stateScope = voiceScopeStateKey(scope);
-    const isActive = !!stateScope && chatVoiceState.activeScope === stateScope;
+    const isActive = !!stateScope && chatVoiceState.scope === stateScope;
     return {
       ...chatVoiceState,
       scope: stateScope,
@@ -1178,14 +1256,15 @@
 
   function setVoiceRecorderStatus(scope, text = '', errorText = '') {
     const stateScope = voiceScopeStateKey(scope);
-    if (!stateScope || chatVoiceState.activeScope === stateScope || !chatVoiceState.activeScope) {
-      chatVoiceState.statusText = String(text || '').trim() || 'Tap mic to record';
+    if (!stateScope || chatVoiceState.scope === stateScope || !chatVoiceState.scope) {
+      chatVoiceState.statusText = String(text || '').trim() || CHAT_VOICE_IDLE_STATUS;
       chatVoiceState.errorText = String(errorText || '').trim();
+      chatVoiceState.lastError = chatVoiceState.errorText;
     }
     const domKey = voiceScopeDomKey(scope);
     const statusEl = document.getElementById(`${domKey}VoiceStatus`);
     const errorEl = document.getElementById(`${domKey}VoiceError`);
-    if (statusEl) statusEl.textContent = String(text || '').trim() || 'Tap mic to record';
+    if (statusEl) statusEl.textContent = String(text || '').trim() || CHAT_VOICE_IDLE_STATUS;
     if (errorEl) {
       const nextError = String(errorText || '').trim();
       errorEl.textContent = nextError;
@@ -1196,9 +1275,10 @@
   function syncVoiceRecorderUi(scope) {
     const domKey = voiceScopeDomKey(scope);
     const stateScope = voiceScopeStateKey(scope);
-    const isActive = !!stateScope && chatVoiceState.activeScope === stateScope;
-    const isRecording = isActive && !!chatVoiceState.recorder && chatVoiceState.recorder.state === 'recording';
-    const isUploading = isActive && !!chatVoiceState.isUploading;
+    const isActive = !!stateScope && chatVoiceState.scope === stateScope;
+    const isRecording = isActive && chatVoiceState.phase === 'recording';
+    const isBusy = isActive && isChatVoiceBusy();
+    const isUploading = isActive && chatVoiceState.phase === 'uploading';
     const startBtn = document.getElementById(`${domKey}VoiceStartBtn`);
     const stopBtn = document.getElementById(`${domKey}VoiceStopBtn`);
     const cancelBtn = document.getElementById(`${domKey}VoiceCancelBtn`);
@@ -1207,29 +1287,29 @@
     const statusEl = document.getElementById(`${domKey}VoiceStatus`);
     const errorEl = document.getElementById(`${domKey}VoiceError`);
     if (startBtn) {
-      startBtn.hidden = isRecording;
-      startBtn.disabled = isUploading;
-      startBtn.classList.toggle('busy', isUploading);
+      startBtn.hidden = isRecording || isBusy;
+      startBtn.disabled = isBusy;
+      startBtn.classList.toggle('busy', isBusy);
       startBtn.classList.toggle('recording', isRecording);
       startBtn.textContent = isUploading ? '…' : '🎤';
     }
     if (stopBtn) {
       stopBtn.hidden = !isRecording;
-      stopBtn.disabled = isUploading;
-      stopBtn.classList.toggle('busy', isUploading);
+      stopBtn.disabled = !isRecording;
+      stopBtn.classList.toggle('busy', chatVoiceState.phase === 'stopping');
     }
     if (cancelBtn) {
-      cancelBtn.hidden = !isRecording && !isUploading;
-      cancelBtn.disabled = isUploading;
-      cancelBtn.classList.toggle('busy', isUploading);
+      cancelBtn.hidden = !isActive || (!isBusy && !isUploading);
+      cancelBtn.disabled = chatVoiceState.phase === 'stopping';
+      cancelBtn.classList.toggle('busy', chatVoiceState.phase === 'stopping');
     }
-    if (timerEl) timerEl.textContent = isActive ? chatFormatVoiceDuration(chatVoiceState.durationMs) : '0:00';
+    if (timerEl) timerEl.textContent = isActive ? formatChatVoiceDuration(chatVoiceState.durationMs) : '0:00';
     if (uploadEl) {
       uploadEl.hidden = !isUploading;
       uploadEl.textContent = isUploading ? 'Uploading voice note…' : '';
     }
     if (statusEl && !statusEl.textContent.trim()) {
-      statusEl.textContent = isRecording ? 'Recording voice note…' : 'Tap mic to record';
+      statusEl.textContent = isRecording ? 'Recording voice note…' : CHAT_VOICE_IDLE_STATUS;
     }
     if (errorEl && !isActive) {
       errorEl.textContent = '';
@@ -1243,193 +1323,217 @@
     syncVoiceRecorderUi('driverProfile');
   }
 
-  function chatStopVoiceTracks() {
+  function stopChatVoiceTracks() {
     try {
       chatVoiceState.stream?.getTracks?.().forEach((track) => track.stop());
     } catch (_) {}
     chatVoiceState.stream = null;
   }
 
-  function chatResetVoiceState() {
-    if (chatVoiceState.timer) {
-      window.clearInterval(chatVoiceState.timer);
-      chatVoiceState.timer = null;
+  function resetChatVoiceState() {
+    if (chatVoiceState.timerId) {
+      window.clearInterval(chatVoiceState.timerId);
+      chatVoiceState.timerId = null;
     }
-    chatStopVoiceTracks();
     chatVoiceState.recorder = null;
     chatVoiceState.chunks = [];
     chatVoiceState.startedAt = 0;
-    chatVoiceState.selectedMimeType = '';
-    chatVoiceState.isUploading = false;
-    chatVoiceState.isCancelling = false;
+    chatVoiceState.mimeType = '';
     chatVoiceState.durationMs = 0;
-    chatVoiceState.activeScope = '';
-    chatVoiceState.targetRoom = '';
-    chatVoiceState.targetUserId = '';
-    chatVoiceState.statusText = 'Tap mic to record';
+    chatVoiceState.scope = '';
+    chatVoiceState.room = '';
+    chatVoiceState.otherUserId = '';
+    chatVoiceState.statusText = CHAT_VOICE_IDLE_STATUS;
     chatVoiceState.errorText = '';
-    syncAllVoiceRecorderUis();
+    chatVoiceState.cancelRequested = false;
   }
 
-  function chatCancelVoiceRecording(reason = 'Recording canceled') {
-    if (!chatVoiceState.activeScope) {
-      chatResetVoiceState();
-      return;
+  function mapChatVoiceError(err) {
+    const name = String(err?.name || '');
+    const rawMessage = String(err?.message || '');
+    const lowered = rawMessage.toLowerCase();
+    if (name === 'NotAllowedError' || name === 'SecurityError' || name === 'PermissionDeniedError') {
+      return 'Microphone permission was denied.';
     }
-    const activeScope = chatVoiceState.activeScope;
-    const domScope = activeScope === 'profile-dm' ? 'driverProfile' : activeScope;
-    chatVoiceState.isCancelling = true;
-    setVoiceRecorderStatus(domScope, reason, '');
-    if (chatVoiceState.timer) {
-      window.clearInterval(chatVoiceState.timer);
-      chatVoiceState.timer = null;
+    if (name === 'NotFoundError') {
+      return 'No microphone was found.';
     }
-    if (chatVoiceState.recorder && chatVoiceState.recorder.state === 'recording') {
-      try {
-        chatVoiceState.recorder.stop();
-        return;
-      } catch (_) {}
+    if (name === 'NotReadableError' || name === 'AbortError' || lowered.includes('audiosession category is not compatible with audio capture') || lowered.includes('incompatiblecategory')) {
+      return 'iPhone audio mode was wrong for recording. Audio was reset. Tap mic again.';
     }
-    chatResetVoiceState();
+    if (rawMessage) return 'Unable to start voice recording right now.';
+    return 'Unable to start voice recording right now.';
   }
 
-  async function chatUploadVoiceNote(scope, blob, durationMs, options = {}) {
+  async function uploadChatVoiceNote(scope, blob, durationMs, options = {}) {
     const normalizedScope = voiceScopeStateKey(scope);
     if (normalizedScope === 'public') {
-      return await chatSendPublicVoiceNote(blob, durationMs, chatVoiceState.selectedMimeType || blob?.type || '', options.room || CHAT_ROOM);
+      return await chatSendPublicVoiceNote(blob, durationMs, chatVoiceState.mimeType || blob?.type || '', options.room || CHAT_ROOM);
     }
     if (normalizedScope === 'private' || normalizedScope === 'profile-dm') {
-      return await chatSendPrivateVoiceNote(options.userId, blob, durationMs, chatVoiceState.selectedMimeType || blob?.type || '');
+      return await chatSendPrivateVoiceNote(options.userId, blob, durationMs, chatVoiceState.mimeType || blob?.type || '');
     }
     throw new Error('Voice notes are not available here.');
   }
 
-  async function chatFinishVoiceRecording(scope, options = {}) {
+  async function startChatVoiceRecording(scope, options = {}) {
     const normalizedScope = voiceScopeStateKey(scope);
-    if (!normalizedScope || chatVoiceState.activeScope !== normalizedScope) {
-      chatResetVoiceState();
-      return;
-    }
-    if (chatVoiceState.timer) {
-      window.clearInterval(chatVoiceState.timer);
-      chatVoiceState.timer = null;
-    }
-    chatStopVoiceTracks();
     const domScope = normalizedScope === 'profile-dm' ? 'driverProfile' : normalizedScope;
-    const durationMs = Math.max(0, Date.now() - Number(chatVoiceState.startedAt || 0));
-    const chunks = chatVoiceState.chunks.slice();
-    const mimeType = chatVoiceState.selectedMimeType || chatVoiceState.recorder?.mimeType || 'audio/webm';
-    chatVoiceState.recorder = null;
-    chatVoiceState.chunks = [];
-    chatVoiceState.durationMs = durationMs;
-    if (chatVoiceState.isCancelling || !chunks.length) {
-      chatResetVoiceState();
-      setVoiceRecorderStatus(domScope, 'Tap mic to record', '');
-      return;
-    }
-    chatVoiceState.isUploading = true;
-    setVoiceRecorderStatus(domScope, 'Preparing voice note…', '');
-    syncAllVoiceRecorderUis();
-    try {
-      const blob = new Blob(chunks, { type: mimeType });
-      const response = await chatUploadVoiceNote(normalizedScope, blob, Math.min(durationMs, VOICE_NOTE_MAX_MS), options);
-      if (typeof options.onUploaded === 'function') {
-        await options.onUploaded(response, { blob, durationMs: Math.min(durationMs, VOICE_NOTE_MAX_MS), scope: normalizedScope });
-      }
-      setVoiceRecorderStatus(domScope, 'Voice note sent', '');
-      await playChatTone('outgoing');
-      chatResetVoiceState();
-      setVoiceRecorderStatus(domScope, 'Voice note sent', '');
-    } catch (err) {
-      const message = err?.message || 'Voice note failed to send.';
-      chatVoiceState.isUploading = false;
-      syncAllVoiceRecorderUis();
-      setVoiceRecorderStatus(domScope, 'Tap mic to record', message);
-      alert(message);
-      chatResetVoiceState();
-      setVoiceRecorderStatus(domScope, 'Tap mic to record', message);
-      throw err;
-    }
-  }
-
-  async function chatBeginVoiceRecording(scope, options = {}) {
-    const normalizedScope = voiceScopeStateKey(scope);
-    if (!normalizedScope || chatVoiceState.isUploading) return;
+    if (!normalizedScope) return false;
     if (!chatSupportsVoiceRecording()) {
-      const domScope = normalizedScope === 'profile-dm' ? 'driverProfile' : normalizedScope;
-      setVoiceRecorderStatus(domScope, 'Tap mic to record', 'Voice notes are not supported on this device.');
-      alert('Voice notes are not supported on this device.');
-      return;
+      setVoiceRecorderStatus(domScope, CHAT_VOICE_IDLE_STATUS, 'Voice notes are not supported on this browser.');
+      syncAllVoiceRecorderUis();
+      return false;
     }
-    if (chatVoiceState.activeScope && chatVoiceState.activeScope !== normalizedScope) {
-      chatCancelVoiceRecording('Recording canceled');
-      return;
+    if (isChatVoiceBusy()) {
+      setVoiceRecorderStatus(domScope, chatVoiceState.statusText || 'Finish current voice note first', 'Finish the current voice note first.');
+      syncAllVoiceRecorderUis();
+      return false;
     }
-    await primeChatSoundSystem(`${normalizedScope}-voice-start`);
-    const mimeType = chatPickVoiceMimeType();
-    const domScope = normalizedScope === 'profile-dm' ? 'driverProfile' : normalizedScope;
+
+    await prepareChatAudioForCapture(`${normalizedScope}-voice-start`);
+    chatVoiceState.scope = normalizedScope;
+    chatVoiceState.room = String(options.room || CHAT_ROOM || '');
+    chatVoiceState.otherUserId = options.userId == null ? '' : String(options.userId);
+    chatVoiceState.mimeType = chooseChatVoiceMimeType();
+    chatVoiceState.cancelRequested = false;
+    chatVoiceState.durationMs = 0;
+    setVoiceRecorderStatus(domScope, 'Requesting microphone…', '');
+    syncAllVoiceRecorderUis();
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      chatVoiceState.activeScope = normalizedScope;
-      chatVoiceState.targetRoom = String(options.room || CHAT_ROOM || '');
-      chatVoiceState.targetUserId = options.userId == null ? '' : String(options.userId);
-      chatVoiceState.recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
       chatVoiceState.stream = stream;
+      chatVoiceState.recorder = chatVoiceState.mimeType
+        ? new MediaRecorder(stream, { mimeType: chatVoiceState.mimeType })
+        : new MediaRecorder(stream);
+      chatVoiceState.mimeType = chatVoiceState.mimeType || chatVoiceState.recorder.mimeType || '';
       chatVoiceState.chunks = [];
       chatVoiceState.startedAt = Date.now();
-      chatVoiceState.selectedMimeType = mimeType || chatVoiceState.recorder.mimeType || '';
-      chatVoiceState.isUploading = false;
-      chatVoiceState.isCancelling = false;
-      chatVoiceState.durationMs = 0;
+      chatVoiceState.phase = 'recording';
       setVoiceRecorderStatus(domScope, 'Recording voice note…', '');
       chatVoiceState.recorder.addEventListener('dataavailable', (event) => {
         if (event.data && event.data.size > 0) chatVoiceState.chunks.push(event.data);
       });
       chatVoiceState.recorder.addEventListener('stop', () => {
-        void chatFinishVoiceRecording(normalizedScope, options).catch((err) => {
+        const finalizeScope = chatVoiceState.scope || normalizedScope;
+        const finalizeOptions = { ...options, room: chatVoiceState.room || options.room, userId: chatVoiceState.otherUserId || options.userId };
+        void (async () => {
+          const domTarget = finalizeScope === 'profile-dm' ? 'driverProfile' : finalizeScope;
+          const durationMs = Math.max(0, Date.now() - Number(chatVoiceState.startedAt || 0));
+          const chunks = chatVoiceState.chunks.slice();
+          const mimeType = chatVoiceState.mimeType || chatVoiceState.recorder?.mimeType || 'audio/webm';
+          const canceled = !!chatVoiceState.cancelRequested;
+          chatVoiceState.durationMs = durationMs;
+          if (canceled || !chunks.length) {
+            await restoreChatAudioAfterCapture('voice-stop-cancel');
+            setVoiceRecorderStatus(domTarget, CHAT_VOICE_IDLE_STATUS, '');
+            return;
+          }
+          chatVoiceState.phase = 'uploading';
+          setVoiceRecorderStatus(domTarget, 'Uploading voice note…', '');
+          syncAllVoiceRecorderUis();
+          try {
+            const blob = new Blob(chunks, { type: mimeType });
+            const safeDurationMs = Math.min(durationMs, VOICE_NOTE_MAX_MS);
+            const response = await uploadChatVoiceNote(finalizeScope, blob, safeDurationMs, finalizeOptions);
+            if (typeof finalizeOptions.onUploaded === 'function') {
+              await finalizeOptions.onUploaded(response, { blob, durationMs: safeDurationMs, scope: finalizeScope });
+            }
+            await restoreChatAudioAfterCapture('voice-stop-uploaded');
+            setVoiceRecorderStatus(domTarget, 'Voice note sent', '');
+          } catch (err) {
+            const message = err?.message || 'Voice note failed to send.';
+            await restoreChatAudioAfterCapture('voice-stop-error');
+            setVoiceRecorderStatus(domTarget, CHAT_VOICE_IDLE_STATUS, message);
+            throw err;
+          }
+        })().catch((err) => {
           console.warn('voice note finish failed', err);
         });
       });
       chatVoiceState.recorder.start();
-      chatVoiceState.timer = window.setInterval(() => {
+      chatVoiceState.timerId = window.setInterval(() => {
         const elapsed = Math.max(0, Date.now() - chatVoiceState.startedAt);
         chatVoiceState.durationMs = elapsed;
         setVoiceRecorderStatus(domScope, 'Recording voice note…', '');
         syncAllVoiceRecorderUis();
         if (elapsed >= VOICE_NOTE_MAX_MS && chatVoiceState.recorder?.state === 'recording') {
-          try { chatVoiceState.recorder.stop(); } catch (_) {}
+          void stopChatVoiceRecording();
         }
       }, 250);
       syncAllVoiceRecorderUis();
+      return true;
     } catch (err) {
-      chatStopVoiceTracks();
-      chatResetVoiceState();
-      const denied = err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError' || /denied|permission/i.test(String(err?.message || ''));
-      const message = denied
-        ? 'Microphone permission was denied. You can still send text messages.'
-        : (err?.message || 'Unable to start voice recording.');
-      setVoiceRecorderStatus(domScope, 'Tap mic to record', message);
-      alert(message);
+      const rawMessage = String(err?.message || '');
+      const lowered = rawMessage.toLowerCase();
+      if (lowered.includes('audiosession category is not compatible with audio capture')) {
+        await restoreChatAudioAfterCapture('incompatible-category');
+      } else {
+        stopChatVoiceTracks();
+        await restoreChatAudioAfterCapture('voice-start-error');
+      }
+      const friendlyMessage = mapChatVoiceError(err);
+      chatVoiceState.lastError = friendlyMessage;
+      setVoiceRecorderStatus(domScope, CHAT_VOICE_IDLE_STATUS, friendlyMessage);
+      syncAllVoiceRecorderUis();
+      return false;
     }
   }
 
+  async function stopChatVoiceRecording() {
+    if (!chatVoiceState.recorder || chatVoiceState.phase !== 'recording') return false;
+    chatVoiceState.phase = 'stopping';
+    chatVoiceState.durationMs = Math.max(0, Date.now() - Number(chatVoiceState.startedAt || 0));
+    syncAllVoiceRecorderUis();
+    try {
+      chatVoiceState.recorder.stop();
+      return true;
+    } catch (err) {
+      await restoreChatAudioAfterCapture('voice-stop-error');
+      const domScope = chatVoiceState.scope === 'profile-dm' ? 'driverProfile' : chatVoiceState.scope;
+      setVoiceRecorderStatus(domScope, CHAT_VOICE_IDLE_STATUS, 'Voice note failed to stop cleanly.');
+      syncAllVoiceRecorderUis();
+      return false;
+    }
+  }
+
+  async function cancelChatVoiceRecording(reason = 'Recording canceled') {
+    const activeScope = chatVoiceState.scope;
+    const domScope = activeScope === 'profile-dm' ? 'driverProfile' : activeScope;
+    chatVoiceState.cancelRequested = true;
+    chatVoiceState.chunks = [];
+    if (domScope) setVoiceRecorderStatus(domScope, reason, '');
+    if (chatVoiceState.recorder && chatVoiceState.recorder.state === 'recording') {
+      chatVoiceState.phase = 'stopping';
+      syncAllVoiceRecorderUis();
+      try {
+        chatVoiceState.recorder.stop();
+        return true;
+      } catch (_) {}
+    }
+    await restoreChatAudioAfterCapture('voice-cancel');
+    if (domScope) setVoiceRecorderStatus(domScope, CHAT_VOICE_IDLE_STATUS, '');
+    syncAllVoiceRecorderUis();
+    return true;
+  }
+
   function startVoiceRecording(scope, options) {
-    return chatBeginVoiceRecording(scope, options);
+    return startChatVoiceRecording(scope, options);
   }
 
   function cancelVoiceRecording(scope) {
     const normalizedScope = voiceScopeStateKey(scope);
-    if (!normalizedScope || chatVoiceState.activeScope === normalizedScope) {
-      chatCancelVoiceRecording('Recording canceled');
+    if (!normalizedScope || chatVoiceState.scope === normalizedScope) {
+      return cancelChatVoiceRecording('Recording canceled');
     }
+    return false;
   }
 
   function stopActiveVoiceRecording(scope) {
     const normalizedScope = voiceScopeStateKey(scope);
-    if (!normalizedScope || chatVoiceState.activeScope !== normalizedScope) return;
-    if (chatVoiceState.recorder?.state === 'recording') {
-      try { chatVoiceState.recorder.stop(); } catch (_) {}
-    }
+    if (!normalizedScope || chatVoiceState.scope !== normalizedScope) return false;
+    return stopChatVoiceRecording();
   }
 
   function bindVoiceComposerControls(surface, optionsFactory) {
@@ -1438,10 +1542,14 @@
     const cancelBtn = document.getElementById(`${surface}VoiceCancelBtn`);
     startBtn?.addEventListener('click', async () => {
       const options = typeof optionsFactory === 'function' ? optionsFactory() : {};
-      await chatBeginVoiceRecording(surface, options);
+      await startChatVoiceRecording(surface, options);
     });
-    stopBtn?.addEventListener('click', () => stopActiveVoiceRecording(surface));
-    cancelBtn?.addEventListener('click', () => cancelVoiceRecording(surface));
+    stopBtn?.addEventListener('click', () => {
+      void stopActiveVoiceRecording(surface);
+    });
+    cancelBtn?.addEventListener('click', () => {
+      void cancelVoiceRecording(surface);
+    });
     syncVoiceRecorderUi(surface);
   }
 
@@ -1774,7 +1882,7 @@
       else list.scrollTop = preserveScrollTop;
     }
     document.getElementById('chatPrivateBackBtn')?.addEventListener('click', () => {
-      if (chatVoiceState.activeScope === 'private') chatCancelVoiceRecording('Recording canceled');
+      if (chatVoiceState.scope === 'private') cancelChatVoiceRecording('Recording canceled');
       privateActiveUserId = null;
       privateActiveDisplayName = '';
       renderPrivateThreadList();
@@ -1785,8 +1893,8 @@
 
   async function openPrivateConversation(userId, displayName = '', options = {}) {
     if (!userId) return;
-    if (chatVoiceState.activeScope === 'private' && chatVoiceState.targetUserId && String(chatVoiceState.targetUserId) !== String(userId)) {
-      chatCancelVoiceRecording('Recording canceled');
+    if (chatVoiceState.scope === 'private' && chatVoiceState.otherUserId && String(chatVoiceState.otherUserId) !== String(userId)) {
+      cancelChatVoiceRecording('Recording canceled');
     }
     const uid = String(userId);
     privateActiveUserId = uid;
@@ -1867,8 +1975,8 @@
 
   function switchChatTab(nextTab) {
     const upcomingTab = nextTab === 'private' ? 'private' : 'public';
-    if (chatVoiceState.activeScope === 'public' && upcomingTab !== 'public') chatCancelVoiceRecording('Recording canceled');
-    if (chatVoiceState.activeScope === 'private' && upcomingTab !== 'private') chatCancelVoiceRecording('Recording canceled');
+    if (chatVoiceState.scope === 'public' && upcomingTab !== 'public') cancelChatVoiceRecording('Recording canceled');
+    if (chatVoiceState.scope === 'private' && upcomingTab !== 'private') cancelChatVoiceRecording('Recording canceled');
     activeChatTab = upcomingTab;
     const publicView = document.getElementById('chatPublicView');
     const publicComposer = document.getElementById('chatPublicComposer');
@@ -1947,8 +2055,7 @@
     privateThreadPollTimer = null;
   }
   function chatResetState() {
-    chatCancelVoiceRecording('Recording canceled');
-    chatResetVoiceState();
+    void cancelChatVoiceRecording('Recording canceled');
     chatLastSeen = null;
     chatLatestMessageId = null;
     chatLastReadId = loadChatLastReadId();
@@ -2137,8 +2244,8 @@
     if (typeof authHeaderOK === 'function' && authHeaderOK()) {
       startChatPolling();
       startPrivatePolling();
-      if (!isChatPanelOpen() && (chatVoiceState.activeScope === 'public' || chatVoiceState.activeScope === 'private')) {
-        chatCancelVoiceRecording('Recording canceled');
+      if (!isChatPanelOpen() && (chatVoiceState.scope === 'public' || chatVoiceState.scope === 'private')) {
+        cancelChatVoiceRecording('Recording canceled');
       }
       if (isChatPanelOpen() && chatInitialHistoryLoadAttempted && !chatInitialHistoryLoaded && !chatInitialHistoryRetryQueued) {
         chatInitialHistoryRetryQueued = true;
@@ -2150,7 +2257,7 @@
         });
       }
     } else {
-      chatCancelVoiceRecording('Recording canceled');
+      cancelChatVoiceRecording('Recording canceled');
       stopChatPolling();
       stopPrivatePolling();
     }
@@ -4517,7 +4624,7 @@
   }
 
   function closeDriverProfileModal() {
-    if (chatVoiceState.activeScope === 'profile-dm') chatCancelVoiceRecording('Recording canceled');
+    if (chatVoiceState.scope === 'profile-dm') cancelChatVoiceRecording('Recording canceled');
     stopDriverProfileDmPolling();
     driverProfileState.open = false;
     driverProfileState.userId = null;
@@ -4769,7 +4876,7 @@
   }
 
   async function openDriverProfileModal({ userId, isSelf = false, source = '' } = {}) {
-    if (chatVoiceState.activeScope === 'profile-dm') chatCancelVoiceRecording('Recording canceled');
+    if (chatVoiceState.scope === 'profile-dm') cancelChatVoiceRecording('Recording canceled');
     const nextUserId = Number(userId);
     if (!Number.isFinite(nextUserId)) return;
     const meId = Number(window?.me?.id);
