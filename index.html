@@ -896,7 +896,6 @@
     @supports not ((-webkit-backdrop-filter: blur(12px)) or (backdrop-filter: blur(12px))) {
       .dockDrawer { background: rgba(255,255,255,0.92); }
     }
-    :root{ --chat-max-panel-height:min(70dvh,620px); --chat-keyboard-offset:0px; --chat-composer-safe-bottom:0px; }
     .dockDrawer.open{ transform: translateX(0); }
     .dockDrawerHeader{
       display: flex;
@@ -1085,12 +1084,12 @@
     .mapIdentityCropActions{ display:flex; justify-content:flex-end; gap:8px; }
 
     .chatPanelWrap{
-      display:flex;
-      flex-direction:column;
-      height:100%;
-      min-height:0;
-      background:#fff;
-      gap:8px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      height: 100%;
+      min-height: 0;
+      background: #fff;
     }
     .chatHeader{
       display:flex;
@@ -1130,12 +1129,10 @@
       color:#fff;
       box-shadow: inset 0 0 0 1px rgba(37,99,235,0.55);
     }
-    .chatTabIndicator{ display:none; }
+    .chatTabIndicator{ position:absolute; left:6px; right:6px; bottom:2px; height:2px; background:rgba(220,38,38,0.45); border-radius:999px; pointer-events:none; }
     .chatBody{ display:flex; flex-direction:column; flex:1; min-height:0; overflow:hidden; border-radius:12px; border:1px solid rgba(15,23,42,0.10); background:#fff; }
     .chatTabContent{ display:flex; flex-direction:column; flex:1; min-height:0; overflow:hidden; }
     .chatTabContent.hidden{ display:none; }
-    .chatComposerRegion{ flex-shrink:0; min-height:0; }
-    .chatComposerWrap{ flex-shrink:0; background:#fff; border-top:1px solid rgba(15,23,42,0.10); padding:8px 8px calc(8px + env(safe-area-inset-bottom, 0px)); }
     .chatComposerWrap.hidden{ display:none; }
     .chatPrivateTabUnread{ margin-left:6px; display:none; min-width:16px; height:16px; line-height:16px; border-radius:999px; background:#d91f33; color:#fff; font-size:10px; font-weight:900; padding:0 4px; }
     .chatPrivateTabUnread.show{ display:inline-block; }
@@ -1178,21 +1175,17 @@
       font-size: 10px;
       opacity: 0.68;
     }
-    .chatMsgVoice audio{ width:min(260px,100%); margin-top:4px; }
-    .chatVoiceStatus{ font:700 11px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial; color:#334155; padding:6px 2px 0; }
-    .chatPrivateThreadAvatarImg{ width:100%; height:100%; border-radius:50%; object-fit:cover; display:block; }
     .chatComposer{
       display: flex;
       align-items: center;
       gap: 6px;
     }
+    .chatComposerWrap{ flex-shrink:0; background:#fff; border-top:1px solid rgba(15,23,42,0.10); padding:8px 8px calc(8px + env(safe-area-inset-bottom, 0px)); }
     .chatPrivateWrap{ flex:1; min-height:0; max-height:none; overflow:hidden; border-radius:0; border:0; background:#fff; display:flex; flex-direction:column; }
     .chatPrivateThreadList{ flex:1; min-height:0; max-height:none; overflow:auto; -webkit-overflow-scrolling:touch; display:flex; flex-direction:column; }
-    .chatPrivateThreadToolbar{ padding:8px; border-bottom:1px solid rgba(15,23,42,0.12); display:flex; justify-content:space-between; background:#fff; }
-    .chatPrivatePickerSearch{ padding:8px; border-bottom:1px solid rgba(15,23,42,0.08); }
+    .chatPrivateThreadToolbar{ padding:8px; border-bottom:1px solid rgba(15,23,42,0.12); display:flex; justify-content:flex-end; background:#fff; }
     .chatPrivateThreadRow{ width:100%; border:none; background:#fff; color:#0f172a; display:flex; align-items:center; gap:8px; padding:9px; border-bottom:1px solid rgba(15,23,42,0.08); text-align:left; }
-    .chatPrivateThreadAvatar{ position:relative; width:28px; height:28px; border-radius:50%; background:linear-gradient(135deg,#1e45a6,#0d6ddf); display:grid; place-items:center; font-size:11px; font-weight:900; overflow:visible; }
-    .chatPrivateUserOnline{ position:absolute; right:-1px; bottom:-1px; width:8px; height:8px; border-radius:999px; background:#16a34a; box-shadow:0 0 0 2px #fff; }
+    .chatPrivateThreadAvatar{ width:28px; height:28px; border-radius:50%; background:linear-gradient(135deg,#1e45a6,#0d6ddf); display:grid; place-items:center; font-size:11px; font-weight:900; }
     .chatPrivateThreadBody{ flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
     .chatPrivateThreadName{ font-size:12px; font-weight:900; }
     .chatPrivateThreadPreview{ font-size:11px; color:#475569; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -1711,10 +1704,10 @@
       top: auto;
       left: 50%;
       transform: translateX(-50%) translateY(18px);
-      bottom: calc(env(safe-area-inset-bottom, 0px) + 122px + var(--chat-keyboard-offset, 0px));
+      bottom: calc(env(safe-area-inset-bottom, 0px) + 122px);
       width: min(92vw, 430px);
-      height: min(var(--chat-max-panel-height), 620px);
-      max-height: min(var(--chat-max-panel-height), 620px);
+      height: min(70dvh, 620px);
+      max-height: min(70dvh, 620px);
       border-radius: 20px;
       overflow: hidden;
       z-index: 7000;
