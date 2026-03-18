@@ -145,6 +145,7 @@
   let chatVoiceRecordingStartedAt = 0;
   let chatVoiceRecordingTimer = null;
   let chatVoiceRecordingDeadline = 0;
+  let chatViewportScrollTimer = null;
 
   function chatLastReadStorageKey() {
     return `tlc_chat_last_read_${CHAT_ROOM}`;
@@ -1085,11 +1086,11 @@
 
   function privateThreadPreview(thread) {
     if (String(thread?.message_kind || '').toLowerCase() === 'voice' || thread?.voice_url) return '[Voice message]';
-    return String(thread?.last_text || thread?.text || thread?.last_message || '').trim();
+    return String(thread?.last_message_text || thread?.last_text || thread?.last_message || thread?.text || '').trim();
   }
 
   function privateThreadTime(thread) {
-    return thread?.last_created_at || thread?.created_at || thread?.ts || thread?.timestamp || '';
+    return thread?.last_message_at || thread?.last_message_created_at || thread?.last_created_at || thread?.created_at || '';
   }
 
   function privateThreadUnreadCount(thread) {
@@ -1111,11 +1112,14 @@
       ...existing,
       other_user_id: uid,
       other_display_name: existing?.other_display_name || (!normalizedLatest?._isSelf ? normalizedLatest?._senderDisplayName : '') || privateActiveDisplayName,
+      other_avatar_url: existing?.other_avatar_url || normalizedLatest?._senderAvatarUrl || privateAvatarUrl(normalizedLatest),
       avatar_url: privateAvatarUrl(existing) || privateAvatarUrl(normalizedLatest),
       display_name: privateActiveUserId === uid && privateActiveDisplayName ? privateActiveDisplayName : privateThreadName(existing || normalizedLatest),
       message_kind: normalizedLatest?.message_kind || existing?.message_kind || '',
       voice_url: normalizedLatest?.voice_url || existing?.voice_url || '',
+      last_message_text: String(normalizedLatest?.text || normalizedLatest?.message || existing?.last_message_text || existing?.last_text || '').trim(),
       last_text: String(normalizedLatest?.text || normalizedLatest?.message || existing?.last_text || '').trim(),
+      last_message_at: normalizedLatest?.created_at || normalizedLatest?.ts || normalizedLatest?.timestamp || existing?.last_message_at || existing?.last_created_at || null,
       last_created_at: normalizedLatest?.created_at || normalizedLatest?.ts || normalizedLatest?.timestamp || existing?.last_created_at || null,
       unread_count: privateUnreadByUserId[uid] || 0,
     };
@@ -1128,14 +1132,9 @@
     try {
       const data = await getJSONAuth('/chat/private/threads', token);
       return Array.isArray(data) ? data : (Array.isArray(data?.threads) ? data.threads : []);
-    } catch (_) {
-      try {
-        const fallback = await getJSONAuth('/chat/dm/threads', token);
-        return Array.isArray(fallback) ? fallback : (Array.isArray(fallback?.threads) ? fallback.threads : []);
-      } catch (err) {
-        console.warn('chatFetchPrivateThreads failed', err);
-        return [];
-      }
+    } catch (err) {
+      console.warn('chatFetchPrivateThreads failed', err);
+      return [];
     }
   }
 
@@ -1148,14 +1147,9 @@
     try {
       const data = await getJSONAuth(`/chat/private/users${suffix}`, token);
       return Array.isArray(data) ? data : (Array.isArray(data?.users) ? data.users : []);
-    } catch (_) {
-      try {
-        const fallback = await getJSONAuth(`/chat/dm/users${suffix}`, token);
-        return Array.isArray(fallback) ? fallback : (Array.isArray(fallback?.users) ? fallback.users : []);
-      } catch (err) {
-        console.warn('chatFetchPrivateUsers failed', err);
-        return [];
-      }
+    } catch (err) {
+      console.warn('chatFetchPrivateUsers failed', err);
+      return [];
     }
   }
 
@@ -1165,24 +1159,15 @@
     const uid = encodeURIComponent(String(otherUserId));
     const qs = new URLSearchParams();
     qs.set('limit', String(limit));
-    try {
-      const data = await getJSONAuth(`/chat/private/${uid}?${qs.toString()}`, token);
-      return Array.isArray(data) ? data : (Array.isArray(data?.messages) ? data.messages : []);
-    } catch (_) {
-      const fallback = await getJSONAuth(`/chat/dm/${uid}?${qs.toString()}`, token);
-      return Array.isArray(fallback) ? fallback : (Array.isArray(fallback?.messages) ? fallback.messages : []);
-    }
+    const data = await getJSONAuth(`/chat/private/${uid}?${qs.toString()}`, token);
+    return Array.isArray(data) ? data : (Array.isArray(data?.messages) ? data.messages : []);
   }
 
   async function chatSendPrivateMessage(otherUserId, text) {
     const token = getCommunityToken();
     if (!token || !otherUserId) throw new Error('Private chat unavailable');
     const uid = encodeURIComponent(String(otherUserId));
-    try {
-      return await postJSON(`/chat/private/${uid}`, { text }, token);
-    } catch (_) {
-      return await postJSON(`/chat/dm/${uid}`, { text }, token);
-    }
+    return await postJSON(`/chat/private/${uid}`, { text }, token);
   }
 
   function pickVoiceMimeType() {
@@ -1226,10 +1211,7 @@
     form.append('voice', blob, `voice.${(meta?.ext || 'webm')}`);
     form.append('duration_ms', String(meta?.durationMs || 0));
     const uid = encodeURIComponent(String(otherUserId));
-    let res = await fetch(`${RAILWAY_BASE}/chat/private/${uid}/voice`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form });
-    if (!res.ok) {
-      res = await fetch(`${RAILWAY_BASE}/chat/dm/${uid}/voice`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form });
-    }
+    const res = await fetch(`${RAILWAY_BASE}/chat/private/${uid}/voice`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form });
     if (!res.ok) throw new Error('Voice upload failed');
     return await res.json();
   }
@@ -1290,7 +1272,7 @@
           if (msg) {
             privateMessagesByUserId[recordingUserId] = normalizePrivateMessages((privateMessagesByUserId[recordingUserId] || []).concat(Array.isArray(msg) ? msg : [msg]), recordingUserId);
             privateUpsertThreadFromMessages(recordingUserId, privateMessagesByUserId[recordingUserId]);
-            if (privateActiveUserId === recordingUserId && privateView === 'conversation') renderPrivateConversation();
+            if (privateActiveUserId === recordingUserId && privateView === 'conversation') patchPrivateConversationMessages(privateMessagesByUserId[recordingUserId]);
           }
         } else {
           const msg = await uploadPublicVoiceMessage(blob, { durationMs, ext });
@@ -1335,7 +1317,7 @@
       const senderName = resolveDriverDisplayName({
         userId: senderId,
         senderDisplayName: msg?.sender_display_name,
-        displayName: msg?.display_name || (!isSelf && senderId === targetId ? privateActiveDisplayName : window?.me?.display_name),
+        displayName: msg?.other_display_name || msg?.display_name || (!isSelf && senderId === targetId ? privateActiveDisplayName : window?.me?.display_name),
         userName: msg?.user_name,
         name: msg?.name,
         email: msg?.email,
@@ -1422,7 +1404,7 @@
   function renderPrivateConversationMessages(messages) {
     return normalizePrivateMessages(messages, privateActiveUserId).map((msg) => {
       const own = !!msg?._isSelf;
-      const senderName = msg?._senderDisplayName || 'User';
+      const senderName = msg?._senderDisplayName || `User ${msgUserId(msg) || ''}`.trim();
       const ts = formatChatTime(msg?.created_at || msg?.ts || msg?.timestamp || '');
       const isVoice = String(msg?.message_kind || '').toLowerCase() === 'voice';
       const voiceUrl = String(msg?.voice_url || '').trim();
@@ -1589,7 +1571,6 @@
     privateUpsertThreadFromMessages(uid, list);
     if (chatUiTab === 'private' && privateActiveUserId === uid && privateView === 'conversation') {
       patchPrivateConversationMessages(list);
-      renderComposerRegion();
     }
     renderPrivateTabUnread();
     updateChatUnreadBadge();
@@ -1940,6 +1921,7 @@
     publicChatDraft = String(chatInput.value || '');
     publicChatSelectionStart = Number.isFinite(Number(chatInput.selectionStart)) ? Number(chatInput.selectionStart) : null;
     publicChatSelectionEnd = Number.isFinite(Number(chatInput.selectionEnd)) ? Number(chatInput.selectionEnd) : publicChatSelectionStart;
+    publicChatHasFocus = document.activeElement === chatInput;
   }
 
   function restorePublicComposerState(inputEl) {
@@ -1966,6 +1948,7 @@
       start: Number.isFinite(Number(input.selectionStart)) ? Number(input.selectionStart) : null,
       end: Number.isFinite(Number(input.selectionEnd)) ? Number(input.selectionEnd) : null,
     };
+    privateChatFocusedUserId = document.activeElement === input ? uid : privateChatFocusedUserId;
   }
 
   function restorePrivateComposerState(inputEl, userId) {
@@ -4403,7 +4386,7 @@
         const senderName = resolveDriverDisplayName({
           userId: senderId,
           senderDisplayName: msg?.sender_display_name,
-          displayName: isSelf ? window?.me?.display_name : (senderId === targetUserId ? driverProfileState?.profile?.user?.display_name : msg?.display_name),
+          displayName: isSelf ? window?.me?.display_name : (msg?.other_display_name || (senderId === targetUserId ? driverProfileState?.profile?.user?.display_name : msg?.display_name)),
           userName: msg?.user_name,
           name: msg?.name,
           email: msg?.email,
@@ -4461,7 +4444,7 @@
       const body = isVoice
         ? (voiceUrl ? `<audio controls preload="metadata" src="${escapeHtml(voiceUrl)}"></audio>` : 'Voice message expired')
         : escapeHtml(String(msg?.text || msg?.message || ''));
-      return `<div class="driverProfileDmMsg ${klass}"><div class="driverProfileDmSender">${escapeHtml(msg?._senderDisplayName || '')}</div><div class="driverProfileDmBubble ${klass}">${body}</div><div class="driverProfileDmTime">${escapeHtml(ts)}</div></div>`;
+      return `<div class="driverProfileDmMsg ${klass}"><div class="driverProfileDmSender">${escapeHtml(msg?._senderDisplayName || `User ${msgUserId(msg) || ''}`.trim())}</div><div class="driverProfileDmBubble ${klass}">${body}</div><div class="driverProfileDmTime">${escapeHtml(ts)}</div></div>`;
     }).join('');
     if (shouldStickBottom) dmList.scrollTop = dmList.scrollHeight;
   }
@@ -4827,13 +4810,17 @@
     const vv = window.visualViewport;
     const viewportHeight = Number(vv?.height) || window.innerHeight || 0;
     const viewportTop = Number(vv?.offsetTop) || 0;
-    const fullHeight = window.innerHeight || viewportHeight;
+    const fullHeight = Math.max(window.innerHeight || 0, Number(vv?.height || 0) + Number(vv?.offsetTop || 0));
     const keyboardOverlap = Math.max(0, fullHeight - (viewportHeight + viewportTop));
     const maxPanel = Math.max(260, Math.round(viewportHeight - 140));
     root.style.setProperty('--chat-max-panel-height', `${maxPanel}px`);
     root.style.setProperty('--chat-keyboard-offset', `${Math.round(keyboardOverlap)}px`);
     root.style.setProperty('--chat-composer-safe-bottom', '0px');
-    scrollActiveChatInputIntoView();
+    if (chatViewportScrollTimer) clearTimeout(chatViewportScrollTimer);
+    chatViewportScrollTimer = window.setTimeout(() => {
+      scrollActiveChatInputIntoView();
+      chatViewportScrollTimer = null;
+    }, 80);
   }
 
   // Expose chat functions for app.js to call if needed
