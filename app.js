@@ -5683,6 +5683,39 @@ const communityNote = document.getElementById("communityNote");
 
 let communityToken = localStorage.getItem(LS_TOKEN) || "";
 let me = null;
+
+function syncCommunityIdentityGlobals() {
+  const hasWindow = typeof window !== "undefined";
+  const hasLocalStorage = typeof localStorage !== "undefined";
+  const signedIn = !!(authHeaderOK() && me);
+  const displayName = String(me?.display_name || "").trim();
+
+  if (signedIn) {
+    const meId = me?.id != null ? String(me.id) : "";
+    if (hasWindow) {
+      window.me = me || null;
+      window.communityMe = me || null;
+      window.communityMeId = meId;
+      window.communityDisplayName = displayName;
+    }
+    if (hasLocalStorage) {
+      if (meId) localStorage.setItem("community_me_id_v1", meId);
+      else localStorage.removeItem("community_me_id_v1");
+      localStorage.setItem("community_display_name_v1", displayName);
+    }
+    return;
+  }
+
+  if (hasWindow) {
+    window.me = null;
+    window.communityMe = null;
+    window.communityMeId = "";
+    window.communityDisplayName = "";
+  }
+  if (hasLocalStorage) {
+    localStorage.removeItem("community_me_id_v1");
+  }
+}
 let lastGpsAccuracyM = null;
 
 function syncAdminPortalSession() {
@@ -5807,6 +5840,7 @@ function clearAuth() {
   me = null;
   localStorage.removeItem(LS_TOKEN);
   localStorage.removeItem("community_token");
+  syncCommunityIdentityGlobals();
   // Reset chat state if a new chat implementation exists.
   if (typeof window !== "undefined") {
     if (typeof window.chatResetState === "function") window.chatResetState();
@@ -5843,6 +5877,7 @@ async function loadMe() {
     const data = await getJSONAuth("/me", communityToken);
     me = data || null;
     if (me?.display_name) localStorage.setItem(LS_DISPLAY_NAME, me.display_name);
+    syncCommunityIdentityGlobals();
     syncGhostUI();
     refreshNavNameLabel();
     syncAdminPortalSession();
@@ -5867,10 +5902,12 @@ async function loadMe() {
     const fallbackEmail = (localStorage.getItem(LS_EMAIL) || "").trim();
     me = {
       ...(me || {}),
+      id: me?.id ?? localStorage.getItem("community_me_id_v1") ?? null,
       display_name: fallbackDisplayName || me?.display_name || fallbackEmail.split("@")[0] || "Driver",
       email: me?.email || fallbackEmail || null,
       is_admin: !!me?.is_admin,
     };
+    syncCommunityIdentityGlobals();
     refreshNavNameLabel();
     syncGhostUI();
     syncAdminPortalSession();
@@ -5886,6 +5923,7 @@ async function updateMeProfile(updates) {
   if (!authHeaderOK()) return;
   await postJSON("/me/update", updates, communityToken);
   await loadMe();
+  syncCommunityIdentityGlobals();
 }
 
 async function applyPostAuthPreferences({ email, forceGhostSync, desiredGhostMode }) {
@@ -5922,6 +5960,7 @@ async function doLogin(email, password, desiredGhostMode) {
   localStorage.setItem(LS_TOKEN, token);
   localStorage.setItem(LS_EMAIL, email);
   await loadMe();
+  syncCommunityIdentityGlobals();
   await applyPostAuthPreferences({ email, forceGhostSync: true, desiredGhostMode });
   setAuthUI(true, `Status: signed in as ${me?.display_name || me?.email || email}`);
   pullPresenceAll().catch((e) => console.warn("/presence/all post-login bootstrap failed:", e));
@@ -5939,6 +5978,7 @@ async function doSignup(email, password, desiredGhostMode) {
   localStorage.setItem(LS_TOKEN, token);
   localStorage.setItem(LS_EMAIL, email);
   await loadMe();
+  syncCommunityIdentityGlobals();
   await applyPostAuthPreferences({ email, forceGhostSync: true, desiredGhostMode });
   setAuthUI(true, `Status: account created • signed in as ${me?.display_name || me?.email || email}`);
   pullPresenceAll().catch((e) => console.warn("/presence/all post-signup bootstrap failed:", e));

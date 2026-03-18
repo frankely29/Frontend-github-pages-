@@ -299,6 +299,7 @@
 
   function normalizeCanonicalChatMessage(raw, options = {}) {
     const meId = String(options.meId || currentChatSelfUserId() || '');
+    const meDisplayName = currentChatSelfDisplayName();
     const fallbackDisplayName = String(options.fallbackDisplayName || 'Driver').trim() || 'Driver';
     const senderUserId = raw?.sender_user_id ?? raw?.senderUserId ?? raw?.user_id ?? raw?.userId ?? null;
     const recipientUserId = raw?.recipient_user_id ?? raw?.recipientUserId ?? raw?.other_user_id ?? raw?.otherUserId ?? null;
@@ -309,12 +310,17 @@
     const sender = senderUserId == null ? null : String(senderUserId);
     const recipient = recipientUserId == null ? null : String(recipientUserId);
     const fallbackUserId = options.scope === 'public' ? sender : (sender || recipient);
+    const normalizedDisplayName = normalizeChatDisplayName(displayName);
+    const normalizedSelfDisplayName = normalizeChatDisplayName(meDisplayName);
+    const ownById = !!(meId && sender && meId === sender);
+    const ownByName = !sender && !!(normalizedSelfDisplayName && normalizedDisplayName && normalizedSelfDisplayName === normalizedDisplayName);
+    const explicitOwn = raw?.isOwn === true || raw?.is_own === true;
     return {
       id: parseMessageId(raw?.id),
       messageType,
       text,
       createdAt: raw?.created_at || raw?.createdAt || raw?.ts || raw?.timestamp || null,
-      isOwn: !!(meId && sender && meId === sender),
+      isOwn: !!(explicitOwn || ownById || ownByName),
       displayName,
       audioUrl,
       audioDurationMs: normalizeAudioDurationMs(raw),
@@ -376,7 +382,36 @@
   const recentOutgoingChatEchoes = new Map();
 
   function currentChatSelfUserId() {
-    return (window && window.me && window.me.id != null) ? String(window.me.id) : '';
+    const globalWindow = typeof window !== 'undefined' ? window : null;
+    const candidates = [
+      globalWindow?.communityMeId,
+      globalWindow?.communityMe?.id,
+      globalWindow?.me?.id,
+      typeof localStorage !== 'undefined' ? localStorage.getItem('community_me_id_v1') : '',
+    ];
+    for (const value of candidates) {
+      if (value != null && String(value).trim()) return String(value).trim();
+    }
+    return '';
+  }
+
+  function currentChatSelfDisplayName() {
+    const globalWindow = typeof window !== 'undefined' ? window : null;
+    const candidates = [
+      globalWindow?.communityDisplayName,
+      globalWindow?.communityMe?.display_name,
+      globalWindow?.me?.display_name,
+      typeof localStorage !== 'undefined' ? localStorage.getItem('community_display_name_v1') : '',
+    ];
+    for (const value of candidates) {
+      const normalized = normalizeChatDisplayName(value);
+      if (normalized) return String(value || '').trim();
+    }
+    return '';
+  }
+
+  function normalizeChatDisplayName(value) {
+    return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase();
   }
 
   function normalizeEchoText(value) {
@@ -1577,7 +1612,7 @@
     const body = msg.messageType === 'voice'
       ? renderVoiceNotePlayer(msg, 'public')
       : `<div class="${bubbleClass} chatPublicTextBubble">${escapeHtml(String(msg.text || ''))}</div>`;
-    return `<div class="chatMsgRow chatMsgRowPublic ${own ? 'self' : 'other'}${msg.messageType === 'voice' ? ' chatMsgRowVoice' : ''}" data-chat-row="public" data-message-key="${escapeHtml(getVoiceMessageDomKey(msg))}" data-message-id="${escapeHtml(String(msg?.id ?? ''))}" data-message-scope="public" data-audio-url="${escapeHtml(String(msg?.audioUrl || ''))}"><div class="chatMsgMeta"><strong class="chatMsgName">${safeName}</strong></div><div class="chatMsgBubbleWrap">${body}</div><div class="chatMsgTime">${time}</div></div>`;
+    return `<div class="chatMsgRow ${own ? 'self' : 'other'}${msg.messageType === 'voice' ? ' chatMsgRowVoice' : ''}" data-chat-row="public" data-message-key="${escapeHtml(getVoiceMessageDomKey(msg))}" data-message-id="${escapeHtml(String(msg?.id ?? ''))}" data-message-scope="public" data-audio-url="${escapeHtml(String(msg?.audioUrl || ''))}"><div class="chatMsgNameLine"><strong class="chatMsgName">${safeName}</strong></div><div class="chatMsgBubbleWrap">${body}</div><div class="chatMsgTime">${time}</div></div>`;
   }
 
   function renderPrivateConversationRow(message, scope = 'private') {
