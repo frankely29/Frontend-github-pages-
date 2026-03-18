@@ -90,9 +90,11 @@
     cancelRequested: false,
   };
   const voicePlaybackRegistry = new Map();
+  const voiceAssetCache = new Map();
 
   // Chat state
   let chatPollTimer = null;
+  let publicChatMessages = [];
   let chatLastSeen = null;
   let chatLatestMessageId = null;
   let chatLastReadId = loadChatLastReadId();
@@ -232,9 +234,19 @@
     return raw;
   }
 
+  function resolveChatAssetUrl(url) {
+    const raw = String(url || '').trim();
+    if (!raw) return '';
+    if (/^https?:\/\//i.test(raw) || raw.startsWith('blob:') || raw.startsWith('data:')) return raw;
+    const base = String(typeof RAILWAY_BASE !== 'undefined' ? RAILWAY_BASE : (window?.API_BASE || '') || '').trim();
+    if (!base) return raw;
+    if (raw.startsWith('/')) return `${base}${raw}`;
+    return `${base}/${raw}`;
+  }
+
   function normalizeAudioUrl(raw) {
     const url = raw?.audio_url || raw?.voice_url || raw?.media_url || raw?.file_url || raw?.attachment_url || raw?.audioUrl || raw?.voiceUrl || raw?.mediaUrl || '';
-    return String(url || '').trim();
+    return resolveChatAssetUrl(url);
   }
 
   function normalizeAudioDurationMs(raw) {
@@ -246,26 +258,42 @@
     return null;
   }
 
-  function normalizePublicChatMessage(raw) {
-    const selfId = currentChatSelfUserId();
-    const userId = raw?.user_id ?? raw?.userId ?? raw?.sender_user_id ?? raw?.senderUserId ?? null;
-    const displayName = String(raw?.displayName || raw?.display_name || raw?.user_name || raw?.name || raw?.sender_display_name || 'Driver').trim() || 'Driver';
+  function normalizeAudioMimeType(raw) {
+    const mime = raw?.audio_mime_type || raw?.voice_mime_type || raw?.mime_type || raw?.content_type || raw?.audioMimeType || raw?.voiceMimeType || raw?.mimeType || '';
+    return String(mime || '').trim();
+  }
+
+  function normalizeCanonicalChatMessage(raw, options = {}) {
+    const meId = String(options.meId || currentChatSelfUserId() || '');
+    const fallbackDisplayName = String(options.fallbackDisplayName || 'Driver').trim() || 'Driver';
+    const senderUserId = raw?.sender_user_id ?? raw?.senderUserId ?? raw?.user_id ?? raw?.userId ?? null;
+    const recipientUserId = raw?.recipient_user_id ?? raw?.recipientUserId ?? raw?.other_user_id ?? raw?.otherUserId ?? null;
+    const displayName = String(raw?.displayName || raw?.display_name || raw?.user_name || raw?.name || raw?.sender_display_name || raw?.recipient_display_name || raw?.other_display_name || fallbackDisplayName).trim() || fallbackDisplayName;
     const text = String(raw?.text || raw?.message || raw?.body || '').trim();
     const audioUrl = normalizeAudioUrl(raw);
     const messageType = normalizeMessageType(raw?.message_type || raw?.messageType || raw?.type, audioUrl ? 'voice' : 'text');
-    const normalizedUserId = userId == null ? null : String(userId);
+    const sender = senderUserId == null ? null : String(senderUserId);
+    const recipient = recipientUserId == null ? null : String(recipientUserId);
+    const fallbackUserId = options.scope === 'public' ? sender : (sender || recipient);
     return {
       id: parseMessageId(raw?.id),
-      userId: normalizedUserId,
-      displayName,
+      messageType,
       text,
       createdAt: raw?.created_at || raw?.createdAt || raw?.ts || raw?.timestamp || null,
-      messageType,
+      isOwn: !!(meId && sender && meId === sender),
+      displayName,
       audioUrl,
       audioDurationMs: normalizeAudioDurationMs(raw),
-      isOwn: !!(selfId && normalizedUserId && selfId === normalizedUserId),
+      audioMimeType: normalizeAudioMimeType(raw),
+      userId: fallbackUserId == null ? null : String(fallbackUserId),
+      senderUserId: sender,
+      recipientUserId: recipient,
       raw,
     };
+  }
+
+  function normalizePublicChatMessage(raw) {
+    return normalizeCanonicalChatMessage(raw, { scope: 'public' });
   }
 
 
@@ -275,28 +303,7 @@
   }
 
   function normalizePrivateChatMessage(raw, meId = currentChatSelfUserId()) {
-    const senderUserId = raw?.sender_user_id ?? raw?.senderUserId ?? raw?.user_id ?? raw?.userId ?? null;
-    const recipientUserId = raw?.recipient_user_id ?? raw?.recipientUserId ?? raw?.other_user_id ?? raw?.otherUserId ?? null;
-    const displayName = String(raw?.displayName || raw?.other_display_name || raw?.display_name || raw?.sender_display_name || raw?.recipient_display_name || raw?.name || 'Driver').trim() || 'Driver';
-    const text = String(raw?.text || raw?.message || raw?.body || '').trim();
-    const audioUrl = normalizeAudioUrl(raw);
-    const messageType = normalizeMessageType(raw?.message_type || raw?.messageType || raw?.type, audioUrl ? 'voice' : 'text');
-    const sender = senderUserId == null ? null : String(senderUserId);
-    const recipient = recipientUserId == null ? null : String(recipientUserId);
-    return {
-      id: parseMessageId(raw?.id),
-      senderUserId: sender,
-      recipientUserId: recipient,
-      userId: sender,
-      displayName,
-      text,
-      createdAt: raw?.created_at || raw?.createdAt || raw?.ts || raw?.timestamp || null,
-      messageType,
-      audioUrl,
-      audioDurationMs: normalizeAudioDurationMs(raw),
-      isOwn: !!(meId && sender && String(meId) === sender),
-      raw,
-    };
+    return normalizeCanonicalChatMessage(raw, { scope: 'private', meId });
   }
 
   function normalizePrivateThread(raw) {
@@ -322,6 +329,7 @@
       raw,
     };
   }
+
 
   function isOwnMessage(msg) {
     if (msg?.isOwn === true) return true;
@@ -1210,57 +1218,312 @@
     </div>`;
   }
 
-  function renderVoiceNotePlayer(message, variant = 'chat') {
+  function isCompleteVoiceMessage(message) {
+    return parseMessageId(message?.id) !== null
+      && normalizeMessageType(message?.messageType, message?.audioUrl ? 'voice' : 'text') === 'voice'
+      && !!String(message?.audioUrl || '').trim();
+  }
+
+  function getVoiceAssetCacheKey(message) {
+    const messageId = parseMessageId(message?.id);
     const audioUrl = String(message?.audioUrl || '').trim();
-    const durationText = formatChatVoiceDuration(message?.audioDurationMs);
-    const fallback = escapeHtml(voiceNoteLabel(message));
-    if (!audioUrl) {
-      return `<div class="chatVoiceBubble ${variant}"><div class="chatVoiceError">Voice note unavailable.</div></div>`;
+    return `${messageId === null ? 'unknown' : messageId}::${audioUrl}`;
+  }
+
+  function clearVoiceAssetForMessage(messageId) {
+    const targetId = parseMessageId(messageId);
+    if (targetId === null) return;
+    for (const [key, entry] of voiceAssetCache.entries()) {
+      if (!key.startsWith(`${targetId}::`)) continue;
+      if (entry?.blobUrl) {
+        try { URL.revokeObjectURL(entry.blobUrl); } catch (_) {}
+      }
+      voiceAssetCache.delete(key);
     }
-    const safeUrl = escapeHtml(audioUrl);
-    const messageId = message?.id != null ? String(message.id) : `${variant}-${Math.random().toString(36).slice(2, 8)}`;
-    return `<div class="chatVoiceBubble ${variant}" data-voice-player="${escapeHtml(messageId)}">
-      <audio class="chatVoicePlayer" controls preload="metadata" src="${safeUrl}"></audio>
-      <div class="chatVoiceMeta">
-        <div class="chatVoicePreview">🎤 ${fallback}</div>
-        <div class="chatVoiceDuration" data-voice-duration>${escapeHtml(durationText || '0:00')}</div>
-      </div>
-    </div>`;
+  }
+
+  function clearVoiceAssetsForMessages(messages = []) {
+    (Array.isArray(messages) ? messages : []).forEach((message) => {
+      const id = parseMessageId(message?.id);
+      if (id !== null) clearVoiceAssetForMessage(id);
+    });
+  }
+
+  function revokeVoiceBlobUrls() {
+    for (const entry of voiceAssetCache.values()) {
+      if (entry?.blobUrl) {
+        try { URL.revokeObjectURL(entry.blobUrl); } catch (_) {}
+      }
+    }
+    voiceAssetCache.clear();
+  }
+
+  function collectTrackedVoiceMessages() {
+    const messages = [];
+    if (Array.isArray(publicChatMessages)) messages.push(...publicChatMessages);
+    Object.values(privateMessagesByUserId || {}).forEach((list) => {
+      if (Array.isArray(list)) messages.push(...list);
+    });
+    return messages.filter((msg) => normalizeMessageType(msg?.messageType, msg?.audioUrl ? 'voice' : 'text') === 'voice');
+  }
+
+  function pruneVoiceAssetCache(messages = collectTrackedVoiceMessages()) {
+    const activeKeys = new Set((messages || [])
+      .map((message) => getVoiceAssetCacheKey(message))
+      .filter((key) => !key.endsWith('::')));
+    for (const [key, entry] of voiceAssetCache.entries()) {
+      if (activeKeys.has(key)) continue;
+      if (entry?.blobUrl) {
+        try { URL.revokeObjectURL(entry.blobUrl); } catch (_) {}
+      }
+      voiceAssetCache.delete(key);
+    }
+  }
+
+  async function ensureVoiceBlobUrl(message, attempt = 0) {
+    const audioUrl = String(message?.audioUrl || '').trim();
+    const key = getVoiceAssetCacheKey(message);
+    if (!audioUrl) {
+      voiceAssetCache.set(key, {
+        status: 'error',
+        blobUrl: '',
+        mimeType: String(message?.audioMimeType || '').trim(),
+        error: 'Voice note unavailable.',
+      });
+      return '';
+    }
+    const cached = voiceAssetCache.get(key);
+    if (cached?.status === 'ready' && cached.blobUrl) return cached.blobUrl;
+    if (cached?.status === 'loading' && cached.promise) return cached.promise;
+    const token = getCommunityToken();
+    const promise = (async () => {
+      try {
+        const headers = new Headers();
+        if (token) headers.set('Authorization', `Bearer ${token}`);
+        const response = await fetch(audioUrl, {
+          method: 'GET',
+          headers,
+          cache: 'no-store',
+        });
+        if (!response.ok) throw new Error(`Voice fetch failed (${response.status})`);
+        const blob = await response.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        const next = {
+          status: 'ready',
+          blobUrl,
+          mimeType: blob.type || String(message?.audioMimeType || '').trim(),
+          error: '',
+        };
+        const previous = voiceAssetCache.get(key);
+        if (previous?.blobUrl && previous.blobUrl !== blobUrl) {
+          try { URL.revokeObjectURL(previous.blobUrl); } catch (_) {}
+        }
+        voiceAssetCache.set(key, next);
+        return blobUrl;
+      } catch (error) {
+        console.warn('voice blob fetch failed', { message, error, attempt });
+        if (attempt < 1) {
+          voiceAssetCache.delete(key);
+          return ensureVoiceBlobUrl(message, attempt + 1);
+        }
+        voiceAssetCache.set(key, {
+          status: 'error',
+          blobUrl: '',
+          mimeType: String(message?.audioMimeType || '').trim(),
+          error: 'Voice note unavailable.',
+        });
+        return '';
+      }
+    })();
+    voiceAssetCache.set(key, {
+      status: 'loading',
+      blobUrl: '',
+      mimeType: String(message?.audioMimeType || '').trim(),
+      error: '',
+      promise,
+    });
+    return promise;
+  }
+
+  function prefetchVoiceBlobUrls(messages = []) {
+    const voiceMessages = (Array.isArray(messages) ? messages : [])
+      .filter((message) => normalizeMessageType(message?.messageType, message?.audioUrl ? 'voice' : 'text') === 'voice');
+    if (!voiceMessages.length) return Promise.resolve([]);
+    return Promise.allSettled(voiceMessages.map((message) => ensureVoiceBlobUrl(message)));
+  }
+
+  function buildVoicePlayerMessageFromDataset(player) {
+    return {
+      id: parseMessageId(player?.dataset?.messageId),
+      messageType: 'voice',
+      text: String(player?.dataset?.voiceLabel || 'Voice note'),
+      createdAt: player?.dataset?.createdAt || null,
+      isOwn: player?.dataset?.voiceOwn === '1',
+      displayName: player?.dataset?.displayName || 'Driver',
+      audioUrl: String(player?.dataset?.audioUrl || '').trim(),
+      audioDurationMs: Number(player?.dataset?.durationMs || 0) || 0,
+      audioMimeType: String(player?.dataset?.audioMimeType || '').trim(),
+      senderUserId: player?.dataset?.senderUserId || null,
+      recipientUserId: player?.dataset?.recipientUserId || null,
+    };
+  }
+
+  function updateVoicePlayerVisualState(player, state = {}) {
+    if (!player) return;
+    const audio = player.querySelector('audio');
+    const btn = player.querySelector('[data-voice-toggle]');
+    const progressBar = player.querySelector('.chatVoiceProgressBar');
+    const durationEl = player.querySelector('[data-voice-duration]');
+    const loadingEl = player.querySelector('.chatVoiceLoading');
+    const errorEl = player.querySelector('.chatVoiceError');
+    const isPlaying = !!(audio && !audio.paused && !audio.ended);
+    if (btn) {
+      btn.textContent = state.loading ? '…' : (isPlaying ? '❚❚' : '▶');
+      btn.setAttribute('aria-label', state.loading ? 'Loading voice note' : (isPlaying ? 'Pause voice note' : 'Play voice note'));
+      btn.disabled = !!state.loading;
+    }
+    const durationMs = Number(state.durationMs);
+    if (durationEl && Number.isFinite(durationMs) && durationMs >= 0) {
+      durationEl.textContent = formatChatVoiceDuration(durationMs);
+    }
+    const progress = Math.max(0, Math.min(100, Number(state.progressPct) || 0));
+    if (progressBar) progressBar.style.width = `${progress}%`;
+    if (loadingEl) {
+      const loadingText = String(state.loadingText || '').trim();
+      loadingEl.hidden = !loadingText;
+      loadingEl.textContent = loadingText;
+    }
+    if (errorEl) {
+      const errorText = String(state.errorText || '').trim();
+      errorEl.hidden = !errorText;
+      errorEl.textContent = errorText;
+    }
+    player.classList.toggle('is-loading', !!state.loading);
+    player.classList.toggle('is-error', !!state.errorText);
+    player.classList.toggle('is-playing', isPlaying);
   }
 
   function syncVoicePlayerUi(player) {
     if (!player) return;
     const audio = player.querySelector('audio');
-    const timeEl = player.querySelector('[data-voice-duration]');
-    if (!audio || !timeEl) return;
-    const durationMs = Number.isFinite(audio.duration) && audio.duration > 0
+    const message = buildVoicePlayerMessageFromDataset(player);
+    const cacheEntry = voiceAssetCache.get(getVoiceAssetCacheKey(message));
+    const durationMs = Number.isFinite(audio?.duration) && audio.duration > 0
       ? Math.round(audio.duration * 1000)
+      : (Number(message?.audioDurationMs) || 0);
+    const progressPct = audio && Number.isFinite(audio.duration) && audio.duration > 0
+      ? (audio.currentTime / audio.duration) * 100
       : 0;
-    if (durationMs > 0) timeEl.textContent = formatChatVoiceDuration(durationMs);
+    updateVoicePlayerVisualState(player, {
+      durationMs,
+      progressPct,
+      loading: cacheEntry?.status === 'loading',
+      loadingText: cacheEntry?.status === 'loading' ? 'Loading audio…' : '',
+      errorText: cacheEntry?.status === 'error' ? (cacheEntry.error || 'Voice note unavailable.') : '',
+    });
+  }
+
+  function renderVoiceNotePlayer(message, variant = 'chat') {
+    const bubbleRole = message?.isOwn ? 'self' : 'other';
+    const messageId = message?.id != null ? String(message.id) : `${variant}-${Math.random().toString(36).slice(2, 8)}`;
+    const durationText = formatChatVoiceDuration(message?.audioDurationMs);
+    return `<div class="chatVoiceBubble ${bubbleRole} ${variant}" data-voice-player="${escapeHtml(messageId)}" data-message-id="${escapeHtml(messageId)}" data-audio-url="${escapeHtml(String(message?.audioUrl || ''))}" data-duration-ms="${escapeHtml(String(Number(message?.audioDurationMs || 0) || 0))}" data-audio-mime-type="${escapeHtml(String(message?.audioMimeType || ''))}" data-created-at="${escapeHtml(String(message?.createdAt || ''))}" data-display-name="${escapeHtml(String(message?.displayName || 'Driver'))}" data-voice-label="${escapeHtml(voiceNoteLabel(message))}" data-voice-own="${message?.isOwn ? '1' : '0'}" data-sender-user-id="${escapeHtml(String(message?.senderUserId || ''))}" data-recipient-user-id="${escapeHtml(String(message?.recipientUserId || ''))}">
+      <button class="chatVoiceBtn" type="button" data-voice-toggle aria-label="Play voice note">▶</button>
+      <div class="chatVoiceMeta">
+        <div class="chatVoiceTitle">🎤 Voice note</div>
+        <div class="chatVoiceDuration" data-voice-duration>${escapeHtml(durationText || '0:00')}</div>
+        <div class="chatVoiceProgress"><div class="chatVoiceProgressBar"></div></div>
+        <div class="chatVoiceLoading" hidden></div>
+        <div class="chatVoiceError" hidden></div>
+      </div>
+      <audio class="chatVoicePlayer" preload="none"></audio>
+    </div>`;
   }
 
   function bindVoicePlayer(player) {
     if (!player || player.dataset.voiceBound === '1') return;
     player.dataset.voiceBound = '1';
     const audio = player.querySelector('audio');
-    if (!audio) return;
+    const btn = player.querySelector('[data-voice-toggle]');
+    if (!audio || !btn) return;
     const key = player.getAttribute('data-voice-player') || `${Date.now()}`;
     voicePlaybackRegistry.set(key, audio);
-    audio.addEventListener('play', () => {
-      for (const [otherKey, otherAudio] of voicePlaybackRegistry.entries()) {
-        if (otherKey !== key && otherAudio && !otherAudio.paused) otherAudio.pause();
+    const message = buildVoicePlayerMessageFromDataset(player);
+    const sync = () => syncVoicePlayerUi(player);
+    const attachBlobIfReady = () => {
+      const entry = voiceAssetCache.get(getVoiceAssetCacheKey(message));
+      if (entry?.status === 'ready' && entry.blobUrl && audio.src !== entry.blobUrl) {
+        audio.src = entry.blobUrl;
+        audio.load();
       }
-      syncVoicePlayerUi(player);
+      sync();
+    };
+    btn.addEventListener('click', async (event) => {
+      event.preventDefault();
+      try {
+        if (!audio.paused && !audio.ended) {
+          audio.pause();
+          return;
+        }
+        for (const [otherKey, otherAudio] of voicePlaybackRegistry.entries()) {
+          if (otherKey !== key && otherAudio && !otherAudio.paused) otherAudio.pause();
+        }
+        updateVoicePlayerVisualState(player, {
+          durationMs: Number(message?.audioDurationMs) || 0,
+          progressPct: audio.duration > 0 ? (audio.currentTime / audio.duration) * 100 : 0,
+          loading: true,
+          loadingText: 'Loading audio…',
+          errorText: '',
+        });
+        const blobUrl = await ensureVoiceBlobUrl(message);
+        if (!blobUrl) {
+          sync();
+          return;
+        }
+        if (audio.src !== blobUrl) {
+          audio.src = blobUrl;
+          audio.load();
+        }
+        await audio.play();
+        sync();
+      } catch (error) {
+        console.warn('voice playback failed', { message, error });
+        const cacheKey = getVoiceAssetCacheKey(message);
+        const entry = voiceAssetCache.get(cacheKey) || {};
+        voiceAssetCache.set(cacheKey, {
+          ...entry,
+          status: 'error',
+          error: 'Unable to play voice note right now.',
+        });
+        sync();
+      }
     });
-    audio.addEventListener('pause', () => syncVoicePlayerUi(player));
-    audio.addEventListener('ended', () => syncVoicePlayerUi(player));
-    audio.addEventListener('loadedmetadata', () => syncVoicePlayerUi(player));
-    syncVoicePlayerUi(player);
+    audio.addEventListener('play', sync);
+    audio.addEventListener('pause', sync);
+    audio.addEventListener('ended', () => {
+      audio.currentTime = 0;
+      sync();
+    });
+    audio.addEventListener('timeupdate', sync);
+    audio.addEventListener('loadedmetadata', sync);
+    audio.addEventListener('error', (event) => {
+      console.warn('voice player audio element error', { message, event });
+      const cacheKey = getVoiceAssetCacheKey(message);
+      const entry = voiceAssetCache.get(cacheKey) || {};
+      voiceAssetCache.set(cacheKey, {
+        ...entry,
+        status: 'error',
+        error: entry.error || 'Unable to play voice note right now.',
+      });
+      sync();
+    });
+    attachBlobIfReady();
   }
 
   function bindVoicePlayers(root = document) {
     root.querySelectorAll?.('[data-voice-player]').forEach(bindVoicePlayer);
   }
+
 
   function getVoiceRecorderState(scope) {
     const stateScope = voiceScopeStateKey(scope);
@@ -1670,37 +1933,106 @@
     const meId = currentChatSelfUserId();
     return list
       .map((raw) => normalizePrivateChatMessage(raw, meId))
-      .sort((a, b) => {
-        const aid = parseMessageId(a?.id);
-        const bid = parseMessageId(b?.id);
-        if (aid !== null && bid !== null && aid !== bid) return aid - bid;
-        return String(a?.createdAt || '').localeCompare(String(b?.createdAt || ''));
-      });
+      .sort((a, b) => compareChatMessages(a, b));
+  }
+
+  function compareChatMessages(a, b) {
+    const aid = parseMessageId(a?.id);
+    const bid = parseMessageId(b?.id);
+    if (aid !== null && bid !== null && aid !== bid) return aid - bid;
+    return String(a?.createdAt || '').localeCompare(String(b?.createdAt || ''));
+  }
+
+  function getMessageMergeKey(msg) {
+    if (msg?.id != null) return `id:${msg.id}`;
+    return `fallback:${msg?.createdAt || ''}|${msg?.senderUserId || msg?.userId || ''}|${msg?.recipientUserId || ''}|${msg?.text || ''}|${msg?.audioUrl || ''}`;
+  }
+
+  function messageCompletenessScore(msg) {
+    let score = 0;
+    if (parseMessageId(msg?.id) !== null) score += 10;
+    if (String(msg?.text || '').trim()) score += 1;
+    if (String(msg?.createdAt || '').trim()) score += 1;
+    if (String(msg?.displayName || '').trim()) score += 1;
+    if (normalizeMessageType(msg?.messageType, msg?.audioUrl ? 'voice' : 'text') === 'voice') score += 2;
+    if (String(msg?.audioUrl || '').trim()) score += 6;
+    if (Number.isFinite(Number(msg?.audioDurationMs))) score += 1;
+    if (String(msg?.audioMimeType || '').trim()) score += 1;
+    if (String(msg?.senderUserId || '').trim()) score += 1;
+    if (String(msg?.recipientUserId || '').trim()) score += 1;
+    return score;
+  }
+
+  function mergeMessagePair(existing, incoming) {
+    if (!existing) return incoming;
+    if (!incoming) return existing;
+    const incomingVoiceUpgrade = normalizeMessageType(existing?.messageType, existing?.audioUrl ? 'voice' : 'text') === 'voice'
+      && normalizeMessageType(incoming?.messageType, incoming?.audioUrl ? 'voice' : 'text') === 'voice'
+      && !String(existing?.audioUrl || '').trim()
+      && !!String(incoming?.audioUrl || '').trim();
+    const existingVoiceUpgrade = normalizeMessageType(existing?.messageType, existing?.audioUrl ? 'voice' : 'text') === 'voice'
+      && normalizeMessageType(incoming?.messageType, incoming?.audioUrl ? 'voice' : 'text') === 'voice'
+      && !!String(existing?.audioUrl || '').trim()
+      && !String(incoming?.audioUrl || '').trim();
+    const preferred = incomingVoiceUpgrade || (!existingVoiceUpgrade && messageCompletenessScore(incoming) >= messageCompletenessScore(existing))
+      ? incoming
+      : existing;
+    const fallback = preferred === incoming ? existing : incoming;
+    return {
+      ...fallback,
+      ...preferred,
+      id: parseMessageId(preferred?.id ?? fallback?.id),
+      messageType: normalizeMessageType(preferred?.messageType || fallback?.messageType, preferred?.audioUrl || fallback?.audioUrl ? 'voice' : 'text'),
+      text: String(preferred?.text || fallback?.text || '').trim(),
+      createdAt: preferred?.createdAt || fallback?.createdAt || null,
+      isOwn: preferred?.isOwn === true || fallback?.isOwn === true,
+      displayName: String(preferred?.displayName || fallback?.displayName || 'Driver').trim() || 'Driver',
+      audioUrl: String(preferred?.audioUrl || fallback?.audioUrl || '').trim(),
+      audioDurationMs: normalizeAudioDurationMs(preferred) ?? normalizeAudioDurationMs(fallback),
+      audioMimeType: String(preferred?.audioMimeType || fallback?.audioMimeType || '').trim(),
+      userId: preferred?.userId || fallback?.userId || null,
+      senderUserId: preferred?.senderUserId || fallback?.senderUserId || null,
+      recipientUserId: preferred?.recipientUserId || fallback?.recipientUserId || null,
+      raw: preferred?.raw || fallback?.raw || null,
+    };
+  }
+
+  function upsertChatMessages(base = [], incoming = []) {
+    const merged = new Map();
+    [...(Array.isArray(base) ? base : []), ...(Array.isArray(incoming) ? incoming : [])].forEach((msg) => {
+      if (!msg) return;
+      const key = getMessageMergeKey(msg);
+      merged.set(key, mergeMessagePair(merged.get(key), msg));
+    });
+    return Array.from(merged.values()).sort(compareChatMessages);
+  }
+
+  function setPublicChatMessages(messages = []) {
+    publicChatMessages = upsertChatMessages([], messages);
+    pruneVoiceAssetCache();
+    return publicChatMessages;
+  }
+
+  function upsertPublicChatMessages(messages = []) {
+    publicChatMessages = upsertChatMessages(publicChatMessages, messages);
+    pruneVoiceAssetCache();
+    return publicChatMessages;
   }
 
   function mergePrivateMessages(otherUserId, messages = []) {
     const uid = String(otherUserId || '');
     if (!uid) return [];
-    const base = Array.isArray(privateMessagesByUserId[uid]) ? privateMessagesByUserId[uid] : [];
-    const byKey = new Map();
-    base.concat(messages).forEach((msg) => {
-      const key = msg?.id != null ? `id:${msg.id}` : `${msg?.createdAt || ''}|${msg?.senderUserId || ''}|${msg?.text || ''}|${msg?.audioUrl || ''}`;
-      byKey.set(key, msg);
-    });
-    const merged = Array.from(byKey.values()).sort((a, b) => {
-      const aid = parseMessageId(a?.id);
-      const bid = parseMessageId(b?.id);
-      if (aid !== null && bid !== null && aid !== bid) return aid - bid;
-      return String(a?.createdAt || '').localeCompare(String(b?.createdAt || ''));
-    });
-    privateMessagesByUserId[uid] = merged;
+    privateMessagesByUserId[uid] = upsertChatMessages(privateMessagesByUserId[uid] || [], messages);
+    const merged = privateMessagesByUserId[uid];
     const latestId = merged.reduce((max, msg) => {
       const id = parseMessageId(msg?.id);
       return id === null ? max : Math.max(max, id);
     }, 0);
     privateLastMessageIdByUserId[uid] = latestId || privateLastMessageIdByUserId[uid] || null;
+    pruneVoiceAssetCache();
     return merged;
   }
+
 
   function privateUpsertThreadFromMessages(otherUserId, messages = [], options = {}) {
     const uid = String(otherUserId || '');
@@ -1807,6 +2139,51 @@
     );
   }
 
+  async function refreshVoiceUploadFallback(scope, options = {}) {
+    const previousLatestId = parseMessageId(options.previousLatestId);
+    const afterId = previousLatestId === null ? null : Math.max(0, previousLatestId - 1);
+    if (scope === 'public') {
+      const result = await chatFetchMessages({ after: afterId, limit: 20 });
+      return result?.ok ? (result.messages || []) : [];
+    }
+    const uid = String(options.otherUserId || '');
+    if (!uid) return [];
+    return await chatFetchPrivateMessages(uid, {
+      sinceId: afterId,
+      limit: 20,
+      markRead: options.markRead !== false,
+    });
+  }
+
+  async function integrateUploadedVoiceMessage(scope, response, options = {}) {
+    const normalized = scope === 'public'
+      ? normalizePublicMessagesPayload(response)
+      : normalizePrivateMessagesPayload(response);
+    const completeMessages = normalized.filter(isCompleteVoiceMessage);
+    let appliedMessages = normalized;
+    if (!completeMessages.length) {
+      const refreshed = await refreshVoiceUploadFallback(scope, options);
+      if (refreshed.length) appliedMessages = refreshed;
+    }
+    if (!appliedMessages.length) return [];
+    if (scope === 'public') {
+      const merged = upsertPublicChatMessages(appliedMessages);
+      advanceChatWatermarksFromMessages(appliedMessages);
+      renderChatMessages(merged, { replace: true });
+      const latestVoice = appliedMessages.filter((msg) => msg.messageType === 'voice');
+      if (latestVoice.length) void prefetchVoiceBlobUrls(latestVoice);
+      if (isChatPanelOpen()) markChatReadThroughLatestLoaded();
+      return merged;
+    }
+    const uid = String(options.otherUserId || '');
+    const merged = mergePrivateMessages(uid, appliedMessages);
+    privateUnreadByUserId[uid] = 0;
+    privateUpsertThreadFromMessages(uid, merged, { displayName: options.displayName || privateActiveDisplayName || driverProfileState.displayName || '' });
+    const latestVoice = appliedMessages.filter((msg) => msg.messageType === 'voice');
+    if (latestVoice.length) void prefetchVoiceBlobUrls(latestVoice);
+    return merged;
+  }
+
   function renderPrivateThreadList() {
     const wrap = document.getElementById('chatPrivateWrap');
     if (!wrap) return;
@@ -1838,7 +2215,7 @@
         ? renderVoiceNotePlayer(msg, 'private')
         : `<div class="${cls}">${escapeHtml(String(msg?.text || ''))}</div>`;
       const t = escapeHtml(formatChatTime(msg?.createdAt));
-      return `<div class="chatPrivateMsgRow ${own ? 'self' : 'other'}">${msg?.messageType === 'voice' ? `<div class="${cls}">${body}</div>` : body}<div class="chatMsgTime">${t}</div></div>`;
+      return `<div class="chatPrivateMsgRow ${own ? 'self' : 'other'}">${body}<div class="chatMsgTime">${t}</div></div>`;
     }).join('');
   }
 
@@ -1880,11 +2257,9 @@
     bindVoiceComposerControls('private', () => ({
       userId,
       onUploaded: async (response) => {
-        const sent = normalizePrivateMessagesPayload(response);
-        if (sent.length) mergePrivateMessages(userId, sent);
-        else await chatPollPrivateActiveThread({ visible: true, forceFull: false });
-        privateUnreadByUserId[String(userId)] = 0;
-        privateUpsertThreadFromMessages(userId, privateMessagesByUserId[String(userId)] || sent, { displayName: privateActiveDisplayName });
+        const previousLatestId = privateLastMessageIdByUserId[String(userId)] || null;
+        const merged = await integrateUploadedVoiceMessage('private', response, { previousLatestId, otherUserId: userId, markRead: true, displayName: privateActiveDisplayName });
+        if (!merged.length) await chatPollPrivateActiveThread({ visible: true, forceFull: false });
         renderPrivateConversation();
         renderPrivateTabUnread();
         updateChatUnreadBadge();
@@ -1914,6 +2289,7 @@
     });
     bindPrivateConversationComposer(privateActiveUserId);
     bindVoicePlayers(wrap);
+    void prefetchVoiceBlobUrls(messages.filter((msg) => msg?.messageType === 'voice'));
   }
 
   async function openPrivateConversation(userId, displayName = '', options = {}) {
@@ -1928,7 +2304,8 @@
     syncPrivateThreadMeta(uid, privateActiveDisplayName);
     updateChatUnreadBadge();
     const messages = await chatFetchPrivateMessages(uid, { limit: options.limit || 60, markRead: options.markRead !== false, sinceId: null });
-    privateMessagesByUserId[uid] = messages;
+    privateMessagesByUserId[uid] = upsertChatMessages([], messages);
+    pruneVoiceAssetCache();
     const latestId = messages.reduce((max, msg) => Math.max(max, Number(msg?.id || 0)), 0);
     privateLastMessageIdByUserId[uid] = latestId || null;
     privateUpsertThreadFromMessages(uid, messages, { displayName: privateActiveDisplayName });
@@ -1972,7 +2349,8 @@
     const previousLast = Number(privateLastMessageIdByUserId[uid] || 0);
     const merged = forceFull ? incoming.slice() : mergePrivateMessages(uid, incoming);
     if (forceFull) {
-      privateMessagesByUserId[uid] = merged;
+      privateMessagesByUserId[uid] = upsertChatMessages([], merged);
+      pruneVoiceAssetCache();
     }
     const latestId = (privateMessagesByUserId[uid] || merged || []).reduce((max, msg) => Math.max(max, Number(msg?.id || 0)), 0);
     privateLastMessageIdByUserId[uid] = latestId || privateLastMessageIdByUserId[uid] || null;
@@ -2083,6 +2461,8 @@
     void cancelChatVoiceRecording('Recording canceled');
     chatLastSeen = null;
     chatLatestMessageId = null;
+    publicChatMessages = [];
+    revokeVoiceBlobUrls();
     chatLastReadId = loadChatLastReadId();
     chatSeenKeys = new Set();
     unreadChatCount = 0;
@@ -2112,66 +2492,40 @@
   function renderChatMessages(messages, { replace = false } = {}) {
     const listEl = document.getElementById('chatList');
     if (!listEl) return;
+    const nextMessages = Array.isArray(messages) ? messages.map((msg) => normalizePublicChatMessage(msg)) : [];
     if (replace) {
       chatSeenKeys = new Set();
       listEl.innerHTML = '';
       listEl.dataset.hasMessages = '0';
     }
-    if (!Array.isArray(messages) || !messages.length) {
+    if (!nextMessages.length) {
       if (replace) setChatStatus('No messages yet.');
       return;
     }
-    const normalized = messages.map((msg) => normalizePublicChatMessage(msg));
     const nearBottom = isChatNearBottom(listEl, 80);
-    const frag = document.createDocumentFragment();
-    let appended = 0;
-    for (const msg of normalized) {
+    const rowsHtml = nextMessages.map((msg) => {
+      const time = escapeHtml(formatChatTime(msg.createdAt));
+      const safeName = escapeHtml(msg.displayName || 'Driver');
+      const body = msg.messageType === 'voice'
+        ? renderVoiceNotePlayer(msg, 'public')
+        : `<span class="chatMsgText">${escapeHtml(String(msg.text || ''))}</span>`;
+      return `<div class="chatMsgRow${msg.messageType === 'voice' ? ' chatMsgRowVoice' : ''}"><div class="chatMsgLine"><strong class="chatMsgName">${safeName}: </strong>${body}</div><div class="chatMsgTime">${time}</div></div>`;
+    }).join('');
+    listEl.innerHTML = rowsHtml;
+    listEl.dataset.hasMessages = '1';
+    nextMessages.forEach((msg) => {
       const key = chatMsgKey(msg);
-      if (chatSeenKeys.has(key)) continue;
       chatSeenKeys.add(key);
-      const row = document.createElement('div');
-      row.className = `chatMsgRow${msg.messageType === 'voice' ? ' chatMsgRowVoice' : ''}`;
-      const line = document.createElement('div');
-      line.className = 'chatMsgLine';
-      const who = document.createElement('strong');
-      who.className = 'chatMsgName';
-      who.textContent = `${msg.displayName}: `;
-      line.appendChild(who);
-      if (msg.messageType === 'voice') {
-        const voiceWrap = document.createElement('div');
-        voiceWrap.innerHTML = renderVoiceNotePlayer(msg, 'public');
-        line.appendChild(voiceWrap.firstElementChild || document.createTextNode('Voice note'));
-      } else {
-        const textNode = document.createElement('span');
-        textNode.className = 'chatMsgText';
-        textNode.textContent = msg.text;
-        line.appendChild(textNode);
-      }
-      const time = document.createElement('div');
-      time.className = 'chatMsgTime';
-      time.textContent = formatChatTime(msg.createdAt);
-      row.appendChild(line);
-      row.appendChild(time);
-      frag.appendChild(row);
       const cursor = chatMsgCursor(msg);
       if (cursor !== null && cursor !== undefined) chatLastSeen = cursor;
       const id = messageNumericId(msg);
       if (id !== null) chatLatestMessageId = chatLatestMessageId === null ? id : Math.max(chatLatestMessageId, id);
-      appended += 1;
-    }
-    if (!appended) {
-      if (replace) setChatStatus('No messages yet.');
-      return;
-    }
-    if (!replace && listEl.dataset.hasMessages !== '1') {
-      listEl.innerHTML = '';
-    }
-    listEl.dataset.hasMessages = '1';
-    if (replace) listEl.innerHTML = '';
-    listEl.appendChild(frag);
+    });
     bindVoicePlayers(listEl);
+    void prefetchVoiceBlobUrls(nextMessages.filter((msg) => msg.messageType === 'voice'));
     if (nearBottom || replace) listEl.scrollTop = listEl.scrollHeight;
   }
+
 
   async function chatFetchMessages({ after = null, limit = 50 } = {}) {
     const token = getCommunityToken();
@@ -2183,8 +2537,7 @@
     }
     try {
       const data = await getJSONAuth(`/chat/rooms/${CHAT_ROOM}?${qs.toString()}`, token);
-      const rows = Array.isArray(data) ? data : data?.messages || [];
-      return { ok: true, messages: rows.map((row) => normalizePublicChatMessage(row)) };
+      return { ok: true, messages: normalizePublicMessagesPayload(data) };
     } catch (err) {
       console.warn('chatFetchMessages failed', err);
       return { ok: false, reason: 'failed', error: err };
@@ -2199,7 +2552,7 @@
       else setChatStatus('Chat unavailable right now.');
       return { ok: false, messages: [] };
     }
-    const msgs = Array.isArray(result.messages) ? result.messages : [];
+    const msgs = setPublicChatMessages(Array.isArray(result.messages) ? result.messages : []);
     seedChatIncomingAudioBaseline(msgs);
     renderChatMessages(msgs, { replace: true });
     chatInitialHistoryLoaded = true;
@@ -2226,6 +2579,7 @@
         return;
       }
       const loadedMsgs = Array.isArray(msgs.messages) ? msgs.messages : [];
+      const mergedMsgs = loadedMsgs.length ? upsertPublicChatMessages(loadedMsgs) : publicChatMessages;
       advanceChatWatermarksFromMessages(loadedMsgs);
       const needsInitialRecovery = !chatInitialHistoryLoaded;
       const hadIncomingAudioBaseline = chatSoundState.baselineReady;
@@ -2243,7 +2597,7 @@
         if (!maybeInitializeChatReadBaseline()) rebuildUnreadBadgeFromMessages(loadedMsgs);
       }
       if (isChatPanelOpen()) {
-        renderChatMessages(loadedMsgs, { replace: needsInitialRecovery });
+        renderChatMessages(mergedMsgs, { replace: true });
         markChatReadThroughLatestLoaded();
         if (killFeedContainer) killFeedContainer.style.display = 'none';
       } else {
@@ -2320,11 +2674,11 @@
         await ensureChatNotificationsBootstrapped('chat-send-click');
         const msg = await chatSend(textValue);
         rememberOutgoingChatEcho(textValue);
-        const sentMessages = (Array.isArray(msg) ? msg : (msg ? [msg] : [])).map((row) => normalizePublicChatMessage(row));
+        const sentMessages = normalizePublicMessagesPayload(msg);
         if (sentMessages.length > 0) {
           sentMessages.forEach(rememberOutgoingChatEcho);
           seedChatIncomingAudioBaseline(sentMessages);
-          renderChatMessages(sentMessages);
+          renderChatMessages(upsertPublicChatMessages(sentMessages), { replace: true });
         }
         chatInput.value = '';
         await playChatTone('outgoing');
@@ -2347,11 +2701,9 @@
     bindVoiceComposerControls('public', () => ({
       room: CHAT_ROOM,
       onUploaded: async (response) => {
-        const sentMessages = normalizePublicMessagesPayload(response);
-        if (sentMessages.length) {
-          seedChatIncomingAudioBaseline(sentMessages);
-          renderChatMessages(sentMessages);
-        }
+        const previousLatestId = chatLatestMessageId;
+        const merged = await integrateUploadedVoiceMessage('public', response, { previousLatestId, room: CHAT_ROOM });
+        if (Array.isArray(merged) && merged.length) seedChatIncomingAudioBaseline(merged);
         await playChatTone('outgoing');
         await chatPollOnce();
       },
@@ -4608,9 +4960,10 @@
     const uid = String(driverProfileState.userId || '');
     if (!uid) return;
     const normalized = normalizeDriverMessages(messages);
-    const next = replace ? normalized.slice() : mergePrivateMessages(uid, normalized);
+    const next = replace ? upsertChatMessages([], normalized) : mergePrivateMessages(uid, normalized);
     if (replace) {
       privateMessagesByUserId[uid] = next;
+      pruneVoiceAssetCache();
     }
     driverProfileState.messages = privateMessagesByUserId[uid] || next || [];
     driverProfileState.latestMessageId = (driverProfileState.messages || []).reduce((max, msg) => {
@@ -4652,8 +5005,10 @@
   function closeDriverProfileModal() {
     if (chatVoiceState.scope === 'profile-dm') cancelChatVoiceRecording('Recording canceled');
     stopDriverProfileDmPolling();
+    clearVoiceAssetsForMessages(driverProfileState.messages);
     driverProfileState.open = false;
     driverProfileState.userId = null;
+    pruneVoiceAssetCache();
     driverProfileState.isSelf = false;
     driverProfileState.status = '';
     chatSoundRuntime.dmLastObservedIncomingId = null;
@@ -4876,10 +5231,12 @@
     bindVoiceComposerControls('driverProfile', () => ({
       userId: driverProfileState.userId,
       onUploaded: async (sent) => {
-        const sentMessages = normalizeDriverMessages(sent);
-        if (sentMessages.length) {
-          seedDriverProfileDmAudioBaseline(sentMessages);
-          appendDriverProfileMessages(sentMessages);
+        const previousLatestId = driverProfileState.latestMessageId || null;
+        const merged = await integrateUploadedVoiceMessage('private', sent, { previousLatestId, otherUserId: driverProfileState.userId, markRead: true, displayName: driverProfileState.displayName });
+        if (merged.length) {
+          seedDriverProfileDmAudioBaseline(merged);
+          driverProfileState.messages = merged;
+          driverProfileState.latestMessageId = merged.reduce((max, msg) => Math.max(max, Number(msg?.id || 0)), 0) || null;
         } else {
           const refreshed = await fetchDriverProfileDmThread(driverProfileState.userId, { limit: 30, markRead: true });
           appendDriverProfileMessages(refreshed, { replace: true });
@@ -4893,6 +5250,7 @@
       },
     }));
     bindVoicePlayers(document.getElementById('driverProfileDmList') || document);
+    void prefetchVoiceBlobUrls(messages.filter((msg) => msg?.messageType === 'voice'));
 
     const dmList = document.getElementById('driverProfileDmList');
     if (dmList) {
@@ -4918,7 +5276,9 @@
     driverProfileState.displayName = '';
     driverProfileState.profile = null;
     driverProfileState.myProgression = null;
+    clearVoiceAssetsForMessages(driverProfileState.messages);
     driverProfileState.messages = [];
+    pruneVoiceAssetCache();
     driverProfileState.latestMessageId = null;
     chatSoundRuntime.dmLastObservedIncomingId = null;
     chatSoundRuntime.dmBaselineReady = false;
