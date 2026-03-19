@@ -73,3 +73,39 @@
   .adminBtn{ padding:6px 9px; font-size:11px; }
   .adminTabBtn{ padding:6px 9px; font-size:11px; }
 }
+.adminLoadSection{ display:grid; gap:10px; }
+.adminLoadToggleRow{ display:flex; align-items:center; justify-content:space-between; gap:10px; border:1px dashed rgba(15,23,42,.18); border-radius:12px; padding:10px; background:#f8fafc; }
+.adminLoadToggleRow strong{ display:block; font-size:12px; }
+.adminLoadSafety{ display:block; margin-top:2px; }
+.adminLoadToggleInput{ width:18px; height:18px; accent-color:#0ea5e9; }
+.adminLoadControls{ display:grid; gap:10px; }
+.adminLoadPresetRow{ margin-top:6px; }
+.adminLoadAdvanced{ margin-top:0; }
+.adminLoadFieldRow{ align-items:flex-end; }
+.adminLoadField{ display:grid; gap:4px; min-width:160px; font-size:12px; font-weight:700; }
+.adminLoadCheckboxGrid{ grid-template-columns:repeat(2,minmax(0,1fr)); }
+.adminLoadActionRow,.adminLoadCopyRow,.adminLoadMetaRow{ gap:8px; }
+.adminLoadStatusCard,.adminLoadResultCard{ border-radius:12px; padding:10px; border:1px solid rgba(15,23,42,.12); background:#fff; }
+.adminLoadStatusCard{ display:grid; gap:8px; }
+.adminLoadStatus-running{ border-color:rgba(245,158,11,.35); background:#fff7ed; }
+.adminLoadStatus-pass{ border-color:rgba(16,185,129,.28); background:#ecfdf5; }
+.adminLoadStatus-fail,.adminLoadStatus-error{ border-color:rgba(220,38,38,.28); background:#fff1f2; }
+.adminLoadStatus-stopped{ background:#f8fafc; }
+.adminLoadStatusHead{ align-items:flex-start; }
+.adminLoadProgress{ position:relative; height:8px; border-radius:999px; background:rgba(148,163,184,.22); overflow:hidden; }
+.adminLoadProgress span{ display:block; height:100%; border-radius:inherit; background:linear-gradient(90deg,#0ea5e9,#22c55e); }
+.adminLoadResultCard{ display:grid; gap:8px; }
+.adminLoadResult-yes{ border-color:rgba(16,185,129,.28); background:#ecfdf5; }
+.adminLoadResult-no{ border-color:rgba(220,38,38,.28); background:#fff1f2; }
+.adminLoadResult-warn{ border-color:rgba(245,158,11,.35); background:#fff7ed; }
+.adminLoadResult-muted{ background:#f8fafc; }
+.adminLoadResultBadge{ font-size:16px; font-weight:900; letter-spacing:.02em; }
+.adminLoadResultSummary{ font-size:13px; font-weight:800; }
+.adminLoadReasonList{ margin:0; padding-left:18px; display:grid; gap:4px; font-size:12px; }
+.adminLoadMetrics .adminCardValue{ font-size:14px; }
+.adminLoadDebugPre{ max-height:280px; overflow:auto; white-space:pre-wrap; word-break:break-word; }
+
+@media (max-width: 640px){
+  .adminLoadToggleRow{ align-items:flex-start; }
+  .adminLoadCheckboxGrid{ grid-template-columns:repeat(1,minmax(0,1fr)); }
+}

@@ -10,6 +10,7 @@
     tabCache: {},
     loadingTab: null,
     actions: null,
+    tabCleanup: null,
   };
 
   const tabs = [
@@ -188,6 +189,9 @@
       onMutate: () => {
         state.tabCache = {};
       },
+      registerCleanup: (cleanup) => {
+        state.tabCleanup = typeof cleanup === 'function' ? cleanup : null;
+      },
     };
   }
 
@@ -238,7 +242,19 @@
     }
   }
 
+  function runTabCleanup() {
+    if (typeof state.tabCleanup === 'function') {
+      try {
+        state.tabCleanup();
+      } catch (_error) {
+        // no-op cleanup guard
+      }
+    }
+    state.tabCleanup = null;
+  }
+
   function paintTab(key, payload) {
+    runTabCleanup();
     const h = helpers();
     if (key === 'dashboard') {
       renderDashboard(payload);
@@ -271,12 +287,14 @@
 
   function close() {
     if (!root) return;
+    runTabCleanup();
     state.isOpen = false;
     root.classList.remove('open');
     root.setAttribute('aria-hidden', 'true');
   }
 
   function refreshAll() {
+    runTabCleanup();
     state.tabCache = {};
     if (state.isOpen) {
       renderActiveTab({ force: true });
