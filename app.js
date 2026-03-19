@@ -1951,10 +1951,14 @@ if (dockProfile) {
 
 if (dockAdmin) {
   dockAdmin.addEventListener("pointerdown", (e) => e.stopPropagation());
-  dockAdmin.addEventListener("click", (e) => {
+  dockAdmin.addEventListener("click", async (e) => {
     e.preventDefault();
     e.stopPropagation();
     closeDrawer();
+    if (!window.AdminPortal?.open && typeof window.loadFrontendModuleGroup === "function") {
+      await window.loadFrontendModuleGroup("admin");
+      syncAdminPortalSession();
+    }
     window.AdminPortal?.open?.();
   });
 }
@@ -2212,7 +2216,7 @@ function initMap() {
         notePresenceBoost();
         scheduleAdaptivePresenceRender();
         schedulePickupOverlayRefresh();
-        schedulePresencePoll({ immediate: true });
+        schedulePresencePoll({ immediate: true, reason: "viewport-change" });
       }
       applyDriverLabelZoomStyles();
     });
@@ -2224,7 +2228,7 @@ function initMap() {
       if (authHeaderOK()) {
         scheduleAdaptivePresenceRender();
         schedulePickupOverlayRefresh();
-        schedulePresencePoll({ immediate: true });
+        schedulePresencePoll({ immediate: true, reason: "viewport-change" });
       }
       applyDriverLabelZoomStyles();
     });
@@ -3435,6 +3439,27 @@ function getBufferedMapBounds(bufferRatio = 0, minBufferDeg = 0) {
   };
 }
 
+function getPresenceViewportSignature() {
+  if (!map || typeof map.getBounds !== "function") return "";
+  const bounds = map.getBounds();
+  if (!bounds) return "";
+  const west = Number(bounds.getWest?.());
+  const east = Number(bounds.getEast?.());
+  const south = Number(bounds.getSouth?.());
+  const north = Number(bounds.getNorth?.());
+  const zoom = Number(map?.getZoom?.());
+  if (![west, east, south, north, zoom].every(Number.isFinite)) return "";
+  const roundCoord = (value) => Number(value).toFixed(2);
+  const zoomBucket = (Math.round(zoom * 2) / 2).toFixed(1);
+  return [
+    roundCoord(Math.min(west, east)),
+    roundCoord(Math.max(west, east)),
+    roundCoord(Math.min(south, north)),
+    roundCoord(Math.max(south, north)),
+    zoomBucket,
+  ].join('|');
+}
+
 function getPresenceRequestParams() {
   const bounds = getBufferedMapBounds(PRESENCE_VIEWPORT_BUFFER_RATIO, PRESENCE_VIEWPORT_MIN_BUFFER_DEG);
   const params = new URLSearchParams();
@@ -3448,7 +3473,100 @@ function getPresenceRequestParams() {
   if (Number.isFinite(zoom)) params.set("zoom", String(zoom));
   params.set("mode", zoom >= 12 ? "full" : "lite");
   params.set("limit", String(PRESENCE_PULL_LIMIT));
+  const viewportSignature = getPresenceViewportSignature();
+  if (viewportSignature) params.set("viewport_sig", viewportSignature);
+  params.set("refresh_tier", document.hidden ? "hidden" : (autoCenter ? "visible-fast" : "visible-idle"));
   return params;
+}
+
+function normalizePresenceRemovalId(value) {
+  if (value == null || value === "") return "";
+  return String(value);
+}
+
+function normalizePresenceRow(it, nowUnix) {
+  const uid = String(it?.user_id ?? it?.userId ?? it?.id ?? "");
+  if (!uid) return null;
+  if (me && String(me.id) === uid) return null;
+
+  const lat = Number(it?.lat ?? it?.latitude ?? NaN);
+  const lng = Number(it?.lng ?? it?.longitude ?? NaN);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+  const updated = Number(it?.updated_at_unix ?? it?.ts_unix ?? it?.updated_at ?? NaN);
+  if (Number.isFinite(updated) && nowUnix - updated > PRESENCE_STALE_SEC) return null;
+
+  const reportedAccuracy = Number(it?.accuracy ?? it?.acc ?? NaN);
+  if (Number.isFinite(reportedAccuracy) && reportedAccuracy > GPS_ACCURACY_THRESHOLD) return null;
+
+  return {
+    uid,
+    name: it?.display_name || it?.name || it?.email || "Driver",
+    avatarUrl: getCachedAvatarUrl(uid, it?.avatar_thumb_url || it?.avatar_url || "", it?.avatar_version || it?.avatarVersion || ""),
+    mode: it?.map_identity_mode || "name",
+    lat,
+    lng,
+    heading: Number(it?.heading ?? it?.bearing ?? NaN),
+    leaderboardBadgeCode: it?.leaderboard_badge_code || '',
+    leaderboardHasCrown: !!it?.leaderboard_has_crown,
+    updatedAt: it?.updated_at ?? it?.updated_at_unix ?? it?.ts_unix ?? null,
+  };
+}
+
+function rebuildCachedPresenceRowsFromStore() {
+  const nowUnix = Date.now() / 1000;
+  const rows = [];
+  for (const [uid, row] of presenceStore.entries()) {
+    const updated = Number(row?.updatedAt ?? NaN);
+    if (Number.isFinite(updated) && nowUnix - updated > PRESENCE_STALE_SEC) {
+      presenceStore.delete(uid);
+      continue;
+    }
+    rows.push(row);
+  }
+  return rows;
+}
+
+function mergePresencePayload(list, { replaceStore = false, removals = [] } = {}) {
+  if (replaceStore) presenceStore.clear();
+  for (const removal of removals || []) {
+    const uid = normalizePresenceRemovalId(removal);
+    if (uid) presenceStore.delete(uid);
+  }
+  const nowUnix = Date.now() / 1000;
+  for (const item of list || []) {
+    const normalized = normalizePresenceRow(item, nowUnix);
+    if (!normalized) continue;
+    presenceStore.set(String(normalized.uid), normalized);
+  }
+  return rebuildCachedPresenceRowsFromStore();
+}
+
+async function fetchPresencePayload(params, signal) {
+  const deltaParams = new URLSearchParams(params.toString());
+  if (presenceLastSyncCursor) deltaParams.set('cursor', presenceLastSyncCursor);
+  if (Number.isFinite(presenceLastSyncTimestamp) && presenceLastSyncTimestamp > 0) {
+    deltaParams.set('since_ts', String(Math.floor(presenceLastSyncTimestamp)));
+  }
+
+  if (presenceDeltaMode !== 'disabled' && (presenceLastSyncCursor || presenceLastSyncTimestamp > 0)) {
+    try {
+      const delta = await getJSONAuth(`/presence/delta?${deltaParams.toString()}`, communityToken, { signal });
+      presenceDeltaMode = 'enabled';
+      return { payload: delta, mode: 'delta' };
+    } catch (error) {
+      if (error?.name === 'AbortError') throw error;
+      const status = Number(error?.status ?? NaN);
+      if (status === 404 || status === 405) {
+        presenceDeltaMode = 'disabled';
+      } else {
+        console.warn('/presence/delta failed, falling back to /presence/all:', error);
+      }
+    }
+  }
+
+  const full = await getJSONAuth(`/presence/all?${params.toString()}`, communityToken, { signal });
+  return { payload: full, mode: 'full' };
 }
 
 function pickupOverlayQueryPath(limit = PICKUP_RECENT_LIMIT) {
@@ -6098,15 +6216,23 @@ function syncAdminPortalSession() {
   }
 }
 
+window.syncAdminPortalSession = syncAdminPortalSession;
+
 // other drivers markers
 const otherMarkers = new Map(); // user_id -> marker
 const driverMarkerVisualSignature = new Map();
+const presenceStore = new Map();
 let cachedPresenceRows = [];
 let presenceRenderMode = 'full';
 let presenceFocusedUserId = null;
 let presenceLiteSourceFingerprint = '';
 let presenceAdaptiveRenderRaf = 0;
 let lastSelfOrbitMeta = null;
+let presenceLastSyncTimestamp = 0;
+let presenceLastSyncCursor = '';
+let presenceDeltaMode = 'probe';
+let lastPresenceViewportSignature = '';
+let lastPresenceFetchViewportSignature = '';
 
 const PRESENCE_FULL_MAX_VISIBLE = 50;
 const PRESENCE_MEDIUM_MAX_VISIBLE = 100;
@@ -6568,10 +6694,16 @@ function clearOtherDrivers() {
   }
   otherMarkers.clear();
   driverMarkerVisualSignature.clear();
+  presenceStore.clear();
   cachedPresenceRows = [];
   cachedPresenceFingerprint = '';
   renderedPresenceFingerprint = '';
   presenceFocusedUserId = null;
+  presenceLastSyncTimestamp = 0;
+  presenceLastSyncCursor = '';
+  presenceDeltaMode = 'probe';
+  lastPresenceViewportSignature = '';
+  lastPresenceFetchViewportSignature = '';
   const presenceLiteSource = map?.getSource?.('presence-lite');
   if (presenceLiteSource && typeof presenceLiteSource.setData === 'function') {
     presenceLiteSource.setData(emptyGeojson());
@@ -6974,11 +7106,19 @@ function clearPresencePollTimer() {
   }
 }
 
-function schedulePresencePoll({ immediate = false } = {}) {
+function schedulePresencePoll({ immediate = false, reason = "scheduled" } = {}) {
   clearPresencePollTimer();
+  if (!authHeaderOK()) return;
+  if (immediate && reason === 'viewport-change') {
+    const nextViewportSignature = getPresenceViewportSignature();
+    if (nextViewportSignature && nextViewportSignature === lastPresenceViewportSignature) {
+      immediate = false;
+    } else if (nextViewportSignature) {
+      lastPresenceViewportSignature = nextViewportSignature;
+    }
+  }
   const delay = immediate ? 0 : getPresencePollIntervalMs();
   if (!delay && delay !== 0) return;
-  if (!authHeaderOK()) return;
   const runner = () => {
     presencePollTimer = null;
     runPresencePollLoop().catch((e) => console.warn("presence poll loop failed:", e));
@@ -7117,17 +7257,15 @@ async function pullPresenceAll() {
     frontendPerfStats.presencePollsAttempted += 1;
     const requestSerial = ++presenceRequestSerial;
     const params = getPresenceRequestParams();
-    const list = await getJSONAuth(`/presence/all?${params.toString()}`, communityToken, { signal: presencePullAbortController.signal });
+    const viewportSignature = params.get("viewport_sig") || getPresenceViewportSignature();
+    const { payload: list, mode: responseMode } = await fetchPresencePayload(params, presencePullAbortController.signal);
     frontendPerfStats.presencePollsCompleted += 1;
-    const now = Date.now() / 1000;
-    const items = Array.isArray(list) ? list : list?.items || [];
+    const items = Array.isArray(list) ? list : list?.items || list?.changes || [];
     const fallbackVisibleCount = Array.isArray(items) ? items.length : 0;
     let badgeUpdatedFromSummary = false;
     const listOnlineCount = Number(list?.online_count ?? list?.summary?.online_count ?? list?.counts?.online_count);
     const listGhostedCount = Number(list?.ghosted_count ?? list?.summary?.ghosted_count ?? list?.counts?.ghosted_count);
 
-    // Update the online badge from backend aggregate counts so ghosted users
-    // remain hidden on the map but still count as online.
     if (Number.isFinite(listOnlineCount) && listOnlineCount >= 0) {
       updateOnlineBadge(listOnlineCount, Number.isFinite(listGhostedCount) ? listGhostedCount : 0);
       badgeUpdatedFromSummary = true;
@@ -7149,47 +7287,28 @@ async function pullPresenceAll() {
     if (!badgeUpdatedFromSummary) {
       updateOnlineBadge(fallbackVisibleCount, 0);
     }
-    const candidates = [];
 
-    for (const it of items) {
-      const uid = String(it.user_id ?? it.userId ?? it.id ?? "");
-      if (!uid) continue;
-      if (me && String(me.id) === uid) continue;
+    const removals = [];
+    if (Array.isArray(list?.removed)) removals.push(...list.removed);
+    if (Array.isArray(list?.removed_user_ids)) removals.push(...list.removed_user_ids);
+    if (Array.isArray(list?.deleted_user_ids)) removals.push(...list.deleted_user_ids);
+    const replaceStore = !!(list?.full_snapshot === true || list?.replace_all === true || (responseMode === 'delta' && list?.mode === 'full'));
+    const nextRows = mergePresencePayload(items, { replaceStore, removals });
 
-      let lat = Number(it.lat ?? it.latitude ?? NaN);
-      let lng = Number(it.lng ?? it.longitude ?? NaN);
-      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
-      // Do NOT round lat/lng. Use the exact coordinates returned by the backend
-      // so markers remain accurate even when many drivers share one location.
-
-      const updated = Number(it.updated_at_unix ?? it.ts_unix ?? it.updated_at ?? NaN);
-      if (Number.isFinite(updated)) {
-        if (now - updated > PRESENCE_STALE_SEC) continue;
-      }
-
-      const reportedAccuracy = Number(it.accuracy ?? it.acc ?? NaN);
-      if (Number.isFinite(reportedAccuracy) && reportedAccuracy > GPS_ACCURACY_THRESHOLD) {
-        continue;
-      }
-
-      candidates.push({
-        uid,
-        name: it.display_name || it.name || it.email || "Driver",
-        avatarUrl: getCachedAvatarUrl(uid, it.avatar_thumb_url || it.avatar_url || "", it.avatar_version || it.avatarVersion || ""),
-        mode: it.map_identity_mode || "name",
-        lat,
-        lng,
-        heading: Number(it.heading ?? it.bearing ?? NaN),
-        leaderboardBadgeCode: it.leaderboard_badge_code || '',
-        leaderboardHasCrown: !!it.leaderboard_has_crown,
-        updatedAt: it.updated_at ?? it.updated_at_unix ?? it.ts_unix ?? null,
-      });
+    const nextSyncCursor = String(list?.next_cursor ?? list?.cursor ?? list?.sync_cursor ?? '').trim();
+    const nextSyncTs = Number(list?.server_ts ?? list?.server_time ?? list?.next_since_ts ?? list?.last_sync_ts ?? list?.last_updated_at ?? NaN);
+    presenceLastSyncCursor = nextSyncCursor || presenceLastSyncCursor;
+    if (Number.isFinite(nextSyncTs) && nextSyncTs > 0) {
+      presenceLastSyncTimestamp = nextSyncTs;
+    } else {
+      presenceLastSyncTimestamp = Math.floor(Date.now() / 1000);
     }
 
     if (requestSerial < appliedPresenceRequestSerial) return;
-    const nextFingerprint = presenceRowsFingerprint(candidates);
-    cachedPresenceRows = candidates;
+    const nextFingerprint = presenceRowsFingerprint(nextRows);
+    cachedPresenceRows = nextRows;
     appliedPresenceRequestSerial = requestSerial;
+    lastPresenceFetchViewportSignature = viewportSignature || lastPresenceFetchViewportSignature;
     if (nextFingerprint !== cachedPresenceFingerprint) {
       cachedPresenceFingerprint = nextFingerprint;
       scheduleAdaptivePresenceRender();

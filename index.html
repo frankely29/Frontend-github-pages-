@@ -20,8 +20,7 @@
   ></script>
 
     <link rel="stylesheet" href="./frontend-shell.css?v=frontend-shell-v1" />
-
-
+  <link rel="stylesheet" href="./index.extracted.css?v=frontend-inline-v1" />
   <link rel="stylesheet" href="./admin.panel.css?v=adminv2" />
 </head>
 
@@ -75,7 +74,7 @@
         <div class="row"><svg class="swatchSvg" viewBox="0 0 12 12" aria-hidden="true" focusable="false"><rect x="0.5" y="0.5" width="11" height="11" rx="3" fill="#ffd400" stroke="rgba(0,0,0,0.15)"/></svg> Yellow = Below Normal</div>
         <div class="row"><svg class="swatchSvg" viewBox="0 0 12 12" aria-hidden="true" focusable="false"><rect x="0.5" y="0.5" width="11" height="11" rx="3" fill="#e60000" stroke="rgba(0,0,0,0.15)"/></svg> Red = Very Low / Avoid</div>
 
-        <div id="modeNote" class="sub" style="margin-top:7px;">
+        <div id="modeNote" class="sub panelNoteSpacer">
           Colors come from rating (1–100) for the selected 20-minute window.<br/>
           Time label is NYC time.
         </div>
@@ -102,7 +101,7 @@
       <button id="btnPickup" class="okBtn" type="button">✅ Save</button>
     </div>
 
-    <div id="communityNote" class="sub" style="margin-top:7px;">
+    <div id="communityNote" class="sub panelNoteSpacer">
       Community: sign in to see other drivers + report police + record trips.
     </div>
   </div>
@@ -239,7 +238,7 @@
     </div>
   </div>
 
-  <div id="mapLoading" style="position:absolute;inset:0;background:rgba(255,255,255,0.85);display:flex;align-items:center;justify-content:center;font-weight:900;color:#0066ff;z-index:999;">Loading map… (first load may take a few seconds)</div>
+  <div id="mapLoading" class="mapLoadingOverlay">Loading map… (first load may take a few seconds)</div>
 
   <button id="debugToggle" class="debugToggle" type="button" hidden>Debug</button>
   <div id="debugPanel" class="debugPanel" hidden>
@@ -269,17 +268,8 @@
   <script src="./runtime.shared.js?v=runtime-v1"></script>
   <script src="./app.js?v=railway3"></script>
   <script src="./app.part2.js?v=railway3"></script>
-  <script src="./app.part3.js?v=railway3"></script>
   <script src="./pickup-recording.feature.js?v=pickuprecordv1"></script>
   <script src="./day-tendency.js?v=dayv1"></script>
-  <script src="./admin.components.js?v=adminv2"></script>
-  <script src="./admin.actions.js?v=adminv2"></script>
-  <script src="./admin.users.js?v=adminv2"></script>
-  <script src="./admin.live.js?v=adminv2"></script>
-  <script src="./admin.reports.js?v=adminv2"></script>
-  <script src="./admin.system.js?v=adminv2"></script>
-  <script src="./admin.trips.js?v=adminv2"></script>
-  <script src="./admin.tests.js?v=adminv2"></script>
-  <script src="./admin.panel.js?v=adminv2"></script>
+  <script src="./app.lazy.js?v=frontend-lazy-v1"></script>
 </body>
 </html>

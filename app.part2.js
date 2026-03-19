@@ -148,6 +148,7 @@
   let chatInitialHistoryLoaded = false;
   let chatInitialHistoryLoadAttempted = false;
   let chatInitialHistoryRetryQueued = false;
+  let chatHiddenBaselineReady = false;
 
   // Kill-feed bootstrap guard.
   // We seed startup history into seen-keys, then suppress feed replay until
@@ -3302,6 +3303,7 @@
     chatSoundRuntime.seenIncomingKeys = new Set();
     chatSoundRuntime.dmBaselineReady = false;
     chatSoundState.baselineReady = false;
+    chatHiddenBaselineReady = false;
     killFeedBootstrapReady = false;
     killFeedBootstrapPollConsumed = false;
   }
@@ -3382,13 +3384,19 @@
     seedChatIncomingAudioBaseline(msgs);
     renderChatMessages(msgs, { replace: true });
     chatInitialHistoryLoaded = true;
+    chatHiddenBaselineReady = true;
     chatInitialHistoryRetryQueued = false;
     seedKillFeedSeenKeys(msgs);
     killFeedBootstrapReady = true;
     if (!maybeInitializeChatReadBaseline()) rebuildUnreadBadgeFromMessages(msgs);
     return { ok: true, messages: msgs };
   }
-  async function chatFetchNew() { return chatFetchMessages({ after: chatLastSeen, limit: 50 }); }
+
+  async function chatFetchIncremental({ panelOpen = isChatPanelOpen() } = {}) {
+    const cursor = panelOpen ? chatLastSeen : (chatLatestMessageId ?? chatLastSeen);
+    const limit = panelOpen ? 50 : (chatHiddenBaselineReady ? 12 : 1);
+    return chatFetchMessages({ after: cursor, limit });
+  }
 
   async function chatSend(text) {
     const token = getCommunityToken();
@@ -3401,31 +3409,44 @@
     if (typeof authHeaderOK === 'function' && !authHeaderOK()) return;
     chatPollInFlight = true;
     try {
-      const msgs = await chatFetchNew();
+      const panelOpen = isChatPanelOpen();
+      if (panelOpen && !chatInitialHistoryLoaded) {
+        await chatLoadInitial();
+        return;
+      }
+      const msgs = await chatFetchIncremental({ panelOpen });
       if (!msgs?.ok) {
-        if (isChatPanelOpen() && !chatInitialHistoryLoaded) setChatStatus(msgs?.reason === 'not_ready' ? 'Loading chat...' : 'Chat unavailable right now.');
+        if (panelOpen && !chatInitialHistoryLoaded) setChatStatus(msgs?.reason === 'not_ready' ? 'Loading chat...' : 'Chat unavailable right now.');
         return;
       }
       const loadedMsgs = Array.isArray(msgs.messages) ? msgs.messages : [];
-      const mergedMsgs = loadedMsgs.length ? upsertPublicChatMessages(loadedMsgs) : publicChatMessages;
-      pruneExpiredChatState();
-      advanceChatWatermarksFromMessages(loadedMsgs);
-      const needsInitialRecovery = !chatInitialHistoryLoaded;
-      const hadIncomingAudioBaseline = chatSoundState.baselineReady;
-      const freshIncoming = hadIncomingAudioBaseline ? collectFreshIncomingMessagesForAudio(loadedMsgs) : [];
-      if (freshIncoming.length > 0) void playChatTone('incoming');
-      if (needsInitialRecovery) {
-        chatInitialHistoryLoaded = true;
-        chatInitialHistoryRetryQueued = false;
-        if (!hadIncomingAudioBaseline) seedChatIncomingAudioBaseline(loadedMsgs);
+      if (!panelOpen && !chatHiddenBaselineReady) {
+        const baselineMsgs = loadedMsgs.length ? upsertPublicChatMessages(loadedMsgs) : publicChatMessages;
+        pruneExpiredChatState();
+        advanceChatWatermarksFromMessages(loadedMsgs);
+        if (!chatSoundState.baselineReady) seedChatIncomingAudioBaseline(baselineMsgs);
         if (!killFeedBootstrapReady) {
-          seedKillFeedSeenKeys(loadedMsgs);
+          seedKillFeedSeenKeys(baselineMsgs);
           killFeedBootstrapReady = true;
           killFeedBootstrapPollConsumed = true;
         }
-        if (!maybeInitializeChatReadBaseline()) rebuildUnreadBadgeFromMessages(loadedMsgs);
+        chatHiddenBaselineReady = true;
+        if (!maybeInitializeChatReadBaseline()) rebuildUnreadBadgeFromMessages(baselineMsgs);
+        return;
       }
-      if (isChatPanelOpen()) {
+      const mergedMsgs = loadedMsgs.length ? upsertPublicChatMessages(loadedMsgs) : publicChatMessages;
+      pruneExpiredChatState();
+      advanceChatWatermarksFromMessages(loadedMsgs);
+      const hadIncomingAudioBaseline = chatSoundState.baselineReady;
+      const freshIncoming = hadIncomingAudioBaseline ? collectFreshIncomingMessagesForAudio(loadedMsgs) : [];
+      if (freshIncoming.length > 0) void playChatTone('incoming');
+      if (!hadIncomingAudioBaseline && loadedMsgs.length) seedChatIncomingAudioBaseline(loadedMsgs);
+      if (!killFeedBootstrapReady) {
+        seedKillFeedSeenKeys(loadedMsgs);
+        killFeedBootstrapReady = true;
+        killFeedBootstrapPollConsumed = true;
+      }
+      if (panelOpen) {
         renderChatMessages(mergedMsgs, { replace: true });
         markChatReadThroughLatestLoaded();
         if (killFeedContainer) killFeedContainer.style.display = 'none';
@@ -5751,12 +5772,19 @@
 
   function startProgressionSyncInterval() {
     if (progressionSyncTimer) return;
-    progressionSyncTimer = window.setInterval(() => {
+    const runner = () => {
+      if (document.visibilityState === 'hidden') return;
       syncMyProgression({ forcePopupCheck: true });
-    }, PROGRESSION_SYNC_INTERVAL_MS);
+    };
+    if (runtimePolling) {
+      progressionSyncTimer = runtimePolling.setInterval('chat:progression-sync', runner, PROGRESSION_SYNC_INTERVAL_MS);
+      return;
+    }
+    progressionSyncTimer = window.setInterval(runner, PROGRESSION_SYNC_INTERVAL_MS);
   }
 
   function stopProgressionSyncInterval() {
+    if (runtimePolling) runtimePolling.clear('chat:progression-sync');
     if (!progressionSyncTimer) return;
     window.clearInterval(progressionSyncTimer);
     progressionSyncTimer = null;
@@ -6373,16 +6401,21 @@
     syncChatPollingState();
   });
 
-  window.setTimeout(function observeChatAuthLoop() {
+  const observeChatAuthLoop = () => {
     observeChatAuthState();
     maybeSyncProgressionOnSignInState();
-    window.setTimeout(observeChatAuthLoop, 2000);
-  }, 2000);
-
-  window.setTimeout(function clearIdentityLoop() {
+  };
+  const clearIdentityLoop = () => {
     if (typeof authHeaderOK === 'function' && !authHeaderOK()) clearMapIdentityTempState();
-    window.setTimeout(clearIdentityLoop, 2500);
-  }, 2500);
+  };
+
+  if (runtimePolling) {
+    runtimePolling.setInterval('chat:auth-observer', observeChatAuthLoop, 2000);
+    runtimePolling.setInterval('chat:identity-clear', clearIdentityLoop, 2500);
+  } else {
+    window.setInterval(observeChatAuthLoop, 2000);
+    window.setInterval(clearIdentityLoop, 2500);
+  }
 
   window.testChatIncomingSound = async function () {
     await primeChatSoundSystem('manual-test-incoming');
