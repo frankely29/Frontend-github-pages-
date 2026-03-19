@@ -1,105 +1,75 @@
 # Frontend Performance Architecture
 
-## Actual startup script order
-1. `index.html` loads MapLibre CSS and JS from `unpkg` in the document head.
-2. `index.html` loads `frontend-shell.css`, `index.extracted.css`, and `admin.panel.css` as static stylesheets.
-3. The body delivers the full shell markup up front: map canvas, auth overlay, side panels, dock, slider, weather badge, online badge, radio modal, and debug panel.
-4. Inline config sets `window.API_BASE`.
-5. `runtime.shared.js` loads first and registers shared helpers for URL resolution, auth-aware fetch wrappers, poll/timer dedupe, perf counters, and account actions.
-6. `app.js` loads next and boots the map, timeline/frame system, auth shell, self-location watch, presence transport/render loop, pickup overlay, dock shell, weather badge, and top-level panel wiring.
-7. `app.part2.js` loads after `app.js` and boots public chat, private messages, unread badges, kill feed, games, profile/driver messaging, chat sounds, and live-chat capability probing.
-8. `pickup-recording.feature.js` and `day-tendency.js` load at startup because Save/pickup recording and the day tendency badge still participate in the initial shell.
-9. `app.lazy.js` loads last and attaches deferred script-group loaders so leaderboard and admin code stay out of first paint.
+## Runtime shell and lazy-load boundaries
+1. `index.html` eagerly loads `runtime.shared.js`, `app.js`, `app.part2.js`, `pickup-recording.feature.js`, `day-tendency.js`, and `app.lazy.js`.
+2. `app.part3.js` remains lazy-loaded through `window.loadFrontendModuleGroup('leaderboard')`; it is **not** reintroduced into the shell.
+3. The admin bundle remains lazy-loaded through the existing admin script group in `app.lazy.js`.
+4. `app.js` now exports the drawer helpers on `window` (`openDrawer`, `closeDrawer`, `toggleDrawer`, `bindDockToggle`, `getOpenPanelKey`) so lazy modules can open drawers without depending on brittle implicit globals.
 
-## Actual panels and dock flow
-- The dock buttons in `app.js` still own the shell-level open/close state for Colors, Modes, Chat, Games, Leaderboard, Admin, Music, and Profile.
-- Drawer open/close state is centralized through the dock drawer markup (`#dockDrawer`, `#dockDrawerBody`, `#dockBackdrop`) and button state styling in `setActiveDockButton(...)` / `openDockPanel(...)` flows inside `app.js`.
-- `app.part2.js` owns the chat drawer body population, tab switching, unread badge updates, kill feed state, games panel wiring, and profile/DM overlays.
-- Leaderboard and admin buttons stay visible in the dock shell, but `app.lazy.js` intercepts their first click, loads the missing scripts once, and then hands control back to `window.LeaderboardPanel.open()` or `window.AdminPortal.open()`.
-- Repeated opens do not inject duplicate script tags because `app.lazy.js` caches loaded groups in `loadedGroups` and marks each script node with `data-lazy-src`.
+## Leaderboard loading contract
+- The primary leaderboard open path now lives in `app.js`.
+- `#dockLeaderboard` has its own explicit `pointerdown` and `click` handlers, matching the dock-admin pattern.
+- `ensureLeaderboardPanelReady()` in `app.js` does the only required readiness check:
+  - return immediately when `window.LeaderboardPanel.open` already exists,
+  - otherwise lazy-load the `leaderboard` module group,
+  - validate `window.LeaderboardPanel.open` after loading,
+  - warn and record diagnostics if the panel still is not ready.
+- `app.lazy.js` no longer owns leaderboard open behavior on click; it only keeps lazy loading support and optional preload hooks.
+- `app.part3.js` exposes `window.LeaderboardPanel = { init, open, refresh }` and its `open()` path directly calls `window.openDrawer(...)`.
 
-## Current presence fetch/render flow
-### Transport selection
-- `app.js` computes viewport-aware presence params in `getPresenceRequestParams()` using `min_lng`, `max_lng`, `min_lat`, `max_lat`, `zoom`, `mode`, `limit`, `viewport_sig`, and `refresh_tier`.
-- `fetchPresencePayload(...)` now prefers a viewport snapshot route on full fetches:
-  - `/presence/viewport?...` when bounds are available and the route has not been marked unsupported.
-  - `/presence/all?...` as the compatibility fallback.
-- Subsequent syncs try `/presence/delta?...` first when a cursor or sync timestamp is available.
-- Delta sync uses `cursor` and `updated_since_ms` consistently, with timestamp normalization back into milliseconds.
-- If `/presence/delta` or `/presence/viewport` returns 404/405/501 or an unsupported response shape, the frontend automatically falls back to the broader snapshot route instead of breaking the map.
+## Leaderboard bug root cause and fix
+### Root cause
+- The leaderboard dock button depended on a first-click interception path in `app.lazy.js`.
+- That interception tried to lazy-load `app.part3.js`, while `app.part3.js` separately expected drawer helpers/global names to already exist and, during `init()`, tried to bind the same dock button again.
+- This created a fragile race between shell click capture, module load timing, and later dock binding, so the first click could be consumed without deterministically opening the drawer.
 
-### Merge/store behavior
-- Presence rows are normalized in `normalizePresenceRow(...)` and stored in `presenceStore`, keyed by user id.
-- `mergePresencePayload(...)` applies removals first, then upserts only valid/still-fresh rows.
-- `cachedPresenceRows` is rebuilt from the in-memory store so stale rows naturally age out without forcing a full marker rebuild.
-- The online badge is updated from payload summary counts when present, otherwise from `/presence/summary`, and finally from the visible row count as a last fallback.
+### Fix
+- `app.js` now owns the authoritative dock-button click path.
+- `app.lazy.js` only preloads the leaderboard group and keeps `loadFrontendModuleGroup(...)` as the loader API.
+- `app.part3.js` opens the drawer directly through exported helper functions and no longer depends on binding the leaderboard dock button to function.
+- `window.__mapPerfDebug.leaderboard` now records `loaded`, `opened`, `lastError`, `lastOpenAt`, and `loadAttempts` for future troubleshooting.
 
-### Rendering behavior
-- `renderAdaptivePresenceFromCache()` filters the cached store to current render bounds, computes a render mode (`full` / `medium` / `lite`), and keeps richer DOM markers only for the chosen visible users.
-- `upsertDriverMarker(...)` mutates existing markers in place for users that stay in the rich set.
-- Lower-priority visible drivers are pushed into the `presence-lite` GeoJSON source instead of creating many rich DOM markers.
-- Users removed from the rich set have their DOM markers cleaned up, but the underlying store entry remains available for future viewport re-entry until stale expiry/removal.
+## Presence transport architecture (Phase 1)
+### Snapshot vs delta
+- First presence load now prefers `/presence/viewport` whenever viewport bounds are available.
+- Incremental refreshes prefer `/presence/delta`.
+- `/presence/all` remains the compatibility fallback.
 
-## Current pickup overlay fetch flow
-- Startup keeps pickup support active because Save/pickup remains a top-level feature.
-- `refreshPickupOverlay(...)` in `app.js` builds a buffered viewport query through `pickupOverlayQueryPath(...)` and requests `/events/pickups/recent` with viewport bounds, `limit`, and `zone_sample_limit`.
-- Pickup fetches are guarded by:
-  - `pickupOverlayAbortController` to cancel superseded requests,
-  - `lastPickupFetchKey` + `lastPickupViewportKey` to avoid duplicate re-fetches,
-  - `PICKUP_FETCH_COOLDOWN_MS` to suppress stormy redraws.
-- Response application is serial-number guarded so older responses cannot overwrite newer viewport data.
+### Request contract
+- Presence requests keep viewport params (`min_lat`, `min_lng`, `max_lat`, `max_lng`, `zoom`) when bounds are known.
+- Presence requests now always include `include_removed=true` and `padding_ratio=<buffer ratio>`.
+- Delta requests now send **only** the backend-aligned incremental cursor contract: `updated_since_ms=<ms cursor>`.
+- The frontend no longer sends the unsupported `cursor` delta param as the main incremental contract.
 
-## Current public chat polling flow
-- `app.part2.js` owns public chat receive state.
-- `scheduleChatPoll(...)` uses exactly one timeout loop for public chat and routes through `FrontendRuntime.polling` when available.
-- Poll cadence is state-aware:
-  - open/visible public chat uses the fast open cadence,
-  - closed chat uses a slower badge-maintenance cadence,
-  - hidden documents use the hidden cadence,
-  - SSE-connected modes intentionally keep a slower fallback poll lane alive.
-- `chatPollOnce()` prevents overlap with `chatPollInFlight`, cancels superseded HTTP work via `chatPollAbortController`, and uses incremental `after=` fetching once a baseline has been established.
-- Hidden closed chat no longer keeps downloading the full visible history payload every cycle; it first seeds a tiny baseline and then polls incrementally from the latest known id.
+### Cursor tracking
+- `presenceLastSyncCursor` is now normalized to a millisecond cursor.
+- The frontend normalizes backend cursor/timestamp variants into one millisecond value and reuses that value for both delta fetches and local sync state.
 
-## Current DM polling flow
-- `schedulePrivatePoll(...)` owns the inbox/thread-summary loop and uses a single timeout at a time.
-- Each cycle refreshes `/chat/private/threads` and, if a thread is active, incrementally fetches that thread instead of reloading every DM history.
-- Per-thread DM fetches are guarded with `AbortController`s stored in `privateMessageAbortControllers`.
-- Driver-profile DMs use a separate timeout lane that only runs while a non-self profile modal is open.
+### Merge/render safety
+- Presence payloads still merge into `presenceStore` instead of forcing a full marker rebuild.
+- Removals are still applied first.
+- Rich markers are still updated in place, while lighter nearby users continue to render through the `presence-lite` source.
+- Full snapshot responses now explicitly replace the store, which avoids stale-user accumulation during fallback snapshots.
 
-## Hidden panel work that still runs unnecessarily
-- Public chat still keeps a reduced unread/notification poll alive while closed; this is intentional for badges, but it is still background work.
-- Private thread summaries still refresh while the drawer is closed so unread counts stay current.
-- Driver-profile DM polling continues while the profile modal is open, only slowing down when the document is hidden.
-- Weather, self-location, presence, pickup, and day-tendency timers continue regardless of dock state because they power always-visible map UI.
-- Progression/auth observer/identity cleanup loops from `app.part2.js` still exist, but they now run through stable timers rather than spawning recursive duplicates.
+## Safe Phase 2 chat architecture
+### Capability discovery
+- `app.part2.js` still prefers `window.CHAT_LIVE_CONFIG` and otherwise probes `GET /chat/live/capabilities`.
+- Missing/disabled capability payloads cleanly keep the app in polling mode.
 
-## Exact modules currently eagerly loaded
-### CSS
-- `https://unpkg.com/maplibre-gl@5.10.0/dist/maplibre-gl.css`
-- `./frontend-shell.css`
-- `./index.extracted.css`
-- `./admin.panel.css`
+### Capability normalization
+- Capability normalization now tolerates more payload shapes for public/private SSE URLs while still refusing to enable SSE without a concrete URL.
+- Public and private capability states are normalized independently, so one can stay on polling while the other uses SSE.
 
-### JavaScript
-- `https://unpkg.com/maplibre-gl@5.10.0/dist/maplibre-gl.js`
-- `./runtime.shared.js`
-- `./app.js`
-- `./app.part2.js`
-- `./pickup-recording.feature.js`
-- `./day-tendency.js`
-- `./app.lazy.js`
+### Live transport safety
+- At most one public EventSource and one private EventSource are maintained.
+- Reconnect still uses exponential backoff.
+- Low-frequency reconciliation polling remains active even while SSE is connected.
+- Live events continue to merge into existing deduped chat state without forcing full-history reloads.
 
-## Exact modules currently lazy-loaded on demand
-### Leaderboard group
-- `./app.part3.js`
-
-### Admin group
-- `./admin.components.js`
-- `./admin.actions.js`
-- `./admin.users.js`
-- `./admin.live.js`
-- `./admin.reports.js`
-- `./admin.system.js`
-- `./admin.trips.js`
-- `./admin.tests.js`
-- `./admin.panel.js`
+## Responsiveness guardrails kept in this pass
+- No eager reintroduction of `app.part3.js` or admin bundles.
+- No full-app rerender path added.
+- No chat work added to map move handlers.
+- No change to message send routes.
+- No removal of polling fallback.
+- Presence rendering still updates incrementally and preserves viewport responsiveness.

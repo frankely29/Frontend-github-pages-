@@ -857,19 +857,57 @@
     }
   }
 
+  function normalizeChatLiveCapabilityEndpoint(source, fallbackKeys = []) {
+    const candidates = [
+      source?.url,
+      source?.sse_url,
+      source?.stream_url,
+      source?.streamUrl,
+      source?.eventsource_url,
+      source?.eventSourceUrl,
+      ...fallbackKeys.map((key) => source?.[key]),
+    ];
+    const url = candidates.map((value) => String(value || '').trim()).find(Boolean) || '';
+    const explicitEnabled = source?.enabled;
+    const disabled = explicitEnabled === false || source?.available === false || source?.disabled === true;
+    return {
+      enabled: !disabled && !!url,
+      url,
+    };
+  }
+
   function normalizeChatLiveCapabilityShape(payload) {
     const source = payload && typeof payload === 'object' ? payload : {};
-    const publicSource = source.public || source.public_chat || source.publicChat || source.chat || {};
-    const privateSource = source.private || source.dm || source.private_messages || source.privateMessages || {};
+    const publicSource = source.public || source.public_chat || source.publicChat || source.chat || source.public_live || {};
+    const privateSource = source.private || source.dm || source.private_messages || source.privateMessages || source.private_live || {};
+    const publicEndpoint = normalizeChatLiveCapabilityEndpoint(publicSource, ['public_url', 'public_sse_url']);
+    const privateEndpoint = normalizeChatLiveCapabilityEndpoint(privateSource, ['private_url', 'private_sse_url', 'dm_url']);
+
+    if (!publicEndpoint.url) {
+      const payloadPublicUrl = String(source.public_url || source.public_sse_url || source.publicStreamUrl || '').trim();
+      if (payloadPublicUrl) {
+        publicEndpoint.url = payloadPublicUrl;
+        publicEndpoint.enabled = source.public_enabled !== false && source.enabled !== false;
+      }
+    }
+
+    if (!privateEndpoint.url) {
+      const payloadPrivateUrl = String(source.private_url || source.private_sse_url || source.privateStreamUrl || source.dm_url || '').trim();
+      if (payloadPrivateUrl) {
+        privateEndpoint.url = payloadPrivateUrl;
+        privateEndpoint.enabled = source.private_enabled !== false && source.enabled !== false;
+      }
+    }
+
     return {
       checkedAt: Date.now(),
       public: {
-        enabled: publicSource.enabled !== false && !!String(publicSource.url || publicSource.sse_url || publicSource.stream_url || publicSource.streamUrl || '').trim(),
-        url: String(publicSource.url || publicSource.sse_url || publicSource.stream_url || publicSource.streamUrl || '').trim(),
+        enabled: !!publicEndpoint.enabled,
+        url: String(publicEndpoint.url || '').trim(),
       },
       private: {
-        enabled: privateSource.enabled !== false && !!String(privateSource.url || privateSource.sse_url || privateSource.stream_url || privateSource.streamUrl || '').trim(),
-        url: String(privateSource.url || privateSource.sse_url || privateSource.stream_url || privateSource.streamUrl || '').trim(),
+        enabled: !!privateEndpoint.enabled,
+        url: String(privateEndpoint.url || '').trim(),
       },
     };
   }

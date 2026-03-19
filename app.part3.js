@@ -6,6 +6,9 @@
   const runtime = window.FrontendRuntime || null;
   const LS_TOKEN = 'community_token_v1';
   const PANEL_KEY = 'leaderboard';
+  const openDrawerFn = window.openDrawer || (typeof openDrawer === 'function' ? openDrawer : null);
+  const bindDockToggleFn = window.bindDockToggle || (typeof bindDockToggle === 'function' ? bindDockToggle : null);
+  const getOpenPanelKeyFn = window.getOpenPanelKey || (() => (typeof openPanelKey !== 'undefined' ? openPanelKey : null));
 
   const RANK_LADDER_FALLBACK = [
     { start_level: 1, end_level: 4, rank_name: 'Recruit', rank_icon_key: 'recruit' },
@@ -40,6 +43,38 @@
     status: '',
     statusType: '',
   };
+
+  function leaderboardPerfDebugState() {
+    window.__mapPerfDebug = window.__mapPerfDebug || {};
+    window.__mapPerfDebug.leaderboard = window.__mapPerfDebug.leaderboard || {
+      loaded: false,
+      opened: false,
+      lastError: '',
+      lastOpenAt: 0,
+      loadAttempts: 0,
+    };
+    return window.__mapPerfDebug.leaderboard;
+  }
+
+  function markLeaderboardLoaded() {
+    const debugState = leaderboardPerfDebugState();
+    debugState.loaded = true;
+    debugState.lastError = '';
+  }
+
+  function markLeaderboardOpenError(error) {
+    const debugState = leaderboardPerfDebugState();
+    debugState.opened = false;
+    debugState.lastError = String(error?.message || error || 'Leaderboard error');
+  }
+
+  function markLeaderboardOpened() {
+    const debugState = leaderboardPerfDebugState();
+    debugState.loaded = true;
+    debugState.opened = true;
+    debugState.lastError = '';
+    debugState.lastOpenAt = Date.now();
+  }
 
   function getToken() {
     try { return localStorage.getItem(LS_TOKEN) || ''; } catch (_) { return ''; }
@@ -293,7 +328,7 @@
   }
 
   function rerenderIfOpen() {
-    if (typeof openPanelKey === 'undefined' || openPanelKey !== PANEL_KEY) return;
+    if (getOpenPanelKeyFn() !== PANEL_KEY) return;
     const body = document.getElementById('dockDrawerBody');
     if (!body) return;
     body.innerHTML = leaderboardPanelHTML();
@@ -323,12 +358,14 @@
     try {
       const boardPromise = getAuth(`/leaderboard?metric=${metric}&period=${period}`)
         .catch(() => getAuth(`/leaderboard?metric=${metric}&period=${period}&limit=10`));
+      if (!state.rankLadderLoaded) {
+        await loadRankLadder().catch(() => RANK_LADDER_FALLBACK.slice());
+      }
       const [boardRes, meRes, badgesRes, overviewRes] = await Promise.all([
         boardPromise,
         getAuth(`/leaderboard/me?metric=${metric}&period=${period}`),
         getAuth('/leaderboard/badges/me').catch(() => ({ badges: [] })),
         getAuth('/leaderboard/overview/me').catch(() => null),
-        loadRankLadder().catch(() => RANK_LADDER_FALLBACK.slice()),
       ]);
 
       state.rows = Array.isArray(boardRes?.rows) ? boardRes.rows : [];
@@ -348,6 +385,7 @@
       }
       state.status = `Unable to load leaderboard: ${String(err?.message || err)}`;
       state.statusType = 'err';
+      markLeaderboardOpenError(err);
     }
 
     rerenderIfOpen();
@@ -445,23 +483,30 @@
   }
 
   function openLeaderboardPanel() {
-    if (typeof openDrawer !== 'function') return;
-    openDrawer(PANEL_KEY, 'Leaderboard', leaderboardPanelHTML());
-    wireLeaderboardPanel();
-    loadAll();
+    if (typeof openDrawerFn !== 'function') {
+      markLeaderboardOpenError('openDrawer unavailable');
+      return false;
+    }
+    try {
+      openDrawerFn(PANEL_KEY, 'Leaderboard', leaderboardPanelHTML());
+      wireLeaderboardPanel();
+      markLeaderboardOpened();
+      void loadAll();
+      return true;
+    } catch (error) {
+      markLeaderboardOpenError(error);
+      console.warn('Failed to open leaderboard drawer', error);
+      return false;
+    }
   }
 
   function init() {
     injectLeaderboardProgressionStyles();
+    markLeaderboardLoaded();
     const btn = document.getElementById('dockLeaderboard');
-    if (!btn || typeof bindDockToggle !== 'function') return;
+    if (!btn || typeof bindDockToggleFn !== 'function') return;
     if (btn.dataset.leaderboardBound === '1') return;
     btn.dataset.leaderboardBound = '1';
-
-    bindDockToggle(btn, PANEL_KEY, 'Leaderboard', leaderboardPanelHTML, () => {
-      wireLeaderboardPanel();
-      loadAll();
-    });
   }
 
   window.LeaderboardPanel = {
