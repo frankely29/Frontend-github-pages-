@@ -135,6 +135,11 @@ const FRAME_PREFETCH_DISTANCE = 2;
 const PRESENCE_VIEWPORT_BUFFER_RATIO = 0.18;
 const PRESENCE_VIEWPORT_MIN_BUFFER_DEG = 0.01;
 const PRESENCE_PULL_LIMIT = 350;
+const PRESENCE_VIEWPORT_ROUTE = '/presence/viewport';
+const PRESENCE_DELTA_ROUTE = '/presence/delta';
+const PRESENCE_ALL_ROUTE = '/presence/all';
+const PRESENCE_DELTA_CURSOR_PARAM = 'cursor';
+const PRESENCE_DELTA_SINCE_MS_PARAM = 'updated_since_ms';
 const PRESENCE_MOVE_THRESHOLD_MI = 0.018;
 const PRESENCE_HEADING_CHANGE_THRESHOLD_DEG = 14;
 const PRESENCE_STATIONARY_PUSH_MS = 25 * 1000;
@@ -3542,30 +3547,107 @@ function mergePresencePayload(list, { replaceStore = false, removals = [] } = {}
   return rebuildCachedPresenceRowsFromStore();
 }
 
+function presenceHasViewportBounds(params) {
+  return ["min_lng", "max_lng", "min_lat", "max_lat"].every((key) => {
+    const value = params?.get?.(key);
+    return value !== null && value !== "";
+  });
+}
+
+function isPresenceDeltaUnsupportedError(error) {
+  const status = Number(error?.status ?? NaN);
+  if (status === 404 || status === 405 || status === 501) return true;
+  const message = String(error?.message || "").toLowerCase();
+  const detail = JSON.stringify(error?.detail || error?.payload || "").toLowerCase();
+  return (
+    message.includes("not implemented") ||
+    message.includes("unsupported") ||
+    detail.includes("not implemented") ||
+    detail.includes("unsupported")
+  );
+}
+
+function normalizePresenceSyncTimestampMs(value) {
+  if (value === null || value === undefined || value === "") return NaN;
+  if (typeof value === "string" && /[a-z]/i.test(value)) {
+    const parsedDate = Date.parse(value);
+    return Number.isFinite(parsedDate) ? parsedDate : NaN;
+  }
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return NaN;
+  return numeric > 1e12 ? Math.floor(numeric) : Math.floor(numeric * 1000);
+}
+
+function extractPresenceItems(payload) {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.items)) return payload.items;
+  if (Array.isArray(payload?.changes)) return payload.changes;
+  if (Array.isArray(payload?.drivers)) return payload.drivers;
+  if (Array.isArray(payload?.presence)) return payload.presence;
+  return [];
+}
+
+function hasUsablePresencePayload(payload) {
+  if (Array.isArray(payload)) return true;
+  if (!payload || typeof payload !== "object") return false;
+  return (
+    Array.isArray(payload.items) ||
+    Array.isArray(payload.changes) ||
+    Array.isArray(payload.drivers) ||
+    Array.isArray(payload.presence) ||
+    Array.isArray(payload.removed) ||
+    Array.isArray(payload.removed_user_ids) ||
+    Array.isArray(payload.deleted_user_ids) ||
+    payload.full_snapshot === true ||
+    payload.replace_all === true
+  );
+}
+
 async function fetchPresencePayload(params, signal) {
+  const prefersViewportSnapshot = presenceHasViewportBounds(params);
   const deltaParams = new URLSearchParams(params.toString());
-  if (presenceLastSyncCursor) deltaParams.set('cursor', presenceLastSyncCursor);
+  if (presenceLastSyncCursor) deltaParams.set(PRESENCE_DELTA_CURSOR_PARAM, presenceLastSyncCursor);
   if (Number.isFinite(presenceLastSyncTimestamp) && presenceLastSyncTimestamp > 0) {
-    deltaParams.set('since_ts', String(Math.floor(presenceLastSyncTimestamp)));
+    deltaParams.set(PRESENCE_DELTA_SINCE_MS_PARAM, String(Math.floor(presenceLastSyncTimestamp)));
   }
 
   if (presenceDeltaMode !== 'disabled' && (presenceLastSyncCursor || presenceLastSyncTimestamp > 0)) {
     try {
-      const delta = await getJSONAuth(`/presence/delta?${deltaParams.toString()}`, communityToken, { signal });
+      const delta = await getJSONAuth(`${PRESENCE_DELTA_ROUTE}?${deltaParams.toString()}`, communityToken, { signal });
+      if (!hasUsablePresencePayload(delta)) {
+        throw Object.assign(new Error("Unsupported /presence/delta response shape"), { status: 422, detail: delta });
+      }
       presenceDeltaMode = 'enabled';
       return { payload: delta, mode: 'delta' };
     } catch (error) {
       if (error?.name === 'AbortError') throw error;
-      const status = Number(error?.status ?? NaN);
-      if (status === 404 || status === 405) {
+      if (isPresenceDeltaUnsupportedError(error)) {
         presenceDeltaMode = 'disabled';
       } else {
-        console.warn('/presence/delta failed, falling back to /presence/all:', error);
+        console.warn('/presence/delta failed, falling back to snapshot presence fetch:', error);
       }
     }
   }
 
-  const full = await getJSONAuth(`/presence/all?${params.toString()}`, communityToken, { signal });
+  if (prefersViewportSnapshot && presenceViewportMode !== 'disabled') {
+    try {
+      const viewport = await getJSONAuth(`${PRESENCE_VIEWPORT_ROUTE}?${params.toString()}`, communityToken, { signal });
+      if (!hasUsablePresencePayload(viewport)) {
+        throw Object.assign(new Error("Unsupported /presence/viewport response shape"), { status: 422, detail: viewport });
+      }
+      presenceViewportMode = 'enabled';
+      return { payload: viewport, mode: 'viewport' };
+    } catch (error) {
+      if (error?.name === 'AbortError') throw error;
+      if (isPresenceDeltaUnsupportedError(error)) {
+        presenceViewportMode = 'disabled';
+      } else {
+        console.warn('/presence/viewport failed, falling back to /presence/all:', error);
+      }
+    }
+  }
+
+  const full = await getJSONAuth(`${PRESENCE_ALL_ROUTE}?${params.toString()}`, communityToken, { signal });
   return { payload: full, mode: 'full' };
 }
 
@@ -6231,6 +6313,7 @@ let lastSelfOrbitMeta = null;
 let presenceLastSyncTimestamp = 0;
 let presenceLastSyncCursor = '';
 let presenceDeltaMode = 'probe';
+let presenceViewportMode = 'probe';
 let lastPresenceViewportSignature = '';
 let lastPresenceFetchViewportSignature = '';
 
@@ -6702,6 +6785,7 @@ function clearOtherDrivers() {
   presenceLastSyncTimestamp = 0;
   presenceLastSyncCursor = '';
   presenceDeltaMode = 'probe';
+  presenceViewportMode = 'probe';
   lastPresenceViewportSignature = '';
   lastPresenceFetchViewportSignature = '';
   const presenceLiteSource = map?.getSource?.('presence-lite');
@@ -7260,7 +7344,7 @@ async function pullPresenceAll() {
     const viewportSignature = params.get("viewport_sig") || getPresenceViewportSignature();
     const { payload: list, mode: responseMode } = await fetchPresencePayload(params, presencePullAbortController.signal);
     frontendPerfStats.presencePollsCompleted += 1;
-    const items = Array.isArray(list) ? list : list?.items || list?.changes || [];
+    const items = extractPresenceItems(list);
     const fallbackVisibleCount = Array.isArray(items) ? items.length : 0;
     let badgeUpdatedFromSummary = false;
     const listOnlineCount = Number(list?.online_count ?? list?.summary?.online_count ?? list?.counts?.online_count);
@@ -7292,16 +7376,31 @@ async function pullPresenceAll() {
     if (Array.isArray(list?.removed)) removals.push(...list.removed);
     if (Array.isArray(list?.removed_user_ids)) removals.push(...list.removed_user_ids);
     if (Array.isArray(list?.deleted_user_ids)) removals.push(...list.deleted_user_ids);
-    const replaceStore = !!(list?.full_snapshot === true || list?.replace_all === true || (responseMode === 'delta' && list?.mode === 'full'));
+    const replaceStore = !!(
+      responseMode === 'viewport' ||
+      list?.full_snapshot === true ||
+      list?.replace_all === true ||
+      (responseMode === 'delta' && list?.mode === 'full')
+    );
     const nextRows = mergePresencePayload(items, { replaceStore, removals });
 
     const nextSyncCursor = String(list?.next_cursor ?? list?.cursor ?? list?.sync_cursor ?? '').trim();
-    const nextSyncTs = Number(list?.server_ts ?? list?.server_time ?? list?.next_since_ts ?? list?.last_sync_ts ?? list?.last_updated_at ?? NaN);
+    const nextSyncTs = normalizePresenceSyncTimestampMs(
+      list?.server_ts_ms ??
+      list?.server_time_ms ??
+      list?.next_updated_since_ms ??
+      list?.last_sync_ms ??
+      list?.server_ts ??
+      list?.server_time ??
+      list?.next_since_ts ??
+      list?.last_sync_ts ??
+      list?.last_updated_at
+    );
     presenceLastSyncCursor = nextSyncCursor || presenceLastSyncCursor;
     if (Number.isFinite(nextSyncTs) && nextSyncTs > 0) {
       presenceLastSyncTimestamp = nextSyncTs;
     } else {
-      presenceLastSyncTimestamp = Math.floor(Date.now() / 1000);
+      presenceLastSyncTimestamp = Date.now();
     }
 
     if (requestSerial < appliedPresenceRequestSerial) return;

@@ -2,14 +2,22 @@
 
 ## 2026-03-19
 
-### What changed
-- Added `runtime.shared.js` as a conservative shared frontend runtime for API-base resolution, auth-aware JSON helpers, detailed request parsing, account actions, poll timer coordination, and lightweight perf counters.
-- Extracted the large `index.html` inline stylesheet into `frontend-shell.css` and loaded it as a versioned static asset without changing the existing markup structure.
-- Updated `app.js` to reuse the shared runtime helpers, centralize sign-out/change-password/delete-account flows, coordinate core pollers, and expose lightweight debug timings for map, timeline, frame, presence, pickup overlay, blank-map warnings, and duplicate-poller guards.
-- Updated `app.part2.js` to coordinate public/private chat poll timers through the shared poll registry and track chat polling errors.
-- Updated `app.part3.js`, `pickup-recording.feature.js`, `day-tendency.js`, and `admin.panel.js` to consume the shared runtime API/request helpers instead of maintaining separate API-base/fetch logic.
-- Kept `server.js` cache behavior aligned with the current deployment model while ensuring HTML shell requests remain `no-store`.
+### Phase 1 cleanup
+- Kept the extracted shell CSS strategy in place: `index.html` now loads `frontend-shell.css` and `index.extracted.css` instead of carrying the old giant inline stylesheet.
+- Kept non-core startup lean by loading only shared runtime/core app/chat/pickup/day-tendency scripts at first paint and leaving leaderboard/admin code behind `app.lazy.js`.
+- Preserved dock/panel behavior while ensuring lazy leaderboard/admin loads only happen once.
 
-### Scope notes
-- No endpoints, payload shapes, major UI contracts, or feature ownership were intentionally changed.
-- Changes were limited to deduplication, polling coordination, CSS extraction, and lightweight instrumentation.
+### Presence/runtime updates
+- Updated `app.js` presence transport to prefer `/presence/viewport` snapshots when bounds are available, then use `/presence/delta` incremental syncs when cursor/timestamp state exists, and finally fall back to `/presence/all` for compatibility.
+- Normalized presence sync timestamps into milliseconds so delta cursors stay consistent even when backend payloads provide seconds, milliseconds, or ISO timestamps.
+- Preserved the in-memory `presenceStore` / in-place marker update path so visible drivers stay responsive without rebuilding every marker on each poll.
+
+### Safe Phase 2 chat/runtime status
+- Retained the centralized public/private polling loops in `app.part2.js` with abortable fetches and single-timer scheduling.
+- Kept the capability-gated SSE receive abstraction in place for public chat and DM summaries, with polling still active as the fallback/reconcile lane.
+- Preserved existing unread, sound, kill-feed, and profile-DM behavior while documenting the live-delivery runtime and remaining background work.
+
+### Documentation refreshed
+- Rewrote `PERFORMANCE-ARCHITECTURE.md` to describe the actual startup order, dock flow, presence transport, pickup overlay flow, polling ownership, hidden work, and eager vs lazy modules.
+- Rewrote `SAFE-PHASE2-CHAT-RUNTIME.md` to document the current polling/runtime behavior, unread storage, sound/feed paths, duplicate-risk points, and SSE fallback strategy.
+- Rewrote `FRONTEND-REGRESSION-CHECKLIST.md` to match the requested product-surface checklist and the checks that were actually run in this environment.
