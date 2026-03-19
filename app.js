@@ -123,14 +123,45 @@ let lastRenderedFrameSignature = "";
 const timelineCache = { data: null, loadedAt: 0 };
 const frameCache = new Map();
 const frameCacheOrder = [];
-const FRAME_CACHE_MAX = 6;
+const FRAME_CACHE_MAX = 8;
+const TIMELINE_CACHE_TTL_MS = 10 * 60 * 1000;
+const FRAME_PREFETCH_DISTANCE = 2;
+const PRESENCE_VIEWPORT_BUFFER_RATIO = 0.18;
+const PRESENCE_VIEWPORT_MIN_BUFFER_DEG = 0.01;
+const PRESENCE_PULL_LIMIT = 350;
+const PRESENCE_MOVE_THRESHOLD_MI = 0.018;
+const PRESENCE_HEADING_CHANGE_THRESHOLD_DEG = 14;
+const PRESENCE_STATIONARY_PUSH_MS = 25 * 1000;
+const PRESENCE_MOVING_PUSH_MS = 8 * 1000;
+const PICKUP_VIEWPORT_BUFFER_RATIO = 0.12;
+const PICKUP_VIEWPORT_MIN_BUFFER_DEG = 0.01;
 const frontendPerfStats = {
-  presencePolls: 0,
-  pickupFetches: 0,
+  presencePollsAttempted: 0,
+  presencePollsCompleted: 0,
+  presencePollsAborted: 0,
+  pickupFetchesAttempted: 0,
+  pickupFetchesCompleted: 0,
+  pickupFetchesAborted: 0,
+  chatPolls: { public_open: 0, public_closed: 0, public_hidden: 0, private_open: 0, private_closed: 0, private_hidden: 0 },
   abortedRequests: 0,
   frameCacheHits: 0,
   frameCacheMisses: 0,
+  timelineCacheHits: 0,
+  timelineCacheMisses: 0,
+  avatarCacheHits: 0,
+  avatarCacheMisses: 0,
 };
+const avatarThumbCache = new Map();
+let timelineLoadAbortController = null;
+let frameLoadAbortController = null;
+let pendingFrameLoad = null;
+let timelineLoadPromise = null;
+const frameRequestState = new Map();
+let pickupRequestSerial = 0;
+let appliedPickupRequestSerial = 0;
+let presenceRequestSerial = 0;
+let appliedPresenceRequestSerial = 0;
+window.__mapPerfDebug = window.__mapPerfDebug || frontendPerfStats;
 
 /* =========================================================
    MANHATTAN MODE — DEFAULT SETTINGS (SAFE TO EDIT)
@@ -286,7 +317,7 @@ function pickClosestIndex(minutesOfWeekArr, target) {
    ========================================================= */
 function shouldBypassBrowserCache(url) {
   const text = String(url || "");
-  return /\/presence\/|\/events\/pickups\/recent|\/chat\//.test(text);
+  return /\/presence\/|\/events\/pickups\/recent|\/chat\/|\/auth\/|\/me(\b|\/)/.test(text);
 }
 
 async function fetchJSON(url, opts = {}) {
@@ -3370,14 +3401,50 @@ async function ensurePickupSourceAndLayers() {
   return true;
 }
 
+function getBufferedMapBounds(bufferRatio = 0, minBufferDeg = 0) {
+  if (!map || typeof map.getBounds !== "function") return null;
+  const bounds = map.getBounds();
+  if (!bounds) return null;
+  const west = Number(bounds.getWest?.());
+  const east = Number(bounds.getEast?.());
+  const south = Number(bounds.getSouth?.());
+  const north = Number(bounds.getNorth?.());
+  if (![west, east, south, north].every(Number.isFinite)) return null;
+  const lngSpan = Math.max(Math.abs(east - west), minBufferDeg * 2);
+  const latSpan = Math.max(Math.abs(north - south), minBufferDeg * 2);
+  const lngBuffer = Math.max(minBufferDeg, lngSpan * bufferRatio);
+  const latBuffer = Math.max(minBufferDeg, latSpan * bufferRatio);
+  return {
+    west: Math.min(west, east) - lngBuffer,
+    east: Math.max(west, east) + lngBuffer,
+    south: Math.min(south, north) - latBuffer,
+    north: Math.max(south, north) + latBuffer,
+  };
+}
+
+function getPresenceRequestParams() {
+  const bounds = getBufferedMapBounds(PRESENCE_VIEWPORT_BUFFER_RATIO, PRESENCE_VIEWPORT_MIN_BUFFER_DEG);
+  const params = new URLSearchParams();
+  if (bounds) {
+    params.set("min_lng", String(bounds.west));
+    params.set("max_lng", String(bounds.east));
+    params.set("min_lat", String(bounds.south));
+    params.set("max_lat", String(bounds.north));
+  }
+  const zoom = Number(map?.getZoom?.());
+  if (Number.isFinite(zoom)) params.set("zoom", String(zoom));
+  params.set("mode", zoom >= 12 ? "full" : "lite");
+  params.set("limit", String(PRESENCE_PULL_LIMIT));
+  return params;
+}
+
 function pickupOverlayQueryPath(limit = PICKUP_RECENT_LIMIT) {
-  if (!map) return null;
-  const b = map.getBounds();
-  if (!b) return null;
-  const west = Number(b.getWest());
-  const east = Number(b.getEast());
-  const south = Number(b.getSouth());
-  const north = Number(b.getNorth());
+  const bounds = getBufferedMapBounds(PICKUP_VIEWPORT_BUFFER_RATIO, PICKUP_VIEWPORT_MIN_BUFFER_DEG);
+  if (!bounds) return null;
+  const west = Number(bounds.west);
+  const east = Number(bounds.east);
+  const south = Number(bounds.south);
+  const north = Number(bounds.north);
   if (![west, east, south, north].every(Number.isFinite)) return null;
 
   const qs = new URLSearchParams({
@@ -3401,7 +3468,7 @@ function buildPickupViewportKey() {
   const south = Number(b.getSouth?.());
   const north = Number(b.getNorth?.());
   if (![west, east, south, north, zoom].every(Number.isFinite)) return "";
-  const roundCoord = (value) => Number(value).toFixed(3);
+  const roundCoord = (value) => Number(value).toFixed(2);
   const zoomBucket = (Math.round(zoom * 2) / 2).toFixed(1);
   return [
     roundCoord(Math.min(west, east)),
@@ -3413,6 +3480,7 @@ function buildPickupViewportKey() {
 }
 
 async function refreshPickupOverlay({ force = false } = {}) {
+  frontendPerfStats.pickupFetchesAttempted += 1;
   if (!mapPageIsVisible) return;
   if (!map || !mapReady) return;
   const ready = await ensurePickupSourceAndLayers();
@@ -3435,6 +3503,7 @@ async function refreshPickupOverlay({ force = false } = {}) {
     frontendPerfStats.abortedRequests += 1;
   }
   pickupOverlayAbortController = new AbortController();
+  const requestSerial = ++pickupRequestSerial;
 
   pickupRefreshInFlight = true;
   lastPickupFetchKey = path;
@@ -3443,7 +3512,8 @@ async function refreshPickupOverlay({ force = false } = {}) {
 
   try {
     const data = await getJSONAuth(path, communityToken, { signal: pickupOverlayAbortController.signal });
-    frontendPerfStats.pickupFetches += 1;
+    if (requestSerial < appliedPickupRequestSerial) return;
+    frontendPerfStats.pickupFetchesCompleted += 1;
     const items = Array.isArray(data) ? data : data?.items || [];
     const zoneStats = Array.isArray(data?.zone_stats) ? data.zone_stats : [];
     const zoneHotspots = (data?.zone_hotspots && data.zone_hotspots.type === "FeatureCollection" && Array.isArray(data.zone_hotspots.features))
@@ -3471,6 +3541,7 @@ async function refreshPickupOverlay({ force = false } = {}) {
     const zoneHotspotCount = zoneHotspots?.features?.length ?? 0;
     const normalizedMicroHotspotCount = microHotspots?.features?.length ?? 0;
     const fc = buildPickupFeatureCollection(items);
+    appliedPickupRequestSerial = requestSerial;
     setPickupOverlayData(fc, items, zoneStats, zoneHotspots, microHotspots);
     const coveredZonesCount = window.__pickupDebug?.hotspotCoveredZoneIds?.length ?? 0;
     const visibleDotsCount = window.__pickupDebug?.visiblePickupDotCount ?? 0;
@@ -3478,7 +3549,10 @@ async function refreshPickupOverlay({ force = false } = {}) {
       `[pickup overlay] zoneHotspots=${zoneHotspotCount} microHotspots=${normalizedMicroHotspotCount} coveredZones=${coveredZonesCount} visibleDots=${visibleDotsCount}`
     );
   } catch (e) {
-    if (e?.name === "AbortError") return;
+    if (e?.name === "AbortError") {
+      frontendPerfStats.pickupFetchesAborted += 1;
+      return;
+    }
     const status = Number(e?.status ?? NaN);
     if (status === 401) {
       clearAuth();
@@ -3981,6 +4055,39 @@ function rememberFrame(idx, frame) {
   return frame;
 }
 
+function clearFrameRequest(idx) {
+  const key = Number(idx);
+  const state = frameRequestState.get(key);
+  if (state?.controller) {
+    try { state.controller.abort(); } catch (_) {}
+  }
+  frameRequestState.delete(key);
+}
+
+async function fetchFrameData(idx, { priority = "active", force = false } = {}) {
+  const normalizedIdx = Number(idx);
+  if (!Number.isInteger(normalizedIdx) || normalizedIdx < 0) throw new Error(`Invalid frame index: ${idx}`);
+  if (!force && frameCache.has(normalizedIdx)) return getCachedFrame(normalizedIdx);
+  const existing = frameRequestState.get(normalizedIdx);
+  if (existing?.promise) return existing.promise;
+  if (priority === "active" && frameLoadAbortController) {
+    try { frameLoadAbortController.abort(); } catch (_) {}
+  }
+  const controller = new AbortController();
+  const state = { controller, priority, promise: null };
+  if (priority === "active") frameLoadAbortController = controller;
+  frontendPerfStats.frameCacheMisses += 1;
+  state.promise = fetchJSON(`${RAILWAY_BASE}/frame/${normalizedIdx}`, { signal: controller.signal, cache: force ? "reload" : undefined })
+    .then((frame) => rememberFrame(normalizedIdx, frame))
+    .finally(() => {
+      const latest = frameRequestState.get(normalizedIdx);
+      if (latest?.controller === controller) frameRequestState.delete(normalizedIdx);
+      if (frameLoadAbortController === controller) frameLoadAbortController = null;
+    });
+  frameRequestState.set(normalizedIdx, state);
+  return state.promise;
+}
+
 function getCachedFrame(idx) {
   if (!frameCache.has(idx)) return null;
   const frame = frameCache.get(idx);
@@ -3997,14 +4104,11 @@ function frameSignature(frame) {
 function prefetchFrame(idx) {
   const normalizedIdx = Number(idx);
   if (!Number.isInteger(normalizedIdx) || normalizedIdx < 0 || normalizedIdx >= timeline.length) return;
-  if (frameCache.has(normalizedIdx)) return;
-  frontendPerfStats.frameCacheMisses += 1;
-  fetchJSON(`${RAILWAY_BASE}/frame/${normalizedIdx}`)
-    .then((frame) => rememberFrame(normalizedIdx, frame))
-    .catch((e) => {
-      if (e?.name === "AbortError") return;
-      console.warn(`Frame prefetch failed (${normalizedIdx}):`, e);
-    });
+  if (frameCache.has(normalizedIdx) || frameRequestState.has(normalizedIdx)) return;
+  fetchFrameData(normalizedIdx, { priority: "prefetch" }).catch((e) => {
+    if (e?.name === "AbortError") return;
+    console.warn(`Frame prefetch failed (${normalizedIdx}):`, e);
+  });
 }
 
 async function loadNextFramePickupsMap(curIdx) {
@@ -4018,7 +4122,7 @@ async function loadNextFramePickupsMap(curIdx) {
       return;
     }
 
-    const frame = getCachedFrame(nextIdx) || rememberFrame(nextIdx, await fetchJSON(`${RAILWAY_BASE}/frame/${nextIdx}`));
+    const frame = getCachedFrame(nextIdx) || await fetchFrameData(nextIdx, { priority: "prefetch" });
     const feats = frame?.polygons?.features || [];
 
     const puMap = new Map();
@@ -4253,6 +4357,7 @@ async function renderFrame(frame) {
 async function loadFrame(idx, { force = false } = {}) {
   const normalizedIdx = Math.max(0, Number(idx) || 0);
   const frameUrl = `${RAILWAY_BASE}/frame/${normalizedIdx}`;
+  if (pendingFrameLoad?.idx === normalizedIdx && pendingFrameLoad?.promise && !force) return pendingFrameLoad.promise;
   const cachedFrame = !force ? getCachedFrame(normalizedIdx) : null;
   if (!force && normalizedIdx === lastRenderedFrameIndex && cachedFrame && lastRenderedFrameSignature === frameSignature(cachedFrame)) {
     prefetchFrame(normalizedIdx + 1);
@@ -4262,9 +4367,9 @@ async function loadFrame(idx, { force = false } = {}) {
   loadNextFramePickupsMap(idx).catch(() => {});
   let frame = cachedFrame;
   if (!frame) {
-    frontendPerfStats.frameCacheMisses += 1;
-    frame = await fetchJSON(frameUrl);
-    rememberFrame(normalizedIdx, frame);
+    const promise = fetchFrameData(normalizedIdx, { priority: "active", force });
+    pendingFrameLoad = { idx: normalizedIdx, promise };
+    frame = await promise;
   }
 
   if (debugEnabled) {
@@ -4274,36 +4379,55 @@ async function loadFrame(idx, { force = false } = {}) {
   }
 
   await renderFrame(frame);
+  if (pendingFrameLoad?.idx === normalizedIdx) pendingFrameLoad = null;
   lastRenderedFrameIndex = normalizedIdx;
-  prefetchFrame(normalizedIdx + 1);
-  prefetchFrame(normalizedIdx - 1);
+  for (let delta = 1; delta <= FRAME_PREFETCH_DISTANCE; delta += 1) {
+    prefetchFrame(normalizedIdx + delta);
+    prefetchFrame(normalizedIdx - delta);
+  }
   return frame;
 }
 
 async function loadTimeline({ force = false } = {}) {
   const timelineUrl = `${RAILWAY_BASE}/timeline`;
-  const t = (!force && timelineCache.data)
-    ? timelineCache.data
-    : await fetchJSON(timelineUrl);
-  timelineCache.data = t;
-  timelineCache.loadedAt = Date.now();
-  timeline = Array.isArray(t) ? t : t.timeline || [];
-  if (!timeline.length) throw new Error("Timeline empty. Run /generate once on Railway.");
+  const canReuseTimeline = !force && timelineCache.data && (Date.now() - Number(timelineCache.loadedAt || 0) < TIMELINE_CACHE_TTL_MS);
+  if (canReuseTimeline) frontendPerfStats.timelineCacheHits += 1;
+  else frontendPerfStats.timelineCacheMisses += 1;
+  if (!canReuseTimeline && timelineLoadPromise) return timelineLoadPromise;
+  const loadPromise = (async () => {
+    if (timelineLoadAbortController) {
+      try { timelineLoadAbortController.abort(); } catch (_) {}
+    }
+    timelineLoadAbortController = new AbortController();
+    const t = canReuseTimeline
+      ? timelineCache.data
+      : await fetchJSON(timelineUrl, { signal: timelineLoadAbortController.signal, cache: force ? "reload" : undefined });
+    timelineCache.data = t;
+    timelineCache.loadedAt = Date.now();
+    timeline = Array.isArray(t) ? t : t.timeline || [];
+    if (!timeline.length) throw new Error("Timeline empty. Run /generate once on Railway.");
 
-  if (debugEnabled) dbg("dbgTimeline", `OK ${timelineUrl} count=${timeline.length}`);
+    if (debugEnabled) dbg("dbgTimeline", `OK ${timelineUrl} count=${timeline.length}`);
 
-  minutesOfWeek = timeline.map(minuteOfWeekFromIso);
+    minutesOfWeek = timeline.map(minuteOfWeekFromIso);
 
-  slider.min = "0";
-  slider.max = String(timeline.length - 1);
-  slider.step = "1";
+    slider.min = "0";
+    slider.max = String(timeline.length - 1);
+    slider.step = "1";
 
-  const targetMinWeek = getNextBinNowNYCMinuteOfWeek();
-  const idx = pickClosestIndex(minutesOfWeek, targetMinWeek);
-  slider.value = String(idx);
+    const targetMinWeek = getNextBinNowNYCMinuteOfWeek();
+    const idx = pickClosestIndex(minutesOfWeek, targetMinWeek);
+    slider.value = String(idx);
 
-  bubbleUpdateNow();
-  await loadFrame(idx);
+    bubbleUpdateNow();
+    await loadFrame(idx);
+    return timeline;
+  })();
+  timelineLoadPromise = loadPromise.finally(() => {
+    timelineLoadPromise = null;
+    timelineLoadAbortController = null;
+  });
+  return timelineLoadPromise;
 }
 
 let sliderDebounce = null;
@@ -5296,16 +5420,44 @@ setInterval(() => {
 }, 10 * 60 * 1000);
 
 setInterval(() => {
-  const { presencePolls, pickupFetches, abortedRequests, frameCacheHits, frameCacheMisses } = frontendPerfStats;
-  if (!presencePolls && !pickupFetches && !abortedRequests && !frameCacheHits && !frameCacheMisses) return;
+  const {
+    presencePollsAttempted,
+    presencePollsCompleted,
+    presencePollsAborted,
+    pickupFetchesAttempted,
+    pickupFetchesCompleted,
+    pickupFetchesAborted,
+    abortedRequests,
+    frameCacheHits,
+    frameCacheMisses,
+    timelineCacheHits,
+    timelineCacheMisses,
+    avatarCacheHits,
+    avatarCacheMisses,
+  } = frontendPerfStats;
+  if (!presencePollsAttempted && !pickupFetchesAttempted && !abortedRequests && !frameCacheHits && !frameCacheMisses && !timelineCacheHits && !timelineCacheMisses && !avatarCacheHits && !avatarCacheMisses) return;
   console.log(
-    `[perf] presence/min=${presencePolls} pickup/min=${pickupFetches} aborted=${abortedRequests} frameCache=${frameCacheHits}/${frameCacheMisses}`
+    `[perf] presence=${presencePollsCompleted}/${presencePollsAttempted} presenceAborted=${presencePollsAborted} pickup=${pickupFetchesCompleted}/${pickupFetchesAttempted} pickupAborted=${pickupFetchesAborted} aborted=${abortedRequests} frameCache=${frameCacheHits}/${frameCacheMisses} timelineCache=${timelineCacheHits}/${timelineCacheMisses} avatarCache=${avatarCacheHits}/${avatarCacheMisses}`
   );
-  frontendPerfStats.presencePolls = 0;
-  frontendPerfStats.pickupFetches = 0;
+  frontendPerfStats.presencePollsAttempted = 0;
+  frontendPerfStats.presencePollsCompleted = 0;
+  frontendPerfStats.presencePollsAborted = 0;
+  frontendPerfStats.pickupFetchesAttempted = 0;
+  frontendPerfStats.pickupFetchesCompleted = 0;
+  frontendPerfStats.pickupFetchesAborted = 0;
   frontendPerfStats.abortedRequests = 0;
   frontendPerfStats.frameCacheHits = 0;
   frontendPerfStats.frameCacheMisses = 0;
+  frontendPerfStats.timelineCacheHits = 0;
+  frontendPerfStats.timelineCacheMisses = 0;
+  frontendPerfStats.avatarCacheHits = 0;
+  frontendPerfStats.avatarCacheMisses = 0;
+  frontendPerfStats.chatPolls.public_open = 0;
+  frontendPerfStats.chatPolls.public_closed = 0;
+  frontendPerfStats.chatPolls.public_hidden = 0;
+  frontendPerfStats.chatPolls.private_open = 0;
+  frontendPerfStats.chatPolls.private_closed = 0;
+  frontendPerfStats.chatPolls.private_hidden = 0;
 }, 60 * 1000);
 
 function updateWxParticlesForState() {
@@ -5930,7 +6082,6 @@ const PRESENCE_MEDIUM_TO_HEAVY_UP = 106;
 const PRESENCE_HEAVY_TO_MEDIUM_DOWN = 92;
 const PRESENCE_MEDIUM_RICH_LIMIT = 24;
 const PRESENCE_HEAVY_RICH_LIMIT = 10;
-const PRESENCE_VIEWPORT_BUFFER_RATIO = 0.18;
 
 const PRESENCE_LABEL_COLLISION_PX = 28;
 const PRESENCE_SLOT_SEQUENCE = [
@@ -6344,6 +6495,27 @@ function clearOtherDrivers() {
     presenceLiteSource.setData(emptyGeojson());
   }
   presenceLiteSourceFingerprint = '';
+}
+
+function getCachedAvatarUrl(userId, avatarUrl = "", avatarVersion = "") {
+  const normalizedUserId = String(userId || "").trim();
+  const normalizedUrl = String(avatarUrl || "").trim();
+  const version = String(avatarVersion || "").trim();
+  if (!normalizedUserId) return normalizedUrl;
+  const cacheKey = `${normalizedUserId}::${version || normalizedUrl}`;
+  if (normalizedUrl) {
+    if (avatarThumbCache.has(cacheKey)) frontendPerfStats.avatarCacheHits += 1;
+    else frontendPerfStats.avatarCacheMisses += 1;
+    avatarThumbCache.set(cacheKey, normalizedUrl);
+    return avatarThumbCache.get(cacheKey) || normalizedUrl;
+  }
+  for (const [key, value] of avatarThumbCache.entries()) {
+    if (key.startsWith(`${normalizedUserId}::`) && value) {
+      frontendPerfStats.avatarCacheHits += 1;
+      return value;
+    }
+  }
+  return normalizedUrl;
 }
 
 function buildDriverMarkerVisualSignature(userId, name, avatarUrl = "", mode = "name", orbitMeta = null, leaderboardBadgeCode = '', leaderboardHasCrown = false) {
@@ -6850,8 +7022,11 @@ async function pullPresenceAll() {
   presencePullInFlight = true;
 
   try {
-    const list = await getJSONAuth("/presence/all", communityToken, { signal: presencePullAbortController.signal });
-    frontendPerfStats.presencePolls += 1;
+    frontendPerfStats.presencePollsAttempted += 1;
+    const requestSerial = ++presenceRequestSerial;
+    const params = getPresenceRequestParams();
+    const list = await getJSONAuth(`/presence/all?${params.toString()}`, communityToken, { signal: presencePullAbortController.signal });
+    frontendPerfStats.presencePollsCompleted += 1;
     const now = Date.now() / 1000;
     const items = Array.isArray(list) ? list : list?.items || [];
     const fallbackVisibleCount = Array.isArray(items) ? items.length : 0;
@@ -6908,7 +7083,7 @@ async function pullPresenceAll() {
       candidates.push({
         uid,
         name: it.display_name || it.name || it.email || "Driver",
-        avatarUrl: it.avatar_url || "",
+        avatarUrl: getCachedAvatarUrl(uid, it.avatar_thumb_url || it.avatar_url || "", it.avatar_version || it.avatarVersion || ""),
         mode: it.map_identity_mode || "name",
         lat,
         lng,
@@ -6919,8 +7094,10 @@ async function pullPresenceAll() {
       });
     }
 
+    if (requestSerial < appliedPresenceRequestSerial) return;
     const nextFingerprint = presenceRowsFingerprint(candidates);
     cachedPresenceRows = candidates;
+    appliedPresenceRequestSerial = requestSerial;
     if (nextFingerprint !== cachedPresenceFingerprint) {
       cachedPresenceFingerprint = nextFingerprint;
       scheduleAdaptivePresenceRender();
@@ -6941,6 +7118,7 @@ async function pullPresenceAll() {
 
 let lastPresencePushMs = 0;
 let lastPresenceSentLatLng = null;
+let lastPresenceHeadingDegSent = null;
 async function communityMaybePushPresence(tsMsOrUnix, heading, accuracy) {
   if (!authHeaderOK()) return;
   if (!userLatLng) return;
@@ -6952,7 +7130,14 @@ async function communityMaybePushPresence(tsMsOrUnix, heading, accuracy) {
   }
 
   const nowMs = Date.now();
-  if (nowMs - lastPresencePushMs < PRESENCE_PUSH_MS) return;
+  const moveDeltaMi = lastPresenceSentLatLng ? haversineMiles(lastPresenceSentLatLng, userLatLng) : Infinity;
+  const headingDelta = Number.isFinite(lastPresenceHeadingDegSent) && Number.isFinite(heading)
+    ? Math.abs(shortestAngleDelta(lastPresenceHeadingDegSent, heading))
+    : Infinity;
+  const recentlyMoved = Number.isFinite(lastMoveTs) && (nowMs - lastMoveTs) < 7000;
+  const minIntervalMs = recentlyMoved ? PRESENCE_MOVING_PUSH_MS : PRESENCE_STATIONARY_PUSH_MS;
+  if ((moveDeltaMi < PRESENCE_MOVE_THRESHOLD_MI) && (headingDelta < PRESENCE_HEADING_CHANGE_THRESHOLD_DEG) && (nowMs - lastPresencePushMs < minIntervalMs)) return;
+  if (nowMs - lastPresencePushMs < minIntervalMs) return;
   lastPresencePushMs = nowMs;
 
   try {
@@ -6969,6 +7154,7 @@ async function communityMaybePushPresence(tsMsOrUnix, heading, accuracy) {
       communityToken
     );
     lastPresenceSentLatLng = { lat: userLatLng.lat, lng: userLatLng.lng };
+    lastPresenceHeadingDegSent = Number.isFinite(heading) ? normDeg(heading) : lastPresenceHeadingDegSent;
   } catch (e) {
     console.warn("presence/update failed:", e);
   }

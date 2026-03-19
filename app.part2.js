@@ -15,12 +15,14 @@
   // Reduce the polling interval so new messages appear more promptly.
   const CHAT_POLL_MS = typeof window !== 'undefined' && window.CHAT_POLL_MS
     ? window.CHAT_POLL_MS
-    : 800; // milliseconds
-  const CHAT_CLOSED_POLL_MS = 3500;
-  const CHAT_HIDDEN_POLL_MS = 7000;
-  const PRIVATE_CHAT_OPEN_POLL_MS = 3000;
-  const PRIVATE_CHAT_CLOSED_POLL_MS = 6000;
-  const PRIVATE_CHAT_HIDDEN_POLL_MS = 12000;
+    : 1500;
+  const CHAT_CLOSED_POLL_MS = 5000;
+  const CHAT_HIDDEN_POLL_MS = 12000;
+  const PRIVATE_CHAT_OPEN_POLL_MS = 3500;
+  const PRIVATE_CHAT_CLOSED_POLL_MS = 7500;
+  const PRIVATE_CHAT_HIDDEN_POLL_MS = 15000;
+  const DRIVER_PROFILE_DM_POLL_OPEN_MS = 4000;
+  const DRIVER_PROFILE_DM_POLL_HIDDEN_MS = 14000;
 
   // Token helper (matches LS_TOKEN in app.js)
   const LS_TOKEN = 'community_token_v1';
@@ -160,6 +162,10 @@
   let privateLastMessageIdByUserId = Object.create(null);
   let privateThreadPollTimer = null;
   let privateThreadPollInFlight = false;
+  let chatPollAbortController = null;
+  let privateThreadAbortController = null;
+  const privateMessageAbortControllers = new Map();
+  let driverProfilePollInFlight = false;
 
   function chatLastReadStorageKey() {
     return `tlc_chat_last_read_${CHAT_ROOM}`;
@@ -219,6 +225,35 @@
     markChatReadBaselineDone();
     clearChatUnreadBadge();
     return true;
+  }
+
+  function getPerfDebugRoot() {
+    if (typeof window === 'undefined') return null;
+    window.__mapPerfDebug = window.__mapPerfDebug || {};
+    if (!window.__mapPerfDebug.chatPolls) {
+      window.__mapPerfDebug.chatPolls = { public_open: 0, public_closed: 0, public_hidden: 0, private_open: 0, private_closed: 0, private_hidden: 0 };
+    }
+    return window.__mapPerfDebug;
+  }
+
+  function bumpChatPollStat(key) {
+    const perf = getPerfDebugRoot();
+    if (!perf?.chatPolls) return;
+    perf.chatPolls[key] = Number(perf.chatPolls[key] || 0) + 1;
+  }
+
+  function abortControllerSafe(controller) {
+    if (!controller) return;
+    try { controller.abort(); } catch (_) {}
+  }
+
+  function replaceAbortController(currentController, nextController) {
+    abortControllerSafe(currentController);
+    return nextController;
+  }
+
+  function getDriverProfilePollIntervalMs() {
+    return document.visibilityState === 'hidden' ? DRIVER_PROFILE_DM_POLL_HIDDEN_MS : DRIVER_PROFILE_DM_POLL_OPEN_MS;
   }
 
   // Remember which chat messages have been displayed in the kill feed.
@@ -1458,7 +1493,7 @@
         const response = await fetch(audioUrl, {
           method: 'GET',
           headers,
-          cache: 'no-store',
+          cache: 'force-cache',
         });
         if (!response.ok) throw new Error(`Voice fetch failed (${response.status})`);
         const blob = await response.blob();
@@ -2754,16 +2789,18 @@
     const token = getCommunityToken();
     if (!token) return [];
     try {
-      const data = await getJSONAuth('/chat/private/threads', token);
+      privateThreadAbortController = replaceAbortController(privateThreadAbortController, new AbortController());
+      const data = await getJSONAuth('/chat/private/threads', token, { signal: privateThreadAbortController.signal });
       const list = Array.isArray(data) ? data : (Array.isArray(data?.threads) ? data.threads : []);
       return list.map(normalizePrivateThread).filter((thread) => !!thread.otherUserId);
     } catch (err) {
+      if (err?.name === 'AbortError') return [];
       console.warn('chatFetchPrivateThreads failed', err);
       return [];
     }
   }
 
-  async function chatFetchPrivateMessages(otherUserId, { limit = 50, sinceId = null, markRead = true } = {}) {
+  async function chatFetchPrivateMessages(otherUserId, { limit = 50, sinceId = null, markRead = true, signal = null, supersede = false } = {}) {
     const token = getCommunityToken();
     if (!token || !otherUserId) return [];
     const uid = encodeURIComponent(String(otherUserId));
@@ -2773,8 +2810,21 @@
     if (sinceId !== null && sinceId !== undefined && String(sinceId).trim() !== '') {
       qs.set('since_id', String(sinceId));
     }
-    const data = await getJSONAuth(`/chat/private/${uid}?${qs.toString()}`, token);
-    return normalizePrivateMessagesPayload(data);
+    let requestSignal = signal;
+    if (!requestSignal && supersede) {
+      const nextController = new AbortController();
+      const previousController = privateMessageAbortControllers.get(uid);
+      abortControllerSafe(previousController);
+      privateMessageAbortControllers.set(uid, nextController);
+      requestSignal = nextController.signal;
+    }
+    try {
+      const data = await getJSONAuth(`/chat/private/${uid}?${qs.toString()}`, token, requestSignal ? { signal: requestSignal } : {});
+      return normalizePrivateMessagesPayload(data);
+    } catch (err) {
+      if (err?.name === 'AbortError') return [];
+      throw err;
+    }
   }
 
   async function chatSendPrivateMessage(otherUserId, payload) {
@@ -3035,7 +3085,7 @@
     privateUnreadByUserId[uid] = 0;
     syncPrivateThreadMeta(uid, privateActiveDisplayName);
     updateChatUnreadBadge();
-    const messages = await chatFetchPrivateMessages(uid, { limit: options.limit || 60, markRead: options.markRead !== false, sinceId: null });
+    const messages = await chatFetchPrivateMessages(uid, { limit: options.limit || 60, markRead: options.markRead !== false, sinceId: null, supersede: true });
     privateMessagesByUserId[uid] = upsertChatMessages([], messages);
     pruneVoiceAssetCache();
     const latestId = messages.reduce((max, msg) => Math.max(max, Number(msg?.id || 0)), 0);
@@ -3073,7 +3123,7 @@
     if (!privateActiveUserId) return;
     const uid = String(privateActiveUserId);
     const sinceId = forceFull ? null : (privateLastMessageIdByUserId[uid] || null);
-    const incoming = await chatFetchPrivateMessages(uid, { limit: forceFull ? 60 : 30, sinceId, markRead: !!visible });
+    const incoming = await chatFetchPrivateMessages(uid, { limit: forceFull ? 60 : 30, sinceId, markRead: !!visible, supersede: true });
     if (!incoming.length && visible) {
       privateUnreadByUserId[uid] = 0;
       renderPrivateTabUnread();
@@ -3188,6 +3238,7 @@
       return;
     }
     const delay = immediate ? 0 : getPrivatePollIntervalMs();
+    bumpChatPollStat(document.visibilityState === 'hidden' ? 'private_hidden' : (isChatPanelOpen() ? 'private_open' : 'private_closed'));
     privateThreadPollTimer = setTimeout(async () => {
       privateThreadPollTimer = null;
       if (privateThreadPollInFlight) return;
@@ -3295,9 +3346,11 @@
       qs.set('after', String(after));
     }
     try {
-      const data = await getJSONAuth(`/chat/rooms/${CHAT_ROOM}?${qs.toString()}`, token);
+      chatPollAbortController = replaceAbortController(chatPollAbortController, new AbortController());
+      const data = await getJSONAuth(`/chat/rooms/${CHAT_ROOM}?${qs.toString()}`, token, { signal: chatPollAbortController.signal });
       return { ok: true, messages: normalizePublicMessagesPayload(data) };
     } catch (err) {
+      if (err?.name === 'AbortError') return { ok: false, reason: 'aborted' };
       console.warn('chatFetchMessages failed', err);
       return { ok: false, reason: 'failed', error: err };
     }
@@ -3389,6 +3442,7 @@
       return;
     }
     const delay = immediate ? 0 : getChatPollIntervalMs();
+    bumpChatPollStat(document.visibilityState === 'hidden' ? 'public_hidden' : (isChatPanelOpen() ? 'public_open' : 'public_closed'));
     chatPollTimer = setTimeout(() => {
       chatPollTimer = null;
       chatPollOnce();
@@ -4931,7 +4985,6 @@
   }
 
 
-  const DRIVER_PROFILE_DM_POLL_MS = 1500;
   const driverProfileState = {
     open: false,
     userId: null,
@@ -6190,17 +6243,32 @@
     } catch (_) {}
   }
 
+  function scheduleDriverProfileDmPoll({ immediate = false } = {}) {
+    if (driverProfileState.isSelf || !driverProfileState.open || !driverProfileState.userId) return;
+    if (driverProfileState.pollTimer) window.clearTimeout(driverProfileState.pollTimer);
+    const delay = immediate ? 0 : getDriverProfilePollIntervalMs();
+    driverProfileState.pollTimer = window.setTimeout(async () => {
+      driverProfileState.pollTimer = null;
+      if (driverProfilePollInFlight) return;
+      driverProfilePollInFlight = true;
+      try {
+        await pollDriverProfileDmOnce();
+      } finally {
+        driverProfilePollInFlight = false;
+        if (driverProfileState.open && driverProfileState.userId && !driverProfileState.isSelf) scheduleDriverProfileDmPoll();
+      }
+    }, delay);
+  }
+
   function startDriverProfileDmPolling() {
     if (driverProfileState.isSelf) return;
     stopDriverProfileDmPolling();
-    driverProfileState.pollTimer = window.setInterval(() => {
-      pollDriverProfileDmOnce();
-    }, DRIVER_PROFILE_DM_POLL_MS);
+    scheduleDriverProfileDmPoll({ immediate: true });
   }
 
   function stopDriverProfileDmPolling() {
     if (!driverProfileState.pollTimer) return;
-    window.clearInterval(driverProfileState.pollTimer);
+    window.clearTimeout(driverProfileState.pollTimer);
     driverProfileState.pollTimer = null;
   }
 
@@ -6272,18 +6340,23 @@
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible' && typeof authHeaderOK === 'function' && authHeaderOK()) {
       syncMyProgression({ forcePopupCheck: true });
+      scheduleChatPoll({ immediate: true });
+      schedulePrivatePoll({ immediate: true });
+      if (driverProfileState.open && driverProfileState.userId && !driverProfileState.isSelf) scheduleDriverProfileDmPoll({ immediate: true });
     }
     syncChatPollingState();
   });
 
-  setInterval(() => {
+  window.setTimeout(function observeChatAuthLoop() {
     observeChatAuthState();
     maybeSyncProgressionOnSignInState();
-  }, 1200);
+    window.setTimeout(observeChatAuthLoop, 2000);
+  }, 2000);
 
-  setInterval(() => {
+  window.setTimeout(function clearIdentityLoop() {
     if (typeof authHeaderOK === 'function' && !authHeaderOK()) clearMapIdentityTempState();
-  }, 1500);
+    window.setTimeout(clearIdentityLoop, 2500);
+  }, 2500);
 
   window.testChatIncomingSound = async function () {
     await primeChatSoundSystem('manual-test-incoming');
