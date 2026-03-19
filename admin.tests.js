@@ -40,7 +40,7 @@
     },
   ];
 
-  const LOAD_PRESETS = [100, 300, 500, 1000];
+  const LOAD_PRESETS = [100, 300, 500, 1000, 1500, 2000];
   const DEFAULT_LOAD_OPTIONS = Object.freeze({
     preset: 100,
     duration_sec: 60,
@@ -308,17 +308,18 @@
   }
 
   function buildLoadRequestBody(config) {
+    const normalized = normalizeLoadConfig(config || {}, true);
     return {
-      preset: config.preset,
-      duration_sec: config.duration_sec,
-      mode: config.mode,
-      include_presence_writes: !!config.include_presence_writes,
-      include_presence_viewport_reads: !!config.include_presence_viewport_reads,
-      include_presence_summary_reads: !!config.include_presence_summary_reads,
-      include_presence_delta_reads: !!config.include_presence_delta_reads,
-      include_pickup_overlay_reads: !!config.include_pickup_overlay_reads,
-      include_leaderboard_reads: !!config.include_leaderboard_reads,
-      include_chat_lite: !!config.include_chat_lite,
+      preset: normalized.preset,
+      duration_sec: normalized.duration_sec,
+      mode: normalized.mode,
+      include_presence_writes: !!normalized.include_presence_writes,
+      include_presence_viewport_reads: !!normalized.include_presence_viewport_reads,
+      include_presence_summary_reads: !!normalized.include_presence_summary_reads,
+      include_presence_delta_reads: !!normalized.include_presence_delta_reads,
+      include_pickup_overlay_reads: !!normalized.include_pickup_overlay_reads,
+      include_leaderboard_reads: !!normalized.include_leaderboard_reads,
+      include_chat_lite: !!normalized.include_chat_lite,
     };
   }
 
@@ -421,13 +422,17 @@
     const wrapper = payload && typeof payload === 'object' ? payload : {};
     const raw = unwrapAdminTestDetails(wrapper);
     const status = normalizeStatus(pickFirst(raw, ['status', 'state', 'result.status', 'run.status']) || 'idle');
-    const config = {
-      ...DEFAULT_LOAD_OPTIONS,
-      ...normalizeLoadConfig(fallbackConfig, false),
-      ...normalizeLoadConfig(wrapper, false),
-      ...normalizeLoadConfig(raw, false),
-      ...normalizeLoadConfig(pickFirst(raw, ['selected_config', 'current_run', 'last_run', 'last_result', 'last_result.selected_config']) || {}, false),
-    };
+    const currentConfigSources = [
+      fallbackConfig,
+      wrapper,
+      raw,
+      pickFirst(wrapper, ['selected_config', 'current_run', 'run', 'result.selected_config', 'result.config', 'config']),
+      pickFirst(raw, ['selected_config', 'current_run', 'run', 'result.selected_config', 'result.config', 'config']),
+    ].filter((entry) => entry && typeof entry === 'object');
+    const config = currentConfigSources.reduce((acc, source) => ({
+      ...acc,
+      ...normalizeLoadConfig(source, false),
+    }), { ...DEFAULT_LOAD_OPTIONS });
     const progressValue = pickFirst(raw, ['progress_percent', 'progress.percent', 'run.progress_percent', 'result.progress_percent']);
     const elapsedValue = pickFirst(raw, ['elapsed_sec', 'elapsed_seconds', 'elapsed', 'run.elapsed_sec', 'run.elapsed_seconds', 'result.elapsed_sec', 'result.elapsed_seconds']);
     const summaryLine = pickFirst(raw, ['summary.line', 'summary.text', 'summary', 'message', 'detail', 'details.message']);
@@ -860,7 +865,7 @@
           body: requestBody,
         });
         console.info('synthetic load test start response', payload);
-        const next = normalizeLoadResponse(payload, state.loadData.config);
+        const next = normalizeLoadResponse(payload, requestBody);
         if (state.destroyed) return;
         state.loadData = next;
 
@@ -913,17 +918,20 @@
       render();
     }
 
+    function formatModeLabel(mode) {
+      return mode === 'map_plus_chat' ? 'Map + Chat' : 'Map Core';
+    }
+
+    function formatOptionState(value) {
+      return value ? 'on' : 'off';
+    }
+
     function formatNextRunSummary() {
-      const labels = [];
-      if (state.formConfig.include_presence_writes) labels.push('presence writes');
-      if (state.formConfig.include_presence_viewport_reads) labels.push('viewport reads');
-      if (state.formConfig.include_presence_summary_reads) labels.push('summary reads');
-      if (state.formConfig.include_presence_delta_reads) labels.push('delta reads');
-      if (state.formConfig.include_pickup_overlay_reads) labels.push('pickup overlay');
-      if (state.formConfig.include_leaderboard_reads) labels.push('leaderboard');
-      if (state.formConfig.include_chat_lite) labels.push('chat-lite');
-      const extras = labels.length ? ` • Flags: ${labels.join(', ')}` : '';
-      return `Next run: ${state.formConfig.preset} drivers • ${state.formConfig.mode === 'map_plus_chat' ? 'Map + Chat' : 'Map Core'} • ${state.formConfig.duration_sec}s${extras}`;
+      return `Next run: ${state.formConfig.preset} drivers • ${formatModeLabel(state.formConfig.mode)} • ${state.formConfig.duration_sec}s`;
+    }
+
+    function formatOptionsSummary() {
+      return `Options: presence writes ${formatOptionState(state.formConfig.include_presence_writes)}, viewport ${formatOptionState(state.formConfig.include_presence_viewport_reads)}, summary ${formatOptionState(state.formConfig.include_presence_summary_reads)}, delta ${formatOptionState(state.formConfig.include_presence_delta_reads)}, pickup overlay ${formatOptionState(state.formConfig.include_pickup_overlay_reads)}, leaderboard ${formatOptionState(state.formConfig.include_leaderboard_reads)}, chat-lite ${formatOptionState(state.formConfig.include_chat_lite)}`;
     }
 
     function renderMetricGrid() {
@@ -962,6 +970,7 @@
       const summaryText = buildLoadSummary(state.loadData);
       const debugJson = JSON.stringify(state.loadData.debug ?? state.loadData.raw ?? null, null, 2);
       const nextRunSummary = formatNextRunSummary();
+      const optionsSummary = formatOptionsSummary();
 
       mount.innerHTML = `
         <section class="adminSection adminLoadSection">
@@ -992,6 +1001,7 @@
                 <div>
                   <div class="adminCardLabel">Next run</div>
                   <div class="adminMuted">${c.esc(nextRunSummary)}</div>
+                  <div class="adminMuted">${c.esc(optionsSummary)}</div>
                 </div>
               </div>
 

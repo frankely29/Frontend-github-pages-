@@ -3,18 +3,18 @@
   let leaderboardReadyPromise = null;
   const scriptGroups = {
     leaderboard: [
-      './app.part3.js?v=railway3',
+      './app.part3.js?v=railway4',
     ],
     admin: [
-      './admin.components.js?v=adminv5',
-      './admin.actions.js?v=adminv5',
-      './admin.users.js?v=adminv5',
-      './admin.live.js?v=adminv5',
-      './admin.reports.js?v=adminv5',
-      './admin.system.js?v=adminv5',
-      './admin.trips.js?v=adminv5',
-      './admin.tests.js?v=adminv5',
-      './admin.panel.js?v=adminv5',
+      './admin.components.js?v=adminv6',
+      './admin.actions.js?v=adminv6',
+      './admin.users.js?v=adminv6',
+      './admin.live.js?v=adminv6',
+      './admin.reports.js?v=adminv6',
+      './admin.system.js?v=adminv6',
+      './admin.trips.js?v=adminv6',
+      './admin.tests.js?v=adminv6',
+      './admin.panel.js?v=adminv6',
     ],
   };
 
@@ -76,6 +76,9 @@
           const debugState = leaderboardPerfDebugState();
           debugState.loaded = typeof window.LeaderboardPanel?.open === 'function';
           debugState.lastError = debugState.loaded ? '' : 'Leaderboard module loaded without open()';
+          if (!debugState.loaded) {
+            console.error('leaderboard module loaded without open()');
+          }
           console.info('leaderboard lazy load resolved');
         }
         if (key === 'admin' && typeof window.syncAdminPortalSession === 'function') {
