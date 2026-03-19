@@ -42,16 +42,16 @@
 
   const LOAD_PRESETS = [100, 300, 500, 1000];
   const DEFAULT_LOAD_OPTIONS = Object.freeze({
-    driverCount: 100,
-    durationSeconds: 60,
+    preset: 100,
+    duration_sec: 60,
     mode: 'map_core',
-    includePresenceWrites: true,
-    includeViewportReads: true,
-    includeSummaryReads: true,
-    includeDeltaReads: true,
-    includePickupOverlayReads: false,
-    includeLeaderboardReads: false,
-    includeChatLite: false,
+    include_presence_writes: true,
+    include_presence_viewport_reads: true,
+    include_presence_summary_reads: true,
+    include_presence_delta_reads: true,
+    include_pickup_overlay_reads: false,
+    include_leaderboard_reads: false,
+    include_chat_lite: false,
   });
   const LOAD_POLL_MS = 2000;
 
@@ -193,61 +193,77 @@
   }
 
   function normalizeDriverCount(value) {
-    const count = safeInteger(value, DEFAULT_LOAD_OPTIONS.driverCount);
+    const count = safeInteger(value, DEFAULT_LOAD_OPTIONS.preset);
     if (LOAD_PRESETS.includes(count)) return count;
-    return DEFAULT_LOAD_OPTIONS.driverCount;
+    return DEFAULT_LOAD_OPTIONS.preset;
   }
 
   function normalizeDuration(value) {
-    return clamp(safeInteger(value, DEFAULT_LOAD_OPTIONS.durationSeconds), 5, 600);
+    return clamp(safeInteger(value, DEFAULT_LOAD_OPTIONS.duration_sec), 5, 600);
   }
 
   function normalizeMode(value) {
     const normalized = String(value || '').trim().toLowerCase();
-    if (['map+chat', 'map_chat', 'map-chat', 'chat'].includes(normalized)) return 'map_chat';
+    if (normalized === 'map_core') return 'map_core';
+    if (['map+chat', 'map_chat', 'map-chat', 'chat', 'map_plus_chat'].includes(normalized)) return 'map_plus_chat';
     return 'map_core';
   }
 
   function normalizeLoadConfig(source) {
     const config = source && typeof source === 'object' ? source : {};
     const normalized = {};
-    const driverCount = pickFirst(config, ['driverCount', 'driver_count', 'drivers', 'config.driver_count', 'selected_preset']);
-    const durationSeconds = pickFirst(config, ['durationSeconds', 'duration_seconds', 'duration', 'config.duration_seconds']);
+    const driverCount = pickFirst(config, ['preset', 'driverCount', 'driver_count', 'drivers', 'config.preset', 'config.driver_count', 'selected_preset']);
+    const durationSeconds = pickFirst(config, ['duration_sec', 'durationSeconds', 'duration_seconds', 'duration', 'config.duration_sec', 'config.duration_seconds']);
     const mode = pickFirst(config, ['mode', 'scenario_mode', 'config.mode']);
-    const includePresenceWrites = pickFirst(config, ['includePresenceWrites', 'include_presence_writes', 'config.include_presence_writes']);
-    const includeViewportReads = pickFirst(config, ['includeViewportReads', 'include_viewport_reads', 'config.include_viewport_reads']);
-    const includeSummaryReads = pickFirst(config, ['includeSummaryReads', 'include_summary_reads', 'config.include_summary_reads']);
-    const includeDeltaReads = pickFirst(config, ['includeDeltaReads', 'include_delta_reads', 'config.include_delta_reads']);
-    const includePickupOverlayReads = pickFirst(config, ['includePickupOverlayReads', 'include_pickup_overlay_reads', 'config.include_pickup_overlay_reads']);
-    const includeLeaderboardReads = pickFirst(config, ['includeLeaderboardReads', 'include_leaderboard_reads', 'config.include_leaderboard_reads']);
-    const includeChatLite = pickFirst(config, ['includeChatLite', 'include_chat_lite', 'chat_lite_enabled', 'config.include_chat_lite']);
+    const includePresenceWrites = pickFirst(config, ['include_presence_writes', 'includePresenceWrites', 'config.include_presence_writes']);
+    const includeViewportReads = pickFirst(config, ['include_presence_viewport_reads', 'includeViewportReads', 'include_viewport_reads', 'config.include_presence_viewport_reads', 'config.include_viewport_reads']);
+    const includeSummaryReads = pickFirst(config, ['include_presence_summary_reads', 'includeSummaryReads', 'include_summary_reads', 'config.include_presence_summary_reads', 'config.include_summary_reads']);
+    const includeDeltaReads = pickFirst(config, ['include_presence_delta_reads', 'includeDeltaReads', 'include_delta_reads', 'config.include_presence_delta_reads', 'config.include_delta_reads']);
+    const includePickupOverlayReads = pickFirst(config, ['include_pickup_overlay_reads', 'includePickupOverlayReads', 'config.include_pickup_overlay_reads']);
+    const includeLeaderboardReads = pickFirst(config, ['include_leaderboard_reads', 'includeLeaderboardReads', 'config.include_leaderboard_reads']);
+    const includeChatLite = pickFirst(config, ['include_chat_lite', 'includeChatLite', 'chat_lite_enabled', 'config.include_chat_lite']);
 
-    if (driverCount !== undefined) normalized.driverCount = normalizeDriverCount(driverCount);
-    if (durationSeconds !== undefined) normalized.durationSeconds = normalizeDuration(durationSeconds);
+    if (driverCount !== undefined) normalized.preset = normalizeDriverCount(driverCount);
+    if (durationSeconds !== undefined) normalized.duration_sec = normalizeDuration(durationSeconds);
     if (mode !== undefined) normalized.mode = normalizeMode(mode);
-    if (includePresenceWrites !== undefined) normalized.includePresenceWrites = !!includePresenceWrites;
-    if (includeViewportReads !== undefined) normalized.includeViewportReads = !!includeViewportReads;
-    if (includeSummaryReads !== undefined) normalized.includeSummaryReads = !!includeSummaryReads;
-    if (includeDeltaReads !== undefined) normalized.includeDeltaReads = !!includeDeltaReads;
-    if (includePickupOverlayReads !== undefined) normalized.includePickupOverlayReads = !!includePickupOverlayReads;
-    if (includeLeaderboardReads !== undefined) normalized.includeLeaderboardReads = !!includeLeaderboardReads;
-    if (includeChatLite !== undefined) normalized.includeChatLite = !!includeChatLite;
+    if (includePresenceWrites !== undefined) normalized.include_presence_writes = !!includePresenceWrites;
+    if (includeViewportReads !== undefined) normalized.include_presence_viewport_reads = !!includeViewportReads;
+    if (includeSummaryReads !== undefined) normalized.include_presence_summary_reads = !!includeSummaryReads;
+    if (includeDeltaReads !== undefined) normalized.include_presence_delta_reads = !!includeDeltaReads;
+    if (includePickupOverlayReads !== undefined) normalized.include_pickup_overlay_reads = !!includePickupOverlayReads;
+    if (includeLeaderboardReads !== undefined) normalized.include_leaderboard_reads = !!includeLeaderboardReads;
+    if (includeChatLite !== undefined) normalized.include_chat_lite = !!includeChatLite;
     return normalized;
   }
 
   function buildLoadRequestBody(config) {
     return {
-      driver_count: config.driverCount,
-      duration_seconds: config.durationSeconds,
+      preset: config.preset,
+      duration_sec: config.duration_sec,
       mode: config.mode,
-      include_presence_writes: !!config.includePresenceWrites,
-      include_viewport_reads: !!config.includeViewportReads,
-      include_summary_reads: !!config.includeSummaryReads,
-      include_delta_reads: !!config.includeDeltaReads,
-      include_pickup_overlay_reads: !!config.includePickupOverlayReads,
-      include_leaderboard_reads: !!config.includeLeaderboardReads,
-      include_chat_lite: !!config.includeChatLite,
+      include_presence_writes: !!config.include_presence_writes,
+      include_presence_viewport_reads: !!config.include_presence_viewport_reads,
+      include_presence_summary_reads: !!config.include_presence_summary_reads,
+      include_presence_delta_reads: !!config.include_presence_delta_reads,
+      include_pickup_overlay_reads: !!config.include_pickup_overlay_reads,
+      include_leaderboard_reads: !!config.include_leaderboard_reads,
+      include_chat_lite: !!config.include_chat_lite,
     };
+  }
+
+  function extractLoadErrorMessage(error, fallback) {
+    const detail = error?.detail;
+    const payload = error?.payload;
+    const pieces = [
+      pickFirst(detail, ['detail', 'message', 'error']),
+      pickFirst(payload, ['detail.detail', 'detail.message', 'detail.error', 'detail', 'message', 'error']),
+      error?.message,
+    ];
+    const text = pieces
+      .flatMap((value) => toArray(value))
+      .map((value) => (typeof value === 'string' ? value : JSON.stringify(value)))
+      .find((value) => String(value || '').trim());
+    return String(text || fallback || 'Request failed').trim();
   }
 
   function pushReason(target, value) {
@@ -288,8 +304,8 @@
       metrics.push({ label, value: formatter ? formatter(value) : String(value) });
     };
 
-    add('Driver count', pickFirst(raw, ['driver_count', 'drivers', 'config.driver_count', 'summary.driver_count']) ?? config.driverCount);
-    add('Duration', pickFirst(raw, ['duration_seconds', 'config.duration_seconds', 'summary.duration_seconds']) ?? config.durationSeconds, formatDuration);
+    add('Driver count', pickFirst(raw, ['preset', 'driver_count', 'drivers', 'config.preset', 'config.driver_count', 'summary.preset', 'summary.driver_count']) ?? config.preset);
+    add('Duration', pickFirst(raw, ['duration_sec', 'duration_seconds', 'config.duration_sec', 'config.duration_seconds', 'summary.duration_sec', 'summary.duration_seconds']) ?? config.duration_sec, formatDuration);
     add('Total operations', pickFirst(raw, ['total_operations', 'summary.total_operations', 'metrics.total_operations', 'debug.total_operations']));
     add('Error rate', pickFirst(raw, ['error_rate', 'summary.error_rate', 'metrics.error_rate', 'debug.error_rate']), formatPercent);
     add('Presence write p50', pickFirst(raw, ['presence_write_p50_ms', 'metrics.presence_write.p50_ms', 'debug.presence_write.p50_ms']), formatLatency);
@@ -312,9 +328,9 @@
     const metricLines = normalized.metrics.slice(0, 6).map((metric) => `${metric.label}: ${metric.value}`);
     return [
       `Status: ${formatLoadStatus(normalized.status)}`,
-      `Preset: ${normalized.config.driverCount} drivers`,
-      `Duration: ${normalized.config.durationSeconds}s`,
-      `Mode: ${normalized.config.mode === 'map_chat' ? 'Map + Chat' : 'Map Core'}`,
+      `Preset: ${normalized.config.preset} drivers`,
+      `Duration: ${normalized.config.duration_sec}s`,
+      `Mode: ${normalized.config.mode === 'map_plus_chat' ? 'Map + Chat' : 'Map Core'}`,
       `Summary: ${normalized.summary}`,
       `Reasons: ${reasons.join(' | ')}`,
       metricLines.length ? `Metrics: ${metricLines.join(' | ')}` : 'Metrics: none returned',
@@ -335,13 +351,13 @@
     const reasons = collectReasons(raw, status);
     const metrics = collectMetrics(raw, config);
     const summary = typeof summaryLine === 'string' && summaryLine.trim()
-      ? summaryLine.trim()
-      : normalizeStatus(status) === 'pass'
-        ? `PASS — all enabled checks stayed within thresholds for ${config.driverCount} drivers.`
+        ? summaryLine.trim()
+        : normalizeStatus(status) === 'pass'
+          ? `PASS — all enabled checks stayed within thresholds for ${config.preset} drivers.`
         : normalizeStatus(status) === 'fail'
-          ? `FAIL — one or more enabled checks exceeded thresholds at the ${config.driverCount}-driver preset.`
+          ? `FAIL — one or more enabled checks exceeded thresholds at the ${config.preset}-driver preset.`
           : normalizeStatus(status) === 'running'
-            ? `Running synthetic load test for ${config.driverCount} drivers.`
+            ? `Running synthetic load test for ${config.preset} drivers.`
             : normalizeStatus(status) === 'stopped'
               ? 'Load test was stopped before completion.'
               : normalizeStatus(status) === 'error'
@@ -721,7 +737,7 @@
           state.enabled = true;
         }
       } catch (error) {
-        state.errorMessage = error?.message || 'Failed to start synthetic load test.';
+        state.errorMessage = extractLoadErrorMessage(error, 'Failed to start synthetic load test.');
       } finally {
         state.busy = false;
         render();
@@ -822,7 +838,7 @@
               <div>
                 <div class="adminCardLabel">Driver preset</div>
                 <div class="adminRow wrap adminLoadPresetRow">
-                  ${LOAD_PRESETS.map((preset) => `<button type="button" class="adminToggleBtn${state.config.driverCount === preset ? ' active' : ''}" data-load-preset="${preset}" ${active || state.busy ? 'disabled' : ''}>${preset} drivers</button>`).join('')}
+                  ${LOAD_PRESETS.map((preset) => `<button type="button" class="adminToggleBtn${state.config.preset === preset ? ' active' : ''}" data-load-preset="${preset}" ${active || state.busy ? 'disabled' : ''}>${preset} drivers</button>`).join('')}
                 </div>
               </div>
 
@@ -832,25 +848,25 @@
                   <div class="adminRow wrap adminLoadFieldRow">
                     <label class="adminLoadField">
                       <span>Duration seconds</span>
-                      <input class="adminInput" type="number" min="5" max="600" step="5" id="adminLoadDuration" value="${c.esc(state.config.durationSeconds)}" ${active || state.busy ? 'disabled' : ''}>
+                      <input class="adminInput" type="number" min="5" max="600" step="5" id="adminLoadDuration" value="${c.esc(state.config.duration_sec)}" ${active || state.busy ? 'disabled' : ''}>
                     </label>
                     <label class="adminLoadField">
                       <span>Mode</span>
                       <select class="adminInput" id="adminLoadMode" ${active || state.busy ? 'disabled' : ''}>
                         <option value="map_core" ${state.config.mode === 'map_core' ? 'selected' : ''}>Map Core</option>
-                        <option value="map_chat" ${state.config.mode === 'map_chat' ? 'selected' : ''}>Map + Chat</option>
+                        <option value="map_plus_chat" ${state.config.mode === 'map_plus_chat' ? 'selected' : ''}>Map + Chat</option>
                       </select>
                     </label>
                   </div>
                   <div class="adminControlGrid adminLoadCheckboxGrid">
                     ${[
-                      ['includePresenceWrites', 'Include presence writes'],
-                      ['includeViewportReads', 'Include viewport reads'],
-                      ['includeSummaryReads', 'Include summary reads'],
-                      ['includeDeltaReads', 'Include delta reads'],
-                      ['includePickupOverlayReads', 'Include pickup overlay reads'],
-                      ['includeLeaderboardReads', 'Include leaderboard reads'],
-                      ['includeChatLite', 'Include chat-lite'],
+                      ['include_presence_writes', 'Include presence writes'],
+                      ['include_presence_viewport_reads', 'Include viewport reads'],
+                      ['include_presence_summary_reads', 'Include summary reads'],
+                      ['include_presence_delta_reads', 'Include delta reads'],
+                      ['include_pickup_overlay_reads', 'Include pickup overlay reads'],
+                      ['include_leaderboard_reads', 'Include leaderboard reads'],
+                      ['include_chat_lite', 'Include chat-lite'],
                     ].map(([key, label]) => `<button type="button" class="adminToggleBtn${state.config[key] ? ' active' : ''}" data-load-option="${key}" ${active || state.busy ? 'disabled' : ''}>${c.esc(label)}</button>`).join('')}
                   </div>
                 </div>
@@ -870,8 +886,8 @@
             </div>
             <div class="adminMuted">${c.esc(state.loadData.summary)}</div>
             <div class="adminRow wrap adminLoadMetaRow">
-              ${c.badge ? c.badge(`${state.loadData.config.driverCount} drivers`, 'muted') : ''}
-              ${c.badge ? c.badge(state.loadData.config.mode === 'map_chat' ? 'Map + Chat' : 'Map Core', 'muted') : ''}
+              ${c.badge ? c.badge(`${state.loadData.config.preset} drivers`, 'muted') : ''}
+              ${c.badge ? c.badge(state.loadData.config.mode === 'map_plus_chat' ? 'Map + Chat' : 'Map Core', 'muted') : ''}
               ${c.badge ? c.badge(`${Math.round(state.loadData.progressPercent)}% progress`, active ? 'warn' : resultTone) : ''}
             </div>
             <div class="adminLoadProgress" role="progressbar" aria-valuenow="${Math.round(state.loadData.progressPercent)}" aria-valuemin="0" aria-valuemax="100">
@@ -917,7 +933,7 @@
 
       container.querySelectorAll('[data-load-preset]').forEach((button) => {
         button.addEventListener('click', () => {
-          state.config.driverCount = normalizeDriverCount(button.dataset.loadPreset);
+          state.config.preset = normalizeDriverCount(button.dataset.loadPreset);
           render();
         });
       });
@@ -927,7 +943,7 @@
       });
 
       container.querySelector('#adminLoadDuration')?.addEventListener('change', (event) => {
-        state.config.durationSeconds = normalizeDuration(event.currentTarget.value);
+        state.config.duration_sec = normalizeDuration(event.currentTarget.value);
         render();
       });
 
