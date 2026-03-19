@@ -1,5 +1,6 @@
 (function () {
   const loadedGroups = new Map();
+  let leaderboardReadyPromise = null;
   const scriptGroups = {
     leaderboard: [
       './app.part3.js?v=railway3',
@@ -27,6 +28,10 @@
       loadAttempts: 0,
     };
     return window.__mapPerfDebug.leaderboard;
+  }
+
+  function getLeaderboardPanel() {
+    return typeof window.LeaderboardPanel?.open === 'function' ? window.LeaderboardPanel : null;
   }
 
   function loadScript(src) {
@@ -62,6 +67,7 @@
         if (key === 'leaderboard') {
           const debugState = leaderboardPerfDebugState();
           debugState.loadAttempts = Number(debugState.loadAttempts || 0) + 1;
+          console.info('leaderboard lazy load started');
         }
         for (const src of scriptGroups[key]) {
           await loadScript(src);
@@ -70,6 +76,7 @@
           const debugState = leaderboardPerfDebugState();
           debugState.loaded = typeof window.LeaderboardPanel?.open === 'function';
           debugState.lastError = debugState.loaded ? '' : 'Leaderboard module loaded without open()';
+          console.info('leaderboard lazy load resolved');
         }
         if (key === 'admin' && typeof window.syncAdminPortalSession === 'function') {
           window.syncAdminPortalSession();
@@ -85,6 +92,39 @@
       }));
     }
     return loadedGroups.get(key);
+  }
+
+  async function ensureLeaderboardPanelReady() {
+    const debugState = leaderboardPerfDebugState();
+    const readyPanel = getLeaderboardPanel();
+    if (readyPanel) {
+      debugState.loaded = true;
+      debugState.lastError = '';
+      return readyPanel;
+    }
+    if (!leaderboardReadyPromise) {
+      leaderboardReadyPromise = (async () => {
+        await loadFrontendModuleGroup('leaderboard');
+        const loadedPanel = getLeaderboardPanel();
+        if (!loadedPanel) {
+          const error = new Error('Leaderboard module missing open() after lazy load');
+          debugState.loaded = false;
+          debugState.lastError = error.message;
+          console.error('leaderboard module missing open()');
+          throw error;
+        }
+        debugState.loaded = true;
+        debugState.lastError = '';
+        return loadedPanel;
+      })().catch((error) => {
+        leaderboardReadyPromise = null;
+        debugState.loaded = false;
+        debugState.lastError = String(error?.message || error || 'Failed to prepare leaderboard module');
+        console.error('leaderboard lazy load failed', error);
+        throw error;
+      });
+    }
+    return leaderboardReadyPromise;
   }
 
   function wireDeferredDockButton(buttonId, groupName, onLoaded) {
@@ -107,6 +147,28 @@
     }, true);
   }
 
+  function wireLeaderboardDockButton(buttonId) {
+    const button = document.getElementById(buttonId);
+    if (!button || button.dataset.leaderboardLazyBound === '1') return;
+    button.dataset.leaderboardLazyBound = '1';
+    button.addEventListener('click', async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      try {
+        const panel = await ensureLeaderboardPanelReady();
+        if (typeof panel?.open !== 'function') {
+          console.error('leaderboard module missing open()');
+          return;
+        }
+        console.info('leaderboard open invoked');
+        panel.open();
+      } catch (error) {
+        console.error('leaderboard open failed', error);
+      }
+    }, true);
+  }
+
   function preloadModuleGroup(groupName) {
     if (!window.requestIdleCallback) {
       setTimeout(() => {
@@ -123,18 +185,20 @@
     const button = document.getElementById(buttonId);
     if (!button || button.dataset.lazyPreloadBound === '1') return;
     button.dataset.lazyPreloadBound = '1';
-    const preload = () => preloadModuleGroup('leaderboard');
+    const preload = () => ensureLeaderboardPanelReady().catch(() => {});
     button.addEventListener('pointerenter', preload, { once: true, passive: true });
     button.addEventListener('focus', preload, { once: true, passive: true });
     button.addEventListener('touchstart', preload, { once: true, passive: true });
   }
 
   wireLeaderboardPreload('dockLeaderboard');
+  wireLeaderboardDockButton('dockLeaderboard');
 
   wireDeferredDockButton('dockAdmin', 'admin', async () => {
     window.syncAdminPortalSession?.();
     window.AdminPortal?.open?.();
   });
 
+  window.ensureLeaderboardPanelReady = ensureLeaderboardPanelReady;
   window.loadFrontendModuleGroup = loadFrontendModuleGroup;
 })();
