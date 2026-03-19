@@ -26,6 +26,16 @@
   const PRIVATE_CHAT_HIDDEN_POLL_MS = 15000;
   const DRIVER_PROFILE_DM_POLL_OPEN_MS = 4000;
   const DRIVER_PROFILE_DM_POLL_HIDDEN_MS = 14000;
+  const CHAT_LIVE_CAPABILITIES_PATH = '/chat/live/capabilities';
+  const CHAT_LIVE_CAPABILITIES_TTL_MS = 90 * 1000;
+  const CHAT_LIVE_RECONNECT_BASE_MS = 1500;
+  const CHAT_LIVE_RECONNECT_MAX_MS = 30000;
+  const CHAT_LIVE_CONNECTED_PUBLIC_OPEN_POLL_MS = 4000;
+  const CHAT_LIVE_CONNECTED_PUBLIC_CLOSED_POLL_MS = 15000;
+  const CHAT_LIVE_CONNECTED_PUBLIC_HIDDEN_POLL_MS = 25000;
+  const CHAT_LIVE_CONNECTED_PRIVATE_OPEN_POLL_MS = 7000;
+  const CHAT_LIVE_CONNECTED_PRIVATE_CLOSED_POLL_MS = 18000;
+  const CHAT_LIVE_CONNECTED_PRIVATE_HIDDEN_POLL_MS = 28000;
 
   // Token helper (matches LS_TOKEN in app.js)
   const LS_TOKEN = 'community_token_v1';
@@ -170,6 +180,51 @@
   let privateThreadAbortController = null;
   const privateMessageAbortControllers = new Map();
   let driverProfilePollInFlight = false;
+  const chatLiveRuntime = {
+    capabilitiesCheckedAt: 0,
+    capabilitiesInFlight: null,
+    capabilities: null,
+    public: {
+      key: 'public',
+      es: null,
+      url: '',
+      status: 'idle',
+      reconnectAttempts: 0,
+      reconnectTimer: null,
+      connectSeq: 0,
+      lastEventId: '',
+      lastMessageId: null,
+      reconnectCount: 0,
+      lastConnectAt: 0,
+      lastDisconnectReason: '',
+      lastEventAt: 0,
+      lastMergeKey: '',
+      lastReconcileAt: 0,
+      lastError: '',
+    },
+    private: {
+      key: 'private',
+      es: null,
+      url: '',
+      status: 'idle',
+      reconnectAttempts: 0,
+      reconnectTimer: null,
+      connectSeq: 0,
+      lastEventId: '',
+      lastMessageId: null,
+      reconnectCount: 0,
+      lastConnectAt: 0,
+      lastDisconnectReason: '',
+      lastEventAt: 0,
+      lastMergeKey: '',
+      lastReconcileAt: 0,
+      lastThreadUserId: '',
+      lastError: '',
+    },
+    pendingPublicReconcile: null,
+    pendingPrivateRefresh: null,
+    pendingPrivateThreadReconcile: new Map(),
+  };
 
   function chatLastReadStorageKey() {
     return `tlc_chat_last_read_${CHAT_ROOM}`;
@@ -261,7 +316,10 @@
   }
 
   function getDriverProfilePollIntervalMs() {
-    return document.visibilityState === 'hidden' ? DRIVER_PROFILE_DM_POLL_HIDDEN_MS : DRIVER_PROFILE_DM_POLL_OPEN_MS;
+    if (document.visibilityState === 'hidden') {
+      return isChatLiveConnected('private') ? Math.max(DRIVER_PROFILE_DM_POLL_HIDDEN_MS, CHAT_LIVE_CONNECTED_PRIVATE_HIDDEN_POLL_MS) : DRIVER_PROFILE_DM_POLL_HIDDEN_MS;
+    }
+    return isChatLiveConnected('private') ? Math.max(DRIVER_PROFILE_DM_POLL_OPEN_MS, CHAT_LIVE_CONNECTED_PRIVATE_OPEN_POLL_MS) : DRIVER_PROFILE_DM_POLL_OPEN_MS;
   }
 
   // Remember which chat messages have been displayed in the kill feed.
@@ -727,6 +785,424 @@
       return hasToken && authHeaderOK();
     }
     return hasToken;
+  }
+
+  function isEventSourceSupported() {
+    return typeof window !== 'undefined' && typeof window.EventSource !== 'undefined';
+  }
+
+  function chatLiveTransportState(key) {
+    return key === 'private' ? chatLiveRuntime.private : chatLiveRuntime.public;
+  }
+
+  function isChatLiveConnected(key) {
+    return chatLiveTransportState(key)?.status === 'connected';
+  }
+
+  function updateChatLiveMergeDebug(key, messages = [], extra = {}) {
+    const state = chatLiveTransportState(key);
+    if (!state) return;
+    const list = Array.isArray(messages) ? messages : [];
+    const lastMessage = list.length ? list[list.length - 1] : null;
+    state.lastMergeKey = extra.lastMergeKey || (lastMessage ? getMessageMergeKey(lastMessage) : state.lastMergeKey || '');
+    const messageId = parseMessageId(extra.lastMessageId ?? messageNumericId(lastMessage));
+    if (messageId !== null) state.lastMessageId = messageId;
+    if (extra.threadUserId) state.lastThreadUserId = String(extra.threadUserId);
+    if (extra.reconciledAt) state.lastReconcileAt = extra.reconciledAt;
+  }
+
+  function clearChatLiveReconnectTimer(key) {
+    const state = chatLiveTransportState(key);
+    if (!state?.reconnectTimer) return;
+    clearTimeout(state.reconnectTimer);
+    state.reconnectTimer = null;
+  }
+
+  function resetChatLiveTransportState(key, reason = 'reset') {
+    const state = chatLiveTransportState(key);
+    if (!state) return;
+    clearChatLiveReconnectTimer(key);
+    if (state.es) {
+      try { state.es.close(); } catch (_) {}
+    }
+    state.es = null;
+    state.url = '';
+    state.status = 'idle';
+    state.reconnectAttempts = 0;
+    state.lastDisconnectReason = reason;
+    state.lastError = '';
+  }
+
+  function teardownChatLiveRuntime(reason = 'teardown') {
+    clearChatLiveReconnectTimer('public');
+    clearChatLiveReconnectTimer('private');
+    resetChatLiveTransportState('public', reason);
+    resetChatLiveTransportState('private', reason);
+    chatLiveRuntime.capabilitiesCheckedAt = 0;
+    chatLiveRuntime.capabilitiesInFlight = null;
+    chatLiveRuntime.capabilities = null;
+    if (chatLiveRuntime.pendingPublicReconcile) {
+      clearTimeout(chatLiveRuntime.pendingPublicReconcile);
+      chatLiveRuntime.pendingPublicReconcile = null;
+    }
+    if (chatLiveRuntime.pendingPrivateRefresh) {
+      clearTimeout(chatLiveRuntime.pendingPrivateRefresh);
+      chatLiveRuntime.pendingPrivateRefresh = null;
+    }
+    if (chatLiveRuntime.pendingPrivateThreadReconcile instanceof Map) {
+      for (const timer of chatLiveRuntime.pendingPrivateThreadReconcile.values()) {
+        clearTimeout(timer);
+      }
+      chatLiveRuntime.pendingPrivateThreadReconcile.clear();
+    }
+  }
+
+  function normalizeChatLiveCapabilityShape(payload) {
+    const source = payload && typeof payload === 'object' ? payload : {};
+    const publicSource = source.public || source.public_chat || source.publicChat || source.chat || {};
+    const privateSource = source.private || source.dm || source.private_messages || source.privateMessages || {};
+    return {
+      checkedAt: Date.now(),
+      public: {
+        enabled: publicSource.enabled !== false && !!String(publicSource.url || publicSource.sse_url || publicSource.stream_url || publicSource.streamUrl || '').trim(),
+        url: String(publicSource.url || publicSource.sse_url || publicSource.stream_url || publicSource.streamUrl || '').trim(),
+      },
+      private: {
+        enabled: privateSource.enabled !== false && !!String(privateSource.url || privateSource.sse_url || privateSource.stream_url || privateSource.streamUrl || '').trim(),
+        url: String(privateSource.url || privateSource.sse_url || privateSource.stream_url || privateSource.streamUrl || '').trim(),
+      },
+    };
+  }
+
+  function readChatLiveConfigFromWindow() {
+    const cfg = typeof window !== 'undefined' ? (window.CHAT_LIVE_CONFIG || null) : null;
+    if (!cfg || typeof cfg !== 'object') return null;
+    return normalizeChatLiveCapabilityShape(cfg);
+  }
+
+  async function fetchChatLiveCapabilities({ force = false } = {}) {
+    if (!isChatAuthReady()) return null;
+    const inlineConfig = readChatLiveConfigFromWindow();
+    if (inlineConfig && (inlineConfig.public.enabled || inlineConfig.private.enabled)) {
+      chatLiveRuntime.capabilities = inlineConfig;
+      chatLiveRuntime.capabilitiesCheckedAt = Date.now();
+      return inlineConfig;
+    }
+    if (!force && chatLiveRuntime.capabilities && (Date.now() - chatLiveRuntime.capabilitiesCheckedAt) < CHAT_LIVE_CAPABILITIES_TTL_MS) {
+      return chatLiveRuntime.capabilities;
+    }
+    if (!force && chatLiveRuntime.capabilitiesInFlight) return chatLiveRuntime.capabilitiesInFlight;
+    const token = getCommunityToken();
+    if (!token) return null;
+    chatLiveRuntime.capabilitiesInFlight = (async () => {
+      try {
+        const data = await getJSONAuth(CHAT_LIVE_CAPABILITIES_PATH, token, { cache: 'no-store' });
+        const normalized = normalizeChatLiveCapabilityShape(data);
+        chatLiveRuntime.capabilities = normalized;
+        chatLiveRuntime.capabilitiesCheckedAt = Date.now();
+        return normalized;
+      } catch (err) {
+        chatLiveRuntime.capabilities = {
+          checkedAt: Date.now(),
+          public: { enabled: false, url: '' },
+          private: { enabled: false, url: '' },
+        };
+        chatLiveRuntime.capabilitiesCheckedAt = Date.now();
+        return chatLiveRuntime.capabilities;
+      } finally {
+        chatLiveRuntime.capabilitiesInFlight = null;
+      }
+    })();
+    return chatLiveRuntime.capabilitiesInFlight;
+  }
+
+  function schedulePublicReconcile(reason = 'live-event', delay = 0) {
+    if (chatLiveRuntime.pendingPublicReconcile) return;
+    chatLiveRuntime.pendingPublicReconcile = setTimeout(() => {
+      chatLiveRuntime.pendingPublicReconcile = null;
+      chatLiveRuntime.public.lastReconcileAt = Date.now();
+      scheduleChatPoll({ immediate: true });
+    }, Math.max(0, delay));
+  }
+
+  function schedulePrivateThreadsRefresh(reason = 'live-event', delay = 0) {
+    if (chatLiveRuntime.pendingPrivateRefresh) return;
+    chatLiveRuntime.pendingPrivateRefresh = setTimeout(async () => {
+      chatLiveRuntime.pendingPrivateRefresh = null;
+      chatLiveRuntime.private.lastReconcileAt = Date.now();
+      try {
+        await chatRefreshPrivateThreads();
+      } catch (_) {}
+      schedulePrivatePoll({ immediate: true });
+    }, Math.max(0, delay));
+  }
+
+  function schedulePrivateThreadReconcile(userId, reason = 'live-event', delay = 0) {
+    const uid = String(userId || '').trim();
+    if (!uid) return;
+    if (!(chatLiveRuntime.pendingPrivateThreadReconcile instanceof Map)) {
+      chatLiveRuntime.pendingPrivateThreadReconcile = new Map();
+    }
+    if (chatLiveRuntime.pendingPrivateThreadReconcile.has(uid)) return;
+    const timer = setTimeout(async () => {
+      chatLiveRuntime.pendingPrivateThreadReconcile.delete(uid);
+      chatLiveRuntime.private.lastReconcileAt = Date.now();
+      try {
+        if (privateActiveUserId === uid) {
+          await chatPollPrivateActiveThread({ visible: activeChatTab === 'private' && isChatPanelOpen(), forceFull: false });
+        }
+        if (driverProfileState.open && String(driverProfileState.userId || '') === uid && !driverProfileState.isSelf) {
+          await pollDriverProfileDmOnce();
+        }
+      } catch (_) {}
+    }, Math.max(0, delay));
+    chatLiveRuntime.pendingPrivateThreadReconcile.set(uid, timer);
+  }
+
+  function applyLivePrivateThreadSummaries(threads = []) {
+    const list = (Array.isArray(threads) ? threads : []).map(normalizePrivateThread).filter((thread) => !!thread.otherUserId);
+    if (!list.length) return;
+    const nextById = new Map((Array.isArray(privateThreads) ? privateThreads : []).map((thread) => [privateThreadUserId(thread), thread]).filter(([uid]) => !!uid));
+    list.forEach((thread) => {
+      const uid = privateThreadUserId(thread);
+      if (!uid) return;
+      const existing = nextById.get(uid) || null;
+      const visibleThread = activeChatTab === 'private' && isChatPanelOpen() && privateActiveUserId === uid;
+      const nextUnread = visibleThread ? 0 : Math.max(Number(privateUnreadByUserId[uid] || 0), Number(thread.unreadCount || 0));
+      privateUnreadByUserId[uid] = nextUnread;
+      nextById.set(uid, {
+        ...(existing || {}),
+        ...thread,
+        unreadCount: nextUnread,
+      });
+    });
+    privateThreads = Array.from(nextById.values()).sort((a, b) => String(privateThreadTime(b)).localeCompare(String(privateThreadTime(a))));
+    renderPrivateTabUnread();
+    if (activeChatTab === 'private' && !privateActiveUserId) renderPrivateThreadList();
+    updateChatUnreadBadge();
+  }
+
+  function handlePublicLiveMessages(messages = [], source = 'sse') {
+    const normalized = normalizePublicMessagesPayload(messages);
+    if (!normalized.length) return;
+    if (!chatInitialHistoryLoaded && !chatHiddenBaselineReady) {
+      schedulePublicReconcile('bootstrap-needed', 0);
+      return;
+    }
+    const merged = upsertPublicChatMessages(normalized);
+    advanceChatWatermarksFromMessages(normalized);
+    const freshIncoming = chatSoundState.baselineReady ? collectFreshIncomingMessagesForAudio(normalized) : [];
+    if (!chatSoundState.baselineReady) seedChatIncomingAudioBaseline(normalized);
+    if (!killFeedBootstrapReady) {
+      seedKillFeedSeenKeys(publicChatMessages);
+      killFeedBootstrapReady = true;
+      killFeedBootstrapPollConsumed = true;
+    }
+    updateChatLiveMergeDebug('public', normalized, {
+      lastMessageId: messageNumericId(normalized[normalized.length - 1]),
+      lastMergeKey: getMessageMergeKey(normalized[normalized.length - 1]),
+    });
+    const panelOpen = isChatPanelOpen() && activeChatTab === 'public';
+    if (panelOpen) {
+      renderChatMessages(merged, { replace: true });
+      markChatReadThroughLatestLoaded();
+      if (killFeedContainer) killFeedContainer.style.display = 'none';
+    } else {
+      if (killFeedContainer) killFeedContainer.style.display = 'flex';
+      showKillFeed(normalized);
+    }
+    if (freshIncoming.length > 0) void playChatTone('incoming');
+    if (!panelOpen && !maybeInitializeChatReadBaseline()) rebuildUnreadBadgeFromMessages(publicChatMessages);
+  }
+
+  function applyLivePrivateMessages(otherUserId, messages = [], options = {}) {
+    const uid = String(otherUserId || '').trim();
+    const normalized = normalizePrivateMessagesPayload(messages);
+    if (!uid || !normalized.length) return;
+    const previousLast = Number(privateLastMessageIdByUserId[uid] || 0);
+    const merged = mergePrivateMessages(uid, normalized);
+    const visibleInboxThread = activeChatTab === 'private' && isChatPanelOpen() && privateActiveUserId === uid;
+    const visibleDriverProfile = driverProfileState.open && !driverProfileState.isSelf && String(driverProfileState.userId || '') === uid;
+    const visible = options.visible === true || visibleInboxThread || visibleDriverProfile;
+    const freshIncoming = collectFreshIncomingDriverProfileDm(normalized).filter((msg) => !msg.isOwn);
+    const unseenIncoming = normalized.filter((msg) => !msg.isOwn && Number(msg?.id || 0) > previousLast);
+    if (visible) {
+      privateUnreadByUserId[uid] = 0;
+    } else if (unseenIncoming.length) {
+      privateUnreadByUserId[uid] = Number(privateUnreadByUserId[uid] || 0) + unseenIncoming.length;
+    }
+    privateUpsertThreadFromMessages(uid, merged, { displayName: options.displayName || privateActiveDisplayName || driverProfileState.displayName || '' });
+    if (visibleInboxThread) renderPrivateConversation();
+    if (visibleDriverProfile) {
+      driverProfileState.messages = privateMessagesByUserId[uid] || merged;
+      driverProfileState.latestMessageId = (driverProfileState.messages || []).reduce((max, msg) => Math.max(max, Number(msg?.id || 0)), 0) || null;
+      updateDriverProfileDmList(driverProfileState.messages);
+    }
+    updateChatLiveMergeDebug('private', normalized, {
+      lastMessageId: messageNumericId(normalized[normalized.length - 1]),
+      lastMergeKey: getMessageMergeKey(normalized[normalized.length - 1]),
+      threadUserId: uid,
+    });
+    renderPrivateTabUnread();
+    updateChatUnreadBadge();
+    if (freshIncoming.length > 0 && !visible) void playChatTone('incoming');
+  }
+
+  function safeParseLiveEvent(event) {
+    const type = String(event?.type || 'message');
+    const data = String(event?.data || '').trim();
+    let payload = {};
+    if (data) {
+      try { payload = JSON.parse(data); } catch (_) { payload = { raw: data }; }
+    }
+    return { type, payload, lastEventId: String(event?.lastEventId || payload?.event_id || payload?.id || '').trim() };
+  }
+
+  function handlePublicLiveEvent(event) {
+    const parsed = safeParseLiveEvent(event);
+    const state = chatLiveRuntime.public;
+    state.lastEventAt = Date.now();
+    state.lastEventId = parsed.lastEventId || state.lastEventId || '';
+    const payload = parsed.payload || {};
+    if (payload.keepalive || parsed.type === 'ping' || parsed.type === 'keepalive') return;
+    if (payload.message || Array.isArray(payload.messages) || Array.isArray(payload.rows)) {
+      handlePublicLiveMessages(payload.messages || payload.rows || [payload.message], 'sse');
+      return;
+    }
+    if (payload.message_id != null || payload.after != null || payload.cursor != null || payload.reconcile === true) {
+      schedulePublicReconcile('public-live-nudge', 50);
+    }
+  }
+
+  function resolvePrivateLiveThreadUserId(payload = {}) {
+    return String(payload.other_user_id || payload.otherUserId || payload.user_id || payload.userId || payload.thread_user_id || payload.threadUserId || '').trim();
+  }
+
+  function handlePrivateLiveEvent(event) {
+    const parsed = safeParseLiveEvent(event);
+    const state = chatLiveRuntime.private;
+    state.lastEventAt = Date.now();
+    state.lastEventId = parsed.lastEventId || state.lastEventId || '';
+    const payload = parsed.payload || {};
+    if (payload.keepalive || parsed.type === 'ping' || parsed.type === 'keepalive') return;
+    if (payload.thread || Array.isArray(payload.threads)) {
+      applyLivePrivateThreadSummaries(payload.threads || [payload.thread]);
+    }
+    if (payload.message || Array.isArray(payload.messages)) {
+      const first = payload.message || (Array.isArray(payload.messages) ? payload.messages[0] : null) || {};
+      const uid = resolvePrivateLiveThreadUserId(first) || resolvePrivateLiveThreadUserId(payload);
+      if (uid) {
+        applyLivePrivateMessages(uid, payload.messages || [payload.message], { displayName: payload.display_name || payload.displayName || '' });
+        return;
+      }
+    }
+    const uid = resolvePrivateLiveThreadUserId(payload);
+    if (uid) {
+      if ((activeChatTab === 'private' && privateActiveUserId === uid) || (driverProfileState.open && String(driverProfileState.userId || '') === uid && !driverProfileState.isSelf)) {
+        schedulePrivateThreadReconcile(uid, 'private-live-thread-nudge', 60);
+      } else {
+        schedulePrivateThreadsRefresh('private-live-summary-nudge', 100);
+      }
+      return;
+    }
+    if (payload.reconcile === true || parsed.type === 'dm_summary' || parsed.type === 'thread_summary') {
+      schedulePrivateThreadsRefresh('private-live-reconcile', 120);
+    }
+  }
+
+  function bindChatLiveTransportEvents(key, eventSource) {
+    const handler = key === 'private' ? handlePrivateLiveEvent : handlePublicLiveEvent;
+    const eventNames = ['message', 'public_message', 'chat_message', 'chat_public_message', 'private_message', 'dm_message', 'dm_summary', 'thread_summary', 'thread_update', 'chat_nudge', 'ping', 'keepalive'];
+    eventNames.forEach((eventName) => {
+      eventSource.addEventListener(eventName, handler);
+    });
+    eventSource.onmessage = handler;
+  }
+
+  function queueChatLiveReconnect(key, reason = 'reconnect') {
+    const state = chatLiveTransportState(key);
+    if (!state || !isChatAuthReady()) return;
+    if (state.reconnectTimer) return;
+    state.reconnectAttempts += 1;
+    state.reconnectCount += 1;
+    state.lastDisconnectReason = reason;
+    state.status = 'polling';
+    const delay = Math.min(CHAT_LIVE_RECONNECT_MAX_MS, CHAT_LIVE_RECONNECT_BASE_MS * Math.max(1, 2 ** Math.max(0, state.reconnectAttempts - 1)));
+    state.reconnectTimer = setTimeout(() => {
+      state.reconnectTimer = null;
+      ensureChatLiveTransport(key).catch(() => {});
+    }, delay);
+  }
+
+  function closeChatLiveTransport(key, reason = 'close', { suppressReconnect = true } = {}) {
+    const state = chatLiveTransportState(key);
+    if (!state) return;
+    clearChatLiveReconnectTimer(key);
+    const es = state.es;
+    state.es = null;
+    state.status = 'polling';
+    state.lastDisconnectReason = reason;
+    if (es) {
+      try { es.close(); } catch (_) {}
+    }
+    if (!suppressReconnect && isChatAuthReady()) queueChatLiveReconnect(key, reason);
+  }
+
+  async function ensureChatLiveTransport(key) {
+    const state = chatLiveTransportState(key);
+    if (!state) return;
+    if (!isChatAuthReady() || !isEventSourceSupported()) {
+      closeChatLiveTransport(key, 'unsupported', { suppressReconnect: true });
+      return;
+    }
+    const caps = await fetchChatLiveCapabilities();
+    const target = key === 'private' ? caps?.private : caps?.public;
+    const url = String(target?.url || '').trim();
+    if (!target?.enabled || !url) {
+      closeChatLiveTransport(key, 'capability-unavailable', { suppressReconnect: true });
+      return;
+    }
+    if (state.es && state.url === url && (state.status === 'connecting' || state.status === 'connected')) return;
+    closeChatLiveTransport(key, 'refresh-connection', { suppressReconnect: true });
+    const seq = state.connectSeq + 1;
+    state.connectSeq = seq;
+    state.status = 'connecting';
+    state.url = url;
+    state.lastConnectAt = Date.now();
+    try {
+      const es = new window.EventSource(url);
+      state.es = es;
+      bindChatLiveTransportEvents(key, es);
+      es.onopen = () => {
+        if (state.connectSeq !== seq) return;
+        state.status = 'connected';
+        state.reconnectAttempts = 0;
+        state.lastError = '';
+        if (key === 'public') scheduleChatPoll({ immediate: true });
+        if (key === 'private') schedulePrivatePoll({ immediate: true });
+      };
+      es.onerror = () => {
+        if (state.connectSeq !== seq) return;
+        state.lastError = 'EventSource error';
+        closeChatLiveTransport(key, 'eventsource-error', { suppressReconnect: false });
+        if (key === 'public') scheduleChatPoll({ immediate: true });
+        if (key === 'private') schedulePrivatePoll({ immediate: true });
+      };
+    } catch (err) {
+      state.lastError = String(err?.message || err || 'connect failed');
+      closeChatLiveTransport(key, 'connect-failed', { suppressReconnect: false });
+    }
+  }
+
+  async function ensureChatLiveTransports() {
+    if (!isChatAuthReady()) {
+      teardownChatLiveRuntime('signed-out');
+      return;
+    }
+    await Promise.allSettled([
+      ensureChatLiveTransport('public'),
+      ensureChatLiveTransport('private'),
+    ]);
   }
 
   function makeChatToneDataUrl(kind) {
@@ -3235,8 +3711,9 @@
   }
 
   function getPrivatePollIntervalMs() {
-    if (document.visibilityState === 'hidden') return PRIVATE_CHAT_HIDDEN_POLL_MS;
-    return isChatPanelOpen() ? PRIVATE_CHAT_OPEN_POLL_MS : PRIVATE_CHAT_CLOSED_POLL_MS;
+    if (document.visibilityState === 'hidden') return isChatLiveConnected('private') ? CHAT_LIVE_CONNECTED_PRIVATE_HIDDEN_POLL_MS : PRIVATE_CHAT_HIDDEN_POLL_MS;
+    if (isChatPanelOpen()) return isChatLiveConnected('private') ? CHAT_LIVE_CONNECTED_PRIVATE_OPEN_POLL_MS : PRIVATE_CHAT_OPEN_POLL_MS;
+    return isChatLiveConnected('private') ? CHAT_LIVE_CONNECTED_PRIVATE_CLOSED_POLL_MS : PRIVATE_CHAT_CLOSED_POLL_MS;
   }
 
   function schedulePrivatePoll({ immediate = false } = {}) {
@@ -3282,6 +3759,7 @@
     privateThreadPollTimer = null;
   }
   function chatResetState() {
+    teardownChatLiveRuntime('chat-reset');
     void cancelChatVoiceRecording('Recording canceled');
     clearChatVoiceDraft('reset');
     chatLastSeen = null;
@@ -3468,8 +3946,11 @@
     }
   }
   function getChatPollIntervalMs() {
-    if (document.visibilityState === 'hidden') return CHAT_HIDDEN_POLL_MS;
-    return isChatPanelOpen() ? CHAT_POLL_MS : CHAT_CLOSED_POLL_MS;
+    if (document.visibilityState === 'hidden') {
+      return isChatLiveConnected('public') ? CHAT_LIVE_CONNECTED_PUBLIC_HIDDEN_POLL_MS : CHAT_HIDDEN_POLL_MS;
+    }
+    if (isChatPanelOpen()) return isChatLiveConnected('public') ? CHAT_LIVE_CONNECTED_PUBLIC_OPEN_POLL_MS : CHAT_POLL_MS;
+    return isChatLiveConnected('public') ? CHAT_LIVE_CONNECTED_PUBLIC_CLOSED_POLL_MS : CHAT_CLOSED_POLL_MS;
   }
   function scheduleChatPoll({ immediate = false } = {}) {
     if (runtimePolling) runtimePolling.clear('chat:public-poll');
@@ -3504,6 +3985,7 @@
     if (typeof authHeaderOK === 'function' && authHeaderOK()) {
       startChatPolling();
       startPrivatePolling();
+      ensureChatLiveTransports().catch(() => {});
       if (!isChatPanelOpen() && (chatVoiceState.scope === 'public' || chatVoiceState.scope === 'private')) {
         cancelChatVoiceRecording('Recording canceled');
       }
@@ -3518,6 +4000,7 @@
       }
     } else {
       cancelChatVoiceRecording('Recording canceled');
+      teardownChatLiveRuntime('auth-missing');
       stopChatPolling();
       stopPrivatePolling();
     }
@@ -6396,6 +6879,7 @@
       syncMyProgression({ forcePopupCheck: true });
       scheduleChatPoll({ immediate: true });
       schedulePrivatePoll({ immediate: true });
+      ensureChatLiveTransports().catch(() => {});
       if (driverProfileState.open && driverProfileState.userId && !driverProfileState.isSelf) scheduleDriverProfileDmPoll({ immediate: true });
     }
     syncChatPollingState();
@@ -6470,6 +6954,38 @@
       audioSessionType,
       recentOutgoingChatEchoes: recentOutgoingChatEchoes.size,
       recentOutgoingDmEchoes: typeof recentOutgoingDmEchoes !== 'undefined' ? recentOutgoingDmEchoes.size : 0,
+    };
+  };
+
+  window.getChatTransportDebugState = function () {
+    return {
+      capabilitiesCheckedAt: chatLiveRuntime.capabilitiesCheckedAt || 0,
+      capabilities: chatLiveRuntime.capabilities,
+      public: {
+        mode: isChatLiveConnected('public') ? 'sse+poll' : 'poll-only',
+        status: chatLiveRuntime.public.status,
+        reconnectCount: chatLiveRuntime.public.reconnectCount,
+        lastEventId: chatLiveRuntime.public.lastEventId,
+        lastMessageId: chatLiveRuntime.public.lastMessageId,
+        lastMergedKey: chatLiveRuntime.public.lastMergeKey,
+        lastReconcileAt: chatLiveRuntime.public.lastReconcileAt,
+        lastEventAt: chatLiveRuntime.public.lastEventAt,
+        lastDisconnectReason: chatLiveRuntime.public.lastDisconnectReason,
+        pollingActive: !!chatPollTimer,
+      },
+      private: {
+        mode: isChatLiveConnected('private') ? 'sse+poll' : 'poll-only',
+        status: chatLiveRuntime.private.status,
+        reconnectCount: chatLiveRuntime.private.reconnectCount,
+        lastEventId: chatLiveRuntime.private.lastEventId,
+        lastMessageId: chatLiveRuntime.private.lastMessageId,
+        lastMergedKey: chatLiveRuntime.private.lastMergeKey,
+        lastThreadUserId: chatLiveRuntime.private.lastThreadUserId,
+        lastReconcileAt: chatLiveRuntime.private.lastReconcileAt,
+        lastEventAt: chatLiveRuntime.private.lastEventAt,
+        lastDisconnectReason: chatLiveRuntime.private.lastDisconnectReason,
+        pollingActive: !!privateThreadPollTimer,
+      },
     };
   };
 })();
