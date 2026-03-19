@@ -721,15 +721,19 @@
     const state = {
       enabled: false,
       busy: false,
-      copyMessage: '',
-      errorMessage: '',
-      capabilityMessage: '',
       unsupported: false,
+      errorMessage: '',
+      copyMessage: '',
+      capabilityMessage: '',
+      formConfig: { ...DEFAULT_LOAD_OPTIONS },
+      formDirty: false,
+      advancedOptionsOpen: false,
       loadData: normalizeLoadResponse({}, DEFAULT_LOAD_OPTIONS),
-      config: { ...DEFAULT_LOAD_OPTIONS },
       pollTimer: null,
       destroyed: false,
       pollInFlight: false,
+      pendingStatusRefresh: false,
+      hydratedFromActiveRun: false,
     };
 
     function clearPollTimer() {
@@ -746,8 +750,29 @@
 
     helpers?.registerCleanup?.(cleanup);
 
+    function logFormConfig() {
+      console.info('synthetic load test form config', state.formConfig);
+    }
+
+    function applyFormConfig(nextConfig, options = {}) {
+      const normalized = normalizeLoadConfig(nextConfig || {}, true);
+      state.formConfig = normalized;
+      if (options.markDirty) state.formDirty = true;
+      logFormConfig();
+    }
+
+    function updateFormConfig(patch, options = {}) {
+      applyFormConfig({ ...state.formConfig, ...(patch || {}) }, options);
+    }
+
+    function syncFormFromActiveRun(config) {
+      if (state.formDirty || state.hydratedFromActiveRun) return;
+      applyFormConfig(config || DEFAULT_LOAD_OPTIONS);
+      state.hydratedFromActiveRun = true;
+    }
+
     function shouldPoll() {
-      return !state.destroyed && !state.unsupported && (state.enabled || state.loadData.active);
+      return !state.destroyed && !state.unsupported && (state.loadData.active || state.pendingStatusRefresh);
     }
 
     async function fetchCapabilities() {
@@ -759,16 +784,12 @@
           state.unsupported = true;
           state.capabilityMessage = pickFirst(payload || {}, ['message', 'error']) || pickFirst(details, ['message', 'error']) || 'Synthetic load testing is not available on this backend.';
         }
-        const defaults = normalizeLoadConfig(pickFirst(details, ['defaults', 'default_config']) || pickFirst(payload || {}, ['defaults', 'default_config']) || details || payload || {});
-        state.config = { ...state.config, ...defaults };
-        state.loadData = normalizeLoadResponse(
-          pickFirst(details, ['active_run', 'current_run', 'last_result', 'last_completed_result', 'result']) || details || payload || {},
-          state.config,
-        );
-        if (pickFirst(details, ['active_run', 'current_run'])) {
-          state.loadData = normalizeLoadResponse(pickFirst(details, ['active_run', 'current_run']), state.config);
+        const loadPayload = pickFirst(details, ['active_run', 'current_run', 'last_result', 'last_completed_result', 'result']) || details || payload || {};
+        state.loadData = normalizeLoadResponse(loadPayload, state.loadData.config);
+        if (state.loadData.active) {
+          state.enabled = true;
+          syncFormFromActiveRun(state.loadData.config);
         }
-        if (state.loadData.active) state.enabled = true;
       } catch (error) {
         const message = error?.message || 'Failed to load load-test capabilities.';
         if (/404|405/i.test(message)) {
@@ -789,15 +810,18 @@
       try {
         const payload = await helpers.request('/admin/tests/load/status');
         console.info('synthetic load test status response', payload);
-        const next = normalizeLoadResponse(payload, state.config);
+        const next = normalizeLoadResponse(payload, state.loadData.config);
         if (state.destroyed) return;
         state.loadData = next;
-        state.config = { ...state.config, ...next.config };
         state.errorMessage = '';
-        if (state.destroyed) return;
+        if (next.active) {
+          state.enabled = true;
+          syncFormFromActiveRun(next.config);
+        }
       } catch (error) {
         state.errorMessage = error?.message || 'Failed to refresh load-test status.';
       } finally {
+        state.pendingStatusRefresh = false;
         state.pollInFlight = false;
         render();
         syncPolling();
@@ -805,14 +829,21 @@
     }
 
     function syncPolling() {
-      if (shouldPoll()) {
+      if (!shouldPoll()) {
+        clearPollTimer();
+        return;
+      }
+      if (state.loadData.active) {
         if (!state.pollTimer) {
           state.pollTimer = setInterval(() => {
             fetchStatus();
           }, LOAD_POLL_MS);
         }
-      } else {
-        clearPollTimer();
+        return;
+      }
+      clearPollTimer();
+      if (state.pendingStatusRefresh && !state.pollInFlight) {
+        fetchStatus();
       }
     }
 
@@ -822,17 +853,16 @@
       state.copyMessage = '';
       render();
       try {
-        const requestBody = buildLoadRequestBody(state.config);
+        const requestBody = buildLoadRequestBody(state.formConfig);
         console.info('synthetic load test start body', requestBody);
         const payload = await helpers.request('/admin/tests/load/start', {
           method: 'POST',
           body: requestBody,
         });
         console.info('synthetic load test start response', payload);
-        const next = normalizeLoadResponse(payload, state.config);
+        const next = normalizeLoadResponse(payload, state.loadData.config);
         if (state.destroyed) return;
         state.loadData = next;
-        state.config = { ...state.config, ...next.config };
 
         const startFailed = !next.active && ['fail', 'error', 'idle', 'stopped', 'unsupported'].includes(normalizeStatus(next.status));
         if (startFailed) {
@@ -844,13 +874,13 @@
           }, 'Failed to start synthetic load test.');
         } else {
           state.enabled = true;
+          state.pendingStatusRefresh = true;
         }
       } catch (error) {
         state.errorMessage = extractLoadErrorMessage(error, 'Failed to start synthetic load test.');
       } finally {
         state.busy = false;
         render();
-        fetchStatus();
         syncPolling();
       }
     }
@@ -865,24 +895,35 @@
           method: 'POST',
           body: {},
         });
-        const next = normalizeLoadResponse(payload, state.config);
+        const next = normalizeLoadResponse(payload, state.loadData.config);
         if (state.destroyed) return;
         state.loadData = next;
-        state.config = { ...state.config, ...next.config };
+        state.pendingStatusRefresh = true;
       } catch (error) {
         state.errorMessage = error?.message || 'Failed to stop synthetic load test.';
       } finally {
         state.busy = false;
         render();
-        fetchStatus();
         syncPolling();
       }
     }
 
     function toggleOption(name) {
-      state.config[name] = !state.config[name];
+      updateFormConfig({ [name]: !state.formConfig[name] }, { markDirty: true });
       render();
-      syncPolling();
+    }
+
+    function formatNextRunSummary() {
+      const labels = [];
+      if (state.formConfig.include_presence_writes) labels.push('presence writes');
+      if (state.formConfig.include_presence_viewport_reads) labels.push('viewport reads');
+      if (state.formConfig.include_presence_summary_reads) labels.push('summary reads');
+      if (state.formConfig.include_presence_delta_reads) labels.push('delta reads');
+      if (state.formConfig.include_pickup_overlay_reads) labels.push('pickup overlay');
+      if (state.formConfig.include_leaderboard_reads) labels.push('leaderboard');
+      if (state.formConfig.include_chat_lite) labels.push('chat-lite');
+      const extras = labels.length ? ` • Flags: ${labels.join(', ')}` : '';
+      return `Next run: ${state.formConfig.preset} drivers • ${state.formConfig.mode === 'map_plus_chat' ? 'Map + Chat' : 'Map Core'} • ${state.formConfig.duration_sec}s${extras}`;
     }
 
     function renderMetricGrid() {
@@ -913,12 +954,14 @@
       if (!mount || state.destroyed) return;
       const controlsVisible = state.enabled || state.loadData.active;
       const active = state.loadData.active;
+      const controlsDisabled = active || state.busy || state.unsupported;
       const progressWidth = `${clamp(state.loadData.progressPercent, 0, 100)}%`;
       const statusLabel = formatLoadStatus(state.loadData.status);
       const resultTone = loadTone(state.loadData.status);
       const reasons = state.loadData.reasons.length ? state.loadData.reasons : [state.loadData.summary];
       const summaryText = buildLoadSummary(state.loadData);
       const debugJson = JSON.stringify(state.loadData.debug ?? state.loadData.raw ?? null, null, 2);
+      const nextRunSummary = formatNextRunSummary();
 
       mount.innerHTML = `
         <section class="adminSection adminLoadSection">
@@ -945,26 +988,35 @@
 
           ${controlsVisible ? `
             <div class="adminLoadControls">
-              <div>
-                <div class="adminCardLabel">Driver preset</div>
-                <div class="adminRow wrap adminLoadPresetRow">
-                  ${LOAD_PRESETS.map((preset) => `<button type="button" class="adminToggleBtn${state.config.preset === preset ? ' active' : ''}" data-load-preset="${preset}" ${active || state.busy ? 'disabled' : ''}>${preset} drivers</button>`).join('')}
+              <div class="adminSectionHead wrap">
+                <div>
+                  <div class="adminCardLabel">Next run</div>
+                  <div class="adminMuted">${c.esc(nextRunSummary)}</div>
                 </div>
               </div>
 
-              <details class="adminDetails adminLoadAdvanced">
-                <summary>Advanced options</summary>
-                <div class="adminDetailsBody">
+              <div>
+                <div class="adminCardLabel">Driver preset</div>
+                <div class="adminRow wrap adminLoadPresetRow">
+                  ${LOAD_PRESETS.map((preset) => `<button type="button" class="adminToggleBtn${state.formConfig.preset === preset ? ' active' : ''}" data-load-preset="${preset}" ${controlsDisabled ? 'disabled' : ''}>${preset} drivers</button>`).join('')}
+                </div>
+              </div>
+
+              <div class="adminLoadAdvanced">
+                <button type="button" class="adminBtn adminLoadAdvancedToggle" id="adminLoadAdvancedToggle" aria-expanded="${state.advancedOptionsOpen ? 'true' : 'false'}">
+                  Advanced options
+                </button>
+                <div class="adminDetailsBody" ${state.advancedOptionsOpen ? '' : 'hidden'}>
                   <div class="adminRow wrap adminLoadFieldRow">
                     <label class="adminLoadField">
                       <span>Duration seconds</span>
-                      <input class="adminInput" type="number" min="30" max="90" step="15" id="adminLoadDuration" value="${c.esc(state.config.duration_sec)}" ${active || state.busy ? 'disabled' : ''}>
+                      <input class="adminInput" type="number" min="30" max="90" step="15" id="adminLoadDuration" value="${c.esc(state.formConfig.duration_sec)}" ${controlsDisabled ? 'disabled' : ''}>
                     </label>
                     <label class="adminLoadField">
                       <span>Mode</span>
-                      <select class="adminInput" id="adminLoadMode" ${active || state.busy ? 'disabled' : ''}>
-                        <option value="map_core" ${state.config.mode === 'map_core' ? 'selected' : ''}>Map Core</option>
-                        <option value="map_plus_chat" ${state.config.mode === 'map_plus_chat' ? 'selected' : ''}>Map + Chat</option>
+                      <select class="adminInput" id="adminLoadMode" ${controlsDisabled ? 'disabled' : ''}>
+                        <option value="map_core" ${state.formConfig.mode === 'map_core' ? 'selected' : ''}>Map Core</option>
+                        <option value="map_plus_chat" ${state.formConfig.mode === 'map_plus_chat' ? 'selected' : ''}>Map + Chat</option>
                       </select>
                     </label>
                   </div>
@@ -977,17 +1029,25 @@
                       ['include_pickup_overlay_reads', 'Include pickup overlay reads'],
                       ['include_leaderboard_reads', 'Include leaderboard reads'],
                       ['include_chat_lite', 'Include chat-lite'],
-                    ].map(([key, label]) => `<button type="button" class="adminToggleBtn${state.config[key] ? ' active' : ''}" data-load-option="${key}" ${active || state.busy ? 'disabled' : ''}>${c.esc(label)}</button>`).join('')}
+                    ].map(([key, label]) => `<button type="button" class="adminToggleBtn${state.formConfig[key] ? ' active' : ''}" data-load-option="${key}" ${controlsDisabled ? 'disabled' : ''}>${c.esc(label)}</button>`).join('')}
                   </div>
                 </div>
-              </details>
+              </div>
 
               <div class="adminRow wrap adminLoadActionRow">
                 <button type="button" class="adminBtn" id="adminLoadStartBtn" ${(active || state.busy || state.unsupported) ? 'disabled' : ''}>Start Load Test</button>
                 <button type="button" class="adminBtn danger" id="adminLoadStopBtn" ${(!active || state.busy || state.unsupported) ? 'disabled' : ''}>Stop</button>
+                <button type="button" class="adminBtn" id="adminLoadRefreshBtn" ${(state.busy || state.unsupported) ? 'disabled' : ''}>Refresh</button>
               </div>
             </div>
           ` : '<div class="adminMuted">Enable the toggle to configure a server-side synthetic load run. Status stays visible while a run is active.</div>'}
+
+          <div class="adminSectionHead wrap">
+            <div>
+              <div class="adminCardLabel">Last result / current run</div>
+              <div class="adminMuted">Latest server-side status and metrics for the current or most recent synthetic load run.</div>
+            </div>
+          </div>
 
           <div class="adminLoadStatusCard adminLoadStatus-${c.esc(normalizeStatus(state.loadData.status))}">
             <div class="adminRowBetween adminLoadStatusHead">
@@ -1041,9 +1101,14 @@
         syncPolling();
       });
 
+      container.querySelector('#adminLoadAdvancedToggle')?.addEventListener('click', () => {
+        state.advancedOptionsOpen = !state.advancedOptionsOpen;
+        render();
+      });
+
       container.querySelectorAll('[data-load-preset]').forEach((button) => {
         button.addEventListener('click', () => {
-          state.config.preset = normalizeDriverCount(button.dataset.loadPreset);
+          updateFormConfig({ preset: normalizeDriverCount(button.dataset.loadPreset) }, { markDirty: true });
           render();
         });
       });
@@ -1053,13 +1118,18 @@
       });
 
       container.querySelector('#adminLoadDuration')?.addEventListener('change', (event) => {
-        state.config.duration_sec = normalizeDuration(event.currentTarget.value);
+        updateFormConfig({ duration_sec: normalizeDuration(event.currentTarget.value) }, { markDirty: true });
         render();
       });
 
       container.querySelector('#adminLoadMode')?.addEventListener('change', (event) => {
-        state.config.mode = normalizeMode(event.currentTarget.value);
+        updateFormConfig({ mode: normalizeMode(event.currentTarget.value) }, { markDirty: true });
         render();
+      });
+
+      container.querySelector('#adminLoadRefreshBtn')?.addEventListener('click', () => {
+        state.pendingStatusRefresh = true;
+        syncPolling();
       });
 
       container.querySelector('#adminLoadStartBtn')?.addEventListener('click', () => startLoadTest());
@@ -1089,7 +1159,6 @@
     render();
     fetchCapabilities();
   }
-
   function renderAdminTests(container, _payload, helpers) {
     const c = helpers?.components || window.AdminComponents;
     const resultState = {};
