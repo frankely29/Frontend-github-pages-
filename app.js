@@ -138,7 +138,6 @@ const PRESENCE_PULL_LIMIT = 350;
 const PRESENCE_VIEWPORT_ROUTE = '/presence/viewport';
 const PRESENCE_DELTA_ROUTE = '/presence/delta';
 const PRESENCE_ALL_ROUTE = '/presence/all';
-const PRESENCE_DELTA_CURSOR_PARAM = 'cursor';
 const PRESENCE_DELTA_SINCE_MS_PARAM = 'updated_since_ms';
 const PRESENCE_MOVE_THRESHOLD_MI = 0.018;
 const PRESENCE_HEADING_CHANGE_THRESHOLD_DEG = 14;
@@ -175,6 +174,13 @@ let appliedPickupRequestSerial = 0;
 let presenceRequestSerial = 0;
 let appliedPresenceRequestSerial = 0;
 window.__mapPerfDebug = window.__mapPerfDebug || frontendPerfStats;
+window.__mapPerfDebug.leaderboard = window.__mapPerfDebug.leaderboard || {
+  loaded: false,
+  opened: false,
+  lastError: '',
+  lastOpenAt: 0,
+  loadAttempts: 0,
+};
 
 /* =========================================================
    MANHATTAN MODE — DEFAULT SETTINGS (SAFE TO EDIT)
@@ -1605,6 +1611,55 @@ function toggleDrawer(key, title, html) {
   }
 }
 
+window.openDrawer = openDrawer;
+window.closeDrawer = closeDrawer;
+window.toggleDrawer = toggleDrawer;
+window.bindDockToggle = bindDockToggle;
+window.getOpenPanelKey = () => openPanelKey;
+
+function leaderboardPerfDebugState() {
+  window.__mapPerfDebug = window.__mapPerfDebug || frontendPerfStats;
+  window.__mapPerfDebug.leaderboard = window.__mapPerfDebug.leaderboard || {
+    loaded: false,
+    opened: false,
+    lastError: '',
+    lastOpenAt: 0,
+    loadAttempts: 0,
+  };
+  return window.__mapPerfDebug.leaderboard;
+}
+
+async function ensureLeaderboardPanelReady() {
+  const debugState = leaderboardPerfDebugState();
+  if (typeof window.LeaderboardPanel?.open === 'function') {
+    debugState.loaded = true;
+    debugState.lastError = '';
+    return true;
+  }
+  debugState.loadAttempts = Number(debugState.loadAttempts || 0) + 1;
+  try {
+    if (typeof window.loadFrontendModuleGroup === 'function') {
+      await window.loadFrontendModuleGroup('leaderboard');
+    }
+  } catch (error) {
+    debugState.loaded = false;
+    debugState.lastError = String(error?.message || error || 'Failed to load leaderboard modules');
+    console.warn('Failed to lazy-load leaderboard modules', error);
+    return false;
+  }
+  if (typeof window.LeaderboardPanel?.open === 'function') {
+    debugState.loaded = true;
+    debugState.lastError = '';
+    return true;
+  }
+  debugState.loaded = false;
+  debugState.lastError = 'LeaderboardPanel.open unavailable after lazy load';
+  console.warn('Leaderboard panel failed to initialize after lazy load.');
+  return false;
+}
+
+window.ensureLeaderboardPanelReady = ensureLeaderboardPanelReady;
+
 dockBackdrop?.addEventListener("click", closeDrawer);
 dockDrawerClose?.addEventListener("click", closeDrawer);
 dockDrawer?.addEventListener("click", (e) => e.stopPropagation());
@@ -1951,6 +2006,28 @@ if (dockProfile) {
     const myId = Number(me?.id);
     if (!Number.isFinite(myId)) return;
     window.openDriverProfileModal?.({ userId: myId, isSelf: true, source: "dock-profile" });
+  });
+}
+
+if (dockLeaderboard) {
+  dockLeaderboard.addEventListener("pointerdown", (e) => e.stopPropagation());
+  dockLeaderboard.addEventListener("click", async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const ready = await ensureLeaderboardPanelReady();
+    if (!ready) return;
+    const debugState = leaderboardPerfDebugState();
+    try {
+      window.LeaderboardPanel.open();
+      debugState.loaded = true;
+      debugState.opened = true;
+      debugState.lastError = '';
+      debugState.lastOpenAt = Date.now();
+    } catch (error) {
+      debugState.opened = false;
+      debugState.lastError = String(error?.message || error || 'Leaderboard open failed');
+      console.warn('Failed to open leaderboard panel', error);
+    }
   });
 }
 
@@ -3478,6 +3555,8 @@ function getPresenceRequestParams() {
   if (Number.isFinite(zoom)) params.set("zoom", String(zoom));
   params.set("mode", zoom >= 12 ? "full" : "lite");
   params.set("limit", String(PRESENCE_PULL_LIMIT));
+  params.set("include_removed", "true");
+  params.set("padding_ratio", String(PRESENCE_VIEWPORT_BUFFER_RATIO));
   const viewportSignature = getPresenceViewportSignature();
   if (viewportSignature) params.set("viewport_sig", viewportSignature);
   params.set("refresh_tier", document.hidden ? "hidden" : (autoCenter ? "visible-fast" : "visible-idle"));
@@ -3578,6 +3657,50 @@ function normalizePresenceSyncTimestampMs(value) {
   return numeric > 1e12 ? Math.floor(numeric) : Math.floor(numeric * 1000);
 }
 
+function getPresenceDeltaCursorMs() {
+  const cursorMs = normalizePresenceSyncTimestampMs(presenceLastSyncCursor);
+  if (Number.isFinite(cursorMs) && cursorMs > 0) return cursorMs;
+  const timestampMs = normalizePresenceSyncTimestampMs(presenceLastSyncTimestamp);
+  if (Number.isFinite(timestampMs) && timestampMs > 0) return timestampMs;
+  return 0;
+}
+
+function updatePresenceSyncCursorFromPayload(payload) {
+  const nextSyncTs = normalizePresenceSyncTimestampMs(
+    payload?.next_updated_since_ms ??
+    payload?.cursor ??
+    payload?.next_cursor ??
+    payload?.sync_cursor ??
+    payload?.last_sync_ms ??
+    payload?.server_ts_ms ??
+    payload?.server_time_ms ??
+    payload?.server_ts ??
+    payload?.server_time ??
+    payload?.next_since_ts ??
+    payload?.last_sync_ts ??
+    payload?.last_updated_at
+  );
+  if (Number.isFinite(nextSyncTs) && nextSyncTs > 0) {
+    presenceLastSyncCursor = nextSyncTs;
+    presenceLastSyncTimestamp = nextSyncTs;
+    return nextSyncTs;
+  }
+  const maxItemUpdatedAt = extractPresenceItems(payload).reduce((maxTs, item) => {
+    const itemTs = normalizePresenceSyncTimestampMs(
+      item?.updated_at_ms ??
+      item?.updated_at ??
+      item?.updated_at_unix ??
+      item?.ts_unix ??
+      item?.last_seen_at
+    );
+    return Number.isFinite(itemTs) && itemTs > maxTs ? itemTs : maxTs;
+  }, 0);
+  const fallbackTs = maxItemUpdatedAt > 0 ? maxItemUpdatedAt : Date.now();
+  presenceLastSyncCursor = fallbackTs;
+  presenceLastSyncTimestamp = fallbackTs;
+  return fallbackTs;
+}
+
 function extractPresenceItems(payload) {
   if (Array.isArray(payload)) return payload;
   if (Array.isArray(payload?.items)) return payload.items;
@@ -3606,12 +3729,12 @@ function hasUsablePresencePayload(payload) {
 async function fetchPresencePayload(params, signal) {
   const prefersViewportSnapshot = presenceHasViewportBounds(params);
   const deltaParams = new URLSearchParams(params.toString());
-  if (presenceLastSyncCursor) deltaParams.set(PRESENCE_DELTA_CURSOR_PARAM, presenceLastSyncCursor);
-  if (Number.isFinite(presenceLastSyncTimestamp) && presenceLastSyncTimestamp > 0) {
-    deltaParams.set(PRESENCE_DELTA_SINCE_MS_PARAM, String(Math.floor(presenceLastSyncTimestamp)));
+  const deltaSinceMs = getPresenceDeltaCursorMs();
+  if (deltaSinceMs > 0) {
+    deltaParams.set(PRESENCE_DELTA_SINCE_MS_PARAM, String(Math.floor(deltaSinceMs)));
   }
 
-  if (presenceDeltaMode !== 'disabled' && (presenceLastSyncCursor || presenceLastSyncTimestamp > 0)) {
+  if (presenceDeltaMode !== 'disabled' && deltaSinceMs > 0) {
     try {
       const delta = await getJSONAuth(`${PRESENCE_DELTA_ROUTE}?${deltaParams.toString()}`, communityToken, { signal });
       if (!hasUsablePresencePayload(delta)) {
@@ -6311,7 +6434,7 @@ let presenceLiteSourceFingerprint = '';
 let presenceAdaptiveRenderRaf = 0;
 let lastSelfOrbitMeta = null;
 let presenceLastSyncTimestamp = 0;
-let presenceLastSyncCursor = '';
+let presenceLastSyncCursor = 0;
 let presenceDeltaMode = 'probe';
 let presenceViewportMode = 'probe';
 let lastPresenceViewportSignature = '';
@@ -6783,7 +6906,7 @@ function clearOtherDrivers() {
   renderedPresenceFingerprint = '';
   presenceFocusedUserId = null;
   presenceLastSyncTimestamp = 0;
-  presenceLastSyncCursor = '';
+  presenceLastSyncCursor = 0;
   presenceDeltaMode = 'probe';
   presenceViewportMode = 'probe';
   lastPresenceViewportSignature = '';
@@ -7378,30 +7501,14 @@ async function pullPresenceAll() {
     if (Array.isArray(list?.deleted_user_ids)) removals.push(...list.deleted_user_ids);
     const replaceStore = !!(
       responseMode === 'viewport' ||
+      responseMode === 'full' ||
       list?.full_snapshot === true ||
       list?.replace_all === true ||
       (responseMode === 'delta' && list?.mode === 'full')
     );
     const nextRows = mergePresencePayload(items, { replaceStore, removals });
 
-    const nextSyncCursor = String(list?.next_cursor ?? list?.cursor ?? list?.sync_cursor ?? '').trim();
-    const nextSyncTs = normalizePresenceSyncTimestampMs(
-      list?.server_ts_ms ??
-      list?.server_time_ms ??
-      list?.next_updated_since_ms ??
-      list?.last_sync_ms ??
-      list?.server_ts ??
-      list?.server_time ??
-      list?.next_since_ts ??
-      list?.last_sync_ts ??
-      list?.last_updated_at
-    );
-    presenceLastSyncCursor = nextSyncCursor || presenceLastSyncCursor;
-    if (Number.isFinite(nextSyncTs) && nextSyncTs > 0) {
-      presenceLastSyncTimestamp = nextSyncTs;
-    } else {
-      presenceLastSyncTimestamp = Date.now();
-    }
+    updatePresenceSyncCursorFromPayload(list);
 
     if (requestSerial < appliedPresenceRequestSerial) return;
     const nextFingerprint = presenceRowsFingerprint(nextRows);

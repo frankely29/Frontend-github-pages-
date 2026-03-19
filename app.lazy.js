@@ -17,6 +17,18 @@
     ],
   };
 
+  function leaderboardPerfDebugState() {
+    window.__mapPerfDebug = window.__mapPerfDebug || {};
+    window.__mapPerfDebug.leaderboard = window.__mapPerfDebug.leaderboard || {
+      loaded: false,
+      opened: false,
+      lastError: '',
+      lastOpenAt: 0,
+      loadAttempts: 0,
+    };
+    return window.__mapPerfDebug.leaderboard;
+  }
+
   function loadScript(src) {
     return new Promise((resolve, reject) => {
       const existing = document.querySelector(`script[data-lazy-src="${src}"]`);
@@ -47,13 +59,27 @@
     if (!scriptGroups[key]) throw new Error(`Unknown frontend module group: ${key}`);
     if (!loadedGroups.has(key)) {
       loadedGroups.set(key, (async () => {
+        if (key === 'leaderboard') {
+          const debugState = leaderboardPerfDebugState();
+          debugState.loadAttempts = Number(debugState.loadAttempts || 0) + 1;
+        }
         for (const src of scriptGroups[key]) {
           await loadScript(src);
+        }
+        if (key === 'leaderboard') {
+          const debugState = leaderboardPerfDebugState();
+          debugState.loaded = typeof window.LeaderboardPanel?.open === 'function';
+          debugState.lastError = debugState.loaded ? '' : 'Leaderboard module loaded without open()';
         }
         if (key === 'admin' && typeof window.syncAdminPortalSession === 'function') {
           window.syncAdminPortalSession();
         }
       })().catch((error) => {
+        if (key === 'leaderboard') {
+          const debugState = leaderboardPerfDebugState();
+          debugState.loaded = false;
+          debugState.lastError = String(error?.message || error || 'Failed to load leaderboard module group');
+        }
         loadedGroups.delete(key);
         throw error;
       }));
@@ -81,9 +107,29 @@
     }, true);
   }
 
-  wireDeferredDockButton('dockLeaderboard', 'leaderboard', async () => {
-    window.LeaderboardPanel?.open?.();
-  });
+  function preloadModuleGroup(groupName) {
+    if (!window.requestIdleCallback) {
+      setTimeout(() => {
+        loadFrontendModuleGroup(groupName).catch(() => {});
+      }, 180);
+      return;
+    }
+    window.requestIdleCallback(() => {
+      loadFrontendModuleGroup(groupName).catch(() => {});
+    }, { timeout: 1500 });
+  }
+
+  function wireLeaderboardPreload(buttonId) {
+    const button = document.getElementById(buttonId);
+    if (!button || button.dataset.lazyPreloadBound === '1') return;
+    button.dataset.lazyPreloadBound = '1';
+    const preload = () => preloadModuleGroup('leaderboard');
+    button.addEventListener('pointerenter', preload, { once: true, passive: true });
+    button.addEventListener('focus', preload, { once: true, passive: true });
+    button.addEventListener('touchstart', preload, { once: true, passive: true });
+  }
+
+  wireLeaderboardPreload('dockLeaderboard');
 
   wireDeferredDockButton('dockAdmin', 'admin', async () => {
     window.syncAdminPortalSession?.();
