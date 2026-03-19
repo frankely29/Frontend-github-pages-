@@ -54,6 +54,7 @@
     include_chat_lite: false,
   });
   const LOAD_POLL_MS = 2000;
+  const ALLOWED_LOAD_DURATIONS = [30, 45, 60, 90];
 
   function summarize(data, c) {
     if (data === null || data === undefined) return 'No response body.';
@@ -199,29 +200,99 @@
   }
 
   function normalizeDuration(value) {
-    return clamp(safeInteger(value, DEFAULT_LOAD_OPTIONS.duration_sec), 5, 600);
+    const parsed = safeInteger(value, DEFAULT_LOAD_OPTIONS.duration_sec);
+    const exact = ALLOWED_LOAD_DURATIONS.find((duration) => duration === parsed);
+    if (exact) return exact;
+    return ALLOWED_LOAD_DURATIONS.reduce((closest, candidate) => (
+      Math.abs(candidate - parsed) < Math.abs(closest - parsed) ? candidate : closest
+    ), ALLOWED_LOAD_DURATIONS[0]);
   }
 
   function normalizeMode(value) {
     const normalized = String(value || '').trim().toLowerCase();
     if (normalized === 'map_core') return 'map_core';
-    if (['map+chat', 'map_chat', 'map-chat', 'chat', 'map_plus_chat'].includes(normalized)) return 'map_plus_chat';
+    if (normalized === 'map_plus_chat') return 'map_plus_chat';
+    if (['map_chat', 'map-chat', 'map+chat', 'chat'].includes(normalized)) return 'map_plus_chat';
     return 'map_core';
   }
 
-  function normalizeLoadConfig(source) {
-    const config = source && typeof source === 'object' ? source : {};
+  function unwrapAdminTestDetails(payload) {
+    if (payload && typeof payload === 'object' && payload.details && typeof payload.details === 'object') {
+      return payload.details;
+    }
+    return payload && typeof payload === 'object' ? payload : {};
+  }
+
+  function normalizeLoadConfig(source, includeDefaults = true) {
+    const payload = source && typeof source === 'object' ? source : {};
+    const configSources = [
+      payload,
+      unwrapAdminTestDetails(payload),
+      pickFirst(payload, ['payload.details', 'current_run', 'last_run', 'selected_config', 'last_result', 'last_result.selected_config', 'details.selected_config', 'details.last_result.selected_config']),
+      pickFirst(unwrapAdminTestDetails(payload), ['current_run', 'last_run', 'selected_config', 'last_result', 'last_result.selected_config', 'selected_config', 'details.selected_config']),
+    ].filter((entry) => entry && typeof entry === 'object');
     const normalized = {};
-    const preset = pickFirst(config, ['preset', 'driverCount', 'driver_count', 'drivers', 'selected_preset', 'config.preset', 'config.driver_count', 'config.drivers', 'config.selected_preset']);
-    const duration_sec = pickFirst(config, ['duration_sec', 'durationSeconds', 'duration_seconds', 'duration', 'config.duration_sec', 'config.duration_seconds', 'config.duration']);
-    const mode = pickFirst(config, ['mode', 'scenario_mode', 'config.mode']);
-    const include_presence_writes = pickFirst(config, ['include_presence_writes', 'includePresenceWrites', 'config.include_presence_writes']);
-    const include_presence_viewport_reads = pickFirst(config, ['include_presence_viewport_reads', 'includeViewportReads', 'include_viewport_reads', 'config.include_presence_viewport_reads', 'config.include_viewport_reads']);
-    const include_presence_summary_reads = pickFirst(config, ['include_presence_summary_reads', 'includeSummaryReads', 'include_summary_reads', 'config.include_presence_summary_reads', 'config.include_summary_reads']);
-    const include_presence_delta_reads = pickFirst(config, ['include_presence_delta_reads', 'includeDeltaReads', 'include_delta_reads', 'config.include_presence_delta_reads', 'config.include_delta_reads']);
-    const include_pickup_overlay_reads = pickFirst(config, ['include_pickup_overlay_reads', 'includePickupOverlayReads', 'config.include_pickup_overlay_reads']);
-    const include_leaderboard_reads = pickFirst(config, ['include_leaderboard_reads', 'includeLeaderboardReads', 'config.include_leaderboard_reads']);
-    const include_chat_lite = pickFirst(config, ['include_chat_lite', 'includeChatLite', 'chat_lite_enabled', 'config.include_chat_lite']);
+
+    const preset = pickFirst({ configSources }, [
+      'configSources.0.preset', 'configSources.0.driverCount', 'configSources.0.driver_count', 'configSources.0.drivers', 'configSources.0.selected_preset',
+      'configSources.1.preset', 'configSources.1.driverCount', 'configSources.1.driver_count', 'configSources.1.drivers', 'configSources.1.selected_preset',
+      'configSources.2.preset', 'configSources.2.driverCount', 'configSources.2.driver_count', 'configSources.2.drivers', 'configSources.2.selected_preset',
+      'configSources.3.preset', 'configSources.3.driverCount', 'configSources.3.driver_count', 'configSources.3.drivers', 'configSources.3.selected_preset',
+    ]);
+    const duration_sec = pickFirst({ configSources }, [
+      'configSources.0.duration_sec', 'configSources.0.durationSeconds', 'configSources.0.duration_seconds', 'configSources.0.duration',
+      'configSources.1.duration_sec', 'configSources.1.durationSeconds', 'configSources.1.duration_seconds', 'configSources.1.duration',
+      'configSources.2.duration_sec', 'configSources.2.durationSeconds', 'configSources.2.duration_seconds', 'configSources.2.duration',
+      'configSources.3.duration_sec', 'configSources.3.durationSeconds', 'configSources.3.duration_seconds', 'configSources.3.duration',
+    ]);
+    const mode = pickFirst({ configSources }, [
+      'configSources.0.mode', 'configSources.0.scenario_mode',
+      'configSources.1.mode', 'configSources.1.scenario_mode',
+      'configSources.2.mode', 'configSources.2.scenario_mode',
+      'configSources.3.mode', 'configSources.3.scenario_mode',
+    ]);
+    const include_presence_writes = pickFirst({ configSources }, [
+      'configSources.0.include_presence_writes', 'configSources.0.includePresenceWrites',
+      'configSources.1.include_presence_writes', 'configSources.1.includePresenceWrites',
+      'configSources.2.include_presence_writes', 'configSources.2.includePresenceWrites',
+      'configSources.3.include_presence_writes', 'configSources.3.includePresenceWrites',
+    ]);
+    const include_presence_viewport_reads = pickFirst({ configSources }, [
+      'configSources.0.include_presence_viewport_reads', 'configSources.0.includeViewportReads', 'configSources.0.include_viewport_reads',
+      'configSources.1.include_presence_viewport_reads', 'configSources.1.includeViewportReads', 'configSources.1.include_viewport_reads',
+      'configSources.2.include_presence_viewport_reads', 'configSources.2.includeViewportReads', 'configSources.2.include_viewport_reads',
+      'configSources.3.include_presence_viewport_reads', 'configSources.3.includeViewportReads', 'configSources.3.include_viewport_reads',
+    ]);
+    const include_presence_summary_reads = pickFirst({ configSources }, [
+      'configSources.0.include_presence_summary_reads', 'configSources.0.includeSummaryReads', 'configSources.0.include_summary_reads',
+      'configSources.1.include_presence_summary_reads', 'configSources.1.includeSummaryReads', 'configSources.1.include_summary_reads',
+      'configSources.2.include_presence_summary_reads', 'configSources.2.includeSummaryReads', 'configSources.2.include_summary_reads',
+      'configSources.3.include_presence_summary_reads', 'configSources.3.includeSummaryReads', 'configSources.3.include_summary_reads',
+    ]);
+    const include_presence_delta_reads = pickFirst({ configSources }, [
+      'configSources.0.include_presence_delta_reads', 'configSources.0.includeDeltaReads', 'configSources.0.include_delta_reads',
+      'configSources.1.include_presence_delta_reads', 'configSources.1.includeDeltaReads', 'configSources.1.include_delta_reads',
+      'configSources.2.include_presence_delta_reads', 'configSources.2.includeDeltaReads', 'configSources.2.include_delta_reads',
+      'configSources.3.include_presence_delta_reads', 'configSources.3.includeDeltaReads', 'configSources.3.include_delta_reads',
+    ]);
+    const include_pickup_overlay_reads = pickFirst({ configSources }, [
+      'configSources.0.include_pickup_overlay_reads', 'configSources.0.includePickupOverlayReads',
+      'configSources.1.include_pickup_overlay_reads', 'configSources.1.includePickupOverlayReads',
+      'configSources.2.include_pickup_overlay_reads', 'configSources.2.includePickupOverlayReads',
+      'configSources.3.include_pickup_overlay_reads', 'configSources.3.includePickupOverlayReads',
+    ]);
+    const include_leaderboard_reads = pickFirst({ configSources }, [
+      'configSources.0.include_leaderboard_reads', 'configSources.0.includeLeaderboardReads',
+      'configSources.1.include_leaderboard_reads', 'configSources.1.includeLeaderboardReads',
+      'configSources.2.include_leaderboard_reads', 'configSources.2.includeLeaderboardReads',
+      'configSources.3.include_leaderboard_reads', 'configSources.3.includeLeaderboardReads',
+    ]);
+    const include_chat_lite = pickFirst({ configSources }, [
+      'configSources.0.include_chat_lite', 'configSources.0.includeChatLite', 'configSources.0.chat_lite_enabled',
+      'configSources.1.include_chat_lite', 'configSources.1.includeChatLite', 'configSources.1.chat_lite_enabled',
+      'configSources.2.include_chat_lite', 'configSources.2.includeChatLite', 'configSources.2.chat_lite_enabled',
+      'configSources.3.include_chat_lite', 'configSources.3.includeChatLite', 'configSources.3.chat_lite_enabled',
+    ]);
 
     if (preset !== undefined) normalized.preset = normalizeDriverCount(preset);
     if (duration_sec !== undefined) normalized.duration_sec = normalizeDuration(duration_sec);
@@ -233,7 +304,7 @@
     if (include_pickup_overlay_reads !== undefined) normalized.include_pickup_overlay_reads = !!include_pickup_overlay_reads;
     if (include_leaderboard_reads !== undefined) normalized.include_leaderboard_reads = !!include_leaderboard_reads;
     if (include_chat_lite !== undefined) normalized.include_chat_lite = !!include_chat_lite;
-    return normalized;
+    return includeDefaults ? { ...DEFAULT_LOAD_OPTIONS, ...normalized } : normalized;
   }
 
   function buildLoadRequestBody(config) {
@@ -259,7 +330,7 @@
 
     [
       pickFirst(detail, ['detail', 'message', 'error']),
-      pickFirst(payload, ['detail.detail', 'detail.message', 'detail.error', 'detail', 'message', 'error']),
+      pickFirst(payload, ['summary', 'details.error', 'details.message', 'detail.detail', 'detail.message', 'detail.error', 'detail', 'message', 'error']),
       error?.message,
     ].flatMap((value) => toArray(value)).forEach((value) => {
       const text = typeof value === 'string' ? value : JSON.stringify(value);
@@ -286,7 +357,7 @@
 
   function collectReasons(raw, status) {
     const reasons = [];
-    pushReason(reasons, pickFirst(raw, ['summary.top_reasons', 'top_reasons', 'reasons', 'failure_reasons', 'debug.reasons', 'debug.failure_reasons']));
+    pushReason(reasons, pickFirst(raw, ['current_reasons', 'summary.top_reasons', 'top_reasons', 'reasons', 'failure_reasons', 'debug.reasons', 'debug.failure_reasons']));
 
     const checks = toArray(pickFirst(raw, ['checks', 'summary.checks', 'debug.checks']));
     checks.forEach((check) => {
@@ -347,46 +418,61 @@
   }
 
   function normalizeLoadResponse(payload, fallbackConfig) {
-    const raw = payload && typeof payload === 'object' ? payload : {};
+    const wrapper = payload && typeof payload === 'object' ? payload : {};
+    const raw = unwrapAdminTestDetails(wrapper);
     const status = normalizeStatus(pickFirst(raw, ['status', 'state', 'result.status', 'run.status']) || 'idle');
     const config = {
       ...DEFAULT_LOAD_OPTIONS,
-      ...fallbackConfig,
-      ...normalizeLoadConfig(raw),
+      ...normalizeLoadConfig(fallbackConfig, false),
+      ...normalizeLoadConfig(wrapper, false),
+      ...normalizeLoadConfig(raw, false),
+      ...normalizeLoadConfig(pickFirst(raw, ['selected_config', 'current_run', 'last_run', 'last_result', 'last_result.selected_config']) || {}, false),
     };
     const progressValue = pickFirst(raw, ['progress_percent', 'progress.percent', 'run.progress_percent', 'result.progress_percent']);
-    const elapsedValue = pickFirst(raw, ['elapsed_seconds', 'elapsed', 'run.elapsed_seconds', 'result.elapsed_seconds']);
-    const summaryLine = pickFirst(raw, ['summary.line', 'summary.text', 'summary', 'message', 'detail']) || '';
+    const elapsedValue = pickFirst(raw, ['elapsed_sec', 'elapsed_seconds', 'elapsed', 'run.elapsed_sec', 'run.elapsed_seconds', 'result.elapsed_sec', 'result.elapsed_seconds']);
+    const summaryLine = pickFirst(raw, ['summary.line', 'summary.text', 'summary', 'message', 'detail', 'details.message']);
+    const lastResultRaw = pickFirst(raw, ['last_result']);
+    const normalizedLastResult = lastResultRaw && typeof lastResultRaw === 'object' ? normalizeLoadResponse(lastResultRaw, config) : null;
     const reasons = collectReasons(raw, status);
-    const metrics = collectMetrics(raw, config);
+    const currentMetrics = pickFirst(raw, ['current_metrics']);
+    const metrics = collectMetrics(currentMetrics && typeof currentMetrics === 'object' ? { ...raw, metrics: currentMetrics, current_metrics: currentMetrics } : raw, config);
     const summary = typeof summaryLine === 'string' && summaryLine.trim()
         ? summaryLine.trim()
         : normalizeStatus(status) === 'pass'
           ? `PASS — all enabled checks stayed within thresholds for ${config.preset} drivers.`
-        : normalizeStatus(status) === 'fail'
-          ? `FAIL — one or more enabled checks exceeded thresholds at the ${config.preset}-driver preset.`
-          : normalizeStatus(status) === 'running'
-            ? `Running synthetic load test for ${config.preset} drivers.`
-            : normalizeStatus(status) === 'stopped'
-              ? 'Load test was stopped before completion.'
-              : normalizeStatus(status) === 'error'
-                ? 'Backend returned an error for the synthetic load test.'
-                : 'No synthetic load test has been started yet.';
+          : normalizeStatus(status) === 'fail'
+            ? `FAIL — one or more enabled checks exceeded thresholds at the ${config.preset}-driver preset.`
+            : normalizeStatus(status) === 'running'
+              ? `Running synthetic load test for ${config.preset} drivers.`
+              : normalizeStatus(status) === 'stopped'
+                ? 'Load test was stopped before completion.'
+                : normalizeStatus(status) === 'error'
+                  ? 'Backend returned an error for the synthetic load test.'
+                  : 'No synthetic load test has been started yet.';
 
     return {
       raw,
+      wrapper,
       status,
       active: isActiveLoadStatus(status),
-      unsupported: status === 'unsupported' || raw.supported === false || raw.available === false,
+      unsupported: status === 'unsupported' || raw.supported === false || raw.available === false || wrapper.supported === false || wrapper.available === false,
       progressPercent: clamp(safeNumber(progressValue, status === 'pass' || status === 'fail' ? 100 : 0), 0, 100),
       elapsedSeconds: safeNumber(elapsedValue, 0),
+      remainingEstimateSeconds: safeNumber(pickFirst(raw, ['remaining_estimate_sec']), 0),
       summary,
-      reasons,
-      metrics,
+      reasons: reasons.length ? reasons : collectReasons(normalizedLastResult?.raw || {}, normalizedLastResult?.status || status),
+      metrics: metrics.length ? metrics : (normalizedLastResult?.metrics || []),
       debug: pickFirst(raw, ['debug', 'result.debug']) ?? raw,
       config,
-      errorMessage: pickFirst(raw, ['detail.detail', 'detail.message', 'detail.error', 'error', 'message', 'detail']) || '',
-      checks: toArray(pickFirst(raw, ['checks', 'summary.checks', 'debug.checks'])),
+      errorMessage: pickFirst(wrapper, ['summary', 'details.error', 'details.message', 'detail', 'message', 'error']) || pickFirst(raw, ['summary', 'details.error', 'details.message', 'error', 'message', 'detail']) || '',
+      checks: toArray(pickFirst(raw, ['checks', 'summary.checks', 'debug.checks'])).length ? toArray(pickFirst(raw, ['checks', 'summary.checks', 'debug.checks'])) : (normalizedLastResult?.checks || []),
+      warnings: toArray(pickFirst(raw, ['warnings'])),
+      errors: toArray(pickFirst(raw, ['errors'])),
+      currentReasons: toArray(pickFirst(raw, ['current_reasons'])),
+      activeRunId: pickFirst(raw, ['active_run_id']),
+      startedAt: pickFirst(raw, ['started_at']),
+      endedAt: pickFirst(raw, ['ended_at']),
+      lastResult: normalizedLastResult,
       updatedAt: Date.now(),
     };
   }
@@ -667,19 +753,20 @@
     async function fetchCapabilities() {
       try {
         const payload = await helpers.request('/admin/tests/load/capabilities');
-        const supported = pickFirst(payload || {}, ['supported', 'available']);
+        const details = unwrapAdminTestDetails(payload);
+        const supported = pickFirst(payload || {}, ['supported', 'available']) ?? pickFirst(details, ['supported', 'available']);
         if (supported === false) {
           state.unsupported = true;
-          state.capabilityMessage = pickFirst(payload || {}, ['message', 'error']) || 'Synthetic load testing is not available on this backend.';
+          state.capabilityMessage = pickFirst(payload || {}, ['message', 'error']) || pickFirst(details, ['message', 'error']) || 'Synthetic load testing is not available on this backend.';
         }
-        const defaults = normalizeLoadConfig(payload?.defaults || payload?.default_config || payload || {});
+        const defaults = normalizeLoadConfig(pickFirst(details, ['defaults', 'default_config']) || pickFirst(payload || {}, ['defaults', 'default_config']) || details || payload || {});
         state.config = { ...state.config, ...defaults };
         state.loadData = normalizeLoadResponse(
-          pickFirst(payload || {}, ['active_run', 'current_run', 'last_result', 'last_completed_result', 'result']) || payload || {},
+          pickFirst(details, ['active_run', 'current_run', 'last_result', 'last_completed_result', 'result']) || details || payload || {},
           state.config,
         );
-        if (pickFirst(payload || {}, ['active_run', 'current_run'])) {
-          state.loadData = normalizeLoadResponse(pickFirst(payload, ['active_run', 'current_run']), state.config);
+        if (pickFirst(details, ['active_run', 'current_run'])) {
+          state.loadData = normalizeLoadResponse(pickFirst(details, ['active_run', 'current_run']), state.config);
         }
         if (state.loadData.active) state.enabled = true;
       } catch (error) {
@@ -701,9 +788,11 @@
       state.pollInFlight = true;
       try {
         const payload = await helpers.request('/admin/tests/load/status');
+        console.info('synthetic load test status response', payload);
         const next = normalizeLoadResponse(payload, state.config);
         if (state.destroyed) return;
         state.loadData = next;
+        state.config = { ...state.config, ...next.config };
         state.errorMessage = '';
         if (state.destroyed) return;
       } catch (error) {
@@ -743,6 +832,7 @@
         const next = normalizeLoadResponse(payload, state.config);
         if (state.destroyed) return;
         state.loadData = next;
+        state.config = { ...state.config, ...next.config };
 
         const startFailed = !next.active && ['fail', 'error', 'idle', 'stopped', 'unsupported'].includes(normalizeStatus(next.status));
         if (startFailed) {
@@ -750,7 +840,7 @@
             status: 200,
             message: next.errorMessage || next.summary || 'Synthetic load test did not start.',
             payload: payload && typeof payload === 'object' ? payload : { message: String(payload || '') },
-            detail: payload?.detail || null,
+            detail: payload?.detail || payload?.details || null,
           }, 'Failed to start synthetic load test.');
         } else {
           state.enabled = true;
@@ -778,6 +868,7 @@
         const next = normalizeLoadResponse(payload, state.config);
         if (state.destroyed) return;
         state.loadData = next;
+        state.config = { ...state.config, ...next.config };
       } catch (error) {
         state.errorMessage = error?.message || 'Failed to stop synthetic load test.';
       } finally {
@@ -867,7 +958,7 @@
                   <div class="adminRow wrap adminLoadFieldRow">
                     <label class="adminLoadField">
                       <span>Duration seconds</span>
-                      <input class="adminInput" type="number" min="5" max="600" step="5" id="adminLoadDuration" value="${c.esc(state.config.duration_sec)}" ${active || state.busy ? 'disabled' : ''}>
+                      <input class="adminInput" type="number" min="30" max="90" step="15" id="adminLoadDuration" value="${c.esc(state.config.duration_sec)}" ${active || state.busy ? 'disabled' : ''}>
                     </label>
                     <label class="adminLoadField">
                       <span>Mode</span>
