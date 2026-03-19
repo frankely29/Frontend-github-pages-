@@ -2009,27 +2009,6 @@ if (dockProfile) {
   });
 }
 
-if (dockLeaderboard) {
-  dockLeaderboard.addEventListener("pointerdown", (e) => e.stopPropagation());
-  dockLeaderboard.addEventListener("click", async (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const ready = await ensureLeaderboardPanelReady();
-    if (!ready) return;
-    const debugState = leaderboardPerfDebugState();
-    try {
-      window.LeaderboardPanel.open();
-      debugState.loaded = true;
-      debugState.opened = true;
-      debugState.lastError = '';
-      debugState.lastOpenAt = Date.now();
-    } catch (error) {
-      debugState.opened = false;
-      debugState.lastError = String(error?.message || error || 'Leaderboard open failed');
-      console.warn('Failed to open leaderboard panel', error);
-    }
-  });
-}
 
 if (dockAdmin) {
   dockAdmin.addEventListener("pointerdown", (e) => e.stopPropagation());

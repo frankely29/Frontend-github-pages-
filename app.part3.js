@@ -6,9 +6,14 @@
   const runtime = window.FrontendRuntime || null;
   const LS_TOKEN = 'community_token_v1';
   const PANEL_KEY = 'leaderboard';
-  const openDrawerFn = window.openDrawer || (typeof openDrawer === 'function' ? openDrawer : null);
   const bindDockToggleFn = window.bindDockToggle || (typeof bindDockToggle === 'function' ? bindDockToggle : null);
   const getOpenPanelKeyFn = window.getOpenPanelKey || (() => (typeof openPanelKey !== 'undefined' ? openPanelKey : null));
+
+  function getOpenDrawerFn() {
+    if (typeof window.openDrawer === 'function') return window.openDrawer;
+    if (typeof openDrawer === 'function') return openDrawer;
+    return null;
+  }
 
   const RANK_LADDER_FALLBACK = [
     { start_level: 1, end_level: 4, rank_name: 'Recruit', rank_icon_key: 'recruit' },
@@ -483,6 +488,7 @@
   }
 
   function openLeaderboardPanel() {
+    const openDrawerFn = getOpenDrawerFn();
     if (typeof openDrawerFn !== 'function') {
       markLeaderboardOpenError('openDrawer unavailable');
       return false;
