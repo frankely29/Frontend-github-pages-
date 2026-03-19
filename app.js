@@ -26,6 +26,9 @@ const RAILWAY_BASE = (typeof window !== "undefined" && window.API_BASE !== undef
   ? String(window.API_BASE || DEFAULT_API_BASE)
   : DEFAULT_API_BASE;
 const BIN_MINUTES = 20;
+const FrontendRuntime = (typeof window !== "undefined" && window.FrontendRuntime) ? window.FrontendRuntime : null;
+const runtimePolling = FrontendRuntime?.polling || null;
+const runtimePerf = FrontendRuntime?.perf || null;
 
 const REFRESH_MS = 5 * 60 * 1000;
 const NYC_CLOCK_TICK_MS = 60 * 1000;
@@ -66,6 +69,9 @@ function dbg(id, text) {
   const el = document.getElementById(id);
   if (el) el.textContent = String(text || "");
 }
+
+const appBootStartedAt = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+let firstUsableMapRecorded = false;
 
 /* =========================================================
    COMMUNITY SETTINGS (cheap polling)
@@ -150,6 +156,8 @@ const frontendPerfStats = {
   timelineCacheMisses: 0,
   avatarCacheHits: 0,
   avatarCacheMisses: 0,
+  blankMapWarnings: 0,
+  duplicatePollGuards: 0,
 };
 const avatarThumbCache = new Map();
 let timelineLoadAbortController = null;
@@ -316,11 +324,13 @@ function pickClosestIndex(minutesOfWeekArr, target) {
    Network helper (+ auth support)
    ========================================================= */
 function shouldBypassBrowserCache(url) {
+  if (FrontendRuntime?.shouldBypassBrowserCache) return FrontendRuntime.shouldBypassBrowserCache(url);
   const text = String(url || "");
   return /\/presence\/|\/events\/pickups\/recent|\/chat\/|\/auth\/|\/me(\b|\/)/.test(text);
 }
 
 async function fetchJSON(url, opts = {}) {
+  if (FrontendRuntime?.fetchJSON) return FrontendRuntime.fetchJSON(url, opts);
   const fetchOpts = { mode: "cors", ...opts };
   if (fetchOpts.cache === undefined && shouldBypassBrowserCache(url)) {
     fetchOpts.cache = "no-store";
@@ -340,6 +350,7 @@ async function fetchJSON(url, opts = {}) {
   }
 }
 async function postJSON(path, body, token) {
+  if (FrontendRuntime?.postJSON) return FrontendRuntime.postJSON(path, body, token);
   const headers = { "Content-Type": "application/json" };
   if (token) headers["Authorization"] = `Bearer ${token}`;
   return fetchJSON(`${RAILWAY_BASE}${path}`, {
@@ -349,6 +360,7 @@ async function postJSON(path, body, token) {
   });
 }
 async function getJSONAuth(path, token, opts = {}) {
+  if (FrontendRuntime?.getJSONAuth) return FrontendRuntime.getJSONAuth(path, token, opts);
   const headers = {};
   if (token) headers["Authorization"] = `Bearer ${token}`;
   return fetchJSON(`${RAILWAY_BASE}${path}`, { ...opts, headers: { ...headers, ...(opts.headers || {}) } });
@@ -2258,6 +2270,7 @@ function initMap() {
 
     const loading = document.getElementById("mapLoading");
     if (loading) loading.style.display = "none";
+    recordPerfMetric("dbgBlankMap", "map loaded");
 
     map.triggerRepaint();
     setTimeout(() => map.triggerRepaint(), 150);
@@ -3481,6 +3494,7 @@ function buildPickupViewportKey() {
 
 async function refreshPickupOverlay({ force = false } = {}) {
   frontendPerfStats.pickupFetchesAttempted += 1;
+  const startedAt = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
   if (!mapPageIsVisible) return;
   if (!map || !mapReady) return;
   const ready = await ensurePickupSourceAndLayers();
@@ -3560,6 +3574,9 @@ async function refreshPickupOverlay({ force = false } = {}) {
     }
     console.warn(`/events/pickups/recent failed (${path}):`, e);
   } finally {
+    const endedAt = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+    recordPerfMetric("dbgPickupOverlay", `${Math.max(0, Math.round(endedAt - startedAt))}ms`);
+    runtimePerf?.recordDuration?.("pickup_overlay_fetch", endedAt - startedAt);
     pickupRefreshInFlight = false;
     pickupOverlayAbortController = null;
   }
@@ -3570,11 +3587,17 @@ function schedulePickupOverlayRefresh({ force = false } = {}) {
     const nextViewportKey = buildPickupViewportKey();
     if (nextViewportKey && nextViewportKey === lastPickupViewportKey) return;
   }
+  if (runtimePolling) runtimePolling.clear("app:pickup-refresh");
   if (pickupRefreshTimer) clearTimeout(pickupRefreshTimer);
-  pickupRefreshTimer = setTimeout(() => {
+  const runner = () => {
     pickupRefreshTimer = null;
     refreshPickupOverlay({ force }).catch((e) => console.warn("/events/pickups/recent refresh scheduler failed:", e));
-  }, force ? 0 : PICKUP_REFRESH_DEBOUNCE_MS);
+  };
+  if (runtimePolling) {
+    pickupRefreshTimer = runtimePolling.setTimeout("app:pickup-refresh", runner, force ? 0 : PICKUP_REFRESH_DEBOUNCE_MS);
+    return;
+  }
+  pickupRefreshTimer = setTimeout(runner, force ? 0 : PICKUP_REFRESH_DEBOUNCE_MS);
 }
 
 window.runCommunityVisibilitySmokeTest = async function () {
@@ -4349,12 +4372,14 @@ async function renderFrame(frame) {
     timeLabel.textContent = `Showing Demand At ${formatNYCTimeOnlyLabel(currentFrame.time)}`;
   }
   updateRecommendation(currentFrame);
+  markFirstUsableMap("frame rendered");
 }
 
 /* =========================================================
    Load frame / timeline
    ========================================================= */
 async function loadFrame(idx, { force = false } = {}) {
+  const frameStartedAt = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
   const normalizedIdx = Math.max(0, Number(idx) || 0);
   const frameUrl = `${RAILWAY_BASE}/frame/${normalizedIdx}`;
   if (pendingFrameLoad?.idx === normalizedIdx && pendingFrameLoad?.promise && !force) return pendingFrameLoad.promise;
@@ -4385,10 +4410,14 @@ async function loadFrame(idx, { force = false } = {}) {
     prefetchFrame(normalizedIdx + delta);
     prefetchFrame(normalizedIdx - delta);
   }
+  const frameEndedAt = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+  recordPerfMetric("dbgFrameTiming", `${Math.max(0, Math.round(frameEndedAt - frameStartedAt))}ms @ ${normalizedIdx}`);
+  runtimePerf?.recordDuration?.("frame_fetch_render", frameEndedAt - frameStartedAt);
   return frame;
 }
 
 async function loadTimeline({ force = false } = {}) {
+  const timelineStartedAt = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
   const timelineUrl = `${RAILWAY_BASE}/timeline`;
   const canReuseTimeline = !force && timelineCache.data && (Date.now() - Number(timelineCache.loadedAt || 0) < TIMELINE_CACHE_TTL_MS);
   if (canReuseTimeline) frontendPerfStats.timelineCacheHits += 1;
@@ -4421,6 +4450,9 @@ async function loadTimeline({ force = false } = {}) {
 
     bubbleUpdateNow();
     await loadFrame(idx);
+    const timelineEndedAt = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+    recordPerfMetric("dbgTimelineTiming", `${Math.max(0, Math.round(timelineEndedAt - timelineStartedAt))}ms`);
+    runtimePerf?.recordDuration?.("timeline_fetch", timelineEndedAt - timelineStartedAt);
     return timeline;
   })();
   timelineLoadPromise = loadPromise.finally(() => {
@@ -5134,7 +5166,8 @@ async function refreshCurrentFrame() {
     console.warn("Auto-refresh failed:", e);
   }
 }
-setInterval(refreshCurrentFrame, REFRESH_MS);
+if (runtimePolling) runtimePolling.setInterval("app:frame-refresh", refreshCurrentFrame, REFRESH_MS);
+else setInterval(refreshCurrentFrame, REFRESH_MS);
 
 async function tickNYCClockAndAdvanceIfNeeded() {
   try {
@@ -5155,7 +5188,8 @@ async function tickNYCClockAndAdvanceIfNeeded() {
     console.warn("NYC clock tick failed:", e);
   }
 }
-setInterval(tickNYCClockAndAdvanceIfNeeded, NYC_CLOCK_TICK_MS);
+if (runtimePolling) runtimePolling.setInterval("app:nyc-clock", tickNYCClockAndAdvanceIfNeeded, NYC_CLOCK_TICK_MS);
+else setInterval(tickNYCClockAndAdvanceIfNeeded, NYC_CLOCK_TICK_MS);
 
 document.addEventListener("visibilitychange", () => {
   mapPageIsVisible = !document.hidden;
@@ -6095,6 +6129,42 @@ const PRESENCE_SLOT_SEQUENCE = [
   { side: "SW", angleDeg: 135 },
 ];
 
+const accountActions = FrontendRuntime?.createAccountActions
+  ? FrontendRuntime.createAccountActions({
+      getToken: () => communityToken,
+      clearAuth: () => clearAuth(),
+      closeDrawer: () => closeDrawer(),
+      requireToken: (actionLabel) => requireCommunityToken(actionLabel),
+      afterSignOut: () => syncAdminPortalSession(),
+      onPasswordChanged: () => {
+        if (authPass) authPass.value = "";
+      },
+    })
+  : null;
+
+function recordPerfMetric(metricId, value) {
+  runtimePerf?.setMetric?.(metricId, value);
+  dbg(metricId, value);
+}
+
+function markFirstUsableMap(reason = "") {
+  if (firstUsableMapRecorded) return;
+  firstUsableMapRecorded = true;
+  const now = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+  const elapsedMs = Math.max(0, Math.round(now - appBootStartedAt));
+  recordPerfMetric("dbgFirstUsableMap", `${elapsedMs}ms${reason ? ` (${reason})` : ""}`);
+}
+
+function recordBlankMapWarning(reason) {
+  frontendPerfStats.blankMapWarnings += 1;
+  recordPerfMetric("dbgBlankMap", reason || "warning");
+}
+
+function recordDuplicateGuard(reason) {
+  frontendPerfStats.duplicatePollGuards += 1;
+  recordPerfMetric("dbgPollGuards", `${frontendPerfStats.duplicatePollGuards} guard(s) • ${reason}`);
+}
+
 function syncGhostUI() {
   const ghostOn = !!me?.ghost_mode;
   if (btnGhostMode) {
@@ -6106,6 +6176,10 @@ function syncGhostUI() {
 }
 
 function signOutNow({ reload = false } = {}) {
+  if (accountActions?.signOutNow) {
+    accountActions.signOutNow({ reload });
+    return;
+  }
   clearAuth();
   closeDrawer();
   if (reload) {
@@ -6324,13 +6398,17 @@ async function doSignup(email, password, desiredGhostMode) {
 async function changePassword(oldPwd, newPwd) {
   if (!requireCommunityToken("change password")) return;
   try {
-    await postJSON(
-      "/me/change_password",
-      { old_password: oldPwd, new_password: newPwd },
-      communityToken
-    );
+    if (accountActions?.changePassword) {
+      await accountActions.changePassword(oldPwd, newPwd);
+    } else {
+      await postJSON(
+        "/me/change_password",
+        { old_password: oldPwd, new_password: newPwd },
+        communityToken
+      );
+      if (authPass) authPass.value = "";
+    }
     alert("Password changed successfully.");
-    if (authPass) authPass.value = "";
   } catch (err) {
     alert(err?.detail || err?.message || "Error changing password.");
   }
@@ -6356,12 +6434,16 @@ function openChangePasswordDialog() {
 
 async function deleteAccount() {
   if (!requireCommunityToken("delete account")) return;
-  if (!confirm("Are you sure you want to delete your account? This cannot be undone.")) return;
   try {
-    await postJSON("/me/delete_account", {}, communityToken);
-    clearAuth();
-    localStorage.removeItem("community_token");
-    location.reload();
+    if (accountActions?.deleteAccount) {
+      await accountActions.deleteAccount({ confirmMessage: "Are you sure you want to delete your account? This cannot be undone." });
+    } else {
+      if (!confirm("Are you sure you want to delete your account? This cannot be undone.")) return;
+      await postJSON("/me/delete_account", {}, communityToken);
+      clearAuth();
+      localStorage.removeItem("community_token");
+      location.reload();
+    }
   } catch (err) {
     alert(err?.detail || err?.message || "Error deleting account.");
   }
@@ -6885,6 +6967,7 @@ function getPresencePollIntervalMs() {
 }
 
 function clearPresencePollTimer() {
+  if (runtimePolling) runtimePolling.clear("app:presence-poll");
   if (presencePollTimer) {
     clearTimeout(presencePollTimer);
     presencePollTimer = null;
@@ -6896,10 +6979,15 @@ function schedulePresencePoll({ immediate = false } = {}) {
   const delay = immediate ? 0 : getPresencePollIntervalMs();
   if (!delay && delay !== 0) return;
   if (!authHeaderOK()) return;
-  presencePollTimer = setTimeout(() => {
+  const runner = () => {
     presencePollTimer = null;
     runPresencePollLoop().catch((e) => console.warn("presence poll loop failed:", e));
-  }, Math.max(0, delay));
+  };
+  if (runtimePolling) {
+    presencePollTimer = runtimePolling.setTimeout("app:presence-poll", runner, Math.max(0, delay));
+    return;
+  }
+  presencePollTimer = setTimeout(runner, Math.max(0, delay));
 }
 
 async function runPresencePollLoop() {
@@ -6907,7 +6995,10 @@ async function runPresencePollLoop() {
     clearPresencePollTimer();
     return;
   }
-  if (presencePullLoopRunning) return;
+  if (presencePullLoopRunning) {
+    recordDuplicateGuard("presence poll loop already running");
+    return;
+  }
   presencePullLoopRunning = true;
   try {
     await pullPresenceAll();
@@ -7013,6 +7104,7 @@ function renderAdaptivePresenceFromCache() {
 }
 
 async function pullPresenceAll() {
+  const startedAt = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
   if (!authHeaderOK() || !map) return;
   if (presencePullInFlight && presencePullAbortController) {
     presencePullAbortController.abort();
@@ -7111,6 +7203,9 @@ async function pullPresenceAll() {
     }
     console.warn("/presence/all failed:", e);
   } finally {
+    const endedAt = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+    recordPerfMetric("dbgPresenceTiming", `${Math.max(0, Math.round(endedAt - startedAt))}ms`);
+    runtimePerf?.recordDuration?.("presence_fetch", endedAt - startedAt);
     presencePullInFlight = false;
     presencePullAbortController = null;
   }
@@ -7315,6 +7410,9 @@ setNavDestination(null);
 
   const loading = document.getElementById("mapLoading");
   if (loading) loading.style.display = "flex";
+  window.setTimeout(() => {
+    if (!firstUsableMapRecorded) recordBlankMapWarning("first usable map still pending after 6s");
+  }, 6000);
   setTimeout(() => {
     const l = document.getElementById("mapLoading");
     if (l) l.style.display = "none";
