@@ -212,27 +212,27 @@
   function normalizeLoadConfig(source) {
     const config = source && typeof source === 'object' ? source : {};
     const normalized = {};
-    const driverCount = pickFirst(config, ['preset', 'driverCount', 'driver_count', 'drivers', 'config.preset', 'config.driver_count', 'selected_preset']);
-    const durationSeconds = pickFirst(config, ['duration_sec', 'durationSeconds', 'duration_seconds', 'duration', 'config.duration_sec', 'config.duration_seconds']);
+    const preset = pickFirst(config, ['preset', 'driverCount', 'driver_count', 'drivers', 'selected_preset', 'config.preset', 'config.driver_count', 'config.drivers', 'config.selected_preset']);
+    const duration_sec = pickFirst(config, ['duration_sec', 'durationSeconds', 'duration_seconds', 'duration', 'config.duration_sec', 'config.duration_seconds', 'config.duration']);
     const mode = pickFirst(config, ['mode', 'scenario_mode', 'config.mode']);
-    const includePresenceWrites = pickFirst(config, ['include_presence_writes', 'includePresenceWrites', 'config.include_presence_writes']);
-    const includeViewportReads = pickFirst(config, ['include_presence_viewport_reads', 'includeViewportReads', 'include_viewport_reads', 'config.include_presence_viewport_reads', 'config.include_viewport_reads']);
-    const includeSummaryReads = pickFirst(config, ['include_presence_summary_reads', 'includeSummaryReads', 'include_summary_reads', 'config.include_presence_summary_reads', 'config.include_summary_reads']);
-    const includeDeltaReads = pickFirst(config, ['include_presence_delta_reads', 'includeDeltaReads', 'include_delta_reads', 'config.include_presence_delta_reads', 'config.include_delta_reads']);
-    const includePickupOverlayReads = pickFirst(config, ['include_pickup_overlay_reads', 'includePickupOverlayReads', 'config.include_pickup_overlay_reads']);
-    const includeLeaderboardReads = pickFirst(config, ['include_leaderboard_reads', 'includeLeaderboardReads', 'config.include_leaderboard_reads']);
-    const includeChatLite = pickFirst(config, ['include_chat_lite', 'includeChatLite', 'chat_lite_enabled', 'config.include_chat_lite']);
+    const include_presence_writes = pickFirst(config, ['include_presence_writes', 'includePresenceWrites', 'config.include_presence_writes']);
+    const include_presence_viewport_reads = pickFirst(config, ['include_presence_viewport_reads', 'includeViewportReads', 'include_viewport_reads', 'config.include_presence_viewport_reads', 'config.include_viewport_reads']);
+    const include_presence_summary_reads = pickFirst(config, ['include_presence_summary_reads', 'includeSummaryReads', 'include_summary_reads', 'config.include_presence_summary_reads', 'config.include_summary_reads']);
+    const include_presence_delta_reads = pickFirst(config, ['include_presence_delta_reads', 'includeDeltaReads', 'include_delta_reads', 'config.include_presence_delta_reads', 'config.include_delta_reads']);
+    const include_pickup_overlay_reads = pickFirst(config, ['include_pickup_overlay_reads', 'includePickupOverlayReads', 'config.include_pickup_overlay_reads']);
+    const include_leaderboard_reads = pickFirst(config, ['include_leaderboard_reads', 'includeLeaderboardReads', 'config.include_leaderboard_reads']);
+    const include_chat_lite = pickFirst(config, ['include_chat_lite', 'includeChatLite', 'chat_lite_enabled', 'config.include_chat_lite']);
 
-    if (driverCount !== undefined) normalized.preset = normalizeDriverCount(driverCount);
-    if (durationSeconds !== undefined) normalized.duration_sec = normalizeDuration(durationSeconds);
+    if (preset !== undefined) normalized.preset = normalizeDriverCount(preset);
+    if (duration_sec !== undefined) normalized.duration_sec = normalizeDuration(duration_sec);
     if (mode !== undefined) normalized.mode = normalizeMode(mode);
-    if (includePresenceWrites !== undefined) normalized.include_presence_writes = !!includePresenceWrites;
-    if (includeViewportReads !== undefined) normalized.include_presence_viewport_reads = !!includeViewportReads;
-    if (includeSummaryReads !== undefined) normalized.include_presence_summary_reads = !!includeSummaryReads;
-    if (includeDeltaReads !== undefined) normalized.include_presence_delta_reads = !!includeDeltaReads;
-    if (includePickupOverlayReads !== undefined) normalized.include_pickup_overlay_reads = !!includePickupOverlayReads;
-    if (includeLeaderboardReads !== undefined) normalized.include_leaderboard_reads = !!includeLeaderboardReads;
-    if (includeChatLite !== undefined) normalized.include_chat_lite = !!includeChatLite;
+    if (include_presence_writes !== undefined) normalized.include_presence_writes = !!include_presence_writes;
+    if (include_presence_viewport_reads !== undefined) normalized.include_presence_viewport_reads = !!include_presence_viewport_reads;
+    if (include_presence_summary_reads !== undefined) normalized.include_presence_summary_reads = !!include_presence_summary_reads;
+    if (include_presence_delta_reads !== undefined) normalized.include_presence_delta_reads = !!include_presence_delta_reads;
+    if (include_pickup_overlay_reads !== undefined) normalized.include_pickup_overlay_reads = !!include_pickup_overlay_reads;
+    if (include_leaderboard_reads !== undefined) normalized.include_leaderboard_reads = !!include_leaderboard_reads;
+    if (include_chat_lite !== undefined) normalized.include_chat_lite = !!include_chat_lite;
     return normalized;
   }
 
@@ -254,16 +254,25 @@
   function extractLoadErrorMessage(error, fallback) {
     const detail = error?.detail;
     const payload = error?.payload;
-    const pieces = [
+    const statusText = error?.status ? `HTTP ${error.status}` : '';
+    const parts = [];
+
+    [
       pickFirst(detail, ['detail', 'message', 'error']),
       pickFirst(payload, ['detail.detail', 'detail.message', 'detail.error', 'detail', 'message', 'error']),
       error?.message,
-    ];
-    const text = pieces
-      .flatMap((value) => toArray(value))
-      .map((value) => (typeof value === 'string' ? value : JSON.stringify(value)))
-      .find((value) => String(value || '').trim());
-    return String(text || fallback || 'Request failed').trim();
+    ].flatMap((value) => toArray(value)).forEach((value) => {
+      const text = typeof value === 'string' ? value : JSON.stringify(value);
+      if (String(text || '').trim()) parts.push(String(text).trim());
+    });
+
+    if (payload && typeof payload === 'object') {
+      const payloadText = JSON.stringify(payload);
+      if (payloadText && !parts.includes(payloadText)) parts.push(payloadText);
+    }
+
+    const message = [...new Set(parts)].join(' | ') || fallback || 'Request failed';
+    return [statusText, message].filter(Boolean).join(' — ').trim();
   }
 
   function pushReason(target, value) {
@@ -376,7 +385,7 @@
       metrics,
       debug: pickFirst(raw, ['debug', 'result.debug']) ?? raw,
       config,
-      errorMessage: pickFirst(raw, ['error', 'message']) || '',
+      errorMessage: pickFirst(raw, ['detail.detail', 'detail.message', 'detail.error', 'error', 'message', 'detail']) || '',
       checks: toArray(pickFirst(raw, ['checks', 'summary.checks', 'debug.checks'])),
       updatedAt: Date.now(),
     };
@@ -724,15 +733,25 @@
       state.copyMessage = '';
       render();
       try {
+        const requestBody = buildLoadRequestBody(state.config);
+        console.info('synthetic load test start body', requestBody);
         const payload = await helpers.request('/admin/tests/load/start', {
           method: 'POST',
-          body: buildLoadRequestBody(state.config),
+          body: requestBody,
         });
+        console.info('synthetic load test start response', payload);
         const next = normalizeLoadResponse(payload, state.config);
         if (state.destroyed) return;
         state.loadData = next;
-        if (!next.active && normalizeStatus(next.status) !== 'running' && /active/i.test(next.errorMessage || next.summary)) {
-          state.errorMessage = next.errorMessage || next.summary;
+
+        const startFailed = !next.active && ['fail', 'error', 'idle', 'stopped', 'unsupported'].includes(normalizeStatus(next.status));
+        if (startFailed) {
+          state.errorMessage = extractLoadErrorMessage({
+            status: 200,
+            message: next.errorMessage || next.summary || 'Synthetic load test did not start.',
+            payload: payload && typeof payload === 'object' ? payload : { message: String(payload || '') },
+            detail: payload?.detail || null,
+          }, 'Failed to start synthetic load test.');
         } else {
           state.enabled = true;
         }
