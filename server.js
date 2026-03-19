@@ -7,6 +7,7 @@ const rootDir = __dirname;
 const port = process.env.PORT || 3000;
 
 const noStorePaths = new Set(["/", "/index.html"]);
+const htmlShellPattern = /\.html?$/i;
 const staticAssetPattern = /\.(?:css|js|mjs|json|svg|png|jpg|jpeg|gif|webp|ico|woff2?|ttf)$/i;
 
 app.use(compression({
@@ -19,7 +20,7 @@ app.use(compression({
 }));
 
 app.use((req, res, next) => {
-  if (noStorePaths.has(req.path)) {
+  if (noStorePaths.has(req.path) || htmlShellPattern.test(req.path)) {
     res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     res.set("Pragma", "no-cache");
     res.set("Expires", "0");

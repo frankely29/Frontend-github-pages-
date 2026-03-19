@@ -1,4 +1,5 @@
 (function () {
+  const runtime = window.FrontendRuntime || null;
   const FEATURE = {};
   let pickupSaveInFlight = false;
   let pickupSaveCooldownUntilMs = 0;
@@ -43,6 +44,9 @@
   }
 
   async function postJSONDetailed(path, body, token) {
+    if (runtime?.requestJSONDetailed) {
+      return runtime.requestJSONDetailed(path, { method: 'POST', body, token });
+    }
     const headers = { 'Content-Type': 'application/json' };
     if (token) headers.Authorization = `Bearer ${token}`;
 
@@ -86,6 +90,9 @@
   }
 
   async function apiGet(path, token) {
+    if (runtime?.getJSONAuth) {
+      return runtime.getJSONAuth(path, token);
+    }
     const headers = token ? { Authorization: `Bearer ${token}` } : {};
     const res = await fetch(`${window.API_BASE || ''}${path}`, { headers });
     const text = await res.text();

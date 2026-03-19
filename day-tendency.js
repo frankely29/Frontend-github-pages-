@@ -1,4 +1,6 @@
 (() => {
+  const runtime = window.FrontendRuntime || null;
+  const runtimePolling = runtime?.polling || null;
   const DAY_TENDENCY_REFRESH_MS = 30 * 60 * 1000;
   const DAY_TENDENCY_RETRY_MS = 10 * 1000;
   const DAY_TENDENCY_MOVE_CHECK_MS = 60 * 1000;
@@ -23,6 +25,8 @@
     mutationObserver: null,
     positionPollTimer: null,
     movementCheckTimer: null,
+    visibilityBound: false,
+    started: false,
     isRefreshing: false,
     borough: null,
     lastQueryLat: null,
@@ -34,10 +38,13 @@
   };
 
   function apiBase() {
-    return String(window.API_BASE || '').replace(/\/$/, '');
+    return String(runtime?.resolveApiBase?.(window.API_BASE || '') || window.API_BASE || '').replace(/\/$/, '');
   }
 
   async function fetchJSONWithTimeout(url, timeoutMs = 10000) {
+    if (runtime?.fetchJSON) {
+      return runtime.fetchJSON(url, { method: 'GET', headers: { Accept: 'application/json' }, timeoutMs });
+    }
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
@@ -383,10 +390,13 @@
     const explain = String(payload?.explain || '').toLowerCase();
     const shouldRetry = hadError || status === 'model_not_ready' || explain.includes('not ready');
     if (!shouldRetry || STATE.retryTimer) return;
-    STATE.retryTimer = window.setTimeout(async () => {
+    const runner = async () => {
       STATE.retryTimer = null;
       await refreshDayTendencyMeter();
-    }, DAY_TENDENCY_RETRY_MS);
+    };
+    STATE.retryTimer = runtimePolling
+      ? runtimePolling.setTimeout('day-tendency:retry', runner, DAY_TENDENCY_RETRY_MS)
+      : window.setTimeout(runner, DAY_TENDENCY_RETRY_MS);
   }
 
   async function refreshDayTendencyMeter({ force = false } = {}) {
@@ -437,7 +447,7 @@
 
   function startFirstFixWatcher() {
     if (STATE.firstFixTimer) return;
-    STATE.firstFixTimer = window.setInterval(async () => {
+    const runner = async () => {
       if (STATE.hasInitialGpsFix) {
         window.clearInterval(STATE.firstFixTimer);
         STATE.firstFixTimer = null;
@@ -452,10 +462,15 @@
       window.clearInterval(STATE.firstFixTimer);
       STATE.firstFixTimer = null;
       refreshDayTendencyMeter({ force: true });
-    }, DAY_TENDENCY_FIRST_FIX_CHECK_MS);
+    };
+    STATE.firstFixTimer = runtimePolling
+      ? runtimePolling.setInterval('day-tendency:first-fix', runner, DAY_TENDENCY_FIRST_FIX_CHECK_MS)
+      : window.setInterval(runner, DAY_TENDENCY_FIRST_FIX_CHECK_MS);
   }
 
   function startDayTendencyMeter() {
+    if (STATE.started) return;
+    STATE.started = true;
     ensureDayTendencyStyles();
     ensureDayTendencyRoot();
     positionDayTendencyRoot();
@@ -480,15 +495,29 @@
     window.addEventListener('orientationchange', positionDayTendencyRoot, { passive: true });
     window.addEventListener('scroll', positionDayTendencyRoot, { passive: true });
 
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') {
-        positionDayTendencyRoot();
-        refreshDayTendencyMeter({ force: true });
-      }
-    });
+    if (!STATE.visibilityBound) {
+      STATE.visibilityBound = true;
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          positionDayTendencyRoot();
+          refreshDayTendencyMeter({ force: true });
+        }
+      });
+    }
 
-    STATE.positionPollTimer = window.setInterval(positionDayTendencyRoot, 5000);
-    STATE.movementCheckTimer = window.setInterval(() => {
+    STATE.positionPollTimer = runtimePolling
+      ? runtimePolling.setInterval('day-tendency:position', positionDayTendencyRoot, 5000)
+      : window.setInterval(positionDayTendencyRoot, 5000);
+    STATE.movementCheckTimer = runtimePolling
+      ? runtimePolling.setInterval('day-tendency:movement', () => {
+        getCurrentTendencyLatLng().then((latLng) => {
+          if (!latLng) return;
+          if (!movedMateriallyFromLastQuery(latLng)) return;
+          if (STATE.isRefreshing) return;
+          refreshDayTendencyMeter({ force: true });
+        });
+      }, DAY_TENDENCY_MOVE_CHECK_MS)
+      : window.setInterval(() => {
       getCurrentTendencyLatLng().then((latLng) => {
         if (!latLng) return;
         if (!movedMateriallyFromLastQuery(latLng)) return;
@@ -496,9 +525,13 @@
         refreshDayTendencyMeter({ force: true });
       });
     }, DAY_TENDENCY_MOVE_CHECK_MS);
-    STATE.refreshTimer = window.setInterval(() => {
-      refreshDayTendencyMeter({ force: true });
-    }, DAY_TENDENCY_REFRESH_MS);
+    STATE.refreshTimer = runtimePolling
+      ? runtimePolling.setInterval('day-tendency:refresh', () => {
+        refreshDayTendencyMeter({ force: true });
+      }, DAY_TENDENCY_REFRESH_MS)
+      : window.setInterval(() => {
+        refreshDayTendencyMeter({ force: true });
+      }, DAY_TENDENCY_REFRESH_MS);
 
     applyWaitingForGpsState();
     startFirstFixWatcher();

@@ -1,4 +1,5 @@
 (function () {
+  const runtime = window.FrontendRuntime || null;
   const components = () => window.AdminComponents || {};
 
   const state = {
@@ -41,6 +42,14 @@
   }
 
   function authRequest(path, options = {}) {
+    if (runtime?.requestJSONDetailed) {
+      return runtime.requestJSONDetailed(path, {
+        method: options.method || 'GET',
+        body: options.body,
+        token: state.token,
+        headers: { Accept: 'application/json', ...(options.headers || {}) },
+      });
+    }
     const headers = { Accept: 'application/json', ...(options.headers || {}) };
     if (state.token) headers.Authorization = `Bearer ${state.token}`;
     if (options.body !== undefined) headers['Content-Type'] = 'application/json';

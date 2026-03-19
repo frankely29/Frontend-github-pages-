@@ -3,6 +3,7 @@
  * Leaderboard panel (Miles/Hours + periods + badges + my rank + overview).
  */
 (function () {
+  const runtime = window.FrontendRuntime || null;
   const LS_TOKEN = 'community_token_v1';
   const PANEL_KEY = 'leaderboard';
 
@@ -55,6 +56,7 @@
   }
 
   async function fetchJSON(url, opts = {}) {
+    if (runtime?.fetchJSON) return runtime.fetchJSON(url, opts);
     const shouldBypassCache = opts.cache === 'no-store' || /\/(auth|me|chat|presence)\b/.test(String(url || ''));
     const res = await fetch(url, { mode: 'cors', ...(shouldBypassCache ? { cache: 'no-store' } : {}), ...opts });
     const text = await res.text();
@@ -63,11 +65,13 @@
   }
 
   function apiBase() {
+    if (runtime?.resolveApiBase) return runtime.resolveApiBase();
     if (typeof window !== 'undefined' && window.API_BASE) return String(window.API_BASE);
     return 'https://web-production-78f67.up.railway.app';
   }
 
   async function getAuth(path) {
+    if (runtime?.getJSONAuth) return runtime.getJSONAuth(path, getToken());
     if (typeof window.getJSONAuth === 'function') return window.getJSONAuth(path, getToken());
     const headers = {};
     const token = getToken();
