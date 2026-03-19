@@ -444,16 +444,31 @@
     document.head.appendChild(style);
   }
 
+  function openLeaderboardPanel() {
+    if (typeof openDrawer !== 'function') return;
+    openDrawer(PANEL_KEY, 'Leaderboard', leaderboardPanelHTML());
+    wireLeaderboardPanel();
+    loadAll();
+  }
+
   function init() {
     injectLeaderboardProgressionStyles();
     const btn = document.getElementById('dockLeaderboard');
     if (!btn || typeof bindDockToggle !== 'function') return;
+    if (btn.dataset.leaderboardBound === '1') return;
+    btn.dataset.leaderboardBound = '1';
 
     bindDockToggle(btn, PANEL_KEY, 'Leaderboard', leaderboardPanelHTML, () => {
       wireLeaderboardPanel();
       loadAll();
     });
   }
+
+  window.LeaderboardPanel = {
+    init,
+    open: openLeaderboardPanel,
+    refresh: loadAll,
+  };
 
   init();
 })();
