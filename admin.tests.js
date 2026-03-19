@@ -799,6 +799,7 @@
           <div class="adminSectionHead wrap">
             <div>
               <h4>Synthetic Load Test</h4>
+              <div class="adminCardLabel">Synthetic Load Test</div>
               <div class="adminMuted">Admin-only synthetic benchmark. Runs on the server. Does not create real subscribers.</div>
             </div>
             ${c.badge ? c.badge(statusLabel, resultTone) : ''}
