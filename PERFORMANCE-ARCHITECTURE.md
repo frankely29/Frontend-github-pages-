@@ -1,112 +1,105 @@
 # Frontend Performance Architecture
 
-## Current runtime ownership map
+## Actual startup script order
+1. `index.html` loads MapLibre CSS and JS from `unpkg` in the document head.
+2. `index.html` loads `frontend-shell.css`, `index.extracted.css`, and `admin.panel.css` as static stylesheets.
+3. The body delivers the full shell markup up front: map canvas, auth overlay, side panels, dock, slider, weather badge, online badge, radio modal, and debug panel.
+4. Inline config sets `window.API_BASE`.
+5. `runtime.shared.js` loads first and registers shared helpers for URL resolution, auth-aware fetch wrappers, poll/timer dedupe, perf counters, and account actions.
+6. `app.js` loads next and boots the map, timeline/frame system, auth shell, self-location watch, presence transport/render loop, pickup overlay, dock shell, weather badge, and top-level panel wiring.
+7. `app.part2.js` loads after `app.js` and boots public chat, private messages, unread badges, kill feed, games, profile/driver messaging, chat sounds, and live-chat capability probing.
+8. `pickup-recording.feature.js` and `day-tendency.js` load at startup because Save/pickup recording and the day tendency badge still participate in the initial shell.
+9. `app.lazy.js` loads last and attaches deferred script-group loaders so leaderboard and admin code stay out of first paint.
 
-### Startup-critical files
-- `index.html` bootstraps the shell, map container, dock, weather badge, auth overlay, and shared script loading order.
-- `runtime.shared.js` owns shared API helpers, cache-bypass rules, poll dedupe helpers, and small perf counters.
-- `app.js` owns map bootstrap, timeline/frame loading, self GPS watch, self presence uploads, viewport-aware presence fetch/render orchestration, pickup overlays, dock shell behavior, and weather refresh.
-- `app.part2.js` owns public chat, DM threads, unread badges, kill feed, voice notes, driver profile DM UI, dock games, map identity rendering, and progression badge notifications.
-- `pickup-recording.feature.js` owns Save/pickup recording send flow.
-- `day-tendency.js` owns the day-tendency widget anchored near the online badge.
+## Actual panels and dock flow
+- The dock buttons in `app.js` still own the shell-level open/close state for Colors, Modes, Chat, Games, Leaderboard, Admin, Music, and Profile.
+- Drawer open/close state is centralized through the dock drawer markup (`#dockDrawer`, `#dockDrawerBody`, `#dockBackdrop`) and button state styling in `setActiveDockButton(...)` / `openDockPanel(...)` flows inside `app.js`.
+- `app.part2.js` owns the chat drawer body population, tab switching, unread badge updates, kill feed state, games panel wiring, and profile/DM overlays.
+- Leaderboard and admin buttons stay visible in the dock shell, but `app.lazy.js` intercepts their first click, loads the missing scripts once, and then hands control back to `window.LeaderboardPanel.open()` or `window.AdminPortal.open()`.
+- Repeated opens do not inject duplicate script tags because `app.lazy.js` caches loaded groups in `loadedGroups` and marks each script node with `data-lazy-src`.
 
-### Lazy-loaded after this pass
-- `app.part3.js` is loaded on first leaderboard open.
-- `admin.components.js`, `admin.actions.js`, `admin.users.js`, `admin.live.js`, `admin.reports.js`, `admin.system.js`, `admin.trips.js`, `admin.tests.js`, and `admin.panel.js` are loaded on first admin open.
-- `app.lazy.js` owns these deferred script groups and keeps one-time loaders cached.
+## Current presence fetch/render flow
+### Transport selection
+- `app.js` computes viewport-aware presence params in `getPresenceRequestParams()` using `min_lng`, `max_lng`, `min_lat`, `max_lat`, `zoom`, `mode`, `limit`, `viewport_sig`, and `refresh_tier`.
+- `fetchPresencePayload(...)` now prefers a viewport snapshot route on full fetches:
+  - `/presence/viewport?...` when bounds are available and the route has not been marked unsupported.
+  - `/presence/all?...` as the compatibility fallback.
+- Subsequent syncs try `/presence/delta?...` first when a cursor or sync timestamp is available.
+- Delta sync uses `cursor` and `updated_since_ms` consistently, with timestamp normalization back into milliseconds.
+- If `/presence/delta` or `/presence/viewport` returns 404/405/501 or an unsupported response shape, the frontend automatically falls back to the broader snapshot route instead of breaking the map.
 
-## Active presence flow
+### Merge/store behavior
+- Presence rows are normalized in `normalizePresenceRow(...)` and stored in `presenceStore`, keyed by user id.
+- `mergePresencePayload(...)` applies removals first, then upserts only valid/still-fresh rows.
+- `cachedPresenceRows` is rebuilt from the in-memory store so stale rows naturally age out without forcing a full marker rebuild.
+- The online badge is updated from payload summary counts when present, otherwise from `/presence/summary`, and finally from the visible row count as a last fallback.
 
-### Self GPS updates
-- `app.js` `startLocationWatch()` owns `navigator.geolocation.watchPosition(...)`.
-- Self marker updates stay immediate and in-place through `navMarker.setLngLat(...)`.
-- Heading smoothing, compass fallback, and auto-center camera updates stay in `app.js`.
-- Self presence uploads are sent by `communityMaybePushPresence(...)` using `/presence/update` with moving vs stationary cadence.
+### Rendering behavior
+- `renderAdaptivePresenceFromCache()` filters the cached store to current render bounds, computes a render mode (`full` / `medium` / `lite`), and keeps richer DOM markers only for the chosen visible users.
+- `upsertDriverMarker(...)` mutates existing markers in place for users that stay in the rich set.
+- Lower-priority visible drivers are pushed into the `presence-lite` GeoJSON source instead of creating many rich DOM markers.
+- Users removed from the rich set have their DOM markers cleaned up, but the underlying store entry remains available for future viewport re-entry until stale expiry/removal.
 
-### Presence polling and rendering
-- `app.js` schedules presence polls with `schedulePresencePoll(...)` and `runPresencePollLoop()`.
-- Map viewport bounds are derived with `getBufferedMapBounds(...)` and a rounded viewport signature is generated by `getPresenceViewportSignature()`.
-- Presence fetches now support:
-  - full snapshot fallback via `/presence/all`,
-  - optional delta mode via `/presence/delta`,
-  - in-memory merge storage via `presenceStore`,
-  - explicit removals when the backend provides removal IDs.
-- `renderAdaptivePresenceFromCache()` renders only viewport rows, keeps rich markers for the highest-priority visible drivers, and sends lower-priority visible drivers to the `presence-lite` source.
-- Driver markers are updated in place through `upsertDriverMarker(...)` rather than full marker rebuilds.
-- Offscreen drivers are retained in memory until stale expiry or explicit removal, so viewport filtering no longer drops them from the client model immediately.
+## Current pickup overlay fetch flow
+- Startup keeps pickup support active because Save/pickup remains a top-level feature.
+- `refreshPickupOverlay(...)` in `app.js` builds a buffered viewport query through `pickupOverlayQueryPath(...)` and requests `/events/pickups/recent` with viewport bounds, `limit`, and `zone_sample_limit`.
+- Pickup fetches are guarded by:
+  - `pickupOverlayAbortController` to cancel superseded requests,
+  - `lastPickupFetchKey` + `lastPickupViewportKey` to avoid duplicate re-fetches,
+  - `PICKUP_FETCH_COOLDOWN_MS` to suppress stormy redraws.
+- Response application is serial-number guarded so older responses cannot overwrite newer viewport data.
 
-## Active chat flow
+## Current public chat polling flow
+- `app.part2.js` owns public chat receive state.
+- `scheduleChatPoll(...)` uses exactly one timeout loop for public chat and routes through `FrontendRuntime.polling` when available.
+- Poll cadence is state-aware:
+  - open/visible public chat uses the fast open cadence,
+  - closed chat uses a slower badge-maintenance cadence,
+  - hidden documents use the hidden cadence,
+  - SSE-connected modes intentionally keep a slower fallback poll lane alive.
+- `chatPollOnce()` prevents overlap with `chatPollInFlight`, cancels superseded HTTP work via `chatPollAbortController`, and uses incremental `after=` fetching once a baseline has been established.
+- Hidden closed chat no longer keeps downloading the full visible history payload every cycle; it first seeds a tiny baseline and then polls incrementally from the latest known id.
 
-### Public chat polling
-- `app.part2.js` owns public chat polling.
-- Visible public chat uses `chatLoadInitial()` for full history bootstrap and `chatPollOnce()` for fast incremental updates.
-- Hidden/closed public chat now uses a lightweight baseline and incremental lane:
-  - first hidden fetch pulls only a minimal baseline,
-  - later hidden fetches poll from the latest known message ID instead of full history,
-  - the full 60-message bootstrap is deferred until the panel is actually opened.
+## Current DM polling flow
+- `schedulePrivatePoll(...)` owns the inbox/thread-summary loop and uses a single timeout at a time.
+- Each cycle refreshes `/chat/private/threads` and, if a thread is active, incrementally fetches that thread instead of reloading every DM history.
+- Per-thread DM fetches are guarded with `AbortController`s stored in `privateMessageAbortControllers`.
+- Driver-profile DMs use a separate timeout lane that only runs while a non-self profile modal is open.
 
-### Unread badge logic
-- `app.part2.js` `updateChatUnreadBadge()` owns dock unread badge aggregation.
-- Public unread state is derived from message watermarks and last-read storage.
-- Private unread state is aggregated from `privateUnreadByUserId`.
+## Hidden panel work that still runs unnecessarily
+- Public chat still keeps a reduced unread/notification poll alive while closed; this is intentional for badges, but it is still background work.
+- Private thread summaries still refresh while the drawer is closed so unread counts stay current.
+- Driver-profile DM polling continues while the profile modal is open, only slowing down when the document is hidden.
+- Weather, self-location, presence, pickup, and day-tendency timers continue regardless of dock state because they power always-visible map UI.
+- Progression/auth observer/identity cleanup loops from `app.part2.js` still exist, but they now run through stable timers rather than spawning recursive duplicates.
 
-### Kill feed / message notifications
-- `app.part2.js` owns kill feed bootstrap guards, seen-key tracking, and kill-feed rendering.
-- Hidden public chat keeps kill feed active without replaying the startup baseline.
-- Incoming/outgoing sound notifications stay in `app.part2.js` and still use polling-compatible behavior.
+## Exact modules currently eagerly loaded
+### CSS
+- `https://unpkg.com/maplibre-gl@5.10.0/dist/maplibre-gl.css`
+- `./frontend-shell.css`
+- `./index.extracted.css`
+- `./admin.panel.css`
 
-## Active DM flow
-- `app.part2.js` owns DM thread list polling via `/chat/private/threads`.
-- Active DM thread fetches use incremental `/chat/private/:id?since_id=...` requests.
-- Hidden DM state keeps unread/thread summaries fresh without heavy history refetch.
-- Driver profile DM polling is separate and only runs while a non-self profile sheet is open.
+### JavaScript
+- `https://unpkg.com/maplibre-gl@5.10.0/dist/maplibre-gl.js`
+- `./runtime.shared.js`
+- `./app.js`
+- `./app.part2.js`
+- `./pickup-recording.feature.js`
+- `./day-tendency.js`
+- `./app.lazy.js`
 
-## Polling timers and intervals
+## Exact modules currently lazy-loaded on demand
+### Leaderboard group
+- `./app.part3.js`
 
-### Global / map-side timers
-- `app.js`
-  - frame refresh interval,
-  - NYC clock advancement interval,
-  - weather refresh interval,
-  - presence poll timeout loop,
-  - pickup overlay refresh debounce timeout,
-  - self-nav motion indicator interval.
-- `day-tendency.js`
-  - position refresh interval,
-  - movement refresh interval,
-  - day tendency refresh interval.
-
-### Chat-side timers
-- `app.part2.js`
-  - public chat timeout loop,
-  - private thread timeout loop,
-  - driver profile DM timeout loop,
-  - progression sync interval,
-  - auth observer interval,
-  - identity cleanup interval,
-  - voice recording timer.
-
-## Hidden-panel background work audit
-
-### Reduced in this pass
-- Closed public chat no longer performs startup-scale history pulls just to keep unread state alive.
-- Reopened chat still refreshes immediately, then returns to the fast visible cadence.
-- Progression sync skips hidden-document work and uses the shared poll registry when available.
-- Auth observer and identity cleanup loops now use stable intervals instead of chained recursive timers.
-- Admin and leaderboard code are no longer parsed/executed at first paint.
-
-### Still intentionally active
-- Self GPS, self heading, auto-center, pickup recording, weather badge, and visible map presence remain active because they power top-level UI.
-- Private thread summaries and public unread checks remain active at reduced hidden cadence so unread badges and notifications stay current.
-
-## Optimization rules added in this pass
-1. Keep self-location uploads and self-arrow updates on the fast lane.
-2. Keep viewport-visible drivers on the fast render lane.
-3. Treat offscreen drivers as slower-render / retained-store entries instead of dropping them.
-4. Prefer delta presence merge when available, but fall back cleanly to `/presence/all`.
-5. Only trigger immediate presence pulls when the rounded viewport signature actually changes.
-6. Keep markers stable by user ID and update their DOM/map objects in place.
-7. Reduce hidden public chat payload weight before changing active chat cadence.
-8. Stop duplicate long-running loops by routing them through shared poll guards when possible.
-9. Lazy-load admin and leaderboard bundles so startup only pays for map/auth/core community work.
-10. Preserve current backend compatibility by making all optimized paths optional with fallback.
+### Admin group
+- `./admin.components.js`
+- `./admin.actions.js`
+- `./admin.users.js`
+- `./admin.live.js`
+- `./admin.reports.js`
+- `./admin.system.js`
+- `./admin.trips.js`
+- `./admin.tests.js`
+- `./admin.panel.js`

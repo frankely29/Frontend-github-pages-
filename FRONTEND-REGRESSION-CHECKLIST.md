@@ -1,20 +1,52 @@
 # Frontend Regression Checklist
 
-## Verified directly in this environment
-- [x] JavaScript syntax checks passed for the updated runtime/frontend/admin/server files.
-- [x] The extracted shell stylesheet is referenced from `index.html`.
-- [x] The shared runtime script is loaded before `app.js`.
-- [x] Debug panel markup includes the new instrumentation fields.
-- [x] HTML shell responses remain configured as `no-store` in `server.js`.
+## Core auth and shell
+- [ ] Sign in works.
+- [ ] Sign out works.
+- [ ] Auth overlay still opens/closes and reflects signed-in state.
+- [ ] Map loads.
+- [ ] Timeline loads.
+- [ ] Frame switching works.
+- [ ] Dock opens/closes panels correctly.
+- [ ] No duplicate script loads after repeated Leaderboard/Admin opens.
 
-## Code-path regression review completed
-- [x] API base handling remains backward compatible via `window.API_BASE` and the Railway fallback.
-- [x] Account actions now route through one shared helper while preserving the existing prompts/alerts.
-- [x] Presence, pickup overlay, day tendency, and chat polling now clear/reuse named timers to avoid duplicate loops.
-- [x] Timeline/frame/presence/pickup instrumentation writes into the existing debug surface without changing endpoint semantics.
-- [x] CSS extraction preserved the existing shell selectors by moving the original inline stylesheet contents verbatim into `frontend-shell.css`.
+## Map/community/runtime behavior
+- [ ] Borough modes still work.
+- [ ] Ghost mode still works.
+- [ ] Self location updates still work.
+- [ ] Nearby visible drivers still feel responsive.
+- [ ] Online badge still works.
+- [ ] Police report still works.
+- [ ] Save/pickup still works.
+- [ ] Pickup overlay still works.
+- [ ] No map performance regression during pan/zoom.
 
-## Not fully executable in this headless task environment
-- [ ] Manual browser verification for all map/auth/chat/admin/radio/game flows.
-- [ ] End-to-end backend-connected sign-in, change-password, delete-account, pickup save, police report, chat/DM, and admin tab checks.
-- [ ] Visual screenshot validation (browser screenshot tool unavailable in this session).
+## Chat and messaging
+- [ ] Public chat send still works.
+- [ ] Public chat receive via polling still works.
+- [ ] DM send still works.
+- [ ] DM receive via polling still works.
+- [ ] Unread badge still works.
+- [ ] Sound still works.
+- [ ] No duplicate timers after opening/closing chat repeatedly.
+
+## Additional panels/features
+- [ ] Profile still works.
+- [ ] Leaderboard lazy-loads once and opens correctly.
+- [ ] Admin lazy-loads once and opens correctly.
+- [ ] Games still work.
+- [ ] Radio still works.
+
+## Checks completed in this environment
+- [x] `node --check app.js`
+- [x] `node --check app.part2.js`
+- [x] `node --check runtime.shared.js`
+- [x] `node --check app.lazy.js`
+- [x] `node --check app.part3.js`
+- [x] `node --check admin.panel.js`
+- [x] `index.html` script order keeps shared runtime before core app scripts and removes eager admin loads.
+- [x] Presence transport now prefers `/presence/viewport`, then `/presence/delta`, then `/presence/all` fallback without removing polling compatibility.
+
+## Not fully verifiable in this headless environment
+- [ ] Full browser-backed UX verification for sign-in, live map interactions, chat/audio, radio playback, games, and admin screens.
+- [ ] Screenshot capture (browser screenshot tool unavailable in this session).
