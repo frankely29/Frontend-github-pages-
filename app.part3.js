@@ -55,7 +55,8 @@
   }
 
   async function fetchJSON(url, opts = {}) {
-    const res = await fetch(url, { cache: 'no-store', mode: 'cors', ...opts });
+    const shouldBypassCache = opts.cache === 'no-store' || /\/(auth|me|chat|presence)\b/.test(String(url || ''));
+    const res = await fetch(url, { mode: 'cors', ...(shouldBypassCache ? { cache: 'no-store' } : {}), ...opts });
     const text = await res.text();
     if (!res.ok) throw new Error(text || `${res.status} ${res.statusText}`);
     return text ? JSON.parse(text) : {};
