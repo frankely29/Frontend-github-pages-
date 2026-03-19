@@ -40,6 +40,21 @@
     },
   ];
 
+  const LOAD_PRESETS = [100, 300, 500, 1000];
+  const DEFAULT_LOAD_OPTIONS = Object.freeze({
+    driverCount: 100,
+    durationSeconds: 60,
+    mode: 'map_core',
+    includePresenceWrites: true,
+    includeViewportReads: true,
+    includeSummaryReads: true,
+    includeDeltaReads: true,
+    includePickupOverlayReads: false,
+    includeLeaderboardReads: false,
+    includeChatLite: false,
+  });
+  const LOAD_POLL_MS = 2000;
+
   function summarize(data, c) {
     if (data === null || data === undefined) return 'No response body.';
     if (typeof data !== 'object') return String(data);
@@ -63,9 +78,292 @@
     return 'pass';
   }
 
-  function safeNumber(value) {
+  function safeNumber(value, fallback = 0) {
     const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : 0;
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+
+  function safeInteger(value, fallback = 0) {
+    return Math.round(safeNumber(value, fallback));
+  }
+
+  function clamp(value, min, max) {
+    return Math.min(Math.max(value, min), max);
+  }
+
+  function toArray(value) {
+    if (Array.isArray(value)) return value.filter((entry) => entry !== undefined && entry !== null && entry !== '');
+    if (value === undefined || value === null || value === '') return [];
+    return [value];
+  }
+
+  function pickFirst(source, paths) {
+    for (const path of paths) {
+      const parts = String(path).split('.');
+      let cursor = source;
+      let found = true;
+      for (const part of parts) {
+        if (!cursor || typeof cursor !== 'object' || !(part in cursor)) {
+          found = false;
+          break;
+        }
+        cursor = cursor[part];
+      }
+      if (found && cursor !== undefined) return cursor;
+    }
+    return undefined;
+  }
+
+  function normalizeStatus(value) {
+    const text = String(value || '').trim().toLowerCase();
+    if (!text) return 'idle';
+    if (['ok', 'passed', 'complete_pass', 'completed_pass', 'success'].includes(text)) return 'pass';
+    if (['failed', 'complete_fail', 'completed_fail'].includes(text)) return 'fail';
+    if (['stopping', 'cancelling', 'canceling'].includes(text)) return 'stopped';
+    return text;
+  }
+
+  function isActiveLoadStatus(status) {
+    return ['running', 'starting', 'queued', 'in_progress', 'active'].includes(normalizeStatus(status));
+  }
+
+  function formatLoadStatus(status) {
+    const normalized = normalizeStatus(status);
+    if (normalized === 'pass') return 'PASS';
+    if (normalized === 'fail') return 'FAIL';
+    if (normalized === 'stopped') return 'Stopped';
+    if (normalized === 'error') return 'Error';
+    if (normalized === 'running') return 'Running';
+    if (normalized === 'unsupported') return 'Unavailable';
+    return normalized ? normalized.replace(/[_-]+/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase()) : 'Idle';
+  }
+
+  function loadTone(status) {
+    const normalized = normalizeStatus(status);
+    if (normalized === 'pass') return 'yes';
+    if (normalized === 'fail' || normalized === 'error') return 'no';
+    if (normalized === 'running') return 'warn';
+    if (normalized === 'stopped') return 'muted';
+    return 'muted';
+  }
+
+  function copyText(text) {
+    if (navigator?.clipboard?.writeText) return navigator.clipboard.writeText(text);
+    const el = document.createElement('textarea');
+    el.value = text;
+    el.setAttribute('readonly', 'readonly');
+    el.style.position = 'absolute';
+    el.style.left = '-9999px';
+    document.body.appendChild(el);
+    el.select();
+    try {
+      document.execCommand('copy');
+      document.body.removeChild(el);
+      return Promise.resolve();
+    } catch (error) {
+      document.body.removeChild(el);
+      return Promise.reject(error);
+    }
+  }
+
+  function formatPercent(value) {
+    const num = safeNumber(value, NaN);
+    if (!Number.isFinite(num)) return '—';
+    return `${num.toFixed(num >= 10 ? 0 : 1)}%`;
+  }
+
+  function formatDuration(value) {
+    const num = safeNumber(value, NaN);
+    if (!Number.isFinite(num)) return '—';
+    return `${num.toFixed(num >= 10 ? 0 : 1)}s`;
+  }
+
+  function formatLatency(value) {
+    const num = safeNumber(value, NaN);
+    if (!Number.isFinite(num)) return '—';
+    return `${num.toFixed(num >= 100 ? 0 : num >= 10 ? 1 : 2)} ms`;
+  }
+
+  function formatBytes(value) {
+    const num = safeNumber(value, NaN);
+    if (!Number.isFinite(num)) return '—';
+    if (Math.abs(num) < 1024) return `${num.toFixed(0)} B`;
+    if (Math.abs(num) < 1024 * 1024) return `${(num / 1024).toFixed(1)} KB`;
+    return `${(num / (1024 * 1024)).toFixed(2)} MB`;
+  }
+
+  function normalizeDriverCount(value) {
+    const count = safeInteger(value, DEFAULT_LOAD_OPTIONS.driverCount);
+    if (LOAD_PRESETS.includes(count)) return count;
+    return DEFAULT_LOAD_OPTIONS.driverCount;
+  }
+
+  function normalizeDuration(value) {
+    return clamp(safeInteger(value, DEFAULT_LOAD_OPTIONS.durationSeconds), 5, 600);
+  }
+
+  function normalizeMode(value) {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (['map+chat', 'map_chat', 'map-chat', 'chat'].includes(normalized)) return 'map_chat';
+    return 'map_core';
+  }
+
+  function normalizeLoadConfig(source) {
+    const config = source && typeof source === 'object' ? source : {};
+    const normalized = {};
+    const driverCount = pickFirst(config, ['driverCount', 'driver_count', 'drivers', 'config.driver_count', 'selected_preset']);
+    const durationSeconds = pickFirst(config, ['durationSeconds', 'duration_seconds', 'duration', 'config.duration_seconds']);
+    const mode = pickFirst(config, ['mode', 'scenario_mode', 'config.mode']);
+    const includePresenceWrites = pickFirst(config, ['includePresenceWrites', 'include_presence_writes', 'config.include_presence_writes']);
+    const includeViewportReads = pickFirst(config, ['includeViewportReads', 'include_viewport_reads', 'config.include_viewport_reads']);
+    const includeSummaryReads = pickFirst(config, ['includeSummaryReads', 'include_summary_reads', 'config.include_summary_reads']);
+    const includeDeltaReads = pickFirst(config, ['includeDeltaReads', 'include_delta_reads', 'config.include_delta_reads']);
+    const includePickupOverlayReads = pickFirst(config, ['includePickupOverlayReads', 'include_pickup_overlay_reads', 'config.include_pickup_overlay_reads']);
+    const includeLeaderboardReads = pickFirst(config, ['includeLeaderboardReads', 'include_leaderboard_reads', 'config.include_leaderboard_reads']);
+    const includeChatLite = pickFirst(config, ['includeChatLite', 'include_chat_lite', 'chat_lite_enabled', 'config.include_chat_lite']);
+
+    if (driverCount !== undefined) normalized.driverCount = normalizeDriverCount(driverCount);
+    if (durationSeconds !== undefined) normalized.durationSeconds = normalizeDuration(durationSeconds);
+    if (mode !== undefined) normalized.mode = normalizeMode(mode);
+    if (includePresenceWrites !== undefined) normalized.includePresenceWrites = !!includePresenceWrites;
+    if (includeViewportReads !== undefined) normalized.includeViewportReads = !!includeViewportReads;
+    if (includeSummaryReads !== undefined) normalized.includeSummaryReads = !!includeSummaryReads;
+    if (includeDeltaReads !== undefined) normalized.includeDeltaReads = !!includeDeltaReads;
+    if (includePickupOverlayReads !== undefined) normalized.includePickupOverlayReads = !!includePickupOverlayReads;
+    if (includeLeaderboardReads !== undefined) normalized.includeLeaderboardReads = !!includeLeaderboardReads;
+    if (includeChatLite !== undefined) normalized.includeChatLite = !!includeChatLite;
+    return normalized;
+  }
+
+  function buildLoadRequestBody(config) {
+    return {
+      driver_count: config.driverCount,
+      duration_seconds: config.durationSeconds,
+      mode: config.mode,
+      include_presence_writes: !!config.includePresenceWrites,
+      include_viewport_reads: !!config.includeViewportReads,
+      include_summary_reads: !!config.includeSummaryReads,
+      include_delta_reads: !!config.includeDeltaReads,
+      include_pickup_overlay_reads: !!config.includePickupOverlayReads,
+      include_leaderboard_reads: !!config.includeLeaderboardReads,
+      include_chat_lite: !!config.includeChatLite,
+    };
+  }
+
+  function pushReason(target, value) {
+    toArray(value).forEach((entry) => {
+      const text = String(entry && typeof entry === 'object'
+        ? entry.reason || entry.message || entry.summary || JSON.stringify(entry)
+        : entry || '').trim();
+      if (text) target.push(text);
+    });
+  }
+
+  function collectReasons(raw, status) {
+    const reasons = [];
+    pushReason(reasons, pickFirst(raw, ['summary.top_reasons', 'top_reasons', 'reasons', 'failure_reasons', 'debug.reasons', 'debug.failure_reasons']));
+
+    const checks = toArray(pickFirst(raw, ['checks', 'summary.checks', 'debug.checks']));
+    checks.forEach((check) => {
+      if (!check || typeof check !== 'object') return;
+      const checkStatus = normalizeStatus(check.status || check.result);
+      if (checkStatus === 'fail' || check.failed === true) {
+        const label = check.label || check.name || check.metric || 'Check';
+        const message = check.reason || check.message || check.summary || `${label} exceeded threshold.`;
+        pushReason(reasons, `${label}: ${message}`);
+      }
+    });
+
+    if (!reasons.length && normalizeStatus(status) === 'pass') {
+      pushReason(reasons, pickFirst(raw, ['summary.pass_reasons', 'summary.notes', 'notes']));
+    }
+
+    return [...new Set(reasons)].slice(0, 6);
+  }
+
+  function collectMetrics(raw, config) {
+    const metrics = [];
+    const add = (label, value, formatter) => {
+      if (value === undefined || value === null || value === '') return;
+      metrics.push({ label, value: formatter ? formatter(value) : String(value) });
+    };
+
+    add('Driver count', pickFirst(raw, ['driver_count', 'drivers', 'config.driver_count', 'summary.driver_count']) ?? config.driverCount);
+    add('Duration', pickFirst(raw, ['duration_seconds', 'config.duration_seconds', 'summary.duration_seconds']) ?? config.durationSeconds, formatDuration);
+    add('Total operations', pickFirst(raw, ['total_operations', 'summary.total_operations', 'metrics.total_operations', 'debug.total_operations']));
+    add('Error rate', pickFirst(raw, ['error_rate', 'summary.error_rate', 'metrics.error_rate', 'debug.error_rate']), formatPercent);
+    add('Presence write p50', pickFirst(raw, ['presence_write_p50_ms', 'metrics.presence_write.p50_ms', 'debug.presence_write.p50_ms']), formatLatency);
+    add('Presence write p95', pickFirst(raw, ['presence_write_p95_ms', 'metrics.presence_write.p95_ms', 'debug.presence_write.p95_ms']), formatLatency);
+    add('Viewport read p50', pickFirst(raw, ['viewport_read_p50_ms', 'metrics.viewport_read.p50_ms', 'debug.viewport_read.p50_ms']), formatLatency);
+    add('Viewport read p95', pickFirst(raw, ['viewport_read_p95_ms', 'metrics.viewport_read.p95_ms', 'debug.viewport_read.p95_ms']), formatLatency);
+    add('Summary read p50', pickFirst(raw, ['summary_read_p50_ms', 'metrics.summary_read.p50_ms', 'debug.summary_read.p50_ms']), formatLatency);
+    add('Summary read p95', pickFirst(raw, ['summary_read_p95_ms', 'metrics.summary_read.p95_ms', 'debug.summary_read.p95_ms']), formatLatency);
+    add('Delta read p50', pickFirst(raw, ['delta_read_p50_ms', 'metrics.delta_read.p50_ms', 'debug.delta_read.p50_ms']), formatLatency);
+    add('Delta read p95', pickFirst(raw, ['delta_read_p95_ms', 'metrics.delta_read.p95_ms', 'debug.delta_read.p95_ms']), formatLatency);
+    add('Chat p50', pickFirst(raw, ['chat_p50_ms', 'metrics.chat.p50_ms', 'debug.chat.p50_ms', 'metrics.chat_lite.p50_ms']), formatLatency);
+    add('Chat p95', pickFirst(raw, ['chat_p95_ms', 'metrics.chat.p95_ms', 'debug.chat.p95_ms', 'metrics.chat_lite.p95_ms']), formatLatency);
+    add('Memory growth', pickFirst(raw, ['memory_growth_bytes', 'metrics.memory_growth_bytes', 'debug.memory_growth_bytes', 'memory.growth_bytes']), formatBytes);
+
+    return metrics;
+  }
+
+  function buildLoadSummary(normalized) {
+    const reasons = normalized.reasons.length ? normalized.reasons : ['No detailed reasons returned.'];
+    const metricLines = normalized.metrics.slice(0, 6).map((metric) => `${metric.label}: ${metric.value}`);
+    return [
+      `Status: ${formatLoadStatus(normalized.status)}`,
+      `Preset: ${normalized.config.driverCount} drivers`,
+      `Duration: ${normalized.config.durationSeconds}s`,
+      `Mode: ${normalized.config.mode === 'map_chat' ? 'Map + Chat' : 'Map Core'}`,
+      `Summary: ${normalized.summary}`,
+      `Reasons: ${reasons.join(' | ')}`,
+      metricLines.length ? `Metrics: ${metricLines.join(' | ')}` : 'Metrics: none returned',
+    ].join('\n');
+  }
+
+  function normalizeLoadResponse(payload, fallbackConfig) {
+    const raw = payload && typeof payload === 'object' ? payload : {};
+    const status = normalizeStatus(pickFirst(raw, ['status', 'state', 'result.status', 'run.status']) || 'idle');
+    const config = {
+      ...DEFAULT_LOAD_OPTIONS,
+      ...fallbackConfig,
+      ...normalizeLoadConfig(raw),
+    };
+    const progressValue = pickFirst(raw, ['progress_percent', 'progress.percent', 'run.progress_percent', 'result.progress_percent']);
+    const elapsedValue = pickFirst(raw, ['elapsed_seconds', 'elapsed', 'run.elapsed_seconds', 'result.elapsed_seconds']);
+    const summaryLine = pickFirst(raw, ['summary.line', 'summary.text', 'summary', 'message', 'detail']) || '';
+    const reasons = collectReasons(raw, status);
+    const metrics = collectMetrics(raw, config);
+    const summary = typeof summaryLine === 'string' && summaryLine.trim()
+      ? summaryLine.trim()
+      : normalizeStatus(status) === 'pass'
+        ? `PASS — all enabled checks stayed within thresholds for ${config.driverCount} drivers.`
+        : normalizeStatus(status) === 'fail'
+          ? `FAIL — one or more enabled checks exceeded thresholds at the ${config.driverCount}-driver preset.`
+          : normalizeStatus(status) === 'running'
+            ? `Running synthetic load test for ${config.driverCount} drivers.`
+            : normalizeStatus(status) === 'stopped'
+              ? 'Load test was stopped before completion.'
+              : normalizeStatus(status) === 'error'
+                ? 'Backend returned an error for the synthetic load test.'
+                : 'No synthetic load test has been started yet.';
+
+    return {
+      raw,
+      status,
+      active: isActiveLoadStatus(status),
+      unsupported: status === 'unsupported' || raw.supported === false || raw.available === false,
+      progressPercent: clamp(safeNumber(progressValue, status === 'pass' || status === 'fail' ? 100 : 0), 0, 100),
+      elapsedSeconds: safeNumber(elapsedValue, 0),
+      summary,
+      reasons,
+      metrics,
+      debug: pickFirst(raw, ['debug', 'result.debug']) ?? raw,
+      config,
+      errorMessage: pickFirst(raw, ['error', 'message']) || '',
+      checks: toArray(pickFirst(raw, ['checks', 'summary.checks', 'debug.checks'])),
+      updatedAt: Date.now(),
+    };
   }
 
   function parsePickupHotspotResult(response) {
@@ -308,6 +606,363 @@
     return { ok: false, data: { message: 'Client test not implemented.' } };
   }
 
+  function renderLoadTestSection(container, helpers, c) {
+    const state = {
+      enabled: false,
+      busy: false,
+      copyMessage: '',
+      errorMessage: '',
+      capabilityMessage: '',
+      unsupported: false,
+      loadData: normalizeLoadResponse({}, DEFAULT_LOAD_OPTIONS),
+      config: { ...DEFAULT_LOAD_OPTIONS },
+      pollTimer: null,
+      destroyed: false,
+      pollInFlight: false,
+    };
+
+    function clearPollTimer() {
+      if (state.pollTimer) {
+        clearInterval(state.pollTimer);
+        state.pollTimer = null;
+      }
+    }
+
+    function cleanup() {
+      state.destroyed = true;
+      clearPollTimer();
+    }
+
+    helpers?.registerCleanup?.(cleanup);
+
+    function shouldPoll() {
+      return !state.destroyed && !state.unsupported && (state.enabled || state.loadData.active);
+    }
+
+    async function fetchCapabilities() {
+      try {
+        const payload = await helpers.request('/admin/tests/load/capabilities');
+        const supported = pickFirst(payload || {}, ['supported', 'available']);
+        if (supported === false) {
+          state.unsupported = true;
+          state.capabilityMessage = pickFirst(payload || {}, ['message', 'error']) || 'Synthetic load testing is not available on this backend.';
+        }
+        const defaults = normalizeLoadConfig(payload?.defaults || payload?.default_config || payload || {});
+        state.config = { ...state.config, ...defaults };
+        state.loadData = normalizeLoadResponse(
+          pickFirst(payload || {}, ['active_run', 'current_run', 'last_result', 'last_completed_result', 'result']) || payload || {},
+          state.config,
+        );
+        if (pickFirst(payload || {}, ['active_run', 'current_run'])) {
+          state.loadData = normalizeLoadResponse(pickFirst(payload, ['active_run', 'current_run']), state.config);
+        }
+        if (state.loadData.active) state.enabled = true;
+      } catch (error) {
+        const message = error?.message || 'Failed to load load-test capabilities.';
+        if (/404|405/i.test(message)) {
+          state.unsupported = true;
+          state.capabilityMessage = 'Synthetic load-test endpoints are not available yet on this backend.';
+        } else {
+          state.errorMessage = message;
+        }
+      }
+      if (state.destroyed) return;
+      render();
+      syncPolling();
+    }
+
+    async function fetchStatus() {
+      if (state.pollInFlight || state.destroyed || state.unsupported) return;
+      state.pollInFlight = true;
+      try {
+        const payload = await helpers.request('/admin/tests/load/status');
+        const next = normalizeLoadResponse(payload, state.config);
+        if (state.destroyed) return;
+        state.loadData = next;
+        state.errorMessage = '';
+        if (state.destroyed) return;
+      } catch (error) {
+        state.errorMessage = error?.message || 'Failed to refresh load-test status.';
+      } finally {
+        state.pollInFlight = false;
+        render();
+        syncPolling();
+      }
+    }
+
+    function syncPolling() {
+      if (shouldPoll()) {
+        if (!state.pollTimer) {
+          state.pollTimer = setInterval(() => {
+            fetchStatus();
+          }, LOAD_POLL_MS);
+        }
+      } else {
+        clearPollTimer();
+      }
+    }
+
+    async function startLoadTest() {
+      state.busy = true;
+      state.errorMessage = '';
+      state.copyMessage = '';
+      render();
+      try {
+        const payload = await helpers.request('/admin/tests/load/start', {
+          method: 'POST',
+          body: buildLoadRequestBody(state.config),
+        });
+        const next = normalizeLoadResponse(payload, state.config);
+        if (state.destroyed) return;
+        state.loadData = next;
+        if (!next.active && normalizeStatus(next.status) !== 'running' && /active/i.test(next.errorMessage || next.summary)) {
+          state.errorMessage = next.errorMessage || next.summary;
+        } else {
+          state.enabled = true;
+        }
+      } catch (error) {
+        state.errorMessage = error?.message || 'Failed to start synthetic load test.';
+      } finally {
+        state.busy = false;
+        render();
+        fetchStatus();
+        syncPolling();
+      }
+    }
+
+    async function stopLoadTest() {
+      state.busy = true;
+      state.errorMessage = '';
+      state.copyMessage = '';
+      render();
+      try {
+        const payload = await helpers.request('/admin/tests/load/stop', {
+          method: 'POST',
+          body: {},
+        });
+        const next = normalizeLoadResponse(payload, state.config);
+        if (state.destroyed) return;
+        state.loadData = next;
+      } catch (error) {
+        state.errorMessage = error?.message || 'Failed to stop synthetic load test.';
+      } finally {
+        state.busy = false;
+        render();
+        fetchStatus();
+        syncPolling();
+      }
+    }
+
+    function toggleOption(name) {
+      state.config[name] = !state.config[name];
+      render();
+      syncPolling();
+    }
+
+    function renderMetricGrid() {
+      if (!state.loadData.metrics.length) {
+        return '<div class="adminMuted">No load metrics returned yet.</div>';
+      }
+      return `<div class="adminGrid two adminLoadMetrics">${state.loadData.metrics.map((metric) => c.statCard ? c.statCard(metric.label, metric.value) : `<div class="adminCard"><div class="adminCardLabel">${c.esc(metric.label)}</div><div class="adminCardValue">${c.esc(metric.value)}</div></div>`).join('')}</div>`;
+    }
+
+    function renderChecks() {
+      if (!state.loadData.checks.length) return '';
+      return `
+        <div class="adminSection adminLoadChecks">
+          <h4>Checks</h4>
+          <div class="adminListMini">
+            ${state.loadData.checks.slice(0, 8).map((check) => {
+              const label = check?.label || check?.name || check?.metric || 'Check';
+              const value = check?.reason || check?.message || check?.summary || check?.status || check?.result || 'No detail';
+              return `<div class="adminKV"><span>${c.esc(label)}</span><strong>${c.esc(String(value))}</strong></div>`;
+            }).join('')}
+          </div>
+        </div>
+      `;
+    }
+
+    function render() {
+      const mount = container.querySelector('#adminSyntheticLoadMount');
+      if (!mount || state.destroyed) return;
+      const controlsVisible = state.enabled || state.loadData.active;
+      const active = state.loadData.active;
+      const progressWidth = `${clamp(state.loadData.progressPercent, 0, 100)}%`;
+      const statusLabel = formatLoadStatus(state.loadData.status);
+      const resultTone = loadTone(state.loadData.status);
+      const reasons = state.loadData.reasons.length ? state.loadData.reasons : [state.loadData.summary];
+      const summaryText = buildLoadSummary(state.loadData);
+      const debugJson = JSON.stringify(state.loadData.debug ?? state.loadData.raw ?? null, null, 2);
+
+      mount.innerHTML = `
+        <section class="adminSection adminLoadSection">
+          <div class="adminSectionHead wrap">
+            <div>
+              <h4>Synthetic Load Test</h4>
+              <div class="adminMuted">Admin-only synthetic benchmark. Runs on the server. Does not create real subscribers.</div>
+            </div>
+            ${c.badge ? c.badge(statusLabel, resultTone) : ''}
+          </div>
+
+          <label class="adminLoadToggleRow">
+            <span>
+              <strong>Enable Load Test Controls</strong>
+              <span class="adminMuted adminLoadSafety">This creates temporary synthetic server load.</span>
+            </span>
+            <input type="checkbox" class="adminLoadToggleInput" id="adminLoadEnableToggle" ${state.enabled ? 'checked' : ''} ${state.unsupported ? 'disabled' : ''}>
+          </label>
+
+          ${state.unsupported ? `<div class="adminError">${c.esc(state.capabilityMessage || 'Synthetic load testing is unavailable.')}</div>` : ''}
+          ${state.errorMessage ? `<div class="adminError">${c.esc(state.errorMessage)}</div>` : ''}
+          ${state.copyMessage ? `<div class="adminLoading">${c.esc(state.copyMessage)}</div>` : ''}
+
+          ${controlsVisible ? `
+            <div class="adminLoadControls">
+              <div>
+                <div class="adminCardLabel">Driver preset</div>
+                <div class="adminRow wrap adminLoadPresetRow">
+                  ${LOAD_PRESETS.map((preset) => `<button type="button" class="adminToggleBtn${state.config.driverCount === preset ? ' active' : ''}" data-load-preset="${preset}" ${active || state.busy ? 'disabled' : ''}>${preset} drivers</button>`).join('')}
+                </div>
+              </div>
+
+              <details class="adminDetails adminLoadAdvanced">
+                <summary>Advanced options</summary>
+                <div class="adminDetailsBody">
+                  <div class="adminRow wrap adminLoadFieldRow">
+                    <label class="adminLoadField">
+                      <span>Duration seconds</span>
+                      <input class="adminInput" type="number" min="5" max="600" step="5" id="adminLoadDuration" value="${c.esc(state.config.durationSeconds)}" ${active || state.busy ? 'disabled' : ''}>
+                    </label>
+                    <label class="adminLoadField">
+                      <span>Mode</span>
+                      <select class="adminInput" id="adminLoadMode" ${active || state.busy ? 'disabled' : ''}>
+                        <option value="map_core" ${state.config.mode === 'map_core' ? 'selected' : ''}>Map Core</option>
+                        <option value="map_chat" ${state.config.mode === 'map_chat' ? 'selected' : ''}>Map + Chat</option>
+                      </select>
+                    </label>
+                  </div>
+                  <div class="adminControlGrid adminLoadCheckboxGrid">
+                    ${[
+                      ['includePresenceWrites', 'Include presence writes'],
+                      ['includeViewportReads', 'Include viewport reads'],
+                      ['includeSummaryReads', 'Include summary reads'],
+                      ['includeDeltaReads', 'Include delta reads'],
+                      ['includePickupOverlayReads', 'Include pickup overlay reads'],
+                      ['includeLeaderboardReads', 'Include leaderboard reads'],
+                      ['includeChatLite', 'Include chat-lite'],
+                    ].map(([key, label]) => `<button type="button" class="adminToggleBtn${state.config[key] ? ' active' : ''}" data-load-option="${key}" ${active || state.busy ? 'disabled' : ''}>${c.esc(label)}</button>`).join('')}
+                  </div>
+                </div>
+              </details>
+
+              <div class="adminRow wrap adminLoadActionRow">
+                <button type="button" class="adminBtn" id="adminLoadStartBtn" ${(active || state.busy || state.unsupported) ? 'disabled' : ''}>Start Load Test</button>
+                <button type="button" class="adminBtn danger" id="adminLoadStopBtn" ${(!active || state.busy || state.unsupported) ? 'disabled' : ''}>Stop</button>
+              </div>
+            </div>
+          ` : '<div class="adminMuted">Enable the toggle to configure a server-side synthetic load run. Status stays visible while a run is active.</div>'}
+
+          <div class="adminLoadStatusCard adminLoadStatus-${c.esc(normalizeStatus(state.loadData.status))}">
+            <div class="adminRowBetween adminLoadStatusHead">
+              <strong>${c.esc(statusLabel)}</strong>
+              <span class="adminMuted">Elapsed ${c.esc(formatDuration(state.loadData.elapsedSeconds))}</span>
+            </div>
+            <div class="adminMuted">${c.esc(state.loadData.summary)}</div>
+            <div class="adminRow wrap adminLoadMetaRow">
+              ${c.badge ? c.badge(`${state.loadData.config.driverCount} drivers`, 'muted') : ''}
+              ${c.badge ? c.badge(state.loadData.config.mode === 'map_chat' ? 'Map + Chat' : 'Map Core', 'muted') : ''}
+              ${c.badge ? c.badge(`${Math.round(state.loadData.progressPercent)}% progress`, active ? 'warn' : resultTone) : ''}
+            </div>
+            <div class="adminLoadProgress" role="progressbar" aria-valuenow="${Math.round(state.loadData.progressPercent)}" aria-valuemin="0" aria-valuemax="100">
+              <span style="width:${progressWidth}"></span>
+            </div>
+          </div>
+
+          <div class="adminLoadResultCard adminLoadResult-${c.esc(resultTone)}">
+            <div class="adminLoadResultBadge">${c.esc(statusLabel)}</div>
+            <div class="adminLoadResultSummary">${c.esc(state.loadData.summary)}</div>
+            <ul class="adminLoadReasonList">
+              ${reasons.map((reason) => `<li>${c.esc(reason)}</li>`).join('')}
+            </ul>
+          </div>
+
+          <div class="adminSection adminLoadMetricsSection">
+            <h4>Metrics</h4>
+            ${renderMetricGrid()}
+          </div>
+
+          ${renderChecks()}
+
+          <div class="adminSection">
+            <div class="adminSectionHead wrap">
+              <h4>Copyable output</h4>
+              <div class="adminRow wrap adminLoadCopyRow">
+                <button type="button" class="adminBtn" id="adminLoadCopySummaryBtn">Copy Summary</button>
+                <button type="button" class="adminBtn" id="adminLoadCopyDebugBtn">Copy Debug JSON</button>
+              </div>
+            </div>
+            <div class="adminMuted">Copy the summary for a readable report or the raw debug JSON for deeper analysis.</div>
+            ${c.collapsible ? c.collapsible('Raw Debug JSON', `<pre class="adminPre adminLoadDebugPre">${c.esc(debugJson)}</pre>`, 'adminRawResponse') : `<pre class="adminPre adminLoadDebugPre">${c.esc(debugJson)}</pre>`}
+          </div>
+        </section>
+      `;
+
+      container.querySelector('#adminLoadEnableToggle')?.addEventListener('change', (event) => {
+        state.enabled = !!event.currentTarget.checked;
+        state.copyMessage = '';
+        render();
+        syncPolling();
+      });
+
+      container.querySelectorAll('[data-load-preset]').forEach((button) => {
+        button.addEventListener('click', () => {
+          state.config.driverCount = normalizeDriverCount(button.dataset.loadPreset);
+          render();
+        });
+      });
+
+      container.querySelectorAll('[data-load-option]').forEach((button) => {
+        button.addEventListener('click', () => toggleOption(button.dataset.loadOption));
+      });
+
+      container.querySelector('#adminLoadDuration')?.addEventListener('change', (event) => {
+        state.config.durationSeconds = normalizeDuration(event.currentTarget.value);
+        render();
+      });
+
+      container.querySelector('#adminLoadMode')?.addEventListener('change', (event) => {
+        state.config.mode = normalizeMode(event.currentTarget.value);
+        render();
+      });
+
+      container.querySelector('#adminLoadStartBtn')?.addEventListener('click', () => startLoadTest());
+      container.querySelector('#adminLoadStopBtn')?.addEventListener('click', () => stopLoadTest());
+
+      container.querySelector('#adminLoadCopySummaryBtn')?.addEventListener('click', async () => {
+        try {
+          await copyText(summaryText);
+          state.copyMessage = 'Copied summary to clipboard.';
+        } catch (error) {
+          state.copyMessage = error?.message || 'Unable to copy summary.';
+        }
+        render();
+      });
+
+      container.querySelector('#adminLoadCopyDebugBtn')?.addEventListener('click', async () => {
+        try {
+          await copyText(debugJson);
+          state.copyMessage = 'Copied debug JSON to clipboard.';
+        } catch (error) {
+          state.copyMessage = error?.message || 'Unable to copy debug JSON.';
+        }
+        render();
+      });
+    }
+
+    render();
+    fetchCapabilities();
+  }
+
   function renderAdminTests(container, _payload, helpers) {
     const c = helpers?.components || window.AdminComponents;
     const resultState = {};
@@ -333,6 +988,7 @@
     `).join('');
 
     container.innerHTML = `
+      <div id="adminSyntheticLoadMount"></div>
       <div class="adminSection">
         <div class="adminSectionHead wrap">
           <h4>System Tests</h4>
@@ -344,8 +1000,10 @@
       <div id="adminPickupRecordingSuiteMount"></div>
     `;
 
-    const pickupSuiteMount = container.querySelector("#adminPickupRecordingSuiteMount");
-    if (pickupSuiteMount && window.PickupRecordingFeature && typeof window.PickupRecordingFeature.mountAdminPickupRecordingTests === "function") {
+    renderLoadTestSection(container, helpers, c);
+
+    const pickupSuiteMount = container.querySelector('#adminPickupRecordingSuiteMount');
+    if (pickupSuiteMount && window.PickupRecordingFeature && typeof window.PickupRecordingFeature.mountAdminPickupRecordingTests === 'function') {
       window.PickupRecordingFeature.mountAdminPickupRecordingTests(pickupSuiteMount, helpers);
     }
 
