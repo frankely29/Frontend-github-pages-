@@ -113,10 +113,13 @@
   function renderWorkBattlesPane() {
     const host = document.getElementById('gameHubWorkBattlesMount');
     if (!host) return;
-    const profileTarget = state.pendingProfileTarget;
+    const profileTarget = state.pendingProfileTarget || window.WorkBattlesUI?.getPendingProfileTarget?.() || null;
     state.pendingProfileTarget = null;
     if (window.WorkBattlesUI?.mount) {
       window.WorkBattlesUI.mount(host, profileTarget ? { profileTarget } : {});
+      if (profileTarget) {
+        window.WorkBattlesUI?.clearPendingProfileTarget?.();
+      }
     } else {
       host.innerHTML = '<div class="gameHubStatus">Work Battles is unavailable right now.</div>';
     }

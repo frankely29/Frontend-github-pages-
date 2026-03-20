@@ -581,25 +581,34 @@
     }
   }
 
+  function normalizeProfileTarget(profileTarget) {
+    if (!profileTarget || typeof profileTarget !== 'object') return null;
+    const numericId = Number(profileTarget.userId);
+    if (!Number.isFinite(numericId) || numericId <= 0) return null;
+    return {
+      userId: numericId,
+      displayName: String(profileTarget.displayName || `Driver ${numericId}`).trim() || `Driver ${numericId}`,
+      avatarUrl: String(profileTarget.avatarUrl || ''),
+      online: !!profileTarget.online,
+      rankIcon: String(profileTarget.rankIcon || ''),
+      level: Number(profileTarget.level || 0) || 0,
+    };
+  }
+
+  function applyProfileTarget(profileTarget) {
+    const normalizedTarget = normalizeProfileTarget(profileTarget);
+    if (!normalizedTarget) return false;
+    state.pendingProfileTarget = normalizedTarget;
+    state.selectedUser = normalizedTarget;
+    state.activeTab = 'create';
+    return true;
+  }
+
   function mount(containerEl, options = {}) {
     if (containerEl instanceof HTMLElement) state.mountRoot = containerEl;
     if (!state.mountRoot) return;
-    const profileTarget = options?.profileTarget;
-    if (profileTarget && typeof profileTarget === 'object') {
-      const numericId = Number(profileTarget.userId);
-      if (Number.isFinite(numericId) && numericId > 0) {
-        state.pendingProfileTarget = {
-          userId: numericId,
-          displayName: String(profileTarget.displayName || `Driver ${numericId}`).trim() || `Driver ${numericId}`,
-          avatarUrl: String(profileTarget.avatarUrl || ''),
-          online: !!profileTarget.online,
-          rankIcon: String(profileTarget.rankIcon || ''),
-          level: Number(profileTarget.level || 0) || 0,
-        };
-        state.selectedUser = state.pendingProfileTarget;
-        state.activeTab = 'create';
-      }
-    }
+    const profileTarget = options?.profileTarget || getPendingProfileTarget();
+    applyProfileTarget(profileTarget);
     render();
     if (!state.lastRefreshAt || (Date.now() - state.lastRefreshAt) > REFRESH_POLL_MS) {
       void refresh({ silent: false, forceUsers: !state.users.length || !!state.pendingProfileTarget });
@@ -651,22 +660,24 @@
   }
 
   function openForProfileTarget({ userId, displayName } = {}) {
-    const numericId = Number(userId);
-    if (!Number.isFinite(numericId) || numericId <= 0) {
-      openHub();
-      return;
-    }
-    state.pendingProfileTarget = {
-      userId: numericId,
-      displayName: String(displayName || `Driver ${numericId}`).trim() || `Driver ${numericId}`,
+    const profileTarget = normalizeProfileTarget({
+      userId,
+      displayName,
       avatarUrl: '',
       online: false,
       rankIcon: '',
       level: 0,
-    };
-    state.selectedUser = state.pendingProfileTarget;
-    state.activeTab = 'create';
-    openHub({ profileTarget: state.pendingProfileTarget });
+    });
+    if (profileTarget) {
+      state.pendingProfileTarget = profileTarget;
+      state.selectedUser = profileTarget;
+      state.activeTab = 'create';
+      if (window.GameHubUI?.open) {
+        window.GameHubUI.open({ initialTab: 'work-battles', profileTarget: { userId: profileTarget.userId, displayName: profileTarget.displayName } });
+        return;
+      }
+    }
+    openHub({ profileTarget: profileTarget || state.pendingProfileTarget });
   }
 
   function getPendingProfileTarget() {
