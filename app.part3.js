@@ -15,25 +15,30 @@
     return null;
   }
 
-  const RANK_LADDER_FALLBACK = [
-    { start_level: 1, end_level: 4, rank_name: 'Recruit', rank_icon_key: 'recruit' },
-    { start_level: 5, end_level: 8, rank_name: 'Private', rank_icon_key: 'private' },
-    { start_level: 9, end_level: 12, rank_name: 'Corporal', rank_icon_key: 'corporal' },
-    { start_level: 13, end_level: 16, rank_name: 'Sergeant', rank_icon_key: 'sergeant' },
-    { start_level: 17, end_level: 20, rank_name: 'Staff Sergeant', rank_icon_key: 'staff_sergeant' },
-    { start_level: 21, end_level: 24, rank_name: 'Sergeant First Class', rank_icon_key: 'sergeant_first_class' },
-    { start_level: 25, end_level: 28, rank_name: 'Master Sergeant', rank_icon_key: 'master_sergeant' },
-    { start_level: 29, end_level: 32, rank_name: 'Lieutenant', rank_icon_key: 'lieutenant' },
-    { start_level: 33, end_level: 36, rank_name: 'Captain', rank_icon_key: 'captain' },
-    { start_level: 37, end_level: 40, rank_name: 'Major', rank_icon_key: 'major' },
-    { start_level: 41, end_level: 44, rank_name: 'Colonel', rank_icon_key: 'colonel' },
-    { start_level: 45, end_level: 52, rank_name: 'Brigadier', rank_icon_key: 'brigadier' },
-    { start_level: 53, end_level: 60, rank_name: 'Major General', rank_icon_key: 'major_general' },
-    { start_level: 61, end_level: 70, rank_name: 'Lieutenant General', rank_icon_key: 'lieutenant_general' },
-    { start_level: 71, end_level: 82, rank_name: 'General', rank_icon_key: 'general' },
-    { start_level: 83, end_level: 92, rank_name: 'Commander', rank_icon_key: 'commander' },
-    { start_level: 93, end_level: 100, rank_name: 'Road Legend', rank_icon_key: 'road_legend' },
-  ];
+  const RANK_BAND_SIZE = 10;
+  const RANK_LADDER_MAX_LEVEL = 1000;
+  const RANK_LADDER_BAND_TITLES = ['Recruit', 'Runner', 'Courier', 'Navigator', 'Pilot', 'Sentinel', 'Captain', 'Marshal', 'Commander', 'Legend'];
+  const RANK_LADDER_BAND_PREFIXES = ['Bronze', 'Copper', 'Iron', 'Steel', 'Silver', 'Gold', 'Platinum', 'Diamond', 'Obsidian', 'Celestial'];
+
+  function createRankLadderFallback() {
+    const rows = [];
+    const totalBands = Math.ceil(RANK_LADDER_MAX_LEVEL / RANK_BAND_SIZE);
+    for (let band = 1; band <= totalBands; band += 1) {
+      const startLevel = ((band - 1) * RANK_BAND_SIZE) + 1;
+      const endLevel = Math.min(RANK_LADDER_MAX_LEVEL, band * RANK_BAND_SIZE);
+      const familyIndex = (band - 1) % RANK_LADDER_BAND_TITLES.length;
+      const tierIndex = Math.floor((band - 1) / RANK_LADDER_BAND_TITLES.length) % RANK_LADDER_BAND_PREFIXES.length;
+      rows.push({
+        start_level: startLevel,
+        end_level: endLevel,
+        rank_name: `${RANK_LADDER_BAND_PREFIXES[tierIndex]} ${RANK_LADDER_BAND_TITLES[familyIndex]}`,
+        rank_icon_key: `band_${String(band).padStart(3, '0')}`,
+      });
+    }
+    return rows;
+  }
+
+  const RANK_LADDER_FALLBACK = createRankLadderFallback();
 
   const state = {
     metric: 'miles',

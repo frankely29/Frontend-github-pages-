@@ -956,6 +956,51 @@ html, body { height: 100%; margin: 0; padding: 0; }
     .gamesUnoHand{ display:flex; gap:6px; overflow-x:auto; padding-bottom:4px; }
     .gamesUnoColorPick{ display:flex; gap:6px; flex-wrap:wrap; margin-top:4px; }
     .gamesMiniLabel{ font:800 11px/1.2 system-ui; opacity:.8; }
+    .gamesModeTabs .chipBtn{ flex:1 1 0; justify-content:center; }
+    .gamesBattleTabs{ display:flex; gap:6px; flex-wrap:wrap; }
+    .gamesBattleTabs.hidden,.gamesTabs.hidden{ display:none; }
+    .gamesBattleColumns{ display:flex; flex-direction:column; gap:10px; }
+    .gamesBattlePanel{ display:flex; flex-direction:column; gap:8px; background:rgba(255,255,255,.74); border:1px solid rgba(15,23,42,.08); border-radius:14px; padding:10px; }
+    .gamesSectionHeader{ font:900 11px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial; text-transform:uppercase; letter-spacing:.4px; color:#334155; }
+    .gamesChallengeComposer{ display:flex; flex-direction:column; gap:8px; }
+    .gamesComposerInput{ width:100%; box-sizing:border-box; }
+    .gamesMiniTabs .chipBtn{ flex:1 1 0; justify-content:center; }
+    .gamesBattleList{ display:flex; flex-direction:column; gap:8px; }
+    .gamesBattleCard{ border:1px solid rgba(14,165,233,.18); border-radius:12px; padding:10px; background:linear-gradient(180deg,rgba(248,250,252,.98),rgba(239,246,255,.92)); display:flex; flex-direction:column; gap:6px; }
+    .gamesBattleCard.compact.win{ border-color:rgba(34,197,94,.32); }
+    .gamesBattleCard.compact.loss{ border-color:rgba(239,68,68,.28); }
+    .gamesBattleTitle{ font:900 13px/1.25 system-ui,-apple-system,Segoe UI,Roboto,Arial; color:#0f172a; }
+    .gamesBattleMeta{ font:800 11px/1.25 system-ui,-apple-system,Segoe UI,Roboto,Arial; color:#475569; }
+    .gamesBattleReward{ font:900 11px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial; color:#0369a1; }
+    .gamesActionRow{ display:flex; gap:8px; flex-wrap:wrap; }
+    .miniChip{ min-height:28px; padding:5px 8px; font-size:10px; }
+    .gamesBattleArena{ display:flex; flex-direction:column; gap:10px; background:rgba(255,255,255,.78); border:1px solid rgba(0,0,0,.08); border-radius:14px; padding:10px; }
+    .gamesBattleTopline{ display:flex; align-items:center; justify-content:space-between; gap:8px; }
+    .gamesBattleResult{ border-radius:12px; background:rgba(15,23,42,.06); padding:10px; font:900 12px/1.35 system-ui,-apple-system,Segoe UI,Roboto,Arial; color:#0f172a; }
+    .gamesDominoBoard{ display:flex; gap:6px; overflow-x:auto; padding-bottom:4px; min-height:62px; }
+    .gamesDominoBoardTile{ flex:0 0 auto; }
+    .gamesDominoHand{ display:flex; gap:8px; overflow-x:auto; padding-bottom:6px; }
+    .gamesDominoTileWrap{ display:flex; flex-direction:column; gap:6px; align-items:center; }
+    .gamesDominoActions{ display:flex; gap:6px; }
+    .gamesDominoTile{ border:0; background:transparent; padding:0; cursor:default; min-width:44px; }
+    .gamesDominoTile svg{ width:42px; height:84px; display:block; filter:drop-shadow(0 4px 10px rgba(15,23,42,.12)); }
+    .gamesDominoTile.playable{ cursor:pointer; transform:translateY(-2px); }
+    .gamesDominoTile.playable svg rect{ stroke:#0ea5e9; stroke-width:2; }
+    .gamesBilliardsCanvas{ width:100%; max-width:320px; border-radius:14px; background:#0a6b47; border:1px solid rgba(15,23,42,.14); box-shadow:inset 0 0 0 1px rgba(255,255,255,.12); }
+    .gamesBilliardsControls{ display:flex; flex-direction:column; gap:8px; }
+    .gamesControlLabel{ display:flex; flex-direction:column; gap:4px; font:800 11px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial; color:#334155; }
+    .battleFeedMsg{ border-color:rgba(14,165,233,.32); background:linear-gradient(180deg,rgba(8,47,73,.95),rgba(14,116,144,.92)); }
+    .battleFeedMsg .killFeedText{ color:#f0f9ff; }
+    .driverProfileBattleGrid{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+    .driverProfileBattleCard{ border:1px solid rgba(148,163,184,.26); background:rgba(248,250,252,.88); border-radius:14px; padding:10px; display:flex; flex-direction:column; gap:4px; }
+    .driverProfileBattleLabel{ font:800 10px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial; text-transform:uppercase; letter-spacing:.35px; color:#64748b; }
+    .driverProfileBattleValue{ font:900 16px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial; color:#0f172a; }
+    .driverProfileRecentBattles{ display:flex; flex-direction:column; gap:8px; }
+    .driverProfileRecentBattle{ border:1px solid rgba(148,163,184,.24); background:rgba(255,255,255,.92); border-radius:14px; padding:10px; display:flex; flex-direction:column; gap:4px; }
+    .driverProfileRecentBattle.win{ border-color:rgba(34,197,94,.25); }
+    .driverProfileRecentBattle.loss{ border-color:rgba(239,68,68,.22); }
+    .driverProfileRecentBattleTop{ display:flex; align-items:center; justify-content:space-between; gap:8px; font:900 12px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial; color:#0f172a; }
+    .driverProfileRecentBattleMeta{ font:800 11px/1.25 system-ui,-apple-system,Segoe UI,Roboto,Arial; color:#475569; }
 
     .leaderboardPanelWrap{ display:flex; flex-direction:column; gap:10px; }
     .leaderboardTabs{ display:flex; gap:6px; flex-wrap:wrap; }
