@@ -78,7 +78,7 @@ let firstUsableMapRecorded = false;
    ========================================================= */
 const PRESENCE_PUSH_MS = 8 * 1000; // send my location
 const PRESENCE_PULL_MS = 10 * 1000; // fetch all drivers
-const PRESENCE_STALE_SEC = 70; // hide if older than this
+const PRESENCE_STALE_SEC = 120; // fallback only; prefer backend stale_after_sec when available
 const PRESENCE_HIDDEN_POLL_MS = 30 * 1000;
 const PRESENCE_IDLE_POLL_MS = 15 * 1000;
 const PRESENCE_ACTIVE_POLL_MS = 10 * 1000;
@@ -1666,13 +1666,14 @@ dockDrawer?.addEventListener("click", (e) => e.stopPropagation());
 bindDrawerAutoMinimizeActivity();
 
 function musicPanelHTML() {
+  const isPlaying = (key) => radioPlaybackRuntime.isPlaying && radioPlaybackRuntime.activeStationKey === key;
   return `
     <div class="panelBlock">
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-        <button id="dockHot97Btn" class="chipBtn">${hot97Playing ? "⏸" : "▶"} HOT 97.1</button>
-        <button id="dockMegaBtn" class="chipBtn">${megaPlaying ? "⏸" : "▶"} La Mega 97.9</button>
-        <button id="dockKQBtn" class="chipBtn">${kqPlaying ? "⏸" : "▶"} KQ 94.5</button>
-        <button id="dockZ100Btn" class="chipBtn">${z100Playing ? "⏸" : "▶"} Z100</button>
+        <button id="dockHot97Btn" class="chipBtn">${isPlaying("hot97") ? "⏸" : "▶"} HOT 97.1</button>
+        <button id="dockMegaBtn" class="chipBtn">${isPlaying("mega979") ? "⏸" : "▶"} La Mega 97.9</button>
+        <button id="dockKQBtn" class="chipBtn">${isPlaying("kq945") ? "⏸" : "▶"} KQ 94.5</button>
+        <button id="dockZ100Btn" class="chipBtn">${isPlaying("z100") ? "⏸" : "▶"} Z100</button>
         <div style="margin-left:auto;font-weight:700;opacity:0.75;">${escapeHtml(radioStatusEl?.textContent || "Radio: off")}</div>
       </div>
     </div>
@@ -1686,25 +1687,25 @@ function wireMusicPanel() {
   const d = document.getElementById("dockZ100Btn");
   a?.addEventListener("click", async (e) => {
     e.preventDefault();
-    await toggleHot97();
+    await toggleRadioStation("hot97");
     openDrawer("music", "Music", musicPanelHTML());
     wireMusicPanel();
   });
   b?.addEventListener("click", async (e) => {
     e.preventDefault();
-    await toggleMega();
+    await toggleRadioStation("mega979");
     openDrawer("music", "Music", musicPanelHTML());
     wireMusicPanel();
   });
   c?.addEventListener("click", async (e) => {
     e.preventDefault();
-    await toggleKQ();
+    await toggleRadioStation("kq945");
     openDrawer("music", "Music", musicPanelHTML());
     wireMusicPanel();
   });
   d?.addEventListener("click", async (e) => {
     e.preventDefault();
-    await toggleZ100();
+    await toggleRadioStation("z100");
     openDrawer("music", "Music", musicPanelHTML());
     wireMusicPanel();
   });
@@ -3557,7 +3558,7 @@ function normalizePresenceRow(it, nowUnix) {
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
 
   const updated = Number(it?.updated_at_unix ?? it?.ts_unix ?? it?.updated_at ?? NaN);
-  if (Number.isFinite(updated) && nowUnix - updated > PRESENCE_STALE_SEC) return null;
+  if (Number.isFinite(updated) && nowUnix - updated > getPresenceStaleAfterSec()) return null;
 
   const reportedAccuracy = Number(it?.accuracy ?? it?.acc ?? NaN);
   if (Number.isFinite(reportedAccuracy) && reportedAccuracy > GPS_ACCURACY_THRESHOLD) return null;
@@ -3581,7 +3582,7 @@ function rebuildCachedPresenceRowsFromStore() {
   const rows = [];
   for (const [uid, row] of presenceStore.entries()) {
     const updated = Number(row?.updatedAt ?? NaN);
-    if (Number.isFinite(updated) && nowUnix - updated > PRESENCE_STALE_SEC) {
+    if (Number.isFinite(updated) && nowUnix - updated > getPresenceStaleAfterSec()) {
       presenceStore.delete(uid);
       continue;
     }
@@ -5940,32 +5941,67 @@ const KQ945_STREAM_URL = "https://radio.yaservers.com:9990/stream?icy=http";
 const KQ945_SITE_URL = "https://kq94.net/";
 const ALOFOKE993_STREAM_URL = "https://radiordomi.com:8566/stream";
 const Z100_STREAM_URL = "https://stream.revma.ihrhls.com/zc1469";
+const RADIO_RUNTIME_STORAGE_KEY = "tlc_radio_runtime_v1";
 
 const megaAudio = new Audio();
 megaAudio.src = MEGA979_STREAM_URL;
 megaAudio.preload = "none";
+megaAudio.crossOrigin = "anonymous";
+megaAudio.playsInline = true;
 
 const hot97Audio = new Audio();
 hot97Audio.src = HOT97_STREAM_URL;
 hot97Audio.preload = "none";
+hot97Audio.crossOrigin = "anonymous";
+hot97Audio.playsInline = true;
 
 const kqAudio = new Audio();
 kqAudio.src = KQ945_STREAM_URL;
 kqAudio.preload = "none";
+kqAudio.crossOrigin = "anonymous";
+kqAudio.playsInline = true;
 
 const alofoke993Audio = new Audio();
 alofoke993Audio.src = ALOFOKE993_STREAM_URL;
 alofoke993Audio.preload = "none";
+alofoke993Audio.crossOrigin = "anonymous";
+alofoke993Audio.playsInline = true;
 
 const z100Audio = new Audio();
 z100Audio.src = Z100_STREAM_URL;
 z100Audio.preload = "none";
+z100Audio.crossOrigin = "anonymous";
+z100Audio.playsInline = true;
 
-let megaPlaying = false;
-let hot97Playing = false;
-let kqPlaying = false;
-let alofoke993Playing = false;
-let z100Playing = false;
+const RADIO_STATIONS = {
+  mega979: { key: "mega979", label: "La Mega 97.9", streamUrl: MEGA979_STREAM_URL, audio: megaAudio, button: () => btnMega979 },
+  hot97: { key: "hot97", label: "HOT 97.1", streamUrl: HOT97_STREAM_URL, audio: hot97Audio, button: () => btnHot97 },
+  kq945: { key: "kq945", label: "KQ 94.5 FM", streamUrl: KQ945_STREAM_URL, siteUrl: KQ945_SITE_URL, audio: kqAudio, button: () => btnKQ945 },
+  alofoke993: { key: "alofoke993", label: "Alofoke 99.3 FM", streamUrl: ALOFOKE993_STREAM_URL, audio: alofoke993Audio, button: () => btnAlofoke993 },
+  z100: { key: "z100", label: "Z100", streamUrl: Z100_STREAM_URL, audio: z100Audio, button: () => btnZ100 },
+};
+
+function readStoredRadioRuntime() {
+  try {
+    const raw = localStorage.getItem(RADIO_RUNTIME_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+const radioPlaybackRuntime = (() => {
+  const stored = readStoredRadioRuntime();
+  return window.radioPlaybackRuntime = window.radioPlaybackRuntime || {
+    activeStationKey: String(stored?.activeStationKey || "").trim(),
+    activeAudio: null,
+    isPlaying: !!stored?.isPlaying,
+    startedByUser: !!stored?.startedByUser,
+    currentTitle: "",
+    currentStreamUrl: "",
+    uiState: { drawerOpen: false },
+  };
+})();
 
 function setRadioStatus(txt) {
   if (radioStatusEl) radioStatusEl.textContent = txt;
@@ -5980,6 +6016,150 @@ function setBtnState(btn, on) {
              : btn === btnZ100 ? "Z100"
              : "";
   btn.textContent = (on ? "⏸ " : "▶ ") + base;
+}
+
+function persistRadioRuntime() {
+  try {
+    localStorage.setItem(RADIO_RUNTIME_STORAGE_KEY, JSON.stringify({
+      activeStationKey: radioPlaybackRuntime.activeStationKey || "",
+      isPlaying: !!radioPlaybackRuntime.isPlaying,
+      startedByUser: !!radioPlaybackRuntime.startedByUser,
+    }));
+  } catch (_) {}
+}
+
+function updateRadioButtons() {
+  Object.values(RADIO_STATIONS).forEach((station) => {
+    const btn = station.button?.();
+    setBtnState(btn, radioPlaybackRuntime.isPlaying && radioPlaybackRuntime.activeStationKey === station.key);
+  });
+  if (radioPlaybackRuntime.isPlaying && radioPlaybackRuntime.currentTitle) {
+    setRadioStatus(`Radio: ${radioPlaybackRuntime.currentTitle} playing`);
+  } else if (radioPlaybackRuntime.activeStationKey) {
+    const station = RADIO_STATIONS[radioPlaybackRuntime.activeStationKey];
+    setRadioStatus(station ? `Radio: ${station.label} paused` : "Radio: paused");
+  } else {
+    setRadioStatus("Radio: off");
+  }
+}
+
+function syncRadioMediaSession() {
+  const mediaSession = navigator?.mediaSession;
+  if (!mediaSession) return;
+  const station = RADIO_STATIONS[radioPlaybackRuntime.activeStationKey];
+  mediaSession.playbackState = radioPlaybackRuntime.isPlaying ? "playing" : "paused";
+  if (station) {
+    try {
+      mediaSession.metadata = new MediaMetadata({
+        title: station.label,
+        artist: "TLC Map Radio",
+        album: "Live Stations",
+      });
+    } catch (_) {}
+  }
+}
+
+function stopAllRadioExcept(activeKey = "") {
+  Object.values(RADIO_STATIONS).forEach((station) => {
+    if (station.key === activeKey) return;
+    try { station.audio.pause(); } catch {}
+  });
+}
+
+async function startRadioStation(stationKey) {
+  const station = RADIO_STATIONS[stationKey];
+  if (!station) return false;
+  closeHot97Modal();
+  stopAllRadioExcept(station.key);
+  radioPlaybackRuntime.activeStationKey = station.key;
+  radioPlaybackRuntime.activeAudio = station.audio;
+  radioPlaybackRuntime.startedByUser = true;
+  radioPlaybackRuntime.currentTitle = station.label;
+  radioPlaybackRuntime.currentStreamUrl = station.streamUrl;
+  try {
+    await prepareAndPlayStream(station.audio, station.streamUrl);
+    radioPlaybackRuntime.isPlaying = true;
+    persistRadioRuntime();
+    syncRadioMediaSession();
+    updateRadioButtons();
+    return true;
+  } catch (e) {
+    radioPlaybackRuntime.isPlaying = false;
+    persistRadioRuntime();
+    syncRadioMediaSession();
+    updateRadioButtons();
+    if (station.siteUrl) {
+      try { window.open(station.siteUrl, "_blank", "noopener"); } catch {}
+    }
+    throw e;
+  }
+}
+
+function pauseRadioStation(stationKey = radioPlaybackRuntime.activeStationKey) {
+  const station = RADIO_STATIONS[stationKey];
+  if (station?.audio) {
+    try { station.audio.pause(); } catch {}
+  }
+  radioPlaybackRuntime.activeStationKey = stationKey || radioPlaybackRuntime.activeStationKey;
+  radioPlaybackRuntime.activeAudio = station?.audio || radioPlaybackRuntime.activeAudio || null;
+  radioPlaybackRuntime.currentTitle = station?.label || radioPlaybackRuntime.currentTitle || "";
+  radioPlaybackRuntime.currentStreamUrl = station?.streamUrl || radioPlaybackRuntime.currentStreamUrl || "";
+  radioPlaybackRuntime.isPlaying = false;
+  persistRadioRuntime();
+  syncRadioMediaSession();
+  updateRadioButtons();
+}
+
+async function toggleRadioStation(stationKey) {
+  const station = RADIO_STATIONS[stationKey];
+  if (!station) return;
+  if (radioPlaybackRuntime.activeStationKey === stationKey && radioPlaybackRuntime.isPlaying) {
+    pauseRadioStation(stationKey);
+    return;
+  }
+  try {
+    await startRadioStation(stationKey);
+  } catch (e) {
+    console.warn(`${station.label} play failed:`, e);
+    alert(`${station.label} could not start. Turn volume up and try again.`);
+  }
+}
+
+function bindRadioElementLifecycle(stationKey) {
+  const station = RADIO_STATIONS[stationKey];
+  const audioEl = station?.audio;
+  if (!audioEl || audioEl.dataset.radioRuntimeBound === "1") return;
+  audioEl.dataset.radioRuntimeBound = "1";
+  audioEl.addEventListener("play", () => {
+    radioPlaybackRuntime.activeStationKey = stationKey;
+    radioPlaybackRuntime.activeAudio = audioEl;
+    radioPlaybackRuntime.currentTitle = station.label;
+    radioPlaybackRuntime.currentStreamUrl = station.streamUrl;
+    radioPlaybackRuntime.isPlaying = !audioEl.paused;
+    persistRadioRuntime();
+    syncRadioMediaSession();
+    updateRadioButtons();
+  });
+  audioEl.addEventListener("pause", () => {
+    if (radioPlaybackRuntime.activeStationKey !== stationKey) return;
+    radioPlaybackRuntime.isPlaying = !audioEl.paused;
+    persistRadioRuntime();
+    syncRadioMediaSession();
+    updateRadioButtons();
+  });
+  audioEl.addEventListener("ended", () => {
+    if (radioPlaybackRuntime.activeStationKey === stationKey) pauseRadioStation(stationKey);
+  });
+}
+
+Object.keys(RADIO_STATIONS).forEach(bindRadioElementLifecycle);
+syncRadioMediaSession();
+updateRadioButtons();
+
+if (navigator?.mediaSession) {
+  try { navigator.mediaSession.setActionHandler("play", () => void startRadioStation(radioPlaybackRuntime.activeStationKey || "mega979")); } catch (_) {}
+  try { navigator.mediaSession.setActionHandler("pause", () => pauseRadioStation()); } catch (_) {}
+  try { navigator.mediaSession.setActionHandler("stop", () => pauseRadioStation()); } catch (_) {}
 }
 
 function closeHot97Modal() {
@@ -6010,225 +6190,12 @@ async function prepareAndPlayStream(audioEl, streamUrl) {
   if (p && typeof p.then === "function") await p;
 }
 
-function stopAlofokeSiteMode() {
-  if (!alofoke993Playing) return;
-  try { alofoke993Audio.pause(); } catch {}
-  alofoke993Playing = false;
-  setBtnState(btnAlofoke993, false);
-}
-
-async function toggleAlofoke993() {
-  if (hot97Playing) { hot97Audio.pause(); hot97Playing = false; setBtnState(btnHot97, false); }
-  if (megaPlaying) { megaAudio.pause(); megaPlaying = false; setBtnState(btnMega979, false); }
-  if (kqPlaying) { kqAudio.pause(); kqPlaying = false; setBtnState(btnKQ945, false); }
-  if (z100Playing) { z100Audio.pause(); z100Playing = false; setBtnState(btnZ100, false); }
-
-  closeHot97Modal();
-
-  if (alofoke993Playing) {
-    stopAlofokeSiteMode();
-    setRadioStatus("Radio: off");
-    return;
-  }
-
-  alofoke993Playing = true;
-  setBtnState(btnAlofoke993, true);
-  setBtnState(btnHot97, false);
-  setBtnState(btnMega979, false);
-  setBtnState(btnKQ945, false);
-  setBtnState(btnZ100, false);
-  try {
-    await prepareAndPlayStream(alofoke993Audio, ALOFOKE993_STREAM_URL);
-    setRadioStatus("Radio: Alofoke 99.3 FM playing");
-  } catch (e) {
-    console.warn("Alofoke 99.3 FM play failed:", e);
-    stopAlofokeSiteMode();
-    setRadioStatus("Radio: Alofoke 99.3 FM failed to play");
-    alert("Alofoke 99.3 FM could not start. Turn volume up and try again.");
-  }
-}
-
-async function toggleMega() {
-  try {
-    if (hot97Playing) {
-      hot97Audio.pause();
-      hot97Playing = false;
-      setBtnState(btnHot97, false);
-    }
-    if (kqPlaying) {
-      kqAudio.pause();
-      kqPlaying = false;
-      setBtnState(btnKQ945, false);
-    }
-    if (z100Playing) {
-      z100Audio.pause();
-      z100Playing = false;
-      setBtnState(btnZ100, false);
-    }
-    if (alofoke993Playing) {
-      stopAlofokeSiteMode();
-    }
-  } catch {}
-
-  try {
-    if (megaPlaying) {
-      megaAudio.pause();
-      megaPlaying = false;
-      setBtnState(btnMega979, false);
-      setRadioStatus("Radio: off");
-      return;
-    }
-
-    await prepareAndPlayStream(megaAudio, MEGA979_STREAM_URL);
-    megaPlaying = true;
-
-    setBtnState(btnMega979, true);
-    setBtnState(btnHot97, false);
-    setBtnState(btnKQ945, false);
-    setBtnState(btnAlofoke993, false);
-    setBtnState(btnZ100, false);
-    setRadioStatus("Radio: La Mega 97.9 playing");
-  } catch (e) {
-    console.warn("La Mega play failed:", e);
-    megaPlaying = false;
-    setBtnState(btnMega979, false);
-    setRadioStatus("Radio: La Mega failed to play");
-    alert("La Mega 97.9 could not start. Turn volume up and try again.");
-  }
-}
-
-async function toggleHot97() {
-  try {
-    if (megaPlaying) {
-      megaAudio.pause();
-      megaPlaying = false;
-      setBtnState(btnMega979, false);
-    }
-    if (kqPlaying) {
-      kqAudio.pause();
-      kqPlaying = false;
-      setBtnState(btnKQ945, false);
-    }
-    if (z100Playing) {
-      z100Audio.pause();
-      z100Playing = false;
-      setBtnState(btnZ100, false);
-    }
-    if (alofoke993Playing) {
-      stopAlofokeSiteMode();
-    }
-  } catch {}
-
-  closeHot97Modal();
-
-  if (hot97Playing) {
-    try { hot97Audio.pause(); } catch {}
-    hot97Playing = false;
-    setBtnState(btnHot97, false);
-    setRadioStatus("Radio: off");
-    return;
-  }
-
-  try {
-    await prepareAndPlayStream(hot97Audio, HOT97_STREAM_URL);
-
-    hot97Playing = true;
-    setBtnState(btnHot97, true);
-    setBtnState(btnMega979, false);
-    setBtnState(btnKQ945, false);
-    setBtnState(btnAlofoke993, false);
-    setBtnState(btnZ100, false);
-    setRadioStatus("Radio: HOT 97.1 playing");
-  } catch (e) {
-    const errName = e && e.name ? String(e.name) : "";
-    if (errName === "AbortError") {
-      console.warn("Hot 97 aborted (Safari interruption):", e);
-      hot97Playing = false;
-      setBtnState(btnHot97, false);
-      setRadioStatus("Radio: HOT 97.1 stopped");
-      return;
-    }
-
-    console.warn("Hot 97 play failed:", e);
-    hot97Playing = false;
-    setBtnState(btnHot97, false);
-    setRadioStatus("Radio: HOT 97.1 failed to play");
-    alert("HOT 97.1 could not start. Turn volume up and try again.");
-  }
-}
-async function toggleKQ() {
-  if (hot97Playing) { hot97Audio.pause(); hot97Playing = false; setBtnState(btnHot97, false); }
-  if (megaPlaying) { megaAudio.pause(); megaPlaying = false; setBtnState(btnMega979, false); }
-  if (z100Playing) { z100Audio.pause(); z100Playing = false; setBtnState(btnZ100, false); }
-  if (alofoke993Playing) { stopAlofokeSiteMode(); }
-
-  closeHot97Modal();
-
-  if (kqPlaying) {
-    try { kqAudio.pause(); } catch {}
-    kqPlaying = false;
-    setBtnState(btnKQ945, false);
-    setRadioStatus("Radio: off");
-    return;
-  }
-
-  try {
-    await prepareAndPlayStream(kqAudio, KQ945_STREAM_URL);
-
-    kqPlaying = true;
-    setBtnState(btnKQ945, true);
-    setBtnState(btnHot97, false);
-    setBtnState(btnMega979, false);
-    setBtnState(btnAlofoke993, false);
-    setBtnState(btnZ100, false);
-    setRadioStatus("Radio: KQ 94.5 FM playing");
-  } catch (e) {
-    console.warn("KQ 94.5 play failed:", e);
-    kqPlaying = false;
-    setBtnState(btnKQ945, false);
-    setRadioStatus("Radio: KQ 94.5 FM failed to play");
-    try { window.open(KQ945_SITE_URL, "_blank", "noopener"); } catch {}
-    alert("KQ 94.5 FM could not start. Turn volume up and try again.");
-  }
-}
-
-async function toggleZ100() {
-  if (hot97Playing) { hot97Audio.pause(); hot97Playing = false; setBtnState(btnHot97, false); }
-  if (megaPlaying) { megaAudio.pause(); megaPlaying = false; setBtnState(btnMega979, false); }
-  if (kqPlaying) { kqAudio.pause(); kqPlaying = false; setBtnState(btnKQ945, false); }
-  if (alofoke993Playing) { stopAlofokeSiteMode(); }
-
-  if (z100Playing) {
-    z100Audio.pause();
-    z100Playing = false;
-    setBtnState(btnZ100, false);
-    setRadioStatus("Radio: off");
-    return;
-  }
-  try {
-    await prepareAndPlayStream(z100Audio, Z100_STREAM_URL);
-    z100Playing = true;
-    setBtnState(btnZ100, true);
-    setBtnState(btnHot97, false);
-    setBtnState(btnMega979, false);
-    setBtnState(btnKQ945, false);
-    setBtnState(btnAlofoke993, false);
-    setRadioStatus("Radio: Z100 playing");
-  } catch (e) {
-    z100Playing = false;
-    setBtnState(btnZ100, false);
-    setRadioStatus("Radio: Z100 failed to play");
-    alert("Z100 could not start. Turn volume up and try again.");
-  }
-}
-
-
 if (btnMega979) {
   btnMega979.addEventListener("pointerdown", (e) => e.stopPropagation());
   btnMega979.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
-    toggleMega();
+    void toggleRadioStation("mega979");
   });
 }
 if (btnHot97) {
@@ -6236,7 +6203,7 @@ if (btnHot97) {
   btnHot97.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
-    toggleHot97();
+    void toggleRadioStation("hot97");
   });
 }
 if (btnKQ945) {
@@ -6244,7 +6211,7 @@ if (btnKQ945) {
   btnKQ945.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
-    toggleKQ();
+    void toggleRadioStation("kq945");
   });
 }
 if (btnAlofoke993) {
@@ -6252,7 +6219,7 @@ if (btnAlofoke993) {
   btnAlofoke993.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
-    toggleAlofoke993();
+    void toggleRadioStation("alofoke993");
   });
 }
 if (btnZ100) {
@@ -6260,7 +6227,7 @@ if (btnZ100) {
   btnZ100.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
-    toggleZ100();
+    void toggleRadioStation("z100");
   });
 }
 if (radioModalClose) {
@@ -6278,49 +6245,35 @@ if (radioModal) {
   });
 }
 megaAudio.addEventListener("ended", () => {
-  megaPlaying = false;
-  setBtnState(btnMega979, false);
-  setRadioStatus("Radio: off");
+  pauseRadioStation("mega979");
 });
 megaAudio.addEventListener("error", () => {
-  megaPlaying = false;
-  setBtnState(btnMega979, false);
+  pauseRadioStation("mega979");
   setRadioStatus("Radio: La Mega stream error");
 });
 hot97Audio.addEventListener("ended", () => {
-  hot97Playing = false;
-  setBtnState(btnHot97, false);
-  setRadioStatus("Radio: off");
+  pauseRadioStation("hot97");
 });
 hot97Audio.addEventListener("error", () => {
-  hot97Playing = false;
-  setBtnState(btnHot97, false);
+  pauseRadioStation("hot97");
   setRadioStatus("Radio: HOT 97.1 stream error");
 });
 kqAudio.addEventListener("ended", () => {
-  kqPlaying = false;
-  setBtnState(btnKQ945, false);
-  setRadioStatus("Radio: off");
+  pauseRadioStation("kq945");
 });
 kqAudio.addEventListener("error", () => {
-  kqPlaying = false;
-  setBtnState(btnKQ945, false);
+  pauseRadioStation("kq945");
   setRadioStatus("Radio: KQ 94.5 FM stream error");
 });
 alofoke993Audio.addEventListener("ended", () => {
-  alofoke993Playing = false;
-  setBtnState(btnAlofoke993, false);
-  setRadioStatus("Radio: off");
+  pauseRadioStation("alofoke993");
 });
 alofoke993Audio.addEventListener("error", () => {
-  alofoke993Playing = false;
-  setBtnState(btnAlofoke993, false);
+  pauseRadioStation("alofoke993");
   setRadioStatus("Radio: Alofoke 99.3 FM stream error");
 });
 z100Audio.addEventListener("ended", () => {
-  z100Playing = false;
-  setBtnState(btnZ100, false);
-  setRadioStatus("Radio: off");
+  pauseRadioStation("z100");
 });
 
 /* =========================================================
@@ -6418,6 +6371,7 @@ let presenceDeltaMode = 'probe';
 let presenceViewportMode = 'probe';
 let lastPresenceViewportSignature = '';
 let lastPresenceFetchViewportSignature = '';
+let presenceServerStaleAfterSec = PRESENCE_STALE_SEC;
 
 const PRESENCE_FULL_MAX_VISIBLE = 50;
 const PRESENCE_MEDIUM_MAX_VISIBLE = 100;
@@ -6589,6 +6543,63 @@ function authSuspensionMessage(errLike) {
   const text = String(errLike?.detail || errLike?.message || errLike || '').trim();
   if (/account\s+suspended/i.test(text)) return "Account suspended. Contact admin.";
   return '';
+}
+
+function getPresenceStaleAfterSec() {
+  const serverValue = Number(presenceServerStaleAfterSec);
+  if (Number.isFinite(serverValue) && serverValue > 0) {
+    return Math.max(PRESENCE_STALE_SEC, Math.round(serverValue));
+  }
+  return PRESENCE_STALE_SEC;
+}
+
+function updatePresenceStaleAfterSecFromPayload(payload) {
+  const nextValue = Number(
+    payload?.stale_after_sec ??
+    payload?.summary?.stale_after_sec ??
+    payload?.meta?.stale_after_sec ??
+    payload?.presence_meta?.stale_after_sec
+  );
+  if (Number.isFinite(nextValue) && nextValue > 0) {
+    presenceServerStaleAfterSec = Math.max(PRESENCE_STALE_SEC, Math.round(nextValue));
+  }
+}
+
+function trustedAvatarOrigins() {
+  const origins = new Set();
+  try {
+    if (typeof window !== 'undefined' && window.location?.origin) origins.add(window.location.origin);
+  } catch (_) {}
+  try {
+    const apiBase = FrontendRuntime?.resolveApiBase ? FrontendRuntime.resolveApiBase() : RAILWAY_BASE;
+    if (apiBase) origins.add(new URL(apiBase, window.location?.href || undefined).origin);
+  } catch (_) {}
+  return origins;
+}
+
+function resolveMapAvatarUrl(url) {
+  if (typeof url !== 'string') return '';
+  const trimmed = url.trim();
+  if (!trimmed) return '';
+  if (/^data:image\//i.test(trimmed)) return trimmed;
+  const toAbsolute = FrontendRuntime?.toAbsoluteUrl
+    ? (value) => FrontendRuntime.toAbsoluteUrl(value)
+    : (value) => {
+        try { return new URL(value, window.location?.href || RAILWAY_BASE).toString(); } catch (_) { return ''; }
+      };
+  try {
+    const trustedOrigins = trustedAvatarOrigins();
+    const candidate = /^https?:\/\//i.test(trimmed) ? trimmed : toAbsolute(trimmed);
+    if (!candidate) return '';
+    const parsed = new URL(candidate, window.location?.href || undefined);
+    if (!/^https?:$/i.test(parsed.protocol)) return '';
+    if (trustedOrigins.has(parsed.origin)) return parsed.toString();
+  } catch (_) {}
+  return '';
+}
+
+if (typeof window !== 'undefined') {
+  window.resolveMapAvatarUrl = resolveMapAvatarUrl;
 }
 
 async function loadMe() {
@@ -6886,6 +6897,7 @@ function clearOtherDrivers() {
   presenceFocusedUserId = null;
   presenceLastSyncTimestamp = 0;
   presenceLastSyncCursor = 0;
+  presenceServerStaleAfterSec = PRESENCE_STALE_SEC;
   presenceDeltaMode = 'probe';
   presenceViewportMode = 'probe';
   lastPresenceViewportSignature = '';
@@ -6899,7 +6911,7 @@ function clearOtherDrivers() {
 
 function getCachedAvatarUrl(userId, avatarUrl = "", avatarVersion = "") {
   const normalizedUserId = String(userId || "").trim();
-  const normalizedUrl = String(avatarUrl || "").trim();
+  const normalizedUrl = resolveMapAvatarUrl(avatarUrl);
   const version = String(avatarVersion || "").trim();
   if (!normalizedUserId) return normalizedUrl;
   const cacheKey = `${normalizedUserId}::${version || normalizedUrl}`;
@@ -7446,6 +7458,7 @@ async function pullPresenceAll() {
     const viewportSignature = params.get("viewport_sig") || getPresenceViewportSignature();
     const { payload: list, mode: responseMode } = await fetchPresencePayload(params, presencePullAbortController.signal);
     frontendPerfStats.presencePollsCompleted += 1;
+    updatePresenceStaleAfterSecFromPayload(list);
     const items = extractPresenceItems(list);
     const fallbackVisibleCount = Array.isArray(items) ? items.length : 0;
     let badgeUpdatedFromSummary = false;
@@ -7724,14 +7737,17 @@ setNavDestination(null);
 
   preventBrowserZoomUI();
   initMap();
-  await loadTimeline();
+  const timelinePromise = loadTimeline();
 
   if (authHeaderOK()) {
     setAuthUI(true, "Checking session…");
+    notePresenceBoost();
+    pullPresenceAll().catch((e) => console.warn("/presence/all early bootstrap failed:", e));
     await loadMe();
     if (authHeaderOK()) {
       setAuthUI(true, `Status: signed in as ${me?.display_name || me?.email || "Driver"}`);
       notePresenceBoost();
+      pullPresenceAll().catch((e) => console.warn("/presence/all post-me bootstrap failed:", e));
       schedulePresencePoll({ immediate: true });
       schedulePickupOverlayRefresh({ force: true });
     } else {
@@ -7740,6 +7756,8 @@ setNavDestination(null);
   } else {
     setAuthUI(false, "Status: signed out");
   }
+
+  await timelinePromise;
 
   syncAdminPortalSession();
 
