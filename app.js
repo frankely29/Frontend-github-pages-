@@ -3592,7 +3592,7 @@ function normalizePresenceRow(it, nowUnix) {
   return {
     uid,
     name: it?.display_name || it?.name || it?.email || "Driver",
-    avatarUrl: getCachedAvatarUrl(uid, it?.avatar_thumb_url || it?.avatar_url || "", it?.avatar_version || it?.avatarVersion || ""),
+    avatarUrl: getCachedAvatarUrl(uid, it?.avatar_thumb_url || it?.avatarThumbUrl || it?.avatar_url || it?.avatarUrl || "", it?.avatar_version || it?.avatarVersion || ""),
     mode: it?.map_identity_mode || "name",
     lat,
     lng,
@@ -6605,24 +6605,33 @@ function trustedAvatarOrigins() {
   return origins;
 }
 
-function resolveMapAvatarUrl(url) {
+function resolveCommunityAvatarUrl(url, baseOverride) {
+  const runtimeBase = baseOverride !== undefined
+    ? baseOverride
+    : (FrontendRuntime?.resolveApiBase ? FrontendRuntime.resolveApiBase() : (window.API_BASE || RAILWAY_BASE));
   const sharedResolver = FrontendRuntime?.resolveMediaUrl || window.resolveMediaUrl;
   if (typeof sharedResolver === 'function') {
-    const resolved = sharedResolver(url, FrontendRuntime?.resolveApiBase ? FrontendRuntime.resolveApiBase() : RAILWAY_BASE);
+    const resolved = sharedResolver(url, runtimeBase);
     return typeof resolved === 'string' ? resolved.trim() : '';
   }
   if (typeof url !== 'string') return '';
   const trimmed = url.trim();
   if (!trimmed) return '';
   if (/^data:image\//i.test(trimmed) || /^blob:/i.test(trimmed) || /^https?:\/\//i.test(trimmed)) return trimmed;
+  if (trimmed.startsWith('/')) return `${String(runtimeBase || '').replace(/\/+$/, '')}${trimmed}`;
   try {
-    return new URL(trimmed, window.API_BASE || RAILWAY_BASE || window.location?.href || undefined).toString();
+    return new URL(trimmed, `${String(runtimeBase || window.location?.href || '').replace(/\/+$/, '')}/`).toString();
   } catch (_) {
     return '';
   }
 }
 
+function resolveMapAvatarUrl(url) {
+  return resolveCommunityAvatarUrl(url);
+}
+
 if (typeof window !== 'undefined') {
+  window.resolveCommunityAvatarUrl = resolveCommunityAvatarUrl;
   window.resolveMapAvatarUrl = resolveMapAvatarUrl;
 }
 
@@ -6936,7 +6945,7 @@ function clearOtherDrivers() {
 
 function getCachedAvatarUrl(userId, avatarUrl = "", avatarVersion = "") {
   const normalizedUserId = String(userId || "").trim();
-  const resolver = FrontendRuntime?.resolveMediaUrl || window.resolveMediaUrl || resolveMapAvatarUrl;
+  const resolver = window.resolveCommunityAvatarUrl || FrontendRuntime?.resolveMediaUrl || window.resolveMediaUrl || resolveMapAvatarUrl;
   const resolvedUrl = typeof resolver === 'function'
     ? String(resolver(avatarUrl, FrontendRuntime?.resolveApiBase ? FrontendRuntime.resolveApiBase() : RAILWAY_BASE) || '').trim()
     : resolveMapAvatarUrl(avatarUrl);

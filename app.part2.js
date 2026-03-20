@@ -462,7 +462,7 @@
     const previewText = threadMessageType === 'voice'
       ? '🎤 Voice note'
       : String(raw?.last_message_text || raw?.last_text || raw?.last_message || raw?.text || '').trim();
-    const avatarUrl = String(raw?.avatar_url || raw?.avatarUrl || raw?.other_avatar_url || raw?.otherAvatarUrl || '').trim();
+    const avatarUrl = safeMapAvatarUrl(raw?.avatar_thumb_url || raw?.avatarThumbUrl || raw?.other_avatar_thumb_url || raw?.otherAvatarThumbUrl || raw?.avatar_url || raw?.avatarUrl || raw?.other_avatar_url || raw?.otherAvatarUrl || '');
     const lastAt = raw?.last_message_at || raw?.last_created_at || raw?.created_at || raw?.createdAt || raw?.timestamp || raw?.ts || null;
     const lastSenderUserId = raw?.last_sender_user_id ?? raw?.lastSenderUserId ?? null;
     const unread = Number(raw?.unread_count ?? raw?.unreadCount ?? 0);
@@ -3479,8 +3479,7 @@
       const preview = privateThreadPreview(thread) || 'No messages yet';
       const unread = privateThreadUnreadCount(thread);
       const ts = formatChatTime(privateThreadTime(thread));
-      const initials = name.slice(0, 2).toUpperCase();
-      return `<button type="button" class="chatPrivateThreadRow" data-private-thread="${uid || ''}" data-private-name="${escapeHtml(name)}"><span class="chatPrivateThreadAvatar">${escapeHtml(initials)}</span><span class="chatPrivateThreadBody"><span class="chatPrivateThreadName">${escapeHtml(name)}</span><span class="chatPrivateThreadPreview">${escapeHtml(preview)}</span></span><span class="chatPrivateThreadMeta"><span class="chatPrivateThreadTime">${escapeHtml(ts)}</span>${unread > 0 ? `<span class="chatPrivateThreadUnread">${unread > 99 ? '99+' : unread}</span>` : ''}</span></button>`;
+      return `<button type="button" class="chatPrivateThreadRow" data-private-thread="${uid || ''}" data-private-name="${escapeHtml(name)}">${renderAvatarMarkup({ name, url: thread?.avatarUrl || '', className: 'chatPrivateThreadAvatar', alt: `${name} avatar` })}<span class="chatPrivateThreadBody"><span class="chatPrivateThreadName">${escapeHtml(name)}</span><span class="chatPrivateThreadPreview">${escapeHtml(preview)}</span></span><span class="chatPrivateThreadMeta"><span class="chatPrivateThreadTime">${escapeHtml(ts)}</span>${unread > 0 ? `<span class="chatPrivateThreadUnread">${unread > 99 ? '99+' : unread}</span>` : ''}</span></button>`;
     }).join('');
 
     wrap.innerHTML = `<div class="chatPrivateThreadList"><div class="chatPrivateThreadToolbar"><button id="chatPrivateNewMessageBtn" class="chipBtn" type="button">New Message</button></div>${rows || '<div class="chatEmpty">No private conversations yet</div>'}</div>`;
@@ -4213,7 +4212,7 @@
   }
 
   function safeMapAvatarUrl(url) {
-    const resolver = window.FrontendRuntime?.resolveMediaUrl || window.resolveMediaUrl || window.resolveMapAvatarUrl;
+    const resolver = window.resolveCommunityAvatarUrl || window.FrontendRuntime?.resolveMediaUrl || window.resolveMediaUrl || window.resolveMapAvatarUrl;
     if (typeof resolver === 'function') {
       return resolver(url, window.FrontendRuntime?.resolveApiBase ? window.FrontendRuntime.resolveApiBase() : (window.API_BASE || ''));
     }
