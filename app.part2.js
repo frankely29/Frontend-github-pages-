@@ -7970,16 +7970,37 @@
   window.syncMyProgression = syncMyProgression;
   window.handlePickupProgressionDelta = handlePickupProgressionDelta;
   window.renderLeaderboardBadgeSvg = renderLeaderboardBadgeSvg;
+  window.renderRankBadgeIcon = renderRankBadgeIcon;
   window.syncLeaderboardBadgeRewards = syncLeaderboardBadgeRewards;
   window.openGamesBattleComposer = openGamesBattleComposer;
+
+  function bindCurrentGamesDockRuntime() {
+    const gamesBtn = document.getElementById('dockGames');
+    if (!gamesBtn || gamesBtn.dataset.gamesRuntimeBound === 'current') return;
+    gamesBtn.dataset.gamesRuntimeBound = 'current';
+    gamesBtn.addEventListener('pointerdown', (e) => e.stopPropagation(), true);
+    gamesBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+      if (typeof window.toggleDrawer === 'function') {
+        window.toggleDrawer('games', 'Games', gamesPanelHTML());
+        if (typeof window.getOpenPanelKey === 'function' && window.getOpenPanelKey() === 'games') wireGamesPanel();
+        return;
+      }
+      if (typeof window.openDrawer === 'function') {
+        window.openDrawer('games', 'Games', gamesPanelHTML());
+        wireGamesPanel();
+      }
+    }, true);
+  }
 
   // Bind the chat dock button using its ID
   if (typeof bindDockToggle === 'function') {
     const chatBtn = document.getElementById('dockChat');
     if (chatBtn) { bindDockToggle(chatBtn, 'chat', 'Chat', chatPanelHTML, wireChatPanel); }
-    const gamesBtn = document.getElementById('dockGames');
-    if (gamesBtn) { bindDockToggle(gamesBtn, 'games', 'Games', gamesPanelHTML, wireGamesPanel); }
   }
+  bindCurrentGamesDockRuntime();
 
   // Example night mode toggle (optional)
   function toggleNightMode() { document.body.classList.toggle('night'); }
