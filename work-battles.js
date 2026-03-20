@@ -5,7 +5,6 @@
     : DEFAULT_API_BASE;
   const LS_TOKEN = 'community_token_v1';
   const HUB_KEY = 'games';
-  const HUB_TITLE = 'Work Battles';
   const SEARCH_DEBOUNCE_MS = 250;
   const REFRESH_POLL_MS = 30000;
   const TYPE_ORDER = ['daily_miles', 'daily_hours', 'weekly_miles', 'weekly_hours'];
@@ -37,7 +36,7 @@
     challengeFeed: [],
     searchTimer: null,
     refreshTimer: null,
-    boundDockButton: null,
+    mountRoot: null,
     lastRefreshAt: 0,
   };
 
@@ -225,7 +224,7 @@
     }
     state.refreshTimer = window.setTimeout(() => {
       state.refreshTimer = null;
-      if (window.getOpenPanelKey?.() !== HUB_KEY) return;
+      if (!state.mountRoot || !state.mountRoot.isConnected || window.getOpenPanelKey?.() !== HUB_KEY) return;
       void refresh();
     }, REFRESH_POLL_MS);
   }
@@ -390,7 +389,7 @@
   }
 
   function bindPanelEvents() {
-    const body = document.getElementById('dockDrawerBody');
+    const body = state.mountRoot;
     if (!body) return;
 
     body.querySelectorAll('[data-work-battles-tab]').forEach((btn) => btn.addEventListener('click', () => {
@@ -440,7 +439,7 @@
 
   function render() {
     if (window.getOpenPanelKey?.() !== HUB_KEY) return;
-    const body = document.getElementById('dockDrawerBody');
+    const body = state.mountRoot;
     if (!body) return;
     body.innerHTML = panelHtml();
     bindPanelEvents();
@@ -579,20 +578,37 @@
     }
   }
 
-  function openHub() {
-    if (typeof window.openDrawer === 'function') {
-      window.openDrawer(HUB_KEY, HUB_TITLE, '<div id="workBattlesRoot"></div>');
-      const title = document.getElementById('dockDrawerTitle');
-      if (title) title.textContent = HUB_TITLE;
-      render();
-      void refresh({ silent: false, forceUsers: !state.users.length });
+  function mount(containerEl, options = {}) {
+    if (containerEl instanceof HTMLElement) state.mountRoot = containerEl;
+    if (!state.mountRoot) return;
+    const profileTarget = options?.profileTarget;
+    if (profileTarget && typeof profileTarget === 'object') {
+      const numericId = Number(profileTarget.userId);
+      if (Number.isFinite(numericId) && numericId > 0) {
+        state.pendingProfileTarget = {
+          userId: numericId,
+          displayName: String(profileTarget.displayName || `Driver ${numericId}`).trim() || `Driver ${numericId}`,
+          avatarUrl: String(profileTarget.avatarUrl || ''),
+          online: !!profileTarget.online,
+          rankIcon: String(profileTarget.rankIcon || ''),
+          level: Number(profileTarget.level || 0) || 0,
+        };
+        state.selectedUser = state.pendingProfileTarget;
+        state.activeTab = 'create';
+      }
+    }
+    render();
+    if (!state.lastRefreshAt || (Date.now() - state.lastRefreshAt) > REFRESH_POLL_MS) {
+      void refresh({ silent: false, forceUsers: !state.users.length || !!state.pendingProfileTarget });
+    } else if (!state.users.length) {
+      void loadUsers({ query: state.usersQuery, force: !!state.pendingProfileTarget });
     }
   }
 
   function openForProfileTarget({ userId, displayName } = {}) {
     const numericId = Number(userId);
     if (!Number.isFinite(numericId) || numericId <= 0) {
-      openHub();
+      window.GameHubUI?.open?.({ initialTab: 'work-battles' });
       return;
     }
     state.pendingProfileTarget = {
@@ -605,29 +621,22 @@
     };
     state.selectedUser = state.pendingProfileTarget;
     state.activeTab = 'create';
-    openHub();
+    window.GameHubUI?.open?.({ initialTab: 'work-battles', profileTarget: state.pendingProfileTarget });
   }
 
-  function bindDockButton(buttonEl) {
-    if (!buttonEl || buttonEl === state.boundDockButton || buttonEl.dataset.workBattlesBound === '1') return;
-    state.boundDockButton = buttonEl;
-    buttonEl.dataset.workBattlesBound = '1';
-    buttonEl.addEventListener('pointerdown', (event) => event.stopPropagation());
-    buttonEl.addEventListener('click', (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      if (window.getOpenPanelKey?.() === HUB_KEY) {
-        window.closeDrawer?.();
-        return;
-      }
-      openHub();
-    });
+  function getPendingProfileTarget() {
+    return state.pendingProfileTarget ? { ...state.pendingProfileTarget } : null;
+  }
+
+  function clearPendingProfileTarget() {
+    state.pendingProfileTarget = null;
   }
 
   window.WorkBattlesUI = {
-    bindDockButton,
-    openHub,
-    openForProfileTarget,
+    mount,
     refresh: () => refresh({ silent: false, forceUsers: true }),
+    openForProfileTarget,
+    getPendingProfileTarget,
+    clearPendingProfileTarget,
   };
 })();
