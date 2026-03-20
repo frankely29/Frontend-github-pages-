@@ -165,7 +165,8 @@
   }
 
   function normalizeCatalog(payload) {
-    const rawRows = Array.isArray(payload?.rows) ? payload.rows
+    const rawRows = Array.isArray(payload?.items) ? payload.items
+      : Array.isArray(payload?.rows) ? payload.rows
       : Array.isArray(payload?.types) ? payload.types
       : Array.isArray(payload) ? payload
       : [];
@@ -180,6 +181,7 @@
   }
 
   function challengeArray(payload) {
+    if (Array.isArray(payload?.items)) return payload.items;
     if (Array.isArray(payload?.rows)) return payload.rows;
     if (Array.isArray(payload?.challenges)) return payload.challenges;
     if (Array.isArray(payload)) return payload;
@@ -187,6 +189,7 @@
   }
 
   function historyArray(payload) {
+    if (Array.isArray(payload?.items)) return payload.items;
     if (Array.isArray(payload?.rows)) return payload.rows;
     if (Array.isArray(payload?.history)) return payload.history;
     if (Array.isArray(payload)) return payload;
@@ -194,7 +197,7 @@
   }
 
   function activeChallengeFromPayload(payload) {
-    const candidate = payload?.challenge || payload?.active_challenge || payload?.activeChallenge || payload?.row || payload;
+    const candidate = payload?.item || payload?.challenge || payload?.active_challenge || payload?.activeChallenge || payload?.row || payload;
     if (!candidate || typeof candidate !== 'object') return null;
     if (!candidate.id && !candidate.challenge_id) return null;
     return normalizeChallenge(candidate);
@@ -463,7 +466,7 @@
     render();
     try {
       const payload = await fetchJSON(`/work-battles/users?q=${encodeURIComponent(String(query || '').trim())}&limit=40`);
-      const rows = (Array.isArray(payload?.rows) ? payload.rows : Array.isArray(payload?.users) ? payload.users : Array.isArray(payload) ? payload : [])
+      const rows = (Array.isArray(payload?.items) ? payload.items : Array.isArray(payload?.rows) ? payload.rows : Array.isArray(payload?.users) ? payload.users : Array.isArray(payload) ? payload : [])
         .map(normalizeUser)
         .filter(Boolean);
       state.users = rows;
@@ -542,8 +545,8 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          challenged_user_id: Number(state.selectedUser.userId),
-          challenge_type: challengeType,
+          target_user_id: Number(state.selectedUser.userId),
+          battle_type: challengeType,
         }),
       });
       state.activeTab = 'outgoing';
