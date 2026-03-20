@@ -3522,24 +3522,46 @@ function getPresenceViewportSignature() {
   ].join('|');
 }
 
+function normalizePresenceZoom(value) {
+  const zoom = Number(value);
+  if (!Number.isFinite(zoom)) return null;
+  return String(Number(zoom.toFixed(2)));
+}
+
+function appendQueryIfPresent(params, key, value) {
+  if (!(params instanceof URLSearchParams) || !key) return;
+  if (value === null || value === undefined) return;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) return;
+    params.set(key, String(value));
+    return;
+  }
+  if (typeof value === "boolean") {
+    params.set(key, value ? "true" : "false");
+    return;
+  }
+  const normalized = String(value);
+  if (normalized === "") return;
+  params.set(key, normalized);
+}
+
 function getPresenceRequestParams() {
   const bounds = getBufferedMapBounds(PRESENCE_VIEWPORT_BUFFER_RATIO, PRESENCE_VIEWPORT_MIN_BUFFER_DEG);
   const params = new URLSearchParams();
   if (bounds) {
-    params.set("min_lng", String(bounds.west));
-    params.set("max_lng", String(bounds.east));
-    params.set("min_lat", String(bounds.south));
-    params.set("max_lat", String(bounds.north));
+    appendQueryIfPresent(params, "min_lng", bounds.west);
+    appendQueryIfPresent(params, "max_lng", bounds.east);
+    appendQueryIfPresent(params, "min_lat", bounds.south);
+    appendQueryIfPresent(params, "max_lat", bounds.north);
   }
   const zoom = Number(map?.getZoom?.());
-  if (Number.isFinite(zoom)) params.set("zoom", String(zoom));
-  params.set("mode", zoom >= 12 ? "full" : "lite");
-  params.set("limit", String(PRESENCE_PULL_LIMIT));
-  params.set("include_removed", "true");
-  params.set("padding_ratio", String(PRESENCE_VIEWPORT_BUFFER_RATIO));
-  const viewportSignature = getPresenceViewportSignature();
-  if (viewportSignature) params.set("viewport_sig", viewportSignature);
-  params.set("refresh_tier", document.hidden ? "hidden" : (autoCenter ? "visible-fast" : "visible-idle"));
+  appendQueryIfPresent(params, "zoom", normalizePresenceZoom(zoom));
+  appendQueryIfPresent(params, "mode", zoom >= 12 ? "full" : "lite");
+  appendQueryIfPresent(params, "limit", PRESENCE_PULL_LIMIT);
+  appendQueryIfPresent(params, "include_removed", true);
+  appendQueryIfPresent(params, "padding_ratio", PRESENCE_VIEWPORT_BUFFER_RATIO);
+  appendQueryIfPresent(params, "viewport_sig", getPresenceViewportSignature());
+  appendQueryIfPresent(params, "refresh_tier", document.hidden ? "hidden" : (autoCenter ? "visible-fast" : "visible-idle"));
   return params;
 }
 
