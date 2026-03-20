@@ -5694,10 +5694,12 @@
       closeDriverProfileModal();
     });
     document.getElementById('driverProfileChallengeBtn')?.addEventListener('click', () => {
-      window.GameHubUI?.open?.({
-        initialTab: 'work-battles',
-        profileTarget: { userId: driverProfileState.userId, displayName: name },
-      });
+      const profileTarget = { userId: driverProfileState.userId, displayName: name };
+      if (window.GameHubUI?.open) {
+        window.GameHubUI.open({ initialTab: 'work-battles', profileTarget });
+      } else {
+        window.WorkBattlesUI?.openForProfileTarget?.(profileTarget);
+      }
       closeDriverProfileModal();
     });
 
@@ -6006,22 +6008,23 @@
     }
 
     if (gamesBtn && gamesBtn.dataset.gamesDockBound !== '1') {
+      gamesBtn.dataset.gamesDockBound = '1';
       try {
         if (window.GameHubUI && typeof window.GameHubUI.bindDockButton === 'function') {
           window.GameHubUI.bindDockButton(gamesBtn);
-          gamesBtn.dataset.gamesDockBound = '1';
         } else if (window.WorkBattlesUI && typeof window.WorkBattlesUI.bindDockButton === 'function') {
           window.WorkBattlesUI.bindDockButton(gamesBtn);
-          gamesBtn.dataset.gamesDockBound = '1';
         } else if (
           typeof window.bindDockToggle === 'function' &&
           typeof window.gamesPanelHTML === 'function' &&
           typeof window.wireGamesPanel === 'function'
         ) {
           window.bindDockToggle(gamesBtn, 'games', 'Games', window.gamesPanelHTML, window.wireGamesPanel);
-          gamesBtn.dataset.gamesDockBound = '1';
+        } else {
+          delete gamesBtn.dataset.gamesDockBound;
         }
       } catch (error) {
+        delete gamesBtn.dataset.gamesDockBound;
         console.warn('Games dock binding failed', error);
       }
     }
