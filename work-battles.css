@@ -1,0 +1,251 @@
+.workBattlesWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  color: #e2e8f0;
+}
+
+.workBattlesTabs {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.workBattlesTabs .chipBtn,
+.workBattlesMetricChips .chipBtn,
+.workBattlesActionRow .chipBtn {
+  min-height: 40px;
+  border-radius: 999px;
+}
+
+.workBattlesSection {
+  display: none;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.workBattlesSection.active {
+  display: flex;
+}
+
+.workBattlesSectionHeader {
+  font-size: 13px;
+  font-weight: 800;
+  color: #f8fafc;
+  letter-spacing: 0.02em;
+}
+
+.workBattlesMetricChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.workBattlesUserList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: min(34vh, 280px);
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.workBattlesUserRow,
+.workBattlesCard {
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.86), rgba(15, 23, 42, 0.74));
+  box-shadow: 0 10px 24px rgba(2, 6, 23, 0.24);
+  border-radius: 18px;
+  padding: 12px;
+}
+
+.workBattlesUserRow {
+  width: 100%;
+  text-align: left;
+  color: inherit;
+  display: flex;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.82), rgba(30, 41, 59, 0.76));
+}
+
+.workBattlesUserRow.selected,
+.workBattlesMetricChips .chipBtn.active,
+.workBattlesTabs .chipBtn.active {
+  border-color: rgba(96, 165, 250, 0.72);
+  box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.22), 0 10px 24px rgba(30, 64, 175, 0.24);
+}
+
+.workBattlesCardMuted {
+  opacity: 0.86;
+}
+
+.workBattlesCard.win {
+  border-color: rgba(74, 222, 128, 0.46);
+}
+
+.workBattlesCard.loss {
+  border-color: rgba(248, 113, 113, 0.44);
+}
+
+.workBattlesCard.tie {
+  border-color: rgba(250, 204, 21, 0.38);
+}
+
+.workBattlesUserIdentity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+}
+
+.workBattlesUserIdentity.compact {
+  gap: 10px;
+}
+
+.workBattlesAvatar {
+  position: relative;
+  width: 46px;
+  height: 46px;
+  border-radius: 999px;
+  overflow: hidden;
+  flex: 0 0 46px;
+  background: rgba(148, 163, 184, 0.18);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  color: #f8fafc;
+}
+
+.workBattlesAvatar.small {
+  width: 40px;
+  height: 40px;
+  flex-basis: 40px;
+}
+
+.workBattlesAvatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.workBattlesOnlineDot {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #22c55e;
+  border: 2px solid rgba(15, 23, 42, 0.96);
+}
+
+.workBattlesUserMeta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 3px;
+}
+
+.workBattlesUserName,
+.workBattlesCardTitle {
+  font-weight: 800;
+  color: #f8fafc;
+  line-height: 1.2;
+}
+
+.workBattlesUserSubline,
+.workBattlesCardMeta,
+.workBattlesStatus,
+.workBattlesScoreLabel {
+  color: #cbd5e1;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.workBattlesSearchWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.workBattlesSearchLabel {
+  font-size: 12px;
+  color: #cbd5e1;
+  font-weight: 700;
+}
+
+.workBattlesCardTop {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.workBattlesCardTitleWrap {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.workBattlesScoreRow {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.workBattlesScoreRow.compact {
+  margin-bottom: 6px;
+}
+
+.workBattlesScoreCell {
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.05);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.workBattlesActionRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.workBattlesActionRow .primary {
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  color: #fff;
+  border-color: rgba(147, 197, 253, 0.5);
+}
+
+.workBattlesRankBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: rgba(96, 165, 250, 0.16);
+  color: #dbeafe;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.workBattlesUserMetaBadgeWrap {
+  margin-left: auto;
+  align-self: flex-start;
+}
+
+@media (max-width: 640px) {
+  .workBattlesTabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .workBattlesTabs .chipBtn:last-child {
+    grid-column: span 2;
+  }
+}

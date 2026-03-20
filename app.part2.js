@@ -7691,7 +7691,11 @@
       closeDriverProfileModal();
     });
     document.getElementById('driverProfileChallengeBtn')?.addEventListener('click', () => {
-      openGamesBattleComposer({ targetUserId: driverProfileState.userId, displayName: name, gameType: 'dominoes' });
+      if (window.WorkBattlesUI?.openForProfileTarget) {
+        window.WorkBattlesUI.openForProfileTarget({ userId: driverProfileState.userId, displayName: name });
+      } else {
+        openGamesBattleComposer({ targetUserId: driverProfileState.userId, displayName: name, gameType: 'dominoes' });
+      }
       closeDriverProfileModal();
     });
 
@@ -7978,7 +7982,13 @@
     const chatBtn = document.getElementById('dockChat');
     if (chatBtn) { bindDockToggle(chatBtn, 'chat', 'Chat', chatPanelHTML, wireChatPanel); }
     const gamesBtn = document.getElementById('dockGames');
-    if (gamesBtn) { bindDockToggle(gamesBtn, 'games', 'Games', gamesPanelHTML, wireGamesPanel); }
+    if (gamesBtn) {
+      if (window.WorkBattlesUI?.bindDockButton) {
+        window.WorkBattlesUI.bindDockButton(gamesBtn);
+      } else {
+        bindDockToggle(gamesBtn, 'games', 'Games', gamesPanelHTML, wireGamesPanel);
+      }
+    }
   }
 
   // Example night mode toggle (optional)
