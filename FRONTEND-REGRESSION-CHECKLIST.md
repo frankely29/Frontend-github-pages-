@@ -50,3 +50,17 @@
 ## Not fully verifiable in this headless environment
 - [ ] Full browser-backed UX verification for sign-in, live map interactions, chat/audio, radio playback, games, and admin screens.
 - [ ] Screenshot capture (browser screenshot tool unavailable in this session).
+
+## TLC map battle/progression expansion regression additions
+- [ ] Chess still works.
+- [ ] UNO still works.
+- [ ] Leaderboard still opens.
+- [ ] Profile still opens.
+- [ ] Pickup save still shows reward overlay.
+- [ ] Level-up overlay still works.
+- [ ] 1000-level ladder renders.
+- [ ] Challenge create / accept / decline / cancel works.
+- [ ] Dominoes battle completes and awards XP.
+- [ ] Billiards battle completes and awards XP.
+- [ ] Public winner banner appears.
+- [ ] Profile shows win/loss stats.
