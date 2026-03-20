@@ -1438,6 +1438,7 @@
   }
 
   async function playChatTone(kind) {
+    if (window.radioPlaybackRuntime?.isPlaying) return false;
     if (isChatVoiceBusy() || isVoicePlaybackActive() || Date.now() < Number(voicePlaybackRuntime.suppressTonesUntil || 0)) {
       queuePendingChatTone(kind);
       return false;
@@ -4213,6 +4214,8 @@
   }
 
   function safeMapAvatarUrl(url) {
+    const resolver = window.resolveMapAvatarUrl;
+    if (typeof resolver === 'function') return resolver(url);
     if (typeof url !== 'string') return '';
     const trimmed = url.trim();
     if (!trimmed) return '';
@@ -4908,13 +4911,70 @@
   const UNO_COLORS = ['red','yellow','green','blue'];
   const UNO_ACTIONS = ['skip','reverse','draw2'];
 
+  function shuffleInPlace(items) {
+    const list = Array.isArray(items) ? items : [];
+    for (let i = list.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [list[i], list[j]] = [list[j], list[i]];
+    }
+    return list;
+  }
+
+  function createDominoTileSet() {
+    const tiles = [];
+    for (let left = 0; left <= 6; left += 1) {
+      for (let right = left; right <= 6; right += 1) {
+        tiles.push([left, right]);
+      }
+    }
+    return shuffleInPlace(tiles.slice());
+  }
+
+  function createInitialDominoesState() {
+    const deck = createDominoTileSet();
+    return {
+      board: [],
+      playerHand: deck.splice(0, 7),
+      cpuHand: deck.splice(0, 7),
+      boneyard: deck,
+      turn: 'player',
+      over: false,
+      winner: '',
+      message: 'Your turn. Match doubles or chain ends.',
+      passStreak: 0,
+    };
+  }
+
+  function createInitialBilliardsPracticeState() {
+    return {
+      playerScore: 0,
+      cpuScore: 0,
+      targetScore: 3,
+      shotsTaken: 0,
+      over: false,
+      message: 'Practice mode ready. Sink 3 before the bot does.',
+      balls: [
+        { x: 0.22, y: 0.5, color: '#ffffff' },
+        { x: 0.7, y: 0.32, color: '#fbbf24' },
+        { x: 0.76, y: 0.5, color: '#38bdf8' },
+        { x: 0.7, y: 0.68, color: '#f97316' },
+      ],
+    };
+  }
+
+  function gamesDefaultChallengeUserState() {
+    return { rows: [], loadedAt: 0, query: '', loading: false, error: '', selected: null };
+  }
+
   const gamesState = {
-    activeMode: 'arcade',
     activeTab: 'chess',
+    activeModeByGame: { chess: 'cpu', uno: 'cpu', dominoes: 'cpu', billiards: 'cpu' },
     battleTab: 'overview',
     chess: createInitialChessState(),
     uno: createInitialUnoState(),
     unoWaitingColor: false,
+    dominoes: createInitialDominoesState(),
+    billiards: createInitialBilliardsPracticeState(),
     dashboard: { incoming: [], outgoing: [], activeMatch: null, history: [] },
     activeMatch: null,
     history: [],
@@ -4925,6 +4985,7 @@
     status: '',
     error: '',
     challengeComposer: { targetUserId: '', targetDisplayName: '', gameType: 'dominoes' },
+    challengeUsers: gamesDefaultChallengeUserState(),
     battleNotificationsSeen: new Set(),
     billiardsAim: { angle: 0.1, power: 0.58 },
   };
@@ -4960,6 +5021,7 @@
     return {
       wins: 0,
       losses: 0,
+      total_matches: 0,
       matches_played: 0,
       win_rate: 0,
       dominoes_wins: 0,
@@ -5010,14 +5072,18 @@
       rerenderGamesPanel();
     }
     try {
-      const [challengesRes, historyRes] = await Promise.all([
-        gamesApiGet('/games/challenges').catch(() => ({ ok: false, incoming: [], outgoing: [], active_match: null })),
+      const [incomingRes, outgoingRes, activeRes, historyRes, aggregateRes] = await Promise.all([
+        gamesApiGet('/games/challenges/incoming').catch(() => null),
+        gamesApiGet('/games/challenges/outgoing').catch(() => null),
+        gamesApiGet('/games/matches/active/me').catch(() => null),
         gamesApiGet('/games/history/me').catch(() => ({ ok: false, rows: [] })),
+        gamesApiGet('/games/challenges').catch(() => null),
       ]);
+      const challengesRes = aggregateRes || {};
       gamesState.dashboard = {
-        incoming: Array.isArray(challengesRes?.incoming) ? challengesRes.incoming : [],
-        outgoing: Array.isArray(challengesRes?.outgoing) ? challengesRes.outgoing : [],
-        activeMatch: challengesRes?.active_match || challengesRes?.activeMatch || null,
+        incoming: Array.isArray(incomingRes?.rows) ? incomingRes.rows : (Array.isArray(challengesRes?.incoming) ? challengesRes.incoming : []),
+        outgoing: Array.isArray(outgoingRes?.rows) ? outgoingRes.rows : (Array.isArray(challengesRes?.outgoing) ? challengesRes.outgoing : []),
+        activeMatch: activeRes?.match || activeRes?.active_match || activeRes?.activeMatch || challengesRes?.active_match || challengesRes?.activeMatch || null,
         history: Array.isArray(historyRes?.rows) ? historyRes.rows : Array.isArray(historyRes?.history) ? historyRes.history : [],
       };
       gamesState.history = gamesState.dashboard.history.slice();
@@ -5082,7 +5148,9 @@
     try {
       await gamesApiPost('/games/challenges', {
         target_user_id: Number(targetUserId),
+        challenged_user_id: Number(targetUserId),
         game_type: String(gameType || 'dominoes'),
+        game_key: String(gameType || 'dominoes'),
       });
       setGamesStatus('Challenge sent.');
       gamesState.battleTab = 'outgoing';
@@ -5402,28 +5470,337 @@
     }
   }
 
+  function activeGamesMode() {
+    return gamesState.activeModeByGame[gamesState.activeTab] || 'cpu';
+  }
+
+  function setGamesTabMode(gameKey, mode) {
+    gamesState.activeModeByGame[gameKey] = mode === 'vs_driver' ? 'vs_driver' : 'cpu';
+    if (gamesState.activeModeByGame[gameKey] === 'vs_driver') {
+      gamesState.challengeComposer.gameType = gameKey === 'billiards' ? 'billiards' : 'dominoes';
+      void loadGamesBattleDashboard({ silent: true });
+      void loadChallengeableUsers({ query: gamesState.challengeUsers.query || '', gameKey });
+    }
+  }
+
+  function normalizeChallengeUser(row = {}) {
+    const id = Number(row?.user_id ?? row?.id ?? row?.uid ?? 0);
+    if (!Number.isFinite(id) || id <= 0) return null;
+    return {
+      user_id: id,
+      display_name: String(row?.display_name || row?.name || row?.email || `Driver ${id}`),
+      avatar_thumb_url: safeMapAvatarUrl(row?.avatar_thumb_url || row?.avatar_url || ''),
+      rank_icon_key: row?.rank_icon_key || row?.rankIconKey || '',
+      level: Number(row?.level || 0) || 0,
+      online: !!(row?.online || row?.is_online),
+      leaderboard_badge_code: row?.leaderboard_badge_code || '',
+    };
+  }
+
+  async function loadChallengeableUsers({ query = '', gameKey = null, force = false } = {}) {
+    if (!getGamesAuthToken()) return [];
+    const nextQuery = String(query || '').trim();
+    const activeGame = gameKey || gamesState.challengeComposer.gameType || 'dominoes';
+    const cacheFresh = !force && gamesState.challengeUsers.loadedAt && (Date.now() - gamesState.challengeUsers.loadedAt < 15000);
+    if (cacheFresh && nextQuery === gamesState.challengeUsers.query) return gamesState.challengeUsers.rows;
+    gamesState.challengeUsers.loading = true;
+    gamesState.challengeUsers.error = '';
+    gamesState.challengeUsers.query = nextQuery;
+    rerenderGamesPanel();
+    try {
+      const route = `/games/users?q=${encodeURIComponent(nextQuery)}&limit=80&game_key=${encodeURIComponent(activeGame)}`;
+      let payload = await gamesApiGet(route).catch(() => null);
+      let rows = Array.isArray(payload?.rows) ? payload.rows : Array.isArray(payload?.users) ? payload.users : [];
+      if (!rows.length) {
+        payload = await gamesApiGet('/presence/all?mode=full&limit=500').catch(() => null);
+        const fallbackRows = Array.isArray(payload) ? payload : Array.isArray(payload?.items) ? payload.items : [];
+        rows = fallbackRows.filter((row) => {
+          const meId = Number(window?.me?.id || 0);
+          const rowId = Number(row?.user_id ?? row?.id ?? row?.uid ?? 0);
+          if (!rowId || (meId && rowId === meId)) return false;
+          const label = String(row?.display_name || row?.name || row?.email || '').toLowerCase();
+          return !nextQuery || label.includes(nextQuery.toLowerCase());
+        });
+      }
+      gamesState.challengeUsers.rows = rows.map(normalizeChallengeUser).filter(Boolean);
+      gamesState.challengeUsers.loadedAt = Date.now();
+      return gamesState.challengeUsers.rows;
+    } catch (err) {
+      gamesState.challengeUsers.error = err?.message || 'Unable to load drivers.';
+      return [];
+    } finally {
+      gamesState.challengeUsers.loading = false;
+      rerenderGamesPanel();
+    }
+  }
+
+  function battleRowsForGame(gameKey) {
+    const normalizedKey = gameKey === 'billiards' ? 'billiards' : 'dominoes';
+    const matchKey = (row) => String(row?.game_key || row?.game_type || '').toLowerCase();
+    return {
+      incoming: (gamesState.dashboard?.incoming || []).filter((row) => matchKey(row) === normalizedKey),
+      outgoing: (gamesState.dashboard?.outgoing || []).filter((row) => matchKey(row) === normalizedKey),
+      history: (gamesState.history || []).filter((row) => matchKey(row) === normalizedKey).slice(0, 5),
+      active: String(gamesState.activeMatch?.game_key || gamesState.activeMatch?.game_type || '').toLowerCase() === normalizedKey ? gamesState.activeMatch : null,
+    };
+  }
+
+  function renderChallengeableUsers(gameKey) {
+    const state = gamesState.challengeUsers;
+    const rows = Array.isArray(state.rows) ? state.rows : [];
+    const selectedId = Number(state.selected?.user_id || gamesState.challengeComposer.targetUserId || 0);
+    return `<section class="gamesBattlePanel">
+      <div class="gamesSectionHeader">Vs Driver</div>
+      <input id="gamesChallengeSearch" class="driverProfileInput gamesComposerInput" type="search" placeholder="Search drivers" value="${escapeHtml(state.query || '')}">
+      <div class="gamesUserList">
+        ${state.loading ? '<div class="leaderboardEmpty">Loading drivers…</div>' : ''}
+        ${!state.loading && !rows.length ? '<div class="leaderboardEmpty">No drivers found.</div>' : rows.map((row) => `
+          <button type="button" class="gamesUserRow ${selectedId === row.user_id ? 'selected' : ''}" data-games-user="${row.user_id}">
+            <span class="gamesUserAvatar">${row.avatar_thumb_url ? `<img src="${escapeHtml(row.avatar_thumb_url)}" alt="" loading="lazy">` : escapeHtml((row.display_name || 'D').slice(0, 2).toUpperCase())}</span>
+            <span class="gamesUserMeta"><strong>${escapeHtml(row.display_name)}</strong><span>${row.level ? `Level ${escapeHtml(String(row.level))}` : 'Driver'} ${row.online ? '• Online' : ''}</span></span>
+            <span class="gamesUserRank">${row.rank_icon_key ? renderRankBadgeIcon(row.rank_icon_key, { compact: true }) : ''}</span>
+          </button>`).join('')}
+      </div>
+      <div class="gamesChallengeComposer">
+        <input id="gamesChallengeTargetName" class="driverProfileInput gamesComposerInput" type="text" placeholder="Selected driver" readonly value="${escapeHtml(String(state.selected?.display_name || gamesState.challengeComposer.targetDisplayName || ''))}">
+        <button id="gamesSendChallengeBtn" class="chipBtn" ${!(state.selected?.user_id || gamesState.challengeComposer.targetUserId) ? 'disabled' : ''}>Challenge to ${escapeHtml(gameKey === 'billiards' ? 'Billiards' : 'Dominoes')}</button>
+      </div>
+      ${state.error ? `<div class="gamesStatus err">${escapeHtml(state.error)}</div>` : ''}
+    </section>`;
+  }
+
+  function renderBattleInboxStack(gameKey) {
+    const battleRows = battleRowsForGame(gameKey);
+    return `<div class="gamesBattleColumns">
+      ${renderChallengeableUsers(gameKey)}
+      <section class="gamesBattlePanel"><div class="gamesSectionHeader">Incoming</div><div class="gamesBattleList">${battleRows.incoming.length ? battleRows.incoming.map((row) => renderChallengeRow(row, 'incoming')).join('') : '<div class="leaderboardEmpty">No incoming challenges.</div>'}</div></section>
+      <section class="gamesBattlePanel"><div class="gamesSectionHeader">Outgoing</div><div class="gamesBattleList">${battleRows.outgoing.length ? battleRows.outgoing.map((row) => renderChallengeRow(row, 'outgoing')).join('') : '<div class="leaderboardEmpty">No outgoing challenges.</div>'}</div></section>
+      <section class="gamesBattlePanel"><div class="gamesSectionHeader">Active battle</div>${battleRows.active ? `<div class="gamesBattleCard"><div class="gamesBattleTitle">${escapeHtml(String(battleRows.active.opponent_display_name || 'Driver'))}</div><div class="gamesBattleMeta">${escapeHtml(String(gameKey === 'billiards' ? 'Billiards' : 'Dominoes'))} • ${escapeHtml(String(battleRows.active.status || 'active'))}</div><button class="chipBtn" data-games-open-active="1">Open Match</button></div>` : '<div class="leaderboardEmpty">No active battle.</div>'}</section>
+      <section class="gamesBattlePanel"><div class="gamesSectionHeader">Recent history</div><div class="gamesBattleList">${battleRows.history.length ? battleRows.history.map(renderBattleHistoryRow).join('') : '<div class="leaderboardEmpty">No recent battles yet.</div>'}</div></section>
+    </div>`;
+  }
+
+  function dominoValueAtSide(tile, side) {
+    const pair = Array.isArray(tile) ? tile : [];
+    return Number(pair[side === 'right' ? 1 : 0] || 0);
+  }
+
+  function dominoesOpenEnds(board) {
+    if (!Array.isArray(board) || !board.length) return null;
+    return { left: dominoValueAtSide(board[0], 'left'), right: dominoValueAtSide(board[board.length - 1], 'right') };
+  }
+
+  function dominoesPlayableSides(tile, board) {
+    const pair = Array.isArray(tile) ? tile : [];
+    if (!board.length) return ['left', 'right'];
+    const ends = dominoesOpenEnds(board);
+    const values = [Number(pair[0] || 0), Number(pair[1] || 0)];
+    const sides = [];
+    if (values.includes(ends.left)) sides.push('left');
+    if (values.includes(ends.right)) sides.push('right');
+    return sides;
+  }
+
+  function orientDominoForSide(tile, board, side) {
+    const pair = Array.isArray(tile) ? tile.slice(0, 2) : [0, 0];
+    if (!board.length) return pair;
+    const ends = dominoesOpenEnds(board);
+    if (side === 'left') return Number(pair[1]) === ends.left ? pair : [pair[1], pair[0]];
+    return Number(pair[0]) === ends.right ? pair : [pair[1], pair[0]];
+  }
+
+  function settleDominoesCpuTurn() {
+    const state = gamesState.dominoes;
+    if (state.over || state.turn !== 'cpu') return;
+    const playable = state.cpuHand.map((tile, index) => ({ tile, index, sides: dominoesPlayableSides(tile, state.board) })).filter((entry) => entry.sides.length);
+    if (!playable.length) {
+      if (state.boneyard.length) {
+        state.cpuHand.push(state.boneyard.shift());
+        state.message = 'CPU drew a tile.';
+        rerenderGamesPanel();
+        window.setTimeout(settleDominoesCpuTurn, 320);
+        return;
+      }
+      state.passStreak += 1;
+      if (state.passStreak >= 2) {
+        state.over = true;
+        const playerPips = state.playerHand.flat().reduce((sum, value) => sum + Number(value || 0), 0);
+        const cpuPips = state.cpuHand.flat().reduce((sum, value) => sum + Number(value || 0), 0);
+        state.winner = playerPips <= cpuPips ? 'player' : 'cpu';
+        state.message = state.winner === 'player' ? 'Blocked board. You win on lower pips.' : 'Blocked board. CPU wins on lower pips.';
+      } else {
+        state.turn = 'player';
+        state.message = 'CPU passed. Your turn.';
+      }
+      rerenderGamesPanel();
+      return;
+    }
+    const pick = playable[Math.floor(Math.random() * playable.length)];
+    const side = pick.sides[Math.floor(Math.random() * pick.sides.length)];
+    const oriented = orientDominoForSide(pick.tile, state.board, side);
+    state.cpuHand.splice(pick.index, 1);
+    if (side === 'left') state.board.unshift(oriented);
+    else state.board.push(oriented);
+    state.passStreak = 0;
+    if (!state.cpuHand.length) {
+      state.over = true;
+      state.winner = 'cpu';
+      state.message = 'CPU used every tile and won.';
+    } else {
+      state.turn = 'player';
+      state.message = `CPU played ${oriented[0]}-${oriented[1]}. Your turn.`;
+    }
+    rerenderGamesPanel();
+  }
+
+  function renderDominoesCpu(host) {
+    const state = gamesState.dominoes;
+    const playable = state.playerHand.map((tile, index) => ({ tile, index, sides: dominoesPlayableSides(tile, state.board) }));
+    host.innerHTML = `<div class="gamesBattleArena">
+      <div class="gamesBattleTopline"><div class="gamesStatus">${escapeHtml(state.message)}</div><div class="gamesBattleMeta">CPU hand: ${escapeHtml(String(state.cpuHand.length))} • Boneyard: ${escapeHtml(String(state.boneyard.length))}</div></div>
+      <div class="gamesDominoBoard">${state.board.length ? state.board.map((tile) => `<div class="gamesDominoBoardTile">${renderDominoesTile(tile)}</div>`).join('') : '<div class="leaderboardEmpty">Board waiting for first tile.</div>'}</div>
+      <div class="gamesActionRow"><button id="gamesDominoCpuDrawBtn" class="chipBtn" ${state.over || state.turn !== 'player' || !state.boneyard.length ? 'disabled' : ''}>Draw</button><button id="gamesDominoCpuPassBtn" class="chipBtn" ${state.over || state.turn !== 'player' ? 'disabled' : ''}>Pass</button></div>
+      <div class="gamesMiniLabel">Your hand</div>
+      <div class="gamesDominoHand">${playable.map((entry) => `<div class="gamesDominoTileWrap">${renderDominoesTile(entry.tile, state.turn === 'player' && !state.over && entry.sides.length)}<div class="gamesDominoActions"><button class="chipBtn miniChip" ${entry.sides.includes('left') && state.turn === 'player' && !state.over ? `data-domino-cpu="${entry.index}" data-domino-side="left"` : 'disabled'}>Left</button><button class="chipBtn miniChip" ${entry.sides.includes('right') && state.turn === 'player' && !state.over ? `data-domino-cpu="${entry.index}" data-domino-side="right"` : 'disabled'}>Right</button></div></div>`).join('')}</div>
+    </div>`;
+    document.getElementById('gamesDominoCpuDrawBtn')?.addEventListener('click', () => {
+      if (!state.boneyard.length || state.over || state.turn !== 'player') return;
+      state.playerHand.push(state.boneyard.shift());
+      state.message = 'You drew a tile.';
+      rerenderGamesPanel();
+    });
+    document.getElementById('gamesDominoCpuPassBtn')?.addEventListener('click', () => {
+      if (state.over || state.turn !== 'player') return;
+      state.passStreak += 1;
+      state.turn = 'cpu';
+      state.message = 'You passed.';
+      rerenderGamesPanel();
+      window.setTimeout(settleDominoesCpuTurn, 320);
+    });
+    host.querySelectorAll('[data-domino-cpu]').forEach((btn) => btn.addEventListener('click', () => {
+      const index = Number(btn.getAttribute('data-domino-cpu'));
+      const side = btn.getAttribute('data-domino-side') || 'left';
+      const tile = state.playerHand[index];
+      if (!tile || state.over || state.turn !== 'player') return;
+      const oriented = orientDominoForSide(tile, state.board, side);
+      state.playerHand.splice(index, 1);
+      if (side === 'left') state.board.unshift(oriented);
+      else state.board.push(oriented);
+      state.passStreak = 0;
+      if (!state.playerHand.length) {
+        state.over = true;
+        state.winner = 'player';
+        state.message = 'You win! Your hand is empty.';
+      } else {
+        state.turn = 'cpu';
+        state.message = `You played ${oriented[0]}-${oriented[1]}. CPU thinking…`;
+        rerenderGamesPanel();
+        window.setTimeout(settleDominoesCpuTurn, 320);
+        return;
+      }
+      rerenderGamesPanel();
+    }));
+  }
+
+  function drawBilliardsPracticeCanvas(canvas) {
+    drawBilliardsCanvas(canvas, { state: { balls: gamesState.billiards.balls }, current_turn_user_id: window?.me?.id || 1 });
+  }
+
+  function settleBilliardsCpuTurn() {
+    const state = gamesState.billiards;
+    if (state.over) return;
+    const madeShot = Math.random() > 0.48;
+    if (madeShot) state.cpuScore += 1;
+    if (state.cpuScore >= state.targetScore) {
+      state.over = true;
+      state.message = 'Bot cleared the rack first.';
+    } else {
+      state.message = madeShot ? 'Bot sank one. Your turn.' : 'Bot missed. Your turn.';
+    }
+    rerenderGamesPanel();
+  }
+
+  function renderBilliardsCpu(host) {
+    const state = gamesState.billiards;
+    host.innerHTML = `<div class="gamesBattleArena">
+      <div class="gamesBattleTopline"><div class="gamesStatus">${escapeHtml(state.message)}</div><div class="gamesBattleMeta">You ${escapeHtml(String(state.playerScore))} • Bot ${escapeHtml(String(state.cpuScore))}</div></div>
+      <canvas id="gamesBilliardsCpuCanvas" class="gamesBilliardsCanvas" width="320" height="180"></canvas>
+      <div class="gamesBilliardsControls">
+        <label class="gamesControlLabel">Angle <input id="gamesBilliardsAngle" type="range" min="-314" max="314" step="1" value="${Math.round((gamesState.billiardsAim.angle || 0) * 100)}" ${state.over ? 'disabled' : ''}></label>
+        <label class="gamesControlLabel">Power <input id="gamesBilliardsPower" type="range" min="10" max="100" step="1" value="${Math.round((gamesState.billiardsAim.power || 0.58) * 100)}" ${state.over ? 'disabled' : ''}></label>
+        <button id="gamesBilliardsShotBtn" class="chipBtn" ${state.over ? 'disabled' : ''}>Take Shot</button>
+      </div>
+      <div class="gamesBattleMeta">First to ${escapeHtml(String(state.targetScore))} wins this quick practice race.</div>
+    </div>`;
+    const canvas = document.getElementById('gamesBilliardsCpuCanvas');
+    drawBilliardsPracticeCanvas(canvas);
+    document.getElementById('gamesBilliardsAngle')?.addEventListener('input', (e) => { gamesState.billiardsAim.angle = Number(e.target.value || 0) / 100; drawBilliardsPracticeCanvas(canvas); });
+    document.getElementById('gamesBilliardsPower')?.addEventListener('input', (e) => { gamesState.billiardsAim.power = Math.max(0.1, Math.min(1, Number(e.target.value || 58) / 100)); drawBilliardsPracticeCanvas(canvas); });
+    document.getElementById('gamesBilliardsShotBtn')?.addEventListener('click', () => {
+      if (state.over) return;
+      state.shotsTaken += 1;
+      const madeShot = Math.random() < (0.18 + (gamesState.billiardsAim.power * 0.32));
+      if (madeShot) state.playerScore += 1;
+      if (state.playerScore >= state.targetScore) {
+        state.over = true;
+        state.message = 'You cleared the practice rack first.';
+      } else {
+        state.message = madeShot ? 'Nice shot. Bot turn…' : 'Missed shot. Bot turn…';
+        rerenderGamesPanel();
+        window.setTimeout(settleBilliardsCpuTurn, 420);
+        return;
+      }
+      rerenderGamesPanel();
+    });
+  }
+
+  function renderGamesVsDriver(host, gameKey) {
+    host.innerHTML = renderBattleInboxStack(gameKey);
+    document.getElementById('gamesChallengeSearch')?.addEventListener('input', (e) => {
+      gamesState.challengeUsers.query = String(e.target.value || '');
+      void loadChallengeableUsers({ query: gamesState.challengeUsers.query, gameKey, force: true });
+    });
+    host.querySelectorAll('[data-games-user]').forEach((btn) => btn.addEventListener('click', () => {
+      const userId = Number(btn.getAttribute('data-games-user'));
+      const row = (gamesState.challengeUsers.rows || []).find((item) => Number(item.user_id) === userId) || null;
+      gamesState.challengeUsers.selected = row;
+      gamesState.challengeComposer.targetUserId = String(userId || '');
+      gamesState.challengeComposer.targetDisplayName = row?.display_name || '';
+      gamesState.challengeComposer.gameType = gameKey;
+      rerenderGamesPanel();
+    }));
+    document.getElementById('gamesSendChallengeBtn')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      const selected = gamesState.challengeUsers.selected;
+      if (!selected?.user_id) return;
+      void createBattleChallenge(selected.user_id, gameKey);
+    });
+    host.querySelector('[data-games-open-active="1"]')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      const match = battleRowsForGame(gameKey).active;
+      if (match?.id) {
+        loadActiveBattleMatch({ silent: true, preferredMatchId: match.id }).then(() => rerenderGamesPanel());
+      }
+    });
+  }
+
   function gamesPanelHTML() {
-    const arcadeModeActive = gamesState.activeMode === 'arcade';
-    const battleModeActive = gamesState.activeMode === 'battles';
-    const battleTabs = [
-      ['overview', 'Challenges'],
-      ['incoming', 'Inbox'],
-      ['outgoing', 'Outgoing'],
-      ['active', 'Active Battle'],
-      ['history', 'History'],
-    ];
+    const activeTab = gamesState.activeTab || 'chess';
+    const activeMode = activeGamesMode();
+    const showModeSelector = activeTab === 'dominoes' || activeTab === 'billiards';
     return `
       <div class="panelBlock gamesPanelWrap">
         <div class="gamesTabs gamesModeTabs">
-          <button id="gamesModeArcade" class="chipBtn gamesTabBtn ${arcadeModeActive ? 'active' : ''}">Arcade</button>
-          <button id="gamesModeBattles" class="chipBtn gamesTabBtn ${battleModeActive ? 'active' : ''}">Battles</button>
+          <button id="gamesTabChess" class="chipBtn gamesTabBtn ${activeTab === 'chess' ? 'active' : ''}">Chess</button>
+          <button id="gamesTabUno" class="chipBtn gamesTabBtn ${activeTab === 'uno' ? 'active' : ''}">UNO</button>
+          <button id="gamesTabDominoes" class="chipBtn gamesTabBtn ${activeTab === 'dominoes' ? 'active' : ''}">Dominoes</button>
+          <button id="gamesTabBilliards" class="chipBtn gamesTabBtn ${activeTab === 'billiards' ? 'active' : ''}">Billiards</button>
           <button id="gamesResetBtn" class="chipBtn">New Game</button>
         </div>
-        <div class="gamesTabs ${arcadeModeActive ? '' : 'hidden'}">
-          <button id="gamesTabChess" class="chipBtn gamesTabBtn ${gamesState.activeTab === 'chess' ? 'active' : ''}">Chess vs CPU</button>
-          <button id="gamesTabUno" class="chipBtn gamesTabBtn ${gamesState.activeTab === 'uno' ? 'active' : ''}">UNO vs CPU</button>
-        </div>
-        <div class="gamesTabs gamesBattleTabs ${battleModeActive ? '' : 'hidden'}">${battleTabs.map(([key, label]) => `<button class="chipBtn gamesTabBtn ${gamesState.battleTab === key ? 'active' : ''}" data-games-tab="${key}">${label}</button>`).join('')}</div>
+        ${showModeSelector ? `<div class="gamesTabs gamesBattleTabs">
+          <button class="chipBtn gamesTabBtn ${activeMode === 'cpu' ? 'active' : ''}" data-games-mode="cpu">CPU</button>
+          <button class="chipBtn gamesTabBtn ${activeMode === 'vs_driver' ? 'active' : ''}" data-games-mode="vs_driver">Vs Driver</button>
+        </div>` : ''}
         <div class="gamesStatus ${gamesState.error ? 'err' : ''}">${escapeHtml(gamesState.status || '')}</div>
         <div id="gamesContent"></div>
       </div>
@@ -5431,37 +5808,39 @@
   }
 
   function wireGamesPanel() {
-    document.getElementById('gamesModeArcade')?.addEventListener('click', (e) => { e.preventDefault(); gamesState.activeMode = 'arcade'; rerenderGamesPanel(); });
-    document.getElementById('gamesModeBattles')?.addEventListener('click', (e) => { e.preventDefault(); gamesState.activeMode = 'battles'; void loadGamesBattleDashboard({ silent: true }); rerenderGamesPanel(); });
     document.getElementById('gamesTabChess')?.addEventListener('click', (e) => { e.preventDefault(); gamesState.activeTab = 'chess'; rerenderGamesPanel(); });
     document.getElementById('gamesTabUno')?.addEventListener('click', (e) => { e.preventDefault(); gamesState.activeTab = 'uno'; rerenderGamesPanel(); });
-    document.querySelectorAll('[data-games-tab]').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        e.preventDefault();
-        gamesState.activeMode = 'battles';
-        gamesState.battleTab = btn.getAttribute('data-games-tab') || 'overview';
-        if (gamesState.battleTab === 'active') void loadActiveBattleMatch({ silent: true });
-        rerenderGamesPanel();
-      });
-    });
+    document.getElementById('gamesTabDominoes')?.addEventListener('click', (e) => { e.preventDefault(); gamesState.activeTab = 'dominoes'; rerenderGamesPanel(); });
+    document.getElementById('gamesTabBilliards')?.addEventListener('click', (e) => { e.preventDefault(); gamesState.activeTab = 'billiards'; rerenderGamesPanel(); });
+    document.querySelectorAll('[data-games-mode]').forEach((btn) => btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      setGamesTabMode(gamesState.activeTab, btn.getAttribute('data-games-mode') || 'cpu');
+      rerenderGamesPanel();
+    }));
     document.getElementById('gamesResetBtn')?.addEventListener('click', (e) => {
       e.preventDefault();
-      if (gamesState.activeMode === 'arcade') {
-        if (gamesState.activeTab === 'chess') gamesState.chess = createInitialChessState();
-        else {
-          gamesState.uno = createInitialUnoState();
-          gamesState.unoWaitingColor = false;
-        }
-        rerenderGamesPanel();
-        if (gamesState.activeTab === 'uno') maybeRunUnoCpuTurn();
-        return;
+      if (gamesState.activeTab === 'chess') gamesState.chess = createInitialChessState();
+      else if (gamesState.activeTab === 'uno') {
+        gamesState.uno = createInitialUnoState();
+        gamesState.unoWaitingColor = false;
+      } else if (gamesState.activeTab === 'dominoes' && activeGamesMode() === 'cpu') {
+        gamesState.dominoes = createInitialDominoesState();
+      } else if (gamesState.activeTab === 'billiards' && activeGamesMode() === 'cpu') {
+        gamesState.billiards = createInitialBilliardsPracticeState();
+      } else {
+        gamesState.challengeComposer = { targetUserId: '', targetDisplayName: '', gameType: gamesState.activeTab === 'billiards' ? 'billiards' : 'dominoes' };
+        gamesState.challengeUsers.selected = null;
+        setGamesStatus('Challenge composer reset.');
       }
-      gamesState.challengeComposer = { targetUserId: '', targetDisplayName: '', gameType: 'dominoes' };
-      setGamesStatus('Battle composer reset.');
       rerenderGamesPanel();
+      if (gamesState.activeTab === 'uno') maybeRunUnoCpuTurn();
+      if (activeGamesMode() === 'vs_driver') {
+        void loadGamesBattleDashboard({ silent: true });
+        void loadChallengeableUsers({ query: gamesState.challengeUsers.query || '', gameKey: gamesState.activeTab, force: true });
+      }
     });
     renderGamesContent();
-    if (gamesState.activeMode === 'battles') {
+    if (activeGamesMode() === 'vs_driver') {
       scheduleGamesDashboardPoll();
       if (gamesState.dashboard?.activeMatch?.id || gamesState.activeMatch?.id) scheduleGamesMatchPoll();
     }
@@ -5478,36 +5857,22 @@
   function renderGamesContent() {
     const host = document.getElementById('gamesContent');
     if (!host) return;
-    if (gamesState.activeMode === 'arcade') {
-      if (gamesState.activeTab === 'chess') renderChessContent(host);
-      else renderUnoContent(host);
+    if (gamesState.activeTab === 'chess') {
+      renderChessContent(host);
       return;
     }
-    if (gamesState.battleTab === 'overview') {
-      host.innerHTML = renderBattleOverview();
-      document.querySelectorAll('[data-games-select-type]').forEach((btn) => {
-        btn.addEventListener('click', (e) => {
-          e.preventDefault();
-          gamesState.challengeComposer.gameType = btn.getAttribute('data-games-select-type') || 'dominoes';
-          rerenderGamesPanel();
-        });
-      });
-      document.getElementById('gamesSendChallengeBtn')?.addEventListener('click', (e) => {
-        e.preventDefault();
-        const targetEl = document.getElementById('gamesChallengeTarget');
-        const nameEl = document.getElementById('gamesChallengeTargetName');
-        gamesState.challengeComposer.targetUserId = String(targetEl?.value || '').trim();
-        gamesState.challengeComposer.targetDisplayName = String(nameEl?.value || '').trim();
-        void createBattleChallenge(gamesState.challengeComposer.targetUserId, gamesState.challengeComposer.gameType);
-      });
-    } else if (gamesState.battleTab === 'incoming') {
-      host.innerHTML = `<div class="gamesBattleList">${gamesState.dashboard.incoming.length ? gamesState.dashboard.incoming.map((row) => renderChallengeRow(row, 'incoming')).join('') : '<div class="leaderboardEmpty">No incoming challenges.</div>'}</div>`;
-    } else if (gamesState.battleTab === 'outgoing') {
-      host.innerHTML = `<div class="gamesBattleList">${gamesState.dashboard.outgoing.length ? gamesState.dashboard.outgoing.map((row) => renderChallengeRow(row, 'outgoing')).join('') : '<div class="leaderboardEmpty">No outgoing challenges.</div>'}</div>`;
-    } else if (gamesState.battleTab === 'history') {
-      host.innerHTML = `<div class="gamesBattleList">${gamesState.history.length ? gamesState.history.map(renderBattleHistoryRow).join('') : '<div class="leaderboardEmpty">No recent battles yet.</div>'}</div>`;
+    if (gamesState.activeTab === 'uno') {
+      renderUnoContent(host);
+      return;
+    }
+    if (gamesState.activeTab === 'dominoes') {
+      if (activeGamesMode() === 'cpu') renderDominoesCpu(host);
+      else if (battleRowsForGame('dominoes').active) renderActiveBattle(host);
+      else renderGamesVsDriver(host, 'dominoes');
     } else {
-      renderActiveBattle(host);
+      if (activeGamesMode() === 'cpu') renderBilliardsCpu(host);
+      else if (battleRowsForGame('billiards').active) renderActiveBattle(host);
+      else renderGamesVsDriver(host, 'billiards');
     }
     host.querySelectorAll('[data-games-accept]').forEach((btn) => btn.addEventListener('click', (e) => { e.preventDefault(); void respondToChallenge(btn.getAttribute('data-games-accept'), 'accept'); }));
     host.querySelectorAll('[data-games-decline]').forEach((btn) => btn.addEventListener('click', (e) => { e.preventDefault(); void respondToChallenge(btn.getAttribute('data-games-decline'), 'decline'); }));
@@ -5515,19 +5880,22 @@
   }
 
   function openGamesBattleComposer({ targetUserId = '', displayName = '', gameType = 'dominoes' } = {}) {
-    gamesState.activeMode = 'battles';
-    gamesState.battleTab = 'overview';
+    const normalizedGame = gameType === 'billiards' ? 'billiards' : 'dominoes';
+    gamesState.activeTab = normalizedGame;
+    gamesState.activeModeByGame[normalizedGame] = 'vs_driver';
     gamesState.challengeComposer = {
       targetUserId: String(targetUserId || '').trim(),
       targetDisplayName: String(displayName || '').trim(),
-      gameType: gameType === 'billiards' ? 'billiards' : 'dominoes',
+      gameType: normalizedGame,
     };
+    gamesState.challengeUsers.selected = targetUserId ? { user_id: Number(targetUserId), display_name: String(displayName || 'Driver') } : null;
     if (typeof openPanel === 'function') {
       openPanel('games', 'Games', gamesPanelHTML(), wireGamesPanel);
     } else {
       rerenderGamesPanel();
     }
     void loadGamesBattleDashboard({ silent: true });
+    void loadChallengeableUsers({ query: '', gameKey: normalizedGame, force: true });
   }
 
 
@@ -6555,11 +6923,15 @@
 
   function renderBattleStatsSection(stats) {
     const safe = { ...defaultBattleStats(), ...(stats && typeof stats === 'object' ? stats : {}) };
+    const totalMatches = Number(safe.total_matches ?? safe.matches_played ?? 0) || 0;
+    const wins = Number(safe.wins ?? safe.total_wins ?? 0) || 0;
+    const losses = Number(safe.losses ?? safe.total_losses ?? 0) || 0;
+    const winRate = safe.win_rate ?? (totalMatches > 0 ? (wins / totalMatches) : 0);
     const cards = [
-      ['Wins', safe.wins],
-      ['Losses', safe.losses],
-      ['Matches', safe.matches_played],
-      ['Win rate', formatBattlePct(safe.win_rate)],
+      ['Wins', wins],
+      ['Losses', losses],
+      ['Matches', totalMatches],
+      ['Win rate', formatBattlePct(winRate)],
       ['Dominoes W', safe.dominoes_wins],
       ['Dominoes L', safe.dominoes_losses],
       ['Billiards W', safe.billiards_wins],
@@ -6574,9 +6946,9 @@
     if (!rows.length) return '<div class="driverProfileStatus">No recent battles yet.</div>';
     return `<div class="driverProfileRecentBattles">${rows.map((row) => {
       const result = battleResultLabel(row);
-      const game = String(row?.game_type || 'battle').replace(/^./, (m) => m.toUpperCase());
-      const opponent = String(row?.opponent_display_name || 'Driver');
-      const xp = Number(row?.xp_awarded || 0);
+      const game = String(row?.game_key || row?.game_type || 'battle').replace(/^./, (m) => m.toUpperCase());
+      const opponent = String(row?.opponent_display_name || row?.opponent_name || 'Driver');
+      const xp = Number(row?.xp_awarded ?? row?.xp_delta ?? row?.xp ?? 0);
       return `<article class="driverProfileRecentBattle ${result.toLowerCase()}"><div class="driverProfileRecentBattleTop"><strong>${escapeHtml(game)}</strong><span>${escapeHtml(result)}</span></div><div class="driverProfileRecentBattleMeta">vs ${escapeHtml(opponent)} • ${escapeHtml(formatBattleDate(row?.completed_at))}</div><div class="driverProfileRecentBattleMeta">${xp > 0 ? `+${escapeHtml(formatProgressNumber(xp, { maxFractionDigits: 0 }))} XP` : 'Completed'}</div></article>`;
     }).join('')}</div>`;
   }
@@ -7294,9 +7666,9 @@
           ${renderDriverProfilePeriodCard('Yearly', yearly)}
         </div>
         <div class="driverProfileSectionTitle">Battle record</div>
-        ${renderBattleStatsSection(profilePayload?.battle_stats)}
+        ${renderBattleStatsSection(profilePayload?.battle_record || profilePayload?.battle_stats)}
         <div class="driverProfileSectionTitle">Recent battles</div>
-        ${renderRecentBattlesList(profilePayload?.recent_battles)}
+        ${renderRecentBattlesList(profilePayload?.recent_battles || profilePayload?.battle_history)}
         ${selfMode ? accountActionsHtml : `
           <div class="driverProfileSectionTitle">Private messages</div>
           <div class="driverProfileDmWrap">
