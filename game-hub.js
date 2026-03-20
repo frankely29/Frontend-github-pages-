@@ -142,19 +142,35 @@
   }
 
   function bindDockButton(buttonEl) {
-    if (!buttonEl || buttonEl === state.boundDockButton || buttonEl.dataset.gameHubBound === '1') return;
+    if (!buttonEl) return false;
+    if (state.boundDockButton && state.boundDockButton !== buttonEl && state.boundDockButton.__gameHubClickHandler) {
+      state.boundDockButton.removeEventListener('click', state.boundDockButton.__gameHubClickHandler);
+      delete state.boundDockButton.__gameHubClickHandler;
+    }
+    if (state.boundDockButton && state.boundDockButton !== buttonEl && state.boundDockButton.__gameHubPointerHandler) {
+      state.boundDockButton.removeEventListener('pointerdown', state.boundDockButton.__gameHubPointerHandler);
+      delete state.boundDockButton.__gameHubPointerHandler;
+    }
+    if (!buttonEl.__gameHubPointerHandler) {
+      buttonEl.__gameHubPointerHandler = (event) => event.stopPropagation();
+      buttonEl.addEventListener('pointerdown', buttonEl.__gameHubPointerHandler);
+    }
+    if (!buttonEl.__gameHubClickHandler) {
+      buttonEl.__gameHubClickHandler = (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (isOpen()) {
+          window.closeDrawer?.();
+          return;
+        }
+        open({ initialTab: 'games' });
+      };
+      buttonEl.addEventListener('click', buttonEl.__gameHubClickHandler);
+    }
     state.boundDockButton = buttonEl;
     buttonEl.dataset.gameHubBound = '1';
-    buttonEl.addEventListener('pointerdown', (event) => event.stopPropagation());
-    buttonEl.addEventListener('click', (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      if (isOpen()) {
-        window.closeDrawer?.();
-        return;
-      }
-      open({ initialTab: 'games' });
-    });
+    buttonEl.dataset.gamesDockBound = '1';
+    return true;
   }
 
   function chessPieceName(type) {
@@ -715,4 +731,10 @@
     open,
     rerender,
   };
+
+  try {
+    window.initCommunityDockBindings?.();
+  } catch (error) {
+    console.warn('GameHub dock bootstrap retry failed', error);
+  }
 })();
