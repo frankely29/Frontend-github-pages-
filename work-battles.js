@@ -605,10 +605,52 @@
     }
   }
 
+  function openHub(options = {}) {
+    const profileTarget = options?.profileTarget && typeof options.profileTarget === 'object'
+      ? options.profileTarget
+      : (state.pendingProfileTarget || null);
+    if (window.GameHubUI?.open) {
+      window.GameHubUI.open({ initialTab: 'work-battles', profileTarget });
+      return true;
+    }
+    if (typeof window.openDrawer === 'function') {
+      window.openDrawer(HUB_KEY, 'Games', '<div id="workBattlesPanelMount" class="gameHubEmbeddedWorkBattles"></div>');
+      const host = document.getElementById('workBattlesPanelMount');
+      if (host) mount(host, profileTarget ? { profileTarget } : {});
+      return true;
+    }
+    return false;
+  }
+
+  function bindDockButton(buttonEl) {
+    if (!buttonEl) return false;
+    if (buttonEl.__workBattlesPointerHandler) {
+      buttonEl.removeEventListener('pointerdown', buttonEl.__workBattlesPointerHandler);
+    }
+    if (buttonEl.__workBattlesClickHandler) {
+      buttonEl.removeEventListener('click', buttonEl.__workBattlesClickHandler);
+    }
+    buttonEl.__workBattlesPointerHandler = (event) => event.stopPropagation();
+    buttonEl.__workBattlesClickHandler = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (window.getOpenPanelKey?.() === HUB_KEY) {
+        window.closeDrawer?.();
+        return;
+      }
+      openHub();
+    };
+    buttonEl.addEventListener('pointerdown', buttonEl.__workBattlesPointerHandler);
+    buttonEl.addEventListener('click', buttonEl.__workBattlesClickHandler);
+    buttonEl.dataset.workBattlesDockBound = '1';
+    buttonEl.dataset.gamesDockBound = '1';
+    return true;
+  }
+
   function openForProfileTarget({ userId, displayName } = {}) {
     const numericId = Number(userId);
     if (!Number.isFinite(numericId) || numericId <= 0) {
-      window.GameHubUI?.open?.({ initialTab: 'work-battles' });
+      openHub();
       return;
     }
     state.pendingProfileTarget = {
@@ -621,7 +663,7 @@
     };
     state.selectedUser = state.pendingProfileTarget;
     state.activeTab = 'create';
-    window.GameHubUI?.open?.({ initialTab: 'work-battles', profileTarget: state.pendingProfileTarget });
+    openHub({ profileTarget: state.pendingProfileTarget });
   }
 
   function getPendingProfileTarget() {
@@ -633,10 +675,18 @@
   }
 
   window.WorkBattlesUI = {
+    bindDockButton,
     mount,
+    openHub,
     refresh: () => refresh({ silent: false, forceUsers: true }),
     openForProfileTarget,
     getPendingProfileTarget,
     clearPendingProfileTarget,
   };
+
+  try {
+    window.initCommunityDockBindings?.();
+  } catch (error) {
+    console.warn('WorkBattles dock bootstrap retry failed', error);
+  }
 })();

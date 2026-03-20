@@ -5978,14 +5978,61 @@
   window.renderLeaderboardBadgeSvg = renderLeaderboardBadgeSvg;
   window.syncLeaderboardBadgeRewards = syncLeaderboardBadgeRewards;
 
-  // Bind the chat dock button using its ID
-  if (typeof bindDockToggle === 'function') {
-    const chatBtn = document.getElementById('dockChat');
-    if (chatBtn) { bindDockToggle(chatBtn, 'chat', 'Chat', chatPanelHTML, wireChatPanel); }
-    const gamesBtn = document.getElementById('dockGames');
-    if (gamesBtn && window.GameHubUI?.bindDockButton) {
-      window.GameHubUI.bindDockButton(gamesBtn);
+  function openChatDockFallback() {
+    if (typeof window.openPanel === 'function') {
+      window.openPanel('chat', 'Chat', chatPanelHTML(), wireChatPanel);
+      return;
     }
+    if (typeof window.openDrawer === 'function') {
+      window.openDrawer('chat', 'Chat', chatPanelHTML());
+      if (typeof wireChatPanel === 'function') wireChatPanel();
+    }
+  }
+
+  function initCommunityDockBindings() {
+    const chatBtn = document.getElementById('dockChat');
+    const gamesBtn = document.getElementById('dockGames');
+
+    if (chatBtn && chatBtn.dataset.chatDockBound !== '1') {
+      chatBtn.dataset.chatDockBound = '1';
+      if (typeof window.bindDockToggle === 'function') {
+        window.bindDockToggle(chatBtn, 'chat', 'Chat', chatPanelHTML, wireChatPanel);
+      } else {
+        chatBtn.addEventListener('click', (event) => {
+          event.preventDefault();
+          openChatDockFallback();
+        });
+      }
+    }
+
+    if (gamesBtn && gamesBtn.dataset.gamesDockBound !== '1') {
+      try {
+        if (window.GameHubUI && typeof window.GameHubUI.bindDockButton === 'function') {
+          window.GameHubUI.bindDockButton(gamesBtn);
+          gamesBtn.dataset.gamesDockBound = '1';
+        } else if (window.WorkBattlesUI && typeof window.WorkBattlesUI.bindDockButton === 'function') {
+          window.WorkBattlesUI.bindDockButton(gamesBtn);
+          gamesBtn.dataset.gamesDockBound = '1';
+        } else if (
+          typeof window.bindDockToggle === 'function' &&
+          typeof window.gamesPanelHTML === 'function' &&
+          typeof window.wireGamesPanel === 'function'
+        ) {
+          window.bindDockToggle(gamesBtn, 'games', 'Games', window.gamesPanelHTML, window.wireGamesPanel);
+          gamesBtn.dataset.gamesDockBound = '1';
+        }
+      } catch (error) {
+        console.warn('Games dock binding failed', error);
+      }
+    }
+  }
+
+  window.initCommunityDockBindings = initCommunityDockBindings;
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initCommunityDockBindings, { once: true });
+  } else {
+    initCommunityDockBindings();
   }
 
   // Example night mode toggle (optional)
