@@ -24,6 +24,56 @@
     return `${base}${text.startsWith('/') ? text : `/${text}`}`;
   }
 
+  function resolveMediaUrl(urlOrPath, baseOverride) {
+    const text = String(urlOrPath || '').trim();
+    if (!text) return '';
+    if (/^data:image\//i.test(text)) return text;
+    if (/^blob:/i.test(text)) return text;
+    if (/^https?:\/\//i.test(text)) return text;
+    if (/^[/?#.a-zA-Z0-9_-]/.test(text)) {
+      try {
+        return toAbsoluteUrl(text, baseOverride);
+      } catch (_) {
+        return '';
+      }
+    }
+    return '';
+  }
+
+  function bindAvatarFallbacks(root, options = {}) {
+    const scope = root && typeof root.querySelectorAll === 'function' ? root : document;
+    const selector = options.selector || 'img[data-avatar-image="1"]';
+    scope.querySelectorAll(selector).forEach((img) => {
+      if (!img || img.dataset.avatarFallbackBound === '1') return;
+      img.dataset.avatarFallbackBound = '1';
+      const revealFallback = () => {
+        if (img.dataset.avatarFallbackDone === '1') return;
+        img.dataset.avatarFallbackDone = '1';
+        img.onerror = null;
+        img.removeAttribute('src');
+        img.hidden = true;
+        img.setAttribute('aria-hidden', 'true');
+        const host = img.closest('[data-avatar-host="1"]') || img.parentElement;
+        const fallback = host?.querySelector?.('[data-avatar-initials="1"]');
+        if (fallback) {
+          fallback.hidden = false;
+          fallback.removeAttribute('aria-hidden');
+        }
+      };
+      img.addEventListener('error', revealFallback, { once: true });
+      img.addEventListener('load', () => {
+        const host = img.closest('[data-avatar-host="1"]') || img.parentElement;
+        const fallback = host?.querySelector?.('[data-avatar-initials="1"]');
+        if (fallback) {
+          fallback.hidden = true;
+          fallback.setAttribute('aria-hidden', 'true');
+        }
+        img.hidden = false;
+        img.removeAttribute('aria-hidden');
+      });
+    });
+  }
+
   function shouldBypassBrowserCache(urlOrPath) {
     const text = String(urlOrPath || '');
     return /\/(presence\/|events\/pickups\/recent|chat\/|auth\/|me(\b|\/)|day_tendency\/today|admin\/)/.test(text);
@@ -250,6 +300,8 @@
     DEFAULT_API_BASE,
     resolveApiBase,
     toAbsoluteUrl,
+    resolveMediaUrl,
+    bindAvatarFallbacks,
     shouldBypassBrowserCache,
     getToken,
     authHeaders,
@@ -276,5 +328,7 @@
 
   if (typeof window !== 'undefined') {
     window.FrontendRuntime = runtime;
+    window.resolveMediaUrl = resolveMediaUrl;
+    window.bindAvatarFallbacks = bindAvatarFallbacks;
   }
 })();

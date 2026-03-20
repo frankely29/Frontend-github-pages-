@@ -4214,17 +4214,54 @@
   }
 
   function safeMapAvatarUrl(url) {
-    const resolver = window.resolveMapAvatarUrl;
-    if (typeof resolver === 'function') return resolver(url);
+    const resolver = window.FrontendRuntime?.resolveMediaUrl || window.resolveMediaUrl || window.resolveMapAvatarUrl;
+    if (typeof resolver === 'function') {
+      return resolver(url, window.FrontendRuntime?.resolveApiBase ? window.FrontendRuntime.resolveApiBase() : (window.API_BASE || ''));
+    }
     if (typeof url !== 'string') return '';
     const trimmed = url.trim();
     if (!trimmed) return '';
-    if (trimmed.startsWith('data:image/')) return trimmed;
-    return '';
+    if (/^data:image\//i.test(trimmed) || /^blob:/i.test(trimmed) || /^https?:\/\//i.test(trimmed)) return trimmed;
+    try {
+      return new URL(trimmed, window.API_BASE || window.location?.href || undefined).toString();
+    } catch (_) {
+      return '';
+    }
+  }
+
+  function avatarInitialsText(name) {
+    const safe = String(name || 'Driver').trim() || 'Driver';
+    const parts = safe.split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) return `${parts[0][0] || ''}${parts[1][0] || ''}`.toUpperCase();
+    return (safe.replace(/[^\p{L}\p{N}]/gu, '').slice(0, 2) || safe.slice(0, 2) || 'D').toUpperCase();
+  }
+
+  function preferredAvatarUrl(record = {}) {
+    return safeMapAvatarUrl(
+      record?.avatar_thumb_url
+      || record?.avatarThumbUrl
+      || record?.thumb_url
+      || record?.avatar_url
+      || record?.avatarUrl
+      || record?.other_avatar_thumb_url
+      || record?.otherAvatarThumbUrl
+      || record?.other_avatar_url
+      || record?.otherAvatarUrl
+      || ''
+    );
+  }
+
+  function renderAvatarMarkup({ name = 'Driver', url = '', className = '', alt = '' } = {}) {
+    const safeUrl = safeMapAvatarUrl(url);
+    return `<span class="${escapeHtml(String(className || '').trim())}" style="display:grid;place-items:center;overflow:hidden;" data-avatar-host="1"><span data-avatar-initials="1" style="display:grid;place-items:center;width:100%;height:100%;font-weight:800;" ${safeUrl ? 'hidden aria-hidden="true"' : ''}>${escapeHtml(avatarInitialsText(name))}</span>${safeUrl ? `<img src="${escapeHtml(safeUrl)}" alt="${escapeHtml(alt || `${name} avatar`)}" loading="lazy" style="width:100%;height:100%;object-fit:cover;display:block;" data-avatar-image="1">` : ''}</span>`;
+  }
+
+  function bindAvatarFallbacks(root) {
+    window.bindAvatarFallbacks?.(root);
   }
 
   function syncMapIdentitySavedAvatarCache() {
-    const serverAvatar = safeMapAvatarUrl(window?.me?.avatar_url);
+    const serverAvatar = safeMapAvatarUrl(window?.me?.avatar_thumb_url || window?.me?.avatar_url);
     if (serverAvatar) {
       mapIdentitySavedAvatarDataUrl = serverAvatar;
       return serverAvatar;
@@ -4466,10 +4503,7 @@
   }
 
   function mapIdentityPresenceCoreHTML({ markerClass, name, avatarUrl, cfg, leaderboardBadgeCode, orbitMeta = null, directionId = '' }) {
-    const safeAvatar = safeMapAvatarUrl(avatarUrl);
-    const avatarHTML = safeAvatar
-      ? `<div class="mapPresenceAvatar"><img src="${escapeHtml(safeAvatar)}" alt="avatar" loading="lazy"></div>`
-      : `<div class="mapPresenceInitials">${escapeHtml(mapIdentityInitials(name))}</div>`;
+    const avatarHTML = renderAvatarMarkup({ name, url: avatarUrl, className: 'mapPresenceAvatar', alt: `${name} avatar` });
     const dirAttr = directionId ? ` id="${escapeHtml(directionId)}"` : '';
     const orbitAttrs = mapIdentityOrbitDataAttrs(orbitMeta);
     return `
@@ -4984,7 +5018,7 @@
     matchLoading: false,
     status: '',
     error: '',
-    challengeComposer: { targetUserId: '', targetDisplayName: '', gameType: 'dominoes' },
+    challengeComposer: { targetUserId: '', targetDisplayName: '', targetAvatarUrl: '', gameType: 'dominoes' },
     challengeUsers: gamesDefaultChallengeUserState(),
     battleNotificationsSeen: new Set(),
     billiardsAim: { angle: 0.1, power: 0.58 },
@@ -5238,13 +5272,19 @@
   }
 
   function renderChallengeRow(item, type) {
-    const opponent = escapeHtml(String(item?.other_user_display_name || item?.opponent_display_name || item?.challenged_display_name || item?.challenger_display_name || item?.display_name || 'Driver'));
+    const rawOpponent = String(item?.other_user_display_name || item?.opponent_display_name || item?.challenged_display_name || item?.challenger_display_name || item?.display_name || 'Driver');
+    const opponent = escapeHtml(rawOpponent);
     const actions = type === 'incoming'
       ? `<div class="gamesActionRow"><button class="chipBtn" data-games-accept="${escapeHtml(String(item?.id || ''))}">Accept</button><button class="chipBtn" data-games-decline="${escapeHtml(String(item?.id || ''))}">Decline</button></div>`
       : `<div class="gamesActionRow"><button class="chipBtn" data-games-cancel="${escapeHtml(String(item?.id || ''))}">Cancel</button></div>`;
     return `<article class="gamesBattleCard">
-      <div class="gamesBattleTitle">${opponent}</div>
-      <div class="gamesBattleMeta">${escapeHtml(challengeMetaLine(item))}</div>
+      <div style="display:flex;align-items:center;gap:10px;">
+        ${renderAvatarMarkup({ name: rawOpponent, url: preferredAvatarUrl(item), className: 'gamesUserAvatar', alt: `${rawOpponent} avatar` })}
+        <div style="min-width:0;flex:1;">
+          <div class="gamesBattleTitle">${opponent}</div>
+          <div class="gamesBattleMeta">${escapeHtml(challengeMetaLine(item))}</div>
+        </div>
+      </div>
       ${actions}
     </article>`;
   }
@@ -5255,8 +5295,13 @@
     const game = String(item?.game_type || 'battle').replace(/^./, (m) => m.toUpperCase());
     const opponent = String(item?.opponent_display_name || item?.loser_display_name || item?.winner_display_name || 'Driver');
     return `<article class="gamesBattleCard compact ${label === 'Win' ? 'win' : (label === 'Loss' ? 'loss' : '')}">
-      <div class="gamesBattleTitle">${escapeHtml(game)} • ${escapeHtml(label)}</div>
-      <div class="gamesBattleMeta">vs ${escapeHtml(opponent)} • ${escapeHtml(formatBattleDate(item?.completed_at))}</div>
+      <div style="display:flex;align-items:center;gap:10px;">
+        ${renderAvatarMarkup({ name: opponent, url: preferredAvatarUrl(item), className: 'gamesUserAvatar', alt: `${opponent} avatar` })}
+        <div style="min-width:0;flex:1;">
+          <div class="gamesBattleTitle">${escapeHtml(game)} • ${escapeHtml(label)}</div>
+          <div class="gamesBattleMeta">vs ${escapeHtml(opponent)} • ${escapeHtml(formatBattleDate(item?.completed_at))}</div>
+        </div>
+      </div>
       <div class="gamesBattleReward">${xp > 0 ? `+${formatProgressNumber(xp, { maxFractionDigits: 0 })} XP` : 'Completed'}</div>
     </article>`;
   }
@@ -5399,35 +5444,66 @@
     }
   }
 
+  const gamesRuntime = { billiards: null, cpuTimer: null };
+
+  function destroyBilliardsRuntime() {
+    if (gamesRuntime.cpuTimer) {
+      window.clearTimeout(gamesRuntime.cpuTimer);
+      gamesRuntime.cpuTimer = null;
+    }
+    try { gamesRuntime.billiards?.destroy?.(); } catch (_) {}
+    gamesRuntime.billiards = null;
+  }
+
+  async function ensureGameRuntimeReady(gameKey) {
+    if (typeof window.ensureGameModuleReady === 'function') return window.ensureGameModuleReady(gameKey);
+    return gameKey === 'dominoes' ? window.RealDominoesUI : window.RealBilliardsUI;
+  }
+
   function renderBilliardsBattle(host, match) {
     const state = match?.match_state || match?.state || {};
     const myTurn = isLocalPlayersTurn(match);
     host.innerHTML = `<div class="gamesBattleArena">
       <div class="gamesBattleTopline"><div class="gamesStatus">${escapeHtml(String(match?.status === 'completed' ? (match?.result_summary || 'Match complete.') : (myTurn ? 'Line up your shot.' : 'Waiting for opponent shot.')))}</div><button id="gamesForfeitBtn" class="chipBtn dangerBtn" ${match?.status === 'completed' ? 'disabled' : ''}>Forfeit</button></div>
       <div class="gamesBattleMeta">Targets left: ${escapeHtml(String(state?.your_targets_remaining ?? state?.player_targets_remaining ?? '—'))} • Opponent: ${escapeHtml(String(state?.opponent_targets_remaining ?? '—'))}</div>
-      <canvas id="gamesBilliardsCanvas" class="gamesBilliardsCanvas" width="320" height="180"></canvas>
+      <div id="gamesBilliardsStage" class="gamesBilliardsCanvas" style="width:100%;max-width:420px;min-height:220px;"></div>
       <div class="gamesBilliardsControls">
         <label class="gamesControlLabel">Angle <input id="gamesBilliardsAngle" type="range" min="-314" max="314" step="1" value="${Math.round((gamesState.billiardsAim.angle || 0) * 100)}" ${!myTurn || match?.status === 'completed' ? 'disabled' : ''}></label>
         <label class="gamesControlLabel">Power <input id="gamesBilliardsPower" type="range" min="10" max="100" step="1" value="${Math.round((gamesState.billiardsAim.power || 0.58) * 100)}" ${!myTurn || match?.status === 'completed' ? 'disabled' : ''}></label>
         <button id="gamesBilliardsShotBtn" class="chipBtn" ${!myTurn || match?.status === 'completed' ? 'disabled' : ''}>Take Shot</button>
       </div>
-      <div class="gamesBattleMeta">Rule: first player to pocket every target ball, then the final ball, wins.</div>
+      <div class="gamesBattleMeta">Real physics table with collisions, pockets, and turn-end when balls stop.</div>
       ${match?.status === 'completed' ? `<div class="gamesBattleResult">${escapeHtml(String(match?.result_summary || 'Battle completed.'))}</div>` : ''}
     </div>`;
-    const canvas = document.getElementById('gamesBilliardsCanvas');
-    drawBilliardsCanvas(canvas, match);
     document.getElementById('gamesForfeitBtn')?.addEventListener('click', (e) => { e.preventDefault(); void forfeitBattleMatch(); });
     document.getElementById('gamesBilliardsAngle')?.addEventListener('input', (e) => {
       gamesState.billiardsAim.angle = Number(e.target.value || 0) / 100;
-      drawBilliardsCanvas(canvas, match);
+      gamesRuntime.billiards?.updateAim?.(gamesState.billiardsAim);
     });
     document.getElementById('gamesBilliardsPower')?.addEventListener('input', (e) => {
       gamesState.billiardsAim.power = Math.max(0.1, Math.min(1, Number(e.target.value || 58) / 100));
-      drawBilliardsCanvas(canvas, match);
+      gamesRuntime.billiards?.updateAim?.(gamesState.billiardsAim);
     });
     document.getElementById('gamesBilliardsShotBtn')?.addEventListener('click', (e) => {
       e.preventDefault();
+      gamesRuntime.billiards?.takeShot?.({ angle: Number(gamesState.billiardsAim.angle || 0), power: Number(gamesState.billiardsAim.power || 0.58) });
       void submitBattleMove({ move_type: 'shot', angle: Number(gamesState.billiardsAim.angle || 0), power: Number(gamesState.billiardsAim.power || 0.58) });
+    });
+    ensureGameRuntimeReady('billiards').then((runtime) => {
+      if (!runtime?.mount) throw new Error('Unable to load billiards engine.');
+      destroyBilliardsRuntime();
+      const mountHost = document.getElementById('gamesBilliardsStage');
+      if (!mountHost) return;
+      gamesRuntime.billiards = runtime.mount(mountHost, {
+        match,
+        aim: gamesState.billiardsAim,
+        statusText: String(match?.status === 'completed' ? (match?.result_summary || 'Match complete.') : (myTurn ? 'Your turn' : 'Opponent turn')),
+        turnText: myTurn ? 'Your turn' : 'Opponent turn',
+        showAim: !!myTurn && match?.status !== 'completed',
+      });
+    }).catch((err) => {
+      const mountHost = document.getElementById('gamesBilliardsStage');
+      if (mountHost) mountHost.innerHTML = `<div class="leaderboardEmpty">${escapeHtml(err?.message || 'Unable to load billiards table.')}</div>`;
     });
   }
 
@@ -5489,7 +5565,7 @@
     return {
       user_id: id,
       display_name: String(row?.display_name || row?.name || row?.email || `Driver ${id}`),
-      avatar_thumb_url: safeMapAvatarUrl(row?.avatar_thumb_url || row?.avatar_url || ''),
+      avatar_thumb_url: preferredAvatarUrl(row),
       rank_icon_key: row?.rank_icon_key || row?.rankIconKey || '',
       level: Number(row?.level || 0) || 0,
       online: !!(row?.online || row?.is_online),
@@ -5556,11 +5632,12 @@
         ${state.loading ? '<div class="leaderboardEmpty">Loading drivers…</div>' : ''}
         ${!state.loading && !rows.length ? '<div class="leaderboardEmpty">No drivers found.</div>' : rows.map((row) => `
           <button type="button" class="gamesUserRow ${selectedId === row.user_id ? 'selected' : ''}" data-games-user="${row.user_id}">
-            <span class="gamesUserAvatar">${row.avatar_thumb_url ? `<img src="${escapeHtml(row.avatar_thumb_url)}" alt="" loading="lazy">` : escapeHtml((row.display_name || 'D').slice(0, 2).toUpperCase())}</span>
+            ${renderAvatarMarkup({ name: row.display_name, url: row.avatar_thumb_url, className: 'gamesUserAvatar', alt: `${row.display_name} avatar` })}
             <span class="gamesUserMeta"><strong>${escapeHtml(row.display_name)}</strong><span>${row.level ? `Level ${escapeHtml(String(row.level))}` : 'Driver'} ${row.online ? '• Online' : ''}</span></span>
             <span class="gamesUserRank">${row.rank_icon_key ? renderRankBadgeIcon(row.rank_icon_key, { compact: true }) : ''}</span>
           </button>`).join('')}
       </div>
+      ${(state.selected || gamesState.challengeComposer.targetUserId) ? `<div class="gamesBattleCard"><div style="display:flex;align-items:center;gap:10px;">${renderAvatarMarkup({ name: state.selected?.display_name || gamesState.challengeComposer.targetDisplayName || 'Driver', url: state.selected?.avatar_thumb_url || gamesState.challengeComposer.targetAvatarUrl || '', className: 'gamesUserAvatar', alt: 'Selected driver avatar' })}<div style="min-width:0;flex:1;"><div class="gamesBattleTitle">${escapeHtml(String(state.selected?.display_name || gamesState.challengeComposer.targetDisplayName || 'Driver'))}</div><div class="gamesBattleMeta">${escapeHtml(gameKey === 'billiards' ? 'Billiards' : 'Dominoes')} challenge target</div></div></div></div>` : ''}
       <div class="gamesChallengeComposer">
         <input id="gamesChallengeTargetName" class="driverProfileInput gamesComposerInput" type="text" placeholder="Selected driver" readonly value="${escapeHtml(String(state.selected?.display_name || gamesState.challengeComposer.targetDisplayName || ''))}">
         <button id="gamesSendChallengeBtn" class="chipBtn" ${!(state.selected?.user_id || gamesState.challengeComposer.targetUserId) ? 'disabled' : ''}>Challenge to ${escapeHtml(gameKey === 'billiards' ? 'Billiards' : 'Dominoes')}</button>
@@ -5575,7 +5652,7 @@
       ${renderChallengeableUsers(gameKey)}
       <section class="gamesBattlePanel"><div class="gamesSectionHeader">Incoming</div><div class="gamesBattleList">${battleRows.incoming.length ? battleRows.incoming.map((row) => renderChallengeRow(row, 'incoming')).join('') : '<div class="leaderboardEmpty">No incoming challenges.</div>'}</div></section>
       <section class="gamesBattlePanel"><div class="gamesSectionHeader">Outgoing</div><div class="gamesBattleList">${battleRows.outgoing.length ? battleRows.outgoing.map((row) => renderChallengeRow(row, 'outgoing')).join('') : '<div class="leaderboardEmpty">No outgoing challenges.</div>'}</div></section>
-      <section class="gamesBattlePanel"><div class="gamesSectionHeader">Active battle</div>${battleRows.active ? `<div class="gamesBattleCard"><div class="gamesBattleTitle">${escapeHtml(String(battleRows.active.opponent_display_name || 'Driver'))}</div><div class="gamesBattleMeta">${escapeHtml(String(gameKey === 'billiards' ? 'Billiards' : 'Dominoes'))} • ${escapeHtml(String(battleRows.active.status || 'active'))}</div><button class="chipBtn" data-games-open-active="1">Open Match</button></div>` : '<div class="leaderboardEmpty">No active battle.</div>'}</section>
+      <section class="gamesBattlePanel"><div class="gamesSectionHeader">Active battle</div>${battleRows.active ? `<div class="gamesBattleCard"><div style="display:flex;align-items:center;gap:10px;">${renderAvatarMarkup({ name: battleRows.active.opponent_display_name || 'Driver', url: preferredAvatarUrl(battleRows.active), className: 'gamesUserAvatar', alt: 'Opponent avatar' })}<div style="min-width:0;flex:1;"><div class="gamesBattleTitle">${escapeHtml(String(battleRows.active.opponent_display_name || 'Driver'))}</div><div class="gamesBattleMeta">${escapeHtml(String(gameKey === 'billiards' ? 'Billiards' : 'Dominoes'))} • ${escapeHtml(String(battleRows.active.status || 'active'))}</div></div></div><button class="chipBtn" data-games-open-active="1">Open Match</button></div>` : '<div class="leaderboardEmpty">No active battle.</div>'}</section>
       <section class="gamesBattlePanel"><div class="gamesSectionHeader">Recent history</div><div class="gamesBattleList">${battleRows.history.length ? battleRows.history.map(renderBattleHistoryRow).join('') : '<div class="leaderboardEmpty">No recent battles yet.</div>'}</div></section>
     </div>`;
   }
@@ -5609,148 +5686,85 @@
     return Number(pair[0]) === ends.right ? pair : [pair[1], pair[0]];
   }
 
-  function settleDominoesCpuTurn() {
-    const state = gamesState.dominoes;
-    if (state.over || state.turn !== 'cpu') return;
-    const playable = state.cpuHand.map((tile, index) => ({ tile, index, sides: dominoesPlayableSides(tile, state.board) })).filter((entry) => entry.sides.length);
-    if (!playable.length) {
-      if (state.boneyard.length) {
-        state.cpuHand.push(state.boneyard.shift());
-        state.message = 'CPU drew a tile.';
-        rerenderGamesPanel();
-        window.setTimeout(settleDominoesCpuTurn, 320);
-        return;
-      }
-      state.passStreak += 1;
-      if (state.passStreak >= 2) {
-        state.over = true;
-        const playerPips = state.playerHand.flat().reduce((sum, value) => sum + Number(value || 0), 0);
-        const cpuPips = state.cpuHand.flat().reduce((sum, value) => sum + Number(value || 0), 0);
-        state.winner = playerPips <= cpuPips ? 'player' : 'cpu';
-        state.message = state.winner === 'player' ? 'Blocked board. You win on lower pips.' : 'Blocked board. CPU wins on lower pips.';
-      } else {
-        state.turn = 'player';
-        state.message = 'CPU passed. Your turn.';
-      }
-      rerenderGamesPanel();
-      return;
-    }
-    const pick = playable[Math.floor(Math.random() * playable.length)];
-    const side = pick.sides[Math.floor(Math.random() * pick.sides.length)];
-    const oriented = orientDominoForSide(pick.tile, state.board, side);
-    state.cpuHand.splice(pick.index, 1);
-    if (side === 'left') state.board.unshift(oriented);
-    else state.board.push(oriented);
-    state.passStreak = 0;
-    if (!state.cpuHand.length) {
-      state.over = true;
-      state.winner = 'cpu';
-      state.message = 'CPU used every tile and won.';
-    } else {
-      state.turn = 'player';
-      state.message = `CPU played ${oriented[0]}-${oriented[1]}. Your turn.`;
-    }
+  async function settleDominoesCpuTurn() {
+    const engine = await ensureGameRuntimeReady('dominoes');
+    if (!engine?.runCpuTurn) return;
+    engine.runCpuTurn(gamesState.dominoes);
     rerenderGamesPanel();
   }
 
   function renderDominoesCpu(host) {
-    const state = gamesState.dominoes;
-    const playable = state.playerHand.map((tile, index) => ({ tile, index, sides: dominoesPlayableSides(tile, state.board) }));
-    host.innerHTML = `<div class="gamesBattleArena">
-      <div class="gamesBattleTopline"><div class="gamesStatus">${escapeHtml(state.message)}</div><div class="gamesBattleMeta">CPU hand: ${escapeHtml(String(state.cpuHand.length))} • Boneyard: ${escapeHtml(String(state.boneyard.length))}</div></div>
-      <div class="gamesDominoBoard">${state.board.length ? state.board.map((tile) => `<div class="gamesDominoBoardTile">${renderDominoesTile(tile)}</div>`).join('') : '<div class="leaderboardEmpty">Board waiting for first tile.</div>'}</div>
-      <div class="gamesActionRow"><button id="gamesDominoCpuDrawBtn" class="chipBtn" ${state.over || state.turn !== 'player' || !state.boneyard.length ? 'disabled' : ''}>Draw</button><button id="gamesDominoCpuPassBtn" class="chipBtn" ${state.over || state.turn !== 'player' ? 'disabled' : ''}>Pass</button></div>
-      <div class="gamesMiniLabel">Your hand</div>
-      <div class="gamesDominoHand">${playable.map((entry) => `<div class="gamesDominoTileWrap">${renderDominoesTile(entry.tile, state.turn === 'player' && !state.over && entry.sides.length)}<div class="gamesDominoActions"><button class="chipBtn miniChip" ${entry.sides.includes('left') && state.turn === 'player' && !state.over ? `data-domino-cpu="${entry.index}" data-domino-side="left"` : 'disabled'}>Left</button><button class="chipBtn miniChip" ${entry.sides.includes('right') && state.turn === 'player' && !state.over ? `data-domino-cpu="${entry.index}" data-domino-side="right"` : 'disabled'}>Right</button></div></div>`).join('')}</div>
-    </div>`;
-    document.getElementById('gamesDominoCpuDrawBtn')?.addEventListener('click', () => {
-      if (!state.boneyard.length || state.over || state.turn !== 'player') return;
-      state.playerHand.push(state.boneyard.shift());
-      state.message = 'You drew a tile.';
-      rerenderGamesPanel();
-    });
-    document.getElementById('gamesDominoCpuPassBtn')?.addEventListener('click', () => {
-      if (state.over || state.turn !== 'player') return;
-      state.passStreak += 1;
-      state.turn = 'cpu';
-      state.message = 'You passed.';
-      rerenderGamesPanel();
-      window.setTimeout(settleDominoesCpuTurn, 320);
-    });
-    host.querySelectorAll('[data-domino-cpu]').forEach((btn) => btn.addEventListener('click', () => {
-      const index = Number(btn.getAttribute('data-domino-cpu'));
-      const side = btn.getAttribute('data-domino-side') || 'left';
-      const tile = state.playerHand[index];
-      if (!tile || state.over || state.turn !== 'player') return;
-      const oriented = orientDominoForSide(tile, state.board, side);
-      state.playerHand.splice(index, 1);
-      if (side === 'left') state.board.unshift(oriented);
-      else state.board.push(oriented);
-      state.passStreak = 0;
-      if (!state.playerHand.length) {
-        state.over = true;
-        state.winner = 'player';
-        state.message = 'You win! Your hand is empty.';
-      } else {
-        state.turn = 'cpu';
-        state.message = `You played ${oriented[0]}-${oriented[1]}. CPU thinking…`;
+    ensureGameRuntimeReady('dominoes').then((engine) => {
+      if (!engine?.createCpuMatch) throw new Error('Unable to load dominoes engine.');
+      if (!gamesState.dominoes || !Array.isArray(gamesState.dominoes.history)) gamesState.dominoes = engine.createCpuMatch();
+      const state = gamesState.dominoes;
+      const playable = state.playerHand.map((tile, index) => ({ tile, index, sides: engine.playableSides(tile, state.board) }));
+      host.innerHTML = `<div class="gamesBattleArena">
+        <div class="gamesBattleTopline"><div class="gamesStatus">${escapeHtml(state.message)}</div><div class="gamesBattleMeta">CPU hand: ${escapeHtml(String(state.cpuHand.length))} • Boneyard: ${escapeHtml(String(state.boneyard.length))}</div></div>
+        <div class="gamesDominoBoard">${state.board.length ? state.board.map((tile) => `<div class="gamesDominoBoardTile">${renderDominoesTile(tile)}</div>`).join('') : '<div class="leaderboardEmpty">Board waiting for first tile.</div>'}</div>
+        <div class="gamesActionRow"><button id="gamesDominoCpuDrawBtn" class="chipBtn" ${state.over || state.turn !== 'player' || !state.boneyard.length ? 'disabled' : ''}>Draw</button><button id="gamesDominoCpuPassBtn" class="chipBtn" ${state.over || state.turn !== 'player' || state.boneyard.length || playable.some((entry) => entry.sides.length) ? 'disabled' : ''}>Pass</button></div>
+        <div class="gamesMiniLabel">Your hand</div>
+        <div class="gamesDominoHand">${playable.map((entry) => `<div class="gamesDominoTileWrap">${renderDominoesTile(entry.tile, state.turn === 'player' && !state.over && entry.sides.length)}<div class="gamesDominoActions"><button class="chipBtn miniChip" ${entry.sides.includes('left') && state.turn === 'player' && !state.over ? `data-domino-cpu="${entry.index}" data-domino-side="left"` : 'disabled'}>Left</button><button class="chipBtn miniChip" ${entry.sides.includes('right') && state.turn === 'player' && !state.over ? `data-domino-cpu="${entry.index}" data-domino-side="right"` : 'disabled'}>Right</button></div></div>`).join('')}</div>
+        ${state.resultSummary ? `<div class="gamesBattleResult">${escapeHtml(state.resultSummary)}</div>` : ''}
+      </div>`;
+      document.getElementById('gamesDominoCpuDrawBtn')?.addEventListener('click', () => {
+        engine.playerDraw(state);
         rerenderGamesPanel();
-        window.setTimeout(settleDominoesCpuTurn, 320);
-        return;
-      }
-      rerenderGamesPanel();
-    }));
-  }
-
-  function drawBilliardsPracticeCanvas(canvas) {
-    drawBilliardsCanvas(canvas, { state: { balls: gamesState.billiards.balls }, current_turn_user_id: window?.me?.id || 1 });
-  }
-
-  function settleBilliardsCpuTurn() {
-    const state = gamesState.billiards;
-    if (state.over) return;
-    const madeShot = Math.random() > 0.48;
-    if (madeShot) state.cpuScore += 1;
-    if (state.cpuScore >= state.targetScore) {
-      state.over = true;
-      state.message = 'Bot cleared the rack first.';
-    } else {
-      state.message = madeShot ? 'Bot sank one. Your turn.' : 'Bot missed. Your turn.';
-    }
-    rerenderGamesPanel();
+      });
+      document.getElementById('gamesDominoCpuPassBtn')?.addEventListener('click', () => {
+        engine.playerPass(state);
+        rerenderGamesPanel();
+        if (state.turn === 'cpu' && !state.over) window.setTimeout(() => { void settleDominoesCpuTurn(); }, 320);
+      });
+      host.querySelectorAll('[data-domino-cpu]').forEach((btn) => btn.addEventListener('click', () => {
+        const index = Number(btn.getAttribute('data-domino-cpu'));
+        const side = btn.getAttribute('data-domino-side') || 'left';
+        engine.applyPlacement(state, 'player', 'playerHand', index, side);
+        rerenderGamesPanel();
+        if (state.turn === 'cpu' && !state.over) window.setTimeout(() => { void settleDominoesCpuTurn(); }, 320);
+      }));
+    }).catch((err) => {
+      host.innerHTML = `<div class="leaderboardEmpty">${escapeHtml(err?.message || 'Unable to load dominoes engine.')}</div>`;
+    });
   }
 
   function renderBilliardsCpu(host) {
-    const state = gamesState.billiards;
     host.innerHTML = `<div class="gamesBattleArena">
-      <div class="gamesBattleTopline"><div class="gamesStatus">${escapeHtml(state.message)}</div><div class="gamesBattleMeta">You ${escapeHtml(String(state.playerScore))} • Bot ${escapeHtml(String(state.cpuScore))}</div></div>
-      <canvas id="gamesBilliardsCpuCanvas" class="gamesBilliardsCanvas" width="320" height="180"></canvas>
+      <div class="gamesBattleTopline"><div class="gamesStatus">Real billiards practice table.</div><div class="gamesBattleMeta">Phaser + Matter physics</div></div>
+      <div id="gamesBilliardsStage" class="gamesBilliardsCanvas" style="width:100%;max-width:420px;min-height:220px;"></div>
       <div class="gamesBilliardsControls">
-        <label class="gamesControlLabel">Angle <input id="gamesBilliardsAngle" type="range" min="-314" max="314" step="1" value="${Math.round((gamesState.billiardsAim.angle || 0) * 100)}" ${state.over ? 'disabled' : ''}></label>
-        <label class="gamesControlLabel">Power <input id="gamesBilliardsPower" type="range" min="10" max="100" step="1" value="${Math.round((gamesState.billiardsAim.power || 0.58) * 100)}" ${state.over ? 'disabled' : ''}></label>
-        <button id="gamesBilliardsShotBtn" class="chipBtn" ${state.over ? 'disabled' : ''}>Take Shot</button>
+        <label class="gamesControlLabel">Angle <input id="gamesBilliardsAngle" type="range" min="-314" max="314" step="1" value="${Math.round((gamesState.billiardsAim.angle || 0) * 100)}"></label>
+        <label class="gamesControlLabel">Power <input id="gamesBilliardsPower" type="range" min="10" max="100" step="1" value="${Math.round((gamesState.billiardsAim.power || 0.58) * 100)}"></label>
+        <button id="gamesBilliardsShotBtn" class="chipBtn">Take Shot</button>
       </div>
-      <div class="gamesBattleMeta">First to ${escapeHtml(String(state.targetScore))} wins this quick practice race.</div>
+      <div class="gamesBattleMeta">The scene unloads when you leave the Games panel or switch tabs.</div>
     </div>`;
-    const canvas = document.getElementById('gamesBilliardsCpuCanvas');
-    drawBilliardsPracticeCanvas(canvas);
-    document.getElementById('gamesBilliardsAngle')?.addEventListener('input', (e) => { gamesState.billiardsAim.angle = Number(e.target.value || 0) / 100; drawBilliardsPracticeCanvas(canvas); });
-    document.getElementById('gamesBilliardsPower')?.addEventListener('input', (e) => { gamesState.billiardsAim.power = Math.max(0.1, Math.min(1, Number(e.target.value || 58) / 100)); drawBilliardsPracticeCanvas(canvas); });
+    document.getElementById('gamesBilliardsAngle')?.addEventListener('input', (e) => {
+      gamesState.billiardsAim.angle = Number(e.target.value || 0) / 100;
+      gamesRuntime.billiards?.updateAim?.(gamesState.billiardsAim);
+    });
+    document.getElementById('gamesBilliardsPower')?.addEventListener('input', (e) => {
+      gamesState.billiardsAim.power = Math.max(0.1, Math.min(1, Number(e.target.value || 58) / 100));
+      gamesRuntime.billiards?.updateAim?.(gamesState.billiardsAim);
+    });
     document.getElementById('gamesBilliardsShotBtn')?.addEventListener('click', () => {
-      if (state.over) return;
-      state.shotsTaken += 1;
-      const madeShot = Math.random() < (0.18 + (gamesState.billiardsAim.power * 0.32));
-      if (madeShot) state.playerScore += 1;
-      if (state.playerScore >= state.targetScore) {
-        state.over = true;
-        state.message = 'You cleared the practice rack first.';
-      } else {
-        state.message = madeShot ? 'Nice shot. Bot turn…' : 'Missed shot. Bot turn…';
-        rerenderGamesPanel();
-        window.setTimeout(settleBilliardsCpuTurn, 420);
-        return;
-      }
-      rerenderGamesPanel();
+      gamesRuntime.billiards?.takeShot?.({ angle: Number(gamesState.billiardsAim.angle || 0), power: Number(gamesState.billiardsAim.power || 0.58) });
+    });
+    ensureGameRuntimeReady('billiards').then((runtime) => {
+      if (!runtime?.mount) throw new Error('Unable to load billiards engine.');
+      destroyBilliardsRuntime();
+      const mountHost = document.getElementById('gamesBilliardsStage');
+      if (!mountHost) return;
+      gamesRuntime.billiards = runtime.mount(mountHost, {
+        match: { status: 'active', state: { balls: Array.isArray(gamesState.billiards?.balls) ? gamesState.billiards.balls : [] } },
+        aim: gamesState.billiardsAim,
+        statusText: 'Real practice table',
+        turnText: 'Practice',
+        showAim: true,
+      });
+    }).catch((err) => {
+      const mountHost = document.getElementById('gamesBilliardsStage');
+      if (mountHost) mountHost.innerHTML = `<div class="leaderboardEmpty">${escapeHtml(err?.message || 'Unable to load billiards table.')}</div>`;
     });
   }
 
@@ -5766,6 +5780,7 @@
       gamesState.challengeUsers.selected = row;
       gamesState.challengeComposer.targetUserId = String(userId || '');
       gamesState.challengeComposer.targetDisplayName = row?.display_name || '';
+      gamesState.challengeComposer.targetAvatarUrl = row?.avatar_thumb_url || '';
       gamesState.challengeComposer.gameType = gameKey;
       rerenderGamesPanel();
     }));
@@ -5782,6 +5797,7 @@
         loadActiveBattleMatch({ silent: true, preferredMatchId: match.id }).then(() => rerenderGamesPanel());
       }
     });
+    bindAvatarFallbacks(host);
   }
 
   function gamesPanelHTML() {
@@ -5808,12 +5824,13 @@
   }
 
   function wireGamesPanel() {
-    document.getElementById('gamesTabChess')?.addEventListener('click', (e) => { e.preventDefault(); gamesState.activeTab = 'chess'; rerenderGamesPanel(); });
-    document.getElementById('gamesTabUno')?.addEventListener('click', (e) => { e.preventDefault(); gamesState.activeTab = 'uno'; rerenderGamesPanel(); });
-    document.getElementById('gamesTabDominoes')?.addEventListener('click', (e) => { e.preventDefault(); gamesState.activeTab = 'dominoes'; rerenderGamesPanel(); });
+    document.getElementById('gamesTabChess')?.addEventListener('click', (e) => { e.preventDefault(); destroyBilliardsRuntime(); gamesState.activeTab = 'chess'; rerenderGamesPanel(); });
+    document.getElementById('gamesTabUno')?.addEventListener('click', (e) => { e.preventDefault(); destroyBilliardsRuntime(); gamesState.activeTab = 'uno'; rerenderGamesPanel(); });
+    document.getElementById('gamesTabDominoes')?.addEventListener('click', (e) => { e.preventDefault(); destroyBilliardsRuntime(); gamesState.activeTab = 'dominoes'; rerenderGamesPanel(); });
     document.getElementById('gamesTabBilliards')?.addEventListener('click', (e) => { e.preventDefault(); gamesState.activeTab = 'billiards'; rerenderGamesPanel(); });
     document.querySelectorAll('[data-games-mode]').forEach((btn) => btn.addEventListener('click', (e) => {
       e.preventDefault();
+      if ((btn.getAttribute('data-games-mode') || 'cpu') !== 'vs_driver') destroyBilliardsRuntime();
       setGamesTabMode(gamesState.activeTab, btn.getAttribute('data-games-mode') || 'cpu');
       rerenderGamesPanel();
     }));
@@ -5826,9 +5843,10 @@
       } else if (gamesState.activeTab === 'dominoes' && activeGamesMode() === 'cpu') {
         gamesState.dominoes = createInitialDominoesState();
       } else if (gamesState.activeTab === 'billiards' && activeGamesMode() === 'cpu') {
+        destroyBilliardsRuntime();
         gamesState.billiards = createInitialBilliardsPracticeState();
       } else {
-        gamesState.challengeComposer = { targetUserId: '', targetDisplayName: '', gameType: gamesState.activeTab === 'billiards' ? 'billiards' : 'dominoes' };
+        gamesState.challengeComposer = { targetUserId: '', targetDisplayName: '', targetAvatarUrl: '', gameType: gamesState.activeTab === 'billiards' ? 'billiards' : 'dominoes' };
         gamesState.challengeUsers.selected = null;
         setGamesStatus('Challenge composer reset.');
       }
@@ -5850,6 +5868,7 @@
     if (!isGamesPanelOpen()) return;
     const body = document.getElementById('dockDrawerBody');
     if (!body) return;
+    if (gamesState.activeTab !== 'billiards') destroyBilliardsRuntime();
     body.innerHTML = gamesPanelHTML();
     wireGamesPanel();
   }
@@ -5879,16 +5898,17 @@
     host.querySelectorAll('[data-games-cancel]').forEach((btn) => btn.addEventListener('click', (e) => { e.preventDefault(); void respondToChallenge(btn.getAttribute('data-games-cancel'), 'cancel'); }));
   }
 
-  function openGamesBattleComposer({ targetUserId = '', displayName = '', gameType = 'dominoes' } = {}) {
+  function openGamesBattleComposer({ targetUserId = '', displayName = '', avatarUrl = '', gameType = 'dominoes' } = {}) {
     const normalizedGame = gameType === 'billiards' ? 'billiards' : 'dominoes';
     gamesState.activeTab = normalizedGame;
     gamesState.activeModeByGame[normalizedGame] = 'vs_driver';
     gamesState.challengeComposer = {
       targetUserId: String(targetUserId || '').trim(),
       targetDisplayName: String(displayName || '').trim(),
+      targetAvatarUrl: safeMapAvatarUrl(avatarUrl || ''),
       gameType: normalizedGame,
     };
-    gamesState.challengeUsers.selected = targetUserId ? { user_id: Number(targetUserId), display_name: String(displayName || 'Driver') } : null;
+    gamesState.challengeUsers.selected = targetUserId ? { user_id: Number(targetUserId), display_name: String(displayName || 'Driver'), avatar_thumb_url: safeMapAvatarUrl(avatarUrl || '') } : null;
     if (typeof openPanel === 'function') {
       openPanel('games', 'Games', gamesPanelHTML(), wireGamesPanel);
     } else {
@@ -5896,6 +5916,20 @@
     }
     void loadGamesBattleDashboard({ silent: true });
     void loadChallengeableUsers({ query: '', gameKey: normalizedGame, force: true });
+  }
+
+  function battleStateForUser(userId, gameKey) {
+    const normalizedUserId = Number(userId || 0);
+    const normalizedKey = String(gameKey || 'dominoes').toLowerCase();
+    const incoming = (gamesState.dashboard?.incoming || []).find((row) => Number(row?.challenger_user_id || row?.other_user_id || row?.opponent_user_id || row?.user_id) === normalizedUserId && String(row?.game_key || row?.game_type || '').toLowerCase() === normalizedKey);
+    if (incoming) return { kind: 'incoming', row: incoming, label: `Accept ${normalizedKey === 'billiards' ? 'Billiards' : 'Dominoes'} Challenge` };
+    const outgoing = (gamesState.dashboard?.outgoing || []).find((row) => Number(row?.challenged_user_id || row?.other_user_id || row?.opponent_user_id || row?.user_id) === normalizedUserId && String(row?.game_key || row?.game_type || '').toLowerCase() === normalizedKey);
+    if (outgoing) return { kind: 'outgoing', row: outgoing, label: 'Challenge Sent' };
+    const active = gamesState.activeMatch && Number(gamesState.activeMatch?.opponent_user_id || gamesState.activeMatch?.other_user_id || 0) === normalizedUserId && String(gamesState.activeMatch?.game_key || gamesState.activeMatch?.game_type || '').toLowerCase() === normalizedKey
+      ? gamesState.activeMatch
+      : null;
+    if (active) return { kind: 'active', row: active, label: `Open Active ${normalizedKey === 'billiards' ? 'Billiards' : 'Dominoes'} Match` };
+    return { kind: 'new', row: null, label: normalizedKey === 'billiards' ? 'Challenge to Billiards' : 'Challenge to Dominoes' };
   }
 
 
@@ -6725,11 +6759,7 @@
 
   function driverProfileAvatarHTML(profileUser) {
     const name = String(profileUser?.display_name || 'Driver').trim() || 'Driver';
-    const avatarUrl = String(profileUser?.avatar_url || '').trim();
-    if (avatarUrl) {
-      return `<img class="driverProfileAvatar" src="${escapeHtml(avatarUrl)}" alt="${escapeHtml(name)} avatar">`;
-    }
-    return `<div class="driverProfileAvatar" style="display:flex;align-items:center;justify-content:center;font-weight:700;color:#334155;">${escapeHtml(name.slice(0, 1).toUpperCase())}</div>`;
+    return renderAvatarMarkup({ name, url: preferredAvatarUrl(profileUser), className: 'driverProfileAvatar', alt: `${name} avatar` });
   }
 
   function formatDriverProfileStat(value, kind = 'value') {
@@ -7670,6 +7700,13 @@
         <div class="driverProfileSectionTitle">Recent battles</div>
         ${renderRecentBattlesList(profilePayload?.recent_battles || profilePayload?.battle_history)}
         ${selfMode ? accountActionsHtml : `
+          <div id="driverProfileChallengeSheet" class="driverProfileDmWrap" style="display:none;min-height:0;margin-bottom:6px;padding:8px;">
+            <div class="driverProfileSectionTitle" style="margin-bottom:6px;">Choose a game</div>
+            <div class="driverProfileActions">
+              <button class="driverProfileActionBtn" id="driverProfileChallengeDominoesBtn" type="button">${escapeHtml(battleStateForUser(driverProfileState.userId, 'dominoes').label)}</button>
+              <button class="driverProfileActionBtn" id="driverProfileChallengeBilliardsBtn" type="button">${escapeHtml(battleStateForUser(driverProfileState.userId, 'billiards').label)}</button>
+            </div>
+          </div>
           <div class="driverProfileSectionTitle">Private messages</div>
           <div class="driverProfileDmWrap">
             <div class="driverProfileDmList" id="driverProfileDmList">${dmHtml}</div>
@@ -7691,9 +7728,25 @@
       closeDriverProfileModal();
     });
     document.getElementById('driverProfileChallengeBtn')?.addEventListener('click', () => {
-      openGamesBattleComposer({ targetUserId: driverProfileState.userId, displayName: name, gameType: 'dominoes' });
+      void loadGamesBattleDashboard({ silent: true }).then(() => renderDriverProfileModal());
+      const sheet = document.getElementById('driverProfileChallengeSheet');
+      if (sheet) sheet.style.display = sheet.style.display === 'none' ? 'block' : 'none';
+    });
+    document.getElementById('driverProfileChallengeDominoesBtn')?.addEventListener('click', async () => {
+      const state = battleStateForUser(driverProfileState.userId, 'dominoes');
+      if (state.kind === 'incoming' && state.row?.id) await respondToChallenge(state.row.id, 'accept');
+      else if (state.kind === 'active' && state.row?.id) await loadActiveBattleMatch({ silent: true, preferredMatchId: state.row.id });
+      openGamesBattleComposer({ targetUserId: driverProfileState.userId, displayName: name, avatarUrl: preferredAvatarUrl(profileUser), gameType: 'dominoes' });
       closeDriverProfileModal();
     });
+    document.getElementById('driverProfileChallengeBilliardsBtn')?.addEventListener('click', async () => {
+      const state = battleStateForUser(driverProfileState.userId, 'billiards');
+      if (state.kind === 'incoming' && state.row?.id) await respondToChallenge(state.row.id, 'accept');
+      else if (state.kind === 'active' && state.row?.id) await loadActiveBattleMatch({ silent: true, preferredMatchId: state.row.id });
+      openGamesBattleComposer({ targetUserId: driverProfileState.userId, displayName: name, avatarUrl: preferredAvatarUrl(profileUser), gameType: 'billiards' });
+      closeDriverProfileModal();
+    });
+    bindAvatarFallbacks(body);
 
     if (selfMode) {
       bindSelfProfileActions();
@@ -7973,6 +8026,7 @@
   window.renderRankBadgeIcon = renderRankBadgeIcon;
   window.syncLeaderboardBadgeRewards = syncLeaderboardBadgeRewards;
   window.openGamesBattleComposer = openGamesBattleComposer;
+  window.cleanupGamesPanel = destroyBilliardsRuntime;
 
   function bindCurrentGamesDockRuntime() {
     const gamesBtn = document.getElementById('dockGames');
