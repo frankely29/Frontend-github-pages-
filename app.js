@@ -6936,15 +6936,18 @@ function clearOtherDrivers() {
 
 function getCachedAvatarUrl(userId, avatarUrl = "", avatarVersion = "") {
   const normalizedUserId = String(userId || "").trim();
-  const normalizedUrl = resolveMapAvatarUrl(avatarUrl);
+  const resolver = FrontendRuntime?.resolveMediaUrl || window.resolveMediaUrl || resolveMapAvatarUrl;
+  const resolvedUrl = typeof resolver === 'function'
+    ? String(resolver(avatarUrl, FrontendRuntime?.resolveApiBase ? FrontendRuntime.resolveApiBase() : RAILWAY_BASE) || '').trim()
+    : resolveMapAvatarUrl(avatarUrl);
   const version = String(avatarVersion || "").trim();
-  if (!normalizedUserId) return normalizedUrl;
-  const cacheKey = `${normalizedUserId}::${version || normalizedUrl}`;
-  if (normalizedUrl) {
+  if (!normalizedUserId) return resolvedUrl;
+  const cacheKey = `${normalizedUserId}::${version || resolvedUrl}`;
+  if (resolvedUrl) {
     if (avatarThumbCache.has(cacheKey)) frontendPerfStats.avatarCacheHits += 1;
     else frontendPerfStats.avatarCacheMisses += 1;
-    avatarThumbCache.set(cacheKey, normalizedUrl);
-    return avatarThumbCache.get(cacheKey) || normalizedUrl;
+    avatarThumbCache.set(cacheKey, resolvedUrl);
+    return avatarThumbCache.get(cacheKey) || resolvedUrl;
   }
   for (const [key, value] of avatarThumbCache.entries()) {
     if (key.startsWith(`${normalizedUserId}::`) && value) {
@@ -6952,7 +6955,7 @@ function getCachedAvatarUrl(userId, avatarUrl = "", avatarVersion = "") {
       return value;
     }
   }
-  return normalizedUrl;
+  return resolvedUrl;
 }
 
 function buildDriverMarkerVisualSignature(userId, name, avatarUrl = "", mode = "name", orbitMeta = null, leaderboardBadgeCode = '', leaderboardHasCrown = false) {
