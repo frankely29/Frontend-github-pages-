@@ -16,6 +16,13 @@
       './admin.tests.js?v=adminv6',
       './admin.panel.js?v=adminv6',
     ],
+    games_dominoes: [
+      './games.dominoes.real.js?v=games-dominoes-v1',
+    ],
+    games_billiards: [
+      'https://cdn.jsdelivr.net/npm/phaser@3.90.0/dist/phaser.min.js',
+      './games.billiards.real.js?v=games-billiards-v1',
+    ],
   };
 
   function leaderboardPerfDebugState() {
@@ -95,6 +102,20 @@
       }));
     }
     return loadedGroups.get(key);
+  }
+
+
+  async function ensureGameModuleReady(gameKey) {
+    const key = String(gameKey || '').trim().toLowerCase();
+    if (key === 'dominoes') {
+      await loadFrontendModuleGroup('games_dominoes');
+      return window.RealDominoesUI || null;
+    }
+    if (key === 'billiards') {
+      await loadFrontendModuleGroup('games_billiards');
+      return window.RealBilliardsUI || null;
+    }
+    return null;
   }
 
   async function ensureLeaderboardPanelReady() {
@@ -204,4 +225,5 @@
 
   window.ensureLeaderboardPanelReady = ensureLeaderboardPanelReady;
   window.loadFrontendModuleGroup = loadFrontendModuleGroup;
+  window.ensureGameModuleReady = ensureGameModuleReady;
 })();

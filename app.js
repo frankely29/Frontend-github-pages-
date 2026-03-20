@@ -1590,6 +1590,7 @@ function openDrawer(key, title, html) {
 
 function closeDrawer() {
   clearDrawerAutoMinimizeTimer();
+  const closingPanelKey = openPanelKey;
   openPanelKey = null;
   dockDrawer?.classList.remove("open");
   dockBackdrop?.classList.remove("open");
@@ -1600,6 +1601,9 @@ function closeDrawer() {
   // If a chat implementation defines syncChatPollingState on window, call it.
   if (typeof window !== "undefined" && typeof window.syncChatPollingState === "function") {
     window.syncChatPollingState();
+  }
+  if (closingPanelKey === "games") {
+    window.cleanupGamesPanel?.();
   }
 }
 
@@ -5025,7 +5029,7 @@ function makeNavIcon() {
   const navLabelHTML = (typeof window !== "undefined" && typeof window.mapIdentityRenderSelfLabel === "function")
     ? window.mapIdentityRenderSelfLabel({
       name: myName,
-      avatarUrl: me?.avatar_url,
+      avatarUrl: me?.avatar_thumb_url || me?.avatar_url,
       mode: me?.map_identity_mode,
       zoom: map?.getZoom?.(),
       leaderboardBadgeCode: me?.leaderboard_badge_code,
@@ -5039,6 +5043,7 @@ function makeNavIcon() {
       ${navLabelHTML}
     </div>
   `;
+  window.bindAvatarFallbacks?.(el);
   return el;
 }
 
@@ -5100,13 +5105,14 @@ function refreshNavNameLabel() {
   if (wrap && typeof window !== "undefined" && typeof window.mapIdentityRenderSelfLabel === "function") {
     wrap.innerHTML = window.mapIdentityRenderSelfLabel({
       name: myName,
-      avatarUrl: me?.avatar_url,
+      avatarUrl: me?.avatar_thumb_url || me?.avatar_url,
       mode: me?.map_identity_mode,
       zoom: map?.getZoom?.(),
       leaderboardBadgeCode: me?.leaderboard_badge_code,
       leaderboardHasCrown: !!me?.leaderboard_has_crown,
       orbitMeta: lastSelfOrbitMeta
     });
+    window.bindAvatarFallbacks?.(wrap);
   } else {
     const el = document.getElementById("navMeName");
     if (!el) return;
@@ -6600,24 +6606,20 @@ function trustedAvatarOrigins() {
 }
 
 function resolveMapAvatarUrl(url) {
+  const sharedResolver = FrontendRuntime?.resolveMediaUrl || window.resolveMediaUrl;
+  if (typeof sharedResolver === 'function') {
+    const resolved = sharedResolver(url, FrontendRuntime?.resolveApiBase ? FrontendRuntime.resolveApiBase() : RAILWAY_BASE);
+    return typeof resolved === 'string' ? resolved.trim() : '';
+  }
   if (typeof url !== 'string') return '';
   const trimmed = url.trim();
   if (!trimmed) return '';
-  if (/^data:image\//i.test(trimmed)) return trimmed;
-  const toAbsolute = FrontendRuntime?.toAbsoluteUrl
-    ? (value) => FrontendRuntime.toAbsoluteUrl(value)
-    : (value) => {
-        try { return new URL(value, window.location?.href || RAILWAY_BASE).toString(); } catch (_) { return ''; }
-      };
+  if (/^data:image\//i.test(trimmed) || /^blob:/i.test(trimmed) || /^https?:\/\//i.test(trimmed)) return trimmed;
   try {
-    const trustedOrigins = trustedAvatarOrigins();
-    const candidate = /^https?:\/\//i.test(trimmed) ? trimmed : toAbsolute(trimmed);
-    if (!candidate) return '';
-    const parsed = new URL(candidate, window.location?.href || undefined);
-    if (!/^https?:$/i.test(parsed.protocol)) return '';
-    if (trustedOrigins.has(parsed.origin)) return parsed.toString();
-  } catch (_) {}
-  return '';
+    return new URL(trimmed, window.API_BASE || RAILWAY_BASE || window.location?.href || undefined).toString();
+  } catch (_) {
+    return '';
+  }
 }
 
 if (typeof window !== 'undefined') {
@@ -6902,6 +6904,7 @@ function makeDriverIcon(name, headingDeg, avatarUrl = "", mode = "name", orbitMe
   el.innerHTML = `
     ${driverLabelHTML}
   `;
+  window.bindAvatarFallbacks?.(el);
   setPresenceDirection(el, rot, false);
   return el;
 }
@@ -6995,6 +6998,7 @@ function upsertDriverMarker(userId, name, lat, lng, heading, avatarUrl = "", mod
       const el = existing.getElement();
       const newEl = makeDriverIcon(name || `Driver ${userId}`, heading, avatarUrl, mode, orbitMeta, leaderboardBadgeCode, leaderboardHasCrown);
       el.innerHTML = newEl.innerHTML;
+      window.bindAvatarFallbacks?.(el);
       wireProfileOpenTargets(el, userId, { isSelf: false });
       driverMarkerVisualSignature.set(userId, visualSig);
     } else {
