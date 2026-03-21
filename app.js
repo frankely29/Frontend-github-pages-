@@ -6365,6 +6365,16 @@ function markRadioPausedResumable(reason = "system-pause") {
   return true;
 }
 
+function radioShouldStayAliveInBackground() {
+  return !!(
+    radioPlaybackRuntime.activeAudio
+    && String(radioPlaybackRuntime.activeStation || radioPlaybackRuntime.desiredStation || "")
+    && !radioPlaybackRuntime.userPaused
+    && !radioPlaybackRuntime.pausedForVoicePlayback
+    && !radioPlaybackRuntime.pausedForVoiceCapture
+  );
+}
+
 function clearHiddenRadioResumeTimer() {
   if (!radioPlaybackRuntime.hiddenPauseResumeTimer) return;
   clearTimeout(radioPlaybackRuntime.hiddenPauseResumeTimer);
@@ -6381,38 +6391,19 @@ function scheduleHiddenRadioResume(reason = "hidden-pause") {
   const activeAudio = radioPlaybackRuntime.activeAudio;
   const shouldRetry = !!(
     activeAudio
-    && document.visibilityState === "hidden"
+    && document.visibilityState !== "hidden"
     && !radioPlaybackRuntime.userPaused
     && !radioPlaybackRuntime.pausedForVoicePlayback
     && !radioPlaybackRuntime.pausedForVoiceCapture
   );
   if (!shouldRetry) return false;
   clearHiddenRadioResumeTimer();
+  clearHiddenRadioResumeInterval();
+  radioPlaybackRuntime.hiddenResumeAttempts = 0;
   radioPlaybackRuntime.hiddenPauseResumeTimer = window.setTimeout(() => {
     radioPlaybackRuntime.hiddenPauseResumeTimer = null;
     void resumeRadioIfNeeded(reason);
   }, 150);
-  if (document.visibilityState === "hidden" && typeof window !== "undefined") {
-    clearHiddenRadioResumeInterval();
-    radioPlaybackRuntime.hiddenResumeAttempts = 0;
-    radioPlaybackRuntime.hiddenResumeInterval = window.setInterval(() => {
-      if (document.visibilityState !== "hidden") {
-        clearHiddenRadioResumeInterval();
-        radioPlaybackRuntime.hiddenResumeAttempts = 0;
-        return;
-      }
-      if (!radioPlaybackRuntime.activeAudio || radioPlaybackRuntime.userPaused || radioPlaybackRuntime.pausedForVoicePlayback || radioPlaybackRuntime.pausedForVoiceCapture) {
-        clearHiddenRadioResumeInterval();
-        radioPlaybackRuntime.hiddenResumeAttempts = 0;
-        return;
-      }
-      radioPlaybackRuntime.hiddenResumeAttempts += 1;
-      void resumeRadioIfNeeded(`background-watchdog-${radioPlaybackRuntime.hiddenResumeAttempts}`);
-      if (radioPlaybackRuntime.hiddenResumeAttempts >= 10) {
-        clearHiddenRadioResumeInterval();
-      }
-    }, 2000);
-  }
   return true;
 }
 
@@ -6735,7 +6726,9 @@ radioStations.forEach((station) => {
     }
     if (!station.audio.ended) {
       markRadioPausedResumable(pauseReason || "system-pause");
-      scheduleHiddenRadioResume(`hidden-${pauseReason || "system-pause"}`);
+      if (document.visibilityState !== "hidden") {
+        scheduleHiddenRadioResume(`visible-${pauseReason || "system-pause"}`);
+      }
     }
   });
   station.audio.addEventListener("ended", () => {
@@ -6748,14 +6741,14 @@ radioStations.forEach((station) => {
   });
   station.audio.addEventListener("suspend", () => {
     if (radioPlaybackRuntime.activeAudio !== station.audio) return;
-    if (document.visibilityState === "hidden" && !radioPlaybackRuntime.userPaused && !station.audio.ended) {
+    if (!radioPlaybackRuntime.userPaused && !station.audio.ended && document.visibilityState !== "hidden") {
       markRadioPausedResumable("background-suspend");
       scheduleHiddenRadioResume("background-suspend");
     }
   });
   station.audio.addEventListener("stalled", () => {
     if (radioPlaybackRuntime.activeAudio !== station.audio) return;
-    if (document.visibilityState === "hidden" && !radioPlaybackRuntime.userPaused && !station.audio.ended) {
+    if (!radioPlaybackRuntime.userPaused && !station.audio.ended && document.visibilityState !== "hidden") {
       scheduleHiddenRadioResume("background-stalled");
     }
   });
@@ -6763,41 +6756,38 @@ radioStations.forEach((station) => {
 
 if (typeof window !== "undefined") {
   window.addEventListener("pageshow", () => {
-    void resumeRadioIfNeeded("pageshow");
+    const activeAudio = radioPlaybackRuntime.activeAudio;
+    if (radioShouldStayAliveInBackground() && activeAudio && activeAudio.paused) {
+      void resumeRadioIfNeeded("pageshow");
+    }
   });
   window.addEventListener("focus", () => {
-    void resumeRadioIfNeeded("focus");
+    const activeAudio = radioPlaybackRuntime.activeAudio;
+    if (radioShouldStayAliveInBackground() && activeAudio && activeAudio.paused) {
+      void resumeRadioIfNeeded("focus");
+    }
   });
   window.addEventListener("pagehide", () => {
-    const shouldKeepPlaying = !!(
-      radioPlaybackRuntime.activeAudio
-      && !radioPlaybackRuntime.userPaused
-      && !radioPlaybackRuntime.pausedForVoicePlayback
-      && !radioPlaybackRuntime.pausedForVoiceCapture
-    );
-    if (shouldKeepPlaying) {
+    if (radioShouldStayAliveInBackground()) {
       ensurePlaybackAudioSession("radio-pagehide");
       setRadioMediaSessionPlaybackState("playing", radioPlaybackRuntime.activeStation || radioPlaybackRuntime.desiredStation || stationLabelForAudio(radioPlaybackRuntime.activeAudio));
     }
   });
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") {
-      const shouldKeepPlaying = !!(
-        radioPlaybackRuntime.activeAudio
-        && !radioPlaybackRuntime.userPaused
-        && !radioPlaybackRuntime.pausedForVoicePlayback
-        && !radioPlaybackRuntime.pausedForVoiceCapture
-      );
-      if (shouldKeepPlaying) {
+      if (radioShouldStayAliveInBackground()) {
         ensurePlaybackAudioSession("radio-background");
         setRadioMediaSessionPlaybackState("playing", radioPlaybackRuntime.activeStation || radioPlaybackRuntime.desiredStation || stationLabelForAudio(radioPlaybackRuntime.activeAudio));
-        scheduleHiddenRadioResume("visibility-hidden");
       }
       return;
     }
+    clearHiddenRadioResumeTimer();
     clearHiddenRadioResumeInterval();
     radioPlaybackRuntime.hiddenResumeAttempts = 0;
-    void resumeRadioIfNeeded("visible");
+    const activeAudio = radioPlaybackRuntime.activeAudio;
+    if (radioShouldStayAliveInBackground() && activeAudio && activeAudio.paused) {
+      void resumeRadioIfNeeded("visible");
+    }
   });
 }
 
