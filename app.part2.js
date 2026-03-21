@@ -128,6 +128,7 @@
   const voiceAssetCache = new Map();
   const voicePlaybackAudio = new Audio();
   voicePlaybackAudio.preload = 'auto';
+  voicePlaybackAudio.autoplay = false;
   voicePlaybackAudio.playsInline = true;
   const voicePlaybackRuntime = {
     activeMessageId: null,
@@ -1561,7 +1562,7 @@
 
       window.addEventListener('pagehide', () => {
         if (isChatVoiceBusy()) void cancelChatVoiceRecording('Recording canceled');
-        stopSharedVoicePlayback('background', { resetPosition: false, clearActive: false, resumeRadio: true });
+        hardStopSharedVoicePlaybackForBackground('background-pagehide');
         reconcileChatSoundRuntime('pagehide');
         if (!chatAudioReady && !chatSoundRuntime?.htmlAudioReady) {
           bindChatSoundPrimeListeners?.();
@@ -1572,7 +1573,7 @@
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'hidden') {
           void cancelChatVoiceRecording('Recording canceled');
-          stopSharedVoicePlayback('background', { resetPosition: false, clearActive: false, resumeRadio: true });
+          hardStopSharedVoicePlaybackForBackground('background-hidden');
           return;
         }
         if (document.visibilityState === 'visible') {
@@ -2040,6 +2041,40 @@
       voicePlaybackRuntime.isSeeking = false;
     }
     syncAllVoicePlayers();
+  }
+
+  function hardStopSharedVoicePlaybackForBackground(reason = 'background') {
+    stopSharedVoicePlayback(reason, { resetPosition: true, clearActive: true, resumeRadio: true });
+    try { voicePlaybackAudio.pause(); } catch (_) {}
+    try { voicePlaybackAudio.removeAttribute('src'); } catch (_) {}
+    try { voicePlaybackAudio.load(); } catch (_) {}
+    voicePlaybackRuntime.activeMessageId = null;
+    voicePlaybackRuntime.activeScope = '';
+    voicePlaybackRuntime.activeBlobUrl = '';
+    voicePlaybackRuntime.activeAudioUrl = '';
+    voicePlaybackRuntime.currentTime = 0;
+    voicePlaybackRuntime.isPlaying = false;
+    voicePlaybackRuntime.isSeeking = false;
+    voicePlaybackRuntime.lastUserAction = '';
+    syncAllVoicePlayers();
+    syncAllVoiceRecorderUis();
+  }
+
+  function hardStopSharedVoicePlaybackForRadio(reason = 'radio-start') {
+    stopSharedVoicePlayback(reason, { resetPosition: true, clearActive: true, resumeRadio: false });
+    try { voicePlaybackAudio.pause(); } catch (_) {}
+    try { voicePlaybackAudio.removeAttribute('src'); } catch (_) {}
+    try { voicePlaybackAudio.load(); } catch (_) {}
+    voicePlaybackRuntime.activeMessageId = null;
+    voicePlaybackRuntime.activeScope = '';
+    voicePlaybackRuntime.activeBlobUrl = '';
+    voicePlaybackRuntime.activeAudioUrl = '';
+    voicePlaybackRuntime.currentTime = 0;
+    voicePlaybackRuntime.isPlaying = false;
+    voicePlaybackRuntime.isSeeking = false;
+    voicePlaybackRuntime.lastUserAction = '';
+    syncAllVoicePlayers();
+    syncAllVoiceRecorderUis();
   }
 
   function revokeVoiceBlobUrls() {
@@ -8173,7 +8208,7 @@
   };
 
   window.pauseSharedVoicePlaybackForRadio = function pauseSharedVoicePlaybackForRadio(reason = 'radio-start') {
-    stopSharedVoicePlayback(reason, { resetPosition: false, clearActive: false, resumeRadio: false });
+    hardStopSharedVoicePlaybackForRadio(reason);
     return true;
   };
 })();
