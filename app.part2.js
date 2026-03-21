@@ -639,9 +639,26 @@
 
   async function prepareChatAudioForCapture(reason = 'voice-capture') {
     pauseActiveChatVoicePlayback();
+
+    if (typeof window.forcePauseRadioForVoiceCapture === 'function') {
+      try {
+        await window.forcePauseRadioForVoiceCapture('voice-record-start');
+      } catch (_) {}
+    } else {
+      try {
+        window.pauseRadioForVoiceCapture?.('voice-record-start');
+      } catch (_) {}
+    }
+
     chatVoiceState.phase = 'preparing';
     chatVoiceState.lastError = '';
-    getSharedAudioCoordinator()?.beginRecordingCapture?.('voice-record-start');
+
+    await new Promise((resolve) => window.setTimeout(resolve, 160));
+
+    if (!setChatAudioSessionType('play-and-record')) {
+      setChatAudioSessionType('auto');
+    }
+
     chatVoiceState.phase = 'requesting';
     return true;
   }
