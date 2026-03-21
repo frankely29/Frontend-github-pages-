@@ -6090,6 +6090,33 @@ function setBtnState(btn, on) {
   btn.textContent = (on ? "⏸ " : "▶ ") + base;
 }
 
+function waitForRadioPauseSettle(audioEl, timeoutMs = 320) {
+  return new Promise((resolve) => {
+    if (!audioEl || audioEl.paused || audioEl.ended) {
+      resolve(true);
+      return;
+    }
+
+    let finished = false;
+    const done = (result) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timerId);
+      audioEl.removeEventListener("pause", onPaused);
+      audioEl.removeEventListener("emptied", onPaused);
+      resolve(result);
+    };
+
+    const onPaused = () => done(true);
+    const timerId = window.setTimeout(() => {
+      done(!!audioEl.paused || !!audioEl.ended);
+    }, timeoutMs);
+
+    audioEl.addEventListener("pause", onPaused, { once: true });
+    audioEl.addEventListener("emptied", onPaused, { once: true });
+  });
+}
+
 const TlcSharedAudio = (typeof window !== "undefined" && window.TlcSharedAudio && typeof window.TlcSharedAudio === "object")
   ? window.TlcSharedAudio
   : {};
@@ -6168,6 +6195,8 @@ Object.assign(TlcSharedAudio, {
     this.voiceContext = null;
     this.setPlaybackSession("radio-play");
     try {
+      try { this.audioEl.muted = false; } catch (_) {}
+      try { this.audioEl.volume = 1; } catch (_) {}
       if ((this.audioEl.currentSrc || this.audioEl.src || "") !== station.url) {
         this.audioEl.src = station.url;
         this.audioEl.load();
@@ -6217,6 +6246,10 @@ Object.assign(TlcSharedAudio, {
   },
   pauseRadioForVoice(reason = "voice") {
     if (this.owner !== "radio" || !this.desiredRadioStationKey) return false;
+    if (String(reason || "").includes("record")) {
+      try { this.audioEl.muted = true; } catch (_) {}
+      try { this.audioEl.volume = 0; } catch (_) {}
+    }
     this.suspendedRadio = {
       key: this.desiredRadioStationKey,
       label: this.desiredRadioStationLabel,
@@ -6296,8 +6329,34 @@ Object.assign(TlcSharedAudio, {
       void this.stopVoicePlayback("record-start", { resetPosition: true, clearSource: true, resumeRadio: false });
     }
     if (this.owner === "radio") {
+      try { this.audioEl.muted = true; } catch (_) {}
+      try { this.audioEl.volume = 0; } catch (_) {}
       this.pauseRadioForVoice("record-start");
     }
+    this.owner = "record";
+    this.lastPauseReason = reason;
+    this.setRecordSession(reason);
+    this.syncMediaSession("none", "");
+    refreshRadioButtons();
+    return true;
+  },
+  async forcePauseRadioForVoiceCapture(reason = "record-start") {
+    this.recorderLock = true;
+    if (this.owner === "voice") {
+      await this.stopVoicePlayback("record-start", { resetPosition: true, clearSource: true, resumeRadio: false });
+    }
+
+    const activeAudio = this.audioEl;
+    const shouldWaitForRadioPause = this.owner === "radio" && !!this.desiredRadioStationKey;
+    if (shouldWaitForRadioPause) {
+      try { activeAudio.muted = true; } catch (_) {}
+      try { activeAudio.volume = 0; } catch (_) {}
+      this.pauseRadioForVoice(reason);
+      await waitForRadioPauseSettle(activeAudio, 320);
+    } else {
+      this.owner = "record";
+    }
+
     this.owner = "record";
     this.lastPauseReason = reason;
     this.setRecordSession(reason);
@@ -6539,6 +6598,7 @@ if (typeof window !== "undefined") {
   window.pauseRadioForVoicePlayback = (reason = "voice-play") => TlcSharedAudio.pauseRadioForVoice(reason);
   window.resumeRadioAfterVoicePlayback = (reason = "voice-stop") => TlcSharedAudio.resumeRadioAfterVoice(reason);
   window.pauseRadioForVoiceCapture = (reason = "record-start") => TlcSharedAudio.beginRecordingCapture(reason);
+  window.forcePauseRadioForVoiceCapture = (reason = "record-start") => TlcSharedAudio.forcePauseRadioForVoiceCapture(reason);
   window.resumeRadioAfterVoiceCapture = (reason = "record-end") => TlcSharedAudio.endRecordingCapture(reason);
   window.resumeRadioIfNeeded = (reason = "resume") => {
     if (!TlcSharedAudio.desiredRadioStationKey || TlcSharedAudio.userPausedRadio || TlcSharedAudio.recorderLock || TlcSharedAudio.owner === "voice") return false;
