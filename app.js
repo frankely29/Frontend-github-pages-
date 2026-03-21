@@ -5942,23 +5942,18 @@ const ALOFOKE993_STREAM_URL = "https://radiordomi.com:8566/stream";
 const Z100_STREAM_URL = "https://stream.revma.ihrhls.com/zc1469";
 
 const megaAudio = new Audio();
-megaAudio.src = MEGA979_STREAM_URL;
 megaAudio.preload = "none";
 
 const hot97Audio = new Audio();
-hot97Audio.src = HOT97_STREAM_URL;
 hot97Audio.preload = "none";
 
 const kqAudio = new Audio();
-kqAudio.src = KQ945_STREAM_URL;
 kqAudio.preload = "none";
 
 const alofoke993Audio = new Audio();
-alofoke993Audio.src = ALOFOKE993_STREAM_URL;
 alofoke993Audio.preload = "none";
 
 const z100Audio = new Audio();
-z100Audio.src = Z100_STREAM_URL;
 z100Audio.preload = "none";
 
 let megaPlaying = false;
@@ -5967,19 +5962,92 @@ let kqPlaying = false;
 let alofoke993Playing = false;
 let z100Playing = false;
 
+const radioStations = [
+  {
+    key: "mega",
+    label: "La Mega 97.9",
+    url: MEGA979_STREAM_URL,
+    audio: megaAudio,
+    button: btnMega979,
+    failStatus: "Radio: La Mega failed to play",
+    errorStatus: "Radio: La Mega stream error",
+    failAlert: "La Mega 97.9 could not start. Turn volume up and try again.",
+  },
+  {
+    key: "hot97",
+    label: "HOT 97.1",
+    url: HOT97_STREAM_URL,
+    audio: hot97Audio,
+    button: btnHot97,
+    failStatus: "Radio: HOT 97.1 failed to play",
+    errorStatus: "Radio: HOT 97.1 stream error",
+    failAlert: "HOT 97.1 could not start. Turn volume up and try again.",
+  },
+  {
+    key: "kq",
+    label: "KQ 94.5 FM",
+    url: KQ945_STREAM_URL,
+    audio: kqAudio,
+    button: btnKQ945,
+    failStatus: "Radio: KQ 94.5 FM failed to play",
+    errorStatus: "Radio: KQ 94.5 FM stream error",
+    failAlert: "KQ 94.5 FM could not start. Turn volume up and try again.",
+  },
+  {
+    key: "alofoke993",
+    label: "Alofoke 99.3 FM",
+    url: ALOFOKE993_STREAM_URL,
+    audio: alofoke993Audio,
+    button: btnAlofoke993,
+    failStatus: "Radio: Alofoke 99.3 FM failed to play",
+    errorStatus: "Radio: Alofoke 99.3 FM stream error",
+    failAlert: "Alofoke 99.3 FM could not start. Turn volume up and try again.",
+  },
+  {
+    key: "z100",
+    label: "Z100",
+    url: Z100_STREAM_URL,
+    audio: z100Audio,
+    button: btnZ100,
+    failStatus: "Radio: Z100 failed to play",
+    errorStatus: "Radio: Z100 stream error",
+    failAlert: "Z100 could not start. Turn volume up and try again.",
+  },
+];
+const radioStationByKey = new Map(radioStations.map((station) => [station.key, station]));
+
 const radioPlaybackRuntime = (typeof window !== "undefined" && window.radioPlaybackRuntime && typeof window.radioPlaybackRuntime === "object")
   ? window.radioPlaybackRuntime
-  : {
-      isPlaying: false,
-      activeStation: "",
-      activeAudio: null,
-      pausedForVoiceCapture: false,
-      shouldResumeAfterVoiceCapture: false,
-      lastPauseReason: "",
-      lastPlayAt: 0,
-    };
+  : {};
+Object.assign(radioPlaybackRuntime, {
+  isPlaying: !!radioPlaybackRuntime.isPlaying,
+  isStarting: !!radioPlaybackRuntime.isStarting,
+  activeStation: String(radioPlaybackRuntime.activeStation || ""),
+  desiredStation: String(radioPlaybackRuntime.desiredStation || ""),
+  activeAudio: radioPlaybackRuntime.activeAudio || null,
+  pausedForVoiceCapture: !!radioPlaybackRuntime.pausedForVoiceCapture,
+  shouldResumeAfterVoiceCapture: !!radioPlaybackRuntime.shouldResumeAfterVoiceCapture,
+  pausedForVoicePlayback: !!radioPlaybackRuntime.pausedForVoicePlayback,
+  shouldResumeAfterVoicePlayback: !!radioPlaybackRuntime.shouldResumeAfterVoicePlayback,
+  userPaused: !!radioPlaybackRuntime.userPaused,
+  lastPauseReason: String(radioPlaybackRuntime.lastPauseReason || ""),
+  lastPlayAt: Number(radioPlaybackRuntime.lastPlayAt || 0),
+  lastResumeAt: Number(radioPlaybackRuntime.lastResumeAt || 0),
+  lastStartAt: Number(radioPlaybackRuntime.lastStartAt || 0),
+  restartCount: Number(radioPlaybackRuntime.restartCount || 0),
+  mediaSessionBound: !!radioPlaybackRuntime.mediaSessionBound,
+  mediaSessionStationName: String(radioPlaybackRuntime.mediaSessionStationName || ""),
+});
 if (typeof window !== "undefined") {
   window.radioPlaybackRuntime = radioPlaybackRuntime;
+}
+
+function radioStationForAudio(audioEl) {
+  return radioStations.find((station) => station.audio === audioEl) || null;
+}
+
+function stationLabelForAudio(audioEl) {
+  return radioStationForAudio(audioEl)?.label || "";
 }
 
 function getSharedNavigatorAudioSession() {
@@ -6007,98 +6075,92 @@ function ensurePlaybackAudioSession(reason = "playback") {
   return "unsupported";
 }
 
-function stationLabelForAudio(audioEl) {
-  if (audioEl === megaAudio) return "La Mega 97.9";
-  if (audioEl === hot97Audio) return "HOT 97.1";
-  if (audioEl === kqAudio) return "KQ 94.5 FM";
-  if (audioEl === alofoke993Audio) return "Alofoke 99.3 FM";
-  if (audioEl === z100Audio) return "Z100";
-  return "";
-}
-
-function markRadioPlaying(stationName, audioEl) {
-  radioPlaybackRuntime.isPlaying = true;
-  radioPlaybackRuntime.activeStation = String(stationName || stationLabelForAudio(audioEl) || "");
-  radioPlaybackRuntime.activeAudio = audioEl || null;
-  radioPlaybackRuntime.pausedForVoiceCapture = false;
-  radioPlaybackRuntime.shouldResumeAfterVoiceCapture = false;
-  radioPlaybackRuntime.lastPauseReason = "play";
-  radioPlaybackRuntime.lastPlayAt = Date.now();
-  ensurePlaybackAudioSession("radio-playing");
-  return true;
-}
-
-function markRadioStopped(reason = "stop") {
-  radioPlaybackRuntime.isPlaying = false;
-  radioPlaybackRuntime.activeStation = "";
-  radioPlaybackRuntime.activeAudio = null;
-  radioPlaybackRuntime.pausedForVoiceCapture = false;
-  radioPlaybackRuntime.shouldResumeAfterVoiceCapture = false;
-  radioPlaybackRuntime.lastPauseReason = String(reason || "stop");
-  return true;
-}
-
-function pauseRadioForVoiceCapture(reason = "voice-capture") {
-  const activeAudio = radioPlaybackRuntime.activeAudio;
-  const isActive = !!(radioPlaybackRuntime.isPlaying && activeAudio && !activeAudio.paused && !activeAudio.ended);
-  if (!isActive) {
-    radioPlaybackRuntime.pausedForVoiceCapture = false;
-    radioPlaybackRuntime.shouldResumeAfterVoiceCapture = false;
-    return false;
-  }
-  radioPlaybackRuntime.pausedForVoiceCapture = true;
-  radioPlaybackRuntime.shouldResumeAfterVoiceCapture = true;
-  radioPlaybackRuntime.lastPauseReason = String(reason || "voice-capture");
-  try { activeAudio.pause(); } catch (_) {}
-  radioPlaybackRuntime.isPlaying = false;
-  return true;
-}
-
-async function resumeRadioAfterVoiceCapture(reason = "voice-capture") {
-  const activeAudio = radioPlaybackRuntime.activeAudio;
-  const shouldResume = !!(radioPlaybackRuntime.pausedForVoiceCapture && radioPlaybackRuntime.shouldResumeAfterVoiceCapture && activeAudio);
-  if (!shouldResume) {
-    radioPlaybackRuntime.pausedForVoiceCapture = false;
-    return false;
-  }
-  radioPlaybackRuntime.pausedForVoiceCapture = false;
-  radioPlaybackRuntime.lastPauseReason = String(reason || "voice-capture-resume");
-  ensurePlaybackAudioSession(reason || "voice-capture-resume");
-  try {
-    const playPromise = activeAudio.play();
-    if (playPromise && typeof playPromise.then === "function") await playPromise;
-    markRadioPlaying(radioPlaybackRuntime.activeStation || stationLabelForAudio(activeAudio), activeAudio);
-    return true;
-  } catch (error) {
-    console.warn("Radio resume after voice capture failed:", error);
-    radioPlaybackRuntime.shouldResumeAfterVoiceCapture = false;
+function bindRadioMediaSessionHandlers() {
+  if (radioPlaybackRuntime.mediaSessionBound) return true;
+  const mediaSession = typeof navigator !== "undefined" ? navigator.mediaSession : null;
+  if (!mediaSession) return false;
+  const playHandler = async () => {
+    const activeAudio = radioPlaybackRuntime.activeAudio;
+    if (!activeAudio) return;
+    if (radioPlaybackRuntime.pausedForVoicePlayback) {
+      await resumeRadioAfterVoicePlayback("media-session-play");
+      return;
+    }
+    if (radioPlaybackRuntime.pausedForVoiceCapture) {
+      await resumeRadioAfterVoiceCapture("media-session-play");
+      return;
+    }
+    try {
+      ensurePlaybackAudioSession("media-session-play");
+      const playPromise = activeAudio.play();
+      if (playPromise && typeof playPromise.then === "function") await playPromise;
+      markRadioPlaying(radioPlaybackRuntime.activeStation || stationLabelForAudio(activeAudio), activeAudio);
+    } catch (error) {
+      console.warn("Radio media session play failed:", error);
+      syncRadioPlaybackFlags();
+      refreshRadioButtons();
+    }
+  };
+  const pauseHandler = () => {
+    const activeAudio = radioPlaybackRuntime.activeAudio;
+    if (!activeAudio) return;
+    try { activeAudio.pause(); } catch (_) {}
     radioPlaybackRuntime.isPlaying = false;
+    radioPlaybackRuntime.isStarting = false;
+    radioPlaybackRuntime.userPaused = true;
+    radioPlaybackRuntime.lastPauseReason = "media-session-pause";
+    setRadioMediaSessionPlaybackState("paused", radioPlaybackRuntime.activeStation || stationLabelForAudio(activeAudio));
+    refreshRadioButtons();
+  };
+  const stopHandler = () => {
+    const activeAudio = radioPlaybackRuntime.activeAudio;
+    if (!activeAudio) return;
+    stopRadioAudio(activeAudio, "media-session-stop");
+    setRadioStatus("Radio: off");
+  };
+  try {
+    mediaSession.setActionHandler("play", playHandler);
+    mediaSession.setActionHandler("pause", pauseHandler);
+    mediaSession.setActionHandler("stop", stopHandler);
+    radioPlaybackRuntime.mediaSessionBound = true;
+    return true;
+  } catch (_) {
     return false;
   }
 }
 
-function isAnyRadioPlaying() {
-  const activeAudio = radioPlaybackRuntime.activeAudio;
-  return !!(radioPlaybackRuntime.isPlaying && activeAudio && !activeAudio.paused && !activeAudio.ended);
-}
-
-if (typeof window !== "undefined") {
-  window.getSharedNavigatorAudioSession = getSharedNavigatorAudioSession;
-  window.setSharedNavigatorAudioSessionType = setSharedNavigatorAudioSessionType;
-  window.ensurePlaybackAudioSession = ensurePlaybackAudioSession;
-  window.markRadioPlaying = markRadioPlaying;
-  window.markRadioStopped = markRadioStopped;
-  window.pauseRadioForVoiceCapture = pauseRadioForVoiceCapture;
-  window.resumeRadioAfterVoiceCapture = resumeRadioAfterVoiceCapture;
-  window.isAnyRadioPlaying = isAnyRadioPlaying;
+function setRadioMediaSessionPlaybackState(state, stationName) {
+  const mediaSession = typeof navigator !== "undefined" ? navigator.mediaSession : null;
+  if (!mediaSession) return false;
+  const normalizedState = state === "playing" ? "playing" : (state === "paused" ? "paused" : "none");
+  try {
+    mediaSession.playbackState = normalizedState;
+  } catch (_) {}
+  const title = String(stationName || radioPlaybackRuntime.activeStation || "Radio").trim();
+  if (title) {
+    try {
+      mediaSession.metadata = new MediaMetadata({ title, artist: "Traffic Live Chat Radio" });
+      radioPlaybackRuntime.mediaSessionStationName = title;
+    } catch (_) {
+      radioPlaybackRuntime.mediaSessionStationName = title;
+    }
+  }
+  return true;
 }
 
 function syncRadioPlaybackFlags() {
-  megaPlaying = isAnyRadioPlaying() && radioPlaybackRuntime.activeAudio === megaAudio;
-  hot97Playing = isAnyRadioPlaying() && radioPlaybackRuntime.activeAudio === hot97Audio;
-  kqPlaying = isAnyRadioPlaying() && radioPlaybackRuntime.activeAudio === kqAudio;
-  alofoke993Playing = isAnyRadioPlaying() && radioPlaybackRuntime.activeAudio === alofoke993Audio;
-  z100Playing = isAnyRadioPlaying() && radioPlaybackRuntime.activeAudio === z100Audio;
+  const activeAudio = radioPlaybackRuntime.activeAudio;
+  const activeBusy = !!(activeAudio && (
+    radioPlaybackRuntime.isPlaying
+    || radioPlaybackRuntime.isStarting
+    || radioPlaybackRuntime.pausedForVoiceCapture
+    || radioPlaybackRuntime.pausedForVoicePlayback
+  ));
+  megaPlaying = activeBusy && activeAudio === megaAudio;
+  hot97Playing = activeBusy && activeAudio === hot97Audio;
+  kqPlaying = activeBusy && activeAudio === kqAudio;
+  alofoke993Playing = activeBusy && activeAudio === alofoke993Audio;
+  z100Playing = activeBusy && activeAudio === z100Audio;
 }
 
 function setRadioStatus(txt) {
@@ -6107,22 +6169,211 @@ function setRadioStatus(txt) {
 function setBtnState(btn, on) {
   if (!btn) return;
   btn.classList.toggle("on", !!on);
-  const base = btn === btnMega979 ? "La Mega 97.9"
-             : btn === btnHot97 ? "HOT 97.1"
-             : btn === btnKQ945 ? "KQ 94.5"
-             : btn === btnAlofoke993 ? "Alofoke 99.3 FM"
-             : btn === btnZ100 ? "Z100"
-             : "";
+  const station = radioStations.find((entry) => entry.button === btn);
+  const base = station ? station.label : "";
   btn.textContent = (on ? "⏸ " : "▶ ") + base;
 }
 
 function refreshRadioButtons() {
   syncRadioPlaybackFlags();
-  setBtnState(btnMega979, megaPlaying);
-  setBtnState(btnHot97, hot97Playing);
-  setBtnState(btnKQ945, kqPlaying);
-  setBtnState(btnAlofoke993, alofoke993Playing);
-  setBtnState(btnZ100, z100Playing);
+  radioStations.forEach((station) => setBtnState(station.button, radioPlaybackRuntime.activeAudio === station.audio && (
+    radioPlaybackRuntime.isPlaying
+    || radioPlaybackRuntime.isStarting
+    || radioPlaybackRuntime.pausedForVoicePlayback
+    || radioPlaybackRuntime.pausedForVoiceCapture
+  )));
+}
+
+function markRadioPlaying(stationName, audioEl) {
+  const now = Date.now();
+  radioPlaybackRuntime.isStarting = false;
+  radioPlaybackRuntime.isPlaying = true;
+  radioPlaybackRuntime.activeStation = String(stationName || stationLabelForAudio(audioEl) || "");
+  radioPlaybackRuntime.desiredStation = radioPlaybackRuntime.activeStation;
+  radioPlaybackRuntime.activeAudio = audioEl || null;
+  radioPlaybackRuntime.pausedForVoiceCapture = false;
+  radioPlaybackRuntime.shouldResumeAfterVoiceCapture = false;
+  radioPlaybackRuntime.pausedForVoicePlayback = false;
+  radioPlaybackRuntime.shouldResumeAfterVoicePlayback = false;
+  radioPlaybackRuntime.userPaused = false;
+  radioPlaybackRuntime.lastPauseReason = "play";
+  radioPlaybackRuntime.lastPlayAt = now;
+  radioPlaybackRuntime.lastResumeAt = now;
+  ensurePlaybackAudioSession("radio-playing");
+  setRadioMediaSessionPlaybackState("playing", radioPlaybackRuntime.activeStation);
+  refreshRadioButtons();
+  return true;
+}
+
+function markRadioStopped(reason = "stop", { keepSource = false, userPaused = reason === "manual-stop" } = {}) {
+  const activeAudio = radioPlaybackRuntime.activeAudio;
+  radioPlaybackRuntime.isStarting = false;
+  radioPlaybackRuntime.isPlaying = false;
+  radioPlaybackRuntime.userPaused = !!userPaused;
+  radioPlaybackRuntime.lastPauseReason = String(reason || "stop");
+  if (!keepSource) {
+    if (activeAudio) {
+      try { activeAudio.removeAttribute("src"); } catch (_) {}
+      try { activeAudio.load(); } catch (_) {}
+    }
+    radioPlaybackRuntime.activeStation = "";
+    radioPlaybackRuntime.desiredStation = "";
+    radioPlaybackRuntime.activeAudio = null;
+    radioPlaybackRuntime.pausedForVoiceCapture = false;
+    radioPlaybackRuntime.shouldResumeAfterVoiceCapture = false;
+    radioPlaybackRuntime.pausedForVoicePlayback = false;
+    radioPlaybackRuntime.shouldResumeAfterVoicePlayback = false;
+  }
+  setRadioMediaSessionPlaybackState(keepSource ? "paused" : "none", keepSource ? (radioPlaybackRuntime.activeStation || stationLabelForAudio(activeAudio)) : "");
+  refreshRadioButtons();
+  return true;
+}
+
+function isAnyRadioPlaying() {
+  const activeAudio = radioPlaybackRuntime.activeAudio;
+  return !!(radioPlaybackRuntime.isPlaying && activeAudio && !activeAudio.paused && !activeAudio.ended);
+}
+
+function pauseActiveRadioFor(reason, mode) {
+  const activeAudio = radioPlaybackRuntime.activeAudio;
+  const isActive = !!(activeAudio && radioPlaybackRuntime.isPlaying && !activeAudio.paused && !activeAudio.ended);
+  if (!isActive) {
+    if (mode === "voice-playback") {
+      radioPlaybackRuntime.pausedForVoicePlayback = false;
+      radioPlaybackRuntime.shouldResumeAfterVoicePlayback = false;
+    }
+    if (mode === "voice-capture") {
+      radioPlaybackRuntime.pausedForVoiceCapture = false;
+      radioPlaybackRuntime.shouldResumeAfterVoiceCapture = false;
+    }
+    refreshRadioButtons();
+    return false;
+  }
+  if (mode === "voice-playback") {
+    radioPlaybackRuntime.pausedForVoicePlayback = true;
+    radioPlaybackRuntime.shouldResumeAfterVoicePlayback = true;
+  }
+  if (mode === "voice-capture") {
+    radioPlaybackRuntime.pausedForVoiceCapture = true;
+    radioPlaybackRuntime.shouldResumeAfterVoiceCapture = true;
+  }
+  radioPlaybackRuntime.isPlaying = false;
+  radioPlaybackRuntime.isStarting = false;
+  radioPlaybackRuntime.userPaused = false;
+  radioPlaybackRuntime.lastPauseReason = String(reason || mode || "pause");
+  try { activeAudio.pause(); } catch (_) {}
+  setRadioMediaSessionPlaybackState("paused", radioPlaybackRuntime.activeStation || stationLabelForAudio(activeAudio));
+  refreshRadioButtons();
+  return true;
+}
+
+function pauseRadioForVoicePlayback(reason = "voice-playback") {
+  return pauseActiveRadioFor(reason, "voice-playback");
+}
+
+function pauseRadioForVoiceCapture(reason = "voice-capture") {
+  return pauseActiveRadioFor(reason, "voice-capture");
+}
+
+async function resumeRadioAfterVoicePlayback(reason = "voice-playback") {
+  const activeAudio = radioPlaybackRuntime.activeAudio;
+  const shouldResume = !!(radioPlaybackRuntime.pausedForVoicePlayback && radioPlaybackRuntime.shouldResumeAfterVoicePlayback && activeAudio);
+  if (!shouldResume) {
+    radioPlaybackRuntime.pausedForVoicePlayback = false;
+    radioPlaybackRuntime.shouldResumeAfterVoicePlayback = false;
+    refreshRadioButtons();
+    return false;
+  }
+  radioPlaybackRuntime.pausedForVoicePlayback = false;
+  radioPlaybackRuntime.shouldResumeAfterVoicePlayback = false;
+  radioPlaybackRuntime.lastPauseReason = String(reason || "voice-playback-resume");
+  try {
+    ensurePlaybackAudioSession(reason || "voice-playback-resume");
+    const playPromise = activeAudio.play();
+    if (playPromise && typeof playPromise.then === "function") await playPromise;
+    markRadioPlaying(radioPlaybackRuntime.activeStation || stationLabelForAudio(activeAudio), activeAudio);
+    return true;
+  } catch (error) {
+    console.warn("Radio resume after voice playback failed:", error);
+    radioPlaybackRuntime.isPlaying = false;
+    setRadioMediaSessionPlaybackState("paused", radioPlaybackRuntime.activeStation || stationLabelForAudio(activeAudio));
+    refreshRadioButtons();
+    return false;
+  }
+}
+
+async function resumeRadioAfterVoiceCapture(reason = "voice-capture") {
+  const activeAudio = radioPlaybackRuntime.activeAudio;
+  const shouldResume = !!(radioPlaybackRuntime.pausedForVoiceCapture && radioPlaybackRuntime.shouldResumeAfterVoiceCapture && activeAudio);
+  if (!shouldResume) {
+    radioPlaybackRuntime.pausedForVoiceCapture = false;
+    radioPlaybackRuntime.shouldResumeAfterVoiceCapture = false;
+    refreshRadioButtons();
+    return false;
+  }
+  radioPlaybackRuntime.pausedForVoiceCapture = false;
+  radioPlaybackRuntime.shouldResumeAfterVoiceCapture = false;
+  radioPlaybackRuntime.lastPauseReason = String(reason || "voice-capture-resume");
+  try {
+    ensurePlaybackAudioSession(reason || "voice-capture-resume");
+    const playPromise = activeAudio.play();
+    if (playPromise && typeof playPromise.then === "function") await playPromise;
+    markRadioPlaying(radioPlaybackRuntime.activeStation || stationLabelForAudio(activeAudio), activeAudio);
+    return true;
+  } catch (error) {
+    console.warn("Radio resume after voice capture failed:", error);
+    radioPlaybackRuntime.isPlaying = false;
+    setRadioMediaSessionPlaybackState("paused", radioPlaybackRuntime.activeStation || stationLabelForAudio(activeAudio));
+    refreshRadioButtons();
+    return false;
+  }
+}
+
+if (typeof window !== "undefined") {
+  window.getSharedNavigatorAudioSession = getSharedNavigatorAudioSession;
+  window.setSharedNavigatorAudioSessionType = setSharedNavigatorAudioSessionType;
+  window.ensurePlaybackAudioSession = ensurePlaybackAudioSession;
+  window.bindRadioMediaSessionHandlers = bindRadioMediaSessionHandlers;
+  window.setRadioMediaSessionPlaybackState = setRadioMediaSessionPlaybackState;
+  window.syncRadioPlaybackFlags = syncRadioPlaybackFlags;
+  window.refreshRadioButtons = refreshRadioButtons;
+  window.markRadioPlaying = markRadioPlaying;
+  window.markRadioStopped = markRadioStopped;
+  window.pauseActiveRadioFor = pauseActiveRadioFor;
+  window.pauseRadioForVoicePlayback = pauseRadioForVoicePlayback;
+  window.pauseRadioForVoiceCapture = pauseRadioForVoiceCapture;
+  window.resumeRadioAfterVoicePlayback = resumeRadioAfterVoicePlayback;
+  window.resumeRadioAfterVoiceCapture = resumeRadioAfterVoiceCapture;
+  window.isAnyRadioPlaying = isAnyRadioPlaying;
+  window.radioStationForAudio = radioStationForAudio;
+  window.stationLabelForAudio = stationLabelForAudio;
+  window.getRadioAudioDebugState = function getRadioAudioDebugState() {
+    const activeAudio = radioPlaybackRuntime.activeAudio;
+    const session = getSharedNavigatorAudioSession();
+    return {
+      activeStation: radioPlaybackRuntime.activeStation,
+      desiredStation: radioPlaybackRuntime.desiredStation,
+      isStarting: !!radioPlaybackRuntime.isStarting,
+      isPlaying: !!radioPlaybackRuntime.isPlaying,
+      pausedForVoicePlayback: !!radioPlaybackRuntime.pausedForVoicePlayback,
+      pausedForVoiceCapture: !!radioPlaybackRuntime.pausedForVoiceCapture,
+      shouldResumeAfterVoicePlayback: !!radioPlaybackRuntime.shouldResumeAfterVoicePlayback,
+      shouldResumeAfterVoiceCapture: !!radioPlaybackRuntime.shouldResumeAfterVoiceCapture,
+      userPaused: !!radioPlaybackRuntime.userPaused,
+      lastPauseReason: radioPlaybackRuntime.lastPauseReason,
+      lastPlayAt: Number(radioPlaybackRuntime.lastPlayAt || 0),
+      lastResumeAt: Number(radioPlaybackRuntime.lastResumeAt || 0),
+      lastStartAt: Number(radioPlaybackRuntime.lastStartAt || 0),
+      restartCount: Number(radioPlaybackRuntime.restartCount || 0),
+      audioSessionType: session?.type || "",
+      currentSrc: String(activeAudio?.currentSrc || activeAudio?.src || ""),
+      paused: !!activeAudio?.paused,
+      ended: !!activeAudio?.ended,
+      muted: !!activeAudio?.muted,
+      volume: Number(activeAudio?.volume ?? 1),
+      currentTime: Number(activeAudio?.currentTime ?? 0),
+    };
+  };
 }
 
 function closeHot97Modal() {
@@ -6144,45 +6395,60 @@ function openStationWebModal(title, url) {
 
 function stopRadioAudio(audioEl, reason = "stop") {
   if (!audioEl) return false;
-  const wasActive = radioPlaybackRuntime.activeAudio === audioEl;
+  const station = radioStationForAudio(audioEl);
+  const wasTracked = radioPlaybackRuntime.activeAudio === audioEl || (!audioEl.paused && !audioEl.ended);
+  const keepSource = reason === "voice-playback" || reason === "voice-capture";
   try { audioEl.pause(); } catch (_) {}
-  if (wasActive) {
-    markRadioStopped(reason);
+  if (radioPlaybackRuntime.activeAudio === audioEl) {
+    markRadioStopped(reason, { keepSource, userPaused: reason === "manual-stop" });
+  } else if (!keepSource) {
+    try { audioEl.removeAttribute("src"); } catch (_) {}
+    try { audioEl.load(); } catch (_) {}
   }
   refreshRadioButtons();
-  return wasActive;
+  return !!(wasTracked || station);
 }
 
 function stopOtherRadioStations(nextAudio, reason = "switch-away") {
-  [megaAudio, hot97Audio, kqAudio, alofoke993Audio, z100Audio].forEach((audioEl) => {
-    if (!audioEl || audioEl === nextAudio) return;
-    const wasPlaying = !audioEl.paused && !audioEl.ended;
-    try { audioEl.pause(); } catch (_) {}
-    if (radioPlaybackRuntime.activeAudio === audioEl || wasPlaying) {
-      markRadioStopped(reason);
-    }
+  radioStations.forEach((station) => {
+    if (!station.audio || station.audio === nextAudio) return;
+    stopRadioAudio(station.audio, reason);
   });
   refreshRadioButtons();
 }
 
 async function prepareAndPlayStream(audioEl, streamUrl, stationName = "") {
+  bindRadioMediaSessionHandlers();
+  stopOtherRadioStations(audioEl, "switch-away");
+  if (typeof window.pauseSharedVoicePlaybackForRadio === "function") {
+    try { window.pauseSharedVoicePlaybackForRadio("radio-start"); } catch (_) {}
+  }
+  ensurePlaybackAudioSession("radio-play");
+  radioPlaybackRuntime.isStarting = true;
+  radioPlaybackRuntime.isPlaying = false;
+  radioPlaybackRuntime.desiredStation = String(stationName || stationLabelForAudio(audioEl) || "");
+  radioPlaybackRuntime.activeStation = radioPlaybackRuntime.desiredStation;
+  radioPlaybackRuntime.activeAudio = audioEl || null;
+  radioPlaybackRuntime.lastStartAt = Date.now();
+  radioPlaybackRuntime.lastPauseReason = "starting";
+  radioPlaybackRuntime.userPaused = false;
+  radioPlaybackRuntime.restartCount = Number(radioPlaybackRuntime.restartCount || 0) + 1;
+  setRadioMediaSessionPlaybackState("paused", radioPlaybackRuntime.activeStation);
+  refreshRadioButtons();
   try { audioEl.pause(); } catch (_) {}
   audioEl.src = streamUrl;
   audioEl.volume = 1;
+  audioEl.muted = false;
   audioEl.preload = "none";
   if ("playsInline" in audioEl) audioEl.playsInline = true;
   audioEl.load();
-  ensurePlaybackAudioSession("radio-play");
   try {
     const p = audioEl.play();
     if (p && typeof p.then === "function") await p;
     markRadioPlaying(stationName || stationLabelForAudio(audioEl), audioEl);
-    refreshRadioButtons();
     return true;
   } catch (error) {
-    if (radioPlaybackRuntime.activeAudio === audioEl) {
-      markRadioStopped("play-failed");
-    }
+    markRadioStopped("play-failed");
     refreshRadioButtons();
     throw error;
   }
@@ -6192,121 +6458,62 @@ function stopAlofokeSiteMode(reason = "manual-stop") {
   stopRadioAudio(alofoke993Audio, reason);
 }
 
-async function toggleAlofoke993() {
-  stopOtherRadioStations(alofoke993Audio, "switch-away");
+async function toggleStation(stationKey) {
+  const station = radioStationByKey.get(String(stationKey || "").trim());
+  if (!station) return false;
   closeHot97Modal();
-
-  if (radioPlaybackRuntime.activeAudio === alofoke993Audio && (alofoke993Playing || isAnyRadioPlaying() || radioPlaybackRuntime.pausedForVoiceCapture)) {
-    stopAlofokeSiteMode("manual-stop");
+  const stationBusy = radioPlaybackRuntime.activeAudio === station.audio && (
+    radioPlaybackRuntime.isPlaying
+    || radioPlaybackRuntime.isStarting
+    || radioPlaybackRuntime.pausedForVoicePlayback
+    || radioPlaybackRuntime.pausedForVoiceCapture
+  );
+  if (stationBusy) {
+    stopRadioAudio(station.audio, "manual-stop");
     setRadioStatus("Radio: off");
-    return;
+    return true;
   }
-
   try {
-    await prepareAndPlayStream(alofoke993Audio, ALOFOKE993_STREAM_URL, "Alofoke 99.3 FM");
-    setRadioStatus("Radio: Alofoke 99.3 FM playing");
+    await prepareAndPlayStream(station.audio, station.url, station.label);
+    setRadioStatus(`Radio: ${station.label} playing`);
+    return true;
   } catch (e) {
-    console.warn("Alofoke 99.3 FM play failed:", e);
-    stopAlofokeSiteMode("play-failed");
-    setRadioStatus("Radio: Alofoke 99.3 FM failed to play");
-    alert("Alofoke 99.3 FM could not start. Turn volume up and try again.");
+    const errName = e && e.name ? String(e.name) : "";
+    if (station.key === "hot97" && errName === "AbortError") {
+      console.warn("Hot 97 aborted (Safari interruption):", e);
+      stopRadioAudio(station.audio, "abort");
+      setRadioStatus("Radio: HOT 97.1 stopped");
+      return false;
+    }
+    console.warn(`${station.label} play failed:`, e);
+    stopRadioAudio(station.audio, "play-failed");
+    setRadioStatus(station.failStatus);
+    if (station.key === "kq") {
+      try { window.open(KQ945_SITE_URL, "_blank", "noopener"); } catch (_) {}
+    }
+    alert(station.failAlert);
+    return false;
   }
+}
+
+async function toggleAlofoke993() {
+  return toggleStation("alofoke993");
 }
 
 async function toggleMega() {
-  closeHot97Modal();
-  if (radioPlaybackRuntime.activeAudio === megaAudio && (megaPlaying || isAnyRadioPlaying() || radioPlaybackRuntime.pausedForVoiceCapture)) {
-    stopRadioAudio(megaAudio, "manual-stop");
-    setRadioStatus("Radio: off");
-    return;
-  }
-
-  stopOtherRadioStations(megaAudio, "switch-away");
-
-  try {
-    await prepareAndPlayStream(megaAudio, MEGA979_STREAM_URL, "La Mega 97.9");
-    setRadioStatus("Radio: La Mega 97.9 playing");
-  } catch (e) {
-    console.warn("La Mega play failed:", e);
-    stopRadioAudio(megaAudio, "play-failed");
-    setRadioStatus("Radio: La Mega failed to play");
-    alert("La Mega 97.9 could not start. Turn volume up and try again.");
-  }
+  return toggleStation("mega");
 }
 
 async function toggleHot97() {
-  closeHot97Modal();
-
-  if (radioPlaybackRuntime.activeAudio === hot97Audio && (hot97Playing || isAnyRadioPlaying() || radioPlaybackRuntime.pausedForVoiceCapture)) {
-    stopRadioAudio(hot97Audio, "manual-stop");
-    setRadioStatus("Radio: off");
-    return;
-  }
-
-  stopOtherRadioStations(hot97Audio, "switch-away");
-
-  try {
-    await prepareAndPlayStream(hot97Audio, HOT97_STREAM_URL, "HOT 97.1");
-    setRadioStatus("Radio: HOT 97.1 playing");
-  } catch (e) {
-    const errName = e && e.name ? String(e.name) : "";
-    if (errName === "AbortError") {
-      console.warn("Hot 97 aborted (Safari interruption):", e);
-      stopRadioAudio(hot97Audio, "abort");
-      setRadioStatus("Radio: HOT 97.1 stopped");
-      return;
-    }
-
-    console.warn("Hot 97 play failed:", e);
-    stopRadioAudio(hot97Audio, "play-failed");
-    setRadioStatus("Radio: HOT 97.1 failed to play");
-    alert("HOT 97.1 could not start. Turn volume up and try again.");
-  }
+  return toggleStation("hot97");
 }
 async function toggleKQ() {
-  closeHot97Modal();
-
-  if (radioPlaybackRuntime.activeAudio === kqAudio && (kqPlaying || isAnyRadioPlaying() || radioPlaybackRuntime.pausedForVoiceCapture)) {
-    stopRadioAudio(kqAudio, "manual-stop");
-    setRadioStatus("Radio: off");
-    return;
-  }
-
-  stopOtherRadioStations(kqAudio, "switch-away");
-
-  try {
-    await prepareAndPlayStream(kqAudio, KQ945_STREAM_URL, "KQ 94.5 FM");
-    setRadioStatus("Radio: KQ 94.5 FM playing");
-  } catch (e) {
-    console.warn("KQ 94.5 play failed:", e);
-    stopRadioAudio(kqAudio, "play-failed");
-    setRadioStatus("Radio: KQ 94.5 FM failed to play");
-    try { window.open(KQ945_SITE_URL, "_blank", "noopener"); } catch (_) {}
-    alert("KQ 94.5 FM could not start. Turn volume up and try again.");
-  }
+  return toggleStation("kq");
 }
 
 async function toggleZ100() {
-  closeHot97Modal();
-
-  if (radioPlaybackRuntime.activeAudio === z100Audio && (z100Playing || isAnyRadioPlaying() || radioPlaybackRuntime.pausedForVoiceCapture)) {
-    stopRadioAudio(z100Audio, "manual-stop");
-    setRadioStatus("Radio: off");
-    return;
-  }
-
-  stopOtherRadioStations(z100Audio, "switch-away");
-
-  try {
-    await prepareAndPlayStream(z100Audio, Z100_STREAM_URL, "Z100");
-    setRadioStatus("Radio: Z100 playing");
-  } catch (e) {
-    stopRadioAudio(z100Audio, "play-failed");
-    setRadioStatus("Radio: Z100 failed to play");
-    alert("Z100 could not start. Turn volume up and try again.");
-  }
+  return toggleStation("z100");
 }
-
 
 if (btnMega979) {
   btnMega979.addEventListener("pointerdown", (e) => e.stopPropagation());
@@ -6365,42 +6572,39 @@ if (radioModal) {
 
 function handleRadioPlaybackStopped(audioEl, reason = "ended", statusText = "Radio: off") {
   if (radioPlaybackRuntime.activeAudio === audioEl) {
-    markRadioStopped(reason);
+    markRadioStopped(reason, { keepSource: false, userPaused: reason === "manual-stop" });
   }
   refreshRadioButtons();
   setRadioStatus(statusText);
 }
 
-megaAudio.addEventListener("ended", () => {
-  handleRadioPlaybackStopped(megaAudio, "ended", "Radio: off");
+radioStations.forEach((station) => {
+  station.audio.addEventListener("ended", () => {
+    handleRadioPlaybackStopped(station.audio, "ended", "Radio: off");
+  });
+  station.audio.addEventListener("error", () => {
+    handleRadioPlaybackStopped(station.audio, "error", station.errorStatus);
+  });
 });
-megaAudio.addEventListener("error", () => {
-  handleRadioPlaybackStopped(megaAudio, "error", "Radio: La Mega stream error");
-});
-hot97Audio.addEventListener("ended", () => {
-  handleRadioPlaybackStopped(hot97Audio, "ended", "Radio: off");
-});
-hot97Audio.addEventListener("error", () => {
-  handleRadioPlaybackStopped(hot97Audio, "error", "Radio: HOT 97.1 stream error");
-});
-kqAudio.addEventListener("ended", () => {
-  handleRadioPlaybackStopped(kqAudio, "ended", "Radio: off");
-});
-kqAudio.addEventListener("error", () => {
-  handleRadioPlaybackStopped(kqAudio, "error", "Radio: KQ 94.5 FM stream error");
-});
-alofoke993Audio.addEventListener("ended", () => {
-  handleRadioPlaybackStopped(alofoke993Audio, "ended", "Radio: off");
-});
-alofoke993Audio.addEventListener("error", () => {
-  handleRadioPlaybackStopped(alofoke993Audio, "error", "Radio: Alofoke 99.3 FM stream error");
-});
-z100Audio.addEventListener("ended", () => {
-  handleRadioPlaybackStopped(z100Audio, "ended", "Radio: off");
-});
-z100Audio.addEventListener("error", () => {
-  handleRadioPlaybackStopped(z100Audio, "error", "Radio: Z100 stream error");
-});
+
+if (typeof window !== "undefined") {
+  const reaffirmRadioPlaybackSession = (reason) => {
+    if (!(radioPlaybackRuntime.activeAudio && (
+      radioPlaybackRuntime.isPlaying
+      || radioPlaybackRuntime.pausedForVoicePlayback
+      || radioPlaybackRuntime.pausedForVoiceCapture
+      || radioPlaybackRuntime.isStarting
+    ))) return;
+    ensurePlaybackAudioSession(reason || "radio-lifecycle");
+    setRadioMediaSessionPlaybackState(radioPlaybackRuntime.isPlaying ? "playing" : "paused", radioPlaybackRuntime.activeStation || stationLabelForAudio(radioPlaybackRuntime.activeAudio));
+  };
+  window.addEventListener("pageshow", () => reaffirmRadioPlaybackSession("radio-pageshow"));
+  window.addEventListener("focus", () => reaffirmRadioPlaybackSession("radio-focus"));
+  document.addEventListener("visibilitychange", () => {
+    reaffirmRadioPlaybackSession(document.visibilityState === "hidden" ? "radio-hidden" : "radio-visible");
+  });
+}
+
 refreshRadioButtons();
 
 /* =========================================================
