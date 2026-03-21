@@ -6238,6 +6238,10 @@ function isAnyRadioPlaying() {
   return !!(radioPlaybackRuntime.isPlaying && activeAudio && !activeAudio.paused && !activeAudio.ended);
 }
 
+function isRadioAudioActivelyPlaying(audioEl) {
+  return !!(audioEl && !audioEl.paused && !audioEl.ended);
+}
+
 function pauseActiveRadioFor(reason = "pause", mode = "generic") {
   const activeAudio = radioPlaybackRuntime.activeAudio;
   const isActive = !!(radioPlaybackRuntime.isPlaying && activeAudio && !activeAudio.paused && !activeAudio.ended);
@@ -6379,9 +6383,11 @@ function clearHiddenRadioResumeInterval() {
 
 function scheduleHiddenRadioResume(reason = "hidden-pause") {
   const activeAudio = radioPlaybackRuntime.activeAudio;
+  const isAlreadyPlaying = isRadioAudioActivelyPlaying(activeAudio);
   const shouldRetry = !!(
     activeAudio
     && document.visibilityState === "hidden"
+    && !isAlreadyPlaying
     && !radioPlaybackRuntime.userPaused
     && !radioPlaybackRuntime.pausedForVoicePlayback
     && !radioPlaybackRuntime.pausedForVoiceCapture
@@ -6748,14 +6754,14 @@ radioStations.forEach((station) => {
   });
   station.audio.addEventListener("suspend", () => {
     if (radioPlaybackRuntime.activeAudio !== station.audio) return;
-    if (document.visibilityState === "hidden" && !radioPlaybackRuntime.userPaused && !station.audio.ended) {
+    if (document.visibilityState === "hidden" && !radioPlaybackRuntime.userPaused && !station.audio.ended && station.audio.paused) {
       markRadioPausedResumable("background-suspend");
       scheduleHiddenRadioResume("background-suspend");
     }
   });
   station.audio.addEventListener("stalled", () => {
     if (radioPlaybackRuntime.activeAudio !== station.audio) return;
-    if (document.visibilityState === "hidden" && !radioPlaybackRuntime.userPaused && !station.audio.ended) {
+    if (document.visibilityState === "hidden" && !radioPlaybackRuntime.userPaused && !station.audio.ended && station.audio.paused) {
       scheduleHiddenRadioResume("background-stalled");
     }
   });
@@ -6791,7 +6797,6 @@ if (typeof window !== "undefined") {
       if (shouldKeepPlaying) {
         ensurePlaybackAudioSession("radio-background");
         setRadioMediaSessionPlaybackState("playing", radioPlaybackRuntime.activeStation || radioPlaybackRuntime.desiredStation || stationLabelForAudio(radioPlaybackRuntime.activeAudio));
-        scheduleHiddenRadioResume("visibility-hidden");
       }
       return;
     }
