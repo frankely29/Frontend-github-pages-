@@ -147,6 +147,24 @@
     resumeRadioOnStop: true,
   };
 
+  let scheduledRadioResumeAfterVoice = 0;
+
+  function clearScheduledRadioResumeAfterVoice() {
+    if (scheduledRadioResumeAfterVoice) {
+      window.clearTimeout(scheduledRadioResumeAfterVoice);
+      scheduledRadioResumeAfterVoice = 0;
+    }
+  }
+
+  function scheduleRadioResumeAfterVoice(reason = 'voice-stop') {
+    clearScheduledRadioResumeAfterVoice();
+    scheduledRadioResumeAfterVoice = window.setTimeout(async () => {
+      scheduledRadioResumeAfterVoice = 0;
+      await maybeResumeRadioAfterVoicePlayback(reason);
+    }, 0);
+    return scheduledRadioResumeAfterVoice;
+  }
+
   // Chat state
   let chatPollTimer = null;
   let chatPollInFlight = false;
@@ -607,13 +625,9 @@
     return 'unsupported';
   }
 
-  function pauseActiveChatVoicePlayback() {
-    stopSharedVoicePlayback('capture', { resetPosition: false, clearActive: false, resumeRadio: false });
-  }
-
   async function maybeResumeRadioAfterVoicePlayback(reason = 'voice-playback') {
     try {
-      return !!(await window.resumeRadioAfterVoicePlayback?.(reason));
+      return await window.resumeRadioAfterVoicePlayback?.(reason);
     } catch (_) {
       return false;
     }
@@ -621,17 +635,21 @@
 
   async function maybeResumeRadioAfterVoiceCapture(reason = 'voice-capture') {
     try {
-      return !!(await window.resumeRadioAfterVoiceCapture?.(reason));
+      return await window.resumeRadioAfterVoiceCapture?.(reason);
     } catch (_) {
       return false;
     }
   }
 
+  function pauseActiveChatVoicePlayback() {
+    stopSharedVoicePlayback('capture', { resetPosition: false, clearActive: false, resumeRadio: false });
+  }
+
   function applyChatAudioSessionAmbient(reason = 'chat') {
     if (isSharedRadioActive()) return false;
-    if (isChatVoiceBusy()) return false;
-    if (isVoicePlaybackActive()) return !!ensureChatPlaybackSession(reason || 'chat-voice-playback');
-    return setChatAudioSessionAuto();
+    if (isChatVoiceBusy() || isVoicePlaybackActive()) return false;
+    if (setChatAudioSessionType('ambient')) return true;
+    return setChatAudioSessionType('auto');
   }
 
   async function prepareChatAudioForCapture(reason = 'voice-capture') {
@@ -653,7 +671,9 @@
     resetChatVoiceState();
     const radioResumed = await maybeResumeRadioAfterVoiceCapture('voice-record-end');
     if (!radioResumed && !isSharedRadioActive()) {
-      setChatAudioSessionAuto();
+      if (!setChatAudioSessionType('ambient')) {
+        setChatAudioSessionType('auto');
+      }
     }
     chatVoiceState.queuedIncomingTone = 0;
     chatVoiceState.queuedOutgoingTone = 0;
@@ -1562,7 +1582,7 @@
 
       window.addEventListener('pagehide', () => {
         void cancelChatVoiceRecording('Recording canceled');
-        void hardStopSharedVoicePlaybackForBackground('background');
+        hardStopSharedVoicePlaybackForBackground('pagehide');
         chatAudioUnlocked = false;
         chatAudioReady = false;
         if (typeof chatSoundRuntime !== 'undefined' && chatSoundRuntime) {
@@ -1576,7 +1596,7 @@
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'hidden') {
           void cancelChatVoiceRecording('Recording canceled');
-          void hardStopSharedVoicePlaybackForBackground('background');
+          hardStopSharedVoicePlaybackForBackground('hidden');
           return;
         }
         if (document.visibilityState === 'visible') {
@@ -2022,8 +2042,9 @@
     });
   }
 
-  function stopSharedVoicePlayback(reason = 'stop', { resetPosition = false, clearActive = false, resumeRadio = true, clearSrc = false } = {}) {
+  function stopSharedVoicePlayback(reason = 'stop', { resetPosition = false, clearActive = false, resumeRadio = true } = {}) {
     const audio = voicePlaybackRuntime.activeAudio;
+    clearScheduledRadioResumeAfterVoice();
     voicePlaybackRuntime.lastPauseReason = reason;
     voicePlaybackRuntime.resumeRadioOnStop = !!resumeRadio;
     if (audio) {
@@ -2032,12 +2053,6 @@
       } catch (_) {}
       if (resetPosition) {
         try { audio.currentTime = 0; } catch (_) {}
-      }
-      if (clearSrc) {
-        try { audio.pause(); } catch (_) {}
-        try { audio.removeAttribute('src'); } catch (_) {}
-        try { audio.src = ''; } catch (_) {}
-        try { audio.load(); } catch (_) {}
       }
     }
     if (clearActive) {
@@ -2054,7 +2069,11 @@
 
   async function hardStopSharedVoicePlaybackForBackground(reason = 'background') {
     const shouldResumeRadio = !!(window.radioPlaybackRuntime?.pausedForVoicePlayback && window.radioPlaybackRuntime?.shouldResumeAfterVoicePlayback);
-    stopSharedVoicePlayback(reason, { resetPosition: true, clearActive: true, resumeRadio: false, clearSrc: true });
+    stopSharedVoicePlayback(reason, { resetPosition: true, clearActive: true, resumeRadio: false });
+    try { voicePlaybackAudio.pause(); } catch (_) {}
+    try { voicePlaybackAudio.removeAttribute('src'); } catch (_) {}
+    try { voicePlaybackAudio.src = ''; } catch (_) {}
+    try { voicePlaybackAudio.load(); } catch (_) {}
     syncAllVoicePlayers();
     syncAllVoiceRecorderUis();
     if (shouldResumeRadio) {
@@ -2386,14 +2405,14 @@
     const audioUrl = String(message?.audioUrl || '').trim();
     const audio = voicePlaybackRuntime.activeAudio;
     const alreadyActive = isVoicePlaybackMessage(messageId, scope);
-    let pausedRadio = false;
+    clearScheduledRadioResumeAfterVoice();
+    const pausedRadio = !!window.pauseRadioForVoicePlayback?.('voice-note-play');
     try {
       if (alreadyActive && voicePlaybackRuntime.isPlaying) {
         voicePlaybackRuntime.lastUserAction = 'pause';
         stopSharedVoicePlayback('user', { resetPosition: false, clearActive: false, resumeRadio: true });
         return;
       }
-      pausedRadio = !!window.pauseRadioForVoicePlayback?.('voice-note-play');
       updateVoicePlayerVisualState(player, {
         durationMs: Number(message?.audioDurationMs) || 0,
         progressPct: alreadyActive && Number.isFinite(audio?.duration) && audio.duration > 0 ? (audio.currentTime / audio.duration) * 100 : 0,
@@ -2405,8 +2424,8 @@
       });
       const blobUrl = await ensureVoiceBlobUrl(message);
       if (!blobUrl) {
-        if (pausedRadio) await maybeResumeRadioAfterVoicePlayback('voice-note-load-failed');
         syncVoicePlayerUi(player);
+        if (pausedRadio) await maybeResumeRadioAfterVoicePlayback('voice-note-load-failed');
         return;
       }
       const switchingMessages = !alreadyActive && parseMessageId(voicePlaybackRuntime.activeMessageId) !== null;
@@ -2425,7 +2444,6 @@
       await audio.play();
       syncAllVoicePlayers();
     } catch (error) {
-      if (pausedRadio) await maybeResumeRadioAfterVoicePlayback('voice-note-play-failed');
       console.warn('voice playback failed', { message, error });
       const cacheKey = getVoiceAssetCacheKey(message);
       const entry = voiceAssetCache.get(cacheKey) || {};
@@ -2434,6 +2452,7 @@
         status: 'error',
         error: 'Unable to play voice note right now.',
       });
+      if (pausedRadio) await maybeResumeRadioAfterVoicePlayback('voice-note-play-failed');
       syncAllVoicePlayers();
     }
   }
@@ -2442,6 +2461,7 @@
     if (voicePlaybackRuntime.eventsBound) return;
     voicePlaybackRuntime.eventsBound = true;
     voicePlaybackAudio.addEventListener('play', () => {
+      clearScheduledRadioResumeAfterVoice();
       voicePlaybackRuntime.isPlaying = true;
       voicePlaybackRuntime.currentTime = Number.isFinite(voicePlaybackAudio.currentTime) ? voicePlaybackAudio.currentTime : 0;
       voicePlaybackRuntime.activeBlobUrl = String(voicePlaybackAudio.currentSrc || voicePlaybackAudio.src || voicePlaybackRuntime.activeBlobUrl || '').trim();
@@ -2450,7 +2470,7 @@
       syncAllVoicePlayers();
       syncAllVoiceRecorderUis();
     });
-    voicePlaybackAudio.addEventListener('pause', async () => {
+    voicePlaybackAudio.addEventListener('pause', () => {
       const shouldResumeRadio = voicePlaybackRuntime.resumeRadioOnStop !== false;
       voicePlaybackRuntime.resumeRadioOnStop = true;
       voicePlaybackRuntime.currentTime = Number.isFinite(voicePlaybackAudio.currentTime) ? voicePlaybackAudio.currentTime : voicePlaybackRuntime.currentTime;
@@ -2460,12 +2480,14 @@
       }
       syncAllVoicePlayers();
       syncAllVoiceRecorderUis();
-      if (shouldResumeRadio) await maybeResumeRadioAfterVoicePlayback(`voice-${voicePlaybackRuntime.lastPauseReason || 'pause'}`);
-      if (voicePlaybackRuntime.lastPauseReason === 'user' || voicePlaybackRuntime.lastPauseReason === 'switch' || voicePlaybackRuntime.lastPauseReason === 'stop') {
+      if (voicePlaybackRuntime.lastPauseReason === 'user' || voicePlaybackRuntime.lastPauseReason === 'switch' || voicePlaybackRuntime.lastPauseReason === 'stop' || voicePlaybackRuntime.lastPauseReason === 'background' || voicePlaybackRuntime.lastPauseReason === 'pagehide' || voicePlaybackRuntime.lastPauseReason === 'hidden') {
         void flushPendingChatTones();
       }
+      if (shouldResumeRadio) {
+        scheduleRadioResumeAfterVoice(`voice-${voicePlaybackRuntime.lastPauseReason || 'pause'}`);
+      }
     });
-    voicePlaybackAudio.addEventListener('ended', async () => {
+    voicePlaybackAudio.addEventListener('ended', () => {
       const shouldResumeRadio = voicePlaybackRuntime.resumeRadioOnStop !== false;
       voicePlaybackRuntime.resumeRadioOnStop = true;
       voicePlaybackRuntime.isPlaying = false;
@@ -2474,8 +2496,10 @@
       try { voicePlaybackAudio.currentTime = 0; } catch (_) {}
       syncAllVoicePlayers();
       syncAllVoiceRecorderUis();
-      if (shouldResumeRadio) await maybeResumeRadioAfterVoicePlayback('voice-ended');
       void flushPendingChatTones();
+      if (shouldResumeRadio) {
+        scheduleRadioResumeAfterVoice('voice-ended');
+      }
     });
     voicePlaybackAudio.addEventListener('timeupdate', () => {
       voicePlaybackRuntime.currentTime = Number.isFinite(voicePlaybackAudio.currentTime) ? voicePlaybackAudio.currentTime : voicePlaybackRuntime.currentTime;
@@ -2492,7 +2516,7 @@
       voicePlaybackRuntime.isSeeking = false;
       syncAllVoicePlayers();
     });
-    voicePlaybackAudio.addEventListener('error', async () => {
+    voicePlaybackAudio.addEventListener('error', () => {
       const shouldResumeRadio = voicePlaybackRuntime.resumeRadioOnStop !== false;
       voicePlaybackRuntime.resumeRadioOnStop = true;
       const key = `${parseMessageId(voicePlaybackRuntime.activeMessageId) === null ? 'unknown' : voicePlaybackRuntime.activeMessageId}::${String(voicePlaybackRuntime.activeAudioUrl || '').trim()}`;
@@ -2503,7 +2527,9 @@
         error: entry.error || 'Unable to play voice note right now.',
       });
       syncAllVoicePlayers();
-      if (shouldResumeRadio) await maybeResumeRadioAfterVoicePlayback('voice-error');
+      if (shouldResumeRadio) {
+        scheduleRadioResumeAfterVoice('voice-error');
+      }
     });
   }
 
@@ -2842,7 +2868,8 @@
     const normalizedScope = voiceScopeStateKey(scope);
     const draft = getChatVoiceDraft(scope);
     if (!draft?.objectUrl) return false;
-    let pausedRadio = false;
+    clearScheduledRadioResumeAfterVoice();
+    const pausedRadio = !!window.pauseRadioForVoicePlayback?.('voice-draft-preview');
     try {
       if (voicePlaybackRuntime.lastUserAction === `draft:${normalizedScope}` && !voicePlaybackAudio.paused && voicePlaybackAudio.src === draft.objectUrl) {
         voicePlaybackRuntime.lastPauseReason = 'user';
@@ -2851,7 +2878,6 @@
         syncVoiceRecorderUi(scope);
         return true;
       }
-      pausedRadio = !!window.pauseRadioForVoicePlayback?.('voice-draft-preview');
       stopSharedVoicePlayback('preview-switch', { resetPosition: true, clearActive: true, resumeRadio: false });
       if (voicePlaybackAudio.src !== draft.objectUrl) voicePlaybackAudio.src = draft.objectUrl;
       voicePlaybackRuntime.lastUserAction = `draft:${normalizedScope}`;
@@ -8211,7 +8237,14 @@
   };
 
   window.pauseSharedVoicePlaybackForRadio = function pauseSharedVoicePlaybackForRadio(reason = 'radio-start') {
-    stopSharedVoicePlayback(reason, { resetPosition: true, clearActive: true, resumeRadio: false, clearSrc: true });
+    clearScheduledRadioResumeAfterVoice();
+    const audio = voicePlaybackRuntime.activeAudio;
+    stopSharedVoicePlayback(reason, { resetPosition: true, clearActive: true, resumeRadio: false });
+    if (audio) {
+      try { audio.pause(); } catch (_) {}
+      try { audio.removeAttribute('src'); } catch (_) {}
+      try { audio.load(); } catch (_) {}
+    }
     return true;
   };
 })();
