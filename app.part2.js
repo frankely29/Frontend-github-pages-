@@ -143,6 +143,7 @@
     pendingToneQueue: [],
     cache: voiceAssetCache,
     lastPauseReason: '',
+    resumeRadioOnStop: true,
   };
 
   // Chat state
@@ -606,7 +607,23 @@
   }
 
   function pauseActiveChatVoicePlayback() {
-    stopSharedVoicePlayback('capture', { resetPosition: false, clearActive: false });
+    stopSharedVoicePlayback('capture', { resetPosition: false, clearActive: false, resumeRadio: false });
+  }
+
+  async function maybeResumeRadioAfterVoicePlayback(reason = 'voice-playback') {
+    try {
+      return !!(await window.resumeRadioAfterVoicePlayback?.(reason));
+    } catch (_) {
+      return false;
+    }
+  }
+
+  async function maybeResumeRadioAfterVoiceCapture(reason = 'voice-capture') {
+    try {
+      return !!(await window.resumeRadioAfterVoiceCapture?.(reason));
+    } catch (_) {
+      return false;
+    }
   }
 
   function applyChatAudioSessionAmbient(reason = 'chat') {
@@ -633,10 +650,8 @@
     const queuedOutgoing = chatVoiceState.queuedOutgoingTone > 0;
     stopChatVoiceTracks();
     resetChatVoiceState();
-    const radioResumed = await window.resumeRadioAfterVoiceCapture?.('voice-record-end');
-    if (radioResumed || isSharedRadioActive()) {
-      ensureChatPlaybackSession(radioResumed ? 'voice-record-end-resume' : 'voice-record-end-active-radio');
-    } else {
+    const radioResumed = await maybeResumeRadioAfterVoiceCapture('voice-record-end');
+    if (!radioResumed && !isSharedRadioActive()) {
       setChatAudioSessionAuto();
     }
     chatVoiceState.queuedIncomingTone = 0;
@@ -1465,7 +1480,6 @@
 
   async function playChatTone(kind) {
     if (isSharedRadioActive()) {
-      queuePendingChatTone(kind);
       return false;
     }
     if (isChatVoiceBusy() || isVoicePlaybackActive() || Date.now() < Number(voicePlaybackRuntime.suppressTonesUntil || 0)) {
@@ -1547,6 +1561,7 @@
 
       window.addEventListener('pagehide', () => {
         if (isChatVoiceBusy()) void cancelChatVoiceRecording('Recording canceled');
+        stopSharedVoicePlayback('background', { resetPosition: false, clearActive: false, resumeRadio: true });
         reconcileChatSoundRuntime('pagehide');
         if (!chatAudioReady && !chatSoundRuntime?.htmlAudioReady) {
           bindChatSoundPrimeListeners?.();
@@ -1557,6 +1572,7 @@
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'hidden') {
           void cancelChatVoiceRecording('Recording canceled');
+          stopSharedVoicePlayback('background', { resetPosition: false, clearActive: false, resumeRadio: true });
           return;
         }
         if (document.visibilityState === 'visible') {
@@ -2002,9 +2018,10 @@
     });
   }
 
-  function stopSharedVoicePlayback(reason = 'stop', { resetPosition = false, clearActive = false } = {}) {
+  function stopSharedVoicePlayback(reason = 'stop', { resetPosition = false, clearActive = false, resumeRadio = true } = {}) {
     const audio = voicePlaybackRuntime.activeAudio;
     voicePlaybackRuntime.lastPauseReason = reason;
+    voicePlaybackRuntime.resumeRadioOnStop = !!resumeRadio;
     if (audio) {
       try {
         if (!audio.paused) audio.pause();
@@ -2026,7 +2043,7 @@
   }
 
   function revokeVoiceBlobUrls() {
-    stopSharedVoicePlayback('reset', { resetPosition: true, clearActive: true });
+    stopSharedVoicePlayback('reset', { resetPosition: true, clearActive: true, resumeRadio: false });
     for (const entry of voiceAssetCache.values()) {
       const blobUrl = String(entry?.blobUrl || '').trim();
       if (blobUrl && blobUrl !== voicePlaybackRuntime.activeBlobUrl) {
@@ -2331,17 +2348,14 @@
     const audioUrl = String(message?.audioUrl || '').trim();
     const audio = voicePlaybackRuntime.activeAudio;
     const alreadyActive = isVoicePlaybackMessage(messageId, scope);
+    let pausedRadio = false;
     try {
       if (alreadyActive && voicePlaybackRuntime.isPlaying) {
         voicePlaybackRuntime.lastUserAction = 'pause';
-        stopSharedVoicePlayback('user', { resetPosition: false, clearActive: false });
+        stopSharedVoicePlayback('user', { resetPosition: false, clearActive: false, resumeRadio: true });
         return;
       }
-      if (isSharedRadioActive()) {
-        stopSharedVoicePlayback('radio-active', { resetPosition: true, clearActive: true });
-        syncVoicePlayerUi(player);
-        return false;
-      }
+      pausedRadio = !!window.pauseRadioForVoicePlayback?.('voice-note-play');
       updateVoicePlayerVisualState(player, {
         durationMs: Number(message?.audioDurationMs) || 0,
         progressPct: alreadyActive && Number.isFinite(audio?.duration) && audio.duration > 0 ? (audio.currentTime / audio.duration) * 100 : 0,
@@ -2353,11 +2367,12 @@
       });
       const blobUrl = await ensureVoiceBlobUrl(message);
       if (!blobUrl) {
+        if (pausedRadio) await maybeResumeRadioAfterVoicePlayback('voice-note-load-failed');
         syncVoicePlayerUi(player);
         return;
       }
       const switchingMessages = !alreadyActive && parseMessageId(voicePlaybackRuntime.activeMessageId) !== null;
-      if (switchingMessages) stopSharedVoicePlayback('switch', { resetPosition: true, clearActive: true });
+      if (switchingMessages) stopSharedVoicePlayback('switch', { resetPosition: true, clearActive: true, resumeRadio: false });
       if (!alreadyActive) {
         try { audio.currentTime = 0; } catch (_) {}
       }
@@ -2372,6 +2387,7 @@
       await audio.play();
       syncAllVoicePlayers();
     } catch (error) {
+      if (pausedRadio) await maybeResumeRadioAfterVoicePlayback('voice-note-play-failed');
       console.warn('voice playback failed', { message, error });
       const cacheKey = getVoiceAssetCacheKey(message);
       const entry = voiceAssetCache.get(cacheKey) || {};
@@ -2392,10 +2408,13 @@
       voicePlaybackRuntime.currentTime = Number.isFinite(voicePlaybackAudio.currentTime) ? voicePlaybackAudio.currentTime : 0;
       voicePlaybackRuntime.activeBlobUrl = String(voicePlaybackAudio.currentSrc || voicePlaybackAudio.src || voicePlaybackRuntime.activeBlobUrl || '').trim();
       voicePlaybackRuntime.suppressTonesUntil = Date.now() + 250;
+      voicePlaybackRuntime.resumeRadioOnStop = true;
       syncAllVoicePlayers();
       syncAllVoiceRecorderUis();
     });
-    voicePlaybackAudio.addEventListener('pause', () => {
+    voicePlaybackAudio.addEventListener('pause', async () => {
+      const shouldResumeRadio = voicePlaybackRuntime.resumeRadioOnStop !== false;
+      voicePlaybackRuntime.resumeRadioOnStop = true;
       voicePlaybackRuntime.currentTime = Number.isFinite(voicePlaybackAudio.currentTime) ? voicePlaybackAudio.currentTime : voicePlaybackRuntime.currentTime;
       voicePlaybackRuntime.isPlaying = false;
       if (voicePlaybackRuntime.lastPauseReason === 'switch' || voicePlaybackRuntime.lastPauseReason === 'stop') {
@@ -2403,17 +2422,21 @@
       }
       syncAllVoicePlayers();
       syncAllVoiceRecorderUis();
+      if (shouldResumeRadio) await maybeResumeRadioAfterVoicePlayback(`voice-${voicePlaybackRuntime.lastPauseReason || 'pause'}`);
       if (voicePlaybackRuntime.lastPauseReason === 'user' || voicePlaybackRuntime.lastPauseReason === 'switch' || voicePlaybackRuntime.lastPauseReason === 'stop') {
         void flushPendingChatTones();
       }
     });
-    voicePlaybackAudio.addEventListener('ended', () => {
+    voicePlaybackAudio.addEventListener('ended', async () => {
+      const shouldResumeRadio = voicePlaybackRuntime.resumeRadioOnStop !== false;
+      voicePlaybackRuntime.resumeRadioOnStop = true;
       voicePlaybackRuntime.isPlaying = false;
       voicePlaybackRuntime.currentTime = 0;
       voicePlaybackRuntime.lastPauseReason = 'ended';
       try { voicePlaybackAudio.currentTime = 0; } catch (_) {}
       syncAllVoicePlayers();
       syncAllVoiceRecorderUis();
+      if (shouldResumeRadio) await maybeResumeRadioAfterVoicePlayback('voice-ended');
       void flushPendingChatTones();
     });
     voicePlaybackAudio.addEventListener('timeupdate', () => {
@@ -2431,7 +2454,9 @@
       voicePlaybackRuntime.isSeeking = false;
       syncAllVoicePlayers();
     });
-    voicePlaybackAudio.addEventListener('error', () => {
+    voicePlaybackAudio.addEventListener('error', async () => {
+      const shouldResumeRadio = voicePlaybackRuntime.resumeRadioOnStop !== false;
+      voicePlaybackRuntime.resumeRadioOnStop = true;
       const key = `${parseMessageId(voicePlaybackRuntime.activeMessageId) === null ? 'unknown' : voicePlaybackRuntime.activeMessageId}::${String(voicePlaybackRuntime.activeAudioUrl || '').trim()}`;
       const entry = voiceAssetCache.get(key) || {};
       voiceAssetCache.set(key, {
@@ -2440,6 +2465,7 @@
         error: entry.error || 'Unable to play voice note right now.',
       });
       syncAllVoicePlayers();
+      if (shouldResumeRadio) await maybeResumeRadioAfterVoicePlayback('voice-error');
     });
   }
 
@@ -2495,7 +2521,7 @@
 
   function clearChatVoiceDraft(reason = 'clear') {
     if (chatVoiceDraftState.objectUrl && voicePlaybackAudio.src === chatVoiceDraftState.objectUrl) {
-      stopSharedVoicePlayback('draft-clear', { resetPosition: true, clearActive: true });
+      stopSharedVoicePlayback('draft-clear', { resetPosition: true, clearActive: true, resumeRadio: false });
       try { voicePlaybackAudio.removeAttribute('src'); } catch (_) {}
     }
     if (chatVoiceDraftState.objectUrl) {
@@ -2778,6 +2804,7 @@
     const normalizedScope = voiceScopeStateKey(scope);
     const draft = getChatVoiceDraft(scope);
     if (!draft?.objectUrl) return false;
+    let pausedRadio = false;
     try {
       if (voicePlaybackRuntime.lastUserAction === `draft:${normalizedScope}` && !voicePlaybackAudio.paused && voicePlaybackAudio.src === draft.objectUrl) {
         voicePlaybackRuntime.lastPauseReason = 'user';
@@ -2786,13 +2813,8 @@
         syncVoiceRecorderUi(scope);
         return true;
       }
-      if (isSharedRadioActive()) {
-        stopSharedVoicePlayback('radio-active', { resetPosition: true, clearActive: true });
-        if (button) button.dataset.previewPlaying = '0';
-        syncVoiceRecorderUi(scope);
-        return false;
-      }
-      stopSharedVoicePlayback('preview-switch', { resetPosition: true, clearActive: true });
+      pausedRadio = !!window.pauseRadioForVoicePlayback?.('voice-draft-preview');
+      stopSharedVoicePlayback('preview-switch', { resetPosition: true, clearActive: true, resumeRadio: false });
       if (voicePlaybackAudio.src !== draft.objectUrl) voicePlaybackAudio.src = draft.objectUrl;
       voicePlaybackRuntime.lastUserAction = `draft:${normalizedScope}`;
       ensureChatPlaybackSession('voice-draft-preview');
@@ -2801,6 +2823,7 @@
       syncVoiceRecorderUi(scope);
       return true;
     } catch (err) {
+      if (pausedRadio) await maybeResumeRadioAfterVoicePlayback('voice-draft-preview-failed');
       if (button) button.dataset.previewPlaying = '0';
       chatVoiceDraftState.error = 'Unable to preview voice note right now.';
       syncVoiceRecorderUi(scope);
@@ -8147,5 +8170,10 @@
         pollingActive: !!privateThreadPollTimer,
       },
     };
+  };
+
+  window.pauseSharedVoicePlaybackForRadio = function pauseSharedVoicePlaybackForRadio(reason = 'radio-start') {
+    stopSharedVoicePlayback(reason, { resetPosition: false, clearActive: false, resumeRadio: false });
+    return true;
   };
 })();
