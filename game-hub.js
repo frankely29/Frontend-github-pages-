@@ -138,10 +138,18 @@
   function open({ initialTab = 'games', profileTarget = null } = {}) {
     state.activeTopTab = normalizeTopTab(initialTab);
     if (profileTarget && typeof profileTarget === 'object') {
-      state.pendingProfileTarget = profileTarget;
+      state.pendingProfileTarget = { ...profileTarget };
     }
     window.openDrawer?.(HUB_KEY, HUB_TITLE, shellHtml());
     rerender();
+  }
+
+  function openGamesTab() {
+    open({ initialTab: 'games' });
+  }
+
+  function openWorkBattlesTab(profileTarget = null) {
+    open({ initialTab: 'work-battles', profileTarget });
   }
 
   function bindDockButton(buttonEl) {
@@ -732,6 +740,8 @@
   window.GameHubUI = {
     bindDockButton,
     open,
+    openGamesTab,
+    openWorkBattlesTab,
     rerender,
   };
 

@@ -5695,7 +5695,9 @@
     });
     document.getElementById('driverProfileChallengeBtn')?.addEventListener('click', () => {
       const profileTarget = { userId: driverProfileState.userId, displayName: name };
-      if (window.GameHubUI?.open) {
+      if (window.GameHubUI?.openWorkBattlesTab) {
+        window.GameHubUI.openWorkBattlesTab(profileTarget);
+      } else if (window.GameHubUI?.open) {
         window.GameHubUI.open({ initialTab: 'work-battles', profileTarget });
       } else {
         window.WorkBattlesUI?.openForProfileTarget?.(profileTarget);
@@ -5980,7 +5982,7 @@
   window.renderLeaderboardBadgeSvg = renderLeaderboardBadgeSvg;
   window.syncLeaderboardBadgeRewards = syncLeaderboardBadgeRewards;
 
-  function openChatDockFallback() {
+  function forceOpenChatDrawer() {
     if (typeof window.openPanel === 'function') {
       window.openPanel('chat', 'Chat', chatPanelHTML(), wireChatPanel);
       return;
@@ -5991,23 +5993,46 @@
     }
   }
 
+  function forceOpenGamesDrawer() {
+    if (window.GameHubUI && typeof window.GameHubUI.openGamesTab === 'function') {
+      window.GameHubUI.openGamesTab();
+      return;
+    }
+    if (window.GameHubUI && typeof window.GameHubUI.open === 'function') {
+      window.GameHubUI.open({ initialTab: 'games' });
+      return;
+    }
+    if (window.WorkBattlesUI && typeof window.WorkBattlesUI.openHub === 'function') {
+      window.WorkBattlesUI.openHub();
+      return;
+    }
+    if (typeof window.openPanel === 'function' && typeof window.gamesPanelHTML === 'function' && typeof window.wireGamesPanel === 'function') {
+      window.openPanel('games', 'Games', window.gamesPanelHTML(), window.wireGamesPanel);
+      return;
+    }
+    if (typeof window.openDrawer === 'function' && typeof window.gamesPanelHTML === 'function') {
+      window.openDrawer('games', 'Games', window.gamesPanelHTML());
+      if (typeof window.wireGamesPanel === 'function') window.wireGamesPanel();
+    }
+  }
+
   function initCommunityDockBindings() {
     const chatBtn = document.getElementById('dockChat');
     const gamesBtn = document.getElementById('dockGames');
 
-    if (chatBtn && chatBtn.dataset.chatDockBound !== '1') {
+    if (chatBtn && chatBtn.dataset.chatDockBound !== '1' && chatBtn.dataset.chatDockHardBound !== '1') {
       chatBtn.dataset.chatDockBound = '1';
       if (typeof window.bindDockToggle === 'function') {
         window.bindDockToggle(chatBtn, 'chat', 'Chat', chatPanelHTML, wireChatPanel);
       } else {
         chatBtn.addEventListener('click', (event) => {
           event.preventDefault();
-          openChatDockFallback();
+          forceOpenChatDrawer();
         });
       }
     }
 
-    if (gamesBtn && gamesBtn.dataset.gamesDockBound !== '1') {
+    if (gamesBtn && gamesBtn.dataset.gamesDockBound !== '1' && gamesBtn.dataset.gamesDockHardBound !== '1') {
       gamesBtn.dataset.gamesDockBound = '1';
       try {
         if (window.GameHubUI && typeof window.GameHubUI.bindDockButton === 'function') {
@@ -6030,13 +6055,53 @@
     }
   }
 
+  function hardBindCoreDockButtons() {
+    const chatBtn = document.getElementById('dockChat');
+    if (chatBtn && chatBtn.dataset.chatDockHardBound !== '1') {
+      if (chatBtn.__chatDockHardHandler) {
+        chatBtn.removeEventListener('click', chatBtn.__chatDockHardHandler, true);
+      }
+      chatBtn.__chatDockHardHandler = (event) => {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        forceOpenChatDrawer();
+      };
+      chatBtn.addEventListener('click', chatBtn.__chatDockHardHandler, true);
+      chatBtn.dataset.chatDockHardBound = '1';
+    }
+
+    const gamesBtn = document.getElementById('dockGames');
+    if (gamesBtn && gamesBtn.dataset.gamesDockHardBound !== '1') {
+      if (gamesBtn.__gamesDockHardHandler) {
+        gamesBtn.removeEventListener('click', gamesBtn.__gamesDockHardHandler, true);
+      }
+      gamesBtn.__gamesDockHardHandler = (event) => {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        forceOpenGamesDrawer();
+      };
+      gamesBtn.addEventListener('click', gamesBtn.__gamesDockHardHandler, true);
+      gamesBtn.dataset.gamesDockHardBound = '1';
+    }
+  }
+
+  window.forceOpenChatDrawer = forceOpenChatDrawer;
+  window.forceOpenGamesDrawer = forceOpenGamesDrawer;
   window.initCommunityDockBindings = initCommunityDockBindings;
+  window.hardBindCoreDockButtons = hardBindCoreDockButtons;
 
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initCommunityDockBindings, { once: true });
+    document.addEventListener('DOMContentLoaded', () => {
+      initCommunityDockBindings();
+      hardBindCoreDockButtons();
+    }, { once: true });
   } else {
     initCommunityDockBindings();
+    hardBindCoreDockButtons();
   }
+
+  window.setTimeout(hardBindCoreDockButtons, 250);
+  window.setTimeout(hardBindCoreDockButtons, 1000);
 
   // Example night mode toggle (optional)
   function toggleNightMode() { document.body.classList.toggle('night'); }
