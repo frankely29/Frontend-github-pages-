@@ -573,6 +573,14 @@
     return CHAT_VOICE_BUSY_PHASES.has(String(chatVoiceState.phase || 'idle'));
   }
 
+  function isSharedRadioActive() {
+    try {
+      return !!window.isAnyRadioPlaying?.();
+    } catch (_) {
+      return !!window.radioPlaybackRuntime?.isPlaying;
+    }
+  }
+
   function setChatAudioSessionType(type) {
     const session = getChatAudioSession();
     if (!session || !type) return false;
@@ -584,18 +592,33 @@
     }
   }
 
+  function setChatAudioSessionAuto() {
+    return setChatAudioSessionType('auto');
+  }
+
+  function ensureChatPlaybackSession(reason = 'chat-playback') {
+    if (typeof window.ensurePlaybackAudioSession === 'function') {
+      return window.ensurePlaybackAudioSession(reason);
+    }
+    if (setChatAudioSessionType('playback')) return 'playback';
+    if (setChatAudioSessionType('auto')) return 'auto';
+    return 'unsupported';
+  }
+
   function pauseActiveChatVoicePlayback() {
     stopSharedVoicePlayback('capture', { resetPosition: false, clearActive: false });
   }
 
   function applyChatAudioSessionAmbient(reason = 'chat') {
-    if (isChatVoiceBusy() || isVoicePlaybackActive()) return false;
-    if (setChatAudioSessionType('ambient')) return true;
-    return setChatAudioSessionType('auto');
+    if (isSharedRadioActive()) return false;
+    if (isChatVoiceBusy()) return false;
+    if (isVoicePlaybackActive()) return !!ensureChatPlaybackSession(reason || 'chat-voice-playback');
+    return setChatAudioSessionAuto();
   }
 
   async function prepareChatAudioForCapture(reason = 'voice-capture') {
     pauseActiveChatVoicePlayback();
+    window.pauseRadioForVoiceCapture?.('voice-record-start');
     chatVoiceState.phase = 'preparing';
     chatVoiceState.lastError = '';
     if (!setChatAudioSessionType('play-and-record')) {
@@ -610,8 +633,11 @@
     const queuedOutgoing = chatVoiceState.queuedOutgoingTone > 0;
     stopChatVoiceTracks();
     resetChatVoiceState();
-    if (!setChatAudioSessionType('ambient')) {
-      setChatAudioSessionType('auto');
+    const radioResumed = await window.resumeRadioAfterVoiceCapture?.('voice-record-end');
+    if (radioResumed || isSharedRadioActive()) {
+      ensureChatPlaybackSession(radioResumed ? 'voice-record-end-resume' : 'voice-record-end-active-radio');
+    } else {
+      setChatAudioSessionAuto();
     }
     chatVoiceState.queuedIncomingTone = 0;
     chatVoiceState.queuedOutgoingTone = 0;
@@ -686,7 +712,7 @@
   let chatFirstInteractionBound = false;
 
   function ensureChatSoundContext() {
-    if (!isChatVoiceBusy()) applyChatAudioSessionAmbient('ensure-context');
+    if (!isChatVoiceBusy() && !isSharedRadioActive()) applyChatAudioSessionAmbient('ensure-context');
     if (chatAudioCtx && chatAudioCtx.state !== 'closed') return chatAudioCtx;
     const Ctx = window.AudioContext || window.webkitAudioContext;
     if (!Ctx) {
@@ -1371,7 +1397,7 @@
     if (chatSoundState.primeInFlight) return chatAudioReady;
     if (isChatVoiceBusy()) return false;
     chatSoundState.primeInFlight = true;
-    applyChatAudioSessionAmbient(trigger);
+    if (!isSharedRadioActive()) applyChatAudioSessionAmbient(trigger);
     reconcileChatSoundRuntime('prime-start');
     ensureChatHtmlAudioPools();
     attachChatSoundStateHandlers();
@@ -1438,14 +1464,19 @@
   }
 
   async function playChatTone(kind) {
-    if (window.radioPlaybackRuntime?.isPlaying) return false;
+    if (isSharedRadioActive()) {
+      queuePendingChatTone(kind);
+      return false;
+    }
     if (isChatVoiceBusy() || isVoicePlaybackActive() || Date.now() < Number(voicePlaybackRuntime.suppressTonesUntil || 0)) {
       queuePendingChatTone(kind);
       return false;
     }
     reconcileChatSoundRuntime(`play-${kind}-start`);
-    if (kind === 'incoming') applyChatAudioSessionAmbient('incoming-tone');
-    if (kind === 'outgoing') applyChatAudioSessionAmbient('outgoing-tone');
+    if (!isSharedRadioActive()) {
+      if (kind === 'incoming') applyChatAudioSessionAmbient('incoming-tone');
+      if (kind === 'outgoing') applyChatAudioSessionAmbient('outgoing-tone');
+    }
     ensureChatHtmlAudioPools();
     ensureChatSoundContext();
     if (!canPlayChatTone()) {
@@ -1483,7 +1514,7 @@
   function removeChatSoundPrimeListeners() {
     if (!chatSoundState.primeListenersBound) return;
     ['pointerdown', 'touchstart', 'click', 'keydown'].forEach((evtName) => {
-      document.removeEventListener(evtName, onChatSoundPrimeInteraction, true);
+      document.removeEventListener(evtName, onChatSoundPrimeInteraction);
     });
     chatSoundState.primeListenersBound = false;
   }
@@ -1491,7 +1522,7 @@
   function bindChatSoundPrimeListeners() {
     if (chatAudioReady || chatSoundState.primeListenersBound) return;
     ['pointerdown', 'touchstart', 'click', 'keydown'].forEach((evtName) => {
-      document.addEventListener(evtName, onChatSoundPrimeInteraction, { passive: true, capture: true });
+      document.addEventListener(evtName, onChatSoundPrimeInteraction, { passive: true });
     });
     chatSoundState.primeListenersBound = true;
   }
@@ -1515,15 +1546,12 @@
       });
 
       window.addEventListener('pagehide', () => {
-        void cancelChatVoiceRecording('Recording canceled');
-        chatAudioUnlocked = false;
-        chatAudioReady = false;
-        if (typeof chatSoundRuntime !== 'undefined' && chatSoundRuntime) {
-          chatSoundRuntime.userPrimed = false;
-          chatSoundRuntime.webAudioReady = false;
+        if (isChatVoiceBusy()) void cancelChatVoiceRecording('Recording canceled');
+        reconcileChatSoundRuntime('pagehide');
+        if (!chatAudioReady && !chatSoundRuntime?.htmlAudioReady) {
+          bindChatSoundPrimeListeners?.();
+          bindChatAudioUnlockListeners?.();
         }
-        bindChatSoundPrimeListeners?.();
-        bindChatAudioUnlockListeners?.();
       });
 
       document.addEventListener('visibilitychange', () => {
@@ -2309,6 +2337,11 @@
         stopSharedVoicePlayback('user', { resetPosition: false, clearActive: false });
         return;
       }
+      if (isSharedRadioActive()) {
+        stopSharedVoicePlayback('radio-active', { resetPosition: true, clearActive: true });
+        syncVoicePlayerUi(player);
+        return false;
+      }
       updateVoicePlayerVisualState(player, {
         durationMs: Number(message?.audioDurationMs) || 0,
         progressPct: alreadyActive && Number.isFinite(audio?.duration) && audio.duration > 0 ? (audio.currentTime / audio.duration) * 100 : 0,
@@ -2335,6 +2368,7 @@
       voicePlaybackRuntime.activeAudioUrl = audioUrl;
       voicePlaybackRuntime.lastPauseReason = 'play';
       voicePlaybackRuntime.lastUserAction = 'play';
+      ensureChatPlaybackSession('voice-note-play');
       await audio.play();
       syncAllVoicePlayers();
     } catch (error) {
@@ -2752,9 +2786,16 @@
         syncVoiceRecorderUi(scope);
         return true;
       }
+      if (isSharedRadioActive()) {
+        stopSharedVoicePlayback('radio-active', { resetPosition: true, clearActive: true });
+        if (button) button.dataset.previewPlaying = '0';
+        syncVoiceRecorderUi(scope);
+        return false;
+      }
       stopSharedVoicePlayback('preview-switch', { resetPosition: true, clearActive: true });
       if (voicePlaybackAudio.src !== draft.objectUrl) voicePlaybackAudio.src = draft.objectUrl;
       voicePlaybackRuntime.lastUserAction = `draft:${normalizedScope}`;
+      ensureChatPlaybackSession('voice-draft-preview');
       await voicePlaybackAudio.play();
       if (button) button.dataset.previewPlaying = '1';
       syncVoiceRecorderUi(scope);
