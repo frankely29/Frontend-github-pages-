@@ -640,7 +640,16 @@
   async function prepareChatAudioForCapture(reason = 'voice-capture') {
     pauseActiveChatVoicePlayback();
 
-    if (typeof window.forcePauseRadioForVoiceCapture === 'function') {
+    chatVoiceState.phase = 'preparing';
+    chatVoiceState.lastError = '';
+
+    const shared = getSharedAudioCoordinator();
+
+    if (shared?.beginRecordingCapture) {
+      try {
+        await shared.beginRecordingCapture(reason || 'voice-record-start');
+      } catch (_) {}
+    } else if (typeof window.forcePauseRadioForVoiceCapture === 'function') {
       try {
         await window.forcePauseRadioForVoiceCapture('voice-record-start');
       } catch (_) {}
@@ -650,10 +659,7 @@
       } catch (_) {}
     }
 
-    chatVoiceState.phase = 'preparing';
-    chatVoiceState.lastError = '';
-
-    await new Promise((resolve) => window.setTimeout(resolve, 160));
+    await new Promise((resolve) => window.setTimeout(resolve, 220));
 
     if (!setChatAudioSessionType('play-and-record')) {
       setChatAudioSessionType('auto');
@@ -666,16 +672,33 @@
   async function restoreChatAudioAfterCapture(reason = 'voice-capture') {
     const queuedIncoming = chatVoiceState.queuedIncomingTone > 0;
     const queuedOutgoing = chatVoiceState.queuedOutgoingTone > 0;
+
     stopChatVoiceTracks();
     resetChatVoiceState();
-    const radioResumed = await maybeResumeRadioAfterVoiceCapture('voice-record-end');
-    if (!radioResumed && !isSharedRadioActive()) {
-      getSharedAudioCoordinator()?.setAutoSession?.(reason);
+
+    const shared = getSharedAudioCoordinator();
+    let radioResumed = false;
+
+    if (shared?.endRecordingCapture) {
+      try {
+        radioResumed = !!(await shared.endRecordingCapture(reason || 'voice-record-end'));
+      } catch (_) {
+        radioResumed = false;
+      }
+    } else {
+      radioResumed = await maybeResumeRadioAfterVoiceCapture('voice-record-end');
     }
+
+    if (!radioResumed && !isSharedRadioActive()) {
+      shared?.setAutoSession?.(reason || 'voice-record-end');
+    }
+
     chatVoiceState.queuedIncomingTone = 0;
     chatVoiceState.queuedOutgoingTone = 0;
+
     if (queuedIncoming) queuePendingChatTone('incoming');
     if (queuedOutgoing) queuePendingChatTone('outgoing');
+
     await flushPendingChatTones();
     syncAllVoiceRecorderUis();
     return true;
