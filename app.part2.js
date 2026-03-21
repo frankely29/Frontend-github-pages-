@@ -1561,19 +1561,22 @@
       });
 
       window.addEventListener('pagehide', () => {
-        if (isChatVoiceBusy()) void cancelChatVoiceRecording('Recording canceled');
-        hardStopSharedVoicePlaybackForBackground('background-pagehide');
-        reconcileChatSoundRuntime('pagehide');
-        if (!chatAudioReady && !chatSoundRuntime?.htmlAudioReady) {
-          bindChatSoundPrimeListeners?.();
-          bindChatAudioUnlockListeners?.();
+        void cancelChatVoiceRecording('Recording canceled');
+        void hardStopSharedVoicePlaybackForBackground('background');
+        chatAudioUnlocked = false;
+        chatAudioReady = false;
+        if (typeof chatSoundRuntime !== 'undefined' && chatSoundRuntime) {
+          chatSoundRuntime.userPrimed = false;
+          chatSoundRuntime.webAudioReady = false;
         }
+        bindChatSoundPrimeListeners?.();
+        bindChatAudioUnlockListeners?.();
       });
 
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'hidden') {
           void cancelChatVoiceRecording('Recording canceled');
-          hardStopSharedVoicePlaybackForBackground('background-hidden');
+          void hardStopSharedVoicePlaybackForBackground('background');
           return;
         }
         if (document.visibilityState === 'visible') {
@@ -2019,7 +2022,7 @@
     });
   }
 
-  function stopSharedVoicePlayback(reason = 'stop', { resetPosition = false, clearActive = false, resumeRadio = true } = {}) {
+  function stopSharedVoicePlayback(reason = 'stop', { resetPosition = false, clearActive = false, resumeRadio = true, clearSrc = false } = {}) {
     const audio = voicePlaybackRuntime.activeAudio;
     voicePlaybackRuntime.lastPauseReason = reason;
     voicePlaybackRuntime.resumeRadioOnStop = !!resumeRadio;
@@ -2029,6 +2032,12 @@
       } catch (_) {}
       if (resetPosition) {
         try { audio.currentTime = 0; } catch (_) {}
+      }
+      if (clearSrc) {
+        try { audio.pause(); } catch (_) {}
+        try { audio.removeAttribute('src'); } catch (_) {}
+        try { audio.src = ''; } catch (_) {}
+        try { audio.load(); } catch (_) {}
       }
     }
     if (clearActive) {
@@ -2043,21 +2052,15 @@
     syncAllVoicePlayers();
   }
 
-  function hardStopSharedVoicePlaybackForBackground(reason = 'background') {
-    stopSharedVoicePlayback(reason, { resetPosition: true, clearActive: true, resumeRadio: true });
-    try { voicePlaybackAudio.pause(); } catch (_) {}
-    try { voicePlaybackAudio.removeAttribute('src'); } catch (_) {}
-    try { voicePlaybackAudio.load(); } catch (_) {}
-    voicePlaybackRuntime.activeMessageId = null;
-    voicePlaybackRuntime.activeScope = '';
-    voicePlaybackRuntime.activeBlobUrl = '';
-    voicePlaybackRuntime.activeAudioUrl = '';
-    voicePlaybackRuntime.currentTime = 0;
-    voicePlaybackRuntime.isPlaying = false;
-    voicePlaybackRuntime.isSeeking = false;
-    voicePlaybackRuntime.lastUserAction = '';
+  async function hardStopSharedVoicePlaybackForBackground(reason = 'background') {
+    const shouldResumeRadio = !!(window.radioPlaybackRuntime?.pausedForVoicePlayback && window.radioPlaybackRuntime?.shouldResumeAfterVoicePlayback);
+    stopSharedVoicePlayback(reason, { resetPosition: true, clearActive: true, resumeRadio: false, clearSrc: true });
     syncAllVoicePlayers();
     syncAllVoiceRecorderUis();
+    if (shouldResumeRadio) {
+      await maybeResumeRadioAfterVoicePlayback(`voice-${reason}`);
+    }
+    return true;
   }
 
   function hardStopSharedVoicePlaybackForRadio(reason = 'radio-start') {
@@ -8208,7 +8211,7 @@
   };
 
   window.pauseSharedVoicePlaybackForRadio = function pauseSharedVoicePlaybackForRadio(reason = 'radio-start') {
-    hardStopSharedVoicePlaybackForRadio(reason);
+    stopSharedVoicePlayback(reason, { resetPosition: true, clearActive: true, resumeRadio: false, clearSrc: true });
     return true;
   };
 })();
