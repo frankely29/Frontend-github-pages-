@@ -6323,22 +6323,8 @@ Object.assign(TlcSharedAudio, {
     refreshRadioButtons();
     return true;
   },
-  beginRecordingCapture(reason = "record-start") {
-    this.recorderLock = true;
-    if (this.owner === "voice") {
-      void this.stopVoicePlayback("record-start", { resetPosition: true, clearSource: true, resumeRadio: false });
-    }
-    if (this.owner === "radio") {
-      try { this.audioEl.muted = true; } catch (_) {}
-      try { this.audioEl.volume = 0; } catch (_) {}
-      this.pauseRadioForVoice("record-start");
-    }
-    this.owner = "record";
-    this.lastPauseReason = reason;
-    this.setRecordSession(reason);
-    this.syncMediaSession("none", "");
-    refreshRadioButtons();
-    return true;
+  async beginRecordingCapture(reason = "record-start") {
+    return this.forcePauseRadioForVoiceCapture(reason);
   },
   async forcePauseRadioForVoiceCapture(reason = "record-start") {
     this.recorderLock = true;
