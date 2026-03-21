@@ -1105,9 +1105,11 @@
     if (payload.keepalive || parsed.type === 'ping' || parsed.type === 'keepalive') return;
     if (parsed.type === 'battle_result' || parsed.type === 'game_battle_result' || payload.event_name === 'battle_result' || payload.event_name === 'game_battle_result' || payload.battle_result || payload.winner_display_name) {
       showBattleFeedEntry(payload.battle_result || payload);
-      if (window.getOpenPanelKey?.() === 'games') {
-        window.GameHubUI?.rerender?.();
-        window.WorkBattlesUI?.refresh?.();
+      if (payload.match_id && isGamesPanelOpen()) {
+        void loadGamesBattleDashboard({ silent: true });
+        if (Number(gamesState.activeMatch?.id || 0) === Number(payload.match_id || 0)) {
+          void loadActiveBattleMatch({ silent: true, preferredMatchId: Number(payload.match_id) });
+        }
       }
       return;
     }
@@ -4898,6 +4900,123 @@
     if (fileInput) fileInput.value = '';
   }
 
+  const CHESS_PIECE_SVGS = {
+    P: '<path d="M50 22a10 10 0 1 1 0 20a10 10 0 0 1 0-20Zm0 23c-11 0-18 8-18 18h36c0-10-7-18-18-18Z"/>',
+    N: '<path d="M34 69h34v-4H50l11-11-6-12-11-8-8 6 6 8-8 12v9Z"/><circle cx="54" cy="43" r="2.5" fill="currentColor"/>',
+    B: '<path d="M50 22l7 7-7 7-7-7 7-7Zm0 17c-9 0-15 7-15 16h30c0-9-6-16-15-16Zm-18 27h36v5H32z"/>',
+    R: '<path d="M35 27h6v8h6v-8h6v8h6v-8h6v13H35V27Zm3 15h24l-2 23H40l-2-23Zm-6 23h36v5H32z"/>',
+    Q: '<path d="M35 33a4 4 0 1 1 0-8a4 4 0 0 1 0 8Zm15-3a4 4 0 1 1 0-8a4 4 0 0 1 0 8Zm15 3a4 4 0 1 1 0-8a4 4 0 0 1 0 8Z"/><path d="M33 36h34l-5 24H38l-5-24Zm-1 29h36v5H32z"/>',
+    K: '<path d="M48 22h4v7h7v4h-7v7h-4v-7h-7v-4h7v-7Zm-14 20h32l-4 22H38l-4-22Zm-2 23h36v5H32z"/>'
+  };
+  const UNO_COLORS = ['red','yellow','green','blue'];
+  const UNO_ACTIONS = ['skip','reverse','draw2'];
+
+  function shuffleInPlace(items) {
+    const list = Array.isArray(items) ? items : [];
+    for (let i = list.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [list[i], list[j]] = [list[j], list[i]];
+    }
+    return list;
+  }
+
+  function createDominoTileSet() {
+    const tiles = [];
+    for (let left = 0; left <= 6; left += 1) {
+      for (let right = left; right <= 6; right += 1) {
+        tiles.push([left, right]);
+      }
+    }
+    return shuffleInPlace(tiles.slice());
+  }
+
+  function createInitialDominoesState() {
+    const deck = createDominoTileSet();
+    return {
+      board: [],
+      playerHand: deck.splice(0, 7),
+      cpuHand: deck.splice(0, 7),
+      boneyard: deck,
+      turn: 'player',
+      over: false,
+      winner: '',
+      message: 'Your turn. Match doubles or chain ends.',
+      passStreak: 0,
+    };
+  }
+
+  function createInitialBilliardsPracticeState() {
+    return {
+      playerScore: 0,
+      cpuScore: 0,
+      targetScore: 3,
+      shotsTaken: 0,
+      over: false,
+      message: 'Practice mode ready. Sink 3 before the bot does.',
+      balls: [
+        { x: 0.22, y: 0.5, color: '#ffffff' },
+        { x: 0.7, y: 0.32, color: '#fbbf24' },
+        { x: 0.76, y: 0.5, color: '#38bdf8' },
+        { x: 0.7, y: 0.68, color: '#f97316' },
+      ],
+    };
+  }
+
+  function gamesDefaultChallengeUserState() {
+    return { rows: [], loadedAt: 0, query: '', loading: false, error: '', selected: null };
+  }
+
+  const gamesState = {
+    activeTab: 'chess',
+    activeModeByGame: { chess: 'cpu', uno: 'cpu', dominoes: 'cpu', billiards: 'cpu' },
+    battleTab: 'overview',
+    chess: createInitialChessState(),
+    uno: createInitialUnoState(),
+    unoWaitingColor: false,
+    dominoes: createInitialDominoesState(),
+    billiards: createInitialBilliardsPracticeState(),
+    dashboard: { incoming: [], outgoing: [], activeMatch: null, history: [] },
+    activeMatch: null,
+    history: [],
+    challengesLoadedAt: 0,
+    matchLoadedAt: 0,
+    loading: false,
+    matchLoading: false,
+    status: '',
+    error: '',
+    challengeComposer: { targetUserId: '', targetDisplayName: '', gameType: 'dominoes' },
+    challengeUsers: gamesDefaultChallengeUserState(),
+    battleNotificationsSeen: new Set(),
+    billiardsAim: { angle: 0.1, power: 0.58 },
+  };
+
+  const GAMES_DASHBOARD_POLL_MS = 12000;
+  const GAMES_ACTIVE_MATCH_POLL_MS = 2800;
+  let gamesDashboardPollTimer = null;
+  let gamesMatchPollTimer = null;
+
+  function isGamesPanelOpen() {
+    return typeof openPanelKey !== 'undefined' && openPanelKey === 'games';
+  }
+
+  function getGamesAuthToken() {
+    try { return localStorage.getItem(LS_TOKEN) || ''; } catch (_) { return ''; }
+  }
+
+  async function gamesApiGet(path) {
+    const token = getGamesAuthToken();
+    if (runtime?.getJSONAuth) return runtime.getJSONAuth(path, token);
+    if (window.FrontendRuntime?.getJSONAuth) return window.FrontendRuntime.getJSONAuth(path, token);
+    return getJSONAuth(path, token);
+  }
+
+  async function gamesApiPost(path, body = {}) {
+    const token = getGamesAuthToken();
+    if (runtime?.postJSON) return runtime.postJSON(path, body, token);
+    if (window.FrontendRuntime?.postJSON) return window.FrontendRuntime.postJSON(path, body, token);
+    return postJSON(path, body, token);
+  }
+
   function defaultBattleStats() {
     return {
       wins: 0,
@@ -4905,6 +5024,10 @@
       total_matches: 0,
       matches_played: 0,
       win_rate: 0,
+      dominoes_wins: 0,
+      dominoes_losses: 0,
+      billiards_wins: 0,
+      billiards_losses: 0,
       game_xp_earned: 0,
     };
   }
@@ -4912,6 +5035,186 @@
   function formatBattlePct(value) {
     const n = Number(value);
     return `${Number.isFinite(n) ? Math.max(0, Math.min(100, n * 100)) : 0}`.replace(/\.0+$/, '') + '%';
+  }
+
+  function setGamesStatus(message = '', isError = false) {
+    gamesState.status = String(message || '');
+    gamesState.error = isError ? gamesState.status : '';
+  }
+
+  function scheduleGamesDashboardPoll({ immediate = false } = {}) {
+    if (gamesDashboardPollTimer) window.clearTimeout(gamesDashboardPollTimer);
+    gamesDashboardPollTimer = window.setTimeout(async () => {
+      gamesDashboardPollTimer = null;
+      if (!isGamesPanelOpen()) return;
+      await loadGamesBattleDashboard({ silent: true });
+      scheduleGamesDashboardPoll();
+    }, immediate ? 0 : GAMES_DASHBOARD_POLL_MS);
+  }
+
+  function scheduleGamesMatchPoll({ immediate = false } = {}) {
+    if (gamesMatchPollTimer) window.clearTimeout(gamesMatchPollTimer);
+    const activeId = Number(gamesState.activeMatch?.id || gamesState.dashboard?.activeMatch?.id || 0);
+    if (!activeId) return;
+    gamesMatchPollTimer = window.setTimeout(async () => {
+      gamesMatchPollTimer = null;
+      if (!isGamesPanelOpen()) return;
+      await loadActiveBattleMatch({ silent: true, preferredMatchId: activeId });
+      if (Number(gamesState.activeMatch?.id || 0)) scheduleGamesMatchPoll();
+    }, immediate ? 0 : GAMES_ACTIVE_MATCH_POLL_MS);
+  }
+
+  async function loadGamesBattleDashboard({ silent = false } = {}) {
+    if (!getGamesAuthToken()) return null;
+    if (!silent) {
+      gamesState.loading = true;
+      setGamesStatus('Loading battle hub…');
+      rerenderGamesPanel();
+    }
+    try {
+      const [incomingRes, outgoingRes, activeRes, historyRes, aggregateRes] = await Promise.all([
+        gamesApiGet('/games/challenges/incoming').catch(() => null),
+        gamesApiGet('/games/challenges/outgoing').catch(() => null),
+        gamesApiGet('/games/matches/active/me').catch(() => null),
+        gamesApiGet('/games/history/me').catch(() => ({ ok: false, rows: [] })),
+        gamesApiGet('/games/challenges').catch(() => null),
+      ]);
+      const challengesRes = aggregateRes || {};
+      gamesState.dashboard = {
+        incoming: Array.isArray(incomingRes?.rows) ? incomingRes.rows : (Array.isArray(challengesRes?.incoming) ? challengesRes.incoming : []),
+        outgoing: Array.isArray(outgoingRes?.rows) ? outgoingRes.rows : (Array.isArray(challengesRes?.outgoing) ? challengesRes.outgoing : []),
+        activeMatch: activeRes?.match || activeRes?.active_match || activeRes?.activeMatch || challengesRes?.active_match || challengesRes?.activeMatch || null,
+        history: Array.isArray(historyRes?.rows) ? historyRes.rows : Array.isArray(historyRes?.history) ? historyRes.history : [],
+      };
+      gamesState.history = gamesState.dashboard.history.slice();
+      gamesState.challengesLoadedAt = Date.now();
+      if (!gamesState.activeMatch && gamesState.dashboard.activeMatch) gamesState.activeMatch = gamesState.dashboard.activeMatch;
+      if (gamesState.dashboard.activeMatch?.id) scheduleGamesMatchPoll({ immediate: true });
+      if (!silent) setGamesStatus('');
+      return gamesState.dashboard;
+    } catch (err) {
+      setGamesStatus(err?.message || 'Unable to load battle hub.', true);
+      return null;
+    } finally {
+      gamesState.loading = false;
+      rerenderGamesPanel();
+    }
+  }
+
+  async function loadActiveBattleMatch({ silent = false, preferredMatchId = null } = {}) {
+    if (!getGamesAuthToken()) return null;
+    if (!silent) {
+      gamesState.matchLoading = true;
+      setGamesStatus('Loading active battle…');
+      rerenderGamesPanel();
+    }
+    const numericId = Number(preferredMatchId || gamesState.dashboard?.activeMatch?.id || gamesState.activeMatch?.id || 0);
+    try {
+      const res = numericId
+        ? await gamesApiGet(`/games/matches/${encodeURIComponent(numericId)}`)
+        : await gamesApiGet('/games/matches/active/me');
+      const match = res?.match || res?.active_match || res?.activeMatch || null;
+      if (match) {
+        gamesState.activeMatch = match;
+        gamesState.dashboard.activeMatch = {
+          id: match.id,
+          game_type: match.game_type,
+          opponent_display_name: match.opponent_display_name,
+          opponent_user_id: match.opponent_user_id,
+          status: match.status,
+        };
+        gamesState.matchLoadedAt = Date.now();
+      } else if (!silent) {
+        gamesState.activeMatch = null;
+      }
+      if (res?.reward_contract) {
+        gamesState.battleNotificationsSeen.add(`reward:${match?.id || 'unknown'}`);
+        showBattleProgressReward(res.reward_contract, match);
+      }
+      rerenderGamesPanel();
+      return match;
+    } catch (err) {
+      if (!silent) setGamesStatus(err?.message || 'Unable to load active battle.', true);
+      return null;
+    } finally {
+      gamesState.matchLoading = false;
+    }
+  }
+
+  async function createBattleChallenge(targetUserId, gameType) {
+    if (!targetUserId) return;
+    setGamesStatus('Sending challenge…');
+    rerenderGamesPanel();
+    try {
+      await gamesApiPost('/games/challenges', {
+        target_user_id: Number(targetUserId),
+        challenged_user_id: Number(targetUserId),
+        game_type: String(gameType || 'dominoes'),
+        game_key: String(gameType || 'dominoes'),
+      });
+      setGamesStatus('Challenge sent.');
+      gamesState.battleTab = 'outgoing';
+      await loadGamesBattleDashboard({ silent: true });
+    } catch (err) {
+      setGamesStatus(err?.message || 'Challenge failed.', true);
+    }
+    rerenderGamesPanel();
+  }
+
+  async function respondToChallenge(challengeId, action) {
+    if (!challengeId || !action) return;
+    const path = `/games/challenges/${encodeURIComponent(challengeId)}/${action}`;
+    setGamesStatus(`${action === 'accept' ? 'Accepting' : action === 'decline' ? 'Declining' : 'Canceling'} challenge…`);
+    rerenderGamesPanel();
+    try {
+      const res = await gamesApiPost(path, {});
+      setGamesStatus(action === 'accept' ? 'Battle accepted.' : action === 'decline' ? 'Challenge declined.' : 'Challenge canceled.');
+      await loadGamesBattleDashboard({ silent: true });
+      const matchId = Number(res?.match?.id || res?.active_match?.id || res?.match_id || 0);
+      if (matchId) {
+        gamesState.battleTab = 'active';
+        await loadActiveBattleMatch({ silent: true, preferredMatchId: matchId });
+      }
+    } catch (err) {
+      setGamesStatus(err?.message || 'Challenge action failed.', true);
+    }
+    rerenderGamesPanel();
+  }
+
+  async function submitBattleMove(payload) {
+    const matchId = Number(gamesState.activeMatch?.id || 0);
+    if (!matchId || !payload || typeof payload !== 'object') return;
+    setGamesStatus('Submitting move…');
+    rerenderGamesPanel();
+    try {
+      const res = await gamesApiPost(`/games/matches/${encodeURIComponent(matchId)}/move`, payload);
+      if (res?.match) gamesState.activeMatch = res.match;
+      if (res?.reward_contract) showBattleProgressReward(res.reward_contract, res.match || gamesState.activeMatch);
+      setGamesStatus(res?.match?.status === 'completed' ? 'Battle completed.' : 'Move submitted.');
+      await loadGamesBattleDashboard({ silent: true });
+      rerenderGamesPanel();
+    } catch (err) {
+      setGamesStatus(err?.message || 'Move failed.', true);
+      rerenderGamesPanel();
+    }
+  }
+
+  async function forfeitBattleMatch() {
+    const matchId = Number(gamesState.activeMatch?.id || 0);
+    if (!matchId) return;
+    if (typeof confirm === 'function' && !confirm('Forfeit this battle?')) return;
+    setGamesStatus('Forfeiting battle…');
+    rerenderGamesPanel();
+    try {
+      const res = await gamesApiPost(`/games/matches/${encodeURIComponent(matchId)}/forfeit`, {});
+      if (res?.match) gamesState.activeMatch = res.match;
+      if (res?.reward_contract) showBattleProgressReward(res.reward_contract, res.match || gamesState.activeMatch);
+      await loadGamesBattleDashboard({ silent: true });
+      rerenderGamesPanel();
+    } catch (err) {
+      setGamesStatus(err?.message || 'Unable to forfeit.', true);
+      rerenderGamesPanel();
+    }
   }
 
   function formatBattleDate(value) {
@@ -4928,6 +5231,1696 @@
     return 'Pending';
   }
 
+  function challengeMetaLine(item) {
+    const game = String(item?.game_type || 'battle').replace(/^./, (m) => m.toUpperCase());
+    const expires = item?.expires_at ? ` • expires ${formatBattleDate(item.expires_at)}` : '';
+    return `${game}${expires}`;
+  }
+
+  function renderChallengeRow(item, type) {
+    const opponent = escapeHtml(String(item?.other_user_display_name || item?.opponent_display_name || item?.challenged_display_name || item?.challenger_display_name || item?.display_name || 'Driver'));
+    const actions = type === 'incoming'
+      ? `<div class="gamesActionRow"><button class="chipBtn" data-games-accept="${escapeHtml(String(item?.id || ''))}">Accept</button><button class="chipBtn" data-games-decline="${escapeHtml(String(item?.id || ''))}">Decline</button></div>`
+      : `<div class="gamesActionRow"><button class="chipBtn" data-games-cancel="${escapeHtml(String(item?.id || ''))}">Cancel</button></div>`;
+    return `<article class="gamesBattleCard">
+      <div class="gamesBattleTitle">${opponent}</div>
+      <div class="gamesBattleMeta">${escapeHtml(challengeMetaLine(item))}</div>
+      ${actions}
+    </article>`;
+  }
+
+  function renderBattleHistoryRow(item) {
+    const label = battleResultLabel(item);
+    const xp = Number(item?.xp_awarded || item?.winner_xp_awarded || item?.xp || 0);
+    const game = String(item?.game_type || 'battle').replace(/^./, (m) => m.toUpperCase());
+    const opponent = String(item?.opponent_display_name || item?.loser_display_name || item?.winner_display_name || 'Driver');
+    return `<article class="gamesBattleCard compact ${label === 'Win' ? 'win' : (label === 'Loss' ? 'loss' : '')}">
+      <div class="gamesBattleTitle">${escapeHtml(game)} • ${escapeHtml(label)}</div>
+      <div class="gamesBattleMeta">vs ${escapeHtml(opponent)} • ${escapeHtml(formatBattleDate(item?.completed_at))}</div>
+      <div class="gamesBattleReward">${xp > 0 ? `+${formatProgressNumber(xp, { maxFractionDigits: 0 })} XP` : 'Completed'}</div>
+    </article>`;
+  }
+
+  function renderBattleOverview() {
+    const incoming = Array.isArray(gamesState.dashboard?.incoming) ? gamesState.dashboard.incoming : [];
+    const outgoing = Array.isArray(gamesState.dashboard?.outgoing) ? gamesState.dashboard.outgoing : [];
+    const history = Array.isArray(gamesState.history) ? gamesState.history.slice(0, 5) : [];
+    const active = gamesState.activeMatch || gamesState.dashboard?.activeMatch || null;
+    const composer = gamesState.challengeComposer || {};
+    return `<div class="gamesBattleColumns">
+      <section class="gamesBattlePanel">
+        <div class="gamesSectionHeader">Create challenge</div>
+        <div class="gamesChallengeComposer">
+          <input id="gamesChallengeTarget" class="driverProfileInput gamesComposerInput" type="number" min="1" inputmode="numeric" placeholder="Driver ID" value="${escapeHtml(String(composer.targetUserId || ''))}">
+          <input id="gamesChallengeTargetName" class="driverProfileInput gamesComposerInput" type="text" placeholder="Driver name (optional)" value="${escapeHtml(String(composer.targetDisplayName || ''))}">
+          <div class="gamesTabs gamesMiniTabs">
+            <button class="chipBtn ${composer.gameType === 'dominoes' ? 'active' : ''}" data-games-select-type="dominoes">Dominoes</button>
+            <button class="chipBtn ${composer.gameType === 'billiards' ? 'active' : ''}" data-games-select-type="billiards">Billiards</button>
+          </div>
+          <button id="gamesSendChallengeBtn" class="chipBtn">Send Challenge</button>
+        </div>
+      </section>
+      <section class="gamesBattlePanel">
+        <div class="gamesSectionHeader">Battle inbox</div>
+        <div class="gamesBattleList">${incoming.length ? incoming.map((row) => renderChallengeRow(row, 'incoming')).join('') : '<div class="leaderboardEmpty">No incoming challenges.</div>'}</div>
+      </section>
+      <section class="gamesBattlePanel">
+        <div class="gamesSectionHeader">Outgoing</div>
+        <div class="gamesBattleList">${outgoing.length ? outgoing.map((row) => renderChallengeRow(row, 'outgoing')).join('') : '<div class="leaderboardEmpty">No outgoing challenges.</div>'}</div>
+      </section>
+      <section class="gamesBattlePanel">
+        <div class="gamesSectionHeader">Active battle</div>
+        ${active ? `<div class="gamesBattleCard"><div class="gamesBattleTitle">${escapeHtml(String(active.game_type || 'battle').replace(/^./, (m) => m.toUpperCase()))}</div><div class="gamesBattleMeta">${escapeHtml(String(active.opponent_display_name || 'Driver'))}</div><button class="chipBtn" data-games-tab="active">Open Match</button></div>` : '<div class="leaderboardEmpty">No active battle.</div>'}
+      </section>
+      <section class="gamesBattlePanel">
+        <div class="gamesSectionHeader">Recent history</div>
+        <div class="gamesBattleList">${history.length ? history.map(renderBattleHistoryRow).join('') : '<div class="leaderboardEmpty">No recent battles yet.</div>'}</div>
+      </section>
+    </div>`;
+  }
+
+  function isLocalPlayersTurn(match) {
+    const meId = String(window?.me?.id || '');
+    return !!meId && String(match?.current_turn_user_id || match?.currentTurnUserId || '') === meId;
+  }
+
+  function renderDominoesTile(tile, playable = false, attrs = '') {
+    const left = Number(Array.isArray(tile) ? tile[0] : tile?.[0]);
+    const right = Number(Array.isArray(tile) ? tile[1] : tile?.[1]);
+    const safeLeft = Number.isFinite(left) ? left : 0;
+    const safeRight = Number.isFinite(right) ? right : 0;
+    const dots = [safeLeft, safeRight].map((value, idx) => {
+      const positions = {
+        1: [[12, 18]], 2: [[8, 14], [16, 22]], 3: [[8, 14], [12, 18], [16, 22]],
+        4: [[8, 14], [16, 14], [8, 22], [16, 22]], 5: [[8, 14], [16, 14], [12, 18], [8, 22], [16, 22]],
+        6: [[8, 13], [16, 13], [8, 18], [16, 18], [8, 23], [16, 23]],
+      };
+      return (positions[value] || []).map(([x, y]) => `<circle cx="${x}" cy="${y + (idx * 22)}" r="1.9"/>`).join('');
+    }).join('');
+    return `<button type="button" class="gamesDominoTile${playable ? ' playable' : ''}" ${attrs}>` +
+      `<svg viewBox="0 0 24 48" aria-hidden="true"><rect x="1.5" y="1.5" width="21" height="45" rx="4" fill="rgba(255,255,255,.95)" stroke="rgba(15,23,42,.35)" stroke-width="1.5"/><path d="M4 24h16" stroke="rgba(15,23,42,.35)" stroke-width="1.4"/>${dots}</svg>` +
+      `<span class="sr-only">${safeLeft}-${safeRight}</span></button>`;
+  }
+
+  function renderDominoesBattle(host, match) {
+    const state = match?.match_state || match?.state || {};
+    const myHand = Array.isArray(state?.your_hand || state?.my_hand || state?.player_hand) ? (state.your_hand || state.my_hand || state.player_hand) : [];
+    const board = Array.isArray(state?.board_chain || state?.board || state?.chain) ? (state.board_chain || state.board || state.chain) : [];
+    const playable = new Set((Array.isArray(state?.playable_tiles) ? state.playable_tiles : []).map((tile) => JSON.stringify(tile)));
+    const myTurn = isLocalPlayersTurn(match);
+    host.innerHTML = `<div class="gamesBattleArena">
+      <div class="gamesBattleTopline"><div class="gamesStatus">${escapeHtml(String(match?.status === 'completed' ? (match?.result_summary || 'Match complete.') : (myTurn ? 'Your turn' : 'Opponent turn')))}</div><button id="gamesForfeitBtn" class="chipBtn dangerBtn" ${match?.status === 'completed' ? 'disabled' : ''}>Forfeit</button></div>
+      <div class="gamesBattleMeta">Opponent hand: ${escapeHtml(String(state?.opponent_hand_count ?? state?.other_hand_count ?? '—'))} • Boneyard: ${escapeHtml(String(state?.boneyard_count ?? state?.stock_count ?? '—'))}</div>
+      <div class="gamesDominoBoard">${board.length ? board.map((tile) => `<div class="gamesDominoBoardTile">${renderDominoesTile(tile)}</div>`).join('') : '<div class="leaderboardEmpty">Board waiting for first move.</div>'}</div>
+      <div class="gamesActionRow"><button id="gamesDominoDrawBtn" class="chipBtn" ${!myTurn || !state?.can_draw ? 'disabled' : ''}>Draw Tile</button><button id="gamesDominoPassBtn" class="chipBtn" ${!myTurn || !state?.can_pass ? 'disabled' : ''}>Pass</button></div>
+      <div class="gamesMiniLabel">Your hand</div>
+      <div class="gamesDominoHand">${myHand.map((tile, idx) => {
+        const encoded = escapeHtml(JSON.stringify(tile));
+        const canPlay = myTurn && playable.has(JSON.stringify(tile));
+        return `<div class="gamesDominoTileWrap">${renderDominoesTile(tile, canPlay, `${canPlay ? `data-domino-tile="${encoded}"` : 'disabled'}`)}<div class="gamesDominoActions"><button class="chipBtn miniChip" ${canPlay ? `data-domino-play='${encoded}' data-domino-side="left"` : 'disabled'}>Left</button><button class="chipBtn miniChip" ${canPlay ? `data-domino-play='${encoded}' data-domino-side="right"` : 'disabled'}>Right</button></div></div>`;
+      }).join('')}</div>
+      ${match?.status === 'completed' ? `<div class="gamesBattleResult">${escapeHtml(String(match?.result_summary || 'Battle completed.'))}</div>` : ''}
+    </div>`;
+    document.getElementById('gamesForfeitBtn')?.addEventListener('click', (e) => { e.preventDefault(); void forfeitBattleMatch(); });
+    document.getElementById('gamesDominoDrawBtn')?.addEventListener('click', (e) => { e.preventDefault(); void submitBattleMove({ move_type: 'draw_tile' }); });
+    document.getElementById('gamesDominoPassBtn')?.addEventListener('click', (e) => { e.preventDefault(); void submitBattleMove({ move_type: 'pass' }); });
+    host.querySelectorAll('[data-domino-play]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        const raw = btn.getAttribute('data-domino-play') || '[]';
+        const side = btn.getAttribute('data-domino-side') || 'left';
+        let tile = [];
+        try { tile = JSON.parse(raw); } catch (_) {}
+        void submitBattleMove({ move_type: 'play_tile', tile, side });
+      });
+    });
+  }
+
+  function drawBilliardsCanvas(canvas, match) {
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const state = match?.match_state || match?.state || {};
+    const balls = Array.isArray(state?.balls) ? state.balls : [];
+    const width = canvas.width;
+    const height = canvas.height;
+    ctx.clearRect(0, 0, width, height);
+    ctx.fillStyle = '#0a6b47';
+    ctx.fillRect(0, 0, width, height);
+    ctx.strokeStyle = 'rgba(255,255,255,.24)';
+    ctx.lineWidth = 4;
+    ctx.strokeRect(6, 6, width - 12, height - 12);
+    const pockets = [[12,12],[width/2,10],[width-12,12],[12,height-12],[width/2,height-10],[width-12,height-12]];
+    ctx.fillStyle = '#0f172a';
+    pockets.forEach(([x,y]) => { ctx.beginPath(); ctx.arc(x, y, 8, 0, Math.PI * 2); ctx.fill(); });
+    balls.forEach((ball, idx) => {
+      const x = Number(ball?.x);
+      const y = Number(ball?.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y) || ball?.pocketed) return;
+      ctx.beginPath();
+      ctx.fillStyle = String(ball?.color || (idx === 0 ? '#ffffff' : '#fbbf24'));
+      ctx.arc(x * width, y * height, idx === 0 ? 8 : 7, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(15,23,42,.28)';
+      ctx.stroke();
+    });
+    if (isLocalPlayersTurn(match) && balls[0] && !balls[0].pocketed) {
+      const cue = balls[0];
+      const aim = gamesState.billiardsAim || { angle: 0, power: 0.5 };
+      const startX = cue.x * width;
+      const startY = cue.y * height;
+      const lineLen = 24 + (aim.power * 52);
+      ctx.strokeStyle = 'rgba(255,255,255,.9)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(startX, startY);
+      ctx.lineTo(startX + Math.cos(aim.angle) * lineLen, startY + Math.sin(aim.angle) * lineLen);
+      ctx.stroke();
+    }
+  }
+
+  function renderBilliardsBattle(host, match) {
+    const state = match?.match_state || match?.state || {};
+    const myTurn = isLocalPlayersTurn(match);
+    host.innerHTML = `<div class="gamesBattleArena">
+      <div class="gamesBattleTopline"><div class="gamesStatus">${escapeHtml(String(match?.status === 'completed' ? (match?.result_summary || 'Match complete.') : (myTurn ? 'Line up your shot.' : 'Waiting for opponent shot.')))}</div><button id="gamesForfeitBtn" class="chipBtn dangerBtn" ${match?.status === 'completed' ? 'disabled' : ''}>Forfeit</button></div>
+      <div class="gamesBattleMeta">Targets left: ${escapeHtml(String(state?.your_targets_remaining ?? state?.player_targets_remaining ?? '—'))} • Opponent: ${escapeHtml(String(state?.opponent_targets_remaining ?? '—'))}</div>
+      <canvas id="gamesBilliardsCanvas" class="gamesBilliardsCanvas" width="320" height="180"></canvas>
+      <div class="gamesBilliardsControls">
+        <label class="gamesControlLabel">Angle <input id="gamesBilliardsAngle" type="range" min="-314" max="314" step="1" value="${Math.round((gamesState.billiardsAim.angle || 0) * 100)}" ${!myTurn || match?.status === 'completed' ? 'disabled' : ''}></label>
+        <label class="gamesControlLabel">Power <input id="gamesBilliardsPower" type="range" min="10" max="100" step="1" value="${Math.round((gamesState.billiardsAim.power || 0.58) * 100)}" ${!myTurn || match?.status === 'completed' ? 'disabled' : ''}></label>
+        <button id="gamesBilliardsShotBtn" class="chipBtn" ${!myTurn || match?.status === 'completed' ? 'disabled' : ''}>Take Shot</button>
+      </div>
+      <div class="gamesBattleMeta">Rule: first player to pocket every target ball, then the final ball, wins.</div>
+      ${match?.status === 'completed' ? `<div class="gamesBattleResult">${escapeHtml(String(match?.result_summary || 'Battle completed.'))}</div>` : ''}
+    </div>`;
+    const canvas = document.getElementById('gamesBilliardsCanvas');
+    drawBilliardsCanvas(canvas, match);
+    document.getElementById('gamesForfeitBtn')?.addEventListener('click', (e) => { e.preventDefault(); void forfeitBattleMatch(); });
+    document.getElementById('gamesBilliardsAngle')?.addEventListener('input', (e) => {
+      gamesState.billiardsAim.angle = Number(e.target.value || 0) / 100;
+      drawBilliardsCanvas(canvas, match);
+    });
+    document.getElementById('gamesBilliardsPower')?.addEventListener('input', (e) => {
+      gamesState.billiardsAim.power = Math.max(0.1, Math.min(1, Number(e.target.value || 58) / 100));
+      drawBilliardsCanvas(canvas, match);
+    });
+    document.getElementById('gamesBilliardsShotBtn')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      void submitBattleMove({ move_type: 'shot', angle: Number(gamesState.billiardsAim.angle || 0), power: Number(gamesState.billiardsAim.power || 0.58) });
+    });
+  }
+
+  function renderActiveBattle(host) {
+    const match = gamesState.activeMatch;
+    if (!match) {
+      host.innerHTML = '<div class="leaderboardEmpty">No active battle right now.</div>';
+      return;
+    }
+    if (String(match?.game_type || '') === 'billiards') {
+      renderBilliardsBattle(host, match);
+      return;
+    }
+    renderDominoesBattle(host, match);
+  }
+
+  function showBattleProgressReward(progression = {}, match = {}) {
+    const payload = progression?.progression ? progression : { progression };
+    if (!renderPickupProgressReward(payload)) return;
+    updatePickupRewardLayout();
+    const root = ensurePickupProgressReward();
+    const kickerEl = document.getElementById('pickupProgressRewardKicker');
+    const footEl = document.getElementById('pickupProgressRewardFoot');
+    if (kickerEl) kickerEl.textContent = `${String(match?.game_type || 'Battle').replace(/^./, (m) => m.toUpperCase())} Battle Complete`;
+    if (footEl && match?.winner_display_name && match?.loser_display_name) {
+      footEl.textContent = `${match.winner_display_name} defeated ${match.loser_display_name}`;
+    }
+    root.classList.remove('show');
+    void root.offsetWidth;
+    root.classList.add('show');
+    root.setAttribute('aria-hidden', 'false');
+    if (showBattleProgressReward._timer) window.clearTimeout(showBattleProgressReward._timer);
+    showBattleProgressReward._timer = window.setTimeout(() => {
+      root.classList.remove('show');
+      root.setAttribute('aria-hidden', 'true');
+      showBattleProgressReward._timer = null;
+    }, 3800);
+    if (progression?.leveled_up || progression?.new_level > progression?.previous_level) {
+      showLevelUpOverlay(progression);
+    }
+  }
+
+  function activeGamesMode() {
+    return gamesState.activeModeByGame[gamesState.activeTab] || 'cpu';
+  }
+
+  function setGamesTabMode(gameKey, mode) {
+    gamesState.activeModeByGame[gameKey] = mode === 'vs_driver' ? 'vs_driver' : 'cpu';
+    if (gamesState.activeModeByGame[gameKey] === 'vs_driver') {
+      gamesState.challengeComposer.gameType = gameKey === 'billiards' ? 'billiards' : 'dominoes';
+      void loadGamesBattleDashboard({ silent: true });
+      void loadChallengeableUsers({ query: gamesState.challengeUsers.query || '', gameKey });
+    }
+  }
+
+  function normalizeChallengeUser(row = {}) {
+    const id = Number(row?.user_id ?? row?.id ?? row?.uid ?? 0);
+    if (!Number.isFinite(id) || id <= 0) return null;
+    return {
+      user_id: id,
+      display_name: String(row?.display_name || row?.name || row?.email || `Driver ${id}`),
+      avatar_thumb_url: safeMapAvatarUrl(row?.avatar_thumb_url || row?.avatar_url || ''),
+      rank_icon_key: row?.rank_icon_key || row?.rankIconKey || '',
+      level: Number(row?.level || 0) || 0,
+      online: !!(row?.online || row?.is_online),
+      leaderboard_badge_code: row?.leaderboard_badge_code || '',
+    };
+  }
+
+  async function loadChallengeableUsers({ query = '', gameKey = null, force = false } = {}) {
+    if (!getGamesAuthToken()) return [];
+    const nextQuery = String(query || '').trim();
+    const activeGame = gameKey || gamesState.challengeComposer.gameType || 'dominoes';
+    const cacheFresh = !force && gamesState.challengeUsers.loadedAt && (Date.now() - gamesState.challengeUsers.loadedAt < 15000);
+    if (cacheFresh && nextQuery === gamesState.challengeUsers.query) return gamesState.challengeUsers.rows;
+    gamesState.challengeUsers.loading = true;
+    gamesState.challengeUsers.error = '';
+    gamesState.challengeUsers.query = nextQuery;
+    rerenderGamesPanel();
+    try {
+      const route = `/games/users?q=${encodeURIComponent(nextQuery)}&limit=80&game_key=${encodeURIComponent(activeGame)}`;
+      let payload = await gamesApiGet(route).catch(() => null);
+      let rows = Array.isArray(payload?.rows) ? payload.rows : Array.isArray(payload?.users) ? payload.users : [];
+      if (!rows.length) {
+        payload = await gamesApiGet('/presence/all?mode=full&limit=500').catch(() => null);
+        const fallbackRows = Array.isArray(payload) ? payload : Array.isArray(payload?.items) ? payload.items : [];
+        rows = fallbackRows.filter((row) => {
+          const meId = Number(window?.me?.id || 0);
+          const rowId = Number(row?.user_id ?? row?.id ?? row?.uid ?? 0);
+          if (!rowId || (meId && rowId === meId)) return false;
+          const label = String(row?.display_name || row?.name || row?.email || '').toLowerCase();
+          return !nextQuery || label.includes(nextQuery.toLowerCase());
+        });
+      }
+      gamesState.challengeUsers.rows = rows.map(normalizeChallengeUser).filter(Boolean);
+      gamesState.challengeUsers.loadedAt = Date.now();
+      return gamesState.challengeUsers.rows;
+    } catch (err) {
+      gamesState.challengeUsers.error = err?.message || 'Unable to load drivers.';
+      return [];
+    } finally {
+      gamesState.challengeUsers.loading = false;
+      rerenderGamesPanel();
+    }
+  }
+
+  function battleRowsForGame(gameKey) {
+    const normalizedKey = gameKey === 'billiards' ? 'billiards' : 'dominoes';
+    const matchKey = (row) => String(row?.game_key || row?.game_type || '').toLowerCase();
+    return {
+      incoming: (gamesState.dashboard?.incoming || []).filter((row) => matchKey(row) === normalizedKey),
+      outgoing: (gamesState.dashboard?.outgoing || []).filter((row) => matchKey(row) === normalizedKey),
+      history: (gamesState.history || []).filter((row) => matchKey(row) === normalizedKey).slice(0, 5),
+      active: String(gamesState.activeMatch?.game_key || gamesState.activeMatch?.game_type || '').toLowerCase() === normalizedKey ? gamesState.activeMatch : null,
+    };
+  }
+
+  function renderChallengeableUsers(gameKey) {
+    const state = gamesState.challengeUsers;
+    const rows = Array.isArray(state.rows) ? state.rows : [];
+    const selectedId = Number(state.selected?.user_id || gamesState.challengeComposer.targetUserId || 0);
+    return `<section class="gamesBattlePanel">
+      <div class="gamesSectionHeader">Vs Driver</div>
+      <input id="gamesChallengeSearch" class="driverProfileInput gamesComposerInput" type="search" placeholder="Search drivers" value="${escapeHtml(state.query || '')}">
+      <div class="gamesUserList">
+        ${state.loading ? '<div class="leaderboardEmpty">Loading drivers…</div>' : ''}
+        ${!state.loading && !rows.length ? '<div class="leaderboardEmpty">No drivers found.</div>' : rows.map((row) => `
+          <button type="button" class="gamesUserRow ${selectedId === row.user_id ? 'selected' : ''}" data-games-user="${row.user_id}">
+            <span class="gamesUserAvatar">${row.avatar_thumb_url ? `<img src="${escapeHtml(row.avatar_thumb_url)}" alt="" loading="lazy">` : escapeHtml((row.display_name || 'D').slice(0, 2).toUpperCase())}</span>
+            <span class="gamesUserMeta"><strong>${escapeHtml(row.display_name)}</strong><span>${row.level ? `Level ${escapeHtml(String(row.level))}` : 'Driver'} ${row.online ? '• Online' : ''}</span></span>
+            <span class="gamesUserRank">${row.rank_icon_key ? renderRankBadgeIcon(row.rank_icon_key, { compact: true }) : ''}</span>
+          </button>`).join('')}
+      </div>
+      <div class="gamesChallengeComposer">
+        <input id="gamesChallengeTargetName" class="driverProfileInput gamesComposerInput" type="text" placeholder="Selected driver" readonly value="${escapeHtml(String(state.selected?.display_name || gamesState.challengeComposer.targetDisplayName || ''))}">
+        <button id="gamesSendChallengeBtn" class="chipBtn" ${!(state.selected?.user_id || gamesState.challengeComposer.targetUserId) ? 'disabled' : ''}>Challenge to ${escapeHtml(gameKey === 'billiards' ? 'Billiards' : 'Dominoes')}</button>
+      </div>
+      ${state.error ? `<div class="gamesStatus err">${escapeHtml(state.error)}</div>` : ''}
+    </section>`;
+  }
+
+  function renderBattleInboxStack(gameKey) {
+    const battleRows = battleRowsForGame(gameKey);
+    return `<div class="gamesBattleColumns">
+      ${renderChallengeableUsers(gameKey)}
+      <section class="gamesBattlePanel"><div class="gamesSectionHeader">Incoming</div><div class="gamesBattleList">${battleRows.incoming.length ? battleRows.incoming.map((row) => renderChallengeRow(row, 'incoming')).join('') : '<div class="leaderboardEmpty">No incoming challenges.</div>'}</div></section>
+      <section class="gamesBattlePanel"><div class="gamesSectionHeader">Outgoing</div><div class="gamesBattleList">${battleRows.outgoing.length ? battleRows.outgoing.map((row) => renderChallengeRow(row, 'outgoing')).join('') : '<div class="leaderboardEmpty">No outgoing challenges.</div>'}</div></section>
+      <section class="gamesBattlePanel"><div class="gamesSectionHeader">Active battle</div>${battleRows.active ? `<div class="gamesBattleCard"><div class="gamesBattleTitle">${escapeHtml(String(battleRows.active.opponent_display_name || 'Driver'))}</div><div class="gamesBattleMeta">${escapeHtml(String(gameKey === 'billiards' ? 'Billiards' : 'Dominoes'))} • ${escapeHtml(String(battleRows.active.status || 'active'))}</div><button class="chipBtn" data-games-open-active="1">Open Match</button></div>` : '<div class="leaderboardEmpty">No active battle.</div>'}</section>
+      <section class="gamesBattlePanel"><div class="gamesSectionHeader">Recent history</div><div class="gamesBattleList">${battleRows.history.length ? battleRows.history.map(renderBattleHistoryRow).join('') : '<div class="leaderboardEmpty">No recent battles yet.</div>'}</div></section>
+    </div>`;
+  }
+
+  function dominoValueAtSide(tile, side) {
+    const pair = Array.isArray(tile) ? tile : [];
+    return Number(pair[side === 'right' ? 1 : 0] || 0);
+  }
+
+  function dominoesOpenEnds(board) {
+    if (!Array.isArray(board) || !board.length) return null;
+    return { left: dominoValueAtSide(board[0], 'left'), right: dominoValueAtSide(board[board.length - 1], 'right') };
+  }
+
+  function dominoesPlayableSides(tile, board) {
+    const pair = Array.isArray(tile) ? tile : [];
+    if (!board.length) return ['left', 'right'];
+    const ends = dominoesOpenEnds(board);
+    const values = [Number(pair[0] || 0), Number(pair[1] || 0)];
+    const sides = [];
+    if (values.includes(ends.left)) sides.push('left');
+    if (values.includes(ends.right)) sides.push('right');
+    return sides;
+  }
+
+  function orientDominoForSide(tile, board, side) {
+    const pair = Array.isArray(tile) ? tile.slice(0, 2) : [0, 0];
+    if (!board.length) return pair;
+    const ends = dominoesOpenEnds(board);
+    if (side === 'left') return Number(pair[1]) === ends.left ? pair : [pair[1], pair[0]];
+    return Number(pair[0]) === ends.right ? pair : [pair[1], pair[0]];
+  }
+
+  function settleDominoesCpuTurn() {
+    const state = gamesState.dominoes;
+    if (state.over || state.turn !== 'cpu') return;
+    const playable = state.cpuHand.map((tile, index) => ({ tile, index, sides: dominoesPlayableSides(tile, state.board) })).filter((entry) => entry.sides.length);
+    if (!playable.length) {
+      if (state.boneyard.length) {
+        state.cpuHand.push(state.boneyard.shift());
+        state.message = 'CPU drew a tile.';
+        rerenderGamesPanel();
+        window.setTimeout(settleDominoesCpuTurn, 320);
+        return;
+      }
+      state.passStreak += 1;
+      if (state.passStreak >= 2) {
+        state.over = true;
+        const playerPips = state.playerHand.flat().reduce((sum, value) => sum + Number(value || 0), 0);
+        const cpuPips = state.cpuHand.flat().reduce((sum, value) => sum + Number(value || 0), 0);
+        state.winner = playerPips <= cpuPips ? 'player' : 'cpu';
+        state.message = state.winner === 'player' ? 'Blocked board. You win on lower pips.' : 'Blocked board. CPU wins on lower pips.';
+      } else {
+        state.turn = 'player';
+        state.message = 'CPU passed. Your turn.';
+      }
+      rerenderGamesPanel();
+      return;
+    }
+    const pick = playable[Math.floor(Math.random() * playable.length)];
+    const side = pick.sides[Math.floor(Math.random() * pick.sides.length)];
+    const oriented = orientDominoForSide(pick.tile, state.board, side);
+    state.cpuHand.splice(pick.index, 1);
+    if (side === 'left') state.board.unshift(oriented);
+    else state.board.push(oriented);
+    state.passStreak = 0;
+    if (!state.cpuHand.length) {
+      state.over = true;
+      state.winner = 'cpu';
+      state.message = 'CPU used every tile and won.';
+    } else {
+      state.turn = 'player';
+      state.message = `CPU played ${oriented[0]}-${oriented[1]}. Your turn.`;
+    }
+    rerenderGamesPanel();
+  }
+
+  function renderDominoesCpu(host) {
+    const state = gamesState.dominoes;
+    const playable = state.playerHand.map((tile, index) => ({ tile, index, sides: dominoesPlayableSides(tile, state.board) }));
+    host.innerHTML = `<div class="gamesBattleArena">
+      <div class="gamesBattleTopline"><div class="gamesStatus">${escapeHtml(state.message)}</div><div class="gamesBattleMeta">CPU hand: ${escapeHtml(String(state.cpuHand.length))} • Boneyard: ${escapeHtml(String(state.boneyard.length))}</div></div>
+      <div class="gamesDominoBoard">${state.board.length ? state.board.map((tile) => `<div class="gamesDominoBoardTile">${renderDominoesTile(tile)}</div>`).join('') : '<div class="leaderboardEmpty">Board waiting for first tile.</div>'}</div>
+      <div class="gamesActionRow"><button id="gamesDominoCpuDrawBtn" class="chipBtn" ${state.over || state.turn !== 'player' || !state.boneyard.length ? 'disabled' : ''}>Draw</button><button id="gamesDominoCpuPassBtn" class="chipBtn" ${state.over || state.turn !== 'player' ? 'disabled' : ''}>Pass</button></div>
+      <div class="gamesMiniLabel">Your hand</div>
+      <div class="gamesDominoHand">${playable.map((entry) => `<div class="gamesDominoTileWrap">${renderDominoesTile(entry.tile, state.turn === 'player' && !state.over && entry.sides.length)}<div class="gamesDominoActions"><button class="chipBtn miniChip" ${entry.sides.includes('left') && state.turn === 'player' && !state.over ? `data-domino-cpu="${entry.index}" data-domino-side="left"` : 'disabled'}>Left</button><button class="chipBtn miniChip" ${entry.sides.includes('right') && state.turn === 'player' && !state.over ? `data-domino-cpu="${entry.index}" data-domino-side="right"` : 'disabled'}>Right</button></div></div>`).join('')}</div>
+    </div>`;
+    document.getElementById('gamesDominoCpuDrawBtn')?.addEventListener('click', () => {
+      if (!state.boneyard.length || state.over || state.turn !== 'player') return;
+      state.playerHand.push(state.boneyard.shift());
+      state.message = 'You drew a tile.';
+      rerenderGamesPanel();
+    });
+    document.getElementById('gamesDominoCpuPassBtn')?.addEventListener('click', () => {
+      if (state.over || state.turn !== 'player') return;
+      state.passStreak += 1;
+      state.turn = 'cpu';
+      state.message = 'You passed.';
+      rerenderGamesPanel();
+      window.setTimeout(settleDominoesCpuTurn, 320);
+    });
+    host.querySelectorAll('[data-domino-cpu]').forEach((btn) => btn.addEventListener('click', () => {
+      const index = Number(btn.getAttribute('data-domino-cpu'));
+      const side = btn.getAttribute('data-domino-side') || 'left';
+      const tile = state.playerHand[index];
+      if (!tile || state.over || state.turn !== 'player') return;
+      const oriented = orientDominoForSide(tile, state.board, side);
+      state.playerHand.splice(index, 1);
+      if (side === 'left') state.board.unshift(oriented);
+      else state.board.push(oriented);
+      state.passStreak = 0;
+      if (!state.playerHand.length) {
+        state.over = true;
+        state.winner = 'player';
+        state.message = 'You win! Your hand is empty.';
+      } else {
+        state.turn = 'cpu';
+        state.message = `You played ${oriented[0]}-${oriented[1]}. CPU thinking…`;
+        rerenderGamesPanel();
+        window.setTimeout(settleDominoesCpuTurn, 320);
+        return;
+      }
+      rerenderGamesPanel();
+    }));
+  }
+
+  function drawBilliardsPracticeCanvas(canvas) {
+    drawBilliardsCanvas(canvas, { state: { balls: gamesState.billiards.balls }, current_turn_user_id: window?.me?.id || 1 });
+  }
+
+  function settleBilliardsCpuTurn() {
+    const state = gamesState.billiards;
+    if (state.over) return;
+    const madeShot = Math.random() > 0.48;
+    if (madeShot) state.cpuScore += 1;
+    if (state.cpuScore >= state.targetScore) {
+      state.over = true;
+      state.message = 'Bot cleared the rack first.';
+    } else {
+      state.message = madeShot ? 'Bot sank one. Your turn.' : 'Bot missed. Your turn.';
+    }
+    rerenderGamesPanel();
+  }
+
+  function renderBilliardsCpu(host) {
+    const state = gamesState.billiards;
+    host.innerHTML = `<div class="gamesBattleArena">
+      <div class="gamesBattleTopline"><div class="gamesStatus">${escapeHtml(state.message)}</div><div class="gamesBattleMeta">You ${escapeHtml(String(state.playerScore))} • Bot ${escapeHtml(String(state.cpuScore))}</div></div>
+      <canvas id="gamesBilliardsCpuCanvas" class="gamesBilliardsCanvas" width="320" height="180"></canvas>
+      <div class="gamesBilliardsControls">
+        <label class="gamesControlLabel">Angle <input id="gamesBilliardsAngle" type="range" min="-314" max="314" step="1" value="${Math.round((gamesState.billiardsAim.angle || 0) * 100)}" ${state.over ? 'disabled' : ''}></label>
+        <label class="gamesControlLabel">Power <input id="gamesBilliardsPower" type="range" min="10" max="100" step="1" value="${Math.round((gamesState.billiardsAim.power || 0.58) * 100)}" ${state.over ? 'disabled' : ''}></label>
+        <button id="gamesBilliardsShotBtn" class="chipBtn" ${state.over ? 'disabled' : ''}>Take Shot</button>
+      </div>
+      <div class="gamesBattleMeta">First to ${escapeHtml(String(state.targetScore))} wins this quick practice race.</div>
+    </div>`;
+    const canvas = document.getElementById('gamesBilliardsCpuCanvas');
+    drawBilliardsPracticeCanvas(canvas);
+    document.getElementById('gamesBilliardsAngle')?.addEventListener('input', (e) => { gamesState.billiardsAim.angle = Number(e.target.value || 0) / 100; drawBilliardsPracticeCanvas(canvas); });
+    document.getElementById('gamesBilliardsPower')?.addEventListener('input', (e) => { gamesState.billiardsAim.power = Math.max(0.1, Math.min(1, Number(e.target.value || 58) / 100)); drawBilliardsPracticeCanvas(canvas); });
+    document.getElementById('gamesBilliardsShotBtn')?.addEventListener('click', () => {
+      if (state.over) return;
+      state.shotsTaken += 1;
+      const madeShot = Math.random() < (0.18 + (gamesState.billiardsAim.power * 0.32));
+      if (madeShot) state.playerScore += 1;
+      if (state.playerScore >= state.targetScore) {
+        state.over = true;
+        state.message = 'You cleared the practice rack first.';
+      } else {
+        state.message = madeShot ? 'Nice shot. Bot turn…' : 'Missed shot. Bot turn…';
+        rerenderGamesPanel();
+        window.setTimeout(settleBilliardsCpuTurn, 420);
+        return;
+      }
+      rerenderGamesPanel();
+    });
+  }
+
+  function renderGamesVsDriver(host, gameKey) {
+    host.innerHTML = renderBattleInboxStack(gameKey);
+    document.getElementById('gamesChallengeSearch')?.addEventListener('input', (e) => {
+      gamesState.challengeUsers.query = String(e.target.value || '');
+      void loadChallengeableUsers({ query: gamesState.challengeUsers.query, gameKey, force: true });
+    });
+    host.querySelectorAll('[data-games-user]').forEach((btn) => btn.addEventListener('click', () => {
+      const userId = Number(btn.getAttribute('data-games-user'));
+      const row = (gamesState.challengeUsers.rows || []).find((item) => Number(item.user_id) === userId) || null;
+      gamesState.challengeUsers.selected = row;
+      gamesState.challengeComposer.targetUserId = String(userId || '');
+      gamesState.challengeComposer.targetDisplayName = row?.display_name || '';
+      gamesState.challengeComposer.gameType = gameKey;
+      rerenderGamesPanel();
+    }));
+    document.getElementById('gamesSendChallengeBtn')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      const selected = gamesState.challengeUsers.selected;
+      if (!selected?.user_id) return;
+      void createBattleChallenge(selected.user_id, gameKey);
+    });
+    host.querySelector('[data-games-open-active="1"]')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      const match = battleRowsForGame(gameKey).active;
+      if (match?.id) {
+        loadActiveBattleMatch({ silent: true, preferredMatchId: match.id }).then(() => rerenderGamesPanel());
+      }
+    });
+  }
+
+  function gamesPanelHTML() {
+    const activeTab = gamesState.activeTab || 'chess';
+    const activeMode = activeGamesMode();
+    const showModeSelector = activeTab === 'dominoes' || activeTab === 'billiards';
+    return `
+      <div class="panelBlock gamesPanelWrap">
+        <div class="gamesTabs gamesModeTabs">
+          <button id="gamesTabChess" class="chipBtn gamesTabBtn ${activeTab === 'chess' ? 'active' : ''}">Chess</button>
+          <button id="gamesTabUno" class="chipBtn gamesTabBtn ${activeTab === 'uno' ? 'active' : ''}">UNO</button>
+          <button id="gamesTabDominoes" class="chipBtn gamesTabBtn ${activeTab === 'dominoes' ? 'active' : ''}">Dominoes</button>
+          <button id="gamesTabBilliards" class="chipBtn gamesTabBtn ${activeTab === 'billiards' ? 'active' : ''}">Billiards</button>
+          <button id="gamesResetBtn" class="chipBtn">New Game</button>
+        </div>
+        ${showModeSelector ? `<div class="gamesTabs gamesBattleTabs">
+          <button class="chipBtn gamesTabBtn ${activeMode === 'cpu' ? 'active' : ''}" data-games-mode="cpu">CPU</button>
+          <button class="chipBtn gamesTabBtn ${activeMode === 'vs_driver' ? 'active' : ''}" data-games-mode="vs_driver">Vs Driver</button>
+        </div>` : ''}
+        <div class="gamesStatus ${gamesState.error ? 'err' : ''}">${escapeHtml(gamesState.status || '')}</div>
+        <div id="gamesContent"></div>
+      </div>
+    `;
+  }
+
+  function wireGamesPanel() {
+    document.getElementById('gamesTabChess')?.addEventListener('click', (e) => { e.preventDefault(); gamesState.activeTab = 'chess'; rerenderGamesPanel(); });
+    document.getElementById('gamesTabUno')?.addEventListener('click', (e) => { e.preventDefault(); gamesState.activeTab = 'uno'; rerenderGamesPanel(); });
+    document.getElementById('gamesTabDominoes')?.addEventListener('click', (e) => { e.preventDefault(); gamesState.activeTab = 'dominoes'; rerenderGamesPanel(); });
+    document.getElementById('gamesTabBilliards')?.addEventListener('click', (e) => { e.preventDefault(); gamesState.activeTab = 'billiards'; rerenderGamesPanel(); });
+    document.querySelectorAll('[data-games-mode]').forEach((btn) => btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      setGamesTabMode(gamesState.activeTab, btn.getAttribute('data-games-mode') || 'cpu');
+      rerenderGamesPanel();
+    }));
+    document.getElementById('gamesResetBtn')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (gamesState.activeTab === 'chess') gamesState.chess = createInitialChessState();
+      else if (gamesState.activeTab === 'uno') {
+        gamesState.uno = createInitialUnoState();
+        gamesState.unoWaitingColor = false;
+      } else if (gamesState.activeTab === 'dominoes' && activeGamesMode() === 'cpu') {
+        gamesState.dominoes = createInitialDominoesState();
+      } else if (gamesState.activeTab === 'billiards' && activeGamesMode() === 'cpu') {
+        gamesState.billiards = createInitialBilliardsPracticeState();
+      } else {
+        gamesState.challengeComposer = { targetUserId: '', targetDisplayName: '', gameType: gamesState.activeTab === 'billiards' ? 'billiards' : 'dominoes' };
+        gamesState.challengeUsers.selected = null;
+        setGamesStatus('Challenge composer reset.');
+      }
+      rerenderGamesPanel();
+      if (gamesState.activeTab === 'uno') maybeRunUnoCpuTurn();
+      if (activeGamesMode() === 'vs_driver') {
+        void loadGamesBattleDashboard({ silent: true });
+        void loadChallengeableUsers({ query: gamesState.challengeUsers.query || '', gameKey: gamesState.activeTab, force: true });
+      }
+    });
+    renderGamesContent();
+    if (activeGamesMode() === 'vs_driver') {
+      scheduleGamesDashboardPoll();
+      if (gamesState.dashboard?.activeMatch?.id || gamesState.activeMatch?.id) scheduleGamesMatchPoll();
+    }
+  }
+
+  function rerenderGamesPanel() {
+    if (!isGamesPanelOpen()) return;
+    const body = document.getElementById('dockDrawerBody');
+    if (!body) return;
+    body.innerHTML = gamesPanelHTML();
+    wireGamesPanel();
+  }
+
+  function renderGamesContent() {
+    const host = document.getElementById('gamesContent');
+    if (!host) return;
+    if (gamesState.activeTab === 'chess') {
+      renderChessContent(host);
+      return;
+    }
+    if (gamesState.activeTab === 'uno') {
+      renderUnoContent(host);
+      return;
+    }
+    if (gamesState.activeTab === 'dominoes') {
+      if (activeGamesMode() === 'cpu') renderDominoesCpu(host);
+      else if (battleRowsForGame('dominoes').active) renderActiveBattle(host);
+      else renderGamesVsDriver(host, 'dominoes');
+    } else {
+      if (activeGamesMode() === 'cpu') renderBilliardsCpu(host);
+      else if (battleRowsForGame('billiards').active) renderActiveBattle(host);
+      else renderGamesVsDriver(host, 'billiards');
+    }
+    host.querySelectorAll('[data-games-accept]').forEach((btn) => btn.addEventListener('click', (e) => { e.preventDefault(); void respondToChallenge(btn.getAttribute('data-games-accept'), 'accept'); }));
+    host.querySelectorAll('[data-games-decline]').forEach((btn) => btn.addEventListener('click', (e) => { e.preventDefault(); void respondToChallenge(btn.getAttribute('data-games-decline'), 'decline'); }));
+    host.querySelectorAll('[data-games-cancel]').forEach((btn) => btn.addEventListener('click', (e) => { e.preventDefault(); void respondToChallenge(btn.getAttribute('data-games-cancel'), 'cancel'); }));
+  }
+
+  function openGamesBattleComposer({ targetUserId = '', displayName = '', gameType = 'dominoes' } = {}) {
+    const normalizedGame = gameType === 'billiards' ? 'billiards' : 'dominoes';
+    gamesState.activeTab = normalizedGame;
+    gamesState.activeModeByGame[normalizedGame] = 'vs_driver';
+    gamesState.challengeComposer = {
+      targetUserId: String(targetUserId || '').trim(),
+      targetDisplayName: String(displayName || '').trim(),
+      gameType: normalizedGame,
+    };
+    gamesState.challengeUsers.selected = targetUserId ? { user_id: Number(targetUserId), display_name: String(displayName || 'Driver') } : null;
+    if (typeof openPanel === 'function') {
+      openPanel('games', 'Games', gamesPanelHTML(), wireGamesPanel);
+    } else {
+      rerenderGamesPanel();
+    }
+    void loadGamesBattleDashboard({ silent: true });
+    void loadChallengeableUsers({ query: '', gameKey: normalizedGame, force: true });
+  }
+
+
+  function chessPieceName(type) {
+    if (type === 'P') return 'pawn';
+    if (type === 'N') return 'knight';
+    if (type === 'B') return 'bishop';
+    if (type === 'R') return 'rook';
+    if (type === 'Q') return 'queen';
+    if (type === 'K') return 'king';
+    return 'piece';
+  }
+
+  function chessPieceSvg(piece) {
+    const isWhite = piece[0] === 'w';
+    const type = piece[1];
+    const bodyFill = isWhite ? '#f8f8f8' : '#1c1c1c';
+    const bodyStroke = isWhite ? '#3a3a3a' : '#ececec';
+    const glyph = CHESS_PIECE_SVGS[type] || CHESS_PIECE_SVGS.P;
+    return `<svg class="chessPieceIcon" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><circle cx="50" cy="50" r="34" fill="${bodyFill}" class="chessPieceBase"></circle><g fill="${bodyStroke}" class="chessPieceMark">${glyph}</g></svg>`;
+  }
+
+  function createInitialChessState() {
+    return {
+      board: [
+        ['bR','bN','bB','bQ','bK','bB','bN','bR'],
+        ['bP','bP','bP','bP','bP','bP','bP','bP'],
+        [null,null,null,null,null,null,null,null],
+        [null,null,null,null,null,null,null,null],
+        [null,null,null,null,null,null,null,null],
+        [null,null,null,null,null,null,null,null],
+        ['wP','wP','wP','wP','wP','wP','wP','wP'],
+        ['wR','wN','wB','wQ','wK','wB','wN','wR']
+      ],
+      turn: 'w',
+      selected: null,
+      legalTargets: [],
+      over: false,
+      message: 'Your turn (White)'
+    };
+  }
+
+  function renderChessContent(host) {
+    const s = gamesState.chess;
+    const legalSet = new Set(s.legalTargets.map((m) => `${m.r},${m.c}`));
+    host.innerHTML = `
+      <div class="gamesStatus">${escapeHtml(s.message)}</div>
+      <div class="gamesBoard" id="gamesChessBoard"></div>
+    `;
+    const boardEl = document.getElementById('gamesChessBoard');
+    if (!boardEl) return;
+    for (let r = 0; r < 8; r += 1) {
+      for (let c = 0; c < 8; c += 1) {
+        const piece = s.board[r][c];
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = `gamesSq ${(r + c) % 2 === 0 ? 'light' : 'dark'}`;
+        if (s.selected && s.selected.r === r && s.selected.c === c) btn.classList.add('sel');
+        if (legalSet.has(`${r},${c}`)) btn.classList.add('legal');
+        if (piece) {
+          btn.innerHTML = chessPieceSvg(piece);
+          btn.setAttribute('aria-label', `${piece[0] === 'w' ? 'White' : 'Black'} ${chessPieceName(piece[1])}`);
+        } else {
+          btn.textContent = '';
+          btn.removeAttribute('aria-label');
+        }
+        btn.disabled = s.over || s.turn !== 'w';
+        btn.addEventListener('click', () => onChessSquareClick(r, c));
+        boardEl.appendChild(btn);
+      }
+    }
+  }
+
+  function onChessSquareClick(r, c) {
+    const s = gamesState.chess;
+    if (s.over || s.turn !== 'w') return;
+    const p = s.board[r][c];
+    if (s.selected) {
+      const target = s.legalTargets.find((m) => m.r === r && m.c === c);
+      if (target) {
+        applyChessMove(s, target);
+        s.selected = null;
+        s.legalTargets = [];
+        updateChessStatus();
+        rerenderGamesPanel();
+        if (!s.over && s.turn === 'b') setTimeout(runChessCpuTurn, 240);
+        return;
+      }
+    }
+    if (p && p[0] === 'w') {
+      s.selected = { r, c };
+      s.legalTargets = legalChessMovesForPiece(s, r, c);
+    } else {
+      s.selected = null;
+      s.legalTargets = [];
+    }
+    rerenderGamesPanel();
+  }
+
+  function runChessCpuTurn() {
+    const s = gamesState.chess;
+    if (s.over || s.turn !== 'b') return;
+    const moves = legalChessMoves(s, 'b');
+    if (!moves.length) {
+      updateChessStatus();
+      rerenderGamesPanel();
+      return;
+    }
+    let best = [];
+    let bestScore = -1e9;
+    for (const mv of moves) {
+      let score = 0;
+      if (mv.capture) score += pieceValue(mv.capture) * 10 - pieceValue(mv.piece);
+      if (mv.promotion) score += 8;
+      score += Math.random() * 0.2;
+      if (score > bestScore) { bestScore = score; best = [mv]; }
+      else if (Math.abs(score - bestScore) < 0.001) best.push(mv);
+    }
+    const pick = best[Math.floor(Math.random() * best.length)] || moves[0];
+    applyChessMove(s, pick);
+    updateChessStatus();
+    rerenderGamesPanel();
+  }
+
+  function pieceValue(piece) {
+    if (!piece) return 0;
+    const t = piece[1];
+    if (t === 'P') return 1;
+    if (t === 'N' || t === 'B') return 3;
+    if (t === 'R') return 5;
+    if (t === 'Q') return 9;
+    if (t === 'K') return 100;
+    return 0;
+  }
+
+  function cloneBoard(board) { return board.map((row) => row.slice()); }
+
+  function applyChessMove(state, move) {
+    const b = state.board;
+    const piece = b[move.from.r][move.from.c];
+    b[move.from.r][move.from.c] = null;
+    b[move.r][move.c] = move.promotion ? `${piece[0]}Q` : piece;
+    state.turn = state.turn === 'w' ? 'b' : 'w';
+  }
+
+  function inBounds(r, c) { return r >= 0 && r < 8 && c >= 0 && c < 8; }
+
+  function legalChessMovesForPiece(state, r, c) {
+    const p = state.board[r][c];
+    if (!p) return [];
+    const all = legalChessMoves(state, p[0]);
+    return all.filter((m) => m.from.r === r && m.from.c === c);
+  }
+
+  function legalChessMoves(state, color) {
+    const raw = [];
+    for (let r = 0; r < 8; r += 1) {
+      for (let c = 0; c < 8; c += 1) {
+        const p = state.board[r][c];
+        if (!p || p[0] !== color) continue;
+        raw.push(...pieceMoves(state.board, r, c, p));
+      }
+    }
+    return raw.filter((mv) => {
+      const b = cloneBoard(state.board);
+      const piece = b[mv.from.r][mv.from.c];
+      b[mv.from.r][mv.from.c] = null;
+      b[mv.r][mv.c] = mv.promotion ? `${piece[0]}Q` : piece;
+      return !isKingInCheck(b, color);
+    });
+  }
+
+  function pieceMoves(board, r, c, piece) {
+    const color = piece[0];
+    const type = piece[1];
+    const enemy = color === 'w' ? 'b' : 'w';
+    const out = [];
+    const push = (nr, nc, opts = {}) => {
+      if (!inBounds(nr, nc)) return;
+      const target = board[nr][nc];
+      if (target && target[0] === color) return;
+      out.push({ from: { r, c }, r: nr, c: nc, piece, capture: target || null, promotion: !!opts.promotion });
+    };
+
+    if (type === 'P') {
+      const dir = color === 'w' ? -1 : 1;
+      const start = color === 'w' ? 6 : 1;
+      const promoRow = color === 'w' ? 0 : 7;
+      const nr = r + dir;
+      if (inBounds(nr, c) && !board[nr][c]) {
+        push(nr, c, { promotion: nr === promoRow });
+        const nr2 = r + dir * 2;
+        if (r === start && !board[nr2][c]) push(nr2, c);
+      }
+      for (const dc of [-1, 1]) {
+        const nc = c + dc;
+        if (!inBounds(nr, nc)) continue;
+        const t = board[nr][nc];
+        if (t && t[0] === enemy) push(nr, nc, { promotion: nr === promoRow });
+      }
+      return out;
+    }
+
+    if (type === 'N') {
+      [[1,2],[2,1],[-1,2],[-2,1],[1,-2],[2,-1],[-1,-2],[-2,-1]].forEach(([dr,dc]) => push(r+dr,c+dc));
+      return out;
+    }
+
+    if (type === 'K') {
+      for (let dr=-1; dr<=1; dr+=1) for (let dc=-1; dc<=1; dc+=1) if (dr||dc) push(r+dr,c+dc);
+      return out;
+    }
+
+    const dirs = type === 'B' ? [[1,1],[1,-1],[-1,1],[-1,-1]] : type === 'R' ? [[1,0],[-1,0],[0,1],[0,-1]] : [[1,1],[1,-1],[-1,1],[-1,-1],[1,0],[-1,0],[0,1],[0,-1]];
+    for (const [dr,dc] of dirs) {
+      let nr = r + dr;
+      let nc = c + dc;
+      while (inBounds(nr,nc)) {
+        const t = board[nr][nc];
+        if (!t) {
+          out.push({ from:{r,c}, r:nr, c:nc, piece, capture:null, promotion:false });
+        } else {
+          if (t[0] !== color) out.push({ from:{r,c}, r:nr, c:nc, piece, capture:t, promotion:false });
+          break;
+        }
+        nr += dr;
+        nc += dc;
+      }
+    }
+    return out;
+  }
+
+  function isKingInCheck(board, color) {
+    let kr = -1; let kc = -1;
+    for (let r = 0; r < 8; r += 1) for (let c = 0; c < 8; c += 1) if (board[r][c] === `${color}K`) { kr = r; kc = c; }
+    if (kr < 0) return true;
+    const enemy = color === 'w' ? 'b' : 'w';
+    for (let r = 0; r < 8; r += 1) {
+      for (let c = 0; c < 8; c += 1) {
+        const p = board[r][c];
+        if (!p || p[0] !== enemy) continue;
+        const moves = pieceMoves(board, r, c, p);
+        if (moves.some((m) => m.r === kr && m.c === kc)) return true;
+      }
+    }
+    return false;
+  }
+
+  function updateChessStatus() {
+    const s = gamesState.chess;
+    const legal = legalChessMoves(s, s.turn);
+    const inCheck = isKingInCheck(s.board, s.turn);
+    if (!legal.length) {
+      s.over = true;
+      if (inCheck) s.message = s.turn === 'w' ? 'Checkmate. CPU wins.' : 'Checkmate. You win!';
+      else s.message = 'Stalemate.';
+      return;
+    }
+    s.over = false;
+    if (s.turn === 'w') s.message = inCheck ? 'Your turn (White) - Check!' : 'Your turn (White)';
+    else s.message = inCheck ? 'CPU turn (Black) - Check!' : 'CPU turn (Black)';
+  }
+
+  function createUnoDeck() {
+    const deck = [];
+    for (const color of UNO_COLORS) {
+      deck.push({ color, type: 'num', value: 0 });
+      for (let n = 1; n <= 9; n += 1) {
+        deck.push({ color, type: 'num', value: n });
+        deck.push({ color, type: 'num', value: n });
+      }
+      for (const action of UNO_ACTIONS) {
+        deck.push({ color, type: action });
+        deck.push({ color, type: action });
+      }
+    }
+    for (let i = 0; i < 4; i += 1) deck.push({ color: 'wild', type: 'wild' });
+    for (let i = 0; i < 4; i += 1) deck.push({ color: 'wild', type: 'wild4' });
+    for (let i = deck.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const t = deck[i]; deck[i] = deck[j]; deck[j] = t;
+    }
+    return deck;
+  }
+
+  function createInitialUnoState() {
+    const deck = createUnoDeck();
+    const player = []; const cpu = [];
+    for (let i = 0; i < 7; i += 1) { player.push(deck.pop()); cpu.push(deck.pop()); }
+    let first = deck.pop();
+    while (first && first.color === 'wild') { deck.unshift(first); first = deck.pop(); }
+    return {
+      player,
+      cpu,
+      draw: deck,
+      discard: [first],
+      turn: 'player',
+      currentColor: first?.color || 'red',
+      over: false,
+      message: 'Your turn'
+    };
+  }
+
+  function cardLabel(card) {
+    if (!card) return '';
+    if (card.type === 'num') return `${card.value}`;
+    if (card.type === 'skip') return 'SKIP';
+    if (card.type === 'reverse') return 'REV';
+    if (card.type === 'draw2') return '+2';
+    if (card.type === 'wild') return 'W';
+    if (card.type === 'wild4') return '+4';
+    return '?';
+  }
+
+  function isUnoPlayable(card, top, color) {
+    if (!card || !top) return false;
+    if (card.color === 'wild') return true;
+    if (card.color === color) return true;
+    if (card.type === 'num' && top.type === 'num' && card.value === top.value) return true;
+    return card.type === top.type;
+  }
+
+  function ensureUnoDraw(state) {
+    if (state.draw.length) return;
+    if (state.discard.length <= 1) return;
+    const top = state.discard.pop();
+    state.draw = state.discard;
+    state.discard = [top];
+    for (let i = state.draw.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const t = state.draw[i]; state.draw[i] = state.draw[j]; state.draw[j] = t;
+    }
+  }
+
+  function drawUnoCard(state, hand) {
+    ensureUnoDraw(state);
+    if (!state.draw.length) return null;
+    const c = state.draw.pop();
+    hand.push(c);
+    return c;
+  }
+
+
+  function unoCardFaceMarkup(card) {
+    const label = cardLabel(card);
+    if (!card) return '';
+    if (card.color === 'wild') {
+      return `<span class="gamesUnoFace gamesUnoFaceWild"><span class="gamesUnoBadge" aria-hidden="true"></span><span>${escapeHtml(label)}</span></span>`;
+    }
+    return `<span class="gamesUnoFace"><span>${escapeHtml(label)}</span></span>`;
+  }
+
+  function renderUnoContent(host) {
+    const s = gamesState.uno;
+    const top = s.discard[s.discard.length - 1];
+    host.innerHTML = `
+      <div class="gamesUnoRows">
+        <div class="gamesStatus">${escapeHtml(s.message)}${s.over ? '' : s.turn === 'player' ? '' : ' (CPU thinking...)'}</div>
+        <div class="gamesUnoTop">
+          <div>
+            <div class="gamesMiniLabel">CPU cards: ${s.cpu.length}</div>
+            <div class="gamesUnoHand">${s.cpu.slice(0, 6).map(() => '<div class="gamesUnoCard mini wild"><span class="gamesUnoBackTag"><span class="gamesUnoBadge" aria-hidden="true"></span><span>UNO</span></span></div>').join('')}</div>
+          </div>
+          <div class="gamesUnoPile">
+            <div>
+              <div class="gamesMiniLabel">Draw (${s.draw.length})</div>
+              <button id="unoDrawBtn" class="gamesUnoCard mini wild" ${s.over || s.turn !== 'player' || gamesState.unoWaitingColor ? 'disabled' : ''}><span class="gamesUnoBackTag"><span class="gamesUnoBadge" aria-hidden="true"></span><span>Draw</span></span></button>
+            </div>
+            <div>
+              <div class="gamesMiniLabel">Discard (${s.currentColor})</div>
+              <div class="gamesUnoCard ${top?.color || 'wild'}">${unoCardFaceMarkup(top)}</div>
+            </div>
+          </div>
+        </div>
+        <div class="gamesMiniLabel">Your hand</div>
+        <div id="unoPlayerHand" class="gamesUnoHand"></div>
+        <div id="unoColorPick" class="gamesUnoColorPick"></div>
+      </div>
+    `;
+    const handEl = document.getElementById('unoPlayerHand');
+    if (handEl) {
+      s.player.forEach((card, idx) => {
+        const playable = !s.over && s.turn === 'player' && !gamesState.unoWaitingColor && isUnoPlayable(card, top, s.currentColor);
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = `gamesUnoCard ${card.color} ${playable ? '' : 'unplayable'}`;
+        btn.innerHTML = unoCardFaceMarkup(card);
+        btn.disabled = !playable;
+        btn.addEventListener('click', () => onUnoPlayerPlay(idx));
+        handEl.appendChild(btn);
+      });
+    }
+    document.getElementById('unoDrawBtn')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (s.over || s.turn !== 'player' || gamesState.unoWaitingColor) return;
+      const drawn = drawUnoCard(s, s.player);
+      if (drawn && isUnoPlayable(drawn, top, s.currentColor)) {
+        s.message = 'You drew a playable card.';
+      } else {
+        s.turn = 'cpu';
+        s.message = 'CPU turn';
+        rerenderGamesPanel();
+        setTimeout(maybeRunUnoCpuTurn, 420);
+      }
+      rerenderGamesPanel();
+    });
+    renderUnoColorPicker();
+  }
+
+  function renderUnoColorPicker() {
+    const holder = document.getElementById('unoColorPick');
+    if (!holder) return;
+    if (!gamesState.unoWaitingColor) { holder.innerHTML = ''; return; }
+    holder.innerHTML = '<div class="gamesMiniLabel" style="width:100%;">Choose color:</div>';
+    UNO_COLORS.forEach((color) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `gamesUnoCard mini ${color}`;
+      btn.textContent = color[0].toUpperCase();
+      btn.addEventListener('click', () => {
+        const s = gamesState.uno;
+        s.currentColor = color;
+        gamesState.unoWaitingColor = false;
+        finalizeUnoTurnAfterCard();
+      });
+      holder.appendChild(btn);
+    });
+  }
+
+  function onUnoPlayerPlay(index) {
+    const s = gamesState.uno;
+    if (s.over || s.turn !== 'player') return;
+    const top = s.discard[s.discard.length - 1];
+    const card = s.player[index];
+    if (!isUnoPlayable(card, top, s.currentColor)) return;
+    s.player.splice(index, 1);
+    s.discard.push(card);
+    if (card.color !== 'wild') s.currentColor = card.color;
+    if (s.player.length === 0) { s.over = true; s.message = 'You win!'; rerenderGamesPanel(); return; }
+    if (card.color === 'wild') { gamesState.unoWaitingColor = true; rerenderGamesPanel(); return; }
+    finalizeUnoTurnAfterCard();
+  }
+
+  function finalizeUnoTurnAfterCard() {
+    const s = gamesState.uno;
+    const card = s.discard[s.discard.length - 1];
+    let cpuExtraDraw = 0;
+    let skipCpu = false;
+    if (card.type === 'skip') skipCpu = true;
+    if (card.type === 'reverse') skipCpu = true;
+    if (card.type === 'draw2') cpuExtraDraw = 2;
+    if (card.type === 'wild4') cpuExtraDraw = 4;
+    for (let i = 0; i < cpuExtraDraw; i += 1) drawUnoCard(s, s.cpu);
+    if (skipCpu) {
+      s.turn = 'player';
+      s.message = 'CPU skipped. Your turn.';
+      rerenderGamesPanel();
+      return;
+    }
+    s.turn = 'cpu';
+    s.message = 'CPU turn';
+    rerenderGamesPanel();
+    setTimeout(maybeRunUnoCpuTurn, 420);
+  }
+
+  function maybeRunUnoCpuTurn() {
+    const s = gamesState.uno;
+    if (s.over || s.turn !== 'cpu') return;
+    const top = s.discard[s.discard.length - 1];
+    let idx = s.cpu.findIndex((card) => isUnoPlayable(card, top, s.currentColor));
+    if (idx < 0) {
+      drawUnoCard(s, s.cpu);
+      idx = s.cpu.findIndex((card) => isUnoPlayable(card, top, s.currentColor));
+      if (idx < 0) {
+        s.turn = 'player';
+        s.message = 'Your turn';
+        rerenderGamesPanel();
+        return;
+      }
+    }
+    const card = s.cpu.splice(idx, 1)[0];
+    s.discard.push(card);
+    if (card.color === 'wild') {
+      const counts = { red:0, yellow:0, green:0, blue:0 };
+      s.cpu.forEach((c) => { if (counts[c.color] != null) counts[c.color] += 1; });
+      s.currentColor = UNO_COLORS.sort((a,b) => counts[b]-counts[a])[0] || 'red';
+    } else {
+      s.currentColor = card.color;
+    }
+    if (s.cpu.length === 0) { s.over = true; s.message = 'CPU wins.'; rerenderGamesPanel(); return; }
+    let playerDraw = 0;
+    let skipPlayer = false;
+    if (card.type === 'skip') skipPlayer = true;
+    if (card.type === 'reverse') skipPlayer = true;
+    if (card.type === 'draw2') playerDraw = 2;
+    if (card.type === 'wild4') playerDraw = 4;
+    for (let i = 0; i < playerDraw; i += 1) drawUnoCard(s, s.player);
+    if (skipPlayer) {
+      s.turn = 'cpu';
+      s.message = 'You were skipped.';
+      rerenderGamesPanel();
+      setTimeout(maybeRunUnoCpuTurn, 420);
+      return;
+    }
+    s.turn = 'player';
+    s.message = 'Your turn';
+    rerenderGamesPanel();
+  }
+
+  function getDockViewport() {
+    return document.getElementById('dockViewport');
+  }
+
+  function getDockTrack() {
+    return document.getElementById('dockTrack');
+  }
+
+  function getDockSaveButton() {
+    return document.getElementById('pickupFab');
+  }
+
+  function updateDockScrollHints() {
+    const dock = document.getElementById('dock');
+    const viewport = getDockViewport();
+    if (!dock || !viewport) return;
+    const maxScroll = Math.max(0, viewport.scrollWidth - viewport.clientWidth);
+    const leftVisible = viewport.scrollLeft > 2;
+    const rightVisible = viewport.scrollLeft < (maxScroll - 2);
+    dock.classList.toggle('dock-can-scroll-left', leftVisible);
+    dock.classList.toggle('dock-can-scroll-right', rightVisible);
+  }
+
+  function centerDockOnSave({ behavior = 'smooth' } = {}) {
+    const viewport = getDockViewport();
+    const saveBtn = getDockSaveButton();
+    if (!viewport || !saveBtn) return;
+
+    const viewportWidth = viewport.clientWidth;
+    const targetLeft = saveBtn.offsetLeft + (saveBtn.offsetWidth / 2) - (viewportWidth / 2);
+    const maxScroll = Math.max(0, viewport.scrollWidth - viewportWidth);
+    const clampedLeft = Math.max(0, Math.min(maxScroll, targetLeft));
+    viewport.scrollTo({ left: clampedLeft, behavior });
+  }
+
+  let dockAutoCenterTimer = 0;
+  let dockPointerIsDown = false;
+
+  function cancelDockAutoCenter() {
+    if (!dockAutoCenterTimer) return;
+    clearTimeout(dockAutoCenterTimer);
+    dockAutoCenterTimer = 0;
+  }
+
+  function scheduleDockAutoCenter() {
+    cancelDockAutoCenter();
+    dockAutoCenterTimer = setTimeout(() => {
+      if (dockPointerIsDown) {
+        scheduleDockAutoCenter();
+        return;
+      }
+      dockAutoCenterTimer = 0;
+      centerDockOnSave({ behavior: 'smooth' });
+    }, 10000);
+  }
+
+  function scrollDockByStep(direction) {
+    const viewport = getDockViewport();
+    if (!viewport) return;
+    const step = Math.max(120, Math.round(viewport.clientWidth * 1.2));
+    viewport.scrollBy({ left: direction * step, behavior: 'smooth' });
+    scheduleDockAutoCenter();
+  }
+
+  function initDockScroller() {
+    const viewport = getDockViewport();
+    const leftHint = document.getElementById('dockScrollHintLeft');
+    const rightHint = document.getElementById('dockScrollHintRight');
+    if (!viewport) return;
+
+    let rafId = 0;
+    const scheduleHintUpdate = () => {
+      if (rafId) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = 0;
+        updateDockScrollHints();
+      });
+    };
+
+    const handleDockInteraction = () => {
+      cancelDockAutoCenter();
+      scheduleHintUpdate();
+      scheduleDockAutoCenter();
+    };
+
+    const beginDockDrag = () => {
+      dockPointerIsDown = true;
+      handleDockInteraction();
+    };
+
+    const endDockDrag = () => {
+      if (!dockPointerIsDown) return;
+      dockPointerIsDown = false;
+      scheduleDockAutoCenter();
+    };
+
+    viewport.addEventListener('scroll', handleDockInteraction, { passive: true });
+    viewport.addEventListener('pointerdown', beginDockDrag, { passive: true });
+    viewport.addEventListener('touchstart', beginDockDrag, { passive: true });
+    viewport.addEventListener('wheel', handleDockInteraction, { passive: true });
+    window.addEventListener('pointerup', endDockDrag, { passive: true });
+    window.addEventListener('pointercancel', endDockDrag, { passive: true });
+    window.addEventListener('touchend', endDockDrag, { passive: true });
+    window.addEventListener('touchcancel', endDockDrag, { passive: true });
+    window.addEventListener('resize', () => {
+      centerDockOnSave({ behavior: 'auto' });
+      scheduleHintUpdate();
+      scheduleDockAutoCenter();
+    });
+
+    leftHint?.addEventListener('click', () => scrollDockByStep(-1));
+    rightHint?.addEventListener('click', () => scrollDockByStep(1));
+
+    centerDockOnSave({ behavior: 'auto' });
+    scheduleHintUpdate();
+    scheduleDockAutoCenter();
+    setTimeout(() => {
+      centerDockOnSave({ behavior: 'auto' });
+      scheduleHintUpdate();
+    }, 120);
+  }
+
+
+  const driverProfileState = {
+    open: false,
+    userId: null,
+    isSelf: false,
+    source: '',
+    loading: false,
+    displayName: '',
+    profile: null,
+    myProgression: null,
+    messages: [],
+    latestMessageId: null,
+    dmInitialLoadComplete: false,
+    pollTimer: null,
+    error: "",
+    status: "",
+    sending: false
+  };
+  
+  const recentOutgoingDmEchoes = new Map();
+  let driverProfileLayoutBound = false;
+  let driverProfileLayoutTimer50 = null;
+  let driverProfileLayoutTimer180 = null;
+
+  function injectDriverProfileStyles() {
+    if (document.getElementById('driverProfileModalStyles')) return;
+    const style = document.createElement('style');
+    style.id = 'driverProfileModalStyles';
+    style.textContent = `
+      #driverProfileModalRoot{position:fixed;inset:0;z-index:9800;display:none}
+      #driverProfileModalRoot.open{display:block}
+      .driverProfileBackdrop{position:absolute;inset:0;background:rgba(7,10,19,.42);z-index:9800}
+      .driverProfileSheet{position:absolute;left:50%;transform:translate(-50%,110%);bottom:var(--driver-profile-bottom-offset, 14px);width:min(430px,calc(100vw - 16px));max-height:calc(100dvh - var(--driver-profile-bottom-offset, 14px) - env(safe-area-inset-top) - 6px);background:rgba(255,255,255,.985);border-radius:24px 24px 16px 16px;box-shadow:0 -12px 30px rgba(0,0,0,.2);display:flex;flex-direction:column;overflow:hidden;transition:transform .18s ease-out;z-index:9801}
+      #driverProfileModalRoot.open .driverProfileSheet{transform:translate(-50%,0)}
+      .driverProfileBody{display:flex;flex-direction:column;min-height:0;height:100%}
+      .driverProfileHeader{display:flex;align-items:flex-start;justify-content:space-between;gap:5px;padding:7px 10px 4px}
+      .driverProfileIdentity{display:flex;gap:6px;align-items:center;min-width:0}
+      .driverProfileAvatar{width:44px;height:44px;border-radius:999px;flex:0 0 44px;object-fit:cover;background:#e8edf5}
+      .driverProfileName{font-size:15px;line-height:1.18;font-weight:700;color:#111827;word-break:break-word}
+      .driverProfileBadgeRow{display:flex;align-items:center;gap:5px;margin-top:1px;min-height:20px}
+      .driverProfileBadgeChipWrap{display:inline-flex;align-items:center;gap:7px}.driverProfileBadgeLabel{font-size:11px;font-weight:700;color:#334155;letter-spacing:.15px}
+      .driverProfileProgressWrap{background:#f8fafc;border:1px solid #e2e8f0;border-radius:11px;padding:5px;margin-bottom:6px}
+      .driverProfileProgressHead{display:flex;align-items:center;justify-content:space-between;gap:5px;margin-bottom:3px}
+      .driverProfileProgressLine{font-size:12px;font-weight:700;color:#0f172a;display:flex;align-items:center;gap:5px;min-width:0;flex-wrap:wrap}
+      .driverProfileProgressMeta{font-size:11px;color:#475569;line-height:1.3}
+      .driverProfileProgressBar{height:7px;border-radius:999px;background:#e2e8f0;overflow:hidden;margin:2px 0 3px}
+      .driverProfileProgressFill{height:100%;background:linear-gradient(90deg,#3b82f6,#22c55e);border-radius:999px;transition:width .2s ease-out}
+      .driverProfileRankName{color:#0f172a;font-weight:800}
+      .driverProfileBreakdownGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:2px 7px;margin-top:3px;padding-top:3px;border-top:1px dashed #dbe4ee}
+      .rankBadgeIconWrap{width:56px;height:56px;display:grid;place-items:center;border-radius:999px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.35),0 5px 14px rgba(2,6,23,.2)}
+      .rankBadgeIconWrap.compact{width:44px;height:44px}
+      .rankBadgeIconWrap.toneRecruit{background:linear-gradient(140deg,#64748b,#334155);color:#e2e8f0}
+      .rankBadgeIconWrap.toneEnlisted{background:linear-gradient(140deg,#2563eb,#0f172a);color:#dbeafe}
+      .rankBadgeIconWrap.toneOfficer{background:linear-gradient(140deg,#7c3aed,#1e1b4b);color:#ede9fe}
+      .rankBadgeIconWrap.toneGeneral{background:linear-gradient(140deg,#f59e0b,#7c2d12);color:#fef3c7}
+      .rankBadgeIconWrap.toneLegend{background:linear-gradient(140deg,#22d3ee,#4f46e5);color:#ecfeff;box-shadow:0 0 0 1px rgba(255,255,255,.25),0 0 18px rgba(56,189,248,.5)}
+      #levelUpOverlayRoot{position:fixed;inset:0;z-index:9845;display:none;pointer-events:none;align-items:center;justify-content:center;padding:20px}
+      #levelUpOverlayRoot.open{display:flex}
+      .levelUpOverlayCard{position:relative;isolation:isolate;min-width:min(390px,calc(100vw - 24px));max-width:min(460px,calc(100vw - 20px));background:linear-gradient(150deg,rgba(7,12,24,.97),rgba(15,23,42,.94) 46%,rgba(30,64,175,.28) 100%);border:1px solid rgba(125,211,252,.44);border-radius:24px;box-shadow:0 22px 58px rgba(2,6,23,.68),0 0 44px rgba(56,189,248,.33),inset 0 0 0 1px rgba(255,255,255,.05);padding:22px 20px;color:#e2e8f0;display:flex;align-items:center;gap:16px;opacity:0;transform:translateY(16px) scale(.9);transition:opacity .32s ease,transform .42s cubic-bezier(.18,.85,.24,1.2)}
+      .levelUpOverlayCard::before{content:'';position:absolute;inset:-18%;z-index:-1;background:radial-gradient(circle,rgba(56,189,248,.26) 0%,rgba(59,130,246,.16) 40%,rgba(14,116,144,0) 72%);opacity:0;transform:scale(.86)}
+      #levelUpOverlayRoot.open .levelUpOverlayCard{opacity:1;transform:translateY(0) scale(1)}
+      #levelUpOverlayRoot.open .levelUpOverlayCard::before{animation:levelUpOverlayBurst .9s ease-out .1s both}
+      .levelUpOverlayCard .rankBadgeIconWrap{width:74px;height:74px;flex:0 0 74px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.42),0 12px 26px rgba(2,6,23,.5),0 0 30px rgba(56,189,248,.34)}
+      .levelUpOverlayCard .rankBadgeIconWrap svg{width:42px;height:42px}
+      .levelUpOverlayText{min-width:0;display:flex;flex-direction:column;gap:4px}
+      .levelUpTag{font-size:12px;font-weight:900;letter-spacing:1px;text-transform:uppercase;color:#67e8f9}
+      .levelUpTitle{font-size:24px;font-weight:900;line-height:1.04;color:#fff}
+      .levelUpSub{font-size:15px;font-weight:800;color:#c7d2fe}
+      .levelUpXp{font-size:13px;font-weight:800;color:#93c5fd}
+      .pickupProgressReward{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom, 0px) + var(--pickup-reward-bottom, 240px));width:min(320px,calc(100vw - 22px));transform:translate(-50%,26px) scale(.9);opacity:0;z-index:9802;pointer-events:none;display:block;color:#e2e8f0;transition:opacity .42s ease,transform .42s cubic-bezier(.16,.82,.24,1.18);text-shadow:0 4px 20px rgba(2,6,23,.62),0 1px 1px rgba(2,6,23,.45)}
+      .pickupProgressRewardCard{position:relative;overflow:hidden;border-radius:22px;padding:14px 14px 13px;background:linear-gradient(160deg,rgba(2,6,23,.94) 0%,rgba(15,23,42,.92) 50%,rgba(30,64,175,.44) 100%);border:1px solid rgba(125,211,252,.34);box-shadow:0 20px 46px rgba(2,6,23,.56),0 0 34px rgba(56,189,248,.28),inset 0 1px 0 rgba(255,255,255,.1);display:flex;flex-direction:column;align-items:center;gap:7px}
+      .pickupProgressRewardCard::before{content:'';position:absolute;inset:-24% -12% auto -12%;height:86%;background:radial-gradient(circle at top,rgba(125,211,252,.28) 0%,rgba(56,189,248,0) 65%);opacity:.7;pointer-events:none}
+      .pickupProgressReward.show{opacity:1;transform:translate(-50%,0) scale(1)}
+      .pickupProgressRewardKicker,.pickupProgressRewardXp,.pickupProgressRewardLevel,.pickupProgressRewardRank,.pickupProgressRewardFoot{opacity:0;transform:translateY(7px);transition:opacity .24s ease,transform .24s ease}
+      .pickupProgressReward.show .pickupProgressRewardKicker{opacity:1;transform:translateY(0);transition-delay:.05s}
+      .pickupProgressReward.show .pickupProgressRewardXp{opacity:1;transform:translateY(0);transition-delay:.11s}
+      .pickupProgressReward.show .pickupProgressRewardLevel,.pickupProgressReward.show .pickupProgressRewardRank{opacity:1;transform:translateY(0);transition-delay:.18s}
+      .pickupProgressReward.show .pickupProgressRewardFoot{opacity:1;transform:translateY(0);transition-delay:.25s}
+      .pickupProgressRewardKicker{font-size:12px;font-weight:900;letter-spacing:1px;text-transform:uppercase;color:#dbeafe}
+      .pickupProgressRewardXp{font-size:16px;font-weight:900;line-height:1;color:#67e8f9}
+      .pickupProgressRewardIcon{position:relative;display:grid;place-items:center;opacity:0;transform:scale(.74)}
+      .pickupProgressReward.show .pickupProgressRewardIcon{opacity:1;animation:pickupProgressRewardIconPop .62s cubic-bezier(.2,.8,.2,1) .1s both}
+      .pickupProgressRewardIcon::before{content:'';position:absolute;inset:-13px;border-radius:999px;background:radial-gradient(circle,rgba(110,231,255,.5) 0%,rgba(56,189,248,.24) 46%,rgba(56,189,248,0) 72%);filter:blur(1px);opacity:0;transform:scale(.58)}
+      .pickupProgressReward.show .pickupProgressRewardIcon::before{animation:pickupProgressRewardGlow .76s ease-out .14s both}
+      .pickupProgressReward .rankBadgeIconWrap{width:70px;height:70px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.44),0 0 0 1px rgba(15,23,42,.2),0 14px 30px rgba(2,6,23,.52),0 0 26px rgba(56,189,248,.35)}
+      .pickupProgressReward .rankBadgeIconWrap svg{width:40px;height:40px}
+      .pickupProgressRewardLevel{font-size:22px;font-weight:900;line-height:1.08;color:#fff}
+      .pickupProgressRewardRank{margin-top:-1px;font-size:16px;font-weight:800;line-height:1.18;color:#bfdbfe;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .pickupProgressRewardBar{width:min(248px,100%);height:9px;border-radius:999px;background:rgba(148,163,184,.3);box-shadow:0 0 0 1px rgba(148,163,184,.25),0 0 16px rgba(59,130,246,.3);overflow:hidden}
+      .pickupProgressRewardFill{height:100%;width:0;background:linear-gradient(90deg,#22d3ee 0%,#3b82f6 56%,#22c55e 100%);border-radius:999px;transition:width .62s cubic-bezier(.2,.84,.2,1);transition-delay:.2s}
+      .pickupProgressRewardFoot{font-size:12px;line-height:1.22;font-weight:800;color:#dbeafe;text-align:center}
+      @keyframes pickupProgressRewardIconPop{0%{transform:scale(.68)}40%{transform:scale(1.18)}100%{transform:scale(1)}}
+      @keyframes pickupProgressRewardGlow{0%{opacity:0;transform:scale(.5)}34%{opacity:1;transform:scale(1.04)}100%{opacity:0;transform:scale(1.3)}}
+      @keyframes levelUpOverlayBurst{0%{opacity:0;transform:scale(.82)}38%{opacity:1;transform:scale(1.02)}100%{opacity:0;transform:scale(1.24)}}
+      .driverProfileClose{border:0;background:#e5e7eb;color:#111827;border-radius:10px;padding:7px 9px;font-size:13px}
+      .driverProfileScroll{overflow:auto;-webkit-overflow-scrolling:touch;padding:0 10px 6px;min-height:0}
+      .driverProfileSectionTitle{font-size:12px;font-weight:700;color:#111827;margin:1px 0 3px}
+      .driverProfileStats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:3px;margin-bottom:6px}
+      .driverProfileStatCard{background:#f8fafc;border:1px solid #e2e8f0;border-radius:11px;padding:4px 5px}
+      .driverProfileStatPeriod{font-size:11px;font-weight:700;color:#0f172a;margin-bottom:2px}
+      .driverProfileStatRow{display:flex;align-items:center;justify-content:space-between;gap:4px;margin-top:0}
+      .driverProfileStatLabel{font-size:11px;color:#475569}
+      .driverProfileStatValue{font-size:13px;font-weight:700;color:#0f172a}
+      .driverProfileDailyRanks{margin-top:3px;padding-top:2px;border-top:1px dashed #dbe4ee}
+      .driverProfileDailyRanks .driverProfileStatLabel{font-size:10px}
+      .driverProfileDailyRanks .driverProfileStatValue{font-size:11px}
+      .driverProfileDmWrap{display:flex;flex-direction:column;border:1px solid #e2e8f0;border-radius:11px;background:#fff;min-height:130px}
+      .driverProfileDmList{display:flex;flex-direction:column;gap:7px;overflow:auto;max-height:min(22vh,190px);padding:9px}
+      .driverProfileDmList .chatPrivateMsgRow{margin:0}
+      .driverProfileDmList .chatBubbleSelf,.driverProfileDmList .chatBubbleOther{max-width:86%}
+      .driverProfileComposer{display:flex;gap:7px;padding:8px;border-top:1px solid #e2e8f0;padding-bottom:8px}
+      .driverProfileInput{flex:1;min-width:0;border:1px solid #cbd5e1;border-radius:10px;padding:9px;font-size:16px;color:#0f172a}
+      .driverProfileSendBtn{border:0;border-radius:10px;background:#1d4ed8;color:#fff;font-weight:600;padding:9px 11px}
+      .driverProfileSendBtn:disabled{opacity:.6}
+      .driverProfileVoiceComposer{padding:0 8px calc(8px + env(safe-area-inset-bottom));border-top:0}
+      .driverProfileDmList .chatVoiceBubble{max-width:100%}
+      .driverProfileStatus{font-size:12px;color:#64748b;padding:0 10px 7px}
+      .driverProfileError{font-size:12px;color:#b91c1c;background:#fee2e2;border:1px solid #fecaca;border-radius:10px;padding:8px;margin:2px 10px 7px}
+      .driverProfileLoading{padding:14px 10px;color:#334155;font-size:13px}
+      .driverProfileActions{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:5px}
+      .driverProfileActionBtn{border:1px solid #cbd5e1;background:#f8fafc;color:#0f172a;border-radius:10px;padding:8px 10px;font-size:13px;font-weight:600}
+      .driverProfileActionBtn.danger{border-color:#fecaca;background:#fff1f2;color:#b91c1c}
+      .driverProfileMapIdentity{border:1px solid #e2e8f0;border-radius:11px;padding:5px;background:#fff}
+      .driverProfileMapIdentity #profileMapIdentitySection{margin:0}
+    `;
+    document.head.appendChild(style);
+  }
+
+  function updateDriverProfileLayout() {
+    const root = document.getElementById('driverProfileModalRoot') || document.querySelector('[data-driver-profile-modal-root]');
+    if (!root) return;
+    const dock = document.getElementById('dock');
+    const sliderWrap = document.getElementById('sliderWrap');
+    const mapControlStack = document.querySelector('.mapControlStack');
+    void mapControlStack;
+
+    let bottomOffset = 16;
+    if (dock) {
+      bottomOffset = Math.max(bottomOffset, window.innerHeight - dock.getBoundingClientRect().top + 10);
+    }
+    if (sliderWrap) {
+      bottomOffset = Math.max(bottomOffset, window.innerHeight - sliderWrap.getBoundingClientRect().top + 8);
+    }
+    root.style.setProperty('--driver-profile-bottom-offset', `${Math.max(16, Math.round(bottomOffset))}px`);
+  }
+
+  function scheduleDriverProfileLayoutUpdate() {
+    updateDriverProfileLayout();
+    if (driverProfileLayoutTimer50) window.clearTimeout(driverProfileLayoutTimer50);
+    if (driverProfileLayoutTimer180) window.clearTimeout(driverProfileLayoutTimer180);
+    driverProfileLayoutTimer50 = window.setTimeout(updateDriverProfileLayout, 50);
+    driverProfileLayoutTimer180 = window.setTimeout(updateDriverProfileLayout, 180);
+  }
+
+  function bindDriverProfileLayoutEvents() {
+    if (driverProfileLayoutBound) return;
+    driverProfileLayoutBound = true;
+    window.addEventListener('resize', updateDriverProfileLayout);
+    window.addEventListener('orientationchange', updateDriverProfileLayout);
+    if (window.visualViewport && typeof window.visualViewport.addEventListener === 'function') {
+      window.visualViewport.addEventListener('resize', updateDriverProfileLayout);
+    }
+  }
+
+  function ensureDriverProfileUI() {
+    injectDriverProfileStyles();
+    bindDriverProfileLayoutEvents();
+    let root = document.getElementById('driverProfileModalRoot');
+    if (root) {
+      updateDriverProfileLayout();
+      return root;
+    }
+
+    root = document.createElement('div');
+    root.id = 'driverProfileModalRoot';
+    root.innerHTML = `
+      <div class="driverProfileBackdrop"></div>
+      <section class="driverProfileSheet" role="dialog" aria-modal="true" aria-label="Driver profile">
+        <div class="driverProfileBody" id="driverProfileBody"></div>
+      </section>
+    `;
+    const backdrop = root.querySelector('.driverProfileBackdrop');
+    const sheet = root.querySelector('.driverProfileSheet');
+    backdrop?.addEventListener('click', () => closeDriverProfileModal());
+    sheet?.addEventListener('click', (ev) => ev.stopPropagation());
+    document.body.appendChild(root);
+    updateDriverProfileLayout();
+    return root;
+  }
+
+  function driverProfileBadgeChip(code) {
+    const meta = leaderboardBadgeMeta(code);
+    if (!meta.code) return '<span class="driverProfileBadgeLabel">No badge yet</span>';
+    return `<span class="driverProfileBadgeChipWrap"><span class="badgeSvgWrap">${renderLeaderboardBadgeSvg(meta.code, { size: 30 })}</span><span class="driverProfileBadgeLabel">${escapeHtml(meta.profileLabel)}</span></span>`;
+  }
+
+  function driverProfileAvatarHTML(profileUser) {
+    const name = String(profileUser?.display_name || 'Driver').trim() || 'Driver';
+    const avatarUrl = String(profileUser?.avatar_url || '').trim();
+    if (avatarUrl) {
+      return `<img class="driverProfileAvatar" src="${escapeHtml(avatarUrl)}" alt="${escapeHtml(name)} avatar">`;
+    }
+    return `<div class="driverProfileAvatar" style="display:flex;align-items:center;justify-content:center;font-weight:700;color:#334155;">${escapeHtml(name.slice(0, 1).toUpperCase())}</div>`;
+  }
+
+  function formatDriverProfileStat(value, kind = 'value') {
+    if (kind === 'rank') {
+      const n = Number(value);
+      return Number.isFinite(n) && n > 0 ? `#${n}` : '—';
+    }
+    const n = Number(value);
+    if (!Number.isFinite(n)) return '0';
+    return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  }
+
+  function normalizeDriverTier(title) {
+    return String(title || '').trim() || 'Recruit';
+  }
+
+  function formatProgressNumber(value, { maxFractionDigits = 1 } = {}) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return '0';
+    return n.toLocaleString(undefined, { maximumFractionDigits: maxFractionDigits });
+  }
+
+  const LEGACY_RANK_ICON_BAND_MAP = {
+    recruit: 1,
+    private: 2,
+    corporal: 3,
+    sergeant: 4,
+    staff_sergeant: 5,
+    sergeant_first_class: 6,
+    master_sergeant: 7,
+    lieutenant: 8,
+    captain: 9,
+    major: 10,
+    colonel: 11,
+    brigadier: 12,
+    major_general: 13,
+    lieutenant_general: 14,
+    general: 15,
+    commander: 16,
+    road_legend: 17,
+  };
+
+  function resolveRankIconBand(rankIconKey) {
+    const key = String(rankIconKey || '').trim().toLowerCase();
+    const match = key.match(/^band_(\d{1,3})$/);
+    if (match) {
+      const value = Number(match[1]);
+      return Math.max(1, Math.min(100, value));
+    }
+    return Math.max(1, Math.min(100, Number(LEGACY_RANK_ICON_BAND_MAP[key] || 1)));
+  }
+
+  function resolveRankIconTone(rankIconKey) {
+    const band = resolveRankIconBand(rankIconKey);
+    if (band >= 91) return 'toneLegend';
+    if (band >= 71) return 'toneGeneral';
+    if (band >= 41) return 'toneOfficer';
+    if (band >= 11) return 'toneEnlisted';
+    return 'toneRecruit';
+  }
+
+  function buildRankBadgeShell(shellIndex) {
+    const shells = [
+      '<path d="M24 4L42 12v12c0 12-8.4 18.8-18 22C14.4 42.8 6 36 6 24V12z" />',
+      '<path d="M24 4l16 10v12L24 44 8 26V14z" />',
+      '<path d="M24 3l17 8 4 17-11 14H14L3 28l4-17z" />',
+      '<circle cx="24" cy="24" r="18" />',
+      '<path d="M24 4l18 16-18 24L6 20z" />',
+      '<path d="M12 8h24l10 12-10 20H12L2 20z" />',
+      '<path d="M24 5c11 0 18 7 18 16 0 12-9 20-18 23C15 41 6 33 6 21 6 12 13 5 24 5z" />',
+      '<path d="M24 3l19 14-7 25H12L5 17z" />',
+      '<path d="M10 10h28l6 14-6 14H10L4 24z" />',
+      '<rect x="7" y="7" width="34" height="34" rx="11" ry="11" />',
+    ];
+    return shells[((shellIndex % shells.length) + shells.length) % shells.length];
+  }
+
+  function buildRankBadgeGlyph(glyphIndex) {
+    const glyphs = [
+      '<path d="M24 13l3.8 7.8 8.6 1.2-6.2 6 1.5 8.8L24 32.5l-7.7 4.3 1.5-8.8-6.2-6 8.6-1.2z" />',
+      '<path d="M17 14h14v5H17zM14 23h20v5H14zM11 32h26v4H11z" />',
+      '<path d="M24 10l10 14-10 14-10-14z" />',
+      '<circle cx="24" cy="24" r="6" /><path d="M24 11v6M24 31v6M11 24h6M31 24h6" stroke="currentColor" stroke-width="3" stroke-linecap="round" fill="none"/>',
+      '<path d="M16 33V17l8-5 8 5v16l-8 5z" />',
+      '<path d="M14 33l10-18 10 18h-6l-4-7-4 7z" />',
+      '<path d="M14 18h20v4H14zM17 24h14v4H17zM20 30h8v4h-8z" />',
+      '<path d="M24 11l11 7v12l-11 7-11-7V18z" fill="none" stroke="currentColor" stroke-width="3"/><circle cx="24" cy="24" r="4" />',
+      '<path d="M18 12h12l4 9-10 15L14 21z" />',
+      '<path d="M24 12c5.5 0 10 4.5 10 10s-4.5 14-10 14-10-8.5-10-14 4.5-10 10-10z" /><path d="M18 24h12" stroke="currentColor" stroke-width="3" stroke-linecap="round" fill="none"/>',
+    ];
+    return glyphs[((glyphIndex % glyphs.length) + glyphs.length) % glyphs.length];
+  }
+
+  function renderRankBadgeIcon(rankIconKey, { compact = false } = {}) {
+    const band = resolveRankIconBand(rankIconKey);
+    const toneClass = resolveRankIconTone(rankIconKey);
+    const shellIndex = Math.floor((band - 1) / 10);
+    const glyphIndex = (band - 1) % 10;
+    const size = compact ? 54 : 68;
+    const hue = ((band - 1) * 17) % 360;
+    const accentHue = (hue + 42) % 360;
+    const shell = buildRankBadgeShell(shellIndex);
+    const glyph = buildRankBadgeGlyph(glyphIndex);
+    const gradientId = `rbg-${band}-${compact ? 'c' : 'f'}`;
+    return `<div class="rankBadgeIconWrap ${toneClass}${compact ? ' compact' : ''}" aria-hidden="true" data-rank-band="${band}">
+      <svg viewBox="0 0 48 48" width="${size}" height="${size}" role="presentation" focusable="false">
+        <defs>
+          <linearGradient id="${gradientId}" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="hsl(${hue} 88% 68%)"/>
+            <stop offset="55%" stop-color="hsl(${accentHue} 85% 58%)"/>
+            <stop offset="100%" stop-color="hsl(${(accentHue + 35) % 360} 72% 32%)"/>
+          </linearGradient>
+        </defs>
+        <circle cx="24" cy="24" r="22" fill="rgba(255,255,255,.22)"/>
+        <g fill="url(#${gradientId})" stroke="rgba(15,23,42,.26)" stroke-width="1.3">${shell}</g>
+        <g fill="rgba(255,255,255,.92)" stroke="rgba(15,23,42,.18)" stroke-width="0.8">${glyph}</g>
+        <circle cx="24" cy="24" r="20.6" fill="none" stroke="rgba(255,255,255,.28)" stroke-width="1"/>
+      </svg>
+    </div>`;
+  }
+
+  function renderDriverProgressionSection(progression) {
+    const level = Number(progression?.level);
+    const safeLevel = Number.isFinite(level) && level > 0 ? Math.floor(level) : 1;
+    const title = normalizeDriverTier(progression?.rank_name || progression?.title);
+    const totalXp = Number(progression?.total_xp);
+    const currentLevelXp = Number(progression?.current_level_xp);
+    const nextLevelXp = Number(progression?.next_level_xp);
+    const xpToNextLevel = Number(progression?.xp_to_next_level);
+    const maxLevelReached = progression?.max_level_reached === true;
+    const lifetimeMiles = Number(progression?.lifetime_miles);
+    const lifetimeHours = Number(progression?.lifetime_hours);
+    const lifetimePickups = Number(progression?.lifetime_pickups_recorded);
+    const milesXp = Number(progression?.xp_breakdown?.miles_xp);
+    const hoursXp = Number(progression?.xp_breakdown?.hours_xp);
+    const reportXp = Number(progression?.xp_breakdown?.report_xp);
+    const gameXp = Number(progression?.xp_breakdown?.game_xp);
+
+    let progressPct = 1;
+    if (!maxLevelReached) {
+      const denom = nextLevelXp - currentLevelXp;
+      if (Number.isFinite(denom) && denom > 0 && Number.isFinite(totalXp)) {
+        progressPct = (totalXp - currentLevelXp) / denom;
+      } else {
+        progressPct = 0;
+      }
+    }
+    const clampedPct = Math.max(0, Math.min(1, progressPct));
+
+    const nextLevelLabel = maxLevelReached
+      ? 'MAX LEVEL'
+      : `Next Level: ${safeLevel + 1} at ${formatProgressNumber(nextLevelXp, { maxFractionDigits: 0 })} XP`;
+    const xpToNextLabel = maxLevelReached
+      ? ''
+      : `<div class="driverProfileProgressMeta">XP to Next Level: ${escapeHtml(formatProgressNumber(xpToNextLevel, { maxFractionDigits: 0 }))}</div>`;
+
+    return `<div class="driverProfileProgressWrap">
+      <div class="driverProfileProgressHead">
+        <div class="driverProfileProgressLine">Level ${safeLevel} • <span class="driverProfileRankName">${escapeHtml(title)}</span></div>
+        ${renderRankBadgeIcon(progression?.rank_icon_key, { compact: true })}
+      </div>
+      <div class="driverProfileProgressMeta">Total XP: ${escapeHtml(formatProgressNumber(totalXp, { maxFractionDigits: 0 }))}</div>
+      <div class="driverProfileProgressBar" aria-hidden="true"><div class="driverProfileProgressFill" style="width:${(clampedPct * 100).toFixed(1)}%"></div></div>
+      <div class="driverProfileProgressMeta">${escapeHtml(nextLevelLabel)}</div>
+      ${xpToNextLabel}
+      <div class="driverProfileBreakdownGrid">
+        <div class="driverProfileProgressMeta">Miles: ${escapeHtml(formatProgressNumber(lifetimeMiles))}</div>
+        <div class="driverProfileProgressMeta">Hours: ${escapeHtml(formatProgressNumber(lifetimeHours))}</div>
+        <div class="driverProfileProgressMeta">Reported Trips: ${escapeHtml(formatProgressNumber(lifetimePickups, { maxFractionDigits: 0 }))}</div>
+        <div class="driverProfileProgressMeta">Miles XP: ${escapeHtml(formatProgressNumber(milesXp, { maxFractionDigits: 0 }))}</div>
+        <div class="driverProfileProgressMeta">Hours XP: ${escapeHtml(formatProgressNumber(hoursXp, { maxFractionDigits: 0 }))}</div>
+        <div class="driverProfileProgressMeta">Report XP: ${escapeHtml(formatProgressNumber(reportXp, { maxFractionDigits: 0 }))}</div>
+        <div class="driverProfileProgressMeta">Game XP: ${escapeHtml(formatProgressNumber(gameXp, { maxFractionDigits: 0 }))}</div>
+      </div>
+    </div>`;
+  }
+
+  function renderDriverProfilePeriodCard(label, data, extraHtml = '') {
+    const pickups = Number(data?.pickups ?? data?.pickup_count ?? data?.reported_trips);
+    const pickupLine = Number.isFinite(pickups)
+      ? `<div class="driverProfileStatRow"><div class="driverProfileStatLabel">Pickups</div><div class="driverProfileStatValue">${escapeHtml(formatDriverProfileStat(pickups, 'value'))}</div></div>`
+      : '';
+    return `<div class="driverProfileStatCard">
+      <div class="driverProfileStatPeriod">${escapeHtml(label)}</div>
+      <div class="driverProfileStatRow"><div class="driverProfileStatLabel">Miles</div><div class="driverProfileStatValue">${escapeHtml(formatDriverProfileStat(data?.miles, 'value'))}</div></div>
+      <div class="driverProfileStatRow"><div class="driverProfileStatLabel">Hours</div><div class="driverProfileStatValue">${escapeHtml(formatDriverProfileStat(data?.hours, 'value'))}</div></div>
+      ${pickupLine}
+      ${extraHtml}
+    </div>`;
+  }
+
   function renderBattleStatsSection(stats) {
     const safe = { ...defaultBattleStats(), ...(stats && typeof stats === 'object' ? stats : {}) };
     const totalMatches = Number(safe.total_matches ?? safe.matches_played ?? 0) || 0;
@@ -4939,6 +6932,10 @@
       ['Losses', losses],
       ['Matches', totalMatches],
       ['Win rate', formatBattlePct(winRate)],
+      ['Dominoes W', safe.dominoes_wins],
+      ['Dominoes L', safe.dominoes_losses],
+      ['Billiards W', safe.billiards_wins],
+      ['Billiards L', safe.billiards_losses],
       ['Game XP', formatProgressNumber(safe.game_xp_earned, { maxFractionDigits: 0 })],
     ];
     return `<div class="driverProfileBattleGrid">${cards.map(([label, value]) => `<div class="driverProfileBattleCard"><div class="driverProfileBattleLabel">${escapeHtml(String(label))}</div><div class="driverProfileBattleValue">${escapeHtml(String(value))}</div></div>`).join('')}</div>`;
@@ -5694,14 +7691,7 @@
       closeDriverProfileModal();
     });
     document.getElementById('driverProfileChallengeBtn')?.addEventListener('click', () => {
-      const profileTarget = { userId: driverProfileState.userId, displayName: name };
-      if (window.GameHubUI?.openWorkBattlesTab) {
-        window.GameHubUI.openWorkBattlesTab(profileTarget);
-      } else if (window.GameHubUI?.open) {
-        window.GameHubUI.open({ initialTab: 'work-battles', profileTarget });
-      } else {
-        window.WorkBattlesUI?.openForProfileTarget?.(profileTarget);
-      }
+      openGamesBattleComposer({ targetUserId: driverProfileState.userId, displayName: name, gameType: 'dominoes' });
       closeDriverProfileModal();
     });
 
@@ -5981,127 +7971,15 @@
   window.handlePickupProgressionDelta = handlePickupProgressionDelta;
   window.renderLeaderboardBadgeSvg = renderLeaderboardBadgeSvg;
   window.syncLeaderboardBadgeRewards = syncLeaderboardBadgeRewards;
+  window.openGamesBattleComposer = openGamesBattleComposer;
 
-  function forceOpenChatDrawer() {
-    if (typeof window.openPanel === 'function') {
-      window.openPanel('chat', 'Chat', chatPanelHTML(), wireChatPanel);
-      return;
-    }
-    if (typeof window.openDrawer === 'function') {
-      window.openDrawer('chat', 'Chat', chatPanelHTML());
-      if (typeof wireChatPanel === 'function') wireChatPanel();
-    }
-  }
-
-  function forceOpenGamesDrawer() {
-    if (window.GameHubUI && typeof window.GameHubUI.openGamesTab === 'function') {
-      window.GameHubUI.openGamesTab();
-      return;
-    }
-    if (window.GameHubUI && typeof window.GameHubUI.open === 'function') {
-      window.GameHubUI.open({ initialTab: 'games' });
-      return;
-    }
-    if (window.WorkBattlesUI && typeof window.WorkBattlesUI.openHub === 'function') {
-      window.WorkBattlesUI.openHub();
-      return;
-    }
-    if (typeof window.openPanel === 'function' && typeof window.gamesPanelHTML === 'function' && typeof window.wireGamesPanel === 'function') {
-      window.openPanel('games', 'Games', window.gamesPanelHTML(), window.wireGamesPanel);
-      return;
-    }
-    if (typeof window.openDrawer === 'function' && typeof window.gamesPanelHTML === 'function') {
-      window.openDrawer('games', 'Games', window.gamesPanelHTML());
-      if (typeof window.wireGamesPanel === 'function') window.wireGamesPanel();
-    }
-  }
-
-  function initCommunityDockBindings() {
+  // Bind the chat dock button using its ID
+  if (typeof bindDockToggle === 'function') {
     const chatBtn = document.getElementById('dockChat');
+    if (chatBtn) { bindDockToggle(chatBtn, 'chat', 'Chat', chatPanelHTML, wireChatPanel); }
     const gamesBtn = document.getElementById('dockGames');
-
-    if (chatBtn && chatBtn.dataset.chatDockBound !== '1' && chatBtn.dataset.chatDockHardBound !== '1') {
-      chatBtn.dataset.chatDockBound = '1';
-      if (typeof window.bindDockToggle === 'function') {
-        window.bindDockToggle(chatBtn, 'chat', 'Chat', chatPanelHTML, wireChatPanel);
-      } else {
-        chatBtn.addEventListener('click', (event) => {
-          event.preventDefault();
-          forceOpenChatDrawer();
-        });
-      }
-    }
-
-    if (gamesBtn && gamesBtn.dataset.gamesDockBound !== '1' && gamesBtn.dataset.gamesDockHardBound !== '1') {
-      gamesBtn.dataset.gamesDockBound = '1';
-      try {
-        if (window.GameHubUI && typeof window.GameHubUI.bindDockButton === 'function') {
-          window.GameHubUI.bindDockButton(gamesBtn);
-        } else if (window.WorkBattlesUI && typeof window.WorkBattlesUI.bindDockButton === 'function') {
-          window.WorkBattlesUI.bindDockButton(gamesBtn);
-        } else if (
-          typeof window.bindDockToggle === 'function' &&
-          typeof window.gamesPanelHTML === 'function' &&
-          typeof window.wireGamesPanel === 'function'
-        ) {
-          window.bindDockToggle(gamesBtn, 'games', 'Games', window.gamesPanelHTML, window.wireGamesPanel);
-        } else {
-          delete gamesBtn.dataset.gamesDockBound;
-        }
-      } catch (error) {
-        delete gamesBtn.dataset.gamesDockBound;
-        console.warn('Games dock binding failed', error);
-      }
-    }
+    if (gamesBtn) { bindDockToggle(gamesBtn, 'games', 'Games', gamesPanelHTML, wireGamesPanel); }
   }
-
-  function hardBindCoreDockButtons() {
-    const chatBtn = document.getElementById('dockChat');
-    if (chatBtn && chatBtn.dataset.chatDockHardBound !== '1') {
-      if (chatBtn.__chatDockHardHandler) {
-        chatBtn.removeEventListener('click', chatBtn.__chatDockHardHandler, true);
-      }
-      chatBtn.__chatDockHardHandler = (event) => {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        forceOpenChatDrawer();
-      };
-      chatBtn.addEventListener('click', chatBtn.__chatDockHardHandler, true);
-      chatBtn.dataset.chatDockHardBound = '1';
-    }
-
-    const gamesBtn = document.getElementById('dockGames');
-    if (gamesBtn && gamesBtn.dataset.gamesDockHardBound !== '1') {
-      if (gamesBtn.__gamesDockHardHandler) {
-        gamesBtn.removeEventListener('click', gamesBtn.__gamesDockHardHandler, true);
-      }
-      gamesBtn.__gamesDockHardHandler = (event) => {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        forceOpenGamesDrawer();
-      };
-      gamesBtn.addEventListener('click', gamesBtn.__gamesDockHardHandler, true);
-      gamesBtn.dataset.gamesDockHardBound = '1';
-    }
-  }
-
-  window.forceOpenChatDrawer = forceOpenChatDrawer;
-  window.forceOpenGamesDrawer = forceOpenGamesDrawer;
-  window.initCommunityDockBindings = initCommunityDockBindings;
-  window.hardBindCoreDockButtons = hardBindCoreDockButtons;
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-      initCommunityDockBindings();
-      hardBindCoreDockButtons();
-    }, { once: true });
-  } else {
-    initCommunityDockBindings();
-    hardBindCoreDockButtons();
-  }
-
-  window.setTimeout(hardBindCoreDockButtons, 250);
-  window.setTimeout(hardBindCoreDockButtons, 1000);
 
   // Example night mode toggle (optional)
   function toggleNightMode() { document.body.classList.toggle('night'); }
