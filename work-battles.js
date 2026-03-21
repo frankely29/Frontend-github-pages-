@@ -181,6 +181,7 @@
   }
 
   function challengeArray(payload) {
+    if (Array.isArray(payload?.item)) return payload.item;
     if (Array.isArray(payload?.items)) return payload.items;
     if (Array.isArray(payload?.rows)) return payload.rows;
     if (Array.isArray(payload?.challenges)) return payload.challenges;
@@ -189,6 +190,7 @@
   }
 
   function historyArray(payload) {
+    if (Array.isArray(payload?.item)) return payload.item;
     if (Array.isArray(payload?.items)) return payload.items;
     if (Array.isArray(payload?.rows)) return payload.rows;
     if (Array.isArray(payload?.history)) return payload.history;
@@ -466,7 +468,7 @@
     render();
     try {
       const payload = await fetchJSON(`/work-battles/users?q=${encodeURIComponent(String(query || '').trim())}&limit=40`);
-      const rows = (Array.isArray(payload?.items) ? payload.items : Array.isArray(payload?.rows) ? payload.rows : Array.isArray(payload?.users) ? payload.users : Array.isArray(payload) ? payload : [])
+      const rows = (Array.isArray(payload?.item) ? payload.item : Array.isArray(payload?.items) ? payload.items : Array.isArray(payload?.rows) ? payload.rows : Array.isArray(payload?.users) ? payload.users : Array.isArray(payload) ? payload : [])
         .map(normalizeUser)
         .filter(Boolean);
       state.users = rows;
@@ -672,6 +674,10 @@
       state.pendingProfileTarget = profileTarget;
       state.selectedUser = profileTarget;
       state.activeTab = 'create';
+      if (window.GameHubUI?.openWorkBattlesTab) {
+        window.GameHubUI.openWorkBattlesTab({ userId: profileTarget.userId, displayName: profileTarget.displayName });
+        return;
+      }
       if (window.GameHubUI?.open) {
         window.GameHubUI.open({ initialTab: 'work-battles', profileTarget: { userId: profileTarget.userId, displayName: profileTarget.displayName } });
         return;
