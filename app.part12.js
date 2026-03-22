@@ -441,7 +441,7 @@
 
     const topology = [];
     for (const occurrences of segmentMap.values()) {
-      if (!Array.isArray(occurrences) || !occurrences.length) continue;
+      if (!Array.isArray(occurrences) || occurrences.length !== 2) continue;
       const byZoneId = new Map();
       for (const occurrence of occurrences) {
         if (!occurrence?.zoneId) continue;
@@ -496,8 +496,8 @@
     return Math.max(0, Math.min(1, Number(v) || 0));
   }
 
-  // Stronger zone borders next to weaker-bucket neighbors get a subtle inward darkening band.
-  // Same-bucket borders do not get this effect; this is only a heuristic visual hint, not measured sub-zone truth.
+  // Stronger zone edges next to weaker-bucket neighbors get a subtle inward dark band.
+  // Same-bucket neighbors do not get this effect; this is only a heuristic visual hint, not measured sub-zone demand truth.
   function buildZoneEdgeInfluenceFeatureCollection(frame) {
     const topology = getZoneEdgeTopology(frame);
     const features = frame?.polygons?.features || [];
@@ -636,8 +636,6 @@
       map.addSource("zones", { type: "geojson", data: core.emptyGeojson?.() || { type: "FeatureCollection", features: [] } });
     }
 
-    // Neutral dark band only; keep the border line intact above it.
-    // This must remain weaker than real hotspot / micro-hotspot overlays.
     if (!map.getSource(EDGE_INFLUENCE_SOURCE_ID)) {
       map.addSource(EDGE_INFLUENCE_SOURCE_ID, { type: "geojson", data: core.emptyGeojson?.() || { type: "FeatureCollection", features: [] } });
     }
@@ -674,6 +672,8 @@
       });
     }
 
+    // Neutral dark inner band only.
+    // Keep the border line intact above it and remain weaker than real hotspot / micro-hotspot overlays.
     if (!map.getLayer(EDGE_INFLUENCE_SOFT_LAYER_ID)) {
       map.addLayer({
         id: EDGE_INFLUENCE_SOFT_LAYER_ID,
