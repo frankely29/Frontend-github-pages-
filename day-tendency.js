@@ -1,4 +1,12 @@
 (() => {
+  window.TlcDayTendencyState = window.TlcDayTendencyState || {
+    payload: null,
+    updatedAt: 0,
+    getPayload() {
+      return this.payload || null;
+    }
+  };
+
   const runtime = window.FrontendRuntime || null;
   const runtimePolling = runtime?.polling || null;
   const DAY_TENDENCY_REFRESH_MS = 30 * 60 * 1000;
@@ -304,6 +312,26 @@
     return meters > DAY_TENDENCY_MATERIAL_MOVE_METERS;
   }
 
+  // the meter UI is separate from coloring
+  // this shared payload is consumed by app.part11 to bias the final rating
+  function publishDayTendencyPayload(payload) {
+    const numericScore = Number(payload?.score);
+    const usablePayload = payload && Number.isFinite(numericScore)
+      ? {
+          ...payload,
+          score: numericScore,
+          confidence: Number.isFinite(Number(payload?.confidence)) ? Number(payload.confidence) : payload?.confidence,
+        }
+      : null;
+
+    window.TlcDayTendencyState.payload = usablePayload;
+    window.TlcDayTendencyState.updatedAt = Date.now();
+    window.dispatchEvent(new CustomEvent('tlc-day-tendency-updated', {
+      detail: usablePayload,
+    }));
+    return usablePayload;
+  }
+
   function applyDayTendencyPayload(payload) {
     const root = ensureDayTendencyRoot();
     if (!root) return false;
@@ -406,6 +434,7 @@
     if (!latLng) {
       if (!STATE.hasInitialGpsFix && !STATE.hasRenderedRealPayload) {
         applyWaitingForGpsState();
+        publishDayTendencyPayload(null);
       }
       return;
     }
@@ -435,9 +464,15 @@
       STATE.lastQueryLat = latLng.lat;
       STATE.lastQueryLng = latLng.lng;
       STATE.lastQueryAt = Date.now();
-      applyDayTendencyPayload(payload);
+      const applied = applyDayTendencyPayload(payload);
+      if (applied) {
+        publishDayTendencyPayload(payload);
+      } else {
+        publishDayTendencyPayload(null);
+      }
     } catch (_) {
       hadError = true;
+      publishDayTendencyPayload(null);
       if (!STATE.hasRenderedRealPayload && STATE.root) STATE.root.hidden = true;
     } finally {
       scheduleRetryIfNeeded(payload, hadError);
@@ -505,6 +540,10 @@
       });
     }
 
+    window.addEventListener('tlc-mode-changed', () => {
+      refreshDayTendencyMeter({ force: true });
+    });
+
     STATE.positionPollTimer = runtimePolling
       ? runtimePolling.setInterval('day-tendency:position', positionDayTendencyRoot, 5000)
       : window.setInterval(positionDayTendencyRoot, 5000);
@@ -538,6 +577,18 @@
 
     refreshDayTendencyMeter({ force: true });
   }
+
+  window.getDayTendencyMeterDebug = function () {
+    return {
+      payload: window.TlcDayTendencyState?.payload || null,
+      updatedAt: window.TlcDayTendencyState?.updatedAt || 0,
+      lastQueryAt: STATE.lastQueryAt || 0,
+      lastQueryLat: STATE.lastQueryLat ?? null,
+      lastQueryLng: STATE.lastQueryLng ?? null,
+      hasInitialGpsFix: !!STATE.hasInitialGpsFix,
+      hasRenderedRealPayload: !!STATE.hasRenderedRealPayload
+    };
+  };
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', startDayTendencyMeter, { once: true });
