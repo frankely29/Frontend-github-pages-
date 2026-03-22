@@ -13,7 +13,8 @@
   const EDGE_INFLUENCE_CORE_LAYER_ID = "zone-edge-influence-core";
   const EDGE_INFLUENCE_MIN_RATING_DIFF = 10;
   const EDGE_INFLUENCE_MAX_RATING_DIFF = 30;
-  const EDGE_INFLUENCE_CHUNK_DEG = 0.00012;
+  const EDGE_INFLUENCE_CHUNK_DEG = 0.0002;
+  const EDGE_INFLUENCE_MAX_SEGMENT_STEPS = 12;
   const EDGE_INFLUENCE_KEY_DP = 5;
 
   const ZONE_LABEL_SHORT_NAMES = {
@@ -407,7 +408,7 @@
     const dx = endLng - startLng;
     const dy = endLat - startLat;
     const length = Math.sqrt((dx * dx) + (dy * dy));
-    const steps = Math.max(1, Math.min(24, Math.ceil(length / EDGE_INFLUENCE_CHUNK_DEG)));
+    const steps = Math.max(1, Math.min(EDGE_INFLUENCE_MAX_SEGMENT_STEPS, Math.ceil(length / EDGE_INFLUENCE_CHUNK_DEG)));
     const points = [];
 
     for (let i = 0; i <= steps; i++) {
@@ -587,15 +588,15 @@
       const orientedCoords = orientSegmentIntoZoneRightSide(strongerCoords, strongerInteriorSide);
       const edgeStrength = clamp01((diff - EDGE_INFLUENCE_MIN_RATING_DIFF) / (EDGE_INFLUENCE_MAX_RATING_DIFF - EDGE_INFLUENCE_MIN_RATING_DIFF));
       const edgeColor = getFeatureBaseColorForEdge(weakerFeature);
-      const haloWidthPx = 30 + (edgeStrength * 16);
-      const softWidthPx = 16 + (edgeStrength * 8);
-      const coreWidthPx = 6 + (edgeStrength * 4);
-      const haloOpacity = 0.004 + (edgeStrength * 0.018);
-      const softOpacity = 0.008 + (edgeStrength * 0.024);
-      const coreOpacity = 0.012 + (edgeStrength * 0.028);
-      const haloOffsetPx = 8 + (edgeStrength * 4.5);
-      const softOffsetPx = 4.5 + (edgeStrength * 2.8);
-      const coreOffsetPx = 2 + (edgeStrength * 1.4);
+      const haloWidthPx = 22 + (edgeStrength * 10);
+      const softWidthPx = 12 + (edgeStrength * 5);
+      const coreWidthPx = 4.5 + (edgeStrength * 2.5);
+      const haloOpacity = 0.003 + (edgeStrength * 0.012);
+      const softOpacity = 0.006 + (edgeStrength * 0.016);
+      const coreOpacity = 0.01 + (edgeStrength * 0.018);
+      const haloOffsetPx = 6 + (edgeStrength * 3.2);
+      const softOffsetPx = 3.4 + (edgeStrength * 1.9);
+      const coreOffsetPx = 1.6 + (edgeStrength * 1.0);
 
       if (!strongerFeature || !Array.isArray(orientedCoords) || orientedCoords.length < 2) continue;
 
@@ -913,6 +914,16 @@
 
     const edgeSrc = map.getSource(EDGE_INFLUENCE_SOURCE_ID);
     if (!edgeSrc) return;
+
+    const mapZoom = Number(map.getZoom?.());
+    if (!Number.isFinite(mapZoom) || mapZoom < ZONE_EDGE_INFLUENCE_MIN_ZOOM) {
+      zoneEdgeInfluenceFeatureCount = 0;
+      if (zoneEdgeInfluenceFingerprint !== "") {
+        edgeSrc.setData({ type: "FeatureCollection", features: [] });
+        zoneEdgeInfluenceFingerprint = "";
+      }
+      return;
+    }
 
     const edgeFc = buildZoneEdgeInfluenceFeatureCollection(frame);
     zoneEdgeInfluenceFeatureCount = Array.isArray(edgeFc?.features) ? edgeFc.features.length : 0;

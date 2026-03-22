@@ -968,10 +968,43 @@ function bindDockToggle(btn, key, title, htmlFactory, wireFn) {
 
 bindDockToggle(dockMusic, "music", "Music", musicPanelHTML, wireMusicPanel);
 bindDockToggle(dockModes, "modes", "Modes", modesPanelHTML, wireModesPanel);
-// Chat binding has been removed from app.js.  A new chat implementation
-// in app.part2.js will call bindDockToggle(dockChat, ...) with its own
-// panel and wiring functions.
 bindDockToggle(dockColors, "colors", "Colors", colorsPanelHTML);
+
+function ensureDockChatAndGamesBindings() {
+  if (dockChat && !dockChat.dataset.tlcBoundChat && typeof window.chatPanelHTML === 'function' && typeof window.wireChatPanel === 'function') {
+    dockChat.dataset.tlcBoundChat = '1';
+    bindDockToggle(dockChat, 'chat', 'Chat', () => window.chatPanelHTML(), () => window.wireChatPanel());
+  }
+
+  if (dockGames && !dockGames.dataset.tlcBoundGames && window.TlcGamesModule?.gamesPanelHTML && window.TlcGamesModule?.wireGamesPanel) {
+    dockGames.dataset.tlcBoundGames = '1';
+    bindDockToggle(
+      dockGames,
+      'games',
+      'Games',
+      () => window.TlcGamesModule.gamesPanelHTML(),
+      () => window.TlcGamesModule.wireGamesPanel()
+    );
+  }
+
+  return !!dockChat?.dataset.tlcBoundChat && !!dockGames?.dataset.tlcBoundGames;
+}
+
+function scheduleDockChatAndGamesBindingRetries() {
+  const retryDelaysMs = [0, 120, 600, 1500, 3000, 5000];
+  retryDelaysMs.forEach((delay) => {
+    window.setTimeout(() => {
+      ensureDockChatAndGamesBindings();
+    }, delay);
+  });
+}
+
+window.ensureDockChatAndGamesBindings = ensureDockChatAndGamesBindings;
+ensureDockChatAndGamesBindings();
+scheduleDockChatAndGamesBindingRetries();
+window.addEventListener('load', ensureDockChatAndGamesBindings, { once: true });
+window.addEventListener('pageshow', ensureDockChatAndGamesBindings);
+window.addEventListener('focus', ensureDockChatAndGamesBindings);
 if (dockProfile) {
   dockProfile.addEventListener("pointerdown", (e) => e.stopPropagation());
   dockProfile.addEventListener("click", (e) => {
