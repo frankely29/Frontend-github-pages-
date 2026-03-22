@@ -2606,7 +2606,7 @@ function renderAdaptivePresenceFromCache() {
   }
 
   if (typeof window !== "undefined" && typeof window.mapIdentityApplySelfOrbit === "function") {
-    window.mapIdentityApplySelfOrbit(lastSelfOrbitMeta);
+    window.mapIdentityApplySelfOrbit(core.getLastSelfOrbitMeta?.() || null);
   }
 
   applyDriverLabelZoomStyles();
