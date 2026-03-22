@@ -13,7 +13,7 @@
   const EDGE_INFLUENCE_CORE_LAYER_ID = "zone-edge-influence-core";
   const EDGE_INFLUENCE_MIN_RATING_DIFF = 10;
   const EDGE_INFLUENCE_MAX_RATING_DIFF = 30;
-  const EDGE_INFLUENCE_CHUNK_DEG = 0.00012;
+  const EDGE_INFLUENCE_CHUNK_DEG = 0.00020;
   const EDGE_INFLUENCE_KEY_DP = 5;
 
   const ZONE_LABEL_SHORT_NAMES = {
@@ -104,7 +104,7 @@
 
   function refreshZoneEdgeInfluenceFromCurrentFrame() {
     const frame = window.TlcCommunityInternals?.getCurrentFrame?.() || window.TlcModeInternals?.getCurrentFrame?.();
-    if (frame) refreshZoneLabels(frame);
+    refreshZoneEdgeInfluence(frame || null);
   }
 
   function bboxFromCoords(coords) {
@@ -407,7 +407,7 @@
     const dx = endLng - startLng;
     const dy = endLat - startLat;
     const length = Math.sqrt((dx * dx) + (dy * dy));
-    const steps = Math.max(1, Math.min(24, Math.ceil(length / EDGE_INFLUENCE_CHUNK_DEG)));
+    const steps = Math.max(1, Math.min(12, Math.ceil(length / EDGE_INFLUENCE_CHUNK_DEG)));
     const points = [];
 
     for (let i = 0; i <= steps; i++) {
@@ -502,16 +502,10 @@
 
   function getZoneEdgeTopology(frame) {
     const features = frame?.polygons?.features || [];
-    const rows = [];
-    for (const feature of features) {
-      const ringRows = [];
-      forEachOuterRing(feature, (ring) => {
-        if (!Array.isArray(ring) || !ring.length) return;
-        ringRows.push(ring.map(edgeCoordKey).join(","));
-      });
-      rows.push(`${getZoneLabelSignature(feature)}|${ringRows.sort().join("||")}`);
-    }
-    const signature = rows.sort().join("###");
+    const signature = features
+      .map((feature) => getZoneLabelSignature(feature))
+      .sort()
+      .join("###");
     if (signature === zoneEdgeTopologySignature) return zoneEdgeTopologyCache;
     zoneEdgeTopologySignature = signature;
     zoneEdgeTopologyCache = buildZoneEdgeTopology(frame);
@@ -646,6 +640,42 @@
       ].join("|");
     }) : [];
     return rows.sort().join("###");
+  }
+
+  function clearZoneEdgeInfluenceSource() {
+    const map = core.getMap?.();
+    const edgeSrc = map?.getSource?.(EDGE_INFLUENCE_SOURCE_ID);
+    if (!edgeSrc) return;
+    edgeSrc.setData(core.emptyGeojson?.() || { type: "FeatureCollection", features: [] });
+    zoneEdgeInfluenceFingerprint = "";
+    zoneEdgeInfluenceFeatureCount = 0;
+  }
+
+  function isZoneEdgeInfluenceZoomActive() {
+    const map = core.getMap?.();
+    const zoom = Number(map?.getZoom?.());
+    return Number.isFinite(zoom) && zoom >= ZONE_EDGE_INFLUENCE_MIN_ZOOM;
+  }
+
+  function refreshZoneEdgeInfluence(frame) {
+    const map = core.getMap?.();
+    const mapReady = core.isMapReady?.();
+    if (!map || !mapReady) return;
+
+    const edgeSrc = map.getSource(EDGE_INFLUENCE_SOURCE_ID);
+    if (!edgeSrc) return;
+
+    if (!frame || !isZoneEdgeInfluenceZoomActive()) {
+      clearZoneEdgeInfluenceSource();
+      return;
+    }
+
+    const edgeFc = buildZoneEdgeInfluenceFeatureCollection(frame);
+    zoneEdgeInfluenceFeatureCount = Array.isArray(edgeFc?.features) ? edgeFc.features.length : 0;
+    const edgeFingerprint = zoneEdgeInfluenceFingerprintFromFc(edgeFc);
+    if (edgeFingerprint === zoneEdgeInfluenceFingerprint) return;
+    edgeSrc.setData(edgeFc);
+    zoneEdgeInfluenceFingerprint = edgeFingerprint;
   }
 
   function buildZoneLabelLayoutFeature(feature) {
@@ -1027,16 +1057,7 @@
 
     const fc = buildZoneLabelsFeatureCollection(frame);
     src.setData(fc);
-
-    const edgeSrc = map.getSource(EDGE_INFLUENCE_SOURCE_ID);
-    if (!edgeSrc) return;
-
-    const edgeFc = buildZoneEdgeInfluenceFeatureCollection(frame);
-    zoneEdgeInfluenceFeatureCount = Array.isArray(edgeFc?.features) ? edgeFc.features.length : 0;
-    const edgeFingerprint = zoneEdgeInfluenceFingerprintFromFc(edgeFc);
-    if (edgeFingerprint === zoneEdgeInfluenceFingerprint) return;
-    edgeSrc.setData(edgeFc);
-    zoneEdgeInfluenceFingerprint = edgeFingerprint;
+    refreshZoneEdgeInfluence(frame);
   }
 
   function getFeatureCollectionBounds(fc) {
@@ -1072,6 +1093,7 @@
   window.TlcZoneLabelModule = {
     ensureZonesSourceAndLayers,
     refreshZoneLabels,
+    refreshZoneEdgeInfluence,
     getFeatureCollectionBounds
   };
 
@@ -1090,6 +1112,7 @@
       topologySignature: zoneEdgeTopologySignature || "",
       fingerprint: zoneEdgeInfluenceFingerprint || "",
       featureCount: zoneEdgeInfluenceFeatureCount,
+      zoomActive: isZoneEdgeInfluenceZoomActive(),
       hotspotShieldZoneIds: Array.from(pickupHotspotShieldZoneIds || []).sort(),
       sourceReady: !!map?.getSource?.(EDGE_INFLUENCE_SOURCE_ID),
       haloLayerReady: !!map?.getLayer?.(EDGE_INFLUENCE_HALO_LAYER_ID),
