@@ -233,6 +233,84 @@
     return { bucket: "red", color: "#e60000" };
   }
 
+
+  function clampRating100(value) {
+    return Math.max(1, Math.min(100, Number(value) || 0));
+  }
+
+  function getLiveDayTendencyPayload() {
+    return window.TlcDayTendencyState?.getPayload?.() || null;
+  }
+
+  function getTendencyConfidenceFactor(payload) {
+    const confidence = Number(payload?.confidence);
+    if (!Number.isFinite(confidence)) return 1;
+    return Math.max(0.35, Math.min(1, confidence));
+  }
+
+  function getTendencyDeltaPoints(payload) {
+    const score = Number(payload?.score);
+    if (!Number.isFinite(score)) return 0;
+    const normalized = (score - 50) / 50;
+    const baseDelta = normalized * 10;
+    return baseDelta * getTendencyConfidenceFactor(payload);
+  }
+
+  function normalizeBoroughName(value) {
+    return String(value || '').trim().toLowerCase();
+  }
+
+  function getFeatureBoroughName(props) {
+    return normalizeBoroughName(props?.borough);
+  }
+
+  function getTendencyScopeWeight(props, geom, payload) {
+    if (!payload) return 0;
+    const flags = getModeFlags();
+
+    if (flags.statenIslandMode) return isStatenIslandFeature(props) ? 1 : 0;
+    if (flags.manhattanMode) return isManhattanModeZone(props, geom) ? 1 : 0;
+    if (flags.queensMode) return isQueensModeZone(props) ? 1 : 0;
+    if (flags.brooklynMode) return isBrooklynModeZone(props) ? 1 : 0;
+    if (flags.bronxWashHeightsMode) return isBronxWashHeightsModeZone(props) ? 1 : 0;
+
+    const payloadBorough = normalizeBoroughName(payload?.source_borough || payload?.borough);
+    if (!payloadBorough) return 0;
+    return getFeatureBoroughName(props) === payloadBorough ? 1 : 0;
+  }
+
+  function getModeAwareBaseRating(props, geom) {
+    if (queensMode && isQueensModeZone(props) && Number.isFinite(Number(props.qn_local_rating))) {
+      return Number(props.qn_local_rating);
+    }
+    if (brooklynMode && isBrooklynModeZone(props) && Number.isFinite(Number(props.bk_local_rating))) {
+      return Number(props.bk_local_rating);
+    }
+    if (bronxWashHeightsMode && isBronxWashHeightsModeZone(props) && Number.isFinite(Number(props.bwh_local_rating))) {
+      return Number(props.bwh_local_rating);
+    }
+    if (statenIslandMode && isStatenIslandFeature(props) && Number.isFinite(Number(props.si_local_rating))) {
+      return Number(props.si_local_rating);
+    }
+    if (manhattanMode && isManhattanModeZone(props, geom) && Number.isFinite(Number(props.mh_local_rating))) {
+      return Number(props.mh_local_rating);
+    }
+    return Number(props?.rating ?? NaN);
+  }
+
+  // tendency does NOT recolor the map independently
+  // tendency adjusts the final mode-aware rating
+  // bucket/color are derived from the adjusted rating so the map still has one final color-driving metric
+  function getTendencyAdjustedRating(baseRating, props, geom) {
+    const clampedBaseRating = clampRating100(baseRating);
+    const payload = getLiveDayTendencyPayload();
+    if (!payload) return clampedBaseRating;
+    const scopeWeight = getTendencyScopeWeight(props, geom, payload);
+    if (scopeWeight <= 0) return clampedBaseRating;
+    const tendencyDelta = getTendencyDeltaPoints(payload);
+    return clampRating100(clampedBaseRating + (tendencyDelta * scopeWeight));
+  }
+
   function applyStatenLocalView(frame) {
     const feats = frame?.polygons?.features || [];
     if (!feats.length) return frame;
@@ -738,45 +816,30 @@
     syncManhattanUI();
     syncQueensUI();
     syncBrooklynUI();
-    return getModeFlags();
+    const flags = getModeFlags();
+    window.dispatchEvent(new CustomEvent('tlc-mode-changed', { detail: flags }));
+    return flags;
+  }
+
+  function getBucketForRating(rating) {
+    return colorFromLocalRating(rating).bucket;
+  }
+
+  function getColorForRating(rating) {
+    return colorFromLocalRating(rating).color;
   }
 
   function effectiveBucket(props, geom) {
-    if (queensMode && isQueensModeZone(props) && props.qn_local_bucket) return props.qn_local_bucket;
-    if (brooklynMode && isBrooklynModeZone(props) && props.bk_local_bucket) return props.bk_local_bucket;
-    if (bronxWashHeightsMode && isBronxWashHeightsModeZone(props) && props.bwh_local_bucket) return props.bwh_local_bucket;
-    if (statenIslandMode && isStatenIslandFeature(props) && props.si_local_bucket) return props.si_local_bucket;
-    if (manhattanMode && isManhattanModeZone(props, geom) && props.mh_local_bucket) return props.mh_local_bucket;
-    return (props?.bucket || "").trim();
+    return getBucketForRating(effectiveRating(props, geom));
   }
 
   function effectiveColor(props, geom) {
-    if (queensMode && isQueensModeZone(props) && props.qn_local_color) return props.qn_local_color;
-    if (brooklynMode && isBrooklynModeZone(props) && props.bk_local_color) return props.bk_local_color;
-    if (bronxWashHeightsMode && isBronxWashHeightsModeZone(props) && props.bwh_local_color) return props.bwh_local_color;
-    if (statenIslandMode && isStatenIslandFeature(props) && props.si_local_color) return props.si_local_color;
-    if (manhattanMode && isManhattanModeZone(props, geom) && props.mh_local_color) return props.mh_local_color;
-    const st = props?.style || {};
-    return st.fillColor || st.color || "#000";
+    return getColorForRating(effectiveRating(props, geom));
   }
 
   function effectiveRating(props, geom) {
-    if (queensMode && isQueensModeZone(props) && Number.isFinite(Number(props.qn_local_rating))) {
-      return Number(props.qn_local_rating);
-    }
-    if (brooklynMode && isBrooklynModeZone(props) && Number.isFinite(Number(props.bk_local_rating))) {
-      return Number(props.bk_local_rating);
-    }
-    if (bronxWashHeightsMode && isBronxWashHeightsModeZone(props) && Number.isFinite(Number(props.bwh_local_rating))) {
-      return Number(props.bwh_local_rating);
-    }
-    if (statenIslandMode && isStatenIslandFeature(props) && Number.isFinite(Number(props.si_local_rating))) {
-      return Number(props.si_local_rating);
-    }
-    if (manhattanMode && isManhattanModeZone(props, geom) && Number.isFinite(Number(props.mh_local_rating))) {
-      return Number(props.mh_local_rating);
-    }
-    return Number(props?.rating ?? NaN);
+    const baseRating = getModeAwareBaseRating(props, geom);
+    return getTendencyAdjustedRating(baseRating, props, geom);
   }
 
   function getActiveSpecialModeTagForFeature(props, geom) {
@@ -787,6 +850,10 @@
     if (manhattanMode && isManhattanModeZone(props, geom)) return "manhattan";
     return null;
   }
+
+  window.addEventListener('tlc-day-tendency-updated', () => {
+    core.renderCurrentFrame?.();
+  });
 
   if (btnManhattan) {
     btnManhattan.addEventListener("pointerdown", (e) => e.stopPropagation());
@@ -842,6 +909,25 @@
       core.renderCurrentFrame?.();
     });
   }
+
+  window.getDayTendencyColorDebug = function (props, geom) {
+    const payload = getLiveDayTendencyPayload();
+    const baseRating = getModeAwareBaseRating(props, geom);
+    const scopeWeight = getTendencyScopeWeight(props, geom, payload);
+    const deltaPoints = getTendencyDeltaPoints(payload);
+    const adjustedRating = getTendencyAdjustedRating(baseRating, props, geom);
+    return {
+      payload,
+      modeFlags: getModeFlags(),
+      activeModeTag: getActiveSpecialModeTagForFeature(props, geom),
+      baseRating,
+      scopeWeight,
+      deltaPoints,
+      adjustedRating,
+      finalBucket: effectiveBucket(props, geom),
+      finalColor: effectiveColor(props, geom)
+    };
+  };
 
   window.TlcModeModule = {
     getModeFlags,
