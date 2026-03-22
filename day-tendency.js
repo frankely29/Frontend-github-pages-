@@ -282,6 +282,17 @@
   }
 
   function getCurrentModeFlags() {
+    const liveFlags = window.TlcModeModule?.getModeFlags?.();
+    if (liveFlags) {
+      return {
+        manhattan_mode: liveFlags.manhattanMode ? 1 : 0,
+        staten_island_mode: liveFlags.statenIslandMode ? 1 : 0,
+        bronx_wash_heights_mode: liveFlags.bronxWashHeightsMode ? 1 : 0,
+        queens_mode: liveFlags.queensMode ? 1 : 0,
+        brooklyn_mode: liveFlags.brooklynMode ? 1 : 0,
+      };
+    }
+
     return {
       manhattan_mode: readModeFlagValue(MODE_FLAG_KEYS.manhattan_mode),
       staten_island_mode: readModeFlagValue(MODE_FLAG_KEYS.staten_island_mode),
@@ -312,24 +323,44 @@
     return meters > DAY_TENDENCY_MATERIAL_MOVE_METERS;
   }
 
-  // the meter UI is separate from coloring
-  // this shared payload is consumed by app.part11 to bias the final rating
-  function publishDayTendencyPayload(payload) {
-    const numericScore = Number(payload?.score);
-    const usablePayload = payload && Number.isFinite(numericScore)
-      ? {
-          ...payload,
-          score: numericScore,
-          confidence: Number.isFinite(Number(payload?.confidence)) ? Number(payload.confidence) : payload?.confidence,
-        }
-      : null;
+  function normalizeDayTendencyPayload(raw) {
+    if (!raw || raw.status === 'insufficient_data') return null;
 
-    window.TlcDayTendencyState.payload = usablePayload;
+    const score = Number(raw.score);
+    if (!Number.isFinite(score)) return null;
+
+    const confidence = Number(raw.confidence);
+    const rawMeterPct = Number(raw.meter_pct);
+    const meterPct = Number.isFinite(rawMeterPct) ? rawMeterPct : (score / 100);
+
+    return {
+      ...raw,
+      score,
+      band: raw.band,
+      label: raw.label,
+      confidence: Number.isFinite(confidence) ? confidence : 1,
+      borough: raw.borough,
+      source_borough: raw.source_borough,
+      scope: raw.scope,
+      scope_label: raw.scope_label,
+      local_time_label: raw.local_time_label,
+      explain: raw.explain,
+      status: raw.status,
+      meter_pct: Math.max(0, Math.min(1, meterPct)),
+    };
+  }
+
+  // the meter UI is separate from map coloring
+  // this shared payload is consumed by app.part11 to bias the final mode-aware rating
+  // the map still uses one final color-driving metric
+  function publishDayTendencyPayload(raw) {
+    const normalized = normalizeDayTendencyPayload(raw);
+    window.TlcDayTendencyState.payload = normalized;
     window.TlcDayTendencyState.updatedAt = Date.now();
     window.dispatchEvent(new CustomEvent('tlc-day-tendency-updated', {
-      detail: usablePayload,
+      detail: normalized,
     }));
-    return usablePayload;
+    return normalized;
   }
 
   function applyDayTendencyPayload(payload) {
@@ -434,7 +465,6 @@
     if (!latLng) {
       if (!STATE.hasInitialGpsFix && !STATE.hasRenderedRealPayload) {
         applyWaitingForGpsState();
-        publishDayTendencyPayload(null);
       }
       return;
     }
