@@ -744,6 +744,123 @@
       });
     }
 
+    const edgeHaloWidthScaleExpr = [
+      "interpolate",
+      ["linear"],
+      ["zoom"],
+      11.8, 0.18,
+      12.2, 0.26,
+      12.8, 0.40,
+      13.4, 0.60,
+      14.2, 0.82,
+      15.0, 1.00,
+      16.0, 1.08
+    ];
+
+    const edgeSoftWidthScaleExpr = [
+      "interpolate",
+      ["linear"],
+      ["zoom"],
+      11.8, 0.22,
+      12.2, 0.32,
+      12.8, 0.46,
+      13.4, 0.66,
+      14.2, 0.86,
+      15.0, 1.00,
+      16.0, 1.06
+    ];
+
+    const edgeCoreWidthScaleExpr = [
+      "interpolate",
+      ["linear"],
+      ["zoom"],
+      11.8, 0.30,
+      12.2, 0.42,
+      12.8, 0.58,
+      13.4, 0.76,
+      14.2, 0.92,
+      15.0, 1.00,
+      16.0, 1.04
+    ];
+
+    const edgeHaloOffsetScaleExpr = [
+      "interpolate",
+      ["linear"],
+      ["zoom"],
+      11.8, 0.25,
+      12.2, 0.36,
+      12.8, 0.50,
+      13.4, 0.68,
+      14.2, 0.86,
+      15.0, 1.00,
+      16.0, 1.04
+    ];
+
+    const edgeSoftOffsetScaleExpr = [
+      "interpolate",
+      ["linear"],
+      ["zoom"],
+      11.8, 0.30,
+      12.2, 0.42,
+      12.8, 0.58,
+      13.4, 0.74,
+      14.2, 0.90,
+      15.0, 1.00,
+      16.0, 1.03
+    ];
+
+    const edgeCoreOffsetScaleExpr = [
+      "interpolate",
+      ["linear"],
+      ["zoom"],
+      11.8, 0.36,
+      12.2, 0.50,
+      12.8, 0.66,
+      13.4, 0.82,
+      14.2, 0.94,
+      15.0, 1.00,
+      16.0, 1.02
+    ];
+
+    const edgeHaloOpacityZoomExpr = [
+      "interpolate",
+      ["linear"],
+      ["zoom"],
+      11.8, 0.40,
+      12.2, 0.52,
+      12.8, 0.68,
+      13.4, 0.82,
+      14.2, 0.92,
+      15.0, 1.00,
+      16.0, 1.00
+    ];
+
+    const edgeSoftOpacityZoomExpr = [
+      "interpolate",
+      ["linear"],
+      ["zoom"],
+      11.8, 0.46,
+      12.2, 0.58,
+      12.8, 0.72,
+      13.4, 0.84,
+      14.2, 0.94,
+      15.0, 1.00,
+      16.0, 1.00
+    ];
+
+    const edgeCoreOpacityZoomExpr = [
+      "interpolate",
+      ["linear"],
+      ["zoom"],
+      11.8, 0.52,
+      12.2, 0.64,
+      12.8, 0.78,
+      13.4, 0.88,
+      14.2, 0.96,
+      15.0, 1.00,
+      16.0, 1.00
+    ];
+
     // Inward hue overlay only on the stronger side of meaningful stronger-vs-weaker borders.
     // Keep the white divider line intact above it and remain weaker than hotspot / micro-hotspot overlays.
     if (!map.getLayer(EDGE_INFLUENCE_HALO_LAYER_ID)) {
@@ -758,8 +875,8 @@
         },
         paint: {
           "line-color": ["coalesce", ["to-string", ["get", "edge_color"]], "#ffffff"],
-          "line-opacity": ["coalesce", ["to-number", ["get", "halo_opacity"]], 0],
-          "line-width": ["coalesce", ["to-number", ["get", "halo_width_px"]], 30],
+          "line-opacity": ["*", ["coalesce", ["to-number", ["get", "halo_opacity"]], 0], edgeHaloOpacityZoomExpr],
+          "line-width": ["*", ["coalesce", ["to-number", ["get", "halo_width_px"]], 30], edgeHaloWidthScaleExpr],
           "line-blur": [
             "interpolate",
             ["linear"],
@@ -768,7 +885,7 @@
             14, 12,
             16, 14,
           ],
-          "line-offset": ["coalesce", ["to-number", ["get", "halo_offset_px"]], 8],
+          "line-offset": ["*", ["coalesce", ["to-number", ["get", "halo_offset_px"]], 8], edgeHaloOffsetScaleExpr],
         },
       }, "zones-line");
     }
@@ -785,8 +902,8 @@
         },
         paint: {
           "line-color": ["coalesce", ["to-string", ["get", "edge_color"]], "#ffffff"],
-          "line-opacity": ["coalesce", ["to-number", ["get", "soft_opacity"]], 0],
-          "line-width": ["coalesce", ["to-number", ["get", "soft_width_px"]], 16],
+          "line-opacity": ["*", ["coalesce", ["to-number", ["get", "soft_opacity"]], 0], edgeSoftOpacityZoomExpr],
+          "line-width": ["*", ["coalesce", ["to-number", ["get", "soft_width_px"]], 16], edgeSoftWidthScaleExpr],
           "line-blur": [
             "interpolate",
             ["linear"],
@@ -795,7 +912,7 @@
             14, 5.5,
             16, 6.5,
           ],
-          "line-offset": ["coalesce", ["to-number", ["get", "soft_offset_px"]], 4.5],
+          "line-offset": ["*", ["coalesce", ["to-number", ["get", "soft_offset_px"]], 4.5], edgeSoftOffsetScaleExpr],
         },
       }, "zones-line");
     }
@@ -812,8 +929,8 @@
         },
         paint: {
           "line-color": ["coalesce", ["to-string", ["get", "edge_color"]], "#ffffff"],
-          "line-opacity": ["coalesce", ["to-number", ["get", "core_opacity"]], 0],
-          "line-width": ["coalesce", ["to-number", ["get", "core_width_px"]], 6],
+          "line-opacity": ["*", ["coalesce", ["to-number", ["get", "core_opacity"]], 0], edgeCoreOpacityZoomExpr],
+          "line-width": ["*", ["coalesce", ["to-number", ["get", "core_width_px"]], 6], edgeCoreWidthScaleExpr],
           "line-blur": [
             "interpolate",
             ["linear"],
@@ -822,7 +939,7 @@
             14, 1.8,
             16, 2.2,
           ],
-          "line-offset": ["coalesce", ["to-number", ["get", "core_offset_px"]], 2],
+          "line-offset": ["*", ["coalesce", ["to-number", ["get", "core_offset_px"]], 2], edgeCoreOffsetScaleExpr],
         },
       }, "zones-line");
     }
