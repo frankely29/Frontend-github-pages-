@@ -553,9 +553,9 @@
       const haloWidthPx = 30 + (edgeStrength * 16);
       const softWidthPx = 16 + (edgeStrength * 8);
       const coreWidthPx = 6 + (edgeStrength * 4);
-      const haloOpacity = 0.012 + (edgeStrength * 0.035);
-      const softOpacity = 0.020 + (edgeStrength * 0.045);
-      const coreOpacity = 0.028 + (edgeStrength * 0.040);
+      const haloOpacity = 0.004 + (edgeStrength * 0.018);
+      const softOpacity = 0.008 + (edgeStrength * 0.024);
+      const coreOpacity = 0.012 + (edgeStrength * 0.028);
       const haloOffsetPx = 8 + (edgeStrength * 4.5);
       const softOffsetPx = 4.5 + (edgeStrength * 2.8);
       const coreOffsetPx = 2 + (edgeStrength * 1.4);
