@@ -991,7 +991,7 @@
   }
 
   function closeDriverProfileModal() {
-    if (chatVoiceState.scope === 'profile-dm') chatInternals.cancelChatVoiceRecording?.('Recording canceled');
+    if (chatInternals.getVoiceRecorderState?.('profile-dm')?.isActive) chatInternals.cancelChatVoiceRecording?.('Recording canceled');
     stopDriverProfileDmPolling();
     chatInternals.clearVoiceAssetsForMessages?.(driverProfileState.messages);
     driverProfileState.open = false;
@@ -1186,7 +1186,7 @@
     const sendBtn = document.getElementById('driverProfileSendBtn');
     const submit = async () => {
       if (driverProfileState.sending || !driverProfileState.userId || driverProfileState.isSelf) return;
-      if (chatVoiceState.scope === 'profile-dm' && chatInternals.isChatVoiceBusy?.()) return;
+      if (chatInternals.getVoiceRecorderState?.('profile-dm')?.isActive && chatInternals.isChatVoiceBusy?.()) return;
       if (chatInternals.hasChatVoiceDraft?.('profile-dm')) {
         driverProfileState.sending = true;
         driverProfileState.error = '';
@@ -1297,7 +1297,7 @@
   }
 
   async function openDriverProfileModal({ userId, isSelf = false, source = '' } = {}) {
-    if (chatVoiceState.scope === 'profile-dm') chatInternals.cancelChatVoiceRecording?.('Recording canceled');
+    if (chatInternals.getVoiceRecorderState?.('profile-dm')?.isActive) chatInternals.cancelChatVoiceRecording?.('Recording canceled');
     const nextUserId = Number(userId);
     if (!Number.isFinite(nextUserId)) return;
     const meId = Number(window?.me?.id);
