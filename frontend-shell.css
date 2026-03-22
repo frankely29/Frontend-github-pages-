@@ -1924,10 +1924,11 @@ html, body { height: 100%; margin: 0; padding: 0; }
    Avatar markers are photo-only for now.
    The legacy direction arrow + pulse layers were still present behind the
    photo marker and became visible again when zooming out, which looked like drift.
-   Keep these layers disabled until a new heading-marker design is explicitly approved.
+   Keep these layers disabled until a new heading marker design is explicitly approved.
 */
 .navPulse::after,
-.navArrow::after {
+.navArrow::after,
+.navArrow::before {
   content: none !important;
   animation: none !important;
   border: 0 !important;
@@ -1938,4 +1939,10 @@ html, body { height: 100%; margin: 0; padding: 0; }
 .mapPresenceDirectionRot,
 .mapPresenceDirectionTip {
   display: none !important;
+}
+
+/* Neutralize the old self-only blue ring so self and other avatars render the same. */
+.mapPresenceSelf .mapPresenceShell,
+.mapPresenceOther .mapPresenceShell {
+  border-color: rgba(255,255,255,0.95) !important;
 }
