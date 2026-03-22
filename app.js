@@ -1250,6 +1250,7 @@ function initMap() {
     applyNightBasemap(!!window.TlcMapUiModule?.getWeatherState?.()?.isNight);
 
     ensureZonesSourceAndLayers().catch((e) => console.warn("zones source/layers init failed:", e));
+    if (authHeaderOK()) scheduleAdaptivePresenceRender();
 
     if (!debugOnce.mapCenter) {
       const c = map.getCenter();
@@ -1340,7 +1341,10 @@ function initMap() {
     }
   });
 
-  map.on("style.load", () => map.triggerRepaint());
+  map.on("style.load", () => {
+    map.triggerRepaint();
+    if (authHeaderOK()) scheduleAdaptivePresenceRender();
+  });
   map.on("error", (e) => console.error("MapLibre error:", e));
 }
 

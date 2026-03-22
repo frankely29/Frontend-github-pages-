@@ -49,6 +49,7 @@
   let zoneEdgeInfluenceFingerprint = "";
   let zoneEdgeInfluenceFeatureCount = 0;
   let pickupHotspotShieldZoneIds = new Set();
+  let zoneEdgeInfluenceRefreshRaf = 0;
 
   function shouldShowLabel(bucket, zoom) {
     if (zoom < LABEL_ZOOM_MIN) return false;
@@ -105,6 +106,30 @@
   function refreshZoneEdgeInfluenceFromCurrentFrame() {
     const frame = window.TlcCommunityInternals?.getCurrentFrame?.() || window.TlcModeInternals?.getCurrentFrame?.();
     refreshZoneEdgeInfluence(frame || null);
+  }
+
+  function scheduleZoneEdgeInfluenceRefresh() {
+    if (zoneEdgeInfluenceRefreshRaf) return;
+    const schedule = typeof window !== "undefined" && typeof window.requestAnimationFrame === "function"
+      ? window.requestAnimationFrame.bind(window)
+      : (cb) => setTimeout(cb, 16);
+    zoneEdgeInfluenceRefreshRaf = schedule(() => {
+      zoneEdgeInfluenceRefreshRaf = 0;
+      refreshZoneEdgeInfluenceFromCurrentFrame();
+    });
+  }
+
+  function ensureZoneEdgeInfluenceRefreshBindings(map) {
+    if (!map || map.__zoneEdgeInfluenceRefreshBindingsBound) return;
+    const onZoomEnd = () => scheduleZoneEdgeInfluenceRefresh();
+    const onStyleData = () => {
+      zoneEdgeInfluenceFingerprint = "";
+      zoneEdgeInfluenceFeatureCount = 0;
+      scheduleZoneEdgeInfluenceRefresh();
+    };
+    map.on("zoomend", onZoomEnd);
+    map.on("styledata", onStyleData);
+    map.__zoneEdgeInfluenceRefreshBindingsBound = true;
   }
 
   function bboxFromCoords(coords) {
@@ -645,10 +670,10 @@
   function clearZoneEdgeInfluenceSource() {
     const map = core.getMap?.();
     const edgeSrc = map?.getSource?.(EDGE_INFLUENCE_SOURCE_ID);
-    if (!edgeSrc) return;
-    edgeSrc.setData(core.emptyGeojson?.() || { type: "FeatureCollection", features: [] });
     zoneEdgeInfluenceFingerprint = "";
     zoneEdgeInfluenceFeatureCount = 0;
+    if (!edgeSrc) return;
+    edgeSrc.setData(core.emptyGeojson?.() || { type: "FeatureCollection", features: [] });
   }
 
   function isZoneEdgeInfluenceZoomActive() {
@@ -734,12 +759,16 @@
     const styleReady = await core.waitForStyleReady?.();
     if (!styleReady) return false;
 
+    ensureZoneEdgeInfluenceRefreshBindings(map);
+
     if (!map.getSource("zones")) {
       map.addSource("zones", { type: "geojson", data: core.emptyGeojson?.() || { type: "FeatureCollection", features: [] } });
     }
 
     if (!map.getSource(EDGE_INFLUENCE_SOURCE_ID)) {
       map.addSource(EDGE_INFLUENCE_SOURCE_ID, { type: "geojson", data: core.emptyGeojson?.() || { type: "FeatureCollection", features: [] } });
+      zoneEdgeInfluenceFingerprint = "";
+      zoneEdgeInfluenceFeatureCount = 0;
     }
 
     // fill alpha now comes from effectiveFillColor
