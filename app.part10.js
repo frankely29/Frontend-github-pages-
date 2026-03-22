@@ -2704,20 +2704,17 @@ async function pullPresenceAll() {
       updateOnlineBadge(listOnlineCount, Number.isFinite(listGhostedCount) ? listGhostedCount : 0);
     } else {
       updateOnlineBadge(nextRows.length, 0);
-      void getJSONAuth("/presence/summary", communityToken, { signal: activeSignal })
-        .then((summary) => {
-          const onlineCount = Number(summary?.online_count);
-          const ghostedCount = Number(summary?.ghosted_count);
-          if (Number.isFinite(onlineCount) && onlineCount >= 0) {
-            updateOnlineBadge(onlineCount, Number.isFinite(ghostedCount) ? ghostedCount : 0);
-          }
-        })
-        .catch((e) => {
-          if (e?.name !== "AbortError") {
-            console.warn("/presence/summary failed:", e);
-          }
-        });
     }
+
+    void getJSONAuth("/presence/summary", communityToken, { signal: activeSignal })
+      .then((summary) => {
+        const onlineCount = Number(summary?.online_count);
+        const ghostedCount = Number(summary?.ghosted_count);
+        if (Number.isFinite(onlineCount) && onlineCount >= 0) {
+          updateOnlineBadge(onlineCount, Number.isFinite(ghostedCount) ? ghostedCount : 0);
+        }
+      })
+      .catch(() => {});
   } catch (e) {
     if (e?.name === "AbortError") return;
     const status = Number(e?.status ?? NaN);

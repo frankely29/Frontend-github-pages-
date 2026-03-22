@@ -1250,7 +1250,6 @@ function initMap() {
     applyNightBasemap(!!window.TlcMapUiModule?.getWeatherState?.()?.isNight);
 
     ensureZonesSourceAndLayers().catch((e) => console.warn("zones source/layers init failed:", e));
-    if (authHeaderOK()) scheduleAdaptivePresenceRender();
 
     if (!debugOnce.mapCenter) {
       const c = map.getCenter();
@@ -1333,11 +1332,17 @@ function initMap() {
     setTimeout(() => map.triggerRepaint(), 400);
     setTimeout(() => map.triggerRepaint(), 800);
 
-    applyDriverLabelZoomStyles();
-
     if (pendingFrame) {
       renderFrame(pendingFrame);
       pendingFrame = null;
+    }
+
+    applyDriverLabelZoomStyles();
+
+    if (authHeaderOK()) {
+      scheduleAdaptivePresenceRender();
+      schedulePresencePoll({ immediate: true, reason: "map-ready" });
+      schedulePickupOverlayRefresh({ force: true });
     }
   });
 
