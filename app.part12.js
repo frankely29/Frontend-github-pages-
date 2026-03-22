@@ -665,7 +665,7 @@
     const edgeSrc = map.getSource(EDGE_INFLUENCE_SOURCE_ID);
     if (!edgeSrc) return;
 
-    if (!frame || !isZoneEdgeInfluenceZoomActive()) {
+    if (!frame) {
       clearZoneEdgeInfluenceSource();
       return;
     }
@@ -1026,8 +1026,11 @@
     if (!map.__zoneEdgeInfluenceZoomRefreshBound) {
       map.__zoneEdgeInfluenceZoomRefreshBound = true;
       map.on("zoomend", () => {
-        const frame = window.TlcCommunityInternals?.getCurrentFrame?.() || window.TlcModeInternals?.getCurrentFrame?.();
-        refreshZoneEdgeInfluence(frame || null);
+        if (!isZoneEdgeInfluenceZoomActive()) {
+          clearZoneEdgeInfluenceSource();
+          return;
+        }
+        refreshZoneEdgeInfluenceFromCurrentFrame();
       });
     }
 
