@@ -350,9 +350,8 @@
     };
   }
 
-  // the meter UI is separate from map coloring
-  // this shared payload is consumed by app.part11 to bias the final mode-aware rating
-  // the map still uses one final color-driving metric
+  // the meter UI is separate from map coloring.
+  // app.part11.js consumes this shared payload to bias the final mode-aware rating.
   function publishDayTendencyPayload(raw) {
     const normalized = normalizeDayTendencyPayload(raw);
     window.TlcDayTendencyState.payload = normalized;
