@@ -1631,7 +1631,6 @@ let presenceRenderMode = 'full';
 let presenceFocusedUserId = null;
 let presenceLiteSourceFingerprint = '';
 let presenceAdaptiveRenderRaf = 0;
-let lastSelfOrbitMeta = null;
 let presenceLastSyncTimestamp = 0;
 let presenceLastSyncCursor = 0;
 let presenceDeltaMode = 'probe';
@@ -2298,7 +2297,7 @@ function clusterPresenceByScreenPosition(rows, selfPos) {
   }
 
   for (const row of richRows) row.orbitMeta = null;
-  lastSelfOrbitMeta = null;
+  core.setLastSelfOrbitMeta?.(null);
 
   if (!nodes.length) return;
 
@@ -2345,7 +2344,7 @@ function clusterPresenceByScreenPosition(rows, selfPos) {
       if (member.kind === 'row') {
         member.row.orbitMeta = meta;
       } else {
-        lastSelfOrbitMeta = meta;
+        core.setLastSelfOrbitMeta?.(meta);
       }
     });
   }

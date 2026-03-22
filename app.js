@@ -2091,6 +2091,7 @@ let navMarker = null;
 let lastPos = null;
 let lastHeadingDeg = 0;
 let lastMoveTs = 0;
+let lastSelfOrbitMeta = null;
 
 function makeNavIcon() {
   const myName = authHeaderOK() ? me?.display_name || "" : "";
@@ -3451,6 +3452,8 @@ window.TlcCommunityInternals = {
   getMeState: () => me,
   setMeState: (value) => { me = value || null; },
   getLastGpsAccuracy: () => lastGpsAccuracyM,
+  getLastSelfOrbitMeta: () => lastSelfOrbitMeta,
+  setLastSelfOrbitMeta: (value) => { lastSelfOrbitMeta = value || null; },
   getFrontendPerfStats: () => frontendPerfStats,
   getAvatarThumbCache: () => avatarThumbCache,
   getMapPageVisible: () => mapPageIsVisible,
