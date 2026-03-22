@@ -4640,12 +4640,10 @@
       ? `<div class="mapPresenceAvatar"><img src="${escapeHtml(safeAvatar)}" alt="avatar" loading="lazy"></div>`
       : `<div class="mapPresenceInitials">${escapeHtml(mapIdentityInitials(name))}</div>`;
     const orbitAttrs = mapIdentityOrbitDataAttrs(orbitMeta);
-
     // ISSUE NOTE:
-    // The old heading arrow layer used to live behind the avatar circle.
-    // When the avatar shrank on zoom-out, parts of that hidden arrow leaked out
-    // and looked like marker drift.
     // Keep markers photo-only for now.
+    // The old heading arrow layer used to live behind the avatar circle and leak out
+    // on zoom-out, which looked like marker drift.
     return `
       <div class="mapPresenceOrbit ${markerClass}" data-map-identity-label="1" data-map-presence-orbit="1" ${orbitAttrs}>
         <div class="mapPresenceRoot">

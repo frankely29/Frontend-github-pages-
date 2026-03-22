@@ -5012,10 +5012,9 @@ function makeNavIcon() {
     : `<div id="navMeName" class="mapPresenceInitials" style="display:${myName ? "flex" : "none"}">${escapeHtml((myName || 'D').slice(0, 2).toUpperCase())}</div>`;
 
   const el = document.createElement("div");
-
   // ISSUE NOTE:
-  // Keep self marker photo-only for now.
-  // The old navPulse layer was leaking through the avatar when zooming out.
+  // Keep avatar markers photo-only for now.
+  // The legacy pulse ring used to sit behind the avatar and leak through on zoom-out.
   el.innerHTML = `
     <div id="navWrap" class="mapPresenceHost">
       ${navLabelHTML}
@@ -5107,10 +5106,12 @@ function refreshNavNameLabel() {
 function setNavVisual(isMoving) {
   const el = document.getElementById("navWrap");
   if (!el) return;
-
   // ISSUE NOTE:
-  // The legacy moving/stationary arrow + pulse classes are intentionally disabled.
-  // Avatar markers must remain photo-only until a separate heading marker design is approved.
+  // Disable the legacy moving/pulse marker visuals for now.
+  // They were part of the old arrow marker stack and caused visible drift/leakage
+  // behind avatar photos when zooming out.
+  el.classList.remove("navMoving");
+  el.classList.remove("navPulse");
   el.dataset.moving = isMoving ? "1" : "0";
 }
 function setNavRotation(deg) {
