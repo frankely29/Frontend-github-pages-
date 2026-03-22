@@ -8,6 +8,7 @@
   const LABEL_MAX_CHARS_MID = 14;
   const ZONE_EDGE_INFLUENCE_MIN_ZOOM = 12.4;
   const EDGE_INFLUENCE_SOURCE_ID = "zone-edge-influence";
+  const EDGE_INFLUENCE_HALO_LAYER_ID = "zone-edge-influence-halo";
   const EDGE_INFLUENCE_SOFT_LAYER_ID = "zone-edge-influence-soft";
   const EDGE_INFLUENCE_CORE_LAYER_ID = "zone-edge-influence-core";
   const EDGE_INFLUENCE_MIN_RATING_DIFF = 10;
@@ -496,8 +497,21 @@
     return Math.max(0, Math.min(1, Number(v) || 0));
   }
 
-  // Stronger zone edges next to weaker-bucket neighbors get a subtle inward dark band.
-  // Same-bucket neighbors do not get this effect; this is only a heuristic visual hint, not measured sub-zone demand truth.
+  function getFeatureBaseColorForEdge(feature) {
+    const props = feature?.properties || {};
+    const geom = feature?.geometry;
+    return (
+      window.TlcModeModule?.effectiveColor?.(props, geom) ||
+      props?.effectiveColor ||
+      props?.style?.fillColor ||
+      props?.style?.color ||
+      "#ffffff"
+    );
+  }
+
+  // Stronger zone edges next to weaker-bucket neighbors get a subtle inward hue
+  // from the weaker zone. Same-bucket neighbors do not get this effect; this is
+  // only a heuristic visual hint, not measured sub-zone demand truth.
   function buildZoneEdgeInfluenceFeatureCollection(frame) {
     const topology = getZoneEdgeTopology(frame);
     const features = frame?.polygons?.features || [];
@@ -530,10 +544,21 @@
       const strongerZoneId = aIsStronger ? edge.aZoneId : edge.bZoneId;
       const weakerZoneId = aIsStronger ? edge.bZoneId : edge.aZoneId;
       const strongerFeature = aIsStronger ? featureA : featureB;
+      const weakerFeature = aIsStronger ? featureB : featureA;
       const strongerCoords = aIsStronger ? edge.aCoords : edge.bCoords;
       const strongerInteriorSide = aIsStronger ? edge.aInteriorSide : edge.bInteriorSide;
       const orientedCoords = orientSegmentIntoZoneRightSide(strongerCoords, strongerInteriorSide);
       const edgeStrength = clamp01((diff - EDGE_INFLUENCE_MIN_RATING_DIFF) / (EDGE_INFLUENCE_MAX_RATING_DIFF - EDGE_INFLUENCE_MIN_RATING_DIFF));
+      const edgeColor = getFeatureBaseColorForEdge(weakerFeature);
+      const haloWidthPx = 34 + (edgeStrength * 20);
+      const softWidthPx = 20 + (edgeStrength * 12);
+      const coreWidthPx = 10 + (edgeStrength * 6);
+      const haloOpacity = 0.06 + (edgeStrength * 0.08);
+      const softOpacity = 0.08 + (edgeStrength * 0.10);
+      const coreOpacity = 0.10 + (edgeStrength * 0.08);
+      const haloOffsetPx = 10 + (edgeStrength * 6);
+      const softOffsetPx = 6 + (edgeStrength * 4);
+      const coreOffsetPx = 3 + (edgeStrength * 2);
 
       if (!strongerFeature || !Array.isArray(orientedCoords) || orientedCoords.length < 2) continue;
 
@@ -544,10 +569,20 @@
           coordinates: orientedCoords,
         },
         properties: {
+          edge_color: edgeColor,
           strong_zone_id: strongerZoneId,
           weak_zone_id: weakerZoneId,
           rating_diff: diff,
           edge_strength: edgeStrength,
+          halo_width_px: haloWidthPx,
+          soft_width_px: softWidthPx,
+          core_width_px: coreWidthPx,
+          halo_opacity: haloOpacity,
+          soft_opacity: softOpacity,
+          core_opacity: coreOpacity,
+          halo_offset_px: haloOffsetPx,
+          soft_offset_px: softOffsetPx,
+          core_offset_px: coreOffsetPx,
         },
       });
     }
@@ -672,8 +707,35 @@
       });
     }
 
-    // Neutral dark inner band only.
-    // Keep the border line intact above it and remain weaker than real hotspot / micro-hotspot overlays.
+    // Inward hue overlay only on the stronger side of meaningful stronger-vs-weaker borders.
+    // Keep the white divider line intact above it and remain weaker than hotspot / micro-hotspot overlays.
+    if (!map.getLayer(EDGE_INFLUENCE_HALO_LAYER_ID)) {
+      map.addLayer({
+        id: EDGE_INFLUENCE_HALO_LAYER_ID,
+        type: "line",
+        source: EDGE_INFLUENCE_SOURCE_ID,
+        minzoom: ZONE_EDGE_INFLUENCE_MIN_ZOOM,
+        layout: {
+          "line-cap": "round",
+          "line-join": "round",
+        },
+        paint: {
+          "line-color": ["coalesce", ["to-string", ["get", "edge_color"]], "#ffffff"],
+          "line-opacity": ["coalesce", ["to-number", ["get", "halo_opacity"]], 0],
+          "line-width": ["coalesce", ["to-number", ["get", "halo_width_px"]], 34],
+          "line-blur": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            12.4, 13,
+            14, 15,
+            16, 18,
+          ],
+          "line-offset": ["coalesce", ["to-number", ["get", "halo_offset_px"]], 10],
+        },
+      }, "zones-line");
+    }
+
     if (!map.getLayer(EDGE_INFLUENCE_SOFT_LAYER_ID)) {
       map.addLayer({
         id: EDGE_INFLUENCE_SOFT_LAYER_ID,
@@ -685,37 +747,18 @@
           "line-join": "round",
         },
         paint: {
-          "line-color": "rgba(0,0,0,1)",
-          "line-opacity": [
-            "interpolate",
-            ["linear"],
-            ["coalesce", ["to-number", ["get", "edge_strength"]], 0],
-            0, 0,
-            1, 0.16,
-          ],
-          "line-width": [
-            "interpolate",
-            ["linear"],
-            ["zoom"],
-            12.4, 14,
-            14, 18,
-            16, 24,
-          ],
+          "line-color": ["coalesce", ["to-string", ["get", "edge_color"]], "#ffffff"],
+          "line-opacity": ["coalesce", ["to-number", ["get", "soft_opacity"]], 0],
+          "line-width": ["coalesce", ["to-number", ["get", "soft_width_px"]], 20],
           "line-blur": [
             "interpolate",
             ["linear"],
             ["zoom"],
-            12.4, 4.5,
-            16, 6.0,
+            12.4, 7,
+            14, 8.5,
+            16, 10,
           ],
-          "line-offset": [
-            "interpolate",
-            ["linear"],
-            ["zoom"],
-            12.4, 4,
-            14, 5.5,
-            16, 7.5,
-          ],
+          "line-offset": ["coalesce", ["to-number", ["get", "soft_offset_px"]], 6],
         },
       }, "zones-line");
     }
@@ -731,37 +774,18 @@
           "line-join": "round",
         },
         paint: {
-          "line-color": "rgba(0,0,0,1)",
-          "line-opacity": [
-            "interpolate",
-            ["linear"],
-            ["coalesce", ["to-number", ["get", "edge_strength"]], 0],
-            0, 0,
-            1, 0.09,
-          ],
-          "line-width": [
-            "interpolate",
-            ["linear"],
-            ["zoom"],
-            12.4, 7,
-            14, 9,
-            16, 12,
-          ],
+          "line-color": ["coalesce", ["to-string", ["get", "edge_color"]], "#ffffff"],
+          "line-opacity": ["coalesce", ["to-number", ["get", "core_opacity"]], 0],
+          "line-width": ["coalesce", ["to-number", ["get", "core_width_px"]], 10],
           "line-blur": [
             "interpolate",
             ["linear"],
             ["zoom"],
-            12.4, 1.6,
-            16, 2.4,
+            12.4, 2.8,
+            14, 3.4,
+            16, 4.2,
           ],
-          "line-offset": [
-            "interpolate",
-            ["linear"],
-            ["zoom"],
-            12.4, 2.5,
-            14, 3.5,
-            16, 5,
-          ],
+          "line-offset": ["coalesce", ["to-number", ["get", "core_offset_px"]], 3],
         },
       }, "zones-line");
     }
@@ -905,6 +929,7 @@
       fingerprint: zoneEdgeInfluenceFingerprint || "",
       featureCount: zoneEdgeInfluenceFeatureCount,
       sourceReady: !!map?.getSource?.(EDGE_INFLUENCE_SOURCE_ID),
+      haloLayerReady: !!map?.getLayer?.(EDGE_INFLUENCE_HALO_LAYER_ID),
       softLayerReady: !!map?.getLayer?.(EDGE_INFLUENCE_SOFT_LAYER_ID),
       coreLayerReady: !!map?.getLayer?.(EDGE_INFLUENCE_CORE_LAYER_ID),
     };
