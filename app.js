@@ -1332,24 +1332,15 @@ function initMap() {
     setTimeout(() => map.triggerRepaint(), 400);
     setTimeout(() => map.triggerRepaint(), 800);
 
+    applyDriverLabelZoomStyles();
+
     if (pendingFrame) {
       renderFrame(pendingFrame);
       pendingFrame = null;
     }
-
-    applyDriverLabelZoomStyles();
-
-    if (authHeaderOK()) {
-      scheduleAdaptivePresenceRender();
-      schedulePresencePoll({ immediate: true, reason: "map-ready" });
-      schedulePickupOverlayRefresh({ force: true });
-    }
   });
 
-  map.on("style.load", () => {
-    map.triggerRepaint();
-    if (authHeaderOK()) scheduleAdaptivePresenceRender();
-  });
+  map.on("style.load", () => map.triggerRepaint());
   map.on("error", (e) => console.error("MapLibre error:", e));
 }
 
