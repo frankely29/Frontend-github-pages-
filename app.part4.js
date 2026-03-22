@@ -581,7 +581,7 @@
     return {
       user_id: id,
       display_name: String(row?.display_name || row?.name || row?.email || `Driver ${id}`),
-      avatar_thumb_url: safeMapAvatarUrl(row?.avatar_thumb_url || row?.avatar_url || ''),
+      avatar_thumb_url: window.safeMapAvatarUrl?.(row?.avatar_thumb_url || row?.avatar_url || '') || '',
       rank_icon_key: row?.rank_icon_key || row?.rankIconKey || '',
       level: Number(row?.level || 0) || 0,
       online: !!(row?.online || row?.is_online),
@@ -1497,128 +1497,14 @@
     rerenderGamesPanel();
   }
 
-  function getDockViewport() {
-    return document.getElementById('dockViewport');
-  }
-
-  function getDockTrack() {
-    return document.getElementById('dockTrack');
-  }
-
-  function getDockSaveButton() {
-    return document.getElementById('pickupFab');
-  }
-
-  function updateDockScrollHints() {
-    const dock = document.getElementById('dock');
-    const viewport = getDockViewport();
-    if (!dock || !viewport) return;
-    const maxScroll = Math.max(0, viewport.scrollWidth - viewport.clientWidth);
-    const leftVisible = viewport.scrollLeft > 2;
-    const rightVisible = viewport.scrollLeft < (maxScroll - 2);
-    dock.classList.toggle('dock-can-scroll-left', leftVisible);
-    dock.classList.toggle('dock-can-scroll-right', rightVisible);
-  }
-
-  function centerDockOnSave({ behavior = 'smooth' } = {}) {
-    const viewport = getDockViewport();
-    const saveBtn = getDockSaveButton();
-    if (!viewport || !saveBtn) return;
-
-    const viewportWidth = viewport.clientWidth;
-    const targetLeft = saveBtn.offsetLeft + (saveBtn.offsetWidth / 2) - (viewportWidth / 2);
-    const maxScroll = Math.max(0, viewport.scrollWidth - viewportWidth);
-    const clampedLeft = Math.max(0, Math.min(maxScroll, targetLeft));
-    viewport.scrollTo({ left: clampedLeft, behavior });
-  }
-
-  let dockAutoCenterTimer = 0;
-  let dockPointerIsDown = false;
-
-  function cancelDockAutoCenter() {
-    if (!dockAutoCenterTimer) return;
-    clearTimeout(dockAutoCenterTimer);
-    dockAutoCenterTimer = 0;
-  }
-
-  function scheduleDockAutoCenter() {
-    cancelDockAutoCenter();
-    dockAutoCenterTimer = setTimeout(() => {
-      if (dockPointerIsDown) {
-        scheduleDockAutoCenter();
-        return;
-      }
-      dockAutoCenterTimer = 0;
-      centerDockOnSave({ behavior: 'smooth' });
-    }, 10000);
-  }
-
-  function scrollDockByStep(direction) {
-    const viewport = getDockViewport();
-    if (!viewport) return;
-    const step = Math.max(120, Math.round(viewport.clientWidth * 1.2));
-    viewport.scrollBy({ left: direction * step, behavior: 'smooth' });
-    scheduleDockAutoCenter();
-  }
-
-  function initDockScroller() {
-    const viewport = getDockViewport();
-    const leftHint = document.getElementById('dockScrollHintLeft');
-    const rightHint = document.getElementById('dockScrollHintRight');
-    if (!viewport) return;
-
-    let rafId = 0;
-    const scheduleHintUpdate = () => {
-      if (rafId) return;
-      rafId = requestAnimationFrame(() => {
-        rafId = 0;
-        updateDockScrollHints();
-      });
-    };
-
-    const handleDockInteraction = () => {
-      cancelDockAutoCenter();
-      scheduleHintUpdate();
-      scheduleDockAutoCenter();
-    };
-
-    const beginDockDrag = () => {
-      dockPointerIsDown = true;
-      handleDockInteraction();
-    };
-
-    const endDockDrag = () => {
-      if (!dockPointerIsDown) return;
-      dockPointerIsDown = false;
-      scheduleDockAutoCenter();
-    };
-
-    viewport.addEventListener('scroll', handleDockInteraction, { passive: true });
-    viewport.addEventListener('pointerdown', beginDockDrag, { passive: true });
-    viewport.addEventListener('touchstart', beginDockDrag, { passive: true });
-    viewport.addEventListener('wheel', handleDockInteraction, { passive: true });
-    window.addEventListener('pointerup', endDockDrag, { passive: true });
-    window.addEventListener('pointercancel', endDockDrag, { passive: true });
-    window.addEventListener('touchend', endDockDrag, { passive: true });
-    window.addEventListener('touchcancel', endDockDrag, { passive: true });
-    window.addEventListener('resize', () => {
-      centerDockOnSave({ behavior: 'auto' });
-      scheduleHintUpdate();
-      scheduleDockAutoCenter();
-    });
-
-    leftHint?.addEventListener('click', () => scrollDockByStep(-1));
-    rightHint?.addEventListener('click', () => scrollDockByStep(1));
-
-    centerDockOnSave({ behavior: 'auto' });
-    scheduleHintUpdate();
-    scheduleDockAutoCenter();
-    setTimeout(() => {
-      centerDockOnSave({ behavior: 'auto' });
-      scheduleHintUpdate();
-    }, 120);
-  }
-
+  /* =========================================================
+   MOVED TO app.part6.js
+   Dock Scroller helpers
+   Search there for:
+   - initDockScroller
+   - updateDockScrollHints
+   - scrollDockByStep
+   ========================================================= */
 
   const driverProfileState = {
     open: false,
