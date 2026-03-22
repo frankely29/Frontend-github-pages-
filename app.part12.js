@@ -48,6 +48,7 @@
   let zoneEdgeTopologySignature = "";
   let zoneEdgeInfluenceFingerprint = "";
   let zoneEdgeInfluenceFeatureCount = 0;
+  let pickupHotspotShieldZoneIds = new Set();
 
   function shouldShowLabel(bucket, zoom) {
     if (zoom < LABEL_ZOOM_MIN) return false;
@@ -69,6 +70,41 @@
 
   function clamp(v, lo, hi) {
     return Math.max(lo, Math.min(hi, v));
+  }
+
+  function normalizePickupShieldZoneId(value) {
+    if (value == null || value === "") return null;
+    const n = Number(value);
+    if (!Number.isFinite(n)) return null;
+    return String(n);
+  }
+
+  function setPickupHotspotShieldZoneIds(zoneIds) {
+    const next = new Set();
+    const values = Array.isArray(zoneIds) ? zoneIds : [];
+    for (const value of values) {
+      const normalized = normalizePickupShieldZoneId(value);
+      if (normalized != null) next.add(normalized);
+    }
+    pickupHotspotShieldZoneIds = next;
+  }
+
+  function isPickupHotspotShieldedZone(zoneId) {
+    const normalized = normalizePickupShieldZoneId(zoneId);
+    if (normalized == null) return false;
+    return pickupHotspotShieldZoneIds.has(normalized);
+  }
+
+  function syncPickupHotspotShieldZoneIdsFromSource() {
+    const snapshot = window.TlcCommunityModule?.getPickupHotspotZoneIdsSnapshot?.()
+      || window.__pickupDebug?.hotspotCoveredZoneIds
+      || [];
+    setPickupHotspotShieldZoneIds(snapshot);
+  }
+
+  function refreshZoneEdgeInfluenceFromCurrentFrame() {
+    const frame = window.TlcCommunityInternals?.getCurrentFrame?.() || window.TlcModeInternals?.getCurrentFrame?.();
+    if (frame) refreshZoneLabels(frame);
   }
 
   function bboxFromCoords(coords) {
@@ -543,6 +579,7 @@
       const aIsStronger = rankA > rankB;
       const strongerZoneId = aIsStronger ? edge.aZoneId : edge.bZoneId;
       const weakerZoneId = aIsStronger ? edge.bZoneId : edge.aZoneId;
+      if (isPickupHotspotShieldedZone(strongerZoneId)) continue;
       const strongerFeature = aIsStronger ? featureA : featureB;
       const weakerFeature = aIsStronger ? featureB : featureA;
       const strongerCoords = aIsStronger ? edge.aCoords : edge.bCoords;
@@ -921,6 +958,14 @@
     getFeatureCollectionBounds
   };
 
+  syncPickupHotspotShieldZoneIdsFromSource();
+  if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+    window.addEventListener("tlc-pickup-hotspot-zones-updated", (event) => {
+      setPickupHotspotShieldZoneIds(event?.detail?.hotspotZoneIds || []);
+      refreshZoneEdgeInfluenceFromCurrentFrame();
+    });
+  }
+
   window.getZoneEdgeInfluenceDebug = function () {
     const map = core.getMap?.();
     return {
@@ -928,6 +973,7 @@
       topologySignature: zoneEdgeTopologySignature || "",
       fingerprint: zoneEdgeInfluenceFingerprint || "",
       featureCount: zoneEdgeInfluenceFeatureCount,
+      hotspotShieldZoneIds: Array.from(pickupHotspotShieldZoneIds || []).sort(),
       sourceReady: !!map?.getSource?.(EDGE_INFLUENCE_SOURCE_ID),
       haloLayerReady: !!map?.getLayer?.(EDGE_INFLUENCE_HALO_LAYER_ID),
       softLayerReady: !!map?.getLayer?.(EDGE_INFLUENCE_SOFT_LAYER_ID),
