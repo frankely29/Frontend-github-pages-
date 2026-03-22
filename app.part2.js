@@ -2094,7 +2094,7 @@
       voicePlaybackRuntime.activeBlobUrl = String(shared.voiceContext.blobUrl || voicePlaybackRuntime.activeBlobUrl || '');
       voicePlaybackRuntime.activeAudioUrl = String(shared.voiceContext.audioUrl || voicePlaybackRuntime.activeAudioUrl || '');
     }
-    if (shared?.stopVoicePlayback) {
+    if (sharedOwnsVoice && shared?.stopVoicePlayback) {
       void shared.stopVoicePlayback(reason, { resetPosition, clearSource: !!clearActive, resumeRadio: !!resumeRadio });
     } else if (audio) {
       try { if (!audio.paused) audio.pause(); } catch (_) {}

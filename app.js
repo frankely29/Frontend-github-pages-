@@ -6328,25 +6328,54 @@ Object.assign(TlcSharedAudio, {
   },
   async forcePauseRadioForVoiceCapture(reason = "record-start") {
     this.recorderLock = true;
-    if (this.owner === "voice") {
-      await this.stopVoicePlayback("record-start", { resetPosition: true, clearSource: true, resumeRadio: false });
+
+    if (this.owner === "voice" && typeof this.stopVoicePlayback === "function") {
+      try {
+        await this.stopVoicePlayback("record-start", {
+          resetPosition: true,
+          clearSource: true,
+          resumeRadio: false
+        });
+      } catch (_) {}
     }
 
-    const activeAudio = this.audioEl;
-    const shouldWaitForRadioPause = this.owner === "radio" && !!this.desiredRadioStationKey;
-    if (shouldWaitForRadioPause) {
-      try { activeAudio.muted = true; } catch (_) {}
-      try { activeAudio.volume = 0; } catch (_) {}
-      this.pauseRadioForVoice(reason);
-      await waitForRadioPauseSettle(activeAudio, 320);
-    } else {
-      this.owner = "record";
+    const audioEl = this.getAudio?.() || this.audioEl || null;
+    const stationKey = String(this.desiredRadioStationKey || this.radioStationKey || "").trim();
+    const stationLabel = String(this.desiredRadioStationLabel || this.radioStationLabel || "").trim();
+    const stationUrl = String(this.desiredRadioSourceUrl || this.radioSourceUrl || "").trim();
+    const hadRadio = !!stationKey;
+
+    if (hadRadio && !this.suspendedRadio) {
+      this.suspendedRadio = {
+        key: stationKey,
+        label: stationLabel,
+        url: stationUrl,
+        shouldResume: !this.userPausedRadio
+      };
     }
 
+    this.radioStationKey = "";
+    this.radioStationLabel = "";
+    this.radioSourceUrl = "";
+    this.desiredRadioStationKey = "";
+    this.desiredRadioStationLabel = "";
+    this.desiredRadioSourceUrl = "";
     this.owner = "record";
     this.lastPauseReason = reason;
-    this.setRecordSession(reason);
+
+    if (audioEl) {
+      try { audioEl.muted = true; } catch (_) {}
+      try { audioEl.volume = 0; } catch (_) {}
+      try { audioEl.pause(); } catch (_) {}
+      try { audioEl.removeAttribute("src"); } catch (_) {}
+      try { audioEl.src = ""; } catch (_) {}
+      try { audioEl.load(); } catch (_) {}
+      try { audioEl.currentTime = 0; } catch (_) {}
+    }
+
     this.syncMediaSession("none", "");
+    this.setRecordSession(reason);
+    setRadioStatus("Radio: paused for recording");
     refreshRadioButtons();
     return true;
   },
