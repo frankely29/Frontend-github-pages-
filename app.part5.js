@@ -1445,6 +1445,7 @@
     ensureLevelUpOverlay,
     updatePickupRewardLayout,
     scheduleDriverProfileDmPoll,
+    maybeSyncProgressionOnSignInState,
     getState: () => driverProfileState,
   };
 
