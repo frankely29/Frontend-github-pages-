@@ -628,7 +628,21 @@
   }
 
   function pauseActiveChatVoicePlayback() {
-    stopSharedVoicePlayback('capture', { resetPosition: false, clearActive: false, resumeRadio: false });
+    const shared = getSharedAudioCoordinator();
+    const audio = syncVoiceRuntimeAudioRef();
+    const activeBlobUrl = String(voicePlaybackRuntime.activeBlobUrl || '').trim();
+    const currentSrc = String(audio?.currentSrc || audio?.src || '').trim();
+    const sharedOwnsVoice = shared?.owner === 'voice';
+    const runtimeOwnsVoice = !!activeBlobUrl && !!currentSrc && currentSrc === activeBlobUrl;
+
+    if (!sharedOwnsVoice && !runtimeOwnsVoice) return false;
+
+    stopSharedVoicePlayback('capture', {
+      resetPosition: false,
+      clearActive: false,
+      resumeRadio: false
+    });
+    return true;
   }
 
   function applyChatAudioSessionAmbient(reason = 'chat') {
@@ -2062,9 +2076,16 @@
   }
 
   function stopSharedVoicePlayback(reason = 'stop', { resetPosition = false, clearActive = false, resumeRadio = true } = {}) {
-    clearScheduledRadioResumeAfterVoice();
     const shared = getSharedAudioCoordinator();
     const audio = syncVoiceRuntimeAudioRef();
+    const activeBlobUrl = String(voicePlaybackRuntime.activeBlobUrl || '').trim();
+    const currentSrc = String(audio?.currentSrc || audio?.src || '').trim();
+    const sharedOwnsVoice = shared?.owner === 'voice';
+    const runtimeOwnsVoice = !!activeBlobUrl && !!currentSrc && currentSrc === activeBlobUrl;
+
+    if (!sharedOwnsVoice && !runtimeOwnsVoice) return false;
+
+    clearScheduledRadioResumeAfterVoice();
     voicePlaybackRuntime.lastPauseReason = reason;
     voicePlaybackRuntime.resumeRadioOnStop = !!resumeRadio;
     if (shared?.voiceContext) {
@@ -2092,6 +2113,7 @@
       voicePlaybackRuntime.lastUserAction = '';
     }
     syncAllVoicePlayers();
+    return true;
   }
 
   async function hardStopSharedVoicePlaybackForBackground(reason = 'background') {
