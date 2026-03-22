@@ -89,6 +89,7 @@ function clearPickupOverlayCache() {
     pickupOverlayAbortController = null;
   }
   pickupRefreshInFlight = false;
+  emitPickupHotspotZoneShieldUpdate();
 }
 
 function normalizePickupZoneId(value) {
@@ -119,6 +120,25 @@ function pickupHotspotKeyFromProps(props = {}) {
   const hotspotId = normalizePickupHotspotId(props.hotspot_id ?? props.hotspotId ?? props.pickup_hotspot_id);
   const hotspotIndex = normalizePickupHotspotIndex(props.hotspot_index ?? props.hotspotIndex ?? props.pickup_hotspot_index);
   return pickupHotspotKeyFromParts(zoneId, hotspotId, hotspotIndex);
+}
+
+function getPickupHotspotZoneIdsSnapshot() {
+  return Array.from(pickupHotspotZoneIds || []).map((value) => String(value)).sort();
+}
+
+function hasPickupHotspotZone(zoneId) {
+  const normalized = normalizePickupZoneId(zoneId);
+  if (normalized == null) return false;
+  return pickupHotspotZoneIds.has(normalized);
+}
+
+function emitPickupHotspotZoneShieldUpdate() {
+  if (typeof window === "undefined" || typeof window.dispatchEvent !== "function") return;
+  window.dispatchEvent(new CustomEvent("tlc-pickup-hotspot-zones-updated", {
+    detail: {
+      hotspotZoneIds: getPickupHotspotZoneIdsSnapshot(),
+    },
+  }));
 }
 
 function normalizePickupMicroHotspots(rawInput, allowedZoneIds = null) {
@@ -486,6 +506,8 @@ function setPickupOverlayData(fc, items = [], zoneStats = [], zoneHotspots = emp
     src.setData(filteredPickupPointsFc);
     pickupPointsSourceFingerprint = visiblePointsFingerprint;
   }
+
+  emitPickupHotspotZoneShieldUpdate();
 }
 
 function clearPickupOverlay() {
@@ -2934,7 +2956,9 @@ window.TlcCommunityModule = {
   sendPoliceReport,
   sendPickupLog,
   notePresenceBoost,
-  getPickupRecordingContext: window.getPickupRecordingContext
+  getPickupRecordingContext: window.getPickupRecordingContext,
+  getPickupHotspotZoneIdsSnapshot,
+  hasPickupHotspotZone
 };
 
 bootstrapCommunityModule();
