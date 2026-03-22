@@ -6,7 +6,7 @@
   const LABEL_ZOOM_MIN = 10;
   const BOROUGH_ZOOM_SHOW = 15;
   const LABEL_MAX_CHARS_MID = 14;
-  const ZONE_EDGE_INFLUENCE_MIN_ZOOM = 12.4;
+  const ZONE_EDGE_INFLUENCE_MIN_ZOOM = 11.8;
   const EDGE_INFLUENCE_SOURCE_ID = "zone-edge-influence";
   const EDGE_INFLUENCE_HALO_LAYER_ID = "zone-edge-influence-halo";
   const EDGE_INFLUENCE_SOFT_LAYER_ID = "zone-edge-influence-soft";
