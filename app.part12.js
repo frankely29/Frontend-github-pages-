@@ -366,18 +366,27 @@
       map.addSource("zones", { type: "geojson", data: core.emptyGeojson?.() || { type: "FeatureCollection", features: [] } });
     }
 
+    // fill alpha now comes from effectiveFillColor
+    // keep fill-opacity at 1 so only the feature color alpha controls dimming
+    const zonesFillColorExpr = [
+      "coalesce",
+      ["to-string", ["get", "effectiveFillColor"]],
+      "#66aaff"
+    ];
+
     if (!map.getLayer("zones-fill")) {
       map.addLayer({
         id: "zones-fill",
         type: "fill",
         source: "zones",
         paint: {
-          // fill alpha now comes from effectiveFillColor
-          // keep fill-opacity at 1 so only the feature color alpha controls dimming
-          "fill-color": ["coalesce", ["to-string", ["get", "effectiveFillColor"]], "#66aaff"],
+          "fill-color": zonesFillColorExpr,
           "fill-opacity": 1,
         },
       });
+    } else {
+      map.setPaintProperty("zones-fill", "fill-color", zonesFillColorExpr);
+      map.setPaintProperty("zones-fill", "fill-opacity", 1);
     }
 
     if (!map.getLayer("zones-line")) {

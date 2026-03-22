@@ -1726,8 +1726,15 @@ async function renderFrame(frame) {
   // IMPORTANT FIX: always recompute effectiveColor each render so toggles update instantly
   for (const f of fc.features) {
     const props = f.properties || {};
-    const baseCol = effectiveColor(props, f.geometry) || (props?.style?.fillColor || props?.style?.color) || "#66aaff";
-    const fillCol = window.TlcModeModule?.effectiveFillColor?.(props, f.geometry) || baseCol;
+    const baseCol =
+      effectiveColor(props, f.geometry) ||
+      (props?.style?.fillColor || props?.style?.color) ||
+      "#66aaff";
+
+    const fillCol =
+      window.TlcModeModule?.effectiveFillColor?.(props, f.geometry) ||
+      baseCol;
+
     props.effectiveColor = baseCol;
     props.effectiveFillColor = fillCol;
   }

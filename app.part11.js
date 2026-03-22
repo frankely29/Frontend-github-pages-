@@ -251,8 +251,8 @@
   function getLowTendencyFactor(payload) {
     const score = Number(payload?.score);
     if (!Number.isFinite(score)) return 0;
-    if (score >= 50) return 0;
-    return Math.max(0, Math.min(1, (50 - score) / 50));
+    if (score >= 80) return 0;
+    return Math.max(0, Math.min(1, (80 - score) / 80));
   }
 
   function normalizeBoroughName(value) {
@@ -298,7 +298,7 @@
   }
 
   // tendency no longer boosts rating above neutral
-  // score 50+ leaves colors normal
+  // score 80+ leaves colors normal
   // low tendency dims fill alpha only
   // base demand color stays unchanged
   function getTendencyAdjustedRating(baseRating, props, geom) {
