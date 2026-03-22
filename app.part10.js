@@ -2665,29 +2665,13 @@ async function pullPresenceAll() {
     frontendPerfStats.presencePollsCompleted += 1;
     const items = extractPresenceItems(list);
     const fallbackVisibleCount = Array.isArray(items) ? items.length : 0;
-    let badgeUpdatedFromSummary = false;
     const listOnlineCount = Number(list?.online_count ?? list?.summary?.online_count ?? list?.counts?.online_count);
     const listGhostedCount = Number(list?.ghosted_count ?? list?.summary?.ghosted_count ?? list?.counts?.ghosted_count);
+    const hasListSummary = Number.isFinite(listOnlineCount) && listOnlineCount >= 0;
 
-    if (Number.isFinite(listOnlineCount) && listOnlineCount >= 0) {
+    if (hasListSummary) {
       updateOnlineBadge(listOnlineCount, Number.isFinite(listGhostedCount) ? listGhostedCount : 0);
-      badgeUpdatedFromSummary = true;
     } else {
-      try {
-        const summary = await getJSONAuth("/presence/summary", communityToken, { signal: presencePullAbortController.signal });
-        const onlineCount = Number(summary?.online_count);
-        const ghostedCount = Number(summary?.ghosted_count);
-        if (Number.isFinite(onlineCount) && onlineCount >= 0) {
-          updateOnlineBadge(onlineCount, Number.isFinite(ghostedCount) ? ghostedCount : 0);
-          badgeUpdatedFromSummary = true;
-        }
-      } catch (e) {
-        if (e?.name !== "AbortError") {
-          console.warn("/presence/summary failed:", e);
-        }
-      }
-    }
-    if (!badgeUpdatedFromSummary) {
       updateOnlineBadge(fallbackVisibleCount, 0);
     }
 
@@ -2714,6 +2698,24 @@ async function pullPresenceAll() {
     if (nextFingerprint !== cachedPresenceFingerprint) {
       cachedPresenceFingerprint = nextFingerprint;
       scheduleAdaptivePresenceRender();
+    }
+
+    if (!hasListSummary && communityToken) {
+      const activeController = presencePullAbortController;
+      getJSONAuth("/presence/summary", communityToken, { signal: activeController?.signal })
+        .then((summary) => {
+          if (presencePullAbortController !== activeController) return;
+          const onlineCount = Number(summary?.online_count);
+          const ghostedCount = Number(summary?.ghosted_count);
+          if (Number.isFinite(onlineCount) && onlineCount >= 0) {
+            updateOnlineBadge(onlineCount, Number.isFinite(ghostedCount) ? ghostedCount : 0);
+          }
+        })
+        .catch((e) => {
+          if (e?.name !== "AbortError") {
+            console.warn("/presence/summary failed:", e);
+          }
+        });
     }
   } catch (e) {
     if (e?.name === "AbortError") return;
