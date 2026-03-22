@@ -1896,6 +1896,8 @@ let autoCenter = true;
 let inactivityTimer = null;
 const AUTO_FOCUS_INACTIVITY_MS = 20000;
 const AUTO_FOCUS_RETURN_ZOOM = 13.0;
+const AUTO_FOCUS_ZOOM_GRACE_MS = 9000;
+let autoFocusZoomUntil = 0;
 
 function cancelAutoFocusInactivityTimer() {
   if (inactivityTimer) clearTimeout(inactivityTimer);
@@ -1915,6 +1917,18 @@ function markUserActivity() {
   if (Date.now() < suppressAutoDisableUntil) return;
   scheduleAutoFocusFromInactivity();
   notePresenceBoost();
+}
+
+function armAutoFocusZoomWindow(ms = AUTO_FOCUS_ZOOM_GRACE_MS) {
+  autoFocusZoomUntil = Math.max(autoFocusZoomUntil, Date.now() + Math.max(0, Number(ms) || 0));
+}
+
+function clearAutoFocusZoomWindow() {
+  autoFocusZoomUntil = 0;
+}
+
+function isAutoFocusZoomWindowActive(now = Date.now()) {
+  return now < autoFocusZoomUntil;
 }
 
 function getSelfCenterLngLat() {
@@ -1943,6 +1957,15 @@ function clamp(n, a, b) {
   return Math.max(a, Math.min(b, n));
 }
 
+function getAutoFollowZoom({ forceZoom = false } = {}) {
+  const currentZoom = Number(map?.getZoom?.());
+  const baseZoom = Number.isFinite(currentZoom) ? currentZoom : AUTO_FOCUS_RETURN_ZOOM;
+  if (forceZoom || isAutoFocusZoomWindowActive()) {
+    return Math.max(baseZoom, AUTO_FOCUS_RETURN_ZOOM);
+  }
+  return baseZoom;
+}
+
 function autoCenterAndAutoZoom() {
   if (!map || !userLatLng) return;
 
@@ -1969,7 +1992,7 @@ function autoCenterAndAutoZoom() {
   // When there is only one point to follow, compute the difference to the current
   // map center and only fly if the change is significant (~0.0002 degrees).
   if (pts.length <= 1) {
-    const z = clamp(map.getZoom(), AUTO_ZOOM_MIN, AUTO_ZOOM_MAX);
+    const z = clamp(getAutoFollowZoom(), AUTO_ZOOM_MIN, AUTO_ZOOM_MAX);
     const curr = map.getCenter();
     const dx = pts[0][0] - curr.lng;
     const dy = pts[0][1] - curr.lat;
@@ -2025,10 +2048,8 @@ function refreshAutoCenterCamera({ forceZoom = false } = {}) {
   if (!map || !autoCenter) return;
   const c = getSelfCenterLngLat();
   if (!c) return;
-  const currentZoom = Number(map.getZoom?.());
-  const targetZoom = forceZoom
-    ? AUTO_FOCUS_RETURN_ZOOM
-    : (Number.isFinite(currentZoom) ? currentZoom : AUTO_FOCUS_RETURN_ZOOM);
+  if (forceZoom) armAutoFocusZoomWindow();
+  const targetZoom = getAutoFollowZoom({ forceZoom });
 
   suppressAutoDisableFor(900, () => {
     map.flyTo({
@@ -2048,12 +2069,15 @@ function setAutoCenterEnabled(next, reason = "manual") {
   syncCenterButton();
 
   if (!autoCenter && map && mapReady) {
+    clearAutoFocusZoomWindow();
     const b = map.getBearing ? map.getBearing() : 0;
     lastMapBearingDeg = normDeg(b);
   }
 
   if (autoCenter && (changed || reason === "inactive-timeout")) {
-    refreshAutoCenterCamera({ forceZoom: reason === "inactive-timeout" });
+    const shouldForceZoom = changed || reason === "inactive-timeout";
+    if (shouldForceZoom) armAutoFocusZoomWindow();
+    refreshAutoCenterCamera({ forceZoom: shouldForceZoom });
   }
   if (changed && authHeaderOK()) {
     schedulePresencePoll({ immediate: true });
@@ -2280,7 +2304,7 @@ function maybeRotateMapTo(deg) {
   suppressAutoDisableFor(ROTATE_ANIM_MS + 120, () => {
     map.easeTo({
       center: [c.lng, c.lat],
-      zoom: map.getZoom(),
+      zoom: getAutoFollowZoom(),
       bearing: target,
       duration: ROTATE_ANIM_MS,
       essential: true,
@@ -2532,9 +2556,10 @@ function startLocationWatch() {
         // Do not recenter more often than once every second.
         if (movedEnough && nowTs - lastAutoCenterTs > 1000) {
           lastAutoCenterTs = nowTs;
+          const targetZoom = getAutoFollowZoom();
           suppressAutoDisableFor(700, () => map.easeTo({
             center: [c.lng, c.lat],
-            zoom: map.getZoom(),
+            zoom: targetZoom,
             bearing: targetBearing,
             duration: 320,
             essential: true,
