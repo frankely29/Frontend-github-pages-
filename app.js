@@ -132,39 +132,16 @@ window.__mapPerfDebug.leaderboard = window.__mapPerfDebug.leaderboard || {
 };
 
 /* =========================================================
-   MANHATTAN MODE — DEFAULT SETTINGS (SAFE TO EDIT)
+   MOVED TO app.part11.js
+   Special Modes + Local Scoring module
+   Search there for:
+   - getModeFlags
+   - toggleModeByKey
+   - applyStatenLocalView
+   - applyManhattanLocalView
+   - effectiveBucket
+   - effectiveColor
    ========================================================= */
-const LS_KEY_MANHATTAN = "manhattan_mode_enabled";
-const LS_KEY_BRONX_WASH_HEIGHTS = "bronx_wash_heights_mode";
-const LS_KEY_QUEENS = "queens_mode_enabled";
-const LS_KEY_BROOKLYN = "brooklyn_mode_enabled";
-
-const MANHATTAN_PICKUP_WEIGHT = 0.40;
-const MANHATTAN_NEXT_BIN_WEIGHT = 0.35;
-const MANHATTAN_PAY_WEIGHT = 0.25;
-const MANHATTAN_FADE_PENALTY_WEIGHT = 0.15;
-const MANHATTAN_GLOBAL_PENALTY = 0.98;
-
-const MANHATTAN_MIN_ZONES = 40;
-const MANHATTAN_CORE_MAX_LAT = 40.795;
-
-const BRONX_WASH_HEIGHTS_TRIP_FREQUENCY_WEIGHT = 0.55;
-const BRONX_WASH_HEIGHTS_FOLLOWUP_WEIGHT = 0.20;
-const BRONX_WASH_HEIGHTS_LOCAL_MOMENTUM_WEIGHT = 0.15;
-const BRONX_WASH_HEIGHTS_PROXIMITY_WEIGHT = 0.10;
-
-const QUEENS_TRIP_FREQUENCY_WEIGHT = 0.60;
-const QUEENS_FOLLOWUP_WEIGHT = 0.20;
-const QUEENS_LOCAL_MOMENTUM_WEIGHT = 0.12;
-const QUEENS_PROXIMITY_WEIGHT = 0.08;
-const QUEENS_DEAD_ZONE_PENALTY_WEIGHT = 0.03;
-const QUEENS_MIN_ZONES = 8;
-const QUEENS_NEARBY_RADIUS_MI = 1.35;
-const BROOKLYN_MIN_ZONES = 3;
-
-const BRONX_WASH_HEIGHTS_MANHATTAN_ZONE_IDS = new Set([
-  "41", "42", "74", "75", "116", "127", "128", "151", "152", "166", "243", "244",
-]);
 
 /* =========================================================
    Legend minimize
@@ -176,24 +153,6 @@ if (legendEl && legendToggleBtn) {
     const minimized = legendEl.classList.toggle("minimized");
     legendToggleBtn.textContent = minimized ? "+" : "–";
   });
-}
-
-/* =========================================================
-   Label visibility rules (kept, but NEW labels are "major map app style")
-   ========================================================= */
-const LABEL_ZOOM_MIN = 10;
-const BOROUGH_ZOOM_SHOW = 15;
-const LABEL_MAX_CHARS_MID = 14;
-
-function shouldShowLabel(bucket, zoom) {
-  if (zoom < LABEL_ZOOM_MIN) return false;
-  const b = (bucket || "").trim();
-  if (zoom >= 15) return true;
-  if (zoom === 14) return b !== "red";
-  if (zoom === 13) return b === "green" || b === "purple" || b === "blue" || b === "sky";
-  if (zoom === 12) return b === "green" || b === "purple" || b === "blue";
-  if (zoom === 11) return b === "green" || b === "purple";
-  return b === "green";
 }
 
 /* =========================================================
@@ -342,43 +301,14 @@ function prettyBucket(b) {
 }
 
 /* =========================================================
-   Label helpers
+   MOVED TO app.part12.js
+   Zone Labels + Zones Source module
+   Search there for:
+   - ensureZonesSourceAndLayers
+   - refreshZoneLabels
+   - getFeatureCollectionBounds
+   - buildZoneLabelsFeatureCollection
    ========================================================= */
-function shortenLabel(text, maxChars) {
-  const t = (text || "").trim();
-  if (!t) return "";
-  if (t.length <= maxChars) return t;
-  return t.slice(0, maxChars - 1) + "…";
-}
-
-const ZONE_LABEL_SHORT_NAMES = {
-  "13": "Battery Pk",
-  "74": "East Harlem",
-  "75": "East Harlem",
-  "87": "FiDi",
-  "88": "FiDi",
-  "107": "Gramercy",
-  "120": "Hamilton",
-  "138": "LaGuardia",
-  "141": "LIC",
-  "151": "Morningside",
-  "186": "Penn Sta",
-  "230": "Times Sq",
-  "236": "Upper East",
-  "237": "Upper East",
-  "238": "Upper West",
-  "239": "Upper West",
-  "246": "Chelsea\nYards",
-  "264": "Washington\nHeights",
-  "265": "Washington\nHeights",
-};
-
-const ZONE_LABEL_OVERRIDES = {
-  "138": { size: 11.6, maxWidth: 5.8, letterSpacing: 0.01 },
-  "230": { label: "Times Sq", size: 10.8, maxWidth: 4.4, letterSpacing: 0.015 },
-};
-
-let zoneLabelLayoutCache = new Map();
 
 function escapeHtml(s) {
   return String(s)
@@ -388,98 +318,6 @@ function escapeHtml(s) {
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
 }
-
-/* =========================================================
-   Staten Island Mode (local percentile recolor)
-   ========================================================= */
-const btnStatenIsland = document.getElementById("btnStatenIsland");
-const btnBronxWashHeightsMode = document.getElementById("btnBronxWashHeightsMode");
-const btnQueensMode = document.getElementById("btnQueensMode");
-const btnBrooklynMode = document.getElementById("btnBrooklynMode");
-const modeNote = document.getElementById("modeNote");
-
-const LS_KEY_STATEN = "staten_island_mode_enabled";
-let statenIslandMode = (localStorage.getItem(LS_KEY_STATEN) || "0") === "1";
-let bronxWashHeightsMode = (localStorage.getItem(LS_KEY_BRONX_WASH_HEIGHTS) || "0") === "1";
-let queensMode = (localStorage.getItem(LS_KEY_QUEENS) || "0") === "1";
-let brooklynMode = (localStorage.getItem(LS_KEY_BROOKLYN) || "0") === "1";
-
-function isStatenIslandFeature(props) {
-  const b = (props?.borough || "").toString().toLowerCase();
-  return b.includes("staten");
-}
-
-/* =========================================================
-   Manhattan Mode
-   ========================================================= */
-let manhattanMode = (localStorage.getItem(LS_KEY_MANHATTAN) || "0") === "1";
-
-function isManhattanFeature(props) {
-  const b = (props?.borough || "").toString().toLowerCase();
-  return b.includes("manhattan");
-}
-
-function isQueensFeature(props) {
-  const b = (props?.borough || "").toString().toLowerCase();
-  return b.includes("queens");
-}
-
-function isAirportZone(props) {
-  const zoneName = (props?.zone_name || "").toString().toLowerCase();
-  const locationId = String(props?.LocationID ?? "").trim();
-  const airportNameMatch = /airport|jfk|la guardia|laguardia|newark/i.test(zoneName);
-  const airportLocationIdSet = new Set(["1", "132", "138"]);
-  return airportNameMatch || airportLocationIdSet.has(locationId);
-}
-
-function isQueensModeZone(props) {
-  return isQueensFeature(props) && !isAirportZone(props);
-}
-
-function isBrooklynFeature(props) {
-  const b = (props?.borough || "").toString().toLowerCase();
-  return b.includes("brooklyn");
-}
-
-function isBrooklynModeZone(props) {
-  return isBrooklynFeature(props);
-}
-
-function isBronxWashHeightsBorough(props) {
-  const b = (props?.borough || "").toString().toLowerCase();
-  return b.includes("bronx");
-}
-
-function isBronxWashHeightsCorridorZone(props) {
-  const b = (props?.borough || "").toString().toLowerCase();
-  if (!b.includes("manhattan")) return false;
-  return BRONX_WASH_HEIGHTS_MANHATTAN_ZONE_IDS.has(String(props?.LocationID ?? "").trim());
-}
-
-function isBronxWashHeightsModeZone(props) {
-  return isBronxWashHeightsBorough(props) || isBronxWashHeightsCorridorZone(props);
-}
-
-function isManhattanModeZone(props, geom) {
-  return isCoreManhattan(props, geom) && !isBronxWashHeightsModeZone(props);
-}
-
-function enforceSpecialModeExclusivity() {
-  statenIslandMode = !!statenIslandMode;
-  bronxWashHeightsMode = !!bronxWashHeightsMode;
-  manhattanMode = !!manhattanMode;
-}
-
-function persistSpecialModeState() {
-  localStorage.setItem(LS_KEY_BRONX_WASH_HEIGHTS, bronxWashHeightsMode ? "1" : "0");
-  localStorage.setItem(LS_KEY_MANHATTAN, manhattanMode ? "1" : "0");
-  localStorage.setItem(LS_KEY_STATEN, statenIslandMode ? "1" : "0");
-  localStorage.setItem(LS_KEY_QUEENS, queensMode ? "1" : "0");
-  localStorage.setItem(LS_KEY_BROOKLYN, brooklynMode ? "1" : "0");
-}
-
-enforceSpecialModeExclusivity();
-persistSpecialModeState();
 
 /* =========================================================
    FIX: Accurate polygon centroid (area-weighted)
@@ -564,719 +402,6 @@ function geometryCenter(geom) {
 }
 
 /* =========================================================
-   Manhattan core zone check (Uptown exclusion)
-   ========================================================= */
-function isCoreManhattan(props, geom) {
-  if (!isManhattanFeature(props)) return false;
-  const c = geometryCenter(geom);
-  if (!c || !Number.isFinite(c.lat)) return false;
-  return c.lat <= MANHATTAN_CORE_MAX_LAT;
-}
-
-/* =========================================================
-   Manhattan button (create dynamically)
-   ========================================================= */
-function ensureManhattanButton() {
-  let btn = document.getElementById("btnManhattan");
-  if (btn) return btn;
-
-  btn = document.createElement("button");
-  btn.id = "btnManhattan";
-  btn.type = "button";
-  btn.className = "navBtn";
-  btn.style.marginLeft = "6px";
-  btn.style.padding = "6px 10px";
-  btn.style.borderRadius = "10px";
-  btn.style.border = "1px solid rgba(0,0,0,0.2)";
-  btn.style.background = "rgba(255,255,255,0.95)";
-  btn.style.fontWeight = "700";
-  btn.style.fontSize = "12px";
-
-  const navRow =
-    document.getElementById("navRow") ||
-    (legendEl ? legendEl.querySelector(".navRow") : null) ||
-    legendEl;
-
-  if (navRow) {
-    if (btnStatenIsland && btnStatenIsland.parentElement === navRow) {
-      btnStatenIsland.insertAdjacentElement("afterend", btn);
-    } else {
-      navRow.appendChild(btn);
-    }
-  } else {
-    document.body.appendChild(btn);
-  }
-
-  return btn;
-}
-
-const btnManhattan = ensureManhattanButton();
-
-function syncManhattanUI() {
-  if (!btnManhattan) return;
-  btnManhattan.textContent = manhattanMode ? "Manhattan Mode: ON" : "Manhattan Mode: OFF";
-  btnManhattan.classList.toggle("on", !!manhattanMode);
-}
-syncManhattanUI();
-
-function syncQueensUI() {
-  if (!btnQueensMode) return;
-  btnQueensMode.textContent = queensMode ? "Queens Mode: ON" : "Queens Mode: OFF";
-  btnQueensMode.classList.toggle("on", !!queensMode);
-}
-syncQueensUI();
-
-function syncBrooklynUI() {
-  if (!btnBrooklynMode) return;
-  btnBrooklynMode.textContent = brooklynMode ? "Brooklyn Mode: ON" : "Brooklyn Mode: OFF";
-  btnBrooklynMode.classList.toggle("on", !!brooklynMode);
-}
-
-if (btnManhattan) {
-  btnManhattan.addEventListener("pointerdown", (e) => e.stopPropagation());
-  btnManhattan.addEventListener("touchstart", (e) => e.stopPropagation(), { passive: true });
-
-  btnManhattan.addEventListener("click", (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    manhattanMode = !manhattanMode;
-    persistSpecialModeState();
-    syncManhattanUI();
-    syncStatenIslandUI();
-    syncBronxWashHeightsUI();
-    if (currentFrame) renderFrame(currentFrame);
-  });
-}
-
-/* =========================================================
-   Shared rating->color helper
-   ========================================================= */
-function colorFromLocalRating(r) {
-  const x = Math.max(1, Math.min(100, Math.round(r)));
-  if (x >= 90) return { bucket: "green", color: "#00b050" };
-  if (x >= 80) return { bucket: "purple", color: "#8000ff" };
-  if (x >= 65) return { bucket: "blue", color: "#0066ff" };
-  if (x >= 45) return { bucket: "sky", color: "#66ccff" };
-  if (x >= 25) return { bucket: "yellow", color: "#ffd400" };
-  return { bucket: "red", color: "#e60000" };
-}
-
-function applyStatenLocalView(frame) {
-  const feats = frame?.polygons?.features || [];
-  if (!feats.length) return frame;
-
-  const siRatings = [];
-  for (const f of feats) {
-    const props = f.properties || {};
-    if (!isStatenIslandFeature(props)) continue;
-    const r = Number(props.rating ?? NaN);
-    if (!Number.isFinite(r)) continue;
-    siRatings.push(r);
-  }
-  if (siRatings.length < 3) return frame;
-
-  const sorted = siRatings.slice().sort((a, b) => a - b);
-  const n = sorted.length;
-
-  function percentileOfRating(r) {
-    let lo = 0, hi = n - 1, ans = -1;
-    while (lo <= hi) {
-      const mid = (lo + hi) >> 1;
-      if (sorted[mid] <= r) { ans = mid; lo = mid + 1; }
-      else hi = mid - 1;
-    }
-    if (n <= 1) return 0;
-    return Math.max(0, Math.min(1, ans / (n - 1)));
-  }
-
-  for (const f of feats) {
-    const props = f.properties || {};
-    if (!isStatenIslandFeature(props)) {
-      props.si_local_rating = null;
-      props.si_local_bucket = null;
-      props.si_local_color = null;
-      continue;
-    }
-    const r = Number(props.rating ?? NaN);
-    if (!Number.isFinite(r)) continue;
-
-    const p = percentileOfRating(r);
-    const localRating = 1 + 99 * p;
-
-    const { bucket, color } = colorFromLocalRating(localRating);
-    props.si_local_rating = Math.round(localRating);
-    props.si_local_bucket = bucket;
-    props.si_local_color = color;
-  }
-
-  return frame;
-}
-
-function applyManhattanLocalView(frame) {
-  const feats = frame?.polygons?.features || [];
-  if (!feats.length) return frame;
-
-  const mPickups = [];
-  const mNextBinPickups = [];
-  const mPay = [];
-
-  const clearManhattanLocalProps = (props) => {
-    props.mh_local_score = null;
-    props.mh_local_rating = null;
-    props.mh_local_bucket = null;
-    props.mh_local_color = null;
-    props.mh_pickup_strength = null;
-    props.mh_next_bin_strength = null;
-    props.mh_pay_strength = null;
-    props.mh_fade_penalty = null;
-  };
-
-  for (const f of feats) {
-    const props = f.properties || {};
-    if (!isManhattanModeZone(props, f.geometry)) continue;
-
-    const pu = Number(props.pickups ?? NaN);
-    const nextPu = Number(nextFramePickupsById.get(String(props.LocationID ?? "")) ?? NaN);
-    const pay = Number(props.avg_driver_pay ?? NaN);
-
-    if (Number.isFinite(pu)) mPickups.push(pu);
-    if (Number.isFinite(nextPu)) mNextBinPickups.push(nextPu);
-    if (Number.isFinite(pay)) mPay.push(pay);
-  }
-
-  if (mPickups.length < MANHATTAN_MIN_ZONES || mPay.length < MANHATTAN_MIN_ZONES) {
-    for (const f of feats) {
-      const props = f.properties || {};
-      clearManhattanLocalProps(props);
-    }
-    return frame;
-  }
-
-  const pickSorted = mPickups.slice().sort((a, b) => a - b);
-  const nextBinSorted = mNextBinPickups.length >= MANHATTAN_MIN_ZONES
-    ? mNextBinPickups.slice().sort((a, b) => a - b)
-    : null;
-  const paySorted = mPay.slice().sort((a, b) => a - b);
-
-  function percentileFromSorted(sorted, v) {
-    const n = sorted.length;
-    if (n <= 1) return 0;
-    let lo = 0, hi = n - 1, ans = -1;
-    while (lo <= hi) {
-      const mid = (lo + hi) >> 1;
-      if (sorted[mid] <= v) { ans = mid; lo = mid + 1; }
-      else hi = mid - 1;
-    }
-    return Math.max(0, Math.min(1, ans / (n - 1)));
-  }
-
-  for (const f of feats) {
-    const props = f.properties || {};
-
-    if (!isManhattanModeZone(props, f.geometry)) {
-      clearManhattanLocalProps(props);
-      continue;
-    }
-
-    const pu = Number(props.pickups ?? NaN);
-    const nextPuRaw = Number(nextFramePickupsById.get(String(props.LocationID ?? "")) ?? NaN);
-    const pay = Number(props.avg_driver_pay ?? NaN);
-
-    if (!Number.isFinite(pu) || !Number.isFinite(pay)) {
-      clearManhattanLocalProps(props);
-      continue;
-    }
-
-    const pickupStrength = percentileFromSorted(pickSorted, pu);
-    const nextBinStrength = (nextBinSorted && Number.isFinite(nextPuRaw))
-      ? percentileFromSorted(nextBinSorted, nextPuRaw)
-      : pickupStrength;
-    const payStrength = percentileFromSorted(paySorted, pay);
-    const fadePenalty = Math.max(0, pickupStrength - nextBinStrength);
-
-    let modeScore =
-      (MANHATTAN_PICKUP_WEIGHT * pickupStrength) +
-      (MANHATTAN_NEXT_BIN_WEIGHT * nextBinStrength) +
-      (MANHATTAN_PAY_WEIGHT * payStrength) -
-      (MANHATTAN_FADE_PENALTY_WEIGHT * fadePenalty);
-
-    modeScore = Math.max(0, Math.min(1, modeScore));
-
-    let localRating = 1 + 99 * modeScore;
-    localRating = localRating * MANHATTAN_GLOBAL_PENALTY;
-    localRating = Math.max(1, Math.min(100, localRating));
-
-    const { bucket, color } = colorFromLocalRating(localRating);
-    props.mh_local_score = modeScore;
-    props.mh_local_rating = Math.round(localRating);
-    props.mh_local_bucket = bucket;
-    props.mh_local_color = color;
-    props.mh_pickup_strength = pickupStrength;
-    props.mh_next_bin_strength = nextBinStrength;
-    props.mh_pay_strength = payStrength;
-    props.mh_fade_penalty = fadePenalty;
-  }
-
-  return frame;
-}
-
-function applyBronxWashHeightsLocalView(frame) {
-  const feats = frame?.polygons?.features || [];
-  if (!feats.length) return frame;
-
-  const scopedPickups = [];
-  const scopedFollowups = [];
-
-  for (const f of feats) {
-    const props = f.properties || {};
-    if (!isBronxWashHeightsModeZone(props)) continue;
-
-    const pu = Number(props.pickups ?? NaN);
-    const followup = Number(nextFramePickupsById.get(String(props.LocationID ?? "")) ?? NaN);
-    if (Number.isFinite(pu)) scopedPickups.push(pu);
-    if (Number.isFinite(followup)) scopedFollowups.push(followup);
-  }
-
-  if (scopedPickups.length < 8) {
-    for (const f of feats) {
-      const props = f.properties || {};
-      props.bwh_local_rating = null;
-      props.bwh_local_bucket = null;
-      props.bwh_local_color = null;
-      props.bwh_local_score = null;
-    }
-    return frame;
-  }
-
-  const pickSorted = scopedPickups.slice().sort((a, b) => a - b);
-  const followupSorted = scopedFollowups.slice().sort((a, b) => a - b);
-
-  function percentileFromSorted(sorted, v) {
-    const n = sorted.length;
-    if (n <= 1) return 0;
-    let lo = 0;
-    let hi = n - 1;
-    let ans = -1;
-    while (lo <= hi) {
-      const mid = (lo + hi) >> 1;
-      if (sorted[mid] <= v) {
-        ans = mid;
-        lo = mid + 1;
-      } else {
-        hi = mid - 1;
-      }
-    }
-    return Math.max(0, Math.min(1, ans / (n - 1)));
-  }
-
-  for (const f of feats) {
-    const props = f.properties || {};
-    if (!isBronxWashHeightsModeZone(props)) {
-      props.bwh_local_rating = null;
-      props.bwh_local_bucket = null;
-      props.bwh_local_color = null;
-      props.bwh_local_score = null;
-      continue;
-    }
-
-    const pu = Number(props.pickups ?? NaN);
-    if (!Number.isFinite(pu)) {
-      props.bwh_local_rating = null;
-      props.bwh_local_bucket = null;
-      props.bwh_local_color = null;
-      props.bwh_local_score = null;
-      continue;
-    }
-
-    const curId = String(props.LocationID ?? "");
-    const followup = Number(nextFramePickupsById.get(curId) ?? NaN);
-
-    const tripFrequencyStrength = percentileFromSorted(pickSorted, pu);
-    const followupTripStrength = Number.isFinite(followup)
-      ? percentileFromSorted(followupSorted, followup)
-      : tripFrequencyStrength;
-    const localMomentumStrength = (tripFrequencyStrength * 0.6) + (followupTripStrength * 0.4);
-    const proximityStrength = 1;
-
-    let modeScore =
-      (BRONX_WASH_HEIGHTS_TRIP_FREQUENCY_WEIGHT * tripFrequencyStrength) +
-      (BRONX_WASH_HEIGHTS_FOLLOWUP_WEIGHT * followupTripStrength) +
-      (BRONX_WASH_HEIGHTS_LOCAL_MOMENTUM_WEIGHT * localMomentumStrength) +
-      (BRONX_WASH_HEIGHTS_PROXIMITY_WEIGHT * proximityStrength);
-
-    modeScore = Math.max(0, Math.min(1, modeScore));
-    const localRating = 1 + 99 * modeScore;
-
-    const { bucket, color } = colorFromLocalRating(localRating);
-    props.bwh_local_score = modeScore;
-    props.bwh_local_rating = Math.round(localRating);
-    props.bwh_local_bucket = bucket;
-    props.bwh_local_color = color;
-  }
-
-  return frame;
-}
-
-function applyQueensLocalView(frame) {
-  const feats = frame?.polygons?.features || [];
-  if (!feats.length) return frame;
-
-  const scoped = [];
-  const scopedPickups = [];
-  const scopedFollowups = [];
-
-  for (const f of feats) {
-    const props = f.properties || {};
-    if (!isQueensModeZone(props)) continue;
-
-    const center = geometryCenter(f.geometry);
-    const pu = Number(props.pickups ?? NaN);
-    const followupRaw = Number(nextFramePickupsById.get(String(props.LocationID ?? "")) ?? NaN);
-
-    const row = { f, props, center, pu, followupRaw };
-    scoped.push(row);
-
-    if (Number.isFinite(pu)) scopedPickups.push(pu);
-    if (Number.isFinite(followupRaw)) scopedFollowups.push(followupRaw);
-  }
-
-  if (scoped.length < QUEENS_MIN_ZONES) {
-    for (const f of feats) {
-      const props = f.properties || {};
-      props.qn_local_score = null;
-      props.qn_local_rating = null;
-      props.qn_local_bucket = null;
-      props.qn_local_color = null;
-    }
-    return frame;
-  }
-
-  const pickSorted = scopedPickups.slice().sort((a, b) => a - b);
-  const followupSorted = scopedFollowups.slice().sort((a, b) => a - b);
-
-  function percentileFromSorted(sorted, v) {
-    const n = sorted.length;
-    if (n <= 1) return 0;
-    let lo = 0;
-    let hi = n - 1;
-    let ans = -1;
-    while (lo <= hi) {
-      const mid = (lo + hi) >> 1;
-      if (sorted[mid] <= v) {
-        ans = mid;
-        lo = mid + 1;
-      } else {
-        hi = mid - 1;
-      }
-    }
-    return Math.max(0, Math.min(1, ans / (n - 1)));
-  }
-
-  const momentumRawList = [];
-  for (const row of scoped) {
-    if (!row.center) {
-      row.localMomentumRaw = 0;
-      momentumRawList.push(0);
-      continue;
-    }
-
-    let sum = 0;
-    let count = 0;
-    for (const near of scoped) {
-      if (!near.center || !Number.isFinite(near.pu)) continue;
-      const dMi = haversineMiles(row.center, near.center);
-      if (dMi <= QUEENS_NEARBY_RADIUS_MI) {
-        sum += near.pu;
-        count += 1;
-      }
-    }
-    const raw = count > 0 ? sum / count : 0;
-    row.localMomentumRaw = raw;
-    momentumRawList.push(raw);
-  }
-
-  const momentumSorted = momentumRawList.slice().sort((a, b) => a - b);
-
-  for (const f of feats) {
-    const props = f.properties || {};
-    if (!isQueensModeZone(props)) {
-      props.qn_local_score = null;
-      props.qn_local_rating = null;
-      props.qn_local_bucket = null;
-      props.qn_local_color = null;
-      continue;
-    }
-
-    const row = scoped.find((x) => x.f === f);
-    const tripFrequencyStrength = Number.isFinite(row?.pu)
-      ? percentileFromSorted(pickSorted, row.pu)
-      : 0;
-    const followupTripStrength = Number.isFinite(row?.followupRaw)
-      ? percentileFromSorted(followupSorted, row.followupRaw)
-      : tripFrequencyStrength;
-    const localMomentumStrength = percentileFromSorted(momentumSorted, Number(row?.localMomentumRaw ?? 0));
-
-    let proximityStrength = 0.5;
-    if (userLatLng && row?.center) {
-      const dMi = haversineMiles(userLatLng, row.center);
-      proximityStrength = Math.max(0, Math.min(1, 1 - (dMi / 8)));
-    }
-
-    const deadZonePenalty = Math.max(0, Math.min(1, 1 - Math.max(followupTripStrength, localMomentumStrength)));
-
-    let modeScore =
-      (QUEENS_TRIP_FREQUENCY_WEIGHT * tripFrequencyStrength) +
-      (QUEENS_FOLLOWUP_WEIGHT * followupTripStrength) +
-      (QUEENS_LOCAL_MOMENTUM_WEIGHT * localMomentumStrength) +
-      (QUEENS_PROXIMITY_WEIGHT * proximityStrength) -
-      (QUEENS_DEAD_ZONE_PENALTY_WEIGHT * deadZonePenalty);
-
-    modeScore = Math.max(0, Math.min(1, modeScore));
-    const localRating = 1 + 99 * modeScore;
-    const { bucket, color } = colorFromLocalRating(localRating);
-
-    props.qn_local_score = modeScore;
-    props.qn_local_rating = Math.round(localRating);
-    props.qn_local_bucket = bucket;
-    props.qn_local_color = color;
-  }
-
-  return frame;
-}
-
-
-function applyBrooklynLocalView(frame) {
-  const feats = frame?.polygons?.features || [];
-  if (!feats.length) return frame;
-
-  const bkRatings = [];
-  for (const f of feats) {
-    const props = f.properties || {};
-    if (!isBrooklynModeZone(props)) continue;
-    const r = Number(props.rating ?? NaN);
-    if (!Number.isFinite(r)) continue;
-    bkRatings.push(r);
-  }
-
-  if (bkRatings.length < BROOKLYN_MIN_ZONES) {
-    for (const f of feats) {
-      const props = f.properties || {};
-      props.bk_local_rating = null;
-      props.bk_local_bucket = null;
-      props.bk_local_color = null;
-      props.bk_local_score = null;
-    }
-    return frame;
-  }
-
-  const sorted = bkRatings.slice().sort((a, b) => a - b);
-  const n = sorted.length;
-
-  function percentileOfRating(r) {
-    let lo = 0, hi = n - 1, ans = -1;
-    while (lo <= hi) {
-      const mid = (lo + hi) >> 1;
-      if (sorted[mid] <= r) { ans = mid; lo = mid + 1; }
-      else hi = mid - 1;
-    }
-    if (n <= 1) return 0;
-    return Math.max(0, Math.min(1, ans / (n - 1)));
-  }
-
-  for (const f of feats) {
-    const props = f.properties || {};
-    if (!isBrooklynModeZone(props)) {
-      props.bk_local_rating = null;
-      props.bk_local_bucket = null;
-      props.bk_local_color = null;
-      props.bk_local_score = null;
-      continue;
-    }
-
-    const r = Number(props.rating ?? NaN);
-    if (!Number.isFinite(r)) {
-      props.bk_local_rating = null;
-      props.bk_local_bucket = null;
-      props.bk_local_color = null;
-      props.bk_local_score = null;
-      continue;
-    }
-
-    const percentile = percentileOfRating(r);
-    const localRating = 1 + 99 * percentile;
-    const { bucket, color } = colorFromLocalRating(localRating);
-
-    props.bk_local_score = percentile;
-    props.bk_local_rating = Math.round(localRating);
-    props.bk_local_bucket = bucket;
-    props.bk_local_color = color;
-  }
-
-  return frame;
-}
-
-
-function syncStatenIslandUI() {
-  if (btnStatenIsland) {
-    btnStatenIsland.textContent = statenIslandMode ? "Staten Island Mode: ON" : "Staten Island Mode: OFF";
-    btnStatenIsland.classList.toggle("on", !!statenIslandMode);
-  }
-  if (modeNote) {
-    const activeLabels = [];
-    if (queensMode) activeLabels.push("Queens Mode");
-    if (manhattanMode) activeLabels.push("Manhattan Mode");
-    if (statenIslandMode) activeLabels.push("Staten Island Mode");
-    if (bronxWashHeightsMode) activeLabels.push("Bronx/Wash Heights Mode");
-    if (brooklynMode) activeLabels.push("Brooklyn Mode");
-
-    if (activeLabels.length > 1) {
-      const joined = activeLabels.length === 2
-        ? `${activeLabels[0]} and ${activeLabels[1]}`
-        : `${activeLabels.slice(0, -1).join(", ")}, and ${activeLabels[activeLabels.length - 1]}`;
-      modeNote.innerHTML = `${joined} are <b>ON</b>: each applies only to its own scope.`;
-    } else if (queensMode) {
-      modeNote.innerHTML = `Queens Mode is <b>ON</b>: non-airport Queens anti-dead-zone trip-flow mode. Airport zones are excluded. Pay average is ignored.`;
-    } else if (bronxWashHeightsMode) {
-      modeNote.innerHTML = `Bronx/Wash Heights Mode is <b>ON</b>: trip-frequency prioritization for <b>Bronx + Manhattan 100th St and up corridor</b>.<br/>Pay average is ignored for this mode.`;
-    } else if (manhattanMode) {
-      modeNote.innerHTML = `Manhattan Mode is <b>ON</b>: core Manhattan anti-saturation proxy. Strong now + still strong next bin beats flash-in-the-pan zones. Bronx/Wash Heights corridor stays excluded.`;
-    } else if (statenIslandMode) {
-      modeNote.innerHTML = `Staten Island Mode is <b>ON</b>: Staten Island colors are <b>relative within Staten Island</b> only.<br/>Other boroughs remain NYC-wide.`;
-    } else if (brooklynMode) {
-      modeNote.innerHTML = `Brooklyn Mode is <b>ON</b>: Brooklyn zones are ranked relative within Brooklyn only from best to worst.`;
-    } else {
-      modeNote.innerHTML = `Colors come from rating (1–100) for the selected 20-minute window.<br/>Time label is NYC time.`;
-    }
-  }
-}
-
-function syncBronxWashHeightsUI() {
-  if (!btnBronxWashHeightsMode) return;
-  btnBronxWashHeightsMode.textContent = bronxWashHeightsMode
-    ? "Bronx/Wash Heights Mode: ON"
-    : "Bronx/Wash Heights Mode: OFF";
-  btnBronxWashHeightsMode.classList.toggle("on", !!bronxWashHeightsMode);
-}
-syncStatenIslandUI();
-syncBronxWashHeightsUI();
-syncBrooklynUI();
-
-if (btnStatenIsland) {
-  btnStatenIsland.addEventListener("pointerdown", (e) => e.stopPropagation());
-  btnStatenIsland.addEventListener("touchstart", (e) => e.stopPropagation(), { passive: true });
-
-  btnStatenIsland.addEventListener("click", (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    statenIslandMode = !statenIslandMode;
-    persistSpecialModeState();
-    syncStatenIslandUI();
-    syncManhattanUI();
-    syncBronxWashHeightsUI();
-    if (currentFrame) renderFrame(currentFrame);
-  });
-}
-
-if (btnQueensMode) {
-  btnQueensMode.addEventListener("pointerdown", (e) => e.stopPropagation());
-  btnQueensMode.addEventListener("touchstart", (e) => e.stopPropagation(), { passive: true });
-
-  btnQueensMode.addEventListener("click", (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    queensMode = !queensMode;
-    persistSpecialModeState();
-    syncQueensUI();
-    syncStatenIslandUI();
-    syncManhattanUI();
-    syncBronxWashHeightsUI();
-    if (currentFrame) renderFrame(currentFrame);
-  });
-}
-
-if (btnBrooklynMode) {
-  btnBrooklynMode.addEventListener("pointerdown", (e) => e.stopPropagation());
-  btnBrooklynMode.addEventListener("touchstart", (e) => e.stopPropagation(), { passive: true });
-
-  btnBrooklynMode.addEventListener("click", (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    brooklynMode = !brooklynMode;
-    persistSpecialModeState();
-    syncBrooklynUI();
-    syncQueensUI();
-    syncStatenIslandUI();
-    syncManhattanUI();
-    syncBronxWashHeightsUI();
-    if (currentFrame) renderFrame(currentFrame);
-  });
-}
-
-if (btnBronxWashHeightsMode) {
-  btnBronxWashHeightsMode.addEventListener("pointerdown", (e) => e.stopPropagation());
-  btnBronxWashHeightsMode.addEventListener("touchstart", (e) => e.stopPropagation(), { passive: true });
-
-  btnBronxWashHeightsMode.addEventListener("click", (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    bronxWashHeightsMode = !bronxWashHeightsMode;
-    persistSpecialModeState();
-    syncBronxWashHeightsUI();
-    syncStatenIslandUI();
-    syncManhattanUI();
-    if (currentFrame) renderFrame(currentFrame);
-  });
-}
-
-/* =========================================================
-   Effective selection helpers
-   ========================================================= */
-function effectiveBucket(props, geom) {
-  if (queensMode && isQueensModeZone(props) && props.qn_local_bucket) return props.qn_local_bucket;
-  if (brooklynMode && isBrooklynModeZone(props) && props.bk_local_bucket) return props.bk_local_bucket;
-  if (bronxWashHeightsMode && isBronxWashHeightsModeZone(props) && props.bwh_local_bucket) return props.bwh_local_bucket;
-  if (statenIslandMode && isStatenIslandFeature(props) && props.si_local_bucket) return props.si_local_bucket;
-  if (manhattanMode && isManhattanModeZone(props, geom) && props.mh_local_bucket) return props.mh_local_bucket;
-  return (props.bucket || "").trim();
-}
-function effectiveColor(props, geom) {
-  if (queensMode && isQueensModeZone(props) && props.qn_local_color) return props.qn_local_color;
-  if (brooklynMode && isBrooklynModeZone(props) && props.bk_local_color) return props.bk_local_color;
-  if (bronxWashHeightsMode && isBronxWashHeightsModeZone(props) && props.bwh_local_color) return props.bwh_local_color;
-  if (statenIslandMode && isStatenIslandFeature(props) && props.si_local_color) return props.si_local_color;
-  if (manhattanMode && isManhattanModeZone(props, geom) && props.mh_local_color) return props.mh_local_color;
-  const st = props?.style || {};
-  return st.fillColor || st.color || "#000";
-}
-function effectiveRating(props, geom) {
-  if (queensMode && isQueensModeZone(props) && Number.isFinite(Number(props.qn_local_rating))) {
-    return Number(props.qn_local_rating);
-  }
-  if (brooklynMode && isBrooklynModeZone(props) && Number.isFinite(Number(props.bk_local_rating))) {
-    return Number(props.bk_local_rating);
-  }
-  if (bronxWashHeightsMode && isBronxWashHeightsModeZone(props) && Number.isFinite(Number(props.bwh_local_rating))) {
-    return Number(props.bwh_local_rating);
-  }
-  if (statenIslandMode && isStatenIslandFeature(props) && Number.isFinite(Number(props.si_local_rating))) {
-    return Number(props.si_local_rating);
-  }
-  if (manhattanMode && isManhattanModeZone(props, geom) && Number.isFinite(Number(props.mh_local_rating))) {
-    return Number(props.mh_local_rating);
-  }
-  return Number(props.rating ?? NaN);
-}
-
-function getActiveSpecialModeTagForFeature(props, geom) {
-  if (queensMode && isQueensModeZone(props)) return "queens";
-  if (brooklynMode && isBrooklynModeZone(props)) return "brooklyn";
-  if (statenIslandMode && isStatenIslandFeature(props)) return "staten_island";
-  if (bronxWashHeightsMode && isBronxWashHeightsModeZone(props)) return "bronx_wash_heights";
-  if (manhattanMode && isManhattanModeZone(props, geom)) return "manhattan";
-  return null;
-}
-
-/* =========================================================
    Map projection helpers (for collisions, etc.)
    ========================================================= */
 function projectToPoint(lng, lat) {
@@ -1312,18 +437,28 @@ function setNavDisabled(disabled) { return window.TlcMapUiModule?.setNavDisabled
 function setNavDestination(dest) { return window.TlcMapUiModule?.setNavDestination?.(dest); }
 function hasRecommendedDestination() { return !!window.TlcMapUiModule?.hasRecommendedDestination?.(); }
 function updateRecommendation(frame) { return window.TlcMapUiModule?.updateRecommendation?.(frame); }
+function getModeFlags() { return window.TlcModeModule?.getModeFlags?.() || { statenIslandMode:false, bronxWashHeightsMode:false, manhattanMode:false, queensMode:false, brooklynMode:false }; }
+function toggleModeByKey(key) { return window.TlcModeModule?.toggleModeByKey?.(key); }
+function syncStatenIslandUI(...args) { return window.TlcModeModule?.syncStatenIslandUI?.(...args); }
+function syncBronxWashHeightsUI(...args) { return window.TlcModeModule?.syncBronxWashHeightsUI?.(...args); }
+function syncManhattanUI(...args) { return window.TlcModeModule?.syncManhattanUI?.(...args); }
+function syncQueensUI(...args) { return window.TlcModeModule?.syncQueensUI?.(...args); }
+function syncBrooklynUI(...args) { return window.TlcModeModule?.syncBrooklynUI?.(...args); }
+function applyStatenLocalView(frame) { return window.TlcModeModule?.applyStatenLocalView?.(frame) || frame; }
+function applyManhattanLocalView(frame) { return window.TlcModeModule?.applyManhattanLocalView?.(frame) || frame; }
+function applyBronxWashHeightsLocalView(frame) { return window.TlcModeModule?.applyBronxWashHeightsLocalView?.(frame) || frame; }
+function applyQueensLocalView(frame) { return window.TlcModeModule?.applyQueensLocalView?.(frame) || frame; }
+function applyBrooklynLocalView(frame) { return window.TlcModeModule?.applyBrooklynLocalView?.(frame) || frame; }
+function effectiveBucket(props, geom) { return window.TlcModeModule?.effectiveBucket?.(props, geom) || (props?.bucket || '').trim(); }
+function effectiveColor(props, geom) { return window.TlcModeModule?.effectiveColor?.(props, geom) || (props?.style?.fillColor || props?.style?.color || '#000'); }
+function effectiveRating(props, geom) { return window.TlcModeModule?.effectiveRating?.(props, geom) ?? Number(props?.rating ?? NaN); }
+function getActiveSpecialModeTagForFeature(props, geom) { return window.TlcModeModule?.getActiveSpecialModeTagForFeature?.(props, geom) || null; }
 
 window.TlcMapUiInternals = {
   getRecommendEl: () => recommendEl,
   getNavButton: () => navBtn,
   getUserLatLng: () => userLatLng,
-  getSpecialModes: () => ({
-    queensMode,
-    brooklynMode,
-    statenIslandMode,
-    bronxWashHeightsMode,
-    manhattanMode
-  }),
+  getSpecialModes: () => getModeFlags(),
   effectiveBucket,
   effectiveRating,
   getActiveSpecialModeTagForFeature,
@@ -1577,6 +712,7 @@ function wireMusicPanel() {
 }
 
 function modesPanelHTML() {
+  const modeFlags = getModeFlags();
   return `
     <div class="panelBlock">
       <div style="font-weight:700;margin-bottom:8px;">${escapeHtml(recommendEl?.textContent || "")}</div>
@@ -1587,11 +723,11 @@ function modesPanelHTML() {
       </div>
 
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
-        <button id="dockStatenBtn" class="chipBtn">${statenIslandMode ? "Staten Island: ON" : "Staten Island: OFF"}</button>
-        <button id="dockQueensBtn" class="chipBtn">${queensMode ? "Queens: ON" : "Queens: OFF"}</button>
-        <button id="dockBrooklynBtn" class="chipBtn">${brooklynMode ? "Brooklyn: ON" : "Brooklyn: OFF"}</button>
-        <button id="dockManhattanBtn" class="chipBtn">${manhattanMode ? "Manhattan: ON" : "Manhattan: OFF"}</button>
-        <button id="dockBronxWashHeightsBtn" class="chipBtn">${bronxWashHeightsMode ? "Bronx/Wash Heights: ON" : "Bronx/Wash Heights: OFF"}</button>
+        <button id="dockStatenBtn" class="chipBtn">${modeFlags.statenIslandMode ? "Staten Island: ON" : "Staten Island: OFF"}</button>
+        <button id="dockQueensBtn" class="chipBtn">${modeFlags.queensMode ? "Queens: ON" : "Queens: OFF"}</button>
+        <button id="dockBrooklynBtn" class="chipBtn">${modeFlags.brooklynMode ? "Brooklyn: ON" : "Brooklyn: OFF"}</button>
+        <button id="dockManhattanBtn" class="chipBtn">${modeFlags.manhattanMode ? "Manhattan: ON" : "Manhattan: OFF"}</button>
+        <button id="dockBronxWashHeightsBtn" class="chipBtn">${modeFlags.bronxWashHeightsMode ? "Bronx/Wash Heights: ON" : "Bronx/Wash Heights: OFF"}</button>
         <button id="dockGhostBtn" class="chipBtn">${me?.ghost_mode ? "Ghost: ON" : "Ghost: OFF"}</button>
       </div>
 
@@ -1621,11 +757,7 @@ function wireModesPanel() {
 
   document.getElementById("dockStatenBtn")?.addEventListener("click", (e) => {
     e.preventDefault();
-    statenIslandMode = !statenIslandMode;
-    persistSpecialModeState();
-    syncStatenIslandUI();
-    syncManhattanUI();
-    syncBronxWashHeightsUI();
+    toggleModeByKey('statenIsland');
     if (currentFrame) renderFrame(currentFrame);
     openDrawer("modes", "Modes", modesPanelHTML());
     wireModesPanel();
@@ -1633,12 +765,7 @@ function wireModesPanel() {
 
   document.getElementById("dockQueensBtn")?.addEventListener("click", (e) => {
     e.preventDefault();
-    queensMode = !queensMode;
-    persistSpecialModeState();
-    syncQueensUI();
-    syncStatenIslandUI();
-    syncManhattanUI();
-    syncBronxWashHeightsUI();
+    toggleModeByKey('queens');
     if (currentFrame) renderFrame(currentFrame);
     openDrawer("modes", "Modes", modesPanelHTML());
     wireModesPanel();
@@ -1646,13 +773,7 @@ function wireModesPanel() {
 
   document.getElementById("dockBrooklynBtn")?.addEventListener("click", (e) => {
     e.preventDefault();
-    brooklynMode = !brooklynMode;
-    persistSpecialModeState();
-    syncBrooklynUI();
-    syncQueensUI();
-    syncStatenIslandUI();
-    syncManhattanUI();
-    syncBronxWashHeightsUI();
+    toggleModeByKey('brooklyn');
     if (currentFrame) renderFrame(currentFrame);
     openDrawer("modes", "Modes", modesPanelHTML());
     wireModesPanel();
@@ -1660,11 +781,7 @@ function wireModesPanel() {
 
   document.getElementById("dockManhattanBtn")?.addEventListener("click", (e) => {
     e.preventDefault();
-    manhattanMode = !manhattanMode;
-    persistSpecialModeState();
-    syncManhattanUI();
-    syncStatenIslandUI();
-    syncBronxWashHeightsUI();
+    toggleModeByKey('manhattan');
     if (currentFrame) renderFrame(currentFrame);
     openDrawer("modes", "Modes", modesPanelHTML());
     wireModesPanel();
@@ -1672,11 +789,7 @@ function wireModesPanel() {
 
   document.getElementById("dockBronxWashHeightsBtn")?.addEventListener("click", (e) => {
     e.preventDefault();
-    bronxWashHeightsMode = !bronxWashHeightsMode;
-    persistSpecialModeState();
-    syncBronxWashHeightsUI();
-    syncStatenIslandUI();
-    syncManhattanUI();
+    toggleModeByKey('bronxWashHeights');
     if (currentFrame) renderFrame(currentFrame);
     openDrawer("modes", "Modes", modesPanelHTML());
     wireModesPanel();
@@ -1818,6 +931,7 @@ function wireProfilePanel() {
 /* wireChatPanel has been removed */
 
 function colorsPanelHTML() {
+  const modeFlags = getModeFlags();
   const swatch = (fill) => `<svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true" focusable="false" style="display:inline-block;vertical-align:middle;flex:0 0 12px;forced-color-adjust:none;-webkit-print-color-adjust:exact;print-color-adjust:exact;"><rect x="0.5" y="0.5" width="11" height="11" rx="3" fill="${fill}" stroke="rgba(0,0,0,0.15)"/></svg>`;
   const rows = `
       <div style="display:flex;align-items:center;gap:8px;">${swatch("#00b050")}Green = Highest</div>
@@ -1833,7 +947,7 @@ function colorsPanelHTML() {
       <div style="font-weight:800;margin-bottom:8px;">Demand Colors</div>
       ${rows}
       <div style="margin-top:10px;opacity:0.75;font-weight:600;">
-        ${statenIslandMode
+        ${modeFlags.statenIslandMode
           ? "Staten Island Mode is ON: Staten Island colors are relative within Staten Island only. Other boroughs remain NYC-wide."
           : "Colors come from rating (1–100) for the selected 20-minute window. Time label is NYC time."}
       </div>
@@ -2063,6 +1177,16 @@ if (dbgReloadFrame) {
   });
 }
 
+window.TlcZoneLabelInternals = {
+  getMap: () => map,
+  isMapReady: () => mapReady,
+  waitForStyleReady,
+  emptyGeojson,
+  geometryCenter,
+  ensurePickupSourceAndLayers,
+  debugEnabled
+};
+
 /* =========================================================
    MapLibre init
    ========================================================= */
@@ -2287,89 +1411,9 @@ async function waitForStyleReady(timeoutMs = 5000) {
   });
 }
 
-async function ensureZonesSourceAndLayers() {
-  if (!map) return false;
-  const styleReady = await waitForStyleReady();
-  if (!styleReady) return false;
-
-  // Polygons source
-  if (!map.getSource("zones")) {
-    map.addSource("zones", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
-  }
-
-  // Fill
-  if (!map.getLayer("zones-fill")) {
-    map.addLayer({
-      id: "zones-fill",
-      type: "fill",
-      source: "zones",
-      paint: {
-        "fill-color": ["coalesce", ["to-string", ["get", "effectiveColor"]], "#66aaff"],
-        "fill-opacity": 0.82,
-      },
-    });
-  }
-
-  // Outline
-  if (!map.getLayer("zones-line")) {
-    map.addLayer({
-      id: "zones-line",
-      type: "line",
-      source: "zones",
-      paint: { "line-color": "#ffffff", "line-width": 1, "line-opacity": 1 },
-    });
-  }
-
-  // Labels source (points INSIDE polygons)
-  if (!map.getSource("zone-labels")) {
-    map.addSource("zone-labels", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
-  }
-
-  // Labels layer (clean, professional, fun)
-  if (!map.getLayer("zone-labels")) {
-    map.addLayer({
-      id: "zone-labels",
-      type: "symbol",
-      source: "zone-labels",
-      layout: {
-        "symbol-placement": "point",
-        "text-field": ["coalesce", ["get", "label"], ""],
-        "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
-        "text-size": [
-          "interpolate",
-          ["linear"],
-          ["zoom"],
-          07, 00,
-          08, 00,
-          09, 00,
-          10, 00,
-          11, 05,
-          12, 09,
-          15, 20,
-        ],
-        "text-max-width": ["coalesce", ["get", "textMaxWidth"], 4],
-        "text-letter-spacing": ["coalesce", ["get", "letterSpacing"], 0],
-        "text-rotate": ["coalesce", ["get", "textRotate"], 0],
-        "symbol-sort-key": ["coalesce", ["get", "sortKey"], 0],
-        "text-anchor": "center",
-        "text-justify": "center",
-        "text-allow-overlap": true,
-        "text-ignore-placement": true,
-        "text-padding": 1.5,
-      },
-      paint: {
-        "text-color": "#1f262e",
-        "text-halo-color": "rgba(255,255,255,0)",
-        "text-halo-width": 0,
-        "text-halo-blur": 0,
-      },
-      minzoom: LABEL_ZOOM_MIN,
-    });
-  }
-
-  await ensurePickupSourceAndLayers();
-  return true;
-}
+async function ensureZonesSourceAndLayers(...args) { return await (window.TlcZoneLabelModule?.ensureZonesSourceAndLayers?.(...args) || Promise.resolve(false)); }
+function refreshZoneLabels(...args) { return window.TlcZoneLabelModule?.refreshZoneLabels?.(...args); }
+function getFeatureCollectionBounds(...args) { return window.TlcZoneLabelModule?.getFeatureCollectionBounds?.(...args) || null; }
 
 function emptyGeojson() {
   return { type: "FeatureCollection", features: [] };
@@ -2456,319 +1500,6 @@ function wireZoneClickPopup() {
 }
 
 /* =========================================================
-   Label point computation (inside polygon) — for “major map app” behavior
-   - We DO NOT modify polygon geometry arrays.
-   - We create a separate point FeatureCollection for labels.
-   ========================================================= */
-
-function clamp(v, lo, hi) {
-  return Math.max(lo, Math.min(hi, v));
-}
-
-function bboxFromCoords(coords) {
-  let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
-  const visit = (c) => {
-    if (!Array.isArray(c)) return;
-    if (c.length >= 2 && Number.isFinite(c[0]) && Number.isFinite(c[1])) {
-      minLng = Math.min(minLng, c[0]);
-      minLat = Math.min(minLat, c[1]);
-      maxLng = Math.max(maxLng, c[0]);
-      maxLat = Math.max(maxLat, c[1]);
-      return;
-    }
-    for (const cc of c) visit(cc);
-  };
-  visit(coords);
-  if (!Number.isFinite(minLng) || !Number.isFinite(minLat) || !Number.isFinite(maxLng) || !Number.isFinite(maxLat)) return null;
-  return { minLng, minLat, maxLng, maxLat };
-}
-
-// ray-casting point in ring
-function pointInRing(ptLng, ptLat, ring) {
-  if (!Array.isArray(ring) || ring.length < 3) return false;
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const xi = ring[i][0], yi = ring[i][1];
-    const xj = ring[j][0], yj = ring[j][1];
-    const intersect =
-      ((yi > ptLat) !== (yj > ptLat)) &&
-      (ptLng < ((xj - xi) * (ptLat - yi)) / (yj - yi + 1e-15) + xi);
-    if (intersect) inside = !inside;
-  }
-  return inside;
-}
-
-// point in polygon (outer + holes)
-function pointInPolygonLngLat(ptLng, ptLat, polyCoords) {
-  if (!Array.isArray(polyCoords) || polyCoords.length === 0) return false;
-  const outer = polyCoords[0];
-  if (!pointInRing(ptLng, ptLat, outer)) return false;
-
-  // holes: if inside any hole => outside
-  for (let i = 1; i < polyCoords.length; i++) {
-    if (pointInRing(ptLng, ptLat, polyCoords[i])) return false;
-  }
-  return true;
-}
-
-// choose largest polygon in multipolygon by bbox area (cheap & stable)
-function pickLargestPolygonFromMulti(multiCoords) {
-  if (!Array.isArray(multiCoords) || multiCoords.length === 0) return null;
-  let best = null;
-  let bestArea = -Infinity;
-  for (const poly of multiCoords) {
-    const bb = bboxFromCoords(poly);
-    if (!bb) continue;
-    const area = (bb.maxLng - bb.minLng) * (bb.maxLat - bb.minLat);
-    if (area > bestArea) {
-      bestArea = area;
-      best = poly;
-    }
-  }
-  return best;
-}
-
-// Find a point inside polygon. Start at centroid; if outside, spiral search inside bbox.
-function findInteriorPointForGeometry(geom) {
-  if (!geom) return null;
-
-  let poly = null;
-  if (geom.type === "Polygon") poly = geom.coordinates;
-  else if (geom.type === "MultiPolygon") poly = pickLargestPolygonFromMulti(geom.coordinates);
-  else return null;
-
-  if (!poly) return null;
-
-  const bb = bboxFromCoords(poly);
-  if (!bb) return null;
-
-  // seed = centroid (area-weighted)
-  let seed = geometryCenter({ type: "Polygon", coordinates: poly });
-  if (seed && Number.isFinite(seed.lng) && Number.isFinite(seed.lat)) {
-    if (pointInPolygonLngLat(seed.lng, seed.lat, poly)) return seed;
-  }
-
-  // fallback seed = bbox center
-  const cx = (bb.minLng + bb.maxLng) / 2;
-  const cy = (bb.minLat + bb.maxLat) / 2;
-  if (pointInPolygonLngLat(cx, cy, poly)) return { lng: cx, lat: cy };
-
-  // spiral search around bbox center
-  const w = bb.maxLng - bb.minLng;
-  const h = bb.maxLat - bb.minLat;
-
-  // step size scaled by bbox
-  const stepLng = Math.max(w / 40, 1e-4);
-  const stepLat = Math.max(h / 40, 1e-4);
-
-  const maxR = 60; // attempts radius steps
-  for (let r = 1; r <= maxR; r++) {
-    const dx = r * stepLng;
-    const dy = r * stepLat;
-
-    const candidates = [
-      [cx + dx, cy],
-      [cx - dx, cy],
-      [cx, cy + dy],
-      [cx, cy - dy],
-      [cx + dx, cy + dy],
-      [cx - dx, cy + dy],
-      [cx + dx, cy - dy],
-      [cx - dx, cy - dy],
-    ];
-
-    for (const [x, y] of candidates) {
-      const lng = clamp(x, bb.minLng, bb.maxLng);
-      const lat = clamp(y, bb.minLat, bb.maxLat);
-      if (pointInPolygonLngLat(lng, lat, poly)) return { lng, lat };
-    }
-  }
-
-  // last fallback: bbox center even if not perfect (should be rare)
-  return { lng: cx, lat: cy };
-}
-
-function normalizeZoneLabelBaseName(name) {
-  let base = String(name || "").trim();
-  if (!base) return "";
-
-  base = base.replace(/\s*\([^)]*\)\s*/g, " ").replace(/\s+/g, " ").trim();
-  base = base
-    .replace(/\b(North|South|East|West)\b$/i, "")
-    .replace(/\b(District|Airport|Station)\b$/i, "")
-    .replace(/\bPark City\b/i, "Park")
-    .replace(/\bSquare\b/gi, "Sq")
-    .replace(/\bHeights\b/gi, "Heights")
-    .replace(/\bTheatre\b/gi, "Theatre")
-    .replace(/\s{2,}/g, " ")
-    .trim();
-
-  if (base.length > 18 && !base.includes("\n")) {
-    const words = base.split(" ");
-    if (words.length >= 2) {
-      const splitAt = Math.ceil(words.length / 2);
-      base = `${words.slice(0, splitAt).join(" ")}\n${words.slice(splitAt).join(" ")}`;
-    }
-  }
-
-  return base;
-}
-
-function getPrimaryPolygonForLabel(geom) {
-  if (!geom) return null;
-  if (geom.type === "Polygon") return geom.coordinates;
-  if (geom.type === "MultiPolygon") return pickLargestPolygonFromMulti(geom.coordinates);
-  return null;
-}
-
-function ringBBox(ring) {
-  if (!Array.isArray(ring) || !ring.length) return null;
-  let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
-  for (const pt of ring) {
-    if (!Array.isArray(pt) || pt.length < 2) continue;
-    const lng = Number(pt[0]);
-    const lat = Number(pt[1]);
-    if (!Number.isFinite(lng) || !Number.isFinite(lat)) continue;
-    if (lng < minLng) minLng = lng;
-    if (lat < minLat) minLat = lat;
-    if (lng > maxLng) maxLng = lng;
-    if (lat > maxLat) maxLat = lat;
-  }
-  if (!Number.isFinite(minLng) || !Number.isFinite(minLat) || !Number.isFinite(maxLng) || !Number.isFinite(maxLat)) return null;
-  return { minLng, minLat, maxLng, maxLat, width: maxLng - minLng, height: maxLat - minLat };
-}
-
-function estimatePolygonOrientationDegrees(poly) {
-  const outer = Array.isArray(poly) ? poly[0] : null;
-  const bb = ringBBox(outer);
-  if (!outer || !bb) return 0;
-
-  if (bb.height > bb.width * 1.65) return 90;
-  if (bb.width > bb.height * 1.65) return 0;
-
-  let bestLen2 = 0;
-  let bestAngle = 0;
-  for (let i = 1; i < outer.length; i++) {
-    const a = outer[i - 1];
-    const b = outer[i];
-    if (!a || !b) continue;
-    const dx = Number(b[0]) - Number(a[0]);
-    const dy = Number(b[1]) - Number(a[1]);
-    if (!Number.isFinite(dx) || !Number.isFinite(dy)) continue;
-    const len2 = dx * dx + dy * dy;
-    if (len2 > bestLen2) {
-      bestLen2 = len2;
-      bestAngle = (Math.atan2(dy, dx) * 180) / Math.PI;
-    }
-  }
-
-  const normalized = ((bestAngle + 180) % 360) - 180;
-  const candidates = [0, 90, 45, -45];
-  let snapped = 0;
-  let bestDiff = Infinity;
-  for (const c of candidates) {
-    const d = Math.min(Math.abs(normalized - c), Math.abs(normalized - (c + 180)), Math.abs(normalized - (c - 180)));
-    if (d < bestDiff) {
-      bestDiff = d;
-      snapped = c;
-    }
-  }
-  if (bestDiff > 28) return 0;
-  return snapped;
-}
-
-function estimateZoneLabelSizeBucket(poly) {
-  const outer = Array.isArray(poly) ? poly[0] : null;
-  const bb = ringBBox(outer);
-  if (!bb) return "sm";
-  const area = bb.width * bb.height;
-  if (area < 0.00007) return "xs";
-  if (area < 0.0002) return "sm";
-  if (area < 0.0006) return "md";
-  return "lg";
-}
-
-function splitLabelForZoneShape(label, orientation, sizeBucket) {
-  const raw = String(label || "").trim();
-  if (!raw) return "";
-  if (raw.includes("\n")) return raw;
-
-  const words = raw.split(/\s+/).filter(Boolean);
-  if (words.length < 2) return raw;
-  if (orientation === 90 || sizeBucket === "xs") {
-    return `${words[0]}\n${words.slice(1).join(" ")}`;
-  }
-  if (sizeBucket === "sm" && raw.length > 11) {
-    const idx = Math.ceil(words.length / 2);
-    return `${words.slice(0, idx).join(" ")}\n${words.slice(idx).join(" ")}`;
-  }
-  return raw;
-}
-
-function getZoneLabelSignature(feature) {
-  const props = feature?.properties || {};
-  const id = String(props.LocationID ?? "");
-  const name = String(props.zone_name || "").trim();
-  const geom = feature?.geometry;
-  const poly = getPrimaryPolygonForLabel(geom);
-  const outer = Array.isArray(poly) ? poly[0] : null;
-  const bb = ringBBox(outer);
-  const w = bb ? bb.width.toFixed(6) : "0";
-  const h = bb ? bb.height.toFixed(6) : "0";
-  return `${id}|${name}|${geom?.type || ""}|${w}|${h}`;
-}
-
-function buildZoneLabelLayoutFeature(feature) {
-  const props = feature?.properties || {};
-  const locationId = String(props.LocationID ?? "");
-  const zoneName = String(props.zone_name || "").trim();
-  if (!locationId || !zoneName) return null;
-
-  const override = ZONE_LABEL_OVERRIDES[locationId] || null;
-  const poly = getPrimaryPolygonForLabel(feature?.geometry);
-  const orientation = 0;
-  const sizeBucket = estimateZoneLabelSizeBucket(poly);
-
-  const shortName = override?.label || ZONE_LABEL_SHORT_NAMES[locationId] || normalizeZoneLabelBaseName(zoneName);
-  const label = splitLabelForZoneShape(shortName, orientation, sizeBucket);
-
-  const interior = findInteriorPointForGeometry(feature?.geometry);
-  if (!interior) return null;
-
-  let lng = Number(interior.lng);
-  let lat = Number(interior.lat);
-  if (Number.isFinite(Number(override?.anchorLng)) && Number.isFinite(Number(override?.anchorLat))) {
-    lng = Number(override.anchorLng);
-    lat = Number(override.anchorLat);
-  } else {
-    if (Number.isFinite(Number(override?.dx))) lng += Number(override.dx);
-    if (Number.isFinite(Number(override?.dy))) lat += Number(override.dy);
-  }
-
-  const sizeByBucket = { xs: 9.2, sm: 10, md: 10.8, lg: 11.8 };
-  const widthByBucket = { xs: 3.0, sm: 4.2, md: 5.0, lg: 6.0 };
-  const spacingByBucket = { xs: 0.01, sm: 0.015, md: 0.02, lg: 0.025 };
-  const textSize = Number.isFinite(Number(override?.size)) ? Number(override.size) : sizeByBucket[sizeBucket] || 10;
-  const textMaxWidth = Number.isFinite(Number(override?.maxWidth)) ? Number(override.maxWidth) : widthByBucket[sizeBucket] || 4.2;
-  const letterSpacing = Number.isFinite(Number(override?.letterSpacing)) ? Number(override.letterSpacing) : spacingByBucket[sizeBucket] || 0.015;
-  const sortKey = sizeBucket === "lg" ? 3 : sizeBucket === "md" ? 2 : 1;
-
-  return {
-    type: "Feature",
-    geometry: { type: "Point", coordinates: [lng, lat] },
-    properties: {
-      LocationID: props.LocationID,
-      label,
-      textRotate: orientation,
-      textSize,
-      textMaxWidth,
-      letterSpacing,
-      sortKey,
-    },
-  };
-}
-
-/* =========================================================
    Timeline / frames
    ========================================================= */
 let timeline = [];
@@ -2779,6 +1510,18 @@ let lastUserSliderTs = 0;
 /* NEXT BIN CACHE */
 let nextFramePickupsById = new Map();
 let nextFramePayById = new Map();
+
+window.TlcModeInternals = {
+  getCurrentFrame: () => currentFrame,
+  getUserLatLng: () => userLatLng,
+  getNextFramePickupsById: () => nextFramePickupsById,
+  getNextFramePayById: () => nextFramePayById,
+  getMap: () => map,
+  geometryCenter,
+  haversineMiles,
+  renderCurrentFrame: () => { if (currentFrame) renderFrame(currentFrame); },
+  prettyBucket
+};
 
 function trackFrameCacheOrder(idx) {
   const existing = frameCacheOrder.indexOf(idx);
@@ -2914,24 +1657,26 @@ function buildPopupHTML(props, geom) {
     : "";
 
   let extra = "";
+  const modeFlags = getModeFlags();
+  const activeModeTag = getActiveSpecialModeTagForFeature(props, geom);
 
-  if (statenIslandMode && isStatenIslandFeature(props) && Number.isFinite(Number(props.si_local_rating))) {
+  if (modeFlags.statenIslandMode && activeModeTag === "staten_island" && Number.isFinite(Number(props.si_local_rating))) {
     extra += `<div style="margin-top:6px;"><b>Staten Local Rating:</b> ${props.si_local_rating} (${prettyBucket(props.si_local_bucket)})</div>`;
   }
 
-  if (manhattanMode && isManhattanModeZone(props, geom) && Number.isFinite(Number(props.mh_local_rating))) {
+  if (modeFlags.manhattanMode && activeModeTag === "manhattan" && Number.isFinite(Number(props.mh_local_rating))) {
     extra += `<div style="margin-top:6px;"><b>Manhattan Anti-Saturation:</b> ${props.mh_local_rating} (${prettyBucket(props.mh_local_bucket)})</div>`;
   }
 
-  if (queensMode && isQueensModeZone(props) && Number.isFinite(Number(props.qn_local_rating))) {
+  if (modeFlags.queensMode && activeModeTag === "queens" && Number.isFinite(Number(props.qn_local_rating))) {
     extra += `<div style="margin-top:6px;"><b>Queens Local Flow:</b> ${props.qn_local_rating} (${prettyBucket(props.qn_local_bucket)})</div>`;
   }
 
-  if (brooklynMode && isBrooklynModeZone(props) && Number.isFinite(Number(props.bk_local_rating))) {
+  if (modeFlags.brooklynMode && activeModeTag === "brooklyn" && Number.isFinite(Number(props.bk_local_rating))) {
     extra += `<div style="margin-top:6px;"><b>Brooklyn Local Rating:</b> ${props.bk_local_rating} (${prettyBucket(props.bk_local_bucket)})</div>`;
   }
 
-  if (bronxWashHeightsMode && isBronxWashHeightsModeZone(props) && Number.isFinite(Number(props.bwh_local_rating))) {
+  if (modeFlags.bronxWashHeightsMode && activeModeTag === "bronx_wash_heights" && Number.isFinite(Number(props.bwh_local_rating))) {
     extra += `<div style="margin-top:6px;"><b>Bronx/Wash Heights Trip Flow:</b> ${props.bwh_local_rating} (${prettyBucket(props.bwh_local_bucket)})</div>`;
   }
 
@@ -2948,73 +1693,6 @@ function buildPopupHTML(props, geom) {
       <div><b>Avg Pay per Trip (last 20 min):</b> $${pay}</div>
     </div>
   `;
-}
-
-function getFeatureCollectionBounds(fc) {
-  if (!fc || !Array.isArray(fc.features) || fc.features.length === 0) return null;
-
-  let minLng = Infinity;
-  let minLat = Infinity;
-  let maxLng = -Infinity;
-  let maxLat = -Infinity;
-
-  const visitCoordinates = (coords) => {
-    if (!Array.isArray(coords)) return;
-    if (coords.length >= 2 && Number.isFinite(coords[0]) && Number.isFinite(coords[1])) {
-      const lng = coords[0];
-      const lat = coords[1];
-      if (lng < minLng) minLng = lng;
-      if (lat < minLat) minLat = lat;
-      if (lng > maxLng) maxLng = lng;
-      if (lat > maxLat) maxLat = lat;
-      return;
-    }
-    coords.forEach(visitCoordinates);
-  };
-
-  fc.features.forEach((f) => visitCoordinates(f?.geometry?.coordinates));
-
-  if (!Number.isFinite(minLng) || !Number.isFinite(minLat) || !Number.isFinite(maxLng) || !Number.isFinite(maxLat)) {
-    return null;
-  }
-  return { minLng, minLat, maxLng, maxLat };
-}
-
-/* =========================================================
-   Label refresh (MapLibre symbol layer)
-   ========================================================= */
-function buildZoneLabelsFeatureCollection(frame) {
-  const feats = frame?.polygons?.features || [];
-  const out = [];
-  for (const f of feats) {
-    const signature = getZoneLabelSignature(f);
-    const locationId = String(f?.properties?.LocationID ?? "");
-    if (!locationId) continue;
-
-    const cacheKey = `${locationId}|${signature}`;
-    const cached = zoneLabelLayoutCache.get(cacheKey);
-    if (cached) {
-      out.push(cached);
-      continue;
-    }
-
-    const built = buildZoneLabelLayoutFeature(f);
-    if (!built) continue;
-    zoneLabelLayoutCache.set(cacheKey, built);
-    out.push(built);
-  }
-
-  return { type: "FeatureCollection", features: out };
-}
-
-function refreshZoneLabels(frame) {
-  if (!map || !mapReady) return;
-  if (!frame) return;
-  const src = map.getSource("zone-labels");
-  if (!src) return;
-
-  const fc = buildZoneLabelsFeatureCollection(frame);
-  src.setData(fc);
 }
 
 /* =========================================================
@@ -3036,11 +1714,12 @@ async function renderFrame(frame) {
   lastRenderedFrameSignature = frameSignature(frame);
 
   // apply modes to mutate props (same as old)
-  if (queensMode) applyQueensLocalView(frame);
-  if (brooklynMode) applyBrooklynLocalView(frame);
-  if (bronxWashHeightsMode) applyBronxWashHeightsLocalView(frame);
-  if (statenIslandMode) applyStatenLocalView(frame);
-  if (manhattanMode) applyManhattanLocalView(frame);
+  const modeFlags = getModeFlags();
+  if (modeFlags.queensMode) applyQueensLocalView(frame);
+  if (modeFlags.brooklynMode) applyBrooklynLocalView(frame);
+  if (modeFlags.bronxWashHeightsMode) applyBronxWashHeightsLocalView(frame);
+  if (modeFlags.statenIslandMode) applyStatenLocalView(frame);
+  if (modeFlags.manhattanMode) applyManhattanLocalView(frame);
 
   const fc = frame.polygons || { type: "FeatureCollection", features: [] };
 
