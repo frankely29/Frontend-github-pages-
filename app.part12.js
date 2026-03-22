@@ -372,8 +372,10 @@
         type: "fill",
         source: "zones",
         paint: {
-          "fill-color": ["coalesce", ["to-string", ["get", "effectiveColor"]], "#66aaff"],
-          "fill-opacity": 0.82,
+          // fill alpha now comes from effectiveFillColor
+          // keep fill-opacity at 1 so only the feature color alpha controls dimming
+          "fill-color": ["coalesce", ["to-string", ["get", "effectiveFillColor"]], "#66aaff"],
+          "fill-opacity": 1,
         },
       });
     }

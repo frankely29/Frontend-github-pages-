@@ -248,12 +248,11 @@
     return Math.max(0.35, Math.min(1, confidence));
   }
 
-  function getTendencyDeltaPoints(payload) {
+  function getLowTendencyFactor(payload) {
     const score = Number(payload?.score);
     if (!Number.isFinite(score)) return 0;
-    const normalized = (score - 50) / 50;
-    const baseDelta = normalized * 10;
-    return baseDelta * getTendencyConfidenceFactor(payload);
+    if (score >= 50) return 0;
+    return Math.max(0, Math.min(1, (50 - score) / 50));
   }
 
   function normalizeBoroughName(value) {
@@ -298,17 +297,47 @@
     return Number(props?.rating ?? NaN);
   }
 
-  // tendency does NOT recolor the map independently
-  // tendency adjusts the final mode-aware rating
-  // bucket/color are derived from the adjusted rating so the map still has one final color-driving metric
+  // tendency no longer boosts rating above neutral
+  // score 50+ leaves colors normal
+  // low tendency dims fill alpha only
+  // base demand color stays unchanged
   function getTendencyAdjustedRating(baseRating, props, geom) {
-    const clampedBaseRating = clampRating100(baseRating);
+    return clampRating100(baseRating);
+  }
+
+  function getTendencyFillAlpha(props, geom) {
     const payload = getLiveDayTendencyPayload();
-    if (!payload) return clampedBaseRating;
+    if (!payload) return 1;
     const scopeWeight = getTendencyScopeWeight(props, geom, payload);
-    if (scopeWeight <= 0) return clampedBaseRating;
-    const tendencyDelta = getTendencyDeltaPoints(payload);
-    return clampRating100(clampedBaseRating + (tendencyDelta * scopeWeight));
+    if (scopeWeight <= 0) return 1;
+    const lowFactor = getLowTendencyFactor(payload);
+    if (lowFactor <= 0) return 1;
+    const confidence = getTendencyConfidenceFactor(payload);
+    const dimStrength = lowFactor * confidence * scopeWeight;
+    const alpha = 1 - (dimStrength * 0.18);
+    return Math.max(0.82, Math.min(1, alpha));
+  }
+
+  function hexToRgba(color, alpha) {
+    const raw = String(color || '').trim();
+    const match = raw.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+    if (!match) return color;
+    const hex = match[1];
+    const normalized = hex.length === 3
+      ? hex.split('').map((ch) => ch + ch).join('')
+      : hex;
+    const r = parseInt(normalized.slice(0, 2), 16);
+    const g = parseInt(normalized.slice(2, 4), 16);
+    const b = parseInt(normalized.slice(4, 6), 16);
+    const safeAlpha = Math.max(0, Math.min(1, Number(alpha)));
+    return `rgba(${r}, ${g}, ${b}, ${safeAlpha})`;
+  }
+
+  function effectiveFillColor(props, geom) {
+    const baseColor = effectiveColor(props, geom);
+    const alpha = getTendencyFillAlpha(props, geom);
+    if (alpha >= 0.999) return baseColor;
+    return hexToRgba(baseColor, alpha);
   }
 
   function applyStatenLocalView(frame) {
@@ -838,8 +867,7 @@
   }
 
   function effectiveRating(props, geom) {
-    const baseRating = getModeAwareBaseRating(props, geom);
-    return getTendencyAdjustedRating(baseRating, props, geom);
+    return clampRating100(getModeAwareBaseRating(props, geom));
   }
 
   function getActiveSpecialModeTagForFeature(props, geom) {
@@ -913,19 +941,24 @@
   window.getDayTendencyColorDebug = function (props, geom) {
     const payload = getLiveDayTendencyPayload();
     const baseRating = getModeAwareBaseRating(props, geom);
+    const finalRating = effectiveRating(props, geom);
     const scopeWeight = getTendencyScopeWeight(props, geom, payload);
-    const deltaPoints = getTendencyDeltaPoints(payload);
-    const adjustedRating = getTendencyAdjustedRating(baseRating, props, geom);
+    const lowTendencyFactor = getLowTendencyFactor(payload);
+    const fillAlpha = getTendencyFillAlpha(props, geom);
+    const baseColor = effectiveColor(props, geom);
+    const fillColor = effectiveFillColor(props, geom);
     return {
       payload,
       modeFlags: getModeFlags(),
       activeModeTag: getActiveSpecialModeTagForFeature(props, geom),
       baseRating,
+      finalRating,
       scopeWeight,
-      deltaPoints,
-      adjustedRating,
-      finalBucket: effectiveBucket(props, geom),
-      finalColor: effectiveColor(props, geom)
+      lowTendencyFactor,
+      fillAlpha,
+      baseColor,
+      fillColor,
+      finalBucket: effectiveBucket(props, geom)
     };
   };
 
@@ -944,7 +977,9 @@
     applyBrooklynLocalView,
     effectiveBucket,
     effectiveColor,
+    effectiveFillColor,
     effectiveRating,
+    getTendencyFillAlpha,
     getActiveSpecialModeTagForFeature
   };
 
