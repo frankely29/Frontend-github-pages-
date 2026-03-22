@@ -550,15 +550,15 @@
       const orientedCoords = orientSegmentIntoZoneRightSide(strongerCoords, strongerInteriorSide);
       const edgeStrength = clamp01((diff - EDGE_INFLUENCE_MIN_RATING_DIFF) / (EDGE_INFLUENCE_MAX_RATING_DIFF - EDGE_INFLUENCE_MIN_RATING_DIFF));
       const edgeColor = getFeatureBaseColorForEdge(weakerFeature);
-      const haloWidthPx = 34 + (edgeStrength * 20);
-      const softWidthPx = 20 + (edgeStrength * 12);
-      const coreWidthPx = 10 + (edgeStrength * 6);
-      const haloOpacity = 0.06 + (edgeStrength * 0.08);
-      const softOpacity = 0.08 + (edgeStrength * 0.10);
-      const coreOpacity = 0.10 + (edgeStrength * 0.08);
-      const haloOffsetPx = 10 + (edgeStrength * 6);
-      const softOffsetPx = 6 + (edgeStrength * 4);
-      const coreOffsetPx = 3 + (edgeStrength * 2);
+      const haloWidthPx = 30 + (edgeStrength * 16);
+      const softWidthPx = 16 + (edgeStrength * 8);
+      const coreWidthPx = 6 + (edgeStrength * 4);
+      const haloOpacity = 0.012 + (edgeStrength * 0.035);
+      const softOpacity = 0.020 + (edgeStrength * 0.045);
+      const coreOpacity = 0.028 + (edgeStrength * 0.040);
+      const haloOffsetPx = 8 + (edgeStrength * 4.5);
+      const softOffsetPx = 4.5 + (edgeStrength * 2.8);
+      const coreOffsetPx = 2 + (edgeStrength * 1.4);
 
       if (!strongerFeature || !Array.isArray(orientedCoords) || orientedCoords.length < 2) continue;
 
@@ -722,16 +722,16 @@
         paint: {
           "line-color": ["coalesce", ["to-string", ["get", "edge_color"]], "#ffffff"],
           "line-opacity": ["coalesce", ["to-number", ["get", "halo_opacity"]], 0],
-          "line-width": ["coalesce", ["to-number", ["get", "halo_width_px"]], 34],
+          "line-width": ["coalesce", ["to-number", ["get", "halo_width_px"]], 30],
           "line-blur": [
             "interpolate",
             ["linear"],
             ["zoom"],
-            12.4, 13,
-            14, 15,
-            16, 18,
+            12.4, 10,
+            14, 12,
+            16, 14,
           ],
-          "line-offset": ["coalesce", ["to-number", ["get", "halo_offset_px"]], 10],
+          "line-offset": ["coalesce", ["to-number", ["get", "halo_offset_px"]], 8],
         },
       }, "zones-line");
     }
@@ -749,16 +749,16 @@
         paint: {
           "line-color": ["coalesce", ["to-string", ["get", "edge_color"]], "#ffffff"],
           "line-opacity": ["coalesce", ["to-number", ["get", "soft_opacity"]], 0],
-          "line-width": ["coalesce", ["to-number", ["get", "soft_width_px"]], 20],
+          "line-width": ["coalesce", ["to-number", ["get", "soft_width_px"]], 16],
           "line-blur": [
             "interpolate",
             ["linear"],
             ["zoom"],
-            12.4, 7,
-            14, 8.5,
-            16, 10,
+            12.4, 4.5,
+            14, 5.5,
+            16, 6.5,
           ],
-          "line-offset": ["coalesce", ["to-number", ["get", "soft_offset_px"]], 6],
+          "line-offset": ["coalesce", ["to-number", ["get", "soft_offset_px"]], 4.5],
         },
       }, "zones-line");
     }
@@ -776,16 +776,16 @@
         paint: {
           "line-color": ["coalesce", ["to-string", ["get", "edge_color"]], "#ffffff"],
           "line-opacity": ["coalesce", ["to-number", ["get", "core_opacity"]], 0],
-          "line-width": ["coalesce", ["to-number", ["get", "core_width_px"]], 10],
+          "line-width": ["coalesce", ["to-number", ["get", "core_width_px"]], 6],
           "line-blur": [
             "interpolate",
             ["linear"],
             ["zoom"],
-            12.4, 2.8,
-            14, 3.4,
-            16, 4.2,
+            12.4, 1.4,
+            14, 1.8,
+            16, 2.2,
           ],
-          "line-offset": ["coalesce", ["to-number", ["get", "core_offset_px"]], 3],
+          "line-offset": ["coalesce", ["to-number", ["get", "core_offset_px"]], 2],
         },
       }, "zones-line");
     }
