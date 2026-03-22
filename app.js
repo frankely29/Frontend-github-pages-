@@ -6326,6 +6326,7 @@ Object.assign(TlcSharedAudio, {
   beginRecordingCapture(reason = "record-start") {
     return this.forcePauseRadioForVoiceCapture(reason);
   },
+
   async forcePauseRadioForVoiceCapture(reason = "record-start") {
     this.recorderLock = true;
 
@@ -6345,7 +6346,7 @@ Object.assign(TlcSharedAudio, {
     const stationUrl = String(this.desiredRadioSourceUrl || this.radioSourceUrl || "").trim();
     const hadRadio = !!stationKey;
 
-    if (hadRadio && !this.suspendedRadio) {
+    if (hadRadio) {
       this.suspendedRadio = {
         key: stationKey,
         label: stationLabel,
@@ -6367,6 +6368,11 @@ Object.assign(TlcSharedAudio, {
       try { audioEl.muted = true; } catch (_) {}
       try { audioEl.volume = 0; } catch (_) {}
       try { audioEl.pause(); } catch (_) {}
+
+      try {
+        await waitForRadioPauseSettle(audioEl, 320);
+      } catch (_) {}
+
       try { audioEl.removeAttribute("src"); } catch (_) {}
       try { audioEl.src = ""; } catch (_) {}
       try { audioEl.load(); } catch (_) {}
