@@ -1919,3 +1919,23 @@ html, body { height: 100%; margin: 0; padding: 0; }
     #dockChat[data-unread]::after {
       display: block;
     }
+
+/* ISSUE NOTE:
+   Avatar markers are photo-only for now.
+   The legacy direction arrow + pulse layers were still present behind the
+   photo marker and became visible again when zooming out, which looked like drift.
+   Keep these layers disabled until a new heading-marker design is explicitly approved.
+*/
+.navPulse::after,
+.navArrow::after {
+  content: none !important;
+  animation: none !important;
+  border: 0 !important;
+}
+
+.navArrowRot,
+.navArrow,
+.mapPresenceDirectionRot,
+.mapPresenceDirectionTip {
+  display: none !important;
+}

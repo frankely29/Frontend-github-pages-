@@ -4639,14 +4639,16 @@
     const avatarHTML = safeAvatar
       ? `<div class="mapPresenceAvatar"><img src="${escapeHtml(safeAvatar)}" alt="avatar" loading="lazy"></div>`
       : `<div class="mapPresenceInitials">${escapeHtml(mapIdentityInitials(name))}</div>`;
-    const dirAttr = directionId ? ` id="${escapeHtml(directionId)}"` : '';
     const orbitAttrs = mapIdentityOrbitDataAttrs(orbitMeta);
+
+    // ISSUE NOTE:
+    // The old heading arrow layer used to live behind the avatar circle.
+    // When the avatar shrank on zoom-out, parts of that hidden arrow leaked out
+    // and looked like marker drift.
+    // Keep markers photo-only for now.
     return `
       <div class="mapPresenceOrbit ${markerClass}" data-map-identity-label="1" data-map-presence-orbit="1" ${orbitAttrs}>
         <div class="mapPresenceRoot">
-          <div class="mapPresenceDirectionRot"${dirAttr} aria-hidden="true">
-          <span class="mapPresenceDirectionTip"></span>
-          </div>
           <div class="mapPresenceShell" style="width:${cfg.avatarPx}px;height:${cfg.avatarPx}px;">
             ${avatarHTML}
           </div>
