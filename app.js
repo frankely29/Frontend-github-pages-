@@ -6323,7 +6323,7 @@ Object.assign(TlcSharedAudio, {
     refreshRadioButtons();
     return true;
   },
-  async beginRecordingCapture(reason = "record-start") {
+  beginRecordingCapture(reason = "record-start") {
     return this.forcePauseRadioForVoiceCapture(reason);
   },
   async forcePauseRadioForVoiceCapture(reason = "record-start") {
