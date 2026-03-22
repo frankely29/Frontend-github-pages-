@@ -2276,6 +2276,8 @@ function chooseRichPresenceUserIds(rows, mode) {
 function clusterPresenceByScreenPosition(rows, selfPos) {
   const richRows = Array.isArray(rows) ? rows : [];
   const nodes = [];
+  const map = core.getMap?.();
+  const meState = core.getMeState?.();
 
   for (const row of richRows) {
     const lat = Number(row?.lat);
@@ -2291,7 +2293,7 @@ function clusterPresenceByScreenPosition(rows, selfPos) {
   if (Number.isFinite(selfLat) && Number.isFinite(selfLng)) {
     const point = map?.project?.([selfLng, selfLat]);
     if (point && Number.isFinite(point.x) && Number.isFinite(point.y)) {
-      const selfId = String(me?.id ?? '__self__');
+      const selfId = String(meState?.id ?? '__self__');
       nodes.push({ kind: 'self', id: selfId, x: point.x, y: point.y });
     }
   }
@@ -2527,14 +2529,22 @@ function scheduleAdaptivePresenceRender() {
 }
 
 function renderAdaptivePresenceFromCache() {
+  const map = core.getMap?.();
+  const mapReady = core.isMapReady?.();
+  const userLatLng = core.getUserLatLng?.();
+
   if (!map || !mapReady) return;
+
   ensurePresenceLiteSourceAndLayers();
+
   const rows = Array.isArray(cachedPresenceRows) ? cachedPresenceRows : [];
   const boundsObj = getPresenceRenderBounds();
   const viewportRows = boundsObj ? rows.filter((row) => rowInPresenceRenderBounds(row, boundsObj)) : rows.slice();
   const nextMode = computePresenceRenderMode(rows);
   const nextRenderFingerprint = `${nextMode}::${presenceRowsFingerprint(viewportRows)}`;
+
   if (renderedPresenceFingerprint === nextRenderFingerprint) return;
+
   presenceRenderMode = nextMode;
   const richUserIds = chooseRichPresenceUserIds(viewportRows, nextMode);
   const richRows = [];
@@ -2552,6 +2562,7 @@ function renderAdaptivePresenceFromCache() {
   const selfPos = (userLatLng && Number.isFinite(userLatLng.lat) && Number.isFinite(userLatLng.lng))
     ? { lat: userLatLng.lat, lng: userLatLng.lng }
     : null;
+
   clusterPresenceByScreenPosition(richRows, selfPos);
 
   for (const row of richRows) {
@@ -2572,7 +2583,7 @@ function renderAdaptivePresenceFromCache() {
   for (const uid of Array.from(otherMarkers.keys())) {
     if (!richUserIds.has(String(uid))) {
       const mk = otherMarkers.get(uid);
-      try { mk.remove(); } catch {}
+      try { mk.remove(); } catch (_) {}
       otherMarkers.delete(uid);
       driverMarkerVisualSignature.delete(uid);
     }
@@ -2609,7 +2620,7 @@ function renderAdaptivePresenceFromCache() {
     window.mapIdentityApplySelfOrbit(core.getLastSelfOrbitMeta?.() || null);
   }
 
-  applyDriverLabelZoomStyles();
+  core.applyDriverLabelZoomStyles?.();
   renderedPresenceFingerprint = nextRenderFingerprint;
 }
 
