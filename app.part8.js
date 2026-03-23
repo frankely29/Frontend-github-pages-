@@ -4935,6 +4935,10 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     getChatTransportDebugState,
   };
 
+  /* OWNER EXPORTS:
+     app.part8.js is the single owner of chat + voice public globals.
+     app.part2.js may provide compatibility wrappers, but ownership lives here.
+  */
   window.chatPanelHTML = chatPanelHTML;
   window.wireChatPanel = wireChatPanel;
   window.syncChatPollingState = syncChatPollingState;
