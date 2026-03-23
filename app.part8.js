@@ -1152,7 +1152,7 @@
 
 
 
-  attachChatSoundStateHandlers();
+
 
 
 
@@ -2972,10 +2972,25 @@
   window.chatResetState = chatResetState;
   window.getChatTransportDebugState = getChatTransportDebugState;
 
-  if (typeof bindDockToggle === 'function') {
+  function bindDockChatButtonOnce() {
     const chatBtn = document.getElementById('dockChat');
-    if (chatBtn) { bindDockToggle(chatBtn, 'chat', 'Chat', chatPanelHTML, wireChatPanel); }
+    if (!chatBtn || chatBtn.dataset.tlcBoundChat === '1') return;
+    if (typeof bindDockToggle !== 'function') return;
+    chatBtn.dataset.tlcBoundChat = '1';
+    bindDockToggle(chatBtn, 'chat', 'Chat', chatPanelHTML, wireChatPanel);
   }
+
+  /* ISSUE NOTE:
+     Chat must self-bind here as well as through app.part2 compatibility wrappers.
+     Dataset guards prevent duplicate listeners.
+  */
+  bindDockChatButtonOnce();
+  window.addEventListener('load', bindDockChatButtonOnce);
+  window.addEventListener('pageshow', bindDockChatButtonOnce);
+  window.addEventListener('focus', bindDockChatButtonOnce);
+  setTimeout(bindDockChatButtonOnce, 0);
+  setTimeout(bindDockChatButtonOnce, 400);
+  setTimeout(bindDockChatButtonOnce, 1200);
 
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible' && typeof authHeaderOK === 'function' && authHeaderOK()) {

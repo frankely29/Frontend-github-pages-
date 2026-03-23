@@ -345,11 +345,32 @@
   window.renderLeaderboardBadgeSvg = renderLeaderboardBadgeSvg;
   window.syncLeaderboardBadgeRewards = syncLeaderboardBadgeRewards;
   window.openGamesBattleComposer = openGamesBattleComposer;
+  window.gamesPanelHTML = gamesPanelHTML;
+  window.wireGamesPanel = wireGamesPanel;
 
-  if (typeof bindDockToggle === 'function') {
+  function bindCompatDockPanelsOnce() {
+    if (typeof bindDockToggle !== 'function') return;
+
+    const chatBtn = document.getElementById('dockChat');
+    if (chatBtn && chatBtn.dataset.tlcBoundChat !== '1') {
+      chatBtn.dataset.tlcBoundChat = '1';
+      bindDockToggle(chatBtn, 'chat', 'Chat', chatPanelHTML, wireChatPanel);
+    }
+
     const gamesBtn = document.getElementById('dockGames');
-    if (gamesBtn) { bindDockToggle(gamesBtn, 'games', 'Games', gamesPanelHTML, wireGamesPanel); }
+    if (gamesBtn && gamesBtn.dataset.tlcBoundGames !== '1') {
+      gamesBtn.dataset.tlcBoundGames = '1';
+      bindDockToggle(gamesBtn, 'games', 'Games', gamesPanelHTML, wireGamesPanel);
+    }
   }
+
+  bindCompatDockPanelsOnce();
+  window.addEventListener('load', bindCompatDockPanelsOnce);
+  window.addEventListener('pageshow', bindCompatDockPanelsOnce);
+  window.addEventListener('focus', bindCompatDockPanelsOnce);
+  setTimeout(bindCompatDockPanelsOnce, 0);
+  setTimeout(bindCompatDockPanelsOnce, 400);
+  setTimeout(bindCompatDockPanelsOnce, 1200);
 
   function toggleNightMode() { document.body.classList.toggle('night'); }
   window.toggleNightMode = toggleNightMode;
