@@ -24,14 +24,20 @@ app.use((req, res, next) => {
     res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     res.set("Pragma", "no-cache");
     res.set("Expires", "0");
+    res.set("Surrogate-Control", "no-store");
+    res.set("CDN-Cache-Control", "no-store");
     return next();
   }
 
   if (staticAssetPattern.test(req.path)) {
     const hasVersion = Object.prototype.hasOwnProperty.call(req.query || {}, "v");
-    res.set("Cache-Control", hasVersion
-      ? "public, max-age=31536000, immutable"
-      : "public, max-age=300, stale-while-revalidate=86400");
+    if (hasVersion) {
+      res.set("Cache-Control", "public, max-age=31536000, immutable");
+    } else {
+      res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+      res.set("Pragma", "no-cache");
+      res.set("Expires", "0");
+    }
   }
   next();
 });
@@ -44,6 +50,8 @@ app.use(express.static(rootDir, {
       res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
       res.setHeader("Pragma", "no-cache");
       res.setHeader("Expires", "0");
+      res.setHeader("Surrogate-Control", "no-store");
+      res.setHeader("CDN-Cache-Control", "no-store");
     }
   },
 }));
