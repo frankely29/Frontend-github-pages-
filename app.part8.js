@@ -2119,11 +2119,6 @@ function bindVoiceComposerControls(surface, optionsFactory) {
   window.getChatAudioLifecycleDebug = getChatAudioLifecycleDebug;
   window.getChatAudioDebugState = getChatAudioDebugState;
 
-  attachChatSoundStateHandlers();
-  resetChatSoundLifecycle('module-init');
-  reconcileChatSoundRuntime('module-init');
-  bindChatSoundPrimeListeners();
-  bindSharedVoicePlaybackEvents();
 
   const VOICE_NOTE_MAX_MS = 60000;
   const CHAT_RETENTION_MS = 24 * 60 * 60 * 1000;
@@ -3252,9 +3247,6 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     }
   }
 
-  attachChatSoundStateHandlers();
-  bindChatSoundPrimeListeners();
-  bindChatFirstInteractionListeners();
 
   function shouldCountUnread(msg, { ignoreOpenPanel = false } = {}) {
     if (isOwnMessage(msg)) return false;
@@ -4971,10 +4963,33 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     );
   };
 
+  /* OWNER BOOT:
+     app.part8.js must bootstrap chat + voice exactly once.
+     Do not scatter raw startup calls across the file.
+  */
+  let chatOwnerBootstrapped = false;
+
+  function bootstrapChatOwnerOnce() {
+    if (chatOwnerBootstrapped) return;
+    chatOwnerBootstrapped = true;
+
+    attachChatSoundStateHandlers();
+    resetChatSoundLifecycle('module-init');
+    reconcileChatSoundRuntime('module-init');
+    bindChatSoundPrimeListeners();
+    bindSharedVoicePlaybackEvents();
+    bindChatFirstInteractionListeners();
+  }
+
+  window.isTlcChatOwnerBootstrapped = function isTlcChatOwnerBootstrapped() {
+    return !!chatOwnerBootstrapped;
+  };
+
   window.getTlcChatOwnerStatus = function getTlcChatOwnerStatus() {
     return {
       readyFlag: !!window.__TLC_CHAT_OWNER_READY__,
       readyAt: Number(window.__TLC_CHAT_OWNER_READY_AT__ || 0),
+      bootstrapped: !!chatOwnerBootstrapped,
       hasChatPanelHTML: typeof window.chatPanelHTML === "function",
       hasWireChatPanel: typeof window.wireChatPanel === "function",
       hasChatCoreModule: !!window.TlcChatCoreModule,
@@ -4982,6 +4997,7 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     };
   };
 
+  bootstrapChatOwnerOnce();
   announceChatOwnerReady();
 
   function bindDockChatButtonOnce() {
