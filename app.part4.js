@@ -1542,10 +1542,7 @@
     bindDockToggle(gamesBtn, 'games', 'Games', gamesPanelHTML, wireGamesPanel);
   }
 
-  /* ISSUE NOTE:
-     Games must self-bind here as well as through app.part2 compatibility wrappers.
-     Dataset guards prevent duplicate listeners.
-  */
+  /* Games self-own their dock binding here; dataset guards prevent duplicate listeners with app.js fallback retries. */
   bindDockGamesButtonOnce();
   window.addEventListener('load', bindDockGamesButtonOnce);
   window.addEventListener('pageshow', bindDockGamesButtonOnce);
