@@ -968,9 +968,67 @@ function bindDockToggle(btn, key, title, htmlFactory, wireFn) {
 
 bindDockToggle(dockMusic, "music", "Music", musicPanelHTML, wireMusicPanel);
 bindDockToggle(dockModes, "modes", "Modes", modesPanelHTML, wireModesPanel);
-// Chat binding has been removed from app.js.  A new chat implementation
-// in app.part2.js will call bindDockToggle(dockChat, ...) with its own
-// panel and wiring functions.
+// Fallback binder only: feature modules self-bind first, and this exists only to recover from late module readiness.
+function ensureDockChatAndGamesBindings() {
+  if (typeof bindDockToggle !== "function") return;
+
+  const chatHtmlFactory =
+    window.TlcChatCoreModule?.chatPanelHTML ||
+    window.chatPanelHTML;
+
+  const chatWireFactory =
+    window.TlcChatCoreModule?.wireChatPanel ||
+    window.wireChatPanel;
+
+  if (
+    dockChat &&
+    !dockChat.dataset.tlcBoundChat &&
+    typeof chatHtmlFactory === "function" &&
+    typeof chatWireFactory === "function"
+  ) {
+    dockChat.dataset.tlcBoundChat = "1";
+    bindDockToggle(
+      dockChat,
+      "chat",
+      "Chat",
+      () => chatHtmlFactory(),
+      () => chatWireFactory()
+    );
+  }
+
+  const gamesHtmlFactory =
+    window.TlcGamesModule?.gamesPanelHTML ||
+    window.gamesPanelHTML;
+
+  const gamesWireFactory =
+    window.TlcGamesModule?.wireGamesPanel ||
+    window.wireGamesPanel;
+
+  if (
+    dockGames &&
+    !dockGames.dataset.tlcBoundGames &&
+    typeof gamesHtmlFactory === "function" &&
+    typeof gamesWireFactory === "function"
+  ) {
+    dockGames.dataset.tlcBoundGames = "1";
+    bindDockToggle(
+      dockGames,
+      "games",
+      "Games",
+      () => gamesHtmlFactory(),
+      () => gamesWireFactory()
+    );
+  }
+}
+
+ensureDockChatAndGamesBindings();
+window.addEventListener("load", ensureDockChatAndGamesBindings);
+window.addEventListener("pageshow", ensureDockChatAndGamesBindings);
+window.addEventListener("focus", ensureDockChatAndGamesBindings);
+setTimeout(ensureDockChatAndGamesBindings, 0);
+setTimeout(ensureDockChatAndGamesBindings, 400);
+setTimeout(ensureDockChatAndGamesBindings, 1200);
+
 bindDockToggle(dockColors, "colors", "Colors", colorsPanelHTML);
 if (dockProfile) {
   dockProfile.addEventListener("pointerdown", (e) => e.stopPropagation());
