@@ -1542,6 +1542,9 @@
 
   bindDockGamesButtonOnce();
   window.addEventListener('load', bindDockGamesButtonOnce);
+  window.addEventListener('pageshow', bindDockGamesButtonOnce);
+  window.addEventListener('focus', bindDockGamesButtonOnce);
   setTimeout(bindDockGamesButtonOnce, 0);
   setTimeout(bindDockGamesButtonOnce, 400);
+  setTimeout(bindDockGamesButtonOnce, 1200);
 })();

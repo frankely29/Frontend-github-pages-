@@ -1152,7 +1152,6 @@
 
 
 
-  attachChatSoundStateHandlers();
 
 
 
