@@ -1531,6 +1531,8 @@
 
 
   window.TlcGamesModule = { gamesPanelHTML, wireGamesPanel, isGamesPanelOpen, loadGamesBattleDashboard, loadActiveBattleMatch, openGamesBattleComposer };
+  window.gamesPanelHTML = gamesPanelHTML;
+  window.wireGamesPanel = wireGamesPanel;
 
   function bindDockGamesButtonOnce() {
     const gamesBtn = document.getElementById('dockGames');

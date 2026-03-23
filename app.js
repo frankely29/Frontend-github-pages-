@@ -976,14 +976,27 @@ function ensureDockChatAndGamesBindings() {
     bindDockToggle(dockChat, 'chat', 'Chat', () => window.chatPanelHTML(), () => window.wireChatPanel());
   }
 
-  if (dockGames && !dockGames.dataset.tlcBoundGames && window.TlcGamesModule?.gamesPanelHTML && window.TlcGamesModule?.wireGamesPanel) {
+  const gamesHtmlFactory =
+    window.TlcGamesModule?.gamesPanelHTML ||
+    window.gamesPanelHTML;
+
+  const gamesWireFactory =
+    window.TlcGamesModule?.wireGamesPanel ||
+    window.wireGamesPanel;
+
+  if (
+    dockGames &&
+    !dockGames.dataset.tlcBoundGames &&
+    typeof gamesHtmlFactory === 'function' &&
+    typeof gamesWireFactory === 'function'
+  ) {
     dockGames.dataset.tlcBoundGames = '1';
     bindDockToggle(
       dockGames,
       'games',
       'Games',
-      () => window.TlcGamesModule.gamesPanelHTML(),
-      () => window.TlcGamesModule.wireGamesPanel()
+      () => gamesHtmlFactory(),
+      () => gamesWireFactory()
     );
   }
 
