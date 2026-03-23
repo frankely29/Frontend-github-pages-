@@ -1662,8 +1662,6 @@ function wireZoneClickPopup() {
 
     const props = zoneFeature.properties || {};
     const geom = zoneFeature.geometry || null;
-    zonePopupLocationId = String(props.LocationID ?? "");
-    zonePopupLngLat = { lng: lngLat.lng, lat: lngLat.lat };
 
     closeZonePopup();
 
