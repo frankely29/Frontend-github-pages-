@@ -11,6 +11,7 @@
   const EDGE_INFLUENCE_HALO_LAYER_ID = "zone-edge-influence-halo";
   const EDGE_INFLUENCE_SOFT_LAYER_ID = "zone-edge-influence-soft";
   const EDGE_INFLUENCE_CORE_LAYER_ID = "zone-edge-influence-core";
+  const EDGE_INFLUENCE_SEED_LAYER_ID = "zone-edge-influence-seed";
   const EDGE_INFLUENCE_MIN_RATING_DIFF = 10;
   const EDGE_INFLUENCE_MAX_RATING_DIFF = 30;
   const EDGE_INFLUENCE_CHUNK_DEG = 0.00020;
@@ -700,12 +701,12 @@
       const haloWidthPx = 30 + (edgeStrength * 16);
       const softWidthPx = 16 + (edgeStrength * 8);
       const coreWidthPx = 6 + (edgeStrength * 4);
-      const haloOpacity = 0.014 + (edgeStrength * 0.032);
-      const softOpacity = 0.022 + (edgeStrength * 0.040);
-      const coreOpacity = 0.030 + (edgeStrength * 0.050);
-      const haloOffsetPx = 8 + (edgeStrength * 4.5);
-      const softOffsetPx = 4.5 + (edgeStrength * 2.8);
-      const coreOffsetPx = 2 + (edgeStrength * 1.4);
+      const haloOpacity = 0.018 + (edgeStrength * 0.036);
+      const softOpacity = 0.030 + (edgeStrength * 0.050);
+      const coreOpacity = 0.045 + (edgeStrength * 0.065);
+      const haloOffsetPx = 4.5 + (edgeStrength * 2.4);
+      const softOffsetPx = 2.4 + (edgeStrength * 1.4);
+      const coreOffsetPx = 0.9 + (edgeStrength * 0.8);
 
       if (!strongerFeature || !Array.isArray(orientedCoords) || orientedCoords.length < 2) continue;
 
@@ -1011,6 +1012,52 @@
       16.0, 1.00
     ];
 
+    if (!map.getLayer(EDGE_INFLUENCE_SEED_LAYER_ID)) {
+      map.addLayer({
+        id: EDGE_INFLUENCE_SEED_LAYER_ID,
+        type: "line",
+        source: EDGE_INFLUENCE_SOURCE_ID,
+        minzoom: ZONE_EDGE_INFLUENCE_MIN_ZOOM,
+        layout: {
+          "line-cap": "round",
+          "line-join": "round",
+        },
+        paint: {
+          "line-color": ["coalesce", ["to-string", ["get", "edge_color"]], "#ffffff"],
+          "line-opacity": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            11.8, 0.07,
+            12.4, 0.09,
+            13.2, 0.11,
+            14.2, 0.13,
+            15.0, 0.14,
+            16.0, 0.14
+          ],
+          "line-width": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            11.8, 1.6,
+            12.6, 2.0,
+            13.6, 2.4,
+            15.0, 2.8,
+            16.0, 3.0
+          ],
+          "line-blur": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            11.8, 0.5,
+            13.4, 0.7,
+            16.0, 0.9
+          ],
+          "line-offset": 0
+        }
+      }, "zones-line");
+    }
+
     // Inward hue overlay only on the stronger side of meaningful stronger-vs-weaker borders.
     // Keep the white divider line intact above it and remain weaker than hotspot / micro-hotspot overlays.
     if (!map.getLayer(EDGE_INFLUENCE_HALO_LAYER_ID)) {
@@ -1290,6 +1337,7 @@
       matchMaxAngleDeg: EDGE_INFLUENCE_MATCH_MAX_ANGLE_DEG,
       hotspotShieldZoneIds: Array.from(pickupHotspotShieldZoneIds || []).sort(),
       sourceReady: !!map?.getSource?.(EDGE_INFLUENCE_SOURCE_ID),
+      seedLayerReady: !!map?.getLayer?.(EDGE_INFLUENCE_SEED_LAYER_ID),
       haloLayerReady: !!map?.getLayer?.(EDGE_INFLUENCE_HALO_LAYER_ID),
       softLayerReady: !!map?.getLayer?.(EDGE_INFLUENCE_SOFT_LAYER_ID),
       coreLayerReady: !!map?.getLayer?.(EDGE_INFLUENCE_CORE_LAYER_ID),
