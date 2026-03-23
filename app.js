@@ -1302,6 +1302,8 @@ window.TlcZoneLabelInternals = {
 let zonePopup = null;
 let zonePopupAutoCloseTimer = null;
 let zonePopupActivityListenersBound = false;
+let zonePopupLocationId = "";
+let zonePopupLngLat = null;
 
 function startZonePopupAutoCloseTimer() {
   clearTimeout(zonePopupAutoCloseTimer);
@@ -1317,6 +1319,37 @@ function resetZonePopupAutoCloseTimer() {
       closeZonePopup();
     }, 10000);
   }
+}
+
+function getZonePopupMetrics(zoomValue) {
+  const z = Number(zoomValue);
+  const zoom = Number.isFinite(z) ? z : 13;
+  const t = Math.max(0, Math.min(1, (zoom - 10) / 6));
+
+  return {
+    maxWidthPx: Math.round(150 + (t * 58)),
+    fontPx: 9.5 + (t * 2.0),
+    titlePx: 11.5 + (t * 2.5),
+    paddingPx: 6 + (t * 4),
+    lineGapPx: 3 + (t * 2),
+    borderRadiusPx: 10 + (t * 2),
+  };
+}
+
+function resolveZoneFeatureForPopupById(locationId) {
+  const id = String(locationId || "").trim();
+  if (!id) return null;
+  const features = currentFrame?.polygons?.features || [];
+  return features.find((feature) => String(feature?.properties?.LocationID ?? "") === id) || null;
+}
+
+function syncOpenZonePopupMetrics() {
+  if (!zonePopup || !zonePopupLocationId || !zonePopupLngLat) return;
+  const feature = resolveZoneFeatureForPopupById(zonePopupLocationId);
+  if (!feature) return;
+  const props = feature.properties || {};
+  const geom = feature.geometry || null;
+  zonePopup.setHTML(buildPopupHTML(props, geom, getZonePopupMetrics(map?.getZoom?.())));
 }
 
 function initMap() {
@@ -1383,6 +1416,7 @@ function initMap() {
     map.on("zoom", () => {
       if (authHeaderOK()) scheduleAdaptivePresenceRender();
       applyDriverLabelZoomStyles();
+      syncOpenZonePopupMetrics();
     });
     map.on("zoomend", () => {
       if (authHeaderOK()) {
@@ -1391,6 +1425,7 @@ function initMap() {
         schedulePresencePoll({ immediate: true, reason: "viewport-change" });
       }
       applyDriverLabelZoomStyles();
+      syncOpenZonePopupMetrics();
     });
     map.on("rotateend", () => {
       if (authHeaderOK()) scheduleAdaptivePresenceRender();
@@ -1587,6 +1622,8 @@ function closeZonePopup() {
     if (zonePopup) zonePopup.remove();
   } catch {}
   zonePopup = null;
+  zonePopupLocationId = "";
+  zonePopupLngLat = null;
   clearTimeout(zonePopupAutoCloseTimer);
   zonePopupAutoCloseTimer = null;
 }
@@ -1602,41 +1639,83 @@ function wireZoneClickPopup() {
     try { map.getCanvas().style.cursor = ""; } catch {}
   });
 
-  map.on("click", "zones-fill", (e) => {
-    try {
-      const feat = e?.features?.[0];
-      if (!feat) return;
+  function openZonePopupFromMapEvent(point, lngLat) {
+    const hits = map.queryRenderedFeatures(point, {
+      layers: ["zones-fill", "zones-line", "zone-labels"]
+    });
 
-      const props = feat.properties || {};
-      // MapLibre can stringify nested props; your popup only needs top-level keys used below.
-      const geom = feat.geometry || null;
+    let zoneFeature = hits.find((f) => f?.layer?.id === "zones-fill") || null;
 
-      const lngLat = e.lngLat;
-      const html = buildPopupHTML(props, geom);
+    if (!zoneFeature) {
+      const fallbackHit = hits.find((f) => String(f?.properties?.LocationID ?? "").trim());
+      const fallbackId = String(fallbackHit?.properties?.LocationID ?? "").trim();
+      if (fallbackId) {
+        zoneFeature = resolveZoneFeatureForPopupById(fallbackId);
+      }
+    }
 
+    if (!zoneFeature) {
       closeZonePopup();
+      closeAllPanels();
+      return false;
+    }
 
-      zonePopup = new maplibregl.Popup({
-        closeButton: true,
-        closeOnClick: true,
-        maxWidth: "238px",
-      })
-        .setLngLat([lngLat.lng, lngLat.lat])
-        .setHTML(html)
-        .addTo(map);
+    const props = zoneFeature.properties || {};
+    const geom = zoneFeature.geometry || null;
+    zonePopupLocationId = String(props.LocationID ?? "");
+    zonePopupLngLat = { lng: lngLat.lng, lat: lngLat.lat };
 
-      startZonePopupAutoCloseTimer();
+    closeZonePopup();
+
+    zonePopupLocationId = String(props.LocationID ?? "");
+    zonePopupLngLat = { lng: lngLat.lng, lat: lngLat.lat };
+
+    zonePopup = new maplibregl.Popup({
+      closeButton: true,
+      closeOnClick: false,
+      maxWidth: `${getZonePopupMetrics(map?.getZoom?.()).maxWidthPx}px`,
+    })
+      .setLngLat([lngLat.lng, lngLat.lat])
+      .setHTML(buildPopupHTML(props, geom, getZonePopupMetrics(map?.getZoom?.())))
+      .addTo(map);
+
+    startZonePopupAutoCloseTimer();
+    return true;
+  }
+
+  map.on("click", (e) => {
+    try {
+      openZonePopupFromMapEvent(e.point, e.lngLat);
     } catch (err) {
       console.warn("zone popup failed:", err);
     }
   });
 
   if (!zonePopupActivityListenersBound) {
-    document.addEventListener("pointerdown", resetZonePopupAutoCloseTimer, { passive: true });
-    document.addEventListener("touchstart", resetZonePopupAutoCloseTimer, { passive: true });
+    document.addEventListener("pointerdown", (event) => {
+      const target = event.target;
+      const insidePopup = target && typeof target.closest === "function" && target.closest(".maplibregl-popup");
+      if (!insidePopup) {
+        closeZonePopup();
+      } else {
+        resetZonePopupAutoCloseTimer();
+      }
+    }, true);
+
+    document.addEventListener("touchstart", (event) => {
+      const target = event.target;
+      const insidePopup = target && typeof target.closest === "function" && target.closest(".maplibregl-popup");
+      if (!insidePopup) {
+        closeZonePopup();
+      } else {
+        resetZonePopupAutoCloseTimer();
+      }
+    }, true);
+
     zonePopupActivityListenersBound = true;
   }
 }
+
 
 /* =========================================================
    Timeline / frames
@@ -1772,7 +1851,7 @@ async function loadNextFramePickupsMap(curIdx) {
   }
 }
 
-function buildPopupHTML(props, geom) {
+function buildPopupHTML(props, geom, metrics = getZonePopupMetrics(map?.getZoom?.())) {
   const zoneName = (props.zone_name || "").trim();
   const borough = (props.borough || "").trim();
 
@@ -1820,18 +1899,32 @@ function buildPopupHTML(props, geom) {
   }
 
   return `
-    <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; font-size:13px;">
-      <div style="font-weight:800; margin-bottom:2px;">${escapeHtml(zoneName || `Zone ${props.LocationID ?? ""}`)}</div>
-      ${borough ? `<div style="opacity:0.8; margin-bottom:6px;">${escapeHtml(borough)}</div>` : `<div style="margin-bottom:6px;"></div>`}
-      <div><b>NYC Rating:</b> ${nycRating} (${prettyBucket(nycBucket)})</div>
-      ${extra}
-      <div style="margin-top:6px;"><b>Pickups (last ${BIN_MINUTES} min):</b> ${pickups}</div>
-      <div><b>Next ${BIN_MINUTES} min (historical):</b> ${nextPickups}</div>
-      ${communityPickupLine}
-      <div><b>Avg Pay per Trip (next ${BIN_MINUTES} min historical):</b> $${nextPay}</div>
-      <div><b>Avg Pay per Trip (last 20 min):</b> $${pay}</div>
+  <div
+    class="zonePopupCard"
+    style="
+      max-width:${metrics.maxWidthPx}px;
+      padding:${metrics.paddingPx}px;
+      border-radius:${metrics.borderRadiusPx}px;
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;
+      font-size:${metrics.fontPx}px;
+      line-height:1.22;
+      box-shadow:0 6px 18px rgba(0,0,0,0.18);
+    "
+  >
+    <div style="font-weight:800;font-size:${metrics.titlePx}px;margin-bottom:${metrics.lineGapPx}px;">
+      ${escapeHtml(zoneName || `Zone ${props.LocationID ?? ""}`)}
     </div>
-  `;
+    ${borough ? `<div style="opacity:0.78;margin-bottom:${metrics.lineGapPx + 1}px;">${escapeHtml(borough)}</div>` : `<div style="margin-bottom:${metrics.lineGapPx + 1}px;"></div>`}
+    <div><b>NYC Rating:</b> ${nycRating} (${prettyBucket(nycBucket)})</div>
+    ${extra}
+    <div style="margin-top:${metrics.lineGapPx + 1}px;"><b>Pickups (last ${BIN_MINUTES} min):</b> ${pickups}</div>
+    <div><b>Next ${BIN_MINUTES} min:</b> ${nextPickups}</div>
+    ${communityPickupLine}
+    <div><b>Avg Pay next ${BIN_MINUTES} min:</b> $${nextPay}</div>
+    <div><b>Avg Pay last 20 min:</b> $${pay}</div>
+  </div>
+`;
+
 }
 
 /* =========================================================
