@@ -985,8 +985,18 @@ window.getTlcOwnerBootState = function getTlcOwnerBootState() {
         : false,
     ownerReadyEventsBound:
       !!window.__TLC_OWNER_READY_EVENTS_BOUND__,
+    zoneOwnerReady:
+      typeof window.isTlcZoneOwnerReady === "function"
+        ? window.isTlcZoneOwnerReady()
+        : false,
     chatOwnerStatus: typeof window.getTlcChatOwnerStatus === "function" ? window.getTlcChatOwnerStatus() : null,
     gamesOwnerStatus: typeof window.getTlcGamesOwnerStatus === "function" ? window.getTlcGamesOwnerStatus() : null,
+    zoneOwnerStatus:
+      typeof window.getTlcZoneOwnerStatus === "function"
+        ? window.getTlcZoneOwnerStatus()
+        : null,
+    zoneReadyEventsBound:
+      !!window.__TLC_ZONE_READY_EVENTS_BOUND__,
     hasDockChat: !!document.getElementById("dockChat"),
     hasDockGames: !!document.getElementById("dockGames"),
     dockChatBound: !!document.getElementById("dockChat")?.dataset?.tlcBoundChat,
@@ -1062,6 +1072,7 @@ function bindDockOwnersOnReadyEvents() {
 
 ensureDockChatAndGamesBindings();
 bindDockOwnersOnReadyEvents();
+bindZoneOwnerReadyEvents();
 window.addEventListener("load", ensureDockChatAndGamesBindings);
 window.addEventListener("pageshow", ensureDockChatAndGamesBindings);
 window.addEventListener("focus", ensureDockChatAndGamesBindings);
@@ -1521,6 +1532,27 @@ async function waitForStyleReady(timeoutMs = 5000) {
 async function ensureZonesSourceAndLayers(...args) { return await (window.TlcZoneLabelModule?.ensureZonesSourceAndLayers?.(...args) || Promise.resolve(false)); }
 function refreshZoneLabels(...args) { return window.TlcZoneLabelModule?.refreshZoneLabels?.(...args); }
 function getFeatureCollectionBounds(...args) { return window.TlcZoneLabelModule?.getFeatureCollectionBounds?.(...args) || null; }
+
+function bindZoneOwnerReadyEvents() {
+  if (window.__TLC_ZONE_READY_EVENTS_BOUND__) return;
+  window.__TLC_ZONE_READY_EVENTS_BOUND__ = true;
+
+  window.addEventListener("tlc-zone-owner-ready", async () => {
+    try {
+      if (!map || !mapReady) return;
+      const ready = await ensureZonesSourceAndLayers();
+      if (!ready) return;
+
+      const frameToRender = currentFrame || pendingFrame || null;
+      if (frameToRender) {
+        pendingFrame = null;
+        await renderFrame(frameToRender);
+      }
+    } catch (error) {
+      console.warn("Zone owner ready recovery failed:", error);
+    }
+  });
+}
 
 function emptyGeojson() {
   return { type: "FeatureCollection", features: [] };

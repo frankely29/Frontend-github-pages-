@@ -1094,13 +1094,19 @@ function revokeVoiceBlobUrls() {
 
 function collectTrackedVoiceMessages() {
     const messages = [];
-    const publicMessages = Array.isArray(chatInternals.publicChatMessages) ? chatInternals.publicChatMessages : [];
-    const privateMessages = chatInternals.privateMessagesByUserId || Object.create(null);
+    const publicMessages = Array.isArray(publicChatMessages) ? publicChatMessages : [];
+    const privateMessages = privateMessagesByUserId || Object.create(null);
+
     if (publicMessages.length) messages.push(...publicMessages);
+
     Object.values(privateMessages).forEach((list) => {
       if (Array.isArray(list)) messages.push(...list);
     });
-    if (Array.isArray(driverProfileState?.messages)) messages.push(...driverProfileState.messages);
+
+    if (Array.isArray(driverProfileState?.messages)) {
+      messages.push(...driverProfileState.messages);
+    }
+
     return messages.filter((msg) => normalizeMessageType(msg?.messageType, msg?.audioUrl ? 'voice' : 'text') === 'voice');
   }
 
@@ -2356,7 +2362,7 @@ function bindVoiceComposerControls(surface, optionsFactory) {
   }
 
   function isChatPanelOpen() {
-    return typeof openPanelKey !== 'undefined' && openPanelKey === 'chat';
+    return typeof window.getOpenPanelKey === 'function' && window.getOpenPanelKey() === 'chat';
   }
 
   function msgUserId(msg) {
@@ -2935,12 +2941,17 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     const payload = parsed.payload || {};
     if (payload.keepalive || parsed.type === 'ping' || parsed.type === 'keepalive') return;
     if (parsed.type === 'battle_result' || parsed.type === 'game_battle_result' || payload.event_name === 'battle_result' || payload.event_name === 'game_battle_result' || payload.battle_result || payload.winner_display_name) {
+      const gamesModule = window.TlcGamesModule || null;
+      const gamesOpen = !!gamesModule?.isGamesPanelOpen?.();
+
       showBattleFeedEntry(payload.battle_result || payload);
-      if (payload.match_id && isGamesPanelOpen()) {
-        void loadGamesBattleDashboard({ silent: true });
-        if (Number(gamesState.activeMatch?.id || 0) === Number(payload.match_id || 0)) {
-          void loadActiveBattleMatch({ silent: true, preferredMatchId: Number(payload.match_id) });
-        }
+
+      if (payload.match_id && gamesOpen) {
+        void gamesModule?.loadGamesBattleDashboard?.({ silent: true });
+        void gamesModule?.loadActiveBattleMatch?.({
+          silent: true,
+          preferredMatchId: Number(payload.match_id)
+        });
       }
       return;
     }
@@ -3316,7 +3327,12 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     const xp = Number(payload?.winner_xp_awarded || 0);
     const level = Number(payload?.winner_new_level || payload?.new_level || 0);
     const textBits = [`🏁 ${winner} beat ${loser}`, `in ${game}`];
-    if (xp > 0) textBits.push(`(+${formatProgressNumber(xp, { maxFractionDigits: 0 })} XP)`);
+    if (xp > 0) {
+      const xpText = typeof window.formatProgressNumber === 'function'
+        ? window.formatProgressNumber(xp, { maxFractionDigits: 0 })
+        : String(Math.round(xp));
+      textBits.push(`(+${xpText} XP)`);
+    }
     if (level > 0) textBits.push(`Lvl ${Math.floor(level)}`);
     const div = document.createElement('div');
     div.className = 'killFeedMsg battleFeedMsg';
@@ -4963,12 +4979,12 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     );
   };
 
+  let chatOwnerBootstrapped = false;
+
   /* OWNER BOOT:
      app.part8.js must bootstrap chat + voice exactly once.
      Do not scatter raw startup calls across the file.
   */
-  let chatOwnerBootstrapped = false;
-
   function bootstrapChatOwnerOnce() {
     if (chatOwnerBootstrapped) return;
     chatOwnerBootstrapped = true;
