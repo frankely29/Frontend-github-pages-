@@ -19,9 +19,54 @@
     crossorigin="anonymous"
   ></script>
 
-    <link rel="stylesheet" href="./frontend-shell.css?v=b20260322-map-1" />
-  <link rel="stylesheet" href="./index.extracted.css?v=b20260322-map-1" />
-  <link rel="stylesheet" href="./admin.panel.css?v=b20260322-map-1" />
+  <script>
+    window.__TLC_FRONTEND_BUILD_ID__ = "b20260322-cachefix-1";
+
+    window.__TLC_LOCAL_CSS_ASSETS__ = [
+      "./frontend-shell.css",
+      "./index.extracted.css",
+      "./admin.panel.css"
+    ];
+
+    window.__TLC_LOCAL_JS_ASSETS__ = [
+      "./runtime.shared.js",
+      "./app.js",
+      "./app.part2.js",
+      "./app.part4.js",
+      "./app.part6.js",
+      "./app.part7.js",
+      "./app.part8.js",
+      "./app.part5.js",
+      "./app.part9.js",
+      "./app.part10.js",
+      "./app.part11.js",
+      "./app.part12.js",
+      "./app.part3.js",
+      "./pickup-recording.feature.js",
+      "./day-tendency.js",
+      "./app.lazy.js"
+    ];
+
+    window.__tlcWithBuildId = function __tlcWithBuildId(path) {
+      const raw = String(path || "").trim();
+      if (!raw) return raw;
+      const build = String(window.__TLC_FRONTEND_BUILD_ID__ || "").trim();
+      if (!build) return raw;
+      const sep = raw.includes("?") ? "&" : "?";
+      return `${raw}${sep}v=${encodeURIComponent(build)}`;
+    };
+
+    (function loadLocalCssNow() {
+      const head = document.head || document.getElementsByTagName("head")[0];
+      const cssAssets = Array.isArray(window.__TLC_LOCAL_CSS_ASSETS__) ? window.__TLC_LOCAL_CSS_ASSETS__ : [];
+      cssAssets.forEach((href) => {
+        const link = document.createElement("link");
+        link.rel = "stylesheet";
+        link.href = window.__tlcWithBuildId(href);
+        head.appendChild(link);
+      });
+    })();
+  </script>
 </head>
 
 <body>
@@ -265,21 +310,43 @@
   <script>
     window.API_BASE = "https://web-production-78f67.up.railway.app";
   </script>
-  <script src="./runtime.shared.js?v=b20260322-map-1"></script>
-  <script src="./app.js?v=b20260322-map-1"></script>
-  <script src="./app.part9.js?v=b20260322-map-1"></script>
-  <script src="./app.part10.js?v=b20260322-map-1"></script>
-  <script src="./app.part11.js?v=b20260322-map-1"></script>
-  <script src="./app.part12.js?v=b20260322-edgefade-4"></script>
-  <script src="./app.part2.js?v=b20260322-map-1"></script>
-  <script src="./app.part3.js?v=b20260322-map-1"></script>
-  <script src="./app.part4.js?v=b20260322-map-1"></script>
-  <script src="./app.part6.js?v=b20260322-map-1"></script>
-  <script src="./app.part8.js?v=b20260322-map-1"></script>
-  <script src="./app.part7.js?v=b20260322-map-1"></script>
-  <script src="./app.part5.js?v=b20260322-map-1"></script>
-  <script src="./pickup-recording.feature.js?v=b20260322-map-1"></script>
-  <script src="./day-tendency.js?v=b20260322-map-1"></script>
-  <script src="./app.lazy.js?v=b20260322-map-1"></script>
+  <script>
+    (function () {
+      const build = String(window.__TLC_FRONTEND_BUILD_ID__ || "").trim() || "unknown-build";
+      document.documentElement.setAttribute("data-frontend-build", build);
+      console.log("TLC frontend build:", build);
+
+      if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.getRegistrations()
+          .then((regs) => Promise.all(regs.map((reg) => reg.unregister())))
+          .catch(() => {});
+      }
+
+      window.addEventListener("pageshow", function (event) {
+        if (event.persisted) {
+          window.location.reload();
+        }
+      });
+
+      const jsAssets = Array.isArray(window.__TLC_LOCAL_JS_ASSETS__) ? window.__TLC_LOCAL_JS_ASSETS__ : [];
+
+      function loadScriptSequentially(index) {
+        if (index >= jsAssets.length) return;
+        const src = window.__tlcWithBuildId(jsAssets[index]);
+        const script = document.createElement("script");
+        script.src = src;
+        script.async = false;
+        script.onload = function () {
+          loadScriptSequentially(index + 1);
+        };
+        script.onerror = function () {
+          console.error("Failed to load local script:", src);
+        };
+        document.body.appendChild(script);
+      }
+
+      loadScriptSequentially(0);
+    })();
+  </script>
 </body>
 </html>

@@ -1,22 +1,36 @@
 (function () {
+  const FRONTEND_BUILD_ID = String(window.__TLC_FRONTEND_BUILD_ID__ || "").trim();
+
+  function withBuildId(path) {
+    const raw = String(path || "").trim();
+    if (!raw) return raw;
+    if (!FRONTEND_BUILD_ID) return raw;
+    const sep = raw.includes("?") ? "&" : "?";
+    return `${raw}${sep}v=${encodeURIComponent(FRONTEND_BUILD_ID)}`;
+  }
+
   const loadedGroups = new Map();
   let leaderboardReadyPromise = null;
   const scriptGroups = {
     leaderboard: [
-      './app.part3.js?v=railway4',
+      "./app.part3.js",
     ],
     admin: [
-      './admin.components.js?v=adminv6',
-      './admin.actions.js?v=adminv6',
-      './admin.users.js?v=adminv6',
-      './admin.live.js?v=adminv6',
-      './admin.reports.js?v=adminv6',
-      './admin.system.js?v=adminv6',
-      './admin.trips.js?v=adminv6',
-      './admin.tests.js?v=adminv6',
-      './admin.panel.js?v=adminv6',
+      "./admin.components.js",
+      "./admin.actions.js",
+      "./admin.users.js",
+      "./admin.live.js",
+      "./admin.reports.js",
+      "./admin.system.js",
+      "./admin.trips.js",
+      "./admin.tests.js",
+      "./admin.panel.js",
     ],
   };
+
+  Object.keys(scriptGroups).forEach((groupName) => {
+    scriptGroups[groupName] = scriptGroups[groupName].map(withBuildId);
+  });
 
   function leaderboardPerfDebugState() {
     window.__mapPerfDebug = window.__mapPerfDebug || {};
