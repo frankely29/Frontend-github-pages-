@@ -24,12 +24,51 @@
      Games ownership lives in app.part4.js.
      Do not export owner globals from this file.
   */
-  function chatPanelHTML() { return window.TlcChatCoreModule?.chatPanelHTML?.() || ''; }
-  function wireChatPanel() { return window.TlcChatCoreModule?.wireChatPanel?.(); }
-  function syncChatPollingState() { return window.TlcChatCoreModule?.syncChatPollingState?.(); }
-  function stopChatPolling() { return window.TlcChatCoreModule?.stopChatPolling?.(); }
-  function startChatPolling() { return window.TlcChatCoreModule?.startChatPolling?.(); }
-  function chatResetState() { return window.TlcChatCoreModule?.chatResetState?.(); }
+  function warnMissingOwner(ownerName, methodName) {
+    console.warn(`[compat] ${ownerName} owner missing for ${methodName}`);
+  }
+
+  function chatUnavailablePanelHTML() {
+    return '<div class="panelBlock chatPanelWrap"><div class="chatSignedOut">Chat module not ready yet. Close and reopen the panel.</div></div>';
+  }
+
+  function gamesUnavailablePanelHTML() {
+    return '<div class="panelBlock gamesPanelWrap"><div class="gamesStatus">Games module not ready yet. Close and reopen the panel.</div></div>';
+  }
+
+  function chatPanelHTML() {
+    const fn = window.TlcChatCoreModule?.chatPanelHTML;
+    if (typeof fn === "function") return fn();
+    warnMissingOwner("chat", "chatPanelHTML");
+    return chatUnavailablePanelHTML();
+  }
+
+  function wireChatPanel() {
+    const fn = window.TlcChatCoreModule?.wireChatPanel;
+    if (typeof fn === "function") return fn();
+    warnMissingOwner("chat", "wireChatPanel");
+  }
+
+  function syncChatPollingState() {
+    const fn = window.TlcChatCoreModule?.syncChatPollingState;
+    if (typeof fn === "function") return fn();
+    warnMissingOwner("chat", "syncChatPollingState");
+  }
+
+  function stopChatPolling() {
+    const fn = window.TlcChatCoreModule?.stopChatPolling;
+    if (typeof fn === "function") return fn();
+  }
+
+  function startChatPolling() {
+    const fn = window.TlcChatCoreModule?.startChatPolling;
+    if (typeof fn === "function") return fn();
+  }
+
+  function chatResetState() {
+    const fn = window.TlcChatCoreModule?.chatResetState;
+    if (typeof fn === "function") return fn();
+  }
   function openPrivateConversation(...args) { return window.TlcChatCoreModule?.openPrivateConversation?.(...args); }
   function chatRefreshPrivateThreads(...args) { return window.TlcChatCoreModule?.chatRefreshPrivateThreads?.(...args); }
   function renderPrivateTabUnread(...args) { return window.TlcChatCoreModule?.renderPrivateTabUnread?.(...args); }
@@ -244,8 +283,18 @@
    - openGamesBattleComposer
    ========================================================= */
   /* Compatibility bridge only: chat ownership lives in app.part8.js, games ownership lives in app.part4.js, and no dock binding should happen here. */
-  function gamesPanelHTML() { return window.TlcGamesModule?.gamesPanelHTML?.() || '<div class="panelBlock gamesPanelWrap"><div class="gamesStatus">Games module unavailable.</div></div>'; }
-  function wireGamesPanel() { return window.TlcGamesModule?.wireGamesPanel?.(); }
+  function gamesPanelHTML() {
+    const fn = window.TlcGamesModule?.gamesPanelHTML;
+    if (typeof fn === "function") return fn();
+    warnMissingOwner("games", "gamesPanelHTML");
+    return gamesUnavailablePanelHTML();
+  }
+
+  function wireGamesPanel() {
+    const fn = window.TlcGamesModule?.wireGamesPanel;
+    if (typeof fn === "function") return fn();
+    warnMissingOwner("games", "wireGamesPanel");
+  }
   function isGamesPanelOpen() { return !!window.TlcGamesModule?.isGamesPanelOpen?.(); }
   async function loadGamesBattleDashboard(opts = {}) { return await window.TlcGamesModule?.loadGamesBattleDashboard?.(opts); }
   async function loadActiveBattleMatch(opts = {}) { return await window.TlcGamesModule?.loadActiveBattleMatch?.(opts); }

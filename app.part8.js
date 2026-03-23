@@ -4947,6 +4947,43 @@ function bindVoiceComposerControls(surface, optionsFactory) {
   window.chatResetState = chatResetState;
   window.getChatTransportDebugState = getChatTransportDebugState;
 
+  /* OWNER READY HANDSHAKE:
+     app.part8.js announces when chat + voice exports are fully ready.
+  */
+  function announceChatOwnerReady() {
+    window.__TLC_CHAT_OWNER_READY__ = true;
+    window.__TLC_CHAT_OWNER_READY_AT__ = Date.now();
+    window.dispatchEvent(new CustomEvent("tlc-chat-owner-ready", {
+      detail: {
+        source: "app.part8.js",
+        ready: true
+      }
+    }));
+  }
+
+  window.isTlcChatOwnerReady = function isTlcChatOwnerReady() {
+    return !!(
+      window.__TLC_CHAT_OWNER_READY__ &&
+      typeof window.chatPanelHTML === "function" &&
+      typeof window.wireChatPanel === "function" &&
+      window.TlcChatCoreModule &&
+      window.TlcChatVoiceModule
+    );
+  };
+
+  window.getTlcChatOwnerStatus = function getTlcChatOwnerStatus() {
+    return {
+      readyFlag: !!window.__TLC_CHAT_OWNER_READY__,
+      readyAt: Number(window.__TLC_CHAT_OWNER_READY_AT__ || 0),
+      hasChatPanelHTML: typeof window.chatPanelHTML === "function",
+      hasWireChatPanel: typeof window.wireChatPanel === "function",
+      hasChatCoreModule: !!window.TlcChatCoreModule,
+      hasChatVoiceModule: !!window.TlcChatVoiceModule
+    };
+  };
+
+  announceChatOwnerReady();
+
   function bindDockChatButtonOnce() {
     const chatBtn = document.getElementById('dockChat');
     if (!chatBtn || chatBtn.dataset.tlcBoundChat === '1') return;

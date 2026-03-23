@@ -1539,6 +1539,41 @@
   window.gamesPanelHTML = gamesPanelHTML;
   window.wireGamesPanel = wireGamesPanel;
 
+  /* OWNER READY HANDSHAKE:
+     app.part4.js announces when games exports are fully ready.
+  */
+  function announceGamesOwnerReady() {
+    window.__TLC_GAMES_OWNER_READY__ = true;
+    window.__TLC_GAMES_OWNER_READY_AT__ = Date.now();
+    window.dispatchEvent(new CustomEvent("tlc-games-owner-ready", {
+      detail: {
+        source: "app.part4.js",
+        ready: true
+      }
+    }));
+  }
+
+  window.isTlcGamesOwnerReady = function isTlcGamesOwnerReady() {
+    return !!(
+      window.__TLC_GAMES_OWNER_READY__ &&
+      typeof window.gamesPanelHTML === "function" &&
+      typeof window.wireGamesPanel === "function" &&
+      window.TlcGamesModule
+    );
+  };
+
+  window.getTlcGamesOwnerStatus = function getTlcGamesOwnerStatus() {
+    return {
+      readyFlag: !!window.__TLC_GAMES_OWNER_READY__,
+      readyAt: Number(window.__TLC_GAMES_OWNER_READY_AT__ || 0),
+      hasGamesPanelHTML: typeof window.gamesPanelHTML === "function",
+      hasWireGamesPanel: typeof window.wireGamesPanel === "function",
+      hasGamesModule: !!window.TlcGamesModule
+    };
+  };
+
+  announceGamesOwnerReady();
+
   function bindDockGamesButtonOnce() {
     const gamesBtn = document.getElementById('dockGames');
     if (!gamesBtn || gamesBtn.dataset.tlcBoundGames === '1') return;

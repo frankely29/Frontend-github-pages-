@@ -972,6 +972,23 @@ bindDockToggle(dockModes, "modes", "Modes", modesPanelHTML, wireModesPanel);
    Owner modules self-export and self-bind first.
    This function exists only to recover from late readiness.
 */
+/* DEBUG HELPER:
+   Use getTlcOwnerBootState() in console to see whether chat/games owners and dock bindings are actually ready.
+*/
+window.getTlcOwnerBootState = function getTlcOwnerBootState() {
+  return {
+    chatOwnerReady: typeof window.isTlcChatOwnerReady === "function" ? window.isTlcChatOwnerReady() : false,
+    gamesOwnerReady: typeof window.isTlcGamesOwnerReady === "function" ? window.isTlcGamesOwnerReady() : false,
+    chatOwnerStatus: typeof window.getTlcChatOwnerStatus === "function" ? window.getTlcChatOwnerStatus() : null,
+    gamesOwnerStatus: typeof window.getTlcGamesOwnerStatus === "function" ? window.getTlcGamesOwnerStatus() : null,
+    hasDockChat: !!document.getElementById("dockChat"),
+    hasDockGames: !!document.getElementById("dockGames"),
+    dockChatBound: !!document.getElementById("dockChat")?.dataset?.tlcBoundChat,
+    dockGamesBound: !!document.getElementById("dockGames")?.dataset?.tlcBoundGames,
+    openPanelKey: typeof window.getOpenPanelKey === "function" ? window.getOpenPanelKey() : null
+  };
+};
+
 function ensureDockChatAndGamesBindings() {
   if (typeof bindDockToggle !== "function") return;
 
@@ -1024,7 +1041,18 @@ function ensureDockChatAndGamesBindings() {
   }
 }
 
+function bindDockOwnersOnReadyEvents() {
+  window.addEventListener("tlc-chat-owner-ready", () => {
+    ensureDockChatAndGamesBindings();
+  });
+
+  window.addEventListener("tlc-games-owner-ready", () => {
+    ensureDockChatAndGamesBindings();
+  });
+}
+
 ensureDockChatAndGamesBindings();
+bindDockOwnersOnReadyEvents();
 window.addEventListener("load", ensureDockChatAndGamesBindings);
 window.addEventListener("pageshow", ensureDockChatAndGamesBindings);
 window.addEventListener("focus", ensureDockChatAndGamesBindings);
