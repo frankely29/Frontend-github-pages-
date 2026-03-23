@@ -1531,4 +1531,26 @@
 
 
   window.TlcGamesModule = { gamesPanelHTML, wireGamesPanel, isGamesPanelOpen, loadGamesBattleDashboard, loadActiveBattleMatch, openGamesBattleComposer };
+  window.gamesPanelHTML = gamesPanelHTML;
+  window.wireGamesPanel = wireGamesPanel;
+
+  function bindDockGamesButtonOnce() {
+    const gamesBtn = document.getElementById('dockGames');
+    if (!gamesBtn || gamesBtn.dataset.tlcBoundGames === '1') return;
+    if (typeof bindDockToggle !== 'function') return;
+    gamesBtn.dataset.tlcBoundGames = '1';
+    bindDockToggle(gamesBtn, 'games', 'Games', gamesPanelHTML, wireGamesPanel);
+  }
+
+  /* ISSUE NOTE:
+     Games must self-bind here as well as through app.part2 compatibility wrappers.
+     Dataset guards prevent duplicate listeners.
+  */
+  bindDockGamesButtonOnce();
+  window.addEventListener('load', bindDockGamesButtonOnce);
+  window.addEventListener('pageshow', bindDockGamesButtonOnce);
+  window.addEventListener('focus', bindDockGamesButtonOnce);
+  setTimeout(bindDockGamesButtonOnce, 0);
+  setTimeout(bindDockGamesButtonOnce, 400);
+  setTimeout(bindDockGamesButtonOnce, 1200);
 })();
