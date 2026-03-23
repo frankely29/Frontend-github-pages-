@@ -12,7 +12,7 @@
   const EDGE_INFLUENCE_SOFT_LAYER_ID = "zone-edge-influence-soft";
   const EDGE_INFLUENCE_CORE_LAYER_ID = "zone-edge-influence-core";
   const EDGE_INFLUENCE_SEED_LAYER_ID = "zone-edge-influence-seed";
-  const EDGE_INFLUENCE_MIN_RATING_DIFF = 10;
+  const EDGE_INFLUENCE_MIN_RATING_DIFF = 4;
   const EDGE_INFLUENCE_MAX_RATING_DIFF = 30;
   const EDGE_INFLUENCE_CHUNK_DEG = 0.00020;
   const EDGE_INFLUENCE_KEY_DP = 5;
@@ -53,6 +53,13 @@
   let zoneEdgeTopologySignature = "";
   let zoneEdgeInfluenceFingerprint = "";
   let zoneEdgeInfluenceFeatureCount = 0;
+  let zoneEdgeInfluenceBuildStats = {
+    topologyCount: 0,
+    skippedMissingRating: 0,
+    skippedMinDiff: 0,
+    skippedShielded: 0,
+    builtFeatures: 0,
+  };
   let pickupHotspotShieldZoneIds = new Set();
 
   function shouldShowLabel(bucket, zoom) {
@@ -636,8 +643,13 @@
   }
 
   function getFeatureEffectiveRatingForEdge(feature) {
-    const rating = window.TlcModeModule?.effectiveRating?.(feature?.properties || {}, feature?.geometry);
-    return Number.isFinite(rating) ? rating : NaN;
+    const props = feature?.properties || {};
+    const geom = feature?.geometry;
+    const rating = window.TlcModeModule?.effectiveRating?.(props, geom);
+    if (Number.isFinite(rating)) return rating;
+
+    const fallback = Number(props?.rating ?? NaN);
+    return Number.isFinite(fallback) ? fallback : NaN;
   }
 
   function clamp01(v) {
@@ -661,6 +673,13 @@
   // only a heuristic visual hint, not measured sub-zone demand truth.
   function buildZoneEdgeInfluenceFeatureCollection(frame) {
     const topology = getZoneEdgeTopology(frame);
+    zoneEdgeInfluenceBuildStats = {
+      topologyCount: Array.isArray(topology) ? topology.length : 0,
+      skippedMissingRating: 0,
+      skippedMinDiff: 0,
+      skippedShielded: 0,
+      builtFeatures: 0,
+    };
     const features = frame?.polygons?.features || [];
     const zoneFeatureMap = new Map();
     for (const feature of features) {
@@ -676,21 +695,25 @@
 
       const ratingA = getFeatureEffectiveRatingForEdge(featureA);
       const ratingB = getFeatureEffectiveRatingForEdge(featureB);
-      if (!Number.isFinite(ratingA) || !Number.isFinite(ratingB)) continue;
-
-      const bucketA = window.TlcModeModule?.effectiveBucket?.(featureA.properties || {}, featureA.geometry) || featureA.properties?.bucket || "";
-      const bucketB = window.TlcModeModule?.effectiveBucket?.(featureB.properties || {}, featureB.geometry) || featureB.properties?.bucket || "";
-      const rankA = zoneBucketRank(bucketA);
-      const rankB = zoneBucketRank(bucketB);
-      if (rankA === rankB) continue;
+      if (!Number.isFinite(ratingA) || !Number.isFinite(ratingB)) {
+        zoneEdgeInfluenceBuildStats.skippedMissingRating += 1;
+        continue;
+      }
 
       const diff = Math.abs(ratingA - ratingB);
-      if (diff < EDGE_INFLUENCE_MIN_RATING_DIFF) continue;
+      if (diff < EDGE_INFLUENCE_MIN_RATING_DIFF) {
+        zoneEdgeInfluenceBuildStats.skippedMinDiff += 1;
+        continue;
+      }
 
-      const aIsStronger = rankA > rankB;
+      if (ratingA === ratingB) continue;
+      const aIsStronger = ratingA > ratingB;
       const strongerZoneId = aIsStronger ? edge.aZoneId : edge.bZoneId;
       const weakerZoneId = aIsStronger ? edge.bZoneId : edge.aZoneId;
-      if (isPickupHotspotShieldedZone(strongerZoneId)) continue;
+      if (isPickupHotspotShieldedZone(strongerZoneId)) {
+        zoneEdgeInfluenceBuildStats.skippedShielded += 1;
+        continue;
+      }
       const strongerFeature = aIsStronger ? featureA : featureB;
       const weakerFeature = aIsStronger ? featureB : featureA;
       const strongerCoords = aIsStronger ? edge.aCoords : edge.bCoords;
@@ -733,6 +756,7 @@
           core_offset_px: coreOffsetPx,
         },
       });
+      zoneEdgeInfluenceBuildStats.builtFeatures += 1;
     }
 
     return {
@@ -1335,6 +1359,8 @@
       matchGridDeg: EDGE_INFLUENCE_MATCH_GRID_DEG,
       matchMaxDistDeg: EDGE_INFLUENCE_MATCH_MAX_DIST_DEG,
       matchMaxAngleDeg: EDGE_INFLUENCE_MATCH_MAX_ANGLE_DEG,
+      minRatingDiff: EDGE_INFLUENCE_MIN_RATING_DIFF,
+      buildStats: zoneEdgeInfluenceBuildStats,
       hotspotShieldZoneIds: Array.from(pickupHotspotShieldZoneIds || []).sort(),
       sourceReady: !!map?.getSource?.(EDGE_INFLUENCE_SOURCE_ID),
       seedLayerReady: !!map?.getLayer?.(EDGE_INFLUENCE_SEED_LAYER_ID),
