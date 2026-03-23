@@ -1,10 +1,16 @@
 const express = require("express");
 const compression = require("compression");
+const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 
 const app = express();
 const rootDir = __dirname;
 const port = process.env.PORT || 3000;
+const indexHtmlPath = path.join(rootDir, "index.html");
+const frontendBuildId = [Date.now().toString(36), process.pid.toString(36), crypto.randomBytes(4).toString("hex")].join("-");
+const indexHtmlTemplate = fs.readFileSync(indexHtmlPath, "utf8");
+const indexHtml = indexHtmlTemplate.replace(/"__TLC_FRONTEND_BUILD_ID__"/, JSON.stringify(frontendBuildId));
 
 const noStorePaths = new Set(["/", "/index.html"]);
 const htmlShellPattern = /\.html?$/i;
@@ -42,9 +48,15 @@ app.use((req, res, next) => {
   next();
 });
 
+app.get(["/", "/index.html"], (req, res) => {
+  res.type("html");
+  res.send(indexHtml);
+});
+
 app.use(express.static(rootDir, {
   etag: true,
   lastModified: true,
+  index: false,
   setHeaders(res, filePath) {
     if (filePath.endsWith("index.html")) {
       res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
@@ -56,10 +68,6 @@ app.use(express.static(rootDir, {
   },
 }));
 
-app.get("/", (req, res) => {
-  res.sendFile(path.join(rootDir, "index.html"));
-});
-
 app.listen(port, () => {
-  console.log(`Static frontend server listening on port ${port}`);
+  console.log(`Static frontend server listening on port ${port} with build ${frontendBuildId}`);
 });

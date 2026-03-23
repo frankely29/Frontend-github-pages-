@@ -1,13 +1,14 @@
 (function () {
-  const FRONTEND_BUILD_ID = String(window.__TLC_FRONTEND_BUILD_ID__ || "").trim();
-
-  function withBuildId(path) {
-    const raw = String(path || "").trim();
-    if (!raw) return raw;
-    if (!FRONTEND_BUILD_ID) return raw;
-    const sep = raw.includes("?") ? "&" : "?";
-    return `${raw}${sep}v=${encodeURIComponent(FRONTEND_BUILD_ID)}`;
-  }
+  const withBuildId = typeof window.__tlcWithBuildId === "function"
+    ? window.__tlcWithBuildId
+    : function withBuildId(path) {
+        const raw = String(path || "").trim();
+        if (!raw) return raw;
+        const build = String(window.__TLC_FRONTEND_BUILD_ID__ || "").trim();
+        if (!build) return raw;
+        const sep = raw.includes("?") ? "&" : "?";
+        return `${raw}${sep}v=${encodeURIComponent(build)}`;
+      };
 
   const loadedGroups = new Map();
   let leaderboardReadyPromise = null;
