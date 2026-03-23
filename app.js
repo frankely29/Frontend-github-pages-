@@ -968,17 +968,20 @@ function bindDockToggle(btn, key, title, htmlFactory, wireFn) {
 
 bindDockToggle(dockMusic, "music", "Music", musicPanelHTML, wireMusicPanel);
 bindDockToggle(dockModes, "modes", "Modes", modesPanelHTML, wireModesPanel);
-// Fallback binder only: feature modules self-bind first, and this exists only to recover from late module readiness.
+/* FALLBACK BINDER ONLY:
+   Owner modules self-export and self-bind first.
+   This function exists only to recover from late readiness.
+*/
 function ensureDockChatAndGamesBindings() {
   if (typeof bindDockToggle !== "function") return;
 
   const chatHtmlFactory =
-    window.TlcChatCoreModule?.chatPanelHTML ||
-    window.chatPanelHTML;
+    window.chatPanelHTML ||
+    window.TlcChatCoreModule?.chatPanelHTML;
 
   const chatWireFactory =
-    window.TlcChatCoreModule?.wireChatPanel ||
-    window.wireChatPanel;
+    window.wireChatPanel ||
+    window.TlcChatCoreModule?.wireChatPanel;
 
   if (
     dockChat &&
@@ -997,12 +1000,12 @@ function ensureDockChatAndGamesBindings() {
   }
 
   const gamesHtmlFactory =
-    window.TlcGamesModule?.gamesPanelHTML ||
-    window.gamesPanelHTML;
+    window.gamesPanelHTML ||
+    window.TlcGamesModule?.gamesPanelHTML;
 
   const gamesWireFactory =
-    window.TlcGamesModule?.wireGamesPanel ||
-    window.wireGamesPanel;
+    window.wireGamesPanel ||
+    window.TlcGamesModule?.wireGamesPanel;
 
   if (
     dockGames &&

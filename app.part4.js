@@ -1531,6 +1531,11 @@
 
 
   window.TlcGamesModule = { gamesPanelHTML, wireGamesPanel, isGamesPanelOpen, loadGamesBattleDashboard, loadActiveBattleMatch, openGamesBattleComposer };
+
+  /* OWNER EXPORTS:
+     app.part4.js is the single owner of games public globals.
+     app.part2.js may call into these, but ownership lives here.
+  */
   window.gamesPanelHTML = gamesPanelHTML;
   window.wireGamesPanel = wireGamesPanel;
 

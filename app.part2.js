@@ -18,6 +18,12 @@
    - syncChatPollingState
    ========================================================= */
 
+  /* COMPATIBILITY BRIDGE ONLY:
+     app.part2.js forwards to owner modules.
+     Chat ownership lives in app.part8.js.
+     Games ownership lives in app.part4.js.
+     Do not export owner globals from this file.
+  */
   function chatPanelHTML() { return window.TlcChatCoreModule?.chatPanelHTML?.() || ''; }
   function wireChatPanel() { return window.TlcChatCoreModule?.wireChatPanel?.(); }
   function syncChatPollingState() { return window.TlcChatCoreModule?.syncChatPollingState?.(); }
@@ -300,12 +306,6 @@
 
 
 
-  window.chatPanelHTML = chatPanelHTML;
-  window.wireChatPanel = wireChatPanel;
-  window.syncChatPollingState = syncChatPollingState;
-  window.stopChatPolling = stopChatPolling;
-  window.startChatPolling = startChatPolling;
-  window.chatResetState = chatResetState;
   window.mapIdentityRenderSelfLabel = mapIdentityRenderSelfLabel;
   window.mapIdentityRenderDriverLabel = mapIdentityRenderDriverLabel;
   window.mapIdentityApplyZoomStyles = mapIdentityApplyZoomStyles;
@@ -334,10 +334,17 @@
   window.leaderboardBadgeMeta = leaderboardBadgeMeta;
   window.renderLeaderboardBadgeSvg = renderLeaderboardBadgeSvg;
   window.syncLeaderboardBadgeRewards = syncLeaderboardBadgeRewards;
-  window.openGamesBattleComposer = openGamesBattleComposer;
-  window.gamesPanelHTML = gamesPanelHTML;
-  window.wireGamesPanel = wireGamesPanel;
-
+  window.TlcCompatBridge = {
+    chatPanelHTML,
+    wireChatPanel,
+    syncChatPollingState,
+    stopChatPolling,
+    startChatPolling,
+    chatResetState,
+    gamesPanelHTML,
+    wireGamesPanel,
+    openGamesBattleComposer,
+  };
 
   function toggleNightMode() { document.body.classList.toggle('night'); }
   window.toggleNightMode = toggleNightMode;
