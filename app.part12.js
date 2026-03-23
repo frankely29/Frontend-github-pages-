@@ -14,7 +14,7 @@
   const EDGE_INFLUENCE_SEED_LAYER_ID = "zone-edge-influence-seed";
   const EDGE_INFLUENCE_MIN_RATING_DIFF = 4;
   const EDGE_INFLUENCE_MAX_RATING_DIFF = 30;
-  const EDGE_INFLUENCE_CHUNK_DEG = 0.00045;
+  const EDGE_INFLUENCE_CHUNK_DEG = 0.00060;
   const EDGE_INFLUENCE_KEY_DP = 5;
   const EDGE_INFLUENCE_MATCH_GRID_DEG = 0.00035;
   const EDGE_INFLUENCE_MATCH_MAX_DIST_DEG = 0.00035;
@@ -56,7 +56,7 @@
   let zoneEdgeInfluenceInputSignature = "";
   let zoneEdgeInfluenceCachedFc = { type: "FeatureCollection", features: [] };
   let zoneEdgeInfluencePendingFrame = null;
-  let zoneEdgeInfluenceRefreshRaf = 0;
+  let zoneEdgeInfluenceRefreshHandle = 0;
   let zoneEdgeInfluenceBuildStats = {
     topologyCount: 0,
     skippedMissingRating: 0,
@@ -124,7 +124,7 @@
       window.TlcModeInternals?.getCurrentFrame?.() ||
       null;
     if (!frame) return;
-    refreshZoneEdgeInfluence(frame);
+    scheduleZoneEdgeInfluenceRefresh(frame);
   }
 
   function bboxFromCoords(coords) {
@@ -504,7 +504,7 @@
     const dx = endLng - startLng;
     const dy = endLat - startLat;
     const length = Math.sqrt((dx * dx) + (dy * dy));
-    const steps = Math.max(1, Math.min(6, Math.ceil(length / EDGE_INFLUENCE_CHUNK_DEG)));
+    const steps = Math.max(1, Math.min(4, Math.ceil(length / EDGE_INFLUENCE_CHUNK_DEG)));
     const points = [];
 
     for (let i = 0; i <= steps; i++) {
@@ -716,10 +716,10 @@
       window.TlcModeInternals?.getCurrentFrame?.() ||
       null;
 
-    if (zoneEdgeInfluenceRefreshRaf) return;
+    if (zoneEdgeInfluenceRefreshHandle) return;
 
     const runner = () => {
-      zoneEdgeInfluenceRefreshRaf = 0;
+      zoneEdgeInfluenceRefreshHandle = 0;
       const nextFrame = zoneEdgeInfluencePendingFrame;
       zoneEdgeInfluencePendingFrame = null;
       if (!nextFrame) return;
@@ -727,9 +727,9 @@
     };
 
     if (typeof window.requestAnimationFrame === "function") {
-      zoneEdgeInfluenceRefreshRaf = window.requestAnimationFrame(runner);
+      zoneEdgeInfluenceRefreshHandle = window.requestAnimationFrame(runner);
     } else {
-      zoneEdgeInfluenceRefreshRaf = window.setTimeout(runner, 16);
+      zoneEdgeInfluenceRefreshHandle = window.setTimeout(runner, 16);
     }
   }
 
@@ -1167,9 +1167,9 @@
             "interpolate",
             ["linear"],
             ["zoom"],
-            12.4, 5,
-            14, 6,
-            16, 7,
+            12.4, 2.4,
+            14, 3.0,
+            16, 3.6,
           ],
           "line-offset": ["*", ["coalesce", ["to-number", ["get", "halo_offset_px"]], 8], edgeHaloOffsetScaleExpr],
         },
@@ -1194,9 +1194,9 @@
             "interpolate",
             ["linear"],
             ["zoom"],
-            12.4, 2.4,
-            14, 3.0,
-            16, 3.6,
+            12.4, 1.2,
+            14, 1.5,
+            16, 1.8,
           ],
           "line-offset": ["*", ["coalesce", ["to-number", ["get", "soft_offset_px"]], 4.5], edgeSoftOffsetScaleExpr],
         },
@@ -1221,9 +1221,9 @@
             "interpolate",
             ["linear"],
             ["zoom"],
-            12.4, 0.8,
-            14, 1.0,
-            16, 1.2,
+            12.4, 0.4,
+            14, 0.55,
+            16, 0.7,
           ],
           "line-offset": ["*", ["coalesce", ["to-number", ["get", "core_offset_px"]], 2], edgeCoreOffsetScaleExpr],
         },
@@ -1276,6 +1276,10 @@
     }
 
     await core.ensurePickupSourceAndLayers?.();
+
+    if (!map.__zoneEdgeInfluenceZoomRefreshBound) {
+      map.__zoneEdgeInfluenceZoomRefreshBound = true;
+    }
 
     const frame =
       window.TlcCommunityInternals?.getCurrentFrame?.() ||
@@ -1420,7 +1424,7 @@
       inputSignature: zoneEdgeInfluenceInputSignature || "",
       featureCount: zoneEdgeInfluenceFeatureCount,
       cachedFeatureCount: Array.isArray(zoneEdgeInfluenceCachedFc?.features) ? zoneEdgeInfluenceCachedFc.features.length : 0,
-      rafPending: !!zoneEdgeInfluenceRefreshRaf,
+      refreshPending: !!zoneEdgeInfluenceRefreshHandle,
       hasSourceData: zoneEdgeInfluenceFeatureCount > 0,
       zoomLevel: Number(core.getMap?.()?.getZoom?.() || 0),
       zoomActive: isZoneEdgeInfluenceZoomActive(),
