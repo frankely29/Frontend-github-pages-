@@ -1152,6 +1152,7 @@
 
 
 
+  attachChatSoundStateHandlers();
 
 
 
@@ -1280,11 +1281,8 @@
     }
   }
 
-  // IMPORTANT:
-  // app.part8 must not call raw chat-voice internals during load.
-  // app.part7 initializes the voice/sound module on its own.
-  // Keep only the first-interaction bootstrap here so chat core never aborts
-  // before its exports and dock binding run.
+  attachChatSoundStateHandlers();
+  bindChatSoundPrimeListeners();
   bindChatFirstInteractionListeners();
 
   function shouldCountUnread(msg, { ignoreOpenPanel = false } = {}) {
@@ -2973,6 +2971,11 @@
   window.startChatPolling = startChatPolling;
   window.chatResetState = chatResetState;
   window.getChatTransportDebugState = getChatTransportDebugState;
+
+  if (typeof bindDockToggle === 'function') {
+    const chatBtn = document.getElementById('dockChat');
+    if (chatBtn) { bindDockToggle(chatBtn, 'chat', 'Chat', chatPanelHTML, wireChatPanel); }
+  }
 
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible' && typeof authHeaderOK === 'function' && authHeaderOK()) {
