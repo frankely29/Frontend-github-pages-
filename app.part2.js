@@ -368,8 +368,11 @@
   */
   bindCompatDockPanelsOnce();
   window.addEventListener('load', bindCompatDockPanelsOnce);
+  window.addEventListener('pageshow', bindCompatDockPanelsOnce);
+  window.addEventListener('focus', bindCompatDockPanelsOnce);
   setTimeout(bindCompatDockPanelsOnce, 0);
   setTimeout(bindCompatDockPanelsOnce, 400);
+  setTimeout(bindCompatDockPanelsOnce, 1200);
 
   function toggleNightMode() { document.body.classList.toggle('night'); }
   window.toggleNightMode = toggleNightMode;
