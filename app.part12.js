@@ -15,6 +15,10 @@
   const EDGE_INFLUENCE_MAX_RATING_DIFF = 30;
   const EDGE_INFLUENCE_CHUNK_DEG = 0.00020;
   const EDGE_INFLUENCE_KEY_DP = 5;
+  const EDGE_INFLUENCE_MATCH_GRID_DEG = 0.00025;
+  const EDGE_INFLUENCE_MATCH_MAX_DIST_DEG = 0.00022;
+  const EDGE_INFLUENCE_MATCH_ANGLE_BUCKET_DEG = 12;
+  const EDGE_INFLUENCE_MATCH_MAX_ANGLE_DEG = 18;
 
   const ZONE_LABEL_SHORT_NAMES = {
     "13": "Battery Pk",
@@ -401,6 +405,63 @@
     return aKey <= bKey ? `${aKey}__${bKey}` : `${bKey}__${aKey}`;
   }
 
+  function normalizeEdgeAngleDeg(angle) {
+    let a = Number(angle) || 0;
+    while (a < 0) a += 180;
+    while (a >= 180) a -= 180;
+    return a;
+  }
+
+  function edgeSegmentMidpoint(coords) {
+    if (!Array.isArray(coords) || coords.length < 2) return null;
+    const a = coords[0];
+    const b = coords[1];
+    const lng1 = Number(a?.[0]);
+    const lat1 = Number(a?.[1]);
+    const lng2 = Number(b?.[0]);
+    const lat2 = Number(b?.[1]);
+    if (!Number.isFinite(lng1) || !Number.isFinite(lat1) || !Number.isFinite(lng2) || !Number.isFinite(lat2)) return null;
+    return {
+      lng: (lng1 + lng2) / 2,
+      lat: (lat1 + lat2) / 2,
+    };
+  }
+
+  function edgeSegmentAngleDeg(coords) {
+    if (!Array.isArray(coords) || coords.length < 2) return 0;
+    const a = coords[0];
+    const b = coords[1];
+    const dx = Number(b?.[0]) - Number(a?.[0]);
+    const dy = Number(b?.[1]) - Number(a?.[1]);
+    if (!Number.isFinite(dx) || !Number.isFinite(dy)) return 0;
+    return normalizeEdgeAngleDeg((Math.atan2(dy, dx) * 180) / Math.PI);
+  }
+
+  function edgeMidpointDistanceDeg(a, b) {
+    const dx = Number(a?.lng) - Number(b?.lng);
+    const dy = Number(a?.lat) - Number(b?.lat);
+    if (!Number.isFinite(dx) || !Number.isFinite(dy)) return Infinity;
+    return Math.sqrt((dx * dx) + (dy * dy));
+  }
+
+  function edgeAnglesCompatible(aDeg, bDeg) {
+    const a = normalizeEdgeAngleDeg(aDeg);
+    const b = normalizeEdgeAngleDeg(bDeg);
+    const diff = Math.abs(a - b);
+    const wrapped = Math.min(diff, 180 - diff);
+    return wrapped <= EDGE_INFLUENCE_MATCH_MAX_ANGLE_DEG;
+  }
+
+  function edgeSegmentBucketKey(coords) {
+    const midpoint = edgeSegmentMidpoint(coords);
+    if (!midpoint) return '';
+    const angle = edgeSegmentAngleDeg(coords);
+    const gx = Math.round(midpoint.lng / EDGE_INFLUENCE_MATCH_GRID_DEG);
+    const gy = Math.round(midpoint.lat / EDGE_INFLUENCE_MATCH_GRID_DEG);
+    const ga = Math.round(angle / EDGE_INFLUENCE_MATCH_ANGLE_BUCKET_DEG);
+    return `${gx}|${gy}|${ga}`;
+  }
+
   function splitSegmentIntoEdgeChunks(startCoord, endCoord) {
     const startLng = Number(startCoord?.[0]);
     const startLat = Number(startCoord?.[1]);
@@ -448,14 +509,16 @@
 
   function buildZoneEdgeTopology(frame) {
     const features = frame?.polygons?.features || [];
-    const segmentMap = new Map();
+    const bucketMap = new Map();
 
     for (const feature of features) {
       const zoneId = String(feature?.properties?.LocationID ?? "");
       if (!zoneId) continue;
+
       forEachOuterRing(feature, (ring) => {
         if (!Array.isArray(ring) || ring.length < 2) return;
         const interiorSide = ringSignedArea(ring) > 0 ? "left" : "right";
+
         for (let i = 1; i < ring.length; i++) {
           const startCoord = ring[i - 1];
           const endCoord = ring[i];
@@ -466,39 +529,65 @@
             const chunkStart = chunk?.[0];
             const chunkEnd = chunk?.[1];
             if (!Array.isArray(chunkStart) || !Array.isArray(chunkEnd)) continue;
-            const key = edgeSegmentKey(chunkStart, chunkEnd);
-            if (!key) continue;
-            const occurrences = segmentMap.get(key) || [];
+
+            const coords = [chunkStart, chunkEnd];
+            const midpoint = edgeSegmentMidpoint(coords);
+            if (!midpoint) continue;
+
+            const bucketKey = edgeSegmentBucketKey(coords);
+            if (!bucketKey) continue;
+
+            const occurrences = bucketMap.get(bucketKey) || [];
             occurrences.push({
               zoneId,
-              coords: [chunkStart, chunkEnd],
+              coords,
               interiorSide,
+              midpoint,
+              angleDeg: edgeSegmentAngleDeg(coords),
             });
-            segmentMap.set(key, occurrences);
+            bucketMap.set(bucketKey, occurrences);
           }
         }
       });
     }
 
     const topology = [];
-    for (const occurrences of segmentMap.values()) {
-      if (!Array.isArray(occurrences) || occurrences.length !== 2) continue;
-      const byZoneId = new Map();
-      for (const occurrence of occurrences) {
-        if (!occurrence?.zoneId) continue;
-        if (!byZoneId.has(occurrence.zoneId)) byZoneId.set(occurrence.zoneId, occurrence);
+    const seen = new Set();
+
+    for (const [bucketKey, occurrences] of bucketMap.entries()) {
+      if (!Array.isArray(occurrences) || occurrences.length < 2) continue;
+
+      for (let i = 0; i < occurrences.length; i++) {
+        const a = occurrences[i];
+        if (!a?.zoneId) continue;
+
+        for (let j = i + 1; j < occurrences.length; j++) {
+          const b = occurrences[j];
+          if (!b?.zoneId) continue;
+          if (a.zoneId === b.zoneId) continue;
+
+          if (!edgeAnglesCompatible(a.angleDeg, b.angleDeg)) continue;
+          if (edgeMidpointDistanceDeg(a.midpoint, b.midpoint) > EDGE_INFLUENCE_MATCH_MAX_DIST_DEG) continue;
+
+          const zoneLo = a.zoneId < b.zoneId ? a.zoneId : b.zoneId;
+          const zoneHi = a.zoneId < b.zoneId ? b.zoneId : a.zoneId;
+          const midLng = ((a.midpoint.lng + b.midpoint.lng) / 2).toFixed(EDGE_INFLUENCE_KEY_DP);
+          const midLat = ((a.midpoint.lat + b.midpoint.lat) / 2).toFixed(EDGE_INFLUENCE_KEY_DP);
+          const dedupeKey = `${zoneLo}|${zoneHi}|${bucketKey}|${midLng}|${midLat}`;
+
+          if (seen.has(dedupeKey)) continue;
+          seen.add(dedupeKey);
+
+          topology.push({
+            aZoneId: a.zoneId,
+            bZoneId: b.zoneId,
+            aCoords: a.coords,
+            bCoords: b.coords,
+            aInteriorSide: a.interiorSide,
+            bInteriorSide: b.interiorSide,
+          });
+        }
       }
-      if (byZoneId.size !== 2) continue;
-      const [a, b] = Array.from(byZoneId.values());
-      if (!a || !b || a.zoneId === b.zoneId) continue;
-      topology.push({
-        aZoneId: a.zoneId,
-        bZoneId: b.zoneId,
-        aCoords: a.coords,
-        bCoords: b.coords,
-        aInteriorSide: a.interiorSide,
-        bInteriorSide: b.interiorSide,
-      });
     }
 
     return topology;
@@ -1172,6 +1261,9 @@
       hasSourceData: zoneEdgeInfluenceFeatureCount > 0,
       zoomLevel: Number(core.getMap?.()?.getZoom?.() || 0),
       zoomActive: isZoneEdgeInfluenceZoomActive(),
+      matchGridDeg: EDGE_INFLUENCE_MATCH_GRID_DEG,
+      matchMaxDistDeg: EDGE_INFLUENCE_MATCH_MAX_DIST_DEG,
+      matchMaxAngleDeg: EDGE_INFLUENCE_MATCH_MAX_ANGLE_DEG,
       hotspotShieldZoneIds: Array.from(pickupHotspotShieldZoneIds || []).sort(),
       sourceReady: !!map?.getSource?.(EDGE_INFLUENCE_SOURCE_ID),
       haloLayerReady: !!map?.getLayer?.(EDGE_INFLUENCE_HALO_LAYER_ID),
