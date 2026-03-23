@@ -979,6 +979,12 @@ window.getTlcOwnerBootState = function getTlcOwnerBootState() {
   return {
     chatOwnerReady: typeof window.isTlcChatOwnerReady === "function" ? window.isTlcChatOwnerReady() : false,
     gamesOwnerReady: typeof window.isTlcGamesOwnerReady === "function" ? window.isTlcGamesOwnerReady() : false,
+    chatOwnerBootstrapped:
+      typeof window.isTlcChatOwnerBootstrapped === "function"
+        ? window.isTlcChatOwnerBootstrapped()
+        : false,
+    ownerReadyEventsBound:
+      !!window.__TLC_OWNER_READY_EVENTS_BOUND__,
     chatOwnerStatus: typeof window.getTlcChatOwnerStatus === "function" ? window.getTlcChatOwnerStatus() : null,
     gamesOwnerStatus: typeof window.getTlcGamesOwnerStatus === "function" ? window.getTlcGamesOwnerStatus() : null,
     hasDockChat: !!document.getElementById("dockChat"),
@@ -1042,6 +1048,9 @@ function ensureDockChatAndGamesBindings() {
 }
 
 function bindDockOwnersOnReadyEvents() {
+  if (window.__TLC_OWNER_READY_EVENTS_BOUND__) return;
+  window.__TLC_OWNER_READY_EVENTS_BOUND__ = true;
+
   window.addEventListener("tlc-chat-owner-ready", () => {
     ensureDockChatAndGamesBindings();
   });

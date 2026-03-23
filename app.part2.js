@@ -37,36 +37,48 @@
   }
 
   function chatPanelHTML() {
-    const fn = window.TlcChatCoreModule?.chatPanelHTML;
+    const fn =
+      window.chatPanelHTML ||
+      window.TlcChatCoreModule?.chatPanelHTML;
     if (typeof fn === "function") return fn();
     warnMissingOwner("chat", "chatPanelHTML");
     return chatUnavailablePanelHTML();
   }
 
   function wireChatPanel() {
-    const fn = window.TlcChatCoreModule?.wireChatPanel;
+    const fn =
+      window.wireChatPanel ||
+      window.TlcChatCoreModule?.wireChatPanel;
     if (typeof fn === "function") return fn();
     warnMissingOwner("chat", "wireChatPanel");
   }
 
   function syncChatPollingState() {
-    const fn = window.TlcChatCoreModule?.syncChatPollingState;
+    const fn =
+      window.syncChatPollingState ||
+      window.TlcChatCoreModule?.syncChatPollingState;
     if (typeof fn === "function") return fn();
     warnMissingOwner("chat", "syncChatPollingState");
   }
 
   function stopChatPolling() {
-    const fn = window.TlcChatCoreModule?.stopChatPolling;
+    const fn =
+      window.stopChatPolling ||
+      window.TlcChatCoreModule?.stopChatPolling;
     if (typeof fn === "function") return fn();
   }
 
   function startChatPolling() {
-    const fn = window.TlcChatCoreModule?.startChatPolling;
+    const fn =
+      window.startChatPolling ||
+      window.TlcChatCoreModule?.startChatPolling;
     if (typeof fn === "function") return fn();
   }
 
   function chatResetState() {
-    const fn = window.TlcChatCoreModule?.chatResetState;
+    const fn =
+      window.chatResetState ||
+      window.TlcChatCoreModule?.chatResetState;
     if (typeof fn === "function") return fn();
   }
   function openPrivateConversation(...args) { return window.TlcChatCoreModule?.openPrivateConversation?.(...args); }
@@ -284,14 +296,18 @@
    ========================================================= */
   /* Compatibility bridge only: chat ownership lives in app.part8.js, games ownership lives in app.part4.js, and no dock binding should happen here. */
   function gamesPanelHTML() {
-    const fn = window.TlcGamesModule?.gamesPanelHTML;
+    const fn =
+      window.gamesPanelHTML ||
+      window.TlcGamesModule?.gamesPanelHTML;
     if (typeof fn === "function") return fn();
     warnMissingOwner("games", "gamesPanelHTML");
     return gamesUnavailablePanelHTML();
   }
 
   function wireGamesPanel() {
-    const fn = window.TlcGamesModule?.wireGamesPanel;
+    const fn =
+      window.wireGamesPanel ||
+      window.TlcGamesModule?.wireGamesPanel;
     if (typeof fn === "function") return fn();
     warnMissingOwner("games", "wireGamesPanel");
   }
