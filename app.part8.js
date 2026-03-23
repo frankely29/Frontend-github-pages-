@@ -132,6 +132,8 @@ const CHAT_VOICE_MIME_TYPES = [
 
 const CHAT_VOICE_BUSY_PHASES = new Set(['preparing', 'requesting', 'recording', 'stopping', 'uploading']);
 
+const VOICE_BLOB_FETCH_RETRY_DELAYS_MS = [0, 350, 900, 1800];
+
 const CHAT_VOICE_IDLE_STATUS = 'Tap mic to record (max 1:00)';
 
 const CHAT_VOICE_MAX_REACHED_STATUS = '1:00 max reached. Tap Send or Cancel.';
@@ -1140,73 +1142,101 @@ function pruneVoiceAssetCache(messages = collectTrackedVoiceMessages()) {
     }
   }
 
+function waitVoiceBlobRetryDelay(ms) {
+    return new Promise((resolve) => {
+      window.setTimeout(resolve, Math.max(0, Number(ms) || 0));
+    });
+  }
+
 async function ensureVoiceBlobUrl(message, attempt = 0) {
-    const audioUrl = String(message?.audioUrl || '').trim();
-    const key = getVoiceAssetCacheKey(message);
-    if (!audioUrl) {
+  const audioUrl = String(message?.audioUrl || '').trim();
+  const key = getVoiceAssetCacheKey(message);
+
+  if (!audioUrl) {
+    voiceAssetCache.set(key, {
+      status: 'error',
+      blobUrl: '',
+      mimeType: String(message?.audioMimeType || '').trim(),
+      error: 'Voice note unavailable.',
+    });
+    return '';
+  }
+
+  const cached = voiceAssetCache.get(key);
+  if (cached?.status === 'ready' && cached.blobUrl) return cached.blobUrl;
+  if (cached?.status === 'loading' && cached.promise) return cached.promise;
+
+  const token = getCommunityToken();
+
+  const promise = (async () => {
+    try {
+      const headers = new Headers();
+      if (token) headers.set('Authorization', `Bearer ${token}`);
+
+      const response = await fetch(audioUrl, {
+        method: 'GET',
+        headers,
+        cache: 'no-store',
+      });
+
+      if (!response.ok) {
+        throw new Error(`Voice fetch failed (${response.status})`);
+      }
+
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+
+      const next = {
+        status: 'ready',
+        blobUrl,
+        mimeType: blob.type || String(message?.audioMimeType || '').trim(),
+        error: '',
+      };
+
+      const previous = voiceAssetCache.get(key);
+      if (
+        previous?.blobUrl &&
+        previous.blobUrl !== blobUrl &&
+        previous.blobUrl !== voicePlaybackRuntime.activeBlobUrl
+      ) {
+        try { URL.revokeObjectURL(previous.blobUrl); } catch (_) {}
+      }
+
+      voiceAssetCache.set(key, next);
+      refreshVoicePlayersForMessage(message);
+      return blobUrl;
+    } catch (error) {
+      console.warn('voice blob fetch failed', { message, error, attempt });
+
+      const nextAttempt = Number(attempt) + 1;
+      if (nextAttempt < VOICE_BLOB_FETCH_RETRY_DELAYS_MS.length) {
+        voiceAssetCache.delete(key);
+        await waitVoiceBlobRetryDelay(VOICE_BLOB_FETCH_RETRY_DELAYS_MS[nextAttempt]);
+        return ensureVoiceBlobUrl(message, nextAttempt);
+      }
+
       voiceAssetCache.set(key, {
         status: 'error',
         blobUrl: '',
         mimeType: String(message?.audioMimeType || '').trim(),
         error: 'Voice note unavailable.',
       });
+      refreshVoicePlayersForMessage(message);
       return '';
     }
-    const cached = voiceAssetCache.get(key);
-    if (cached?.status === 'ready' && cached.blobUrl) return cached.blobUrl;
-    if (cached?.status === 'loading' && cached.promise) return cached.promise;
-    const token = getCommunityToken();
-    const promise = (async () => {
-      try {
-        const headers = new Headers();
-        if (token) headers.set('Authorization', `Bearer ${token}`);
-        const response = await fetch(audioUrl, {
-          method: 'GET',
-          headers,
-          cache: 'force-cache',
-        });
-        if (!response.ok) throw new Error(`Voice fetch failed (${response.status})`);
-        const blob = await response.blob();
-        const blobUrl = URL.createObjectURL(blob);
-        const next = {
-          status: 'ready',
-          blobUrl,
-          mimeType: blob.type || String(message?.audioMimeType || '').trim(),
-          error: '',
-        };
-        const previous = voiceAssetCache.get(key);
-        if (previous?.blobUrl && previous.blobUrl !== blobUrl && previous.blobUrl !== voicePlaybackRuntime.activeBlobUrl) {
-          try { URL.revokeObjectURL(previous.blobUrl); } catch (_) {}
-        }
-        voiceAssetCache.set(key, next);
-        refreshVoicePlayersForMessage(message);
-        return blobUrl;
-      } catch (error) {
-        console.warn('voice blob fetch failed', { message, error, attempt });
-        if (attempt < 1) {
-          voiceAssetCache.delete(key);
-          return ensureVoiceBlobUrl(message, attempt + 1);
-        }
-        voiceAssetCache.set(key, {
-          status: 'error',
-          blobUrl: '',
-          mimeType: String(message?.audioMimeType || '').trim(),
-          error: 'Voice note unavailable.',
-        });
-        refreshVoicePlayersForMessage(message);
-        return '';
-      }
-    })();
-    voiceAssetCache.set(key, {
-      status: 'loading',
-      blobUrl: '',
-      mimeType: String(message?.audioMimeType || '').trim(),
-      error: '',
-      promise,
-    });
-    promise.finally(() => refreshVoicePlayersForMessage(message));
-    return promise;
-  }
+  })();
+
+  voiceAssetCache.set(key, {
+    status: 'loading',
+    blobUrl: '',
+    mimeType: String(message?.audioMimeType || '').trim(),
+    error: '',
+    promise,
+  });
+
+  promise.finally(() => refreshVoicePlayersForMessage(message));
+  return promise;
+}
 
 function prefetchVoiceBlobUrls(messages = []) {
     const voiceMessages = (Array.isArray(messages) ? messages : [])
@@ -2140,6 +2170,23 @@ function bindVoiceComposerControls(surface, optionsFactory) {
   window.getChatSoundDebugState = getChatSoundDebugState;
   window.getChatAudioLifecycleDebug = getChatAudioLifecycleDebug;
   window.getChatAudioDebugState = getChatAudioDebugState;
+  window.getChatVoicePlaybackDebug = function getChatVoicePlaybackDebug() {
+    const audio = syncVoiceRuntimeAudioRef();
+    return {
+      activeMessageId: voicePlaybackRuntime.activeMessageId,
+      activeScope: voicePlaybackRuntime.activeScope,
+      activeBlobUrl: String(voicePlaybackRuntime.activeBlobUrl || ''),
+      activeAudioUrl: String(voicePlaybackRuntime.activeAudioUrl || ''),
+      isPlaying: !!voicePlaybackRuntime.isPlaying,
+      lastPauseReason: String(voicePlaybackRuntime.lastPauseReason || ''),
+      sharedOwner: String(getSharedAudioCoordinator()?.owner || 'idle'),
+      audioCurrentSrc: String(audio?.currentSrc || audio?.src || ''),
+      audioPaused: !!audio?.paused,
+      audioEnded: !!audio?.ended,
+      audioReadyState: Number(audio?.readyState ?? 0),
+      audioNetworkState: Number(audio?.networkState ?? 0)
+    };
+  };
   window.getChatVoiceRecordDebug = function getChatVoiceRecordDebug() {
     return {
       phase: chatVoiceState.phase,
@@ -4083,7 +4130,11 @@ function bindVoiceComposerControls(surface, optionsFactory) {
       advanceChatWatermarksFromMessages(appliedMessages);
       renderChatMessages(merged, { replace: true });
       const latestVoice = appliedMessages.filter((msg) => msg.messageType === 'voice');
-      if (latestVoice.length) void prefetchVoiceBlobUrls(latestVoice);
+      if (latestVoice.length) {
+        window.setTimeout(() => {
+          void prefetchVoiceBlobUrls(latestVoice);
+        }, 450);
+      }
       if (isChatPanelOpen()) markChatReadThroughLatestLoaded();
       return merged;
     }
@@ -4092,7 +4143,11 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     privateUnreadByUserId[uid] = 0;
     privateUpsertThreadFromMessages(uid, merged, { displayName: options.displayName || privateActiveDisplayName || driverProfileState.displayName || '' });
     const latestVoice = appliedMessages.filter((msg) => msg.messageType === 'voice');
-    if (latestVoice.length) void prefetchVoiceBlobUrls(latestVoice);
+    if (latestVoice.length) {
+      window.setTimeout(() => {
+        void prefetchVoiceBlobUrls(latestVoice);
+      }, 450);
+    }
     return merged;
   }
 
