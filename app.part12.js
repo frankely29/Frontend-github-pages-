@@ -13,7 +13,7 @@
   const EDGE_INFLUENCE_CORE_LAYER_ID = "zone-edge-influence-core";
   const EDGE_INFLUENCE_MIN_RATING_DIFF = 10;
   const EDGE_INFLUENCE_MAX_RATING_DIFF = 30;
-  const EDGE_INFLUENCE_CHUNK_DEG = 0.0002;
+  const EDGE_INFLUENCE_CHUNK_DEG = 0.00020;
   const EDGE_INFLUENCE_MAX_SEGMENT_STEPS = 12;
   const EDGE_INFLUENCE_KEY_DP = 5;
 
@@ -408,7 +408,7 @@
     const dx = endLng - startLng;
     const dy = endLat - startLat;
     const length = Math.sqrt((dx * dx) + (dy * dy));
-    const steps = Math.max(1, Math.min(EDGE_INFLUENCE_MAX_SEGMENT_STEPS, Math.ceil(length / EDGE_INFLUENCE_CHUNK_DEG)));
+    const steps = Math.max(1, Math.min(12, Math.ceil(length / EDGE_INFLUENCE_CHUNK_DEG)));
     const points = [];
 
     for (let i = 0; i <= steps; i++) {

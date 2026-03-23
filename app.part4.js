@@ -1531,4 +1531,17 @@
 
 
   window.TlcGamesModule = { gamesPanelHTML, wireGamesPanel, isGamesPanelOpen, loadGamesBattleDashboard, loadActiveBattleMatch, openGamesBattleComposer };
+
+  function bindDockGamesButtonOnce() {
+    const gamesBtn = document.getElementById('dockGames');
+    if (!gamesBtn || gamesBtn.dataset.tlcBoundGames === '1') return;
+    if (typeof bindDockToggle !== 'function') return;
+    gamesBtn.dataset.tlcBoundGames = '1';
+    bindDockToggle(gamesBtn, 'games', 'Games', gamesPanelHTML, wireGamesPanel);
+  }
+
+  bindDockGamesButtonOnce();
+  window.addEventListener('load', bindDockGamesButtonOnce);
+  setTimeout(bindDockGamesButtonOnce, 0);
+  setTimeout(bindDockGamesButtonOnce, 400);
 })();
