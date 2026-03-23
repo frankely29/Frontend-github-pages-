@@ -104,8 +104,20 @@
   }
 
   function refreshZoneEdgeInfluenceFromCurrentFrame() {
-    const frame = window.TlcCommunityInternals?.getCurrentFrame?.() || window.TlcModeInternals?.getCurrentFrame?.();
-    if (frame) refreshZoneLabels(frame);
+    const frame =
+      window.TlcCommunityInternals?.getCurrentFrame?.() ||
+      window.TlcModeInternals?.getCurrentFrame?.() ||
+      null;
+    const map = core.getMap?.();
+    const edgeSrc = map?.getSource?.(EDGE_INFLUENCE_SOURCE_ID);
+    if (!frame || !edgeSrc) return;
+    syncPickupHotspotShieldZoneIdsFromSource();
+    const edgeFc = buildZoneEdgeInfluenceFeatureCollection(frame);
+    zoneEdgeInfluenceFeatureCount = Array.isArray(edgeFc?.features) ? edgeFc.features.length : 0;
+    const edgeFingerprint = zoneEdgeInfluenceFingerprintFromFc(edgeFc);
+    if (edgeFingerprint === zoneEdgeInfluenceFingerprint) return;
+    edgeSrc.setData(edgeFc);
+    zoneEdgeInfluenceFingerprint = edgeFingerprint;
   }
 
   function bboxFromCoords(coords) {
@@ -503,16 +515,10 @@
 
   function getZoneEdgeTopology(frame) {
     const features = frame?.polygons?.features || [];
-    const rows = [];
-    for (const feature of features) {
-      const ringRows = [];
-      forEachOuterRing(feature, (ring) => {
-        if (!Array.isArray(ring) || !ring.length) return;
-        ringRows.push(ring.map(edgeCoordKey).join(","));
-      });
-      rows.push(`${getZoneLabelSignature(feature)}|${ringRows.sort().join("||")}`);
-    }
-    const signature = rows.sort().join("###");
+    const signature = features
+      .map((feature) => getZoneLabelSignature(feature))
+      .sort()
+      .join("###");
     if (signature === zoneEdgeTopologySignature) return zoneEdgeTopologyCache;
     zoneEdgeTopologySignature = signature;
     zoneEdgeTopologyCache = buildZoneEdgeTopology(frame);

@@ -2975,19 +2975,6 @@
   window.chatResetState = chatResetState;
   window.getChatTransportDebugState = getChatTransportDebugState;
 
-  function bindDockChatButtonOnce() {
-    const chatBtn = document.getElementById('dockChat');
-    if (!chatBtn || chatBtn.dataset.tlcBoundChat === '1') return;
-    if (typeof bindDockToggle !== 'function') return;
-    chatBtn.dataset.tlcBoundChat = '1';
-    bindDockToggle(chatBtn, 'chat', 'Chat', chatPanelHTML, wireChatPanel);
-  }
-
-  bindDockChatButtonOnce();
-  window.addEventListener('load', bindDockChatButtonOnce);
-  setTimeout(bindDockChatButtonOnce, 0);
-  setTimeout(bindDockChatButtonOnce, 400);
-
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible' && typeof authHeaderOK === 'function' && authHeaderOK()) {
       syncMyProgression({ forcePopupCheck: true });
