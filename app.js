@@ -1459,18 +1459,21 @@ function pickZoneFeatureForPopup(point, lngLat) {
   const hits = queryZoneHitsAroundPoint(point, 12);
 
   if (hits.length) {
-    const fillHit = hits.find((feature) => feature?.layer?.id === "zones-fill");
-    const fillId = getZoneLocationId(fillHit?.properties || {});
-    if (fillId) {
-      const resolved = resolveZoneFeatureForPopupById(fillId);
-      if (resolved) return resolved;
-    }
+    const resolvedHitsById = new Map();
 
     for (const hit of hits) {
       const hitId = getZoneLocationId(hit?.properties || {});
-      if (!hitId) continue;
+      if (!hitId || resolvedHitsById.has(hitId)) continue;
       const resolved = resolveZoneFeatureForPopupById(hitId);
-      if (resolved) return resolved;
+      if (resolved) {
+        resolvedHitsById.set(hitId, resolved);
+      }
+    }
+
+    const resolvedHits = Array.from(resolvedHitsById.values());
+    if (resolvedHits.length) {
+      resolvedHits.sort((a, b) => popupFeatureBBoxArea(a) - popupFeatureBBoxArea(b));
+      return resolvedHits[0] || null;
     }
   }
 
