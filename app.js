@@ -1336,11 +1336,145 @@ function getZonePopupMetrics(zoomValue) {
   };
 }
 
+function getZoneLocationId(props = {}) {
+  const raw = props?.LocationID ?? props?.locationid ?? props?.locationId ?? "";
+  return String(raw || "").trim();
+}
+
+function popupPointInRing(lng, lat, ring) {
+  if (!Array.isArray(ring) || ring.length < 3) return false;
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = Number(ring[i]?.[0]);
+    const yi = Number(ring[i]?.[1]);
+    const xj = Number(ring[j]?.[0]);
+    const yj = Number(ring[j]?.[1]);
+    if (!Number.isFinite(xi) || !Number.isFinite(yi) || !Number.isFinite(xj) || !Number.isFinite(yj)) continue;
+
+    const intersect =
+      ((yi > lat) !== (yj > lat)) &&
+      (lng < ((xj - xi) * (lat - yi)) / ((yj - yi) || 1e-12) + xi);
+
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+function popupPointInPolygonLngLat(lng, lat, polyCoords) {
+  if (!Array.isArray(polyCoords) || polyCoords.length === 0) return false;
+  const outer = polyCoords[0];
+  if (!popupPointInRing(lng, lat, outer)) return false;
+
+  for (let i = 1; i < polyCoords.length; i += 1) {
+    if (popupPointInRing(lng, lat, polyCoords[i])) return false;
+  }
+  return true;
+}
+
+function popupFeatureContainsLngLat(feature, lngLat) {
+  const geom = feature?.geometry;
+  if (!geom || !lngLat) return false;
+
+  const lng = Number(lngLat.lng);
+  const lat = Number(lngLat.lat);
+  if (!Number.isFinite(lng) || !Number.isFinite(lat)) return false;
+
+  if (geom.type === "Polygon") {
+    return popupPointInPolygonLngLat(lng, lat, geom.coordinates);
+  }
+
+  if (geom.type === "MultiPolygon") {
+    const polys = Array.isArray(geom.coordinates) ? geom.coordinates : [];
+    return polys.some((poly) => popupPointInPolygonLngLat(lng, lat, poly));
+  }
+
+  return false;
+}
+
+function popupFeatureBBoxArea(feature) {
+  const geom = feature?.geometry;
+  const coords = geom?.coordinates;
+  let minLng = Infinity;
+  let minLat = Infinity;
+  let maxLng = -Infinity;
+  let maxLat = -Infinity;
+
+  const visit = (node) => {
+    if (!Array.isArray(node)) return;
+    if (node.length >= 2 && Number.isFinite(node[0]) && Number.isFinite(node[1])) {
+      minLng = Math.min(minLng, Number(node[0]));
+      minLat = Math.min(minLat, Number(node[1]));
+      maxLng = Math.max(maxLng, Number(node[0]));
+      maxLat = Math.max(maxLat, Number(node[1]));
+      return;
+    }
+    node.forEach(visit);
+  };
+
+  visit(coords);
+
+  if (!Number.isFinite(minLng) || !Number.isFinite(minLat) || !Number.isFinite(maxLng) || !Number.isFinite(maxLat)) {
+    return Infinity;
+  }
+
+  return (maxLng - minLng) * (maxLat - minLat);
+}
+
+function getCurrentZoneSourceFeatures() {
+  return currentFrame?.polygons?.features || [];
+}
+
 function resolveZoneFeatureForPopupById(locationId) {
-  const id = String(locationId || "").trim();
-  if (!id) return null;
-  const features = currentFrame?.polygons?.features || [];
-  return features.find((feature) => String(feature?.properties?.LocationID ?? "") === id) || null;
+  const targetId = String(locationId || "").trim();
+  if (!targetId) return null;
+  const features = getCurrentZoneSourceFeatures();
+  return features.find((feature) => getZoneLocationId(feature?.properties || {}) === targetId) || null;
+}
+
+function queryZoneHitsAroundPoint(point, pad = 12) {
+  if (!map || !point) return [];
+  const p = Number(pad) || 12;
+  const bbox = [
+    [point.x - p, point.y - p],
+    [point.x + p, point.y + p],
+  ];
+
+  return map.queryRenderedFeatures(bbox, {
+    layers: ["zones-fill", "zones-line", "zone-labels"],
+  }) || [];
+}
+
+function findZoneFeatureBySourceContainment(lngLat) {
+  const matches = getCurrentZoneSourceFeatures().filter((feature) =>
+    popupFeatureContainsLngLat(feature, lngLat)
+  );
+
+  if (!matches.length) return null;
+
+  matches.sort((a, b) => popupFeatureBBoxArea(a) - popupFeatureBBoxArea(b));
+  return matches[0] || null;
+}
+
+function pickZoneFeatureForPopup(point, lngLat) {
+  const hits = queryZoneHitsAroundPoint(point, 12);
+
+  if (hits.length) {
+    const fillHit = hits.find((feature) => feature?.layer?.id === "zones-fill");
+    const fillId = getZoneLocationId(fillHit?.properties || {});
+    if (fillId) {
+      const resolved = resolveZoneFeatureForPopupById(fillId);
+      if (resolved) return resolved;
+    }
+
+    for (const hit of hits) {
+      const hitId = getZoneLocationId(hit?.properties || {});
+      if (!hitId) continue;
+      const resolved = resolveZoneFeatureForPopupById(hitId);
+      if (resolved) return resolved;
+    }
+  }
+
+  return findZoneFeatureBySourceContainment(lngLat);
 }
 
 function syncOpenZonePopupMetrics() {
@@ -1351,6 +1485,15 @@ function syncOpenZonePopupMetrics() {
   const geom = feature.geometry || null;
   zonePopup.setHTML(buildPopupHTML(props, geom, getZonePopupMetrics(map?.getZoom?.())));
 }
+
+window.getZonePopupDebug = function getZonePopupDebug() {
+  return {
+    popupOpen: !!zonePopup,
+    popupLocationId: zonePopupLocationId || "",
+    popupLngLat: zonePopupLngLat || null,
+    sourceFeatureCount: Array.isArray(getCurrentZoneSourceFeatures()) ? getCurrentZoneSourceFeatures().length : 0,
+  };
+};
 
 function initMap() {
   map = new maplibregl.Map({
@@ -1461,11 +1604,6 @@ function initMap() {
     map.on("moveend", markUserActivity);
 
     scheduleAutoFocusFromInactivity();
-
-    map.on("click", (e) => {
-      const features = map.queryRenderedFeatures(e.point, { layers: ["zones-fill"] });
-      if (!features.length) closeAllPanels();
-    });
 
     const loading = document.getElementById("mapLoading");
     if (loading) loading.style.display = "none";
@@ -1639,33 +1777,18 @@ function wireZoneClickPopup() {
     try { map.getCanvas().style.cursor = ""; } catch {}
   });
 
-  function openZonePopupFromMapEvent(point, lngLat) {
-    const hits = map.queryRenderedFeatures(point, {
-      layers: ["zones-fill", "zones-line", "zone-labels"]
-    });
-
-    let zoneFeature = hits.find((f) => f?.layer?.id === "zones-fill") || null;
-
-    if (!zoneFeature) {
-      const fallbackHit = hits.find((f) => String(f?.properties?.LocationID ?? "").trim());
-      const fallbackId = String(fallbackHit?.properties?.LocationID ?? "").trim();
-      if (fallbackId) {
-        zoneFeature = resolveZoneFeatureForPopupById(fallbackId);
-      }
-    }
-
-    if (!zoneFeature) {
+  function openZonePopupFromResolvedFeature(feature, lngLat) {
+    if (!feature || !lngLat) {
       closeZonePopup();
-      closeAllPanels();
       return false;
     }
 
-    const props = zoneFeature.properties || {};
-    const geom = zoneFeature.geometry || null;
+    const props = feature.properties || {};
+    const geom = feature.geometry || null;
 
     closeZonePopup();
 
-    zonePopupLocationId = String(props.LocationID ?? "");
+    zonePopupLocationId = getZoneLocationId(props);
     zonePopupLngLat = { lng: lngLat.lng, lat: lngLat.lat };
 
     zonePopup = new maplibregl.Popup({
@@ -1681,13 +1804,20 @@ function wireZoneClickPopup() {
     return true;
   }
 
-  map.on("click", (e) => {
-    try {
-      openZonePopupFromMapEvent(e.point, e.lngLat);
-    } catch (err) {
-      console.warn("zone popup failed:", err);
-    }
-  });
+  if (!map.__zonePopupClickBound) {
+    map.__zonePopupClickBound = true;
+    map.on("click", (e) => {
+      const zoneFeature = pickZoneFeatureForPopup(e.point, e.lngLat);
+
+      if (!zoneFeature) {
+        closeZonePopup();
+        closeAllPanels();
+        return;
+      }
+
+      openZonePopupFromResolvedFeature(zoneFeature, e.lngLat);
+    });
+  }
 
   if (!zonePopupActivityListenersBound) {
     document.addEventListener("pointerdown", (event) => {
