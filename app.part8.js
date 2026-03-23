@@ -4997,9 +4997,6 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     };
   };
 
-  bootstrapChatOwnerOnce();
-  announceChatOwnerReady();
-
   function bindDockChatButtonOnce() {
     const chatBtn = document.getElementById('dockChat');
     if (!chatBtn || chatBtn.dataset.tlcBoundChat === '1') return;
@@ -5012,6 +5009,8 @@ function bindVoiceComposerControls(surface, optionsFactory) {
      Chat must self-bind here as well as through app.part2 compatibility wrappers.
      Dataset guards prevent duplicate listeners.
   */
+  bootstrapChatOwnerOnce();
+  announceChatOwnerReady();
   bindDockChatButtonOnce();
   window.addEventListener('load', bindDockChatButtonOnce);
   window.addEventListener('pageshow', bindDockChatButtonOnce);
