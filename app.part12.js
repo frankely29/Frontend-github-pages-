@@ -1111,6 +1111,38 @@
     getFeatureCollectionBounds
   };
 
+  function announceZoneOwnerReady() {
+    window.__TLC_ZONE_OWNER_READY__ = true;
+    window.__TLC_ZONE_OWNER_READY_AT__ = Date.now();
+    window.dispatchEvent(new CustomEvent("tlc-zone-owner-ready", {
+      detail: {
+        source: "app.part12.js",
+        ready: true
+      }
+    }));
+  }
+
+  window.isTlcZoneOwnerReady = function isTlcZoneOwnerReady() {
+    return !!(
+      window.__TLC_ZONE_OWNER_READY__ &&
+      window.TlcZoneLabelModule &&
+      typeof window.TlcZoneLabelModule.ensureZonesSourceAndLayers === "function" &&
+      typeof window.TlcZoneLabelModule.refreshZoneLabels === "function"
+    );
+  };
+
+  window.getTlcZoneOwnerStatus = function getTlcZoneOwnerStatus() {
+    return {
+      readyFlag: !!window.__TLC_ZONE_OWNER_READY__,
+      readyAt: Number(window.__TLC_ZONE_OWNER_READY_AT__ || 0),
+      hasZoneModule: !!window.TlcZoneLabelModule,
+      hasEnsureZonesSourceAndLayers: typeof window.TlcZoneLabelModule?.ensureZonesSourceAndLayers === "function",
+      hasRefreshZoneLabels: typeof window.TlcZoneLabelModule?.refreshZoneLabels === "function"
+    };
+  };
+
+  announceZoneOwnerReady();
+
   syncPickupHotspotShieldZoneIdsFromSource();
   if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
     window.addEventListener("tlc-pickup-hotspot-zones-updated", (event) => {
