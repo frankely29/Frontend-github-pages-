@@ -89,6 +89,7 @@ function clearPickupOverlayCache() {
     pickupOverlayAbortController = null;
   }
   pickupRefreshInFlight = false;
+  emitPickupHotspotZoneShieldUpdate();
 }
 
 function normalizePickupZoneId(value) {
@@ -119,6 +120,25 @@ function pickupHotspotKeyFromProps(props = {}) {
   const hotspotId = normalizePickupHotspotId(props.hotspot_id ?? props.hotspotId ?? props.pickup_hotspot_id);
   const hotspotIndex = normalizePickupHotspotIndex(props.hotspot_index ?? props.hotspotIndex ?? props.pickup_hotspot_index);
   return pickupHotspotKeyFromParts(zoneId, hotspotId, hotspotIndex);
+}
+
+function getPickupHotspotZoneIdsSnapshot() {
+  return Array.from(pickupHotspotZoneIds || []).map((value) => String(value)).sort();
+}
+
+function hasPickupHotspotZone(zoneId) {
+  const normalized = normalizePickupZoneId(zoneId);
+  if (normalized == null) return false;
+  return pickupHotspotZoneIds.has(normalized);
+}
+
+function emitPickupHotspotZoneShieldUpdate() {
+  if (typeof window === "undefined" || typeof window.dispatchEvent !== "function") return;
+  window.dispatchEvent(new CustomEvent("tlc-pickup-hotspot-zones-updated", {
+    detail: {
+      hotspotZoneIds: getPickupHotspotZoneIdsSnapshot(),
+    },
+  }));
 }
 
 function normalizePickupMicroHotspots(rawInput, allowedZoneIds = null) {
@@ -486,6 +506,8 @@ function setPickupOverlayData(fc, items = [], zoneStats = [], zoneHotspots = emp
     src.setData(filteredPickupPointsFc);
     pickupPointsSourceFingerprint = visiblePointsFingerprint;
   }
+
+  emitPickupHotspotZoneShieldUpdate();
 }
 
 function clearPickupOverlay() {
@@ -2353,9 +2375,11 @@ function clusterPresenceByScreenPosition(rows, selfPos) {
 }
 
 function ensurePresenceLiteSourceAndLayers() {
-  if (!map || !mapReady) return;
+  if (!map || !mapReady) return false;
+  let createdPresenceLiteArtifacts = false;
   if (!map.getSource('presence-lite')) {
     map.addSource('presence-lite', { type: 'geojson', data: emptyGeojson() });
+    createdPresenceLiteArtifacts = true;
   }
 
   if (!map.getLayer('presence-lite-body')) {
@@ -2372,6 +2396,7 @@ function ensurePresenceLiteSourceAndLayers() {
         'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 10, 1, 16, 1.6],
       },
     });
+    createdPresenceLiteArtifacts = true;
   }
 
   if (!map.getLayer('presence-lite-heading')) {
@@ -2394,6 +2419,7 @@ function ensurePresenceLiteSourceAndLayers() {
         'text-halo-width': 0.7,
       },
     });
+    createdPresenceLiteArtifacts = true;
   }
 
   if (!map.__presenceLiteHandlersBound) {
@@ -2422,6 +2448,8 @@ function ensurePresenceLiteSourceAndLayers() {
     map.on('mouseleave', 'presence-lite-heading', onLeave);
     map.__presenceLiteHandlersBound = true;
   }
+
+  return createdPresenceLiteArtifacts;
 }
 
 function presenceLiteFingerprint(fc) {
@@ -2535,7 +2563,7 @@ function renderAdaptivePresenceFromCache() {
 
   if (!map || !mapReady) return;
 
-  ensurePresenceLiteSourceAndLayers();
+  const presenceLiteArtifactsCreated = !!ensurePresenceLiteSourceAndLayers();
 
   const rows = Array.isArray(cachedPresenceRows) ? cachedPresenceRows : [];
   const boundsObj = getPresenceRenderBounds();
@@ -2543,7 +2571,7 @@ function renderAdaptivePresenceFromCache() {
   const nextMode = computePresenceRenderMode(rows);
   const nextRenderFingerprint = `${nextMode}::${presenceRowsFingerprint(viewportRows)}`;
 
-  if (renderedPresenceFingerprint === nextRenderFingerprint) return;
+  if (!presenceLiteArtifactsCreated && renderedPresenceFingerprint === nextRenderFingerprint) return;
 
   presenceRenderMode = nextMode;
   const richUserIds = chooseRichPresenceUserIds(viewportRows, nextMode);
@@ -2641,34 +2669,8 @@ async function pullPresenceAll() {
     const viewportSignature = params.get("viewport_sig") || getPresenceViewportSignature();
     const { payload: list, mode: responseMode } = await fetchPresencePayload(params, presencePullAbortController.signal);
     frontendPerfStats.presencePollsCompleted += 1;
+    const activeSignal = presencePullAbortController.signal;
     const items = extractPresenceItems(list);
-    const fallbackVisibleCount = Array.isArray(items) ? items.length : 0;
-    let badgeUpdatedFromSummary = false;
-    const listOnlineCount = Number(list?.online_count ?? list?.summary?.online_count ?? list?.counts?.online_count);
-    const listGhostedCount = Number(list?.ghosted_count ?? list?.summary?.ghosted_count ?? list?.counts?.ghosted_count);
-
-    if (Number.isFinite(listOnlineCount) && listOnlineCount >= 0) {
-      updateOnlineBadge(listOnlineCount, Number.isFinite(listGhostedCount) ? listGhostedCount : 0);
-      badgeUpdatedFromSummary = true;
-    } else {
-      try {
-        const summary = await getJSONAuth("/presence/summary", communityToken, { signal: presencePullAbortController.signal });
-        const onlineCount = Number(summary?.online_count);
-        const ghostedCount = Number(summary?.ghosted_count);
-        if (Number.isFinite(onlineCount) && onlineCount >= 0) {
-          updateOnlineBadge(onlineCount, Number.isFinite(ghostedCount) ? ghostedCount : 0);
-          badgeUpdatedFromSummary = true;
-        }
-      } catch (e) {
-        if (e?.name !== "AbortError") {
-          console.warn("/presence/summary failed:", e);
-        }
-      }
-    }
-    if (!badgeUpdatedFromSummary) {
-      updateOnlineBadge(fallbackVisibleCount, 0);
-    }
-
     const removals = [];
     if (Array.isArray(list?.removed)) removals.push(...list.removed);
     if (Array.isArray(list?.removed_user_ids)) removals.push(...list.removed_user_ids);
@@ -2686,13 +2688,33 @@ async function pullPresenceAll() {
 
     if (requestSerial < appliedPresenceRequestSerial) return;
     const nextFingerprint = presenceRowsFingerprint(nextRows);
+    const fingerprintChanged = nextFingerprint !== cachedPresenceFingerprint;
     cachedPresenceRows = nextRows;
+    cachedPresenceFingerprint = nextFingerprint;
     appliedPresenceRequestSerial = requestSerial;
     lastPresenceFetchViewportSignature = viewportSignature || lastPresenceFetchViewportSignature;
-    if (nextFingerprint !== cachedPresenceFingerprint) {
-      cachedPresenceFingerprint = nextFingerprint;
+    if (fingerprintChanged) {
       scheduleAdaptivePresenceRender();
     }
+
+    const listOnlineCount = Number(list?.online_count ?? list?.summary?.online_count ?? list?.counts?.online_count);
+    const listGhostedCount = Number(list?.ghosted_count ?? list?.summary?.ghosted_count ?? list?.counts?.ghosted_count);
+
+    if (Number.isFinite(listOnlineCount) && listOnlineCount >= 0) {
+      updateOnlineBadge(listOnlineCount, Number.isFinite(listGhostedCount) ? listGhostedCount : 0);
+    } else {
+      updateOnlineBadge(nextRows.length, 0);
+    }
+
+    void getJSONAuth("/presence/summary", communityToken, { signal: activeSignal })
+      .then((summary) => {
+        const onlineCount = Number(summary?.online_count);
+        const ghostedCount = Number(summary?.ghosted_count);
+        if (Number.isFinite(onlineCount) && onlineCount >= 0) {
+          updateOnlineBadge(onlineCount, Number.isFinite(ghostedCount) ? ghostedCount : 0);
+        }
+      })
+      .catch(() => {});
   } catch (e) {
     if (e?.name === "AbortError") return;
     const status = Number(e?.status ?? NaN);
@@ -2934,7 +2956,9 @@ window.TlcCommunityModule = {
   sendPoliceReport,
   sendPickupLog,
   notePresenceBoost,
-  getPickupRecordingContext: window.getPickupRecordingContext
+  getPickupRecordingContext: window.getPickupRecordingContext,
+  getPickupHotspotZoneIdsSnapshot,
+  hasPickupHotspotZone
 };
 
 bootstrapCommunityModule();
