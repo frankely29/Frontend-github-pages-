@@ -103,8 +103,12 @@
   }
 
   function refreshZoneEdgeInfluenceFromCurrentFrame() {
-    const frame = window.TlcCommunityInternals?.getCurrentFrame?.() || window.TlcModeInternals?.getCurrentFrame?.();
-    refreshZoneEdgeInfluence(frame || null);
+    const frame =
+      window.TlcCommunityInternals?.getCurrentFrame?.() ||
+      window.TlcModeInternals?.getCurrentFrame?.() ||
+      null;
+    if (!frame) return;
+    refreshZoneEdgeInfluence(frame);
   }
 
   function bboxFromCoords(coords) {

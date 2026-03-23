@@ -3058,6 +3058,12 @@ function waitForRadioPauseSettle(audioEl, timeoutMs = 320) {
   });
 }
 
+function restoreSharedAudioOutputState(audioEl) {
+  if (!audioEl) return;
+  try { audioEl.muted = false; } catch (_) {}
+  try { audioEl.volume = 1; } catch (_) {}
+}
+
 const TlcSharedAudio = (typeof window !== "undefined" && window.TlcSharedAudio && typeof window.TlcSharedAudio === "object")
   ? window.TlcSharedAudio
   : {};
@@ -3217,6 +3223,12 @@ Object.assign(TlcSharedAudio, {
     if (!src || this.recorderLock) return false;
     if (this.owner === "radio") this.pauseRadioForVoice("voice-play");
     const sameSrc = String(this.audioEl.currentSrc || this.audioEl.src || "").trim() === src;
+
+    restoreSharedAudioOutputState(this.audioEl);
+
+    if (sameSrc && this.audioEl.ended) {
+      try { this.audioEl.currentTime = 0; } catch (_) {}
+    }
     if (this.owner === "voice" && sameSrc && !this.audioEl.paused && !this.audioEl.ended) {
       await this.stopVoicePlayback("user", { resetPosition: false, clearSource: false, resumeRadio: false });
       return true;
@@ -3261,6 +3273,7 @@ Object.assign(TlcSharedAudio, {
       else this.setAutoSession(reason);
     }
     if (this.owner !== "radio") this.syncMediaSession("none", "");
+    restoreSharedAudioOutputState(this.audioEl);
     refreshRadioButtons();
     return true;
   },
@@ -3329,6 +3342,8 @@ Object.assign(TlcSharedAudio, {
   async endRecordingCapture(reason = "record-end") {
     this.recorderLock = false;
     if (this.owner === "record") this.owner = "idle";
+
+    restoreSharedAudioOutputState(this.audioEl);
     if (this.suspendedRadio?.shouldResume) return this.resumeRadioAfterVoice(reason);
     this.setAutoSession(reason);
     refreshRadioButtons();
@@ -3351,6 +3366,8 @@ Object.assign(TlcSharedAudio, {
       currentSrc: String(this.audioEl?.currentSrc || this.audioEl?.src || ""),
       paused: !!this.audioEl?.paused,
       ended: !!this.audioEl?.ended,
+      muted: !!this.audioEl?.muted,
+      volume: Number(this.audioEl?.volume ?? 0),
       readyState: Number(this.audioEl?.readyState ?? 0),
       networkState: Number(this.audioEl?.networkState ?? 0),
       visibilityState: typeof document !== "undefined" ? document.visibilityState : "",
