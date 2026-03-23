@@ -740,11 +740,11 @@
           weak_zone_id: weakerZoneId,
           rating_diff: diff,
           edge_strength: edgeStrength,
-          base_width_px: 2.2 + (edgeStrength * 1.4),
-          inner_width_px: 5.4 + (edgeStrength * 2.2),
-          base_opacity: 0.10 + (edgeStrength * 0.05),
-          inner_opacity: 0.08 + (edgeStrength * 0.08),
-          inner_offset_px: 1.1 + (edgeStrength * 1.1),
+          base_width_px: 2.4 + (edgeStrength * 1.2),
+          inner_width_px: 5.8 + (edgeStrength * 2.0),
+          base_opacity: 0.14 + (edgeStrength * 0.05),
+          inner_opacity: 0.12 + (edgeStrength * 0.08),
+          inner_offset_px: 1.2 + (edgeStrength * 1.0),
         },
       });
     }
@@ -997,13 +997,13 @@
         },
         paint: {
           "line-color": ["coalesce", ["to-string", ["get", "edge_color"]], "#ffffff"],
-          "line-opacity": ["coalesce", ["to-number", ["get", "base_opacity"]], 0.12],
+          "line-opacity": ["coalesce", ["to-number", ["get", "base_opacity"]], 0.14],
           "line-width": [
             "*",
             ["coalesce", ["to-number", ["get", "base_width_px"]], 2.4],
-            ["interpolate", ["linear"], ["zoom"], 12, 0.85, 14, 1.0, 16, 1.10]
+            ["interpolate", ["linear"], ["zoom"], 12, 0.85, 14, 1.0, 16, 1.08]
           ],
-          "line-blur": 0.25,
+          "line-blur": 0.22,
           "line-offset": 0
         }
       }, "zones-line");
@@ -1021,17 +1021,17 @@
         },
         paint: {
           "line-color": ["coalesce", ["to-string", ["get", "edge_color"]], "#ffffff"],
-          "line-opacity": ["coalesce", ["to-number", ["get", "inner_opacity"]], 0.10],
+          "line-opacity": ["coalesce", ["to-number", ["get", "inner_opacity"]], 0.14],
           "line-width": [
             "*",
             ["coalesce", ["to-number", ["get", "inner_width_px"]], 5.8],
             ["interpolate", ["linear"], ["zoom"], 12, 0.80, 14, 1.0, 16, 1.08]
           ],
-          "line-blur": 0.8,
+          "line-blur": 0.75,
           "line-offset": [
             "*",
             ["coalesce", ["to-number", ["get", "inner_offset_px"]], 1.2],
-            ["interpolate", ["linear"], ["zoom"], 12, 0.80, 14, 1.0, 16, 1.10]
+            ["interpolate", ["linear"], ["zoom"], 12, 0.80, 14, 1.0, 16, 1.08]
           ]
         }
       }, "zones-line");
