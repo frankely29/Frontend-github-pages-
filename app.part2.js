@@ -346,10 +346,30 @@
   window.syncLeaderboardBadgeRewards = syncLeaderboardBadgeRewards;
   window.openGamesBattleComposer = openGamesBattleComposer;
 
-  if (typeof bindDockToggle === 'function') {
+  function bindCompatDockPanelsOnce() {
+    if (typeof bindDockToggle !== 'function') return;
+
+    const chatBtn = document.getElementById('dockChat');
+    if (chatBtn && chatBtn.dataset.tlcBoundChat !== '1') {
+      chatBtn.dataset.tlcBoundChat = '1';
+      bindDockToggle(chatBtn, 'chat', 'Chat', chatPanelHTML, wireChatPanel);
+    }
+
     const gamesBtn = document.getElementById('dockGames');
-    if (gamesBtn) { bindDockToggle(gamesBtn, 'games', 'Games', gamesPanelHTML, wireGamesPanel); }
+    if (gamesBtn && gamesBtn.dataset.tlcBoundGames !== '1') {
+      gamesBtn.dataset.tlcBoundGames = '1';
+      bindDockToggle(gamesBtn, 'games', 'Games', gamesPanelHTML, wireGamesPanel);
+    }
   }
+
+  /* ISSUE NOTE:
+     app.part2.js is the stable compatibility owner for chat + games dock binding.
+     Split modules may provide the implementations, but this file owns the dock wiring.
+  */
+  bindCompatDockPanelsOnce();
+  window.addEventListener('load', bindCompatDockPanelsOnce);
+  setTimeout(bindCompatDockPanelsOnce, 0);
+  setTimeout(bindCompatDockPanelsOnce, 400);
 
   function toggleNightMode() { document.body.classList.toggle('night'); }
   window.toggleNightMode = toggleNightMode;
