@@ -243,6 +243,19 @@ function ensureChatPlaybackSession(reason = 'chat-playback') {
     return getSharedAudioCoordinator()?.setPlaybackSession?.(reason) || 'unsupported';
   }
 
+function setChatAudioSessionType(type) {
+    const nextType = String(type || '').trim();
+    if (!nextType) return false;
+    try {
+      const session = navigator && navigator.audioSession ? navigator.audioSession : null;
+      if (!session) return false;
+      if (session.type !== nextType) session.type = nextType;
+      return session.type === nextType;
+    } catch (_) {
+      return false;
+    }
+  }
+
 async function maybeResumeRadioAfterVoicePlayback(reason = 'voice-playback') {
     try {
       return await getSharedAudioCoordinator()?.resumeRadioAfterVoice?.(reason);
@@ -307,9 +320,11 @@ async function prepareChatAudioForCapture(reason = 'voice-capture') {
 
     await new Promise((resolve) => window.setTimeout(resolve, 220));
 
-    if (!setChatAudioSessionType('play-and-record')) {
-      setChatAudioSessionType('auto');
-    }
+    try {
+      if (!setChatAudioSessionType('play-and-record')) {
+        setChatAudioSessionType('auto');
+      }
+    } catch (_) {}
 
     chatVoiceState.phase = 'requesting';
     return true;
@@ -1822,7 +1837,6 @@ async function startChatVoiceRecording(scope, options = {}) {
     }
     if (hasChatVoiceDraft(normalizedScope)) clearChatVoiceDraft('re-record');
 
-    await prepareChatAudioForCapture(`${normalizedScope}-voice-start`);
     chatVoiceState.scope = normalizedScope;
     chatVoiceState.room = String(options.room || CHAT_ROOM || '');
     chatVoiceState.otherUserId = options.userId == null ? '' : String(options.userId);
@@ -1833,6 +1847,8 @@ async function startChatVoiceRecording(scope, options = {}) {
     syncAllVoiceRecorderUis();
 
     try {
+      await prepareChatAudioForCapture(`${normalizedScope}-voice-start`);
+
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       chatVoiceState.stream = stream;
       chatVoiceState.recorder = chatVoiceState.mimeType
@@ -2124,6 +2140,27 @@ function bindVoiceComposerControls(surface, optionsFactory) {
   window.getChatSoundDebugState = getChatSoundDebugState;
   window.getChatAudioLifecycleDebug = getChatAudioLifecycleDebug;
   window.getChatAudioDebugState = getChatAudioDebugState;
+  window.getChatVoiceRecordDebug = function getChatVoiceRecordDebug() {
+    return {
+      phase: chatVoiceState.phase,
+      scope: chatVoiceState.scope,
+      hasStream: !!chatVoiceState.stream,
+      hasRecorder: !!chatVoiceState.recorder,
+      mimeType: chatVoiceState.mimeType || '',
+      draftStatus: chatVoiceDraftState.status,
+      draftScope: chatVoiceDraftState.scope,
+      draftDurationMs: Number(chatVoiceDraftState.durationMs || 0),
+      lastError: chatVoiceState.lastError || '',
+      audioSessionType: (() => {
+        try {
+          return navigator && navigator.audioSession ? navigator.audioSession.type : '';
+        } catch (_) {
+          return '';
+        }
+      })(),
+      hasSetChatAudioSessionType: typeof setChatAudioSessionType === 'function'
+    };
+  };
 
 
   const VOICE_NOTE_MAX_MS = 60000;

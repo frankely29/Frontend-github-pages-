@@ -670,6 +670,8 @@
       return;
     }
 
+    syncPickupHotspotShieldZoneIdsFromSource();
+
     const edgeFc = buildZoneEdgeInfluenceFeatureCollection(frame);
     zoneEdgeInfluenceFeatureCount = Array.isArray(edgeFc?.features) ? edgeFc.features.length : 0;
     const edgeFingerprint = zoneEdgeInfluenceFingerprintFromFc(edgeFc);
@@ -1026,12 +1028,17 @@
     if (!map.__zoneEdgeInfluenceZoomRefreshBound) {
       map.__zoneEdgeInfluenceZoomRefreshBound = true;
       map.on("zoomend", () => {
-        if (!isZoneEdgeInfluenceZoomActive()) {
-          clearZoneEdgeInfluenceSource();
-          return;
-        }
         refreshZoneEdgeInfluenceFromCurrentFrame();
       });
+    }
+
+    const frame =
+      window.TlcCommunityInternals?.getCurrentFrame?.() ||
+      window.TlcModeInternals?.getCurrentFrame?.() ||
+      null;
+
+    if (frame) {
+      refreshZoneEdgeInfluence(frame);
     }
 
     return true;
@@ -1158,6 +1165,8 @@
       topologySignature: zoneEdgeTopologySignature || "",
       fingerprint: zoneEdgeInfluenceFingerprint || "",
       featureCount: zoneEdgeInfluenceFeatureCount,
+      hasSourceData: zoneEdgeInfluenceFeatureCount > 0,
+      zoomLevel: Number(core.getMap?.()?.getZoom?.() || 0),
       zoomActive: isZoneEdgeInfluenceZoomActive(),
       hotspotShieldZoneIds: Array.from(pickupHotspotShieldZoneIds || []).sort(),
       sourceReady: !!map?.getSource?.(EDGE_INFLUENCE_SOURCE_ID),
