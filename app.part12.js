@@ -14,7 +14,7 @@
   const EDGE_INFLUENCE_SEED_LAYER_ID = "zone-edge-influence-seed";
   const EDGE_INFLUENCE_MIN_RATING_DIFF = 4;
   const EDGE_INFLUENCE_MAX_RATING_DIFF = 30;
-  const EDGE_INFLUENCE_CHUNK_DEG = 0.00020;
+  const EDGE_INFLUENCE_CHUNK_DEG = 0.00045;
   const EDGE_INFLUENCE_KEY_DP = 5;
   const EDGE_INFLUENCE_MATCH_GRID_DEG = 0.00035;
   const EDGE_INFLUENCE_MATCH_MAX_DIST_DEG = 0.00035;
@@ -53,6 +53,10 @@
   let zoneEdgeTopologySignature = "";
   let zoneEdgeInfluenceFingerprint = "";
   let zoneEdgeInfluenceFeatureCount = 0;
+  let zoneEdgeInfluenceInputSignature = "";
+  let zoneEdgeInfluenceCachedFc = { type: "FeatureCollection", features: [] };
+  let zoneEdgeInfluencePendingFrame = null;
+  let zoneEdgeInfluenceRefreshRaf = 0;
   let zoneEdgeInfluenceBuildStats = {
     topologyCount: 0,
     skippedMissingRating: 0,
@@ -500,7 +504,7 @@
     const dx = endLng - startLng;
     const dy = endLat - startLat;
     const length = Math.sqrt((dx * dx) + (dy * dy));
-    const steps = Math.max(1, Math.min(12, Math.ceil(length / EDGE_INFLUENCE_CHUNK_DEG)));
+    const steps = Math.max(1, Math.min(6, Math.ceil(length / EDGE_INFLUENCE_CHUNK_DEG)));
     const points = [];
 
     for (let i = 0; i <= steps; i++) {
@@ -668,6 +672,67 @@
     );
   }
 
+  function getZoneEdgeInfluenceInputSignature(frame) {
+    const features = frame?.polygons?.features || [];
+    const hotspotSig = Array.from(pickupHotspotShieldZoneIds || []).sort().join(",");
+    const rows = [];
+
+    for (const feature of features) {
+      const zoneId = String(feature?.properties?.LocationID ?? "");
+      if (!zoneId) continue;
+
+      const rating = getFeatureEffectiveRatingForEdge(feature);
+      const color = String(getFeatureBaseColorForEdge(feature) || "");
+
+      rows.push(
+        `${zoneId}|${Number.isFinite(rating) ? rating.toFixed(2) : "nan"}|${color}`
+      );
+    }
+
+    rows.sort();
+    return `${zoneEdgeTopologySignature}@@${hotspotSig}@@${rows.join("###")}`;
+  }
+
+  function getCachedZoneEdgeInfluenceFeatureCollection(frame) {
+    getZoneEdgeTopology(frame);
+    syncPickupHotspotShieldZoneIdsFromSource();
+
+    const inputSignature = getZoneEdgeInfluenceInputSignature(frame);
+    if (inputSignature === zoneEdgeInfluenceInputSignature && zoneEdgeInfluenceCachedFc) {
+      return zoneEdgeInfluenceCachedFc;
+    }
+
+    const nextFc = buildZoneEdgeInfluenceFeatureCollection(frame);
+    zoneEdgeInfluenceInputSignature = inputSignature;
+    zoneEdgeInfluenceCachedFc = nextFc;
+    return nextFc;
+  }
+
+  function scheduleZoneEdgeInfluenceRefresh(frame = null) {
+    zoneEdgeInfluencePendingFrame =
+      frame ||
+      zoneEdgeInfluencePendingFrame ||
+      window.TlcCommunityInternals?.getCurrentFrame?.() ||
+      window.TlcModeInternals?.getCurrentFrame?.() ||
+      null;
+
+    if (zoneEdgeInfluenceRefreshRaf) return;
+
+    const runner = () => {
+      zoneEdgeInfluenceRefreshRaf = 0;
+      const nextFrame = zoneEdgeInfluencePendingFrame;
+      zoneEdgeInfluencePendingFrame = null;
+      if (!nextFrame) return;
+      refreshZoneEdgeInfluence(nextFrame);
+    };
+
+    if (typeof window.requestAnimationFrame === "function") {
+      zoneEdgeInfluenceRefreshRaf = window.requestAnimationFrame(runner);
+    } else {
+      zoneEdgeInfluenceRefreshRaf = window.setTimeout(runner, 16);
+    }
+  }
+
   // Stronger zone edges next to weaker-bucket neighbors get a subtle inward hue
   // from the weaker zone. Same-bucket neighbors do not get this effect; this is
   // only a heuristic visual hint, not measured sub-zone demand truth.
@@ -790,6 +855,8 @@
     edgeSrc.setData(core.emptyGeojson?.() || { type: "FeatureCollection", features: [] });
     zoneEdgeInfluenceFingerprint = "";
     zoneEdgeInfluenceFeatureCount = 0;
+    zoneEdgeInfluenceInputSignature = "";
+    zoneEdgeInfluenceCachedFc = { type: "FeatureCollection", features: [] };
   }
 
   function isZoneEdgeInfluenceZoomActive() {
@@ -811,9 +878,7 @@
       return;
     }
 
-    syncPickupHotspotShieldZoneIdsFromSource();
-
-    const edgeFc = buildZoneEdgeInfluenceFeatureCollection(frame);
+    const edgeFc = getCachedZoneEdgeInfluenceFeatureCollection(frame);
     zoneEdgeInfluenceFeatureCount = Array.isArray(edgeFc?.features) ? edgeFc.features.length : 0;
     const edgeFingerprint = zoneEdgeInfluenceFingerprintFromFc(edgeFc);
     if (edgeFingerprint === zoneEdgeInfluenceFingerprint) return;
@@ -1102,9 +1167,9 @@
             "interpolate",
             ["linear"],
             ["zoom"],
-            12.4, 10,
-            14, 12,
-            16, 14,
+            12.4, 5,
+            14, 6,
+            16, 7,
           ],
           "line-offset": ["*", ["coalesce", ["to-number", ["get", "halo_offset_px"]], 8], edgeHaloOffsetScaleExpr],
         },
@@ -1129,9 +1194,9 @@
             "interpolate",
             ["linear"],
             ["zoom"],
-            12.4, 4.5,
-            14, 5.5,
-            16, 6.5,
+            12.4, 2.4,
+            14, 3.0,
+            16, 3.6,
           ],
           "line-offset": ["*", ["coalesce", ["to-number", ["get", "soft_offset_px"]], 4.5], edgeSoftOffsetScaleExpr],
         },
@@ -1156,9 +1221,9 @@
             "interpolate",
             ["linear"],
             ["zoom"],
-            12.4, 1.4,
-            14, 1.8,
-            16, 2.2,
+            12.4, 0.8,
+            14, 1.0,
+            16, 1.2,
           ],
           "line-offset": ["*", ["coalesce", ["to-number", ["get", "core_offset_px"]], 2], edgeCoreOffsetScaleExpr],
         },
@@ -1212,20 +1277,13 @@
 
     await core.ensurePickupSourceAndLayers?.();
 
-    if (!map.__zoneEdgeInfluenceZoomRefreshBound) {
-      map.__zoneEdgeInfluenceZoomRefreshBound = true;
-      map.on("zoomend", () => {
-        refreshZoneEdgeInfluenceFromCurrentFrame();
-      });
-    }
-
     const frame =
       window.TlcCommunityInternals?.getCurrentFrame?.() ||
       window.TlcModeInternals?.getCurrentFrame?.() ||
       null;
 
     if (frame) {
-      refreshZoneEdgeInfluence(frame);
+      scheduleZoneEdgeInfluenceRefresh(frame);
     }
 
     return true;
@@ -1265,7 +1323,7 @@
 
     const fc = buildZoneLabelsFeatureCollection(frame);
     src.setData(fc);
-    refreshZoneEdgeInfluence(frame);
+    scheduleZoneEdgeInfluenceRefresh(frame);
   }
 
   function getFeatureCollectionBounds(fc) {
@@ -1341,7 +1399,15 @@
   if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
     window.addEventListener("tlc-pickup-hotspot-zones-updated", (event) => {
       setPickupHotspotShieldZoneIds(event?.detail?.hotspotZoneIds || []);
-      refreshZoneEdgeInfluenceFromCurrentFrame();
+      scheduleZoneEdgeInfluenceRefresh();
+    });
+
+    window.addEventListener("tlc-mode-changed", () => {
+      scheduleZoneEdgeInfluenceRefresh();
+    });
+
+    window.addEventListener("tlc-day-tendency-updated", () => {
+      scheduleZoneEdgeInfluenceRefresh();
     });
   }
 
@@ -1351,7 +1417,10 @@
       topologyCount: Array.isArray(zoneEdgeTopologyCache) ? zoneEdgeTopologyCache.length : 0,
       topologySignature: zoneEdgeTopologySignature || "",
       fingerprint: zoneEdgeInfluenceFingerprint || "",
+      inputSignature: zoneEdgeInfluenceInputSignature || "",
       featureCount: zoneEdgeInfluenceFeatureCount,
+      cachedFeatureCount: Array.isArray(zoneEdgeInfluenceCachedFc?.features) ? zoneEdgeInfluenceCachedFc.features.length : 0,
+      rafPending: !!zoneEdgeInfluenceRefreshRaf,
       hasSourceData: zoneEdgeInfluenceFeatureCount > 0,
       zoomLevel: Number(core.getMap?.()?.getZoom?.() || 0),
       zoomActive: isZoneEdgeInfluenceZoomActive(),
