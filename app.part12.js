@@ -443,6 +443,8 @@
 
     await core.ensurePickupSourceAndLayers?.();
 
+    await window.TlcZoneEdgeCueModule?.ensureZoneEdgeCueSourceAndLayers?.();
+
     const frame =
       window.TlcCommunityInternals?.getCurrentFrame?.() ||
       window.TlcModeInternals?.getCurrentFrame?.() ||
