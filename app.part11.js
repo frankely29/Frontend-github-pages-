@@ -200,17 +200,17 @@
           : `${activeLabels.slice(0, -1).join(", ")}, and ${activeLabels[activeLabels.length - 1]}`;
         modeNote.innerHTML = `${joined} are <b>ON</b>: each applies only to its own scope.`;
       } else if (queensMode) {
-        modeNote.innerHTML = `Queens Mode is <b>ON</b>: non-airport Queens anti-dead-zone trip-flow mode. Airport zones are excluded. Pay average is ignored.`;
+        modeNote.innerHTML = `Queens Mode is <b>ON</b>: non-airport Queens anti-dead-zone trip-flow mode. Airport zones are excluded. Pay average is ignored. Other zones continue using the Team Joseo citywide score.`;
       } else if (bronxWashHeightsMode) {
-        modeNote.innerHTML = `Bronx/Wash Heights Mode is <b>ON</b>: trip-frequency prioritization for <b>Bronx + Manhattan 100th St and up corridor</b>.<br/>Pay average is ignored for this mode.`;
+        modeNote.innerHTML = `Bronx/Wash Heights Mode is <b>ON</b>: trip-frequency prioritization for <b>Bronx + Manhattan 100th St and up corridor</b>.<br/>Pay average is ignored for this mode. Other zones continue using the Team Joseo citywide score.`;
       } else if (manhattanMode) {
-        modeNote.innerHTML = `Manhattan Mode is <b>ON</b>: core Manhattan anti-saturation proxy. Strong now + still strong next bin beats flash-in-the-pan zones. Bronx/Wash Heights corridor stays excluded.`;
+        modeNote.innerHTML = `Manhattan Mode is <b>ON</b>: core Manhattan anti-saturation proxy. Strong now + still strong next bin beats flash-in-the-pan zones. Bronx/Wash Heights corridor stays excluded. Other zones continue using the Team Joseo citywide score.`;
       } else if (statenIslandMode) {
-        modeNote.innerHTML = `Staten Island Mode is <b>ON</b>: Staten Island colors are <b>relative within Staten Island</b> only.<br/>Other boroughs remain NYC-wide.`;
+        modeNote.innerHTML = `Staten Island Mode is <b>ON</b>: Staten Island colors are <b>relative within Staten Island</b> only.<br/>Other zones continue using the Team Joseo citywide score.`;
       } else if (brooklynMode) {
-        modeNote.innerHTML = `Brooklyn Mode is <b>ON</b>: Brooklyn zones are ranked relative within Brooklyn only from best to worst.`;
+        modeNote.innerHTML = `Brooklyn Mode is <b>ON</b>: Brooklyn zones are ranked relative within Brooklyn only from best to worst. Other zones continue using the Team Joseo citywide score.`;
       } else {
-        modeNote.innerHTML = `Colors come from rating (1–100) for the selected 20-minute window.<br/>Time label is NYC time.`;
+        modeNote.innerHTML = `Colors come from Team Joseo earnings opportunity rating (1–100) for the selected 20-minute window.<br/>Time label is NYC time.`;
       }
     }
   }
@@ -236,6 +236,26 @@
 
   function clampRating100(value) {
     return Math.max(1, Math.min(100, Number(value) || 0));
+  }
+
+  function readCitywideShadowRating(props) {
+    const n = Number(props?.earnings_shadow_rating_citywide_v2 ?? NaN);
+    return Number.isFinite(n) ? Math.max(1, Math.min(100, Math.round(n))) : NaN;
+  }
+
+  function readCitywideShadowBucket(props) {
+    const text = String(props?.earnings_shadow_bucket_citywide_v2 || "").trim();
+    return text || "";
+  }
+
+  function readCitywideShadowColor(props) {
+    const text = String(props?.earnings_shadow_color_citywide_v2 || "").trim();
+    return text || "";
+  }
+
+  function readCitywideShadowConfidence(props) {
+    const n = Number(props?.earnings_shadow_confidence_citywide_v2 ?? NaN);
+    return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : NaN;
   }
 
   function getLiveDayTendencyPayload() {
@@ -278,6 +298,19 @@
     return getFeatureBoroughName(props) === payloadBorough ? 1 : 0;
   }
 
+  function getVisibleScoreSourceForFeature(props, geom) {
+    if (queensMode && isQueensModeZone(props)) return "queens_mode";
+    if (brooklynMode && isBrooklynModeZone(props)) return "brooklyn_mode";
+    if (statenIslandMode && isStatenIslandFeature(props)) return "staten_island_mode";
+    if (bronxWashHeightsMode && isBronxWashHeightsModeZone(props)) return "bronx_wash_heights_mode";
+    if (manhattanMode && isManhattanModeZone(props, geom)) return "manhattan_mode";
+
+    const citywideShadowRating = readCitywideShadowRating(props);
+    if (Number.isFinite(citywideShadowRating)) return "citywide_shadow";
+
+    return "legacy_citywide";
+  }
+
   function getModeAwareBaseRating(props, geom) {
     if (queensMode && isQueensModeZone(props) && Number.isFinite(Number(props.qn_local_rating))) {
       return Number(props.qn_local_rating);
@@ -294,13 +327,31 @@
     if (manhattanMode && isManhattanModeZone(props, geom) && Number.isFinite(Number(props.mh_local_rating))) {
       return Number(props.mh_local_rating);
     }
+
+    const citywideShadowRating = readCitywideShadowRating(props);
+    if (Number.isFinite(citywideShadowRating)) {
+      return citywideShadowRating;
+    }
+
     return Number(props?.rating ?? NaN);
   }
 
-  // tendency no longer boosts rating above neutral
-  // score 80+ leaves colors normal
-  // low tendency dims fill alpha only
-  // base demand color stays unchanged
+  function getModeAwareBaseBucket(props, geom) {
+    const source = getVisibleScoreSourceForFeature(props, geom);
+    if (source === "citywide_shadow") {
+      return readCitywideShadowBucket(props) || getBucketForRating(getModeAwareBaseRating(props, geom));
+    }
+    return getBucketForRating(getModeAwareBaseRating(props, geom));
+  }
+
+  function getModeAwareBaseColor(props, geom) {
+    const source = getVisibleScoreSourceForFeature(props, geom);
+    if (source === "citywide_shadow") {
+      return readCitywideShadowColor(props) || getColorForRating(getModeAwareBaseRating(props, geom));
+    }
+    return getColorForRating(getModeAwareBaseRating(props, geom));
+  }
+
   function getTendencyAdjustedRating(baseRating, props, geom) {
     return clampRating100(baseRating);
   }
@@ -859,11 +910,11 @@
   }
 
   function effectiveBucket(props, geom) {
-    return getBucketForRating(effectiveRating(props, geom));
+    return getModeAwareBaseBucket(props, geom);
   }
 
   function effectiveColor(props, geom) {
-    return getColorForRating(effectiveRating(props, geom));
+    return getModeAwareBaseColor(props, geom);
   }
 
   function effectiveRating(props, geom) {
@@ -951,6 +1002,10 @@
       payload,
       modeFlags: getModeFlags(),
       activeModeTag: getActiveSpecialModeTagForFeature(props, geom),
+      visibleScoreSource: getVisibleScoreSourceForFeature(props, geom),
+      citywideShadowRating: readCitywideShadowRating(props),
+      citywideShadowBucket: readCitywideShadowBucket(props),
+      citywideShadowConfidence: readCitywideShadowConfidence(props),
       baseRating,
       finalRating,
       scopeWeight,
@@ -980,7 +1035,8 @@
     effectiveFillColor,
     effectiveRating,
     getTendencyFillAlpha,
-    getActiveSpecialModeTagForFeature
+    getActiveSpecialModeTagForFeature,
+    getVisibleScoreSourceForFeature
   };
 
   enforceSpecialModeExclusivity();

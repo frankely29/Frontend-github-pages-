@@ -453,6 +453,7 @@ function effectiveBucket(props, geom) { return window.TlcModeModule?.effectiveBu
 function effectiveColor(props, geom) { return window.TlcModeModule?.effectiveColor?.(props, geom) || (props?.style?.fillColor || props?.style?.color || '#000'); }
 function effectiveRating(props, geom) { return window.TlcModeModule?.effectiveRating?.(props, geom) ?? Number(props?.rating ?? NaN); }
 function getActiveSpecialModeTagForFeature(props, geom) { return window.TlcModeModule?.getActiveSpecialModeTagForFeature?.(props, geom) || null; }
+function getVisibleScoreSourceForFeature(props, geom) { return window.TlcModeModule?.getVisibleScoreSourceForFeature?.(props, geom) || "legacy_citywide"; }
 
 window.TlcMapUiInternals = {
   getRecommendEl: () => recommendEl,
@@ -947,9 +948,23 @@ function colorsPanelHTML() {
       <div style="font-weight:800;margin-bottom:8px;">Demand Colors</div>
       ${rows}
       <div style="margin-top:10px;opacity:0.75;font-weight:600;">
-        ${modeFlags.statenIslandMode
-          ? "Staten Island Mode is ON: Staten Island colors are relative within Staten Island only. Other boroughs remain NYC-wide."
-          : "Colors come from rating (1–100) for the selected 20-minute window. Time label is NYC time."}
+        ${(() => {
+          const active = [];
+          if (modeFlags.queensMode) active.push("Queens Mode");
+          if (modeFlags.brooklynMode) active.push("Brooklyn Mode");
+          if (modeFlags.statenIslandMode) active.push("Staten Island Mode");
+          if (modeFlags.bronxWashHeightsMode) active.push("Bronx/Wash Heights Mode");
+          if (modeFlags.manhattanMode) active.push("Manhattan Mode");
+          if (!active.length) {
+            return "Colors reflect the Team Joseo earnings opportunity score (1–100) for the selected 20-minute window. Time label is NYC time.";
+          }
+          const joined = active.length === 1
+            ? active[0]
+            : active.length === 2
+              ? `${active[0]} and ${active[1]}`
+              : `${active.slice(0, -1).join(", ")}, and ${active[active.length - 1]}`;
+          return `${joined} can override colors only inside its own scope. Other zones still use the Team Joseo citywide score.`;
+        })()}
       </div>
     </div>
   `;
@@ -2048,12 +2063,26 @@ function buildZoneShadowPreviewHTML(props, geom) {
   `;
 }
 
+function getPopupVisibleRating(props, geom) {
+  const n = Number(window.TlcModeModule?.effectiveRating?.(props, geom) ?? props?.rating ?? NaN);
+  return Number.isFinite(n) ? Math.round(n) : "n/a";
+}
+
+function getPopupVisibleBucket(props, geom) {
+  return String(window.TlcModeModule?.effectiveBucket?.(props, geom) || props?.bucket || "");
+}
+
+function getPopupVisibleScoreSource(props, geom) {
+  return String(window.TlcModeModule?.getVisibleScoreSourceForFeature?.(props, geom) || "legacy_citywide");
+}
+
 function buildPopupHTML(props, geom, metrics = getZonePopupMetrics(map?.getZoom?.())) {
   const zoneName = (props.zone_name || "").trim();
   const borough = (props.borough || "").trim();
 
-  const nycRating = props.rating ?? "";
-  const nycBucket = props.bucket ?? "";
+  const visibleRating = getPopupVisibleRating(props, geom);
+  const visibleBucket = getPopupVisibleBucket(props, geom);
+  const visibleScoreSource = getPopupVisibleScoreSource(props, geom);
   const pickups = props.pickups ?? "";
   const pay = props.avg_driver_pay == null ? "n/a" : Number(props.avg_driver_pay).toFixed(2);
 
@@ -2095,6 +2124,10 @@ function buildPopupHTML(props, geom, metrics = getZonePopupMetrics(map?.getZoom?
     extra += `<div style="margin-top:6px;"><b>Bronx/Wash Heights Trip Flow:</b> ${props.bwh_local_rating} (${prettyBucket(props.bwh_local_bucket)})</div>`;
   }
 
+  const showRawHvfBase = (debugEnabled || window.__TEAM_JOSEO_SHADOW_PREVIEW__ === true) && visibleScoreSource === "citywide_shadow";
+  const rawHvfBaseRating = Number.isFinite(Number(props?.rating)) ? Math.round(Number(props.rating)) : "n/a";
+  const rawHvfBaseBucket = String(props?.bucket || "");
+
   return `
   <div
     class="zonePopupCard"
@@ -2112,13 +2145,14 @@ function buildPopupHTML(props, geom, metrics = getZonePopupMetrics(map?.getZoom?
       ${escapeHtml(zoneName || `Zone ${props.LocationID ?? ""}`)}
     </div>
     ${borough ? `<div style="opacity:0.78;margin-bottom:${metrics.lineGapPx + 1}px;">${escapeHtml(borough)}</div>` : `<div style="margin-bottom:${metrics.lineGapPx + 1}px;"></div>`}
-    <div><b>NYC Rating:</b> ${nycRating} (${prettyBucket(nycBucket)})</div>
+    <div><b>Map Rating:</b> ${visibleRating} (${prettyBucket(visibleBucket)})</div>
     ${extra}
     <div style="margin-top:${metrics.lineGapPx + 1}px;"><b>Pickups (last ${BIN_MINUTES} min):</b> ${pickups}</div>
     <div><b>Next ${BIN_MINUTES} min:</b> ${nextPickups}</div>
     ${communityPickupLine}
     <div><b>Avg Pay next ${BIN_MINUTES} min:</b> $${nextPay}</div>
     <div><b>Avg Pay last 20 min:</b> $${pay}</div>
+    ${showRawHvfBase ? `<div><b>Raw HVFHV base rating:</b> ${rawHvfBaseRating} (${prettyBucket(rawHvfBaseBucket)})</div>` : ""}
     ${buildZoneShadowPreviewHTML(props, geom)}
   </div>
 `;
