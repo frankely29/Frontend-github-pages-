@@ -26,6 +26,10 @@
 
     const visibleSourceLabel =
       String(modeModule.getVisibleScoreSourceLabel?.(props, geom) || visibleSource);
+    const technicalSourceLabel =
+      String(modeModule.getVisibleScoreTechnicalSourceLabel?.(props, geom) || visibleSource);
+    const usingFallback = !!modeModule.isVisibleScoreUsingFallback?.(props, geom);
+    const shadowReadiness = shadowModule.getVisibleShadowReadiness?.(props, geom) || null;
 
     const visibleRating = Number(modeModule.effectiveRating?.(props, geom) ?? NaN);
     const visibleBucket = String(modeModule.effectiveBucket?.(props, geom) || "");
@@ -43,10 +47,13 @@
       activeModeTag,
       visibleSource,
       visibleSourceLabel,
+      technicalSourceLabel,
+      usingFallback,
       visibleRating: Number.isFinite(visibleRating) ? Math.round(visibleRating) : null,
       visibleBucket,
       visibleColor,
       shadowProfiles: allShadows,
+      shadowReadiness,
       crowding: crowding
         ? {
             bucket: String(crowding.bucket || ""),
@@ -58,6 +65,51 @@
             demandReference: safeRound(crowding.demandReference, 2),
           }
         : null,
+    };
+  }
+
+  function summarizeVisibleScoreSources(frame) {
+    const features = frame?.polygons?.features || [];
+    const counts = {};
+    let shadowReadyCount = 0;
+    let fallbackCount = 0;
+
+    for (const feature of features) {
+      const props = feature?.properties || {};
+      const geom = feature?.geometry || null;
+
+      const source = String(window.TlcModeModule?.getVisibleScoreSourceForFeature?.(props, geom) || "unknown");
+      counts[source] = Number(counts[source] || 0) + 1;
+
+      const readiness = window.TlcScoreShadowModule?.getVisibleShadowReadiness?.(props, geom);
+      if (readiness?.shadowReady) shadowReadyCount += 1;
+      if (readiness?.usingFallback) fallbackCount += 1;
+    }
+
+    return {
+      counts,
+      shadowReadyCount,
+      fallbackCount,
+      featureCount: features.length,
+    };
+  }
+
+  function getTeamJoseoSystemAudit() {
+    const frame = core.getCurrentFrame?.() || null;
+    const frameSummary = summarizeVisibleScoreSources(frame);
+    const recommendation = window.getTeamJoseoRecommendationAudit?.() || null;
+    const crowding = window.getCommunityCrowdingDebug?.() || null;
+    const modeFlags = window.TlcModeModule?.getModeFlags?.() || {};
+
+    return {
+      frameTime: String(frame?.time || ""),
+      featureCount: Number(frameSummary.featureCount || 0),
+      visibleSourceCounts: frameSummary.counts || {},
+      shadowReadyCount: Number(frameSummary.shadowReadyCount || 0),
+      fallbackCount: Number(frameSummary.fallbackCount || 0),
+      modeFlags,
+      recommendation,
+      communityCrowding: crowding,
     };
   }
 
@@ -76,4 +128,6 @@
   window.getTeamJoseoZoneAuditByLocationId = function getTeamJoseoZoneAuditByLocationId(locationId) {
     return getVisibleScoreAuditByLocationId(locationId);
   };
+
+  window.getTeamJoseoSystemAudit = getTeamJoseoSystemAudit;
 })();

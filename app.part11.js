@@ -435,32 +435,71 @@
 
     switch (source) {
       case "citywide_shadow":
+      case "legacy_citywide":
         return "Citywide Team Joseo score";
       case "manhattan_shadow":
-        return "Manhattan Team Joseo score";
       case "manhattan_mode_legacy":
-        return "Manhattan legacy mode score";
+        return "Manhattan Team Joseo score";
       case "bronx_wash_heights_shadow":
-        return "Bronx/Wash Heights Team Joseo score";
       case "bronx_wash_heights_mode_legacy":
-        return "Bronx/Wash Heights legacy mode score";
+        return "Bronx/Wash Heights Team Joseo score";
       case "queens_shadow":
-        return "Queens Team Joseo score";
       case "queens_mode_legacy":
-        return "Queens legacy mode score";
+        return "Queens Team Joseo score";
       case "brooklyn_shadow":
-        return "Brooklyn Team Joseo score";
       case "brooklyn_mode_legacy":
-        return "Brooklyn legacy mode score";
+        return "Brooklyn Team Joseo score";
       case "staten_island_shadow":
-        return "Staten Island Team Joseo score";
       case "staten_island_mode_legacy":
-        return "Staten Island legacy mode score";
-      case "legacy_citywide":
-        return "Legacy citywide score";
+        return "Staten Island Team Joseo score";
       default:
         return "Team Joseo score";
     }
+  }
+
+  function getVisibleScoreTechnicalSourceLabel(props, geom) {
+    const source = getVisibleScoreSourceForFeature(props, geom);
+
+    switch (source) {
+      case "citywide_shadow":
+        return "citywide_v2 live shadow";
+      case "manhattan_shadow":
+        return "manhattan_v2 live shadow";
+      case "manhattan_mode_legacy":
+        return "manhattan legacy fallback";
+      case "bronx_wash_heights_shadow":
+        return "bronx_wash_heights_v2 live shadow";
+      case "bronx_wash_heights_mode_legacy":
+        return "bronx_wash_heights legacy fallback";
+      case "queens_shadow":
+        return "queens_v2 live shadow";
+      case "queens_mode_legacy":
+        return "queens legacy fallback";
+      case "brooklyn_shadow":
+        return "brooklyn_v2 live shadow";
+      case "brooklyn_mode_legacy":
+        return "brooklyn legacy fallback";
+      case "staten_island_shadow":
+        return "staten_island_v2 live shadow";
+      case "staten_island_mode_legacy":
+        return "staten_island legacy fallback";
+      case "legacy_citywide":
+        return "legacy citywide fallback";
+      default:
+        return source || "unknown";
+    }
+  }
+
+  function isVisibleScoreUsingFallback(props, geom) {
+    const source = getVisibleScoreSourceForFeature(props, geom);
+    return (
+      source === "legacy_citywide" ||
+      source === "manhattan_mode_legacy" ||
+      source === "bronx_wash_heights_mode_legacy" ||
+      source === "queens_mode_legacy" ||
+      source === "brooklyn_mode_legacy" ||
+      source === "staten_island_mode_legacy"
+    );
   }
 
   function getModeAwareBaseRating(props, geom) {
@@ -1245,6 +1284,8 @@
     getActiveSpecialModeTagForFeature,
     getVisibleScoreSourceForFeature,
     getVisibleScoreSourceLabel,
+    getVisibleScoreTechnicalSourceLabel,
+    isVisibleScoreUsingFallback,
     readBrooklynShadowRating,
     readBrooklynShadowBucket,
     readBrooklynShadowConfidence,

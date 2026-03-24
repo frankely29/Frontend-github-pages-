@@ -2089,6 +2089,7 @@ function buildZoneAuditPreviewHTML(props, geom) {
 
   const audit = window.TlcZoneAuditModule?.getVisibleScoreAudit?.(props, geom);
   if (!audit) return "";
+  const readiness = window.TlcScoreShadowModule?.getVisibleShadowReadiness?.(props, geom) || null;
 
   const crowding = audit.crowding;
   const crowdingLine = crowding
@@ -2099,6 +2100,10 @@ function buildZoneAuditPreviewHTML(props, geom) {
     <div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(0,0,0,0.08);">
       <div style="font-weight:800;margin-bottom:4px;">Team Joseo audit</div>
       <div><b>Visible source:</b> ${escapeHtml(audit.visibleSourceLabel || audit.visibleSource || "")}</div>
+      <div><b>Technical source:</b> ${escapeHtml(audit.technicalSourceLabel || audit.visibleSource || "")}</div>
+      <div><b>Fallback:</b> ${audit.usingFallback ? "yes" : "no"}</div>
+      <div><b>Profile key:</b> ${escapeHtml(readiness?.profileKey || "none")}</div>
+      <div><b>Shadow ready:</b> ${readiness?.shadowReady ? "yes" : "no"}</div>
       <div><b>Mode tag:</b> ${escapeHtml(audit.activeModeTag || "citywide")}</div>
       ${crowdingLine}
     </div>
@@ -2124,7 +2129,7 @@ function buildCommunityCrowdingHTML(props) {
     </div>
     <div><b>Visible Team Joseo drivers:</b> ${Math.max(0, Math.round(Number(stat.communityDriverCount || 0)))}</div>
     <div><b>Confidence:</b> ${escapeHtml(confidenceText)}</div>
-    <div style="opacity:0.78;">Community-only caution, not TLC/HVFHV truth.</div>
+    <div style="opacity:0.78;">Community-only caution.</div>
   `;
 }
 
@@ -2162,7 +2167,7 @@ function buildPopupHTML(props, geom, metrics = getZonePopupMetrics(map?.getZoom?
     if (Number.isFinite(statenIslandShadowRating)) {
       extra += `<div style="margin-top:6px;"><b>Staten Island earnings score:</b> ${statenIslandShadowRating} (${prettyBucket(statenIslandShadowBucket)})</div>`;
     } else if (Number.isFinite(Number(props.si_local_rating))) {
-      extra += `<div style="margin-top:6px;"><b>Staten Island legacy score:</b> ${props.si_local_rating} (${prettyBucket(props.si_local_bucket)})</div>`;
+      extra += `<div style="margin-top:6px;"><b>Staten Island earnings score:</b> ${props.si_local_rating} (${prettyBucket(props.si_local_bucket)})</div>`;
     }
   }
 
@@ -2176,7 +2181,7 @@ function buildPopupHTML(props, geom, metrics = getZonePopupMetrics(map?.getZoom?
     if (Number.isFinite(queensShadowRating)) {
       extra += `<div style="margin-top:6px;"><b>Queens earnings score:</b> ${queensShadowRating} (${prettyBucket(queensShadowBucket)})</div>`;
     } else if (Number.isFinite(Number(props.qn_local_rating))) {
-      extra += `<div style="margin-top:6px;"><b>Queens legacy score:</b> ${props.qn_local_rating} (${prettyBucket(props.qn_local_bucket)})</div>`;
+      extra += `<div style="margin-top:6px;"><b>Queens earnings score:</b> ${props.qn_local_rating} (${prettyBucket(props.qn_local_bucket)})</div>`;
     }
   }
 
@@ -2186,7 +2191,7 @@ function buildPopupHTML(props, geom, metrics = getZonePopupMetrics(map?.getZoom?
     if (Number.isFinite(brooklynShadowRating)) {
       extra += `<div style="margin-top:6px;"><b>Brooklyn earnings score:</b> ${brooklynShadowRating} (${prettyBucket(brooklynShadowBucket)})</div>`;
     } else if (Number.isFinite(Number(props.bk_local_rating))) {
-      extra += `<div style="margin-top:6px;"><b>Brooklyn legacy score:</b> ${props.bk_local_rating} (${prettyBucket(props.bk_local_bucket)})</div>`;
+      extra += `<div style="margin-top:6px;"><b>Brooklyn earnings score:</b> ${props.bk_local_rating} (${prettyBucket(props.bk_local_bucket)})</div>`;
     }
   }
 
@@ -2196,7 +2201,7 @@ function buildPopupHTML(props, geom, metrics = getZonePopupMetrics(map?.getZoom?
     if (Number.isFinite(bwhShadowRating)) {
       extra += `<div style="margin-top:6px;"><b>Bronx/Wash Heights earnings score:</b> ${bwhShadowRating} (${prettyBucket(bwhShadowBucket)})</div>`;
     } else if (Number.isFinite(Number(props.bwh_local_rating))) {
-      extra += `<div style="margin-top:6px;"><b>Bronx/Wash Heights legacy score:</b> ${props.bwh_local_rating} (${prettyBucket(props.bwh_local_bucket)})</div>`;
+      extra += `<div style="margin-top:6px;"><b>Bronx/Wash Heights earnings score:</b> ${props.bwh_local_rating} (${prettyBucket(props.bwh_local_bucket)})</div>`;
     }
   }
 

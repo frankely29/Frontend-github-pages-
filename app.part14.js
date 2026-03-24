@@ -164,6 +164,81 @@
     return getZoneShadowComparison(feature.properties || {}, feature.geometry || null);
   }
 
+  function getVisibleShadowProfileKeyForFeature(props, geom) {
+    const source = String(window.TlcModeModule?.getVisibleScoreSourceForFeature?.(props, geom) || "");
+
+    switch (source) {
+      case "citywide_shadow":
+        return "citywide_v2";
+      case "manhattan_shadow":
+        return "manhattan_v2";
+      case "bronx_wash_heights_shadow":
+        return "bronx_wash_heights_v2";
+      case "queens_shadow":
+        return "queens_v2";
+      case "brooklyn_shadow":
+        return "brooklyn_v2";
+      case "staten_island_shadow":
+        return "staten_island_v2";
+      default:
+        return null;
+    }
+  }
+
+  function isVisibleScoreUsingFallback(props, geom) {
+    const source = String(window.TlcModeModule?.getVisibleScoreSourceForFeature?.(props, geom) || "");
+    return (
+      source === "legacy_citywide" ||
+      source === "manhattan_mode_legacy" ||
+      source === "bronx_wash_heights_mode_legacy" ||
+      source === "queens_mode_legacy" ||
+      source === "brooklyn_mode_legacy" ||
+      source === "staten_island_mode_legacy"
+    );
+  }
+
+  function getVisibleShadowReadiness(props, geom) {
+    const profileKey = getVisibleShadowProfileKeyForFeature(props, geom);
+    const all = getAllZoneShadowSnapshots(props) || {};
+
+    let profileSnapshot = null;
+    if (profileKey === "citywide_v2") profileSnapshot = all.citywide;
+    if (profileKey === "manhattan_v2") profileSnapshot = all.manhattan;
+    if (profileKey === "bronx_wash_heights_v2") profileSnapshot = all.bronx_wash_heights;
+    if (profileKey === "queens_v2") profileSnapshot = all.queens;
+    if (profileKey === "brooklyn_v2") profileSnapshot = all.brooklyn;
+    if (profileKey === "staten_island_v2") profileSnapshot = all.staten_island;
+
+    let shadowReady = false;
+    if (profileKey === "citywide_v2") {
+      shadowReady = Number.isFinite(Number(profileSnapshot?.earnings_shadow_rating_citywide_v2));
+    }
+    if (profileKey === "manhattan_v2") {
+      shadowReady = Number.isFinite(Number(profileSnapshot?.earnings_shadow_rating_manhattan_v2));
+    }
+    if (profileKey === "bronx_wash_heights_v2") {
+      shadowReady = Number.isFinite(Number(profileSnapshot?.earnings_shadow_rating_bronx_wash_heights_v2));
+    }
+    if (profileKey === "queens_v2") {
+      shadowReady = Number.isFinite(Number(profileSnapshot?.earnings_shadow_rating_queens_v2));
+    }
+    if (profileKey === "brooklyn_v2") {
+      shadowReady = Number.isFinite(Number(profileSnapshot?.earnings_shadow_rating_brooklyn_v2));
+    }
+    if (profileKey === "staten_island_v2") {
+      shadowReady = Number.isFinite(Number(profileSnapshot?.earnings_shadow_rating_staten_island_v2));
+    }
+
+    return {
+      visibleSource: String(window.TlcModeModule?.getVisibleScoreSourceForFeature?.(props, geom) || ""),
+      visibleSourceLabel: String(window.TlcModeModule?.getVisibleScoreSourceLabel?.(props, geom) || ""),
+      technicalSourceLabel: String(window.TlcModeModule?.getVisibleScoreTechnicalSourceLabel?.(props, geom) || ""),
+      profileKey,
+      shadowReady: !!shadowReady,
+      usingFallback: isVisibleScoreUsingFallback(props, geom),
+    };
+  }
+
   window.getZoneShadowDebugByLocationId = function getZoneShadowDebugByLocationId(locationId) {
     return getZoneShadowComparisonByLocationId(locationId);
   };
@@ -213,5 +288,8 @@
     getZoneShadowComparison,
     getZoneShadowComparisonByLocationId,
     buildZoneShadowSummary,
+    getVisibleShadowProfileKeyForFeature,
+    isVisibleScoreUsingFallback,
+    getVisibleShadowReadiness,
   };
 })();
