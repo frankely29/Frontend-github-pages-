@@ -1065,6 +1065,8 @@ async function ensurePickupSourceAndLayers() {
     });
   }
 
+  await window.TlcCommunityCrowdingModule?.ensureCommunityCrowdingSourceAndLayers?.();
+
   return true;
 }
 
@@ -1660,6 +1662,24 @@ let presenceViewportMode = 'probe';
 let lastPresenceViewportSignature = '';
 let lastPresenceFetchViewportSignature = '';
 
+
+function getCachedPresenceRowsSnapshot() {
+  return Array.isArray(cachedPresenceRows)
+    ? cachedPresenceRows.map((row) => ({ ...row }))
+    : [];
+}
+
+function emitCommunityPresenceCacheUpdated(detail = {}) {
+  if (typeof window === "undefined" || typeof window.dispatchEvent !== "function") return;
+  window.dispatchEvent(new CustomEvent("team-joseo-community-presence-cache-updated", {
+    detail: {
+      count: Array.isArray(cachedPresenceRows) ? cachedPresenceRows.length : 0,
+      fingerprint: cachedPresenceFingerprint || "",
+      ...detail,
+    },
+  }));
+}
+
 const PRESENCE_FULL_MAX_VISIBLE = 50;
 const PRESENCE_MEDIUM_MAX_VISIBLE = 100;
 const PRESENCE_FULL_TO_MEDIUM_UP = 56;
@@ -2101,6 +2121,9 @@ function clearOtherDrivers() {
     presenceLiteSource.setData(emptyGeojson());
   }
   presenceLiteSourceFingerprint = '';
+  emitCommunityPresenceCacheUpdated({
+    viewportSignature: "",
+  });
 }
 
 function getCachedAvatarUrl(userId, avatarUrl = "", avatarVersion = "") {
@@ -2695,6 +2718,9 @@ async function pullPresenceAll() {
     lastPresenceFetchViewportSignature = viewportSignature || lastPresenceFetchViewportSignature;
     if (fingerprintChanged) {
       scheduleAdaptivePresenceRender();
+      emitCommunityPresenceCacheUpdated({
+        viewportSignature: viewportSignature || lastPresenceFetchViewportSignature || "",
+      });
     }
 
     const listOnlineCount = Number(list?.online_count ?? list?.summary?.online_count ?? list?.counts?.online_count);
@@ -2956,6 +2982,7 @@ window.TlcCommunityModule = {
   sendPoliceReport,
   sendPickupLog,
   notePresenceBoost,
+  getCachedPresenceRowsSnapshot,
   getPickupRecordingContext: window.getPickupRecordingContext,
   getPickupHotspotZoneIdsSnapshot,
   hasPickupHotspotZone

@@ -114,6 +114,14 @@
       } else {
         score = rating - dMi * DIST_PENALTY_PER_MILE;
       }
+
+      const crowdingPenalty = Number(
+        window.TlcCommunityCrowdingModule?.getZoneCommunityCrowdingPenalty?.(props.LocationID) ?? 0
+      );
+      if (Number.isFinite(crowdingPenalty) && crowdingPenalty > 0) {
+        score -= crowdingPenalty;
+      }
+
       if (!Number.isFinite(score)) continue;
 
       if (!best || score > best.score) {
@@ -142,6 +150,7 @@
             Number.isFinite(Number(props.earnings_shadow_rating_bronx_wash_heights_v2)) ||
             Number.isFinite(Number(props.bwh_local_rating))
           ),
+          communityCrowding: window.TlcCommunityCrowdingModule?.getZoneCommunityCrowdingSnapshot?.(props.LocationID) || null,
         };
       }
     }
@@ -154,18 +163,21 @@
 
     const distTxt = best.dMi >= 10 ? `${best.dMi.toFixed(0)} mi` : `${best.dMi.toFixed(1)} mi`;
     const bTxt = best.borough ? ` (${best.borough})` : "";
+    const crowdingSuffix = (best.communityCrowding && (best.communityCrowding.bucket === "crowded" || best.communityCrowding.bucket === "heavy"))
+      ? " • community crowding caution"
+      : "";
     if (best.usedQN) {
-      recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Best Queens earnings score • Non-airport pocket • Safer from dead spots • Strong repeat-call pocket — ${distTxt}`;
+      recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Best Queens earnings score • Non-airport pocket • Safer from dead spots • Strong repeat-call pocket — ${distTxt}${crowdingSuffix}`;
     } else if (best.usedBWH) {
-      recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Bronx/Wash Heights earnings score ${best.rating} — ${distTxt}`;
+      recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Bronx/Wash Heights earnings score ${best.rating} — ${distTxt}${crowdingSuffix}`;
     } else if (best.usedBK) {
-      recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Brooklyn earnings score ${best.rating} — ${distTxt}`;
+      recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Brooklyn earnings score ${best.rating} — ${distTxt}${crowdingSuffix}`;
     } else if (best.usedMH) {
-      recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Manhattan anti-saturation rating ${best.rating} — ${distTxt}`;
+      recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Manhattan anti-saturation rating ${best.rating} — ${distTxt}${crowdingSuffix}`;
     } else if (best.usedSI) {
-      recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Staten Island earnings score ${best.rating} — ${distTxt}`;
+      recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Staten Island earnings score ${best.rating} — ${distTxt}${crowdingSuffix}`;
     } else {
-      recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Earnings score ${best.rating} — ${distTxt}`;
+      recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Earnings score ${best.rating} — ${distTxt}${crowdingSuffix}`;
     }
 
     setNavDestination({ lat: best.lat, lng: best.lng });

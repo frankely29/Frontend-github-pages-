@@ -58,3 +58,8 @@
 - Extended shadow readers/debug output in `app.part11.js` and `app.part14.js` to include Staten Island shadow fields and Staten Island shadow readiness/summary metadata while keeping citywide/Manhattan/BWH/Queens/Brooklyn cutovers active in their existing scopes.
 - Updated Staten Island popup extra line (`app.js`) and Staten Island recommendation ranking/wording (`app.part9.js`) so Staten Island mode now uses Team Joseo Staten Island earnings score when available.
 - No presence or polling behavior changes were made.
+
+### Phase 10 community crowding caution layer
+- Added a separate Team Joseo community crowding caution layer driven by existing live Team Joseo presence snapshots; this is community-only signal and not TLC/HVFHV truth.
+- Added one lightweight dashed amber/orange caution outline plus popup/recommendation caution messaging, while keeping base zone colors unchanged.
+- Kept presence/polling timing unchanged with no new polling loops or network requests.
