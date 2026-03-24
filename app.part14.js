@@ -245,7 +245,18 @@
 
   function buildZoneShadowSummary(props, geom) {
     const comparison = getZoneShadowComparison(props, geom);
-    if (!comparison?.shadow_ready) return null;
+    const readiness = getVisibleShadowReadiness(props, geom);
+    const anyReady = !!(
+      readiness?.shadowReady ||
+      comparison?.shadow_ready ||
+      comparison?.manhattan_shadow_ready ||
+      comparison?.bronx_wash_heights_shadow_ready ||
+      comparison?.queens_shadow_ready ||
+      comparison?.brooklyn_shadow_ready ||
+      comparison?.staten_island_shadow_ready
+    );
+
+    if (!anyReady) return null;
 
     const shadow = comparison.shadow;
     return {
