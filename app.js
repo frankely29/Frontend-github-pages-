@@ -2104,8 +2104,14 @@ function buildPopupHTML(props, geom, metrics = getZonePopupMetrics(map?.getZoom?
   const modeFlags = getModeFlags();
   const activeModeTag = getActiveSpecialModeTagForFeature(props, geom);
 
-  if (modeFlags.statenIslandMode && activeModeTag === "staten_island" && Number.isFinite(Number(props.si_local_rating))) {
-    extra += `<div style="margin-top:6px;"><b>Staten Local Rating:</b> ${props.si_local_rating} (${prettyBucket(props.si_local_bucket)})</div>`;
+  if (modeFlags.statenIslandMode && activeModeTag === "staten_island") {
+    const statenIslandShadowRating = Number(window.TlcModeModule?.readStatenIslandShadowRating?.(props) ?? NaN);
+    const statenIslandShadowBucket = String(window.TlcModeModule?.readStatenIslandShadowBucket?.(props) || "");
+    if (Number.isFinite(statenIslandShadowRating)) {
+      extra += `<div style="margin-top:6px;"><b>Staten Island earnings score:</b> ${statenIslandShadowRating} (${prettyBucket(statenIslandShadowBucket)})</div>`;
+    } else if (Number.isFinite(Number(props.si_local_rating))) {
+      extra += `<div style="margin-top:6px;"><b>Staten Island legacy score:</b> ${props.si_local_rating} (${prettyBucket(props.si_local_bucket)})</div>`;
+    }
   }
 
   if (modeFlags.manhattanMode && activeModeTag === "manhattan" && Number.isFinite(Number(props.mh_local_rating))) {

@@ -80,6 +80,16 @@
     };
   }
 
+  function readStatenIslandShadowFields(props) {
+    return {
+      earnings_shadow_score_staten_island_v2: normalizeShadowNumber(props?.earnings_shadow_score_staten_island_v2),
+      earnings_shadow_confidence_staten_island_v2: normalizeShadowNumber(props?.earnings_shadow_confidence_staten_island_v2),
+      earnings_shadow_rating_staten_island_v2: normalizeShadowNumber(props?.earnings_shadow_rating_staten_island_v2),
+      earnings_shadow_bucket_staten_island_v2: normalizeShadowText(props?.earnings_shadow_bucket_staten_island_v2),
+      earnings_shadow_color_staten_island_v2: normalizeShadowText(props?.earnings_shadow_color_staten_island_v2),
+    };
+  }
+
   function getLegacyZoneScoreSnapshot(props, geom) {
     return {
       rating: normalizeShadowNumber(props?.rating),
@@ -96,6 +106,7 @@
     const bronx_wash_heights_shadow = readBronxWashHeightsShadowFields(props);
     const queens_shadow = readQueensShadowFields(props);
     const brooklyn_shadow = readBrooklynShadowFields(props);
+    const staten_island_shadow = readStatenIslandShadowFields(props);
 
     const legacyRating = Number(legacy.rating);
     const shadowRating = Number(shadow.earnings_shadow_rating_citywide_v2);
@@ -107,6 +118,7 @@
       bronx_wash_heights_shadow,
       queens_shadow,
       brooklyn_shadow,
+      staten_island_shadow,
       delta_rating:
         Number.isFinite(legacyRating) && Number.isFinite(shadowRating)
           ? shadowRating - legacyRating
@@ -121,6 +133,8 @@
         Number.isFinite(Number(queens_shadow.earnings_shadow_rating_queens_v2)),
       brooklyn_shadow_ready:
         Number.isFinite(Number(brooklyn_shadow.earnings_shadow_rating_brooklyn_v2)),
+      staten_island_shadow_ready:
+        Number.isFinite(Number(staten_island_shadow.earnings_shadow_rating_staten_island_v2)),
     };
   }
 
@@ -162,6 +176,9 @@
       brooklyn_shadow_rating: comparison.brooklyn_shadow?.earnings_shadow_rating_brooklyn_v2 ?? null,
       brooklyn_shadow_bucket: comparison.brooklyn_shadow?.earnings_shadow_bucket_brooklyn_v2 || "",
       brooklyn_shadow_confidence: comparison.brooklyn_shadow?.earnings_shadow_confidence_brooklyn_v2 ?? null,
+      staten_island_shadow_rating: comparison.staten_island_shadow?.earnings_shadow_rating_staten_island_v2 ?? null,
+      staten_island_shadow_bucket: comparison.staten_island_shadow?.earnings_shadow_bucket_staten_island_v2 || "",
+      staten_island_shadow_confidence: comparison.staten_island_shadow?.earnings_shadow_confidence_staten_island_v2 ?? null,
       delta_rating: comparison.delta_rating,
       median_driver_pay: shadow.median_driver_pay_shadow,
       median_pay_per_min: shadow.median_pay_per_min_shadow,
@@ -178,6 +195,7 @@
     readBronxWashHeightsShadowFields,
     readQueensShadowFields,
     readBrooklynShadowFields,
+    readStatenIslandShadowFields,
     getZoneShadowComparison,
     getZoneShadowComparisonByLocationId,
     buildZoneShadowSummary,

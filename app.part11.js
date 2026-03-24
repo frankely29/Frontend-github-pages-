@@ -206,7 +206,7 @@
       } else if (manhattanMode) {
         modeNote.innerHTML = `Manhattan Mode is <b>ON</b>: core Manhattan anti-saturation proxy. Strong now + still strong next bin beats flash-in-the-pan zones. Bronx/Wash Heights corridor stays excluded. Other zones continue using the Team Joseo citywide score.`;
       } else if (statenIslandMode) {
-        modeNote.innerHTML = `Staten Island Mode is <b>ON</b>: Staten Island colors are <b>relative within Staten Island</b> only.<br/>Other zones continue using the Team Joseo citywide score.`;
+        modeNote.innerHTML = `Staten Island Mode is <b>ON</b>: it now reflects Team Joseo Staten Island earnings score.<br/>It rewards stronger pay quality, downstream value, and better sparse-market earnings opportunity. Other boroughs still use the Team Joseo citywide score.`;
       } else if (brooklynMode) {
         modeNote.innerHTML = `Brooklyn Mode is <b>ON</b>: it now reflects Team Joseo Brooklyn earnings score.<br/>It rewards persistence, pay efficiency, and downstream value, and penalizes short-trip churn and weak local loops. Other zones continue using the Team Joseo citywide score.`;
       } else {
@@ -338,6 +338,26 @@
     return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : NaN;
   }
 
+  function readStatenIslandShadowRating(props) {
+    const n = Number(props?.earnings_shadow_rating_staten_island_v2 ?? NaN);
+    return Number.isFinite(n) ? Math.max(1, Math.min(100, Math.round(n))) : NaN;
+  }
+
+  function readStatenIslandShadowBucket(props) {
+    const text = String(props?.earnings_shadow_bucket_staten_island_v2 || "").trim();
+    return text || "";
+  }
+
+  function readStatenIslandShadowColor(props) {
+    const text = String(props?.earnings_shadow_color_staten_island_v2 || "").trim();
+    return text || "";
+  }
+
+  function readStatenIslandShadowConfidence(props) {
+    const n = Number(props?.earnings_shadow_confidence_staten_island_v2 ?? NaN);
+    return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : NaN;
+  }
+
   function getLiveDayTendencyPayload() {
     return window.TlcDayTendencyState?.getPayload?.() || null;
   }
@@ -389,7 +409,10 @@
       if (Number.isFinite(Number(props.bk_local_rating))) return "brooklyn_mode_legacy";
     }
 
-    if (statenIslandMode && isStatenIslandFeature(props)) return "staten_island_mode";
+    if (statenIslandMode && isStatenIslandFeature(props)) {
+      if (Number.isFinite(readStatenIslandShadowRating(props))) return "staten_island_shadow";
+      if (Number.isFinite(Number(props.si_local_rating))) return "staten_island_mode_legacy";
+    }
 
     if (bronxWashHeightsMode && isBronxWashHeightsModeZone(props)) {
       if (Number.isFinite(readBronxWashHeightsShadowRating(props))) return "bronx_wash_heights_shadow";
@@ -423,8 +446,10 @@
       if (Number.isFinite(shadowRating)) return shadowRating;
       if (Number.isFinite(Number(props.bwh_local_rating))) return Number(props.bwh_local_rating);
     }
-    if (statenIslandMode && isStatenIslandFeature(props) && Number.isFinite(Number(props.si_local_rating))) {
-      return Number(props.si_local_rating);
+    if (statenIslandMode && isStatenIslandFeature(props)) {
+      const shadowRating = readStatenIslandShadowRating(props);
+      if (Number.isFinite(shadowRating)) return shadowRating;
+      if (Number.isFinite(Number(props.si_local_rating))) return Number(props.si_local_rating);
     }
     if (manhattanMode && isManhattanModeZone(props, geom)) {
       const shadowRating = readManhattanShadowRating(props);
@@ -448,6 +473,9 @@
     if (source === "brooklyn_shadow") {
       return readBrooklynShadowBucket(props) || getBucketForRating(getModeAwareBaseRating(props, geom));
     }
+    if (source === "staten_island_shadow") {
+      return readStatenIslandShadowBucket(props) || getBucketForRating(getModeAwareBaseRating(props, geom));
+    }
     if (source === "bronx_wash_heights_shadow") {
       return readBronxWashHeightsShadowBucket(props) || getBucketForRating(getModeAwareBaseRating(props, geom));
     }
@@ -467,6 +495,9 @@
     }
     if (source === "brooklyn_shadow") {
       return readBrooklynShadowColor(props) || getColorForRating(getModeAwareBaseRating(props, geom));
+    }
+    if (source === "staten_island_shadow") {
+      return readStatenIslandShadowColor(props) || getColorForRating(getModeAwareBaseRating(props, geom));
     }
     if (source === "bronx_wash_heights_shadow") {
       return readBronxWashHeightsShadowColor(props) || getColorForRating(getModeAwareBaseRating(props, geom));
@@ -1146,6 +1177,9 @@
       brooklynShadowRating: readBrooklynShadowRating(props),
       brooklynShadowBucket: readBrooklynShadowBucket(props),
       brooklynShadowConfidence: readBrooklynShadowConfidence(props),
+      statenIslandShadowRating: readStatenIslandShadowRating(props),
+      statenIslandShadowBucket: readStatenIslandShadowBucket(props),
+      statenIslandShadowConfidence: readStatenIslandShadowConfidence(props),
       baseRating,
       finalRating,
       scopeWeight,
@@ -1185,7 +1219,10 @@
     readQueensShadowConfidence,
     readBronxWashHeightsShadowRating,
     readBronxWashHeightsShadowBucket,
-    readBronxWashHeightsShadowConfidence
+    readBronxWashHeightsShadowConfidence,
+    readStatenIslandShadowRating,
+    readStatenIslandShadowBucket,
+    readStatenIslandShadowConfidence
   };
 
   enforceSpecialModeExclusivity();

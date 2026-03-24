@@ -105,7 +105,12 @@
       } else if (modeTag === "manhattan") {
         score = Number(props.mh_local_rating ?? NaN) - dMi * DIST_PENALTY_PER_MILE;
       } else if (modeTag === "staten_island") {
-        score = Number(props.si_local_rating ?? NaN) - dMi * DIST_PENALTY_PER_MILE;
+        const statenIslandShadowRating = Number(props.earnings_shadow_rating_staten_island_v2 ?? NaN);
+        if (Number.isFinite(statenIslandShadowRating)) {
+          score = statenIslandShadowRating - dMi * DIST_PENALTY_PER_MILE;
+        } else {
+          score = Number(props.si_local_rating ?? NaN) - dMi * DIST_PENALTY_PER_MILE;
+        }
       } else {
         score = rating - dMi * DIST_PENALTY_PER_MILE;
       }
@@ -128,7 +133,10 @@
             Number.isFinite(Number(props.earnings_shadow_rating_brooklyn_v2)) ||
             Number.isFinite(Number(props.bk_local_rating))
           ),
-          usedSI: modeTag === "staten_island" && Number.isFinite(Number(props.si_local_rating)),
+          usedSI: modeTag === "staten_island" && (
+            Number.isFinite(Number(props.earnings_shadow_rating_staten_island_v2)) ||
+            Number.isFinite(Number(props.si_local_rating))
+          ),
           usedMH: modeTag === "manhattan" && Number.isFinite(Number(props.mh_local_rating)),
           usedBWH: modeTag === "bronx_wash_heights" && (
             Number.isFinite(Number(props.earnings_shadow_rating_bronx_wash_heights_v2)) ||
@@ -155,7 +163,7 @@
     } else if (best.usedMH) {
       recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Manhattan anti-saturation rating ${best.rating} — ${distTxt}`;
     } else if (best.usedSI) {
-      recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Staten Island local rating ${best.rating} — ${distTxt}`;
+      recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Staten Island earnings score ${best.rating} — ${distTxt}`;
     } else {
       recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Earnings score ${best.rating} — ${distTxt}`;
     }
