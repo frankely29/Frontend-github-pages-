@@ -1669,6 +1669,7 @@ function getCachedPresenceRowsSnapshot() {
     : [];
 }
 
+// Bridge event for downstream modules (e.g., app.part15.js) to react to cache refreshes.
 function emitCommunityPresenceCacheUpdated(detail = {}) {
   if (typeof window === "undefined" || typeof window.dispatchEvent !== "function") return;
   window.dispatchEvent(new CustomEvent("team-joseo-community-presence-cache-updated", {
