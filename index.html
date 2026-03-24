@@ -108,11 +108,11 @@
     </div>
   </div>
 
-  <div id="panelColors" class="sidePanel" aria-label="Demand legend">
+  <div id="panelColors" class="sidePanel" aria-label="Score legend">
     <h3 class="panelTitle">Colors</h3>
     <div id="legend" class="legend">
       <div class="legendHeader">
-        <h3>Demand Colors</h3>
+        <h3>Team Joseo Score Colors</h3>
       </div>
 
       <div class="legendBody">
@@ -318,7 +318,7 @@
     (function () {
       const build = String(window.__TLC_FRONTEND_BUILD_ID__ || "").trim() || "unknown-build";
       document.documentElement.setAttribute("data-frontend-build", build);
-      console.log("TLC frontend build:", build);
+      console.log("Team Joseo frontend build:", build);
 
       if ("serviceWorker" in navigator) {
         navigator.serviceWorker.getRegistrations()
