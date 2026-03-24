@@ -17,7 +17,7 @@
   const ZONE_EDGE_CUE_MIN_RATING_DIFF = 6;
   const ZONE_EDGE_CUE_MAX_RATING_DIFF = 30;
   const ZONE_EDGE_CUE_COORD_DP = 6;
-  const ZONE_EDGE_CUE_MAX_FEATURES = 220;
+  const ZONE_EDGE_CUE_MAX_PATHS = 240;
 
   let edgeCueAdjacencyCache = [];
   let edgeCueTopologySignature = "";
@@ -29,6 +29,7 @@
   let edgeCueBuildStats = {
     adjacencyPairs: 0,
     sharedSegments: 0,
+    mergedPaths: 0,
     builtFeatures: 0,
     skippedMissingRating: 0,
     skippedMinDiff: 0,
@@ -46,8 +47,8 @@
   function setPickupHotspotShieldZoneIds(zoneIds) {
     const next = new Set();
     const list = Array.isArray(zoneIds) ? zoneIds : [];
-    for (const value of list) {
-      const normalized = normalizePickupShieldZoneId(value);
+    for (const zoneId of list) {
+      const normalized = normalizePickupShieldZoneId(zoneId);
       if (normalized != null) next.add(normalized);
     }
     pickupHotspotShieldZoneIds = next;
@@ -70,12 +71,10 @@
     if (!Array.isArray(ring) || ring.length < 3) return 0;
     let area = 0;
     for (let i = 0; i < ring.length - 1; i++) {
-      const a = ring[i];
-      const b = ring[i + 1];
-      const ax = Number(a?.[0]);
-      const ay = Number(a?.[1]);
-      const bx = Number(b?.[0]);
-      const by = Number(b?.[1]);
+      const ax = Number(ring[i]?.[0]);
+      const ay = Number(ring[i]?.[1]);
+      const bx = Number(ring[i + 1]?.[0]);
+      const by = Number(ring[i + 1]?.[1]);
       if (!Number.isFinite(ax) || !Number.isFinite(ay) || !Number.isFinite(bx) || !Number.isFinite(by)) continue;
       area += (ax * by) - (bx * ay);
     }
@@ -94,8 +93,8 @@
     }
 
     if (geom.type === "MultiPolygon") {
-      const polys = Array.isArray(geom.coordinates) ? geom.coordinates : [];
-      for (const poly of polys) {
+      const polygons = Array.isArray(geom.coordinates) ? geom.coordinates : [];
+      for (const poly of polygons) {
         const ring = Array.isArray(poly) ? poly[0] : null;
         if (Array.isArray(ring) && ring.length > 1) cb(ring);
       }
@@ -132,83 +131,164 @@
           if (!Array.isArray(startCoord) || !Array.isArray(endCoord)) continue;
           const key = sharedSegmentKey(startCoord, endCoord);
           if (!key) continue;
-          const list = segmentMap.get(key) || [];
-          list.push({ zoneId, coords: [startCoord, endCoord], interiorSide });
-          segmentMap.set(key, list);
+          const existing = segmentMap.get(key) || [];
+          existing.push({
+            zoneId,
+            coords: [startCoord, endCoord],
+            interiorSide,
+          });
+          segmentMap.set(key, existing);
         }
       });
     }
 
-    const pairMap = new Map();
+    const adjacencyByPair = new Map();
 
     for (const occurrences of segmentMap.values()) {
       if (!Array.isArray(occurrences) || occurrences.length < 2) continue;
 
-      const zoneMap = new Map();
-      for (const occurrence of occurrences) {
-        if (!occurrence?.zoneId) continue;
-        if (!zoneMap.has(occurrence.zoneId)) zoneMap.set(occurrence.zoneId, occurrence);
+      const byZone = new Map();
+      for (const entry of occurrences) {
+        if (!entry?.zoneId || byZone.has(entry.zoneId)) continue;
+        byZone.set(entry.zoneId, entry);
       }
+      if (byZone.size !== 2) continue;
 
-      if (zoneMap.size !== 2) continue;
-
-      const zoneIds = Array.from(zoneMap.keys()).sort();
-      const aZoneId = zoneIds[0];
-      const bZoneId = zoneIds[1];
-      const aOccurrence = zoneMap.get(aZoneId);
-      const bOccurrence = zoneMap.get(bZoneId);
-      if (!aOccurrence || !bOccurrence) continue;
+      const pairIds = Array.from(byZone.keys()).sort();
+      const aZoneId = pairIds[0];
+      const bZoneId = pairIds[1];
+      const aEntry = byZone.get(aZoneId);
+      const bEntry = byZone.get(bZoneId);
+      if (!aEntry || !bEntry) continue;
 
       const pairKey = `${aZoneId}|${bZoneId}`;
-      const entry = pairMap.get(pairKey) || {
-        aZoneId,
-        bZoneId,
-        segments: []
-      };
-
-      entry.segments.push({
-        aCoords: aOccurrence.coords,
-        bCoords: bOccurrence.coords,
-        aInteriorSide: aOccurrence.interiorSide,
-        bInteriorSide: bOccurrence.interiorSide
+      const pair = adjacencyByPair.get(pairKey) || { aZoneId, bZoneId, segments: [] };
+      pair.segments.push({
+        aCoords: aEntry.coords,
+        bCoords: bEntry.coords,
+        aInteriorSide: aEntry.interiorSide,
+        bInteriorSide: bEntry.interiorSide,
       });
-
-      pairMap.set(pairKey, entry);
+      adjacencyByPair.set(pairKey, pair);
     }
 
-    return Array.from(pairMap.values());
+    return Array.from(adjacencyByPair.values());
+  }
+
+  function mergeConnectedLineSegments(segments) {
+    const normalized = [];
+    for (const segment of Array.isArray(segments) ? segments : []) {
+      if (!Array.isArray(segment) || segment.length < 2) continue;
+      const a = segment[0];
+      const b = segment[1];
+      const aKey = edgeCoordKey(a);
+      const bKey = edgeCoordKey(b);
+      if (!aKey || !bKey) continue;
+      normalized.push({ a, b, aKey, bKey });
+    }
+
+    const endpointMap = new Map();
+    const addEndpoint = (key, idx) => {
+      const list = endpointMap.get(key) || [];
+      list.push(idx);
+      endpointMap.set(key, list);
+    };
+
+    for (let i = 0; i < normalized.length; i++) {
+      addEndpoint(normalized[i].aKey, i);
+      addEndpoint(normalized[i].bKey, i);
+    }
+
+    const used = new Set();
+    const merged = [];
+
+    const appendUnique = (arr, coord) => {
+      const prev = arr[arr.length - 1];
+      if (prev && edgeCoordKey(prev) === edgeCoordKey(coord)) return;
+      arr.push(coord);
+    };
+
+    const prependUnique = (arr, coord) => {
+      const first = arr[0];
+      if (first && edgeCoordKey(first) === edgeCoordKey(coord)) return;
+      arr.unshift(coord);
+    };
+
+    const findAttachable = (key) => {
+      const indexes = endpointMap.get(key) || [];
+      for (const idx of indexes) {
+        if (!used.has(idx)) return idx;
+      }
+      return -1;
+    };
+
+    for (let startIdx = 0; startIdx < normalized.length; startIdx++) {
+      if (used.has(startIdx)) continue;
+
+      used.add(startIdx);
+      const start = normalized[startIdx];
+      const path = [start.a, start.b];
+
+      let extended = true;
+      while (extended) {
+        extended = false;
+
+        const endKey = edgeCoordKey(path[path.length - 1]);
+        const nextIdx = findAttachable(endKey);
+        if (nextIdx >= 0) {
+          used.add(nextIdx);
+          const seg = normalized[nextIdx];
+          if (seg.aKey === endKey) appendUnique(path, seg.b);
+          else appendUnique(path, seg.a);
+          extended = true;
+        }
+
+        const startKey = edgeCoordKey(path[0]);
+        const prevIdx = findAttachable(startKey);
+        if (prevIdx >= 0) {
+          used.add(prevIdx);
+          const seg = normalized[prevIdx];
+          if (seg.aKey === startKey) prependUnique(path, seg.b);
+          else prependUnique(path, seg.a);
+          extended = true;
+        }
+      }
+
+      if (path.length >= 2) merged.push(path);
+    }
+
+    return merged;
   }
 
   function getZoneTopologySignature(frame) {
     const features = frame?.polygons?.features || [];
-    return features
-      .map((feature) => {
-        const id = String(feature?.properties?.LocationID ?? "");
-        const geom = feature?.geometry;
-        let minLng = Infinity;
-        let minLat = Infinity;
-        let maxLng = -Infinity;
-        let maxLat = -Infinity;
+    const rows = features.map((feature) => {
+      const id = String(feature?.properties?.LocationID ?? "");
+      const geom = feature?.geometry;
+      let minLng = Infinity;
+      let minLat = Infinity;
+      let maxLng = -Infinity;
+      let maxLat = -Infinity;
 
-        const visit = (coords) => {
-          if (!Array.isArray(coords)) return;
-          if (coords.length >= 2 && Number.isFinite(coords[0]) && Number.isFinite(coords[1])) {
-            minLng = Math.min(minLng, coords[0]);
-            minLat = Math.min(minLat, coords[1]);
-            maxLng = Math.max(maxLng, coords[0]);
-            maxLat = Math.max(maxLat, coords[1]);
-            return;
-          }
-          coords.forEach(visit);
-        };
+      const visit = (coords) => {
+        if (!Array.isArray(coords)) return;
+        if (coords.length >= 2 && Number.isFinite(coords[0]) && Number.isFinite(coords[1])) {
+          minLng = Math.min(minLng, coords[0]);
+          minLat = Math.min(minLat, coords[1]);
+          maxLng = Math.max(maxLng, coords[0]);
+          maxLat = Math.max(maxLat, coords[1]);
+          return;
+        }
+        coords.forEach(visit);
+      };
 
-        visit(geom?.coordinates);
-        const w = Number.isFinite(minLng) && Number.isFinite(maxLng) ? (maxLng - minLng).toFixed(6) : "0";
-        const h = Number.isFinite(minLat) && Number.isFinite(maxLat) ? (maxLat - minLat).toFixed(6) : "0";
-        return `${id}|${geom?.type || ""}|${w}|${h}`;
-      })
-      .sort()
-      .join("###");
+      visit(geom?.coordinates);
+      const width = Number.isFinite(minLng) && Number.isFinite(maxLng) ? (maxLng - minLng).toFixed(6) : "0";
+      const height = Number.isFinite(minLat) && Number.isFinite(maxLat) ? (maxLat - minLat).toFixed(6) : "0";
+      return `${id}|${geom?.type || ""}|${width}|${height}`;
+    });
+    rows.sort();
+    return rows.join("###");
   }
 
   function getZoneEdgeAdjacency(frame) {
@@ -254,26 +334,27 @@
   function buildZoneEdgeCueFeatureCollection(frame) {
     const adjacency = getZoneEdgeAdjacency(frame);
     const zoneFeatures = frame?.polygons?.features || [];
-    const zoneFeatureMap = new Map();
+    const zoneMap = new Map();
     for (const feature of zoneFeatures) {
       const zoneId = String(feature?.properties?.LocationID ?? "");
-      if (zoneId) zoneFeatureMap.set(zoneId, feature);
+      if (zoneId) zoneMap.set(zoneId, feature);
     }
 
     let sharedSegments = 0;
+    let mergedPaths = 0;
     let skippedMissingRating = 0;
     let skippedMinDiff = 0;
     let skippedShielded = 0;
 
-    const built = [];
+    const builtFeatures = [];
 
     for (const pair of adjacency) {
-      const featureA = zoneFeatureMap.get(pair.aZoneId);
-      const featureB = zoneFeatureMap.get(pair.bZoneId);
-      if (!featureA || !featureB) continue;
+      const aFeature = zoneMap.get(pair.aZoneId);
+      const bFeature = zoneMap.get(pair.bZoneId);
+      if (!aFeature || !bFeature) continue;
 
-      const ratingA = getFeatureEffectiveRatingForEdge(featureA);
-      const ratingB = getFeatureEffectiveRatingForEdge(featureB);
+      const ratingA = getFeatureEffectiveRatingForEdge(aFeature);
+      const ratingB = getFeatureEffectiveRatingForEdge(bFeature);
       if (!Number.isFinite(ratingA) || !Number.isFinite(ratingB)) {
         skippedMissingRating += 1;
         continue;
@@ -285,10 +366,10 @@
         continue;
       }
 
-      const aStrong = ratingA > ratingB;
-      const strongZoneId = aStrong ? pair.aZoneId : pair.bZoneId;
-      const weakZoneId = aStrong ? pair.bZoneId : pair.aZoneId;
-      const strongFeature = aStrong ? featureA : featureB;
+      const strongerIsA = ratingA >= ratingB;
+      const strongZoneId = strongerIsA ? pair.aZoneId : pair.bZoneId;
+      const weakZoneId = strongerIsA ? pair.bZoneId : pair.aZoneId;
+      const strongFeature = strongerIsA ? aFeature : bFeature;
 
       if (isPickupHotspotShieldedZone(strongZoneId)) {
         skippedShielded += 1;
@@ -306,16 +387,24 @@
       const innerOpacity = 0.12 + (edgeStrength * 0.08);
       const innerOffsetPx = 0.9 + (edgeStrength * 0.7);
 
+      const strongSegments = [];
       for (const segment of pair.segments || []) {
         sharedSegments += 1;
-        const strongerCoords = aStrong ? segment.aCoords : segment.bCoords;
-        const strongerInteriorSide = aStrong ? segment.aInteriorSide : segment.bInteriorSide;
-        const orientedCoords = orientSegmentIntoZoneRightSide(strongerCoords, strongerInteriorSide);
-        if (!Array.isArray(orientedCoords) || orientedCoords.length < 2) continue;
+        const coords = strongerIsA ? segment.aCoords : segment.bCoords;
+        const interiorSide = strongerIsA ? segment.aInteriorSide : segment.bInteriorSide;
+        const oriented = orientSegmentIntoZoneRightSide(coords, interiorSide);
+        if (!Array.isArray(oriented) || oriented.length < 2) continue;
+        strongSegments.push([oriented[0], oriented[1]]);
+      }
 
-        built.push({
+      const merged = mergeConnectedLineSegments(strongSegments);
+      mergedPaths += merged.length;
+
+      for (const path of merged) {
+        if (!Array.isArray(path) || path.length < 2) continue;
+        builtFeatures.push({
           type: "Feature",
-          geometry: { type: "LineString", coordinates: orientedCoords },
+          geometry: { type: "LineString", coordinates: path },
           properties: {
             edge_color: getFeatureBaseColorForEdge(strongFeature),
             strong_zone_id: strongZoneId,
@@ -332,12 +421,13 @@
       }
     }
 
-    built.sort((a, b) => Number(b?.properties?.rating_diff || 0) - Number(a?.properties?.rating_diff || 0));
-    const features = built.slice(0, ZONE_EDGE_CUE_MAX_FEATURES);
+    builtFeatures.sort((a, b) => Number(b?.properties?.rating_diff || 0) - Number(a?.properties?.rating_diff || 0));
+    const features = builtFeatures.slice(0, ZONE_EDGE_CUE_MAX_PATHS);
 
     edgeCueBuildStats = {
       adjacencyPairs: Array.isArray(adjacency) ? adjacency.length : 0,
       sharedSegments,
+      mergedPaths,
       builtFeatures: features.length,
       skippedMissingRating,
       skippedMinDiff,
@@ -350,11 +440,10 @@
   function getZoneEdgeCueInputSignature(frame) {
     const topologySignature = getZoneTopologySignature(frame);
     syncPickupHotspotShieldZoneIdsFromSource();
+    const hotspotShieldSignature = Array.from(pickupHotspotShieldZoneIds || []).sort().join(",");
 
-    const shieldSignature = Array.from(pickupHotspotShieldZoneIds || []).sort().join(",");
     const rows = [];
     const features = frame?.polygons?.features || [];
-
     for (const feature of features) {
       const zoneId = String(feature?.properties?.LocationID ?? "");
       if (!zoneId) continue;
@@ -362,9 +451,9 @@
       const color = String(getFeatureBaseColorForEdge(feature) || "");
       rows.push(`${zoneId}|${Number.isFinite(rating) ? rating.toFixed(3) : "nan"}|${color}`);
     }
-
     rows.sort();
-    return `${topologySignature}@@${shieldSignature}@@${rows.join("###")}`;
+
+    return `${topologySignature}@@${hotspotShieldSignature}@@${rows.join("###")}`;
   }
 
   function getCachedZoneEdgeCueFeatureCollection(frame) {
@@ -402,8 +491,8 @@
     const map = core.getMap?.();
     if (!map) return false;
 
-    const ready = await core.waitForStyleReady?.();
-    if (!ready) return false;
+    const styleReady = await core.waitForStyleReady?.();
+    if (!styleReady) return false;
 
     if (!map.getSource(ZONE_EDGE_CUE_SOURCE_ID)) {
       map.addSource(ZONE_EDGE_CUE_SOURCE_ID, {
@@ -412,8 +501,13 @@
       });
     }
 
-    for (const id of ZONE_EDGE_CUE_LEGACY_LAYER_IDS) {
-      if (map.getLayer(id)) map.removeLayer(id);
+    for (const layerId of ZONE_EDGE_CUE_LEGACY_LAYER_IDS) {
+      if (map.getLayer(layerId)) map.removeLayer(layerId);
+    }
+
+    if (ZONE_EDGE_CUE_SOURCE_ID !== "zone-edge-influence" && map.getSource("zone-edge-influence")) {
+      if (map.getLayer("zone-edge-influence")) map.removeLayer("zone-edge-influence");
+      map.removeSource("zone-edge-influence");
     }
 
     if (!map.getLayer(ZONE_EDGE_CUE_BASE_LAYER_ID)) {
@@ -432,7 +526,7 @@
             ["interpolate", ["linear"], ["zoom"], 12, 0.92, 14, 1.0, 16, 1.08]
           ],
           "line-blur": 0.18,
-          "line-offset": 0
+          "line-offset": 0,
         }
       }, "zones-line");
     }
@@ -457,7 +551,7 @@
             "*",
             ["coalesce", ["to-number", ["get", "inner_offset_px"]], 0.9],
             ["interpolate", ["linear"], ["zoom"], 12, 0.92, 14, 1.0, 16, 1.08]
-          ]
+          ],
         }
       }, "zones-line");
     }
@@ -490,10 +584,10 @@
 
     const run = async () => {
       edgeCueRefreshHandle = 0;
-      const next = edgeCuePendingFrame;
+      const nextFrame = edgeCuePendingFrame;
       edgeCuePendingFrame = null;
-      if (!next) return;
-      await refreshZoneEdgeCue(next);
+      if (!nextFrame) return;
+      await refreshZoneEdgeCue(nextFrame);
     };
 
     if (typeof window.requestAnimationFrame === "function") {
@@ -537,21 +631,22 @@
     const map = core.getMap?.();
     const source = map?.getSource?.(ZONE_EDGE_CUE_SOURCE_ID);
     const sourceData = source && typeof source._data !== "undefined" ? source._data : null;
+    const zoomLevel = Number(map?.getZoom?.() || 0);
     return {
       topologyCount: Array.isArray(edgeCueAdjacencyCache) ? edgeCueAdjacencyCache.length : 0,
       topologySignature: edgeCueTopologySignature,
       inputSignature: edgeCueInputSignature,
       featureCount: edgeCueFeatureCount,
       hasSourceData: Array.isArray(sourceData?.features) ? sourceData.features.length > 0 : edgeCueFeatureCount > 0,
-      zoomLevel: Number(map?.getZoom?.() || 0),
-      zoomActive: Number(map?.getZoom?.() || 0) >= ZONE_EDGE_CUE_MIN_ZOOM,
+      zoomLevel,
+      zoomActive: zoomLevel >= ZONE_EDGE_CUE_MIN_ZOOM,
       buildStats: edgeCueBuildStats,
       hotspotShieldZoneIds: Array.from(pickupHotspotShieldZoneIds || []).sort(),
       sourceReady: !!source,
       baseLayerReady: !!map?.getLayer?.(ZONE_EDGE_CUE_BASE_LAYER_ID),
       innerLayerReady: !!map?.getLayer?.(ZONE_EDGE_CUE_INNER_LAYER_ID),
       refreshPending: !!edgeCueRefreshHandle,
-      maxFeatures: ZONE_EDGE_CUE_MAX_FEATURES,
+      maxPaths: ZONE_EDGE_CUE_MAX_PATHS,
     };
   };
 
