@@ -39,6 +39,27 @@
     };
   }
 
+  function readManhattanShadowFields(props) {
+    const source = props || {};
+    return {
+      earnings_shadow_score_manhattan_v2: normalizeShadowNumber(source.earnings_shadow_score_manhattan_v2),
+      earnings_shadow_confidence_manhattan_v2: normalizeShadowNumber(source.earnings_shadow_confidence_manhattan_v2),
+      earnings_shadow_rating_manhattan_v2: normalizeShadowNumber(source.earnings_shadow_rating_manhattan_v2),
+      earnings_shadow_bucket_manhattan_v2: normalizeShadowText(source.earnings_shadow_bucket_manhattan_v2),
+      earnings_shadow_color_manhattan_v2: normalizeShadowText(source.earnings_shadow_color_manhattan_v2),
+    };
+  }
+
+  function readBronxWashHeightsShadowFields(props) {
+    return {
+      earnings_shadow_score_bronx_wash_heights_v2: normalizeShadowNumber(props?.earnings_shadow_score_bronx_wash_heights_v2),
+      earnings_shadow_confidence_bronx_wash_heights_v2: normalizeShadowNumber(props?.earnings_shadow_confidence_bronx_wash_heights_v2),
+      earnings_shadow_rating_bronx_wash_heights_v2: normalizeShadowNumber(props?.earnings_shadow_rating_bronx_wash_heights_v2),
+      earnings_shadow_bucket_bronx_wash_heights_v2: normalizeShadowText(props?.earnings_shadow_bucket_bronx_wash_heights_v2),
+      earnings_shadow_color_bronx_wash_heights_v2: normalizeShadowText(props?.earnings_shadow_color_bronx_wash_heights_v2),
+    };
+  }
+
   function getLegacyZoneScoreSnapshot(props, geom) {
     return {
       rating: normalizeShadowNumber(props?.rating),
@@ -51,6 +72,8 @@
   function getZoneShadowComparison(props, geom) {
     const legacy = getLegacyZoneScoreSnapshot(props, geom);
     const shadow = readCitywideShadowFields(props);
+    const manhattan_shadow = readManhattanShadowFields(props);
+    const bronx_wash_heights_shadow = readBronxWashHeightsShadowFields(props);
 
     const legacyRating = Number(legacy.rating);
     const shadowRating = Number(shadow.earnings_shadow_rating_citywide_v2);
@@ -58,12 +81,18 @@
     return {
       legacy,
       shadow,
+      manhattan_shadow,
+      bronx_wash_heights_shadow,
       delta_rating:
         Number.isFinite(legacyRating) && Number.isFinite(shadowRating)
           ? shadowRating - legacyRating
           : null,
       shadow_ready:
         Number.isFinite(Number(shadow.earnings_shadow_rating_citywide_v2)),
+      manhattan_shadow_ready:
+        Number.isFinite(Number(manhattan_shadow.earnings_shadow_rating_manhattan_v2)),
+      bronx_wash_heights_shadow_ready:
+        Number.isFinite(Number(bronx_wash_heights_shadow.earnings_shadow_rating_bronx_wash_heights_v2)),
     };
   }
 
@@ -96,6 +125,9 @@
       shadow_rating: shadow.earnings_shadow_rating_citywide_v2,
       shadow_bucket: shadow.earnings_shadow_bucket_citywide_v2,
       shadow_confidence: shadow.earnings_shadow_confidence_citywide_v2,
+      bronx_wash_heights_shadow_rating: comparison.bronx_wash_heights_shadow?.earnings_shadow_rating_bronx_wash_heights_v2 ?? null,
+      bronx_wash_heights_shadow_bucket: comparison.bronx_wash_heights_shadow?.earnings_shadow_bucket_bronx_wash_heights_v2 || "",
+      bronx_wash_heights_shadow_confidence: comparison.bronx_wash_heights_shadow?.earnings_shadow_confidence_bronx_wash_heights_v2 ?? null,
       delta_rating: comparison.delta_rating,
       median_driver_pay: shadow.median_driver_pay_shadow,
       median_pay_per_min: shadow.median_pay_per_min_shadow,
@@ -109,6 +141,7 @@
 
   window.TlcScoreShadowModule = {
     readCitywideShadowFields,
+    readBronxWashHeightsShadowFields,
     getZoneShadowComparison,
     getZoneShadowComparisonByLocationId,
     buildZoneShadowSummary,
