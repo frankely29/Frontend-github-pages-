@@ -17,7 +17,7 @@
   const ZONE_EDGE_CUE_MIN_RATING_DIFF = 6;
   const ZONE_EDGE_CUE_MAX_RATING_DIFF = 30;
   const ZONE_EDGE_CUE_COORD_DP = 6;
-  const ZONE_EDGE_CUE_MAX_PATHS = 240;
+  const ZONE_EDGE_CUE_MAX_PATHS = 260;
 
   let edgeCueAdjacencyCache = [];
   let edgeCueTopologySignature = "";
