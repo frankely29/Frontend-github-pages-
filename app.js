@@ -1451,30 +1451,46 @@ function findZoneFeatureBySourceContainment(lngLat) {
 
   if (!matches.length) return null;
 
-  matches.sort((a, b) => popupFeatureBBoxArea(a) - popupFeatureBBoxArea(b));
+  matches.sort((a, b) => {
+    const areaA = popupFeatureBBoxArea(a);
+    const areaB = popupFeatureBBoxArea(b);
+    if (areaA !== areaB) return areaA - areaB;
+
+    const idA = Number(getZoneLocationId(a?.properties || {}));
+    const idB = Number(getZoneLocationId(b?.properties || {}));
+    if (Number.isFinite(idA) && Number.isFinite(idB)) return idA - idB;
+
+    return 0;
+  });
+
   return matches[0] || null;
 }
 
 function pickZoneFeatureForPopup(point, lngLat) {
-  const hits = queryZoneHitsAroundPoint(point, 12);
+  const contained = findZoneFeatureBySourceContainment(lngLat);
+  if (contained) return contained;
 
-  if (hits.length) {
-    const fillHit = hits.find((feature) => feature?.layer?.id === "zones-fill");
-    const fillId = getZoneLocationId(fillHit?.properties || {});
-    if (fillId) {
-      const resolved = resolveZoneFeatureForPopupById(fillId);
-      if (resolved) return resolved;
-    }
+  const hitPads = [8, 14, 22, 32];
+  for (const pad of hitPads) {
+    const hits = queryZoneHitsAroundPoint(point, pad);
 
+    if (!hits.length) continue;
+
+    const resolvedCandidates = [];
     for (const hit of hits) {
       const hitId = getZoneLocationId(hit?.properties || {});
       if (!hitId) continue;
       const resolved = resolveZoneFeatureForPopupById(hitId);
-      if (resolved) return resolved;
+      if (resolved) resolvedCandidates.push(resolved);
     }
+
+    if (!resolvedCandidates.length) continue;
+
+    resolvedCandidates.sort((a, b) => popupFeatureBBoxArea(a) - popupFeatureBBoxArea(b));
+    return resolvedCandidates[0] || null;
   }
 
-  return findZoneFeatureBySourceContainment(lngLat);
+  return null;
 }
 
 function syncOpenZonePopupMetrics() {
@@ -1489,6 +1505,8 @@ function syncOpenZonePopupMetrics() {
 window.getZonePopupDebug = function getZonePopupDebug() {
   return {
     popupOpen: !!zonePopup,
+    popupLocationId: zonePopupLocationId || "",
+    popupLngLat: zonePopupLngLat || null,
     sourceFeatureCount: Array.isArray(getCurrentZoneSourceFeatures()) ? getCurrentZoneSourceFeatures().length : 0,
   };
 };
@@ -1784,6 +1802,9 @@ function wireZoneClickPopup() {
     const props = feature.properties || {};
     const geom = feature.geometry || null;
 
+    zonePopupLocationId = getZoneLocationId(props);
+    zonePopupLngLat = { lng: lngLat.lng, lat: lngLat.lat };
+
     closeZonePopup();
 
     zonePopup = new maplibregl.Popup({
@@ -1794,6 +1815,9 @@ function wireZoneClickPopup() {
       .setLngLat([lngLat.lng, lngLat.lat])
       .setHTML(buildPopupHTML(props, geom))
       .addTo(map);
+
+    zonePopupLocationId = getZoneLocationId(props);
+    zonePopupLngLat = { lng: lngLat.lng, lat: lngLat.lat };
 
     startZonePopupAutoCloseTimer();
     return true;
