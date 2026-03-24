@@ -2122,8 +2122,14 @@ function buildPopupHTML(props, geom, metrics = getZonePopupMetrics(map?.getZoom?
     }
   }
 
-  if (modeFlags.brooklynMode && activeModeTag === "brooklyn" && Number.isFinite(Number(props.bk_local_rating))) {
-    extra += `<div style="margin-top:6px;"><b>Brooklyn Local Rating:</b> ${props.bk_local_rating} (${prettyBucket(props.bk_local_bucket)})</div>`;
+  if (modeFlags.brooklynMode && activeModeTag === "brooklyn") {
+    const brooklynShadowRating = Number(window.TlcModeModule?.readBrooklynShadowRating?.(props) ?? NaN);
+    const brooklynShadowBucket = String(window.TlcModeModule?.readBrooklynShadowBucket?.(props) || "");
+    if (Number.isFinite(brooklynShadowRating)) {
+      extra += `<div style="margin-top:6px;"><b>Brooklyn earnings score:</b> ${brooklynShadowRating} (${prettyBucket(brooklynShadowBucket)})</div>`;
+    } else if (Number.isFinite(Number(props.bk_local_rating))) {
+      extra += `<div style="margin-top:6px;"><b>Brooklyn legacy score:</b> ${props.bk_local_rating} (${prettyBucket(props.bk_local_bucket)})</div>`;
+    }
   }
 
   if (modeFlags.bronxWashHeightsMode && activeModeTag === "bronx_wash_heights") {
