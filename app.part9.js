@@ -89,7 +89,12 @@
           score = (Number(props.qn_local_score ?? 0) * 100) - dMi * 5.0;
         }
       } else if (modeTag === "brooklyn") {
-        score = Number(props.bk_local_rating ?? NaN) - dMi * DIST_PENALTY_PER_MILE;
+        const brooklynShadowRating = Number(props.earnings_shadow_rating_brooklyn_v2 ?? NaN);
+        if (Number.isFinite(brooklynShadowRating)) {
+          score = brooklynShadowRating - dMi * DIST_PENALTY_PER_MILE;
+        } else {
+          score = Number(props.bk_local_rating ?? NaN) - dMi * DIST_PENALTY_PER_MILE;
+        }
       } else if (modeTag === "bronx_wash_heights") {
         const bwhShadowRating = Number(props.earnings_shadow_rating_bronx_wash_heights_v2 ?? NaN);
         if (Number.isFinite(bwhShadowRating)) {
@@ -119,7 +124,10 @@
             Number.isFinite(Number(props.earnings_shadow_rating_queens_v2)) ||
             Number.isFinite(Number(props.qn_local_rating))
           ),
-          usedBK: modeTag === "brooklyn" && Number.isFinite(Number(props.bk_local_rating)),
+          usedBK: modeTag === "brooklyn" && (
+            Number.isFinite(Number(props.earnings_shadow_rating_brooklyn_v2)) ||
+            Number.isFinite(Number(props.bk_local_rating))
+          ),
           usedSI: modeTag === "staten_island" && Number.isFinite(Number(props.si_local_rating)),
           usedMH: modeTag === "manhattan" && Number.isFinite(Number(props.mh_local_rating)),
           usedBWH: modeTag === "bronx_wash_heights" && (
@@ -143,7 +151,7 @@
     } else if (best.usedBWH) {
       recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Bronx/Wash Heights earnings score ${best.rating} — ${distTxt}`;
     } else if (best.usedBK) {
-      recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Brooklyn local rating ${best.rating} — ${distTxt}`;
+      recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Brooklyn earnings score ${best.rating} — ${distTxt}`;
     } else if (best.usedMH) {
       recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Manhattan anti-saturation rating ${best.rating} — ${distTxt}`;
     } else if (best.usedSI) {
