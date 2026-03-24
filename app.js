@@ -1,6 +1,6 @@
 // BOOT_SIGNATURE: railway-frontend-v1
 /* =========================================================
-   NYC TLC Hotspot Map (Frontend) - SIMPLE + STABLE (MapLibre)
+   Team Joseo Map (Frontend) - SIMPLE + STABLE (MapLibre)
    ✅ Restored: Staten Island Mode, Manhattan Mode, Ghost Mode,
       Self GPS/nav arrow + auto-center, presence, slider, weather, radio.
    ✅ Added back (OLD behavior): Zone click popup details (like Leaflet bindPopup)
