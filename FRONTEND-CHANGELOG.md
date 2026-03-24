@@ -70,3 +70,9 @@
 - Added a lightweight unified zone audit helper (`app.part16.js`) that reports visible source/label, mode tag, shadow snapshots, and community caution snapshot for any zone without adding polling/network work.
 - Added a lightweight recommendation audit helper (`window.getTeamJoseoRecommendationAudit`) to expose the latest selected recommendation summary.
 - No visible score logic, borough formulas, community-crowding logic, polling cadence, or presence timing behavior changed in this phase.
+
+### Phase 12 final production hardening / cleanup
+- Finalized visible score semantics so user-facing labels consistently show Team Joseo score wording without exposing legacy/shadow terminology in normal popup/recommendation/community caution copy.
+- Added visible shadow readiness helpers and technical/fallback labeling hooks for debug/audit tooling while preserving the existing score-source precedence and score formulas.
+- Added system-level audit summary helper (`window.getTeamJoseoSystemAudit`) that reports per-frame source counts, readiness, fallback usage, mode flags, recommendation audit, and community-crowding debug data on demand.
+- All visible mode cutovers remain active; no score formulas, recommendation math, community crowding math, polling cadence, or presence timing were changed in this phase.
