@@ -441,15 +441,15 @@
       if (Number.isFinite(shadowRating)) return shadowRating;
       if (Number.isFinite(Number(props.bk_local_rating))) return Number(props.bk_local_rating);
     }
-    if (bronxWashHeightsMode && isBronxWashHeightsModeZone(props)) {
-      const shadowRating = readBronxWashHeightsShadowRating(props);
-      if (Number.isFinite(shadowRating)) return shadowRating;
-      if (Number.isFinite(Number(props.bwh_local_rating))) return Number(props.bwh_local_rating);
-    }
     if (statenIslandMode && isStatenIslandFeature(props)) {
       const shadowRating = readStatenIslandShadowRating(props);
       if (Number.isFinite(shadowRating)) return shadowRating;
       if (Number.isFinite(Number(props.si_local_rating))) return Number(props.si_local_rating);
+    }
+    if (bronxWashHeightsMode && isBronxWashHeightsModeZone(props)) {
+      const shadowRating = readBronxWashHeightsShadowRating(props);
+      if (Number.isFinite(shadowRating)) return shadowRating;
+      if (Number.isFinite(Number(props.bwh_local_rating))) return Number(props.bwh_local_rating);
     }
     if (manhattanMode && isManhattanModeZone(props, geom)) {
       const shadowRating = readManhattanShadowRating(props);
