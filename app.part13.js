@@ -6,6 +6,7 @@
   const ZONE_EDGE_CUE_BASE_LAYER_ID = "zone-edge-cue-base";
   const ZONE_EDGE_CUE_INNER_LAYER_ID = "zone-edge-cue-inner";
   const ZONE_EDGE_CUE_LEGACY_LAYER_IDS = [
+    "zone-edge-influence",
     "zone-edge-influence-halo",
     "zone-edge-influence-soft",
     "zone-edge-influence-core",
