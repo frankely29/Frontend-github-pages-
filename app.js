@@ -1511,6 +1511,10 @@ window.getZonePopupDebug = function getZonePopupDebug() {
   };
 };
 
+window.getCurrentZoneShadowDebug = function getCurrentZoneShadowDebug(locationId) {
+  return window.TlcScoreShadowModule?.getZoneShadowComparisonByLocationId?.(locationId) || null;
+};
+
 function initMap() {
   map = new maplibregl.Map({
     container: "map",
@@ -2006,6 +2010,44 @@ function formatZonePopupRelativeAge(tsUnix) {
   return `${Math.max(1, Math.round(diffSec / 86400))}d ago`;
 }
 
+function buildZoneShadowPreviewHTML(props, geom) {
+  const shadowSummary = window.TlcScoreShadowModule?.buildZoneShadowSummary?.(props, geom);
+  if (!shadowSummary) return "";
+
+  const showPreview =
+    debugEnabled ||
+    window.__TEAM_JOSEO_SHADOW_PREVIEW__ === true;
+
+  if (!showPreview) return "";
+
+  const delta = Number(shadowSummary.delta_rating);
+  const deltaText = Number.isFinite(delta)
+    ? (delta > 0 ? `+${Math.round(delta)}` : `${Math.round(delta)}`)
+    : "n/a";
+
+  const confidence = Number(shadowSummary.shadow_confidence);
+  const confidenceText = Number.isFinite(confidence)
+    ? `${Math.round(Math.max(0, Math.min(1, confidence)) * 100)}%`
+    : "n/a";
+
+  return `
+    <div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(0,0,0,0.08);">
+      <div style="font-weight:800;margin-bottom:4px;">Team Joseo shadow score preview</div>
+      <div><b>Legacy rating:</b> ${Number.isFinite(Number(shadowSummary.legacy_rating)) ? Math.round(Number(shadowSummary.legacy_rating)) : "n/a"} (${escapeHtml(shadowSummary.legacy_bucket || "")})</div>
+      <div><b>Shadow rating:</b> ${Number.isFinite(Number(shadowSummary.shadow_rating)) ? Math.round(Number(shadowSummary.shadow_rating)) : "n/a"} (${escapeHtml(shadowSummary.shadow_bucket || "")})</div>
+      <div><b>Delta:</b> ${escapeHtml(deltaText)}</div>
+      <div><b>Confidence:</b> ${escapeHtml(confidenceText)}</div>
+      <div><b>Median driver pay:</b> ${Number.isFinite(Number(shadowSummary.median_driver_pay)) ? `$${Number(shadowSummary.median_driver_pay).toFixed(2)}` : "n/a"}</div>
+      <div><b>Pay / min:</b> ${Number.isFinite(Number(shadowSummary.median_pay_per_min)) ? `$${Number(shadowSummary.median_pay_per_min).toFixed(2)}` : "n/a"}</div>
+      <div><b>Pay / mile:</b> ${Number.isFinite(Number(shadowSummary.median_pay_per_mile)) ? `$${Number(shadowSummary.median_pay_per_mile).toFixed(2)}` : "n/a"}</div>
+      <div><b>Req→pickup:</b> ${Number.isFinite(Number(shadowSummary.request_to_pickup_min)) ? `${Number(shadowSummary.request_to_pickup_min).toFixed(1)} min` : "n/a"}</div>
+      <div><b>Short-trip share:</b> ${Number.isFinite(Number(shadowSummary.short_trip_share)) ? `${Math.round(Number(shadowSummary.short_trip_share) * 100)}%` : "n/a"}</div>
+      <div><b>Shared-ride share:</b> ${Number.isFinite(Number(shadowSummary.shared_ride_share)) ? `${Math.round(Number(shadowSummary.shared_ride_share) * 100)}%` : "n/a"}</div>
+      <div><b>Downstream value:</b> ${Number.isFinite(Number(shadowSummary.downstream_value)) ? Number(shadowSummary.downstream_value).toFixed(3) : "n/a"}</div>
+    </div>
+  `;
+}
+
 function buildPopupHTML(props, geom, metrics = getZonePopupMetrics(map?.getZoom?.())) {
   const zoneName = (props.zone_name || "").trim();
   const borough = (props.borough || "").trim();
@@ -2077,6 +2119,7 @@ function buildPopupHTML(props, geom, metrics = getZonePopupMetrics(map?.getZoom?
     ${communityPickupLine}
     <div><b>Avg Pay next ${BIN_MINUTES} min:</b> $${nextPay}</div>
     <div><b>Avg Pay last 20 min:</b> $${pay}</div>
+    ${buildZoneShadowPreviewHTML(props, geom)}
   </div>
 `;
 
