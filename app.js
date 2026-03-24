@@ -956,14 +956,14 @@ function colorsPanelHTML() {
           if (modeFlags.bronxWashHeightsMode) active.push("Bronx/Wash Heights Mode");
           if (modeFlags.manhattanMode) active.push("Manhattan Mode");
           if (!active.length) {
-            return "Colors reflect the Team Joseo earnings opportunity score (1–100) for the selected 20-minute window. Time label is NYC time.";
+            return "Colors reflect the Team Joseo earnings opportunity score (1–100) for the selected 20-minute window. Time label is NYC time. Dashed amber/orange outline = Team Joseo community crowding caution (community-only, not TLC/HVFHV truth).";
           }
           const joined = active.length === 1
             ? active[0]
             : active.length === 2
               ? `${active[0]} and ${active[1]}`
               : `${active.slice(0, -1).join(", ")}, and ${active[active.length - 1]}`;
-          return `${joined} can override colors only inside its own scope. Other zones still use the Team Joseo citywide score.`;
+          return `${joined} can override colors only inside its own scope. Other zones still use the Team Joseo citywide score. Dashed amber/orange outline = Team Joseo community crowding caution (community-only, not TLC/HVFHV truth).`;
         })()}
       </div>
     </div>
@@ -2076,6 +2076,29 @@ function getPopupVisibleScoreSource(props, geom) {
   return String(window.TlcModeModule?.getVisibleScoreSourceForFeature?.(props, geom) || "legacy_citywide");
 }
 
+
+function buildCommunityCrowdingHTML(props) {
+  const zoneId = String(props?.LocationID ?? "");
+  const stat = window.TlcCommunityCrowdingModule?.getZoneCommunityCrowdingSnapshot?.(zoneId);
+  if (!stat || !stat.bucket || stat.bucket === "none") return "";
+
+  const label =
+    stat.bucket === "heavy" ? "Heavy caution" :
+    stat.bucket === "crowded" ? "Crowded caution" :
+    "Watch";
+
+  const confidenceText = `${Math.round(Math.max(0, Math.min(1, Number(stat.confidence || 0))) * 100)}%`;
+
+  return `
+    <div style="margin-top:6px;">
+      <b>Community crowding:</b> ${escapeHtml(label)}
+    </div>
+    <div><b>Visible Team Joseo drivers:</b> ${Math.max(0, Math.round(Number(stat.communityDriverCount || 0)))}</div>
+    <div><b>Confidence:</b> ${escapeHtml(confidenceText)}</div>
+    <div style="opacity:0.78;">Community-only caution, not TLC/HVFHV truth.</div>
+  `;
+}
+
 function buildPopupHTML(props, geom, metrics = getZonePopupMetrics(map?.getZoom?.())) {
   const zoneName = (props.zone_name || "").trim();
   const borough = (props.borough || "").trim();
@@ -2178,14 +2201,31 @@ function buildPopupHTML(props, geom, metrics = getZonePopupMetrics(map?.getZoom?
     <div><b>Avg Pay last 20 min:</b> $${pay}</div>
     ${showRawHvfBase ? `<div><b>Raw HVFHV base rating:</b> ${rawHvfBaseRating} (${prettyBucket(rawHvfBaseBucket)})</div>` : ""}
     ${buildZoneShadowPreviewHTML(props, geom)}
+    ${buildCommunityCrowdingHTML(props)}
   </div>
 `;
 
 }
 
+window.getCurrentZoneCommunityCrowdingDebug = function getCurrentZoneCommunityCrowdingDebug(locationId) {
+  return window.TlcCommunityCrowdingModule?.getZoneCommunityCrowdingSnapshot?.(locationId) || null;
+};
+
+
 /* =========================================================
    Render frame
    ========================================================= */
+
+function emitTeamJoseoFrameRendered(frame, featureCount) {
+  if (typeof window === "undefined" || typeof window.dispatchEvent !== "function") return;
+  window.dispatchEvent(new CustomEvent("team-joseo-frame-rendered", {
+    detail: {
+      time: String(frame?.time || ""),
+      featureCount: Number(featureCount || 0),
+    },
+  }));
+}
+
 async function renderFrame(frame) {
   if (!map || !mapReady) {
     pendingFrame = frame;
@@ -2236,6 +2276,7 @@ async function renderFrame(frame) {
 
   // Labels update (points inside polygons)
   refreshZoneLabels(frame);
+  emitTeamJoseoFrameRendered(frame, fc.features.length);
 
   if (debugEnabled) {
     dbg("dbgSetData", `OK features=${fc.features.length}`);
