@@ -60,6 +60,16 @@
     };
   }
 
+  function readQueensShadowFields(props) {
+    return {
+      earnings_shadow_score_queens_v2: normalizeShadowNumber(props?.earnings_shadow_score_queens_v2),
+      earnings_shadow_confidence_queens_v2: normalizeShadowNumber(props?.earnings_shadow_confidence_queens_v2),
+      earnings_shadow_rating_queens_v2: normalizeShadowNumber(props?.earnings_shadow_rating_queens_v2),
+      earnings_shadow_bucket_queens_v2: normalizeShadowText(props?.earnings_shadow_bucket_queens_v2),
+      earnings_shadow_color_queens_v2: normalizeShadowText(props?.earnings_shadow_color_queens_v2),
+    };
+  }
+
   function getLegacyZoneScoreSnapshot(props, geom) {
     return {
       rating: normalizeShadowNumber(props?.rating),
@@ -74,6 +84,7 @@
     const shadow = readCitywideShadowFields(props);
     const manhattan_shadow = readManhattanShadowFields(props);
     const bronx_wash_heights_shadow = readBronxWashHeightsShadowFields(props);
+    const queens_shadow = readQueensShadowFields(props);
 
     const legacyRating = Number(legacy.rating);
     const shadowRating = Number(shadow.earnings_shadow_rating_citywide_v2);
@@ -83,6 +94,7 @@
       shadow,
       manhattan_shadow,
       bronx_wash_heights_shadow,
+      queens_shadow,
       delta_rating:
         Number.isFinite(legacyRating) && Number.isFinite(shadowRating)
           ? shadowRating - legacyRating
@@ -93,6 +105,8 @@
         Number.isFinite(Number(manhattan_shadow.earnings_shadow_rating_manhattan_v2)),
       bronx_wash_heights_shadow_ready:
         Number.isFinite(Number(bronx_wash_heights_shadow.earnings_shadow_rating_bronx_wash_heights_v2)),
+      queens_shadow_ready:
+        Number.isFinite(Number(queens_shadow.earnings_shadow_rating_queens_v2)),
     };
   }
 
@@ -128,6 +142,9 @@
       bronx_wash_heights_shadow_rating: comparison.bronx_wash_heights_shadow?.earnings_shadow_rating_bronx_wash_heights_v2 ?? null,
       bronx_wash_heights_shadow_bucket: comparison.bronx_wash_heights_shadow?.earnings_shadow_bucket_bronx_wash_heights_v2 || "",
       bronx_wash_heights_shadow_confidence: comparison.bronx_wash_heights_shadow?.earnings_shadow_confidence_bronx_wash_heights_v2 ?? null,
+      queens_shadow_rating: comparison.queens_shadow?.earnings_shadow_rating_queens_v2 ?? null,
+      queens_shadow_bucket: comparison.queens_shadow?.earnings_shadow_bucket_queens_v2 || "",
+      queens_shadow_confidence: comparison.queens_shadow?.earnings_shadow_confidence_queens_v2 ?? null,
       delta_rating: comparison.delta_rating,
       median_driver_pay: shadow.median_driver_pay_shadow,
       median_pay_per_min: shadow.median_pay_per_min_shadow,
@@ -142,6 +159,7 @@
   window.TlcScoreShadowModule = {
     readCitywideShadowFields,
     readBronxWashHeightsShadowFields,
+    readQueensShadowFields,
     getZoneShadowComparison,
     getZoneShadowComparisonByLocationId,
     buildZoneShadowSummary,
