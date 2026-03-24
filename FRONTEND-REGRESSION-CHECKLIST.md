@@ -51,7 +51,7 @@
 - [ ] Full browser-backed UX verification for sign-in, live map interactions, chat/audio, radio playback, games, and admin screens.
 - [ ] Screenshot capture (browser screenshot tool unavailable in this session).
 
-## TLC map battle/progression expansion regression additions
+## Team Joseo Map battle/progression expansion regression additions
 - [ ] Chess still works.
 - [ ] UNO still works.
 - [ ] Leaderboard still opens.

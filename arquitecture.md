@@ -1,4 +1,4 @@
-# NYC TLC Hotspot Map - Verified Arquitecture (Current State, March 16, 2026)
+# Team Joseo Map - Verified Arquitecture (Current State, March 16, 2026)
 
 > Note: the repository currently uses the filename `arquitecture.md`. This document keeps that spelling so it can replace the repo file cleanly.
 
