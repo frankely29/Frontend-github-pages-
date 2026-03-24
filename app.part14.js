@@ -116,6 +116,12 @@
       short_trip_share: shadow.short_trip_share_shadow,
       shared_ride_share: shadow.shared_ride_share_shadow,
       downstream_value: shadow.downstream_value_shadow,
+      median_driver_pay_text: formatShadowMoney(shadow.median_driver_pay_shadow),
+      median_pay_per_min_text: formatShadowMoney(shadow.median_pay_per_min_shadow),
+      median_pay_per_mile_text: formatShadowMoney(shadow.median_pay_per_mile_shadow),
+      short_trip_share_text: formatShadowPct(shadow.short_trip_share_shadow),
+      shared_ride_share_text: formatShadowPct(shadow.shared_ride_share_shadow),
+      confidence_text: formatShadowPct(shadow.earnings_shadow_confidence_citywide_v2),
     };
   }
 
