@@ -2112,8 +2112,14 @@ function buildPopupHTML(props, geom, metrics = getZonePopupMetrics(map?.getZoom?
     extra += `<div style="margin-top:6px;"><b>Manhattan Anti-Saturation:</b> ${props.mh_local_rating} (${prettyBucket(props.mh_local_bucket)})</div>`;
   }
 
-  if (modeFlags.queensMode && activeModeTag === "queens" && Number.isFinite(Number(props.qn_local_rating))) {
-    extra += `<div style="margin-top:6px;"><b>Queens Local Flow:</b> ${props.qn_local_rating} (${prettyBucket(props.qn_local_bucket)})</div>`;
+  if (modeFlags.queensMode && activeModeTag === "queens") {
+    const queensShadowRating = Number(window.TlcModeModule?.readQueensShadowRating?.(props) ?? NaN);
+    const queensShadowBucket = String(window.TlcModeModule?.readQueensShadowBucket?.(props) || "");
+    if (Number.isFinite(queensShadowRating)) {
+      extra += `<div style="margin-top:6px;"><b>Queens earnings score:</b> ${queensShadowRating} (${prettyBucket(queensShadowBucket)})</div>`;
+    } else if (Number.isFinite(Number(props.qn_local_rating))) {
+      extra += `<div style="margin-top:6px;"><b>Queens legacy score:</b> ${props.qn_local_rating} (${prettyBucket(props.qn_local_bucket)})</div>`;
+    }
   }
 
   if (modeFlags.brooklynMode && activeModeTag === "brooklyn" && Number.isFinite(Number(props.bk_local_rating))) {
