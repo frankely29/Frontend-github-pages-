@@ -41,9 +41,9 @@
 
   function getLegacyZoneScoreSnapshot(props, geom) {
     return {
-      rating: Number(window.TlcModeModule?.effectiveRating?.(props, geom) ?? NaN),
-      bucket: String(window.TlcModeModule?.effectiveBucket?.(props, geom) || ""),
-      color: String(window.TlcModeModule?.effectiveColor?.(props, geom) || ""),
+      rating: normalizeShadowNumber(props?.rating),
+      bucket: normalizeShadowText(props?.bucket),
+      color: normalizeShadowText(props?.style?.fillColor || props?.style?.color || ""),
       activeModeTag: String(window.TlcModeModule?.getActiveSpecialModeTagForFeature?.(props, geom) || "")
     };
   }
@@ -84,18 +84,6 @@
   window.getZoneShadowDebugByLocationId = function getZoneShadowDebugByLocationId(locationId) {
     return getZoneShadowComparisonByLocationId(locationId);
   };
-
-  function formatShadowPct(value) {
-    const n = Number(value);
-    if (!Number.isFinite(n)) return "n/a";
-    return `${Math.round(Math.max(0, Math.min(1, n)) * 100)}%`;
-  }
-
-  function formatShadowMoney(value) {
-    const n = Number(value);
-    if (!Number.isFinite(n)) return "n/a";
-    return `$${n.toFixed(2)}`;
-  }
 
   function buildZoneShadowSummary(props, geom) {
     const comparison = getZoneShadowComparison(props, geom);

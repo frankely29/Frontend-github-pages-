@@ -28,3 +28,9 @@
 - Added `app.part14.js` to read Phase 2 citywide shadow earnings fields from zone feature properties with null-safe normalization and comparison helpers, without changing visible scoring or fill-color logic.
 - Added popup/debug-facing shadow summary helpers so legacy vs shadow rating/bucket/confidence can be inspected when debug mode is enabled (or `window.__TEAM_JOSEO_SHADOW_PREVIEW__ === true`).
 - Kept real-time presence and polling behavior unchanged; no new polling loops, network calls, or map layers were introduced.
+
+### Phase 4 visible citywide cutover
+- Switched visible citywide map scoring to Team Joseo shadow earnings-opportunity fields (`earnings_shadow_rating_citywide_v2` + shadow bucket/color when available), while keeping borough/special mode overrides limited to their own scopes.
+- Updated popup main score and non-special recommendation wording to align with the new visible map score source.
+- Updated mode/colors explanatory notes to clarify that out-of-scope zones still use the Team Joseo citywide score.
+- Kept presence and polling behavior unchanged; no new polling loops or network calls were added.

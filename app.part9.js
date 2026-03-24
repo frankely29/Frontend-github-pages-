@@ -133,7 +133,7 @@
     } else if (best.usedSI) {
       recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Staten Island local rating ${best.rating} — ${distTxt}`;
     } else {
-      recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Rating ${best.rating} — ${distTxt}`;
+      recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Earnings score ${best.rating} — ${distTxt}`;
     }
 
     setNavDestination({ lat: best.lat, lng: best.lng });
