@@ -52,3 +52,9 @@
 - Extended shadow readers/debug output in `app.part11.js` and `app.part14.js` to include Brooklyn shadow fields and Brooklyn shadow readiness/summary metadata while keeping citywide/Manhattan/BWH/Queens cutovers active in their existing scopes.
 - Updated Brooklyn popup extra line (`app.js`) and Brooklyn recommendation ranking/wording (`app.part9.js`) so Brooklyn mode now uses Team Joseo Brooklyn earnings score when available.
 - No presence or polling behavior changes were made.
+
+### Phase 9 Staten Island visible cutover
+- Updated Staten Island mode score-source selection in `app.part11.js` to prefer `earnings_shadow_*_staten_island_v2` inside Staten Island scope, with `si_local_*` fallback only when Staten Island shadow fields are unavailable.
+- Extended shadow readers/debug output in `app.part11.js` and `app.part14.js` to include Staten Island shadow fields and Staten Island shadow readiness/summary metadata while keeping citywide/Manhattan/BWH/Queens/Brooklyn cutovers active in their existing scopes.
+- Updated Staten Island popup extra line (`app.js`) and Staten Island recommendation ranking/wording (`app.part9.js`) so Staten Island mode now uses Team Joseo Staten Island earnings score when available.
+- No presence or polling behavior changes were made.
