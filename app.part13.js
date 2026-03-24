@@ -519,8 +519,8 @@
       if (frame) scheduleZoneEdgeCueRefresh(frame);
     });
 
-    window.addEventListener("tlc-pickup-hotspot-zones-updated", (event) => {
-      setPickupHotspotShieldZoneIds(event?.detail?.hotspotZoneIds || []);
+    window.addEventListener("tlc-pickup-hotspot-zones-updated", () => {
+      syncPickupHotspotShieldZoneIdsFromSource();
       scheduleZoneEdgeCueRefresh();
     });
 
