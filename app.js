@@ -1459,21 +1459,18 @@ function pickZoneFeatureForPopup(point, lngLat) {
   const hits = queryZoneHitsAroundPoint(point, 12);
 
   if (hits.length) {
-    const resolvedHitsById = new Map();
+    const fillHit = hits.find((feature) => feature?.layer?.id === "zones-fill");
+    const fillId = getZoneLocationId(fillHit?.properties || {});
+    if (fillId) {
+      const resolved = resolveZoneFeatureForPopupById(fillId);
+      if (resolved) return resolved;
+    }
 
     for (const hit of hits) {
       const hitId = getZoneLocationId(hit?.properties || {});
-      if (!hitId || resolvedHitsById.has(hitId)) continue;
+      if (!hitId) continue;
       const resolved = resolveZoneFeatureForPopupById(hitId);
-      if (resolved) {
-        resolvedHitsById.set(hitId, resolved);
-      }
-    }
-
-    const resolvedHits = Array.from(resolvedHitsById.values());
-    if (resolvedHits.length) {
-      resolvedHits.sort((a, b) => popupFeatureBBoxArea(a) - popupFeatureBBoxArea(b));
-      return resolvedHits[0] || null;
+      if (resolved) return resolved;
     }
   }
 
@@ -1492,8 +1489,6 @@ function syncOpenZonePopupMetrics() {
 window.getZonePopupDebug = function getZonePopupDebug() {
   return {
     popupOpen: !!zonePopup,
-    popupLocationId: zonePopupLocationId || "",
-    popupLngLat: zonePopupLngLat || null,
     sourceFeatureCount: Array.isArray(getCurrentZoneSourceFeatures()) ? getCurrentZoneSourceFeatures().length : 0,
   };
 };
@@ -1772,12 +1767,12 @@ function closeZonePopup() {
 function wireZoneClickPopup() {
   if (!map) return;
 
-  // cursor UX
   map.on("mouseenter", "zones-fill", () => {
-    try { map.getCanvas().style.cursor = "pointer"; } catch {}
+    try { map.getCanvas().style.cursor = "pointer"; } catch (_) {}
   });
+
   map.on("mouseleave", "zones-fill", () => {
-    try { map.getCanvas().style.cursor = ""; } catch {}
+    try { map.getCanvas().style.cursor = ""; } catch (_) {}
   });
 
   function openZonePopupFromResolvedFeature(feature, lngLat) {
@@ -1791,16 +1786,13 @@ function wireZoneClickPopup() {
 
     closeZonePopup();
 
-    zonePopupLocationId = getZoneLocationId(props);
-    zonePopupLngLat = { lng: lngLat.lng, lat: lngLat.lat };
-
     zonePopup = new maplibregl.Popup({
       closeButton: true,
       closeOnClick: false,
-      maxWidth: `${getZonePopupMetrics(map?.getZoom?.()).maxWidthPx}px`,
+      maxWidth: "208px",
     })
       .setLngLat([lngLat.lng, lngLat.lat])
-      .setHTML(buildPopupHTML(props, geom, getZonePopupMetrics(map?.getZoom?.())))
+      .setHTML(buildPopupHTML(props, geom))
       .addTo(map);
 
     startZonePopupAutoCloseTimer();
