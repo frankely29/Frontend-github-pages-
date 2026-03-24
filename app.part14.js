@@ -90,6 +90,18 @@
     };
   }
 
+
+  function getAllZoneShadowSnapshots(props) {
+    return {
+      citywide: readCitywideShadowFields(props),
+      manhattan: typeof readManhattanShadowFields === "function" ? readManhattanShadowFields(props) : null,
+      bronx_wash_heights: typeof readBronxWashHeightsShadowFields === "function" ? readBronxWashHeightsShadowFields(props) : null,
+      queens: typeof readQueensShadowFields === "function" ? readQueensShadowFields(props) : null,
+      brooklyn: typeof readBrooklynShadowFields === "function" ? readBrooklynShadowFields(props) : null,
+      staten_island: typeof readStatenIslandShadowFields === "function" ? readStatenIslandShadowFields(props) : null,
+    };
+  }
+
   function getLegacyZoneScoreSnapshot(props, geom) {
     return {
       rating: normalizeShadowNumber(props?.rating),
@@ -192,10 +204,12 @@
 
   window.TlcScoreShadowModule = {
     readCitywideShadowFields,
+    readManhattanShadowFields,
     readBronxWashHeightsShadowFields,
     readQueensShadowFields,
     readBrooklynShadowFields,
     readStatenIslandShadowFields,
+    getAllZoneShadowSnapshots,
     getZoneShadowComparison,
     getZoneShadowComparisonByLocationId,
     buildZoneShadowSummary,

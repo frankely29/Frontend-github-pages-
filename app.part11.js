@@ -198,19 +198,19 @@
         const joined = activeLabels.length === 2
           ? `${activeLabels[0]} and ${activeLabels[1]}`
           : `${activeLabels.slice(0, -1).join(", ")}, and ${activeLabels[activeLabels.length - 1]}`;
-        modeNote.innerHTML = `${joined} are <b>ON</b>: each applies only to its own scope.`;
+        modeNote.innerHTML = `${joined} are <b>ON</b>: each applies only to its own scope. Other zones continue using the Team Joseo citywide score.`;
       } else if (queensMode) {
-        modeNote.innerHTML = `Queens Mode is <b>ON</b>: now reflects Team Joseo Queens earnings score for non-airport Queens zones.<br/>It rewards persistence, downstream value, and stronger ride quality, and is designed to avoid weak dead-zone loops. Airport zones remain excluded. Other zones continue using the Team Joseo citywide score.`;
+        modeNote.innerHTML = `Queens Mode is <b>ON</b>: Team Joseo Queens earnings score for non-airport Queens zones. Other zones continue using the Team Joseo citywide score.`;
       } else if (bronxWashHeightsMode) {
-        modeNote.innerHTML = `Bronx/Wash Heights Mode is <b>ON</b>: now reflects Team Joseo Bronx/Wash Heights earnings score for <b>Bronx + Manhattan 100th St and up corridor</b>.<br/>It rewards ride flow, next-bin continuation, and downstream value while still caring about earnings quality. Corridor definition stays the same. Other zones continue using the Team Joseo citywide score.`;
+        modeNote.innerHTML = `Bronx/Wash Heights Mode is <b>ON</b>: Team Joseo Bronx/Wash Heights earnings score for the Bronx and the defined upper-Manhattan corridor. Other zones continue using the Team Joseo citywide score.`;
       } else if (manhattanMode) {
-        modeNote.innerHTML = `Manhattan Mode is <b>ON</b>: core Manhattan anti-saturation proxy. Strong now + still strong next bin beats flash-in-the-pan zones. Bronx/Wash Heights corridor stays excluded. Other zones continue using the Team Joseo citywide score.`;
+        modeNote.innerHTML = `Manhattan Mode is <b>ON</b>: Team Joseo Manhattan earnings score for core Manhattan. Other zones continue using the Team Joseo citywide score.`;
       } else if (statenIslandMode) {
-        modeNote.innerHTML = `Staten Island Mode is <b>ON</b>: it now reflects Team Joseo Staten Island earnings score.<br/>It rewards stronger pay quality, downstream value, and better sparse-market earnings opportunity. Other boroughs still use the Team Joseo citywide score.`;
+        modeNote.innerHTML = `Staten Island Mode is <b>ON</b>: Team Joseo Staten Island earnings score for Staten Island zones. Other zones continue using the Team Joseo citywide score.`;
       } else if (brooklynMode) {
-        modeNote.innerHTML = `Brooklyn Mode is <b>ON</b>: it now reflects Team Joseo Brooklyn earnings score.<br/>It rewards persistence, pay efficiency, and downstream value, and penalizes short-trip churn and weak local loops. Other zones continue using the Team Joseo citywide score.`;
+        modeNote.innerHTML = `Brooklyn Mode is <b>ON</b>: Team Joseo Brooklyn earnings score for Brooklyn zones. Other zones continue using the Team Joseo citywide score.`;
       } else {
-        modeNote.innerHTML = `Colors come from Team Joseo earnings opportunity rating (1–100) for the selected 20-minute window.<br/>Time label is NYC time.`;
+        modeNote.innerHTML = `Base colors reflect the Team Joseo score for the selected 20-minute window.`;
       }
     }
   }
@@ -428,6 +428,39 @@
     if (Number.isFinite(citywideShadowRating)) return "citywide_shadow";
 
     return "legacy_citywide";
+  }
+
+  function getVisibleScoreSourceLabel(props, geom) {
+    const source = getVisibleScoreSourceForFeature(props, geom);
+
+    switch (source) {
+      case "citywide_shadow":
+        return "Citywide Team Joseo score";
+      case "manhattan_shadow":
+        return "Manhattan Team Joseo score";
+      case "manhattan_mode_legacy":
+        return "Manhattan legacy mode score";
+      case "bronx_wash_heights_shadow":
+        return "Bronx/Wash Heights Team Joseo score";
+      case "bronx_wash_heights_mode_legacy":
+        return "Bronx/Wash Heights legacy mode score";
+      case "queens_shadow":
+        return "Queens Team Joseo score";
+      case "queens_mode_legacy":
+        return "Queens legacy mode score";
+      case "brooklyn_shadow":
+        return "Brooklyn Team Joseo score";
+      case "brooklyn_mode_legacy":
+        return "Brooklyn legacy mode score";
+      case "staten_island_shadow":
+        return "Staten Island Team Joseo score";
+      case "staten_island_mode_legacy":
+        return "Staten Island legacy mode score";
+      case "legacy_citywide":
+        return "Legacy citywide score";
+      default:
+        return "Team Joseo score";
+    }
   }
 
   function getModeAwareBaseRating(props, geom) {
@@ -1211,6 +1244,7 @@
     getTendencyFillAlpha,
     getActiveSpecialModeTagForFeature,
     getVisibleScoreSourceForFeature,
+    getVisibleScoreSourceLabel,
     readBrooklynShadowRating,
     readBrooklynShadowBucket,
     readBrooklynShadowConfidence,

@@ -63,3 +63,10 @@
 - Added a separate Team Joseo community crowding caution layer driven by existing live Team Joseo presence snapshots; this is community-only signal and not TLC/HVFHV truth.
 - Added one lightweight dashed amber/orange caution outline plus popup/recommendation caution messaging, while keeping base zone colors unchanged.
 - Kept presence/polling timing unchanged with no new polling loops or network requests.
+
+
+### Phase 11 semantic + validation cleanup
+- Standardized user-facing language around “Team Joseo score” / “earnings score” across mode notes, popup score labels/source labels, recommendation text, and colors-panel meaning text.
+- Added a lightweight unified zone audit helper (`app.part16.js`) that reports visible source/label, mode tag, shadow snapshots, and community caution snapshot for any zone without adding polling/network work.
+- Added a lightweight recommendation audit helper (`window.getTeamJoseoRecommendationAudit`) to expose the latest selected recommendation summary.
+- No visible score logic, borough formulas, community-crowding logic, polling cadence, or presence timing behavior changed in this phase.
