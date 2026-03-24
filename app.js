@@ -1816,9 +1816,6 @@ function wireZoneClickPopup() {
       .setHTML(buildPopupHTML(props, geom))
       .addTo(map);
 
-    zonePopupLocationId = getZoneLocationId(props);
-    zonePopupLngLat = { lng: lngLat.lng, lat: lngLat.lat };
-
     startZonePopupAutoCloseTimer();
     return true;
   }
