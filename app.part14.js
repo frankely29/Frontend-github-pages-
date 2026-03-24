@@ -247,7 +247,6 @@
     const comparison = getZoneShadowComparison(props, geom);
     const readiness = getVisibleShadowReadiness(props, geom);
     const anyReady = !!(
-      readiness?.shadowReady ||
       comparison?.shadow_ready ||
       comparison?.manhattan_shadow_ready ||
       comparison?.bronx_wash_heights_shadow_ready ||
