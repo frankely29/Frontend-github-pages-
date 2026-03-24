@@ -16,6 +16,7 @@
   let wxParticles = [];
   let wxAnimRunning = false;
   let wxNextUpdateTimer = null;
+  let lastRecommendationAudit = null;
 
   function setNavDisabled(disabled) {
     if (!navBtn) return;
@@ -45,6 +46,7 @@
     if (!userLatLng) {
       recommendEl.textContent = "Recommended: enable location to get suggestions";
       setNavDestination(null);
+      lastRecommendationAudit = null;
       return;
     }
 
@@ -52,6 +54,7 @@
     if (!feats.length) {
       recommendEl.textContent = "Recommended: …";
       setNavDestination(null);
+      lastRecommendationAudit = null;
       return;
     }
 
@@ -158,6 +161,7 @@
     if (!best) {
       recommendEl.textContent = "Recommended: no Blue+ zone nearby right now";
       setNavDestination(null);
+      lastRecommendationAudit = null;
       return;
     }
 
@@ -173,14 +177,28 @@
     } else if (best.usedBK) {
       recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Brooklyn earnings score ${best.rating} — ${distTxt}${crowdingSuffix}`;
     } else if (best.usedMH) {
-      recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Manhattan anti-saturation rating ${best.rating} — ${distTxt}${crowdingSuffix}`;
+      recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Manhattan earnings score ${best.rating} — ${distTxt}${crowdingSuffix}`;
     } else if (best.usedSI) {
       recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Staten Island earnings score ${best.rating} — ${distTxt}${crowdingSuffix}`;
     } else {
-      recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Earnings score ${best.rating} — ${distTxt}${crowdingSuffix}`;
+      recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Team Joseo score ${best.rating} — ${distTxt}${crowdingSuffix}`;
     }
 
     setNavDestination({ lat: best.lat, lng: best.lng });
+    lastRecommendationAudit = {
+      zoneName: best.name,
+      borough: best.borough,
+      rating: best.rating,
+      distanceMiles: best.dMi,
+      activeModeTag:
+        best.usedQN ? "queens" :
+        best.usedBK ? "brooklyn" :
+        best.usedSI ? "staten_island" :
+        best.usedMH ? "manhattan" :
+        best.usedBWH ? "bronx_wash_heights" :
+        "citywide",
+      communityCrowding: best.communityCrowding || null,
+    };
   }
 
   function updateOnlineBadge(count, ghostedCount = 0) {
@@ -497,6 +515,10 @@
   function getWeatherState() {
     return wxState;
   }
+
+  window.getTeamJoseoRecommendationAudit = function getTeamJoseoRecommendationAudit() {
+    return lastRecommendationAudit;
+  };
 
   window.TlcMapUiModule = {
     setNavDisabled,

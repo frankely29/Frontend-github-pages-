@@ -956,7 +956,7 @@ function colorsPanelHTML() {
           if (modeFlags.bronxWashHeightsMode) active.push("Bronx/Wash Heights Mode");
           if (modeFlags.manhattanMode) active.push("Manhattan Mode");
           if (!active.length) {
-            return "Colors reflect the Team Joseo earnings opportunity score (1–100) for the selected 20-minute window. Time label is NYC time. Dashed amber/orange outline = Team Joseo community crowding caution (community-only, not TLC/HVFHV truth).";
+            return "Base colors reflect the Team Joseo score (earnings opportunity) for the selected 20-minute window. Time label is NYC time. Dashed amber/orange outline = Team Joseo community crowding caution (community-only, not TLC/HVFHV truth).";
           }
           const joined = active.length === 1
             ? active[0]
@@ -2076,6 +2076,35 @@ function getPopupVisibleScoreSource(props, geom) {
   return String(window.TlcModeModule?.getVisibleScoreSourceForFeature?.(props, geom) || "legacy_citywide");
 }
 
+function getPopupVisibleScoreSourceLabel(props, geom) {
+  return String(window.TlcModeModule?.getVisibleScoreSourceLabel?.(props, geom) || "Team Joseo score");
+}
+
+function buildZoneAuditPreviewHTML(props, geom) {
+  const showAudit =
+    debugEnabled ||
+    window.__TEAM_JOSEO_AUDIT__ === true;
+
+  if (!showAudit) return "";
+
+  const audit = window.TlcZoneAuditModule?.getVisibleScoreAudit?.(props, geom);
+  if (!audit) return "";
+
+  const crowding = audit.crowding;
+  const crowdingLine = crowding
+    ? `<div><b>Community caution:</b> ${escapeHtml(crowding.bucketLabel || crowding.bucket || "")} • ${Math.round(Number(crowding.confidence || 0) * 100)}% confidence • penalty ${Number(crowding.penalty || 0).toFixed(1)}</div>`
+    : `<div><b>Community caution:</b> none</div>`;
+
+  return `
+    <div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(0,0,0,0.08);">
+      <div style="font-weight:800;margin-bottom:4px;">Team Joseo audit</div>
+      <div><b>Visible source:</b> ${escapeHtml(audit.visibleSourceLabel || audit.visibleSource || "")}</div>
+      <div><b>Mode tag:</b> ${escapeHtml(audit.activeModeTag || "citywide")}</div>
+      ${crowdingLine}
+    </div>
+  `;
+}
+
 
 function buildCommunityCrowdingHTML(props) {
   const zoneId = String(props?.LocationID ?? "");
@@ -2192,7 +2221,8 @@ function buildPopupHTML(props, geom, metrics = getZonePopupMetrics(map?.getZoom?
       ${escapeHtml(zoneName || `Zone ${props.LocationID ?? ""}`)}
     </div>
     ${borough ? `<div style="opacity:0.78;margin-bottom:${metrics.lineGapPx + 1}px;">${escapeHtml(borough)}</div>` : `<div style="margin-bottom:${metrics.lineGapPx + 1}px;"></div>`}
-    <div><b>Map Rating:</b> ${visibleRating} (${prettyBucket(visibleBucket)})</div>
+    <div><b>Team Joseo Score:</b> ${visibleRating} (${prettyBucket(visibleBucket)})</div>
+    <div><b>Score source:</b> ${escapeHtml(getPopupVisibleScoreSourceLabel(props, geom))}</div>
     ${extra}
     <div style="margin-top:${metrics.lineGapPx + 1}px;"><b>Pickups (last ${BIN_MINUTES} min):</b> ${pickups}</div>
     <div><b>Next ${BIN_MINUTES} min:</b> ${nextPickups}</div>
@@ -2202,6 +2232,7 @@ function buildPopupHTML(props, geom, metrics = getZonePopupMetrics(map?.getZoom?
     ${showRawHvfBase ? `<div><b>Raw HVFHV base rating:</b> ${rawHvfBaseRating} (${prettyBucket(rawHvfBaseBucket)})</div>` : ""}
     ${buildZoneShadowPreviewHTML(props, geom)}
     ${buildCommunityCrowdingHTML(props)}
+    ${buildZoneAuditPreviewHTML(props, geom)}
   </div>
 `;
 

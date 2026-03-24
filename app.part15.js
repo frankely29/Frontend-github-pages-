@@ -268,6 +268,14 @@ function buildCommunityCrowdingStats(frame, presenceRows) {
   };
 }
 
+function getCommunityCrowdingBucketLabel(bucket) {
+  const text = String(bucket || "").trim();
+  if (text === "heavy") return "Heavy caution";
+  if (text === "crowded") return "Crowded caution";
+  if (text === "watch") return "Watch";
+  return "";
+}
+
 function crowdingLineColorForBucket(bucket) {
   if (bucket === "heavy") return "#ff5a36";
   if (bucket === "crowded") return "#ff9f1a";
@@ -446,6 +454,7 @@ window.TlcCommunityCrowdingModule = {
   clearCommunityCrowdingSource: clearCommunityCrowdingSource,
   getZoneCommunityCrowdingSnapshot,
   getZoneCommunityCrowdingPenalty,
+  getCommunityCrowdingBucketLabel,
   getActiveCrowdingZoneIdsSnapshot,
 };
 
