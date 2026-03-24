@@ -34,3 +34,9 @@
 - Updated popup main score and non-special recommendation wording to align with the new visible map score source.
 - Updated mode/colors explanatory notes to clarify that out-of-scope zones still use the Team Joseo citywide score.
 - Kept presence and polling behavior unchanged; no new polling loops or network calls were added.
+
+### Phase 6 Bronx/Wash Heights visible cutover
+- Updated Bronx/Wash Heights mode score-source selection in `app.part11.js` to prefer `earnings_shadow_*_bronx_wash_heights_v2` inside Bronx + corridor scope, with legacy `bwh_local_*` fallback only when BWH shadow is unavailable.
+- Extended shadow readers/debug output in `app.part11.js` and `app.part14.js` to include Bronx/Wash Heights shadow fields (and readiness/comparison summary support) while keeping citywide and Manhattan shadow paths active in their existing scopes.
+- Updated BWH popup extra line (`app.js`) and recommendation ranking/wording (`app.part9.js`) so Bronx/Wash Heights mode now reflects Bronx/Wash Heights earnings shadow rating when present.
+- No presence or polling behavior changes were made.

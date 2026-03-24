@@ -2120,8 +2120,14 @@ function buildPopupHTML(props, geom, metrics = getZonePopupMetrics(map?.getZoom?
     extra += `<div style="margin-top:6px;"><b>Brooklyn Local Rating:</b> ${props.bk_local_rating} (${prettyBucket(props.bk_local_bucket)})</div>`;
   }
 
-  if (modeFlags.bronxWashHeightsMode && activeModeTag === "bronx_wash_heights" && Number.isFinite(Number(props.bwh_local_rating))) {
-    extra += `<div style="margin-top:6px;"><b>Bronx/Wash Heights Trip Flow:</b> ${props.bwh_local_rating} (${prettyBucket(props.bwh_local_bucket)})</div>`;
+  if (modeFlags.bronxWashHeightsMode && activeModeTag === "bronx_wash_heights") {
+    const bwhShadowRating = Number(window.TlcModeModule?.readBronxWashHeightsShadowRating?.(props) ?? NaN);
+    const bwhShadowBucket = String(window.TlcModeModule?.readBronxWashHeightsShadowBucket?.(props) || "");
+    if (Number.isFinite(bwhShadowRating)) {
+      extra += `<div style="margin-top:6px;"><b>Bronx/Wash Heights earnings score:</b> ${bwhShadowRating} (${prettyBucket(bwhShadowBucket)})</div>`;
+    } else if (Number.isFinite(Number(props.bwh_local_rating))) {
+      extra += `<div style="margin-top:6px;"><b>Bronx/Wash Heights legacy score:</b> ${props.bwh_local_rating} (${prettyBucket(props.bwh_local_bucket)})</div>`;
+    }
   }
 
   const showRawHvfBase = (debugEnabled || window.__TEAM_JOSEO_SHADOW_PREVIEW__ === true) && visibleScoreSource === "citywide_shadow";

@@ -86,7 +86,12 @@
       } else if (modeTag === "brooklyn") {
         score = Number(props.bk_local_rating ?? NaN) - dMi * DIST_PENALTY_PER_MILE;
       } else if (modeTag === "bronx_wash_heights") {
-        score = (Number(props.bwh_local_score ?? 0) * 100) - dMi * BRONX_WASH_HEIGHTS_DIST_PENALTY_PER_MILE;
+        const bwhShadowRating = Number(props.earnings_shadow_rating_bronx_wash_heights_v2 ?? NaN);
+        if (Number.isFinite(bwhShadowRating)) {
+          score = bwhShadowRating - dMi * BRONX_WASH_HEIGHTS_DIST_PENALTY_PER_MILE;
+        } else {
+          score = (Number(props.bwh_local_score ?? 0) * 100) - dMi * BRONX_WASH_HEIGHTS_DIST_PENALTY_PER_MILE;
+        }
       } else if (modeTag === "manhattan") {
         score = Number(props.mh_local_rating ?? NaN) - dMi * DIST_PENALTY_PER_MILE;
       } else if (modeTag === "staten_island") {
@@ -109,7 +114,10 @@
           usedBK: modeTag === "brooklyn" && Number.isFinite(Number(props.bk_local_rating)),
           usedSI: modeTag === "staten_island" && Number.isFinite(Number(props.si_local_rating)),
           usedMH: modeTag === "manhattan" && Number.isFinite(Number(props.mh_local_rating)),
-          usedBWH: modeTag === "bronx_wash_heights" && Number.isFinite(Number(props.bwh_local_rating)),
+          usedBWH: modeTag === "bronx_wash_heights" && (
+            Number.isFinite(Number(props.earnings_shadow_rating_bronx_wash_heights_v2)) ||
+            Number.isFinite(Number(props.bwh_local_rating))
+          ),
         };
       }
     }
@@ -125,7 +133,7 @@
     if (best.usedQN) {
       recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Best Queens flow • Non-airport pocket • Safer from dead spots • Strong repeat-call pocket — ${distTxt}`;
     } else if (best.usedBWH) {
-      recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Best trip flow • Strong ride flow • Stay-busy area • Fast repeat-call area — ${distTxt}`;
+      recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Bronx/Wash Heights earnings score ${best.rating} — ${distTxt}`;
     } else if (best.usedBK) {
       recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Brooklyn local rating ${best.rating} — ${distTxt}`;
     } else if (best.usedMH) {
