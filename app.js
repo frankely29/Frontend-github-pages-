@@ -1802,10 +1802,10 @@ function wireZoneClickPopup() {
     const props = feature.properties || {};
     const geom = feature.geometry || null;
 
+    closeZonePopup();
+
     zonePopupLocationId = getZoneLocationId(props);
     zonePopupLngLat = { lng: lngLat.lng, lat: lngLat.lat };
-
-    closeZonePopup();
 
     zonePopup = new maplibregl.Popup({
       closeButton: true,
@@ -1995,6 +1995,17 @@ async function loadNextFramePickupsMap(curIdx) {
   }
 }
 
+function formatZonePopupRelativeAge(tsUnix) {
+  const ts = Number(tsUnix ?? NaN);
+  if (!Number.isFinite(ts) || ts <= 0) return "unknown";
+
+  const diffSec = Math.max(0, Math.floor(Date.now() / 1000 - ts));
+  if (diffSec < 60) return `${diffSec}s ago`;
+  if (diffSec < 3600) return `${Math.max(1, Math.round(diffSec / 60))}m ago`;
+  if (diffSec < 86400) return `${Math.max(1, Math.round(diffSec / 3600))}h ago`;
+  return `${Math.max(1, Math.round(diffSec / 86400))}d ago`;
+}
+
 function buildPopupHTML(props, geom, metrics = getZonePopupMetrics(map?.getZoom?.())) {
   const zoneName = (props.zone_name || "").trim();
   const borough = (props.borough || "").trim();
@@ -2015,7 +2026,7 @@ function buildPopupHTML(props, geom, metrics = getZonePopupMetrics(map?.getZoom?
   const communitySampleLimit = Number(zoneCommunity?.sample_limit ?? PICKUP_ZONE_SAMPLE_LIMIT);
   const communityLastTs = zoneCommunity?.latest_created_at ?? null;
   const communityPickupLine = communityPickupCount > 0
-    ? `<div style="margin-top:6px;"><b>Community zone avg:</b> ${communityPickupCount}/${communitySampleLimit} trips used${communityLastTs ? ` • last ${escapeHtml(formatRelativeAge(communityLastTs))}` : ""}</div>`
+    ? `<div style="margin-top:6px;"><b>Community zone avg:</b> ${communityPickupCount}/${communitySampleLimit} trips used${communityLastTs ? ` • last ${escapeHtml(formatZonePopupRelativeAge(communityLastTs))}` : ""}</div>`
     : "";
 
   let extra = "";
