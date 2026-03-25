@@ -83,3 +83,8 @@
 - Extended shadow-field ingestion/summaries so frontend debug/audit paths can inspect zone-area density metrics and long-trip/trap-related shadow fields, including normalized counterparts.
 - Extended zone audit and shadow preview debug output to surface the new density/trip-quality values when present.
 - Visible Team Joseo scores, recommendation logic, and normal map color behavior remain unchanged in this phase.
+
+### Phase 2 citywide_v3 shadow inspection (frontend only)
+- Extended frontend shadow ingestion/comparison helpers to read and compare citywide_v3 candidate fields (rating/bucket/confidence/positive/negative/score/color) strictly for debug/audit inspection.
+- Extended zone audit and debug shadow preview output to include a compact Team Joseo citywide_v3 candidate subsection when citywide_v3 data is present.
+- Visible Team Joseo scores, recommendation logic, and normal map color behavior remain unchanged in this phase.

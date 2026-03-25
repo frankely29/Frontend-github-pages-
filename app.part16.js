@@ -38,6 +38,8 @@
 
     const allShadows = shadowModule.getAllZoneShadowSnapshots?.(props) || null;
     const shadowCitywide = allShadows?.citywide || null;
+    const citywideV2Rating = Number(shadowCitywide?.earnings_shadow_rating_citywide_v2 ?? NaN);
+    const citywideV3Rating = Number(shadowCitywide?.earnings_shadow_rating_citywide_v3 ?? NaN);
     const densityTripQuality = shadowCitywide
       ? {
           zoneAreaSqMiles: safeRound(shadowCitywide.zone_area_sq_miles_shadow, 2),
@@ -49,6 +51,23 @@
           demandDensityNextN: safeRound(shadowCitywide.demand_density_next_n_shadow, 4),
           longTripShare20PlusN: safeRound(shadowCitywide.long_trip_share_20plus_n_shadow, 4),
           sameZoneRetentionPenaltyN: safeRound(shadowCitywide.same_zone_retention_penalty_n_shadow, 4),
+        }
+      : null;
+    const citywideV3Candidate = shadowCitywide
+      ? {
+          citywideV3Rating: safeRound(shadowCitywide.earnings_shadow_rating_citywide_v3, 2),
+          citywideV3Bucket: String(shadowCitywide.earnings_shadow_bucket_citywide_v3 || ""),
+          citywideV3Confidence: safeRound(shadowCitywide.earnings_shadow_confidence_citywide_v3, 3),
+          citywideV3Positive: safeRound(shadowCitywide.earnings_shadow_positive_citywide_v3, 3),
+          citywideV3Negative: safeRound(shadowCitywide.earnings_shadow_negative_citywide_v3, 3),
+          citywideV3DeltaVsLegacy:
+            Number.isFinite(citywideV3Rating) && Number.isFinite(Number(props?.rating))
+              ? safeRound(citywideV3Rating - Number(props.rating), 2)
+              : null,
+          citywideV3DeltaVsCitywideV2:
+            Number.isFinite(citywideV3Rating) && Number.isFinite(citywideV2Rating)
+              ? safeRound(citywideV3Rating - citywideV2Rating, 2)
+              : null,
         }
       : null;
     const crowding =
@@ -69,6 +88,7 @@
       shadowProfiles: allShadows,
       shadowReadiness,
       densityTripQuality,
+      citywideV3Candidate,
       crowding: crowding
         ? {
             bucket: String(crowding.bucket || ""),
