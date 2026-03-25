@@ -2129,7 +2129,7 @@ function buildZoneShadowPreviewHTML(props, geom) {
       delta: shadowSummary.delta_brooklyn_v3_vs_v2,
     },
     staten_island: {
-      title: "Team Joseo Staten Island_v3 candidate",
+      title: "Team Joseo Staten Island_v3 live",
       rating: shadowSummary.staten_island_v3_rating,
       bucket: shadowSummary.staten_island_v3_bucket,
       confidence: shadowSummary.staten_island_v3_confidence,
@@ -2289,9 +2289,13 @@ function buildPopupHTML(props, geom, metrics = getZonePopupMetrics(map?.getZoom?
   const activeModeTag = getActiveSpecialModeTagForFeature(props, geom);
 
   if (modeFlags.statenIslandMode && activeModeTag === "staten_island") {
+    const statenIslandV3ShadowRating = Number(window.TlcModeModule?.readStatenIslandV3ShadowRating?.(props) ?? NaN);
+    const statenIslandV3ShadowBucket = String(window.TlcModeModule?.readStatenIslandV3ShadowBucket?.(props) || "");
     const statenIslandShadowRating = Number(window.TlcModeModule?.readStatenIslandShadowRating?.(props) ?? NaN);
     const statenIslandShadowBucket = String(window.TlcModeModule?.readStatenIslandShadowBucket?.(props) || "");
-    if (Number.isFinite(statenIslandShadowRating)) {
+    if (Number.isFinite(statenIslandV3ShadowRating)) {
+      extra += `<div style="margin-top:6px;"><b>Staten Island earnings score:</b> ${statenIslandV3ShadowRating} (${prettyBucket(statenIslandV3ShadowBucket)})</div>`;
+    } else if (Number.isFinite(statenIslandShadowRating)) {
       extra += `<div style="margin-top:6px;"><b>Staten Island earnings score:</b> ${statenIslandShadowRating} (${prettyBucket(statenIslandShadowBucket)})</div>`;
     } else if (Number.isFinite(Number(props.si_local_rating))) {
       extra += `<div style="margin-top:6px;"><b>Staten Island earnings score:</b> ${props.si_local_rating} (${prettyBucket(props.si_local_bucket)})</div>`;
