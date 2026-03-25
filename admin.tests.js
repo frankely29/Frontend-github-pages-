@@ -4,7 +4,6 @@
       label: 'Backend/API',
       tests: [
         { key: 'backend-status', label: 'Test Backend Status', path: '/admin/tests/backend-status' },
-        { key: 'build-sync', label: 'Test Backend Build Sync', path: '/admin/tests/build-sync' },
         { key: 'timeline', label: 'Test Timeline Ready', path: '/admin/tests/timeline' },
         { key: 'frame-current', label: 'Test Current Frame', path: '/admin/tests/frame-current' },
         { key: 'admin-auth', label: 'Test Admin Auth', path: '/admin/tests/admin-auth' },
@@ -44,7 +43,6 @@
       label: 'Client Map Logic',
       tests: [
         { key: 'client-system-audit', label: 'Test Client System Audit', type: 'client' },
-        { key: 'client-build-sync', label: 'Test Client Build Sync', type: 'client' },
         { key: 'client-score-field-sample', label: 'Test Client Score Field Sample', type: 'client' },
         { key: 'client-visible-source-routing', label: 'Test Client Visible Source Routing', type: 'client' },
         { key: 'client-recommendation-audit', label: 'Test Client Recommendation Audit', type: 'client' },
@@ -809,23 +807,6 @@
         ? `Crowding module health checks passed. Source: ${!!data.sourceReady} • Line layer: ${!!data.lineLayerReady}`
         : `Crowding module health checks failed. Source: ${!!data.sourceReady} • Line layer: ${!!data.lineLayerReady}`;
     }
-    if (test.key === 'build-sync') {
-      const data = response.data || {};
-      const backendBuildId = String(data.backend_build_id || '').trim();
-      const backendRelease = String(data.backend_release || '').trim();
-      const available = !!(backendBuildId || backendRelease);
-      detail = available
-        ? `Backend build identity is available. Compare with the frontend build identity to verify deploy sync. Backend build: ${backendBuildId || 'n/a'} • Release: ${backendRelease || 'n/a'}`
-        : 'Backend build identity cannot be verified because backend build identity is missing.';
-    }
-    if (test.key === 'client-build-sync') {
-      const data = response.data || {};
-      const frontendBuildId = String(data.frontendBuildId || '').trim();
-      const available = !!frontendBuildId;
-      detail = available
-        ? `Frontend build identity is available. Compare with the backend build identity to verify deploy sync. Frontend build: ${frontendBuildId}`
-        : 'Build identity cannot be verified because frontend build identity is missing.';
-    }
 
     return {
       status,
@@ -1150,19 +1131,6 @@
           distanceMiles: audit.distanceMiles,
           activeModeTag,
           crowdingBucket: audit.crowdingBucket ?? audit.crowding_bucket ?? null,
-        },
-      };
-    }
-    if (test.key === 'client-build-sync') {
-      const frontendBuildId = String(window.__TLC_FRONTEND_BUILD_ID__ || '').trim();
-      const pageTitle = String(document?.title || '').trim();
-      const teamJoseoShellLoaded = !!(window.TlcModeInternals || window.getTeamJoseoSystemAudit || document.getElementById('map'));
-      return {
-        ok: !!frontendBuildId,
-        data: {
-          frontendBuildId,
-          pageTitle,
-          teamJoseoShellLoaded,
         },
       };
     }
