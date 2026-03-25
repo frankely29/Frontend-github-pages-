@@ -308,6 +308,8 @@
         return "citywide_v3";
       case "citywide_shadow":
         return "citywide_v2";
+      case "manhattan_v3_shadow":
+        return "manhattan_v3";
       case "manhattan_shadow":
         return "manhattan_v2";
       case "bronx_wash_heights_shadow":
@@ -342,6 +344,7 @@
     let profileSnapshot = null;
     if (profileKey === "citywide_v3") profileSnapshot = all.citywide;
     if (profileKey === "citywide_v2") profileSnapshot = all.citywide;
+    if (profileKey === "manhattan_v3") profileSnapshot = all.manhattan_v3;
     if (profileKey === "manhattan_v2") profileSnapshot = all.manhattan;
     if (profileKey === "bronx_wash_heights_v2") profileSnapshot = all.bronx_wash_heights;
     if (profileKey === "queens_v2") profileSnapshot = all.queens;
@@ -354,6 +357,9 @@
     }
     if (profileKey === "citywide_v2") {
       shadowReady = Number.isFinite(Number(profileSnapshot?.earnings_shadow_rating_citywide_v2));
+    }
+    if (profileKey === "manhattan_v3") {
+      shadowReady = Number.isFinite(Number(profileSnapshot?.earnings_shadow_rating_manhattan_v3));
     }
     if (profileKey === "manhattan_v2") {
       shadowReady = Number.isFinite(Number(profileSnapshot?.earnings_shadow_rating_manhattan_v2));
@@ -390,6 +396,7 @@
     const readiness = getVisibleShadowReadiness(props, geom);
     const anyReady = !!(
       comparison?.shadow_ready ||
+      comparison?.manhattan_v3_shadow_ready ||
       comparison?.manhattan_shadow_ready ||
       comparison?.bronx_wash_heights_shadow_ready ||
       comparison?.queens_shadow_ready ||

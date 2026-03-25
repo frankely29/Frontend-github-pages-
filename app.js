@@ -2101,7 +2101,7 @@ function buildZoneShadowPreviewHTML(props, geom) {
   const activeModeTag = String(window.TlcModeModule?.getActiveSpecialModeTagForFeature?.(props, geom) || "");
   const boroughV3SpecByMode = {
     manhattan: {
-      title: "Team Joseo Manhattan_v3 candidate",
+      title: "Team Joseo Manhattan_v3 live",
       rating: shadowSummary.manhattan_v3_rating,
       bucket: shadowSummary.manhattan_v3_bucket,
       confidence: shadowSummary.manhattan_v3_confidence,
@@ -2299,9 +2299,13 @@ function buildPopupHTML(props, geom, metrics = getZonePopupMetrics(map?.getZoom?
   }
 
   if (modeFlags.manhattanMode && activeModeTag === "manhattan") {
+    const manhattanV3ShadowRating = Number(window.TlcModeModule?.readManhattanV3ShadowRating?.(props) ?? NaN);
+    const manhattanV3ShadowBucket = String(window.TlcModeModule?.readManhattanV3ShadowBucket?.(props) || "");
     const manhattanShadowRating = Number(window.TlcModeModule?.readManhattanShadowRating?.(props) ?? NaN);
     const manhattanShadowBucket = String(window.TlcModeModule?.readManhattanShadowBucket?.(props) || "");
-    if (Number.isFinite(manhattanShadowRating)) {
+    if (Number.isFinite(manhattanV3ShadowRating)) {
+      extra += `<div style="margin-top:6px;"><b>Manhattan earnings score:</b> ${manhattanV3ShadowRating} (${prettyBucket(manhattanV3ShadowBucket)})</div>`;
+    } else if (Number.isFinite(manhattanShadowRating)) {
       extra += `<div style="margin-top:6px;"><b>Manhattan earnings score:</b> ${manhattanShadowRating} (${prettyBucket(manhattanShadowBucket)})</div>`;
     } else if (Number.isFinite(Number(props.mh_local_rating))) {
       extra += `<div style="margin-top:6px;"><b>Manhattan earnings score:</b> ${props.mh_local_rating} (${prettyBucket(props.mh_local_bucket)})</div>`;

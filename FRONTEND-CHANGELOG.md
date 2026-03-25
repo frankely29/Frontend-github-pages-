@@ -99,3 +99,9 @@
 - Extended frontend shadow readers/comparison/summary paths to ingest borough-specific `*_v3` candidate fields strictly for debug/audit inspection.
 - Extended zone audit + shadow preview debug output to expose borough_v3 candidate rating/bucket/confidence and delta-vs-v2 for the currently active special-mode borough only.
 - Visible borough scores remain unchanged in this phase, and `citywide_v3` remains the live citywide score.
+
+### Phase 5 Manhattan_v3 visible cutover
+- Switched Manhattan-mode visible Team Joseo score source to `manhattan_v3` shadow fields for in-scope Manhattan zones, with `manhattan_v2` shadow retained as fallback/debug comparison.
+- Kept `citywide_v3` as the live citywide visible score and left Bronx/Wash Heights, Queens, Brooklyn, and Staten Island visible profile behavior unchanged in this phase.
+- Updated Manhattan popup/recommendation/debug/audit wiring to prefer `manhattan_v3` while preserving `manhattan_v2` comparison visibility.
+- No presence logic or polling behavior/interval changes were made.
