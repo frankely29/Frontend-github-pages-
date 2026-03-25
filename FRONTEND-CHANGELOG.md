@@ -105,3 +105,9 @@
 - Kept `citywide_v3` as the live citywide visible score and left Bronx/Wash Heights, Queens, Brooklyn, and Staten Island visible profile behavior unchanged in this phase.
 - Updated Manhattan popup/recommendation/debug/audit wiring to prefer `manhattan_v3` while preserving `manhattan_v2` comparison visibility.
 - No presence logic or polling behavior/interval changes were made.
+
+### Phase 6 Bronx/Wash Heights_v3 visible cutover
+- Switched Bronx/Wash Heights-mode visible Team Joseo score source to `bronx_wash_heights_v3` shadow fields, with `bronx_wash_heights_v2` shadow retained as fallback and debug comparison.
+- Kept `citywide_v3` live citywide behavior and `manhattan_v3` live Manhattan behavior unchanged, and left Queens/Brooklyn/Staten Island visible profile logic unchanged for this phase.
+- Updated Bronx/Wash Heights popup/recommendation/debug/audit wiring to prefer v3 while preserving v2 fallback/comparison visibility.
+- No presence logic or polling behavior/interval changes were made.
