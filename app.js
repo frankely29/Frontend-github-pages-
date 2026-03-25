@@ -945,7 +945,7 @@ function colorsPanelHTML() {
 
   return `
     <div class="panelBlock">
-      <div style="font-weight:800;margin-bottom:8px;">Demand Colors</div>
+      <div style="font-weight:800;margin-bottom:8px;">Team Joseo Score Colors</div>
       ${rows}
       <div style="margin-top:10px;opacity:0.75;font-weight:600;">
         ${(() => {
@@ -2171,8 +2171,14 @@ function buildPopupHTML(props, geom, metrics = getZonePopupMetrics(map?.getZoom?
     }
   }
 
-  if (modeFlags.manhattanMode && activeModeTag === "manhattan" && Number.isFinite(Number(props.mh_local_rating))) {
-    extra += `<div style="margin-top:6px;"><b>Manhattan Anti-Saturation:</b> ${props.mh_local_rating} (${prettyBucket(props.mh_local_bucket)})</div>`;
+  if (modeFlags.manhattanMode && activeModeTag === "manhattan") {
+    const manhattanShadowRating = Number(window.TlcModeModule?.readManhattanShadowRating?.(props) ?? NaN);
+    const manhattanShadowBucket = String(window.TlcModeModule?.readManhattanShadowBucket?.(props) || "");
+    if (Number.isFinite(manhattanShadowRating)) {
+      extra += `<div style="margin-top:6px;"><b>Manhattan earnings score:</b> ${manhattanShadowRating} (${prettyBucket(manhattanShadowBucket)})</div>`;
+    } else if (Number.isFinite(Number(props.mh_local_rating))) {
+      extra += `<div style="margin-top:6px;"><b>Manhattan earnings score:</b> ${props.mh_local_rating} (${prettyBucket(props.mh_local_bucket)})</div>`;
+    }
   }
 
   if (modeFlags.queensMode && activeModeTag === "queens") {

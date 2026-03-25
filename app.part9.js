@@ -106,7 +106,12 @@
           score = (Number(props.bwh_local_score ?? 0) * 100) - dMi * BRONX_WASH_HEIGHTS_DIST_PENALTY_PER_MILE;
         }
       } else if (modeTag === "manhattan") {
-        score = Number(props.mh_local_rating ?? NaN) - dMi * DIST_PENALTY_PER_MILE;
+        const manhattanShadowRating = Number(props.earnings_shadow_rating_manhattan_v2 ?? NaN);
+        if (Number.isFinite(manhattanShadowRating)) {
+          score = manhattanShadowRating - dMi * DIST_PENALTY_PER_MILE;
+        } else {
+          score = Number(props.mh_local_rating ?? NaN) - dMi * DIST_PENALTY_PER_MILE;
+        }
       } else if (modeTag === "staten_island") {
         const statenIslandShadowRating = Number(props.earnings_shadow_rating_staten_island_v2 ?? NaN);
         if (Number.isFinite(statenIslandShadowRating)) {
@@ -148,7 +153,10 @@
             Number.isFinite(Number(props.earnings_shadow_rating_staten_island_v2)) ||
             Number.isFinite(Number(props.si_local_rating))
           ),
-          usedMH: modeTag === "manhattan" && Number.isFinite(Number(props.mh_local_rating)),
+          usedMH: modeTag === "manhattan" && (
+            Number.isFinite(Number(props.earnings_shadow_rating_manhattan_v2)) ||
+            Number.isFinite(Number(props.mh_local_rating))
+          ),
           usedBWH: modeTag === "bronx_wash_heights" && (
             Number.isFinite(Number(props.earnings_shadow_rating_bronx_wash_heights_v2)) ||
             Number.isFinite(Number(props.bwh_local_rating))
