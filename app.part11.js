@@ -1302,22 +1302,47 @@
     return { statenIslandMode, bronxWashHeightsMode, manhattanMode, queensMode, brooklynMode };
   }
 
-  function toggleModeByKey(key) {
+  function normalizeModeKey(key) {
     switch (String(key || "")) {
       case "statenIsland":
-        statenIslandMode = !statenIslandMode;
+      case "statenIslandMode":
+        return "statenIsland";
+      case "bronxWashHeights":
+      case "bronxWashHeightsMode":
+        return "bronxWashHeights";
+      case "manhattan":
+      case "manhattanMode":
+        return "manhattan";
+      case "queens":
+      case "queensMode":
+        return "queens";
+      case "brooklyn":
+      case "brooklynMode":
+        return "brooklyn";
+      default:
+        return "";
+    }
+  }
+
+  function toggleModeByKey(key, desiredState) {
+    const normalizedKey = normalizeModeKey(key);
+    const useDesiredState = typeof desiredState === "boolean";
+
+    switch (normalizedKey) {
+      case "statenIsland":
+        statenIslandMode = useDesiredState ? desiredState : !statenIslandMode;
         break;
       case "bronxWashHeights":
-        bronxWashHeightsMode = !bronxWashHeightsMode;
+        bronxWashHeightsMode = useDesiredState ? desiredState : !bronxWashHeightsMode;
         break;
       case "manhattan":
-        manhattanMode = !manhattanMode;
+        manhattanMode = useDesiredState ? desiredState : !manhattanMode;
         break;
       case "queens":
-        queensMode = !queensMode;
+        queensMode = useDesiredState ? desiredState : !queensMode;
         break;
       case "brooklyn":
-        brooklynMode = !brooklynMode;
+        brooklynMode = useDesiredState ? desiredState : !brooklynMode;
         break;
       default:
         return getModeFlags();
