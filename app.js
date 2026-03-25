@@ -1820,6 +1820,8 @@ function wireZoneClickPopup() {
 
     const props = feature.properties || {};
     const geom = feature.geometry || null;
+    window.__TEAM_JOSEO_LAST_CLICKED_FEATURE_SCORE_DEBUG__ =
+      window.TlcModeModule?.getFeatureVisibleScoreDebug?.(props, geom) || null;
 
     closeZonePopup();
 
@@ -2191,12 +2193,12 @@ function buildZoneShadowPreviewHTML(props, geom) {
 }
 
 function getPopupVisibleRating(props, geom) {
-  const n = Number(window.TlcModeModule?.effectiveRating?.(props, geom) ?? props?.rating ?? NaN);
+  const n = Number(window.TlcModeModule?.effectiveRating?.(props, geom) ?? NaN);
   return Number.isFinite(n) ? Math.round(n) : "n/a";
 }
 
 function getPopupVisibleBucket(props, geom) {
-  return String(window.TlcModeModule?.effectiveBucket?.(props, geom) || props?.bucket || "");
+  return String(window.TlcModeModule?.effectiveBucket?.(props, geom) || "");
 }
 
 function getPopupVisibleScoreSource(props, geom) {
@@ -2443,10 +2445,7 @@ async function renderFrame(frame) {
   // IMPORTANT FIX: always recompute effectiveColor each render so toggles update instantly
   for (const f of fc.features) {
     const props = f.properties || {};
-    const baseCol =
-      effectiveColor(props, f.geometry) ||
-      (props?.style?.fillColor || props?.style?.color) ||
-      "#66aaff";
+    const baseCol = effectiveColor(props, f.geometry) || "#66aaff";
 
     const fillCol =
       window.TlcModeModule?.effectiveFillColor?.(props, f.geometry) ||

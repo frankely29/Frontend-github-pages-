@@ -1380,6 +1380,26 @@
     return clampRating100(getModeAwareBaseRating(props, geom));
   }
 
+  function getFeatureVisibleScoreDebug(props, geom) {
+    const visibleScoreSource = getVisibleScoreSourceForFeature(props, geom);
+    const airportExcluded = isQueensFeature(props) && isAirportZone(props);
+    const activeMode = getActiveSpecialModeTagForFeature(props, geom) || "citywide";
+    const rating = effectiveRating(props, geom);
+    const bucket = effectiveBucket(props, geom);
+    const color = effectiveColor(props, geom);
+    return {
+      visibleScoreSource,
+      airport_excluded: airportExcluded,
+      active_mode: activeMode,
+      chosen_rating_source: visibleScoreSource,
+      chosen_bucket_source: visibleScoreSource,
+      chosen_color_source: visibleScoreSource,
+      chosen_rating: Number.isFinite(Number(rating)) ? Number(rating) : null,
+      chosen_bucket: String(bucket || ""),
+      chosen_color: String(color || "")
+    };
+  }
+
   function getActiveSpecialModeTagForFeature(props, geom) {
     if (queensMode && isQueensModeZone(props)) return "queens";
     if (brooklynMode && isBrooklynModeZone(props)) return "brooklyn";
@@ -1532,6 +1552,10 @@
     getVisibleScoreSourceLabel,
     getVisibleScoreTechnicalSourceLabel,
     isVisibleScoreUsingFallback,
+    getModeAwareBaseRating,
+    getModeAwareBaseBucket,
+    getModeAwareBaseColor,
+    getFeatureVisibleScoreDebug,
     readCitywideV3ShadowRating,
     readCitywideV3ShadowBucket,
     readCitywideV3ShadowColor,

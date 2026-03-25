@@ -83,74 +83,13 @@
       if (!center) continue;
 
       const dMi = core.haversineMiles?.(userLatLng, center) || 0;
-      let score;
-      if (modeTag === "queens") {
-        const queensV3ShadowRating = Number(props.earnings_shadow_rating_queens_v3 ?? NaN);
-        if (Number.isFinite(queensV3ShadowRating)) {
-          score = queensV3ShadowRating - dMi * 5.0;
-        } else {
-          const queensV2ShadowRating = Number(props.earnings_shadow_rating_queens_v2 ?? NaN);
-          if (Number.isFinite(queensV2ShadowRating)) {
-            score = queensV2ShadowRating - dMi * 5.0;
-          } else if (Number.isFinite(Number(props.qn_local_rating))) {
-            score = Number(props.qn_local_rating) - dMi * 5.0;
-          } else {
-            score = (Number(props.qn_local_score ?? 0) * 100) - dMi * 5.0;
-          }
-        }
-      } else if (modeTag === "brooklyn") {
-        const brooklynV3ShadowRating = Number(props.earnings_shadow_rating_brooklyn_v3 ?? NaN);
-        if (Number.isFinite(brooklynV3ShadowRating)) {
-          score = brooklynV3ShadowRating - dMi * DIST_PENALTY_PER_MILE;
-        } else {
-          const brooklynV2ShadowRating = Number(props.earnings_shadow_rating_brooklyn_v2 ?? NaN);
-          if (Number.isFinite(brooklynV2ShadowRating)) {
-            score = brooklynV2ShadowRating - dMi * DIST_PENALTY_PER_MILE;
-          } else if (Number.isFinite(Number(props.bk_local_rating))) {
-            score = Number(props.bk_local_rating) - dMi * DIST_PENALTY_PER_MILE;
-          } else {
-            score = (Number(props.bk_local_score ?? 0) * 100) - dMi * DIST_PENALTY_PER_MILE;
-          }
-        }
-      } else if (modeTag === "bronx_wash_heights") {
-        const bwhV3ShadowRating = Number(props.earnings_shadow_rating_bronx_wash_heights_v3 ?? NaN);
-        if (Number.isFinite(bwhV3ShadowRating)) {
-          score = bwhV3ShadowRating - dMi * BRONX_WASH_HEIGHTS_DIST_PENALTY_PER_MILE;
-        } else {
-          const bwhV2ShadowRating = Number(props.earnings_shadow_rating_bronx_wash_heights_v2 ?? NaN);
-          if (Number.isFinite(bwhV2ShadowRating)) {
-            score = bwhV2ShadowRating - dMi * BRONX_WASH_HEIGHTS_DIST_PENALTY_PER_MILE;
-          } else {
-            score = (Number(props.bwh_local_score ?? 0) * 100) - dMi * BRONX_WASH_HEIGHTS_DIST_PENALTY_PER_MILE;
-          }
-        }
-      } else if (modeTag === "manhattan") {
-        const manhattanV3ShadowRating = Number(props.earnings_shadow_rating_manhattan_v3 ?? NaN);
-        if (Number.isFinite(manhattanV3ShadowRating)) {
-          score = manhattanV3ShadowRating - dMi * DIST_PENALTY_PER_MILE;
-        } else {
-          const manhattanV2ShadowRating = Number(props.earnings_shadow_rating_manhattan_v2 ?? NaN);
-          if (Number.isFinite(manhattanV2ShadowRating)) {
-            score = manhattanV2ShadowRating - dMi * DIST_PENALTY_PER_MILE;
-          } else {
-            score = Number(props.mh_local_rating ?? NaN) - dMi * DIST_PENALTY_PER_MILE;
-          }
-        }
-      } else if (modeTag === "staten_island") {
-        const statenIslandV3ShadowRating = Number(props.earnings_shadow_rating_staten_island_v3 ?? NaN);
-        if (Number.isFinite(statenIslandV3ShadowRating)) {
-          score = statenIslandV3ShadowRating - dMi * DIST_PENALTY_PER_MILE;
-        } else {
-          const statenIslandV2ShadowRating = Number(props.earnings_shadow_rating_staten_island_v2 ?? NaN);
-          if (Number.isFinite(statenIslandV2ShadowRating)) {
-            score = statenIslandV2ShadowRating - dMi * DIST_PENALTY_PER_MILE;
-          } else {
-            score = Number(props.si_local_rating ?? NaN) - dMi * DIST_PENALTY_PER_MILE;
-          }
-        }
-      } else {
-        score = rating - dMi * DIST_PENALTY_PER_MILE;
-      }
+      const scoreSource = String(core.getVisibleScoreSourceForFeature?.(props, geom) || "");
+      const distancePenaltyPerMile = modeTag === "queens"
+        ? 5.0
+        : (modeTag === "bronx_wash_heights"
+          ? BRONX_WASH_HEIGHTS_DIST_PENALTY_PER_MILE
+          : DIST_PENALTY_PER_MILE);
+      let score = rating - dMi * distancePenaltyPerMile;
 
       const crowdingPenalty = Number(
         window.TlcCommunityCrowdingModule?.getZoneCommunityCrowdingPenalty?.(props.LocationID) ?? 0
@@ -170,34 +109,12 @@
           lng: center.lng,
           name: (props.zone_name || "").trim() || `Zone ${props.LocationID ?? ""}`,
           borough: (props.borough || "").trim(),
-          usedQN: modeTag === "queens" && (
-            Number.isFinite(Number(props.earnings_shadow_rating_queens_v3)) ||
-            Number.isFinite(Number(props.earnings_shadow_rating_queens_v2)) ||
-            Number.isFinite(Number(props.qn_local_rating)) ||
-            Number.isFinite(Number(props.qn_local_score))
-          ),
-          usedBK: modeTag === "brooklyn" && (
-            Number.isFinite(Number(props.earnings_shadow_rating_brooklyn_v3)) ||
-            Number.isFinite(Number(props.earnings_shadow_rating_brooklyn_v2)) ||
-            Number.isFinite(Number(props.bk_local_rating)) ||
-            Number.isFinite(Number(props.bk_local_score))
-          ),
-          usedSI: modeTag === "staten_island" && (
-            Number.isFinite(Number(props.earnings_shadow_rating_staten_island_v3)) ||
-            Number.isFinite(Number(props.earnings_shadow_rating_staten_island_v2)) ||
-            Number.isFinite(Number(props.si_local_rating))
-          ),
-          usedMH: modeTag === "manhattan" && (
-            Number.isFinite(Number(props.earnings_shadow_rating_manhattan_v3)) ||
-            Number.isFinite(Number(props.earnings_shadow_rating_manhattan_v2)) ||
-            Number.isFinite(Number(props.mh_local_rating))
-          ),
-          usedBWH: modeTag === "bronx_wash_heights" && (
-            Number.isFinite(Number(props.earnings_shadow_rating_bronx_wash_heights_v3)) ||
-            Number.isFinite(Number(props.earnings_shadow_rating_bronx_wash_heights_v2)) ||
-            Number.isFinite(Number(props.bwh_local_rating)) ||
-            Number.isFinite(Number(props.bwh_local_score))
-          ),
+          usedQN: modeTag === "queens" && /^queens_/.test(scoreSource),
+          usedBK: modeTag === "brooklyn" && /^brooklyn_/.test(scoreSource),
+          usedSI: modeTag === "staten_island" && /^staten_island_/.test(scoreSource),
+          usedMH: modeTag === "manhattan" && /^manhattan_/.test(scoreSource),
+          usedBWH: modeTag === "bronx_wash_heights" && /^bronx_wash_heights_/.test(scoreSource),
+          visibleScoreSource: scoreSource || "legacy_citywide",
           communityCrowding: window.TlcCommunityCrowdingModule?.getZoneCommunityCrowdingSnapshot?.(props.LocationID) || null,
         };
       }
@@ -243,6 +160,7 @@
         best.usedBWH ? "bronx_wash_heights" :
         "citywide",
       communityCrowding: best.communityCrowding || null,
+      visibleScoreSource: best.visibleScoreSource || "legacy_citywide",
     };
   }
 
