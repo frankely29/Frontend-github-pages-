@@ -36,6 +36,7 @@
         { key: 'score-sql-definitions', label: 'Test Score SQL Definitions', path: '/admin/tests/score-sql-definitions' },
         { key: 'zone-geometry-metrics', label: 'Test Zone Geometry Metrics', path: '/admin/tests/zone-geometry-metrics' },
         { key: 'score-frame-integrity', label: 'Test Score Frame Integrity', path: '/admin/tests/score-frame-integrity' },
+        { key: 'generated-artifact-sync', label: 'Test Generated Artifact Sync', path: '/admin/tests/generated-artifact-sync' },
       ],
     },
     {
@@ -626,10 +627,11 @@
     return signals;
   }
 
-  function buildResult(test, response, c) {
+  function buildResult(test, response, c, resultState = {}) {
     const defaultDetail = summarize(response.data, c);
     let status = statusFrom(response.ok, response.data);
     let detail = defaultDetail;
+    const generatedArtifactSyncFailing = resultState?.['generated-artifact-sync']?.status === 'fail';
 
     if (test.key === 'radio-ui') {
       const data = response.data || {};
@@ -693,9 +695,15 @@
       const data = response.data || {};
       const liveProfiles = safeNumber(data.live_profile_count ?? data.visible_profile_count);
       const v3Profiles = safeNumber(data.v3_profile_count ?? data.visible_v3_profile_count);
-      detail = status === 'pass'
-        ? `Visible profiles live are fully on v3. Live: ${liveProfiles} • V3: ${v3Profiles}`
-        : `Score manifest check failed. Live: ${liveProfiles} • V3: ${v3Profiles}`;
+      if (status === 'pass') {
+        detail = generatedArtifactSyncFailing
+          ? `Score manifest appears internally valid, but generated frame artifacts are stale versus deployed code/source data. Live: ${liveProfiles} • V3: ${v3Profiles}`
+          : `Visible profiles live are fully on v3. Live: ${liveProfiles} • V3: ${v3Profiles}`;
+      } else {
+        detail = generatedArtifactSyncFailing
+          ? `Score manifest mismatch is consistent with stale generated frame artifacts (not frontend routing logic). Live: ${liveProfiles} • V3: ${v3Profiles}`
+          : `Score manifest check failed. Live: ${liveProfiles} • V3: ${v3Profiles}`;
+      }
     }
     if (test.key === 'score-sql-definitions') {
       const data = response.data || {};
@@ -717,9 +725,43 @@
       const data = response.data || {};
       const frameCount = safeNumber(data.frame_count ?? data.sampled_frame_count);
       const invalidFeatures = safeNumber(data.invalid_feature_count ?? data.feature_violation_count);
-      detail = status === 'pass'
-        ? `Frame integrity passed on sampled frames. Frames: ${frameCount} • Invalid features: ${invalidFeatures}`
-        : `Frame integrity found invalid features. Frames: ${frameCount} • Invalid features: ${invalidFeatures}`;
+      if (status === 'pass') {
+        detail = generatedArtifactSyncFailing
+          ? `Sampled frame integrity is locally consistent, but generated frame artifacts are stale versus deployed code/source data. Frames: ${frameCount} • Invalid features: ${invalidFeatures}`
+          : `Frame integrity passed on sampled frames. Frames: ${frameCount} • Invalid features: ${invalidFeatures}`;
+      } else {
+        detail = generatedArtifactSyncFailing
+          ? `Frame integrity anomalies are consistent with stale generated frame artifacts (not frontend routing logic). Frames: ${frameCount} • Invalid features: ${invalidFeatures}`
+          : `Frame integrity found invalid features. Frames: ${frameCount} • Invalid features: ${invalidFeatures}`;
+      }
+    }
+    if (test.key === 'generated-artifact-sync') {
+      const data = response.data || {};
+      const reasonCodes = toArray(
+        data.reason_codes
+        ?? data.reasonCodes
+        ?? data?.artifact_sync?.reason_codes
+        ?? data?.artifact_sync?.reasonCodes
+      );
+      const sampledSnapshot = pickFirst(data, [
+        'sampled_frame_integrity_snapshot',
+        'sampledFrameIntegritySnapshot',
+        'frame_integrity_snapshot',
+        'frameIntegritySnapshot',
+        'artifact_sync.sampled_frame_integrity_snapshot',
+        'artifact_sync.frame_integrity_snapshot',
+      ]);
+      if (status === 'pass') {
+        detail = 'Generated frame artifacts match deployed code and source data.';
+      } else {
+        const reasonSegment = reasonCodes.length
+          ? `Reason codes: ${reasonCodes.join(', ')}`
+          : 'Reason codes: unavailable';
+        const snapshotSegment = sampledSnapshot
+          ? `Sampled frame integrity snapshot: ${c.formatValue(sampledSnapshot)}`
+          : 'Sampled frame integrity snapshot: unavailable';
+        detail = `Generated frame artifacts are stale relative to deployed code or source data. ${reasonSegment} • ${snapshotSegment}`;
+      }
     }
     if (test.key === 'client-system-audit') {
       const data = response.data || {};
@@ -729,17 +771,29 @@
     }
     if (test.key === 'client-score-field-sample') {
       const data = response.data || {};
-      detail = status === 'pass'
-        ? `Sampled score fields are valid. Sampled: ${safeNumber(data.sampledFeatureCount)} • Violations: ${safeNumber(data.violationCount)}`
-        : `Score field sample found violations. Sampled: ${safeNumber(data.sampledFeatureCount)} • Violations: ${safeNumber(data.violationCount)}`;
+      if (status === 'pass') {
+        detail = generatedArtifactSyncFailing
+          ? `Sampled score fields are internally consistent, but generated frame artifacts are stale versus deployed code/source data. Sampled: ${safeNumber(data.sampledFeatureCount)} • Violations: ${safeNumber(data.violationCount)}`
+          : `Sampled score fields are valid. Sampled: ${safeNumber(data.sampledFeatureCount)} • Violations: ${safeNumber(data.violationCount)}`;
+      } else {
+        detail = generatedArtifactSyncFailing
+          ? `Score field violations are consistent with stale generated artifacts (not frontend field/routing code). Sampled: ${safeNumber(data.sampledFeatureCount)} • Violations: ${safeNumber(data.violationCount)}`
+          : `Score field sample found violations. Sampled: ${safeNumber(data.sampledFeatureCount)} • Violations: ${safeNumber(data.violationCount)}`;
+      }
     }
     if (test.key === 'client-visible-source-routing') {
       const data = response.data || {};
       const scenarioCount = Array.isArray(data.scenarios) ? data.scenarios.length : 0;
       const missingWarnings = Array.isArray(data.missingSampleWarnings) ? data.missingSampleWarnings.length : 0;
-      detail = status === 'pass'
-        ? `Mode routing returned valid sources and restored original state. Scenarios: ${scenarioCount} • Missing samples: ${missingWarnings}`
-        : `Mode routing check failed or found impossible source mapping. Scenarios: ${scenarioCount} • Missing samples: ${missingWarnings}`;
+      if (status === 'pass') {
+        detail = generatedArtifactSyncFailing
+          ? `Mode routing checks passed, but generated frame artifacts are stale versus deployed code/source data. Scenarios: ${scenarioCount} • Missing samples: ${missingWarnings}`
+          : `Mode routing returned valid sources and restored original state. Scenarios: ${scenarioCount} • Missing samples: ${missingWarnings}`;
+      } else {
+        detail = generatedArtifactSyncFailing
+          ? `Mode/source mismatch is consistent with stale generated artifacts rather than frontend routing code regressions. Scenarios: ${scenarioCount} • Missing samples: ${missingWarnings}`
+          : `Mode routing check failed or found impossible source mapping. Scenarios: ${scenarioCount} • Missing samples: ${missingWarnings}`;
+      }
     }
     if (test.key === 'client-recommendation-audit') {
       const data = response.data || {};
@@ -1619,7 +1673,7 @@
           const data = await helpers.request(test.path);
           response = { ok: true, data };
         }
-        const next = buildResult(test, response, c);
+        const next = buildResult(test, response, c, resultState);
         resultState[test.key] = next;
         paintResult(test, next);
       } catch (error) {
