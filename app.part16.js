@@ -37,6 +37,20 @@
     const activeModeTag = String(modeModule.getActiveSpecialModeTagForFeature?.(props, geom) || "");
 
     const allShadows = shadowModule.getAllZoneShadowSnapshots?.(props) || null;
+    const shadowCitywide = allShadows?.citywide || null;
+    const densityTripQuality = shadowCitywide
+      ? {
+          zoneAreaSqMiles: safeRound(shadowCitywide.zone_area_sq_miles_shadow, 2),
+          pickupsPerSqMileNow: safeRound(shadowCitywide.pickups_per_sq_mile_now_shadow, 1),
+          pickupsPerSqMileNext: safeRound(shadowCitywide.pickups_per_sq_mile_next_shadow, 1),
+          longTripShare20Plus: safeRound(shadowCitywide.long_trip_share_20plus_shadow, 4),
+          sameZoneDropoffShare: safeRound(shadowCitywide.same_zone_dropoff_share_shadow, 4),
+          demandDensityNowN: safeRound(shadowCitywide.demand_density_now_n_shadow, 4),
+          demandDensityNextN: safeRound(shadowCitywide.demand_density_next_n_shadow, 4),
+          longTripShare20PlusN: safeRound(shadowCitywide.long_trip_share_20plus_n_shadow, 4),
+          sameZoneRetentionPenaltyN: safeRound(shadowCitywide.same_zone_retention_penalty_n_shadow, 4),
+        }
+      : null;
     const crowding =
       crowdingModule.getZoneCommunityCrowdingSnapshot?.(props?.LocationID) || null;
 
@@ -54,6 +68,7 @@
       visibleColor,
       shadowProfiles: allShadows,
       shadowReadiness,
+      densityTripQuality,
       crowding: crowding
         ? {
             bucket: String(crowding.bucket || ""),

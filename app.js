@@ -2045,6 +2045,28 @@ function buildZoneShadowPreviewHTML(props, geom) {
     ? `${Math.round(Math.max(0, Math.min(1, confidence)) * 100)}%`
     : "n/a";
 
+  const zoneAreaSqMiles = Number(shadowSummary.zone_area_sq_miles);
+  const pickupsPerSqMileNow = Number(shadowSummary.pickups_per_sq_mile_now);
+  const pickupsPerSqMileNext = Number(shadowSummary.pickups_per_sq_mile_next);
+  const longTripShare20Plus = Number(shadowSummary.long_trip_share_20plus);
+  const sameZoneDropoffShare = Number(shadowSummary.same_zone_dropoff_share);
+
+  const zoneAreaLine = Number.isFinite(zoneAreaSqMiles)
+    ? `<div><b>Zone area:</b> ${zoneAreaSqMiles.toFixed(2)} sq mi</div>`
+    : "";
+  const pickupsPerSqMileNowLine = Number.isFinite(pickupsPerSqMileNow)
+    ? `<div><b>Pickups / sq mi now:</b> ${pickupsPerSqMileNow.toFixed(1).replace(/\.0$/, "")}</div>`
+    : "";
+  const pickupsPerSqMileNextLine = Number.isFinite(pickupsPerSqMileNext)
+    ? `<div><b>Pickups / sq mi next:</b> ${pickupsPerSqMileNext.toFixed(1).replace(/\.0$/, "")}</div>`
+    : "";
+  const longTripShare20PlusLine = Number.isFinite(longTripShare20Plus)
+    ? `<div><b>20+ min share:</b> ${Math.round(longTripShare20Plus * 100)}%</div>`
+    : "";
+  const sameZoneDropoffShareLine = Number.isFinite(sameZoneDropoffShare)
+    ? `<div><b>Same-zone dropoff share:</b> ${Math.round(sameZoneDropoffShare * 100)}%</div>`
+    : "";
+
   return `
     <div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(0,0,0,0.08);">
       <div style="font-weight:800;margin-bottom:4px;">Team Joseo shadow score preview</div>
@@ -2059,6 +2081,11 @@ function buildZoneShadowPreviewHTML(props, geom) {
       <div><b>Short-trip share:</b> ${Number.isFinite(Number(shadowSummary.short_trip_share)) ? `${Math.round(Number(shadowSummary.short_trip_share) * 100)}%` : "n/a"}</div>
       <div><b>Shared-ride share:</b> ${Number.isFinite(Number(shadowSummary.shared_ride_share)) ? `${Math.round(Number(shadowSummary.shared_ride_share) * 100)}%` : "n/a"}</div>
       <div><b>Downstream value:</b> ${Number.isFinite(Number(shadowSummary.downstream_value)) ? Number(shadowSummary.downstream_value).toFixed(3) : "n/a"}</div>
+      ${zoneAreaLine}
+      ${pickupsPerSqMileNowLine}
+      ${pickupsPerSqMileNextLine}
+      ${longTripShare20PlusLine}
+      ${sameZoneDropoffShareLine}
     </div>
   `;
 }
