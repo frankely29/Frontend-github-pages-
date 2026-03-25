@@ -2122,7 +2122,7 @@ function buildZoneShadowPreviewHTML(props, geom) {
       delta: shadowSummary.delta_queens_v3_vs_v2,
     },
     brooklyn: {
-      title: "Team Joseo Brooklyn_v3 candidate",
+      title: "Team Joseo Brooklyn_v3 live",
       rating: shadowSummary.brooklyn_v3_rating,
       bucket: shadowSummary.brooklyn_v3_bucket,
       confidence: shadowSummary.brooklyn_v3_confidence,
@@ -2327,9 +2327,13 @@ function buildPopupHTML(props, geom, metrics = getZonePopupMetrics(map?.getZoom?
   }
 
   if (modeFlags.brooklynMode && activeModeTag === "brooklyn") {
+    const brooklynV3ShadowRating = Number(window.TlcModeModule?.readBrooklynV3ShadowRating?.(props) ?? NaN);
+    const brooklynV3ShadowBucket = String(window.TlcModeModule?.readBrooklynV3ShadowBucket?.(props) || "");
     const brooklynShadowRating = Number(window.TlcModeModule?.readBrooklynShadowRating?.(props) ?? NaN);
     const brooklynShadowBucket = String(window.TlcModeModule?.readBrooklynShadowBucket?.(props) || "");
-    if (Number.isFinite(brooklynShadowRating)) {
+    if (Number.isFinite(brooklynV3ShadowRating)) {
+      extra += `<div style="margin-top:6px;"><b>Brooklyn earnings score:</b> ${brooklynV3ShadowRating} (${prettyBucket(brooklynV3ShadowBucket)})</div>`;
+    } else if (Number.isFinite(brooklynShadowRating)) {
       extra += `<div style="margin-top:6px;"><b>Brooklyn earnings score:</b> ${brooklynShadowRating} (${prettyBucket(brooklynShadowBucket)})</div>`;
     } else if (Number.isFinite(Number(props.bk_local_rating))) {
       extra += `<div style="margin-top:6px;"><b>Brooklyn earnings score:</b> ${props.bk_local_rating} (${prettyBucket(props.bk_local_bucket)})</div>`;
