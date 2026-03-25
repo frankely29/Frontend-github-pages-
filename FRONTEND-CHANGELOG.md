@@ -117,3 +117,9 @@
 - Kept `citywide_v3` live citywide behavior, `manhattan_v3` live Manhattan behavior, and `bronx_wash_heights_v3` live Bronx/Wash Heights behavior unchanged; Brooklyn/Staten Island visible profile logic also remains unchanged in this phase.
 - Updated Queens popup/recommendation/debug/audit wiring to prefer v3 while preserving v2 fallback/comparison visibility.
 - No presence logic or polling behavior/interval changes were made.
+
+### Phase 8 Brooklyn_v3 visible cutover
+- Switched Brooklyn-mode visible Team Joseo score source to `brooklyn_v3` shadow fields for Brooklyn zones, with `brooklyn_v2` shadow retained as fallback and debug comparison.
+- Kept `citywide_v3` as the live citywide score, `manhattan_v3` as the live Manhattan score, `bronx_wash_heights_v3` as the live Bronx/Wash Heights score, and `queens_v3` as the live Queens score.
+- Staten Island visible profile behavior remains unchanged in this phase (still on the current visible v2 profile logic).
+- No presence or polling behavior/interval changes were made.

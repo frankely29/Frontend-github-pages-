@@ -176,6 +176,20 @@
           ),
         }
       : null;
+    const brooklynV3LiveCandidate = allShadows
+      ? {
+          brooklynV3Rating: safeRound(allShadows.brooklyn_v3?.earnings_shadow_rating_brooklyn_v3, 2),
+          brooklynV3Bucket: String(allShadows.brooklyn_v3?.earnings_shadow_bucket_brooklyn_v3 || ""),
+          brooklynV3Confidence: safeRound(allShadows.brooklyn_v3?.earnings_shadow_confidence_brooklyn_v3, 3),
+          brooklynV3DeltaVsV2: safeRound(
+            Number.isFinite(Number(allShadows.brooklyn_v3?.earnings_shadow_rating_brooklyn_v3)) &&
+            Number.isFinite(Number(allShadows.brooklyn?.earnings_shadow_rating_brooklyn_v2))
+              ? Number(allShadows.brooklyn_v3.earnings_shadow_rating_brooklyn_v3) - Number(allShadows.brooklyn.earnings_shadow_rating_brooklyn_v2)
+              : null,
+            2
+          ),
+        }
+      : null;
     const crowding =
       crowdingModule.getZoneCommunityCrowdingSnapshot?.(props?.LocationID) || null;
 
@@ -198,6 +212,7 @@
       manhattanV3LiveCandidate,
       bronxWashHeightsV3LiveCandidate,
       queensV3LiveCandidate,
+      brooklynV3LiveCandidate,
       boroughV3Candidates,
       crowding: crowding
         ? {
