@@ -190,6 +190,20 @@
           ),
         }
       : null;
+    const statenIslandV3LiveCandidate = allShadows
+      ? {
+          statenIslandV3Rating: safeRound(allShadows.staten_island_v3?.earnings_shadow_rating_staten_island_v3, 2),
+          statenIslandV3Bucket: String(allShadows.staten_island_v3?.earnings_shadow_bucket_staten_island_v3 || ""),
+          statenIslandV3Confidence: safeRound(allShadows.staten_island_v3?.earnings_shadow_confidence_staten_island_v3, 3),
+          statenIslandV3DeltaVsV2: safeRound(
+            Number.isFinite(Number(allShadows.staten_island_v3?.earnings_shadow_rating_staten_island_v3)) &&
+            Number.isFinite(Number(allShadows.staten_island?.earnings_shadow_rating_staten_island_v2))
+              ? Number(allShadows.staten_island_v3.earnings_shadow_rating_staten_island_v3) - Number(allShadows.staten_island.earnings_shadow_rating_staten_island_v2)
+              : null,
+            2
+          ),
+        }
+      : null;
     const crowding =
       crowdingModule.getZoneCommunityCrowdingSnapshot?.(props?.LocationID) || null;
 
@@ -213,6 +227,7 @@
       bronxWashHeightsV3LiveCandidate,
       queensV3LiveCandidate,
       brooklynV3LiveCandidate,
+      statenIslandV3LiveCandidate,
       boroughV3Candidates,
       crowding: crowding
         ? {

@@ -123,3 +123,9 @@
 - Kept `citywide_v3` as the live citywide score, `manhattan_v3` as the live Manhattan score, `bronx_wash_heights_v3` as the live Bronx/Wash Heights score, and `queens_v3` as the live Queens score.
 - Staten Island visible profile behavior remains unchanged in this phase (still on the current visible v2 profile logic).
 - No presence or polling behavior/interval changes were made.
+
+### Phase 9 Staten Island_v3 visible cutover
+- Switched Staten Island-mode visible Team Joseo score source to `staten_island_v3` shadow fields for Staten Island zones, with `staten_island_v2` retained as fallback/debug comparison.
+- Kept `citywide_v3` as the live citywide score and left `manhattan_v3`, `bronx_wash_heights_v3`, `queens_v3`, and `brooklyn_v3` live behavior unchanged.
+- Visible v3 rollout is now complete across citywide and all borough modes.
+- No presence logic or polling behavior/interval changes were made.

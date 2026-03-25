@@ -137,11 +137,16 @@
           }
         }
       } else if (modeTag === "staten_island") {
-        const statenIslandShadowRating = Number(props.earnings_shadow_rating_staten_island_v2 ?? NaN);
-        if (Number.isFinite(statenIslandShadowRating)) {
-          score = statenIslandShadowRating - dMi * DIST_PENALTY_PER_MILE;
+        const statenIslandV3ShadowRating = Number(props.earnings_shadow_rating_staten_island_v3 ?? NaN);
+        if (Number.isFinite(statenIslandV3ShadowRating)) {
+          score = statenIslandV3ShadowRating - dMi * DIST_PENALTY_PER_MILE;
         } else {
-          score = Number(props.si_local_rating ?? NaN) - dMi * DIST_PENALTY_PER_MILE;
+          const statenIslandV2ShadowRating = Number(props.earnings_shadow_rating_staten_island_v2 ?? NaN);
+          if (Number.isFinite(statenIslandV2ShadowRating)) {
+            score = statenIslandV2ShadowRating - dMi * DIST_PENALTY_PER_MILE;
+          } else {
+            score = Number(props.si_local_rating ?? NaN) - dMi * DIST_PENALTY_PER_MILE;
+          }
         }
       } else {
         score = rating - dMi * DIST_PENALTY_PER_MILE;
@@ -178,6 +183,7 @@
             Number.isFinite(Number(props.bk_local_score))
           ),
           usedSI: modeTag === "staten_island" && (
+            Number.isFinite(Number(props.earnings_shadow_rating_staten_island_v3)) ||
             Number.isFinite(Number(props.earnings_shadow_rating_staten_island_v2)) ||
             Number.isFinite(Number(props.si_local_rating))
           ),
