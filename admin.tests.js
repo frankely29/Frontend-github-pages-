@@ -74,6 +74,7 @@
     include_chat_lite: false,
   });
   const LOAD_POLL_MS = 2000;
+  const REBUILD_POLL_MS = 2000;
   const ALLOWED_LOAD_DURATIONS = [30, 45, 60, 90];
 
   function summarize(data, c) {
@@ -697,11 +698,11 @@
       const v3Profiles = safeNumber(data.v3_profile_count ?? data.visible_v3_profile_count);
       if (status === 'pass') {
         detail = generatedArtifactSyncFailing
-          ? `Score manifest appears internally valid, but generated frame artifacts are stale versus deployed code/source data. Live: ${liveProfiles} • V3: ${v3Profiles}`
+          ? `The map is rendering, but live frame artifacts are stale relative to the deployed code. Score manifest appears internally valid. Live: ${liveProfiles} • V3: ${v3Profiles}`
           : `Visible profiles live are fully on v3. Live: ${liveProfiles} • V3: ${v3Profiles}`;
       } else {
         detail = generatedArtifactSyncFailing
-          ? `Score manifest mismatch is consistent with stale generated frame artifacts (not frontend routing logic). Live: ${liveProfiles} • V3: ${v3Profiles}`
+          ? `The map is rendering, but live frame artifacts are stale relative to the deployed code. Score manifest mismatch is consistent with stale generated frame artifacts (not frontend routing logic). Live: ${liveProfiles} • V3: ${v3Profiles}`
           : `Score manifest check failed. Live: ${liveProfiles} • V3: ${v3Profiles}`;
       }
     }
@@ -727,11 +728,11 @@
       const invalidFeatures = safeNumber(data.invalid_feature_count ?? data.feature_violation_count);
       if (status === 'pass') {
         detail = generatedArtifactSyncFailing
-          ? `Sampled frame integrity is locally consistent, but generated frame artifacts are stale versus deployed code/source data. Frames: ${frameCount} • Invalid features: ${invalidFeatures}`
+          ? `The map is rendering, but live frame artifacts are stale relative to the deployed code. Sampled frame integrity is locally consistent. Frames: ${frameCount} • Invalid features: ${invalidFeatures}`
           : `Frame integrity passed on sampled frames. Frames: ${frameCount} • Invalid features: ${invalidFeatures}`;
       } else {
         detail = generatedArtifactSyncFailing
-          ? `Frame integrity anomalies are consistent with stale generated frame artifacts (not frontend routing logic). Frames: ${frameCount} • Invalid features: ${invalidFeatures}`
+          ? `The map is rendering, but live frame artifacts are stale relative to the deployed code. Frame integrity anomalies are consistent with stale generated frame artifacts (not frontend routing logic). Frames: ${frameCount} • Invalid features: ${invalidFeatures}`
           : `Frame integrity found invalid features. Frames: ${frameCount} • Invalid features: ${invalidFeatures}`;
       }
     }
@@ -760,7 +761,7 @@
         const snapshotSegment = sampledSnapshot
           ? `Sampled frame integrity snapshot: ${c.formatValue(sampledSnapshot)}`
           : 'Sampled frame integrity snapshot: unavailable';
-        detail = `Generated frame artifacts are stale relative to deployed code or source data. ${reasonSegment} • ${snapshotSegment}`;
+        detail = `The map is rendering, but live frame artifacts are stale relative to the deployed code. ${reasonSegment} • ${snapshotSegment}`;
       }
     }
     if (test.key === 'client-system-audit') {
@@ -773,11 +774,11 @@
       const data = response.data || {};
       if (status === 'pass') {
         detail = generatedArtifactSyncFailing
-          ? `Sampled score fields are internally consistent, but generated frame artifacts are stale versus deployed code/source data. Sampled: ${safeNumber(data.sampledFeatureCount)} • Violations: ${safeNumber(data.violationCount)}`
+          ? `The map is rendering, but live frame artifacts are stale relative to the deployed code. Sampled score fields are internally consistent. Sampled: ${safeNumber(data.sampledFeatureCount)} • Violations: ${safeNumber(data.violationCount)}`
           : `Sampled score fields are valid. Sampled: ${safeNumber(data.sampledFeatureCount)} • Violations: ${safeNumber(data.violationCount)}`;
       } else {
         detail = generatedArtifactSyncFailing
-          ? `Score field violations are consistent with stale generated artifacts (not frontend field/routing code). Sampled: ${safeNumber(data.sampledFeatureCount)} • Violations: ${safeNumber(data.violationCount)}`
+          ? `The map is rendering, but live frame artifacts are stale relative to the deployed code. Score field violations are consistent with stale generated artifacts (not frontend field/routing code). Sampled: ${safeNumber(data.sampledFeatureCount)} • Violations: ${safeNumber(data.violationCount)}`
           : `Score field sample found violations. Sampled: ${safeNumber(data.sampledFeatureCount)} • Violations: ${safeNumber(data.violationCount)}`;
       }
     }
@@ -787,11 +788,11 @@
       const missingWarnings = Array.isArray(data.missingSampleWarnings) ? data.missingSampleWarnings.length : 0;
       if (status === 'pass') {
         detail = generatedArtifactSyncFailing
-          ? `Mode routing checks passed, but generated frame artifacts are stale versus deployed code/source data. Scenarios: ${scenarioCount} • Missing samples: ${missingWarnings}`
+          ? `The map is rendering, but live frame artifacts are stale relative to the deployed code. Mode routing checks passed. Scenarios: ${scenarioCount} • Missing samples: ${missingWarnings}`
           : `Mode routing returned valid sources and restored original state. Scenarios: ${scenarioCount} • Missing samples: ${missingWarnings}`;
       } else {
         detail = generatedArtifactSyncFailing
-          ? `Mode/source mismatch is consistent with stale generated artifacts rather than frontend routing code regressions. Scenarios: ${scenarioCount} • Missing samples: ${missingWarnings}`
+          ? `The map is rendering, but live frame artifacts are stale relative to the deployed code. Mode/source mismatch is consistent with stale generated artifacts rather than frontend routing code regressions. Scenarios: ${scenarioCount} • Missing samples: ${missingWarnings}`
           : `Mode routing check failed or found impossible source mapping. Scenarios: ${scenarioCount} • Missing samples: ${missingWarnings}`;
       }
     }
@@ -1605,8 +1606,30 @@
   function renderAdminTests(container, _payload, helpers) {
     const c = helpers?.components || window.AdminComponents;
     const resultState = {};
+    const rebuildState = {
+      status: 'idle',
+      duration: null,
+      error: '',
+      requestInFlight: false,
+      pollTimer: null,
+    };
 
     const sections = GROUPS.map((group) => `
+      ${group.label === 'Score / Manifest / Frame Integrity' ? `
+      <section class="adminSection">
+        <h4>Score Artifact Controls</h4>
+        <article class="adminUserCard adminTestCard">
+          <div class="adminRowBetween">
+            <strong>Score Artifact Controls</strong>
+            ${c.statusBadge ? c.statusBadge('pending') : c.badge('Pending', 'warn')}
+          </div>
+          <div class="adminMuted" data-rebuild-status-line>Idle</div>
+          <div class="adminRow wrap">
+            <button type="button" class="adminBtn" id="adminRebuildScoreArtifactsBtn">Rebuild Score Artifacts</button>
+          </div>
+        </article>
+      </section>
+      ` : ''}
       <section class="adminSection">
         <h4>${c.esc(group.label)}</h4>
         <div class="adminList">${group.tests.map((test) => `
@@ -1644,6 +1667,82 @@
     const pickupSuiteMount = container.querySelector('#adminPickupRecordingSuiteMount');
     if (pickupSuiteMount && window.PickupRecordingFeature && typeof window.PickupRecordingFeature.mountAdminPickupRecordingTests === 'function') {
       window.PickupRecordingFeature.mountAdminPickupRecordingTests(pickupSuiteMount, helpers);
+    }
+
+    function clearRebuildPollTimer() {
+      if (!rebuildState.pollTimer) return;
+      clearTimeout(rebuildState.pollTimer);
+      rebuildState.pollTimer = null;
+    }
+
+    function formatRebuildStatus(status) {
+      const normalized = normalizeStatus(status);
+      if (normalized === 'starting') return 'Starting...';
+      if (normalized === 'running') return 'Running...';
+      if (normalized === 'done') return 'Done';
+      if (normalized === 'error') return 'Error';
+      return 'Idle';
+    }
+
+    function paintRebuildStatus() {
+      const button = container.querySelector('#adminRebuildScoreArtifactsBtn');
+      const line = container.querySelector('[data-rebuild-status-line]');
+      if (button) button.disabled = rebuildState.requestInFlight;
+      if (!line) return;
+
+      const pieces = [formatRebuildStatus(rebuildState.status)];
+      if (rebuildState.duration !== null && rebuildState.duration !== undefined) {
+        pieces.push(`Duration: ${formatDuration(rebuildState.duration)}`);
+      }
+      if (rebuildState.error) {
+        pieces.push(`Error: ${rebuildState.error}`);
+      }
+      line.textContent = pieces.join(' • ');
+    }
+
+    async function pollRebuildStatus() {
+      try {
+        const statusPayload = await helpers.request('/generate_status');
+        const state = normalizeStatus(pickFirst(statusPayload, ['state', 'status']) || 'idle');
+        rebuildState.status = state;
+        rebuildState.duration = pickFirst(statusPayload, ['duration', 'duration_sec', 'elapsed_sec', 'elapsed']);
+        rebuildState.error = String(pickFirst(statusPayload, ['error', 'message', 'last_error']) || '').trim();
+        paintRebuildStatus();
+        if (['done', 'error', 'idle'].includes(state)) {
+          rebuildState.requestInFlight = false;
+          clearRebuildPollTimer();
+          paintRebuildStatus();
+          return;
+        }
+        rebuildState.pollTimer = setTimeout(pollRebuildStatus, REBUILD_POLL_MS);
+      } catch (error) {
+        rebuildState.status = 'error';
+        rebuildState.error = error?.message || 'Failed to poll generate status.';
+        rebuildState.requestInFlight = false;
+        clearRebuildPollTimer();
+        paintRebuildStatus();
+      }
+    }
+
+    async function triggerArtifactRebuild() {
+      if (rebuildState.requestInFlight) return;
+      rebuildState.requestInFlight = true;
+      rebuildState.status = 'starting';
+      rebuildState.duration = null;
+      rebuildState.error = '';
+      clearRebuildPollTimer();
+      paintRebuildStatus();
+      try {
+        await helpers.request('/admin/tests/rebuild-artifacts', { method: 'POST', body: {} });
+        rebuildState.status = 'running';
+        paintRebuildStatus();
+        pollRebuildStatus();
+      } catch (error) {
+        rebuildState.status = 'error';
+        rebuildState.error = error?.message || 'Unable to start rebuild.';
+        rebuildState.requestInFlight = false;
+        paintRebuildStatus();
+      }
     }
 
     function paintResult(test, result) {
@@ -1708,6 +1807,12 @@
       }
       trigger.disabled = false;
     });
+
+    container.querySelector('#adminRebuildScoreArtifactsBtn')?.addEventListener('click', () => {
+      triggerArtifactRebuild();
+    });
+
+    paintRebuildStatus();
   }
 
   window.AdminTests = { renderAdminTests };
