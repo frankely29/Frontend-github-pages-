@@ -76,3 +76,10 @@
 - Added visible shadow readiness helpers and technical/fallback labeling hooks for debug/audit tooling while preserving the existing score-source precedence and score formulas.
 - Added system-level audit summary helper (`window.getTeamJoseoSystemAudit`) that reports per-frame source counts, readiness, fallback usage, mode flags, recommendation audit, and community-crowding debug data on demand.
 - All visible mode cutovers remain active; no score formulas, recommendation math, community crowding math, polling cadence, or presence timing were changed in this phase.
+
+## 2026-03-25
+
+### Phase 1 density + trip-quality shadow inspection (frontend only)
+- Extended shadow-field ingestion/summaries so frontend debug/audit paths can inspect zone-area density metrics and long-trip/trap-related shadow fields, including normalized counterparts.
+- Extended zone audit and shadow preview debug output to surface the new density/trip-quality values when present.
+- Visible Team Joseo scores, recommendation logic, and normal map color behavior remain unchanged in this phase.
