@@ -848,30 +848,55 @@
     return byName || byId;
   }
 
+  const MODE_FLAG_TO_TOGGLE_KEY = {
+    statenIslandMode: 'statenIsland',
+    bronxWashHeightsMode: 'bronxWashHeights',
+    manhattanMode: 'manhattan',
+    queensMode: 'queens',
+    brooklynMode: 'brooklyn',
+  };
+  const SPECIAL_MODE_FLAG_KEYS = Object.keys(MODE_FLAG_TO_TOGGLE_KEY);
+  const SPECIAL_MODE_TOGGLE_KEYS = Object.values(MODE_FLAG_TO_TOGGLE_KEY);
+
+  function normalizeModeToggleKey(modeKeyOrFlagKey) {
+    const raw = String(modeKeyOrFlagKey || '').trim();
+    if (!raw) return '';
+    if (MODE_FLAG_TO_TOGGLE_KEY[raw]) return MODE_FLAG_TO_TOGGLE_KEY[raw];
+    if (SPECIAL_MODE_TOGGLE_KEYS.includes(raw)) return raw;
+    return '';
+  }
+
   function snapshotModeFlags() {
     return window.TlcModeModule?.getModeFlags?.() || null;
   }
 
-  function setSingleModeState(modeKeyOrNull) {
+  function setExactModeState(modeKeyOrFlagKey, shouldBeOn) {
     const modeModule = window.TlcModeModule;
-    const flags = modeModule?.getModeFlags?.() || {};
-    Object.keys(flags).forEach((key) => {
-      if (flags[key]) modeModule?.toggleModeByKey?.(key, false);
+    const toggleKey = normalizeModeToggleKey(modeKeyOrFlagKey);
+    if (!modeModule || !toggleKey || typeof shouldBeOn !== 'boolean') return;
+
+    const flags = modeModule.getModeFlags?.() || {};
+    const flagKey = `${toggleKey}Mode`;
+    const currentValue = !!flags[flagKey];
+    if (currentValue !== shouldBeOn) {
+      modeModule.toggleModeByKey?.(toggleKey, shouldBeOn);
+    }
+  }
+
+  function setSingleModeState(modeKeyOrNull) {
+    SPECIAL_MODE_TOGGLE_KEYS.forEach((toggleKey) => {
+      setExactModeState(toggleKey, false);
     });
-    if (modeKeyOrNull) modeModule?.toggleModeByKey?.(modeKeyOrNull, true);
+    if (modeKeyOrNull) {
+      setExactModeState(modeKeyOrNull, true);
+    }
     window.TlcModeInternals?.renderCurrentFrame?.();
   }
 
   function restoreModeFlags(snapshot) {
-    const modeModule = window.TlcModeModule;
-    const current = modeModule?.getModeFlags?.() || {};
     const target = snapshot && typeof snapshot === 'object' ? snapshot : {};
-    Object.keys(current).forEach((key) => {
-      const shouldBeOn = !!target[key];
-      if (!!current[key] !== shouldBeOn) modeModule?.toggleModeByKey?.(key, shouldBeOn);
-    });
-    Object.keys(target).forEach((key) => {
-      if (!(key in current) && target[key]) modeModule?.toggleModeByKey?.(key, true);
+    SPECIAL_MODE_FLAG_KEYS.forEach((flagKey) => {
+      setExactModeState(flagKey, !!target[flagKey]);
     });
     window.TlcModeInternals?.renderCurrentFrame?.();
   }
@@ -995,9 +1020,12 @@
       const scenarios = [];
       const missingSampleWarnings = [];
       let restoreOk = false;
+      const modeFlagsPerScenario = [];
+      let modeFlagsAfterCitywideReset = null;
 
       function inspectZone(label, modeKey, featureFinder, validSources, expectedSource, opts = {}) {
         setSingleModeState(modeKey);
+        modeFlagsPerScenario.push({ label, modeFlags: snapshotModeFlags() || {} });
         const feature = featureFinder();
         if (!feature) {
           missingSampleWarnings.push(`${label}: no sample feature found`);
@@ -1024,6 +1052,7 @@
 
       try {
         setSingleModeState(null);
+        modeFlagsAfterCitywideReset = snapshotModeFlags() || {};
         const citywide = window.getTeamJoseoSystemAudit?.() || {};
         const citywideCount = safeNumber(citywide?.visibleSourceCounts?.citywide_v3_shadow);
         scenarios.push({
@@ -1101,6 +1130,9 @@
           scenarios,
           missingSampleWarnings,
           restoreOk,
+          modeFlagsBefore: originalFlags || {},
+          modeFlagsAfterCitywideReset: modeFlagsAfterCitywideReset || {},
+          modeFlagsPerScenario,
         },
       };
     }
