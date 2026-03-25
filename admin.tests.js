@@ -30,6 +30,25 @@
       ],
     },
     {
+      label: 'Score / Manifest / Frame Integrity',
+      tests: [
+        { key: 'score-manifest', label: 'Test Score Manifest', path: '/admin/tests/score-manifest' },
+        { key: 'score-sql-definitions', label: 'Test Score SQL Definitions', path: '/admin/tests/score-sql-definitions' },
+        { key: 'zone-geometry-metrics', label: 'Test Zone Geometry Metrics', path: '/admin/tests/zone-geometry-metrics' },
+        { key: 'score-frame-integrity', label: 'Test Score Frame Integrity', path: '/admin/tests/score-frame-integrity' },
+      ],
+    },
+    {
+      label: 'Client Map Logic',
+      tests: [
+        { key: 'client-system-audit', label: 'Test Client System Audit', type: 'client' },
+        { key: 'client-score-field-sample', label: 'Test Client Score Field Sample', type: 'client' },
+        { key: 'client-visible-source-routing', label: 'Test Client Visible Source Routing', type: 'client' },
+        { key: 'client-recommendation-audit', label: 'Test Client Recommendation Audit', type: 'client' },
+        { key: 'client-crowding-audit', label: 'Test Client Crowding Audit', type: 'client' },
+      ],
+    },
+    {
       label: 'Optional External/Client checks',
       tests: [
         { key: 'weather-api', label: 'Test Weather API request', type: 'client' },
@@ -670,6 +689,70 @@
       status = allSharedOk ? 'pass' : 'fail';
       detail = `Me: ${data.me_id ?? 'n/a'} • Admin: ${!!data.me_is_admin} • Presence all: ${safeNumber(data.presence_all_count)} • Online: ${safeNumber(data.online_count)} • Ghosted: ${safeNumber(data.ghosted_count)} • Zone hotspots: ${safeNumber(data.pickup_zone_hotspot_count)} • Micro hotspots: ${safeNumber(data.pickup_micro_hotspot_count)}`;
     }
+    if (test.key === 'score-manifest') {
+      const data = response.data || {};
+      const liveProfiles = safeNumber(data.live_profile_count ?? data.visible_profile_count);
+      const v3Profiles = safeNumber(data.v3_profile_count ?? data.visible_v3_profile_count);
+      detail = status === 'pass'
+        ? `Visible profiles live are fully on v3. Live: ${liveProfiles} • V3: ${v3Profiles}`
+        : `Score manifest check failed. Live: ${liveProfiles} • V3: ${v3Profiles}`;
+    }
+    if (test.key === 'score-sql-definitions') {
+      const data = response.data || {};
+      const total = safeNumber(data.definition_count ?? data.total_count);
+      const missing = safeNumber(data.missing_definition_count ?? data.missing_count);
+      detail = status === 'pass'
+        ? `SQL definitions look complete. Definitions: ${total} • Missing: ${missing}`
+        : `SQL definition mismatch detected. Definitions: ${total} • Missing: ${missing}`;
+    }
+    if (test.key === 'zone-geometry-metrics') {
+      const data = response.data || {};
+      const zoneCount = safeNumber(data.zone_count ?? data.metrics_count);
+      const invalidArea = safeNumber(data.invalid_area_count ?? data.non_positive_area_count);
+      detail = status === 'pass'
+        ? `Zone geometry metrics are healthy. Zones: ${zoneCount} • Invalid area: ${invalidArea}`
+        : `Zone geometry metrics reported issues. Zones: ${zoneCount} • Invalid area: ${invalidArea}`;
+    }
+    if (test.key === 'score-frame-integrity') {
+      const data = response.data || {};
+      const frameCount = safeNumber(data.frame_count ?? data.sampled_frame_count);
+      const invalidFeatures = safeNumber(data.invalid_feature_count ?? data.feature_violation_count);
+      detail = status === 'pass'
+        ? `Frame integrity passed on sampled frames. Frames: ${frameCount} • Invalid features: ${invalidFeatures}`
+        : `Frame integrity found invalid features. Frames: ${frameCount} • Invalid features: ${invalidFeatures}`;
+    }
+    if (test.key === 'client-system-audit') {
+      const data = response.data || {};
+      detail = status === 'pass'
+        ? `Client system audit is available and healthy. Features: ${safeNumber(data.featureCount)} • Fallback: ${safeNumber(data.fallbackCount)}`
+        : `Client system audit is missing required hooks or data. Features: ${safeNumber(data.featureCount)} • Fallback: ${safeNumber(data.fallbackCount)}`;
+    }
+    if (test.key === 'client-score-field-sample') {
+      const data = response.data || {};
+      detail = status === 'pass'
+        ? `Sampled score fields are valid. Sampled: ${safeNumber(data.sampledFeatureCount)} • Violations: ${safeNumber(data.violationCount)}`
+        : `Score field sample found violations. Sampled: ${safeNumber(data.sampledFeatureCount)} • Violations: ${safeNumber(data.violationCount)}`;
+    }
+    if (test.key === 'client-visible-source-routing') {
+      const data = response.data || {};
+      const scenarioCount = Array.isArray(data.scenarios) ? data.scenarios.length : 0;
+      const missingWarnings = Array.isArray(data.missingSampleWarnings) ? data.missingSampleWarnings.length : 0;
+      detail = status === 'pass'
+        ? `Mode routing returned valid sources and restored original state. Scenarios: ${scenarioCount} • Missing samples: ${missingWarnings}`
+        : `Mode routing check failed or found impossible source mapping. Scenarios: ${scenarioCount} • Missing samples: ${missingWarnings}`;
+    }
+    if (test.key === 'client-recommendation-audit') {
+      const data = response.data || {};
+      detail = status === 'pass'
+        ? `Recommendation audit returned a valid top zone. Zone: ${data.zoneName || 'n/a'} • Mode: ${data.activeModeTag || 'citywide'}`
+        : `Recommendation audit did not return a valid result. Zone: ${data.zoneName || 'n/a'} • Mode: ${data.activeModeTag || 'n/a'}`;
+    }
+    if (test.key === 'client-crowding-audit') {
+      const data = response.data || {};
+      detail = status === 'pass'
+        ? `Crowding module health checks passed. Source: ${!!data.sourceReady} • Line layer: ${!!data.lineLayerReady}`
+        : `Crowding module health checks failed. Source: ${!!data.sourceReady} • Line layer: ${!!data.lineLayerReady}`;
+    }
 
     return {
       status,
@@ -677,6 +760,76 @@
       detail,
       lastRun: Date.now(),
     };
+  }
+
+  function getCurrentFrameFeatures() {
+    return window.TlcModeInternals?.getCurrentFrame?.()?.polygons?.features || [];
+  }
+
+  function getFeatureZoneId(feature) {
+    return String(feature?.properties?.LocationID ?? '').trim();
+  }
+
+  function sampleFeatures(features, maxCount = 40) {
+    if (!Array.isArray(features) || !features.length) return [];
+    const count = Math.max(1, Math.min(maxCount, features.length));
+    if (features.length <= count) return features.slice();
+    const out = [];
+    const seen = new Set();
+    for (let i = 0; i < count; i += 1) {
+      const ratio = count === 1 ? 0 : (i / (count - 1));
+      const idx = Math.max(0, Math.min(features.length - 1, Math.round(ratio * (features.length - 1))));
+      if (!seen.has(idx)) {
+        seen.add(idx);
+        out.push(features[idx]);
+      }
+    }
+    return out;
+  }
+
+  function findFeatureByPredicate(features, predicate) {
+    if (!Array.isArray(features) || typeof predicate !== 'function') return null;
+    for (const feature of features) {
+      if (predicate(feature)) return feature;
+    }
+    return null;
+  }
+
+  function isAirportFeature(feature) {
+    const props = feature?.properties || {};
+    const zoneName = String(props.zone_name || props.Zone || props.name || '').toLowerCase();
+    const zoneId = getFeatureZoneId(feature);
+    const byName = /airport|jfk|la guardia|laguardia|newark/.test(zoneName);
+    const byId = ['1', '132', '138'].includes(zoneId);
+    return byName || byId;
+  }
+
+  function snapshotModeFlags() {
+    return window.TlcModeModule?.getModeFlags?.() || null;
+  }
+
+  function setSingleModeState(modeKeyOrNull) {
+    const modeModule = window.TlcModeModule;
+    const flags = modeModule?.getModeFlags?.() || {};
+    Object.keys(flags).forEach((key) => {
+      if (flags[key]) modeModule?.toggleModeByKey?.(key, false);
+    });
+    if (modeKeyOrNull) modeModule?.toggleModeByKey?.(modeKeyOrNull, true);
+    window.TlcModeInternals?.renderCurrentFrame?.();
+  }
+
+  function restoreModeFlags(snapshot) {
+    const modeModule = window.TlcModeModule;
+    const current = modeModule?.getModeFlags?.() || {};
+    const target = snapshot && typeof snapshot === 'object' ? snapshot : {};
+    Object.keys(current).forEach((key) => {
+      const shouldBeOn = !!target[key];
+      if (!!current[key] !== shouldBeOn) modeModule?.toggleModeByKey?.(key, shouldBeOn);
+    });
+    Object.keys(target).forEach((key) => {
+      if (!(key in current) && target[key]) modeModule?.toggleModeByKey?.(key, true);
+    });
+    window.TlcModeInternals?.renderCurrentFrame?.();
   }
 
   function runClientTest(test, helpers) {
@@ -718,6 +871,232 @@
           data: data || {},
         }))
         .catch((error) => ({ ok: false, data: { error: error?.message || 'Smoke test failed.' } }));
+    }
+    if (test.key === 'client-system-audit') {
+      const hasSystemAudit = typeof window.getTeamJoseoSystemAudit === 'function';
+      const hasZoneAudit = typeof window.getTeamJoseoZoneAuditByLocationId === 'function';
+      const hasCrowding = typeof window.getCommunityCrowdingDebug === 'function';
+      const hasRecommendation = typeof window.getTeamJoseoRecommendationAudit === 'function';
+      if (!hasSystemAudit) {
+        return { ok: false, data: { error: 'window.getTeamJoseoSystemAudit is not available.', hasZoneAudit, hasCrowding, hasRecommendation } };
+      }
+      const audit = window.getTeamJoseoSystemAudit();
+      const visibleSourceCounts = audit?.visibleSourceCounts || null;
+      const featureCount = safeNumber(audit?.featureCount);
+      const ok = !!(audit && featureCount > 0 && visibleSourceCounts && typeof visibleSourceCounts === 'object' && hasZoneAudit && hasCrowding && hasRecommendation);
+      return {
+        ok,
+        data: {
+          featureCount,
+          fallbackCount: safeNumber(audit?.fallbackCount),
+          visibleSourceCounts: visibleSourceCounts || {},
+          modeFlags: audit?.modeFlags || snapshotModeFlags() || {},
+          recommendationPresent: hasRecommendation,
+          crowdingHelperPresent: hasCrowding,
+          zoneAuditPresent: hasZoneAudit,
+        },
+      };
+    }
+    if (test.key === 'client-score-field-sample') {
+      const features = getCurrentFrameFeatures();
+      const sampled = sampleFeatures(features, 40);
+      const violations = [];
+      function pushViolation(zoneId, field, value, reason) {
+        violations.push({ zoneId, field, value, reason });
+      }
+      sampled.forEach((feature) => {
+        const props = feature?.properties || {};
+        const zoneId = getFeatureZoneId(feature);
+        const rating = Number(props.rating);
+        const score = props.earnings_shadow_rating_citywide_v3;
+        const confidence = props.earnings_shadow_confidence_citywide_v3;
+        const zoneArea = props.zone_area_sq_miles_shadow;
+        const pickupsNow = props.pickups_per_sq_mile_now_shadow;
+        const pickupsNext = props.pickups_per_sq_mile_next_shadow;
+        const longTripShare = props.long_trip_share_20plus_shadow;
+        const sameZoneDropoff = props.same_zone_dropoff_share_shadow;
+        const demandNow = props.demand_density_now_n_shadow;
+        const demandNext = props.demand_density_next_n_shadow;
+        const retentionPenalty = props.same_zone_retention_penalty_n_shadow;
+
+        if (!zoneId) pushViolation(zoneId, 'LocationID', props.LocationID, 'Missing LocationID');
+        if (!Number.isFinite(rating)) pushViolation(zoneId, 'rating', props.rating, 'rating must be finite');
+        if (!(score === null || (Number.isFinite(Number(score)) && Number(score) >= 1 && Number(score) <= 100))) {
+          pushViolation(zoneId, 'earnings_shadow_rating_citywide_v3', score, 'Must be null or 1..100');
+        }
+        if (score !== null && !(Number.isFinite(Number(confidence)) && Number(confidence) >= 0 && Number(confidence) <= 1)) {
+          pushViolation(zoneId, 'earnings_shadow_confidence_citywide_v3', confidence, 'Must be 0..1 when score is non-null');
+        }
+        if (!(zoneArea === null || (Number.isFinite(Number(zoneArea)) && Number(zoneArea) > 0))) pushViolation(zoneId, 'zone_area_sq_miles_shadow', zoneArea, 'Must be null or > 0');
+        if (!(pickupsNow === null || (Number.isFinite(Number(pickupsNow)) && Number(pickupsNow) >= 0))) pushViolation(zoneId, 'pickups_per_sq_mile_now_shadow', pickupsNow, 'Must be null or >= 0');
+        if (!(pickupsNext === null || (Number.isFinite(Number(pickupsNext)) && Number(pickupsNext) >= 0))) pushViolation(zoneId, 'pickups_per_sq_mile_next_shadow', pickupsNext, 'Must be null or >= 0');
+        if (!(longTripShare === null || (Number.isFinite(Number(longTripShare)) && Number(longTripShare) >= 0 && Number(longTripShare) <= 1))) pushViolation(zoneId, 'long_trip_share_20plus_shadow', longTripShare, 'Must be null or 0..1');
+        if (!(sameZoneDropoff === null || (Number.isFinite(Number(sameZoneDropoff)) && Number(sameZoneDropoff) >= 0 && Number(sameZoneDropoff) <= 1))) pushViolation(zoneId, 'same_zone_dropoff_share_shadow', sameZoneDropoff, 'Must be null or 0..1');
+        if (!(demandNow === null || (Number.isFinite(Number(demandNow)) && Number(demandNow) >= 0 && Number(demandNow) <= 1))) pushViolation(zoneId, 'demand_density_now_n_shadow', demandNow, 'Must be null or 0..1');
+        if (!(demandNext === null || (Number.isFinite(Number(demandNext)) && Number(demandNext) >= 0 && Number(demandNext) <= 1))) pushViolation(zoneId, 'demand_density_next_n_shadow', demandNext, 'Must be null or 0..1');
+        if (!(retentionPenalty === null || (Number.isFinite(Number(retentionPenalty)) && Number(retentionPenalty) >= 0 && Number(retentionPenalty) <= 1))) pushViolation(zoneId, 'same_zone_retention_penalty_n_shadow', retentionPenalty, 'Must be null or 0..1');
+      });
+      return {
+        ok: sampled.length > 0 && !violations.length,
+        data: {
+          sampledFeatureCount: sampled.length,
+          violationCount: violations.length,
+          firstViolations: violations.slice(0, 10),
+        },
+      };
+    }
+    if (test.key === 'client-visible-source-routing') {
+      const features = getCurrentFrameFeatures();
+      const originalFlags = snapshotModeFlags();
+      const scenarios = [];
+      const missingSampleWarnings = [];
+      let restoreOk = false;
+
+      function inspectZone(label, modeKey, featureFinder, validSources, expectedSource, opts = {}) {
+        setSingleModeState(modeKey);
+        const feature = featureFinder();
+        if (!feature) {
+          missingSampleWarnings.push(`${label}: no sample feature found`);
+          scenarios.push({ label, ok: false, warning: 'No sample feature found' });
+          return;
+        }
+        const zoneId = getFeatureZoneId(feature);
+        const zoneAudit = window.getTeamJoseoZoneAuditByLocationId?.(zoneId) || {};
+        const source = String(zoneAudit.visibleSource || zoneAudit.visible_source || '').trim();
+        const possible = validSources.includes(source);
+        if (opts.disallowSources && opts.disallowSources.includes(source)) {
+          scenarios.push({ label, zoneId, source, ok: false, expected: expectedSource, reason: 'Impossible source for scenario' });
+          return;
+        }
+        scenarios.push({
+          label,
+          zoneId,
+          source,
+          ok: possible,
+          expected: expectedSource,
+          expectedSeen: source === expectedSource,
+        });
+      }
+
+      try {
+        setSingleModeState(null);
+        const citywide = window.getTeamJoseoSystemAudit?.() || {};
+        const citywideCount = safeNumber(citywide?.visibleSourceCounts?.citywide_v3_shadow);
+        scenarios.push({
+          label: 'Citywide default',
+          source: 'citywide_v3_shadow',
+          ok: citywideCount > 0,
+          count: citywideCount,
+        });
+
+        inspectZone(
+          'Manhattan',
+          'manhattan',
+          () => findFeatureByPredicate(features, (feature) => /manhattan/i.test(String(feature?.properties?.borough || feature?.properties?.Borough || '')) && !isAirportFeature(feature)),
+          ['manhattan_v3_shadow', 'manhattan_shadow', 'manhattan_mode_legacy'],
+          'manhattan_v3_shadow'
+        );
+        inspectZone(
+          'Bronx/Wash Heights',
+          'bronxWashHeights',
+          () => findFeatureByPredicate(features, (feature) => /bronx/i.test(String(feature?.properties?.borough || feature?.properties?.Borough || ''))),
+          ['bronx_wash_heights_v3_shadow', 'bronx_wash_heights_shadow', 'bronx_wash_heights_mode_legacy'],
+          'bronx_wash_heights_v3_shadow'
+        );
+        inspectZone(
+          'Queens',
+          'queens',
+          () => findFeatureByPredicate(features, (feature) => /queens/i.test(String(feature?.properties?.borough || feature?.properties?.Borough || '')) && !isAirportFeature(feature)),
+          ['queens_v3_shadow', 'queens_shadow', 'queens_mode_legacy'],
+          'queens_v3_shadow'
+        );
+        const queensAirport = findFeatureByPredicate(features, (feature) => /queens/i.test(String(feature?.properties?.borough || feature?.properties?.Borough || '')) && isAirportFeature(feature));
+        if (queensAirport) {
+          const airportAudit = window.getTeamJoseoZoneAuditByLocationId?.(getFeatureZoneId(queensAirport)) || {};
+          const airportSource = String(airportAudit.visibleSource || airportAudit.visible_source || '').trim();
+          scenarios.push({
+            label: 'Queens airport exclusion',
+            zoneId: getFeatureZoneId(queensAirport),
+            source: airportSource,
+            ok: airportSource !== 'queens_v3_shadow',
+          });
+        }
+        inspectZone(
+          'Brooklyn',
+          'brooklyn',
+          () => findFeatureByPredicate(features, (feature) => /brooklyn/i.test(String(feature?.properties?.borough || feature?.properties?.Borough || ''))),
+          ['brooklyn_v3_shadow', 'brooklyn_shadow', 'brooklyn_mode_legacy'],
+          'brooklyn_v3_shadow'
+        );
+        inspectZone(
+          'Staten Island',
+          'statenIsland',
+          () => findFeatureByPredicate(features, (feature) => /staten/i.test(String(feature?.properties?.borough || feature?.properties?.Borough || ''))),
+          ['staten_island_v3_shadow', 'staten_island_shadow', 'staten_island_mode_legacy'],
+          'staten_island_v3_shadow'
+        );
+      } finally {
+        try {
+          restoreModeFlags(originalFlags);
+          restoreOk = true;
+        } catch (_restoreError) {
+          restoreOk = false;
+        }
+      }
+
+      const citywideOk = scenarios.find((s) => s.label === 'Citywide default')?.ok === true;
+      const boroughScenarioLabels = ['Manhattan', 'Bronx/Wash Heights', 'Queens', 'Brooklyn', 'Staten Island'];
+      const boroughScenarios = scenarios.filter((s) => boroughScenarioLabels.includes(s.label));
+      const boroughFound = boroughScenarios.length === boroughScenarioLabels.length;
+      const impossibleSource = boroughScenarios.some((s) => s.ok === false && !/no sample/i.test(String(s.warning || '')));
+      const ok = restoreOk && citywideOk && boroughFound && !impossibleSource;
+
+      return {
+        ok,
+        data: {
+          scenarios,
+          missingSampleWarnings,
+          restoreOk,
+        },
+      };
+    }
+    if (test.key === 'client-recommendation-audit') {
+      if (typeof window.getTeamJoseoRecommendationAudit !== 'function') {
+        return { ok: false, data: { error: 'window.getTeamJoseoRecommendationAudit is not available.' } };
+      }
+      const audit = window.getTeamJoseoRecommendationAudit();
+      if (!audit) return { ok: false, data: { error: 'Recommendation audit returned null.' } };
+      const activeModeTag = String(audit.activeModeTag || 'citywide').trim();
+      const ok = !!(audit.zoneName && Number.isFinite(Number(audit.rating)) && activeModeTag);
+      return {
+        ok,
+        data: {
+          zoneName: audit.zoneName,
+          borough: audit.borough,
+          rating: Number(audit.rating),
+          distanceMiles: audit.distanceMiles,
+          activeModeTag,
+          crowdingBucket: audit.crowdingBucket ?? audit.crowding_bucket ?? null,
+        },
+      };
+    }
+    if (test.key === 'client-crowding-audit') {
+      if (typeof window.getCommunityCrowdingDebug !== 'function') {
+        return { ok: false, data: { error: 'window.getCommunityCrowdingDebug is not available.' } };
+      }
+      const debug = window.getCommunityCrowdingDebug();
+      const ok = !!(debug && typeof debug.sourceReady === 'boolean' && typeof debug.lineLayerReady === 'boolean');
+      return {
+        ok,
+        data: {
+          sourceReady: !!debug?.sourceReady,
+          lineLayerReady: !!debug?.lineLayerReady,
+          flaggedZoneCount: safeNumber(debug?.flaggedZoneCount ?? debug?.flagged_zone_count),
+          watchCount: safeNumber(debug?.watchCount ?? debug?.watch_count),
+          crowdedCount: safeNumber(debug?.crowdedCount ?? debug?.crowded_count),
+          heavyCount: safeNumber(debug?.heavyCount ?? debug?.heavy_count),
+        },
+      };
     }
     return { ok: false, data: { message: 'Client test not implemented.' } };
   }
