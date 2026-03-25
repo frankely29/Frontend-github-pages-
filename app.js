@@ -956,7 +956,7 @@ function colorsPanelHTML() {
           if (modeFlags.bronxWashHeightsMode) active.push("Bronx/Wash Heights Mode");
           if (modeFlags.manhattanMode) active.push("Manhattan Mode");
           if (!active.length) {
-            return "Base colors reflect the Team Joseo citywide score (earnings opportunity), balancing demand, demand density, long-trip quality, pay quality, downstream value, and trap penalties. Time label is NYC time. Dashed amber/orange outline = Team Joseo community crowding caution (community-only, not TLC/HVFHV truth).";
+            return "Base colors reflect the Team Joseo citywide score (earnings opportunity), balancing busy-for-size demand density, trip quality, continuation, and trap avoidance. Airport zones are excluded from hotspot logic. Time label is NYC time. Dashed amber/orange outline = Team Joseo community crowding caution (community-only, not TLC/HVFHV truth).";
           }
           const joined = active.length === 1
             ? active[0]
@@ -2052,6 +2052,14 @@ function buildZoneShadowPreviewHTML(props, geom) {
   const pickupsPerSqMileNext = Number(shadowSummary.pickups_per_sq_mile_next);
   const longTripShare20Plus = Number(shadowSummary.long_trip_share_20plus);
   const sameZoneDropoffShare = Number(shadowSummary.same_zone_dropoff_share);
+  const balancedTripShare = Number(shadowSummary.balanced_trip_share);
+  const balancedTripQualityN = Number(shadowSummary.balanced_trip_quality_n);
+  const busyNowBaseN = Number(shadowSummary.busy_now_base_n);
+  const busyNextBaseN = Number(shadowSummary.busy_next_base_n);
+  const churnPressureN = Number(shadowSummary.churn_pressure_n);
+  const manhattanCoreSaturationProxyN = Number(shadowSummary.manhattan_core_saturation_proxy_n);
+  const citywideAnchorNormV3 = Number(shadowSummary.citywide_anchor_norm_v3);
+  const airportExcluded = !!shadowSummary.airport_excluded;
 
   const zoneAreaLine = Number.isFinite(zoneAreaSqMiles)
     ? `<div><b>Zone area:</b> ${zoneAreaSqMiles.toFixed(2)} sq mi</div>`
@@ -2067,6 +2075,27 @@ function buildZoneShadowPreviewHTML(props, geom) {
     : "";
   const sameZoneDropoffShareLine = Number.isFinite(sameZoneDropoffShare)
     ? `<div><b>Same-zone dropoff share:</b> ${Math.round(sameZoneDropoffShare * 100)}%</div>`
+    : "";
+  const balancedTripShareLine = Number.isFinite(balancedTripShare)
+    ? `<div><b>Balanced trip share:</b> ${Math.round(balancedTripShare * 100)}%</div>`
+    : "";
+  const balancedTripQualityNLine = Number.isFinite(balancedTripQualityN)
+    ? `<div><b>Balanced trip quality (n):</b> ${balancedTripQualityN.toFixed(3)}</div>`
+    : "";
+  const busyNowBaseNLine = Number.isFinite(busyNowBaseN)
+    ? `<div><b>Busy-now base (n):</b> ${busyNowBaseN.toFixed(3)}</div>`
+    : "";
+  const busyNextBaseNLine = Number.isFinite(busyNextBaseN)
+    ? `<div><b>Busy-next base (n):</b> ${busyNextBaseN.toFixed(3)}</div>`
+    : "";
+  const churnPressureNLine = Number.isFinite(churnPressureN)
+    ? `<div><b>Churn pressure (n):</b> ${churnPressureN.toFixed(3)}</div>`
+    : "";
+  const manhattanCoreSaturationProxyNLine = Number.isFinite(manhattanCoreSaturationProxyN)
+    ? `<div><b>Manhattan saturation proxy (n):</b> ${manhattanCoreSaturationProxyN.toFixed(3)}</div>`
+    : "";
+  const citywideAnchorNormV3Line = Number.isFinite(citywideAnchorNormV3)
+    ? `<div><b>Citywide anchor norm v3:</b> ${citywideAnchorNormV3.toFixed(3)}</div>`
     : "";
   const citywideV3Rating = Number(shadowSummary.citywide_v3_rating);
   const citywideV3Confidence = Number(shadowSummary.citywide_v3_confidence);
@@ -2184,6 +2213,14 @@ function buildZoneShadowPreviewHTML(props, geom) {
       ${zoneAreaLine}
       ${pickupsPerSqMileNowLine}
       ${pickupsPerSqMileNextLine}
+      ${balancedTripShareLine}
+      ${balancedTripQualityNLine}
+      ${busyNowBaseNLine}
+      ${busyNextBaseNLine}
+      ${churnPressureNLine}
+      ${manhattanCoreSaturationProxyNLine}
+      ${citywideAnchorNormV3Line}
+      <div><b>Airport excluded:</b> ${airportExcluded ? "yes" : "no"}</div>
       ${longTripShare20PlusLine}
       ${sameZoneDropoffShareLine}
       ${citywideV3Section}
@@ -2262,6 +2299,47 @@ function buildCommunityCrowdingHTML(props) {
   `;
 }
 
+function isAirportExcludedZone(props) {
+  if (props?.airport_excluded === true) return true;
+  const zoneName = String(props?.zone_name || "").toLowerCase();
+  const locationId = String(props?.LocationID ?? "").trim();
+  return /airport|jfk|la guardia|laguardia|newark/i.test(zoneName) || ["1", "132", "138"].includes(locationId);
+}
+
+function buildZoneWhyReasons(props, geom, visibleScoreSource) {
+  const summary = window.TlcScoreShadowModule?.buildZoneShadowSummary?.(props, geom) || null;
+  const reasons = [];
+  const pushReason = (text) => {
+    if (!text || reasons.includes(text) || reasons.length >= 5) return;
+    reasons.push(text);
+  };
+  const num = (value) => (Number.isFinite(Number(value)) ? Number(value) : null);
+
+  const busyNow = num(summary?.busy_now_base_n);
+  const busyNext = num(summary?.busy_next_base_n);
+  const tripMix = num(summary?.balanced_trip_share);
+  const tripQuality = num(summary?.balanced_trip_quality_n);
+  const churnPressure = num(summary?.churn_pressure_n);
+  const saturation = num(summary?.manhattan_core_saturation_proxy_n);
+  const retentionPenalty = num(summary?.same_zone_retention_penalty_n);
+  const shortTripPenalty = num(summary?.short_trip_share);
+  const area = num(summary?.zone_area_sq_miles);
+
+  if (isAirportExcludedZone(props)) pushReason("airport excluded from hotspot logic");
+  if (Number.isFinite(area) && area > 0 && Number.isFinite(busyNow) && busyNow >= 0.6) pushReason("busy for its size right now");
+  if (Number.isFinite(busyNext) && busyNext >= 0.6) pushReason("good next-bin carry");
+  if (Number.isFinite(tripMix) && tripMix >= 0.45) pushReason("balanced trip mix");
+  if (Number.isFinite(tripQuality) && tripQuality >= 0.55) pushReason("balanced trip quality");
+  if (Number.isFinite(shortTripPenalty) && shortTripPenalty >= 0.55) pushReason("short-trip trap risk");
+  if (Number.isFinite(churnPressure) && churnPressure >= 0.6) pushReason("same-zone churn risk");
+  if (Number.isFinite(retentionPenalty) && retentionPenalty >= 0.55) pushReason("same-zone retention penalty is elevated");
+  if (visibleScoreSource === "manhattan_v3_shadow" && Number.isFinite(saturation) && saturation >= 0.5) {
+    pushReason("Manhattan saturation caution");
+  }
+
+  return reasons.slice(0, 5);
+}
+
 function buildPopupHTML(props, geom, metrics = getZonePopupMetrics(map?.getZoom?.())) {
   const zoneName = (props.zone_name || "").trim();
   const borough = (props.borough || "").trim();
@@ -2269,6 +2347,14 @@ function buildPopupHTML(props, geom, metrics = getZonePopupMetrics(map?.getZoom?
   const visibleRating = getPopupVisibleRating(props, geom);
   const visibleBucket = getPopupVisibleBucket(props, geom);
   const visibleScoreSource = getPopupVisibleScoreSource(props, geom);
+  const airportExcluded = isAirportExcludedZone(props);
+  const whyReasons = buildZoneWhyReasons(props, geom, visibleScoreSource);
+  const whyReasonsHtml = whyReasons.length
+    ? `<div style="margin-top:${metrics.lineGapPx + 1}px;"><b>Why this zone:</b> ${escapeHtml(whyReasons.join(" • "))}</div>`
+    : "";
+  const airportExcludedLine = airportExcluded
+    ? `<div style="margin-top:${metrics.lineGapPx + 1}px;color:#9a3412;"><b>Excluded:</b> Airport zone — not part of hotspot opportunity logic.</div>`
+    : "";
   const pickups = props.pickups ?? "";
   const pay = props.avg_driver_pay == null ? "n/a" : Number(props.avg_driver_pay).toFixed(2);
 
@@ -2383,6 +2469,8 @@ function buildPopupHTML(props, geom, metrics = getZonePopupMetrics(map?.getZoom?
     ${borough ? `<div style="opacity:0.78;margin-bottom:${metrics.lineGapPx + 1}px;">${escapeHtml(borough)}</div>` : `<div style="margin-bottom:${metrics.lineGapPx + 1}px;"></div>`}
     <div><b>Team Joseo Score:</b> ${visibleRating} (${prettyBucket(visibleBucket)})</div>
     <div><b>Score source:</b> ${escapeHtml(getPopupVisibleScoreSourceLabel(props, geom))}</div>
+    ${airportExcludedLine}
+    ${whyReasonsHtml}
     ${extra}
     <div style="margin-top:${metrics.lineGapPx + 1}px;"><b>Pickups (last ${BIN_MINUTES} min):</b> ${pickups}</div>
     <div><b>Next ${BIN_MINUTES} min:</b> ${nextPickups}</div>

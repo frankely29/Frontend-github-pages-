@@ -200,17 +200,17 @@
           : `${activeLabels.slice(0, -1).join(", ")}, and ${activeLabels[activeLabels.length - 1]}`;
         modeNote.innerHTML = `${joined} are <b>ON</b>: each applies only to its own scope. Other zones continue using the Team Joseo citywide score.`;
       } else if (queensMode) {
-        modeNote.innerHTML = `Queens Mode is <b>ON</b>: Team Joseo Queens earnings score for non-airport Queens zones, balancing demand density, long-trip quality, pay-per-mile, downstream value, and local trap penalties. Other zones continue using the Team Joseo citywide score.`;
+        modeNote.innerHTML = `Queens Mode is <b>ON</b>: Team Joseo Queens earnings score for non-airport Queens zones, balancing busy-for-size demand, trip quality, continuation, and trap avoidance. Airport zones are excluded from hotspot logic. Other zones continue using the Team Joseo citywide score.`;
       } else if (bronxWashHeightsMode) {
-        modeNote.innerHTML = `Bronx/Wash Heights Mode is <b>ON</b>: Team Joseo Bronx/Wash Heights earnings score for the Bronx and the defined upper-Manhattan corridor, balancing flow, density, continuation, downstream value, and local trap penalties. Other zones continue using the Team Joseo citywide score.`;
+        modeNote.innerHTML = `Bronx/Wash Heights Mode is <b>ON</b>: Team Joseo Bronx/Wash Heights earnings score for the Bronx and the defined upper-Manhattan corridor, balancing flow, busy-for-size demand, continuation, and trap avoidance. Airport zones remain excluded from hotspot logic. Other zones continue using the Team Joseo citywide score.`;
       } else if (manhattanMode) {
-        modeNote.innerHTML = `Manhattan Mode is <b>ON</b>: Team Joseo Manhattan earnings score for core Manhattan, balancing demand density, 20+ minute trip quality, pay efficiency, downstream value, and trap penalties. Other zones continue using the Team Joseo citywide score.`;
+        modeNote.innerHTML = `Manhattan Mode is <b>ON</b>: Team Joseo Manhattan earnings score for core Manhattan, citywide-first with extra saturation caution while balancing trip quality, pay quality, continuation, and trap avoidance. Airport zones remain excluded from hotspot logic. Other zones continue using the Team Joseo citywide score.`;
       } else if (statenIslandMode) {
-        modeNote.innerHTML = `Staten Island Mode is <b>ON</b>: Team Joseo Staten Island earnings score for Staten Island zones, balancing long-trip quality, pay quality, downstream value, sparse-market stability, and local trap penalties. Other zones continue using the Team Joseo citywide score.`;
+        modeNote.innerHTML = `Staten Island Mode is <b>ON</b>: Team Joseo Staten Island earnings score for Staten Island zones, balancing sparse-market stability, trip quality, pay quality, continuation, and trap avoidance. Airport zones remain excluded from hotspot logic. Other zones continue using the Team Joseo citywide score.`;
       } else if (brooklynMode) {
-        modeNote.innerHTML = `Brooklyn Mode is <b>ON</b>: Team Joseo Brooklyn earnings score for Brooklyn zones, balancing demand density, long-trip quality, pay efficiency, downstream value, and local trap penalties. Other zones continue using the Team Joseo citywide score.`;
+        modeNote.innerHTML = `Brooklyn Mode is <b>ON</b>: Team Joseo Brooklyn earnings score for Brooklyn zones, balancing busy-for-size demand, trip quality, pay efficiency, continuation, and trap avoidance. Airport zones remain excluded from hotspot logic. Other zones continue using the Team Joseo citywide score.`;
       } else {
-        modeNote.innerHTML = `Base colors reflect the Team Joseo citywide score for the selected 20-minute window, blending demand, density, long-trip quality, pay quality, downstream value, and trap penalties.`;
+        modeNote.innerHTML = `Base colors reflect the Team Joseo citywide score for the selected 20-minute window, blending busy-for-size demand density (not raw trip count), trip quality, pay quality, continuation, and trap avoidance. Airport zones are excluded from hotspot logic.`;
       }
     }
   }
