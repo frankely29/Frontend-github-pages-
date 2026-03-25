@@ -45,6 +45,13 @@
       earnings_shadow_rating_citywide_v2: normalizeShadowNumber(source.earnings_shadow_rating_citywide_v2),
       earnings_shadow_bucket_citywide_v2: normalizeShadowText(source.earnings_shadow_bucket_citywide_v2),
       earnings_shadow_color_citywide_v2: normalizeShadowText(source.earnings_shadow_color_citywide_v2),
+      earnings_shadow_positive_citywide_v3: normalizeShadowNumber(source.earnings_shadow_positive_citywide_v3),
+      earnings_shadow_negative_citywide_v3: normalizeShadowNumber(source.earnings_shadow_negative_citywide_v3),
+      earnings_shadow_score_citywide_v3: normalizeShadowNumber(source.earnings_shadow_score_citywide_v3),
+      earnings_shadow_confidence_citywide_v3: normalizeShadowNumber(source.earnings_shadow_confidence_citywide_v3),
+      earnings_shadow_rating_citywide_v3: normalizeShadowNumber(source.earnings_shadow_rating_citywide_v3),
+      earnings_shadow_bucket_citywide_v3: normalizeShadowText(source.earnings_shadow_bucket_citywide_v3),
+      earnings_shadow_color_citywide_v3: normalizeShadowText(source.earnings_shadow_color_citywide_v3),
     };
   }
 
@@ -131,10 +138,20 @@
 
     const legacyRating = Number(legacy.rating);
     const shadowRating = Number(shadow.earnings_shadow_rating_citywide_v2);
+    const citywideV3ShadowRating = Number(shadow.earnings_shadow_rating_citywide_v3);
 
     return {
       legacy,
       shadow,
+      citywide_v3_shadow: {
+        earnings_shadow_positive_citywide_v3: shadow.earnings_shadow_positive_citywide_v3,
+        earnings_shadow_negative_citywide_v3: shadow.earnings_shadow_negative_citywide_v3,
+        earnings_shadow_score_citywide_v3: shadow.earnings_shadow_score_citywide_v3,
+        earnings_shadow_confidence_citywide_v3: shadow.earnings_shadow_confidence_citywide_v3,
+        earnings_shadow_rating_citywide_v3: shadow.earnings_shadow_rating_citywide_v3,
+        earnings_shadow_bucket_citywide_v3: shadow.earnings_shadow_bucket_citywide_v3,
+        earnings_shadow_color_citywide_v3: shadow.earnings_shadow_color_citywide_v3,
+      },
       manhattan_shadow,
       bronx_wash_heights_shadow,
       queens_shadow,
@@ -146,6 +163,16 @@
           : null,
       shadow_ready:
         Number.isFinite(Number(shadow.earnings_shadow_rating_citywide_v2)),
+      citywide_v3_shadow_ready:
+        Number.isFinite(Number(shadow.earnings_shadow_rating_citywide_v3)),
+      delta_citywide_v3_vs_legacy:
+        Number.isFinite(legacyRating) && Number.isFinite(citywideV3ShadowRating)
+          ? citywideV3ShadowRating - legacyRating
+          : null,
+      delta_citywide_v3_vs_citywide_v2:
+        Number.isFinite(shadowRating) && Number.isFinite(citywideV3ShadowRating)
+          ? citywideV3ShadowRating - shadowRating
+          : null,
       manhattan_shadow_ready:
         Number.isFinite(Number(manhattan_shadow.earnings_shadow_rating_manhattan_v2)),
       bronx_wash_heights_shadow_ready:
@@ -273,6 +300,11 @@
       shadow_rating: shadow.earnings_shadow_rating_citywide_v2,
       shadow_bucket: shadow.earnings_shadow_bucket_citywide_v2,
       shadow_confidence: shadow.earnings_shadow_confidence_citywide_v2,
+      citywide_v3_rating: shadow.earnings_shadow_rating_citywide_v3,
+      citywide_v3_bucket: shadow.earnings_shadow_bucket_citywide_v3,
+      citywide_v3_confidence: shadow.earnings_shadow_confidence_citywide_v3,
+      citywide_v3_positive: shadow.earnings_shadow_positive_citywide_v3,
+      citywide_v3_negative: shadow.earnings_shadow_negative_citywide_v3,
       bronx_wash_heights_shadow_rating: comparison.bronx_wash_heights_shadow?.earnings_shadow_rating_bronx_wash_heights_v2 ?? null,
       bronx_wash_heights_shadow_bucket: comparison.bronx_wash_heights_shadow?.earnings_shadow_bucket_bronx_wash_heights_v2 || "",
       bronx_wash_heights_shadow_confidence: comparison.bronx_wash_heights_shadow?.earnings_shadow_confidence_bronx_wash_heights_v2 ?? null,
@@ -286,6 +318,8 @@
       staten_island_shadow_bucket: comparison.staten_island_shadow?.earnings_shadow_bucket_staten_island_v2 || "",
       staten_island_shadow_confidence: comparison.staten_island_shadow?.earnings_shadow_confidence_staten_island_v2 ?? null,
       delta_rating: comparison.delta_rating,
+      delta_citywide_v3_vs_legacy: comparison.delta_citywide_v3_vs_legacy,
+      delta_citywide_v3_vs_citywide_v2: comparison.delta_citywide_v3_vs_citywide_v2,
       median_driver_pay: shadow.median_driver_pay_shadow,
       median_pay_per_min: shadow.median_pay_per_min_shadow,
       median_pay_per_mile: shadow.median_pay_per_mile_shadow,

@@ -2066,6 +2066,38 @@ function buildZoneShadowPreviewHTML(props, geom) {
   const sameZoneDropoffShareLine = Number.isFinite(sameZoneDropoffShare)
     ? `<div><b>Same-zone dropoff share:</b> ${Math.round(sameZoneDropoffShare * 100)}%</div>`
     : "";
+  const citywideV3Rating = Number(shadowSummary.citywide_v3_rating);
+  const citywideV3Confidence = Number(shadowSummary.citywide_v3_confidence);
+  const citywideV3Positive = Number(shadowSummary.citywide_v3_positive);
+  const citywideV3Negative = Number(shadowSummary.citywide_v3_negative);
+  const citywideV3DeltaVsLegacy = Number(shadowSummary.delta_citywide_v3_vs_legacy);
+  const citywideV3DeltaVsCitywideV2 = Number(shadowSummary.delta_citywide_v3_vs_citywide_v2);
+  const hasCitywideV3Data =
+    Number.isFinite(citywideV3Rating) ||
+    Number.isFinite(citywideV3Confidence) ||
+    Number.isFinite(citywideV3Positive) ||
+    Number.isFinite(citywideV3Negative);
+  const citywideV3ConfidenceText = Number.isFinite(citywideV3Confidence)
+    ? `${Math.round(Math.max(0, Math.min(1, citywideV3Confidence)) * 100)}%`
+    : "n/a";
+  const citywideV3DeltaVsLegacyText = Number.isFinite(citywideV3DeltaVsLegacy)
+    ? (citywideV3DeltaVsLegacy > 0 ? `+${Math.round(citywideV3DeltaVsLegacy)}` : `${Math.round(citywideV3DeltaVsLegacy)}`)
+    : "n/a";
+  const citywideV3DeltaVsCitywideV2Text = Number.isFinite(citywideV3DeltaVsCitywideV2)
+    ? (citywideV3DeltaVsCitywideV2 > 0 ? `+${Math.round(citywideV3DeltaVsCitywideV2)}` : `${Math.round(citywideV3DeltaVsCitywideV2)}`)
+    : "n/a";
+  const citywideV3Section = hasCitywideV3Data
+    ? `
+      <div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(0,0,0,0.08);">
+        <div style="font-weight:800;margin-bottom:4px;">Team Joseo citywide_v3 candidate</div>
+        <div><b>Rating:</b> ${Number.isFinite(citywideV3Rating) ? Math.round(citywideV3Rating) : "n/a"} (${escapeHtml(shadowSummary.citywide_v3_bucket || "")})</div>
+        <div><b>Confidence:</b> ${escapeHtml(citywideV3ConfidenceText)}</div>
+        <div><b>Positive score:</b> ${Number.isFinite(citywideV3Positive) ? citywideV3Positive.toFixed(3) : "n/a"}</div>
+        <div><b>Negative score:</b> ${Number.isFinite(citywideV3Negative) ? citywideV3Negative.toFixed(3) : "n/a"}</div>
+        <div><b>Delta vs legacy:</b> ${escapeHtml(citywideV3DeltaVsLegacyText)}</div>
+        <div><b>Delta vs citywide_v2:</b> ${escapeHtml(citywideV3DeltaVsCitywideV2Text)}</div>
+      </div>`
+    : "";
 
   return `
     <div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(0,0,0,0.08);">
@@ -2086,6 +2118,7 @@ function buildZoneShadowPreviewHTML(props, geom) {
       ${pickupsPerSqMileNextLine}
       ${longTripShare20PlusLine}
       ${sameZoneDropoffShareLine}
+      ${citywideV3Section}
     </div>
   `;
 }
