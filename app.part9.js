@@ -85,11 +85,18 @@
       const dMi = core.haversineMiles?.(userLatLng, center) || 0;
       let score;
       if (modeTag === "queens") {
-        const queensShadowRating = Number(props.earnings_shadow_rating_queens_v2 ?? NaN);
-        if (Number.isFinite(queensShadowRating)) {
-          score = queensShadowRating - dMi * 5.0;
+        const queensV3ShadowRating = Number(props.earnings_shadow_rating_queens_v3 ?? NaN);
+        if (Number.isFinite(queensV3ShadowRating)) {
+          score = queensV3ShadowRating - dMi * 5.0;
         } else {
-          score = (Number(props.qn_local_score ?? 0) * 100) - dMi * 5.0;
+          const queensV2ShadowRating = Number(props.earnings_shadow_rating_queens_v2 ?? NaN);
+          if (Number.isFinite(queensV2ShadowRating)) {
+            score = queensV2ShadowRating - dMi * 5.0;
+          } else if (Number.isFinite(Number(props.qn_local_rating))) {
+            score = Number(props.qn_local_rating) - dMi * 5.0;
+          } else {
+            score = (Number(props.qn_local_score ?? 0) * 100) - dMi * 5.0;
+          }
         }
       } else if (modeTag === "brooklyn") {
         const brooklynShadowRating = Number(props.earnings_shadow_rating_brooklyn_v2 ?? NaN);
@@ -152,8 +159,10 @@
           name: (props.zone_name || "").trim() || `Zone ${props.LocationID ?? ""}`,
           borough: (props.borough || "").trim(),
           usedQN: modeTag === "queens" && (
+            Number.isFinite(Number(props.earnings_shadow_rating_queens_v3)) ||
             Number.isFinite(Number(props.earnings_shadow_rating_queens_v2)) ||
-            Number.isFinite(Number(props.qn_local_rating))
+            Number.isFinite(Number(props.qn_local_rating)) ||
+            Number.isFinite(Number(props.qn_local_score))
           ),
           usedBK: modeTag === "brooklyn" && (
             Number.isFinite(Number(props.earnings_shadow_rating_brooklyn_v2)) ||
