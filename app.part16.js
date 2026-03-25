@@ -70,6 +70,70 @@
               : null,
         }
       : null;
+    const boroughV3Candidates = allShadows
+      ? {
+          manhattan: {
+            rating: safeRound(allShadows.manhattan_v3?.earnings_shadow_rating_manhattan_v3, 2),
+            bucket: String(allShadows.manhattan_v3?.earnings_shadow_bucket_manhattan_v3 || ""),
+            confidence: safeRound(allShadows.manhattan_v3?.earnings_shadow_confidence_manhattan_v3, 3),
+            deltaVsV2: safeRound(
+              Number.isFinite(Number(allShadows.manhattan_v3?.earnings_shadow_rating_manhattan_v3)) &&
+              Number.isFinite(Number(allShadows.manhattan?.earnings_shadow_rating_manhattan_v2))
+                ? Number(allShadows.manhattan_v3.earnings_shadow_rating_manhattan_v3) - Number(allShadows.manhattan.earnings_shadow_rating_manhattan_v2)
+                : null,
+              2
+            ),
+          },
+          bronx_wash_heights: {
+            rating: safeRound(allShadows.bronx_wash_heights_v3?.earnings_shadow_rating_bronx_wash_heights_v3, 2),
+            bucket: String(allShadows.bronx_wash_heights_v3?.earnings_shadow_bucket_bronx_wash_heights_v3 || ""),
+            confidence: safeRound(allShadows.bronx_wash_heights_v3?.earnings_shadow_confidence_bronx_wash_heights_v3, 3),
+            deltaVsV2: safeRound(
+              Number.isFinite(Number(allShadows.bronx_wash_heights_v3?.earnings_shadow_rating_bronx_wash_heights_v3)) &&
+              Number.isFinite(Number(allShadows.bronx_wash_heights?.earnings_shadow_rating_bronx_wash_heights_v2))
+                ? Number(allShadows.bronx_wash_heights_v3.earnings_shadow_rating_bronx_wash_heights_v3) - Number(allShadows.bronx_wash_heights.earnings_shadow_rating_bronx_wash_heights_v2)
+                : null,
+              2
+            ),
+          },
+          queens: {
+            rating: safeRound(allShadows.queens_v3?.earnings_shadow_rating_queens_v3, 2),
+            bucket: String(allShadows.queens_v3?.earnings_shadow_bucket_queens_v3 || ""),
+            confidence: safeRound(allShadows.queens_v3?.earnings_shadow_confidence_queens_v3, 3),
+            deltaVsV2: safeRound(
+              Number.isFinite(Number(allShadows.queens_v3?.earnings_shadow_rating_queens_v3)) &&
+              Number.isFinite(Number(allShadows.queens?.earnings_shadow_rating_queens_v2))
+                ? Number(allShadows.queens_v3.earnings_shadow_rating_queens_v3) - Number(allShadows.queens.earnings_shadow_rating_queens_v2)
+                : null,
+              2
+            ),
+          },
+          brooklyn: {
+            rating: safeRound(allShadows.brooklyn_v3?.earnings_shadow_rating_brooklyn_v3, 2),
+            bucket: String(allShadows.brooklyn_v3?.earnings_shadow_bucket_brooklyn_v3 || ""),
+            confidence: safeRound(allShadows.brooklyn_v3?.earnings_shadow_confidence_brooklyn_v3, 3),
+            deltaVsV2: safeRound(
+              Number.isFinite(Number(allShadows.brooklyn_v3?.earnings_shadow_rating_brooklyn_v3)) &&
+              Number.isFinite(Number(allShadows.brooklyn?.earnings_shadow_rating_brooklyn_v2))
+                ? Number(allShadows.brooklyn_v3.earnings_shadow_rating_brooklyn_v3) - Number(allShadows.brooklyn.earnings_shadow_rating_brooklyn_v2)
+                : null,
+              2
+            ),
+          },
+          staten_island: {
+            rating: safeRound(allShadows.staten_island_v3?.earnings_shadow_rating_staten_island_v3, 2),
+            bucket: String(allShadows.staten_island_v3?.earnings_shadow_bucket_staten_island_v3 || ""),
+            confidence: safeRound(allShadows.staten_island_v3?.earnings_shadow_confidence_staten_island_v3, 3),
+            deltaVsV2: safeRound(
+              Number.isFinite(Number(allShadows.staten_island_v3?.earnings_shadow_rating_staten_island_v3)) &&
+              Number.isFinite(Number(allShadows.staten_island?.earnings_shadow_rating_staten_island_v2))
+                ? Number(allShadows.staten_island_v3.earnings_shadow_rating_staten_island_v3) - Number(allShadows.staten_island.earnings_shadow_rating_staten_island_v2)
+                : null,
+              2
+            ),
+          },
+        }
+      : null;
     const crowding =
       crowdingModule.getZoneCommunityCrowdingSnapshot?.(props?.LocationID) || null;
 
@@ -89,6 +153,7 @@
       shadowReadiness,
       densityTripQuality,
       citywideV3Candidate,
+      boroughV3Candidates,
       crowding: crowding
         ? {
             bucket: String(crowding.bucket || ""),
@@ -162,6 +227,15 @@
 
   window.getTeamJoseoZoneAuditByLocationId = function getTeamJoseoZoneAuditByLocationId(locationId) {
     return getVisibleScoreAuditByLocationId(locationId);
+  };
+
+  window.getTeamJoseoBoroughV3AuditByLocationId = function getTeamJoseoBoroughV3AuditByLocationId(locationId) {
+    const audit = getVisibleScoreAuditByLocationId(locationId);
+    return audit?.boroughV3Candidates || null;
+  };
+
+  window.getBoroughV3CandidateDebugByLocationId = function getBoroughV3CandidateDebugByLocationId(locationId) {
+    return window.getTeamJoseoBoroughV3AuditByLocationId(locationId);
   };
 
   window.getTeamJoseoSystemAudit = getTeamJoseoSystemAudit;

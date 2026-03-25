@@ -94,3 +94,8 @@
 - Kept all borough-mode visible profiles/precedence unchanged (Manhattan, Bronx/Wash Heights, Queens, Brooklyn, Staten Island continue to use their current v2 profile logic in-scope).
 - Updated visible source labeling/readiness/debug wiring so audits can distinguish live `citywide_v3` vs `citywide_v2` fallback while still preserving both sets of citywide shadow comparison metrics.
 - No presence logic, polling logic, polling intervals, or API routes were changed.
+
+### Phase 4 borough_v3 shadow inspection (frontend only)
+- Extended frontend shadow readers/comparison/summary paths to ingest borough-specific `*_v3` candidate fields strictly for debug/audit inspection.
+- Extended zone audit + shadow preview debug output to expose borough_v3 candidate rating/bucket/confidence and delta-vs-v2 for the currently active special-mode borough only.
+- Visible borough scores remain unchanged in this phase, and `citywide_v3` remains the live citywide score.

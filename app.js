@@ -2098,6 +2098,72 @@ function buildZoneShadowPreviewHTML(props, geom) {
         <div><b>Delta vs citywide_v2:</b> ${escapeHtml(citywideV3DeltaVsCitywideV2Text)}</div>
       </div>`
     : "";
+  const activeModeTag = String(window.TlcModeModule?.getActiveSpecialModeTagForFeature?.(props, geom) || "");
+  const boroughV3SpecByMode = {
+    manhattan: {
+      title: "Team Joseo Manhattan_v3 candidate",
+      rating: shadowSummary.manhattan_v3_rating,
+      bucket: shadowSummary.manhattan_v3_bucket,
+      confidence: shadowSummary.manhattan_v3_confidence,
+      delta: shadowSummary.delta_manhattan_v3_vs_v2,
+    },
+    bronx_wash_heights: {
+      title: "Team Joseo Bronx/Wash Heights_v3 candidate",
+      rating: shadowSummary.bronx_wash_heights_v3_rating,
+      bucket: shadowSummary.bronx_wash_heights_v3_bucket,
+      confidence: shadowSummary.bronx_wash_heights_v3_confidence,
+      delta: shadowSummary.delta_bronx_wash_heights_v3_vs_v2,
+    },
+    queens: {
+      title: "Team Joseo Queens_v3 candidate",
+      rating: shadowSummary.queens_v3_rating,
+      bucket: shadowSummary.queens_v3_bucket,
+      confidence: shadowSummary.queens_v3_confidence,
+      delta: shadowSummary.delta_queens_v3_vs_v2,
+    },
+    brooklyn: {
+      title: "Team Joseo Brooklyn_v3 candidate",
+      rating: shadowSummary.brooklyn_v3_rating,
+      bucket: shadowSummary.brooklyn_v3_bucket,
+      confidence: shadowSummary.brooklyn_v3_confidence,
+      delta: shadowSummary.delta_brooklyn_v3_vs_v2,
+    },
+    staten_island: {
+      title: "Team Joseo Staten Island_v3 candidate",
+      rating: shadowSummary.staten_island_v3_rating,
+      bucket: shadowSummary.staten_island_v3_bucket,
+      confidence: shadowSummary.staten_island_v3_confidence,
+      delta: shadowSummary.delta_staten_island_v3_vs_v2,
+    },
+  };
+  const boroughV3Spec = boroughV3SpecByMode[activeModeTag] || null;
+  const boroughV3Section = boroughV3Spec
+    ? (() => {
+        const boroughRating = Number(boroughV3Spec.rating);
+        const boroughConfidence = Number(boroughV3Spec.confidence);
+        const boroughDelta = Number(boroughV3Spec.delta);
+        const hasBoroughV3Data =
+          Number.isFinite(boroughRating) ||
+          Number.isFinite(boroughConfidence) ||
+          Number.isFinite(boroughDelta) ||
+          String(boroughV3Spec.bucket || "").trim().length > 0;
+        if (!hasBoroughV3Data) return "";
+
+        const boroughConfidenceText = Number.isFinite(boroughConfidence)
+          ? `${Math.round(Math.max(0, Math.min(1, boroughConfidence)) * 100)}%`
+          : "n/a";
+        const boroughDeltaText = Number.isFinite(boroughDelta)
+          ? (boroughDelta > 0 ? `+${Math.round(boroughDelta)}` : `${Math.round(boroughDelta)}`)
+          : "n/a";
+        return `
+      <div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(0,0,0,0.08);">
+        <div style="font-weight:800;margin-bottom:4px;">${escapeHtml(boroughV3Spec.title)}</div>
+        <div><b>Rating:</b> ${Number.isFinite(boroughRating) ? Math.round(boroughRating) : "n/a"} (${escapeHtml(boroughV3Spec.bucket || "")})</div>
+        <div><b>Confidence:</b> ${escapeHtml(boroughConfidenceText)}</div>
+        <div><b>Delta vs v2:</b> ${escapeHtml(boroughDeltaText)}</div>
+      </div>`;
+      })()
+    : "";
 
   return `
     <div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(0,0,0,0.08);">
@@ -2119,6 +2185,7 @@ function buildZoneShadowPreviewHTML(props, geom) {
       ${longTripShare20PlusLine}
       ${sameZoneDropoffShareLine}
       ${citywideV3Section}
+      ${boroughV3Section}
     </div>
   `;
 }
