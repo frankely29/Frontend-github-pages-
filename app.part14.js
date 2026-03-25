@@ -316,6 +316,8 @@
         return "bronx_wash_heights_v3";
       case "bronx_wash_heights_shadow":
         return "bronx_wash_heights_v2";
+      case "queens_v3_shadow":
+        return "queens_v3";
       case "queens_shadow":
         return "queens_v2";
       case "brooklyn_shadow":
@@ -350,6 +352,7 @@
     if (profileKey === "manhattan_v2") profileSnapshot = all.manhattan;
     if (profileKey === "bronx_wash_heights_v3") profileSnapshot = all.bronx_wash_heights_v3;
     if (profileKey === "bronx_wash_heights_v2") profileSnapshot = all.bronx_wash_heights;
+    if (profileKey === "queens_v3") profileSnapshot = all.queens_v3;
     if (profileKey === "queens_v2") profileSnapshot = all.queens;
     if (profileKey === "brooklyn_v2") profileSnapshot = all.brooklyn;
     if (profileKey === "staten_island_v2") profileSnapshot = all.staten_island;
@@ -372,6 +375,9 @@
     }
     if (profileKey === "bronx_wash_heights_v2") {
       shadowReady = Number.isFinite(Number(profileSnapshot?.earnings_shadow_rating_bronx_wash_heights_v2));
+    }
+    if (profileKey === "queens_v3") {
+      shadowReady = Number.isFinite(Number(profileSnapshot?.earnings_shadow_rating_queens_v3));
     }
     if (profileKey === "queens_v2") {
       shadowReady = Number.isFinite(Number(profileSnapshot?.earnings_shadow_rating_queens_v2));
@@ -405,6 +411,7 @@
       comparison?.manhattan_v3_shadow_ready ||
       comparison?.manhattan_shadow_ready ||
       comparison?.bronx_wash_heights_shadow_ready ||
+      comparison?.queens_v3_shadow_ready ||
       comparison?.queens_shadow_ready ||
       comparison?.brooklyn_shadow_ready ||
       comparison?.staten_island_shadow_ready

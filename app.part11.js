@@ -200,7 +200,7 @@
           : `${activeLabels.slice(0, -1).join(", ")}, and ${activeLabels[activeLabels.length - 1]}`;
         modeNote.innerHTML = `${joined} are <b>ON</b>: each applies only to its own scope. Other zones continue using the Team Joseo citywide score.`;
       } else if (queensMode) {
-        modeNote.innerHTML = `Queens Mode is <b>ON</b>: Team Joseo Queens earnings score for non-airport Queens zones. Other zones continue using the Team Joseo citywide score.`;
+        modeNote.innerHTML = `Queens Mode is <b>ON</b>: Team Joseo Queens earnings score for non-airport Queens zones, balancing demand density, long-trip quality, pay-per-mile, downstream value, and local trap penalties. Other zones continue using the Team Joseo citywide score.`;
       } else if (bronxWashHeightsMode) {
         modeNote.innerHTML = `Bronx/Wash Heights Mode is <b>ON</b>: Team Joseo Bronx/Wash Heights earnings score for the Bronx and the defined upper-Manhattan corridor, balancing flow, density, continuation, downstream value, and local trap penalties. Other zones continue using the Team Joseo citywide score.`;
       } else if (manhattanMode) {
@@ -378,6 +378,26 @@
     return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : NaN;
   }
 
+  function readQueensV3ShadowRating(props) {
+    const n = Number(props?.earnings_shadow_rating_queens_v3 ?? NaN);
+    return Number.isFinite(n) ? Math.max(1, Math.min(100, Math.round(n))) : NaN;
+  }
+
+  function readQueensV3ShadowBucket(props) {
+    const text = String(props?.earnings_shadow_bucket_queens_v3 || "").trim();
+    return text || "";
+  }
+
+  function readQueensV3ShadowColor(props) {
+    const text = String(props?.earnings_shadow_color_queens_v3 || "").trim();
+    return text || "";
+  }
+
+  function readQueensV3ShadowConfidence(props) {
+    const n = Number(props?.earnings_shadow_confidence_queens_v3 ?? NaN);
+    return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : NaN;
+  }
+
   function readBrooklynShadowRating(props) {
     const n = Number(props?.earnings_shadow_rating_brooklyn_v2 ?? NaN);
     return Number.isFinite(n) ? Math.max(1, Math.min(100, Math.round(n))) : NaN;
@@ -460,6 +480,7 @@
 
   function getVisibleScoreSourceForFeature(props, geom) {
     if (queensMode && isQueensModeZone(props)) {
+      if (Number.isFinite(readQueensV3ShadowRating(props))) return "queens_v3_shadow";
       if (Number.isFinite(readQueensShadowRating(props))) return "queens_shadow";
       if (Number.isFinite(Number(props.qn_local_rating))) return "queens_mode_legacy";
     }
@@ -511,6 +532,7 @@
       case "bronx_wash_heights_shadow":
       case "bronx_wash_heights_mode_legacy":
         return "Bronx/Wash Heights Team Joseo score";
+      case "queens_v3_shadow":
       case "queens_shadow":
       case "queens_mode_legacy":
         return "Queens Team Joseo score";
@@ -545,8 +567,10 @@
         return "bronx_wash_heights_v2 fallback shadow";
       case "bronx_wash_heights_mode_legacy":
         return "bronx_wash_heights legacy fallback";
+      case "queens_v3_shadow":
+        return "queens_v3 live shadow";
       case "queens_shadow":
-        return "queens_v2 live shadow";
+        return "queens_v2 fallback shadow";
       case "queens_mode_legacy":
         return "queens legacy fallback";
       case "brooklyn_shadow":
@@ -573,6 +597,7 @@
       source === "manhattan_mode_legacy" ||
       source === "bronx_wash_heights_shadow" ||
       source === "bronx_wash_heights_mode_legacy" ||
+      source === "queens_shadow" ||
       source === "queens_mode_legacy" ||
       source === "brooklyn_mode_legacy" ||
       source === "staten_island_mode_legacy"
@@ -581,8 +606,10 @@
 
   function getModeAwareBaseRating(props, geom) {
     if (queensMode && isQueensModeZone(props)) {
-      const shadowRating = readQueensShadowRating(props);
-      if (Number.isFinite(shadowRating)) return shadowRating;
+      const shadowRatingV3 = readQueensV3ShadowRating(props);
+      if (Number.isFinite(shadowRatingV3)) return shadowRatingV3;
+      const shadowRatingV2 = readQueensShadowRating(props);
+      if (Number.isFinite(shadowRatingV2)) return shadowRatingV2;
       if (Number.isFinite(Number(props.qn_local_rating))) return Number(props.qn_local_rating);
     }
     if (brooklynMode && isBrooklynModeZone(props)) {
@@ -625,6 +652,9 @@
 
   function getModeAwareBaseBucket(props, geom) {
     const source = getVisibleScoreSourceForFeature(props, geom);
+    if (source === "queens_v3_shadow") {
+      return readQueensV3ShadowBucket(props) || getBucketForRating(getModeAwareBaseRating(props, geom));
+    }
     if (source === "queens_shadow") {
       return readQueensShadowBucket(props) || getBucketForRating(getModeAwareBaseRating(props, geom));
     }
@@ -657,6 +687,9 @@
 
   function getModeAwareBaseColor(props, geom) {
     const source = getVisibleScoreSourceForFeature(props, geom);
+    if (source === "queens_v3_shadow") {
+      return readQueensV3ShadowColor(props) || getColorForRating(getModeAwareBaseRating(props, geom));
+    }
     if (source === "queens_shadow") {
       return readQueensShadowColor(props) || getColorForRating(getModeAwareBaseRating(props, geom));
     }
@@ -1356,6 +1389,9 @@
       bronxWashHeightsShadowRating: readBronxWashHeightsShadowRating(props),
       bronxWashHeightsShadowBucket: readBronxWashHeightsShadowBucket(props),
       bronxWashHeightsShadowConfidence: readBronxWashHeightsShadowConfidence(props),
+      queensV3ShadowRating: readQueensV3ShadowRating(props),
+      queensV3ShadowBucket: readQueensV3ShadowBucket(props),
+      queensV3ShadowConfidence: readQueensV3ShadowConfidence(props),
       queensShadowRating: readQueensShadowRating(props),
       queensShadowBucket: readQueensShadowBucket(props),
       queensShadowConfidence: readQueensShadowConfidence(props),
@@ -1416,6 +1452,10 @@
     readQueensShadowRating,
     readQueensShadowBucket,
     readQueensShadowConfidence,
+    readQueensV3ShadowRating,
+    readQueensV3ShadowBucket,
+    readQueensV3ShadowColor,
+    readQueensV3ShadowConfidence,
     readBronxWashHeightsShadowRating,
     readBronxWashHeightsShadowBucket,
     readBronxWashHeightsShadowConfidence,
