@@ -204,6 +204,8 @@
     const source = String(window.TlcModeModule?.getVisibleScoreSourceForFeature?.(props, geom) || "");
 
     switch (source) {
+      case "citywide_v3_shadow":
+        return "citywide_v3";
       case "citywide_shadow":
         return "citywide_v2";
       case "manhattan_shadow":
@@ -238,6 +240,7 @@
     const all = getAllZoneShadowSnapshots(props) || {};
 
     let profileSnapshot = null;
+    if (profileKey === "citywide_v3") profileSnapshot = all.citywide;
     if (profileKey === "citywide_v2") profileSnapshot = all.citywide;
     if (profileKey === "manhattan_v2") profileSnapshot = all.manhattan;
     if (profileKey === "bronx_wash_heights_v2") profileSnapshot = all.bronx_wash_heights;
@@ -246,6 +249,9 @@
     if (profileKey === "staten_island_v2") profileSnapshot = all.staten_island;
 
     let shadowReady = false;
+    if (profileKey === "citywide_v3") {
+      shadowReady = Number.isFinite(Number(profileSnapshot?.earnings_shadow_rating_citywide_v3));
+    }
     if (profileKey === "citywide_v2") {
       shadowReady = Number.isFinite(Number(profileSnapshot?.earnings_shadow_rating_citywide_v2));
     }

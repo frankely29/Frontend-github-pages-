@@ -88,3 +88,9 @@
 - Extended frontend shadow ingestion/comparison helpers to read and compare citywide_v3 candidate fields (rating/bucket/confidence/positive/negative/score/color) strictly for debug/audit inspection.
 - Extended zone audit and debug shadow preview output to include a compact Team Joseo citywide_v3 candidate subsection when citywide_v3 data is present.
 - Visible Team Joseo scores, recommendation logic, and normal map color behavior remain unchanged in this phase.
+
+### Phase 3 citywide_v3 visible cutover
+- Switched the default (no-special-mode) visible citywide Team Joseo map score source to `citywide_v3` shadow fields, with retained `citywide_v2` shadow as fallback and debug comparison path.
+- Kept all borough-mode visible profiles/precedence unchanged (Manhattan, Bronx/Wash Heights, Queens, Brooklyn, Staten Island continue to use their current v2 profile logic in-scope).
+- Updated visible source labeling/readiness/debug wiring so audits can distinguish live `citywide_v3` vs `citywide_v2` fallback while still preserving both sets of citywide shadow comparison metrics.
+- No presence logic, polling logic, polling intervals, or API routes were changed.
