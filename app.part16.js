@@ -134,6 +134,20 @@
           },
         }
       : null;
+    const manhattanV3LiveCandidate = allShadows
+      ? {
+          manhattanV3Rating: safeRound(allShadows.manhattan_v3?.earnings_shadow_rating_manhattan_v3, 2),
+          manhattanV3Bucket: String(allShadows.manhattan_v3?.earnings_shadow_bucket_manhattan_v3 || ""),
+          manhattanV3Confidence: safeRound(allShadows.manhattan_v3?.earnings_shadow_confidence_manhattan_v3, 3),
+          manhattanV3DeltaVsV2: safeRound(
+            Number.isFinite(Number(allShadows.manhattan_v3?.earnings_shadow_rating_manhattan_v3)) &&
+            Number.isFinite(Number(allShadows.manhattan?.earnings_shadow_rating_manhattan_v2))
+              ? Number(allShadows.manhattan_v3.earnings_shadow_rating_manhattan_v3) - Number(allShadows.manhattan.earnings_shadow_rating_manhattan_v2)
+              : null,
+            2
+          ),
+        }
+      : null;
     const crowding =
       crowdingModule.getZoneCommunityCrowdingSnapshot?.(props?.LocationID) || null;
 
@@ -153,6 +167,7 @@
       shadowReadiness,
       densityTripQuality,
       citywideV3Candidate,
+      manhattanV3LiveCandidate,
       boroughV3Candidates,
       crowding: crowding
         ? {

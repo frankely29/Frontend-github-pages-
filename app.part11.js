@@ -204,7 +204,7 @@
       } else if (bronxWashHeightsMode) {
         modeNote.innerHTML = `Bronx/Wash Heights Mode is <b>ON</b>: Team Joseo Bronx/Wash Heights earnings score for the Bronx and the defined upper-Manhattan corridor. Other zones continue using the Team Joseo citywide score.`;
       } else if (manhattanMode) {
-        modeNote.innerHTML = `Manhattan Mode is <b>ON</b>: Team Joseo Manhattan earnings score for core Manhattan. Other zones continue using the Team Joseo citywide score.`;
+        modeNote.innerHTML = `Manhattan Mode is <b>ON</b>: Team Joseo Manhattan earnings score for core Manhattan, balancing demand density, 20+ minute trip quality, pay efficiency, downstream value, and trap penalties. Other zones continue using the Team Joseo citywide score.`;
       } else if (statenIslandMode) {
         modeNote.innerHTML = `Staten Island Mode is <b>ON</b>: Team Joseo Staten Island earnings score for Staten Island zones. Other zones continue using the Team Joseo citywide score.`;
       } else if (brooklynMode) {
@@ -295,6 +295,26 @@
 
   function readManhattanShadowConfidence(props) {
     const n = Number(props?.earnings_shadow_confidence_manhattan_v2 ?? NaN);
+    return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : NaN;
+  }
+
+  function readManhattanV3ShadowRating(props) {
+    const n = Number(props?.earnings_shadow_rating_manhattan_v3 ?? NaN);
+    return Number.isFinite(n) ? Math.max(1, Math.min(100, Math.round(n))) : NaN;
+  }
+
+  function readManhattanV3ShadowBucket(props) {
+    const text = String(props?.earnings_shadow_bucket_manhattan_v3 || "").trim();
+    return text || "";
+  }
+
+  function readManhattanV3ShadowColor(props) {
+    const text = String(props?.earnings_shadow_color_manhattan_v3 || "").trim();
+    return text || "";
+  }
+
+  function readManhattanV3ShadowConfidence(props) {
+    const n = Number(props?.earnings_shadow_confidence_manhattan_v3 ?? NaN);
     return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : NaN;
   }
 
@@ -440,6 +460,7 @@
     }
 
     if (manhattanMode && isManhattanModeZone(props, geom)) {
+      if (Number.isFinite(readManhattanV3ShadowRating(props))) return "manhattan_v3_shadow";
       if (Number.isFinite(readManhattanShadowRating(props))) return "manhattan_shadow";
       if (Number.isFinite(Number(props.mh_local_rating))) return "manhattan_mode_legacy";
     }
@@ -462,6 +483,7 @@
       case "legacy_citywide":
         return "Citywide Team Joseo score";
       case "manhattan_shadow":
+      case "manhattan_v3_shadow":
       case "manhattan_mode_legacy":
         return "Manhattan Team Joseo score";
       case "bronx_wash_heights_shadow":
@@ -489,8 +511,10 @@
         return "citywide_v3 live shadow";
       case "citywide_shadow":
         return "citywide_v2 fallback shadow";
+      case "manhattan_v3_shadow":
+        return "manhattan_v3 live shadow";
       case "manhattan_shadow":
-        return "manhattan_v2 live shadow";
+        return "manhattan_v2 fallback shadow";
       case "manhattan_mode_legacy":
         return "manhattan legacy fallback";
       case "bronx_wash_heights_shadow":
@@ -521,6 +545,7 @@
     return (
       source === "citywide_shadow" ||
       source === "legacy_citywide" ||
+      source === "manhattan_shadow" ||
       source === "manhattan_mode_legacy" ||
       source === "bronx_wash_heights_mode_legacy" ||
       source === "queens_mode_legacy" ||
@@ -551,8 +576,10 @@
       if (Number.isFinite(Number(props.bwh_local_rating))) return Number(props.bwh_local_rating);
     }
     if (manhattanMode && isManhattanModeZone(props, geom)) {
-      const shadowRating = readManhattanShadowRating(props);
-      if (Number.isFinite(shadowRating)) return shadowRating;
+      const shadowRatingV3 = readManhattanV3ShadowRating(props);
+      if (Number.isFinite(shadowRatingV3)) return shadowRatingV3;
+      const shadowRatingV2 = readManhattanShadowRating(props);
+      if (Number.isFinite(shadowRatingV2)) return shadowRatingV2;
       if (Number.isFinite(Number(props.mh_local_rating))) return Number(props.mh_local_rating);
     }
 
@@ -583,6 +610,9 @@
     if (source === "bronx_wash_heights_shadow") {
       return readBronxWashHeightsShadowBucket(props) || getBucketForRating(getModeAwareBaseRating(props, geom));
     }
+    if (source === "manhattan_v3_shadow") {
+      return readManhattanV3ShadowBucket(props) || getBucketForRating(getModeAwareBaseRating(props, geom));
+    }
     if (source === "manhattan_shadow") {
       return readManhattanShadowBucket(props) || getBucketForRating(getModeAwareBaseRating(props, geom));
     }
@@ -608,6 +638,9 @@
     }
     if (source === "bronx_wash_heights_shadow") {
       return readBronxWashHeightsShadowColor(props) || getColorForRating(getModeAwareBaseRating(props, geom));
+    }
+    if (source === "manhattan_v3_shadow") {
+      return readManhattanV3ShadowColor(props) || getColorForRating(getModeAwareBaseRating(props, geom));
     }
     if (source === "manhattan_shadow") {
       return readManhattanShadowColor(props) || getColorForRating(getModeAwareBaseRating(props, geom));
@@ -1281,6 +1314,9 @@
       manhattanShadowRating: readManhattanShadowRating(props),
       manhattanShadowBucket: readManhattanShadowBucket(props),
       manhattanShadowConfidence: readManhattanShadowConfidence(props),
+      manhattanV3ShadowRating: readManhattanV3ShadowRating(props),
+      manhattanV3ShadowBucket: readManhattanV3ShadowBucket(props),
+      manhattanV3ShadowConfidence: readManhattanV3ShadowConfidence(props),
       bronxWashHeightsShadowRating: readBronxWashHeightsShadowRating(props),
       bronxWashHeightsShadowBucket: readBronxWashHeightsShadowBucket(props),
       bronxWashHeightsShadowConfidence: readBronxWashHeightsShadowConfidence(props),
@@ -1333,6 +1369,10 @@
     readCitywideV3ShadowConfidence,
     readManhattanShadowRating,
     readManhattanShadowBucket,
+    readManhattanV3ShadowRating,
+    readManhattanV3ShadowBucket,
+    readManhattanV3ShadowColor,
+    readManhattanV3ShadowConfidence,
     readManhattanShadowConfidence,
     readBrooklynShadowRating,
     readBrooklynShadowBucket,
