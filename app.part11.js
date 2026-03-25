@@ -202,7 +202,7 @@
       } else if (queensMode) {
         modeNote.innerHTML = `Queens Mode is <b>ON</b>: Team Joseo Queens earnings score for non-airport Queens zones. Other zones continue using the Team Joseo citywide score.`;
       } else if (bronxWashHeightsMode) {
-        modeNote.innerHTML = `Bronx/Wash Heights Mode is <b>ON</b>: Team Joseo Bronx/Wash Heights earnings score for the Bronx and the defined upper-Manhattan corridor. Other zones continue using the Team Joseo citywide score.`;
+        modeNote.innerHTML = `Bronx/Wash Heights Mode is <b>ON</b>: Team Joseo Bronx/Wash Heights earnings score for the Bronx and the defined upper-Manhattan corridor, balancing flow, density, continuation, downstream value, and local trap penalties. Other zones continue using the Team Joseo citywide score.`;
       } else if (manhattanMode) {
         modeNote.innerHTML = `Manhattan Mode is <b>ON</b>: Team Joseo Manhattan earnings score for core Manhattan, balancing demand density, 20+ minute trip quality, pay efficiency, downstream value, and trap penalties. Other zones continue using the Team Joseo citywide score.`;
       } else if (statenIslandMode) {
@@ -338,6 +338,26 @@
     return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : NaN;
   }
 
+  function readBronxWashHeightsV3ShadowRating(props) {
+    const n = Number(props?.earnings_shadow_rating_bronx_wash_heights_v3 ?? NaN);
+    return Number.isFinite(n) ? Math.max(1, Math.min(100, Math.round(n))) : NaN;
+  }
+
+  function readBronxWashHeightsV3ShadowBucket(props) {
+    const text = String(props?.earnings_shadow_bucket_bronx_wash_heights_v3 || "").trim();
+    return text || "";
+  }
+
+  function readBronxWashHeightsV3ShadowColor(props) {
+    const text = String(props?.earnings_shadow_color_bronx_wash_heights_v3 || "").trim();
+    return text || "";
+  }
+
+  function readBronxWashHeightsV3ShadowConfidence(props) {
+    const n = Number(props?.earnings_shadow_confidence_bronx_wash_heights_v3 ?? NaN);
+    return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : NaN;
+  }
+
   function readQueensShadowRating(props) {
     const n = Number(props?.earnings_shadow_rating_queens_v2 ?? NaN);
     return Number.isFinite(n) ? Math.max(1, Math.min(100, Math.round(n))) : NaN;
@@ -455,6 +475,7 @@
     }
 
     if (bronxWashHeightsMode && isBronxWashHeightsModeZone(props)) {
+      if (Number.isFinite(readBronxWashHeightsV3ShadowRating(props))) return "bronx_wash_heights_v3_shadow";
       if (Number.isFinite(readBronxWashHeightsShadowRating(props))) return "bronx_wash_heights_shadow";
       if (Number.isFinite(Number(props.bwh_local_rating))) return "bronx_wash_heights_mode_legacy";
     }
@@ -486,6 +507,7 @@
       case "manhattan_v3_shadow":
       case "manhattan_mode_legacy":
         return "Manhattan Team Joseo score";
+      case "bronx_wash_heights_v3_shadow":
       case "bronx_wash_heights_shadow":
       case "bronx_wash_heights_mode_legacy":
         return "Bronx/Wash Heights Team Joseo score";
@@ -517,8 +539,10 @@
         return "manhattan_v2 fallback shadow";
       case "manhattan_mode_legacy":
         return "manhattan legacy fallback";
+      case "bronx_wash_heights_v3_shadow":
+        return "bronx_wash_heights_v3 live shadow";
       case "bronx_wash_heights_shadow":
-        return "bronx_wash_heights_v2 live shadow";
+        return "bronx_wash_heights_v2 fallback shadow";
       case "bronx_wash_heights_mode_legacy":
         return "bronx_wash_heights legacy fallback";
       case "queens_shadow":
@@ -547,6 +571,7 @@
       source === "legacy_citywide" ||
       source === "manhattan_shadow" ||
       source === "manhattan_mode_legacy" ||
+      source === "bronx_wash_heights_shadow" ||
       source === "bronx_wash_heights_mode_legacy" ||
       source === "queens_mode_legacy" ||
       source === "brooklyn_mode_legacy" ||
@@ -571,8 +596,10 @@
       if (Number.isFinite(Number(props.si_local_rating))) return Number(props.si_local_rating);
     }
     if (bronxWashHeightsMode && isBronxWashHeightsModeZone(props)) {
-      const shadowRating = readBronxWashHeightsShadowRating(props);
-      if (Number.isFinite(shadowRating)) return shadowRating;
+      const shadowRatingV3 = readBronxWashHeightsV3ShadowRating(props);
+      if (Number.isFinite(shadowRatingV3)) return shadowRatingV3;
+      const shadowRatingV2 = readBronxWashHeightsShadowRating(props);
+      if (Number.isFinite(shadowRatingV2)) return shadowRatingV2;
       if (Number.isFinite(Number(props.bwh_local_rating))) return Number(props.bwh_local_rating);
     }
     if (manhattanMode && isManhattanModeZone(props, geom)) {
@@ -607,6 +634,9 @@
     if (source === "staten_island_shadow") {
       return readStatenIslandShadowBucket(props) || getBucketForRating(getModeAwareBaseRating(props, geom));
     }
+    if (source === "bronx_wash_heights_v3_shadow") {
+      return readBronxWashHeightsV3ShadowBucket(props) || getBucketForRating(getModeAwareBaseRating(props, geom));
+    }
     if (source === "bronx_wash_heights_shadow") {
       return readBronxWashHeightsShadowBucket(props) || getBucketForRating(getModeAwareBaseRating(props, geom));
     }
@@ -635,6 +665,9 @@
     }
     if (source === "staten_island_shadow") {
       return readStatenIslandShadowColor(props) || getColorForRating(getModeAwareBaseRating(props, geom));
+    }
+    if (source === "bronx_wash_heights_v3_shadow") {
+      return readBronxWashHeightsV3ShadowColor(props) || getColorForRating(getModeAwareBaseRating(props, geom));
     }
     if (source === "bronx_wash_heights_shadow") {
       return readBronxWashHeightsShadowColor(props) || getColorForRating(getModeAwareBaseRating(props, geom));
@@ -1317,6 +1350,9 @@
       manhattanV3ShadowRating: readManhattanV3ShadowRating(props),
       manhattanV3ShadowBucket: readManhattanV3ShadowBucket(props),
       manhattanV3ShadowConfidence: readManhattanV3ShadowConfidence(props),
+      bronxWashHeightsV3ShadowRating: readBronxWashHeightsV3ShadowRating(props),
+      bronxWashHeightsV3ShadowBucket: readBronxWashHeightsV3ShadowBucket(props),
+      bronxWashHeightsV3ShadowConfidence: readBronxWashHeightsV3ShadowConfidence(props),
       bronxWashHeightsShadowRating: readBronxWashHeightsShadowRating(props),
       bronxWashHeightsShadowBucket: readBronxWashHeightsShadowBucket(props),
       bronxWashHeightsShadowConfidence: readBronxWashHeightsShadowConfidence(props),
@@ -1383,6 +1419,10 @@
     readBronxWashHeightsShadowRating,
     readBronxWashHeightsShadowBucket,
     readBronxWashHeightsShadowConfidence,
+    readBronxWashHeightsV3ShadowRating,
+    readBronxWashHeightsV3ShadowBucket,
+    readBronxWashHeightsV3ShadowColor,
+    readBronxWashHeightsV3ShadowConfidence,
     readStatenIslandShadowRating,
     readStatenIslandShadowBucket,
     readStatenIslandShadowConfidence

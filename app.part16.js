@@ -148,6 +148,20 @@
           ),
         }
       : null;
+    const bronxWashHeightsV3LiveCandidate = allShadows
+      ? {
+          bronxWashHeightsV3Rating: safeRound(allShadows.bronx_wash_heights_v3?.earnings_shadow_rating_bronx_wash_heights_v3, 2),
+          bronxWashHeightsV3Bucket: String(allShadows.bronx_wash_heights_v3?.earnings_shadow_bucket_bronx_wash_heights_v3 || ""),
+          bronxWashHeightsV3Confidence: safeRound(allShadows.bronx_wash_heights_v3?.earnings_shadow_confidence_bronx_wash_heights_v3, 3),
+          bronxWashHeightsV3DeltaVsV2: safeRound(
+            Number.isFinite(Number(allShadows.bronx_wash_heights_v3?.earnings_shadow_rating_bronx_wash_heights_v3)) &&
+            Number.isFinite(Number(allShadows.bronx_wash_heights?.earnings_shadow_rating_bronx_wash_heights_v2))
+              ? Number(allShadows.bronx_wash_heights_v3.earnings_shadow_rating_bronx_wash_heights_v3) - Number(allShadows.bronx_wash_heights.earnings_shadow_rating_bronx_wash_heights_v2)
+              : null,
+            2
+          ),
+        }
+      : null;
     const crowding =
       crowdingModule.getZoneCommunityCrowdingSnapshot?.(props?.LocationID) || null;
 
@@ -168,6 +182,7 @@
       densityTripQuality,
       citywideV3Candidate,
       manhattanV3LiveCandidate,
+      bronxWashHeightsV3LiveCandidate,
       boroughV3Candidates,
       crowding: crowding
         ? {

@@ -2108,7 +2108,7 @@ function buildZoneShadowPreviewHTML(props, geom) {
       delta: shadowSummary.delta_manhattan_v3_vs_v2,
     },
     bronx_wash_heights: {
-      title: "Team Joseo Bronx/Wash Heights_v3 candidate",
+      title: "Team Joseo Bronx/Wash Heights_v3 live",
       rating: shadowSummary.bronx_wash_heights_v3_rating,
       bucket: shadowSummary.bronx_wash_heights_v3_bucket,
       confidence: shadowSummary.bronx_wash_heights_v3_confidence,
@@ -2333,10 +2333,14 @@ function buildPopupHTML(props, geom, metrics = getZonePopupMetrics(map?.getZoom?
   }
 
   if (modeFlags.bronxWashHeightsMode && activeModeTag === "bronx_wash_heights") {
-    const bwhShadowRating = Number(window.TlcModeModule?.readBronxWashHeightsShadowRating?.(props) ?? NaN);
-    const bwhShadowBucket = String(window.TlcModeModule?.readBronxWashHeightsShadowBucket?.(props) || "");
-    if (Number.isFinite(bwhShadowRating)) {
-      extra += `<div style="margin-top:6px;"><b>Bronx/Wash Heights earnings score:</b> ${bwhShadowRating} (${prettyBucket(bwhShadowBucket)})</div>`;
+    const bwhV3ShadowRating = Number(window.TlcModeModule?.readBronxWashHeightsV3ShadowRating?.(props) ?? NaN);
+    const bwhV3ShadowBucket = String(window.TlcModeModule?.readBronxWashHeightsV3ShadowBucket?.(props) || "");
+    const bwhV2ShadowRating = Number(window.TlcModeModule?.readBronxWashHeightsShadowRating?.(props) ?? NaN);
+    const bwhV2ShadowBucket = String(window.TlcModeModule?.readBronxWashHeightsShadowBucket?.(props) || "");
+    if (Number.isFinite(bwhV3ShadowRating)) {
+      extra += `<div style="margin-top:6px;"><b>Bronx/Wash Heights earnings score:</b> ${bwhV3ShadowRating} (${prettyBucket(bwhV3ShadowBucket)})</div>`;
+    } else if (Number.isFinite(bwhV2ShadowRating)) {
+      extra += `<div style="margin-top:6px;"><b>Bronx/Wash Heights earnings score:</b> ${bwhV2ShadowRating} (${prettyBucket(bwhV2ShadowBucket)})</div>`;
     } else if (Number.isFinite(Number(props.bwh_local_rating))) {
       extra += `<div style="margin-top:6px;"><b>Bronx/Wash Heights earnings score:</b> ${props.bwh_local_rating} (${prettyBucket(props.bwh_local_bucket)})</div>`;
     }
