@@ -42,9 +42,17 @@
     const citywideV3Rating = Number(shadowCitywide?.earnings_shadow_rating_citywide_v3 ?? NaN);
     const densityTripQuality = shadowCitywide
       ? {
+          airportExcluded: !!shadowCitywide.airport_excluded,
           zoneAreaSqMiles: safeRound(shadowCitywide.zone_area_sq_miles_shadow, 2),
           pickupsPerSqMileNow: safeRound(shadowCitywide.pickups_per_sq_mile_now_shadow, 1),
           pickupsPerSqMileNext: safeRound(shadowCitywide.pickups_per_sq_mile_next_shadow, 1),
+          balancedTripShare: safeRound(shadowCitywide.balanced_trip_share_shadow, 4),
+          balancedTripQualityN: safeRound(shadowCitywide.balanced_trip_quality_n_shadow, 4),
+          busyNowBaseN: safeRound(shadowCitywide.busy_now_base_n_shadow, 4),
+          busyNextBaseN: safeRound(shadowCitywide.busy_next_base_n_shadow, 4),
+          churnPressureN: safeRound(shadowCitywide.churn_pressure_n_shadow, 4),
+          manhattanCoreSaturationProxyN: safeRound(shadowCitywide.manhattan_core_saturation_proxy_n_shadow, 4),
+          citywideAnchorNormV3: safeRound(shadowCitywide.earnings_shadow_citywide_anchor_norm_v3, 4),
           longTripShare20Plus: safeRound(shadowCitywide.long_trip_share_20plus_shadow, 4),
           sameZoneDropoffShare: safeRound(shadowCitywide.same_zone_dropoff_share_shadow, 4),
           demandDensityNowN: safeRound(shadowCitywide.demand_density_now_n_shadow, 4),
@@ -68,6 +76,21 @@
             Number.isFinite(citywideV3Rating) && Number.isFinite(citywideV2Rating)
               ? safeRound(citywideV3Rating - citywideV2Rating, 2)
               : null,
+        }
+      : null;
+    const scoreAuditSnapshot = shadowCitywide
+      ? {
+          airport_excluded: !!shadowCitywide.airport_excluded,
+          zoneAreaSqMiles: safeRound(shadowCitywide.zone_area_sq_miles_shadow, 2),
+          pickupsPerSqMileNow: safeRound(shadowCitywide.pickups_per_sq_mile_now_shadow, 1),
+          pickupsPerSqMileNext: safeRound(shadowCitywide.pickups_per_sq_mile_next_shadow, 1),
+          balancedTripShare: safeRound(shadowCitywide.balanced_trip_share_shadow, 4),
+          balancedTripQualityN: safeRound(shadowCitywide.balanced_trip_quality_n_shadow, 4),
+          busyNowBaseN: safeRound(shadowCitywide.busy_now_base_n_shadow, 4),
+          busyNextBaseN: safeRound(shadowCitywide.busy_next_base_n_shadow, 4),
+          churnPressureN: safeRound(shadowCitywide.churn_pressure_n_shadow, 4),
+          manhattanCoreSaturationProxyN: safeRound(shadowCitywide.manhattan_core_saturation_proxy_n_shadow, 4),
+          citywideAnchorNormV3: safeRound(shadowCitywide.earnings_shadow_citywide_anchor_norm_v3, 4),
         }
       : null;
     const boroughV3Candidates = allShadows
@@ -211,6 +234,7 @@
       locationId: String(props?.LocationID ?? ""),
       zoneName: String(props?.zone_name || ""),
       borough: String(props?.borough || ""),
+      airportExcluded: !!props?.airport_excluded,
       activeModeTag,
       visibleSource,
       visibleSourceLabel,
@@ -222,6 +246,7 @@
       shadowProfiles: allShadows,
       shadowReadiness,
       densityTripQuality,
+      scoreAuditSnapshot,
       citywideV3Candidate,
       manhattanV3LiveCandidate,
       bronxWashHeightsV3LiveCandidate,

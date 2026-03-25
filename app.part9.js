@@ -63,12 +63,14 @@
     const BRONX_WASH_HEIGHTS_DIST_PENALTY_PER_MILE = 2.0;
     const modes = core.getSpecialModes?.() || {};
     const specialModesActive = modes.queensMode || modes.brooklynMode || modes.statenIslandMode || modes.bronxWashHeightsMode || modes.manhattanMode;
+    const TIE_BREAK_THRESHOLD = 2.0;
 
     let best = null;
 
     for (const f of feats) {
       const props = f.properties || {};
       const geom = f.geometry;
+      if (props.airport_excluded === true) continue;
       const modeTag = core.getActiveSpecialModeTagForFeature?.(props, geom);
 
       if (specialModesActive && modeTag == null) continue;
@@ -100,23 +102,77 @@
 
       if (!Number.isFinite(score)) continue;
 
+      const churnPressure = Number(props.churn_pressure_n_shadow ?? NaN);
+      const balancedTripQuality = Number(props.balanced_trip_quality_n_shadow ?? NaN);
+      const busyNextBase = Number(props.busy_next_base_n_shadow ?? NaN);
+      const manhattanSaturation = Number(props.manhattan_core_saturation_proxy_n_shadow ?? NaN);
+
+      const candidate = {
+        score,
+        dMi,
+        rating,
+        lat: center.lat,
+        lng: center.lng,
+        name: (props.zone_name || "").trim() || `Zone ${props.LocationID ?? ""}`,
+        borough: (props.borough || "").trim(),
+        usedQN: modeTag === "queens" && /^queens_/.test(scoreSource),
+        usedBK: modeTag === "brooklyn" && /^brooklyn_/.test(scoreSource),
+        usedSI: modeTag === "staten_island" && /^staten_island_/.test(scoreSource),
+        usedMH: modeTag === "manhattan" && /^manhattan_/.test(scoreSource),
+        usedBWH: modeTag === "bronx_wash_heights" && /^bronx_wash_heights_/.test(scoreSource),
+        visibleScoreSource: scoreSource || "legacy_citywide",
+        communityCrowding: window.TlcCommunityCrowdingModule?.getZoneCommunityCrowdingSnapshot?.(props.LocationID) || null,
+        churnPressure: Number.isFinite(churnPressure) ? churnPressure : null,
+        balancedTripQuality: Number.isFinite(balancedTripQuality) ? balancedTripQuality : null,
+        busyNextBase: Number.isFinite(busyNextBase) ? busyNextBase : null,
+        manhattanSaturation: Number.isFinite(manhattanSaturation) ? manhattanSaturation : null,
+      };
+
       if (!best || score > best.score) {
-        best = {
-          score,
-          dMi,
-          rating,
-          lat: center.lat,
-          lng: center.lng,
-          name: (props.zone_name || "").trim() || `Zone ${props.LocationID ?? ""}`,
-          borough: (props.borough || "").trim(),
-          usedQN: modeTag === "queens" && /^queens_/.test(scoreSource),
-          usedBK: modeTag === "brooklyn" && /^brooklyn_/.test(scoreSource),
-          usedSI: modeTag === "staten_island" && /^staten_island_/.test(scoreSource),
-          usedMH: modeTag === "manhattan" && /^manhattan_/.test(scoreSource),
-          usedBWH: modeTag === "bronx_wash_heights" && /^bronx_wash_heights_/.test(scoreSource),
-          visibleScoreSource: scoreSource || "legacy_citywide",
-          communityCrowding: window.TlcCommunityCrowdingModule?.getZoneCommunityCrowdingSnapshot?.(props.LocationID) || null,
-        };
+        best = candidate;
+        continue;
+      }
+
+      if (best && Math.abs(score - best.score) <= TIE_BREAK_THRESHOLD) {
+        const compareValues = [
+          {
+            next: candidate.churnPressure,
+            current: best.churnPressure,
+            lowerIsBetter: true,
+          },
+          {
+            next: candidate.balancedTripQuality,
+            current: best.balancedTripQuality,
+            lowerIsBetter: false,
+          },
+          {
+            next: candidate.busyNextBase,
+            current: best.busyNextBase,
+            lowerIsBetter: false,
+          },
+        ];
+
+        let tieDecision = 0;
+        for (const item of compareValues) {
+          if (!Number.isFinite(item.next) || !Number.isFinite(item.current)) continue;
+          if (item.next === item.current) continue;
+          tieDecision = item.lowerIsBetter
+            ? (item.next < item.current ? 1 : -1)
+            : (item.next > item.current ? 1 : -1);
+          if (tieDecision !== 0) break;
+        }
+
+        if (modes.manhattanMode) {
+          if (Number.isFinite(candidate.manhattanSaturation) && Number.isFinite(best.manhattanSaturation)) {
+            if (candidate.manhattanSaturation !== best.manhattanSaturation) {
+              tieDecision = candidate.manhattanSaturation < best.manhattanSaturation ? 1 : -1;
+            }
+          }
+        }
+
+        if (tieDecision > 0) {
+          best = candidate;
+        }
       }
     }
 
