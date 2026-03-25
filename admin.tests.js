@@ -694,8 +694,9 @@
     }
     if (test.key === 'score-manifest') {
       const data = response.data || {};
-      const liveProfiles = safeNumber(data.live_profile_count ?? data.visible_profile_count);
-      const v3Profiles = safeNumber(data.v3_profile_count ?? data.visible_v3_profile_count);
+      const visibleProfilesLive = Array.isArray(data.visible_profiles_live) ? data.visible_profiles_live : [];
+      const liveProfiles = visibleProfilesLive.length;
+      const v3Profiles = visibleProfilesLive.filter((entry) => String(entry).endsWith('_v3')).length;
       if (status === 'pass') {
         detail = generatedArtifactSyncFailing
           ? `The map is rendering, but live frame artifacts are stale relative to the deployed code. Score manifest appears internally valid. Live: ${liveProfiles} • V3: ${v3Profiles}`
@@ -716,52 +717,40 @@
     }
     if (test.key === 'zone-geometry-metrics') {
       const data = response.data || {};
-      const zoneCount = safeNumber(data.zone_count ?? data.metrics_count);
-      const invalidArea = safeNumber(data.invalid_area_count ?? data.non_positive_area_count);
+      const totalRows = safeNumber(data.total_rows);
+      const positiveAreaRows = safeNumber(data.positive_area_rows);
+      const nullOrZeroAreaRows = safeNumber(data.null_or_zero_area_rows);
       detail = status === 'pass'
-        ? `Zone geometry metrics are healthy. Zones: ${zoneCount} • Invalid area: ${invalidArea}`
-        : `Zone geometry metrics reported issues. Zones: ${zoneCount} • Invalid area: ${invalidArea}`;
+        ? `Zone geometry metrics are healthy. Total rows: ${totalRows} • Positive area rows: ${positiveAreaRows} • Null/zero area rows: ${nullOrZeroAreaRows}`
+        : `Zone geometry metrics reported issues. Total rows: ${totalRows} • Positive area rows: ${positiveAreaRows} • Null/zero area rows: ${nullOrZeroAreaRows}`;
     }
     if (test.key === 'score-frame-integrity') {
       const data = response.data || {};
-      const frameCount = safeNumber(data.frame_count ?? data.sampled_frame_count);
-      const invalidFeatures = safeNumber(data.invalid_feature_count ?? data.feature_violation_count);
+      const frameCount = Array.isArray(data.sampled_frame_indices) ? data.sampled_frame_indices.length : 0;
+      const sampledFeatureCount = Number(data.sampled_feature_count ?? 0);
+      const violationCount = Number(data.violation_count ?? 0);
       if (status === 'pass') {
         detail = generatedArtifactSyncFailing
-          ? `The map is rendering, but live frame artifacts are stale relative to the deployed code. Sampled frame integrity is locally consistent. Frames: ${frameCount} • Invalid features: ${invalidFeatures}`
-          : `Frame integrity passed on sampled frames. Frames: ${frameCount} • Invalid features: ${invalidFeatures}`;
+          ? `The map is rendering, but live frame artifacts are stale relative to the deployed code. Sampled frame integrity is locally consistent. Frames sampled: ${frameCount} • Sampled features: ${sampledFeatureCount} • Violations: ${violationCount}`
+          : `Frame integrity passed on sampled frames. Frames sampled: ${frameCount} • Sampled features: ${sampledFeatureCount} • Violations: ${violationCount}`;
       } else {
         detail = generatedArtifactSyncFailing
-          ? `The map is rendering, but live frame artifacts are stale relative to the deployed code. Frame integrity anomalies are consistent with stale generated frame artifacts (not frontend routing logic). Frames: ${frameCount} • Invalid features: ${invalidFeatures}`
-          : `Frame integrity found invalid features. Frames: ${frameCount} • Invalid features: ${invalidFeatures}`;
+          ? `The map is rendering, but live frame artifacts are stale relative to the deployed code. Frame integrity anomalies are consistent with stale generated frame artifacts (not frontend routing logic). Frames sampled: ${frameCount} • Sampled features: ${sampledFeatureCount} • Violations: ${violationCount}`
+          : `Frame integrity found invalid features. Frames sampled: ${frameCount} • Sampled features: ${sampledFeatureCount} • Violations: ${violationCount}`;
       }
     }
     if (test.key === 'generated-artifact-sync') {
       const data = response.data || {};
-      const reasonCodes = toArray(
-        data.reason_codes
-        ?? data.reasonCodes
-        ?? data?.artifact_sync?.reason_codes
-        ?? data?.artifact_sync?.reasonCodes
-      );
-      const sampledSnapshot = pickFirst(data, [
-        'sampled_frame_integrity_snapshot',
-        'sampledFrameIntegritySnapshot',
-        'frame_integrity_snapshot',
-        'frameIntegritySnapshot',
-        'artifact_sync.sampled_frame_integrity_snapshot',
-        'artifact_sync.frame_integrity_snapshot',
-      ]);
+      const manifestPresent = data.manifest_present;
+      const timelinePresent = data.timeline_present;
+      const sampledFrameFile = data.sampled_frame_file;
+      const frameHasCitywideV3 = data.frame_has_citywide_v3;
+      const frameHasBoroughV3Fields = data.frame_has_borough_v3_fields;
+      const likelyCause = data.likely_cause;
       if (status === 'pass') {
-        detail = 'Generated frame artifacts match deployed code and source data.';
+        detail = `Generated frame artifacts match deployed code and source data. Manifest present: ${c.formatValue(manifestPresent)} • Timeline present: ${c.formatValue(timelinePresent)} • Sampled frame file: ${c.formatValue(sampledFrameFile)} • Citywide v3: ${c.formatValue(frameHasCitywideV3)} • Borough v3 fields: ${c.formatValue(frameHasBoroughV3Fields)} • Likely cause: ${c.formatValue(likelyCause)}`;
       } else {
-        const reasonSegment = reasonCodes.length
-          ? `Reason codes: ${reasonCodes.join(', ')}`
-          : 'Reason codes: unavailable';
-        const snapshotSegment = sampledSnapshot
-          ? `Sampled frame integrity snapshot: ${c.formatValue(sampledSnapshot)}`
-          : 'Sampled frame integrity snapshot: unavailable';
-        detail = `The map is rendering, but live frame artifacts are stale relative to the deployed code. ${reasonSegment} • ${snapshotSegment}`;
+        detail = `The map is rendering, but live frame artifacts are stale relative to the deployed code. Manifest present: ${c.formatValue(manifestPresent)} • Timeline present: ${c.formatValue(timelinePresent)} • Sampled frame file: ${c.formatValue(sampledFrameFile)} • Citywide v3: ${c.formatValue(frameHasCitywideV3)} • Borough v3 fields: ${c.formatValue(frameHasBoroughV3Fields)} • Likely cause: ${c.formatValue(likelyCause)}`;
       }
     }
     if (test.key === 'client-system-audit') {
