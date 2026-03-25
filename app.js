@@ -956,7 +956,7 @@ function colorsPanelHTML() {
           if (modeFlags.bronxWashHeightsMode) active.push("Bronx/Wash Heights Mode");
           if (modeFlags.manhattanMode) active.push("Manhattan Mode");
           if (!active.length) {
-            return "Base colors reflect the Team Joseo score (earnings opportunity) for the selected 20-minute window. Time label is NYC time. Dashed amber/orange outline = Team Joseo community crowding caution (community-only, not TLC/HVFHV truth).";
+            return "Base colors reflect the Team Joseo citywide score (earnings opportunity), balancing demand, demand density, long-trip quality, pay quality, downstream value, and trap penalties. Time label is NYC time. Dashed amber/orange outline = Team Joseo community crowding caution (community-only, not TLC/HVFHV truth).";
           }
           const joined = active.length === 1
             ? active[0]
@@ -2271,7 +2271,7 @@ function buildPopupHTML(props, geom, metrics = getZonePopupMetrics(map?.getZoom?
     }
   }
 
-  const showRawHvfBase = (debugEnabled || window.__TEAM_JOSEO_SHADOW_PREVIEW__ === true) && visibleScoreSource === "citywide_shadow";
+  const showRawHvfBase = (debugEnabled || window.__TEAM_JOSEO_SHADOW_PREVIEW__ === true) && (visibleScoreSource === "citywide_shadow" || visibleScoreSource === "citywide_v3_shadow");
   const rawHvfBaseRating = Number.isFinite(Number(props?.rating)) ? Math.round(Number(props.rating)) : "n/a";
   const rawHvfBaseBucket = String(props?.bucket || "");
 
@@ -2406,7 +2406,7 @@ async function renderFrame(frame) {
   if (debugEnabled) dbg("dbgFit", didFitToZonesOnce);
 
   if (timeLabel && currentFrame?.time) {
-    timeLabel.textContent = `Showing Demand At ${formatNYCTimeOnlyLabel(currentFrame.time)}`;
+    timeLabel.textContent = `Showing Team Joseo Score At ${formatNYCTimeOnlyLabel(currentFrame.time)}`;
   }
   updateRecommendation(currentFrame);
   markFirstUsableMap("frame rendered");

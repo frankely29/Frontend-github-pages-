@@ -210,7 +210,7 @@
       } else if (brooklynMode) {
         modeNote.innerHTML = `Brooklyn Mode is <b>ON</b>: Team Joseo Brooklyn earnings score for Brooklyn zones. Other zones continue using the Team Joseo citywide score.`;
       } else {
-        modeNote.innerHTML = `Base colors reflect the Team Joseo score for the selected 20-minute window.`;
+        modeNote.innerHTML = `Base colors reflect the Team Joseo citywide score for the selected 20-minute window, blending demand, density, long-trip quality, pay quality, downstream value, and trap penalties.`;
       }
     }
   }
@@ -255,6 +255,26 @@
 
   function readCitywideShadowConfidence(props) {
     const n = Number(props?.earnings_shadow_confidence_citywide_v2 ?? NaN);
+    return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : NaN;
+  }
+
+  function readCitywideV3ShadowRating(props) {
+    const n = Number(props?.earnings_shadow_rating_citywide_v3 ?? NaN);
+    return Number.isFinite(n) ? Math.max(1, Math.min(100, Math.round(n))) : NaN;
+  }
+
+  function readCitywideV3ShadowBucket(props) {
+    const text = String(props?.earnings_shadow_bucket_citywide_v3 || "").trim();
+    return text || "";
+  }
+
+  function readCitywideV3ShadowColor(props) {
+    const text = String(props?.earnings_shadow_color_citywide_v3 || "").trim();
+    return text || "";
+  }
+
+  function readCitywideV3ShadowConfidence(props) {
+    const n = Number(props?.earnings_shadow_confidence_citywide_v3 ?? NaN);
     return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : NaN;
   }
 
@@ -424,6 +444,9 @@
       if (Number.isFinite(Number(props.mh_local_rating))) return "manhattan_mode_legacy";
     }
 
+    const citywideV3ShadowRating = readCitywideV3ShadowRating(props);
+    if (Number.isFinite(citywideV3ShadowRating)) return "citywide_v3_shadow";
+
     const citywideShadowRating = readCitywideShadowRating(props);
     if (Number.isFinite(citywideShadowRating)) return "citywide_shadow";
 
@@ -434,6 +457,7 @@
     const source = getVisibleScoreSourceForFeature(props, geom);
 
     switch (source) {
+      case "citywide_v3_shadow":
       case "citywide_shadow":
       case "legacy_citywide":
         return "Citywide Team Joseo score";
@@ -461,8 +485,10 @@
     const source = getVisibleScoreSourceForFeature(props, geom);
 
     switch (source) {
+      case "citywide_v3_shadow":
+        return "citywide_v3 live shadow";
       case "citywide_shadow":
-        return "citywide_v2 live shadow";
+        return "citywide_v2 fallback shadow";
       case "manhattan_shadow":
         return "manhattan_v2 live shadow";
       case "manhattan_mode_legacy":
@@ -493,6 +519,7 @@
   function isVisibleScoreUsingFallback(props, geom) {
     const source = getVisibleScoreSourceForFeature(props, geom);
     return (
+      source === "citywide_shadow" ||
       source === "legacy_citywide" ||
       source === "manhattan_mode_legacy" ||
       source === "bronx_wash_heights_mode_legacy" ||
@@ -529,6 +556,11 @@
       if (Number.isFinite(Number(props.mh_local_rating))) return Number(props.mh_local_rating);
     }
 
+    const citywideV3ShadowRating = readCitywideV3ShadowRating(props);
+    if (Number.isFinite(citywideV3ShadowRating)) {
+      return citywideV3ShadowRating;
+    }
+
     const citywideShadowRating = readCitywideShadowRating(props);
     if (Number.isFinite(citywideShadowRating)) {
       return citywideShadowRating;
@@ -554,6 +586,9 @@
     if (source === "manhattan_shadow") {
       return readManhattanShadowBucket(props) || getBucketForRating(getModeAwareBaseRating(props, geom));
     }
+    if (source === "citywide_v3_shadow") {
+      return readCitywideV3ShadowBucket(props) || getBucketForRating(getModeAwareBaseRating(props, geom));
+    }
     if (source === "citywide_shadow") {
       return readCitywideShadowBucket(props) || getBucketForRating(getModeAwareBaseRating(props, geom));
     }
@@ -576,6 +611,9 @@
     }
     if (source === "manhattan_shadow") {
       return readManhattanShadowColor(props) || getColorForRating(getModeAwareBaseRating(props, geom));
+    }
+    if (source === "citywide_v3_shadow") {
+      return readCitywideV3ShadowColor(props) || getColorForRating(getModeAwareBaseRating(props, geom));
     }
     if (source === "citywide_shadow") {
       return readCitywideShadowColor(props) || getColorForRating(getModeAwareBaseRating(props, geom));
@@ -1234,6 +1272,9 @@
       modeFlags: getModeFlags(),
       activeModeTag: getActiveSpecialModeTagForFeature(props, geom),
       visibleScoreSource: getVisibleScoreSourceForFeature(props, geom),
+      citywideV3ShadowRating: readCitywideV3ShadowRating(props),
+      citywideV3ShadowBucket: readCitywideV3ShadowBucket(props),
+      citywideV3ShadowConfidence: readCitywideV3ShadowConfidence(props),
       citywideShadowRating: readCitywideShadowRating(props),
       citywideShadowBucket: readCitywideShadowBucket(props),
       citywideShadowConfidence: readCitywideShadowConfidence(props),
@@ -1286,6 +1327,10 @@
     getVisibleScoreSourceLabel,
     getVisibleScoreTechnicalSourceLabel,
     isVisibleScoreUsingFallback,
+    readCitywideV3ShadowRating,
+    readCitywideV3ShadowBucket,
+    readCitywideV3ShadowColor,
+    readCitywideV3ShadowConfidence,
     readManhattanShadowRating,
     readManhattanShadowBucket,
     readManhattanShadowConfidence,
