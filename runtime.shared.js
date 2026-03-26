@@ -1,22 +1,21 @@
 (function () {
-  const DEFAULT_API_BASE = 'https://teamjoseo.up.railway.app';
+  const DEFAULT_API_BASE = 'https://web-production-78f67.up.railway.app';
   const perfRoot = (typeof window !== 'undefined')
     ? (window.__mapPerfDebug = window.__mapPerfDebug || {})
     : {};
 
   function resolveApiBase(explicitBase) {
-    const sameOrigin = (typeof window !== 'undefined' && window.location && /^https?:/i.test(window.location.origin))
-      ? window.location.origin
-      : '';
     const source = explicitBase !== undefined
       ? explicitBase
-      : (typeof window !== 'undefined' && window.API_BASE !== undefined ? window.API_BASE : (sameOrigin || DEFAULT_API_BASE));
-    const normalized = String(source || sameOrigin || DEFAULT_API_BASE).trim() || sameOrigin || DEFAULT_API_BASE;
+      : (typeof window !== 'undefined' && window.API_BASE !== undefined
+          ? window.API_BASE
+          : DEFAULT_API_BASE);
+    const normalized = String(source || DEFAULT_API_BASE).trim() || DEFAULT_API_BASE;
     return normalized.replace(/\/+$/, '');
   }
 
   if (typeof window !== 'undefined' && window.API_BASE === undefined) {
-    window.API_BASE = resolveApiBase();
+    window.API_BASE = DEFAULT_API_BASE;
   }
 
   function toAbsoluteUrl(urlOrPath, baseOverride) {
