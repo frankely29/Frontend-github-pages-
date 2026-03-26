@@ -1924,8 +1924,12 @@ async function applyPostAuthPreferences({ email, forceGhostSync, desiredGhostMod
   if (typedName && typedName !== (me?.display_name || "")) {
     updates.display_name = typedName;
   }
-  if (forceGhostSync) {
-    updates.ghost_mode = !!desiredGhostMode;
+
+  const shouldSyncGhostMode = forceGhostSync || desiredGhostMode != null;
+  const desiredGhost = !!desiredGhostMode;
+  const currentGhost = !!me?.ghost_mode;
+  if (shouldSyncGhostMode && desiredGhost !== currentGhost) {
+    updates.ghost_mode = desiredGhost;
   }
 
   if (Object.keys(updates).length) {
@@ -1951,8 +1955,13 @@ async function doLogin(email, password, desiredGhostMode) {
   localStorage.setItem(LS_EMAIL, email);
   await loadMe();
   syncCommunityIdentityGlobals();
-  await applyPostAuthPreferences({ email, forceGhostSync: true, desiredGhostMode });
   setAuthUI(true, `Status: signed in as ${me?.display_name || me?.email || email}`);
+  if (authPass) authPass.value = "";
+  try {
+    await applyPostAuthPreferences({ email, forceGhostSync: true, desiredGhostMode });
+  } catch (e) {
+    console.warn("Post-login preference sync failed:", e);
+  }
   pullPresenceAll().catch((e) => console.warn("/presence/all post-login bootstrap failed:", e));
   schedulePickupOverlayRefresh({ force: true });
   syncAdminPortalSession();
@@ -1969,8 +1978,13 @@ async function doSignup(email, password, desiredGhostMode) {
   localStorage.setItem(LS_EMAIL, email);
   await loadMe();
   syncCommunityIdentityGlobals();
-  await applyPostAuthPreferences({ email, forceGhostSync: true, desiredGhostMode });
   setAuthUI(true, `Status: account created • signed in as ${me?.display_name || me?.email || email}`);
+  if (authPass) authPass.value = "";
+  try {
+    await applyPostAuthPreferences({ email, forceGhostSync: true, desiredGhostMode });
+  } catch (e) {
+    console.warn("Post-signup preference sync failed:", e);
+  }
   pullPresenceAll().catch((e) => console.warn("/presence/all post-signup bootstrap failed:", e));
   schedulePickupOverlayRefresh({ force: true });
   syncAdminPortalSession();
@@ -2038,22 +2052,12 @@ function safePass() {
 }
 
 window.getAuthUiDebugState = function getAuthUiDebugState() {
-  const openPanelValue = (typeof openPanelKey !== "undefined") ? openPanelKey : (window.openPanelKey ?? null);
-  const adminRoot = document.getElementById("adminPortalRoot");
-  const adminPortalOpen = !!(
-    adminRoot &&
-    adminRoot.classList.contains("open") &&
-    adminRoot.getAttribute("aria-hidden") !== "true"
-  );
-
   return {
-    signedIn: !!authHeaderOK(),
-    lockedOverlayVisible: !!(lockedOverlay && lockedOverlay.classList.contains("show") && lockedOverlay.getAttribute("aria-hidden") !== "true"),
-    authStatusText: authStatus?.textContent || "",
-    openPanelKey: openPanelValue ?? null,
-    adminPortalOpen,
-    activeTokenPresent: !!communityToken,
+    tokenPresent: !!communityToken,
     meId: me?.id ?? null,
+    signedIn: !!authHeaderOK(),
+    authStatusText: authStatus?.textContent || "",
+    lockedOverlayVisible: !!(lockedOverlay && lockedOverlay.classList.contains("show") && lockedOverlay.getAttribute("aria-hidden") !== "true"),
   };
 };
 
@@ -2070,6 +2074,11 @@ if (btnLogin) {
       setAuthUI(false, "Signing in…");
       await doLogin(email, password, desiredGhostMode);
     } catch (e) {
+      if (authHeaderOK()) {
+        console.warn("Login completed but a non-auth step failed:", e);
+        setAuthUI(true, `Status: signed in as ${me?.display_name || me?.email || safeEmail()}`);
+        return;
+      }
       const suspendedText = authSuspensionMessage(e);
       setAuthUI(false, suspendedText || `Sign in failed: ${e.message || e}`);
     }
@@ -2085,6 +2094,11 @@ if (btnSignup) {
       setAuthUI(false, "Creating account…");
       await doSignup(email, password, desiredGhostMode);
     } catch (e) {
+      if (authHeaderOK()) {
+        console.warn("Signup completed but a non-auth step failed:", e);
+        setAuthUI(true, `Status: signed in as ${me?.display_name || me?.email || safeEmail()}`);
+        return;
+      }
       setAuthUI(false, `Create account failed: ${e.message || e}`);
     }
   });
