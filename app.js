@@ -2638,74 +2638,78 @@ function buildPopupHTML(props, geom, metrics = getZonePopupMetrics(map?.getZoom?
   let extra = "";
   const modeFlags = getModeFlags();
   const activeModeTag = getActiveSpecialModeTagForFeature(props, geom);
+  const getBucketFromShownRating = (rating) => {
+    const n = Number(rating);
+    if (!Number.isFinite(n)) return "";
+    if (typeof window.TlcModeModule?.getBucketForRating === "function") {
+      return String(window.TlcModeModule.getBucketForRating(n) || "");
+    }
+    const x = Math.max(1, Math.min(100, Math.round(n)));
+    if (x >= 85) return "green";
+    if (x >= 70) return "purple";
+    if (x >= 50) return "blue";
+    if (x >= 40) return "sky";
+    if (x >= 30) return "yellow";
+    return "red";
+  };
 
   if (modeFlags.statenIslandMode && activeModeTag === "staten_island") {
     const statenIslandV3ShadowRating = Number(window.TlcModeModule?.readStatenIslandV3ShadowRating?.(props) ?? NaN);
-    const statenIslandV3ShadowBucket = String(window.TlcModeModule?.readStatenIslandV3ShadowBucket?.(props) || "");
     const statenIslandShadowRating = Number(window.TlcModeModule?.readStatenIslandShadowRating?.(props) ?? NaN);
-    const statenIslandShadowBucket = String(window.TlcModeModule?.readStatenIslandShadowBucket?.(props) || "");
     if (Number.isFinite(statenIslandV3ShadowRating)) {
-      extra += `<div style="margin-top:6px;"><b>Staten Island earnings score:</b> ${statenIslandV3ShadowRating} (${prettyBucket(statenIslandV3ShadowBucket)})</div>`;
+      extra += `<div style="margin-top:6px;"><b>Staten Island earnings score:</b> ${statenIslandV3ShadowRating} (${prettyBucket(getBucketFromShownRating(statenIslandV3ShadowRating))})</div>`;
     } else if (Number.isFinite(statenIslandShadowRating)) {
-      extra += `<div style="margin-top:6px;"><b>Staten Island earnings score:</b> ${statenIslandShadowRating} (${prettyBucket(statenIslandShadowBucket)})</div>`;
+      extra += `<div style="margin-top:6px;"><b>Staten Island earnings score:</b> ${statenIslandShadowRating} (${prettyBucket(getBucketFromShownRating(statenIslandShadowRating))})</div>`;
     } else if (Number.isFinite(Number(props.si_local_rating))) {
-      extra += `<div style="margin-top:6px;"><b>Staten Island earnings score:</b> ${props.si_local_rating} (${prettyBucket(props.si_local_bucket)})</div>`;
+      extra += `<div style="margin-top:6px;"><b>Staten Island earnings score:</b> ${props.si_local_rating} (${prettyBucket(getBucketFromShownRating(props.si_local_rating))})</div>`;
     }
   }
 
   if (modeFlags.manhattanMode && activeModeTag === "manhattan") {
     const manhattanV3ShadowRating = Number(window.TlcModeModule?.readManhattanV3ShadowRating?.(props) ?? NaN);
-    const manhattanV3ShadowBucket = String(window.TlcModeModule?.readManhattanV3ShadowBucket?.(props) || "");
     const manhattanShadowRating = Number(window.TlcModeModule?.readManhattanShadowRating?.(props) ?? NaN);
-    const manhattanShadowBucket = String(window.TlcModeModule?.readManhattanShadowBucket?.(props) || "");
     if (Number.isFinite(manhattanV3ShadowRating)) {
-      extra += `<div style="margin-top:6px;"><b>Manhattan earnings score:</b> ${manhattanV3ShadowRating} (${prettyBucket(manhattanV3ShadowBucket)})</div>`;
+      extra += `<div style="margin-top:6px;"><b>Manhattan earnings score:</b> ${manhattanV3ShadowRating} (${prettyBucket(getBucketFromShownRating(manhattanV3ShadowRating))})</div>`;
     } else if (Number.isFinite(manhattanShadowRating)) {
-      extra += `<div style="margin-top:6px;"><b>Manhattan earnings score:</b> ${manhattanShadowRating} (${prettyBucket(manhattanShadowBucket)})</div>`;
+      extra += `<div style="margin-top:6px;"><b>Manhattan earnings score:</b> ${manhattanShadowRating} (${prettyBucket(getBucketFromShownRating(manhattanShadowRating))})</div>`;
     } else if (Number.isFinite(Number(props.mh_local_rating))) {
-      extra += `<div style="margin-top:6px;"><b>Manhattan earnings score:</b> ${props.mh_local_rating} (${prettyBucket(props.mh_local_bucket)})</div>`;
+      extra += `<div style="margin-top:6px;"><b>Manhattan earnings score:</b> ${props.mh_local_rating} (${prettyBucket(getBucketFromShownRating(props.mh_local_rating))})</div>`;
     }
   }
 
   if (modeFlags.queensMode && activeModeTag === "queens") {
     const queensV3ShadowRating = Number(window.TlcModeModule?.readQueensV3ShadowRating?.(props) ?? NaN);
-    const queensV3ShadowBucket = String(window.TlcModeModule?.readQueensV3ShadowBucket?.(props) || "");
     const queensShadowRating = Number(window.TlcModeModule?.readQueensShadowRating?.(props) ?? NaN);
-    const queensShadowBucket = String(window.TlcModeModule?.readQueensShadowBucket?.(props) || "");
     if (Number.isFinite(queensV3ShadowRating)) {
-      extra += `<div style="margin-top:6px;"><b>Queens earnings score:</b> ${queensV3ShadowRating} (${prettyBucket(queensV3ShadowBucket)})</div>`;
+      extra += `<div style="margin-top:6px;"><b>Queens earnings score:</b> ${queensV3ShadowRating} (${prettyBucket(getBucketFromShownRating(queensV3ShadowRating))})</div>`;
     } else if (Number.isFinite(queensShadowRating)) {
-      extra += `<div style="margin-top:6px;"><b>Queens earnings score:</b> ${queensShadowRating} (${prettyBucket(queensShadowBucket)})</div>`;
+      extra += `<div style="margin-top:6px;"><b>Queens earnings score:</b> ${queensShadowRating} (${prettyBucket(getBucketFromShownRating(queensShadowRating))})</div>`;
     } else if (Number.isFinite(Number(props.qn_local_rating))) {
-      extra += `<div style="margin-top:6px;"><b>Queens earnings score:</b> ${props.qn_local_rating} (${prettyBucket(props.qn_local_bucket)})</div>`;
+      extra += `<div style="margin-top:6px;"><b>Queens earnings score:</b> ${props.qn_local_rating} (${prettyBucket(getBucketFromShownRating(props.qn_local_rating))})</div>`;
     }
   }
 
   if (modeFlags.brooklynMode && activeModeTag === "brooklyn") {
     const brooklynV3ShadowRating = Number(window.TlcModeModule?.readBrooklynV3ShadowRating?.(props) ?? NaN);
-    const brooklynV3ShadowBucket = String(window.TlcModeModule?.readBrooklynV3ShadowBucket?.(props) || "");
     const brooklynShadowRating = Number(window.TlcModeModule?.readBrooklynShadowRating?.(props) ?? NaN);
-    const brooklynShadowBucket = String(window.TlcModeModule?.readBrooklynShadowBucket?.(props) || "");
     if (Number.isFinite(brooklynV3ShadowRating)) {
-      extra += `<div style="margin-top:6px;"><b>Brooklyn earnings score:</b> ${brooklynV3ShadowRating} (${prettyBucket(brooklynV3ShadowBucket)})</div>`;
+      extra += `<div style="margin-top:6px;"><b>Brooklyn earnings score:</b> ${brooklynV3ShadowRating} (${prettyBucket(getBucketFromShownRating(brooklynV3ShadowRating))})</div>`;
     } else if (Number.isFinite(brooklynShadowRating)) {
-      extra += `<div style="margin-top:6px;"><b>Brooklyn earnings score:</b> ${brooklynShadowRating} (${prettyBucket(brooklynShadowBucket)})</div>`;
+      extra += `<div style="margin-top:6px;"><b>Brooklyn earnings score:</b> ${brooklynShadowRating} (${prettyBucket(getBucketFromShownRating(brooklynShadowRating))})</div>`;
     } else if (Number.isFinite(Number(props.bk_local_rating))) {
-      extra += `<div style="margin-top:6px;"><b>Brooklyn earnings score:</b> ${props.bk_local_rating} (${prettyBucket(props.bk_local_bucket)})</div>`;
+      extra += `<div style="margin-top:6px;"><b>Brooklyn earnings score:</b> ${props.bk_local_rating} (${prettyBucket(getBucketFromShownRating(props.bk_local_rating))})</div>`;
     }
   }
 
   if (modeFlags.bronxWashHeightsMode && activeModeTag === "bronx_wash_heights") {
     const bwhV3ShadowRating = Number(window.TlcModeModule?.readBronxWashHeightsV3ShadowRating?.(props) ?? NaN);
-    const bwhV3ShadowBucket = String(window.TlcModeModule?.readBronxWashHeightsV3ShadowBucket?.(props) || "");
     const bwhV2ShadowRating = Number(window.TlcModeModule?.readBronxWashHeightsShadowRating?.(props) ?? NaN);
-    const bwhV2ShadowBucket = String(window.TlcModeModule?.readBronxWashHeightsShadowBucket?.(props) || "");
     if (Number.isFinite(bwhV3ShadowRating)) {
-      extra += `<div style="margin-top:6px;"><b>Bronx/Wash Heights earnings score:</b> ${bwhV3ShadowRating} (${prettyBucket(bwhV3ShadowBucket)})</div>`;
+      extra += `<div style="margin-top:6px;"><b>Bronx/Wash Heights earnings score:</b> ${bwhV3ShadowRating} (${prettyBucket(getBucketFromShownRating(bwhV3ShadowRating))})</div>`;
     } else if (Number.isFinite(bwhV2ShadowRating)) {
-      extra += `<div style="margin-top:6px;"><b>Bronx/Wash Heights earnings score:</b> ${bwhV2ShadowRating} (${prettyBucket(bwhV2ShadowBucket)})</div>`;
+      extra += `<div style="margin-top:6px;"><b>Bronx/Wash Heights earnings score:</b> ${bwhV2ShadowRating} (${prettyBucket(getBucketFromShownRating(bwhV2ShadowRating))})</div>`;
     } else if (Number.isFinite(Number(props.bwh_local_rating))) {
-      extra += `<div style="margin-top:6px;"><b>Bronx/Wash Heights earnings score:</b> ${props.bwh_local_rating} (${prettyBucket(props.bwh_local_bucket)})</div>`;
+      extra += `<div style="margin-top:6px;"><b>Bronx/Wash Heights earnings score:</b> ${props.bwh_local_rating} (${prettyBucket(getBucketFromShownRating(props.bwh_local_rating))})</div>`;
     }
   }
 

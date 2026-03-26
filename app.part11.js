@@ -712,91 +712,95 @@
   }
 
   function getModeAwareBaseBucket(props, geom) {
+    const rating = getModeAwareBaseRating(props, geom);
+    if (Number.isFinite(rating)) return getBucketForRating(rating);
+
     const source = getVisibleScoreSourceForFeature(props, geom);
     const legacyBucket = String(props?.bucket || "").trim();
-    const legacyRatingBucket = getBucketForRating(getModeAwareBaseRating(props, geom));
     if (source === "queens_v3_shadow") {
-      return readQueensV3ShadowBucket(props) || legacyRatingBucket;
+      return readQueensV3ShadowBucket(props) || legacyBucket;
     }
     if (source === "queens_shadow") {
-      return readQueensShadowBucket(props) || legacyRatingBucket;
+      return readQueensShadowBucket(props) || legacyBucket;
     }
     if (source === "brooklyn_v3_shadow") {
-      return readBrooklynV3ShadowBucket(props) || legacyRatingBucket;
+      return readBrooklynV3ShadowBucket(props) || legacyBucket;
     }
     if (source === "brooklyn_shadow") {
-      return readBrooklynShadowBucket(props) || legacyRatingBucket;
+      return readBrooklynShadowBucket(props) || legacyBucket;
     }
     if (source === "staten_island_v3_shadow") {
-      return readStatenIslandV3ShadowBucket(props) || legacyRatingBucket;
+      return readStatenIslandV3ShadowBucket(props) || legacyBucket;
     }
     if (source === "staten_island_shadow") {
-      return readStatenIslandShadowBucket(props) || legacyRatingBucket;
+      return readStatenIslandShadowBucket(props) || legacyBucket;
     }
     if (source === "bronx_wash_heights_v3_shadow") {
-      return readBronxWashHeightsV3ShadowBucket(props) || legacyRatingBucket;
+      return readBronxWashHeightsV3ShadowBucket(props) || legacyBucket;
     }
     if (source === "bronx_wash_heights_shadow") {
-      return readBronxWashHeightsShadowBucket(props) || legacyRatingBucket;
+      return readBronxWashHeightsShadowBucket(props) || legacyBucket;
     }
     if (source === "manhattan_v3_shadow") {
-      return readManhattanV3ShadowBucket(props) || legacyRatingBucket;
+      return readManhattanV3ShadowBucket(props) || legacyBucket;
     }
     if (source === "manhattan_shadow") {
-      return readManhattanShadowBucket(props) || legacyRatingBucket;
+      return readManhattanShadowBucket(props) || legacyBucket;
     }
     if (source === "citywide_v3_shadow") {
-      return readCitywideV3ShadowBucket(props) || legacyRatingBucket;
+      return readCitywideV3ShadowBucket(props) || legacyBucket;
     }
     if (source === "citywide_shadow") {
-      return readCitywideShadowBucket(props) || legacyRatingBucket;
+      return readCitywideShadowBucket(props) || legacyBucket;
     }
     if (source === "legacy_citywide" && legacyBucket) return legacyBucket;
-    return legacyRatingBucket;
+    return "";
   }
 
   function getModeAwareBaseColor(props, geom) {
+    const rating = getModeAwareBaseRating(props, geom);
+    if (Number.isFinite(rating)) return getColorForRating(rating);
+
     const source = getVisibleScoreSourceForFeature(props, geom);
     const legacyColor = String(props?.style?.fillColor || props?.style?.color || "").trim();
-    const legacyRatingColor = getColorForRating(getModeAwareBaseRating(props, geom));
     if (source === "queens_v3_shadow") {
-      return readQueensV3ShadowColor(props) || legacyRatingColor;
+      return readQueensV3ShadowColor(props) || legacyColor;
     }
     if (source === "queens_shadow") {
-      return readQueensShadowColor(props) || legacyRatingColor;
+      return readQueensShadowColor(props) || legacyColor;
     }
     if (source === "brooklyn_v3_shadow") {
-      return readBrooklynV3ShadowColor(props) || legacyRatingColor;
+      return readBrooklynV3ShadowColor(props) || legacyColor;
     }
     if (source === "brooklyn_shadow") {
-      return readBrooklynShadowColor(props) || legacyRatingColor;
+      return readBrooklynShadowColor(props) || legacyColor;
     }
     if (source === "staten_island_v3_shadow") {
-      return readStatenIslandV3ShadowColor(props) || legacyRatingColor;
+      return readStatenIslandV3ShadowColor(props) || legacyColor;
     }
     if (source === "staten_island_shadow") {
-      return readStatenIslandShadowColor(props) || legacyRatingColor;
+      return readStatenIslandShadowColor(props) || legacyColor;
     }
     if (source === "bronx_wash_heights_v3_shadow") {
-      return readBronxWashHeightsV3ShadowColor(props) || legacyRatingColor;
+      return readBronxWashHeightsV3ShadowColor(props) || legacyColor;
     }
     if (source === "bronx_wash_heights_shadow") {
-      return readBronxWashHeightsShadowColor(props) || legacyRatingColor;
+      return readBronxWashHeightsShadowColor(props) || legacyColor;
     }
     if (source === "manhattan_v3_shadow") {
-      return readManhattanV3ShadowColor(props) || legacyRatingColor;
+      return readManhattanV3ShadowColor(props) || legacyColor;
     }
     if (source === "manhattan_shadow") {
-      return readManhattanShadowColor(props) || legacyRatingColor;
+      return readManhattanShadowColor(props) || legacyColor;
     }
     if (source === "citywide_v3_shadow") {
-      return readCitywideV3ShadowColor(props) || legacyRatingColor;
+      return readCitywideV3ShadowColor(props) || legacyColor;
     }
     if (source === "citywide_shadow") {
-      return readCitywideShadowColor(props) || legacyRatingColor;
+      return readCitywideShadowColor(props) || legacyColor;
     }
     if (source === "legacy_citywide" && legacyColor) return legacyColor;
-    return legacyRatingColor;
+    return "";
   }
 
   function getTendencyAdjustedRating(baseRating, props, geom) {
