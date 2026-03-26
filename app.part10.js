@@ -1725,13 +1725,48 @@ function syncGhostUI() {
   if (authGhost) authGhost.checked = ghostOn;
 }
 
+function closeBlockingUiForSignedOutState() {
+  const safeCall = (fn) => {
+    if (typeof fn !== "function") return;
+    try { fn(); } catch (_err) {}
+  };
+
+  safeCall(closeDrawer);
+  safeCall(window.AdminPortal?.close?.bind(window.AdminPortal));
+  safeCall(window.closeDriverProfileModal);
+  safeCall(window.closeHot97Modal);
+  safeCall(window.closeZonePopup);
+  safeCall(window.closeActivePanel);
+  safeCall(window.closePanel);
+  safeCall(window.clearPanelBackdropState);
+  safeCall(window.clearVisibleBackdropPanelState);
+}
+
+function showAuthOverlayAndFocus(reasonText = "Status: signed out") {
+  setAuthUI(false, reasonText);
+  closeBlockingUiForSignedOutState();
+
+  if (lockedOverlay) {
+    lockedOverlay.classList.add("show", "signed-out");
+    lockedOverlay.setAttribute("aria-hidden", "false");
+  }
+
+  const emailValue = authEmail?.value?.trim?.() || "";
+  const firstField = !emailValue ? authEmail : authPass;
+  if (typeof firstField?.focus === "function") {
+    firstField.focus();
+    if (typeof firstField.select === "function" && firstField === authEmail) firstField.select();
+  }
+}
+
 function signOutNow({ reload = false } = {}) {
   if (accountActions?.signOutNow) {
-    accountActions.signOutNow({ reload });
-    return;
+    accountActions.signOutNow({ reload: false });
+  } else {
+    clearAuth();
   }
-  clearAuth();
-  closeDrawer();
+  closeBlockingUiForSignedOutState();
+  showAuthOverlayAndFocus("Status: signed out");
   if (reload) {
     setTimeout(() => {
       window.location.reload();
@@ -1810,7 +1845,7 @@ function clearAuth() {
   clearPickupOverlay();
   if (authPass) authPass.value = "";
   if (authGhost) authGhost.checked = false;
-  setAuthUI(false, "Status: signed out");
+  showAuthOverlayAndFocus("Status: signed out");
   syncAdminPortalSession();
 }
 
@@ -2002,6 +2037,26 @@ function safePass() {
   return authPass && authPass.value ? authPass.value : "";
 }
 
+window.getAuthUiDebugState = function getAuthUiDebugState() {
+  const openPanelValue = (typeof openPanelKey !== "undefined") ? openPanelKey : (window.openPanelKey ?? null);
+  const adminRoot = document.getElementById("adminPortalRoot");
+  const adminPortalOpen = !!(
+    adminRoot &&
+    adminRoot.classList.contains("open") &&
+    adminRoot.getAttribute("aria-hidden") !== "true"
+  );
+
+  return {
+    signedIn: !!authHeaderOK(),
+    lockedOverlayVisible: !!(lockedOverlay && lockedOverlay.classList.contains("show") && lockedOverlay.getAttribute("aria-hidden") !== "true"),
+    authStatusText: authStatus?.textContent || "",
+    openPanelKey: openPanelValue ?? null,
+    adminPortalOpen,
+    activeTokenPresent: !!communityToken,
+    meId: me?.id ?? null,
+  };
+};
+
 if (authEmail) authEmail.value = localStorage.getItem(LS_EMAIL) || "";
 if (authName) authName.value = localStorage.getItem(LS_DISPLAY_NAME) || "";
 
@@ -2041,10 +2096,10 @@ if (btnAuth) {
     e.preventDefault();
     e.stopPropagation();
     if (authHeaderOK()) {
-      signOutNow({ reload: true });
+      signOutNow({ reload: false });
       return;
     }
-    setAuthUI(false, "Status: signed out");
+    showAuthOverlayAndFocus("Status: signed out");
   });
 }
 
@@ -2970,6 +3025,8 @@ window.TlcCommunityModule = {
   refreshPickupOverlay,
   schedulePickupOverlayRefresh,
   syncGhostUI,
+  closeBlockingUiForSignedOutState,
+  showAuthOverlayAndFocus,
   signOutNow,
   setAuthUI,
   clearAuth,
