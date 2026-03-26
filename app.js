@@ -2479,6 +2479,21 @@ function buildZoneWhyReasons(props, geom, visibleScoreSource) {
   return reasons.slice(0, 5);
 }
 
+function resolveScoreTripCount(directCount, areaSqMiles, pickupsPerSqMile) {
+  const direct = Number(directCount);
+  if (Number.isFinite(direct) && direct >= 0) {
+    return { value: Math.round(direct), estimated: false };
+  }
+
+  const area = Number(areaSqMiles);
+  const density = Number(pickupsPerSqMile);
+  if (Number.isFinite(area) && area > 0 && Number.isFinite(density) && density >= 0) {
+    return { value: Math.round(area * density), estimated: true };
+  }
+
+  return { value: null, estimated: false };
+}
+
 function buildPopupHTML(props, geom, metrics = getZonePopupMetrics(map?.getZoom?.())) {
   const zoneName = (props.zone_name || "").trim();
   const borough = (props.borough || "").trim();
@@ -2543,6 +2558,40 @@ function buildPopupHTML(props, geom, metrics = getZonePopupMetrics(map?.getZoom?
   const pay = props.avg_driver_pay == null ? "n/a" : Number(props.avg_driver_pay).toFixed(2);
   const pickupsNowShadow = Number(props.pickups_now_shadow);
   const nextPickupsShadow = Number(props.next_pickups_shadow);
+  const scoreTripsNow = resolveScoreTripCount(
+    props.pickups_now_shadow,
+    props.zone_area_sq_miles_shadow,
+    props.pickups_per_sq_mile_now_shadow
+  );
+  const scoreTripsNext = resolveScoreTripCount(
+    props.next_pickups_shadow,
+    props.zone_area_sq_miles_shadow,
+    props.pickups_per_sq_mile_next_shadow
+  );
+  const scoreTripsNowDisplay = scoreTripsNow.value == null
+    ? "n/a"
+    : `${scoreTripsNow.estimated ? "~" : ""}${scoreTripsNow.value}`;
+  const scoreTripsNextDisplay = scoreTripsNext.value == null
+    ? "n/a"
+    : `${scoreTripsNext.estimated ? "~" : ""}${scoreTripsNext.value}`;
+  const popupMetricWarningLines = [];
+  if (debugEnabled || window.__TEAM_JOSEO_AUDIT__ === true) {
+    const zoneAreaShadow = Number(props.zone_area_sq_miles_shadow);
+    const pickupsPerSqMileNowDirect = Number(props.pickups_per_sq_mile_now_shadow);
+    const pickupsPerSqMileNextDirect = Number(props.pickups_per_sq_mile_next_shadow);
+    const computedNow = Number.isFinite(zoneAreaShadow) && zoneAreaShadow > 0 && Number.isFinite(pickupsPerSqMileNowDirect) && pickupsPerSqMileNowDirect >= 0
+      ? zoneAreaShadow * pickupsPerSqMileNowDirect
+      : null;
+    const computedNext = Number.isFinite(zoneAreaShadow) && zoneAreaShadow > 0 && Number.isFinite(pickupsPerSqMileNextDirect) && pickupsPerSqMileNextDirect >= 0
+      ? zoneAreaShadow * pickupsPerSqMileNextDirect
+      : null;
+    if (Number.isFinite(pickupsNowShadow) && Number.isFinite(computedNow) && Math.abs(pickupsNowShadow - computedNow) > 2.0) {
+      popupMetricWarningLines.push("<div style=\"color:#9a3412;\"><b>Popup metric warning:</b> current score trip count disagrees with area × density</div>");
+    }
+    if (Number.isFinite(nextPickupsShadow) && Number.isFinite(computedNext) && Math.abs(nextPickupsShadow - computedNext) > 2.0) {
+      popupMetricWarningLines.push("<div style=\"color:#9a3412;\"><b>Popup metric warning:</b> next score trip count disagrees with area × density</div>");
+    }
+  }
   const medianDriverPayShadow = Number(props.median_driver_pay_shadow);
   const medianPayPerMinShadow = Number(props.median_pay_per_min_shadow);
   const medianPayPerMileShadow = Number(props.median_pay_per_mile_shadow);
@@ -2570,11 +2619,12 @@ function buildPopupHTML(props, geom, metrics = getZonePopupMetrics(map?.getZoom?
     : "";
   const popupMetricEvidenceHtml = isVisibleV3Source
     ? `
-      <div style="margin-top:${metrics.lineGapPx + 1}px;"><b>Trips counted for score (last 20 min):</b> ${Number.isFinite(pickupsNowShadow) ? String(Math.round(pickupsNowShadow)) : "n/a"}</div>
-      <div><b>Trips counted for score (next 20 min):</b> ${Number.isFinite(nextPickupsShadow) ? String(Math.round(nextPickupsShadow)) : "n/a"}</div>
+      <div style="margin-top:${metrics.lineGapPx + 1}px;"><b>Trips counted for score (last 20 min):</b> ${scoreTripsNowDisplay}</div>
+      <div><b>Trips counted for score (next 20 min):</b> ${scoreTripsNextDisplay}</div>
       <div><b>Median driver pay:</b> ${Number.isFinite(medianDriverPayShadow) ? `$${medianDriverPayShadow.toFixed(2)}` : "n/a"}</div>
       <div><b>Median pay / min:</b> ${Number.isFinite(medianPayPerMinShadow) ? `$${medianPayPerMinShadow.toFixed(2)}` : "n/a"}</div>
       <div><b>Median pay / mile:</b> ${Number.isFinite(medianPayPerMileShadow) ? `$${medianPayPerMileShadow.toFixed(2)}` : "n/a"}</div>
+      ${popupMetricWarningLines.join("")}
       ${legacyPreviewHtml}
     `
     : `
