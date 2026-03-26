@@ -316,12 +316,7 @@
     (function () {
       const explicit = String(window.API_BASE || "").trim();
       if (explicit) return;
-
-      const sameOrigin = (typeof window !== "undefined" && window.location && /^https?:/i.test(window.location.origin))
-        ? window.location.origin
-        : "";
-
-      window.API_BASE = sameOrigin || "https://teamjoseo.up.railway.app";
+      window.API_BASE = "https://web-production-78f67.up.railway.app";
     })();
   </script>
   <script>
