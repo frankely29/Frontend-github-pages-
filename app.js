@@ -2490,6 +2490,22 @@ function buildPopupHTML(props, geom, metrics = getZonePopupMetrics(map?.getZoom?
     : (whyReasons.length
       ? `<div style="margin-top:${metrics.lineGapPx + 1}px;"><b>Why this zone:</b> ${escapeHtml(whyReasons.join(" • "))}</div>`
       : "");
+  const isVisibleV3Source = /_v3_shadow$/.test(visibleScoreSource);
+  const shadowSummary = isVisibleV3Source
+    ? (window.TlcScoreShadowModule?.buildZoneShadowSummary?.(props, geom) || null)
+    : null;
+  const zoneAreaSqMilesShadow = Number(shadowSummary?.zone_area_sq_miles);
+  const pickupsPerSqMileNowShadow = Number(shadowSummary?.pickups_per_sq_mile_now);
+  const pickupsPerSqMileNextShadow = Number(shadowSummary?.pickups_per_sq_mile_next);
+  const busySizeContribution = Number(contributionBreakdown?.positive?.busy_size_positive);
+  const v3SizeEvidenceHtml = isVisibleV3Source
+    ? `
+      <div style="margin-top:${metrics.lineGapPx + 1}px;"><b>Zone area:</b> ${Number.isFinite(zoneAreaSqMilesShadow) ? `${zoneAreaSqMilesShadow.toFixed(2)} sq mi` : "n/a"}</div>
+      <div><b>Pickups / sq mi now:</b> ${Number.isFinite(pickupsPerSqMileNowShadow) ? pickupsPerSqMileNowShadow.toFixed(1).replace(/\.0$/, "") : "n/a"}</div>
+      <div><b>Pickups / sq mi next:</b> ${Number.isFinite(pickupsPerSqMileNextShadow) ? pickupsPerSqMileNextShadow.toFixed(1).replace(/\.0$/, "") : "n/a"}</div>
+      ${Number.isFinite(busySizeContribution) ? `<div><b>Busy/size contribution:</b> ${busySizeContribution.toFixed(3)}</div>` : ""}
+    `
+    : "";
   const contributionDebugHtml = (debugEnabled || window.__TEAM_JOSEO_AUDIT__ === true) && contributionBreakdown
     ? `
       <div style="margin-top:${metrics.lineGapPx + 1}px;">
@@ -2625,6 +2641,7 @@ function buildPopupHTML(props, geom, metrics = getZonePopupMetrics(map?.getZoom?
     <div><b>Score source:</b> ${escapeHtml(getPopupVisibleScoreSourceLabel(props, geom))}</div>
     ${airportExcludedLine}
     ${whyReasonsHtml}
+    ${v3SizeEvidenceHtml}
     ${contributionDebugHtml}
     ${extra}
     <div style="margin-top:${metrics.lineGapPx + 1}px;"><b>Pickups (last ${BIN_MINUTES} min):</b> ${pickups}</div>
