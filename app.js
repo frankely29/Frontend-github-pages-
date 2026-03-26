@@ -2404,13 +2404,26 @@ function buildRealContributionReasonSummary(props, geom) {
   const contributionBreakdown = readVisibleContributionBreakdown(props, geom);
   if (!contributionBreakdown) return null;
 
-  const top = (groups) => groups
-    .filter(([, value]) => Number.isFinite(value) && value > 0)
+  const positiveThresholds = {
+    busy_size_positive: 0.10,
+    pay_quality_positive: 0.08,
+    trip_mix_positive: 0.04,
+    continuation_positive: 0.05,
+  };
+  const negativeThresholds = {
+    short_trip_penalty: 0.03,
+    retention_penalty: 0.03,
+    friction_penalty: 0.02,
+    saturation_penalty: 0.03,
+  };
+
+  const top = (groups, thresholds) => groups
+    .filter(([key, value]) => Number.isFinite(value) && value > 0 && value >= Number(thresholds?.[key] ?? Number.POSITIVE_INFINITY))
     .sort((a, b) => b[1] - a[1])
     .slice(0, 2);
 
-  const topPositiveContributions = top(Object.entries(contributionBreakdown.positive));
-  const topNegativeContributions = top(Object.entries(contributionBreakdown.negative));
+  const topPositiveContributions = top(Object.entries(contributionBreakdown.positive), positiveThresholds);
+  const topNegativeContributions = top(Object.entries(contributionBreakdown.negative), negativeThresholds);
 
   const positiveLabels = {
     busy_size_positive: "busy for its size",
@@ -2528,13 +2541,17 @@ function buildPopupHTML(props, geom, metrics = getZonePopupMetrics(map?.getZoom?
     : "";
   const pickups = props.pickups ?? "";
   const pay = props.avg_driver_pay == null ? "n/a" : Number(props.avg_driver_pay).toFixed(2);
+  const pickupsNowShadow = Number(props.pickups_now_shadow);
+  const nextPickupsShadow = Number(props.next_pickups_shadow);
+  const medianDriverPayShadow = Number(props.median_driver_pay_shadow);
+  const medianPayPerMinShadow = Number(props.median_pay_per_min_shadow);
+  const medianPayPerMileShadow = Number(props.median_pay_per_mile_shadow);
 
   const nextPuVal = nextFramePickupsById.get(String(props.LocationID ?? ""));
   const nextPickups = nextPuVal == null ? "n/a" : String(Math.round(nextPuVal));
 
   const nextPayVal = nextFramePayById.get(String(props.LocationID ?? ""));
   const nextPay = nextPayVal == null ? "n/a" : Number(nextPayVal).toFixed(2);
-
   const zoneCommunity = pickupZoneStats.get(String(props.LocationID ?? ""));
   const communityPickupCount = Number(zoneCommunity?.sample_size ?? 0);
   const communitySampleLimit = Number(zoneCommunity?.sample_limit ?? PICKUP_ZONE_SAMPLE_LIMIT);
@@ -2542,6 +2559,31 @@ function buildPopupHTML(props, geom, metrics = getZonePopupMetrics(map?.getZoom?
   const communityPickupLine = communityPickupCount > 0
     ? `<div style="margin-top:6px;"><b>Community zone avg:</b> ${communityPickupCount}/${communitySampleLimit} trips used${communityLastTs ? ` • last ${escapeHtml(formatZonePopupRelativeAge(communityLastTs))}` : ""}</div>`
     : "";
+  const legacyPreviewHtml = (debugEnabled || window.__TEAM_JOSEO_AUDIT__ === true)
+    ? `
+      <div style="margin-top:${metrics.lineGapPx + 1}px;opacity:0.78;">
+        <b>Legacy preview:</b>
+        <div><b>Legacy pickups preview:</b> ${escapeHtml(String(pickups))}</div>
+        <div><b>Legacy avg pay preview:</b> $${pay}</div>
+      </div>
+    `
+    : "";
+  const popupMetricEvidenceHtml = isVisibleV3Source
+    ? `
+      <div style="margin-top:${metrics.lineGapPx + 1}px;"><b>Trips counted for score (last 20 min):</b> ${Number.isFinite(pickupsNowShadow) ? String(Math.round(pickupsNowShadow)) : "n/a"}</div>
+      <div><b>Trips counted for score (next 20 min):</b> ${Number.isFinite(nextPickupsShadow) ? String(Math.round(nextPickupsShadow)) : "n/a"}</div>
+      <div><b>Median driver pay:</b> ${Number.isFinite(medianDriverPayShadow) ? `$${medianDriverPayShadow.toFixed(2)}` : "n/a"}</div>
+      <div><b>Median pay / min:</b> ${Number.isFinite(medianPayPerMinShadow) ? `$${medianPayPerMinShadow.toFixed(2)}` : "n/a"}</div>
+      <div><b>Median pay / mile:</b> ${Number.isFinite(medianPayPerMileShadow) ? `$${medianPayPerMileShadow.toFixed(2)}` : "n/a"}</div>
+      ${legacyPreviewHtml}
+    `
+    : `
+      <div style="margin-top:${metrics.lineGapPx + 1}px;"><b>Pickups (last ${BIN_MINUTES} min):</b> ${pickups}</div>
+      <div><b>Next ${BIN_MINUTES} min:</b> ${nextPickups}</div>
+      ${communityPickupLine}
+      <div><b>Avg Pay next ${BIN_MINUTES} min:</b> $${nextPay}</div>
+      <div><b>Avg Pay last 20 min:</b> $${pay}</div>
+    `;
 
   let extra = "";
   const modeFlags = getModeFlags();
@@ -2645,11 +2687,8 @@ function buildPopupHTML(props, geom, metrics = getZonePopupMetrics(map?.getZoom?
     ${v3SizeEvidenceHtml}
     ${contributionDebugHtml}
     ${extra}
-    <div style="margin-top:${metrics.lineGapPx + 1}px;"><b>Pickups (last ${BIN_MINUTES} min):</b> ${pickups}</div>
-    <div><b>Next ${BIN_MINUTES} min:</b> ${nextPickups}</div>
-    ${communityPickupLine}
-    <div><b>Avg Pay next ${BIN_MINUTES} min:</b> $${nextPay}</div>
-    <div><b>Avg Pay last 20 min:</b> $${pay}</div>
+    ${popupMetricEvidenceHtml}
+    ${isVisibleV3Source ? communityPickupLine : ""}
     ${showRawHvfBase ? `<div><b>Raw HVFHV base rating:</b> ${rawHvfBaseRating} (${prettyBucket(rawHvfBaseBucket)})</div>` : ""}
     ${buildZoneShadowPreviewHTML(props, geom)}
     ${buildCommunityCrowdingHTML(props)}
