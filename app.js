@@ -292,9 +292,11 @@ async function getJSONAuth(path, token, opts = {}) {
 function prettyBucket(b) {
   const m = {
     green: "Highest",
-    purple: "High",
+    purple: "Very High",
+    indigo: "High",
     blue: "Medium",
     sky: "Normal",
+    orange: "Low",
     yellow: "Below Normal",
     red: "Very Low / Avoid",
   };
@@ -936,12 +938,14 @@ function colorsPanelHTML() {
   const modeFlags = getModeFlags();
   const swatch = (fill) => `<svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true" focusable="false" style="display:inline-block;vertical-align:middle;flex:0 0 12px;forced-color-adjust:none;-webkit-print-color-adjust:exact;print-color-adjust:exact;"><rect x="0.5" y="0.5" width="11" height="11" rx="3" fill="${fill}" stroke="rgba(0,0,0,0.15)"/></svg>`;
   const rows = `
-      <div style="display:flex;align-items:center;gap:8px;">${swatch("#00b050")}Green = 85–100 Highest</div>
-      <div style="display:flex;align-items:center;gap:8px;">${swatch("#8000ff")}Purple = 70–84 High</div>
-      <div style="display:flex;align-items:center;gap:8px;">${swatch("#0066ff")}Blue = 50–69 Medium</div>
-      <div style="display:flex;align-items:center;gap:8px;">${swatch("#66ccff")}Sky = 40–49 Normal</div>
-      <div style="display:flex;align-items:center;gap:8px;">${swatch("#ffd400")}Yellow = 30–39 Below Normal</div>
-      <div style="display:flex;align-items:center;gap:8px;">${swatch("#e60000")}Red = 1–29 Very Low / Avoid</div>
+      <div style="display:flex;align-items:center;gap:8px;">${swatch("#00b050")}Green = 87–100 Highest</div>
+      <div style="display:flex;align-items:center;gap:8px;">${swatch("#8000ff")}Purple = 73–86 Very High</div>
+      <div style="display:flex;align-items:center;gap:8px;">${swatch("#4b3cff")}Indigo = 60–72 High</div>
+      <div style="display:flex;align-items:center;gap:8px;">${swatch("#0066ff")}Blue = 48–59 Medium</div>
+      <div style="display:flex;align-items:center;gap:8px;">${swatch("#66ccff")}Sky Blue = 40–47 Normal</div>
+      <div style="display:flex;align-items:center;gap:8px;">${swatch("#ffd400")}Yellow = 33–39 Below Normal</div>
+      <div style="display:flex;align-items:center;gap:8px;">${swatch("#ff8c00")}Orange = 25–32 Low</div>
+      <div style="display:flex;align-items:center;gap:8px;">${swatch("#e60000")}Red = 1–24 Very Low / Avoid</div>
   `;
 
   return `
@@ -2645,11 +2649,13 @@ function buildPopupHTML(props, geom, metrics = getZonePopupMetrics(map?.getZoom?
       return String(window.TlcModeModule.getBucketForRating(n) || "");
     }
     const x = Math.max(1, Math.min(100, Math.round(n)));
-    if (x >= 85) return "green";
-    if (x >= 70) return "purple";
-    if (x >= 50) return "blue";
+    if (x >= 87) return "green";
+    if (x >= 73) return "purple";
+    if (x >= 60) return "indigo";
+    if (x >= 48) return "blue";
     if (x >= 40) return "sky";
-    if (x >= 30) return "yellow";
+    if (x >= 33) return "yellow";
+    if (x >= 25) return "orange";
     return "red";
   };
 
