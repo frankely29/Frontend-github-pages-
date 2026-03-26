@@ -13,7 +13,7 @@
 /*
  * API base configuration
  *
- * Historically the frontend hard‑coded a Railway domain (e.g. https://web-production-78f67.up.railway.app)
+ * Historically the frontend hard‑coded a Railway domain for all API calls.
  * as the base for all API calls.  When only app.js is replaced without updating other files,
  * using window.location.origin can break critical endpoints like `/timeline` because the static
  * frontend is often hosted separately from the backend.  To maintain compatibility we
@@ -21,10 +21,14 @@
  * setting `window.API_BASE` before app.js loads.  This allows new deployments to specify
  * their backend host without modifying the source code.
  */
-const DEFAULT_API_BASE = "https://web-production-78f67.up.railway.app";
-const RAILWAY_BASE = (typeof window !== "undefined" && window.API_BASE !== undefined)
-  ? String(window.API_BASE || DEFAULT_API_BASE)
-  : DEFAULT_API_BASE;
+const DEFAULT_API_BASE = "https://teamjoseo.up.railway.app";
+const SAME_ORIGIN_API_BASE =
+  (typeof window !== "undefined" && window.location && /^https?:/i.test(window.location.origin))
+    ? window.location.origin
+    : "";
+const RAILWAY_BASE = ((typeof window !== "undefined" && window.API_BASE !== undefined)
+  ? String(window.API_BASE || SAME_ORIGIN_API_BASE || DEFAULT_API_BASE)
+  : (SAME_ORIGIN_API_BASE || DEFAULT_API_BASE)).replace(/\/+$/, "");
 const BIN_MINUTES = 20;
 const FrontendRuntime = (typeof window !== "undefined" && window.FrontendRuntime) ? window.FrontendRuntime : null;
 const runtimePolling = FrontendRuntime?.polling || null;
