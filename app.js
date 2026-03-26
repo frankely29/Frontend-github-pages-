@@ -2261,6 +2261,37 @@ function buildZoneAuditPreviewHTML(props, geom) {
   const crowdingLine = crowding
     ? `<div><b>Community caution:</b> ${escapeHtml(crowding.bucketLabel || crowding.bucket || "")} • ${Math.round(Number(crowding.confidence || 0) * 100)}% confidence • penalty ${Number(crowding.penalty || 0).toFixed(1)}</div>`
     : `<div><b>Community caution:</b> none</div>`;
+  const contributionBreakdown = readVisibleContributionBreakdown(props, geom);
+  const reasonLabelMap = {
+    busy_size_positive: "busy for its size",
+    pay_quality_positive: "pay quality",
+    trip_mix_positive: "trip mix quality",
+    continuation_positive: "good continuation",
+    short_trip_penalty: "short-trip penalty",
+    retention_penalty: "same-zone retention penalty",
+    friction_penalty: "pickup/shared friction",
+    saturation_penalty: "market saturation",
+  };
+  const mainStrengths = contributionBreakdown
+    ? Object.entries(contributionBreakdown.positive)
+      .filter(([, value]) => Number.isFinite(value) && value > 0)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 2)
+      .map(([key]) => reasonLabelMap[key])
+    : [];
+  const mainDeductions = contributionBreakdown
+    ? Object.entries(contributionBreakdown.negative)
+      .filter(([, value]) => Number.isFinite(value) && value > 0)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 2)
+      .map(([key]) => reasonLabelMap[key])
+    : [];
+  const contributionReasonsHtml = contributionBreakdown
+    ? `
+      ${mainStrengths.length ? `<div><b>Main strengths:</b> ${escapeHtml(mainStrengths.join(" • "))}</div>` : ""}
+      ${mainDeductions.length ? `<div><b>Main deductions:</b> ${escapeHtml(mainDeductions.join(" • "))}</div>` : ""}
+    `
+    : "";
 
   return `
     <div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(0,0,0,0.08);">
@@ -2271,6 +2302,7 @@ function buildZoneAuditPreviewHTML(props, geom) {
       <div><b>Profile key:</b> ${escapeHtml(readiness?.profileKey || "none")}</div>
       <div><b>Shadow ready:</b> ${readiness?.shadowReady ? "yes" : "no"}</div>
       <div><b>Mode tag:</b> ${escapeHtml(audit.activeModeTag || "citywide")}</div>
+      ${contributionReasonsHtml}
       ${crowdingLine}
     </div>
   `;
@@ -2304,6 +2336,59 @@ function isAirportExcludedZone(props) {
   const zoneName = String(props?.zone_name || "").toLowerCase();
   const locationId = String(props?.LocationID ?? "").trim();
   return /airport|jfk|la guardia|laguardia|newark/i.test(zoneName) || ["1", "132", "138"].includes(locationId);
+}
+
+function getVisibleV3ProfileKeyForFeature(props, geom) {
+  const source = getPopupVisibleScoreSource(props, geom);
+  const mapBySource = {
+    citywide_v3_shadow: "citywide_v3",
+    manhattan_v3_shadow: "manhattan_v3",
+    bronx_wash_heights_v3_shadow: "bronx_wash_heights_v3",
+    queens_v3_shadow: "queens_v3",
+    brooklyn_v3_shadow: "brooklyn_v3",
+    staten_island_v3_shadow: "staten_island_v3",
+  };
+  return mapBySource[source] || null;
+}
+
+function readVisibleContributionBreakdown(props, geom) {
+  const profile = getVisibleV3ProfileKeyForFeature(props, geom);
+  if (!profile) return null;
+
+  const num = (value) => {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  };
+  const read = (field) => num(props?.[field]);
+
+  const contributions = {
+    profile,
+    positive: {
+      busy_size_positive: read(`earnings_shadow_busy_size_positive_${profile}`),
+      pay_quality_positive: read(`earnings_shadow_pay_quality_positive_${profile}`),
+      trip_mix_positive: read(`earnings_shadow_trip_mix_positive_${profile}`),
+      continuation_positive: read(`earnings_shadow_continuation_positive_${profile}`),
+    },
+    negative: {
+      short_trip_penalty: read(`earnings_shadow_short_trip_penalty_${profile}`),
+      retention_penalty: read(`earnings_shadow_retention_penalty_${profile}`),
+      friction_penalty: read(`earnings_shadow_friction_penalty_${profile}`),
+      saturation_penalty: read(`earnings_shadow_saturation_penalty_${profile}`),
+    },
+    mechanics: {
+      citywide_anchor_norm: read("earnings_shadow_citywide_anchor_norm_v3"),
+      local_rank: read(`earnings_shadow_visible_rank_${profile}`),
+      base_visible_score: read(`earnings_shadow_visible_base_score_${profile}`),
+      final_visible_score: read(`earnings_shadow_visible_score_${profile}`),
+    },
+  };
+
+  const hasContributionFields = [
+    ...Object.values(contributions.positive),
+    ...Object.values(contributions.negative),
+  ].some((value) => Number.isFinite(value));
+
+  return hasContributionFields ? contributions : null;
 }
 
 function buildZoneWhyReasons(props, geom, visibleScoreSource) {
@@ -2348,9 +2433,54 @@ function buildPopupHTML(props, geom, metrics = getZonePopupMetrics(map?.getZoom?
   const visibleBucket = getPopupVisibleBucket(props, geom);
   const visibleScoreSource = getPopupVisibleScoreSource(props, geom);
   const airportExcluded = isAirportExcludedZone(props);
+  const contributionBreakdown = readVisibleContributionBreakdown(props, geom);
   const whyReasons = buildZoneWhyReasons(props, geom, visibleScoreSource);
-  const whyReasonsHtml = whyReasons.length
-    ? `<div style="margin-top:${metrics.lineGapPx + 1}px;"><b>Why this zone:</b> ${escapeHtml(whyReasons.join(" • "))}</div>`
+  const topPositiveContributions = contributionBreakdown
+    ? Object.entries(contributionBreakdown.positive)
+      .filter(([, value]) => Number.isFinite(value) && value > 0)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 2)
+    : [];
+  const topNegativeContributions = contributionBreakdown
+    ? Object.entries(contributionBreakdown.negative)
+      .filter(([, value]) => Number.isFinite(value) && value > 0)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 2)
+    : [];
+  const positiveLabels = {
+    busy_size_positive: "busy for its size",
+    pay_quality_positive: "pay quality",
+    trip_mix_positive: "trip mix quality",
+    continuation_positive: "good continuation",
+  };
+  const negativeLabels = {
+    short_trip_penalty: "short-trip penalty",
+    retention_penalty: "same-zone retention penalty",
+    friction_penalty: "pickup/shared friction",
+    saturation_penalty: "market saturation",
+  };
+  const hasContributionBreakdown = !!contributionBreakdown;
+  const hasRealContributionReasons = topPositiveContributions.length > 0 || topNegativeContributions.length > 0;
+  const whyReasonsHtml = hasContributionBreakdown
+    ? (hasRealContributionReasons
+      ? `
+        ${topPositiveContributions.length ? `<div style="margin-top:${metrics.lineGapPx + 1}px;"><b>Main strengths:</b> ${escapeHtml(topPositiveContributions.map(([key]) => positiveLabels[key]).join(" • "))}</div>` : ""}
+        ${topNegativeContributions.length ? `<div><b>Main deductions:</b> ${escapeHtml(topNegativeContributions.map(([key]) => negativeLabels[key]).join(" • "))}</div>` : ""}
+      `
+      : "")
+    : (whyReasons.length
+      ? `<div style="margin-top:${metrics.lineGapPx + 1}px;"><b>Why this zone:</b> ${escapeHtml(whyReasons.join(" • "))}</div>`
+      : "");
+  const contributionDebugHtml = (debugEnabled || window.__TEAM_JOSEO_AUDIT__ === true) && contributionBreakdown
+    ? `
+      <div style="margin-top:${metrics.lineGapPx + 1}px;">
+        <b>Visible score debug:</b>
+        <div><b>Citywide anchor norm:</b> ${Number.isFinite(contributionBreakdown.mechanics.citywide_anchor_norm) ? contributionBreakdown.mechanics.citywide_anchor_norm.toFixed(3) : "n/a"}</div>
+        <div><b>Local rank:</b> ${Number.isFinite(contributionBreakdown.mechanics.local_rank) ? contributionBreakdown.mechanics.local_rank.toFixed(3) : "n/a"}</div>
+        <div><b>Base visible score:</b> ${Number.isFinite(contributionBreakdown.mechanics.base_visible_score) ? contributionBreakdown.mechanics.base_visible_score.toFixed(3) : "n/a"}</div>
+        <div><b>Final visible score:</b> ${Number.isFinite(contributionBreakdown.mechanics.final_visible_score) ? contributionBreakdown.mechanics.final_visible_score.toFixed(3) : "n/a"}</div>
+      </div>
+    `
     : "";
   const airportExcludedLine = airportExcluded
     ? `<div style="margin-top:${metrics.lineGapPx + 1}px;color:#9a3412;"><b>Excluded:</b> Airport zone — not part of hotspot opportunity logic.</div>`
@@ -2471,6 +2601,7 @@ function buildPopupHTML(props, geom, metrics = getZonePopupMetrics(map?.getZoom?
     <div><b>Score source:</b> ${escapeHtml(getPopupVisibleScoreSourceLabel(props, geom))}</div>
     ${airportExcludedLine}
     ${whyReasonsHtml}
+    ${contributionDebugHtml}
     ${extra}
     <div style="margin-top:${metrics.lineGapPx + 1}px;"><b>Pickups (last ${BIN_MINUTES} min):</b> ${pickups}</div>
     <div><b>Next ${BIN_MINUTES} min:</b> ${nextPickups}</div>
