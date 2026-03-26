@@ -936,12 +936,12 @@ function colorsPanelHTML() {
   const modeFlags = getModeFlags();
   const swatch = (fill) => `<svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true" focusable="false" style="display:inline-block;vertical-align:middle;flex:0 0 12px;forced-color-adjust:none;-webkit-print-color-adjust:exact;print-color-adjust:exact;"><rect x="0.5" y="0.5" width="11" height="11" rx="3" fill="${fill}" stroke="rgba(0,0,0,0.15)"/></svg>`;
   const rows = `
-      <div style="display:flex;align-items:center;gap:8px;">${swatch("#00b050")}Green = Highest</div>
-      <div style="display:flex;align-items:center;gap:8px;">${swatch("#8000ff")}Purple = High</div>
-      <div style="display:flex;align-items:center;gap:8px;">${swatch("#0066ff")}Blue = Medium</div>
-      <div style="display:flex;align-items:center;gap:8px;">${swatch("#66ccff")}Sky = Normal</div>
-      <div style="display:flex;align-items:center;gap:8px;">${swatch("#ffd400")}Yellow = Below Normal</div>
-      <div style="display:flex;align-items:center;gap:8px;">${swatch("#e60000")}Red = Very Low / Avoid</div>
+      <div style="display:flex;align-items:center;gap:8px;">${swatch("#00b050")}Green = 85–100 Highest</div>
+      <div style="display:flex;align-items:center;gap:8px;">${swatch("#8000ff")}Purple = 70–84 High</div>
+      <div style="display:flex;align-items:center;gap:8px;">${swatch("#0066ff")}Blue = 50–69 Medium</div>
+      <div style="display:flex;align-items:center;gap:8px;">${swatch("#66ccff")}Sky = 40–49 Normal</div>
+      <div style="display:flex;align-items:center;gap:8px;">${swatch("#ffd400")}Yellow = 30–39 Below Normal</div>
+      <div style="display:flex;align-items:center;gap:8px;">${swatch("#e60000")}Red = 1–29 Very Low / Avoid</div>
   `;
 
   return `
