@@ -225,11 +225,11 @@
 
   function colorFromLocalRating(r) {
     const x = Math.max(1, Math.min(100, Math.round(r)));
-    if (x >= 90) return { bucket: "green", color: "#00b050" };
-    if (x >= 80) return { bucket: "purple", color: "#8000ff" };
-    if (x >= 65) return { bucket: "blue", color: "#0066ff" };
-    if (x >= 45) return { bucket: "sky", color: "#66ccff" };
-    if (x >= 25) return { bucket: "yellow", color: "#ffd400" };
+    if (x >= 85) return { bucket: "green", color: "#00b050" };
+    if (x >= 70) return { bucket: "purple", color: "#8000ff" };
+    if (x >= 50) return { bucket: "blue", color: "#0066ff" };
+    if (x >= 40) return { bucket: "sky", color: "#66ccff" };
+    if (x >= 30) return { bucket: "yellow", color: "#ffd400" };
     return { bucket: "red", color: "#e60000" };
   }
 
