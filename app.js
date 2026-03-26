@@ -2352,34 +2352,42 @@ function getVisibleV3ProfileKeyForFeature(props, geom) {
 }
 
 function readVisibleContributionBreakdown(props, geom) {
-  const profile = getVisibleV3ProfileKeyForFeature(props, geom);
+  const summary = window.TlcScoreShadowModule?.buildZoneShadowSummary?.(props, geom) || null;
+  const profile = String(summary?.visible_v3_profile_key || getVisibleV3ProfileKeyForFeature(props, geom) || "");
   if (!profile) return null;
 
-  const num = (value) => {
-    const n = Number(value);
-    return Number.isFinite(n) ? n : null;
-  };
+  const num = (value) => (Number.isFinite(Number(value)) ? Number(value) : null);
   const read = (field) => num(props?.[field]);
+  const fromSummaryOrProps = (summaryKey, propField) => {
+    const summaryValue = num(summary?.[summaryKey]);
+    if (Number.isFinite(summaryValue)) return summaryValue;
+    return read(`${propField}_${profile}`);
+  };
 
   const contributions = {
     profile,
     positive: {
-      busy_size_positive: read(`earnings_shadow_busy_size_positive_${profile}`),
-      pay_quality_positive: read(`earnings_shadow_pay_quality_positive_${profile}`),
-      trip_mix_positive: read(`earnings_shadow_trip_mix_positive_${profile}`),
-      continuation_positive: read(`earnings_shadow_continuation_positive_${profile}`),
+      busy_size_positive: fromSummaryOrProps("busy_size_positive_v3", "earnings_shadow_busy_size_positive"),
+      pay_quality_positive: fromSummaryOrProps("pay_quality_positive_v3", "earnings_shadow_pay_quality_positive"),
+      trip_mix_positive: fromSummaryOrProps("trip_mix_positive_v3", "earnings_shadow_trip_mix_positive"),
+      continuation_positive: fromSummaryOrProps("continuation_positive_v3", "earnings_shadow_continuation_positive"),
     },
     negative: {
-      short_trip_penalty: read(`earnings_shadow_short_trip_penalty_${profile}`),
-      retention_penalty: read(`earnings_shadow_retention_penalty_${profile}`),
-      friction_penalty: read(`earnings_shadow_friction_penalty_${profile}`),
-      saturation_penalty: read(`earnings_shadow_saturation_penalty_${profile}`),
+      short_trip_penalty: fromSummaryOrProps("short_trip_penalty_v3", "earnings_shadow_short_trip_penalty"),
+      retention_penalty: fromSummaryOrProps("retention_penalty_v3", "earnings_shadow_retention_penalty"),
+      friction_penalty: fromSummaryOrProps("friction_penalty_v3", "earnings_shadow_friction_penalty"),
+      saturation_penalty: fromSummaryOrProps("saturation_penalty_v3", "earnings_shadow_saturation_penalty"),
     },
     mechanics: {
-      citywide_anchor_norm: read("earnings_shadow_citywide_anchor_norm_v3"),
-      local_rank: read(`earnings_shadow_visible_rank_${profile}`),
-      base_visible_score: read(`earnings_shadow_visible_base_score_${profile}`),
-      final_visible_score: read(`earnings_shadow_visible_score_${profile}`),
+      citywide_anchor_input: num(summary?.citywide_anchor_input_v3) ?? read("earnings_shadow_citywide_anchor_input_v3"),
+      citywide_anchor_base: num(summary?.citywide_anchor_base_v3) ?? read("earnings_shadow_citywide_anchor_base_v3"),
+      citywide_anchor_display: num(summary?.citywide_anchor_display_v3) ?? read("earnings_shadow_citywide_anchor_display_v3"),
+      citywide_anchor_norm: num(summary?.citywide_anchor_norm_v3) ?? read("earnings_shadow_citywide_anchor_norm_v3"),
+      local_rank: num(summary?.visible_rank_v3) ?? read(`earnings_shadow_visible_rank_${profile}`),
+      base_visible_score: num(summary?.visible_base_score_v3) ?? read(`earnings_shadow_visible_base_score_${profile}`),
+      final_visible_score: num(summary?.visible_score_v3) ?? read(`earnings_shadow_visible_score_${profile}`),
+      raw_visible_score: num(summary?.visible_raw_score_v3) ?? read(`earnings_shadow_visible_raw_score_${profile}`),
+      visible_confidence: num(summary?.visible_confidence_v3) ?? read(`earnings_shadow_confidence_${profile}`),
     },
   };
 
@@ -2389,6 +2397,38 @@ function readVisibleContributionBreakdown(props, geom) {
   ].some((value) => Number.isFinite(value));
 
   return hasContributionFields ? contributions : null;
+}
+
+function buildRealContributionReasonSummary(props, geom) {
+  const contributionBreakdown = readVisibleContributionBreakdown(props, geom);
+  if (!contributionBreakdown) return null;
+
+  const top = (groups) => groups
+    .filter(([, value]) => Number.isFinite(value) && value > 0)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 2);
+
+  const topPositiveContributions = top(Object.entries(contributionBreakdown.positive));
+  const topNegativeContributions = top(Object.entries(contributionBreakdown.negative));
+
+  const positiveLabels = {
+    busy_size_positive: "busy for its size",
+    pay_quality_positive: "pay quality",
+    trip_mix_positive: "trip mix quality",
+    continuation_positive: "good continuation",
+  };
+  const negativeLabels = {
+    short_trip_penalty: "short-trip penalty",
+    retention_penalty: "same-zone retention penalty",
+    friction_penalty: "pickup/shared friction",
+    saturation_penalty: "market saturation",
+  };
+
+  return {
+    contributionBreakdown,
+    strengths: topPositiveContributions.map(([key]) => positiveLabels[key]).filter(Boolean),
+    deductions: topNegativeContributions.map(([key]) => negativeLabels[key]).filter(Boolean),
+  };
 }
 
 function buildZoneWhyReasons(props, geom, visibleScoreSource) {
@@ -2433,39 +2473,18 @@ function buildPopupHTML(props, geom, metrics = getZonePopupMetrics(map?.getZoom?
   const visibleBucket = getPopupVisibleBucket(props, geom);
   const visibleScoreSource = getPopupVisibleScoreSource(props, geom);
   const airportExcluded = isAirportExcludedZone(props);
-  const contributionBreakdown = readVisibleContributionBreakdown(props, geom);
+  const realContributionSummary = buildRealContributionReasonSummary(props, geom);
+  const contributionBreakdown = realContributionSummary?.contributionBreakdown || null;
   const whyReasons = buildZoneWhyReasons(props, geom, visibleScoreSource);
-  const topPositiveContributions = contributionBreakdown
-    ? Object.entries(contributionBreakdown.positive)
-      .filter(([, value]) => Number.isFinite(value) && value > 0)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 2)
-    : [];
-  const topNegativeContributions = contributionBreakdown
-    ? Object.entries(contributionBreakdown.negative)
-      .filter(([, value]) => Number.isFinite(value) && value > 0)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 2)
-    : [];
-  const positiveLabels = {
-    busy_size_positive: "busy for its size",
-    pay_quality_positive: "pay quality",
-    trip_mix_positive: "trip mix quality",
-    continuation_positive: "good continuation",
-  };
-  const negativeLabels = {
-    short_trip_penalty: "short-trip penalty",
-    retention_penalty: "same-zone retention penalty",
-    friction_penalty: "pickup/shared friction",
-    saturation_penalty: "market saturation",
-  };
+  const strengthReasons = realContributionSummary?.strengths || [];
+  const deductionReasons = realContributionSummary?.deductions || [];
   const hasContributionBreakdown = !!contributionBreakdown;
-  const hasRealContributionReasons = topPositiveContributions.length > 0 || topNegativeContributions.length > 0;
+  const hasRealContributionReasons = strengthReasons.length > 0 || deductionReasons.length > 0;
   const whyReasonsHtml = hasContributionBreakdown
     ? (hasRealContributionReasons
       ? `
-        ${topPositiveContributions.length ? `<div style="margin-top:${metrics.lineGapPx + 1}px;"><b>Main strengths:</b> ${escapeHtml(topPositiveContributions.map(([key]) => positiveLabels[key]).join(" • "))}</div>` : ""}
-        ${topNegativeContributions.length ? `<div><b>Main deductions:</b> ${escapeHtml(topNegativeContributions.map(([key]) => negativeLabels[key]).join(" • "))}</div>` : ""}
+        ${strengthReasons.length ? `<div style="margin-top:${metrics.lineGapPx + 1}px;"><b>Main strengths:</b> ${escapeHtml(strengthReasons.join(" • "))}</div>` : ""}
+        ${deductionReasons.length ? `<div><b>Main deductions:</b> ${escapeHtml(deductionReasons.join(" • "))}</div>` : ""}
       `
       : "")
     : (whyReasons.length
@@ -2475,10 +2494,15 @@ function buildPopupHTML(props, geom, metrics = getZonePopupMetrics(map?.getZoom?
     ? `
       <div style="margin-top:${metrics.lineGapPx + 1}px;">
         <b>Visible score debug:</b>
+        <div><b>Citywide anchor input:</b> ${Number.isFinite(contributionBreakdown.mechanics.citywide_anchor_input) ? contributionBreakdown.mechanics.citywide_anchor_input.toFixed(3) : "n/a"}</div>
+        <div><b>Citywide anchor base:</b> ${Number.isFinite(contributionBreakdown.mechanics.citywide_anchor_base) ? contributionBreakdown.mechanics.citywide_anchor_base.toFixed(3) : "n/a"}</div>
+        <div><b>Citywide anchor display:</b> ${Number.isFinite(contributionBreakdown.mechanics.citywide_anchor_display) ? contributionBreakdown.mechanics.citywide_anchor_display.toFixed(3) : "n/a"}</div>
         <div><b>Citywide anchor norm:</b> ${Number.isFinite(contributionBreakdown.mechanics.citywide_anchor_norm) ? contributionBreakdown.mechanics.citywide_anchor_norm.toFixed(3) : "n/a"}</div>
         <div><b>Local rank:</b> ${Number.isFinite(contributionBreakdown.mechanics.local_rank) ? contributionBreakdown.mechanics.local_rank.toFixed(3) : "n/a"}</div>
         <div><b>Base visible score:</b> ${Number.isFinite(contributionBreakdown.mechanics.base_visible_score) ? contributionBreakdown.mechanics.base_visible_score.toFixed(3) : "n/a"}</div>
         <div><b>Final visible score:</b> ${Number.isFinite(contributionBreakdown.mechanics.final_visible_score) ? contributionBreakdown.mechanics.final_visible_score.toFixed(3) : "n/a"}</div>
+        <div><b>Raw visible profile score:</b> ${Number.isFinite(contributionBreakdown.mechanics.raw_visible_score) ? contributionBreakdown.mechanics.raw_visible_score.toFixed(3) : "n/a"}</div>
+        <div><b>Visible profile confidence:</b> ${Number.isFinite(contributionBreakdown.mechanics.visible_confidence) ? contributionBreakdown.mechanics.visible_confidence.toFixed(3) : "n/a"}</div>
       </div>
     `
     : "";

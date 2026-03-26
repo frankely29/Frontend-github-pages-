@@ -341,6 +341,26 @@
     }
   }
 
+  function getVisibleV3ProfileKeyForFeature(props, geom) {
+    const source = String(window.TlcModeModule?.getVisibleScoreSourceForFeature?.(props, geom) || "");
+    switch (source) {
+      case "citywide_v3_shadow":
+        return "citywide_v3";
+      case "manhattan_v3_shadow":
+        return "manhattan_v3";
+      case "bronx_wash_heights_v3_shadow":
+        return "bronx_wash_heights_v3";
+      case "queens_v3_shadow":
+        return "queens_v3";
+      case "brooklyn_v3_shadow":
+        return "brooklyn_v3";
+      case "staten_island_v3_shadow":
+        return "staten_island_v3";
+      default:
+        return null;
+    }
+  }
+
   function isVisibleScoreUsingFallback(props, geom) {
     const source = String(window.TlcModeModule?.getVisibleScoreSourceForFeature?.(props, geom) || "");
     return (
@@ -442,6 +462,14 @@
     if (!anyReady) return null;
 
     const shadow = comparison.shadow;
+    const visibleV3ProfileKey = getVisibleV3ProfileKeyForFeature(props, geom);
+    const num = (value) => {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    };
+    const readVisibleField = (baseField) => (
+      visibleV3ProfileKey ? num(props?.[`${baseField}_${visibleV3ProfileKey}`]) : null
+    );
     return {
       legacy_rating: comparison.legacy.rating,
       legacy_bucket: comparison.legacy.bucket,
@@ -510,7 +538,24 @@
       busy_next_base_n: shadow.busy_next_base_n_shadow,
       churn_pressure_n: shadow.churn_pressure_n_shadow,
       manhattan_core_saturation_proxy_n: shadow.manhattan_core_saturation_proxy_n_shadow,
+      visible_v3_profile_key: visibleV3ProfileKey,
+      citywide_anchor_input_v3: num(props?.earnings_shadow_citywide_anchor_input_v3),
+      citywide_anchor_base_v3: num(props?.earnings_shadow_citywide_anchor_base_v3),
+      citywide_anchor_display_v3: num(props?.earnings_shadow_citywide_anchor_display_v3),
       citywide_anchor_norm_v3: shadow.earnings_shadow_citywide_anchor_norm_v3,
+      visible_rank_v3: readVisibleField("earnings_shadow_visible_rank"),
+      visible_base_score_v3: readVisibleField("earnings_shadow_visible_base_score"),
+      visible_score_v3: readVisibleField("earnings_shadow_visible_score"),
+      visible_raw_score_v3: readVisibleField("earnings_shadow_visible_raw_score"),
+      visible_confidence_v3: readVisibleField("earnings_shadow_confidence"),
+      busy_size_positive_v3: readVisibleField("earnings_shadow_busy_size_positive"),
+      pay_quality_positive_v3: readVisibleField("earnings_shadow_pay_quality_positive"),
+      trip_mix_positive_v3: readVisibleField("earnings_shadow_trip_mix_positive"),
+      continuation_positive_v3: readVisibleField("earnings_shadow_continuation_positive"),
+      short_trip_penalty_v3: readVisibleField("earnings_shadow_short_trip_penalty"),
+      retention_penalty_v3: readVisibleField("earnings_shadow_retention_penalty"),
+      friction_penalty_v3: readVisibleField("earnings_shadow_friction_penalty"),
+      saturation_penalty_v3: readVisibleField("earnings_shadow_saturation_penalty"),
       airport_excluded: !!shadow.airport_excluded,
     };
   }
@@ -531,6 +576,7 @@
     getZoneShadowComparison,
     getZoneShadowComparisonByLocationId,
     buildZoneShadowSummary,
+    getVisibleV3ProfileKeyForFeature,
     getVisibleShadowProfileKeyForFeature,
     isVisibleScoreUsingFallback,
     getVisibleShadowReadiness,
