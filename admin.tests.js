@@ -1054,10 +1054,10 @@
         setSingleModeState(null);
         modeFlagsAfterCitywideReset = snapshotModeFlags() || {};
         const citywide = window.getTeamJoseoSystemAudit?.() || {};
-        const citywideCount = safeNumber(citywide?.visibleSourceCounts?.legacy_citywide);
+        const citywideCount = safeNumber(citywide?.visibleSourceCounts?.citywide_v3_shadow);
         scenarios.push({
           label: 'Citywide default',
-          source: 'legacy_citywide',
+          source: 'citywide_v3_shadow',
           ok: citywideCount > 0,
           count: citywideCount,
         });
@@ -1067,21 +1067,21 @@
           'manhattan',
           () => findFeatureByPredicate(features, (feature) => /manhattan/i.test(String(feature?.properties?.borough || feature?.properties?.Borough || '')) && !isAirportFeature(feature)),
           ['manhattan_v3_shadow', 'manhattan_shadow', 'manhattan_mode_legacy'],
-          'manhattan_mode_legacy'
+          'manhattan_v3_shadow'
         );
         inspectZone(
           'Bronx/Wash Heights',
           'bronxWashHeights',
           () => findFeatureByPredicate(features, (feature) => /bronx/i.test(String(feature?.properties?.borough || feature?.properties?.Borough || ''))),
           ['bronx_wash_heights_v3_shadow', 'bronx_wash_heights_shadow', 'bronx_wash_heights_mode_legacy'],
-          'bronx_wash_heights_mode_legacy'
+          'bronx_wash_heights_v3_shadow'
         );
         inspectZone(
           'Queens',
           'queens',
           () => findFeatureByPredicate(features, (feature) => /queens/i.test(String(feature?.properties?.borough || feature?.properties?.Borough || '')) && !isAirportFeature(feature)),
           ['queens_v3_shadow', 'queens_shadow', 'queens_mode_legacy'],
-          'queens_mode_legacy'
+          'queens_v3_shadow'
         );
         const queensAirport = findFeatureByPredicate(features, (feature) => /queens/i.test(String(feature?.properties?.borough || feature?.properties?.Borough || '')) && isAirportFeature(feature));
         if (queensAirport) {
@@ -1091,8 +1091,8 @@
             label: 'Queens airport exclusion',
             zoneId: getFeatureZoneId(queensAirport),
             source: airportSource,
-            ok: airportSource === 'legacy_citywide',
-            expected: 'legacy_citywide',
+            ok: airportSource === 'citywide_v3_shadow',
+            expected: 'citywide_v3_shadow',
           });
         }
         inspectZone(
@@ -1100,14 +1100,14 @@
           'brooklyn',
           () => findFeatureByPredicate(features, (feature) => /brooklyn/i.test(String(feature?.properties?.borough || feature?.properties?.Borough || ''))),
           ['brooklyn_v3_shadow', 'brooklyn_shadow', 'brooklyn_mode_legacy'],
-          'brooklyn_mode_legacy'
+          'brooklyn_v3_shadow'
         );
         inspectZone(
           'Staten Island',
           'statenIsland',
           () => findFeatureByPredicate(features, (feature) => /staten/i.test(String(feature?.properties?.borough || feature?.properties?.Borough || ''))),
           ['staten_island_v3_shadow', 'staten_island_shadow', 'staten_island_mode_legacy'],
-          'staten_island_mode_legacy'
+          'staten_island_v3_shadow'
         );
       } finally {
         try {
