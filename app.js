@@ -1061,13 +1061,11 @@ function ensureDockChatAndGamesBindings() {
     );
   }
 
-  const gamesHtmlFactory =
-    window.gamesPanelHTML ||
-    window.TlcGamesModule?.gamesPanelHTML;
-
-  const gamesWireFactory =
-    window.wireGamesPanel ||
-    window.TlcGamesModule?.wireGamesPanel;
+  const gamesOwnerReady = typeof window.isTlcGamesOwnerReady === "function"
+    ? window.isTlcGamesOwnerReady()
+    : !!window.TlcGamesModule;
+  const gamesHtmlFactory = gamesOwnerReady ? window.TlcGamesModule?.gamesPanelHTML : null;
+  const gamesWireFactory = gamesOwnerReady ? window.TlcGamesModule?.wireGamesPanel : null;
 
   if (
     dockGames &&

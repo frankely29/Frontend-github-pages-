@@ -1,6 +1,7 @@
 (function() {
   const runtime = window.FrontendRuntime || null;
   const DEFAULT_API_BASE = 'https://web-production-78f67.up.railway.app';
+  const ENABLE_DOCK_BINDING = window.__ENABLE_WORK_BATTLES_DOCK_BINDING__ === true;
   const LS_TOKEN = 'community_token_v1';
   const HUB_KEY = 'games';
   const SEARCH_DEBOUNCE_MS = 250;
@@ -715,9 +716,11 @@
     clearPendingProfileTarget,
   };
 
-  try {
-    window.initCommunityDockBindings?.();
-  } catch (error) {
-    console.warn('WorkBattles dock bootstrap retry failed', error);
+  if (ENABLE_DOCK_BINDING) {
+    try {
+      window.initCommunityDockBindings?.();
+    } catch (error) {
+      console.warn('WorkBattles dock bootstrap retry failed', error);
+    }
   }
 })();

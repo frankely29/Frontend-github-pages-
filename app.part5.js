@@ -255,12 +255,12 @@
 
   function resolveRankIconBand(rankIconKey) {
     const key = String(rankIconKey || '').trim().toLowerCase();
-    const match = key.match(/^band_(\d{1,3})$/);
+    const match = key.match(/^band_(\d{1,4})$/);
     if (match) {
       const value = Number(match[1]);
-      return Math.max(1, Math.min(100, value));
+      return Math.max(1, Math.min(1000, value));
     }
-    return Math.max(1, Math.min(100, Number(LEGACY_RANK_ICON_BAND_MAP[key] || 1)));
+    return Math.max(1, Math.min(1000, Number(LEGACY_RANK_ICON_BAND_MAP[key] || 1)));
   }
 
   function resolveRankIconTone(rankIconKey) {
@@ -340,7 +340,9 @@
     const currentLevelXp = Number(progression?.current_level_xp);
     const nextLevelXp = Number(progression?.next_level_xp);
     const xpToNextLevel = Number(progression?.xp_to_next_level);
-    const maxLevelReached = progression?.max_level_reached === true;
+    const maxLevelReached = progression?.max_level_reached === true
+      || progression?.is_max_level === true
+      || (Number.isFinite(xpToNextLevel) && xpToNextLevel <= 0);
     const lifetimeMiles = Number(progression?.lifetime_miles);
     const lifetimeHours = Number(progression?.lifetime_hours);
     const lifetimePickups = Number(progression?.lifetime_pickups_recorded);
@@ -428,10 +430,78 @@
     return `<div class="driverProfileRecentBattles">${rows.map((row) => {
       const result = battleResultLabel(row);
       const game = String(row?.game_key || row?.game_type || 'battle').replace(/^./, (m) => m.toUpperCase());
-      const opponent = String(row?.opponent_display_name || row?.opponent_name || 'Driver');
+      const opponent = String(
+        row?.opponent_display_name
+        || row?.other_user_display_name
+        || row?.challenger_display_name
+        || row?.challenged_display_name
+        || row?.opponent_name
+        || 'Driver'
+      );
       const xp = Number(row?.xp_awarded ?? row?.xp_delta ?? row?.xp ?? 0);
       return `<article class="driverProfileRecentBattle ${result.toLowerCase()}"><div class="driverProfileRecentBattleTop"><strong>${escapeHtml(game)}</strong><span>${escapeHtml(result)}</span></div><div class="driverProfileRecentBattleMeta">vs ${escapeHtml(opponent)} • ${escapeHtml(chatInternals.formatBattleDate?.(row?.completed_at))}</div><div class="driverProfileRecentBattleMeta">${xp > 0 ? `+${escapeHtml(formatProgressNumber(xp, { maxFractionDigits: 0 }))} XP` : 'Completed'}</div></article>`;
     }).join('')}</div>`;
+  }
+
+  function resolveViewerRelationship(profilePayload = {}) {
+    const rel = profilePayload?.viewer_game_relationship && typeof profilePayload.viewer_game_relationship === 'object'
+      ? profilePayload.viewer_game_relationship
+      : {};
+    const summary = profilePayload?.active_match_summary && typeof profilePayload.active_match_summary === 'object'
+      ? profilePayload.active_match_summary
+      : {};
+    const incoming = rel?.incoming_challenge || rel?.incoming || null;
+    const outgoing = rel?.outgoing_challenge || rel?.outgoing || null;
+    const active = rel?.active_match || summary || null;
+    const activeId = Number(active?.id || active?.match_id || 0);
+    if (activeId > 0) {
+      return {
+        kind: 'active',
+        label: String(active?.status || 'Active match in progress'),
+        gameType: String(active?.game_type || active?.game_key || rel?.game_type || rel?.game_key || 'dominoes'),
+        matchId: activeId,
+      };
+    }
+    const incomingId = Number(incoming?.id || incoming?.challenge_id || rel?.incoming_challenge_id || 0);
+    if (incomingId > 0 || String(rel?.state || rel?.relationship || '').toLowerCase() === 'incoming') {
+      return {
+        kind: 'incoming',
+        label: 'Incoming challenge waiting',
+        gameType: String(incoming?.game_type || incoming?.game_key || rel?.game_type || rel?.game_key || 'dominoes'),
+        matchId: 0,
+      };
+    }
+    const outgoingId = Number(outgoing?.id || outgoing?.challenge_id || rel?.outgoing_challenge_id || 0);
+    if (outgoingId > 0 || String(rel?.state || rel?.relationship || '').toLowerCase() === 'outgoing') {
+      return {
+        kind: 'outgoing',
+        label: 'Challenge already sent',
+        gameType: String(outgoing?.game_type || outgoing?.game_key || rel?.game_type || rel?.game_key || 'dominoes'),
+        matchId: 0,
+      };
+    }
+    return { kind: 'none', label: '', gameType: 'dominoes', matchId: 0 };
+  }
+
+  function renderProfileGameActionButtons(profilePayload, selfMode) {
+    if (selfMode) return '';
+    const rel = resolveViewerRelationship(profilePayload);
+    const challengeLabel = rel.kind === 'active'
+      ? 'Open Match'
+      : rel.kind === 'incoming'
+        ? 'View Challenge'
+        : rel.kind === 'outgoing'
+          ? 'Challenge Sent'
+          : 'Challenge';
+    const disabled = rel.kind === 'outgoing' ? ' disabled' : '';
+    return `<button class="driverProfileActionBtn" id="driverProfileChallengeBtn" type="button" data-rel-kind="${escapeHtml(rel.kind)}" data-game-type="${escapeHtml(rel.gameType)}" data-match-id="${escapeHtml(String(rel.matchId || ''))}"${disabled}>${escapeHtml(challengeLabel)}</button><button class="driverProfileActionBtn" id="driverProfileOpenInboxBtn" type="button">Message</button>`;
+  }
+
+  function renderProfileRelationshipStatus(profilePayload, selfMode) {
+    if (selfMode) return '';
+    const rel = resolveViewerRelationship(profilePayload);
+    if (!rel.label) return '';
+    return `<div class="driverProfileStatus">${escapeHtml(rel.label)}</div>`;
   }
 
   async function fetchDriverProfile(userId) {
@@ -1112,6 +1182,7 @@
       ? messages.map((msg) => chatInternals.renderPrivateConversationRow?.(msg, 'profile-dm')).join('')
       : '<div class="driverProfileStatus">No private messages yet.</div>';
 
+    const profileGameActionsHtml = renderProfileGameActionButtons(profilePayload, selfMode);
     const accountActionsHtml = `
       <div class="driverProfileSectionTitle">Account actions</div>
       <div class="driverProfileActions">
@@ -1133,7 +1204,7 @@
           </div>
         </div>
         <div class="driverProfileHeaderActions">
-          ${selfMode ? '' : '<button class="driverProfileActionBtn" id="driverProfileChallengeBtn" type="button">Challenge</button><button class="driverProfileActionBtn" id="driverProfileOpenInboxBtn" type="button">Message</button>'}
+          ${profileGameActionsHtml}
           <button class="driverProfileClose" id="driverProfileCloseBtn" type="button">Close</button>
         </div>
       </div>
@@ -1150,6 +1221,7 @@
         ${renderBattleStatsSection(profilePayload?.battle_record || profilePayload?.battle_stats)}
         <div class="driverProfileSectionTitle">Recent battles</div>
         ${renderRecentBattlesList(profilePayload?.recent_battles || profilePayload?.battle_history)}
+        ${renderProfileRelationshipStatus(profilePayload, selfMode)}
         ${selfMode ? accountActionsHtml : `
           <div class="driverProfileSectionTitle">Private messages</div>
           <div class="driverProfileDmWrap">
@@ -1172,7 +1244,17 @@
       closeDriverProfileModal();
     });
     document.getElementById('driverProfileChallengeBtn')?.addEventListener('click', () => {
-      window.openGamesBattleComposer?.({ targetUserId: driverProfileState.userId, displayName: name, gameType: 'dominoes' });
+      const rel = resolveViewerRelationship(profilePayload);
+      window.openGamesBattleComposer?.({
+        targetUserId: driverProfileState.userId,
+        displayName: name,
+        gameType: rel.gameType || 'dominoes'
+      });
+      if (rel.kind === 'active') {
+        window.loadActiveBattleMatch?.({ preferredMatchId: rel.matchId || undefined });
+      } else if (rel.kind === 'incoming' || rel.kind === 'outgoing') {
+        window.loadGamesBattleDashboard?.({ silent: false });
+      }
       closeDriverProfileModal();
     });
 
