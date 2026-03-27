@@ -513,6 +513,15 @@
     if (!ctx) return;
     const state = match?.match_state || match?.state || {};
     const balls = Array.isArray(state?.balls) ? state.balls : [];
+    const fallbackBallPalette = ['#ffffff', '#fbbf24', '#38bdf8', '#f97316', '#a78bfa', '#fb7185', '#34d399', '#f59e0b', '#60a5fa', '#f472b6'];
+    const fallbackBallColor = (ball, idx) => {
+      if (ball && typeof ball.color === 'string' && ball.color.trim()) return ball.color;
+      const numeric = Number(ball?.number);
+      const paletteIndex = Number.isFinite(numeric) && numeric >= 0
+        ? Math.floor(numeric) % fallbackBallPalette.length
+        : idx % fallbackBallPalette.length;
+      return fallbackBallPalette[Math.max(0, paletteIndex)];
+    };
     const width = canvas.width;
     const height = canvas.height;
     ctx.clearRect(0, 0, width, height);
@@ -529,14 +538,19 @@
       const y = Number(ball?.y);
       if (!Number.isFinite(x) || !Number.isFinite(y) || ball?.pocketed) return;
       ctx.beginPath();
-      ctx.fillStyle = String(ball?.color || (idx === 0 ? '#ffffff' : '#fbbf24'));
+      ctx.fillStyle = String(fallbackBallColor(ball, idx));
       ctx.arc(x * width, y * height, idx === 0 ? 8 : 7, 0, Math.PI * 2);
       ctx.fill();
       ctx.strokeStyle = 'rgba(15,23,42,.28)';
       ctx.stroke();
     });
-    if (isLocalPlayersTurn(match) && balls[0] && !balls[0].pocketed) {
-      const cue = balls[0];
+    const cueBall = balls.find((ball) => {
+      const x = Number(ball?.x);
+      const y = Number(ball?.y);
+      return !ball?.pocketed && Number.isFinite(x) && Number.isFinite(y);
+    });
+    if (isLocalPlayersTurn(match) && cueBall) {
+      const cue = cueBall;
       const aim = gamesState.billiardsAim || { angle: 0, power: 0.5 };
       const startX = cue.x * width;
       const startY = cue.y * height;
@@ -1023,7 +1037,15 @@
     const state = match?.match_state || match?.state || {};
     const missing = [];
     if (gameType === 'billiards') {
-      if (!Array.isArray(state?.balls)) missing.push('balls');
+      const balls = Array.isArray(state?.balls) ? state.balls : null;
+      if (!balls) missing.push('balls');
+      const hasRenderableBall = Array.isArray(balls) && balls.some((ball) => {
+        if (ball?.pocketed) return false;
+        const x = Number(ball?.x);
+        const y = Number(ball?.y);
+        return Number.isFinite(x) && Number.isFinite(y);
+      });
+      if (!hasRenderableBall) missing.push('balls[x,y]');
       if (state?.your_targets_remaining == null && state?.player_targets_remaining == null) missing.push('your_targets_remaining|player_targets_remaining');
       if (state?.opponent_targets_remaining == null) missing.push('opponent_targets_remaining');
     } else if (gameType === 'dominoes') {
