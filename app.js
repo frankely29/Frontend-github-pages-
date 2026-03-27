@@ -2642,21 +2642,23 @@ function buildPopupHTML(props, geom, metrics = getZonePopupMetrics(map?.getZoom?
   let extra = "";
   const modeFlags = getModeFlags();
   const activeModeTag = getActiveSpecialModeTagForFeature(props, geom);
-  const getBucketFromShownRating = (rating) => {
+  const getRatingVisualsFromShownRating = (rating) => {
     const n = Number(rating);
-    if (!Number.isFinite(n)) return "";
-    if (typeof window.TlcModeModule?.getBucketForRating === "function") {
-      return String(window.TlcModeModule.getBucketForRating(n) || "");
+    if (!Number.isFinite(n)) return { bucket: "", color: "" };
+    const modeModule = window.TlcModeModule;
+    if (typeof modeModule?.getBucketForRating === "function" || typeof modeModule?.getColorForRating === "function") {
+      return {
+        bucket: typeof modeModule?.getBucketForRating === "function" ? String(modeModule.getBucketForRating(n) || "") : "",
+        color: typeof modeModule?.getColorForRating === "function" ? String(modeModule.getColorForRating(n) || "") : ""
+      };
     }
-    const x = Math.max(1, Math.min(100, Math.round(n)));
-    if (x >= 87) return "green";
-    if (x >= 73) return "purple";
-    if (x >= 60) return "indigo";
-    if (x >= 48) return "blue";
-    if (x >= 40) return "sky";
-    if (x >= 33) return "yellow";
-    if (x >= 25) return "orange";
-    return "red";
+    return {
+      bucket: String(effectiveBucket(props, geom) || ""),
+      color: String(effectiveColor(props, geom) || "")
+    };
+  };
+  const getBucketFromShownRating = (rating) => {
+    return getRatingVisualsFromShownRating(rating).bucket;
   };
 
   if (modeFlags.statenIslandMode && activeModeTag === "staten_island") {
