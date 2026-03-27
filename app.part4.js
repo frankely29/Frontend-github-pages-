@@ -493,7 +493,7 @@
       ${match?.status === 'completed' ? `<div class="gamesBattleResult">${escapeHtml(formatBattleSummary(match))}</div>` : ''}
     </div>`;
     document.getElementById('gamesForfeitBtn')?.addEventListener('click', (e) => { e.preventDefault(); void forfeitBattleMatch(); });
-    document.getElementById('gamesDominoDrawBtn')?.addEventListener('click', (e) => { e.preventDefault(); void submitBattleMove({ move_type: 'draw_tile' }); });
+    document.getElementById('gamesDominoDrawBtn')?.addEventListener('click', (e) => { e.preventDefault(); void submitBattleMove({ move_type: 'draw' }); });
     document.getElementById('gamesDominoPassBtn')?.addEventListener('click', (e) => { e.preventDefault(); void submitBattleMove({ move_type: 'pass' }); });
     host.querySelectorAll('[data-domino-play]').forEach((btn) => {
       btn.addEventListener('click', (e) => {
@@ -1040,9 +1040,10 @@
 
   function renderChallengeAvatar(row = {}) {
     const initials = escapeHtml((row.display_name || 'D').slice(0, 2).toUpperCase());
+    const fallback = `<span class="gamesUserAvatarFallback" aria-hidden="true" style="display:inline-flex;align-items:center;justify-content:center;width:100%;height:100%;border-radius:999px;background:rgba(148,163,184,.2);color:#e2e8f0;font-size:.72rem;font-weight:700;line-height:1;">${initials}</span>`;
     const hasRealAvatar = !!(row.avatar_version || row.avatar_url);
-    if (!hasRealAvatar || !row.avatar_thumb_url) return initials;
-    return `<img src="${escapeHtml(row.avatar_thumb_url)}" alt="" loading="lazy" onerror="this.onerror=null;this.replaceWith(document.createTextNode('${initials}'))">`;
+    if (!hasRealAvatar || !row.avatar_thumb_url) return fallback;
+    return `<img src="${escapeHtml(row.avatar_thumb_url)}" alt="" loading="lazy" onerror="this.onerror=null;this.outerHTML='${fallback.replace(/"/g, '&quot;')}';">`;
   }
 
   function wireGamesPanel() {
