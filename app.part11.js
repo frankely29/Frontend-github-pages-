@@ -1404,6 +1404,7 @@
     const airportExcluded = isQueensFeature(props) && isAirportZone(props);
     const activeMode = getActiveSpecialModeTagForFeature(props, geom) || "citywide";
     const rating = effectiveRating(props, geom);
+    const derivedFromRating = Number.isFinite(Number(rating));
     const bucket = effectiveBucket(props, geom);
     const color = effectiveColor(props, geom);
     return {
@@ -1411,8 +1412,8 @@
       airport_excluded: airportExcluded,
       active_mode: activeMode,
       chosen_rating_source: visibleScoreSource,
-      chosen_bucket_source: visibleScoreSource,
-      chosen_color_source: visibleScoreSource,
+      chosen_bucket_source: derivedFromRating ? "derived_from_rating" : visibleScoreSource,
+      chosen_color_source: derivedFromRating ? "derived_from_rating" : visibleScoreSource,
       chosen_rating: Number.isFinite(Number(rating)) ? Number(rating) : null,
       chosen_bucket: String(bucket || ""),
       chosen_color: String(color || "")
@@ -1561,6 +1562,8 @@
     applyBronxWashHeightsLocalView,
     applyQueensLocalView,
     applyBrooklynLocalView,
+    getBucketForRating,
+    getColorForRating,
     effectiveBucket,
     effectiveColor,
     effectiveFillColor,
