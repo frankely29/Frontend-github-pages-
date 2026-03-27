@@ -46,7 +46,16 @@
   };
 
   function apiBase() {
-    return String(runtime?.resolveApiBase?.(window.API_BASE || '') || window.API_BASE || '').replace(/\/$/, '');
+    if (typeof runtime?.resolveApiBase === 'function') {
+      return String(runtime.resolveApiBase()).replace(/\/$/, '');
+    }
+    const source =
+      (typeof window !== 'undefined' && window.API_BASE !== undefined)
+        ? window.API_BASE
+        : ((typeof window !== 'undefined' && window.__TLC_RUNTIME_CONFIG__?.apiBase !== undefined)
+            ? window.__TLC_RUNTIME_CONFIG__.apiBase
+            : '');
+    return String(source || '').replace(/\/$/, '');
   }
 
   async function fetchJSONWithTimeout(url, timeoutMs = 10000) {

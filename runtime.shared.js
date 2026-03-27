@@ -18,7 +18,8 @@
   }
 
   if (typeof window !== 'undefined' && window.API_BASE === undefined) {
-    window.API_BASE = DEFAULT_API_BASE;
+    const runtimeConfigApiBase = String(window.__TLC_RUNTIME_CONFIG__?.apiBase || '').trim();
+    window.API_BASE = runtimeConfigApiBase || DEFAULT_API_BASE;
   }
 
   function toAbsoluteUrl(urlOrPath, baseOverride) {
