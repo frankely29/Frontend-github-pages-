@@ -5,11 +5,14 @@
     : {};
 
   function resolveApiBase(explicitBase) {
+    const runtimeConfigApiBase = (typeof window !== 'undefined')
+      ? window.__TLC_RUNTIME_CONFIG__?.apiBase
+      : undefined;
     const source = explicitBase !== undefined
       ? explicitBase
       : (typeof window !== 'undefined' && window.API_BASE !== undefined
           ? window.API_BASE
-          : DEFAULT_API_BASE);
+          : (runtimeConfigApiBase !== undefined ? runtimeConfigApiBase : DEFAULT_API_BASE));
     const normalized = String(source || DEFAULT_API_BASE).trim() || DEFAULT_API_BASE;
     return normalized.replace(/\/+$/, '');
   }

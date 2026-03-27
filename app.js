@@ -22,12 +22,21 @@
  * their backend host without modifying the source code.
  */
 const DEFAULT_API_BASE = "https://web-production-78f67.up.railway.app";
-const RAILWAY_BASE =
-  (typeof window !== "undefined" && window.API_BASE !== undefined)
-    ? String(window.API_BASE || DEFAULT_API_BASE).replace(/\/+$/, "")
-    : DEFAULT_API_BASE;
-const BIN_MINUTES = 20;
 const FrontendRuntime = (typeof window !== "undefined" && window.FrontendRuntime) ? window.FrontendRuntime : null;
+function resolveAppApiBase() {
+  if (FrontendRuntime?.resolveApiBase) {
+    return FrontendRuntime.resolveApiBase();
+  }
+  const source =
+    (typeof window !== "undefined" && window.API_BASE !== undefined)
+      ? window.API_BASE
+      : ((typeof window !== "undefined" && window.__TLC_RUNTIME_CONFIG__?.apiBase !== undefined)
+          ? window.__TLC_RUNTIME_CONFIG__.apiBase
+          : DEFAULT_API_BASE);
+  return String(source || DEFAULT_API_BASE).trim().replace(/\/+$/, "") || DEFAULT_API_BASE;
+}
+const RAILWAY_BASE = resolveAppApiBase();
+const BIN_MINUTES = 20;
 const runtimePolling = FrontendRuntime?.polling || null;
 const runtimePerf = FrontendRuntime?.perf || null;
 
