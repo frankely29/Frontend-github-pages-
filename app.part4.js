@@ -513,6 +513,7 @@
     if (!ctx) return;
     const state = match?.match_state || match?.state || {};
     const balls = Array.isArray(state?.balls) ? state.balls : [];
+    const cueBall = state?.cue_ball || null;
     const fallbackBallPalette = ['#ffffff', '#fbbf24', '#38bdf8', '#f97316', '#a78bfa', '#fb7185', '#34d399', '#f59e0b', '#60a5fa', '#f472b6'];
     const fallbackBallColor = (ball, idx) => {
       if (ball && typeof ball.color === 'string' && ball.color.trim()) return ball.color;
@@ -544,13 +545,27 @@
       ctx.strokeStyle = 'rgba(15,23,42,.28)';
       ctx.stroke();
     });
-    const cueBall = balls.find((ball) => {
+    const cueBallRenderable = (() => {
+      const x = Number(cueBall?.x);
+      const y = Number(cueBall?.y);
+      if (!cueBall?.pocketed && Number.isFinite(x) && Number.isFinite(y)) return { ...cueBall, x, y };
+      return null;
+    })();
+    if (cueBallRenderable) {
+      ctx.beginPath();
+      ctx.fillStyle = '#ffffff';
+      ctx.arc(cueBallRenderable.x * width, cueBallRenderable.y * height, 8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(15,23,42,.4)';
+      ctx.stroke();
+    }
+    const fallbackAimBall = balls.find((ball) => {
       const x = Number(ball?.x);
       const y = Number(ball?.y);
       return !ball?.pocketed && Number.isFinite(x) && Number.isFinite(y);
     });
-    if (isLocalPlayersTurn(match) && cueBall) {
-      const cue = cueBall;
+    if (isLocalPlayersTurn(match) && (cueBallRenderable || fallbackAimBall)) {
+      const cue = cueBallRenderable || fallbackAimBall;
       const aim = gamesState.billiardsAim || { angle: 0, power: 0.5 };
       const startX = cue.x * width;
       const startY = cue.y * height;
@@ -568,6 +583,15 @@
     const state = match?.match_state || match?.state || {};
     const contract = inspectMatchStateContract(match);
     setGamesDiagnostic('matchContract', contract.ok, contract.ok ? 'Match contract OK.' : `Missing: ${contract.missing.join(', ')}`, contract);
+    const cueX = Number(state?.cue_ball?.x);
+    const cueY = Number(state?.cue_ball?.y);
+    const cueBallRenderable = !!(!state?.cue_ball?.pocketed && Number.isFinite(cueX) && Number.isFinite(cueY));
+    setGamesDiagnostic(
+      'billiardsCueBall',
+      cueBallRenderable,
+      cueBallRenderable ? 'Cue ball state detected.' : 'Cue ball state missing/invalid; using fallback aim anchor when available.',
+      { cue_ball: state?.cue_ball || null }
+    );
     if (!contract.ok) {
       host.innerHTML = renderBattleContractMismatch(match, contract);
       return;
