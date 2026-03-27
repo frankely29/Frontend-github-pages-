@@ -1,5 +1,14 @@
 (function () {
-  const DEFAULT_API_BASE = 'https://web-production-78f67.up.railway.app';
+  const DEFAULT_API_BASE = (function resolveDefaultApiBase() {
+    if (typeof window === 'undefined') return '';
+    const configured = String(window.__TLC_DEFAULT_API_BASE__ || '').trim();
+    if (configured) return configured.replace(/\/+$/, '');
+    const host = String(window.location?.hostname || '').toLowerCase();
+    if (host === 'localhost' || host === '127.0.0.1' || host.endsWith('.local')) {
+      return `${window.location.protocol}//${host === '127.0.0.1' ? '127.0.0.1' : 'localhost'}:3000`;
+    }
+    return String(window.API_BASE || '').trim().replace(/\/+$/, '');
+  })();
   const perfRoot = (typeof window !== 'undefined')
     ? (window.__mapPerfDebug = window.__mapPerfDebug || {})
     : {};
@@ -13,13 +22,13 @@
       : (typeof window !== 'undefined' && window.API_BASE !== undefined
           ? window.API_BASE
           : (runtimeConfigApiBase !== undefined ? runtimeConfigApiBase : DEFAULT_API_BASE));
-    const normalized = String(source || DEFAULT_API_BASE).trim() || DEFAULT_API_BASE;
+    const normalized = String(source || DEFAULT_API_BASE || '').trim();
     return normalized.replace(/\/+$/, '');
   }
 
   if (typeof window !== 'undefined' && window.API_BASE === undefined) {
     const runtimeConfigApiBase = String(window.__TLC_RUNTIME_CONFIG__?.apiBase || '').trim();
-    window.API_BASE = runtimeConfigApiBase || DEFAULT_API_BASE;
+    window.API_BASE = runtimeConfigApiBase || DEFAULT_API_BASE || '';
   }
 
   function toAbsoluteUrl(urlOrPath, baseOverride) {

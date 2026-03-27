@@ -92,6 +92,12 @@
     challengeUsers: gamesDefaultChallengeUserState(),
     battleNotificationsSeen: new Set(),
     billiardsAim: { angle: 0.1, power: 0.58 },
+    diagnostics: {
+      dashboardFetch: { ok: null, message: '', at: 0 },
+      activeMatchFetch: { ok: null, message: '', at: 0 },
+      matchContract: { gameType: '', missing: [], ok: null, at: 0 },
+      moveSubmit: { ok: null, message: '', at: 0 },
+    },
   };
 
   const GAMES_DASHBOARD_POLL_MS = 12000;
@@ -146,6 +152,15 @@
     gamesState.error = isError ? gamesState.status : '';
   }
 
+  function setGamesDiagnostic(key, ok, message, extra = {}) {
+    const target = gamesState.diagnostics?.[key];
+    if (!target) return;
+    target.ok = typeof ok === 'boolean' ? ok : null;
+    target.message = String(message || '');
+    target.at = Date.now();
+    Object.assign(target, extra || {});
+  }
+
   function scheduleGamesDashboardPoll({ immediate = false } = {}) {
     if (gamesDashboardPollTimer) window.clearTimeout(gamesDashboardPollTimer);
     gamesDashboardPollTimer = window.setTimeout(async () => {
@@ -194,9 +209,11 @@
       gamesState.challengesLoadedAt = Date.now();
       if (!gamesState.activeMatch && gamesState.dashboard.activeMatch) gamesState.activeMatch = gamesState.dashboard.activeMatch;
       if (gamesState.dashboard.activeMatch?.id) scheduleGamesMatchPoll({ immediate: true });
+      setGamesDiagnostic('dashboardFetch', true, 'Dashboard loaded.');
       if (!silent) setGamesStatus('');
       return gamesState.dashboard;
     } catch (err) {
+      setGamesDiagnostic('dashboardFetch', false, err?.message || 'Unable to load dashboard.');
       setGamesStatus(err?.message || 'Unable to load battle hub.', true);
       return null;
     } finally {
@@ -228,9 +245,12 @@
           status: match.status,
         };
         gamesState.matchLoadedAt = Date.now();
+        const contract = inspectMatchStateContract(match);
+        setGamesDiagnostic('matchContract', contract.ok, contract.ok ? 'Match contract OK.' : `Missing: ${contract.missing.join(', ')}`, contract);
       } else if (!silent) {
         gamesState.activeMatch = null;
       }
+      setGamesDiagnostic('activeMatchFetch', true, match ? 'Active match loaded.' : 'No active match.');
       if (res?.reward_contract) {
         gamesState.battleNotificationsSeen.add(`reward:${match?.id || 'unknown'}`);
         showBattleProgressReward(res.reward_contract, match);
@@ -238,6 +258,7 @@
       rerenderGamesPanel();
       return match;
     } catch (err) {
+      setGamesDiagnostic('activeMatchFetch', false, err?.message || 'Unable to load active match.');
       if (!silent) setGamesStatus(err?.message || 'Unable to load active battle.', true);
       return null;
     } finally {
@@ -294,10 +315,12 @@
       const res = await gamesApiPost(`/games/matches/${encodeURIComponent(matchId)}/move`, payload);
       if (res?.match) gamesState.activeMatch = res.match;
       if (res?.reward_contract) showBattleProgressReward(res.reward_contract, res.match || gamesState.activeMatch);
+      setGamesDiagnostic('moveSubmit', true, 'Move submitted.');
       setGamesStatus(res?.match?.status === 'completed' ? 'Battle completed.' : 'Move submitted.');
       await loadGamesBattleDashboard({ silent: true });
       rerenderGamesPanel();
     } catch (err) {
+      setGamesDiagnostic('moveSubmit', false, err?.message || 'Move failed.');
       setGamesStatus(err?.message || 'Move failed.', true);
       rerenderGamesPanel();
     }
@@ -325,6 +348,24 @@
     const date = value ? new Date(value) : null;
     if (!date || Number.isNaN(date.getTime())) return '—';
     return date.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  }
+
+  function pickBattleTimestamp(row = {}) {
+    return row?.completed_at || row?.updated_at || row?.created_at || '';
+  }
+
+  function formatBattleSummary(match = {}) {
+    const summary = match?.result_summary;
+    if (typeof summary === 'string' && summary.trim()) return summary.trim();
+    if (summary && typeof summary === 'object') {
+      const direct = String(summary.summary || summary.reason || '').trim();
+      if (direct) return direct;
+      const winner = String(summary.winner_display_name || match?.winner_display_name || '').trim();
+      const loser = String(summary.loser_display_name || match?.loser_display_name || '').trim();
+      if (winner && loser) return `${winner} defeated ${loser}.`;
+      if (winner) return `${winner} won the battle.`;
+    }
+    return match?.status === 'completed' ? 'Battle completed.' : 'Battle update available.';
   }
 
   function battleResultLabel(row) {
@@ -360,7 +401,7 @@
     const opponent = String(item?.opponent_display_name || item?.loser_display_name || item?.winner_display_name || 'Driver');
     return `<article class="gamesBattleCard compact ${label === 'Win' ? 'win' : (label === 'Loss' ? 'loss' : '')}">
       <div class="gamesBattleTitle">${escapeHtml(game)} • ${escapeHtml(label)}</div>
-      <div class="gamesBattleMeta">vs ${escapeHtml(opponent)} • ${escapeHtml(formatBattleDate(item?.completed_at))}</div>
+      <div class="gamesBattleMeta">vs ${escapeHtml(opponent)} • ${escapeHtml(formatBattleDate(pickBattleTimestamp(item)))}</div>
       <div class="gamesBattleReward">${xp > 0 ? `+${window.formatProgressNumber(xp, { maxFractionDigits: 0 })} XP` : 'Completed'}</div>
     </article>`;
   }
@@ -428,12 +469,18 @@
 
   function renderDominoesBattle(host, match) {
     const state = match?.match_state || match?.state || {};
+    const contract = inspectMatchStateContract(match);
+    setGamesDiagnostic('matchContract', contract.ok, contract.ok ? 'Match contract OK.' : `Missing: ${contract.missing.join(', ')}`, contract);
+    if (!contract.ok) {
+      host.innerHTML = renderBattleContractMismatch(match, contract);
+      return;
+    }
     const myHand = Array.isArray(state?.your_hand || state?.my_hand || state?.player_hand) ? (state.your_hand || state.my_hand || state.player_hand) : [];
     const board = Array.isArray(state?.board_chain || state?.board || state?.chain) ? (state.board_chain || state.board || state.chain) : [];
     const playable = new Set((Array.isArray(state?.playable_tiles) ? state.playable_tiles : []).map((tile) => JSON.stringify(tile)));
     const myTurn = isLocalPlayersTurn(match);
     host.innerHTML = `<div class="gamesBattleArena">
-      <div class="gamesBattleTopline"><div class="gamesStatus">${escapeHtml(String(match?.status === 'completed' ? (match?.result_summary || 'Match complete.') : (myTurn ? 'Your turn' : 'Opponent turn')))}</div><button id="gamesForfeitBtn" class="chipBtn dangerBtn" ${match?.status === 'completed' ? 'disabled' : ''}>Forfeit</button></div>
+      <div class="gamesBattleTopline"><div class="gamesStatus">${escapeHtml(String(match?.status === 'completed' ? formatBattleSummary(match) : (myTurn ? 'Your turn' : 'Opponent turn')))}</div><button id="gamesForfeitBtn" class="chipBtn dangerBtn" ${match?.status === 'completed' ? 'disabled' : ''}>Forfeit</button></div>
       <div class="gamesBattleMeta">Opponent hand: ${escapeHtml(String(state?.opponent_hand_count ?? state?.other_hand_count ?? '—'))} • Boneyard: ${escapeHtml(String(state?.boneyard_count ?? state?.stock_count ?? '—'))}</div>
       <div class="gamesDominoBoard">${board.length ? board.map((tile) => `<div class="gamesDominoBoardTile">${renderDominoesTile(tile)}</div>`).join('') : '<div class="leaderboardEmpty">Board waiting for first move.</div>'}</div>
       <div class="gamesActionRow"><button id="gamesDominoDrawBtn" class="chipBtn" ${!myTurn || !state?.can_draw ? 'disabled' : ''}>Draw Tile</button><button id="gamesDominoPassBtn" class="chipBtn" ${!myTurn || !state?.can_pass ? 'disabled' : ''}>Pass</button></div>
@@ -443,7 +490,7 @@
         const canPlay = myTurn && playable.has(JSON.stringify(tile));
         return `<div class="gamesDominoTileWrap">${renderDominoesTile(tile, canPlay, `${canPlay ? `data-domino-tile="${encoded}"` : 'disabled'}`)}<div class="gamesDominoActions"><button class="chipBtn miniChip" ${canPlay ? `data-domino-play='${encoded}' data-domino-side="left"` : 'disabled'}>Left</button><button class="chipBtn miniChip" ${canPlay ? `data-domino-play='${encoded}' data-domino-side="right"` : 'disabled'}>Right</button></div></div>`;
       }).join('')}</div>
-      ${match?.status === 'completed' ? `<div class="gamesBattleResult">${escapeHtml(String(match?.result_summary || 'Battle completed.'))}</div>` : ''}
+      ${match?.status === 'completed' ? `<div class="gamesBattleResult">${escapeHtml(formatBattleSummary(match))}</div>` : ''}
     </div>`;
     document.getElementById('gamesForfeitBtn')?.addEventListener('click', (e) => { e.preventDefault(); void forfeitBattleMatch(); });
     document.getElementById('gamesDominoDrawBtn')?.addEventListener('click', (e) => { e.preventDefault(); void submitBattleMove({ move_type: 'draw_tile' }); });
@@ -505,9 +552,15 @@
 
   function renderBilliardsBattle(host, match) {
     const state = match?.match_state || match?.state || {};
+    const contract = inspectMatchStateContract(match);
+    setGamesDiagnostic('matchContract', contract.ok, contract.ok ? 'Match contract OK.' : `Missing: ${contract.missing.join(', ')}`, contract);
+    if (!contract.ok) {
+      host.innerHTML = renderBattleContractMismatch(match, contract);
+      return;
+    }
     const myTurn = isLocalPlayersTurn(match);
     host.innerHTML = `<div class="gamesBattleArena">
-      <div class="gamesBattleTopline"><div class="gamesStatus">${escapeHtml(String(match?.status === 'completed' ? (match?.result_summary || 'Match complete.') : (myTurn ? 'Line up your shot.' : 'Waiting for opponent shot.')))}</div><button id="gamesForfeitBtn" class="chipBtn dangerBtn" ${match?.status === 'completed' ? 'disabled' : ''}>Forfeit</button></div>
+      <div class="gamesBattleTopline"><div class="gamesStatus">${escapeHtml(String(match?.status === 'completed' ? formatBattleSummary(match) : (myTurn ? 'Line up your shot.' : 'Waiting for opponent shot.')))}</div><button id="gamesForfeitBtn" class="chipBtn dangerBtn" ${match?.status === 'completed' ? 'disabled' : ''}>Forfeit</button></div>
       <div class="gamesBattleMeta">Targets left: ${escapeHtml(String(state?.your_targets_remaining ?? state?.player_targets_remaining ?? '—'))} • Opponent: ${escapeHtml(String(state?.opponent_targets_remaining ?? '—'))}</div>
       <canvas id="gamesBilliardsCanvas" class="gamesBilliardsCanvas" width="320" height="180"></canvas>
       <div class="gamesBilliardsControls">
@@ -516,7 +569,7 @@
         <button id="gamesBilliardsShotBtn" class="chipBtn" ${!myTurn || match?.status === 'completed' ? 'disabled' : ''}>Take Shot</button>
       </div>
       <div class="gamesBattleMeta">Rule: first player to pocket every target ball, then the final ball, wins.</div>
-      ${match?.status === 'completed' ? `<div class="gamesBattleResult">${escapeHtml(String(match?.result_summary || 'Battle completed.'))}</div>` : ''}
+      ${match?.status === 'completed' ? `<div class="gamesBattleResult">${escapeHtml(formatBattleSummary(match))}</div>` : ''}
     </div>`;
     const canvas = document.getElementById('gamesBilliardsCanvas');
     drawBilliardsCanvas(canvas, match);
@@ -549,8 +602,21 @@
   }
 
   function showBattleProgressReward(progression = {}, match = {}) {
+    const xpOnly = Number(
+      progression?.xp_awarded
+      ?? progression?.reward?.xp_awarded
+      ?? progression?.progression?.xp_awarded
+      ?? progression?.xp
+      ?? 0
+    );
     const payload = progression?.progression ? progression : { progression };
-    if (!window.renderPickupProgressReward(payload)) return;
+    const renderedRich = !!window.renderPickupProgressReward(payload);
+    if (!renderedRich) {
+      if (xpOnly > 0) {
+        setGamesStatus(`Battle reward: +${window.formatProgressNumber(xpOnly, { maxFractionDigits: 0 })} XP`);
+      }
+      return;
+    }
     updatePickupRewardLayout();
     const root = window.ensurePickupProgressReward();
     const kickerEl = document.getElementById('pickupProgressRewardKicker');
@@ -594,6 +660,8 @@
       user_id: id,
       display_name: String(row?.display_name || row?.name || row?.email || `Driver ${id}`),
       avatar_thumb_url: window.safeMapAvatarUrl?.(row?.avatar_thumb_url || row?.avatar_url || '') || '',
+      avatar_url: window.safeMapAvatarUrl?.(row?.avatar_url || '') || '',
+      avatar_version: row?.avatar_version || row?.avatarVersion || '',
       rank_icon_key: row?.rank_icon_key || row?.rankIconKey || '',
       level: Number(row?.level || 0) || 0,
       online: !!(row?.online || row?.is_online),
@@ -660,7 +728,7 @@
         ${state.loading ? '<div class="leaderboardEmpty">Loading drivers…</div>' : ''}
         ${!state.loading && !rows.length ? '<div class="leaderboardEmpty">No drivers found.</div>' : rows.map((row) => `
           <button type="button" class="gamesUserRow ${selectedId === row.user_id ? 'selected' : ''}" data-games-user="${row.user_id}">
-            <span class="gamesUserAvatar">${row.avatar_thumb_url ? `<img src="${escapeHtml(row.avatar_thumb_url)}" alt="" loading="lazy">` : escapeHtml((row.display_name || 'D').slice(0, 2).toUpperCase())}</span>
+            <span class="gamesUserAvatar">${renderChallengeAvatar(row)}</span>
             <span class="gamesUserMeta"><strong>${escapeHtml(row.display_name)}</strong><span>${row.level ? `Level ${escapeHtml(String(row.level))}` : 'Driver'} ${row.online ? '• Online' : ''}</span></span>
             <span class="gamesUserRank">${row.rank_icon_key ? window.renderRankBadgeIcon(row.rank_icon_key, { compact: true }) : ''}</span>
           </button>`).join('')}
@@ -906,9 +974,75 @@
           <button class="chipBtn gamesTabBtn ${activeMode === 'vs_driver' ? 'active' : ''}" data-games-mode="vs_driver">Vs Driver</button>
         </div>` : ''}
         <div class="gamesStatus ${gamesState.error ? 'err' : ''}">${escapeHtml(gamesState.status || '')}</div>
+        ${renderGamesDiagnostics()}
         <div id="gamesContent"></div>
       </div>
     `;
+  }
+
+  function shouldShowGamesDiagnostics() {
+    const debugQuery = new URLSearchParams(window.location.search).get('debug') === '1';
+    const adminUser = !!(window?.me?.is_admin || window?.me?.isAdmin || String(window?.me?.role || '').toLowerCase() === 'admin');
+    return debugQuery || adminUser;
+  }
+
+  function renderDiagnosticLine(title, item = {}) {
+    if (!item || item.ok === null) return '';
+    const stamp = item.at ? formatBattleDate(item.at) : '—';
+    const status = item.ok ? 'OK' : 'FAIL';
+    return `<div>${escapeHtml(title)}: ${escapeHtml(status)}${item.message ? ` • ${escapeHtml(item.message)}` : ''} • ${escapeHtml(stamp)}</div>`;
+  }
+
+  function renderGamesDiagnostics() {
+    if (!shouldShowGamesDiagnostics()) return '';
+    const diag = gamesState.diagnostics || {};
+    const missing = Array.isArray(diag.matchContract?.missing) && diag.matchContract.missing.length
+      ? diag.matchContract.missing.join(', ')
+      : 'none';
+    return `<details class="gamesBattlePanel" style="margin-top:8px;">
+      <summary class="gamesSectionHeader">Games diagnostics</summary>
+      <div class="gamesBattleMeta">${renderDiagnosticLine('Dashboard fetch', diag.dashboardFetch)}</div>
+      <div class="gamesBattleMeta">${renderDiagnosticLine('Active match fetch', diag.activeMatchFetch)}</div>
+      <div class="gamesBattleMeta">${renderDiagnosticLine('Match contract', diag.matchContract)}${diag.matchContract?.gameType ? ` • ${escapeHtml(diag.matchContract.gameType)}` : ''}${diag.matchContract?.ok === false ? ` • missing: ${escapeHtml(missing)}` : ''}</div>
+      <div class="gamesBattleMeta">${renderDiagnosticLine('Move submit', diag.moveSubmit)}</div>
+    </details>`;
+  }
+
+  function renderBattleContractMismatch(match, contract) {
+    const missing = Array.isArray(contract?.missing) && contract.missing.length ? contract.missing.join(', ') : 'unknown fields';
+    return `<div class="gamesBattleCard">
+      <div class="gamesBattleTitle">Battle state unavailable</div>
+      <div class="gamesBattleMeta">${escapeHtml(String(match?.game_type || 'battle'))} contract mismatch.</div>
+      <div class="gamesStatus err">Missing required fields: ${escapeHtml(missing)}</div>
+      <div class="leaderboardEmpty">Try refreshing. Interactive controls are paused until battle state is complete.</div>
+    </div>`;
+  }
+
+  function inspectMatchStateContract(match = {}) {
+    const gameType = String(match?.game_type || match?.game_key || '').toLowerCase();
+    const state = match?.match_state || match?.state || {};
+    const missing = [];
+    if (gameType === 'billiards') {
+      if (!Array.isArray(state?.balls)) missing.push('balls');
+      if (state?.your_targets_remaining == null && state?.player_targets_remaining == null) missing.push('your_targets_remaining|player_targets_remaining');
+      if (state?.opponent_targets_remaining == null) missing.push('opponent_targets_remaining');
+    } else if (gameType === 'dominoes') {
+      if (!Array.isArray(state?.your_hand || state?.my_hand || state?.player_hand)) missing.push('your_hand|my_hand|player_hand');
+      if (!Array.isArray(state?.board_chain || state?.board || state?.chain)) missing.push('board_chain|board|chain');
+      if (!Array.isArray(state?.playable_tiles)) missing.push('playable_tiles');
+      if (state?.can_draw == null) missing.push('can_draw');
+      if (state?.can_pass == null) missing.push('can_pass');
+      if (state?.opponent_hand_count == null && state?.other_hand_count == null) missing.push('opponent_hand_count');
+      if (state?.boneyard_count == null && state?.stock_count == null) missing.push('boneyard_count');
+    }
+    return { ok: missing.length === 0, gameType: gameType || 'unknown', missing };
+  }
+
+  function renderChallengeAvatar(row = {}) {
+    const initials = escapeHtml((row.display_name || 'D').slice(0, 2).toUpperCase());
+    const hasRealAvatar = !!(row.avatar_version || row.avatar_url);
+    if (!hasRealAvatar || !row.avatar_thumb_url) return initials;
+    return `<img src="${escapeHtml(row.avatar_thumb_url)}" alt="" loading="lazy" onerror="this.onerror=null;this.replaceWith(document.createTextNode('${initials}'))">`;
   }
 
   function wireGamesPanel() {
