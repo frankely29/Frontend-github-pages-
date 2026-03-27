@@ -1543,6 +1543,7 @@
 
 
   window.TlcGamesModule = { gamesPanelHTML, wireGamesPanel, isGamesPanelOpen, loadGamesBattleDashboard, loadActiveBattleMatch, openGamesBattleComposer };
+  window.__TLC_GAMES_DOCK_OWNER__ = "app.part4.js";
 
   /* OWNER EXPORTS:
      app.part4.js is the single owner of games public globals.
