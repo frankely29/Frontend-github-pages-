@@ -316,8 +316,15 @@
 
   <script>
     (function () {
-      const explicit = String(window.API_BASE || "").trim();
-      if (explicit) return;
+      const explicitApiBase = String(window.API_BASE || "").trim();
+      if (explicitApiBase) return;
+
+      const runtimeApiBase = String(window.__TLC_RUNTIME_CONFIG__?.apiBase || "").trim();
+      if (runtimeApiBase) {
+        window.API_BASE = runtimeApiBase;
+        return;
+      }
+
       window.API_BASE = "https://web-production-78f67.up.railway.app";
     })();
   </script>
