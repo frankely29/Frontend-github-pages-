@@ -1,8 +1,6 @@
 (function() {
+  const runtime = window.FrontendRuntime || null;
   const DEFAULT_API_BASE = 'https://web-production-78f67.up.railway.app';
-  const API_BASE = (typeof window !== 'undefined' && window.API_BASE !== undefined)
-    ? String(window.API_BASE || DEFAULT_API_BASE)
-    : DEFAULT_API_BASE;
   const LS_TOKEN = 'community_token_v1';
   const HUB_KEY = 'games';
   const SEARCH_DEBOUNCE_MS = 250;
@@ -63,7 +61,19 @@
 
   function apiUrl(path) {
     if (/^https?:\/\//i.test(path)) return path;
-    return `${API_BASE}${path}`;
+    const base = resolveApiBase();
+    return `${base}${path.startsWith('/') ? path : `/${path}`}`;
+  }
+
+  function resolveApiBase() {
+    if (runtime?.resolveApiBase) return runtime.resolveApiBase();
+    if (typeof window !== 'undefined' && window.API_BASE !== undefined) {
+      const apiBase = String(window.API_BASE || '').trim();
+      if (apiBase) return apiBase.replace(/\/+$/, '');
+    }
+    const runtimeConfigApiBase = String(window.__TLC_RUNTIME_CONFIG__?.apiBase || '').trim();
+    if (runtimeConfigApiBase) return runtimeConfigApiBase.replace(/\/+$/, '');
+    return DEFAULT_API_BASE;
   }
 
   async function fetchJSON(path, opts = {}) {
@@ -112,8 +122,9 @@
     if (!raw) return '';
     if (/^(data:|blob:|https?:)/i.test(raw)) return raw;
     if (raw.startsWith('//')) return `https:${raw}`;
-    if (raw.startsWith('/')) return `${API_BASE}${raw}`;
-    return `${API_BASE}/${raw.replace(/^\/+/, '')}`;
+    const base = resolveApiBase();
+    if (raw.startsWith('/')) return `${base}${raw}`;
+    return `${base}/${raw.replace(/^\/+/, '')}`;
   }
 
   function normalizeUser(row = {}) {

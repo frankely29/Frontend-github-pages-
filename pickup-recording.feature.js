@@ -1,8 +1,27 @@
 (function () {
   const runtime = window.FrontendRuntime || null;
+  const DEFAULT_API_BASE = 'https://web-production-78f67.up.railway.app';
   const FEATURE = {};
   let pickupSaveInFlight = false;
   let pickupSaveCooldownUntilMs = 0;
+
+  function resolveApiBaseFallback() {
+    if (runtime?.resolveApiBase) return runtime.resolveApiBase();
+    if (typeof window !== 'undefined' && window.API_BASE !== undefined) {
+      const apiBase = String(window.API_BASE || '').trim();
+      if (apiBase) return apiBase.replace(/\/+$/, '');
+    }
+    const runtimeConfigApiBase = String(window.__TLC_RUNTIME_CONFIG__?.apiBase || '').trim();
+    if (runtimeConfigApiBase) return runtimeConfigApiBase.replace(/\/+$/, '');
+    return DEFAULT_API_BASE;
+  }
+
+  function resolveApiUrl(path) {
+    const base = resolveApiBaseFallback();
+    const safePath = String(path || '').trim();
+    if (!safePath) return base;
+    return `${base}${safePath.startsWith('/') ? safePath : `/${safePath}`}`;
+  }
 
   function getCtx() {
     const getter = window.getPickupRecordingContext;
@@ -52,7 +71,7 @@
 
     let res;
     try {
-      res = await fetch(`${window.API_BASE || ''}${path}`, {
+      res = await fetch(resolveApiUrl(path), {
         method: 'POST',
         headers,
         body: JSON.stringify(body || {}),
@@ -94,7 +113,7 @@
       return runtime.getJSONAuth(path, token);
     }
     const headers = token ? { Authorization: `Bearer ${token}` } : {};
-    const res = await fetch(`${window.API_BASE || ''}${path}`, { headers });
+    const res = await fetch(resolveApiUrl(path), { headers });
     const text = await res.text();
     let payload = null;
     if (text) {

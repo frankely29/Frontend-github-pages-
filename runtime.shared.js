@@ -25,7 +25,7 @@
   function toAbsoluteUrl(urlOrPath, baseOverride) {
     const text = String(urlOrPath || '').trim();
     if (!text) return resolveApiBase(baseOverride);
-    if (/^https?:\/\//i.test(text)) return text;
+    if (/^https?:\/\//i.test(text) || /^(blob:|data:)/i.test(text)) return text;
     const base = resolveApiBase(baseOverride);
     return `${base}${text.startsWith('/') ? text : `/${text}`}`;
   }
