@@ -103,7 +103,6 @@
       if (!Number.isFinite(score)) continue;
 
       const churnPressure = Number(props.churn_pressure_n_shadow ?? NaN);
-      const balancedTripQuality = Number(props.balanced_trip_quality_n_shadow ?? NaN);
       const busyNextBase = Number(props.busy_next_base_n_shadow ?? NaN);
       const manhattanSaturation = Number(props.manhattan_core_saturation_proxy_n_shadow ?? NaN);
 
@@ -123,7 +122,6 @@
         visibleScoreSource: scoreSource || "legacy_citywide",
         communityCrowding: window.TlcCommunityCrowdingModule?.getZoneCommunityCrowdingSnapshot?.(props.LocationID) || null,
         churnPressure: Number.isFinite(churnPressure) ? churnPressure : null,
-        balancedTripQuality: Number.isFinite(balancedTripQuality) ? balancedTripQuality : null,
         busyNextBase: Number.isFinite(busyNextBase) ? busyNextBase : null,
         manhattanSaturation: Number.isFinite(manhattanSaturation) ? manhattanSaturation : null,
       };
@@ -139,11 +137,6 @@
             next: candidate.churnPressure,
             current: best.churnPressure,
             lowerIsBetter: true,
-          },
-          {
-            next: candidate.balancedTripQuality,
-            current: best.balancedTripQuality,
-            lowerIsBetter: false,
           },
           {
             next: candidate.busyNextBase,

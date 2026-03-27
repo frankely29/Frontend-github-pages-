@@ -2067,7 +2067,6 @@ function buildZoneShadowPreviewHTML(props, geom) {
   const longTripShare20Plus = Number(shadowSummary.long_trip_share_20plus);
   const sameZoneDropoffShare = Number(shadowSummary.same_zone_dropoff_share);
   const balancedTripShare = Number(shadowSummary.balanced_trip_share);
-  const balancedTripQualityN = Number(shadowSummary.balanced_trip_quality_n);
   const busyNowBaseN = Number(shadowSummary.busy_now_base_n);
   const busyNextBaseN = Number(shadowSummary.busy_next_base_n);
   const churnPressureN = Number(shadowSummary.churn_pressure_n);
@@ -2092,9 +2091,6 @@ function buildZoneShadowPreviewHTML(props, geom) {
     : "";
   const balancedTripShareLine = Number.isFinite(balancedTripShare)
     ? `<div><b>Balanced trip share:</b> ${Math.round(balancedTripShare * 100)}%</div>`
-    : "";
-  const balancedTripQualityNLine = Number.isFinite(balancedTripQualityN)
-    ? `<div><b>Balanced trip quality (n):</b> ${balancedTripQualityN.toFixed(3)}</div>`
     : "";
   const busyNowBaseNLine = Number.isFinite(busyNowBaseN)
     ? `<div><b>Busy-now base (n):</b> ${busyNowBaseN.toFixed(3)}</div>`
@@ -2228,7 +2224,6 @@ function buildZoneShadowPreviewHTML(props, geom) {
       ${pickupsPerSqMileNowLine}
       ${pickupsPerSqMileNextLine}
       ${balancedTripShareLine}
-      ${balancedTripQualityNLine}
       ${busyNowBaseNLine}
       ${busyNextBaseNLine}
       ${churnPressureNLine}
@@ -2400,7 +2395,6 @@ function readVisibleContributionBreakdown(props, geom) {
       local_rank: num(summary?.visible_rank_v3) ?? read(`earnings_shadow_visible_rank_${profile}`),
       base_visible_score: num(summary?.visible_base_score_v3) ?? read(`earnings_shadow_visible_base_score_${profile}`),
       final_visible_score: num(summary?.visible_score_v3) ?? read(`earnings_shadow_visible_score_${profile}`),
-      raw_visible_score: num(summary?.visible_raw_score_v3) ?? read(`earnings_shadow_visible_raw_score_${profile}`),
       visible_confidence: num(summary?.visible_confidence_v3) ?? read(`earnings_shadow_confidence_${profile}`),
     },
   };
@@ -2470,7 +2464,6 @@ function buildZoneWhyReasons(props, geom, visibleScoreSource) {
   const busyNow = num(summary?.busy_now_base_n);
   const busyNext = num(summary?.busy_next_base_n);
   const tripMix = num(summary?.balanced_trip_share);
-  const tripQuality = num(summary?.balanced_trip_quality_n);
   const churnPressure = num(summary?.churn_pressure_n);
   const saturation = num(summary?.earnings_shadow_saturation_penalty_manhattan_v3 ?? props?.earnings_shadow_saturation_penalty_manhattan_v3);
   const retentionPenalty = num(summary?.same_zone_retention_penalty_n);
@@ -2481,7 +2474,6 @@ function buildZoneWhyReasons(props, geom, visibleScoreSource) {
   if (Number.isFinite(area) && area > 0 && Number.isFinite(busyNow) && busyNow >= 0.6) pushReason("busy for its size right now");
   if (Number.isFinite(busyNext) && busyNext >= 0.6) pushReason("good next-bin carry");
   if (Number.isFinite(tripMix) && tripMix >= 0.45) pushReason("balanced trip mix");
-  if (Number.isFinite(tripQuality) && tripQuality >= 0.55) pushReason("balanced trip quality");
   if (Number.isFinite(shortTripPenalty) && shortTripPenalty >= 0.55) pushReason("short-trip trap risk");
   if (Number.isFinite(churnPressure) && churnPressure >= 0.6) pushReason("same-zone churn risk");
   if (Number.isFinite(retentionPenalty) && retentionPenalty >= 0.55) pushReason("same-zone retention penalty is elevated");
