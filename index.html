@@ -324,8 +324,31 @@
         window.API_BASE = runtimeApiBase;
         return;
       }
-
-      window.API_BASE = "https://web-production-78f67.up.railway.app";
+      const host = String(window.location?.hostname || '').toLowerCase();
+      const isLocalHost = host === 'localhost' || host === '127.0.0.1' || host.endsWith('.local');
+      const fallbackMap = Object.assign(
+        {
+          localhost: `${window.location.protocol}//localhost:3000`,
+          '127.0.0.1': `${window.location.protocol}//127.0.0.1:3000`,
+        },
+        (window.__TLC_API_BASE_FALLBACKS__ && typeof window.__TLC_API_BASE_FALLBACKS__ === 'object')
+          ? window.__TLC_API_BASE_FALLBACKS__
+          : {}
+      );
+      const mappedFallback = String(fallbackMap[host] || '').trim();
+      if (mappedFallback) {
+        window.API_BASE = mappedFallback;
+        console.warn('[boot] runtime config missing; using host-mapped API fallback:', mappedFallback);
+        return;
+      }
+      if (!isLocalHost) {
+        const msg = `Missing runtime API config for host ${host || 'unknown-host'}. Deploy with __TLC_RUNTIME_CONFIG__.apiBase.`;
+        window.__TLC_BOOT_FATAL__ = msg;
+        console.error('[boot:fatal]', msg);
+        return;
+      }
+      window.API_BASE = `${window.location.protocol}//localhost:3000`;
+      console.warn('[boot] runtime config missing; using local API fallback:', window.API_BASE);
     })();
   </script>
   <script>
@@ -346,11 +369,39 @@
         }
       });
 
+      function showBootFatalOverlay(title, detail) {
+        const existing = document.getElementById('bootFatalOverlay');
+        if (existing) {
+          const detailEl = existing.querySelector('[data-boot-fatal-detail]');
+          if (detailEl && detail) detailEl.textContent = detail;
+          existing.hidden = false;
+          return;
+        }
+        const overlay = document.createElement('div');
+        overlay.id = 'bootFatalOverlay';
+        overlay.setAttribute('role', 'alert');
+        overlay.style.cssText = 'position:fixed;inset:0;z-index:999999;background:rgba(2,6,23,.92);display:grid;place-items:center;padding:20px;color:#e2e8f0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;';
+        overlay.innerHTML = `<div style="max-width:700px;width:100%;border:1px solid rgba(148,163,184,.35);border-radius:14px;padding:18px 20px;background:rgba(15,23,42,.96);box-shadow:0 16px 60px rgba(2,6,23,.6)">
+          <div style="font-size:18px;font-weight:700;margin-bottom:8px;">${title}</div>
+          <div data-boot-fatal-detail style="font-size:14px;opacity:.92;white-space:pre-wrap;">${detail || ''}</div>
+          <div style="margin-top:12px;font-size:12px;opacity:.8;">Open DevTools console for boot diagnostics.</div>
+        </div>`;
+        document.body.appendChild(overlay);
+      }
+
+      if (window.__TLC_BOOT_FATAL__) {
+        showBootFatalOverlay('Frontend boot blocked', String(window.__TLC_BOOT_FATAL__ || 'Missing runtime configuration.'));
+        return;
+      }
+
       const jsAssets = Array.isArray(window.__TLC_LOCAL_JS_ASSETS__) ? window.__TLC_LOCAL_JS_ASSETS__ : [];
+      const failedAssets = [];
+      const CRITICAL_JS_ASSETS = new Set(['./runtime.shared.js', './app.js', './app.part4.js']);
 
       function loadScriptSequentially(index) {
         if (index >= jsAssets.length) return;
-        const src = window.__tlcWithBuildId(jsAssets[index]);
+        const rawAsset = jsAssets[index];
+        const src = window.__tlcWithBuildId(rawAsset);
         const script = document.createElement("script");
         script.src = src;
         script.async = false;
@@ -359,6 +410,16 @@
         };
         script.onerror = function () {
           console.error("Failed to load local script:", src);
+          failedAssets.push(src);
+          const isCritical = CRITICAL_JS_ASSETS.has(rawAsset);
+          if (isCritical) {
+            showBootFatalOverlay(
+              'Frontend failed to boot',
+              `Missing required script:\n${src}\n\nFailed assets:\n${failedAssets.join('\n')}`
+            );
+            return;
+          }
+          loadScriptSequentially(index + 1);
         };
         document.body.appendChild(script);
       }

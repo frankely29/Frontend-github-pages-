@@ -13,15 +13,19 @@
 /*
  * API base configuration
  *
- * Historically the frontend hard‑coded a Railway domain for all API calls.
- * as the base for all API calls.  When only app.js is replaced without updating other files,
- * using window.location.origin can break critical endpoints like `/timeline` because the static
- * frontend is often hosted separately from the backend.  To maintain compatibility we
- * provide a default API base that points at the original backend.  You can override this by
- * setting `window.API_BASE` before app.js loads.  This allows new deployments to specify
- * their backend host without modifying the source code.
+ * Runtime config should provide API base. This fallback only supports local/dev hosts
+ * unless a deployment injects `window.__TLC_DEFAULT_API_BASE__`.
  */
-const DEFAULT_API_BASE = "https://web-production-78f67.up.railway.app";
+const DEFAULT_API_BASE = (() => {
+  if (typeof window === "undefined") return "";
+  const configured = String(window.__TLC_DEFAULT_API_BASE__ || "").trim();
+  if (configured) return configured.replace(/\/+$/, "");
+  const host = String(window.location?.hostname || "").toLowerCase();
+  if (host === "localhost" || host === "127.0.0.1" || host.endsWith(".local")) {
+    return `${window.location.protocol}//${host === "127.0.0.1" ? "127.0.0.1" : "localhost"}:3000`;
+  }
+  return String(window.API_BASE || "").trim().replace(/\/+$/, "");
+})();
 const FrontendRuntime = (typeof window !== "undefined" && window.FrontendRuntime) ? window.FrontendRuntime : null;
 function resolveAppApiBase() {
   if (FrontendRuntime?.resolveApiBase) {
@@ -33,7 +37,7 @@ function resolveAppApiBase() {
       : ((typeof window !== "undefined" && window.__TLC_RUNTIME_CONFIG__?.apiBase !== undefined)
           ? window.__TLC_RUNTIME_CONFIG__.apiBase
           : DEFAULT_API_BASE);
-  return String(source || DEFAULT_API_BASE).trim().replace(/\/+$/, "") || DEFAULT_API_BASE;
+  return String(source || DEFAULT_API_BASE || "").trim().replace(/\/+$/, "");
 }
 const RAILWAY_BASE = resolveAppApiBase();
 const BIN_MINUTES = 20;
