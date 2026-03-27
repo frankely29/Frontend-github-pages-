@@ -342,9 +342,10 @@
         return;
       }
       if (!isLocalHost) {
-        const msg = `Missing runtime API config for host ${host || 'unknown-host'}. Deploy with __TLC_RUNTIME_CONFIG__.apiBase.`;
-        window.__TLC_BOOT_FATAL__ = msg;
-        console.error('[boot:fatal]', msg);
+        window.API_BASE = "";
+        console.warn(
+          `[boot] runtime config missing for host ${host || 'unknown-host'}; using same-origin API base.`
+        );
         return;
       }
       window.API_BASE = `${window.location.protocol}//localhost:3000`;
