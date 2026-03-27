@@ -330,6 +330,7 @@
         {
           localhost: `${window.location.protocol}//localhost:3000`,
           '127.0.0.1': `${window.location.protocol}//127.0.0.1:3000`,
+          'teamjoseo.up.railway.app': 'https://web-production-78f67.up.railway.app',
         },
         (window.__TLC_API_BASE_FALLBACKS__ && typeof window.__TLC_API_BASE_FALLBACKS__ === 'object')
           ? window.__TLC_API_BASE_FALLBACKS__
@@ -342,9 +343,9 @@
         return;
       }
       if (!isLocalHost) {
-        window.API_BASE = "";
+        window.API_BASE = "https://web-production-78f67.up.railway.app";
         console.warn(
-          `[boot] runtime config missing for host ${host || 'unknown-host'}; using same-origin API base.`
+          `[boot] runtime config missing for host ${host || 'unknown-host'}; using default production API fallback: ${window.API_BASE}`
         );
         return;
       }
