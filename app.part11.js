@@ -1401,7 +1401,7 @@
 
   function getFeatureVisibleScoreDebug(props, geom) {
     const visibleScoreSource = getVisibleScoreSourceForFeature(props, geom);
-    const airportExcluded = isQueensFeature(props) && isAirportZone(props);
+    const airportExcluded = isAirportZone(props);
     const activeMode = getActiveSpecialModeTagForFeature(props, geom) || "citywide";
     const rating = effectiveRating(props, geom);
     const derivedFromRating = Number.isFinite(Number(rating));

@@ -2463,7 +2463,7 @@ function buildZoneWhyReasons(props, geom, visibleScoreSource) {
   const tripMix = num(summary?.balanced_trip_share);
   const tripQuality = num(summary?.balanced_trip_quality_n);
   const churnPressure = num(summary?.churn_pressure_n);
-  const saturation = num(summary?.manhattan_core_saturation_proxy_n);
+  const saturation = num(summary?.earnings_shadow_saturation_penalty_manhattan_v3 ?? props?.earnings_shadow_saturation_penalty_manhattan_v3);
   const retentionPenalty = num(summary?.same_zone_retention_penalty_n);
   const shortTripPenalty = num(summary?.short_trip_share);
   const area = num(summary?.zone_area_sq_miles);
@@ -2476,7 +2476,7 @@ function buildZoneWhyReasons(props, geom, visibleScoreSource) {
   if (Number.isFinite(shortTripPenalty) && shortTripPenalty >= 0.55) pushReason("short-trip trap risk");
   if (Number.isFinite(churnPressure) && churnPressure >= 0.6) pushReason("same-zone churn risk");
   if (Number.isFinite(retentionPenalty) && retentionPenalty >= 0.55) pushReason("same-zone retention penalty is elevated");
-  if (visibleScoreSource === "manhattan_v3_shadow" && Number.isFinite(saturation) && saturation >= 0.5) {
+  if (visibleScoreSource === "manhattan_v3_shadow" && Number.isFinite(saturation) && saturation > 0.05) {
     pushReason("Manhattan saturation caution");
   }
 
