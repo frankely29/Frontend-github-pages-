@@ -62,7 +62,10 @@
 async function postMultipartAuth(path, formData, token) {
     const headers = {};
     if (token) headers.Authorization = `Bearer ${token}`;
-    return fetchJSON(`${RAILWAY_BASE}${path}`, {
+    const absolutePath = runtime?.toAbsoluteUrl
+      ? runtime.toAbsoluteUrl(path)
+      : `${String(typeof RAILWAY_BASE !== 'undefined' ? RAILWAY_BASE : (window?.API_BASE || '') || '').trim()}${path}`;
+    return fetchJSON(absolutePath, {
       method: 'POST',
       headers,
       body: formData,
@@ -2468,10 +2471,10 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     const raw = String(url || '').trim();
     if (!raw) return '';
     if (/^https?:\/\//i.test(raw) || raw.startsWith('blob:') || raw.startsWith('data:')) return raw;
+    if (runtime?.toAbsoluteUrl) return runtime.toAbsoluteUrl(raw);
     const base = String(typeof RAILWAY_BASE !== 'undefined' ? RAILWAY_BASE : (window?.API_BASE || '') || '').trim();
     if (!base) return raw;
-    if (raw.startsWith('/')) return `${base}${raw}`;
-    return `${base}/${raw}`;
+    return `${base}${raw.startsWith('/') ? raw : `/${raw}`}`;
   }
 
   function normalizeAudioUrl(raw) {

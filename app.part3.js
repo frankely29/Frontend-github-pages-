@@ -4,6 +4,7 @@
  */
 (function () {
   const runtime = window.FrontendRuntime || null;
+  const DEFAULT_API_BASE = 'https://web-production-78f67.up.railway.app';
   const LS_TOKEN = 'community_token_v1';
   const PANEL_KEY = 'leaderboard';
   const bindDockToggleFn = window.bindDockToggle || (typeof bindDockToggle === 'function' ? bindDockToggle : null);
@@ -111,8 +112,13 @@
 
   function apiBase() {
     if (runtime?.resolveApiBase) return runtime.resolveApiBase();
-    if (typeof window !== 'undefined' && window.API_BASE) return String(window.API_BASE);
-    return 'https://web-production-78f67.up.railway.app';
+    if (typeof window !== 'undefined' && window.API_BASE !== undefined) {
+      const apiBase = String(window.API_BASE || '').trim();
+      if (apiBase) return apiBase.replace(/\/+$/, '');
+    }
+    const runtimeConfigApiBase = String(window.__TLC_RUNTIME_CONFIG__?.apiBase || '').trim();
+    if (runtimeConfigApiBase) return runtimeConfigApiBase.replace(/\/+$/, '');
+    return DEFAULT_API_BASE;
   }
 
   async function getAuth(path) {

@@ -1,5 +1,6 @@
 (function () {
   const runtime = window.FrontendRuntime || null;
+  const DEFAULT_API_BASE = 'https://web-production-78f67.up.railway.app';
   const components = () => window.AdminComponents || {};
 
   const state = {
@@ -55,9 +56,17 @@
     if (state.token) headers.Authorization = `Bearer ${state.token}`;
     if (options.body !== undefined) headers['Content-Type'] = 'application/json';
 
-    const base = (typeof window !== 'undefined' && window.API_BASE)
-      ? String(window.API_BASE).replace(/\/+$/, '')
-      : window.location.origin;
+    const base = runtime?.resolveApiBase
+      ? runtime.resolveApiBase()
+      : (() => {
+          if (typeof window !== 'undefined' && window.API_BASE !== undefined) {
+            const apiBase = String(window.API_BASE || '').trim();
+            if (apiBase) return apiBase.replace(/\/+$/, '');
+          }
+          const runtimeConfigApiBase = String(window.__TLC_RUNTIME_CONFIG__?.apiBase || '').trim();
+          if (runtimeConfigApiBase) return runtimeConfigApiBase.replace(/\/+$/, '');
+          return DEFAULT_API_BASE;
+        })();
 
     const url = `${base}${path.startsWith('/') ? path : `/${path}`}`;
 
