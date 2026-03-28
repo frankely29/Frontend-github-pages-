@@ -3213,6 +3213,7 @@ let lastSelfOrbitMeta = null;
 
 function makeNavIcon() {
   const myName = authHeaderOK() ? me?.display_name || "" : "";
+  const resolvedAvatarUrl = resolveAvatarThumbUrl(me?.avatar_url || '');
   const navLabelHTML = (typeof window !== "undefined" && typeof window.mapIdentityRenderSelfLabel === "function")
     ? window.mapIdentityRenderSelfLabel({
       name: myName,
@@ -3223,7 +3224,20 @@ function makeNavIcon() {
       leaderboardHasCrown: !!me?.leaderboard_has_crown,
       orbitMeta: lastSelfOrbitMeta
     })
-    : `<div id="navMeName" class="mapPresenceInitials" style="display:${myName ? "flex" : "none"}">${escapeHtml((myName || 'D').slice(0, 2).toUpperCase())}</div>`;
+    : `
+      <div id="navMeName" class="mapPresenceRoot selfIdentitySlot" data-map-presence-placeholder="1">
+        <div class="mapPresenceShell">
+          ${resolvedAvatarUrl
+            ? `<img class="mapPresenceAvatar" src="${escapeHtml(resolvedAvatarUrl)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">`
+            : `<div class="mapPresenceAvatar" aria-hidden="true" style="display:flex;align-items:center;justify-content:center;background:linear-gradient(160deg,#ecf5ff,#dbeafe);color:#6b7280;">
+                <svg viewBox="0 0 24 24" width="14" height="14" focusable="false" aria-hidden="true">
+                  <circle cx="12" cy="8" r="4" fill="currentColor"></circle>
+                  <path d="M4 20c0-3.6 3.6-6 8-6s8 2.4 8 6" fill="currentColor"></path>
+                </svg>
+              </div>`}
+        </div>
+        <div id="navPresenceDirectionRot" class="mapPresenceDirectionRot"><div class="mapPresenceDirectionTip"></div></div>
+      </div>`;
 
   const el = document.createElement("div");
   // ISSUE NOTE:
@@ -3305,8 +3319,13 @@ function refreshNavNameLabel() {
   } else {
     const el = document.getElementById("navMeName");
     if (!el) return;
-    el.textContent = myName;
-    el.style.display = myName ? "block" : "none";
+    const avatarEl = el.querySelector('.mapPresenceAvatar');
+    if (avatarEl && avatarEl.tagName === 'IMG') {
+      const nextAvatar = resolveAvatarThumbUrl(me?.avatar_url || '');
+      if (nextAvatar) {
+        avatarEl.src = nextAvatar;
+      }
+    }
   }
   const navWrap = document.getElementById("navWrap");
   if (navWrap) wireProfileOpenTargets(navWrap, me?.id, { isSelf: true });

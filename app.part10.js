@@ -2337,9 +2337,23 @@ function makeDriverIcon(name, headingDeg, avatarUrl = "", mode = "name", orbitMe
   const safe = (name || "Driver").trim() || "Driver";
   const rot = Number.isFinite(headingDeg) ? headingDeg : 0;
   const el = document.createElement("div");
+  const resolvedAvatarUrl = resolveAvatarThumbUrl(avatarUrl || '');
   const driverLabelHTML = (typeof window !== "undefined" && typeof window.mapIdentityRenderDriverLabel === "function")
     ? window.mapIdentityRenderDriverLabel({ name: safe, avatarUrl, mode, zoom: map?.getZoom?.(), orbitMeta, leaderboardBadgeCode, leaderboardHasCrown })
-    : `<div class="mapPresenceInitials">${escapeHtml((safe || 'D').slice(0, 2).toUpperCase())}</div>`;
+    : `
+      <div class="mapPresenceRoot otherDrvIdentitySlot" data-map-presence-placeholder="1">
+        <div class="mapPresenceShell">
+          ${resolvedAvatarUrl
+            ? `<img class="mapPresenceAvatar" src="${escapeHtml(resolvedAvatarUrl)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">`
+            : `<div class="mapPresenceAvatar" aria-hidden="true" style="display:flex;align-items:center;justify-content:center;background:linear-gradient(160deg,#ecf5ff,#dbeafe);color:#6b7280;">
+                <svg viewBox="0 0 24 24" width="14" height="14" focusable="false" aria-hidden="true">
+                  <circle cx="12" cy="8" r="4" fill="currentColor"></circle>
+                  <path d="M4 20c0-3.6 3.6-6 8-6s8 2.4 8 6" fill="currentColor"></path>
+                </svg>
+              </div>`}
+        </div>
+        <div class="mapPresenceDirectionRot"><div class="mapPresenceDirectionTip"></div></div>
+      </div>`;
   el.className = "otherDrvWrap";
   el.innerHTML = `
     ${driverLabelHTML}
@@ -2405,7 +2419,6 @@ function buildDriverMarkerVisualSignature(userId, name, avatarUrl = "", mode = "
   const orbitRing = Number.isFinite(orbitMeta?.ring) ? orbitMeta.ring : "";
   return [
     String(userId ?? ""),
-    String(name ?? ""),
     String(avatarUrl ?? ""),
     "avatar",
     String(leaderboardBadgeCode ?? ""),
@@ -2530,39 +2543,7 @@ function computePresenceRenderMode(rows) {
 }
 
 function chooseRichPresenceUserIds(rows, mode) {
-  const visibleRows = Array.isArray(rows) ? rows : [];
-  const sorted = [...visibleRows];
-
-  const focusedId = Number(presenceFocusedUserId);
-  const hasFocused = Number.isFinite(focusedId)
-    && sorted.some((row) => Number(row?.uid) === focusedId || String(row?.uid) === String(focusedId));
-
-  let anchor = null;
-  if (userLatLng && Number.isFinite(userLatLng.lat) && Number.isFinite(userLatLng.lng)) {
-    anchor = { lat: userLatLng.lat, lng: userLatLng.lng };
-  } else {
-    const center = map?.getCenter?.();
-    if (center && Number.isFinite(center.lat) && Number.isFinite(center.lng)) {
-      anchor = { lat: center.lat, lng: center.lng };
-    }
-  }
-
-  sorted.sort((a, b) => {
-    const aId = String(a?.uid ?? '');
-    const bId = String(b?.uid ?? '');
-    const aFocused = hasFocused && (Number(a?.uid) === focusedId || aId === String(focusedId));
-    const bFocused = hasFocused && (Number(b?.uid) === focusedId || bId === String(focusedId));
-    if (aFocused !== bFocused) return aFocused ? -1 : 1;
-
-    if (anchor) {
-      const da = haversineMiles(anchor, { lat: Number(a?.lat), lng: Number(a?.lng) });
-      const db = haversineMiles(anchor, { lat: Number(b?.lat), lng: Number(b?.lng) });
-      if (da !== db) return da - db;
-    }
-    return aId.localeCompare(bId);
-  });
-
-  return new Set(sorted.map((row) => String(row.uid)));
+  return new Set((Array.isArray(rows) ? rows : []).map((row) => String(row?.uid)));
 }
 function clusterPresenceByScreenPosition(rows, selfPos) {
   const richRows = Array.isArray(rows) ? rows : [];
@@ -2742,12 +2723,10 @@ function presenceRowsFingerprint(rows) {
   return (Array.isArray(rows) ? rows : [])
     .map((row) => [
       String(row?.uid ?? ""),
-      String(row?.name ?? ""),
       Number(row?.lat ?? NaN).toFixed(6),
       Number(row?.lng ?? NaN).toFixed(6),
       Number(row?.heading ?? 0).toFixed(1),
       String(row?.avatarUrl ?? ""),
-      String(row?.mode ?? ""),
       String(row?.leaderboardBadgeCode ?? ""),
       row?.leaderboardHasCrown ? "1" : "0",
     ].join("|"))
