@@ -530,8 +530,7 @@
     if (STATE.firstFixTimer) return;
     const runner = async () => {
       if (STATE.hasInitialGpsFix) {
-        window.clearInterval(STATE.firstFixTimer);
-        STATE.firstFixTimer = null;
+        clearFirstFixWatcher();
         return;
       }
       const latLng = await getCurrentTendencyLatLng();
@@ -540,13 +539,21 @@
         return;
       }
       STATE.hasInitialGpsFix = true;
-      window.clearInterval(STATE.firstFixTimer);
-      STATE.firstFixTimer = null;
+      clearFirstFixWatcher();
       refreshDayTendencyMeter({ force: true });
     };
     STATE.firstFixTimer = runtimePolling
       ? runtimePolling.setInterval('day-tendency:first-fix', runner, DAY_TENDENCY_FIRST_FIX_CHECK_MS)
       : window.setInterval(runner, DAY_TENDENCY_FIRST_FIX_CHECK_MS);
+  }
+
+  function clearFirstFixWatcher() {
+    if (runtimePolling) {
+      runtimePolling.clear('day-tendency:first-fix');
+    } else if (STATE.firstFixTimer) {
+      window.clearInterval(STATE.firstFixTimer);
+    }
+    STATE.firstFixTimer = null;
   }
 
   function startDayTendencyMeter() {
