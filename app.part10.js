@@ -1340,13 +1340,6 @@ async function fetchPresencePayload(params, signal) {
         );
         sawReplaceAll = sawReplaceAll || replaceStore;
 
-        const pageItems = extractPresenceItems(delta);
-        const pageRemovals = [];
-        if (Array.isArray(delta?.removed)) pageRemovals.push(...delta.removed);
-        if (Array.isArray(delta?.removed_user_ids)) pageRemovals.push(...delta.removed_user_ids);
-        if (Array.isArray(delta?.deleted_user_ids)) pageRemovals.push(...delta.deleted_user_ids);
-        mergePresencePayload(pageItems, { replaceStore, removals: pageRemovals });
-
         const nextCursorMs = normalizePresenceSyncTimestampMs(
           delta?.next_updated_since_ms ??
           delta?.cursor ??
@@ -2917,7 +2910,7 @@ async function pullPresenceAll() {
     const listOnlineCount = Number(list?.online_count ?? list?.summary?.online_count ?? list?.counts?.online_count);
     const listGhostedCount = Number(list?.ghosted_count ?? list?.summary?.ghosted_count ?? list?.counts?.ghosted_count);
     const hasPayloadCounts = Number.isFinite(listOnlineCount) && listOnlineCount >= 0;
-    const shouldFetchSummary = responseMode === 'delta' || !hasPayloadCounts;
+    const shouldFetchSummary = !hasPayloadCounts;
 
     if (hasPayloadCounts) {
       updateOnlineBadge(listOnlineCount, Number.isFinite(listGhostedCount) ? listGhostedCount : 0);
