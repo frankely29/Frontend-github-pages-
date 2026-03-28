@@ -431,7 +431,7 @@
     const rows = Array.isArray(items) ? items.slice(0, 5) : [];
     if (!rows.length) return '<div class="driverProfileStatus">No recent battles yet.</div>';
     return `<div class="driverProfileRecentBattles">${rows.map((row) => {
-      const result = battleResultLabel(row);
+      const result = chatInternals.battleResultLabel?.(row) || 'Pending';
       const game = String(row?.game_key || row?.game_type || 'battle').replace(/^./, (m) => m.toUpperCase());
       const opponent = String(
         row?.opponent_display_name
@@ -1312,7 +1312,7 @@
               chatInternals.renderPrivateTabUnread?.();
               chatInternals.updateChatUnreadBadge?.();
               await chatInternals.playChatTone?.('outgoing');
-              updateDriverProfileDmList(driverProfileState.messages);
+              chatInternals.updateDriverProfileDmList?.(driverProfileState.messages);
             },
           });
         } catch (err) {
@@ -1349,7 +1349,7 @@
         chatInternals.renderPrivateTabUnread?.();
         chatInternals.updateChatUnreadBadge?.();
         await chatInternals.playChatTone?.('outgoing');
-        updateDriverProfileDmList(driverProfileState.messages);
+        chatInternals.updateDriverProfileDmList?.(driverProfileState.messages);
       } catch (err) {
         driverProfileState.error = err?.message || 'Message failed to send.';
         const errorEl = body.querySelector('.driverProfileError');
@@ -1384,7 +1384,7 @@
         chatInternals.renderPrivateTabUnread?.();
         chatInternals.updateChatUnreadBadge?.();
         await chatInternals.playChatTone?.('outgoing');
-        updateDriverProfileDmList(driverProfileState.messages);
+        chatInternals.updateDriverProfileDmList?.(driverProfileState.messages);
       },
     }));
     chatInternals.bindVoicePlayers?.(document.getElementById('driverProfileDmList') || document);
@@ -1477,7 +1477,7 @@
       chatInternals.renderPrivateTabUnread?.();
       chatInternals.updateChatUnreadBadge?.();
       if (hasIncomingFromOther) void chatInternals.playChatTone?.('incoming');
-      updateDriverProfileDmList(driverProfileState.messages);
+      chatInternals.updateDriverProfileDmList?.(driverProfileState.messages);
     } catch (_) {}
   }
 
