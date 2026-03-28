@@ -206,7 +206,10 @@
 
   function driverProfileAvatarHTML(profileUser) {
     const name = String(profileUser?.display_name || 'Driver').trim() || 'Driver';
-    const avatarUrl = String(profileUser?.avatar_url || '').trim();
+    const rawAvatarUrl = String(profileUser?.avatar_url || '').trim();
+    const avatarUrl = typeof window.safeMapAvatarUrl === 'function'
+      ? String(window.safeMapAvatarUrl(rawAvatarUrl) || '').trim()
+      : rawAvatarUrl;
     if (avatarUrl) {
       return `<img class="driverProfileAvatar" src="${escapeHtml(avatarUrl)}" alt="${escapeHtml(name)} avatar">`;
     }
