@@ -1538,5 +1538,6 @@
   window.addEventListener('resize', updatePickupRewardLayout);
   window.addEventListener('orientationchange', updatePickupRewardLayout);
   if (window.visualViewport) window.visualViewport.addEventListener('resize', updatePickupRewardLayout);
-  maybeSyncProgressionOnSignInState();
+  // Progression lifecycle boot is owned by the auth-state flow in app.part10.js.
+  // Keep maybeSyncProgressionOnSignInState exported for auth lifecycle callers.
 })();

@@ -2,6 +2,7 @@
   window.TlcDayTendencyState = window.TlcDayTendencyState || {
     payload: null,
     updatedAt: 0,
+    lastPublishedKey: null,
     getPayload() {
       return this.payload || null;
     }
@@ -360,11 +361,49 @@
     };
   }
 
+  function normalizePublishString(value) {
+    return String(value == null ? '' : value).trim().toLowerCase();
+  }
+
+  function normalizePublishNumber(value, { min = null, max = null, precision = 4 } = {}) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return '';
+    let clamped = n;
+    if (Number.isFinite(min)) clamped = Math.max(min, clamped);
+    if (Number.isFinite(max)) clamped = Math.min(max, clamped);
+    return clamped.toFixed(precision);
+  }
+
+  function buildDayTendencyPublishKey(normalizedPayload) {
+    if (!normalizedPayload) return 'null';
+    return [
+      `status:${normalizePublishString(normalizedPayload.status)}`,
+      `score:${normalizePublishNumber(normalizedPayload.score, { min: 0, max: 100, precision: 2 })}`,
+      `confidence:${normalizePublishNumber(normalizedPayload.confidence, { min: 0, max: 1, precision: 4 })}`,
+      `meter_pct:${normalizePublishNumber(normalizedPayload.meter_pct, { min: 0, max: 1, precision: 4 })}`,
+      `band:${normalizePublishString(normalizedPayload.band)}`,
+      `label:${normalizePublishString(normalizedPayload.label)}`,
+      `borough:${normalizePublishString(normalizedPayload.borough)}`,
+      `source_borough:${normalizePublishString(normalizedPayload.source_borough)}`,
+      `source_mode:${normalizePublishString(normalizedPayload.source_mode)}`,
+      `scope:${normalizePublishString(normalizedPayload.scope)}`,
+      `scope_label:${normalizePublishString(normalizedPayload.scope_label)}`,
+      `local_time_label:${normalizePublishString(normalizedPayload.local_time_label)}`,
+      `explain:${normalizePublishString(normalizedPayload.explain)}`,
+    ].join('|');
+  }
+
   // the meter UI is separate from map coloring.
   // app.part11.js consumes this shared payload to bias the final mode-aware rating.
   function publishDayTendencyPayload(raw) {
     const normalized = normalizeDayTendencyPayload(raw);
+    const nextKey = buildDayTendencyPublishKey(normalized);
+    const prevKey = String(window.TlcDayTendencyState?.lastPublishedKey ?? 'null');
+    if (nextKey === prevKey) {
+      return normalized;
+    }
     window.TlcDayTendencyState.payload = normalized;
+    window.TlcDayTendencyState.lastPublishedKey = nextKey;
     window.TlcDayTendencyState.updatedAt = Date.now();
     window.dispatchEvent(new CustomEvent('tlc-day-tendency-updated', {
       detail: normalized,
@@ -642,6 +681,7 @@
     return {
       payload: window.TlcDayTendencyState?.payload || null,
       updatedAt: window.TlcDayTendencyState?.updatedAt || 0,
+      lastPublishedKey: window.TlcDayTendencyState?.lastPublishedKey ?? null,
       lastQueryAt: STATE.lastQueryAt || 0,
       lastQueryLat: STATE.lastQueryLat ?? null,
       lastQueryLng: STATE.lastQueryLng ?? null,
