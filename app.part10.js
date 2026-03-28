@@ -2337,7 +2337,7 @@ function makeDriverIcon(name, headingDeg, avatarUrl = "", mode = "name", orbitMe
   const safe = (name || "Driver").trim() || "Driver";
   const rot = Number.isFinite(headingDeg) ? headingDeg : 0;
   const el = document.createElement("div");
-  const resolvedAvatarUrl = resolveAvatarThumbUrl(avatarUrl || '');
+  const resolvedAvatarUrl = window.safeMapAvatarUrl?.(avatarUrl || '') || '';
   const driverLabelHTML = (typeof window !== "undefined" && typeof window.mapIdentityRenderDriverLabel === "function")
     ? window.mapIdentityRenderDriverLabel({ name: safe, avatarUrl, mode, zoom: map?.getZoom?.(), orbitMeta, leaderboardBadgeCode, leaderboardHasCrown })
     : `
