@@ -2411,7 +2411,7 @@ function getCachedAvatarUrl(userId, avatarUrl = "", avatarVersion = "") {
   return normalizedUrl;
 }
 
-function buildDriverMarkerVisualSignature(userId, name, avatarUrl = "", mode = "name", orbitMeta = null, leaderboardBadgeCode = '', leaderboardHasCrown = false) {
+function buildDriverMarkerVisualSignature(userId, avatarUrl = "", orbitMeta = null, leaderboardBadgeCode = '', leaderboardHasCrown = false) {
   const orbitIndex = Number.isFinite(orbitMeta?.index) ? orbitMeta.index : "";
   const orbitCount = Number.isFinite(orbitMeta?.count) ? orbitMeta.count : "";
   const orbitAngle = Number.isFinite(orbitMeta?.angleDeg) ? orbitMeta.angleDeg : "";
@@ -2437,9 +2437,7 @@ function upsertDriverMarker(userId, name, lat, lng, heading, avatarUrl = "", mod
 
   const visualSig = buildDriverMarkerVisualSignature(
     userId,
-    name,
     avatarUrl,
-    mode,
     orbitMeta,
     leaderboardBadgeCode,
     leaderboardHasCrown
