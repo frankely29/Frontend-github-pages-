@@ -33,6 +33,7 @@ const PICKUP_RECENT_LIMIT = 30;
 const PICKUP_ZONE_SAMPLE_LIMIT = 100;
 const PICKUP_REFRESH_DEBOUNCE_MS = 350;
 const PICKUP_FETCH_COOLDOWN_MS = 1200;
+const PICKUP_POLL_MS = 30 * 1000;
 const PICKUP_MICRO_HOTSPOT_MIN_ZOOM = 10.2;
 const PRESENCE_VIEWPORT_BUFFER_RATIO = 0.18;
 const PRESENCE_VIEWPORT_MIN_BUFFER_DEG = 0.01;
@@ -52,6 +53,7 @@ const PICKUP_VIEWPORT_BUFFER_RATIO = 0.12;
 const PICKUP_VIEWPORT_MIN_BUFFER_DEG = 0.01;
 
 let pickupRefreshTimer = null;
+let pickupPollTimer = null;
 let pickupRefreshInFlight = false;
 let pickupOverlayAbortController = null;
 let pickupLogBusy = false;
@@ -1558,6 +1560,42 @@ function schedulePickupOverlayRefresh({ force = false } = {}) {
   pickupRefreshTimer = setTimeout(runner, force ? 0 : PICKUP_REFRESH_DEBOUNCE_MS);
 }
 
+function clearPickupPollTimer() {
+  if (runtimePolling) runtimePolling.clear("app:pickup-poll");
+  if (pickupPollTimer) {
+    clearTimeout(pickupPollTimer);
+    pickupPollTimer = null;
+  }
+}
+
+function schedulePickupPoll({ immediate = false } = {}) {
+  clearPickupPollTimer();
+  if (!authHeaderOK() || document.hidden) return;
+  const delay = immediate ? 0 : PICKUP_POLL_MS;
+  const runner = () => {
+    pickupPollTimer = null;
+    runPickupPollLoop().catch((e) => console.warn("pickup poll loop failed:", e));
+  };
+  if (runtimePolling) {
+    pickupPollTimer = runtimePolling.setTimeout("app:pickup-poll", runner, Math.max(0, delay));
+    return;
+  }
+  pickupPollTimer = setTimeout(runner, Math.max(0, delay));
+}
+
+async function runPickupPollLoop() {
+  if (!authHeaderOK() || document.hidden) {
+    clearPickupPollTimer();
+    return;
+  }
+
+  try {
+    await refreshPickupOverlay({ force: true });
+  } finally {
+    if (authHeaderOK() && !document.hidden) schedulePickupPoll();
+  }
+}
+
 window.runCommunityVisibilitySmokeTest = async function () {
   const result = {
     signed_in: !!communityToken,
@@ -1781,11 +1819,13 @@ function getCachedPresenceRowsSnapshot() {
 
 // Bridge event for downstream modules (e.g., app.part15.js) to react to cache refreshes.
 function emitCommunityPresenceCacheUpdated(detail = {}) {
+  const crowdingFingerprint = presenceRowsCrowdingFingerprint(cachedPresenceRows);
   if (typeof window === "undefined" || typeof window.dispatchEvent !== "function") return;
   window.dispatchEvent(new CustomEvent("team-joseo-community-presence-cache-updated", {
     detail: {
       count: Array.isArray(cachedPresenceRows) ? cachedPresenceRows.length : 0,
       fingerprint: cachedPresenceFingerprint || "",
+      crowdingFingerprint,
       ...detail,
     },
   }));
@@ -1933,8 +1973,10 @@ function setAuthUI(signedIn, note) {
     notePresenceBoost();
     schedulePresencePoll({ immediate: true });
     schedulePickupOverlayRefresh({ force: true });
+    schedulePickupPoll({ immediate: true });
   } else {
     clearPresencePollTimer();
+    clearPickupPollTimer();
     clearPickupOverlay();
   }
 
@@ -1964,6 +2006,7 @@ function clearAuth() {
   clearOtherDrivers();
   resetPresenceSnapshotOverflowState();
   clearPresencePollTimer();
+  clearPickupPollTimer();
   if (presencePullAbortController) {
     presencePullAbortController.abort();
     presencePullAbortController = null;
@@ -2704,6 +2747,17 @@ function presenceRowsFingerprint(rows) {
     .join("||");
 }
 
+function presenceRowsCrowdingFingerprint(rows) {
+  return (Array.isArray(rows) ? rows : [])
+    .map((row) => [
+      String(row?.uid ?? ""),
+      Number(row?.lat ?? NaN).toFixed(6),
+      Number(row?.lng ?? NaN).toFixed(6),
+    ].join("|"))
+    .sort()
+    .join("||");
+}
+
 function notePresenceBoost() {
   lastPresenceInteractionBoostUntil = Date.now() + PRESENCE_BOOST_WINDOW_MS;
 }
@@ -3036,6 +3090,8 @@ window.getPickupRecordingContext = function getPickupRecordingContext() {
     currentFrame,
     nearestZoneToUser,
     schedulePickupOverlayRefresh,
+    schedulePickupPoll,
+    clearPickupPollTimer,
     me,
   };
 };
@@ -3158,12 +3214,25 @@ async function bootstrapCommunityModule() {
   syncAdminPortalSession();
 }
 
+
+if (typeof document !== "undefined") {
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      if (authHeaderOK()) schedulePickupPoll({ immediate: true });
+    } else {
+      clearPickupPollTimer();
+    }
+  });
+}
+
 window.TlcCommunityModule = {
   ensurePickupSourceAndLayers,
   clearPickupOverlay,
   clearPickupOverlayCache,
   refreshPickupOverlay,
   schedulePickupOverlayRefresh,
+  schedulePickupPoll,
+  clearPickupPollTimer,
   syncGhostUI,
   closeBlockingUiForSignedOutState,
   showAuthOverlayAndFocus,
