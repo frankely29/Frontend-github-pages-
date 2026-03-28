@@ -1135,6 +1135,11 @@ function getPresenceRequestParams() {
 
 function normalizePresenceRemovalId(value) {
   if (value == null || value === "") return "";
+  if (typeof value === "object") {
+    const objectId = value.user_id ?? value.userId ?? value.id;
+    if (objectId == null || objectId === "") return "";
+    return String(objectId);
+  }
   return String(value);
 }
 
@@ -1774,6 +1779,21 @@ function signOutNow({ reload = false } = {}) {
   }
 }
 
+let lastProgressionSyncSignedInState = null;
+function maybeSyncProgressionLifecycleForAuthState(signedIn) {
+  const nextSignedIn = !!signedIn;
+  if (lastProgressionSyncSignedInState === nextSignedIn) return;
+  lastProgressionSyncSignedInState = nextSignedIn;
+  try {
+    const maybePromise = window.TlcDriverProfileModule?.maybeSyncProgressionOnSignInState?.();
+    if (maybePromise && typeof maybePromise.catch === "function") {
+      maybePromise.catch((err) => console.warn("Progression sync gate failed:", err));
+    }
+  } catch (err) {
+    console.warn("Progression sync gate failed:", err);
+  }
+}
+
 function setAuthUI(signedIn, note) {
   if (btnAuth) btnAuth.textContent = signedIn ? "Sign out" : "Sign in";
   if (communityNote) {
@@ -1821,6 +1841,8 @@ function setAuthUI(signedIn, note) {
       window.wireChatPanel();
     }
   }
+
+  maybeSyncProgressionLifecycleForAuthState(signedIn);
 }
 
 function clearAuth() {
