@@ -2531,11 +2531,8 @@ function computePresenceRenderMode(rows) {
 
 function chooseRichPresenceUserIds(rows, mode) {
   const visibleRows = Array.isArray(rows) ? rows : [];
-  if (mode === 'full') {
-    return new Set(visibleRows.map((row) => String(row.uid)));
-  }
-  const maxRich = mode === 'heavy' ? PRESENCE_HEAVY_RICH_LIMIT : PRESENCE_MEDIUM_RICH_LIMIT;
   const sorted = [...visibleRows];
+
   const focusedId = Number(presenceFocusedUserId);
   const hasFocused = Number.isFinite(focusedId)
     && sorted.some((row) => Number(row?.uid) === focusedId || String(row?.uid) === String(focusedId));
@@ -2565,9 +2562,8 @@ function chooseRichPresenceUserIds(rows, mode) {
     return aId.localeCompare(bId);
   });
 
-  return new Set(sorted.slice(0, maxRich).map((row) => String(row.uid)));
+  return new Set(sorted.map((row) => String(row.uid)));
 }
-
 function clusterPresenceByScreenPosition(rows, selfPos) {
   const richRows = Array.isArray(rows) ? rows : [];
   const nodes = [];
@@ -2866,8 +2862,6 @@ function renderAdaptivePresenceFromCache() {
     const uid = String(row.uid);
     if (richUserIds.has(uid)) {
       richRows.push(row);
-    } else {
-      liteRows.push(row);
     }
   }
 

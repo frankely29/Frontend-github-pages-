@@ -500,10 +500,7 @@
     host.innerHTML = `
       <div class="mapIdentitySection">
         <div class="mapIdentityTitle">Map Identity</div>
-        <div class="mapIdentityModes">
-          <button id="mapIdentityModeName" class="chipBtn ${state.mode === 'name' ? 'active' : ''}">Show Name</button>
-          <button id="mapIdentityModeAvatar" class="chipBtn ${state.mode === 'avatar' ? 'active' : ''}">Show Photo</button>
-        </div>
+        <div class="mapIdentityModes">Map markers use photo only.</div>
         <div class="mapIdentityAvatarRow">
           <div class="mapIdentityPreviewWrap">
             ${hasAvatar ? `<img id="mapIdentityPreview" class="mapIdentityPreview" src="${escapeHtml(state.avatarUrl)}" alt="Profile preview">` : `<div id="mapIdentityPreview" class="mapIdentityPreview mapIdentityPreviewFallback">${escapeHtml((state.name || 'D')[0].toUpperCase())}</div>`}
@@ -529,19 +526,6 @@
   function initMapIdentityProfileControls() {
     renderMapIdentityProfileSection();
     const fileInput = document.getElementById('mapIdentityFileInput');
-    document.getElementById('mapIdentityModeName')?.addEventListener('click', async (e) => {
-      e.preventDefault();
-      await saveMapIdentityUpdate({ map_identity_mode: MAP_IDENTITY_MODE_NAME });
-    });
-    document.getElementById('mapIdentityModeAvatar')?.addEventListener('click', async (e) => {
-      e.preventDefault();
-      const state = mapIdentityCurrentState();
-      if (!state.avatarUrl) {
-        alert('Choose a photo first.');
-        return;
-      }
-      await saveMapIdentityUpdate({ map_identity_mode: MAP_IDENTITY_MODE_AVATAR });
-    });
     document.getElementById('mapIdentityChoosePhoto')?.addEventListener('click', (e) => {
       e.preventDefault();
       fileInput?.click();
@@ -551,7 +535,7 @@
       if (!confirm('Remove your saved photo?')) return;
       mapIdentitySavedAvatarDataUrl = '';
       mapIdentityTempAvatarDataUrl = '';
-      await saveMapIdentityUpdate({ avatar_url: '', map_identity_mode: MAP_IDENTITY_MODE_NAME });
+      await saveMapIdentityUpdate({ avatar_url: '', map_identity_mode: MAP_IDENTITY_MODE_AVATAR });
     });
     fileInput?.addEventListener('change', async () => {
       const f = fileInput.files && fileInput.files[0];
