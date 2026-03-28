@@ -959,6 +959,8 @@
     if (typeof authHeaderOK !== 'function') return;
     if (authHeaderOK()) {
       startProgressionSyncInterval();
+      // Keep badge syncing inside syncMyProgression() to avoid duplicate
+      // /leaderboard/badges/me calls during same-session startup/sign-in.
       await syncMyProgression({ forcePopupCheck: false });
     } else {
       stopProgressionSyncInterval();
