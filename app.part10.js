@@ -23,12 +23,13 @@ const updateOnlineBadge = (...args) => core.updateOnlineBadge?.(...args);
    ========================================================= */
 const PRESENCE_PUSH_MS = 8 * 1000; // send my location
 const PRESENCE_PULL_MS = 10 * 1000; // fetch all drivers
-const PRESENCE_STALE_SEC = 70; // hide if older than this
+const PRESENCE_STALE_SEC = 95; // hide if older than this
 const PRESENCE_HIDDEN_POLL_MS = 30 * 1000;
-const PRESENCE_IDLE_POLL_MS = 15 * 1000;
-const PRESENCE_ACTIVE_POLL_MS = 10 * 1000;
+const PRESENCE_IDLE_POLL_MS = 10 * 1000;
+const PRESENCE_ACTIVE_POLL_MS = 6 * 1000;
 const PRESENCE_BOOST_POLL_MS = 7 * 1000;
 const PRESENCE_BOOST_WINDOW_MS = 25 * 1000;
+const PRESENCE_ACCURACY_THRESHOLD = 120;
 const PICKUP_RECENT_LIMIT = 30;
 const PICKUP_ZONE_SAMPLE_LIMIT = 100;
 const PICKUP_REFRESH_DEBOUNCE_MS = 350;
@@ -48,7 +49,7 @@ const PRESENCE_DELTA_MAX_PAGES_PER_CYCLE = 5;
 const PRESENCE_MOVE_THRESHOLD_MI = 0.018;
 const PRESENCE_HEADING_CHANGE_THRESHOLD_DEG = 14;
 const PRESENCE_STATIONARY_PUSH_MS = 25 * 1000;
-const PRESENCE_MOVING_PUSH_MS = 8 * 1000;
+const PRESENCE_MOVING_PUSH_MS = 5 * 1000;
 const PICKUP_VIEWPORT_BUFFER_RATIO = 0.12;
 const PICKUP_VIEWPORT_MIN_BUFFER_DEG = 0.01;
 
@@ -1165,7 +1166,7 @@ function normalizePresenceRow(it, nowUnix) {
   if (Number.isFinite(updated) && nowUnix - updated > PRESENCE_STALE_SEC) return null;
 
   const reportedAccuracy = Number(it?.accuracy ?? it?.acc ?? NaN);
-  if (Number.isFinite(reportedAccuracy) && reportedAccuracy > GPS_ACCURACY_THRESHOLD) return null;
+  if (Number.isFinite(reportedAccuracy) && reportedAccuracy > PRESENCE_ACCURACY_THRESHOLD) return null;
 
   return {
     uid,
@@ -3031,7 +3032,7 @@ let lastPresenceHeadingDegSent = null;
 async function communityMaybePushPresence(tsMsOrUnix, heading, accuracy) {
   if (!authHeaderOK()) return;
   if (!userLatLng) return;
-  if (Number.isFinite(accuracy) && accuracy > GPS_ACCURACY_THRESHOLD) return;
+  if (Number.isFinite(accuracy) && accuracy > PRESENCE_ACCURACY_THRESHOLD) return;
 
   if (lastPresenceSentLatLng) {
     const jumpMi = haversineMiles(lastPresenceSentLatLng, userLatLng);
