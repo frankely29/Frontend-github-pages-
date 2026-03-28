@@ -2084,8 +2084,6 @@ async function doLogin(email, password, desiredGhostMode) {
   } catch (e) {
     console.warn("Post-login preference sync failed:", e);
   }
-  pullPresenceAll().catch((e) => console.warn("/presence/all post-login bootstrap failed:", e));
-  schedulePickupOverlayRefresh({ force: true });
   syncAdminPortalSession();
 }
 
@@ -2107,8 +2105,6 @@ async function doSignup(email, password, desiredGhostMode) {
   } catch (e) {
     console.warn("Post-signup preference sync failed:", e);
   }
-  pullPresenceAll().catch((e) => console.warn("/presence/all post-signup bootstrap failed:", e));
-  schedulePickupOverlayRefresh({ force: true });
   syncAdminPortalSession();
 }
 
