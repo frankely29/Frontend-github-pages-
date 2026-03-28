@@ -798,6 +798,13 @@
     } catch (_) {}
   }
 
+  function clearStoredLeaderboardBadgeRewardState(userId) {
+    if (!Number.isFinite(Number(userId))) return;
+    try {
+      localStorage.removeItem(leaderboardBadgeRewardStorageKey(Math.floor(Number(userId))));
+    } catch (_) {}
+  }
+
   function showLeaderboardBadgeRewardOverlay(badgeRowOrMeta, options = {}) {
     const meta = chatInternals.leaderboardBadgeMeta?.(badgeRowOrMeta?.badge_code || badgeRowOrMeta?.code);
     if (!meta.code) return false;
@@ -860,6 +867,10 @@
       if (!prevState) {
         if (nextState) writeStoredLeaderboardBadgeRewardState(userId, nextState);
         return nextState;
+      }
+      if (!nextState) {
+        clearStoredLeaderboardBadgeRewardState(userId);
+        return null;
       }
       if (nextState && !options?.suppressInitialPopup && shouldShowLeaderboardBadgeReward(prevState, nextState)) {
         showLeaderboardBadgeRewardOverlay(nextState, options);
