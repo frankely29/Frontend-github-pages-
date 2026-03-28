@@ -1547,6 +1547,14 @@
     maybeSyncProgressionOnSignInState,
     getState: () => driverProfileState,
   };
+  window.openDriverProfileModal = openDriverProfileModal;
+  window.closeDriverProfileModal = closeDriverProfileModal;
+  window.renderDriverProfileModal = renderDriverProfileModal;
+  window.showLevelUpOverlay = showLevelUpOverlay;
+  window.syncMyProgression = syncMyProgression;
+  window.handlePickupProgressionDelta = handlePickupProgressionDelta;
+  window.syncLeaderboardBadgeRewards = syncLeaderboardBadgeRewards;
+  window.ensurePickupProgressReward = ensurePickupProgressReward;
 
   ensureDriverProfileUI();
   ensureLevelUpOverlay();
