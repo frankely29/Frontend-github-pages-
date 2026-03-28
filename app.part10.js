@@ -1730,6 +1730,12 @@ let presenceSnapshotBoostUntilMs = 0;
 let presenceLastSnapshotOverflow = false;
 let presenceLastSnapshotVisibleTotal = 0;
 
+function resetPresenceSnapshotOverflowState() {
+  presenceSnapshotBoostUntilMs = 0;
+  presenceLastSnapshotOverflow = false;
+  presenceLastSnapshotVisibleTotal = 0;
+}
+
 function markPresenceSnapshotOverflowSignal() {
   presenceSnapshotBoostUntilMs = Date.now() + PRESENCE_SNAPSHOT_BOOST_WINDOW_MS;
   presenceLastSnapshotOverflow = true;
@@ -1956,6 +1962,7 @@ function clearAuth() {
     if (typeof window.stopChatPolling === "function") window.stopChatPolling();
   }
   clearOtherDrivers();
+  resetPresenceSnapshotOverflowState();
   clearPresencePollTimer();
   if (presencePullAbortController) {
     presencePullAbortController.abort();
@@ -2287,6 +2294,7 @@ function makeDriverIcon(name, headingDeg, avatarUrl = "", mode = "name", orbitMe
 }
 
 function clearOtherDrivers() {
+  resetPresenceSnapshotOverflowState();
   for (const m of otherMarkers.values()) {
     try { m.remove(); } catch {}
   }
