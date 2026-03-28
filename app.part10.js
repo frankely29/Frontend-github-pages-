@@ -2916,22 +2916,26 @@ async function pullPresenceAll() {
 
     const listOnlineCount = Number(list?.online_count ?? list?.summary?.online_count ?? list?.counts?.online_count);
     const listGhostedCount = Number(list?.ghosted_count ?? list?.summary?.ghosted_count ?? list?.counts?.ghosted_count);
+    const hasPayloadCounts = Number.isFinite(listOnlineCount) && listOnlineCount >= 0;
+    const shouldFetchSummary = responseMode === 'delta' || !hasPayloadCounts;
 
-    if (Number.isFinite(listOnlineCount) && listOnlineCount >= 0) {
+    if (hasPayloadCounts) {
       updateOnlineBadge(listOnlineCount, Number.isFinite(listGhostedCount) ? listGhostedCount : 0);
     } else {
       updateOnlineBadge(nextRows.length, 0);
     }
 
-    void getJSONAuth("/presence/summary", communityToken, { signal: activeSignal })
-      .then((summary) => {
-        const onlineCount = Number(summary?.online_count);
-        const ghostedCount = Number(summary?.ghosted_count);
-        if (Number.isFinite(onlineCount) && onlineCount >= 0) {
-          updateOnlineBadge(onlineCount, Number.isFinite(ghostedCount) ? ghostedCount : 0);
-        }
-      })
-      .catch(() => {});
+    if (shouldFetchSummary) {
+      void getJSONAuth("/presence/summary", communityToken, { signal: activeSignal })
+        .then((summary) => {
+          const onlineCount = Number(summary?.online_count);
+          const ghostedCount = Number(summary?.ghosted_count);
+          if (Number.isFinite(onlineCount) && onlineCount >= 0) {
+            updateOnlineBadge(onlineCount, Number.isFinite(ghostedCount) ? ghostedCount : 0);
+          }
+        })
+        .catch(() => {});
+    }
   } catch (e) {
     if (e?.name === "AbortError") return;
     const status = Number(e?.status ?? NaN);
@@ -3133,13 +3137,10 @@ async function bootstrapCommunityModule() {
   if (authName) authName.value = localStorage.getItem(LS_DISPLAY_NAME) || "";
 
   if (authHeaderOK()) {
-    setAuthUI(true, "Checking session…");
+    if (authStatus) authStatus.textContent = "Checking session…";
     await loadMe();
     if (authHeaderOK()) {
       setAuthUI(true, `Status: signed in as ${me?.display_name || me?.email || "Driver"}`);
-      notePresenceBoost();
-      schedulePresencePoll({ immediate: true });
-      schedulePickupOverlayRefresh({ force: true });
     } else {
       setAuthUI(false, "Status: signed out");
     }

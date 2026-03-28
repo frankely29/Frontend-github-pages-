@@ -471,9 +471,13 @@
     const latLng = await getCurrentTendencyLatLng();
 
     if (!latLng) {
-      if (!STATE.hasInitialGpsFix && !STATE.hasRenderedRealPayload) {
-        applyWaitingForGpsState();
-      }
+      STATE.lastQueryLat = null;
+      STATE.lastQueryLng = null;
+      STATE.lastQueryAt = 0;
+      STATE.hasInitialGpsFix = false;
+      applyWaitingForGpsState();
+      publishDayTendencyPayload(null);
+      startFirstFixWatcher();
       return;
     }
 
