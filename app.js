@@ -3722,8 +3722,6 @@ document.addEventListener("visibilitychange", () => {
     refreshCurrentFrame().catch(() => {});
     tickNYCClockAndAdvanceIfNeeded().catch(() => {});
     updateWeatherNow().catch(() => {});
-    refreshPickupOverlay({ force: true }).catch(() => {});
-    schedulePickupPoll({ immediate: true });
     notePresenceBoost();
     schedulePresencePoll({ immediate: true });
     if (timeline.length) bubbleUpdateNow();

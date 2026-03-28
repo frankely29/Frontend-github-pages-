@@ -55,6 +55,8 @@ const PICKUP_VIEWPORT_MIN_BUFFER_DEG = 0.01;
 let pickupRefreshTimer = null;
 let pickupPollTimer = null;
 let pickupRefreshInFlight = false;
+let pickupRefreshQueued = false;
+let pickupRefreshQueuedForce = false;
 let pickupOverlayAbortController = null;
 let pickupLogBusy = false;
 let lastPickupFetchMs = 0;
@@ -94,6 +96,8 @@ function clearPickupOverlayCache() {
     pickupOverlayAbortController = null;
   }
   pickupRefreshInFlight = false;
+  pickupRefreshQueued = false;
+  pickupRefreshQueuedForce = false;
   emitPickupHotspotZoneShieldUpdate();
 }
 
@@ -1455,6 +1459,11 @@ function buildPickupViewportKey() {
 async function refreshPickupOverlay({ force = false } = {}) {
   frontendPerfStats.pickupFetchesAttempted += 1;
   const startedAt = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+  if (pickupRefreshInFlight) {
+    pickupRefreshQueued = true;
+    pickupRefreshQueuedForce = pickupRefreshQueuedForce || !!force;
+    return;
+  }
   if (!mapPageIsVisible) return;
   if (!map || !mapReady) return;
   const ready = await ensurePickupSourceAndLayers();
@@ -1472,10 +1481,6 @@ async function refreshPickupOverlay({ force = false } = {}) {
   const now = Date.now();
   if (!force && path === lastPickupFetchKey && viewportKey === lastPickupViewportKey && now - lastPickupFetchMs < PICKUP_FETCH_COOLDOWN_MS) return;
 
-  if (pickupOverlayAbortController) {
-    pickupOverlayAbortController.abort();
-    frontendPerfStats.abortedRequests += 1;
-  }
   pickupOverlayAbortController = new AbortController();
   const requestSerial = ++pickupRequestSerial;
 
@@ -1539,6 +1544,13 @@ async function refreshPickupOverlay({ force = false } = {}) {
     runtimePerf?.recordDuration?.("pickup_overlay_fetch", endedAt - startedAt);
     pickupRefreshInFlight = false;
     pickupOverlayAbortController = null;
+    const queuedFollowUp = pickupRefreshQueued;
+    const queuedForce = pickupRefreshQueuedForce;
+    pickupRefreshQueued = false;
+    pickupRefreshQueuedForce = false;
+    if (queuedFollowUp && authHeaderOK() && !document.hidden && mapPageIsVisible && map && mapReady) {
+      schedulePickupOverlayRefresh({ force: queuedForce });
+    }
   }
 }
 
@@ -1972,7 +1984,6 @@ function setAuthUI(signedIn, note) {
   if (signedIn) {
     notePresenceBoost();
     schedulePresencePoll({ immediate: true });
-    schedulePickupOverlayRefresh({ force: true });
     schedulePickupPoll({ immediate: true });
   } else {
     clearPresencePollTimer();
