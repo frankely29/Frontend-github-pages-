@@ -41,6 +41,7 @@ const PRESENCE_VIEWPORT_ROUTE = '/presence/viewport';
 const PRESENCE_DELTA_ROUTE = '/presence/delta';
 const PRESENCE_ALL_ROUTE = '/presence/all';
 const PRESENCE_DELTA_SINCE_MS_PARAM = 'updated_since_ms';
+const PRESENCE_DELTA_MAX_PAGES_PER_CYCLE = 4;
 const PRESENCE_MOVE_THRESHOLD_MI = 0.018;
 const PRESENCE_HEADING_CHANGE_THRESHOLD_DEG = 14;
 const PRESENCE_STATIONARY_PUSH_MS = 25 * 1000;
@@ -1303,20 +1304,66 @@ function hasUsablePresencePayload(payload) {
 
 async function fetchPresencePayload(params, signal) {
   const prefersViewportSnapshot = presenceHasViewportBounds(params);
-  const deltaParams = new URLSearchParams(params.toString());
-  const deltaSinceMs = getPresenceDeltaCursorMs();
-  if (deltaSinceMs > 0) {
-    deltaParams.set(PRESENCE_DELTA_SINCE_MS_PARAM, String(Math.floor(deltaSinceMs)));
-  }
+  let deltaCursorMs = getPresenceDeltaCursorMs();
 
-  if (presenceDeltaMode !== 'disabled' && deltaSinceMs > 0) {
+  if (presenceDeltaMode !== 'disabled' && deltaCursorMs > 0) {
     try {
-      const delta = await getJSONAuth(`${PRESENCE_DELTA_ROUTE}?${deltaParams.toString()}`, communityToken, { signal });
-      if (!hasUsablePresencePayload(delta)) {
-        throw Object.assign(new Error("Unsupported /presence/delta response shape"), { status: 422, detail: delta });
+      let pageCount = 0;
+      let hasMore = true;
+      let finalDeltaPayload = null;
+      let aggregatedItems = [];
+      let aggregatedRemoved = [];
+      let sawReplaceAll = false;
+
+      while (hasMore && pageCount < PRESENCE_DELTA_MAX_PAGES_PER_CYCLE) {
+        const deltaParams = new URLSearchParams(params.toString());
+        deltaParams.set(PRESENCE_DELTA_SINCE_MS_PARAM, String(Math.floor(deltaCursorMs)));
+        const delta = await getJSONAuth(`${PRESENCE_DELTA_ROUTE}?${deltaParams.toString()}`, communityToken, { signal });
+        if (!hasUsablePresencePayload(delta)) {
+          throw Object.assign(new Error("Unsupported /presence/delta response shape"), { status: 422, detail: delta });
+        }
+
+        pageCount += 1;
+        finalDeltaPayload = delta;
+        aggregatedItems = aggregatedItems.concat(extractPresenceItems(delta));
+        if (Array.isArray(delta?.removed)) aggregatedRemoved = aggregatedRemoved.concat(delta.removed);
+        if (Array.isArray(delta?.removed_user_ids)) aggregatedRemoved = aggregatedRemoved.concat(delta.removed_user_ids);
+        if (Array.isArray(delta?.deleted_user_ids)) aggregatedRemoved = aggregatedRemoved.concat(delta.deleted_user_ids);
+
+        sawReplaceAll = sawReplaceAll || !!(
+          delta?.full_snapshot === true ||
+          delta?.replace_all === true ||
+          delta?.mode === 'full'
+        );
+
+        const nextCursorMs = normalizePresenceSyncTimestampMs(
+          delta?.next_updated_since_ms ??
+          delta?.cursor ??
+          delta?.next_cursor ??
+          delta?.sync_cursor
+        );
+        if (Number.isFinite(nextCursorMs) && nextCursorMs > 0) {
+          deltaCursorMs = nextCursorMs;
+        }
+
+        hasMore = delta?.has_more === true || delta?.hasMore === true;
+        if (sawReplaceAll) break;
       }
+
+      const deltaResponse = {
+        ...(finalDeltaPayload && typeof finalDeltaPayload === "object" ? finalDeltaPayload : {}),
+        items: aggregatedItems,
+        removed: aggregatedRemoved,
+      };
+      if (sawReplaceAll) {
+        deltaResponse.full_snapshot = true;
+      }
+      if (Number.isFinite(deltaCursorMs) && deltaCursorMs > 0) {
+        deltaResponse.next_updated_since_ms = deltaCursorMs;
+      }
+
       presenceDeltaMode = 'enabled';
-      return { payload: delta, mode: 'delta' };
+      return { payload: deltaResponse, mode: 'delta' };
     } catch (error) {
       if (error?.name === 'AbortError') throw error;
       if (isPresenceDeltaUnsupportedError(error)) {
