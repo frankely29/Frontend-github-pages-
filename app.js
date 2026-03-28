@@ -3213,7 +3213,7 @@ let lastSelfOrbitMeta = null;
 
 function makeNavIcon() {
   const myName = authHeaderOK() ? me?.display_name || "" : "";
-  const resolvedAvatarUrl = resolveAvatarThumbUrl(me?.avatar_url || '');
+  const resolvedAvatarUrl = window.safeMapAvatarUrl?.(me?.avatar_url || '') || '';
   const navLabelHTML = (typeof window !== "undefined" && typeof window.mapIdentityRenderSelfLabel === "function")
     ? window.mapIdentityRenderSelfLabel({
       name: myName,
@@ -3321,7 +3321,7 @@ function refreshNavNameLabel() {
     if (!el) return;
     const avatarEl = el.querySelector('.mapPresenceAvatar');
     if (avatarEl && avatarEl.tagName === 'IMG') {
-      const nextAvatar = resolveAvatarThumbUrl(me?.avatar_url || '');
+      const nextAvatar = window.safeMapAvatarUrl?.(me?.avatar_url || '') || '';
       if (nextAvatar) {
         avatarEl.src = nextAvatar;
       }

@@ -692,6 +692,7 @@
   };
 
   window.safeMapAvatarUrl = safeMapAvatarUrl;
+  window.resolveAvatarThumbUrl = safeMapAvatarUrl;
   window.initDockScroller = initDockScroller;
   window.updateDockScrollHints = updateDockScrollHints;
   window.scrollDockByStep = scrollDockByStep;
