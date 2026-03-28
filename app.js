@@ -1797,6 +1797,8 @@ function clearPickupOverlay(...args) { return window.TlcCommunityModule?.clearPi
 function clearPickupOverlayCache(...args) { return window.TlcCommunityModule?.clearPickupOverlayCache?.(...args); }
 async function refreshPickupOverlay(...args) { return await (window.TlcCommunityModule?.refreshPickupOverlay?.(...args) || Promise.resolve()); }
 function schedulePickupOverlayRefresh(...args) { return window.TlcCommunityModule?.schedulePickupOverlayRefresh?.(...args); }
+function schedulePickupPoll(...args) { return window.TlcCommunityModule?.schedulePickupPoll?.(...args); }
+function clearPickupPollTimer(...args) { return window.TlcCommunityModule?.clearPickupPollTimer?.(...args); }
 function schedulePresencePoll(...args) { return window.TlcCommunityModule?.schedulePresencePoll?.(...args); }
 function scheduleAdaptivePresenceRender(...args) { return window.TlcCommunityModule?.scheduleAdaptivePresenceRender?.(...args); }
 async function pullPresenceAll(...args) { return await (window.TlcCommunityModule?.pullPresenceAll?.(...args) || Promise.resolve()); }
@@ -3721,10 +3723,12 @@ document.addEventListener("visibilitychange", () => {
     tickNYCClockAndAdvanceIfNeeded().catch(() => {});
     updateWeatherNow().catch(() => {});
     refreshPickupOverlay({ force: true }).catch(() => {});
+    schedulePickupPoll({ immediate: true });
     notePresenceBoost();
     schedulePresencePoll({ immediate: true });
     if (timeline.length) bubbleUpdateNow();
   } else {
+    clearPickupPollTimer();
     schedulePresencePoll();
   }
 });

@@ -17,7 +17,7 @@ let crowdingPendingFrame = null;
 let crowdingZoneStats = new Map();
 let zoneGeometryIndexCache = [];
 let zoneGeometryIndexSignature = "";
-let latestPresenceFingerprint = "";
+let latestPresenceCrowdingFingerprint = "";
 let latestPresenceRowCount = 0;
 let crowdingRecomputeCount = 0;
 let assignmentCacheHitCount = 0;
@@ -367,7 +367,7 @@ function getCrowdingInputSignature(frame, presenceRows, statsSummary) {
 
   return [
     frameTime,
-    latestPresenceFingerprint || "",
+    latestPresenceCrowdingFingerprint || "",
     String(Array.isArray(presenceRows) ? presenceRows.length : 0),
     zonePart,
   ].join("@@");
@@ -378,7 +378,7 @@ function getCrowdingSourceSignature(frame) {
   return [
     frameTime,
     zoneGeometryIndexSignature || "",
-    latestPresenceFingerprint || "",
+    latestPresenceCrowdingFingerprint || "",
     String(latestPresenceRowCount || 0),
   ].join("@@");
 }
@@ -547,7 +547,7 @@ window.getCommunityCrowdingDebug = function getCommunityCrowdingDebug() {
 
 if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
   window.addEventListener("team-joseo-community-presence-cache-updated", (event) => {
-    latestPresenceFingerprint = String(event?.detail?.fingerprint || "");
+    latestPresenceCrowdingFingerprint = String(event?.detail?.crowdingFingerprint || event?.detail?.fingerprint || "");
     scheduleCommunityCrowdingRefresh();
   });
 
