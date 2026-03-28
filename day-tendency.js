@@ -466,18 +466,22 @@
       : window.setTimeout(runner, DAY_TENDENCY_RETRY_MS);
   }
 
+  function handleGpsLossState() {
+    STATE.lastQueryLat = null;
+    STATE.lastQueryLng = null;
+    STATE.lastQueryAt = 0;
+    STATE.hasInitialGpsFix = false;
+    applyWaitingForGpsState();
+    publishDayTendencyPayload(null);
+    startFirstFixWatcher();
+  }
+
   async function refreshDayTendencyMeter({ force = false } = {}) {
     if (STATE.isRefreshing) return;
     const latLng = await getCurrentTendencyLatLng();
 
     if (!latLng) {
-      STATE.lastQueryLat = null;
-      STATE.lastQueryLng = null;
-      STATE.lastQueryAt = 0;
-      STATE.hasInitialGpsFix = false;
-      applyWaitingForGpsState();
-      publishDayTendencyPayload(null);
-      startFirstFixWatcher();
+      handleGpsLossState();
       return;
     }
 
@@ -592,7 +596,10 @@
     STATE.movementCheckTimer = runtimePolling
       ? runtimePolling.setInterval('day-tendency:movement', () => {
         getCurrentTendencyLatLng().then((latLng) => {
-          if (!latLng) return;
+          if (!latLng) {
+            handleGpsLossState();
+            return;
+          }
           if (!movedMateriallyFromLastQuery(latLng)) return;
           if (STATE.isRefreshing) return;
           refreshDayTendencyMeter({ force: true });
@@ -600,7 +607,10 @@
       }, DAY_TENDENCY_MOVE_CHECK_MS)
       : window.setInterval(() => {
       getCurrentTendencyLatLng().then((latLng) => {
-        if (!latLng) return;
+        if (!latLng) {
+          handleGpsLossState();
+          return;
+        }
         if (!movedMateriallyFromLastQuery(latLng)) return;
         if (STATE.isRefreshing) return;
         refreshDayTendencyMeter({ force: true });
