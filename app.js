@@ -1675,8 +1675,6 @@ function initMap() {
 
     if (authHeaderOK()) {
       scheduleAdaptivePresenceRender();
-      schedulePresencePoll({ immediate: true, reason: "map-ready" });
-      schedulePickupOverlayRefresh({ force: true });
     }
   });
 
