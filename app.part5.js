@@ -949,6 +949,10 @@
     const progressionPayload = payload?.progression && typeof payload.progression === 'object' ? payload.progression : payload;
     const leveledUp = payload?.leveled_up === true || progressionPayload?.leveled_up === true;
     showPickupProgressReward(payload);
+    if (driverProfileState.isSelf && progressionPayload && typeof progressionPayload === 'object') {
+      driverProfileState.myProgression = progressionPayload;
+      if (driverProfileState.open) renderDriverProfileModal();
+    }
     const meId = Number(window?.me?.id);
     const nextLevel = Number(progressionPayload?.level);
     if (Number.isFinite(meId) && Number.isFinite(nextLevel) && nextLevel > 0) {
