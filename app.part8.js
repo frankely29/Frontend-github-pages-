@@ -4998,6 +4998,8 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     formatBattleDate: (...args) => window.TlcGamesModule?.formatBattleDate?.(...args),
     formatBattlePct: (...args) => window.TlcGamesModule?.formatBattlePct?.(...args),
     defaultBattleStats: (...args) => window.TlcGamesModule?.defaultBattleStats?.(...args),
+    battleResultLabel: (...args) => window.TlcGamesModule?.battleResultLabel?.(...args),
+    updateDriverProfileDmList,
     chatPanelHTML,
     wireChatPanel,
     switchChatTab,
