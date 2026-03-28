@@ -14,6 +14,7 @@
   const DAY_TENDENCY_MOVE_CHECK_MS = 30 * 1000;
   const DAY_TENDENCY_MATERIAL_MOVE_METERS = 300;
   const DAY_TENDENCY_FIRST_FIX_CHECK_MS = 1500;
+  const DAY_TENDENCY_FIRST_FIX_POLL_KEY = 'day-tendency:first-fix';
   const MODE_FLAG_KEYS = {
     manhattan_mode: 'manhattan_mode_enabled',
     staten_island_mode: 'staten_island_mode_enabled',
@@ -543,13 +544,13 @@
       refreshDayTendencyMeter({ force: true });
     };
     STATE.firstFixTimer = runtimePolling
-      ? runtimePolling.setInterval('day-tendency:first-fix', runner, DAY_TENDENCY_FIRST_FIX_CHECK_MS)
+      ? runtimePolling.setInterval(DAY_TENDENCY_FIRST_FIX_POLL_KEY, runner, DAY_TENDENCY_FIRST_FIX_CHECK_MS)
       : window.setInterval(runner, DAY_TENDENCY_FIRST_FIX_CHECK_MS);
   }
 
   function clearFirstFixWatcher() {
     if (runtimePolling) {
-      runtimePolling.clear('day-tendency:first-fix');
+      runtimePolling.clear(DAY_TENDENCY_FIRST_FIX_POLL_KEY);
     } else if (STATE.firstFixTimer) {
       window.clearInterval(STATE.firstFixTimer);
     }

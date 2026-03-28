@@ -1304,6 +1304,11 @@ function hasUsablePresencePayload(payload) {
   );
 }
 
+function isUsablePresenceCount(value) {
+  const count = Number(value);
+  return Number.isFinite(count) && count >= 0;
+}
+
 async function fetchPresencePayload(params, signal) {
   const prefersViewportSnapshot = presenceHasViewportBounds(params);
   let deltaCursorMs = getPresenceDeltaCursorMs();
@@ -1328,6 +1333,7 @@ async function fetchPresencePayload(params, signal) {
 
         pageCount += 1;
         finalDeltaPayload = delta;
+        // Aggregate delta pages and merge once in pullPresenceAll().
         aggregatedItems = aggregatedItems.concat(extractPresenceItems(delta));
         if (Array.isArray(delta?.removed)) aggregatedRemoved = aggregatedRemoved.concat(delta.removed);
         if (Array.isArray(delta?.removed_user_ids)) aggregatedRemoved = aggregatedRemoved.concat(delta.removed_user_ids);
@@ -2909,11 +2915,11 @@ async function pullPresenceAll() {
 
     const listOnlineCount = Number(list?.online_count ?? list?.summary?.online_count ?? list?.counts?.online_count);
     const listGhostedCount = Number(list?.ghosted_count ?? list?.summary?.ghosted_count ?? list?.counts?.ghosted_count);
-    const hasPayloadCounts = Number.isFinite(listOnlineCount) && listOnlineCount >= 0;
+    const hasPayloadCounts = isUsablePresenceCount(listOnlineCount);
     const shouldFetchSummary = !hasPayloadCounts;
 
     if (hasPayloadCounts) {
-      updateOnlineBadge(listOnlineCount, Number.isFinite(listGhostedCount) ? listGhostedCount : 0);
+      updateOnlineBadge(listOnlineCount, isUsablePresenceCount(listGhostedCount) ? listGhostedCount : 0);
     } else {
       updateOnlineBadge(nextRows.length, 0);
     }
@@ -2923,8 +2929,8 @@ async function pullPresenceAll() {
         .then((summary) => {
           const onlineCount = Number(summary?.online_count);
           const ghostedCount = Number(summary?.ghosted_count);
-          if (Number.isFinite(onlineCount) && onlineCount >= 0) {
-            updateOnlineBadge(onlineCount, Number.isFinite(ghostedCount) ? ghostedCount : 0);
+          if (isUsablePresenceCount(onlineCount)) {
+            updateOnlineBadge(onlineCount, isUsablePresenceCount(ghostedCount) ? ghostedCount : 0);
           }
         })
         .catch(() => {});
