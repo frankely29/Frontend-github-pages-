@@ -239,9 +239,6 @@
       if (typeof window.handlePickupProgressionDelta === 'function') {
         window.handlePickupProgressionDelta(res || {});
       }
-      if (typeof window.syncMyProgression === 'function') {
-        window.syncMyProgression({ forcePopupCheck: true });
-      }
       return res;
     } catch (err) {
       const status = Number(err?.status || 0);
