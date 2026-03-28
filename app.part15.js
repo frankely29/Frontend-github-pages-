@@ -10,6 +10,7 @@ const COMMUNITY_CROWDING_CROWDED_THRESHOLD = 0.78;
 const COMMUNITY_CROWDING_HEAVY_THRESHOLD = 1.10;
 
 let crowdingInputSignature = "";
+let crowdingSourceSignature = "";
 let crowdingFeatureCount = 0;
 let crowdingPendingHandle = 0;
 let crowdingPendingFrame = null;
@@ -18,6 +19,11 @@ let zoneGeometryIndexCache = [];
 let zoneGeometryIndexSignature = "";
 let latestPresenceFingerprint = "";
 let latestPresenceRowCount = 0;
+let crowdingRecomputeCount = 0;
+let assignmentCacheHitCount = 0;
+let assignmentCacheMissCount = 0;
+const CROWDING_ASSIGNMENT_CACHE_LIMIT = 4000;
+const crowdingAssignmentCache = new Map();
 
 function clamp01(value) {
   const n = Number(value);
@@ -131,6 +137,7 @@ function getZoneGeometryIndex(frame) {
   if (signature === zoneGeometryIndexSignature) return zoneGeometryIndexCache;
 
   zoneGeometryIndexSignature = signature;
+  crowdingAssignmentCache.clear();
   zoneGeometryIndexCache = features.map((feature) => {
     const props = feature?.properties || {};
     const bb = bboxFromCoords(feature?.geometry?.coordinates);
@@ -165,6 +172,30 @@ function findContainingZoneFeature(indexRows, lngLat) {
   return matches[0]?.feature || null;
 }
 
+function roundedCoordPart(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n.toFixed(5) : "NaN";
+}
+
+function getPresenceRowAssignmentCacheKey(row) {
+  const userId = String(row?.user_id ?? row?.driver_id ?? row?.id ?? "").trim() || "anon";
+  return [
+    zoneGeometryIndexSignature || "",
+    userId,
+    roundedCoordPart(row?.lat),
+    roundedCoordPart(row?.lng),
+  ].join("|");
+}
+
+function writePresenceAssignmentCache(key, zoneId) {
+  if (!key) return;
+  if (crowdingAssignmentCache.size >= CROWDING_ASSIGNMENT_CACHE_LIMIT) {
+    const firstKey = crowdingAssignmentCache.keys().next().value;
+    if (firstKey !== undefined) crowdingAssignmentCache.delete(firstKey);
+  }
+  crowdingAssignmentCache.set(key, String(zoneId || ""));
+}
+
 function assignPresenceRowsToZones(frame, presenceRows) {
   const indexRows = getZoneGeometryIndex(frame);
   const counts = new Map();
@@ -174,8 +205,17 @@ function assignPresenceRowsToZones(frame, presenceRows) {
     const lng = Number(row?.lng);
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
 
-    const feature = findContainingZoneFeature(indexRows, { lng, lat });
-    const zoneId = String(feature?.properties?.LocationID ?? "");
+    const cacheKey = getPresenceRowAssignmentCacheKey(row);
+    let zoneId = "";
+    if (cacheKey && crowdingAssignmentCache.has(cacheKey)) {
+      zoneId = String(crowdingAssignmentCache.get(cacheKey) || "");
+      assignmentCacheHitCount += 1;
+    } else {
+      const feature = findContainingZoneFeature(indexRows, { lng, lat });
+      zoneId = String(feature?.properties?.LocationID ?? "");
+      assignmentCacheMissCount += 1;
+      writePresenceAssignmentCache(cacheKey, zoneId);
+    }
     if (!zoneId) continue;
 
     counts.set(zoneId, Number(counts.get(zoneId) || 0) + 1);
@@ -333,6 +373,16 @@ function getCrowdingInputSignature(frame, presenceRows, statsSummary) {
   ].join("@@");
 }
 
+function getCrowdingSourceSignature(frame) {
+  const frameTime = String(frame?.time || frame?.frame_time || "");
+  return [
+    frameTime,
+    zoneGeometryIndexSignature || "",
+    latestPresenceFingerprint || "",
+    String(latestPresenceRowCount || 0),
+  ].join("@@");
+}
+
 function clearCommunityCrowdingSource() {
   const map = core.getMap?.();
   const src = map?.getSource?.(COMMUNITY_CROWDING_SOURCE_ID);
@@ -340,6 +390,7 @@ function clearCommunityCrowdingSource() {
     src.setData({ type: "FeatureCollection", features: [] });
   }
   crowdingInputSignature = "";
+  crowdingSourceSignature = "";
   crowdingFeatureCount = 0;
   crowdingZoneStats = new Map();
 }
@@ -356,9 +407,13 @@ function refreshCommunityCrowding(frame) {
 
   const presenceRows = window.TlcCommunityModule?.getCachedPresenceRowsSnapshot?.() || [];
   latestPresenceRowCount = Array.isArray(presenceRows) ? presenceRows.length : 0;
+  const sourceSignature = getCrowdingSourceSignature(frame);
+  if (sourceSignature === crowdingSourceSignature) return;
 
   const result = buildCommunityCrowdingStats(frame, presenceRows);
+  crowdingRecomputeCount += 1;
   crowdingZoneStats = result.stats;
+  crowdingSourceSignature = sourceSignature;
 
   const nextSignature = getCrowdingInputSignature(frame, presenceRows, result.summary);
   if (nextSignature === crowdingInputSignature) return;
@@ -381,9 +436,13 @@ function scheduleCommunityCrowdingRefresh(frame = null) {
   };
 
   if (typeof window.requestAnimationFrame === "function") {
-    crowdingPendingHandle = window.requestAnimationFrame(runner);
+    if (typeof window.requestIdleCallback === "function") {
+      crowdingPendingHandle = window.requestIdleCallback(runner, { timeout: 120 });
+    } else {
+      crowdingPendingHandle = window.setTimeout(runner, 40);
+    }
   } else {
-    crowdingPendingHandle = window.setTimeout(runner, 16);
+    crowdingPendingHandle = window.setTimeout(runner, 40);
   }
 }
 
@@ -476,6 +535,11 @@ window.getCommunityCrowdingDebug = function getCommunityCrowdingDebug() {
     crowdedCount: buckets.crowded,
     heavyCount: buckets.heavy,
     inputSignature: crowdingInputSignature || "",
+    sourceSignature: crowdingSourceSignature || "",
+    recomputeCount: crowdingRecomputeCount,
+    assignmentCacheSize: crowdingAssignmentCache.size,
+    cacheHitCount: assignmentCacheHitCount,
+    cacheMissCount: assignmentCacheMissCount,
     refreshPending: !!crowdingPendingHandle,
     activeZoneIds: getActiveCrowdingZoneIdsSnapshot(),
   };
