@@ -59,6 +59,7 @@ const ROTATE_MIN_DELTA_DEG = 1.5;
 const ROTATE_RATE_LIMIT_MS = 120;
 const ROTATE_ANIM_MS = 220;
 const GPS_ACCURACY_THRESHOLD = 50;
+const PRESENCE_ACCURACY_THRESHOLD = 120;
 const HEADING_MIN_SPEED_MPS = 0.8;
 const HEADING_DERIVE_MIN_MILES = 0.002;
 const HEADING_SMOOTHING = 0.42;
@@ -3548,13 +3549,19 @@ function startLocationWatch() {
       // Ignore noisy fixes after the initial lock. Otherwise a brief accuracy
       // spike (e.g. 120-300m) can make the marker/presence jump and then snap
       // back, which looks like the map is "confused".
-      const hasUsableAccuracy = !Number.isFinite(accuracy) || accuracy <= GPS_ACCURACY_THRESHOLD || !gpsFirstFixDone;
-      if (!hasUsableAccuracy) {
+      if (Number.isFinite(accuracy) && accuracy > PRESENCE_ACCURACY_THRESHOLD) {
         setNavVisual(false);
         return;
       }
 
       userLatLng = { lat, lng };
+
+      const hasUsableAccuracy = !Number.isFinite(accuracy) || accuracy <= GPS_ACCURACY_THRESHOLD || !gpsFirstFixDone;
+      if (!hasUsableAccuracy) {
+        setNavVisual(false);
+        communityMaybePushPresence(ts, Number.isFinite(lastHeadingDeg) ? lastHeadingDeg : heading, lastGpsAccuracyM);
+        return;
+      }
 
       if (navMarker) navMarker.setLngLat([lng, lat]);
 

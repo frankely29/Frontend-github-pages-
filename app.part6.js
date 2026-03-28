@@ -27,7 +27,51 @@
     const trimmed = url.trim();
     if (!trimmed) return '';
     if (trimmed.startsWith('data:image/')) return trimmed;
-    return '';
+    if (trimmed.startsWith('blob:')) return trimmed;
+    if (/^https?:\/\//i.test(trimmed)) return trimmed;
+    if (trimmed.startsWith('//')) {
+      const proto = (typeof window !== 'undefined' && window.location?.protocol) ? window.location.protocol : 'https:';
+      return `${proto}${trimmed}`;
+    }
+    if (/^(javascript|vbscript|data):/i.test(trimmed)) return '';
+
+    const runtimeBase = (typeof window !== 'undefined' && window.FrontendRuntime?.resolveApiBase)
+      ? String(window.FrontendRuntime.resolveApiBase() || '').trim()
+      : '';
+    const globalApiBase = (typeof window !== 'undefined' && window.API_BASE !== undefined)
+      ? String(window.API_BASE || '').trim()
+      : '';
+    const runtimeConfigApiBase = (typeof window !== 'undefined' && window.__TLC_RUNTIME_CONFIG__?.apiBase !== undefined)
+      ? String(window.__TLC_RUNTIME_CONFIG__.apiBase || '').trim()
+      : '';
+    const fallbackApiBase = (typeof window !== 'undefined' && window.__TLC_DEFAULT_API_BASE__ !== undefined)
+      ? String(window.__TLC_DEFAULT_API_BASE__ || '').trim()
+      : '';
+    const hostFallback = (() => {
+      if (typeof window === 'undefined') return '';
+      const host = String(window.location?.hostname || '').toLowerCase();
+      if (host === 'localhost' || host === '127.0.0.1' || host.endsWith('.local')) {
+        const resolvedHost = host === '127.0.0.1' ? '127.0.0.1' : 'localhost';
+        return `${window.location.protocol}//${resolvedHost}:3000`;
+      }
+      return '';
+    })();
+    const apiBase = (runtimeBase || globalApiBase || runtimeConfigApiBase || fallbackApiBase || hostFallback || '').replace(/\/+$/, '');
+    if (!apiBase) return '';
+
+    const relativePath = trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+    return `${apiBase}${relativePath}`;
+  }
+
+  function mapIdentityPlaceholderHTML() {
+    return `
+      <div class="mapPresenceAvatar mapPresenceAvatarPlaceholder" aria-label="No profile photo">
+        <svg viewBox="0 0 24 24" role="img" aria-hidden="true" focusable="false">
+          <circle cx="12" cy="8" r="4"></circle>
+          <path d="M4 20c0-4.2 3.6-7 8-7s8 2.8 8 7"></path>
+        </svg>
+      </div>
+    `;
   }
 
   function syncMapIdentitySavedAvatarCache() {
@@ -99,20 +143,11 @@
     return `<span class="mapIdentityBadgeOverlay mapBadgeWearable ${meta.toneClass}" aria-label="${escapeHtml(meta.label)}">${window.renderLeaderboardBadgeSvg?.(meta.code, { size, mapWearable: true, compact: true }) || ''}</span>`;
   }
 
-  function mapIdentityInitials(name) {
-    const safe = String(name || '').trim();
-    if (!safe) return 'D';
-    const parts = safe.split(/\s+/).filter(Boolean);
-    if (parts.length >= 2) return `${parts[0][0] || ''}${parts[1][0] || ''}`.toUpperCase();
-    const compact = safe.replace(/[^\p{L}\p{N}]/gu, '');
-    return (compact.slice(0, 2) || safe.slice(0, 2) || 'D').toUpperCase();
-  }
-
   function mapIdentityPresenceCoreHTML({ markerClass, name, avatarUrl, cfg, leaderboardBadgeCode, orbitMeta = null, directionId = '' }) {
     const safeAvatar = safeMapAvatarUrl(avatarUrl);
     const avatarHTML = safeAvatar
       ? `<div class="mapPresenceAvatar"><img src="${escapeHtml(safeAvatar)}" alt="avatar" loading="lazy"></div>`
-      : `<div class="mapPresenceInitials">${escapeHtml(mapIdentityInitials(name))}</div>`;
+      : mapIdentityPlaceholderHTML();
     const orbitAttrs = mapIdentityOrbitDataAttrs(orbitMeta);
     return `
       <div class="mapPresenceOrbit ${markerClass}" data-map-identity-label="1" data-map-presence-orbit="1" ${orbitAttrs}>
