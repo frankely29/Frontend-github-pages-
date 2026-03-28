@@ -1316,8 +1316,9 @@ async function fetchPresencePayload(params, signal) {
       let sawReplaceAll = false;
 
       while (hasMore && pageCount < PRESENCE_DELTA_MAX_PAGES_PER_CYCLE) {
+        const requestCursorMs = deltaCursorMs;
         const deltaParams = new URLSearchParams(params.toString());
-        deltaParams.set(PRESENCE_DELTA_SINCE_MS_PARAM, String(Math.floor(deltaCursorMs)));
+        deltaParams.set(PRESENCE_DELTA_SINCE_MS_PARAM, String(Math.floor(requestCursorMs)));
         const delta = await getJSONAuth(`${PRESENCE_DELTA_ROUTE}?${deltaParams.toString()}`, communityToken, { signal });
         if (!hasUsablePresencePayload(delta)) {
           throw Object.assign(new Error("Unsupported /presence/delta response shape"), { status: 422, detail: delta });
@@ -1330,11 +1331,19 @@ async function fetchPresencePayload(params, signal) {
         if (Array.isArray(delta?.removed_user_ids)) aggregatedRemoved = aggregatedRemoved.concat(delta.removed_user_ids);
         if (Array.isArray(delta?.deleted_user_ids)) aggregatedRemoved = aggregatedRemoved.concat(delta.deleted_user_ids);
 
-        sawReplaceAll = sawReplaceAll || !!(
+        const replaceStore = !!(
           delta?.full_snapshot === true ||
           delta?.replace_all === true ||
           delta?.mode === 'full'
         );
+        sawReplaceAll = sawReplaceAll || replaceStore;
+
+        const pageItems = extractPresenceItems(delta);
+        const pageRemovals = [];
+        if (Array.isArray(delta?.removed)) pageRemovals.push(...delta.removed);
+        if (Array.isArray(delta?.removed_user_ids)) pageRemovals.push(...delta.removed_user_ids);
+        if (Array.isArray(delta?.deleted_user_ids)) pageRemovals.push(...delta.deleted_user_ids);
+        mergePresencePayload(pageItems, { replaceStore, removals: pageRemovals });
 
         const nextCursorMs = normalizePresenceSyncTimestampMs(
           delta?.next_updated_since_ms ??
@@ -1347,6 +1356,9 @@ async function fetchPresencePayload(params, signal) {
         }
 
         hasMore = delta?.has_more === true || delta?.hasMore === true;
+        if (hasMore && (!Number.isFinite(nextCursorMs) || nextCursorMs <= requestCursorMs)) {
+          hasMore = false;
+        }
         if (sawReplaceAll) break;
       }
 
