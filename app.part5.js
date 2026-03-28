@@ -960,7 +960,6 @@
     if (authHeaderOK()) {
       startProgressionSyncInterval();
       await syncMyProgression({ forcePopupCheck: false });
-      await syncLeaderboardBadgeRewards({ suppressInitialPopup: true });
     } else {
       stopProgressionSyncInterval();
     }
