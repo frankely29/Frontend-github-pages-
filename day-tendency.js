@@ -45,6 +45,7 @@
     hasInitialGpsFix: false,
     hasRenderedRealPayload: false,
     firstFixTimer: null,
+    lastPublishedKey: null,
   };
 
   function apiBase() {
@@ -398,10 +399,11 @@
   function publishDayTendencyPayload(raw) {
     const normalized = normalizeDayTendencyPayload(raw);
     const nextKey = buildDayTendencyPublishKey(normalized);
-    const prevKey = String(window.TlcDayTendencyState?.lastPublishedKey ?? 'null');
+    const prevKey = String(STATE.lastPublishedKey ?? window.TlcDayTendencyState?.lastPublishedKey ?? 'null');
     if (nextKey === prevKey) {
       return normalized;
     }
+    STATE.lastPublishedKey = nextKey;
     window.TlcDayTendencyState.payload = normalized;
     window.TlcDayTendencyState.lastPublishedKey = nextKey;
     window.TlcDayTendencyState.updatedAt = Date.now();
