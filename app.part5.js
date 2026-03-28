@@ -947,9 +947,10 @@
 
   function handlePickupProgressionDelta(payload = {}) {
     const progressionPayload = payload?.progression && typeof payload.progression === 'object' ? payload.progression : payload;
+    const hasProgressionObject = progressionPayload !== null && typeof progressionPayload === 'object';
     const leveledUp = payload?.leveled_up === true || progressionPayload?.leveled_up === true;
     showPickupProgressReward(payload);
-    if (driverProfileState.isSelf && progressionPayload && typeof progressionPayload === 'object') {
+    if (driverProfileState.isSelf && hasProgressionObject) {
       driverProfileState.myProgression = progressionPayload;
       if (driverProfileState.open) renderDriverProfileModal();
     }
