@@ -36,12 +36,14 @@ const PICKUP_FETCH_COOLDOWN_MS = 1200;
 const PICKUP_MICRO_HOTSPOT_MIN_ZOOM = 10.2;
 const PRESENCE_VIEWPORT_BUFFER_RATIO = 0.18;
 const PRESENCE_VIEWPORT_MIN_BUFFER_DEG = 0.01;
-const PRESENCE_PULL_LIMIT = 350;
+const PRESENCE_SNAPSHOT_BASE_LIMIT = 350;
+const PRESENCE_SNAPSHOT_HIGH_LIMIT = 1200;
+const PRESENCE_SNAPSHOT_BOOST_WINDOW_MS = 60 * 1000;
 const PRESENCE_VIEWPORT_ROUTE = '/presence/viewport';
 const PRESENCE_DELTA_ROUTE = '/presence/delta';
 const PRESENCE_ALL_ROUTE = '/presence/all';
 const PRESENCE_DELTA_SINCE_MS_PARAM = 'updated_since_ms';
-const PRESENCE_DELTA_MAX_PAGES_PER_CYCLE = 4;
+const PRESENCE_DELTA_MAX_PAGES_PER_CYCLE = 5;
 const PRESENCE_MOVE_THRESHOLD_MI = 0.018;
 const PRESENCE_HEADING_CHANGE_THRESHOLD_DEG = 14;
 const PRESENCE_STATIONARY_PUSH_MS = 25 * 1000;
@@ -1125,7 +1127,7 @@ function getPresenceRequestParams() {
   const zoom = Number(map?.getZoom?.());
   if (Number.isFinite(zoom)) params.set("zoom", String(zoom));
   params.set("mode", zoom >= 12 ? "full" : "lite");
-  params.set("limit", String(PRESENCE_PULL_LIMIT));
+  params.set("limit", String(getPresenceSnapshotLimit()));
   params.set("include_removed", "true");
   params.set("padding_ratio", String(PRESENCE_VIEWPORT_BUFFER_RATIO));
   const viewportSignature = getPresenceViewportSignature();
@@ -1725,6 +1727,45 @@ let presenceDeltaMode = 'probe';
 let presenceViewportMode = 'probe';
 let lastPresenceViewportSignature = '';
 let lastPresenceFetchViewportSignature = '';
+let presenceSnapshotBoostUntilMs = 0;
+let presenceLastSnapshotOverflow = false;
+let presenceLastSnapshotVisibleTotal = 0;
+
+function markPresenceSnapshotOverflowSignal() {
+  presenceSnapshotBoostUntilMs = Date.now() + PRESENCE_SNAPSHOT_BOOST_WINDOW_MS;
+  presenceLastSnapshotOverflow = true;
+}
+
+function notePresenceSnapshotResponseShape(payload, returnedCount) {
+  const hasMore = payload?.has_more === true || payload?.hasMore === true;
+  const visibleTotal = Number(
+    payload?.visible_count_total ??
+    payload?.visibleCountTotal ??
+    payload?.summary?.visible_count_total ??
+    payload?.counts?.visible_count_total
+  );
+  presenceLastSnapshotVisibleTotal = Number.isFinite(visibleTotal) && visibleTotal > 0 ? visibleTotal : 0;
+  const isTruncated = hasMore
+    || (presenceLastSnapshotVisibleTotal > 0 && Number.isFinite(returnedCount) && presenceLastSnapshotVisibleTotal > returnedCount);
+  if (isTruncated) {
+    markPresenceSnapshotOverflowSignal();
+    return;
+  }
+  presenceLastSnapshotOverflow = false;
+}
+
+function getPresenceSnapshotLimit() {
+  const nowMs = Date.now();
+  const boostActive = presenceSnapshotBoostUntilMs > nowMs;
+  const cachedCount = Array.isArray(cachedPresenceRows) ? cachedPresenceRows.length : 0;
+  const renderHeavy = presenceRenderMode === 'heavy';
+  const highCachedCount = cachedCount > 250;
+  const visibleOverflow = presenceLastSnapshotVisibleTotal > 0 && presenceLastSnapshotVisibleTotal > cachedCount;
+  if (renderHeavy || highCachedCount || boostActive || presenceLastSnapshotOverflow || visibleOverflow) {
+    return PRESENCE_SNAPSHOT_HIGH_LIMIT;
+  }
+  return PRESENCE_SNAPSHOT_BASE_LIMIT;
+}
 
 
 function getCachedPresenceRowsSnapshot() {
@@ -2845,6 +2886,9 @@ async function pullPresenceAll() {
     frontendPerfStats.presencePollsCompleted += 1;
     const activeSignal = presencePullAbortController.signal;
     const items = extractPresenceItems(list);
+    if (responseMode === 'viewport' || responseMode === 'full') {
+      notePresenceSnapshotResponseShape(list, items.length);
+    }
     const removals = [];
     if (Array.isArray(list?.removed)) removals.push(...list.removed);
     if (Array.isArray(list?.removed_user_ids)) removals.push(...list.removed_user_ids);
@@ -3049,9 +3093,6 @@ async function sendPickupLog() {
 
     if (window && typeof window.handlePickupProgressionDelta === "function") {
       window.handlePickupProgressionDelta(pickupRes || {});
-    }
-    if (window && typeof window.syncMyProgression === "function") {
-      window.syncMyProgression({ forcePopupCheck: true });
     }
   } catch (e) {
     const status = Number(e?.status ?? NaN);

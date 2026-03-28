@@ -11,8 +11,8 @@
   const runtimePolling = runtime?.polling || null;
   const DAY_TENDENCY_REFRESH_MS = 30 * 60 * 1000;
   const DAY_TENDENCY_RETRY_MS = 10 * 1000;
-  const DAY_TENDENCY_MOVE_CHECK_MS = 60 * 1000;
-  const DAY_TENDENCY_MATERIAL_MOVE_METERS = 1200;
+  const DAY_TENDENCY_MOVE_CHECK_MS = 30 * 1000;
+  const DAY_TENDENCY_MATERIAL_MOVE_METERS = 300;
   const DAY_TENDENCY_FIRST_FIX_CHECK_MS = 1500;
   const MODE_FLAG_KEYS = {
     manhattan_mode: 'manhattan_mode_enabled',
