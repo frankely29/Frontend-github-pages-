@@ -50,6 +50,7 @@ const PRESENCE_MOVE_THRESHOLD_MI = 0.018;
 const PRESENCE_HEADING_CHANGE_THRESHOLD_DEG = 14;
 const PRESENCE_STATIONARY_PUSH_MS = 25 * 1000;
 const PRESENCE_MOVING_PUSH_MS = 5 * 1000;
+const PRESENCE_PUSH_FAILURE_RETRY_MS = 1000;
 const PRESENCE_REANCHOR_STABLE_RADIUS_MI = 0.18;
 const PRESENCE_REANCHOR_MIN_STABLE_MS = 8000;
 const PICKUP_VIEWPORT_BUFFER_RATIO = 0.12;
@@ -3069,6 +3070,8 @@ async function communityMaybePushPresence(tsMsOrUnix, heading, accuracy) {
     lastPresenceHeadingDegSent = Number.isFinite(heading) ? normDeg(heading) : lastPresenceHeadingDegSent;
     lastPresenceLargeJumpCandidate = null;
   } catch (e) {
+    const retryFloorMs = Math.max(0, minIntervalMs - PRESENCE_PUSH_FAILURE_RETRY_MS);
+    lastPresencePushMs = nowMs - retryFloorMs;
     console.warn("presence/update failed:", e);
   }
 }
