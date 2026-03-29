@@ -104,7 +104,7 @@
     if (!isManhattanFeature(props)) return false;
     const c = core.geometryCenter?.(geom);
     if (!c || !Number.isFinite(c.lat)) return false;
-    return c.lat <= MANHATTAN_CORE_MAX_LAT;
+    return c.lat < MANHATTAN_CORE_MAX_LAT;
   }
 
   function isManhattanModeZone(props, geom) {
