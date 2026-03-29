@@ -66,6 +66,7 @@ let pickupLogBusy = false;
 let lastPickupFetchMs = 0;
 let lastPickupFetchKey = "";
 let lastPickupViewportKey = "";
+let lastPickupViewportGateKey = "";
 let pickupHotspotZoneIds = new Set();
 let pickupPointsSourceFingerprint = "";
 let pickupHotspotsSourceFingerprint = "";
@@ -95,6 +96,7 @@ function clearPickupOverlayCache() {
   pickupMicroHotspotsSourceFingerprint = "";
   lastPickupFetchKey = "";
   lastPickupViewportKey = "";
+  lastPickupViewportGateKey = "";
   if (pickupOverlayAbortController) {
     pickupOverlayAbortController.abort();
     pickupOverlayAbortController = null;
@@ -1483,6 +1485,25 @@ function buildPickupViewportKey() {
   ].join("|");
 }
 
+function getPrecisePickupViewportGateKey() {
+  if (!map) return "";
+  const bounds = map.getBounds?.();
+  if (!bounds) return "";
+  const zoom = Number(map.getZoom?.());
+  const west = Number(bounds.getWest?.());
+  const east = Number(bounds.getEast?.());
+  const south = Number(bounds.getSouth?.());
+  const north = Number(bounds.getNorth?.());
+  if (![west, east, south, north, zoom].every(Number.isFinite)) return "";
+  return [
+    Math.min(west, east).toFixed(4),
+    Math.max(west, east).toFixed(4),
+    Math.min(south, north).toFixed(4),
+    Math.max(south, north).toFixed(4),
+    zoom.toFixed(2),
+  ].join("|");
+}
+
 async function refreshPickupOverlay({ force = false } = {}) {
   frontendPerfStats.pickupFetchesAttempted += 1;
   const startedAt = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
@@ -1583,8 +1604,9 @@ async function refreshPickupOverlay({ force = false } = {}) {
 
 function schedulePickupOverlayRefresh({ force = false } = {}) {
   if (!force) {
-    const nextViewportKey = buildPickupViewportKey();
-    if (nextViewportKey && nextViewportKey === lastPickupViewportKey) return;
+    const nextViewportGateKey = getPrecisePickupViewportGateKey();
+    if (nextViewportGateKey && nextViewportGateKey === lastPickupViewportGateKey) return;
+    if (nextViewportGateKey) lastPickupViewportGateKey = nextViewportGateKey;
   }
   if (runtimePolling) runtimePolling.clear("app:pickup-refresh");
   if (pickupRefreshTimer) clearTimeout(pickupRefreshTimer);
