@@ -2814,6 +2814,13 @@ function selfPresencePositionFingerprint(selfPos) {
   return `${lat.toFixed(6)}|${lng.toFixed(6)}`;
 }
 
+function presenceRenderZoomFingerprint() {
+  const activeMap = core.getMap?.() || map;
+  const zoom = Number(activeMap?.getZoom?.());
+  if (!Number.isFinite(zoom)) return "";
+  return zoom.toFixed(2);
+}
+
 function presenceRowsCrowdingFingerprint(rows) {
   return (Array.isArray(rows) ? rows : [])
     .map((row) => [
@@ -2915,7 +2922,8 @@ function renderAdaptivePresenceFromCache() {
     ? { lat: userLatLng.lat, lng: userLatLng.lng }
     : null;
   const selfFingerprint = selfPresencePositionFingerprint(selfPos);
-  const nextRenderFingerprint = `${nextMode}::${presenceRowsFingerprint(viewportRows)}::${selfFingerprint}`;
+  const zoomFingerprint = presenceRenderZoomFingerprint();
+  const nextRenderFingerprint = `${nextMode}::${presenceRowsFingerprint(viewportRows)}::${selfFingerprint}::${zoomFingerprint}`;
 
   if (!presenceLiteArtifactsCreated && renderedPresenceFingerprint === nextRenderFingerprint) return;
 
