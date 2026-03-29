@@ -1723,7 +1723,18 @@
   let driverProfileLayoutTimer180 = null;
 
 
-  window.TlcGamesModule = { gamesPanelHTML, wireGamesPanel, isGamesPanelOpen, loadGamesBattleDashboard, loadActiveBattleMatch, openGamesBattleComposer };
+  window.TlcGamesModule = {
+    gamesPanelHTML,
+    wireGamesPanel,
+    isGamesPanelOpen,
+    loadGamesBattleDashboard,
+    loadActiveBattleMatch,
+    openGamesBattleComposer,
+    formatBattleDate,
+    formatBattlePct,
+    defaultBattleStats,
+    battleResultLabel,
+  };
   window.__TLC_GAMES_DOCK_OWNER__ = "app.part4.js";
 
   /* OWNER EXPORTS:
