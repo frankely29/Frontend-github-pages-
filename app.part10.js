@@ -2036,6 +2036,7 @@ function clearAuth() {
   lastPresenceHeadingDegSent = null;
   lastPresenceLargeJumpCandidate = null;
   window.resetMapIdentityLocalState?.();
+  // Prevent local pickup save cooldown/guard UI state from leaking across account switches.
   window.resetPickupRecordingLocalState?.();
   showAuthOverlayAndFocus("Status: signed out");
   syncAdminPortalSession();
