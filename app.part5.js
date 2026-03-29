@@ -856,6 +856,40 @@
     return false;
   }
 
+  function applySelfLeaderboardBadgeState(nextState) {
+    const internals = window.TlcCommunityInternals || null;
+    const currentMe = internals?.getMeState?.() || window.me;
+    if (!currentMe || typeof currentMe !== 'object') return;
+
+    const prevBadgeCode = chatInternals.normalizeLeaderboardBadge?.(currentMe?.leaderboard_badge_code) || null;
+    const prevHasCrown = currentMe?.leaderboard_has_crown === true;
+    const nextBadgeCode = chatInternals.normalizeLeaderboardBadge?.(nextState?.badge_code) || null;
+    const nextHasCrown = nextBadgeCode === 'crown';
+
+    const nextMe = {
+      ...currentMe,
+      leaderboard_badge_code: nextBadgeCode,
+      leaderboard_has_crown: nextHasCrown
+    };
+
+    internals?.setMeState?.(nextMe);
+    window.me = nextMe;
+
+    const changed = prevBadgeCode !== nextBadgeCode || prevHasCrown !== nextHasCrown;
+    if (!changed) return;
+
+    internals?.refreshNavNameLabel?.();
+
+    if (driverProfileState.open && driverProfileState.isSelf && driverProfileState.profile?.user) {
+      driverProfileState.profile.user = {
+        ...driverProfileState.profile.user,
+        leaderboard_badge_code: nextBadgeCode,
+        leaderboard_has_crown: nextHasCrown
+      };
+      renderDriverProfileModal();
+    }
+  }
+
   async function syncLeaderboardBadgeRewards(options = {}) {
     const token = chatInternals.getCommunityToken?.();
     const userId = Number(window?.me?.id);
@@ -874,16 +908,19 @@
       const prevState = readStoredLeaderboardBadgeRewardState(userId);
       if (!prevState) {
         if (nextState) writeStoredLeaderboardBadgeRewardState(userId, nextState);
+        applySelfLeaderboardBadgeState(nextState);
         return nextState;
       }
       if (!nextState) {
         clearStoredLeaderboardBadgeRewardState(userId);
+        applySelfLeaderboardBadgeState(null);
         return null;
       }
       if (nextState && !options?.suppressInitialPopup && shouldShowLeaderboardBadgeReward(prevState, nextState)) {
         showLeaderboardBadgeRewardOverlay(nextState, options);
       }
       if (nextState) writeStoredLeaderboardBadgeRewardState(userId, nextState);
+      applySelfLeaderboardBadgeState(nextState);
       return nextState;
     } catch (err) {
       console.warn('syncLeaderboardBadgeRewards failed', err);
