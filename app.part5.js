@@ -446,7 +446,8 @@
         || 'Driver'
       );
       const xp = Number(row?.xp_awarded ?? row?.xp_delta ?? row?.xp ?? 0);
-      return `<article class="driverProfileRecentBattle ${result.toLowerCase()}"><div class="driverProfileRecentBattleTop"><strong>${escapeHtml(game)}</strong><span>${escapeHtml(result)}</span></div><div class="driverProfileRecentBattleMeta">vs ${escapeHtml(opponent)} • ${escapeHtml(chatInternals.formatBattleDate?.(row?.completed_at))}</div><div class="driverProfileRecentBattleMeta">${xp > 0 ? `+${escapeHtml(formatProgressNumber(xp, { maxFractionDigits: 0 }))} XP` : 'Completed'}</div></article>`;
+      const battleTime = row?.completed_at || row?.updated_at || row?.created_at || '';
+      return `<article class="driverProfileRecentBattle ${result.toLowerCase()}"><div class="driverProfileRecentBattleTop"><strong>${escapeHtml(game)}</strong><span>${escapeHtml(result)}</span></div><div class="driverProfileRecentBattleMeta">vs ${escapeHtml(opponent)} • ${escapeHtml(chatInternals.formatBattleDate?.(battleTime) || '—')}</div><div class="driverProfileRecentBattleMeta">${xp > 0 ? `+${escapeHtml(formatProgressNumber(xp, { maxFractionDigits: 0 }))} XP` : 'Completed'}</div></article>`;
     }).join('')}</div>`;
   }
 
@@ -1269,15 +1270,16 @@
     });
     document.getElementById('driverProfileChallengeBtn')?.addEventListener('click', () => {
       const rel = resolveViewerRelationship(profilePayload);
-      window.openGamesBattleComposer?.({
+      const gamesModule = window.TlcGamesModule || null;
+      gamesModule?.openGamesBattleComposer?.({
         targetUserId: driverProfileState.userId,
         displayName: name,
         gameType: rel.gameType || 'dominoes'
       });
       if (rel.kind === 'active') {
-        window.loadActiveBattleMatch?.({ preferredMatchId: rel.matchId || undefined });
+        gamesModule?.loadActiveBattleMatch?.({ preferredMatchId: rel.matchId || undefined });
       } else if (rel.kind === 'incoming' || rel.kind === 'outgoing') {
-        window.loadGamesBattleDashboard?.({ silent: false });
+        gamesModule?.loadGamesBattleDashboard?.({ silent: false });
       }
       closeDriverProfileModal();
     });
