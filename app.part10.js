@@ -1125,6 +1125,29 @@ function getPresenceViewportSignature() {
   ].join('|');
 }
 
+function getPrecisePresenceViewportGateSignature() {
+  if (!map || typeof map.getBounds !== "function") return "";
+  const bounds = map.getBounds();
+  if (!bounds) return "";
+  const west = Number(bounds.getWest?.());
+  const east = Number(bounds.getEast?.());
+  const south = Number(bounds.getSouth?.());
+  const north = Number(bounds.getNorth?.());
+  const zoom = Number(map?.getZoom?.());
+  if (![west, east, south, north, zoom].every(Number.isFinite)) return "";
+  const minWest = Math.min(west, east);
+  const maxEast = Math.max(west, east);
+  const minSouth = Math.min(south, north);
+  const maxNorth = Math.max(south, north);
+  return [
+    minWest.toFixed(4),
+    maxEast.toFixed(4),
+    minSouth.toFixed(4),
+    maxNorth.toFixed(4),
+    zoom.toFixed(2),
+  ].join('|');
+}
+
 function getPresenceRequestParams() {
   const bounds = getBufferedMapBounds(PRESENCE_VIEWPORT_BUFFER_RATIO, PRESENCE_VIEWPORT_MIN_BUFFER_DEG);
   const params = new URLSearchParams();
@@ -1779,6 +1802,7 @@ let presenceLastSyncCursor = 0;
 let presenceDeltaMode = 'probe';
 let presenceViewportMode = 'probe';
 let lastPresenceViewportSignature = '';
+let lastPresenceViewportGateSignature = '';
 let lastPresenceFetchViewportSignature = '';
 let presenceSnapshotBoostUntilMs = 0;
 let presenceLastSnapshotOverflow = false;
@@ -2430,6 +2454,7 @@ function clearOtherDrivers() {
   presenceDeltaMode = 'probe';
   presenceViewportMode = 'probe';
   lastPresenceViewportSignature = '';
+  lastPresenceViewportGateSignature = '';
   lastPresenceFetchViewportSignature = '';
   const presenceLiteSource = map?.getSource?.('presence-lite');
   if (presenceLiteSource && typeof presenceLiteSource.setData === 'function') {
@@ -2858,11 +2883,11 @@ function schedulePresencePoll({ immediate = false, reason = "scheduled" } = {}) 
   clearPresencePollTimer();
   if (!authHeaderOK()) return;
   if (immediate && reason === 'viewport-change') {
-    const nextViewportSignature = getPresenceViewportSignature();
-    if (nextViewportSignature && nextViewportSignature === lastPresenceViewportSignature) {
+    const nextViewportGateSignature = getPrecisePresenceViewportGateSignature();
+    if (nextViewportGateSignature && nextViewportGateSignature === lastPresenceViewportGateSignature) {
       immediate = false;
-    } else if (nextViewportSignature) {
-      lastPresenceViewportSignature = nextViewportSignature;
+    } else if (nextViewportGateSignature) {
+      lastPresenceViewportGateSignature = nextViewportGateSignature;
     }
   }
   const delay = immediate ? 0 : getPresencePollIntervalMs();
