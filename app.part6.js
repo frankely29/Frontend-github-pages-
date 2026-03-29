@@ -80,6 +80,7 @@
       mapIdentitySavedAvatarDataUrl = serverAvatar;
       return serverAvatar;
     }
+    mapIdentitySavedAvatarDataUrl = '';
     return '';
   }
 
@@ -557,6 +558,14 @@
     if (fileInput) fileInput.value = '';
   }
 
+  function resetMapIdentityLocalState() {
+    closeMapIdentityCropper();
+    mapIdentityTempAvatarDataUrl = '';
+    mapIdentitySavedAvatarDataUrl = '';
+    const fileInput = document.getElementById('mapIdentityFileInput');
+    if (fileInput) fileInput.value = '';
+  }
+
   function getDockViewport() {
     return document.getElementById('dockViewport');
   }
@@ -686,6 +695,7 @@
     mapIdentityApplySelfOrbit,
     initMapIdentityProfileControls,
     clearMapIdentityTempState,
+    resetMapIdentityLocalState,
     initDockScroller,
     updateDockScrollHints,
     scrollDockByStep,
@@ -694,6 +704,7 @@
 
   window.safeMapAvatarUrl = safeMapAvatarUrl;
   window.resolveAvatarThumbUrl = safeMapAvatarUrl;
+  window.resetMapIdentityLocalState = resetMapIdentityLocalState;
   window.initDockScroller = initDockScroller;
   window.updateDockScrollHints = updateDockScrollHints;
   window.scrollDockByStep = scrollDockByStep;

@@ -2028,6 +2028,7 @@ function clearAuth() {
   clearPickupOverlay();
   if (authPass) authPass.value = "";
   if (authGhost) authGhost.checked = false;
+  window.resetMapIdentityLocalState?.();
   showAuthOverlayAndFocus("Status: signed out");
   syncAdminPortalSession();
 }
