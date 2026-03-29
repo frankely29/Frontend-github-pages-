@@ -2036,6 +2036,7 @@ function clearAuth() {
   lastPresenceHeadingDegSent = null;
   lastPresenceLargeJumpCandidate = null;
   window.resetMapIdentityLocalState?.();
+  window.resetPickupRecordingLocalState?.();
   showAuthOverlayAndFocus("Status: signed out");
   syncAdminPortalSession();
 }
