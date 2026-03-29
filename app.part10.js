@@ -2136,6 +2136,45 @@ async function applyPostAuthPreferences({ email, forceGhostSync, desiredGhostMod
   }
 }
 
+function seedSelfStateFromAuthResponse(authData, fallbackEmail) {
+  if (!authData || typeof authData !== "object") return;
+  const rawId = authData?.id;
+  const hasNumericId = Number.isFinite(Number(rawId));
+  const hasStringId = typeof rawId === "string" && rawId.trim() !== "";
+  if (!hasNumericId && !hasStringId) return;
+
+  const resolvedId = typeof rawId === "string" ? rawId.trim() : rawId;
+  const normalizedFallbackEmail = String(fallbackEmail || "").trim();
+  const resolvedEmail = String(authData?.email || normalizedFallbackEmail || "").trim();
+  const emailLocalPart = resolvedEmail && resolvedEmail.includes("@") ? resolvedEmail.split("@")[0] : "";
+  const fallbackLocalPart = normalizedFallbackEmail && normalizedFallbackEmail.includes("@")
+    ? normalizedFallbackEmail.split("@")[0]
+    : "";
+  const resolvedDisplayName = String(
+    authData?.display_name || emailLocalPart || fallbackLocalPart || "Driver"
+  ).trim() || "Driver";
+
+  const seededMe = {
+    ...(me || {}),
+    id: resolvedId,
+    email: resolvedEmail || null,
+    display_name: resolvedDisplayName,
+    ghost_mode: !!authData?.ghost_mode,
+    is_admin: !!authData?.is_admin,
+    trial_expires_at: authData?.trial_expires_at ?? null,
+    leaderboard_badge_code: me?.leaderboard_badge_code ?? null,
+    leaderboard_has_crown: !!me?.leaderboard_has_crown,
+    avatar_url: me?.avatar_url ?? null,
+    avatar_thumb_url: me?.avatar_thumb_url ?? null,
+    avatar_version: me?.avatar_version ?? null,
+    map_identity_mode: me?.map_identity_mode ?? null,
+  };
+
+  me = seededMe;
+  if (typeof window !== "undefined") window.me = seededMe;
+  syncCommunityIdentityGlobals();
+}
+
 async function doLogin(email, password, desiredGhostMode) {
   const body = { email, password };
   const data = await postJSON("/auth/login", body, null);
@@ -2144,6 +2183,7 @@ async function doLogin(email, password, desiredGhostMode) {
   communityToken = token;
   localStorage.setItem(LS_TOKEN, token);
   localStorage.setItem(LS_EMAIL, email);
+  seedSelfStateFromAuthResponse(data, email);
   await loadMe();
   syncCommunityIdentityGlobals();
   setAuthUI(true, `Status: signed in as ${me?.display_name || me?.email || email}`);
@@ -2165,6 +2205,7 @@ async function doSignup(email, password, desiredGhostMode) {
   communityToken = token;
   localStorage.setItem(LS_TOKEN, token);
   localStorage.setItem(LS_EMAIL, email);
+  seedSelfStateFromAuthResponse(data, email);
   await loadMe();
   syncCommunityIdentityGlobals();
   setAuthUI(true, `Status: account created • signed in as ${me?.display_name || me?.email || email}`);
