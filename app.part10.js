@@ -2883,6 +2883,10 @@ function schedulePresencePoll({ immediate = false, reason = "scheduled" } = {}) 
   clearPresencePollTimer();
   if (!authHeaderOK()) return;
   if (immediate && reason === 'viewport-change') {
+    const nextViewportSignature = getPresenceViewportSignature();
+    if (nextViewportSignature) {
+      lastPresenceViewportSignature = nextViewportSignature;
+    }
     const nextViewportGateSignature = getPrecisePresenceViewportGateSignature();
     if (nextViewportGateSignature && nextViewportGateSignature === lastPresenceViewportGateSignature) {
       immediate = false;
