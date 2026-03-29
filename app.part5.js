@@ -947,11 +947,11 @@
       const safeLevel = Number.isFinite(level) && level > 0 ? Math.floor(level) : null;
       if (!Number.isFinite(userId) || !safeLevel) return progression;
       const prev = readStoredProgressionLevel(userId);
-      if (prev === null) {
+      const firstSeen = prev === null;
+      if (firstSeen) {
         writeStoredProgressionLevel(userId, safeLevel);
-        return progression;
       }
-      if ((forcePopupCheck || prev !== null) && safeLevel > prev) {
+      if (!firstSeen && (forcePopupCheck || prev !== null) && safeLevel > prev) {
         showLevelUpOverlay({
           ...progression,
           previous_level: prev,
