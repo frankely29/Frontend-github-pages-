@@ -499,9 +499,9 @@
       : rel.kind === 'incoming'
         ? 'View Challenge'
         : rel.kind === 'outgoing'
-          ? 'Challenge Sent'
+          ? 'View Challenge'
           : 'Challenge';
-    const disabled = rel.kind === 'outgoing' ? ' disabled' : '';
+    const disabled = '';
     return `<button class="driverProfileActionBtn" id="driverProfileChallengeBtn" type="button" data-rel-kind="${escapeHtml(rel.kind)}" data-game-type="${escapeHtml(rel.gameType)}" data-match-id="${escapeHtml(String(rel.matchId || ''))}"${disabled}>${escapeHtml(challengeLabel)}</button><button class="driverProfileActionBtn" id="driverProfileOpenInboxBtn" type="button">Message</button>`;
   }
 
