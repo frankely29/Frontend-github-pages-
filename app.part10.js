@@ -50,6 +50,8 @@ const PRESENCE_MOVE_THRESHOLD_MI = 0.018;
 const PRESENCE_HEADING_CHANGE_THRESHOLD_DEG = 14;
 const PRESENCE_STATIONARY_PUSH_MS = 25 * 1000;
 const PRESENCE_MOVING_PUSH_MS = 5 * 1000;
+const PRESENCE_REANCHOR_STABLE_RADIUS_MI = 0.18;
+const PRESENCE_REANCHOR_MIN_STABLE_MS = 8000;
 const PICKUP_VIEWPORT_BUFFER_RATIO = 0.12;
 const PICKUP_VIEWPORT_MIN_BUFFER_DEG = 0.01;
 
@@ -2028,6 +2030,10 @@ function clearAuth() {
   clearPickupOverlay();
   if (authPass) authPass.value = "";
   if (authGhost) authGhost.checked = false;
+  lastPresencePushMs = 0;
+  lastPresenceSentLatLng = null;
+  lastPresenceHeadingDegSent = null;
+  lastPresenceLargeJumpCandidate = null;
   window.resetMapIdentityLocalState?.();
   showAuthOverlayAndFocus("Status: signed out");
   syncAdminPortalSession();
@@ -3001,17 +3007,40 @@ async function pullPresenceAll() {
 let lastPresencePushMs = 0;
 let lastPresenceSentLatLng = null;
 let lastPresenceHeadingDegSent = null;
+let lastPresenceLargeJumpCandidate = null;
 async function communityMaybePushPresence(tsMsOrUnix, heading, accuracy) {
   if (!authHeaderOK()) return;
   if (!userLatLng) return;
   if (Number.isFinite(accuracy) && accuracy > PRESENCE_ACCURACY_THRESHOLD) return;
 
+  const nowMs = Date.now();
   if (lastPresenceSentLatLng) {
     const jumpMi = haversineMiles(lastPresenceSentLatLng, userLatLng);
-    if (jumpMi > MAX_JUMP_MILES) return;
+    if (jumpMi <= MAX_JUMP_MILES) {
+      lastPresenceLargeJumpCandidate = null;
+    } else {
+      const candidate = lastPresenceLargeJumpCandidate;
+      if (!candidate) {
+        lastPresenceLargeJumpCandidate = { lat: userLatLng.lat, lng: userLatLng.lng, ts: nowMs };
+        return;
+      }
+      const candidateDistanceMi = haversineMiles(candidate, userLatLng);
+      const candidateStableMs = nowMs - Number(candidate.ts || 0);
+      const stableEnough = candidateDistanceMi <= PRESENCE_REANCHOR_STABLE_RADIUS_MI
+        && candidateStableMs >= PRESENCE_REANCHOR_MIN_STABLE_MS;
+      if (stableEnough) {
+        lastPresenceSentLatLng = null;
+        lastPresenceHeadingDegSent = null;
+        lastPresenceLargeJumpCandidate = null;
+      } else {
+        if (candidateDistanceMi > PRESENCE_REANCHOR_STABLE_RADIUS_MI) {
+          lastPresenceLargeJumpCandidate = { lat: userLatLng.lat, lng: userLatLng.lng, ts: nowMs };
+        }
+        return;
+      }
+    }
   }
 
-  const nowMs = Date.now();
   const moveDeltaMi = lastPresenceSentLatLng ? haversineMiles(lastPresenceSentLatLng, userLatLng) : Infinity;
   const headingDelta = Number.isFinite(lastPresenceHeadingDegSent) && Number.isFinite(heading)
     ? Math.abs(shortestAngleDelta(lastPresenceHeadingDegSent, heading))
@@ -3037,6 +3066,7 @@ async function communityMaybePushPresence(tsMsOrUnix, heading, accuracy) {
     );
     lastPresenceSentLatLng = { lat: userLatLng.lat, lng: userLatLng.lng };
     lastPresenceHeadingDegSent = Number.isFinite(heading) ? normDeg(heading) : lastPresenceHeadingDegSent;
+    lastPresenceLargeJumpCandidate = null;
   } catch (e) {
     console.warn("presence/update failed:", e);
   }
