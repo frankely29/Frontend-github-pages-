@@ -2740,6 +2740,13 @@ function presenceRowsFingerprint(rows) {
     .join("||");
 }
 
+function selfPresencePositionFingerprint(selfPos) {
+  const lat = Number(selfPos?.lat);
+  const lng = Number(selfPos?.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return "";
+  return `${lat.toFixed(6)}|${lng.toFixed(6)}`;
+}
+
 function presenceRowsCrowdingFingerprint(rows) {
   return (Array.isArray(rows) ? rows : [])
     .map((row) => [
@@ -2834,7 +2841,11 @@ function renderAdaptivePresenceFromCache() {
   const boundsObj = getPresenceRenderBounds();
   const viewportRows = boundsObj ? rows.filter((row) => rowInPresenceRenderBounds(row, boundsObj)) : rows.slice();
   const nextMode = computePresenceRenderMode(rows);
-  const nextRenderFingerprint = `${nextMode}::${presenceRowsFingerprint(viewportRows)}`;
+  const selfPos = (userLatLng && Number.isFinite(userLatLng.lat) && Number.isFinite(userLatLng.lng))
+    ? { lat: userLatLng.lat, lng: userLatLng.lng }
+    : null;
+  const selfFingerprint = selfPresencePositionFingerprint(selfPos);
+  const nextRenderFingerprint = `${nextMode}::${presenceRowsFingerprint(viewportRows)}::${selfFingerprint}`;
 
   if (!presenceLiteArtifactsCreated && renderedPresenceFingerprint === nextRenderFingerprint) return;
 
@@ -2849,10 +2860,6 @@ function renderAdaptivePresenceFromCache() {
       richRows.push(row);
     }
   }
-
-  const selfPos = (userLatLng && Number.isFinite(userLatLng.lat) && Number.isFinite(userLatLng.lng))
-    ? { lat: userLatLng.lat, lng: userLatLng.lng }
-    : null;
 
   clusterPresenceByScreenPosition(richRows, selfPos);
 

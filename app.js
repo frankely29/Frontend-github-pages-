@@ -3581,6 +3581,7 @@ function startLocationWatch() {
       }
 
       if (navMarker) navMarker.setLngLat([lng, lat]);
+      if (authHeaderOK()) scheduleAdaptivePresenceRender();
 
       if (!debugOnce.selfMarker) {
         console.log("DEBUG self marker lngLat", { lng, lat });
