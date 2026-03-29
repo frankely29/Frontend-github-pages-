@@ -41,7 +41,7 @@
 
   function shouldBypassBrowserCache(urlOrPath) {
     const text = String(urlOrPath || '');
-    return /\/(presence\/|events\/pickups\/recent|chat\/|auth\/|me(\b|\/)|day_tendency\/today|admin\/)/.test(text);
+    return /\/(presence\/|events\/pickups\/recent|chat\/|auth\/|me(\b|\/)|day_tendency\/(today|frame_context)|admin\/)/.test(text);
   }
 
   function getToken(storageKey = 'community_token_v1') {
