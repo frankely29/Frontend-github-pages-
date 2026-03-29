@@ -177,10 +177,10 @@
     pickupSaveCooldownUntilMs = 0;
     const guardNotice = document.getElementById('pickupGuardNotice');
     if (!guardNotice) return;
-    if (guardNotice._pickupTimer) window.clearTimeout(guardNotice._pickupTimer);
+    if (guardNotice._pickupTimer != null) window.clearTimeout(guardNotice._pickupTimer);
     guardNotice._pickupTimer = null;
     guardNotice.style.display = 'none';
-    guardNotice.textContent = '';
+    guardNotice.innerHTML = '';
   }
 
   function showPickupReward(payload = {}) {
