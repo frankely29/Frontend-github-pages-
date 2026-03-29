@@ -504,6 +504,13 @@
   function normalizeTendencyScope(value) {
     const scope = String(value || '').trim().toLowerCase().replace(/[-\s]+/g, '_');
     if (!scope) return '';
+    if (scope === 'real_location') return '';
+    if (scope === 'citywide') return 'citywide';
+    if (scope === 'manhattan_mode') return 'manhattan';
+    if (scope === 'staten_island_mode') return 'staten_island';
+    if (scope === 'queens_mode') return 'queens';
+    if (scope === 'brooklyn_mode') return 'brooklyn';
+    if (scope === 'bronx_wash_heights_mode') return 'bronx_wash_heights';
     if (scope === 'statenisland') return 'staten_island';
     if (scope === 'bronxwashheights') return 'bronx_wash_heights';
     return scope;
@@ -526,7 +533,7 @@
   function getTendencyScopeWeight(props, geom, payload) {
     if (!payload) return 0;
 
-    const payloadScope = normalizeTendencyScope(payload?.source_mode || payload?.scope);
+    const payloadScope = normalizeTendencyScope(payload?.scope || payload?.source_mode);
     if (payloadScope === 'staten_island') return isStatenIslandFeature(props) ? 1 : 0;
     if (payloadScope === 'manhattan') return isManhattanModeZone(props, geom) ? 1 : 0;
     if (payloadScope === 'queens') return isQueensModeZone(props) ? 1 : 0;
