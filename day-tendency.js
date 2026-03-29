@@ -1,10 +1,18 @@
 (() => {
   window.TlcDayTendencyState = window.TlcDayTendencyState || {
     payload: null,
+    frameContext: null,
+    advancedContext: null,
     updatedAt: 0,
     lastPublishedKey: null,
     getPayload() {
       return this.payload || null;
+    },
+    getFrameContext() {
+      return this.frameContext || null;
+    },
+    getAdvancedContext() {
+      return this.advancedContext || null;
     }
   };
 
@@ -38,6 +46,9 @@
     visibilityBound: false,
     started: false,
     isRefreshing: false,
+    requestSeq: 0,
+    activeRequestSeq: 0,
+    activeAbortController: null,
     borough: null,
     lastQueryLat: null,
     lastQueryLng: null,
@@ -46,6 +57,9 @@
     hasRenderedRealPayload: false,
     firstFixTimer: null,
     lastPublishedKey: null,
+    lastRequestedFrameTime: null,
+    lastFetchRoute: null,
+    frameRenderDebounceTimer: null,
   };
 
   function apiBase() {
@@ -61,17 +75,17 @@
     return String(source || '').replace(/\/$/, '');
   }
 
-  async function fetchJSONWithTimeout(url, timeoutMs = 10000) {
+  async function fetchJSONWithTimeout(url, timeoutMs = 10000, signal = null) {
     if (runtime?.fetchJSON) {
-      return runtime.fetchJSON(url, { method: 'GET', headers: { Accept: 'application/json' }, timeoutMs });
+      return runtime.fetchJSON(url, { method: 'GET', headers: { Accept: 'application/json' }, timeoutMs, signal });
     }
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const controller = signal ? null : new AbortController();
+    const timeout = setTimeout(() => (controller ? controller.abort() : null), timeoutMs);
     try {
       const res = await fetch(url, {
         method: 'GET',
         headers: { Accept: 'application/json' },
-        signal: controller.signal,
+        signal: signal || controller?.signal,
       });
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}`);
@@ -375,6 +389,37 @@
     return clamped.toFixed(precision);
   }
 
+  function getCurrentFrameTimeIso() {
+    const value = window.TlcModeInternals?.getCurrentFrame?.()?.time;
+    const text = String(value || '').trim();
+    return text || null;
+  }
+
+  function normalizeRouteErrorStatus(error) {
+    const status = Number(error?.status);
+    return Number.isFinite(status) ? status : null;
+  }
+
+  function isFrameContextRouteUnavailable(error) {
+    const status = normalizeRouteErrorStatus(error);
+    if (status === 404 || status === 400) return true;
+    const message = String(error?.message || '').toLowerCase();
+    return (
+      message.includes('failed to fetch') ||
+      message.includes('networkerror') ||
+      message.includes('network request failed') ||
+      message.includes('load failed')
+    );
+  }
+
+  function pickVisiblePayloadFromFrameContext(frameContextResponse) {
+    const local = normalizeDayTendencyPayload(frameContextResponse?.local_context);
+    if (local && String(local.status || '').toLowerCase() === 'ok') return local;
+    const global = normalizeDayTendencyPayload(frameContextResponse?.global_context);
+    if (global && String(global.status || '').toLowerCase() === 'ok') return global;
+    return null;
+  }
+
   function buildDayTendencyPublishKey(normalizedPayload) {
     if (!normalizedPayload) return 'null';
     return [
@@ -396,21 +441,28 @@
 
   // the meter UI is separate from map coloring.
   // app.part11.js consumes this shared payload to bias the final mode-aware rating.
-  function publishDayTendencyPayload(raw) {
-    const normalized = normalizeDayTendencyPayload(raw);
-    const nextKey = buildDayTendencyPublishKey(normalized);
+  function publishDayTendencyState({ payload, frameContext = null, advancedContext = null, route = null } = {}) {
+    const normalizedPayload = normalizeDayTendencyPayload(payload);
+    const payloadKey = buildDayTendencyPublishKey(normalizedPayload);
+    const frameKey = normalizePublishString(frameContext?.frame_time || frameContext?.request?.frame_time);
+    const advancedReady = String(Boolean(advancedContext?.ready_for_frontend_adjustment));
+    const advancedGlobal = normalizePublishNumber(advancedContext?.global_penalty_points, { min: 0, max: 100, precision: 2 });
+    const advancedLocal = normalizePublishNumber(advancedContext?.local_penalty_points, { min: 0, max: 100, precision: 2 });
+    const advancedCap = normalizePublishNumber(advancedContext?.total_penalty_cap, { min: 0, max: 100, precision: 2 });
+    const dropCap = normalizePublishNumber(advancedContext?.bucket_drop_cap, { min: 0, max: 8, precision: 0 });
+    const routeKey = normalizePublishString(route || STATE.lastFetchRoute);
+    const nextKey = [payloadKey, `frame:${frameKey}`, `ready:${advancedReady}`, `g:${advancedGlobal}`, `l:${advancedLocal}`, `cap:${advancedCap}`, `drop:${dropCap}`, `route:${routeKey}`].join('|');
     const prevKey = String(STATE.lastPublishedKey ?? window.TlcDayTendencyState?.lastPublishedKey ?? 'null');
-    if (nextKey === prevKey) {
-      return normalized;
-    }
+    if (nextKey === prevKey) return normalizedPayload;
+
     STATE.lastPublishedKey = nextKey;
-    window.TlcDayTendencyState.payload = normalized;
+    window.TlcDayTendencyState.payload = normalizedPayload;
+    window.TlcDayTendencyState.frameContext = frameContext || null;
+    window.TlcDayTendencyState.advancedContext = advancedContext || null;
     window.TlcDayTendencyState.lastPublishedKey = nextKey;
     window.TlcDayTendencyState.updatedAt = Date.now();
-    window.dispatchEvent(new CustomEvent('tlc-day-tendency-updated', {
-      detail: normalized,
-    }));
-    return normalized;
+    window.dispatchEvent(new CustomEvent('tlc-day-tendency-updated', { detail: normalizedPayload }));
+    return normalizedPayload;
   }
 
   function applyDayTendencyPayload(payload) {
@@ -514,12 +566,11 @@
     STATE.lastQueryAt = 0;
     STATE.hasInitialGpsFix = false;
     applyWaitingForGpsState();
-    publishDayTendencyPayload(null);
+    publishDayTendencyState({ payload: null, frameContext: null, advancedContext: null, route: null });
     startFirstFixWatcher();
   }
 
   async function refreshDayTendencyMeter({ force = false } = {}) {
-    if (STATE.isRefreshing) return;
     const latLng = await getCurrentTendencyLatLng();
 
     if (!latLng) {
@@ -530,15 +581,27 @@
     STATE.hasInitialGpsFix = true;
     if (!force && !movedMateriallyFromLastQuery(latLng) && STATE.lastQueryAt > 0) return;
 
+    const requestSeq = ++STATE.requestSeq;
+    STATE.activeRequestSeq = requestSeq;
+    if (STATE.activeAbortController) {
+      try { STATE.activeAbortController.abort(); } catch (_) {}
+    }
+    const abortController = new AbortController();
+    STATE.activeAbortController = abortController;
     STATE.isRefreshing = true;
+
     let payload = null;
+    let frameContext = null;
+    let advancedContext = null;
     let hadError = false;
 
     try {
       const base = apiBase();
       if (!base) throw new Error('API base missing');
       const modeFlags = getCurrentModeFlags();
-      const params = new URLSearchParams({
+      const frameTime = getCurrentFrameTimeIso();
+      STATE.lastRequestedFrameTime = frameTime;
+      const baseParams = {
         lat: String(latLng.lat),
         lng: String(latLng.lng),
         manhattan_mode: String(modeFlags.manhattan_mode),
@@ -546,25 +609,53 @@
         bronx_wash_heights_mode: String(modeFlags.bronx_wash_heights_mode),
         queens_mode: String(modeFlags.queens_mode),
         brooklyn_mode: String(modeFlags.brooklyn_mode),
-      });
-      const query = `?${params.toString()}`;
-      payload = await fetchJSONWithTimeout(`${base}/day_tendency/today${query}`, 10000);
+      };
+
+      let usedTodayFallback = false;
+      if (frameTime) {
+        try {
+          const frameParams = new URLSearchParams({ ...baseParams, frame_time: frameTime });
+          const frameQuery = `?${frameParams.toString()}`;
+          const frameRes = await fetchJSONWithTimeout(`${base}/day_tendency/frame_context${frameQuery}`, 10000, abortController.signal);
+          frameContext = frameRes || null;
+          advancedContext = frameRes?.advanced_context || null;
+          payload = pickVisiblePayloadFromFrameContext(frameRes);
+          STATE.lastFetchRoute = 'frame_context';
+        } catch (error) {
+          if (abortController.signal.aborted) return;
+          if (!isFrameContextRouteUnavailable(error)) throw error;
+          usedTodayFallback = true;
+        }
+      } else {
+        usedTodayFallback = true;
+      }
+
+      if (usedTodayFallback) {
+        const fallbackParams = new URLSearchParams(baseParams);
+        const fallbackQuery = `?${fallbackParams.toString()}`;
+        const todayRes = await fetchJSONWithTimeout(`${base}/day_tendency/today${fallbackQuery}`, 10000, abortController.signal);
+        payload = normalizeDayTendencyPayload(todayRes);
+        frameContext = null;
+        advancedContext = null;
+        STATE.lastFetchRoute = 'today_fallback';
+      }
+
+      if (requestSeq !== STATE.requestSeq) return;
       STATE.lastQueryLat = latLng.lat;
       STATE.lastQueryLng = latLng.lng;
       STATE.lastQueryAt = Date.now();
-      const applied = applyDayTendencyPayload(payload);
-      if (applied) {
-        publishDayTendencyPayload(payload);
-      } else {
-        publishDayTendencyPayload(null);
-      }
-    } catch (_) {
+      applyDayTendencyPayload(payload);
+      publishDayTendencyState({ payload, frameContext, advancedContext, route: STATE.lastFetchRoute });
+    } catch (error) {
+      if (abortController.signal.aborted || requestSeq !== STATE.requestSeq) return;
       hadError = true;
-      publishDayTendencyPayload(null);
+      publishDayTendencyState({ payload: null, frameContext: null, advancedContext: null, route: null });
       if (!STATE.hasRenderedRealPayload && STATE.root) STATE.root.hidden = true;
     } finally {
+      if (requestSeq === STATE.activeRequestSeq) {
+        STATE.isRefreshing = false;
+      }
       scheduleRetryIfNeeded(payload, hadError);
-      STATE.isRefreshing = false;
     }
   }
 
@@ -639,6 +730,16 @@
       refreshDayTendencyMeter({ force: true });
     });
 
+    window.addEventListener('team-joseo-frame-rendered', () => {
+      if (STATE.frameRenderDebounceTimer) {
+        window.clearTimeout(STATE.frameRenderDebounceTimer);
+      }
+      STATE.frameRenderDebounceTimer = window.setTimeout(() => {
+        STATE.frameRenderDebounceTimer = null;
+        refreshDayTendencyMeter({ force: true });
+      }, 120);
+    });
+
     STATE.positionPollTimer = runtimePolling
       ? runtimePolling.setInterval('day-tendency:position', positionDayTendencyRoot, 5000)
       : window.setInterval(positionDayTendencyRoot, 5000);
@@ -682,13 +783,17 @@
   window.getDayTendencyMeterDebug = function () {
     return {
       payload: window.TlcDayTendencyState?.payload || null,
+      frameContext: window.TlcDayTendencyState?.frameContext || null,
+      advancedContext: window.TlcDayTendencyState?.advancedContext || null,
       updatedAt: window.TlcDayTendencyState?.updatedAt || 0,
       lastPublishedKey: window.TlcDayTendencyState?.lastPublishedKey ?? null,
       lastQueryAt: STATE.lastQueryAt || 0,
       lastQueryLat: STATE.lastQueryLat ?? null,
       lastQueryLng: STATE.lastQueryLng ?? null,
       hasInitialGpsFix: !!STATE.hasInitialGpsFix,
-      hasRenderedRealPayload: !!STATE.hasRenderedRealPayload
+      hasRenderedRealPayload: !!STATE.hasRenderedRealPayload,
+      lastRequestedFrameTime: STATE.lastRequestedFrameTime || null,
+      lastFetchRoute: STATE.lastFetchRoute || null
     };
   };
 

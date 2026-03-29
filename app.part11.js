@@ -484,6 +484,14 @@
     return window.TlcDayTendencyState?.getPayload?.() || null;
   }
 
+  function getLiveDayTendencyFrameContext() {
+    return window.TlcDayTendencyState?.getFrameContext?.() || window.TlcDayTendencyState?.frameContext || null;
+  }
+
+  function getLiveDayTendencyAdvancedContext() {
+    return window.TlcDayTendencyState?.getAdvancedContext?.() || window.TlcDayTendencyState?.advancedContext || null;
+  }
+
   function getTendencyConfidenceFactor(payload) {
     const confidence = Number(payload?.confidence);
     if (!Number.isFinite(confidence)) return 1;
@@ -550,6 +558,184 @@
     }
 
     return 0;
+  }
+
+
+  const BUCKET_THRESHOLDS = [
+    { bucket: 'green', minRating: 87, rank: 0 },
+    { bucket: 'purple', minRating: 73, rank: 1 },
+    { bucket: 'indigo', minRating: 60, rank: 2 },
+    { bucket: 'blue', minRating: 48, rank: 3 },
+    { bucket: 'sky', minRating: 40, rank: 4 },
+    { bucket: 'yellow', minRating: 33, rank: 5 },
+    { bucket: 'orange', minRating: 25, rank: 6 },
+    { bucket: 'red', minRating: 1, rank: 7 },
+  ];
+
+  const BUCKET_MIN_BY_NAME = BUCKET_THRESHOLDS.reduce((acc, item) => {
+    acc[item.bucket] = item.minRating;
+    return acc;
+  }, {});
+
+  const BUCKET_RANK_BY_NAME = BUCKET_THRESHOLDS.reduce((acc, item) => {
+    acc[item.bucket] = item.rank;
+    return acc;
+  }, {});
+
+  function getBucketRank(bucket) {
+    const key = String(bucket || '').trim().toLowerCase();
+    if (!key) return null;
+    return Number.isFinite(BUCKET_RANK_BY_NAME[key]) ? BUCKET_RANK_BY_NAME[key] : null;
+  }
+
+  function getBucketMinRating(bucket) {
+    const key = String(bucket || '').trim().toLowerCase();
+    if (!key) return null;
+    return Number.isFinite(BUCKET_MIN_BY_NAME[key]) ? BUCKET_MIN_BY_NAME[key] : null;
+  }
+
+  function clampAdjustedRatingToBucketDropCap(baseRating, adjustedRating, bucketDropCap) {
+    const baseBucket = getBucketForRating(baseRating);
+    const baseRank = getBucketRank(baseBucket);
+    if (!Number.isFinite(baseRank)) {
+      return { adjustedRating, bucketDropCapTriggered: false, minAllowedRating: null, baseBucket, adjustedBucket: getBucketForRating(adjustedRating) };
+    }
+    const cap = Number.isFinite(Number(bucketDropCap)) ? Math.max(0, Math.floor(Number(bucketDropCap))) : 1;
+    const maxAllowedRank = Math.min(7, baseRank + cap);
+    const minAllowedBucket = BUCKET_THRESHOLDS.find((item) => item.rank === maxAllowedRank)?.bucket || 'red';
+    const minAllowedRating = getBucketMinRating(minAllowedBucket) || 1;
+    if (adjustedRating >= minAllowedRating) {
+      return { adjustedRating, bucketDropCapTriggered: false, minAllowedRating, baseBucket, adjustedBucket: getBucketForRating(adjustedRating) };
+    }
+    return {
+      adjustedRating: minAllowedRating,
+      bucketDropCapTriggered: true,
+      minAllowedRating,
+      baseBucket,
+      adjustedBucket: getBucketForRating(minAllowedRating),
+    };
+  }
+
+  function normalizeLocalScope(value) {
+    const key = String(value || '').trim().toLowerCase().replace(/[-\s]+/g, '_');
+    if (!key || key === 'citywide' || key === 'none' || key === 'null') return '';
+    if (key === 'manhattan_mode') return 'manhattan_mode';
+    if (key === 'staten_island_mode') return 'staten_island_mode';
+    if (key === 'bronx_wash_heights_mode') return 'bronx_wash_heights_mode';
+    if (key === 'queens_mode') return 'queens_mode';
+    if (key === 'brooklyn_mode') return 'brooklyn_mode';
+    if (key === 'manhattan') return 'manhattan';
+    if (key === 'queens') return 'queens';
+    if (key === 'brooklyn') return 'brooklyn';
+    if (key === 'staten_island' || key === 'statenisland') return 'staten_island';
+    if (key === 'bronx_wash_heights' || key === 'bronxwashheights') return 'bronx_wash_heights';
+    return key;
+  }
+
+  function getAdvancedLocalScope(advancedContext) {
+    return normalizeLocalScope(
+      advancedContext?.resolved_local_scope ||
+      advancedContext?.local_scope ||
+      advancedContext?.scope ||
+      advancedContext?.scope_key ||
+      advancedContext?.local_scope_key
+    );
+  }
+
+  function isFeatureInAdvancedLocalScope(scope, props, geom) {
+    if (!scope || scope === 'citywide') return false;
+    if (scope === 'manhattan_mode') return isManhattanModeZone(props, geom);
+    if (scope === 'staten_island_mode') return isStatenIslandFeature(props);
+    if (scope === 'bronx_wash_heights_mode') return isBronxWashHeightsModeZone(props);
+    if (scope === 'queens_mode') return isQueensModeZone(props);
+    if (scope === 'brooklyn_mode') return isBrooklynModeZone(props);
+    if (scope === 'manhattan') return isManhattanFeature(props);
+    if (scope === 'queens') return isQueensFeature(props);
+    if (scope === 'brooklyn') return isBrooklynFeature(props);
+    if (scope === 'staten_island') return isStatenIslandFeature(props);
+    if (scope === 'bronx_wash_heights') return isBronxWashHeightsModeZone(props);
+    return false;
+  }
+
+  function getTendencyAdjustmentMeta(baseRating, props, geom) {
+    const fallbackRating = clampRating100(baseRating);
+    if (!Number.isFinite(Number(baseRating))) {
+      return {
+        adjustedRating: fallbackRating,
+        adjustedFiniteRating: null,
+        globalPenaltyApplied: 0,
+        localPenaltyApplied: 0,
+        totalPenaltyApplied: 0,
+        localScopeMatch: false,
+        localScope: '',
+        bucketDropCapTriggered: false,
+        reason: 'non_finite_base',
+      };
+    }
+
+    if (isAirportZone(props)) {
+      return {
+        adjustedRating: fallbackRating,
+        adjustedFiniteRating: fallbackRating,
+        globalPenaltyApplied: 0,
+        localPenaltyApplied: 0,
+        totalPenaltyApplied: 0,
+        localScopeMatch: false,
+        localScope: '',
+        bucketDropCapTriggered: false,
+        reason: 'airport_zone',
+      };
+    }
+
+    const advancedContext = getLiveDayTendencyAdvancedContext();
+    if (!advancedContext) {
+      return {
+        adjustedRating: fallbackRating,
+        adjustedFiniteRating: fallbackRating,
+        globalPenaltyApplied: 0,
+        localPenaltyApplied: 0,
+        totalPenaltyApplied: 0,
+        localScopeMatch: false,
+        localScope: '',
+        bucketDropCapTriggered: false,
+        reason: 'missing_advanced_context',
+      };
+    }
+
+    if (!advancedContext.ready_for_frontend_adjustment) {
+      return {
+        adjustedRating: fallbackRating,
+        adjustedFiniteRating: fallbackRating,
+        globalPenaltyApplied: 0,
+        localPenaltyApplied: 0,
+        totalPenaltyApplied: 0,
+        localScopeMatch: false,
+        localScope: getAdvancedLocalScope(advancedContext),
+        bucketDropCapTriggered: false,
+        reason: 'advanced_context_not_ready',
+      };
+    }
+
+    const globalPenaltyApplied = Math.max(0, Number(advancedContext.global_penalty_points) || 0);
+    const localScope = getAdvancedLocalScope(advancedContext);
+    const localScopeMatch = isFeatureInAdvancedLocalScope(localScope, props, geom);
+    const localPenaltyApplied = localScopeMatch ? Math.max(0, Number(advancedContext.local_penalty_points) || 0) : 0;
+    const totalPenaltyCap = Math.max(0, Number(advancedContext.total_penalty_cap) || 0);
+    const totalPenaltyApplied = Math.min(totalPenaltyCap, globalPenaltyApplied + localPenaltyApplied);
+    const adjustedBeforeBucketCap = clampRating100(Number(baseRating) - totalPenaltyApplied);
+    const bucketCapResult = clampAdjustedRatingToBucketDropCap(Number(baseRating), adjustedBeforeBucketCap, advancedContext.bucket_drop_cap);
+
+    return {
+      adjustedRating: bucketCapResult.adjustedRating,
+      adjustedFiniteRating: bucketCapResult.adjustedRating,
+      globalPenaltyApplied,
+      localPenaltyApplied,
+      totalPenaltyApplied,
+      localScopeMatch,
+      localScope,
+      bucketDropCapTriggered: !!bucketCapResult.bucketDropCapTriggered,
+      reason: 'adjusted',
+    };
   }
 
   function getVisibleScoreSourceForFeature(props, geom) {
@@ -838,10 +1024,12 @@
   }
 
   function getTendencyAdjustedRating(baseRating, props, geom) {
-    return clampRating100(baseRating);
+    return getTendencyAdjustmentMeta(baseRating, props, geom).adjustedRating;
   }
 
   function getTendencyFillAlpha(props, geom) {
+    const advancedContext = getLiveDayTendencyAdvancedContext();
+    if (advancedContext?.ready_for_frontend_adjustment && !isAirportZone(props)) return 1;
     const payload = getLiveDayTendencyPayload();
     if (!payload) return 1;
     const scopeWeight = getTendencyScopeWeight(props, geom, payload);
@@ -1420,15 +1608,22 @@
   }
 
   function effectiveBucket(props, geom) {
+    const baseRating = getModeAwareBaseRating(props, geom);
+    const meta = getTendencyAdjustmentMeta(baseRating, props, geom);
+    if (Number.isFinite(meta.adjustedFiniteRating)) return getBucketForRating(meta.adjustedFiniteRating);
     return getModeAwareBaseBucket(props, geom);
   }
 
   function effectiveColor(props, geom) {
+    const baseRating = getModeAwareBaseRating(props, geom);
+    const meta = getTendencyAdjustmentMeta(baseRating, props, geom);
+    if (Number.isFinite(meta.adjustedFiniteRating)) return getColorForRating(meta.adjustedFiniteRating);
     return getModeAwareBaseColor(props, geom);
   }
 
   function effectiveRating(props, geom) {
-    return clampRating100(getModeAwareBaseRating(props, geom));
+    const baseRating = getModeAwareBaseRating(props, geom);
+    return getTendencyAdjustedRating(baseRating, props, geom);
   }
 
   function getFeatureVisibleScoreDebug(props, geom) {
@@ -1522,7 +1717,10 @@
 
   window.getDayTendencyColorDebug = function (props, geom) {
     const payload = getLiveDayTendencyPayload();
+    const frameContext = getLiveDayTendencyFrameContext();
+    const advancedContext = getLiveDayTendencyAdvancedContext();
     const baseRating = getModeAwareBaseRating(props, geom);
+    const adjustmentMeta = getTendencyAdjustmentMeta(baseRating, props, geom);
     const finalRating = effectiveRating(props, geom);
     const scopeWeight = getTendencyScopeWeight(props, geom, payload);
     const lowTendencyFactor = getLowTendencyFactor(payload);
@@ -1531,6 +1729,8 @@
     const fillColor = effectiveFillColor(props, geom);
     return {
       payload,
+      frameContext,
+      advancedContext,
       modeFlags: getModeFlags(),
       activeModeTag: getActiveSpecialModeTagForFeature(props, geom),
       visibleScoreSource: getVisibleScoreSourceForFeature(props, geom),
@@ -1571,12 +1771,20 @@
       statenIslandV3ShadowBucket: readStatenIslandV3ShadowBucket(props),
       statenIslandV3ShadowConfidence: readStatenIslandV3ShadowConfidence(props),
       baseRating,
+      adjustedRating: adjustmentMeta.adjustedRating,
       finalRating,
       scopeWeight,
       lowTendencyFactor,
       fillAlpha,
       baseColor,
       fillColor,
+      baseBucket: getBucketForRating(baseRating),
+      adjustedBucket: Number.isFinite(adjustmentMeta.adjustedFiniteRating) ? getBucketForRating(adjustmentMeta.adjustedFiniteRating) : null,
+      globalPenaltyApplied: adjustmentMeta.globalPenaltyApplied,
+      localPenaltyApplied: adjustmentMeta.localPenaltyApplied,
+      totalPenaltyApplied: adjustmentMeta.totalPenaltyApplied,
+      localScopeMatch: adjustmentMeta.localScopeMatch,
+      bucketDropCapTriggered: adjustmentMeta.bucketDropCapTriggered,
       finalBucket: effectiveBucket(props, geom)
     };
   };
