@@ -75,7 +75,7 @@
   }
 
   function syncMapIdentitySavedAvatarCache() {
-    const serverAvatar = safeMapAvatarUrl(window?.me?.avatar_url);
+    const serverAvatar = safeMapAvatarUrl(window?.me?.avatar_thumb_url || window?.me?.avatar_url);
     if (serverAvatar) {
       mapIdentitySavedAvatarDataUrl = serverAvatar;
       return serverAvatar;
