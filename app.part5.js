@@ -206,7 +206,11 @@
 
   function driverProfileAvatarHTML(profileUser) {
     const name = String(profileUser?.display_name || 'Driver').trim() || 'Driver';
-    const rawAvatarUrl = String(profileUser?.avatar_url || '').trim();
+    const rawAvatarUrl = String(
+      profileUser?.avatar_thumb_url ||
+      profileUser?.avatar_url ||
+      ''
+    ).trim();
     const avatarUrl = typeof window.safeMapAvatarUrl === 'function'
       ? String(window.safeMapAvatarUrl(rawAvatarUrl) || '').trim()
       : rawAvatarUrl;
