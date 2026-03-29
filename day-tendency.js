@@ -59,6 +59,7 @@
     lastPublishedKey: null,
     lastRequestedFrameTime: null,
     lastFetchRoute: null,
+    frameRouteUnavailable: false,
     frameRenderDebounceTimer: null,
   };
 
@@ -612,7 +613,8 @@
       };
 
       let usedTodayFallback = false;
-      if (frameTime) {
+      const canUseFrameRoute = !!frameTime && !STATE.frameRouteUnavailable;
+      if (canUseFrameRoute) {
         try {
           const frameParams = new URLSearchParams({ ...baseParams, frame_time: frameTime });
           const frameQuery = `?${frameParams.toString()}`;
@@ -620,10 +622,12 @@
           frameContext = frameRes || null;
           advancedContext = frameRes?.advanced_context || null;
           payload = pickVisiblePayloadFromFrameContext(frameRes);
+          STATE.frameRouteUnavailable = false;
           STATE.lastFetchRoute = 'frame_context';
         } catch (error) {
           if (abortController.signal.aborted) return;
           if (!isFrameContextRouteUnavailable(error)) throw error;
+          STATE.frameRouteUnavailable = true;
           usedTodayFallback = true;
         }
       } else {
@@ -793,7 +797,8 @@
       hasInitialGpsFix: !!STATE.hasInitialGpsFix,
       hasRenderedRealPayload: !!STATE.hasRenderedRealPayload,
       lastRequestedFrameTime: STATE.lastRequestedFrameTime || null,
-      lastFetchRoute: STATE.lastFetchRoute || null
+      lastFetchRoute: STATE.lastFetchRoute || null,
+      frameRouteUnavailable: !!STATE.frameRouteUnavailable
     };
   };
 
