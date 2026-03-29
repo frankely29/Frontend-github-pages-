@@ -171,6 +171,17 @@
     }, 3600);
   }
 
+
+  function resetPickupRecordingLocalState() {
+    pickupSaveInFlight = false;
+    pickupSaveCooldownUntilMs = 0;
+    const guardNotice = document.getElementById('pickupGuardNotice');
+    if (!guardNotice) return;
+    window.clearTimeout(guardNotice._pickupTimer);
+    guardNotice._pickupTimer = null;
+    guardNotice.style.display = 'none';
+  }
+
   function showPickupReward(payload = {}) {
     if (typeof window.handlePickupProgressionDelta === 'function') {
       window.handlePickupProgressionDelta(payload || {});
@@ -499,6 +510,8 @@
   FEATURE.runAdminPickupRecordingFullSuite = runAdminPickupRecordingFullSuite;
   FEATURE.loadAdminRecentPickupTrips = loadAdminRecentPickupTrips;
   FEATURE.voidAdminPickupTrip = voidAdminPickupTrip;
+  FEATURE.resetPickupRecordingLocalState = resetPickupRecordingLocalState;
 
+  window.resetPickupRecordingLocalState = resetPickupRecordingLocalState;
   window.PickupRecordingFeature = FEATURE;
 })();
