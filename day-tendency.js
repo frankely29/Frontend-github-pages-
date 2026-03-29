@@ -59,7 +59,8 @@
     lastPublishedKey: null,
     lastRequestedFrameTime: null,
     lastFetchRoute: null,
-    frameRouteUnavailable: false,
+    frameRouteRetryAfterMs: 0,
+    frameRouteFailureCount: 0,
     frameRenderDebounceTimer: null,
   };
 
@@ -413,6 +414,10 @@
     );
   }
 
+  function canRetryFrameRouteNow() {
+    return Date.now() >= Number(STATE.frameRouteRetryAfterMs || 0);
+  }
+
   function pickVisiblePayloadFromFrameContext(frameContextResponse) {
     const local = normalizeDayTendencyPayload(frameContextResponse?.local_context);
     if (local && String(local.status || '').toLowerCase() === 'ok') return local;
@@ -451,8 +456,41 @@
     const advancedLocal = normalizePublishNumber(advancedContext?.local_penalty_points, { min: 0, max: 100, precision: 2 });
     const advancedCap = normalizePublishNumber(advancedContext?.total_penalty_cap, { min: 0, max: 100, precision: 2 });
     const dropCap = normalizePublishNumber(advancedContext?.bucket_drop_cap, { min: 0, max: 8, precision: 0 });
+    const advancedLocalScope = normalizePublishString(advancedContext?.local_scope);
+    const advancedLocalScopeLabel = normalizePublishString(advancedContext?.local_scope_label);
+    const advancedLocalScopeKind = normalizePublishString(advancedContext?.local_scope_kind);
+    const advancedLocalSourceBorough = normalizePublishString(advancedContext?.local_source_borough);
+    const advancedLocalSourceMode = normalizePublishString(advancedContext?.local_source_mode);
+    const advancedLocalScopeSpecificity = normalizePublishString(advancedContext?.local_context_source_scope_specificity);
+    const advancedLocalModelLayer = normalizePublishString(advancedContext?.local_context_source_model_layer);
+    const advancedLocalSpecificityWeight = normalizePublishNumber(advancedContext?.local_context_context_specificity_weight, { min: 0, max: 1, precision: 4 });
+    const advancedLocalExactScopeSpecific = normalizePublishString(advancedContext?.local_context_exact_scope_specific);
+    const advancedLocalBroadScopeFallback = normalizePublishString(advancedContext?.local_context_broad_scope_fallback);
+    const frameResolvedScope = normalizePublishString(frameContext?.resolved_scope?.scope);
+    const frameResolvedScopeLabel = normalizePublishString(frameContext?.resolved_scope?.scope_label);
     const routeKey = normalizePublishString(route || STATE.lastFetchRoute);
-    const nextKey = [payloadKey, `frame:${frameKey}`, `ready:${advancedReady}`, `g:${advancedGlobal}`, `l:${advancedLocal}`, `cap:${advancedCap}`, `drop:${dropCap}`, `route:${routeKey}`].join('|');
+    const nextKey = [
+      payloadKey,
+      `frame:${frameKey}`,
+      `ready:${advancedReady}`,
+      `g:${advancedGlobal}`,
+      `l:${advancedLocal}`,
+      `cap:${advancedCap}`,
+      `drop:${dropCap}`,
+      `adv_scope:${advancedLocalScope}`,
+      `adv_scope_label:${advancedLocalScopeLabel}`,
+      `adv_scope_kind:${advancedLocalScopeKind}`,
+      `adv_src_borough:${advancedLocalSourceBorough}`,
+      `adv_src_mode:${advancedLocalSourceMode}`,
+      `adv_scope_specificity:${advancedLocalScopeSpecificity}`,
+      `adv_model_layer:${advancedLocalModelLayer}`,
+      `adv_specificity_weight:${advancedLocalSpecificityWeight}`,
+      `adv_exact_scope_specific:${advancedLocalExactScopeSpecific}`,
+      `adv_broad_scope_fallback:${advancedLocalBroadScopeFallback}`,
+      `frame_scope:${frameResolvedScope}`,
+      `frame_scope_label:${frameResolvedScopeLabel}`,
+      `route:${routeKey}`
+    ].join('|');
     const prevKey = String(STATE.lastPublishedKey ?? window.TlcDayTendencyState?.lastPublishedKey ?? 'null');
     if (nextKey === prevKey) return normalizedPayload;
 
@@ -613,7 +651,7 @@
       };
 
       let usedTodayFallback = false;
-      const canUseFrameRoute = !!frameTime && !STATE.frameRouteUnavailable;
+      const canUseFrameRoute = !!frameTime && canRetryFrameRouteNow();
       if (canUseFrameRoute) {
         try {
           const frameParams = new URLSearchParams({ ...baseParams, frame_time: frameTime });
@@ -622,12 +660,14 @@
           frameContext = frameRes || null;
           advancedContext = frameRes?.advanced_context || null;
           payload = pickVisiblePayloadFromFrameContext(frameRes);
-          STATE.frameRouteUnavailable = false;
+          STATE.frameRouteFailureCount = 0;
+          STATE.frameRouteRetryAfterMs = 0;
           STATE.lastFetchRoute = 'frame_context';
         } catch (error) {
           if (abortController.signal.aborted) return;
           if (!isFrameContextRouteUnavailable(error)) throw error;
-          STATE.frameRouteUnavailable = true;
+          STATE.frameRouteFailureCount = Number(STATE.frameRouteFailureCount || 0) + 1;
+          STATE.frameRouteRetryAfterMs = Date.now() + 30000;
           usedTodayFallback = true;
         }
       } else {
@@ -798,7 +838,9 @@
       hasRenderedRealPayload: !!STATE.hasRenderedRealPayload,
       lastRequestedFrameTime: STATE.lastRequestedFrameTime || null,
       lastFetchRoute: STATE.lastFetchRoute || null,
-      frameRouteUnavailable: !!STATE.frameRouteUnavailable
+      frameRouteFailureCount: Number(STATE.frameRouteFailureCount || 0),
+      frameRouteRetryAfterMs: Number(STATE.frameRouteRetryAfterMs || 0),
+      canRetryFrameRouteNow: canRetryFrameRouteNow()
     };
   };
 

@@ -23,7 +23,7 @@
   const MANHATTAN_GLOBAL_PENALTY = 0.98;
 
   const MANHATTAN_MIN_ZONES = 40;
-  const MANHATTAN_CORE_MAX_LAT = 40.795;
+  const MANHATTAN_CORE_MAX_LAT = 40.82;
 
   const BRONX_WASH_HEIGHTS_TRIP_FREQUENCY_WEIGHT = 0.55;
   const BRONX_WASH_HEIGHTS_FOLLOWUP_WEIGHT = 0.20;
@@ -1731,6 +1731,8 @@
       payload,
       frameContext,
       advancedContext,
+      localContextSourceScopeSpecificity: advancedContext?.local_context_source_scope_specificity ?? null,
+      localContextBroadScopeFallback: advancedContext?.local_context_broad_scope_fallback ?? null,
       modeFlags: getModeFlags(),
       activeModeTag: getActiveSpecialModeTagForFeature(props, geom),
       visibleScoreSource: getVisibleScoreSourceForFeature(props, geom),
