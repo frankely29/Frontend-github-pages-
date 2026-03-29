@@ -131,8 +131,9 @@
     return normalizeMapIdentityMode(mode) === MAP_IDENTITY_MODE_AVATAR && !!safeMapAvatarUrl(avatarUrl);
   }
 
-  function mapIdentityBadgeOverlayHTML({ badgeCode, avatarPx, code }) {
-    const meta = window.leaderboardBadgeMeta?.(badgeCode || code) || {
+  function mapIdentityBadgeOverlayHTML({ badgeCode, avatarPx, code, leaderboardHasCrown = false }) {
+    const effectiveCode = leaderboardHasCrown ? 'crown' : (badgeCode || code);
+    const meta = window.leaderboardBadgeMeta?.(effectiveCode) || {
       code: '',
       label: '',
       toneClass: ''
@@ -143,7 +144,7 @@
     return `<span class="mapIdentityBadgeOverlay mapBadgeWearable ${meta.toneClass}" aria-label="${escapeHtml(meta.label)}">${window.renderLeaderboardBadgeSvg?.(meta.code, { size, mapWearable: true, compact: true }) || ''}</span>`;
   }
 
-  function mapIdentityPresenceCoreHTML({ markerClass, name, avatarUrl, cfg, leaderboardBadgeCode, orbitMeta = null, directionId = '' }) {
+  function mapIdentityPresenceCoreHTML({ markerClass, name, avatarUrl, cfg, leaderboardBadgeCode, leaderboardHasCrown = false, orbitMeta = null, directionId = '' }) {
     const safeAvatar = safeMapAvatarUrl(avatarUrl);
     const avatarHTML = safeAvatar
       ? `<div class="mapPresenceAvatar"><img src="${escapeHtml(safeAvatar)}" alt="avatar" loading="lazy"></div>`
@@ -155,7 +156,7 @@
           <div class="mapPresenceShell" style="width:${cfg.avatarPx}px;height:${cfg.avatarPx}px;">
             ${avatarHTML}
           </div>
-          <span class="mapPresenceBadgeOverlay">${mapIdentityBadgeOverlayHTML({ badgeCode: leaderboardBadgeCode, avatarPx: cfg.avatarPx })}</span>
+          <span class="mapPresenceBadgeOverlay">${mapIdentityBadgeOverlayHTML({ badgeCode: leaderboardBadgeCode, leaderboardHasCrown, avatarPx: cfg.avatarPx })}</span>
         </div>
       </div>
     `;
@@ -182,13 +183,13 @@
     return `<span class="mapIdentityOverlapBadge" style="position:absolute;top:-4px;right:-4px;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:#111;color:#fff;border:1px solid rgba(255,255,255,0.7);font-size:10px;line-height:14px;font-weight:700;text-align:center;pointer-events:none;">${escapeHtml(text)}</span>`;
   }
 
-  function mapIdentityRenderSelfLabel({ name, avatarUrl, mode, zoom, leaderboardBadgeCode, orbitMeta = null, overlapMeta = null }) {
+  function mapIdentityRenderSelfLabel({ name, avatarUrl, mode, zoom, leaderboardBadgeCode, leaderboardHasCrown = false, orbitMeta = null, overlapMeta = null }) {
     const safeName = (String(name || 'Driver').trim() || 'Driver');
     const cfg = mapIdentityVisualConfig(zoom);
     const effectiveOrbitMeta = orbitMeta || overlapMeta || null;
     const slotSide = String(effectiveOrbitMeta?.side || '').trim();
     const sideClass = slotSide ? ` slot-${slotSide}` : '';
-    return `<div class="selfIdentitySlot${sideClass}" data-map-identity-label="1">${mapIdentityPresenceCoreHTML({ markerClass: 'mapPresenceSelf', name: safeName, avatarUrl, cfg, leaderboardBadgeCode, directionId: 'navPresenceDirectionRot', orbitMeta: effectiveOrbitMeta })}</div>`;
+    return `<div class="selfIdentitySlot${sideClass}" data-map-identity-label="1">${mapIdentityPresenceCoreHTML({ markerClass: 'mapPresenceSelf', name: safeName, avatarUrl, cfg, leaderboardBadgeCode, leaderboardHasCrown, directionId: 'navPresenceDirectionRot', orbitMeta: effectiveOrbitMeta })}</div>`;
   }
 
   function mapIdentityOrbitStyleText(orbitMeta, zoomValue) {
@@ -256,13 +257,13 @@
     });
   }
 
-  function mapIdentityRenderDriverLabel({ name, avatarUrl, mode, zoom, orbitMeta = null, overlapMeta = null, leaderboardBadgeCode }) {
+  function mapIdentityRenderDriverLabel({ name, avatarUrl, mode, zoom, orbitMeta = null, overlapMeta = null, leaderboardBadgeCode, leaderboardHasCrown = false }) {
     const effectiveOrbitMeta = orbitMeta || overlapMeta || null;
     const safeName = (String(name || 'Driver').trim() || 'Driver');
     const cfg = mapIdentityVisualConfig(zoom);
     const slotSide = String(effectiveOrbitMeta?.side || '').trim();
     const sideClass = slotSide ? ` slot-${slotSide}` : '';
-    return `<div class="otherDrvIdentitySlot${sideClass}" data-map-identity-label="1">${mapIdentityPresenceCoreHTML({ markerClass: 'mapPresenceOther', name: safeName, avatarUrl, cfg, leaderboardBadgeCode, orbitMeta: effectiveOrbitMeta })}</div>`;
+    return `<div class="otherDrvIdentitySlot${sideClass}" data-map-identity-label="1">${mapIdentityPresenceCoreHTML({ markerClass: 'mapPresenceOther', name: safeName, avatarUrl, cfg, leaderboardBadgeCode, leaderboardHasCrown, orbitMeta: effectiveOrbitMeta })}</div>`;
   }
 
   function mapIdentityApplySelfOrbit(orbitMeta) {
