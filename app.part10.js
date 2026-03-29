@@ -3032,6 +3032,7 @@ async function communityMaybePushPresence(tsMsOrUnix, heading, accuracy) {
         lastPresenceSentLatLng = null;
         lastPresenceHeadingDegSent = null;
         lastPresenceLargeJumpCandidate = null;
+        lastPresencePushMs = 0;
       } else {
         if (candidateDistanceMi > PRESENCE_REANCHOR_STABLE_RADIUS_MI) {
           lastPresenceLargeJumpCandidate = { lat: userLatLng.lat, lng: userLatLng.lng, ts: nowMs };
