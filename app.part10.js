@@ -2590,7 +2590,33 @@ function computePresenceRenderMode(rows) {
 }
 
 function chooseRichPresenceUserIds(rows, mode) {
-  return new Set((Array.isArray(rows) ? rows : []).map((row) => String(row?.uid)));
+  const sourceRows = Array.isArray(rows) ? rows : [];
+  if (mode === 'full') {
+    return new Set(sourceRows.map((row) => String(row?.uid)));
+  }
+
+  let richLimit = sourceRows.length;
+  if (mode === 'medium') richLimit = PRESENCE_MEDIUM_RICH_LIMIT;
+  else if (mode === 'heavy') richLimit = PRESENCE_HEAVY_RICH_LIMIT;
+
+  richLimit = Math.max(0, Math.min(sourceRows.length, Number(richLimit) || 0));
+
+  const richUserIds = new Set();
+  const focusedId = presenceFocusedUserId == null ? null : String(presenceFocusedUserId);
+  if (focusedId && sourceRows.some((row) => String(row?.uid) === focusedId)) {
+    richUserIds.add(focusedId);
+  }
+
+  const sortedRows = sourceRows
+    .slice()
+    .sort((a, b) => Number(b?.updatedAt || 0) - Number(a?.updatedAt || 0));
+
+  for (const row of sortedRows) {
+    if (richUserIds.size >= richLimit) break;
+    richUserIds.add(String(row?.uid));
+  }
+
+  return richUserIds;
 }
 function clusterPresenceByScreenPosition(rows, selfPos) {
   const richRows = Array.isArray(rows) ? rows : [];
@@ -2881,6 +2907,9 @@ function renderAdaptivePresenceFromCache() {
   const rows = Array.isArray(cachedPresenceRows) ? cachedPresenceRows : [];
   const boundsObj = getPresenceRenderBounds();
   const viewportRows = boundsObj ? rows.filter((row) => rowInPresenceRenderBounds(row, boundsObj)) : rows.slice();
+  if (presenceFocusedUserId && !viewportRows.some((row) => String(row?.uid) === String(presenceFocusedUserId))) {
+    presenceFocusedUserId = null;
+  }
   const nextMode = computePresenceRenderMode(rows);
   const selfPos = (userLatLng && Number.isFinite(userLatLng.lat) && Number.isFinite(userLatLng.lng))
     ? { lat: userLatLng.lat, lng: userLatLng.lng }
@@ -2899,6 +2928,8 @@ function renderAdaptivePresenceFromCache() {
     const uid = String(row.uid);
     if (richUserIds.has(uid)) {
       richRows.push(row);
+    } else {
+      liteRows.push(row);
     }
   }
 
