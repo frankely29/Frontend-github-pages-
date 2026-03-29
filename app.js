@@ -3211,11 +3211,11 @@ let lastSelfOrbitMeta = null;
 
 function makeNavIcon() {
   const myName = authHeaderOK() ? me?.display_name || "" : "";
-  const resolvedAvatarUrl = window.safeMapAvatarUrl?.(me?.avatar_url || '') || '';
+  const resolvedAvatarUrl = window.safeMapAvatarUrl?.(me?.avatar_thumb_url || me?.avatar_url || '') || '';
   const navLabelHTML = (typeof window !== "undefined" && typeof window.mapIdentityRenderSelfLabel === "function")
     ? window.mapIdentityRenderSelfLabel({
       name: myName,
-      avatarUrl: me?.avatar_url,
+      avatarUrl: me?.avatar_thumb_url || me?.avatar_url,
       mode: me?.map_identity_mode,
       zoom: map?.getZoom?.(),
       leaderboardBadgeCode: me?.leaderboard_badge_code,
@@ -3307,7 +3307,7 @@ function refreshNavNameLabel() {
   if (wrap && typeof window !== "undefined" && typeof window.mapIdentityRenderSelfLabel === "function") {
     wrap.innerHTML = window.mapIdentityRenderSelfLabel({
       name: myName,
-      avatarUrl: me?.avatar_url,
+      avatarUrl: me?.avatar_thumb_url || me?.avatar_url,
       mode: me?.map_identity_mode,
       zoom: map?.getZoom?.(),
       leaderboardBadgeCode: me?.leaderboard_badge_code,
@@ -3319,7 +3319,7 @@ function refreshNavNameLabel() {
     if (!el) return;
     const avatarEl = el.querySelector('.mapPresenceAvatar');
     if (avatarEl && avatarEl.tagName === 'IMG') {
-      const nextAvatar = window.safeMapAvatarUrl?.(me?.avatar_url || '') || '';
+      const nextAvatar = window.safeMapAvatarUrl?.(me?.avatar_thumb_url || me?.avatar_url || '') || '';
       if (nextAvatar) {
         avatarEl.src = nextAvatar;
       }
