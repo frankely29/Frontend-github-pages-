@@ -501,23 +501,48 @@
     return String(value || '').trim().toLowerCase();
   }
 
+  function normalizeTendencyScope(value) {
+    const scope = String(value || '').trim().toLowerCase().replace(/[-\s]+/g, '_');
+    if (!scope) return '';
+    if (scope === 'statenisland') return 'staten_island';
+    if (scope === 'bronxwashheights') return 'bronx_wash_heights';
+    return scope;
+  }
+
+  function isSpecialTendencyScope(scope) {
+    return (
+      scope === 'staten_island' ||
+      scope === 'manhattan' ||
+      scope === 'queens' ||
+      scope === 'brooklyn' ||
+      scope === 'bronx_wash_heights'
+    );
+  }
+
   function getFeatureBoroughName(props) {
     return normalizeBoroughName(props?.borough);
   }
 
   function getTendencyScopeWeight(props, geom, payload) {
     if (!payload) return 0;
-    const flags = getModeFlags();
 
-    if (flags.statenIslandMode) return isStatenIslandFeature(props) ? 1 : 0;
-    if (flags.manhattanMode) return isManhattanModeZone(props, geom) ? 1 : 0;
-    if (flags.queensMode) return isQueensModeZone(props) ? 1 : 0;
-    if (flags.brooklynMode) return isBrooklynModeZone(props) ? 1 : 0;
-    if (flags.bronxWashHeightsMode) return isBronxWashHeightsModeZone(props) ? 1 : 0;
+    const payloadScope = normalizeTendencyScope(payload?.source_mode || payload?.scope);
+    if (payloadScope === 'staten_island') return isStatenIslandFeature(props) ? 1 : 0;
+    if (payloadScope === 'manhattan') return isManhattanModeZone(props, geom) ? 1 : 0;
+    if (payloadScope === 'queens') return isQueensModeZone(props) ? 1 : 0;
+    if (payloadScope === 'brooklyn') return isBrooklynModeZone(props) ? 1 : 0;
+    if (payloadScope === 'bronx_wash_heights') return isBronxWashHeightsModeZone(props) ? 1 : 0;
 
     const payloadBorough = normalizeBoroughName(payload?.source_borough || payload?.borough);
-    if (!payloadBorough) return 0;
-    return getFeatureBoroughName(props) === payloadBorough ? 1 : 0;
+    if (payloadBorough) {
+      return getFeatureBoroughName(props) === payloadBorough ? 1 : 0;
+    }
+
+    if (!payloadScope || payloadScope === 'citywide' || !isSpecialTendencyScope(payloadScope)) {
+      return 0;
+    }
+
+    return 0;
   }
 
   function getVisibleScoreSourceForFeature(props, geom) {
