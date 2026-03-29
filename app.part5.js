@@ -1271,15 +1271,16 @@
     document.getElementById('driverProfileChallengeBtn')?.addEventListener('click', () => {
       const rel = resolveViewerRelationship(profilePayload);
       const gamesModule = window.TlcGamesModule || null;
-      gamesModule?.openGamesBattleComposer?.({
-        targetUserId: driverProfileState.userId,
-        displayName: name,
-        gameType: rel.gameType || 'dominoes'
-      });
       if (rel.kind === 'active') {
         gamesModule?.loadActiveBattleMatch?.({ preferredMatchId: rel.matchId || undefined });
       } else if (rel.kind === 'incoming' || rel.kind === 'outgoing') {
         gamesModule?.loadGamesBattleDashboard?.({ silent: false });
+      } else {
+        gamesModule?.openGamesBattleComposer?.({
+          targetUserId: driverProfileState.userId,
+          displayName: name,
+          gameType: rel.gameType || 'dominoes'
+        });
       }
       closeDriverProfileModal();
     });
