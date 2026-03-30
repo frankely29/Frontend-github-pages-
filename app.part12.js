@@ -314,7 +314,7 @@
 
     const override = ZONE_LABEL_OVERRIDES[locationId] || null;
     const poly = getPrimaryPolygonForLabel(feature?.geometry);
-    const orientation = 0;
+    const orientation = estimatePolygonOrientationDegrees(poly);
     const sizeBucket = estimateZoneLabelSizeBucket(poly);
 
     const shortName = override?.label || ZONE_LABEL_SHORT_NAMES[locationId] || normalizeZoneLabelBaseName(zoneName);
@@ -400,6 +400,19 @@
       map.addSource("zone-labels", { type: "geojson", data: core.emptyGeojson?.() || { type: "FeatureCollection", features: [] } });
     }
 
+    const zoneLabelTextSizeExpr = [
+      "interpolate",
+      ["linear"],
+      ["zoom"],
+      7, 0,
+      8, 0,
+      9, 0,
+      10, 0,
+      11, ["*", ["coalesce", ["get", "textSize"], 10], 0.45],
+      12, ["*", ["coalesce", ["get", "textSize"], 10], 0.75],
+      15, ["*", ["coalesce", ["get", "textSize"], 10], 1.00]
+    ];
+
     if (!map.getLayer("zone-labels")) {
       map.addLayer({
         id: "zone-labels",
@@ -409,18 +422,7 @@
           "symbol-placement": "point",
           "text-field": ["coalesce", ["get", "label"], ""],
           "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
-          "text-size": [
-            "interpolate",
-            ["linear"],
-            ["zoom"],
-            7, 0,
-            8, 0,
-            9, 0,
-            10, 0,
-            11, 5,
-            12, 9,
-            15, 20,
-          ],
+          "text-size": zoneLabelTextSizeExpr,
           "text-max-width": ["coalesce", ["get", "textMaxWidth"], 4],
           "text-letter-spacing": ["coalesce", ["get", "letterSpacing"], 0],
           "text-rotate": ["coalesce", ["get", "textRotate"], 0],
@@ -439,6 +441,12 @@
         },
         minzoom: LABEL_ZOOM_MIN,
       });
+    } else {
+      map.setLayoutProperty("zone-labels", "text-size", zoneLabelTextSizeExpr);
+      map.setLayoutProperty("zone-labels", "text-max-width", ["coalesce", ["get", "textMaxWidth"], 4]);
+      map.setLayoutProperty("zone-labels", "text-letter-spacing", ["coalesce", ["get", "letterSpacing"], 0]);
+      map.setLayoutProperty("zone-labels", "text-rotate", ["coalesce", ["get", "textRotate"], 0]);
+      map.setLayoutProperty("zone-labels", "symbol-sort-key", ["coalesce", ["get", "sortKey"], 0]);
     }
 
     await core.ensurePickupSourceAndLayers?.();
