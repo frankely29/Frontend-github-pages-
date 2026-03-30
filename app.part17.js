@@ -14,6 +14,7 @@
 
   const recommendLine = internals.getRecommendEl?.() || document.getElementById("recommendLine");
   const dockMount = document.getElementById("aiAssistantWidgetMount");
+  let assistantDockResizeObserver = null;
 
   const state = {
     activeStableZoneId: null,
@@ -100,9 +101,9 @@
     heartbeatKey: null,
     touchPauseUntil: 0,
     hoverPaused: false,
-    dockResizeObserver: null,
     marqueeTimeout: null,
-    rotateTimeout: null,
+    rotationTimerHandle: null,
+    rotationNextDueAt: 0,
   };
 
   function safeNum(v, fallback = null) {
@@ -373,6 +374,7 @@
       .replace(/Nearby zone has better score; prepare to move\.?/gi, "Move window coming.")
       .replace(/Current zone is acceptable; keep monitoring\.?/gi, "Mixed signals.")
       .replace(/Waiting for stable zone\.?/gi, "Collecting location context.")
+      .replace(/Outlook unavailable\.?/gi, "Checking outlook.")
       .replace(/dwell/gi, "stay");
     return normalized;
   }
@@ -501,13 +503,14 @@
     const list = [];
     const actionLabel = humanActionLabel(state.finalActionCode);
     const actionReason = humanizeAssistantReason(state.finalActionReason);
-    const primary = `${actionLabel}: ${actionReason}`;
+    const primaryReason = actionReason ? `${actionReason.charAt(0).toLowerCase()}${actionReason.slice(1)}` : "mixed signals.";
+    const primary = `${actionLabel}: ${primaryReason}`;
     list.push({ key: "action", text: primary, severity: severityForAction(state.finalActionCode) });
 
     if (state.assistantMoveTarget?.zoneName && Number.isFinite(state.assistantMoveTarget?.distanceMiles)) {
       list.push({
         key: "target",
-        text: `Go to ${state.assistantMoveTarget.zoneName}: ${state.assistantMoveTarget.distanceMiles.toFixed(1)} mi away.`,
+        text: `Go to ${state.assistantMoveTarget.zoneName} • ${state.assistantMoveTarget.distanceMiles.toFixed(1)} mi`,
         severity: "info"
       });
     }
@@ -517,9 +520,12 @@
       list.push({ key: "target_window", text: `Target stronger through ${until}.`, severity: "info" });
     }
 
-    if (state.outlookSummaryText) list.push({ key: "outlook", text: humanizeAssistantReason(state.outlookSummaryText), severity: "info" });
+    const rawOutlook = String(state.outlookSummaryText || "").trim();
+    if (rawOutlook && !/^outlook unavailable\.?$/i.test(rawOutlook)) {
+      list.push({ key: "outlook", text: humanizeAssistantReason(rawOutlook), severity: "info" });
+    }
     if (state.moveTargetOutlookSummaryText) list.push({ key: "target_outlook", text: humanizeAssistantReason(state.moveTargetOutlookSummaryText), severity: "info" });
-    if (state.currentZoneCitywideRank) list.push({ key: "rank", text: `Citywide #${state.currentZoneCitywideRank} • Borough #${state.currentZoneBoroughRank || "-"}`, severity: "info" });
+    if (state.currentZoneCitywideRank) list.push({ key: "rank", text: `Citywide #${state.currentZoneCitywideRank} • ${state.currentBoroughName || "Borough"} #${state.currentZoneBoroughRank || "-"}`, severity: "info" });
 
     const uniq = [];
     const seen = new Set();
@@ -542,8 +548,10 @@
     if (!recommendLine) return;
     const action = humanActionLabel(state.finalActionCode);
     const reason = humanizeAssistantReason(state.finalActionReason);
-    const target = state.assistantMoveTarget?.zoneName ? ` • Target: ${state.assistantMoveTarget.zoneName}` : "";
-    recommendLine.textContent = `AI Assistant: ${action} • ${reason}${target}`;
+    const reasonForMirror = reason ? `${reason.charAt(0).toUpperCase()}${reason.slice(1)}` : "Mixed signals.";
+    const preferTarget = (state.finalActionCode === "MOVE_SOON" || state.finalActionCode === "LEAVE_NOW") && state.assistantMoveTarget?.zoneName;
+    const tail = preferTarget ? `Target: ${state.assistantMoveTarget.zoneName}` : reasonForMirror;
+    recommendLine.textContent = `AI Assistant: ${action} • ${tail}`;
   }
 
   function renderWidget() {
@@ -571,7 +579,8 @@
       </div>
     `;
     applyMarqueeIfNeeded();
-    updateAssistantDockLayout();
+    scheduleNextMessageRotation();
+    if (dockMount) updateAssistantDockLayout();
   }
 
   function buildRankList(items) {
@@ -606,7 +615,7 @@
     const overflow = inner.scrollWidth - viewport.clientWidth;
     if (overflow > 8) {
       const duration = Math.max(10000, Math.min(22000, overflow * 18));
-      const delay = Math.max(500, Math.min(700, Math.round(overflow * 2.2)));
+      const delay = 600;
       inner.style.animationDuration = `${duration}ms`;
       inner.style.animationDelay = `${delay}ms`;
       state.marqueeActive = true;
@@ -626,34 +635,33 @@
     const dock = document.getElementById("aiAssistantDock");
     const onlineBadge = document.getElementById("onlineBadge");
     const weatherBadge = document.getElementById("weatherBadge");
-    if (!dock) return;
+    if (!dock || !onlineBadge || !weatherBadge) return;
 
     const topLane = "calc(env(safe-area-inset-top) + 10px)";
     const fallbackTop = "calc(env(safe-area-inset-top) + 44px)";
 
-    const onlineRect = onlineBadge?.getBoundingClientRect?.();
-    const weatherRect = weatherBadge?.getBoundingClientRect?.();
-    if (onlineRect && weatherRect) {
-      const laneLeft = onlineRect.right + 10;
-      const laneRight = weatherRect.left - 10;
-      const laneWidth = laneRight - laneLeft;
-      if (laneWidth >= 240) {
-        dock.style.left = `${laneLeft}px`;
-        dock.style.right = `${Math.max(0, window.innerWidth - laneRight)}px`;
-        dock.style.top = topLane;
-        dock.style.transform = "none";
-        dock.style.width = "auto";
-        dock.style.maxWidth = "none";
-        return;
-      }
+    const onlineRect = onlineBadge.getBoundingClientRect?.();
+    const weatherRect = weatherBadge.getBoundingClientRect?.();
+    if (!onlineRect || !weatherRect) return;
+    if (![onlineRect.right, weatherRect.left].every((n) => Number.isFinite(n))) return;
+
+    const laneLeft = onlineRect.right + 10;
+    const laneRight = weatherRect.left - 10;
+    const laneWidth = laneRight - laneLeft;
+    if (Number.isFinite(laneWidth) && laneWidth >= 260) {
+      dock.style.left = `${laneLeft}px`;
+      dock.style.right = `${Math.max(0, window.innerWidth - laneRight)}px`;
+      dock.style.width = `${laneWidth}px`;
+      dock.style.transform = "none";
+      dock.style.top = topLane;
+      return;
     }
 
     dock.style.left = "50%";
     dock.style.right = "auto";
+    dock.style.width = "min(420px, calc(100vw - 32px))";
     dock.style.top = fallbackTop;
     dock.style.transform = "translateX(-50%)";
-    dock.style.width = "min(420px, calc(100vw - 32px))";
-    dock.style.maxWidth = "calc(100vw - 32px)";
   }
 
   function bindDockLayoutObservers() {
@@ -666,9 +674,10 @@
     document.addEventListener("visibilitychange", refresh);
 
     if (typeof ResizeObserver === "function") {
-      state.dockResizeObserver = new ResizeObserver(() => updateAssistantDockLayout());
-      if (onlineBadge) state.dockResizeObserver.observe(onlineBadge);
-      if (weatherBadge) state.dockResizeObserver.observe(weatherBadge);
+      if (assistantDockResizeObserver) assistantDockResizeObserver.disconnect();
+      assistantDockResizeObserver = new ResizeObserver(() => updateAssistantDockLayout());
+      if (onlineBadge) assistantDockResizeObserver.observe(onlineBadge);
+      if (weatherBadge) assistantDockResizeObserver.observe(weatherBadge);
     }
 
     if (onlineBadge) new MutationObserver(refresh).observe(onlineBadge, { childList: true, subtree: true, characterData: true, attributes: true });
@@ -683,19 +692,29 @@
     return false;
   }
 
-  function rotateMessage() {
-    if (!state.assistantMessages.length || shouldPauseRotation()) return;
-    state.activeMessageIndex = (state.activeMessageIndex + 1) % state.assistantMessages.length;
-    renderWidget();
+  function clearMessageRotationTimer() {
+    if (state.rotationTimerHandle) {
+      clearTimeout(state.rotationTimerHandle);
+      state.rotationTimerHandle = null;
+    }
+    state.rotationNextDueAt = 0;
   }
 
-  function scheduleRotation() {
-    if (state.rotateTimeout) clearTimeout(state.rotateTimeout);
-    const delay = state.marqueeActive ? state.marqueeDurationMs : AI_ASSISTANT_ROTATE_MS;
-    state.rotateTimeout = setTimeout(() => {
-      rotateMessage();
-      scheduleRotation();
-    }, delay || AI_ASSISTANT_ROTATE_MS);
+  function scheduleNextMessageRotation() {
+    clearMessageRotationTimer();
+    if (!Array.isArray(state.assistantMessages) || state.assistantMessages.length < 2) return;
+    if (shouldPauseRotation()) return;
+    const delay = state.marqueeActive ? Math.max(800, state.marqueeDurationMs || 0) : AI_ASSISTANT_ROTATE_MS;
+    state.rotationNextDueAt = Date.now() + delay;
+    state.rotationTimerHandle = setTimeout(() => {
+      if (!Array.isArray(state.assistantMessages) || state.assistantMessages.length < 2) return;
+      if (shouldPauseRotation()) {
+        state.rotationTimerHandle = setTimeout(() => scheduleNextMessageRotation(), 800);
+        return;
+      }
+      state.activeMessageIndex = (state.activeMessageIndex + 1) % state.assistantMessages.length;
+      renderWidget();
+    }, delay);
   }
 
   function feedMaterialKey() {
@@ -902,9 +921,9 @@
       if (action === "toggle-expanded") toggleExpanded();
     });
     if (dockMount) {
-      dockMount.addEventListener("mouseenter", () => { state.hoverPaused = true; });
-      dockMount.addEventListener("mouseleave", () => { state.hoverPaused = false; });
-      dockMount.addEventListener("touchstart", () => { state.touchPauseUntil = Date.now() + 4500; }, { passive: true });
+      dockMount.addEventListener("mouseenter", () => { state.hoverPaused = true; clearMessageRotationTimer(); });
+      dockMount.addEventListener("mouseleave", () => { state.hoverPaused = false; scheduleNextMessageRotation(); });
+      dockMount.addEventListener("touchstart", () => { state.touchPauseUntil = Date.now() + 4500; clearMessageRotationTimer(); }, { passive: true });
     }
   }
 
@@ -927,5 +946,5 @@
   bindDockLayoutObservers();
   renderWidget();
   mirrorRecommendLine();
-  scheduleRotation();
+  updateAssistantDockLayout();
 })();
