@@ -1818,6 +1818,12 @@ function closeZonePopup() {
   zonePopupAutoCloseTimer = null;
 }
 
+function closeMapTapPanels() {
+  try { closeDrawer?.(); } catch (_) {}
+  try { window.closeDriverProfileModal?.(); } catch (_) {}
+  try { window.AdminPortal?.close?.(); } catch (_) {}
+}
+
 function wireZoneClickPopup() {
   if (!map) return;
 
@@ -1865,7 +1871,7 @@ function wireZoneClickPopup() {
 
       if (!zoneFeature) {
         closeZonePopup();
-        closeAllPanels();
+        closeMapTapPanels();
         return;
       }
 

@@ -58,7 +58,7 @@
       return;
     }
 
-    const allowed = new Set(["blue", "purple", "green"]);
+    const allowed = new Set(["blue", "indigo", "purple", "green"]);
     const DIST_PENALTY_PER_MILE = 4.0;
     const BRONX_WASH_HEIGHTS_DIST_PENALTY_PER_MILE = 2.0;
     const modes = core.getSpecialModes?.() || {};
