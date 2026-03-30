@@ -488,6 +488,7 @@ window.TlcMapUiInternals = {
   geometryCenter,
   haversineMiles,
   fetchJSON,
+  formatNYCTimeOnlyLabel,
   setBodyTheme,
   applyNightBasemap
 };
