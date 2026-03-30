@@ -657,3 +657,594 @@
     clearZoneEdgeCueSource,
   };
 })();
+
+(function() {
+  const STABLE_MIN_MS = 3000;
+  const STABLE_MIN_HITS = 2;
+  const CLEAR_GRACE_MS = 5000;
+  const STYLE_ID = "tlc-ai-assistant-style";
+
+  const state = {
+    phase: 2,
+    activeStableZoneId: null,
+    activeStableZoneName: "",
+    activeStableBorough: "",
+    activeStableZoneEnterTs: null,
+    activeStableZoneDwellMs: 0,
+    candidateZoneId: null,
+    candidateZoneFirstSeenTs: null,
+    candidateZoneConsecutiveHits: 0,
+    activeZoneLastSeenTs: null,
+    lastUserLocation: null,
+    lastFrameTime: null,
+    assistantStatus: "idle",
+    actionState: "TRACKING",
+    actionHeadline: "AI Assistant: locating current zone…",
+    actionSubline: "Waiting for location and frame.",
+    actionSeverity: "neutral",
+    assistantMoveTarget: null,
+    visibleScoreSource: null,
+    visibleScoreSourceLabel: null,
+    rating: null,
+    bucket: null,
+    airportExcluded: false,
+    citywideRank: null,
+    citywideTotal: null,
+    boroughRank: null,
+    boroughTotal: null,
+    busyNow: null,
+    busyNext: null,
+    shortTripPenalty: null,
+    longTripShareRaw: null,
+    longTripShareN: null,
+    balancedTripShareRaw: null,
+    balancedTripShareN: null,
+    sameZoneRetentionPenalty: null,
+    churnPressure: null,
+    downstreamValue: null,
+    marketSaturationPenalty: null,
+    manhattanCoreSaturationPenalty: null,
+    busyNowFlag: false,
+    slowNowFlag: false,
+    shortTripTrapFlag: false,
+    longTripFriendlyFlag: false,
+    saturationCautionFlag: false,
+    goodContinuationFlag: false,
+    weakContinuationFlag: false,
+    zoneHealth: "mixed",
+    tags: [],
+    dwellMs: 0,
+    dwellSeconds: 0,
+    dwellMinutesRounded: 0,
+    signalSnapshot: null,
+    lastRenderFingerprint: "",
+  };
+
+  function numberOrNull(value) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function getRecommendEl() {
+    return window.TlcMapUiInternals?.getRecommendEl?.() || document.getElementById("recommendLine") || null;
+  }
+
+  function ensureStyle() {
+    if (document.getElementById(STYLE_ID)) return;
+    const style = document.createElement("style");
+    style.id = STYLE_ID;
+    style.textContent = `
+      .aiAssistBanner{display:flex;flex-direction:column;gap:2px;line-height:1.25}
+      .aiAssistHeadline{font-weight:700}
+      .aiAssistMeta{font-size:12px;opacity:.95}
+      .aiAssistTags{display:flex;flex-wrap:wrap;gap:4px}
+      .aiAssistTag{font-size:11px;opacity:.95;padding:1px 6px;border-radius:999px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15)}
+      .aiAssistFooter{font-size:11px;opacity:.8}
+    `;
+    document.head.appendChild(style);
+  }
+
+  function getFrame(frame) {
+    return frame || window.TlcModeInternals?.getCurrentFrame?.() || null;
+  }
+
+  function getZoneId(props = {}) {
+    const id = window.TlcMapUiInternals?.getZoneLocationId?.(props) ?? props.LocationID;
+    return String(id || "").trim() || null;
+  }
+
+  function getActiveStableZoneFeature(frame) {
+    if (!state.activeStableZoneId) return null;
+    const features = frame?.polygons?.features || [];
+    const feature = features.find((item) => getZoneId(item?.properties || {}) === String(state.activeStableZoneId)) || null;
+    if (!feature) return null;
+    return { feature, props: feature.properties || {}, geom: feature.geometry || null };
+  }
+
+  function buildCurrentZoneSignalSnapshot(props = {}, geom = null) {
+    const now = Date.now();
+    const dwellMs = state.activeStableZoneEnterTs ? Math.max(0, now - state.activeStableZoneEnterTs) : 0;
+    const dwellMinutesRounded = Math.round(dwellMs / 60000);
+    return {
+      rating: numberOrNull(window.TlcModeModule?.effectiveRating?.(props, geom)),
+      bucket: String(window.TlcModeModule?.effectiveBucket?.(props, geom) || "").trim() || null,
+      visibleScoreSource: String(window.TlcModeModule?.getVisibleScoreSourceForFeature?.(props, geom) || "legacy_citywide"),
+      visibleScoreSourceLabel: String(window.TlcModeModule?.getVisibleScoreSourceLabel?.(props, geom) || "Team Joseo score"),
+      borough: String(props.borough || "").trim() || null,
+      airportExcluded: props.airport_excluded === true,
+      busyNow: numberOrNull(props.busy_now_base_n_shadow),
+      busyNext: numberOrNull(props.busy_next_base_n_shadow),
+      shortTripPenalty: numberOrNull(props.short_trip_penalty_n ?? props.short_trip_penalty_n_shadow),
+      longTripShareRaw: numberOrNull(props.long_trip_share_20plus),
+      longTripShareN: numberOrNull(props.long_trip_share_20plus_n),
+      balancedTripShareRaw: numberOrNull(props.balanced_trip_share_shadow ?? props.balanced_trip_share),
+      balancedTripShareN: numberOrNull(props.balanced_trip_share_n_shadow),
+      sameZoneRetentionPenalty: numberOrNull(props.same_zone_retention_penalty_n),
+      churnPressure: numberOrNull(props.churn_pressure_n_shadow ?? props.churn_pressure_n),
+      downstreamValue: numberOrNull(props.downstream_value_n),
+      marketSaturationPenalty: numberOrNull(props.market_saturation_penalty_n_shadow ?? props.market_saturation_penalty_n),
+      manhattanCoreSaturationPenalty: numberOrNull(props.manhattan_core_saturation_penalty_n_shadow ?? props.manhattan_core_saturation_penalty_n),
+      dwellMs,
+      dwellMinutesRounded,
+    };
+  }
+
+  function computeCurrentZoneDisplayedRanks(frame, activeZoneId, activeBorough) {
+    const features = frame?.polygons?.features || [];
+    const rows = [];
+    for (const feature of features) {
+      const props = feature?.properties || {};
+      const geom = feature?.geometry || null;
+      if (props.airport_excluded === true) continue;
+      const zoneId = getZoneId(props);
+      if (!zoneId) continue;
+      const rating = Number(window.TlcModeModule?.effectiveRating?.(props, geom));
+      if (!Number.isFinite(rating)) continue;
+      rows.push({
+        zoneId,
+        borough: String(props.borough || "").trim(),
+        rating,
+        idSort: Number.isFinite(Number(zoneId)) ? Number(zoneId) : Number.MAX_SAFE_INTEGER,
+      });
+    }
+
+    rows.sort((a, b) => {
+      if (b.rating !== a.rating) return b.rating - a.rating;
+      if (a.idSort !== b.idSort) return a.idSort - b.idSort;
+      return a.zoneId.localeCompare(b.zoneId);
+    });
+
+    const citywideIndex = rows.findIndex((row) => row.zoneId === String(activeZoneId));
+    const boroughRows = rows.filter((row) => String(row.borough) === String(activeBorough || ""));
+    const boroughIndex = boroughRows.findIndex((row) => row.zoneId === String(activeZoneId));
+
+    return {
+      citywideRank: citywideIndex >= 0 ? citywideIndex + 1 : null,
+      citywideTotal: rows.length || null,
+      boroughRank: boroughIndex >= 0 ? boroughIndex + 1 : null,
+      boroughTotal: boroughRows.length || null,
+    };
+  }
+
+  function classifyCurrentZone(signal) {
+    const busyNowFlag = (signal.busyNow ?? -Infinity) >= 0.68;
+    const slowNowFlag = (signal.busyNow ?? Infinity) <= 0.35 && (signal.busyNext ?? Infinity) <= 0.40;
+    const shortTripTrapFlag = (signal.shortTripPenalty ?? -Infinity) >= 0.62
+      && (signal.sameZoneRetentionPenalty ?? -Infinity) >= 0.55
+      && (signal.downstreamValue ?? Infinity) <= 0.45;
+    const longTripFriendlyFlag = ((signal.longTripShareN ?? -Infinity) >= 0.62
+      || ((signal.longTripShareRaw ?? -Infinity) >= 0.24
+      && (signal.downstreamValue ?? -Infinity) >= 0.50
+      && (signal.shortTripPenalty ?? Infinity) <= 0.55));
+    const borough = String(signal.borough || "");
+    const saturationCautionFlag = ((borough.includes("Manhattan") && (signal.manhattanCoreSaturationPenalty ?? -Infinity) >= 0.45)
+      || (signal.marketSaturationPenalty ?? -Infinity) >= 0.60);
+    const goodContinuationFlag = (signal.downstreamValue ?? -Infinity) >= 0.60;
+    const weakContinuationFlag = (signal.downstreamValue ?? Infinity) <= 0.35;
+
+    let zoneHealth = "mixed";
+    if (busyNowFlag && !shortTripTrapFlag && (longTripFriendlyFlag || goodContinuationFlag) && !saturationCautionFlag) {
+      zoneHealth = "good";
+    } else if (shortTripTrapFlag || (slowNowFlag && weakContinuationFlag)) {
+      zoneHealth = "bad";
+    }
+
+    return {
+      busyNowFlag,
+      slowNowFlag,
+      shortTripTrapFlag,
+      longTripFriendlyFlag,
+      saturationCautionFlag,
+      goodContinuationFlag,
+      weakContinuationFlag,
+      zoneHealth,
+    };
+  }
+
+  function computeCurrentZoneAction(signal, c) {
+    if (signal.airportExcluded) {
+      return { actionState: "EXCLUDED", actionHeadline: "Airport zone", actionSubline: "Hotspot opportunity logic excluded here", actionSeverity: "neutral" };
+    }
+    if (c.shortTripTrapFlag && c.saturationCautionFlag) {
+      return { actionState: "LEAVE_NOW", actionHeadline: "Short-trip trap", actionSubline: "Low-quality continuation and elevated saturation", actionSeverity: "alert" };
+    }
+    if (c.shortTripTrapFlag && !c.busyNowFlag) {
+      return { actionState: "LEAVE_NOW", actionHeadline: "Trap zone", actionSubline: "Short trips and low continuation make this a bad hold", actionSeverity: "alert" };
+    }
+    if (c.slowNowFlag && c.weakContinuationFlag) {
+      return { actionState: "MOVE_SOON", actionHeadline: "Slow zone now", actionSubline: "Low pace and weak continuation", actionSeverity: "warn" };
+    }
+    if (c.busyNowFlag && c.longTripFriendlyFlag && !c.saturationCautionFlag) {
+      return { actionState: "STAY", actionHeadline: "Strong zone now", actionSubline: "Good pace and long-trip quality", actionSeverity: "positive" };
+    }
+    if (c.busyNowFlag && !c.shortTripTrapFlag && c.goodContinuationFlag) {
+      return { actionState: "STAY_BRIEFLY", actionHeadline: "Decent zone now", actionSubline: "Good enough to hold briefly", actionSeverity: "positive" };
+    }
+    if (c.saturationCautionFlag && !c.longTripFriendlyFlag) {
+      return { actionState: "MOVE_SOON", actionHeadline: "Saturation caution", actionSubline: "Crowding risk is elevated here", actionSeverity: "warn" };
+    }
+    if (c.zoneHealth === "bad") {
+      return { actionState: "MOVE_SOON", actionHeadline: "Weak zone now", actionSubline: "Current signals are below hold quality", actionSeverity: "warn" };
+    }
+    return { actionState: "MONITOR", actionHeadline: "Mixed zone", actionSubline: "Monitor before committing to stay", actionSeverity: "neutral" };
+  }
+
+  function buildAssistantTags(c) {
+    const tags = [];
+    if (c.shortTripTrapFlag) tags.push("Short-trip trap");
+    if (c.longTripFriendlyFlag) tags.push("Long-trip friendly");
+    if (c.busyNowFlag) tags.push("Busy now");
+    if (c.slowNowFlag) tags.push("Slow now");
+    if (c.saturationCautionFlag) tags.push("Saturation caution");
+    if (c.goodContinuationFlag) tags.push("Good continuation");
+    if (c.weakContinuationFlag) tags.push("Weak continuation");
+    return tags;
+  }
+
+  function formatDwell(ms) {
+    if (!Number.isFinite(ms) || ms <= 0) return "In zone for 0s";
+    const sec = Math.floor(ms / 1000);
+    if (sec >= 60) return `In zone for ${Math.round(sec / 60)}m`;
+    return `In zone for ${sec}s`;
+  }
+
+  function toFingerprint() {
+    return [
+      state.activeStableZoneId || "",
+      Number.isFinite(state.rating) ? state.rating.toFixed(2) : "nan",
+      state.actionState || "",
+      state.citywideRank || "",
+      state.citywideTotal || "",
+      state.boroughRank || "",
+      state.boroughTotal || "",
+      state.dwellMinutesRounded || 0,
+      state.assistantStatus || "",
+    ].join("|");
+  }
+
+  function renderBanner() {
+    const host = getRecommendEl();
+    if (!host) return;
+    ensureStyle();
+
+    const zoneTxt = state.activeStableZoneName || "—";
+    const boroughTxt = state.activeStableBorough || "—";
+    const ratingTxt = Number.isFinite(state.rating) ? `${Math.round(state.rating)} (${state.bucket || "n/a"})` : "n/a";
+    const sourceTxt = state.visibleScoreSourceLabel || "Team Joseo score";
+    const cityRankTxt = (state.citywideRank && state.citywideTotal) ? `#${state.citywideRank} / ${state.citywideTotal} citywide` : "— citywide";
+    const boroughRankTxt = (state.boroughRank && state.boroughTotal) ? `#${state.boroughRank} / ${state.boroughTotal} in borough` : "— in borough";
+    const dwellTxt = formatDwell(state.dwellMs);
+    const tagsHtml = (state.tags || []).slice(0, 3).map((tag) => `<span class="aiAssistTag">${tag}</span>`).join("");
+
+    host.innerHTML = `
+      <div class="aiAssistBanner" data-phase="2" data-state="${state.actionState || "TRACKING"}">
+        <div class="aiAssistHeadline">${state.actionHeadline || "AI Assistant"}</div>
+        <div class="aiAssistMeta">Zone: ${zoneTxt}</div>
+        <div class="aiAssistMeta">Borough: ${boroughTxt}</div>
+        <div class="aiAssistMeta">Rating/Bucket: ${ratingTxt}</div>
+        <div class="aiAssistMeta">Visible source: ${sourceTxt}</div>
+        <div class="aiAssistMeta">${cityRankTxt}</div>
+        <div class="aiAssistMeta">${boroughRankTxt}</div>
+        <div class="aiAssistMeta">${dwellTxt}</div>
+        ${tagsHtml ? `<div class="aiAssistTags">${tagsHtml}</div>` : ""}
+        <div class="aiAssistMeta">${state.actionSubline || ""}</div>
+        <div class="aiAssistFooter">Phase 2 active: current-zone intelligence</div>
+      </div>
+    `;
+  }
+
+  function clearNavDestination() {
+    state.assistantMoveTarget = null;
+    window.TlcMapUiModule?.setNavDestination?.(null);
+  }
+
+  function applyStatusOnly(status, headline, subline) {
+    state.assistantStatus = status;
+    state.actionState = status === "airport-excluded" ? "EXCLUDED" : "TRACKING";
+    state.actionHeadline = headline;
+    state.actionSubline = subline;
+    state.actionSeverity = "neutral";
+    state.tags = [];
+  }
+
+  function updateStableZone(now) {
+    const loc = state.lastUserLocation;
+    if (!loc || !Number.isFinite(loc.lng) || !Number.isFinite(loc.lat)) {
+      applyStatusOnly("locating", "AI Assistant: locating current zone…", "Need a stable zone lock from location updates.");
+      return;
+    }
+
+    const feature = window.TlcMapUiInternals?.resolveZoneFeatureAtLngLat?.({ lng: loc.lng, lat: loc.lat }) || null;
+    if (!feature) {
+      if (state.activeStableZoneId && state.activeZoneLastSeenTs && now - state.activeZoneLastSeenTs > CLEAR_GRACE_MS) {
+        state.activeStableZoneId = null;
+        state.activeStableZoneName = "";
+        state.activeStableBorough = "";
+        state.activeStableZoneEnterTs = null;
+      }
+      if (!state.activeStableZoneId) {
+        applyStatusOnly("no-stable-zone", "AI Assistant: no stable zone yet", "Hold position briefly for stable zone detection.");
+      }
+      return;
+    }
+
+    const props = feature.properties || {};
+    const zoneId = getZoneId(props);
+    if (!zoneId) {
+      applyStatusOnly("no-stable-zone", "AI Assistant: no stable zone yet", "Hold position briefly for stable zone detection.");
+      return;
+    }
+
+    state.activeZoneLastSeenTs = now;
+
+    if (state.candidateZoneId !== zoneId) {
+      state.candidateZoneId = zoneId;
+      state.candidateZoneFirstSeenTs = now;
+      state.candidateZoneConsecutiveHits = 1;
+      if (!state.activeStableZoneId) {
+        applyStatusOnly("locating", "AI Assistant: locating current zone…", "Need a stable zone lock from location updates.");
+      }
+      return;
+    }
+
+    state.candidateZoneConsecutiveHits += 1;
+    const stableForMs = now - (state.candidateZoneFirstSeenTs || now);
+    const isStable = state.candidateZoneConsecutiveHits >= STABLE_MIN_HITS && stableForMs >= STABLE_MIN_MS;
+    if (isStable && state.activeStableZoneId !== zoneId) {
+      state.activeStableZoneId = zoneId;
+      state.activeStableZoneName = String(props.zone_name || "").trim() || `Zone ${zoneId}`;
+      state.activeStableBorough = String(props.borough || "").trim();
+      state.activeStableZoneEnterTs = now;
+    }
+
+    if (!state.activeStableZoneId) {
+      applyStatusOnly("locating", "AI Assistant: locating current zone…", "Need a stable zone lock from location updates.");
+    }
+  }
+
+  function updateFromFrame(frame, now) {
+    if (!frame) {
+      state.lastFrameTime = null;
+      applyStatusOnly("frame-unavailable", "AI Assistant: frame unavailable", "Waiting for score frame.");
+      return;
+    }
+    state.lastFrameTime = now;
+    if (!state.activeStableZoneId) return;
+
+    const resolved = getActiveStableZoneFeature(frame);
+    if (!resolved) {
+      applyStatusOnly("frame-unavailable", "AI Assistant: frame unavailable for zone", "Waiting for active stable zone geometry.");
+      return;
+    }
+
+    const signal = buildCurrentZoneSignalSnapshot(resolved.props, resolved.geom);
+    const ranks = computeCurrentZoneDisplayedRanks(frame, state.activeStableZoneId, signal.borough || state.activeStableBorough || "");
+    const classification = classifyCurrentZone(signal);
+    const action = computeCurrentZoneAction(signal, classification);
+    const tags = buildAssistantTags(classification);
+
+    state.assistantStatus = signal.airportExcluded ? "airport-excluded" : "classified";
+    state.activeStableZoneName = String(resolved.props.zone_name || "").trim() || state.activeStableZoneName || `Zone ${state.activeStableZoneId}`;
+    state.activeStableBorough = signal.borough || state.activeStableBorough || "";
+    state.visibleScoreSource = signal.visibleScoreSource;
+    state.visibleScoreSourceLabel = signal.visibleScoreSourceLabel;
+    state.rating = signal.rating;
+    state.bucket = signal.bucket;
+    state.airportExcluded = signal.airportExcluded;
+    state.citywideRank = ranks.citywideRank;
+    state.citywideTotal = ranks.citywideTotal;
+    state.boroughRank = ranks.boroughRank;
+    state.boroughTotal = ranks.boroughTotal;
+
+    state.busyNow = signal.busyNow;
+    state.busyNext = signal.busyNext;
+    state.shortTripPenalty = signal.shortTripPenalty;
+    state.longTripShareRaw = signal.longTripShareRaw;
+    state.longTripShareN = signal.longTripShareN;
+    state.balancedTripShareRaw = signal.balancedTripShareRaw;
+    state.balancedTripShareN = signal.balancedTripShareN;
+    state.sameZoneRetentionPenalty = signal.sameZoneRetentionPenalty;
+    state.churnPressure = signal.churnPressure;
+    state.downstreamValue = signal.downstreamValue;
+    state.marketSaturationPenalty = signal.marketSaturationPenalty;
+    state.manhattanCoreSaturationPenalty = signal.manhattanCoreSaturationPenalty;
+
+    state.busyNowFlag = classification.busyNowFlag;
+    state.slowNowFlag = classification.slowNowFlag;
+    state.shortTripTrapFlag = classification.shortTripTrapFlag;
+    state.longTripFriendlyFlag = classification.longTripFriendlyFlag;
+    state.saturationCautionFlag = classification.saturationCautionFlag;
+    state.goodContinuationFlag = classification.goodContinuationFlag;
+    state.weakContinuationFlag = classification.weakContinuationFlag;
+    state.zoneHealth = classification.zoneHealth;
+
+    state.tags = tags;
+    state.actionState = action.actionState;
+    state.actionHeadline = action.actionHeadline;
+    state.actionSubline = action.actionSubline;
+    state.actionSeverity = action.actionSeverity;
+
+    state.signalSnapshot = signal;
+  }
+
+  function getSnapshot() {
+    const now = Date.now();
+    const dwellMs = state.activeStableZoneEnterTs ? Math.max(0, now - state.activeStableZoneEnterTs) : 0;
+    return {
+      phase: 2,
+      activeStableZoneId: state.activeStableZoneId,
+      activeStableZoneName: state.activeStableZoneName,
+      activeStableBorough: state.activeStableBorough,
+      visibleScoreSource: state.visibleScoreSource,
+      visibleScoreSourceLabel: state.visibleScoreSourceLabel,
+      rating: state.rating,
+      bucket: state.bucket,
+      airportExcluded: state.airportExcluded,
+      dwellMs,
+      dwellSeconds: Math.floor(dwellMs / 1000),
+      dwellMinutesRounded: Math.round(dwellMs / 60000),
+      citywideRank: state.citywideRank,
+      citywideTotal: state.citywideTotal,
+      boroughRank: state.boroughRank,
+      boroughTotal: state.boroughTotal,
+      busyNow: state.busyNow,
+      busyNext: state.busyNext,
+      shortTripPenalty: state.shortTripPenalty,
+      longTripShareRaw: state.longTripShareRaw,
+      longTripShareN: state.longTripShareN,
+      balancedTripShareRaw: state.balancedTripShareRaw,
+      balancedTripShareN: state.balancedTripShareN,
+      sameZoneRetentionPenalty: state.sameZoneRetentionPenalty,
+      churnPressure: state.churnPressure,
+      downstreamValue: state.downstreamValue,
+      marketSaturationPenalty: state.marketSaturationPenalty,
+      manhattanCoreSaturationPenalty: state.manhattanCoreSaturationPenalty,
+      busyNowFlag: state.busyNowFlag,
+      slowNowFlag: state.slowNowFlag,
+      shortTripTrapFlag: state.shortTripTrapFlag,
+      longTripFriendlyFlag: state.longTripFriendlyFlag,
+      saturationCautionFlag: state.saturationCautionFlag,
+      goodContinuationFlag: state.goodContinuationFlag,
+      weakContinuationFlag: state.weakContinuationFlag,
+      zoneHealth: state.zoneHealth,
+      tags: Array.isArray(state.tags) ? [...state.tags] : [],
+      actionState: state.actionState,
+      actionHeadline: state.actionHeadline,
+      actionSubline: state.actionSubline,
+      actionSeverity: state.actionSeverity,
+      assistantMoveTarget: null,
+      assistantStatus: state.assistantStatus,
+      ts: now,
+    };
+  }
+
+  function refresh(frame) {
+    const now = Date.now();
+    updateStableZone(now);
+    updateFromFrame(getFrame(frame), now);
+    const dwellMs = state.activeStableZoneEnterTs ? Math.max(0, now - state.activeStableZoneEnterTs) : 0;
+    state.dwellMs = dwellMs;
+    state.dwellSeconds = Math.floor(dwellMs / 1000);
+    state.dwellMinutesRounded = Math.round(dwellMs / 60000);
+    clearNavDestination();
+
+    const nextFingerprint = toFingerprint();
+    if (nextFingerprint !== state.lastRenderFingerprint) {
+      state.lastRenderFingerprint = nextFingerprint;
+      renderBanner();
+    }
+
+    const snapshot = getSnapshot();
+    window.dispatchEvent(new CustomEvent("tlc-ai-assistant-snapshot-updated", { detail: snapshot }));
+    return snapshot;
+  }
+
+  function handleUserLocationUpdate(detail) {
+    const lat = Number(detail?.lat ?? NaN);
+    const lng = Number(detail?.lng ?? NaN);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      state.lastUserLocation = { lat, lng, ts: Number(detail?.ts ?? Date.now()) || Date.now() };
+    }
+    return refresh();
+  }
+
+  function updateAssistantForFrame(frame) {
+    return refresh(frame);
+  }
+
+  function forceRefresh() {
+    return refresh();
+  }
+
+  function clearState() {
+    Object.assign(state, {
+      phase: 2,
+      activeStableZoneId: null,
+      activeStableZoneName: "",
+      activeStableBorough: "",
+      activeStableZoneEnterTs: null,
+      activeStableZoneDwellMs: 0,
+      candidateZoneId: null,
+      candidateZoneFirstSeenTs: null,
+      candidateZoneConsecutiveHits: 0,
+      activeZoneLastSeenTs: null,
+      lastFrameTime: null,
+      assistantStatus: "idle",
+      actionState: "TRACKING",
+      actionHeadline: "AI Assistant: locating current zone…",
+      actionSubline: "Waiting for location and frame.",
+      actionSeverity: "neutral",
+      assistantMoveTarget: null,
+      visibleScoreSource: null,
+      visibleScoreSourceLabel: null,
+      rating: null,
+      bucket: null,
+      airportExcluded: false,
+      citywideRank: null,
+      citywideTotal: null,
+      boroughRank: null,
+      boroughTotal: null,
+      busyNow: null,
+      busyNext: null,
+      shortTripPenalty: null,
+      longTripShareRaw: null,
+      longTripShareN: null,
+      balancedTripShareRaw: null,
+      balancedTripShareN: null,
+      sameZoneRetentionPenalty: null,
+      churnPressure: null,
+      downstreamValue: null,
+      marketSaturationPenalty: null,
+      manhattanCoreSaturationPenalty: null,
+      busyNowFlag: false,
+      slowNowFlag: false,
+      shortTripTrapFlag: false,
+      longTripFriendlyFlag: false,
+      saturationCautionFlag: false,
+      goodContinuationFlag: false,
+      weakContinuationFlag: false,
+      zoneHealth: "mixed",
+      tags: [],
+      dwellMs: 0,
+      dwellSeconds: 0,
+      dwellMinutesRounded: 0,
+      signalSnapshot: null,
+      lastRenderFingerprint: "",
+    });
+    clearNavDestination();
+    renderBanner();
+    return getSnapshot();
+  }
+
+  window.TlcAiAssistantModule = {
+    updateAssistantForFrame,
+    handleUserLocationUpdate,
+    getSnapshot,
+    forceRefresh,
+    clearState,
+  };
+
+  window.getTeamJoseoAiAssistantSnapshot = () => window.TlcAiAssistantModule?.getSnapshot?.() || null;
+
+  renderBanner();
+})();
