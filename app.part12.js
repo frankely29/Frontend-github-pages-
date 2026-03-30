@@ -226,45 +226,6 @@
     return { minLng, minLat, maxLng, maxLat, width: maxLng - minLng, height: maxLat - minLat };
   }
 
-  function estimatePolygonOrientationDegrees(poly) {
-    const outer = Array.isArray(poly) ? poly[0] : null;
-    const bb = ringBBox(outer);
-    if (!outer || !bb) return 0;
-
-    if (bb.height > bb.width * 1.65) return 90;
-    if (bb.width > bb.height * 1.65) return 0;
-
-    let bestLen2 = 0;
-    let bestAngle = 0;
-    for (let i = 1; i < outer.length; i++) {
-      const a = outer[i - 1];
-      const b = outer[i];
-      if (!a || !b) continue;
-      const dx = Number(b[0]) - Number(a[0]);
-      const dy = Number(b[1]) - Number(a[1]);
-      if (!Number.isFinite(dx) || !Number.isFinite(dy)) continue;
-      const len2 = dx * dx + dy * dy;
-      if (len2 > bestLen2) {
-        bestLen2 = len2;
-        bestAngle = (Math.atan2(dy, dx) * 180) / Math.PI;
-      }
-    }
-
-    const normalized = ((bestAngle + 180) % 360) - 180;
-    const candidates = [0, 90, 45, -45];
-    let snapped = 0;
-    let bestDiff = Infinity;
-    for (const c of candidates) {
-      const d = Math.min(Math.abs(normalized - c), Math.abs(normalized - (c + 180)), Math.abs(normalized - (c - 180)));
-      if (d < bestDiff) {
-        bestDiff = d;
-        snapped = c;
-      }
-    }
-    if (bestDiff > 28) return 0;
-    return snapped;
-  }
-
   function estimateZoneLabelSizeBucket(poly) {
     const outer = Array.isArray(poly) ? poly[0] : null;
     const bb = ringBBox(outer);
@@ -314,7 +275,7 @@
 
     const override = ZONE_LABEL_OVERRIDES[locationId] || null;
     const poly = getPrimaryPolygonForLabel(feature?.geometry);
-    const orientation = estimatePolygonOrientationDegrees(poly);
+    const orientation = 0;
     const sizeBucket = estimateZoneLabelSizeBucket(poly);
 
     const shortName = override?.label || ZONE_LABEL_SHORT_NAMES[locationId] || normalizeZoneLabelBaseName(zoneName);
@@ -347,7 +308,6 @@
       properties: {
         LocationID: props.LocationID,
         label,
-        textRotate: orientation,
         textSize,
         textMaxWidth,
         letterSpacing,
@@ -425,7 +385,7 @@
           "text-size": zoneLabelTextSizeExpr,
           "text-max-width": ["coalesce", ["get", "textMaxWidth"], 4],
           "text-letter-spacing": ["coalesce", ["get", "letterSpacing"], 0],
-          "text-rotate": ["coalesce", ["get", "textRotate"], 0],
+          "text-rotate": 0,
           "symbol-sort-key": ["coalesce", ["get", "sortKey"], 0],
           "text-anchor": "center",
           "text-justify": "center",
@@ -445,7 +405,7 @@
       map.setLayoutProperty("zone-labels", "text-size", zoneLabelTextSizeExpr);
       map.setLayoutProperty("zone-labels", "text-max-width", ["coalesce", ["get", "textMaxWidth"], 4]);
       map.setLayoutProperty("zone-labels", "text-letter-spacing", ["coalesce", ["get", "letterSpacing"], 0]);
-      map.setLayoutProperty("zone-labels", "text-rotate", ["coalesce", ["get", "textRotate"], 0]);
+      map.setLayoutProperty("zone-labels", "text-rotate", 0);
       map.setLayoutProperty("zone-labels", "symbol-sort-key", ["coalesce", ["get", "sortKey"], 0]);
     }
 
