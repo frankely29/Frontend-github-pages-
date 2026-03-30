@@ -664,25 +664,37 @@
   const CLEAR_GRACE_MS = 5000;
   const STYLE_ID = "tlc-ai-assistant-style";
 
+  const AI_ASSISTANT_NEARBY_OVERALL_MAX_MI = 3.5;
+  const AI_ASSISTANT_NEARBY_TRAP_ESCAPE_MAX_MI = 4.5;
+  const AI_ASSISTANT_NEARBY_LONG_TRIP_MAX_MI = 5.0;
+  const AI_ASSISTANT_MOVE_DISTANCE_PENALTY_PER_MI = 4.0;
+  const AI_ASSISTANT_MOVE_DISTANCE_PENALTY_PER_MI_BWH = 2.0;
+  const AI_ASSISTANT_MOVE_DISTANCE_PENALTY_PER_MI_QUEENS = 5.0;
+  const AI_ASSISTANT_MOVE_MIN_ADVANTAGE = 4.0;
+  const AI_ASSISTANT_LEAVE_NOW_ADVANTAGE = 7.0;
+  const AI_ASSISTANT_LONG_TRIP_SWITCH_ADVANTAGE = 6.0;
+
   const state = {
-    phase: 2,
+    phase: 3,
     activeStableZoneId: null,
     activeStableZoneName: "",
     activeStableBorough: "",
     activeStableZoneEnterTs: null,
-    activeStableZoneDwellMs: 0,
     candidateZoneId: null,
     candidateZoneFirstSeenTs: null,
     candidateZoneConsecutiveHits: 0,
     activeZoneLastSeenTs: null,
     lastUserLocation: null,
-    lastFrameTime: null,
     assistantStatus: "idle",
-    actionState: "TRACKING",
+    actionCode: "MONITOR",
+    actionReason: "initializing",
     actionHeadline: "AI Assistant: locating current zone…",
     actionSubline: "Waiting for location and frame.",
     actionSeverity: "neutral",
     assistantMoveTarget: null,
+    currentZoneHoldScore: null,
+    scoreAdvantageVsCurrent: null,
+    navActive: false,
     visibleScoreSource: null,
     visibleScoreSourceLabel: null,
     rating: null,
@@ -692,37 +704,28 @@
     citywideTotal: null,
     boroughRank: null,
     boroughTotal: null,
-    busyNow: null,
-    busyNext: null,
-    shortTripPenalty: null,
-    longTripShareRaw: null,
-    longTripShareN: null,
-    balancedTripShareRaw: null,
-    balancedTripShareN: null,
-    sameZoneRetentionPenalty: null,
-    churnPressure: null,
-    downstreamValue: null,
-    marketSaturationPenalty: null,
-    manhattanCoreSaturationPenalty: null,
-    busyNowFlag: false,
-    slowNowFlag: false,
-    shortTripTrapFlag: false,
-    longTripFriendlyFlag: false,
-    saturationCautionFlag: false,
-    goodContinuationFlag: false,
-    weakContinuationFlag: false,
-    zoneHealth: "mixed",
-    tags: [],
-    dwellMs: 0,
-    dwellSeconds: 0,
-    dwellMinutesRounded: 0,
     signalSnapshot: null,
+    bestNearbyOverall: null,
+    bestNearbyTrapEscape: null,
+    bestNearbyLongTrip: null,
+    assistantTags: [],
+    assistantReasonFragments: [],
+    dwellMs: 0,
     lastRenderFingerprint: "",
+    lastActionFingerprint: "",
   };
 
   function numberOrNull(value) {
     const n = Number(value);
     return Number.isFinite(n) ? n : null;
+  }
+
+  function clamp01(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return 0;
+    if (n <= 0) return 0;
+    if (n >= 1) return 1;
+    return n;
   }
 
   function getRecommendEl() {
@@ -739,7 +742,6 @@
       .aiAssistMeta{font-size:12px;opacity:.95}
       .aiAssistTags{display:flex;flex-wrap:wrap;gap:4px}
       .aiAssistTag{font-size:11px;opacity:.95;padding:1px 6px;border-radius:999px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15)}
-      .aiAssistFooter{font-size:11px;opacity:.8}
     `;
     document.head.appendChild(style);
   }
@@ -753,39 +755,55 @@
     return String(id || "").trim() || null;
   }
 
-  function getActiveStableZoneFeature(frame) {
-    if (!state.activeStableZoneId) return null;
-    const features = frame?.polygons?.features || [];
-    const feature = features.find((item) => getZoneId(item?.properties || {}) === String(state.activeStableZoneId)) || null;
-    if (!feature) return null;
-    return { feature, props: feature.properties || {}, geom: feature.geometry || null };
+  function getFeatureCenter(geom) {
+    const center = window.TlcMapUiInternals?.geometryCenter?.(geom) || null;
+    const lat = Number(center?.lat ?? NaN);
+    const lng = Number(center?.lng ?? NaN);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    return { lat, lng };
   }
 
-  function buildCurrentZoneSignalSnapshot(props = {}, geom = null) {
-    const now = Date.now();
-    const dwellMs = state.activeStableZoneEnterTs ? Math.max(0, now - state.activeStableZoneEnterTs) : 0;
-    const dwellMinutesRounded = Math.round(dwellMs / 60000);
+  function isAirportExcludedFeature(props = {}) {
+    if (props.airport_excluded === true) return true;
+    const zoneName = String(props.zone_name || "").toLowerCase();
+    const locationId = String(props.LocationID || "").trim();
+    return /airport|jfk|la guardia|laguardia|newark/i.test(zoneName) || ["1", "132", "138"].includes(locationId);
+  }
+
+  function buildAssistantFeatureSignal(feature) {
+    const props = feature?.properties || {};
+    const geom = feature?.geometry || null;
+    const locationId = getZoneId(props);
+    const center = getFeatureCenter(geom);
+    const communityCrowdingPenaltyRaw = window.TlcCommunityCrowdingModule?.getZoneCommunityCrowdingPenalty?.(locationId);
+    const communityCrowdingPenalty = Number.isFinite(Number(communityCrowdingPenaltyRaw)) ? Number(communityCrowdingPenaltyRaw) : 0;
+    const crowdingSnapshot = window.TlcCommunityCrowdingModule?.getZoneCommunityCrowdingSnapshot?.(locationId) || null;
+
     return {
-      rating: numberOrNull(window.TlcModeModule?.effectiveRating?.(props, geom)),
-      bucket: String(window.TlcModeModule?.effectiveBucket?.(props, geom) || "").trim() || null,
+      locationId,
+      zoneName: String(props.zone_name || "").trim() || (locationId ? `Zone ${locationId}` : "Unknown zone"),
+      borough: String(props.borough || "").trim() || "",
+      centerLat: center?.lat ?? null,
+      centerLng: center?.lng ?? null,
+      visibleRating: numberOrNull(window.TlcModeModule?.effectiveRating?.(props, geom)),
+      visibleBucket: String(window.TlcModeModule?.effectiveBucket?.(props, geom) || "").trim() || null,
       visibleScoreSource: String(window.TlcModeModule?.getVisibleScoreSourceForFeature?.(props, geom) || "legacy_citywide"),
       visibleScoreSourceLabel: String(window.TlcModeModule?.getVisibleScoreSourceLabel?.(props, geom) || "Team Joseo score"),
-      borough: String(props.borough || "").trim() || null,
-      airportExcluded: props.airport_excluded === true,
-      busyNow: numberOrNull(props.busy_now_base_n_shadow),
-      busyNext: numberOrNull(props.busy_next_base_n_shadow),
-      shortTripPenalty: numberOrNull(props.short_trip_penalty_n ?? props.short_trip_penalty_n_shadow),
-      longTripShareRaw: numberOrNull(props.long_trip_share_20plus),
-      longTripShareN: numberOrNull(props.long_trip_share_20plus_n),
-      balancedTripShareRaw: numberOrNull(props.balanced_trip_share_shadow ?? props.balanced_trip_share),
-      balancedTripShareN: numberOrNull(props.balanced_trip_share_n_shadow),
-      sameZoneRetentionPenalty: numberOrNull(props.same_zone_retention_penalty_n),
-      churnPressure: numberOrNull(props.churn_pressure_n_shadow ?? props.churn_pressure_n),
-      downstreamValue: numberOrNull(props.downstream_value_n),
-      marketSaturationPenalty: numberOrNull(props.market_saturation_penalty_n_shadow ?? props.market_saturation_penalty_n),
-      manhattanCoreSaturationPenalty: numberOrNull(props.manhattan_core_saturation_penalty_n_shadow ?? props.manhattan_core_saturation_penalty_n),
-      dwellMs,
-      dwellMinutesRounded,
+      airportExcluded: isAirportExcludedFeature(props),
+      communityCrowdingPenalty,
+      communityCrowdingBucket: String(crowdingSnapshot?.bucket || "").trim() || null,
+      busyNowBase: numberOrNull(props.busy_now_base_n_shadow),
+      busyNextBase: numberOrNull(props.busy_next_base_n_shadow),
+      shortTripPenalty: clamp01(props.short_trip_penalty_n ?? props.short_trip_penalty_n_shadow),
+      longTripShare20Plus: clamp01(props.long_trip_share_20plus_n ?? props.long_trip_share_20plus),
+      balancedTripShare: clamp01(props.balanced_trip_share_n_shadow ?? props.balanced_trip_share_shadow ?? props.balanced_trip_share),
+      churnPressure: clamp01(props.churn_pressure_n_shadow ?? props.churn_pressure_n),
+      marketSaturationPenalty: clamp01(props.market_saturation_penalty_n_shadow ?? props.market_saturation_penalty_n),
+      manhattanCoreSaturationPenalty: clamp01(props.manhattan_core_saturation_penalty_n_shadow ?? props.manhattan_core_saturation_penalty_n),
+      continuationRaw: clamp01(props.downstream_value_n),
+      sameZoneRetentionPenalty: clamp01(props.same_zone_retention_penalty_n),
+      modeTag: String(window.TlcModeModule?.getActiveSpecialModeTagForFeature?.(props, geom) || "").toLowerCase(),
+      feature,
     };
   }
 
@@ -793,31 +811,19 @@
     const features = frame?.polygons?.features || [];
     const rows = [];
     for (const feature of features) {
-      const props = feature?.properties || {};
-      const geom = feature?.geometry || null;
-      if (props.airport_excluded === true) continue;
-      const zoneId = getZoneId(props);
-      if (!zoneId) continue;
-      const rating = Number(window.TlcModeModule?.effectiveRating?.(props, geom));
-      if (!Number.isFinite(rating)) continue;
+      const signal = buildAssistantFeatureSignal(feature);
+      if (!signal.locationId || signal.airportExcluded || !Number.isFinite(signal.visibleRating)) continue;
       rows.push({
-        zoneId,
-        borough: String(props.borough || "").trim(),
-        rating,
-        idSort: Number.isFinite(Number(zoneId)) ? Number(zoneId) : Number.MAX_SAFE_INTEGER,
+        zoneId: signal.locationId,
+        borough: signal.borough,
+        rating: signal.visibleRating,
+        idSort: Number.isFinite(Number(signal.locationId)) ? Number(signal.locationId) : Number.MAX_SAFE_INTEGER,
       });
     }
-
-    rows.sort((a, b) => {
-      if (b.rating !== a.rating) return b.rating - a.rating;
-      if (a.idSort !== b.idSort) return a.idSort - b.idSort;
-      return a.zoneId.localeCompare(b.zoneId);
-    });
-
+    rows.sort((a, b) => (b.rating - a.rating) || (a.idSort - b.idSort) || a.zoneId.localeCompare(b.zoneId));
     const citywideIndex = rows.findIndex((row) => row.zoneId === String(activeZoneId));
-    const boroughRows = rows.filter((row) => String(row.borough) === String(activeBorough || ""));
+    const boroughRows = rows.filter((row) => row.borough === String(activeBorough || ""));
     const boroughIndex = boroughRows.findIndex((row) => row.zoneId === String(activeZoneId));
-
     return {
       citywideRank: citywideIndex >= 0 ? citywideIndex + 1 : null,
       citywideTotal: rows.length || null,
@@ -827,28 +833,16 @@
   }
 
   function classifyCurrentZone(signal) {
-    const busyNowFlag = (signal.busyNow ?? -Infinity) >= 0.68;
-    const slowNowFlag = (signal.busyNow ?? Infinity) <= 0.35 && (signal.busyNext ?? Infinity) <= 0.40;
-    const shortTripTrapFlag = (signal.shortTripPenalty ?? -Infinity) >= 0.62
-      && (signal.sameZoneRetentionPenalty ?? -Infinity) >= 0.55
-      && (signal.downstreamValue ?? Infinity) <= 0.45;
-    const longTripFriendlyFlag = ((signal.longTripShareN ?? -Infinity) >= 0.62
-      || ((signal.longTripShareRaw ?? -Infinity) >= 0.24
-      && (signal.downstreamValue ?? -Infinity) >= 0.50
-      && (signal.shortTripPenalty ?? Infinity) <= 0.55));
-    const borough = String(signal.borough || "");
-    const saturationCautionFlag = ((borough.includes("Manhattan") && (signal.manhattanCoreSaturationPenalty ?? -Infinity) >= 0.45)
-      || (signal.marketSaturationPenalty ?? -Infinity) >= 0.60);
-    const goodContinuationFlag = (signal.downstreamValue ?? -Infinity) >= 0.60;
-    const weakContinuationFlag = (signal.downstreamValue ?? Infinity) <= 0.35;
-
-    let zoneHealth = "mixed";
-    if (busyNowFlag && !shortTripTrapFlag && (longTripFriendlyFlag || goodContinuationFlag) && !saturationCautionFlag) {
-      zoneHealth = "good";
-    } else if (shortTripTrapFlag || (slowNowFlag && weakContinuationFlag)) {
-      zoneHealth = "bad";
-    }
-
+    const busyNowFlag = (signal.busyNowBase ?? -Infinity) >= 0.68;
+    const slowNowFlag = (signal.busyNowBase ?? Infinity) <= 0.35 && (signal.busyNextBase ?? Infinity) <= 0.40;
+    const shortTripTrapFlag = (signal.shortTripPenalty ?? 0) >= 0.62
+      && (signal.sameZoneRetentionPenalty ?? 0) >= 0.55
+      && (signal.continuationRaw ?? 1) <= 0.45;
+    const longTripFriendlyFlag = (signal.longTripShare20Plus ?? 0) >= 0.62;
+    const saturationCautionFlag = ((signal.borough || "").includes("Manhattan") && (signal.manhattanCoreSaturationPenalty ?? 0) >= 0.45)
+      || (signal.marketSaturationPenalty ?? 0) >= 0.60;
+    const goodContinuationFlag = (signal.continuationRaw ?? 0) >= 0.60;
+    const weakContinuationFlag = (signal.continuationRaw ?? 1) <= 0.35;
     return {
       busyNowFlag,
       slowNowFlag,
@@ -857,36 +851,11 @@
       saturationCautionFlag,
       goodContinuationFlag,
       weakContinuationFlag,
-      zoneHealth,
+      trapOrSlowSaturation: shortTripTrapFlag || slowNowFlag || saturationCautionFlag,
+      moderateZone: !shortTripTrapFlag && !longTripFriendlyFlag && !goodContinuationFlag,
+      notStrongLongTripZone: !longTripFriendlyFlag && (signal.longTripShare20Plus ?? 0) < 0.55,
+      strongZone: busyNowFlag && !shortTripTrapFlag && (longTripFriendlyFlag || goodContinuationFlag) && !saturationCautionFlag,
     };
-  }
-
-  function computeCurrentZoneAction(signal, c) {
-    if (signal.airportExcluded) {
-      return { actionState: "EXCLUDED", actionHeadline: "Airport zone", actionSubline: "Hotspot opportunity logic excluded here", actionSeverity: "neutral" };
-    }
-    if (c.shortTripTrapFlag && c.saturationCautionFlag) {
-      return { actionState: "LEAVE_NOW", actionHeadline: "Short-trip trap", actionSubline: "Low-quality continuation and elevated saturation", actionSeverity: "alert" };
-    }
-    if (c.shortTripTrapFlag && !c.busyNowFlag) {
-      return { actionState: "LEAVE_NOW", actionHeadline: "Trap zone", actionSubline: "Short trips and low continuation make this a bad hold", actionSeverity: "alert" };
-    }
-    if (c.slowNowFlag && c.weakContinuationFlag) {
-      return { actionState: "MOVE_SOON", actionHeadline: "Slow zone now", actionSubline: "Low pace and weak continuation", actionSeverity: "warn" };
-    }
-    if (c.busyNowFlag && c.longTripFriendlyFlag && !c.saturationCautionFlag) {
-      return { actionState: "STAY", actionHeadline: "Strong zone now", actionSubline: "Good pace and long-trip quality", actionSeverity: "positive" };
-    }
-    if (c.busyNowFlag && !c.shortTripTrapFlag && c.goodContinuationFlag) {
-      return { actionState: "STAY_BRIEFLY", actionHeadline: "Decent zone now", actionSubline: "Good enough to hold briefly", actionSeverity: "positive" };
-    }
-    if (c.saturationCautionFlag && !c.longTripFriendlyFlag) {
-      return { actionState: "MOVE_SOON", actionHeadline: "Saturation caution", actionSubline: "Crowding risk is elevated here", actionSeverity: "warn" };
-    }
-    if (c.zoneHealth === "bad") {
-      return { actionState: "MOVE_SOON", actionHeadline: "Weak zone now", actionSubline: "Current signals are below hold quality", actionSeverity: "warn" };
-    }
-    return { actionState: "MONITOR", actionHeadline: "Mixed zone", actionSubline: "Monitor before committing to stay", actionSeverity: "neutral" };
   }
 
   function buildAssistantTags(c) {
@@ -901,6 +870,168 @@
     return tags;
   }
 
+  function getDistancePenaltyPerMile(signal) {
+    const tag = String(signal?.modeTag || "");
+    if (tag.includes("queens")) return AI_ASSISTANT_MOVE_DISTANCE_PENALTY_PER_MI_QUEENS;
+    if (tag.includes("bronx") || tag.includes("wash") || tag.includes("heights")) return AI_ASSISTANT_MOVE_DISTANCE_PENALTY_PER_MI_BWH;
+    return AI_ASSISTANT_MOVE_DISTANCE_PENALTY_PER_MI;
+  }
+
+  function scoreAssistantCandidate(signal, currentSignal, distanceMiles, intent) {
+    const distancePenaltyPerMile = getDistancePenaltyPerMile(signal);
+    const baseScore = (signal.visibleRating ?? -Infinity)
+      - (distanceMiles * distancePenaltyPerMile)
+      - (signal.communityCrowdingPenalty ?? 0);
+    let score = baseScore;
+
+    if (intent === "trap_escape") {
+      score += 4.0 * (1 - (signal.shortTripPenalty ?? 0));
+      score += 3.0 * (1 - (signal.churnPressure ?? 0));
+      score += 2.5 * (signal.continuationRaw ?? 0);
+      score += 2.0 * (1 - (signal.marketSaturationPenalty ?? 0));
+    } else if (intent === "long_trip") {
+      score += 5.0 * (signal.longTripShare20Plus ?? 0);
+      score += 2.5 * (signal.continuationRaw ?? 0);
+      score += 1.5 * (1 - (signal.marketSaturationPenalty ?? 0));
+    }
+
+    return {
+      intent,
+      score,
+      baseScore,
+      distancePenaltyPerMile,
+      distanceMiles,
+      signal,
+      scoreAdvantageVsCurrent: null,
+    };
+  }
+
+  function computeNearbyAssistantCandidates(frame, currentStableFeature, snapshot) {
+    const currentSignal = buildAssistantFeatureSignal(currentStableFeature);
+    const currentCenter = Number.isFinite(currentSignal.centerLat) && Number.isFinite(currentSignal.centerLng)
+      ? { lat: currentSignal.centerLat, lng: currentSignal.centerLng }
+      : null;
+    if (!currentCenter) return { currentSignal, bestNearbyOverall: null, bestNearbyTrapEscape: null, bestNearbyLongTrip: null };
+
+    const features = frame?.polygons?.features || [];
+    let bestNearbyOverall = null;
+    let bestNearbyTrapEscape = null;
+    let bestNearbyLongTrip = null;
+
+    for (const feature of features) {
+      const signal = buildAssistantFeatureSignal(feature);
+      if (!signal.locationId || signal.locationId === currentSignal.locationId) continue;
+      if (signal.airportExcluded || !Number.isFinite(signal.visibleRating)) continue;
+      if (!Number.isFinite(signal.centerLat) || !Number.isFinite(signal.centerLng)) continue;
+
+      const distanceMiles = Number(window.TlcMapUiInternals?.haversineMiles?.(currentCenter, { lat: signal.centerLat, lng: signal.centerLng }) || NaN);
+      if (!Number.isFinite(distanceMiles)) continue;
+
+      if (distanceMiles <= AI_ASSISTANT_NEARBY_OVERALL_MAX_MI) {
+        const candidate = scoreAssistantCandidate(signal, currentSignal, distanceMiles, "overall");
+        if (!bestNearbyOverall || candidate.score > bestNearbyOverall.score) bestNearbyOverall = candidate;
+      }
+      if (distanceMiles <= AI_ASSISTANT_NEARBY_TRAP_ESCAPE_MAX_MI) {
+        const candidate = scoreAssistantCandidate(signal, currentSignal, distanceMiles, "trap_escape");
+        if (!bestNearbyTrapEscape || candidate.score > bestNearbyTrapEscape.score) bestNearbyTrapEscape = candidate;
+      }
+      if (distanceMiles <= AI_ASSISTANT_NEARBY_LONG_TRIP_MAX_MI) {
+        const candidate = scoreAssistantCandidate(signal, currentSignal, distanceMiles, "long_trip");
+        if (!bestNearbyLongTrip || candidate.score > bestNearbyLongTrip.score) bestNearbyLongTrip = candidate;
+      }
+    }
+
+    return { currentSignal, bestNearbyOverall, bestNearbyTrapEscape, bestNearbyLongTrip };
+  }
+
+  function computeCurrentZoneHoldScore(currentSignal) {
+    let holdScore = (currentSignal.visibleRating ?? 0) - (currentSignal.communityCrowdingPenalty ?? 0);
+    holdScore -= 4.0 * (currentSignal.shortTripPenalty ?? 0);
+    holdScore -= 3.0 * (currentSignal.marketSaturationPenalty ?? 0);
+    holdScore -= 2.5 * (currentSignal.churnPressure ?? 0);
+    holdScore -= 2.0 * (1 - (currentSignal.continuationRaw ?? 0));
+    return holdScore;
+  }
+
+  function serializeCandidate(candidate, holdScore) {
+    if (!candidate) return null;
+    const scoreAdvantageVsCurrent = Number(candidate.score - holdScore);
+    candidate.scoreAdvantageVsCurrent = scoreAdvantageVsCurrent;
+    return {
+      locationId: candidate.signal.locationId,
+      zoneName: candidate.signal.zoneName,
+      borough: candidate.signal.borough,
+      lat: candidate.signal.centerLat,
+      lng: candidate.signal.centerLng,
+      visibleRating: candidate.signal.visibleRating,
+      visibleBucket: candidate.signal.visibleBucket,
+      visibleScoreSource: candidate.signal.visibleScoreSource,
+      visibleScoreSourceLabel: candidate.signal.visibleScoreSourceLabel,
+      distanceMiles: candidate.distanceMiles,
+      moveIntent: candidate.intent,
+      candidateScore: candidate.score,
+      scoreAdvantageVsCurrent,
+    };
+  }
+
+  function decideAssistantAction(currentSignal, candidateSet, snapshot) {
+    const classification = classifyCurrentZone(currentSignal);
+    const holdScore = computeCurrentZoneHoldScore(currentSignal);
+    const overallAdv = candidateSet.bestNearbyOverall ? candidateSet.bestNearbyOverall.score - holdScore : -Infinity;
+    const trapAdv = candidateSet.bestNearbyTrapEscape ? candidateSet.bestNearbyTrapEscape.score - holdScore : -Infinity;
+    const longAdv = candidateSet.bestNearbyLongTrip ? candidateSet.bestNearbyLongTrip.score - holdScore : -Infinity;
+
+    let actionCode = "MONITOR";
+    let actionReason = "no_material_advantage";
+    let actionSeverity = "neutral";
+    let moveTarget = null;
+
+    if (currentSignal.airportExcluded) {
+      actionCode = "MONITOR";
+      actionReason = "airport_excluded";
+    } else if (classification.trapOrSlowSaturation && candidateSet.bestNearbyTrapEscape && trapAdv >= AI_ASSISTANT_LEAVE_NOW_ADVANTAGE) {
+      actionCode = "LEAVE_NOW";
+      actionReason = "trap_escape";
+      actionSeverity = "alert";
+      moveTarget = serializeCandidate(candidateSet.bestNearbyTrapEscape, holdScore);
+    } else if (classification.trapOrSlowSaturation && candidateSet.bestNearbyTrapEscape && trapAdv >= AI_ASSISTANT_MOVE_MIN_ADVANTAGE) {
+      actionCode = "MOVE_SOON";
+      actionReason = "trap_escape";
+      actionSeverity = "warn";
+      moveTarget = serializeCandidate(candidateSet.bestNearbyTrapEscape, holdScore);
+    } else if (classification.moderateZone && candidateSet.bestNearbyOverall && overallAdv >= AI_ASSISTANT_MOVE_MIN_ADVANTAGE) {
+      actionCode = "MOVE_SOON";
+      actionReason = "overall_better";
+      actionSeverity = "warn";
+      moveTarget = serializeCandidate(candidateSet.bestNearbyOverall, holdScore);
+    } else if (classification.notStrongLongTripZone && candidateSet.bestNearbyLongTrip && longAdv >= AI_ASSISTANT_LONG_TRIP_SWITCH_ADVANTAGE) {
+      actionCode = "STAY_BRIEFLY";
+      actionReason = "better_long_trip_zone";
+      actionSeverity = "positive";
+      moveTarget = serializeCandidate(candidateSet.bestNearbyLongTrip, holdScore);
+    } else if (classification.strongZone) {
+      actionCode = "STAY";
+      actionReason = "current_zone_best_nearby";
+      actionSeverity = "positive";
+    }
+
+    return { actionCode, actionReason, actionSeverity, holdScore, moveTarget, classification };
+  }
+
+  function buildAssistantActionExplanation(snapshot) {
+    const out = [];
+    if (snapshot.shortTripTrapFlag) out.push("current zone is trap-heavy");
+    if (snapshot.saturationCautionFlag) out.push("current zone has saturation pressure");
+    if (snapshot.actionReason === "better_long_trip_zone") out.push("nearby zone has better long-trip quality");
+    if (snapshot.actionReason === "trap_escape") out.push("nearby zone offers a cleaner trap escape");
+    if (snapshot.actionReason === "current_zone_best_nearby") out.push("current zone still has the best nearby score");
+    if (!snapshot.assistantMoveTarget) out.push("no materially better nearby option");
+    if (snapshot.assistantMoveTarget && snapshot.assistantMoveTarget.scoreAdvantageVsCurrent >= AI_ASSISTANT_MOVE_MIN_ADVANTAGE) {
+      out.push("nearby zone has less saturation pressure");
+    }
+    return out.slice(0, 4);
+  }
+
   function formatDwell(ms) {
     if (!Number.isFinite(ms) || ms <= 0) return "In zone for 0s";
     const sec = Math.floor(ms / 1000);
@@ -908,17 +1039,43 @@
     return `In zone for ${sec}s`;
   }
 
+  function formatMiles(miles) {
+    if (!Number.isFinite(miles)) return "—";
+    return `${miles.toFixed(1)} mi`;
+  }
+
+  function buildHeadline() {
+    const zone = state.activeStableZoneName || "—";
+    const target = state.assistantMoveTarget?.zoneName || "—";
+    if (state.actionCode === "STAY") return `STAY — ${zone}`;
+    if (state.actionCode === "MOVE_SOON") return `MOVE SOON → ${target}`;
+    if (state.actionCode === "LEAVE_NOW") return `LEAVE NOW → ${target}`;
+    if (state.actionCode === "STAY_BRIEFLY") return `STAY BRIEFLY → ${target}`;
+    return `MONITOR — ${zone}`;
+  }
+
+  function buildSubline() {
+    if (state.assistantMoveTarget && state.actionReason === "trap_escape") {
+      return `Trap risk here. Better nearby escape in ${formatMiles(state.assistantMoveTarget.distanceMiles)}.`;
+    }
+    if (state.assistantMoveTarget && state.actionReason === "better_long_trip_zone") {
+      return "Nearby long-trip zone scores better.";
+    }
+    if (state.assistantMoveTarget) {
+      return `Nearby alternative scores +${(state.scoreAdvantageVsCurrent || 0).toFixed(1)} vs current.`;
+    }
+    return "Current zone still beats nearby options.";
+  }
+
   function toFingerprint() {
     return [
       state.activeStableZoneId || "",
+      state.actionCode || "",
+      state.actionReason || "",
+      state.assistantMoveTarget?.locationId || "",
       Number.isFinite(state.rating) ? state.rating.toFixed(2) : "nan",
-      state.actionState || "",
-      state.citywideRank || "",
-      state.citywideTotal || "",
-      state.boroughRank || "",
-      state.boroughTotal || "",
-      state.dwellMinutesRounded || 0,
-      state.assistantStatus || "",
+      Number.isFinite(state.currentZoneHoldScore) ? state.currentZoneHoldScore.toFixed(2) : "nan",
+      state.dwellMs ? Math.round(state.dwellMs / 10000) : 0,
     ].join("|");
   }
 
@@ -927,53 +1084,41 @@
     if (!host) return;
     ensureStyle();
 
-    const zoneTxt = state.activeStableZoneName || "—";
-    const boroughTxt = state.activeStableBorough || "—";
     const ratingTxt = Number.isFinite(state.rating) ? `${Math.round(state.rating)} (${state.bucket || "n/a"})` : "n/a";
-    const sourceTxt = state.visibleScoreSourceLabel || "Team Joseo score";
     const cityRankTxt = (state.citywideRank && state.citywideTotal) ? `#${state.citywideRank} / ${state.citywideTotal} citywide` : "— citywide";
     const boroughRankTxt = (state.boroughRank && state.boroughTotal) ? `#${state.boroughRank} / ${state.boroughTotal} in borough` : "— in borough";
-    const dwellTxt = formatDwell(state.dwellMs);
-    const tagsHtml = (state.tags || []).slice(0, 3).map((tag) => `<span class="aiAssistTag">${tag}</span>`).join("");
+    const tagsHtml = (state.assistantTags || []).slice(0, 3).map((tag) => `<span class="aiAssistTag">${tag}</span>`).join("");
+    const target = state.assistantMoveTarget;
 
     host.innerHTML = `
-      <div class="aiAssistBanner" data-phase="2" data-state="${state.actionState || "TRACKING"}">
-        <div class="aiAssistHeadline">${state.actionHeadline || "AI Assistant"}</div>
-        <div class="aiAssistMeta">Zone: ${zoneTxt}</div>
-        <div class="aiAssistMeta">Borough: ${boroughTxt}</div>
-        <div class="aiAssistMeta">Rating/Bucket: ${ratingTxt}</div>
-        <div class="aiAssistMeta">Visible source: ${sourceTxt}</div>
-        <div class="aiAssistMeta">${cityRankTxt}</div>
-        <div class="aiAssistMeta">${boroughRankTxt}</div>
-        <div class="aiAssistMeta">${dwellTxt}</div>
+      <div class="aiAssistBanner" data-phase="3" data-state="${state.actionCode || "MONITOR"}">
+        <div class="aiAssistHeadline">${buildHeadline()}</div>
+        <div class="aiAssistMeta">Current: ${state.activeStableZoneName || "—"} • ${ratingTxt} • ${state.visibleScoreSourceLabel || "Team Joseo score"}</div>
+        <div class="aiAssistMeta">${formatDwell(state.dwellMs)}</div>
+        <div class="aiAssistMeta">${cityRankTxt} • ${boroughRankTxt}</div>
         ${tagsHtml ? `<div class="aiAssistTags">${tagsHtml}</div>` : ""}
-        <div class="aiAssistMeta">${state.actionSubline || ""}</div>
-        <div class="aiAssistFooter">Phase 2 active: current-zone intelligence</div>
+        ${target ? `<div class="aiAssistMeta">Target: ${target.zoneName} (${target.borough || "—"}) • ${formatMiles(target.distanceMiles)} • rating ${Math.round(target.visibleRating || 0)} • ${state.actionReason.replaceAll("_", " ")}</div>` : ""}
+        <div class="aiAssistMeta">${buildSubline()}</div>
       </div>
     `;
   }
 
-  function clearNavDestination() {
-    state.assistantMoveTarget = null;
+  function applyNavDestination(actionCode, moveTarget) {
+    const shouldSet = !!moveTarget && ["LEAVE_NOW", "MOVE_SOON", "STAY_BRIEFLY"].includes(actionCode);
+    if (shouldSet) {
+      window.TlcMapUiModule?.setNavDestination?.({ lat: moveTarget.lat, lng: moveTarget.lng });
+      return true;
+    }
     window.TlcMapUiModule?.setNavDestination?.(null);
-  }
-
-  function applyStatusOnly(status, headline, subline) {
-    state.assistantStatus = status;
-    state.actionState = status === "airport-excluded" ? "EXCLUDED" : "TRACKING";
-    state.actionHeadline = headline;
-    state.actionSubline = subline;
-    state.actionSeverity = "neutral";
-    state.tags = [];
+    return false;
   }
 
   function updateStableZone(now) {
     const loc = state.lastUserLocation;
     if (!loc || !Number.isFinite(loc.lng) || !Number.isFinite(loc.lat)) {
-      applyStatusOnly("locating", "AI Assistant: locating current zone…", "Need a stable zone lock from location updates.");
+      state.assistantStatus = "locating";
       return;
     }
-
     const feature = window.TlcMapUiInternals?.resolveZoneFeatureAtLngLat?.({ lng: loc.lng, lat: loc.lat }) || null;
     if (!feature) {
       if (state.activeStableZoneId && state.activeZoneLastSeenTs && now - state.activeZoneLastSeenTs > CLEAR_GRACE_MS) {
@@ -982,28 +1127,23 @@
         state.activeStableBorough = "";
         state.activeStableZoneEnterTs = null;
       }
-      if (!state.activeStableZoneId) {
-        applyStatusOnly("no-stable-zone", "AI Assistant: no stable zone yet", "Hold position briefly for stable zone detection.");
-      }
+      state.assistantStatus = state.activeStableZoneId ? "tracking" : "no-stable-zone";
       return;
     }
 
     const props = feature.properties || {};
     const zoneId = getZoneId(props);
     if (!zoneId) {
-      applyStatusOnly("no-stable-zone", "AI Assistant: no stable zone yet", "Hold position briefly for stable zone detection.");
+      state.assistantStatus = "no-stable-zone";
       return;
     }
 
     state.activeZoneLastSeenTs = now;
-
     if (state.candidateZoneId !== zoneId) {
       state.candidateZoneId = zoneId;
       state.candidateZoneFirstSeenTs = now;
       state.candidateZoneConsecutiveHits = 1;
-      if (!state.activeStableZoneId) {
-        applyStatusOnly("locating", "AI Assistant: locating current zone…", "Need a stable zone lock from location updates.");
-      }
+      state.assistantStatus = state.activeStableZoneId ? "tracking" : "locating";
       return;
     }
 
@@ -1017,81 +1157,82 @@
       state.activeStableZoneEnterTs = now;
     }
 
-    if (!state.activeStableZoneId) {
-      applyStatusOnly("locating", "AI Assistant: locating current zone…", "Need a stable zone lock from location updates.");
-    }
+    state.assistantStatus = state.activeStableZoneId ? "tracking" : "locating";
+  }
+
+  function getActiveStableZoneFeature(frame) {
+    if (!state.activeStableZoneId) return null;
+    return (frame?.polygons?.features || []).find((item) => getZoneId(item?.properties || {}) === String(state.activeStableZoneId)) || null;
+  }
+
+  function applyStatusOnly(status, headline, subline) {
+    state.assistantStatus = status;
+    state.actionCode = "MONITOR";
+    state.actionReason = "insufficient_inputs";
+    state.actionHeadline = headline;
+    state.actionSubline = subline;
+    state.actionSeverity = "neutral";
+    state.assistantMoveTarget = null;
+    state.navActive = applyNavDestination(state.actionCode, null);
   }
 
   function updateFromFrame(frame, now) {
     if (!frame) {
-      state.lastFrameTime = null;
       applyStatusOnly("frame-unavailable", "AI Assistant: frame unavailable", "Waiting for score frame.");
       return;
     }
-    state.lastFrameTime = now;
-    if (!state.activeStableZoneId) return;
+    if (!state.activeStableZoneId) {
+      applyStatusOnly("locating", "AI Assistant: locating current zone…", "Need a stable zone lock from location updates.");
+      return;
+    }
 
-    const resolved = getActiveStableZoneFeature(frame);
-    if (!resolved) {
+    const currentStableFeature = getActiveStableZoneFeature(frame);
+    if (!currentStableFeature) {
       applyStatusOnly("frame-unavailable", "AI Assistant: frame unavailable for zone", "Waiting for active stable zone geometry.");
       return;
     }
 
-    const signal = buildCurrentZoneSignalSnapshot(resolved.props, resolved.geom);
-    const ranks = computeCurrentZoneDisplayedRanks(frame, state.activeStableZoneId, signal.borough || state.activeStableBorough || "");
-    const classification = classifyCurrentZone(signal);
-    const action = computeCurrentZoneAction(signal, classification);
-    const tags = buildAssistantTags(classification);
+    const candidateSet = computeNearbyAssistantCandidates(frame, currentStableFeature, state.signalSnapshot || null);
+    const currentSignal = candidateSet.currentSignal;
+    const decision = decideAssistantAction(currentSignal, candidateSet, state.signalSnapshot || null);
+    const ranks = computeCurrentZoneDisplayedRanks(frame, state.activeStableZoneId, currentSignal.borough || state.activeStableBorough || "");
 
-    state.assistantStatus = signal.airportExcluded ? "airport-excluded" : "classified";
-    state.activeStableZoneName = String(resolved.props.zone_name || "").trim() || state.activeStableZoneName || `Zone ${state.activeStableZoneId}`;
-    state.activeStableBorough = signal.borough || state.activeStableBorough || "";
-    state.visibleScoreSource = signal.visibleScoreSource;
-    state.visibleScoreSourceLabel = signal.visibleScoreSourceLabel;
-    state.rating = signal.rating;
-    state.bucket = signal.bucket;
-    state.airportExcluded = signal.airportExcluded;
+    state.phase = 3;
+    state.assistantStatus = currentSignal.airportExcluded ? "airport-excluded" : "classified";
+    state.activeStableZoneName = currentSignal.zoneName;
+    state.activeStableBorough = currentSignal.borough;
+    state.visibleScoreSource = currentSignal.visibleScoreSource;
+    state.visibleScoreSourceLabel = currentSignal.visibleScoreSourceLabel;
+    state.rating = currentSignal.visibleRating;
+    state.bucket = currentSignal.visibleBucket;
+    state.airportExcluded = currentSignal.airportExcluded;
     state.citywideRank = ranks.citywideRank;
     state.citywideTotal = ranks.citywideTotal;
     state.boroughRank = ranks.boroughRank;
     state.boroughTotal = ranks.boroughTotal;
 
-    state.busyNow = signal.busyNow;
-    state.busyNext = signal.busyNext;
-    state.shortTripPenalty = signal.shortTripPenalty;
-    state.longTripShareRaw = signal.longTripShareRaw;
-    state.longTripShareN = signal.longTripShareN;
-    state.balancedTripShareRaw = signal.balancedTripShareRaw;
-    state.balancedTripShareN = signal.balancedTripShareN;
-    state.sameZoneRetentionPenalty = signal.sameZoneRetentionPenalty;
-    state.churnPressure = signal.churnPressure;
-    state.downstreamValue = signal.downstreamValue;
-    state.marketSaturationPenalty = signal.marketSaturationPenalty;
-    state.manhattanCoreSaturationPenalty = signal.manhattanCoreSaturationPenalty;
+    state.signalSnapshot = currentSignal;
+    state.currentZoneHoldScore = decision.holdScore;
+    state.bestNearbyOverall = serializeCandidate(candidateSet.bestNearbyOverall, decision.holdScore);
+    state.bestNearbyTrapEscape = serializeCandidate(candidateSet.bestNearbyTrapEscape, decision.holdScore);
+    state.bestNearbyLongTrip = serializeCandidate(candidateSet.bestNearbyLongTrip, decision.holdScore);
 
-    state.busyNowFlag = classification.busyNowFlag;
-    state.slowNowFlag = classification.slowNowFlag;
-    state.shortTripTrapFlag = classification.shortTripTrapFlag;
-    state.longTripFriendlyFlag = classification.longTripFriendlyFlag;
-    state.saturationCautionFlag = classification.saturationCautionFlag;
-    state.goodContinuationFlag = classification.goodContinuationFlag;
-    state.weakContinuationFlag = classification.weakContinuationFlag;
-    state.zoneHealth = classification.zoneHealth;
-
-    state.tags = tags;
-    state.actionState = action.actionState;
-    state.actionHeadline = action.actionHeadline;
-    state.actionSubline = action.actionSubline;
-    state.actionSeverity = action.actionSeverity;
-
-    state.signalSnapshot = signal;
+    state.assistantTags = buildAssistantTags(decision.classification);
+    state.actionCode = decision.actionCode;
+    state.actionReason = decision.actionReason;
+    state.actionSeverity = decision.actionSeverity;
+    state.assistantMoveTarget = decision.moveTarget;
+    state.scoreAdvantageVsCurrent = decision.moveTarget?.scoreAdvantageVsCurrent ?? null;
+    state.navActive = applyNavDestination(state.actionCode, state.assistantMoveTarget);
+    state.assistantReasonFragments = buildAssistantActionExplanation(getSnapshot(now));
+    state.actionHeadline = buildHeadline();
+    state.actionSubline = buildSubline();
   }
 
-  function getSnapshot() {
-    const now = Date.now();
-    const dwellMs = state.activeStableZoneEnterTs ? Math.max(0, now - state.activeStableZoneEnterTs) : 0;
+  function getSnapshot(tsNow = Date.now()) {
+    const dwellMs = state.activeStableZoneEnterTs ? Math.max(0, tsNow - state.activeStableZoneEnterTs) : 0;
     return {
-      phase: 2,
+      phase: 3,
       activeStableZoneId: state.activeStableZoneId,
       activeStableZoneName: state.activeStableZoneName,
       activeStableBorough: state.activeStableBorough,
@@ -1107,34 +1248,38 @@
       citywideTotal: state.citywideTotal,
       boroughRank: state.boroughRank,
       boroughTotal: state.boroughTotal,
-      busyNow: state.busyNow,
-      busyNext: state.busyNext,
-      shortTripPenalty: state.shortTripPenalty,
-      longTripShareRaw: state.longTripShareRaw,
-      longTripShareN: state.longTripShareN,
-      balancedTripShareRaw: state.balancedTripShareRaw,
-      balancedTripShareN: state.balancedTripShareN,
-      sameZoneRetentionPenalty: state.sameZoneRetentionPenalty,
-      churnPressure: state.churnPressure,
-      downstreamValue: state.downstreamValue,
-      marketSaturationPenalty: state.marketSaturationPenalty,
-      manhattanCoreSaturationPenalty: state.manhattanCoreSaturationPenalty,
-      busyNowFlag: state.busyNowFlag,
-      slowNowFlag: state.slowNowFlag,
-      shortTripTrapFlag: state.shortTripTrapFlag,
-      longTripFriendlyFlag: state.longTripFriendlyFlag,
-      saturationCautionFlag: state.saturationCautionFlag,
-      goodContinuationFlag: state.goodContinuationFlag,
-      weakContinuationFlag: state.weakContinuationFlag,
-      zoneHealth: state.zoneHealth,
-      tags: Array.isArray(state.tags) ? [...state.tags] : [],
-      actionState: state.actionState,
-      actionHeadline: state.actionHeadline,
-      actionSubline: state.actionSubline,
+      busyNowBase: state.signalSnapshot?.busyNowBase ?? null,
+      busyNextBase: state.signalSnapshot?.busyNextBase ?? null,
+      shortTripPenalty: state.signalSnapshot?.shortTripPenalty ?? null,
+      longTripShare20Plus: state.signalSnapshot?.longTripShare20Plus ?? null,
+      balancedTripShare: state.signalSnapshot?.balancedTripShare ?? null,
+      churnPressure: state.signalSnapshot?.churnPressure ?? null,
+      continuationRaw: state.signalSnapshot?.continuationRaw ?? null,
+      marketSaturationPenalty: state.signalSnapshot?.marketSaturationPenalty ?? null,
+      manhattanCoreSaturationPenalty: state.signalSnapshot?.manhattanCoreSaturationPenalty ?? null,
+      shortTripTrapFlag: (state.assistantTags || []).includes("Short-trip trap"),
+      slowNowFlag: (state.assistantTags || []).includes("Slow now"),
+      longTripFriendlyFlag: (state.assistantTags || []).includes("Long-trip friendly"),
+      saturationCautionFlag: (state.assistantTags || []).includes("Saturation caution"),
+      goodContinuationFlag: (state.assistantTags || []).includes("Good continuation"),
+      weakContinuationFlag: (state.assistantTags || []).includes("Weak continuation"),
+      currentZoneHoldScore: state.currentZoneHoldScore,
+      bestNearbyOverall: state.bestNearbyOverall,
+      bestNearbyTrapEscape: state.bestNearbyTrapEscape,
+      bestNearbyLongTrip: state.bestNearbyLongTrip,
+      assistantMoveTarget: state.assistantMoveTarget,
+      actionCode: state.actionCode,
+      actionReason: state.actionReason,
       actionSeverity: state.actionSeverity,
-      assistantMoveTarget: null,
+      scoreAdvantageVsCurrent: state.scoreAdvantageVsCurrent,
+      navActive: !!state.navActive,
+      candidateSearchRadiusOverall: AI_ASSISTANT_NEARBY_OVERALL_MAX_MI,
+      candidateSearchRadiusTrapEscape: AI_ASSISTANT_NEARBY_TRAP_ESCAPE_MAX_MI,
+      candidateSearchRadiusLongTrip: AI_ASSISTANT_NEARBY_LONG_TRIP_MAX_MI,
+      assistantTags: Array.isArray(state.assistantTags) ? [...state.assistantTags] : [],
+      assistantReasonFragments: Array.isArray(state.assistantReasonFragments) ? [...state.assistantReasonFragments] : [],
       assistantStatus: state.assistantStatus,
-      ts: now,
+      ts: tsNow,
     };
   }
 
@@ -1142,11 +1287,7 @@
     const now = Date.now();
     updateStableZone(now);
     updateFromFrame(getFrame(frame), now);
-    const dwellMs = state.activeStableZoneEnterTs ? Math.max(0, now - state.activeStableZoneEnterTs) : 0;
-    state.dwellMs = dwellMs;
-    state.dwellSeconds = Math.floor(dwellMs / 1000);
-    state.dwellMinutesRounded = Math.round(dwellMs / 60000);
-    clearNavDestination();
+    state.dwellMs = state.activeStableZoneEnterTs ? Math.max(0, now - state.activeStableZoneEnterTs) : 0;
 
     const nextFingerprint = toFingerprint();
     if (nextFingerprint !== state.lastRenderFingerprint) {
@@ -1154,8 +1295,21 @@
       renderBanner();
     }
 
-    const snapshot = getSnapshot();
+    const snapshot = getSnapshot(now);
     window.dispatchEvent(new CustomEvent("tlc-ai-assistant-snapshot-updated", { detail: snapshot }));
+
+    const actionFingerprint = [
+      snapshot.actionCode || "",
+      snapshot.actionReason || "",
+      snapshot.assistantMoveTarget?.locationId || "",
+      snapshot.navActive ? "1" : "0",
+      Number.isFinite(snapshot.scoreAdvantageVsCurrent) ? snapshot.scoreAdvantageVsCurrent.toFixed(2) : "nan",
+    ].join("|");
+    if (actionFingerprint !== state.lastActionFingerprint) {
+      state.lastActionFingerprint = actionFingerprint;
+      window.dispatchEvent(new CustomEvent("tlc-ai-assistant-action-updated", { detail: snapshot }));
+    }
+
     return snapshot;
   }
 
@@ -1178,23 +1332,26 @@
 
   function clearState() {
     Object.assign(state, {
-      phase: 2,
+      phase: 3,
       activeStableZoneId: null,
       activeStableZoneName: "",
       activeStableBorough: "",
       activeStableZoneEnterTs: null,
-      activeStableZoneDwellMs: 0,
       candidateZoneId: null,
       candidateZoneFirstSeenTs: null,
       candidateZoneConsecutiveHits: 0,
       activeZoneLastSeenTs: null,
-      lastFrameTime: null,
+      lastUserLocation: null,
       assistantStatus: "idle",
-      actionState: "TRACKING",
+      actionCode: "MONITOR",
+      actionReason: "initializing",
       actionHeadline: "AI Assistant: locating current zone…",
       actionSubline: "Waiting for location and frame.",
       actionSeverity: "neutral",
       assistantMoveTarget: null,
+      currentZoneHoldScore: null,
+      scoreAdvantageVsCurrent: null,
+      navActive: false,
       visibleScoreSource: null,
       visibleScoreSourceLabel: null,
       rating: null,
@@ -1204,34 +1361,17 @@
       citywideTotal: null,
       boroughRank: null,
       boroughTotal: null,
-      busyNow: null,
-      busyNext: null,
-      shortTripPenalty: null,
-      longTripShareRaw: null,
-      longTripShareN: null,
-      balancedTripShareRaw: null,
-      balancedTripShareN: null,
-      sameZoneRetentionPenalty: null,
-      churnPressure: null,
-      downstreamValue: null,
-      marketSaturationPenalty: null,
-      manhattanCoreSaturationPenalty: null,
-      busyNowFlag: false,
-      slowNowFlag: false,
-      shortTripTrapFlag: false,
-      longTripFriendlyFlag: false,
-      saturationCautionFlag: false,
-      goodContinuationFlag: false,
-      weakContinuationFlag: false,
-      zoneHealth: "mixed",
-      tags: [],
-      dwellMs: 0,
-      dwellSeconds: 0,
-      dwellMinutesRounded: 0,
       signalSnapshot: null,
+      bestNearbyOverall: null,
+      bestNearbyTrapEscape: null,
+      bestNearbyLongTrip: null,
+      assistantTags: [],
+      assistantReasonFragments: [],
+      dwellMs: 0,
       lastRenderFingerprint: "",
+      lastActionFingerprint: "",
     });
-    clearNavDestination();
+    applyNavDestination("MONITOR", null);
     renderBanner();
     return getSnapshot();
   }

@@ -41,7 +41,6 @@
   function updateRecommendation(frame) {
     if (window.TlcAiAssistantModule?.updateAssistantForFrame) {
       window.TlcAiAssistantModule.updateAssistantForFrame(frame);
-      window.TlcMapUiModule?.setNavDestination?.(null);
       return;
     }
 
