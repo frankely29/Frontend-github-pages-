@@ -684,9 +684,19 @@
   const AI_ASSISTANT_MARKET_SATURATION_MIN = 0.60;
   const AI_ASSISTANT_GOOD_CONTINUATION_MIN = 0.60;
   const AI_ASSISTANT_WEAK_CONTINUATION_MAX = 0.35;
+  const AI_ASSISTANT_HEARTBEAT_MS_VISIBLE = 15000;
+  const AI_ASSISTANT_HEARTBEAT_MS_HIDDEN = 60000;
+  const AI_ASSISTANT_TRAP_DWELL_WARN_MS = 4 * 60 * 1000;
+  const AI_ASSISTANT_TRAP_DWELL_URGENT_MS = 7 * 60 * 1000;
+  const AI_ASSISTANT_SLOW_DWELL_WARN_MS = 6 * 60 * 1000;
+  const AI_ASSISTANT_SLOW_DWELL_URGENT_MS = 10 * 60 * 1000;
+  const AI_ASSISTANT_MEDIOCRE_DWELL_WARN_MS = 8 * 60 * 1000;
+  const AI_ASSISTANT_MEDIOCRE_DWELL_URGENT_MS = 12 * 60 * 1000;
+  const AI_ASSISTANT_HOLD_EXPIRING_WARN_LEAD_MS = 10 * 60 * 1000;
+  const AI_ASSISTANT_HOLD_EXPIRING_URGENT_LEAD_MS = 3 * 60 * 1000;
 
   const state = {
-    phase: 3,
+    phase: 6,
     activeStableZoneId: null,
     activeStableZoneName: "",
     activeStableBorough: "",
@@ -699,6 +709,24 @@
     assistantStatus: "idle",
     actionCode: "MONITOR",
     actionReason: "initializing",
+    baseActionCode: "MONITOR",
+    baseActionReason: "initializing",
+    finalActionCode: "MONITOR",
+    finalActionReason: "initializing",
+    dwellRiskCode: "neutral",
+    dwellEscalationLevel: "none",
+    dwellWarningActive: false,
+    dwellWarningSinceTs: null,
+    dwellWarnAtTs: null,
+    dwellUrgentAtTs: null,
+    dwellShouldLeaveByTs: null,
+    dwellCountdownMs: null,
+    dwellCoachSummaryText: "Hold OK",
+    dwellCoachReasonFragments: [],
+    assistantFeedMaterialKey: "",
+    assistantAlertKey: "",
+    assistantFeedLastEmittedAt: 0,
+    assistantHeartbeatTimer: null,
     actionHeadline: "AI Assistant: locating current zone…",
     actionSubline: "Waiting for location and frame.",
     actionSeverity: "neutral",
@@ -755,6 +783,8 @@
     outlookRequestToken: 0,
     outlookDerived: null,
     outlookLastSignature: "",
+    assistantFeedVersion: 1,
+    feedUpdatedAt: null,
   };
 
   function numberOrNull(value) {
@@ -780,8 +810,12 @@
     style.id = STYLE_ID;
     style.textContent = `
       .aiAssistBanner{display:flex;flex-direction:column;gap:2px;line-height:1.25}
+      .aiAssistBanner[data-escalation="warn"]{border-left:3px solid #f59e0b;padding-left:6px}
+      .aiAssistBanner[data-escalation="urgent"]{border-left:3px solid #ef4444;padding-left:6px}
       .aiAssistHeadline{font-weight:700}
       .aiAssistMeta{font-size:12px;opacity:.95}
+      .aiAssistCoach{font-size:12px;font-weight:600}
+      .aiAssistTimingChip{display:inline-flex;align-items:center;font-size:11px;padding:1px 8px;border-radius:999px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);width:max-content}
       .aiAssistTags{display:flex;flex-wrap:wrap;gap:4px}
       .aiAssistTag{font-size:11px;opacity:.95;padding:1px 6px;border-radius:999px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15)}
       .aiAssistRankHeader{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
@@ -1391,6 +1425,167 @@
     return out.slice(0, 4);
   }
 
+  function toEpochMs(value) {
+    if (value == null || value === "") return null;
+    const n = Number(value);
+    if (Number.isFinite(n)) return n;
+    const parsed = Date.parse(String(value));
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  function deriveAssistantDwellRisk(snapshot, nowTs) {
+    if (!snapshot?.activeStableZoneId || snapshot.airportExcluded) return "neutral";
+    const baseActionCode = String(snapshot.baseActionCode || snapshot.actionCode || "MONITOR");
+    const visibleRating = Number(snapshot.rating);
+    const scoreAdv = Number(snapshot.assistantMoveTarget?.scoreAdvantageVsCurrent ?? snapshot.scoreAdvantageVsCurrent ?? NaN);
+    const holdUntilTs = toEpochMs(snapshot.holdUntilTime);
+    const nextWorseningTs = toEpochMs(snapshot.nextWorseningTime);
+    const trapUntilTs = toEpochMs(snapshot.trapUntilTime);
+    const noMateriallyBetterNearby = !snapshot.assistantMoveTarget || !(scoreAdv >= AI_ASSISTANT_MOVE_MIN_ADVANTAGE);
+
+    if (
+      baseActionCode === "STAY"
+      && Number.isFinite(visibleRating) && visibleRating >= 60
+      && noMateriallyBetterNearby
+      && (
+        (Number(snapshot.currentZoneCitywideRank) > 0 && Number(snapshot.currentZoneCitywideRank) <= 10)
+        || (Number(snapshot.currentZoneBoroughRank) > 0 && Number(snapshot.currentZoneBoroughRank) <= 3)
+        || (holdUntilTs && holdUntilTs - nowTs > 20 * 60 * 1000)
+      )
+    ) {
+      return "hold_strong";
+    }
+    if (
+      baseActionCode === "STAY_BRIEFLY"
+      || (holdUntilTs && holdUntilTs - nowTs <= 15 * 60 * 1000)
+      || (nextWorseningTs && nextWorseningTs - nowTs <= 20 * 60 * 1000)
+    ) {
+      return "hold_expiring";
+    }
+    if (
+      snapshot.assistantMoveTarget
+      && (trapUntilTs || Number(snapshot.shortTripPenalty) >= 0.58)
+      && Number.isFinite(scoreAdv) && scoreAdv >= 4.0
+    ) {
+      return "trap_bad";
+    }
+    if (
+      snapshot.assistantMoveTarget
+      && Number.isFinite(visibleRating) && visibleRating < 48
+      && Number(snapshot.busyNowBase) <= 0.35
+      && Number.isFinite(scoreAdv) && scoreAdv >= 4.0
+    ) {
+      return "slow_bad";
+    }
+    if (
+      snapshot.assistantMoveTarget
+      && Number.isFinite(scoreAdv) && scoreAdv >= 4.0
+    ) {
+      return "mediocre_better_nearby";
+    }
+    return "neutral";
+  }
+
+  function deriveAssistantDwellEscalation(snapshot, dwellRiskCode, nowTs) {
+    const dwellMs = Number(snapshot?.dwellMs || 0);
+    const holdUntilTs = toEpochMs(snapshot?.holdUntilTime);
+    const result = { dwellEscalationLevel: "none", dwellWarnAtTs: null, dwellUrgentAtTs: null, dwellShouldLeaveByTs: null, dwellCountdownMs: null };
+    if (dwellRiskCode === "neutral" || dwellRiskCode === "hold_strong") return result;
+    if (dwellRiskCode === "hold_expiring") {
+      if (!holdUntilTs) {
+        result.dwellEscalationLevel = "info";
+        return result;
+      }
+      result.dwellWarnAtTs = holdUntilTs - AI_ASSISTANT_HOLD_EXPIRING_WARN_LEAD_MS;
+      result.dwellUrgentAtTs = holdUntilTs - AI_ASSISTANT_HOLD_EXPIRING_URGENT_LEAD_MS;
+      result.dwellShouldLeaveByTs = holdUntilTs;
+      result.dwellCountdownMs = Math.max(0, holdUntilTs - nowTs);
+      if (holdUntilTs <= nowTs || holdUntilTs - nowTs <= AI_ASSISTANT_HOLD_EXPIRING_URGENT_LEAD_MS) result.dwellEscalationLevel = "urgent";
+      else if (holdUntilTs - nowTs <= AI_ASSISTANT_HOLD_EXPIRING_WARN_LEAD_MS) result.dwellEscalationLevel = "warn";
+      else result.dwellEscalationLevel = "info";
+      return result;
+    }
+    const startTs = snapshot?.activeStableZoneEnterTs || nowTs;
+    if (dwellRiskCode === "trap_bad") {
+      result.dwellWarnAtTs = startTs + AI_ASSISTANT_TRAP_DWELL_WARN_MS;
+      result.dwellUrgentAtTs = startTs + AI_ASSISTANT_TRAP_DWELL_URGENT_MS;
+      result.dwellShouldLeaveByTs = result.dwellUrgentAtTs;
+      result.dwellCountdownMs = Math.max(0, result.dwellShouldLeaveByTs - nowTs);
+      result.dwellEscalationLevel = dwellMs >= AI_ASSISTANT_TRAP_DWELL_URGENT_MS ? "urgent" : (dwellMs >= AI_ASSISTANT_TRAP_DWELL_WARN_MS ? "warn" : "info");
+      return result;
+    }
+    if (dwellRiskCode === "slow_bad") {
+      result.dwellWarnAtTs = startTs + AI_ASSISTANT_SLOW_DWELL_WARN_MS;
+      result.dwellUrgentAtTs = startTs + AI_ASSISTANT_SLOW_DWELL_URGENT_MS;
+      result.dwellShouldLeaveByTs = result.dwellUrgentAtTs;
+      result.dwellCountdownMs = Math.max(0, result.dwellShouldLeaveByTs - nowTs);
+      result.dwellEscalationLevel = dwellMs >= AI_ASSISTANT_SLOW_DWELL_URGENT_MS ? "urgent" : (dwellMs >= AI_ASSISTANT_SLOW_DWELL_WARN_MS ? "warn" : "info");
+      return result;
+    }
+    if (dwellRiskCode === "mediocre_better_nearby") {
+      result.dwellWarnAtTs = startTs + AI_ASSISTANT_MEDIOCRE_DWELL_WARN_MS;
+      result.dwellUrgentAtTs = startTs + AI_ASSISTANT_MEDIOCRE_DWELL_URGENT_MS;
+      result.dwellShouldLeaveByTs = result.dwellUrgentAtTs;
+      result.dwellCountdownMs = Math.max(0, result.dwellShouldLeaveByTs - nowTs);
+      result.dwellEscalationLevel = dwellMs >= AI_ASSISTANT_MEDIOCRE_DWELL_URGENT_MS ? "urgent" : (dwellMs >= AI_ASSISTANT_MEDIOCRE_DWELL_WARN_MS ? "warn" : "info");
+      return result;
+    }
+    return result;
+  }
+
+  function actionPriority(code) {
+    return ({ MONITOR: 0, STAY: 1, STAY_BRIEFLY: 2, MOVE_SOON: 3, LEAVE_NOW: 4 }[String(code || "MONITOR")] ?? 0);
+  }
+
+  function applyAssistantDwellOverride(snapshot, dwellRiskCode, dwellEscalationLevel) {
+    const baseActionCode = String(snapshot.baseActionCode || snapshot.actionCode || "MONITOR");
+    const moveTarget = snapshot.assistantMoveTarget;
+    let finalActionCode = baseActionCode;
+    let finalActionReason = String(snapshot.baseActionReason || snapshot.actionReason || "baseline");
+    if (dwellRiskCode === "hold_strong") return { finalActionCode: "STAY", finalActionReason: "hold_strong" };
+    if (dwellRiskCode === "hold_expiring") {
+      if (dwellEscalationLevel === "urgent") return { finalActionCode: moveTarget ? "MOVE_SOON" : "MONITOR", finalActionReason: "hold_window_expired_or_near_end" };
+      return { finalActionCode: "STAY_BRIEFLY", finalActionReason: "hold_window_expiring" };
+    }
+    if (dwellRiskCode === "trap_bad") {
+      if (dwellEscalationLevel === "urgent") return { finalActionCode: moveTarget ? "LEAVE_NOW" : "MOVE_SOON", finalActionReason: "stayed_too_long_in_trap" };
+      if (dwellEscalationLevel === "warn") return { finalActionCode: moveTarget ? "MOVE_SOON" : "MONITOR", finalActionReason: "trap_dwell_warning" };
+      if (actionPriority(finalActionCode) < actionPriority("STAY_BRIEFLY")) return { finalActionCode: "STAY_BRIEFLY", finalActionReason: "trap_dwell_info" };
+      return { finalActionCode, finalActionReason };
+    }
+    if (dwellRiskCode === "slow_bad") {
+      if (dwellEscalationLevel === "urgent") return { finalActionCode: moveTarget ? "LEAVE_NOW" : "MOVE_SOON", finalActionReason: "stayed_too_long_in_slow_zone" };
+      if (dwellEscalationLevel === "warn") return { finalActionCode: moveTarget ? "MOVE_SOON" : "MONITOR", finalActionReason: "slow_zone_dwell_warning" };
+      return { finalActionCode, finalActionReason };
+    }
+    if (dwellRiskCode === "mediocre_better_nearby") {
+      if (dwellEscalationLevel === "urgent") return { finalActionCode: moveTarget ? "MOVE_SOON" : "MONITOR", finalActionReason: "better_nearby_zone_after_overstay" };
+      if (dwellEscalationLevel === "warn") return { finalActionCode: "STAY_BRIEFLY", finalActionReason: "move_soon_better_zone_nearby" };
+      return { finalActionCode, finalActionReason };
+    }
+    return { finalActionCode, finalActionReason };
+  }
+
+  function buildAssistantDwellCoachReasonFragments(snapshot) {
+    const out = [];
+    if (snapshot.dwellRiskCode === "hold_strong" && Number(snapshot.currentZoneBoroughRank) > 0 && snapshot.currentZoneBoroughRank <= 3) out.push("top borough zone");
+    if (snapshot.dwellRiskCode === "hold_expiring" && snapshot.holdUntilTime) out.push("hold window ends soon");
+    if (snapshot.dwellRiskCode === "trap_bad") out.push("trap risk still active");
+    if (snapshot.assistantMoveTarget && Number.isFinite(snapshot.assistantMoveTarget.scoreAdvantageVsCurrent)) out.push(`better nearby zone +${snapshot.assistantMoveTarget.scoreAdvantageVsCurrent.toFixed(1)}`);
+    if (snapshot.dwellRiskCode === "slow_bad") out.push(`slow zone for ${Math.max(0, Math.round((snapshot.dwellMs || 0) / 60000))}m`);
+    if (snapshot.targetStrongUntilTime) out.push(`move target stronger through ${formatOutlookTimeLabel(snapshot.targetStrongUntilTime)}`);
+    return out.slice(0, 4);
+  }
+
+  function buildAssistantDwellCoachSummary(snapshot) {
+    if (snapshot.dwellRiskCode === "hold_strong") return "Hold OK — this is still a strong zone";
+    if (snapshot.dwellRiskCode === "hold_expiring") return snapshot.dwellEscalationLevel === "urgent" ? "Window expiring — prepare to move" : "Move in a few minutes — hold window narrowing";
+    if (snapshot.dwellRiskCode === "trap_bad") return snapshot.dwellEscalationLevel === "urgent" ? "Leave now — trap risk and overstay" : "Move in a few minutes — trap risk building";
+    if (snapshot.dwellRiskCode === "slow_bad") return snapshot.dwellEscalationLevel === "urgent" ? "Leave now — slow zone overstay" : "Move in a few minutes — slow zone overstay";
+    if (snapshot.dwellRiskCode === "mediocre_better_nearby") return snapshot.dwellEscalationLevel === "urgent" ? "Move in a few minutes — better nearby option" : "Move in a few minutes — better nearby option";
+    return "Hold OK";
+  }
+
   async function fetchAssistantOutlook(frameTime, locationIds) {
     const requestKey = buildOutlookRequestKey(frameTime, locationIds);
     if (!frameTime || !Array.isArray(locationIds) || !locationIds.length) {
@@ -1433,13 +1628,42 @@
     }
   }
 
+  function reevaluateAssistantDwell(nowTs) {
+    const snapshot = getSnapshot(nowTs);
+    const riskCode = deriveAssistantDwellRisk(snapshot, nowTs);
+    const escalation = deriveAssistantDwellEscalation(snapshot, riskCode, nowTs);
+    const finalAction = applyAssistantDwellOverride(snapshot, riskCode, escalation.dwellEscalationLevel);
+    const previousWarningActive = !!state.dwellWarningActive;
+    const nextWarningActive = escalation.dwellEscalationLevel === "warn" || escalation.dwellEscalationLevel === "urgent";
+
+    state.dwellRiskCode = riskCode;
+    state.dwellEscalationLevel = escalation.dwellEscalationLevel;
+    state.dwellWarnAtTs = escalation.dwellWarnAtTs;
+    state.dwellUrgentAtTs = escalation.dwellUrgentAtTs;
+    state.dwellShouldLeaveByTs = escalation.dwellShouldLeaveByTs;
+    state.dwellCountdownMs = escalation.dwellCountdownMs;
+    state.dwellWarningActive = nextWarningActive;
+    if (nextWarningActive && !previousWarningActive) state.dwellWarningSinceTs = nowTs;
+    if (!nextWarningActive) state.dwellWarningSinceTs = null;
+    state.finalActionCode = finalAction.finalActionCode;
+    state.finalActionReason = finalAction.finalActionReason;
+    state.actionCode = state.finalActionCode;
+    state.actionReason = state.finalActionReason;
+    state.dwellCoachSummaryText = buildAssistantDwellCoachSummary(getSnapshot(nowTs));
+    state.dwellCoachReasonFragments = buildAssistantDwellCoachReasonFragments(getSnapshot(nowTs));
+    state.navActive = applyNavDestination(state.finalActionCode, state.assistantMoveTarget);
+    state.actionHeadline = buildHeadline();
+    state.actionSubline = buildSubline();
+  }
+
   function buildHeadline() {
     const zone = state.activeStableZoneName || "—";
     const target = state.assistantMoveTarget?.zoneName || "—";
-    if (state.actionCode === "STAY") return `STAY — ${zone}`;
-    if (state.actionCode === "MOVE_SOON") return `MOVE SOON → ${target}`;
-    if (state.actionCode === "LEAVE_NOW") return `LEAVE NOW → ${target}`;
-    if (state.actionCode === "STAY_BRIEFLY") return `STAY BRIEFLY → ${target}`;
+    const actionCode = state.finalActionCode || state.actionCode;
+    if (actionCode === "STAY") return `STAY — ${zone}`;
+    if (actionCode === "MOVE_SOON") return `MOVE SOON → ${target}`;
+    if (actionCode === "LEAVE_NOW") return `LEAVE NOW → ${target}`;
+    if (actionCode === "STAY_BRIEFLY") return `STAY BRIEFLY — ${zone}`;
     return `MONITOR — ${zone}`;
   }
 
@@ -1482,11 +1706,35 @@
     return `<ol class="aiAssistRankList">${rows}</ol>`;
   }
 
+  function formatTimeChip(snapshot) {
+    if (!snapshot?.activeStableZoneId) return "Hold OK";
+    if (snapshot.dwellEscalationLevel === "urgent" && snapshot.dwellShouldLeaveByTs) return `Leave by ${formatOutlookTimeLabel(snapshot.dwellShouldLeaveByTs)}`;
+    if (snapshot.dwellEscalationLevel === "info" && snapshot.dwellWarnAtTs) {
+      const mins = Math.max(0, Math.ceil((toEpochMs(snapshot.dwellWarnAtTs) - snapshot.ts) / 60000));
+      return `Warn in ${mins}m`;
+    }
+    if (snapshot.dwellEscalationLevel === "warn" && snapshot.dwellShouldLeaveByTs) return `Leave by ${formatOutlookTimeLabel(snapshot.dwellShouldLeaveByTs)}`;
+    return "Hold OK";
+  }
+
+  function dwellRiskHumanLabel(code) {
+    return ({
+      hold_strong: "Strong hold zone",
+      hold_expiring: "Hold window expiring",
+      trap_bad: "Trap zone overstay",
+      slow_bad: "Slow zone overstay",
+      mediocre_better_nearby: "Better nearby zone available",
+      neutral: "Neutral dwell state",
+    }[String(code || "neutral")] || "Neutral dwell state");
+  }
+
   function toFingerprint() {
     return [
       state.activeStableZoneId || "",
-      state.actionCode || "",
-      state.actionReason || "",
+      state.finalActionCode || state.actionCode || "",
+      state.finalActionReason || state.actionReason || "",
+      state.dwellRiskCode || "",
+      state.dwellEscalationLevel || "",
       state.assistantMoveTarget?.locationId || "",
       Number.isFinite(state.rating) ? state.rating.toFixed(2) : "nan",
       Number.isFinite(state.currentZoneHoldScore) ? state.currentZoneHoldScore.toFixed(2) : "nan",
@@ -1520,6 +1768,23 @@
     const boroughFallback = `<div class="aiAssistMeta">Borough rankings available after stable zone entry</div>`;
     const rankingsPanel = state.rankingsExpanded ? `
       <div class="aiAssistRankPanel" data-role="assistant-rankings-panel">
+        <div class="aiAssistRankSection">
+          <div class="aiAssistRankTitle">Dwell Coach</div>
+          ${snapshot.activeStableZoneId ? `
+          <div class="aiAssistMeta">Dwell time: ${formatDwell(snapshot.dwellMs)}</div>
+          <div class="aiAssistMeta">Base action: ${snapshot.baseActionCode || "MONITOR"} (${snapshot.baseActionReason || "—"})</div>
+          <div class="aiAssistMeta">Final action: ${snapshot.finalActionCode || "MONITOR"} (${snapshot.finalActionReason || "—"})</div>
+          <div class="aiAssistMeta">Dwell risk: ${dwellRiskHumanLabel(snapshot.dwellRiskCode)}</div>
+          <div class="aiAssistMeta">Escalation: ${snapshot.dwellEscalationLevel || "none"}</div>
+          <div class="aiAssistMeta">Warn threshold: ${snapshot.dwellWarnAtTs ? formatOutlookTimeLabel(snapshot.dwellWarnAtTs) : "—"}</div>
+          <div class="aiAssistMeta">Urgent threshold: ${snapshot.dwellUrgentAtTs ? formatOutlookTimeLabel(snapshot.dwellUrgentAtTs) : "—"}</div>
+          <div class="aiAssistMeta">Leave by / recheck: ${snapshot.dwellShouldLeaveByTs ? formatOutlookTimeLabel(snapshot.dwellShouldLeaveByTs) : "—"}</div>
+          <div class="aiAssistMeta">Coach: ${snapshot.dwellCoachSummaryText || "Hold OK"}</div>
+          ${Array.isArray(snapshot.dwellCoachReasonFragments) && snapshot.dwellCoachReasonFragments.length
+            ? `<div class="aiAssistMeta">Reasons: ${snapshot.dwellCoachReasonFragments.join(" • ")}</div>`
+            : `<div class="aiAssistMeta">Reasons: none</div>`}
+          ` : `<div class="aiAssistMeta">Neutral dwell state — no active stable zone yet.</div>`}
+        </div>
         <div class="aiAssistRankSection">
           <div class="aiAssistRankTitle">Outlook</div>
           <div class="aiAssistMeta">Current phase: ${snapshot.activeFromTime ? formatOutlookTimeLabel(snapshot.activeFromTime) : "n/a"}</div>
@@ -1574,8 +1839,10 @@
     ` : "";
 
     host.innerHTML = `
-      <div class="aiAssistBanner" data-phase="5" data-state="${state.actionCode || "MONITOR"}">
+      <div class="aiAssistBanner" data-phase="6" data-state="${state.finalActionCode || state.actionCode || "MONITOR"}" data-escalation="${state.dwellEscalationLevel || "none"}">
         <div class="aiAssistHeadline">${buildHeadline()}</div>
+        <div class="aiAssistCoach">${snapshot.dwellCoachSummaryText || "Hold OK"}</div>
+        <div class="aiAssistTimingChip">${formatTimeChip(snapshot)}</div>
         <div class="aiAssistMeta">Current: ${state.activeStableZoneName || "—"} • ${ratingTxt} • ${state.visibleScoreSourceLabel || "Team Joseo score"}</div>
         <div class="aiAssistMeta">${formatDwell(state.dwellMs)}</div>
         <div class="aiAssistMeta">${snapshot.outlookSummaryText || "Outlook neutral"}</div>
@@ -1696,11 +1963,24 @@
     state.assistantStatus = status;
     state.actionCode = "MONITOR";
     state.actionReason = "insufficient_inputs";
+    state.baseActionCode = "MONITOR";
+    state.baseActionReason = "insufficient_inputs";
+    state.finalActionCode = "MONITOR";
+    state.finalActionReason = "insufficient_inputs";
+    state.dwellRiskCode = "neutral";
+    state.dwellEscalationLevel = "none";
+    state.dwellWarningActive = false;
+    state.dwellWarnAtTs = null;
+    state.dwellUrgentAtTs = null;
+    state.dwellShouldLeaveByTs = null;
+    state.dwellCountdownMs = null;
+    state.dwellCoachSummaryText = "Hold OK";
+    state.dwellCoachReasonFragments = [];
     state.actionHeadline = headline;
     state.actionSubline = subline;
     state.actionSeverity = "neutral";
     state.assistantMoveTarget = null;
-    state.navActive = applyNavDestination(state.actionCode, null);
+    state.navActive = applyNavDestination(state.finalActionCode, null);
   }
 
   function updateFromFrame(frame, now) {
@@ -1728,7 +2008,7 @@
     const decision = decideAssistantAction(currentSignal, candidateSet, state.signalSnapshot || null);
     const rankings = ensureRankings(frame, currentSignal, now);
 
-    state.phase = 3;
+    state.phase = 6;
     state.assistantStatus = currentSignal.airportExcluded ? "airport-excluded" : "classified";
     state.activeStableZoneName = currentSignal.zoneName;
     state.activeStableBorough = currentSignal.borough;
@@ -1746,12 +2026,16 @@
     state.bestNearbyLongTrip = serializeCandidate(candidateSet.bestNearbyLongTrip, decision.holdScore);
 
     state.assistantTags = buildAssistantTags(decision.classification);
+    state.baseActionCode = decision.actionCode;
+    state.baseActionReason = decision.actionReason;
     state.actionCode = decision.actionCode;
     state.actionReason = decision.actionReason;
+    state.finalActionCode = decision.actionCode;
+    state.finalActionReason = decision.actionReason;
     state.actionSeverity = decision.actionSeverity;
     state.assistantMoveTarget = decision.moveTarget;
     state.scoreAdvantageVsCurrent = decision.moveTarget?.scoreAdvantageVsCurrent ?? null;
-    state.navActive = applyNavDestination(state.actionCode, state.assistantMoveTarget);
+    state.navActive = applyNavDestination(state.finalActionCode, state.assistantMoveTarget);
     state.assistantReasonFragments = buildAssistantActionExplanation(getSnapshot(now));
     state.actionHeadline = buildHeadline();
     state.actionSubline = buildSubline();
@@ -1760,10 +2044,11 @@
   function getSnapshot(tsNow = Date.now()) {
     const dwellMs = state.activeStableZoneEnterTs ? Math.max(0, tsNow - state.activeStableZoneEnterTs) : 0;
     const snapshot = {
-      phase: 3,
+      phase: 6,
       activeStableZoneId: state.activeStableZoneId,
       activeStableZoneName: state.activeStableZoneName,
       activeStableBorough: state.activeStableBorough,
+      activeStableZoneEnterTs: state.activeStableZoneEnterTs,
       visibleScoreSource: state.visibleScoreSource,
       visibleScoreSourceLabel: state.visibleScoreSourceLabel,
       rating: state.rating,
@@ -1833,9 +2118,25 @@
       bestNearbyTrapEscape: state.bestNearbyTrapEscape,
       bestNearbyLongTrip: state.bestNearbyLongTrip,
       assistantMoveTarget: state.assistantMoveTarget,
+      baseActionCode: state.baseActionCode || state.actionCode,
+      baseActionReason: state.baseActionReason || state.actionReason,
+      finalActionCode: state.finalActionCode || state.actionCode,
+      finalActionReason: state.finalActionReason || state.actionReason,
       actionCode: state.actionCode,
       actionReason: state.actionReason,
       actionSeverity: state.actionSeverity,
+      dwellRiskCode: state.dwellRiskCode || "neutral",
+      dwellEscalationLevel: state.dwellEscalationLevel || "none",
+      dwellWarningActive: !!state.dwellWarningActive,
+      dwellWarningSinceTs: state.dwellWarningSinceTs,
+      dwellWarnAtTs: state.dwellWarnAtTs,
+      dwellUrgentAtTs: state.dwellUrgentAtTs,
+      dwellShouldLeaveByTs: state.dwellShouldLeaveByTs,
+      dwellCountdownMs: state.dwellCountdownMs,
+      dwellCoachSummaryText: state.dwellCoachSummaryText || "",
+      dwellCoachReasonFragments: Array.isArray(state.dwellCoachReasonFragments) ? [...state.dwellCoachReasonFragments] : [],
+      assistantFeedVersion: 1,
+      feedUpdatedAt: state.feedUpdatedAt,
       scoreAdvantageVsCurrent: state.scoreAdvantageVsCurrent,
       navActive: !!state.navActive,
       candidateSearchRadiusOverall: AI_ASSISTANT_NEARBY_OVERALL_MAX_MI,
@@ -1855,13 +2156,75 @@
     return snapshot;
   }
 
+  function buildAssistantFeedMaterialKey(snapshot) {
+    const dwellMinuteBucket = Math.floor((snapshot?.dwellMs || 0) / 60000);
+    return [
+      snapshot?.activeStableZoneId || "",
+      snapshot?.finalActionCode || "",
+      snapshot?.finalActionReason || "",
+      snapshot?.dwellRiskCode || "",
+      snapshot?.dwellEscalationLevel || "",
+      snapshot?.assistantMoveTarget?.locationId || "",
+      snapshot?.currentZoneCitywideRank || "",
+      snapshot?.currentZoneBoroughRank || "",
+      snapshot?.holdUntilTime || "",
+      dwellMinuteBucket,
+    ].join("|");
+  }
+
+  function buildAssistantAlertKey(snapshot) {
+    return [
+      snapshot?.activeStableZoneId || "",
+      snapshot?.dwellRiskCode || "",
+      snapshot?.dwellEscalationLevel || "",
+      snapshot?.assistantMoveTarget?.locationId || "",
+    ].join("|");
+  }
+
+  function emitAssistantFeedEvents(snapshot, nowTs) {
+    const materialKey = buildAssistantFeedMaterialKey(snapshot);
+    if (materialKey !== state.assistantFeedMaterialKey) {
+      state.assistantFeedMaterialKey = materialKey;
+      state.assistantFeedLastEmittedAt = nowTs;
+      state.feedUpdatedAt = nowTs;
+      window.dispatchEvent(new CustomEvent("tlc-ai-assistant-snapshot-updated", { detail: snapshot }));
+    }
+    const alertKey = buildAssistantAlertKey(snapshot);
+    const escalated = snapshot.dwellEscalationLevel === "warn" || snapshot.dwellEscalationLevel === "urgent";
+    if (escalated && alertKey !== state.assistantAlertKey) {
+      state.assistantAlertKey = alertKey;
+      window.dispatchEvent(new CustomEvent("tlc-ai-assistant-alert", { detail: snapshot }));
+    }
+  }
+
+  function clearAssistantHeartbeat() {
+    if (state.assistantHeartbeatTimer) {
+      clearInterval(state.assistantHeartbeatTimer);
+      state.assistantHeartbeatTimer = null;
+    }
+  }
+
+  function ensureAssistantHeartbeat() {
+    if (!state.activeStableZoneId) {
+      clearAssistantHeartbeat();
+      return;
+    }
+    const intervalMs = document.visibilityState === "hidden" ? AI_ASSISTANT_HEARTBEAT_MS_HIDDEN : AI_ASSISTANT_HEARTBEAT_MS_VISIBLE;
+    if (state.assistantHeartbeatTimer) return;
+    state.assistantHeartbeatTimer = setInterval(() => {
+      refresh().catch(() => {});
+    }, intervalMs);
+  }
+
   async function refresh(frame) {
     const now = Date.now();
     const activeFrame = getFrame(frame);
     updateStableZone(now);
+    ensureAssistantHeartbeat();
     updateFromFrame(activeFrame, now);
     await refreshOutlook(activeFrame, now);
     state.dwellMs = state.activeStableZoneEnterTs ? Math.max(0, now - state.activeStableZoneEnterTs) : 0;
+    reevaluateAssistantDwell(now);
 
     const nextFingerprint = toFingerprint();
     if (nextFingerprint !== state.lastRenderFingerprint) {
@@ -1870,11 +2233,11 @@
     }
 
     const snapshot = getSnapshot(now);
-    window.dispatchEvent(new CustomEvent("tlc-ai-assistant-snapshot-updated", { detail: snapshot }));
+    emitAssistantFeedEvents(snapshot, now);
 
     const actionFingerprint = [
-      snapshot.actionCode || "",
-      snapshot.actionReason || "",
+      snapshot.finalActionCode || "",
+      snapshot.finalActionReason || "",
       snapshot.assistantMoveTarget?.locationId || "",
       snapshot.navActive ? "1" : "0",
       Number.isFinite(snapshot.scoreAdvantageVsCurrent) ? snapshot.scoreAdvantageVsCurrent.toFixed(2) : "nan",
@@ -1905,7 +2268,7 @@
     const byId = payload?.outlook_by_location_id || payload?.locations || {};
     state.currentZoneOutlook = byId?.[currentId] || null;
     state.moveTargetOutlook = targetId ? (byId?.[targetId] || null) : null;
-    const currentDerived = deriveAssistantOutlookWindows(state.currentZoneOutlook, state.visibleScoreSource, state.actionCode);
+    const currentDerived = deriveAssistantOutlookWindows(state.currentZoneOutlook, state.visibleScoreSource, state.baseActionCode || state.actionCode);
     const targetDerived = deriveTargetOutlookWindows(state.moveTargetOutlook, state.assistantMoveTarget?.visibleScoreSource);
     state.outlookDerived = { ...(currentDerived || {}), ...(targetDerived || {}) };
     const snap = getSnapshot(now);
@@ -1958,8 +2321,9 @@
   }
 
   function clearState() {
+    clearAssistantHeartbeat();
     Object.assign(state, {
-      phase: 3,
+      phase: 6,
       activeStableZoneId: null,
       activeStableZoneName: "",
       activeStableBorough: "",
@@ -1972,6 +2336,24 @@
       assistantStatus: "idle",
       actionCode: "MONITOR",
       actionReason: "initializing",
+      baseActionCode: "MONITOR",
+      baseActionReason: "initializing",
+      finalActionCode: "MONITOR",
+      finalActionReason: "initializing",
+      dwellRiskCode: "neutral",
+      dwellEscalationLevel: "none",
+      dwellWarningActive: false,
+      dwellWarningSinceTs: null,
+      dwellWarnAtTs: null,
+      dwellUrgentAtTs: null,
+      dwellShouldLeaveByTs: null,
+      dwellCountdownMs: null,
+      dwellCoachSummaryText: "Hold OK",
+      dwellCoachReasonFragments: [],
+      assistantFeedMaterialKey: "",
+      assistantAlertKey: "",
+      assistantFeedLastEmittedAt: 0,
+      assistantHeartbeatTimer: null,
       actionHeadline: "AI Assistant: locating current zone…",
       actionSubline: "Waiting for location and frame.",
       actionSeverity: "neutral",
@@ -2028,6 +2410,8 @@
       outlookRequestToken: 0,
       outlookDerived: null,
       outlookLastSignature: "",
+      assistantFeedVersion: 1,
+      feedUpdatedAt: null,
     });
     applyNavDestination("MONITOR", null);
     renderBanner();
@@ -2043,6 +2427,12 @@
   };
 
   window.getTeamJoseoAiAssistantSnapshot = () => window.TlcAiAssistantModule?.getSnapshot?.() || null;
+  window.getTeamJoseoAiAssistantFeedSnapshot = () => window.TlcAiAssistantModule?.getSnapshot?.() || null;
+
+  document.addEventListener("visibilitychange", () => {
+    clearAssistantHeartbeat();
+    ensureAssistantHeartbeat();
+  });
 
   renderBanner();
   bindRankingsToggleOnce();
