@@ -472,12 +472,14 @@ function effectiveRating(props, geom) { return window.TlcModeModule?.effectiveRa
 function getActiveSpecialModeTagForFeature(props, geom) { return window.TlcModeModule?.getActiveSpecialModeTagForFeature?.(props, geom) || null; }
 function getVisibleScoreSourceForFeature(props, geom) { return window.TlcModeModule?.getVisibleScoreSourceForFeature?.(props, geom) || "legacy_citywide"; }
 function getVisibleScoreSourceLabel(props, geom) { return window.TlcModeModule?.getVisibleScoreSourceLabel?.(props, geom) || "Team Joseo score"; }
+function getCurrentFrameForAssistant() { return currentFrame || null; }
 
 window.TlcMapUiInternals = {
   getRecommendEl: () => recommendEl,
   getNavButton: () => navBtn,
   getUserLatLng: () => userLatLng,
   getSpecialModes: () => getModeFlags(),
+  getCurrentFrame: getCurrentFrameForAssistant,
   effectiveBucket,
   effectiveRating,
   getActiveSpecialModeTagForFeature,
