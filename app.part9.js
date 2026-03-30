@@ -16,7 +16,6 @@
   let wxParticles = [];
   let wxAnimRunning = false;
   let wxNextUpdateTimer = null;
-  let lastRecommendationAudit = null;
 
   function setNavDisabled(disabled) {
     if (!navBtn) return;
@@ -40,175 +39,18 @@
     return !!recommendedDest;
   }
   function updateRecommendation(frame) {
-    if (!recommendEl) return;
-
-    const userLatLng = core.getUserLatLng?.() || null;
-    if (!userLatLng) {
-      recommendEl.textContent = "Recommended: enable location to get suggestions";
-      setNavDestination(null);
-      lastRecommendationAudit = null;
+    if (window.TlcAiAssistantModule?.updateAssistantForFrame) {
+      window.TlcAiAssistantModule.updateAssistantForFrame(frame);
+      window.TlcMapUiModule?.setNavDestination?.(null);
       return;
     }
 
-    const feats = frame?.polygons?.features || [];
-    if (!feats.length) {
-      recommendEl.textContent = "Recommended: …";
-      setNavDestination(null);
-      lastRecommendationAudit = null;
-      return;
+    if (recommendEl) {
+      recommendEl.textContent = "AI Assistant loading…";
     }
-
-    const allowed = new Set(["blue", "indigo", "purple", "green"]);
-    const DIST_PENALTY_PER_MILE = 4.0;
-    const BRONX_WASH_HEIGHTS_DIST_PENALTY_PER_MILE = 2.0;
-    const modes = core.getSpecialModes?.() || {};
-    const TIE_BREAK_THRESHOLD = 2.0;
-
-    let best = null;
-
-    for (const f of feats) {
-      const props = f.properties || {};
-      const geom = f.geometry;
-      if (props.airport_excluded === true) continue;
-      const modeTag = core.getActiveSpecialModeTagForFeature?.(props, geom);
-
-      const b = core.effectiveBucket?.(props, geom);
-      if (!allowed.has(b)) continue;
-
-      const rating = core.effectiveRating?.(props, geom);
-      if (!Number.isFinite(rating)) continue;
-
-      const center = core.geometryCenter?.(geom);
-      if (!center) continue;
-
-      const dMi = core.haversineMiles?.(userLatLng, center) || 0;
-      const scoreSource = String(core.getVisibleScoreSourceForFeature?.(props, geom) || "");
-      const distancePenaltyPerMile = modeTag === "queens"
-        ? 5.0
-        : (modeTag === "bronx_wash_heights"
-          ? BRONX_WASH_HEIGHTS_DIST_PENALTY_PER_MILE
-          : DIST_PENALTY_PER_MILE);
-      let score = rating - dMi * distancePenaltyPerMile;
-
-      const crowdingPenalty = Number(
-        window.TlcCommunityCrowdingModule?.getZoneCommunityCrowdingPenalty?.(props.LocationID) ?? 0
-      );
-      if (Number.isFinite(crowdingPenalty) && crowdingPenalty > 0) {
-        score -= crowdingPenalty;
-      }
-
-      if (!Number.isFinite(score)) continue;
-
-      const churnPressure = Number(props.churn_pressure_n_shadow ?? NaN);
-      const busyNextBase = Number(props.busy_next_base_n_shadow ?? NaN);
-      const manhattanSaturation = Number(props.manhattan_core_saturation_proxy_n_shadow ?? NaN);
-
-      const candidate = {
-        score,
-        dMi,
-        rating,
-        lat: center.lat,
-        lng: center.lng,
-        name: (props.zone_name || "").trim() || `Zone ${props.LocationID ?? ""}`,
-        borough: (props.borough || "").trim(),
-        usedQN: modeTag === "queens" && /^queens_/.test(scoreSource),
-        usedBK: modeTag === "brooklyn" && /^brooklyn_/.test(scoreSource),
-        usedSI: modeTag === "staten_island" && /^staten_island_/.test(scoreSource),
-        usedMH: modeTag === "manhattan" && /^manhattan_/.test(scoreSource),
-        usedBWH: modeTag === "bronx_wash_heights" && /^bronx_wash_heights_/.test(scoreSource),
-        visibleScoreSource: scoreSource || "legacy_citywide",
-        communityCrowding: window.TlcCommunityCrowdingModule?.getZoneCommunityCrowdingSnapshot?.(props.LocationID) || null,
-        churnPressure: Number.isFinite(churnPressure) ? churnPressure : null,
-        busyNextBase: Number.isFinite(busyNextBase) ? busyNextBase : null,
-        manhattanSaturation: Number.isFinite(manhattanSaturation) ? manhattanSaturation : null,
-      };
-
-      if (!best || score > best.score) {
-        best = candidate;
-        continue;
-      }
-
-      if (best && Math.abs(score - best.score) <= TIE_BREAK_THRESHOLD) {
-        const compareValues = [
-          {
-            next: candidate.churnPressure,
-            current: best.churnPressure,
-            lowerIsBetter: true,
-          },
-          {
-            next: candidate.busyNextBase,
-            current: best.busyNextBase,
-            lowerIsBetter: false,
-          },
-        ];
-
-        let tieDecision = 0;
-        for (const item of compareValues) {
-          if (!Number.isFinite(item.next) || !Number.isFinite(item.current)) continue;
-          if (item.next === item.current) continue;
-          tieDecision = item.lowerIsBetter
-            ? (item.next < item.current ? 1 : -1)
-            : (item.next > item.current ? 1 : -1);
-          if (tieDecision !== 0) break;
-        }
-
-        if (modes.manhattanMode) {
-          if (Number.isFinite(candidate.manhattanSaturation) && Number.isFinite(best.manhattanSaturation)) {
-            if (candidate.manhattanSaturation !== best.manhattanSaturation) {
-              tieDecision = candidate.manhattanSaturation < best.manhattanSaturation ? 1 : -1;
-            }
-          }
-        }
-
-        if (tieDecision > 0) {
-          best = candidate;
-        }
-      }
-    }
-
-    if (!best) {
-      recommendEl.textContent = "Recommended: no Blue/Indigo+ zone nearby right now";
-      setNavDestination(null);
-      lastRecommendationAudit = null;
-      return;
-    }
-
-    const distTxt = best.dMi >= 10 ? `${best.dMi.toFixed(0)} mi` : `${best.dMi.toFixed(1)} mi`;
-    const bTxt = best.borough ? ` (${best.borough})` : "";
-    const crowdingSuffix = (best.communityCrowding && (best.communityCrowding.bucket === "crowded" || best.communityCrowding.bucket === "heavy"))
-      ? " • community crowding caution"
-      : "";
-    if (best.usedQN) {
-      recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Best Queens earnings score • Non-airport pocket • Safer from dead spots • Strong repeat-call pocket — ${distTxt}${crowdingSuffix}`;
-    } else if (best.usedBWH) {
-      recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Bronx/Wash Heights earnings score ${best.rating} — ${distTxt}${crowdingSuffix}`;
-    } else if (best.usedBK) {
-      recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Brooklyn earnings score ${best.rating} — ${distTxt}${crowdingSuffix}`;
-    } else if (best.usedMH) {
-      recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Manhattan earnings score ${best.rating} — ${distTxt}${crowdingSuffix}`;
-    } else if (best.usedSI) {
-      recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Staten Island earnings score ${best.rating} — ${distTxt}${crowdingSuffix}`;
-    } else {
-      recommendEl.textContent = `Recommended: ${best.name}${bTxt} — Team Joseo score ${best.rating} — ${distTxt}${crowdingSuffix}`;
-    }
-
-    setNavDestination({ lat: best.lat, lng: best.lng });
-    lastRecommendationAudit = {
-      zoneName: best.name,
-      borough: best.borough,
-      rating: best.rating,
-      distanceMiles: best.dMi,
-      activeModeTag:
-        best.usedQN ? "queens" :
-        best.usedBK ? "brooklyn" :
-        best.usedSI ? "staten_island" :
-        best.usedMH ? "manhattan" :
-        best.usedBWH ? "bronx_wash_heights" :
-        "citywide",
-      communityCrowding: best.communityCrowding || null,
-      visibleScoreSource: best.visibleScoreSource || "legacy_citywide",
-    };
+    setNavDestination(null);
   }
+
 
   function updateOnlineBadge(count, ghostedCount = 0) {
     if (!onlineBadge) return;
@@ -526,7 +368,7 @@
   }
 
   window.getTeamJoseoRecommendationAudit = function getTeamJoseoRecommendationAudit() {
-    return lastRecommendationAudit;
+    return window.getTeamJoseoAiAssistantSnapshot?.() || null;
   };
 
   window.TlcMapUiModule = {
