@@ -673,6 +673,17 @@
   const AI_ASSISTANT_MOVE_MIN_ADVANTAGE = 4.0;
   const AI_ASSISTANT_LEAVE_NOW_ADVANTAGE = 7.0;
   const AI_ASSISTANT_LONG_TRIP_SWITCH_ADVANTAGE = 6.0;
+  const AI_ASSISTANT_BUSY_NOW_MIN = 0.68;
+  const AI_ASSISTANT_SLOW_NOW_MAX = 0.35;
+  const AI_ASSISTANT_SLOW_NEXT_MAX = 0.40;
+  const AI_ASSISTANT_SHORT_TRIP_TRAP_MIN = 0.62;
+  const AI_ASSISTANT_RETENTION_TRAP_MIN = 0.55;
+  const AI_ASSISTANT_CONTINUATION_TRAP_MAX = 0.45;
+  const AI_ASSISTANT_LONG_TRIP_FRIENDLY_MIN = 0.62;
+  const AI_ASSISTANT_MANHATTAN_SATURATION_MIN = 0.45;
+  const AI_ASSISTANT_MARKET_SATURATION_MIN = 0.60;
+  const AI_ASSISTANT_GOOD_CONTINUATION_MIN = 0.60;
+  const AI_ASSISTANT_WEAK_CONTINUATION_MAX = 0.35;
 
   const state = {
     phase: 3,
@@ -731,6 +742,19 @@
     lastRenderFingerprint: "",
     lastActionFingerprint: "",
     rankingsBound: false,
+    outlookCache: {},
+    outlookCacheKey: "",
+    outlookLoading: false,
+    outlookError: "",
+    currentZoneOutlook: null,
+    moveTargetOutlook: null,
+    outlookExpanded: false,
+    lastOutlookRequestKey: "",
+    lastOutlookLoadedAt: null,
+    outlookAbortController: null,
+    outlookRequestToken: 0,
+    outlookDerived: null,
+    outlookLastSignature: "",
   };
 
   function numberOrNull(value) {
@@ -978,16 +1002,16 @@
   }
 
   function classifyCurrentZone(signal) {
-    const busyNowFlag = (signal.busyNowBase ?? -Infinity) >= 0.68;
-    const slowNowFlag = (signal.busyNowBase ?? Infinity) <= 0.35 && (signal.busyNextBase ?? Infinity) <= 0.40;
-    const shortTripTrapFlag = (signal.shortTripPenalty ?? 0) >= 0.62
-      && (signal.sameZoneRetentionPenalty ?? 0) >= 0.55
-      && (signal.continuationRaw ?? 1) <= 0.45;
-    const longTripFriendlyFlag = (signal.longTripShare20Plus ?? 0) >= 0.62;
-    const saturationCautionFlag = ((signal.borough || "").includes("Manhattan") && (signal.manhattanCoreSaturationPenalty ?? 0) >= 0.45)
-      || (signal.marketSaturationPenalty ?? 0) >= 0.60;
-    const goodContinuationFlag = (signal.continuationRaw ?? 0) >= 0.60;
-    const weakContinuationFlag = (signal.continuationRaw ?? 1) <= 0.35;
+    const busyNowFlag = (signal.busyNowBase ?? -Infinity) >= AI_ASSISTANT_BUSY_NOW_MIN;
+    const slowNowFlag = (signal.busyNowBase ?? Infinity) <= AI_ASSISTANT_SLOW_NOW_MAX && (signal.busyNextBase ?? Infinity) <= AI_ASSISTANT_SLOW_NEXT_MAX;
+    const shortTripTrapFlag = (signal.shortTripPenalty ?? 0) >= AI_ASSISTANT_SHORT_TRIP_TRAP_MIN
+      && (signal.sameZoneRetentionPenalty ?? 0) >= AI_ASSISTANT_RETENTION_TRAP_MIN
+      && (signal.continuationRaw ?? 1) <= AI_ASSISTANT_CONTINUATION_TRAP_MAX;
+    const longTripFriendlyFlag = (signal.longTripShare20Plus ?? 0) >= AI_ASSISTANT_LONG_TRIP_FRIENDLY_MIN;
+    const saturationCautionFlag = ((signal.borough || "").includes("Manhattan") && (signal.manhattanCoreSaturationPenalty ?? 0) >= AI_ASSISTANT_MANHATTAN_SATURATION_MIN)
+      || (signal.marketSaturationPenalty ?? 0) >= AI_ASSISTANT_MARKET_SATURATION_MIN;
+    const goodContinuationFlag = (signal.continuationRaw ?? 0) >= AI_ASSISTANT_GOOD_CONTINUATION_MIN;
+    const weakContinuationFlag = (signal.continuationRaw ?? 1) <= AI_ASSISTANT_WEAK_CONTINUATION_MAX;
     return {
       busyNowFlag,
       slowNowFlag,
@@ -1189,6 +1213,226 @@
     return `${miles.toFixed(1)} mi`;
   }
 
+  function formatOutlookTimeLabel(iso) {
+    if (!iso) return "—";
+    return window.TlcMapUiInternals?.formatNYCTimeOnlyLabel?.(iso) || String(iso);
+  }
+
+  function getBucketRank(bucket) {
+    const order = { red: 0, yellow: 1, orange: 2, sky: 3, blue: 4, indigo: 5, purple: 6, green: 7 };
+    return order[String(bucket || "").toLowerCase()] ?? -1;
+  }
+
+  function buildOutlookRequestKey(frameTime, locationIds) {
+    if (!frameTime || !Array.isArray(locationIds) || !locationIds.length) return "";
+    return `${frameTime}|${locationIds.map((id) => String(id || "").trim()).filter(Boolean).sort().join(",")}`;
+  }
+
+  function resetOutlookState(errorText = "") {
+    if (state.outlookAbortController) {
+      try { state.outlookAbortController.abort(); } catch (_) {}
+    }
+    state.outlookAbortController = null;
+    state.outlookLoading = false;
+    state.outlookError = errorText || "";
+    state.currentZoneOutlook = null;
+    state.moveTargetOutlook = null;
+    state.outlookDerived = null;
+    state.outlookCacheKey = "";
+  }
+
+  function pickOutlookTrack(point, visibleScoreSource) {
+    const tracks = point?.tracks && typeof point.tracks === "object" ? point.tracks : point?.score_tracks;
+    if (!tracks || typeof tracks !== "object") return null;
+    const source = String(visibleScoreSource || "").trim();
+    if (source && tracks[source]) return tracks[source];
+    const isV3 = source.includes("_v3_");
+    if (isV3 && tracks.citywide_v3_shadow) return tracks.citywide_v3_shadow;
+    if (!isV3 && tracks.citywide_shadow) return tracks.citywide_shadow;
+    return null;
+  }
+
+  function classifyAssistantOutlookPoint(point, visibleScoreSource) {
+    const track = pickOutlookTrack(point, visibleScoreSource);
+    if (!track) {
+      return { frame_time: point?.frame_time || point?.time || null, rating: null, bucket: null, isTrap: false, isLongTripFriendly: false, isBusy: false, isSlow: false, isSaturationCaution: false, hasGoodContinuation: false, hasWeakContinuation: false };
+    }
+    const signal = {
+      busyNowBase: numberOrNull(track.busy_now_base_n_shadow ?? point?.busy_now_base_n_shadow),
+      busyNextBase: numberOrNull(track.busy_next_base_n_shadow ?? point?.busy_next_base_n_shadow),
+      shortTripPenalty: clamp01(track.short_trip_penalty_n_shadow ?? track.short_trip_penalty_n ?? point?.short_trip_penalty_n_shadow ?? point?.short_trip_penalty_n),
+      sameZoneRetentionPenalty: clamp01(track.same_zone_retention_penalty_n ?? point?.same_zone_retention_penalty_n),
+      continuationRaw: clamp01(track.downstream_value_n ?? point?.downstream_value_n),
+      longTripShare20Plus: clamp01(track.long_trip_share_20plus_n ?? point?.long_trip_share_20plus_n),
+      marketSaturationPenalty: clamp01(track.market_saturation_penalty_n_shadow ?? track.market_saturation_penalty_n ?? point?.market_saturation_penalty_n_shadow ?? point?.market_saturation_penalty_n),
+      manhattanCoreSaturationPenalty: clamp01(track.manhattan_core_saturation_penalty_n_shadow ?? track.manhattan_core_saturation_penalty_n ?? point?.manhattan_core_saturation_penalty_n_shadow ?? point?.manhattan_core_saturation_penalty_n),
+      borough: String(point?.borough || ""),
+    };
+    const classification = classifyCurrentZone(signal);
+    return {
+      frame_time: point?.frame_time || point?.time || null,
+      rating: numberOrNull(track.rating ?? point?.rating),
+      bucket: String(track.bucket || point?.bucket || "").trim() || null,
+      isTrap: !!classification.shortTripTrapFlag,
+      isLongTripFriendly: !!classification.longTripFriendlyFlag,
+      isBusy: !!classification.busyNowFlag,
+      isSlow: !!classification.slowNowFlag,
+      isSaturationCaution: !!classification.saturationCautionFlag,
+      hasGoodContinuation: !!classification.goodContinuationFlag,
+      hasWeakContinuation: !!classification.weakContinuationFlag,
+    };
+  }
+
+  function lastConsecutiveTime(points, predicate) {
+    if (!Array.isArray(points) || !points.length || !predicate(points[0])) return null;
+    let last = points[0];
+    for (let i = 1; i < points.length; i++) {
+      if (!predicate(points[i])) break;
+      last = points[i];
+    }
+    return last.frame_time || null;
+  }
+
+  function deriveAssistantOutlookWindows(outlookPayload, visibleScoreSource, currentActionCode) {
+    const horizon = Array.isArray(outlookPayload?.horizon) ? outlookPayload.horizon : [];
+    const points = horizon.map((point) => classifyAssistantOutlookPoint(point, visibleScoreSource)).filter((point) => point?.frame_time);
+    if (!points.length) return null;
+    const current = points[0];
+    const currentRating = numberOrNull(current.rating);
+    const currentBucketRank = getBucketRank(current.bucket);
+    const stableBucketUntilTime = lastConsecutiveTime(points, (point) => {
+      const pointRank = getBucketRank(point.bucket);
+      return pointRank >= 0 && currentBucketRank >= 0 && pointRank >= currentBucketRank - 1;
+    });
+    const holdUntilTime = (currentActionCode === "STAY" || currentActionCode === "STAY_BRIEFLY")
+      ? lastConsecutiveTime(points, (point) => {
+        if (!Number.isFinite(currentRating) || !Number.isFinite(point.rating)) return false;
+        const stableOk = stableBucketUntilTime ? String(point.frame_time) <= String(stableBucketUntilTime) : false;
+        return Math.abs(point.rating - currentRating) <= 4 && stableOk;
+      })
+      : null;
+    let nextImprovementTime = null;
+    let nextWorseningTime = null;
+    for (let i = 1; i < points.length; i++) {
+      const point = points[i];
+      if (!nextImprovementTime) {
+        const improved = (Number.isFinite(currentRating) && Number.isFinite(point.rating) && point.rating >= currentRating + 4)
+          || (current.isTrap && !point.isTrap)
+          || (current.isSlow && !point.isSlow);
+        if (improved) nextImprovementTime = point.frame_time;
+      }
+      if (!nextWorseningTime) {
+        const worsened = (Number.isFinite(currentRating) && Number.isFinite(point.rating) && point.rating <= currentRating - 4)
+          || (current.isBusy && point.isSlow)
+          || (!current.isTrap && point.isTrap)
+          || (currentBucketRank >= 0 && getBucketRank(point.bucket) >= 0 && getBucketRank(point.bucket) < currentBucketRank - 1);
+        if (worsened) nextWorseningTime = point.frame_time;
+      }
+      if (nextImprovementTime && nextWorseningTime) break;
+    }
+    return {
+      activeFromTime: current.frame_time || null,
+      activeUntilTime: points[points.length - 1]?.frame_time || null,
+      busyUntilTime: lastConsecutiveTime(points, (point) => point.isBusy),
+      slowUntilTime: lastConsecutiveTime(points, (point) => point.isSlow),
+      trapUntilTime: lastConsecutiveTime(points, (point) => point.isTrap),
+      longTripFriendlyUntilTime: lastConsecutiveTime(points, (point) => point.isLongTripFriendly),
+      saturationUntilTime: lastConsecutiveTime(points, (point) => point.isSaturationCaution),
+      holdUntilTime,
+      nextImprovementTime,
+      nextWorseningTime,
+      stableBucketUntilTime,
+      outlookSummaryCode: "neutral",
+      outlookReasonFragments: [],
+      points,
+    };
+  }
+
+  function deriveTargetOutlookWindows(outlookPayload, visibleScoreSource) {
+    const base = deriveAssistantOutlookWindows(outlookPayload, visibleScoreSource, "MOVE_SOON");
+    if (!base) return null;
+    return {
+      targetStrongUntilTime: base.stableBucketUntilTime,
+      targetTrapUntilTime: base.trapUntilTime,
+      targetBusyUntilTime: base.busyUntilTime,
+      targetLongTripFriendlyUntilTime: base.longTripFriendlyUntilTime,
+      targetStableBucketUntilTime: base.stableBucketUntilTime,
+    };
+  }
+
+  function buildCurrentZoneOutlookSummary(snapshot) {
+    if (snapshot.outlookLoading) return "Outlook loading…";
+    if (snapshot.outlookError) return "Outlook unavailable";
+    if ((snapshot.actionCode === "LEAVE_NOW" || snapshot.actionCode === "MOVE_SOON") && snapshot.trapUntilTime) return `Trap risk until ${formatOutlookTimeLabel(snapshot.trapUntilTime)}`;
+    if ((snapshot.actionCode === "LEAVE_NOW" || snapshot.actionCode === "MOVE_SOON") && snapshot.saturationUntilTime) return `Saturation risk until ${formatOutlookTimeLabel(snapshot.saturationUntilTime)}`;
+    if ((snapshot.actionCode === "STAY" || snapshot.actionCode === "STAY_BRIEFLY") && snapshot.holdUntilTime) return `Hold until ${formatOutlookTimeLabel(snapshot.holdUntilTime)}`;
+    if (snapshot.busyUntilTime) return `Busy until ${formatOutlookTimeLabel(snapshot.busyUntilTime)}`;
+    if (snapshot.slowUntilTime) return `Slow until ${formatOutlookTimeLabel(snapshot.slowUntilTime)}`;
+    if (snapshot.nextImprovementTime) return `Improves after ${formatOutlookTimeLabel(snapshot.nextImprovementTime)}`;
+    return "Outlook neutral";
+  }
+
+  function buildMoveTargetOutlookSummary(snapshot) {
+    if (!snapshot?.assistantMoveTarget) return "";
+    if (snapshot.outlookLoading) return "Target outlook loading…";
+    if (snapshot.outlookError) return "Target outlook unavailable";
+    if (snapshot.targetStrongUntilTime) return `Target strong through ${formatOutlookTimeLabel(snapshot.targetStrongUntilTime)}`;
+    if (snapshot.targetTrapUntilTime) return `Target trap risk until ${formatOutlookTimeLabel(snapshot.targetTrapUntilTime)}`;
+    if (snapshot.targetBusyUntilTime) return `Target busy until ${formatOutlookTimeLabel(snapshot.targetBusyUntilTime)}`;
+    return "Target outlook neutral";
+  }
+
+  function buildOutlookReasonFragments(snapshot) {
+    const out = [];
+    if (snapshot.trapUntilTime) out.push(`trap risk until ${formatOutlookTimeLabel(snapshot.trapUntilTime)}`);
+    if (snapshot.holdUntilTime) out.push(`hold until ${formatOutlookTimeLabel(snapshot.holdUntilTime)}`);
+    if (snapshot.nextImprovementTime) out.push(`improves after ${formatOutlookTimeLabel(snapshot.nextImprovementTime)}`);
+    if (snapshot.nextWorseningTime) out.push(`worsens after ${formatOutlookTimeLabel(snapshot.nextWorseningTime)}`);
+    return out.slice(0, 4);
+  }
+
+  async function fetchAssistantOutlook(frameTime, locationIds) {
+    const requestKey = buildOutlookRequestKey(frameTime, locationIds);
+    if (!frameTime || !Array.isArray(locationIds) || !locationIds.length) {
+      resetOutlookState("");
+      return null;
+    }
+    if (state.outlookCache[requestKey]) {
+      state.outlookCacheKey = requestKey;
+      state.outlookError = "";
+      state.outlookLoading = false;
+      return state.outlookCache[requestKey];
+    }
+    if (state.outlookAbortController) {
+      try { state.outlookAbortController.abort(); } catch (_) {}
+    }
+    const controller = new AbortController();
+    state.outlookAbortController = controller;
+    state.outlookLoading = true;
+    state.outlookError = "";
+    const token = (state.outlookRequestToken || 0) + 1;
+    state.outlookRequestToken = token;
+    try {
+      const encodedIds = locationIds.map((id) => encodeURIComponent(String(id))).join(",");
+      const apiBase = typeof window.FrontendRuntime?.resolveApiBase === "function" ? String(window.FrontendRuntime.resolveApiBase() || "") : "";
+      const path = `/assistant/outlook?frame_time=${encodeURIComponent(frameTime)}&location_ids=${encodedIds}`;
+      const url = apiBase ? `${apiBase}${path}` : path;
+      const payload = await window.TlcMapUiInternals?.fetchJSON?.(url, { signal: controller.signal, cache: "no-store" });
+      if (token !== state.outlookRequestToken) return null;
+      state.outlookCache[requestKey] = payload || {};
+      state.outlookCacheKey = requestKey;
+      state.lastOutlookLoadedAt = Date.now();
+      state.outlookLoading = false;
+      state.outlookError = "";
+      return payload || {};
+    } catch (err) {
+      if (controller.signal.aborted) return null;
+      state.outlookLoading = false;
+      state.outlookError = "Outlook unavailable";
+      return null;
+    }
+  }
+
   function buildHeadline() {
     const zone = state.activeStableZoneName || "—";
     const target = state.assistantMoveTarget?.zoneName || "—";
@@ -1249,6 +1493,12 @@
       state.currentZoneCitywideRank || "",
       state.currentZoneBoroughRank || "",
       state.rankingsCacheKey || "",
+      state.outlookCacheKey || "",
+      state.outlookLoading ? "1" : "0",
+      state.outlookError || "",
+      state.outlookDerived?.trapUntilTime || "",
+      state.outlookDerived?.holdUntilTime || "",
+      state.outlookDerived?.nextImprovementTime || "",
       state.dwellMs ? Math.round(state.dwellMs / 10000) : 0,
     ].join("|");
   }
@@ -1270,6 +1520,21 @@
     const boroughFallback = `<div class="aiAssistMeta">Borough rankings available after stable zone entry</div>`;
     const rankingsPanel = state.rankingsExpanded ? `
       <div class="aiAssistRankPanel" data-role="assistant-rankings-panel">
+        <div class="aiAssistRankSection">
+          <div class="aiAssistRankTitle">Outlook</div>
+          <div class="aiAssistMeta">Current phase: ${snapshot.activeFromTime ? formatOutlookTimeLabel(snapshot.activeFromTime) : "n/a"}</div>
+          <div class="aiAssistMeta">Busy until: ${snapshot.busyUntilTime ? formatOutlookTimeLabel(snapshot.busyUntilTime) : "—"}</div>
+          <div class="aiAssistMeta">Slow until: ${snapshot.slowUntilTime ? formatOutlookTimeLabel(snapshot.slowUntilTime) : "—"}</div>
+          <div class="aiAssistMeta">Trap until: ${snapshot.trapUntilTime ? formatOutlookTimeLabel(snapshot.trapUntilTime) : "—"}</div>
+          <div class="aiAssistMeta">Long-trip friendly until: ${snapshot.longTripFriendlyUntilTime ? formatOutlookTimeLabel(snapshot.longTripFriendlyUntilTime) : "—"}</div>
+          <div class="aiAssistMeta">Saturation caution until: ${snapshot.saturationUntilTime ? formatOutlookTimeLabel(snapshot.saturationUntilTime) : "—"}</div>
+          <div class="aiAssistMeta">Hold until: ${snapshot.holdUntilTime ? formatOutlookTimeLabel(snapshot.holdUntilTime) : "—"}</div>
+          <div class="aiAssistMeta">Improves after: ${snapshot.nextImprovementTime ? formatOutlookTimeLabel(snapshot.nextImprovementTime) : "—"}</div>
+          <div class="aiAssistMeta">Worsens after: ${snapshot.nextWorseningTime ? formatOutlookTimeLabel(snapshot.nextWorseningTime) : "—"}</div>
+          ${target ? `<div class="aiAssistMeta">Target strong until: ${snapshot.targetStrongUntilTime ? formatOutlookTimeLabel(snapshot.targetStrongUntilTime) : "—"}</div><div class="aiAssistMeta">Target trap until: ${snapshot.targetTrapUntilTime ? formatOutlookTimeLabel(snapshot.targetTrapUntilTime) : "—"}</div><div class="aiAssistMeta">Target busy until: ${snapshot.targetBusyUntilTime ? formatOutlookTimeLabel(snapshot.targetBusyUntilTime) : "—"}</div><div class="aiAssistMeta">Target long-trip friendly until: ${snapshot.targetLongTripFriendlyUntilTime ? formatOutlookTimeLabel(snapshot.targetLongTripFriendlyUntilTime) : "—"}</div><div class="aiAssistMeta">Target stable bucket until: ${snapshot.targetStableBucketUntilTime ? formatOutlookTimeLabel(snapshot.targetStableBucketUntilTime) : "—"}</div>` : ""}
+          <div class="aiAssistRankHint">Outlook is based on the next 6 current-source-of-truth frame bins.</div>
+          <div class="aiAssistRankHint">Times are NYC local time.</div>
+        </div>
         <div class="aiAssistRankSection">
           <div class="aiAssistRankTitle">Current standing</div>
           <div class="aiAssistMeta">${cityRankTxt}</div>
@@ -1309,10 +1574,12 @@
     ` : "";
 
     host.innerHTML = `
-      <div class="aiAssistBanner" data-phase="3" data-state="${state.actionCode || "MONITOR"}">
+      <div class="aiAssistBanner" data-phase="5" data-state="${state.actionCode || "MONITOR"}">
         <div class="aiAssistHeadline">${buildHeadline()}</div>
         <div class="aiAssistMeta">Current: ${state.activeStableZoneName || "—"} • ${ratingTxt} • ${state.visibleScoreSourceLabel || "Team Joseo score"}</div>
         <div class="aiAssistMeta">${formatDwell(state.dwellMs)}</div>
+        <div class="aiAssistMeta">${snapshot.outlookSummaryText || "Outlook neutral"}</div>
+        ${snapshot.moveTargetOutlookSummaryText ? `<div class="aiAssistMeta">${snapshot.moveTargetOutlookSummaryText}</div>` : ""}
         <div class="aiAssistRankHeader">
           <div class="aiAssistRankChips">
             <span class="aiAssistRankChip">${cityRankTxt}</span>
@@ -1492,7 +1759,7 @@
 
   function getSnapshot(tsNow = Date.now()) {
     const dwellMs = state.activeStableZoneEnterTs ? Math.max(0, tsNow - state.activeStableZoneEnterTs) : 0;
-    return {
+    const snapshot = {
       phase: 3,
       activeStableZoneId: state.activeStableZoneId,
       activeStableZoneName: state.activeStableZoneName,
@@ -1525,6 +1792,27 @@
       rankingsComputed: !!state.rankingsCache,
       rankingsCacheKey: state.rankingsCacheKey || "",
       rankingsExpanded: !!state.rankingsExpanded,
+      outlookLoading: !!state.outlookLoading,
+      outlookError: state.outlookError || "",
+      currentZoneOutlook: state.currentZoneOutlook ? { ...state.currentZoneOutlook } : null,
+      moveTargetOutlook: state.moveTargetOutlook ? { ...state.moveTargetOutlook } : null,
+      activeFromTime: state.outlookDerived?.activeFromTime || null,
+      activeUntilTime: state.outlookDerived?.activeUntilTime || null,
+      busyUntilTime: state.outlookDerived?.busyUntilTime || null,
+      slowUntilTime: state.outlookDerived?.slowUntilTime || null,
+      trapUntilTime: state.outlookDerived?.trapUntilTime || null,
+      longTripFriendlyUntilTime: state.outlookDerived?.longTripFriendlyUntilTime || null,
+      saturationUntilTime: state.outlookDerived?.saturationUntilTime || null,
+      holdUntilTime: state.outlookDerived?.holdUntilTime || null,
+      nextImprovementTime: state.outlookDerived?.nextImprovementTime || null,
+      nextWorseningTime: state.outlookDerived?.nextWorseningTime || null,
+      stableBucketUntilTime: state.outlookDerived?.stableBucketUntilTime || null,
+      targetStrongUntilTime: state.outlookDerived?.targetStrongUntilTime || null,
+      targetTrapUntilTime: state.outlookDerived?.targetTrapUntilTime || null,
+      targetBusyUntilTime: state.outlookDerived?.targetBusyUntilTime || null,
+      targetLongTripFriendlyUntilTime: state.outlookDerived?.targetLongTripFriendlyUntilTime || null,
+      targetStableBucketUntilTime: state.outlookDerived?.targetStableBucketUntilTime || null,
+      outlookExpanded: !!state.outlookExpanded,
       busyNowBase: state.signalSnapshot?.busyNowBase ?? null,
       busyNextBase: state.signalSnapshot?.busyNextBase ?? null,
       shortTripPenalty: state.signalSnapshot?.shortTripPenalty ?? null,
@@ -1556,14 +1844,23 @@
       assistantTags: Array.isArray(state.assistantTags) ? [...state.assistantTags] : [],
       assistantReasonFragments: Array.isArray(state.assistantReasonFragments) ? [...state.assistantReasonFragments] : [],
       assistantStatus: state.assistantStatus,
+      outlookSummaryText: "",
+      moveTargetOutlookSummaryText: "",
+      outlookReasonFragments: [],
       ts: tsNow,
     };
+    snapshot.outlookSummaryText = buildCurrentZoneOutlookSummary(snapshot);
+    snapshot.moveTargetOutlookSummaryText = buildMoveTargetOutlookSummary(snapshot);
+    snapshot.outlookReasonFragments = buildOutlookReasonFragments(snapshot);
+    return snapshot;
   }
 
-  function refresh(frame) {
+  async function refresh(frame) {
     const now = Date.now();
+    const activeFrame = getFrame(frame);
     updateStableZone(now);
-    updateFromFrame(getFrame(frame), now);
+    updateFromFrame(activeFrame, now);
+    await refreshOutlook(activeFrame, now);
     state.dwellMs = state.activeStableZoneEnterTs ? Math.max(0, now - state.activeStableZoneEnterTs) : 0;
 
     const nextFingerprint = toFingerprint();
@@ -1588,6 +1885,59 @@
     }
 
     return snapshot;
+  }
+
+  async function refreshOutlook(frame, now) {
+    const frameTime = String(frame?.time || "");
+    const currentId = String(state.activeStableZoneId || "").trim();
+    const targetId = String(state.assistantMoveTarget?.locationId || "").trim();
+    const locationIds = [currentId, targetId].filter(Boolean).filter((id, idx, arr) => arr.indexOf(id) === idx);
+    const requestKey = buildOutlookRequestKey(frameTime, locationIds);
+    const sourceKey = `${state.visibleScoreSource || ""}|${state.assistantMoveTarget?.visibleScoreSource || ""}`;
+    const refreshKey = `${requestKey}|${sourceKey}`;
+    if (!requestKey) {
+      resetOutlookState("");
+      return;
+    }
+    if (state.lastOutlookRequestKey === refreshKey && (state.currentZoneOutlook || state.moveTargetOutlook || state.outlookError)) return;
+    state.lastOutlookRequestKey = refreshKey;
+    const payload = await fetchAssistantOutlook(frameTime, locationIds);
+    const byId = payload?.outlook_by_location_id || payload?.locations || {};
+    state.currentZoneOutlook = byId?.[currentId] || null;
+    state.moveTargetOutlook = targetId ? (byId?.[targetId] || null) : null;
+    const currentDerived = deriveAssistantOutlookWindows(state.currentZoneOutlook, state.visibleScoreSource, state.actionCode);
+    const targetDerived = deriveTargetOutlookWindows(state.moveTargetOutlook, state.assistantMoveTarget?.visibleScoreSource);
+    state.outlookDerived = { ...(currentDerived || {}), ...(targetDerived || {}) };
+    const snap = getSnapshot(now);
+    const signature = JSON.stringify({
+      outlookLoading: snap.outlookLoading,
+      outlookError: snap.outlookError,
+      currentZoneOutlook: snap.currentZoneOutlook,
+      moveTargetOutlook: snap.moveTargetOutlook,
+      activeFromTime: snap.activeFromTime,
+      activeUntilTime: snap.activeUntilTime,
+      busyUntilTime: snap.busyUntilTime,
+      slowUntilTime: snap.slowUntilTime,
+      trapUntilTime: snap.trapUntilTime,
+      longTripFriendlyUntilTime: snap.longTripFriendlyUntilTime,
+      saturationUntilTime: snap.saturationUntilTime,
+      holdUntilTime: snap.holdUntilTime,
+      nextImprovementTime: snap.nextImprovementTime,
+      nextWorseningTime: snap.nextWorseningTime,
+      stableBucketUntilTime: snap.stableBucketUntilTime,
+      targetStrongUntilTime: snap.targetStrongUntilTime,
+      targetTrapUntilTime: snap.targetTrapUntilTime,
+      targetBusyUntilTime: snap.targetBusyUntilTime,
+      targetLongTripFriendlyUntilTime: snap.targetLongTripFriendlyUntilTime,
+      targetStableBucketUntilTime: snap.targetStableBucketUntilTime,
+      outlookSummaryText: snap.outlookSummaryText,
+      moveTargetOutlookSummaryText: snap.moveTargetOutlookSummaryText,
+      outlookReasonFragments: snap.outlookReasonFragments,
+    });
+    if (signature !== state.outlookLastSignature) {
+      state.outlookLastSignature = signature;
+      window.dispatchEvent(new CustomEvent("tlc-ai-assistant-outlook-updated", { detail: snap }));
+    }
   }
 
   function handleUserLocationUpdate(detail) {
@@ -1665,6 +2015,19 @@
       lastRenderFingerprint: "",
       lastActionFingerprint: "",
       rankingsBound: state.rankingsBound,
+      outlookCache: {},
+      outlookCacheKey: "",
+      outlookLoading: false,
+      outlookError: "",
+      currentZoneOutlook: null,
+      moveTargetOutlook: null,
+      outlookExpanded: false,
+      lastOutlookRequestKey: "",
+      lastOutlookLoadedAt: null,
+      outlookAbortController: null,
+      outlookRequestToken: 0,
+      outlookDerived: null,
+      outlookLastSignature: "",
     });
     applyNavDestination("MONITOR", null);
     renderBanner();
