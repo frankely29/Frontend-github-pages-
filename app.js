@@ -471,6 +471,7 @@ function effectiveColor(props, geom) { return window.TlcModeModule?.effectiveCol
 function effectiveRating(props, geom) { return window.TlcModeModule?.effectiveRating?.(props, geom) ?? Number(props?.rating ?? NaN); }
 function getActiveSpecialModeTagForFeature(props, geom) { return window.TlcModeModule?.getActiveSpecialModeTagForFeature?.(props, geom) || null; }
 function getVisibleScoreSourceForFeature(props, geom) { return window.TlcModeModule?.getVisibleScoreSourceForFeature?.(props, geom) || "legacy_citywide"; }
+function getVisibleScoreSourceLabel(props, geom) { return window.TlcModeModule?.getVisibleScoreSourceLabel?.(props, geom) || "Team Joseo score"; }
 
 window.TlcMapUiInternals = {
   getRecommendEl: () => recommendEl,
@@ -480,6 +481,10 @@ window.TlcMapUiInternals = {
   effectiveBucket,
   effectiveRating,
   getActiveSpecialModeTagForFeature,
+  getVisibleScoreSourceForFeature,
+  getVisibleScoreSourceLabel,
+  resolveZoneFeatureAtLngLat,
+  getZoneLocationId,
   geometryCenter,
   haversineMiles,
   fetchJSON,
@@ -1496,6 +1501,10 @@ function findZoneFeatureBySourceContainment(lngLat) {
   });
 
   return matches[0] || null;
+}
+
+function resolveZoneFeatureAtLngLat(lngLat) {
+  return findZoneFeatureBySourceContainment(lngLat) || null;
 }
 
 function pickZoneFeatureForPopup(point, lngLat) {
@@ -3590,6 +3599,16 @@ function startLocationWatch() {
         communityMaybePushPresence(ts, Number.isFinite(lastHeadingDeg) ? lastHeadingDeg : heading, lastGpsAccuracyM);
         return;
       }
+
+      window.dispatchEvent(new CustomEvent("tlc-user-location-updated", {
+        detail: {
+          lat,
+          lng,
+          ts: ts || Date.now(),
+          heading: Number.isFinite(lastHeadingDeg) ? lastHeadingDeg : (Number.isFinite(heading) ? heading : null),
+          accuracy: Number.isFinite(accuracy) ? accuracy : null,
+        }
+      }));
 
       if (navMarker) navMarker.setLngLat([lng, lat]);
       if (authHeaderOK()) scheduleAdaptivePresenceRender();
