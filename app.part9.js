@@ -62,7 +62,6 @@
     const DIST_PENALTY_PER_MILE = 4.0;
     const BRONX_WASH_HEIGHTS_DIST_PENALTY_PER_MILE = 2.0;
     const modes = core.getSpecialModes?.() || {};
-    const specialModesActive = modes.queensMode || modes.brooklynMode || modes.statenIslandMode || modes.bronxWashHeightsMode || modes.manhattanMode;
     const TIE_BREAK_THRESHOLD = 2.0;
 
     let best = null;
@@ -72,8 +71,6 @@
       const geom = f.geometry;
       if (props.airport_excluded === true) continue;
       const modeTag = core.getActiveSpecialModeTagForFeature?.(props, geom);
-
-      if (specialModesActive && modeTag == null) continue;
 
       const b = core.effectiveBucket?.(props, geom);
       if (!allowed.has(b)) continue;
@@ -170,7 +167,7 @@
     }
 
     if (!best) {
-      recommendEl.textContent = "Recommended: no Blue+ zone nearby right now";
+      recommendEl.textContent = "Recommended: no Blue/Indigo+ zone nearby right now";
       setNavDestination(null);
       lastRecommendationAudit = null;
       return;
