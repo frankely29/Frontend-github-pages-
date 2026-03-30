@@ -704,6 +704,23 @@
     citywideTotal: null,
     boroughRank: null,
     boroughTotal: null,
+    rankingsCacheKey: "",
+    rankingsCache: null,
+    rankingsExpanded: false,
+    lastRankingsComputedAt: null,
+    currentZoneCitywideRank: null,
+    currentZoneCitywideTotal: null,
+    currentZoneBoroughRank: null,
+    currentZoneBoroughTotal: null,
+    currentBoroughName: "",
+    citywideBestNow: null,
+    citywideWorstNow: null,
+    citywideTop10Best: [],
+    citywideTop10Worst: [],
+    boroughBestNow: null,
+    boroughWorstNow: null,
+    boroughTop5Best: [],
+    boroughTop5Worst: [],
     signalSnapshot: null,
     bestNearbyOverall: null,
     bestNearbyTrapEscape: null,
@@ -713,6 +730,7 @@
     dwellMs: 0,
     lastRenderFingerprint: "",
     lastActionFingerprint: "",
+    rankingsBound: false,
   };
 
   function numberOrNull(value) {
@@ -742,6 +760,15 @@
       .aiAssistMeta{font-size:12px;opacity:.95}
       .aiAssistTags{display:flex;flex-wrap:wrap;gap:4px}
       .aiAssistTag{font-size:11px;opacity:.95;padding:1px 6px;border-radius:999px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15)}
+      .aiAssistRankHeader{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+      .aiAssistRankChips{display:flex;gap:6px;flex-wrap:wrap}
+      .aiAssistRankChip{font-size:11px;padding:1px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.08)}
+      .aiAssistRankToggle{font-size:11px;padding:2px 8px;border-radius:8px;border:1px solid rgba(255,255,255,.28);background:rgba(15,23,42,.55);color:#fff;cursor:pointer}
+      .aiAssistRankPanel{margin-top:4px;padding:6px;border-radius:10px;border:1px solid rgba(255,255,255,.16);background:rgba(15,23,42,.28);max-height:220px;overflow:auto}
+      .aiAssistRankSection{margin-bottom:8px}
+      .aiAssistRankTitle{font-size:11px;font-weight:700;opacity:.95}
+      .aiAssistRankList{margin:2px 0 0 16px;padding:0}
+      .aiAssistRankHint{font-size:10px;opacity:.78}
     `;
     document.head.appendChild(style);
   }
@@ -807,29 +834,147 @@
     };
   }
 
-  function computeCurrentZoneDisplayedRanks(frame, activeZoneId, activeBorough) {
+  function normalizeBoroughKey(value) {
+    return String(value || "").trim().toLowerCase();
+  }
+
+  function compareNumbers(a, b, dir = "asc") {
+    const av = Number.isFinite(a) ? a : (dir === "asc" ? Infinity : -Infinity);
+    const bv = Number.isFinite(b) ? b : (dir === "asc" ? Infinity : -Infinity);
+    return dir === "asc" ? av - bv : bv - av;
+  }
+
+  function compareAssistantBestRank(a, b) {
+    return compareNumbers(a.visibleRating, b.visibleRating, "desc")
+      || compareNumbers(a.busyNextBase, b.busyNextBase, "desc")
+      || compareNumbers(a.continuationRaw, b.continuationRaw, "desc")
+      || compareNumbers(a.shortTripPenalty, b.shortTripPenalty, "asc")
+      || compareNumbers(a.marketSaturationPenalty, b.marketSaturationPenalty, "asc")
+      || String(a.zoneName || "").localeCompare(String(b.zoneName || ""))
+      || String(a.locationId || "").localeCompare(String(b.locationId || ""));
+  }
+
+  function compareAssistantWorstRank(a, b) {
+    return compareNumbers(a.visibleRating, b.visibleRating, "asc")
+      || compareNumbers(a.busyNowBase, b.busyNowBase, "asc")
+      || compareNumbers(a.busyNextBase, b.busyNextBase, "asc")
+      || compareNumbers(a.continuationRaw, b.continuationRaw, "asc")
+      || compareNumbers(a.shortTripPenalty, b.shortTripPenalty, "desc")
+      || compareNumbers(a.marketSaturationPenalty, b.marketSaturationPenalty, "desc")
+      || String(a.zoneName || "").localeCompare(String(b.zoneName || ""))
+      || String(a.locationId || "").localeCompare(String(b.locationId || ""));
+  }
+
+  function toRankSnapshotEntry(entry) {
+    if (!entry) return null;
+    return {
+      locationId: entry.locationId,
+      zoneName: entry.zoneName,
+      borough: entry.borough,
+      visibleRating: entry.visibleRating,
+      visibleBucket: entry.visibleBucket,
+      visibleScoreSource: entry.visibleScoreSource,
+      visibleScoreSourceLabel: entry.visibleScoreSourceLabel,
+    };
+  }
+
+  function buildAssistantRankingUniverse(frame) {
     const features = frame?.polygons?.features || [];
-    const rows = [];
+    const universe = [];
     for (const feature of features) {
       const signal = buildAssistantFeatureSignal(feature);
-      if (!signal.locationId || signal.airportExcluded || !Number.isFinite(signal.visibleRating)) continue;
-      rows.push({
-        zoneId: signal.locationId,
+      if (!signal.locationId || !signal.zoneName || signal.airportExcluded || !Number.isFinite(signal.visibleRating)) continue;
+      universe.push({
+        locationId: signal.locationId,
+        zoneName: signal.zoneName,
         borough: signal.borough,
-        rating: signal.visibleRating,
-        idSort: Number.isFinite(Number(signal.locationId)) ? Number(signal.locationId) : Number.MAX_SAFE_INTEGER,
+        boroughKey: normalizeBoroughKey(signal.borough),
+        visibleRating: signal.visibleRating,
+        visibleBucket: signal.visibleBucket,
+        visibleScoreSource: signal.visibleScoreSource,
+        visibleScoreSourceLabel: signal.visibleScoreSourceLabel,
+        busyNowBase: signal.busyNowBase,
+        busyNextBase: signal.busyNextBase,
+        continuationRaw: signal.continuationRaw,
+        shortTripPenalty: signal.shortTripPenalty,
+        marketSaturationPenalty: signal.marketSaturationPenalty,
       });
     }
-    rows.sort((a, b) => (b.rating - a.rating) || (a.idSort - b.idSort) || a.zoneId.localeCompare(b.zoneId));
-    const citywideIndex = rows.findIndex((row) => row.zoneId === String(activeZoneId));
-    const boroughRows = rows.filter((row) => row.borough === String(activeBorough || ""));
-    const boroughIndex = boroughRows.findIndex((row) => row.zoneId === String(activeZoneId));
-    return {
-      citywideRank: citywideIndex >= 0 ? citywideIndex + 1 : null,
-      citywideTotal: rows.length || null,
-      boroughRank: boroughIndex >= 0 ? boroughIndex + 1 : null,
-      boroughTotal: boroughRows.length || null,
+    return universe;
+  }
+
+  function getRankingCacheKey(frame) {
+    const frameTime = String(frame?.time ?? "");
+    const featureCount = Number(frame?.polygons?.features?.length || 0);
+    const modeFlags = window.TlcModeModule?.getModeFlags?.() || {};
+    return `${frameTime}|${featureCount}|${JSON.stringify(modeFlags)}`;
+  }
+
+  function ensureRankings(frame, currentSignal, now) {
+    const cacheKey = getRankingCacheKey(frame);
+    if (state.rankingsCache && state.rankingsCacheKey === cacheKey) return state.rankingsCache;
+
+    const universe = buildAssistantRankingUniverse(frame);
+    const sortedCitywideBest = universe.slice().sort(compareAssistantBestRank);
+    const sortedCitywideWorst = universe.slice().sort(compareAssistantWorstRank);
+
+    const citywideBestNow = sortedCitywideBest[0] || null;
+    const citywideWorstNow = sortedCitywideWorst[0] || null;
+    const citywideTop10Best = sortedCitywideBest.slice(0, 10);
+    const citywideTop10Worst = sortedCitywideWorst.slice(0, 10);
+
+    const currentId = String(state.activeStableZoneId || "");
+    const citywideIndex = currentId ? sortedCitywideBest.findIndex((entry) => entry.locationId === currentId) : -1;
+    const currentZoneCitywideRank = citywideIndex >= 0 ? citywideIndex + 1 : null;
+    const currentZoneCitywideTotal = sortedCitywideBest.length || null;
+
+    let currentBoroughName = "";
+    let boroughBestNow = null;
+    let boroughWorstNow = null;
+    let boroughTop5Best = [];
+    let boroughTop5Worst = [];
+    let currentZoneBoroughRank = null;
+    let currentZoneBoroughTotal = null;
+
+    if (currentSignal && !currentSignal.airportExcluded && currentSignal.locationId) {
+      currentBoroughName = String(currentSignal.borough || "").trim();
+      const boroughKey = normalizeBoroughKey(currentBoroughName);
+      if (boroughKey) {
+        const boroughUniverse = universe.filter((entry) => entry.boroughKey === boroughKey);
+        const sortedBoroughBest = boroughUniverse.slice().sort(compareAssistantBestRank);
+        const sortedBoroughWorst = boroughUniverse.slice().sort(compareAssistantWorstRank);
+        boroughBestNow = sortedBoroughBest[0] || null;
+        boroughWorstNow = sortedBoroughWorst[0] || null;
+        boroughTop5Best = sortedBoroughBest.slice(0, 5);
+        boroughTop5Worst = sortedBoroughWorst.slice(0, 5);
+        const boroughIndex = sortedBoroughBest.findIndex((entry) => entry.locationId === currentSignal.locationId);
+        currentZoneBoroughRank = boroughIndex >= 0 ? boroughIndex + 1 : null;
+        currentZoneBoroughTotal = sortedBoroughBest.length || null;
+      }
+    }
+
+    const rankings = {
+      rankingsCacheKey: cacheKey,
+      rankingsComputed: true,
+      currentZoneCitywideRank,
+      currentZoneCitywideTotal,
+      currentZoneBoroughRank,
+      currentZoneBoroughTotal,
+      currentBoroughName,
+      citywideBestNow: toRankSnapshotEntry(citywideBestNow),
+      citywideWorstNow: toRankSnapshotEntry(citywideWorstNow),
+      citywideTop10Best: citywideTop10Best.map(toRankSnapshotEntry),
+      citywideTop10Worst: citywideTop10Worst.map(toRankSnapshotEntry),
+      boroughBestNow: toRankSnapshotEntry(boroughBestNow),
+      boroughWorstNow: toRankSnapshotEntry(boroughWorstNow),
+      boroughTop5Best: boroughTop5Best.map(toRankSnapshotEntry),
+      boroughTop5Worst: boroughTop5Worst.map(toRankSnapshotEntry),
     };
+
+    state.rankingsCacheKey = cacheKey;
+    state.rankingsCache = rankings;
+    state.lastRankingsComputedAt = now;
+    return rankings;
   }
 
   function classifyCurrentZone(signal) {
@@ -1067,6 +1212,32 @@
     return "Current zone still beats nearby options.";
   }
 
+  function buildCitywideStandingLabel(snapshot) {
+    if (!snapshot?.currentZoneCitywideRank || !snapshot?.currentZoneCitywideTotal) return "Citywide —/—";
+    return `Citywide #${snapshot.currentZoneCitywideRank}/${snapshot.currentZoneCitywideTotal}`;
+  }
+
+  function buildBoroughStandingLabel(snapshot) {
+    const borough = snapshot?.currentBoroughName || snapshot?.activeStableBorough || "Borough";
+    if (!snapshot?.currentZoneBoroughRank || !snapshot?.currentZoneBoroughTotal) return `${borough} —/—`;
+    return `${borough} #${snapshot.currentZoneBoroughRank}/${snapshot.currentZoneBoroughTotal}`;
+  }
+
+  function buildBestNowSummary(snapshot) {
+    if (snapshot?.boroughBestNow?.zoneName) return `Best in borough now: ${snapshot.boroughBestNow.zoneName}`;
+    if (snapshot?.citywideBestNow?.zoneName) return `Best citywide now: ${snapshot.citywideBestNow.zoneName}`;
+    return "Best now unavailable";
+  }
+
+  function renderRankingList(items) {
+    if (!Array.isArray(items) || !items.length) return "<div class=\"aiAssistMeta\">No ranking entries</div>";
+    const rows = items.map((entry, index) => {
+      const score = Number.isFinite(entry?.visibleRating) ? Math.round(entry.visibleRating) : "n/a";
+      return `<li>${index + 1}. ${entry?.zoneName || "Unknown"} (${entry?.borough || "—"}) — ${score}</li>`;
+    }).join("");
+    return `<ol class="aiAssistRankList">${rows}</ol>`;
+  }
+
   function toFingerprint() {
     return [
       state.activeStableZoneId || "",
@@ -1075,6 +1246,9 @@
       state.assistantMoveTarget?.locationId || "",
       Number.isFinite(state.rating) ? state.rating.toFixed(2) : "nan",
       Number.isFinite(state.currentZoneHoldScore) ? state.currentZoneHoldScore.toFixed(2) : "nan",
+      state.currentZoneCitywideRank || "",
+      state.currentZoneBoroughRank || "",
+      state.rankingsCacheKey || "",
       state.dwellMs ? Math.round(state.dwellMs / 10000) : 0,
     ].join("|");
   }
@@ -1083,24 +1257,110 @@
     const host = getRecommendEl();
     if (!host) return;
     ensureStyle();
+    bindRankingsToggleOnce();
 
     const ratingTxt = Number.isFinite(state.rating) ? `${Math.round(state.rating)} (${state.bucket || "n/a"})` : "n/a";
-    const cityRankTxt = (state.citywideRank && state.citywideTotal) ? `#${state.citywideRank} / ${state.citywideTotal} citywide` : "— citywide";
-    const boroughRankTxt = (state.boroughRank && state.boroughTotal) ? `#${state.boroughRank} / ${state.boroughTotal} in borough` : "— in borough";
+    const snapshot = getSnapshot();
+    const cityRankTxt = buildCitywideStandingLabel(snapshot);
+    const boroughRankTxt = buildBoroughStandingLabel(snapshot);
+    const bestSummaryTxt = buildBestNowSummary(snapshot);
     const tagsHtml = (state.assistantTags || []).slice(0, 3).map((tag) => `<span class="aiAssistTag">${tag}</span>`).join("");
     const target = state.assistantMoveTarget;
+    const canShowBorough = !!(snapshot.currentBoroughName && snapshot.currentZoneBoroughTotal);
+    const boroughFallback = `<div class="aiAssistMeta">Borough rankings available after stable zone entry</div>`;
+    const rankingsPanel = state.rankingsExpanded ? `
+      <div class="aiAssistRankPanel" data-role="assistant-rankings-panel">
+        <div class="aiAssistRankSection">
+          <div class="aiAssistRankTitle">Current standing</div>
+          <div class="aiAssistMeta">${cityRankTxt}</div>
+          <div class="aiAssistMeta">${boroughRankTxt}</div>
+          <div class="aiAssistMeta">Current visible score: ${Number.isFinite(snapshot.rating) ? Math.round(snapshot.rating) : "n/a"}</div>
+          <div class="aiAssistMeta">Current visible bucket: ${snapshot.bucket || "n/a"}</div>
+          <div class="aiAssistMeta">Current visible source: ${snapshot.visibleScoreSourceLabel || "Team Joseo score"}</div>
+        </div>
+        <div class="aiAssistRankSection">
+          <div class="aiAssistRankTitle">Citywide best/worst now</div>
+          <div class="aiAssistMeta">Best citywide now: ${snapshot.citywideBestNow?.zoneName || "n/a"}</div>
+          <div class="aiAssistMeta">Worst citywide now: ${snapshot.citywideWorstNow?.zoneName || "n/a"}</div>
+        </div>
+        <div class="aiAssistRankSection">
+          <div class="aiAssistRankTitle">Top 10 citywide best now</div>
+          ${renderRankingList(snapshot.citywideTop10Best)}
+        </div>
+        <div class="aiAssistRankSection">
+          <div class="aiAssistRankTitle">Top 10 citywide worst now</div>
+          ${renderRankingList(snapshot.citywideTop10Worst)}
+        </div>
+        <div class="aiAssistRankSection">
+          <div class="aiAssistRankTitle">Current borough best/worst now</div>
+          ${canShowBorough ? `<div class="aiAssistMeta">Best in borough now: ${snapshot.boroughBestNow?.zoneName || "n/a"}</div><div class="aiAssistMeta">Worst in borough now: ${snapshot.boroughWorstNow?.zoneName || "n/a"}</div>` : boroughFallback}
+        </div>
+        <div class="aiAssistRankSection">
+          <div class="aiAssistRankTitle">Top 5 borough best now</div>
+          ${canShowBorough ? renderRankingList(snapshot.boroughTop5Best) : boroughFallback}
+        </div>
+        <div class="aiAssistRankSection">
+          <div class="aiAssistRankTitle">Top 5 borough worst now</div>
+          ${canShowBorough ? renderRankingList(snapshot.boroughTop5Worst) : boroughFallback}
+        </div>
+        <div class="aiAssistRankHint">Rankings use the same visible Team Joseo score path the map is showing right now.</div>
+        <div class="aiAssistRankHint">Community crowding caution is separate and does not reorder these standings.</div>
+      </div>
+    ` : "";
 
     host.innerHTML = `
       <div class="aiAssistBanner" data-phase="3" data-state="${state.actionCode || "MONITOR"}">
         <div class="aiAssistHeadline">${buildHeadline()}</div>
         <div class="aiAssistMeta">Current: ${state.activeStableZoneName || "—"} • ${ratingTxt} • ${state.visibleScoreSourceLabel || "Team Joseo score"}</div>
         <div class="aiAssistMeta">${formatDwell(state.dwellMs)}</div>
-        <div class="aiAssistMeta">${cityRankTxt} • ${boroughRankTxt}</div>
+        <div class="aiAssistRankHeader">
+          <div class="aiAssistRankChips">
+            <span class="aiAssistRankChip">${cityRankTxt}</span>
+            <span class="aiAssistRankChip">${boroughRankTxt}</span>
+          </div>
+          <button type="button" class="aiAssistRankToggle" data-assistant-rankings-toggle="1">${state.rankingsExpanded ? "Hide rankings" : "Rankings"}</button>
+        </div>
         ${tagsHtml ? `<div class="aiAssistTags">${tagsHtml}</div>` : ""}
         ${target ? `<div class="aiAssistMeta">Target: ${target.zoneName} (${target.borough || "—"}) • ${formatMiles(target.distanceMiles)} • rating ${Math.round(target.visibleRating || 0)} • ${state.actionReason.replaceAll("_", " ")}</div>` : ""}
         <div class="aiAssistMeta">${buildSubline()}</div>
+        <div class="aiAssistMeta">${bestSummaryTxt}</div>
+        ${rankingsPanel}
       </div>
     `;
+  }
+
+  function bindRankingsToggleOnce() {
+    if (state.rankingsBound) return;
+    const host = getRecommendEl();
+    if (!host) return;
+    host.addEventListener("click", (event) => {
+      const target = event?.target;
+      if (!(target instanceof Element)) return;
+      if (!target.closest("[data-assistant-rankings-toggle=\"1\"]")) return;
+      state.rankingsExpanded = !state.rankingsExpanded;
+      renderBanner();
+    });
+    state.rankingsBound = true;
+  }
+
+  function applyRankingsToState(rankings) {
+    state.citywideRank = rankings?.currentZoneCitywideRank ?? null;
+    state.citywideTotal = rankings?.currentZoneCitywideTotal ?? null;
+    state.boroughRank = rankings?.currentZoneBoroughRank ?? null;
+    state.boroughTotal = rankings?.currentZoneBoroughTotal ?? null;
+    state.currentZoneCitywideRank = rankings?.currentZoneCitywideRank ?? null;
+    state.currentZoneCitywideTotal = rankings?.currentZoneCitywideTotal ?? null;
+    state.currentZoneBoroughRank = rankings?.currentZoneBoroughRank ?? null;
+    state.currentZoneBoroughTotal = rankings?.currentZoneBoroughTotal ?? null;
+    state.currentBoroughName = rankings?.currentBoroughName || "";
+    state.citywideBestNow = rankings?.citywideBestNow || null;
+    state.citywideWorstNow = rankings?.citywideWorstNow || null;
+    state.citywideTop10Best = rankings?.citywideTop10Best || [];
+    state.citywideTop10Worst = rankings?.citywideTop10Worst || [];
+    state.boroughBestNow = rankings?.boroughBestNow || null;
+    state.boroughWorstNow = rankings?.boroughWorstNow || null;
+    state.boroughTop5Best = rankings?.boroughTop5Best || [];
+    state.boroughTop5Worst = rankings?.boroughTop5Worst || [];
   }
 
   function applyNavDestination(actionCode, moveTarget) {
@@ -1178,9 +1438,13 @@
 
   function updateFromFrame(frame, now) {
     if (!frame) {
+      state.rankingsCacheKey = "";
+      state.rankingsCache = null;
       applyStatusOnly("frame-unavailable", "AI Assistant: frame unavailable", "Waiting for score frame.");
       return;
     }
+    const baseRankings = ensureRankings(frame, null, now);
+    applyRankingsToState(baseRankings);
     if (!state.activeStableZoneId) {
       applyStatusOnly("locating", "AI Assistant: locating current zone…", "Need a stable zone lock from location updates.");
       return;
@@ -1195,7 +1459,7 @@
     const candidateSet = computeNearbyAssistantCandidates(frame, currentStableFeature, state.signalSnapshot || null);
     const currentSignal = candidateSet.currentSignal;
     const decision = decideAssistantAction(currentSignal, candidateSet, state.signalSnapshot || null);
-    const ranks = computeCurrentZoneDisplayedRanks(frame, state.activeStableZoneId, currentSignal.borough || state.activeStableBorough || "");
+    const rankings = ensureRankings(frame, currentSignal, now);
 
     state.phase = 3;
     state.assistantStatus = currentSignal.airportExcluded ? "airport-excluded" : "classified";
@@ -1206,10 +1470,7 @@
     state.rating = currentSignal.visibleRating;
     state.bucket = currentSignal.visibleBucket;
     state.airportExcluded = currentSignal.airportExcluded;
-    state.citywideRank = ranks.citywideRank;
-    state.citywideTotal = ranks.citywideTotal;
-    state.boroughRank = ranks.boroughRank;
-    state.boroughTotal = ranks.boroughTotal;
+    applyRankingsToState(rankings);
 
     state.signalSnapshot = currentSignal;
     state.currentZoneHoldScore = decision.holdScore;
@@ -1248,6 +1509,22 @@
       citywideTotal: state.citywideTotal,
       boroughRank: state.boroughRank,
       boroughTotal: state.boroughTotal,
+      currentZoneCitywideRank: state.currentZoneCitywideRank,
+      currentZoneCitywideTotal: state.currentZoneCitywideTotal,
+      currentZoneBoroughRank: state.currentZoneBoroughRank,
+      currentZoneBoroughTotal: state.currentZoneBoroughTotal,
+      currentBoroughName: state.currentBoroughName,
+      citywideBestNow: toRankSnapshotEntry(state.citywideBestNow),
+      citywideWorstNow: toRankSnapshotEntry(state.citywideWorstNow),
+      citywideTop10Best: Array.isArray(state.citywideTop10Best) ? state.citywideTop10Best.map(toRankSnapshotEntry) : [],
+      citywideTop10Worst: Array.isArray(state.citywideTop10Worst) ? state.citywideTop10Worst.map(toRankSnapshotEntry) : [],
+      boroughBestNow: toRankSnapshotEntry(state.boroughBestNow),
+      boroughWorstNow: toRankSnapshotEntry(state.boroughWorstNow),
+      boroughTop5Best: Array.isArray(state.boroughTop5Best) ? state.boroughTop5Best.map(toRankSnapshotEntry) : [],
+      boroughTop5Worst: Array.isArray(state.boroughTop5Worst) ? state.boroughTop5Worst.map(toRankSnapshotEntry) : [],
+      rankingsComputed: !!state.rankingsCache,
+      rankingsCacheKey: state.rankingsCacheKey || "",
+      rankingsExpanded: !!state.rankingsExpanded,
       busyNowBase: state.signalSnapshot?.busyNowBase ?? null,
       busyNextBase: state.signalSnapshot?.busyNextBase ?? null,
       shortTripPenalty: state.signalSnapshot?.shortTripPenalty ?? null,
@@ -1361,6 +1638,23 @@
       citywideTotal: null,
       boroughRank: null,
       boroughTotal: null,
+      rankingsCacheKey: "",
+      rankingsCache: null,
+      rankingsExpanded: false,
+      lastRankingsComputedAt: null,
+      currentZoneCitywideRank: null,
+      currentZoneCitywideTotal: null,
+      currentZoneBoroughRank: null,
+      currentZoneBoroughTotal: null,
+      currentBoroughName: "",
+      citywideBestNow: null,
+      citywideWorstNow: null,
+      citywideTop10Best: [],
+      citywideTop10Worst: [],
+      boroughBestNow: null,
+      boroughWorstNow: null,
+      boroughTop5Best: [],
+      boroughTop5Worst: [],
       signalSnapshot: null,
       bestNearbyOverall: null,
       bestNearbyTrapEscape: null,
@@ -1370,6 +1664,7 @@
       dwellMs: 0,
       lastRenderFingerprint: "",
       lastActionFingerprint: "",
+      rankingsBound: state.rankingsBound,
     });
     applyNavDestination("MONITOR", null);
     renderBanner();
@@ -1387,4 +1682,5 @@
   window.getTeamJoseoAiAssistantSnapshot = () => window.TlcAiAssistantModule?.getSnapshot?.() || null;
 
   renderBanner();
+  bindRankingsToggleOnce();
 })();
