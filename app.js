@@ -2457,6 +2457,8 @@ function buildRealContributionReasonSummary(props, geom) {
 
 function buildZoneWhyReasons(props, geom, visibleScoreSource) {
   const summary = window.TlcScoreShadowModule?.buildZoneShadowSummary?.(props, geom) || null;
+  const contributionBreakdown = readVisibleContributionBreakdown(props, geom);
+  const visibleSaturationPenalty = Number(contributionBreakdown?.negative?.saturation_penalty);
   const reasons = [];
   const pushReason = (text) => {
     if (!text || reasons.includes(text) || reasons.length >= 5) return;
@@ -2468,7 +2470,6 @@ function buildZoneWhyReasons(props, geom, visibleScoreSource) {
   const busyNext = num(summary?.busy_next_base_n);
   const tripMix = num(summary?.balanced_trip_share);
   const churnPressure = num(summary?.churn_pressure_n);
-  const saturation = num(summary?.earnings_shadow_saturation_penalty_manhattan_v3 ?? props?.earnings_shadow_saturation_penalty_manhattan_v3);
   const retentionPenalty = num(summary?.same_zone_retention_penalty_n);
   const shortTripPenalty = num(summary?.short_trip_share);
   const area = num(summary?.zone_area_sq_miles);
@@ -2480,8 +2481,13 @@ function buildZoneWhyReasons(props, geom, visibleScoreSource) {
   if (Number.isFinite(shortTripPenalty) && shortTripPenalty >= 0.55) pushReason("short-trip trap risk");
   if (Number.isFinite(churnPressure) && churnPressure >= 0.6) pushReason("same-zone churn risk");
   if (Number.isFinite(retentionPenalty) && retentionPenalty >= 0.55) pushReason("same-zone retention penalty is elevated");
-  if (visibleScoreSource === "manhattan_v3_shadow" && Number.isFinite(saturation) && saturation > 0.05) {
+  if (Number.isFinite(visibleSaturationPenalty) && visibleSaturationPenalty > 0.05 && (
+    visibleScoreSource === "manhattan_v3_shadow" ||
+    (visibleScoreSource === "citywide_v3_shadow" && isManhattanFeature(props))
+  )) {
     pushReason("Manhattan saturation caution");
+  } else if (Number.isFinite(visibleSaturationPenalty) && visibleSaturationPenalty > 0.05 && visibleScoreSource === "citywide_v3_shadow") {
+    pushReason("market saturation caution");
   }
 
   return reasons.slice(0, 5);
@@ -2554,7 +2560,6 @@ function buildPopupHTML(props, geom, metrics = getZonePopupMetrics(map?.getZoom?
         <div><b>Local rank:</b> ${Number.isFinite(contributionBreakdown.mechanics.local_rank) ? contributionBreakdown.mechanics.local_rank.toFixed(3) : "n/a"}</div>
         <div><b>Base visible score:</b> ${Number.isFinite(contributionBreakdown.mechanics.base_visible_score) ? contributionBreakdown.mechanics.base_visible_score.toFixed(3) : "n/a"}</div>
         <div><b>Final visible score:</b> ${Number.isFinite(contributionBreakdown.mechanics.final_visible_score) ? contributionBreakdown.mechanics.final_visible_score.toFixed(3) : "n/a"}</div>
-        <div><b>Raw visible profile score:</b> ${Number.isFinite(contributionBreakdown.mechanics.raw_visible_score) ? contributionBreakdown.mechanics.raw_visible_score.toFixed(3) : "n/a"}</div>
         <div><b>Visible profile confidence:</b> ${Number.isFinite(contributionBreakdown.mechanics.visible_confidence) ? contributionBreakdown.mechanics.visible_confidence.toFixed(3) : "n/a"}</div>
       </div>
     `

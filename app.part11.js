@@ -23,7 +23,7 @@
   const MANHATTAN_GLOBAL_PENALTY = 0.98;
 
   const MANHATTAN_MIN_ZONES = 40;
-  const MANHATTAN_CORE_MAX_LAT = 40.82;
+  const MANHATTAN_CORE_MAX_LAT = 40.795;
 
   const BRONX_WASH_HEIGHTS_TRIP_FREQUENCY_WEIGHT = 0.55;
   const BRONX_WASH_HEIGHTS_FOLLOWUP_WEIGHT = 0.20;
@@ -661,7 +661,7 @@
     const fallbackRating = clampRating100(baseRating);
     if (!Number.isFinite(Number(baseRating))) {
       return {
-        adjustedRating: fallbackRating,
+        adjustedRating: NaN,
         adjustedFiniteRating: null,
         globalPenaltyApplied: 0,
         localPenaltyApplied: 0,
@@ -1631,7 +1631,8 @@
     const airportExcluded = isAirportZone(props);
     const activeMode = getActiveSpecialModeTagForFeature(props, geom) || "citywide";
     const rating = effectiveRating(props, geom);
-    const derivedFromRating = Number.isFinite(Number(rating));
+    const chosenRating = Number.isFinite(rating) ? Number(rating) : null;
+    const derivedFromRating = Number.isFinite(chosenRating);
     const bucket = effectiveBucket(props, geom);
     const color = effectiveColor(props, geom);
     return {
@@ -1641,7 +1642,7 @@
       chosen_rating_source: visibleScoreSource,
       chosen_bucket_source: derivedFromRating ? "derived_from_rating" : visibleScoreSource,
       chosen_color_source: derivedFromRating ? "derived_from_rating" : visibleScoreSource,
-      chosen_rating: Number.isFinite(Number(rating)) ? Number(rating) : null,
+      chosen_rating: chosenRating,
       chosen_bucket: String(bucket || ""),
       chosen_color: String(color || "")
     };
