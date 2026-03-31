@@ -391,8 +391,19 @@
     return map[String(code || "").trim()] || "info";
   }
 
+  function isCompactLaneMode() {
+    return document.getElementById("aiAssistantDock")?.dataset?.aiCompactLane === "1";
+  }
+
   function buildPrimaryHeadline() {
     const action = humanActionLabel(state.finalActionCode);
+    const compactLane = isCompactLaneMode();
+    if (compactLane) {
+      if ((state.finalActionCode === "MOVE_SOON" || state.finalActionCode === "LEAVE_NOW") && state.assistantMoveTarget?.zoneName) {
+        return `${action} • ${state.assistantMoveTarget.zoneName}`;
+      }
+      return `${action} • ${humanizeAssistantReason(state.finalActionReason)}`;
+    }
     if ((state.finalActionCode === "MOVE_SOON" || state.finalActionCode === "LEAVE_NOW")
       && state.assistantMoveTarget?.zoneName
       && Number.isFinite(state.assistantMoveTarget?.distanceMiles)) {
@@ -522,18 +533,21 @@
   }
 
   function buildMessages() {
+    const compactLane = isCompactLaneMode();
     const list = [];
     const primary = buildPrimaryHeadline();
     list.push({ key: "action", text: primary, severity: severityForAction(state.finalActionCode) });
 
     if (state.assistantMoveTarget?.zoneName && Number.isFinite(state.assistantMoveTarget?.distanceMiles)) {
-      const targetSummary = `Go to ${state.assistantMoveTarget.zoneName} • ${state.assistantMoveTarget.distanceMiles.toFixed(1)} mi`;
+      const targetSummary = compactLane
+        ? `Target ${state.assistantMoveTarget.zoneName}`
+        : `Go to ${state.assistantMoveTarget.zoneName} • ${state.assistantMoveTarget.distanceMiles.toFixed(1)} mi`;
       if (!primary.includes(targetSummary)) {
         list.push({ key: "target", text: targetSummary, severity: "info" });
       }
     }
 
-    if (state.targetStrongUntilTime) {
+    if (!compactLane && state.targetStrongUntilTime) {
       const until = internals.formatNYCTimeOnlyLabel?.(state.targetStrongUntilTime) || state.targetStrongUntilTime;
       list.push({ key: "target_window", text: `Target stronger through ${until}.`, severity: "info" });
     }
@@ -541,11 +555,11 @@
     const rawOutlook = String(state.outlookSummaryText || "").trim();
     const outlookText = humanizeAssistantReason(rawOutlook);
     const outlookMeaningful = rawOutlook && !/^outlook unavailable\.?$/i.test(rawOutlook) && !/^checking outlook\.?$/i.test(outlookText);
-    if (outlookMeaningful) {
+    if (!compactLane && outlookMeaningful) {
       list.push({ key: "outlook", text: outlookText, severity: "info" });
     }
     const targetOutlook = humanizeAssistantReason(state.moveTargetOutlookSummaryText);
-    if (String(targetOutlook || "").trim() && !/^checking outlook\.?$/i.test(targetOutlook)) {
+    if (!compactLane && String(targetOutlook || "").trim() && !/^checking outlook\.?$/i.test(targetOutlook)) {
       list.push({ key: "target_outlook", text: targetOutlook, severity: "info" });
     }
     if (state.currentZoneCitywideRank) {
@@ -561,12 +575,22 @@
       seen.add(key);
       uniq.push({ ...m, text: cleanedText });
     }
-    if (!uniq.length) {
-      uniq.push({ key: "fallback", text: "Monitor: Mixed signals.", severity: "info" });
+    let finalized = uniq;
+    if (compactLane) {
+      const preferredOrder = ["action", "target", "rank"];
+      const preferred = [];
+      for (const key of preferredOrder) {
+        const found = uniq.find((m) => m.key === key);
+        if (found) preferred.push(found);
+      }
+      finalized = preferred.length ? preferred : uniq.slice(0, 1);
     }
-    state.assistantMessages = uniq;
-    if (state.activeMessageIndex >= uniq.length) state.activeMessageIndex = 0;
-    const active = uniq[state.activeMessageIndex] || { key: "none", text: "AI Assistant ready.", severity: "info" };
+    if (!finalized.length) {
+      finalized.push({ key: "fallback", text: "Monitor: Mixed signals.", severity: "info" });
+    }
+    state.assistantMessages = finalized;
+    if (state.activeMessageIndex >= finalized.length) state.activeMessageIndex = 0;
+    const active = finalized[state.activeMessageIndex] || { key: "none", text: "AI Assistant ready.", severity: "info" };
     state.activeMessageKey = active.key;
     state.activeMessageSeverity = active.severity;
     state.activeMessageIcon = active.severity;
@@ -592,17 +616,18 @@
 
   function renderWidget() {
     if (!dockMount) return;
+    const compactLane = isCompactLaneMode();
     buildMessages();
     const active = state.assistantMessages[state.activeMessageIndex] || { text: "AI Assistant ready.", severity: "info" };
     const iconType = leadingIconKindFromAction(state.finalActionCode);
     const chips = [];
     chips.push(`Zone: ${state.activeStableZoneName || "Locating…"}`);
-    if (Number.isFinite(state.visibleRating)) chips.push(`Score ${Math.round(state.visibleRating)}`);
-    if (state.currentZoneCitywideRank) chips.push(`City #${state.currentZoneCitywideRank}`);
+    if (!compactLane && Number.isFinite(state.visibleRating)) chips.push(`Score ${Math.round(state.visibleRating)}`);
+    if (!compactLane && state.currentZoneCitywideRank) chips.push(`City #${state.currentZoneCitywideRank}`);
     chips.push(`Here ${Math.floor((state.activeStableZoneDwellMs || 0) / 60000)}m`);
 
     dockMount.innerHTML = `
-      <div class="aiAssistantWidget ${state.expanded ? "is-expanded" : ""}" id="aiAssistantWidget">
+      <div class="aiAssistantWidget ${compactLane ? "aiAssistantWidget--compactLane" : ""} ${state.expanded ? "is-expanded" : ""}" id="aiAssistantWidget">
         <div class="aiAssistantMainRow">
           <div class="aiAssistantIconChip aiAssistantIconChip--${iconType}">${iconMarkup(iconType)}</div>
           <div class="aiAssistantTickerViewport" id="aiAssistantTickerViewport">
@@ -672,9 +697,6 @@
     const weatherBadge = document.getElementById("weatherBadge");
     if (!dock || !onlineBadge || !weatherBadge) return;
 
-    const topLane = "calc(env(safe-area-inset-top) + 10px)";
-    const fallbackTop = "calc(env(safe-area-inset-top) + 42px)";
-
     const onlineRect = onlineBadge.getBoundingClientRect?.();
     const weatherRect = weatherBadge.getBoundingClientRect?.();
     if (!onlineRect || !weatherRect) return;
@@ -684,23 +706,26 @@
     const laneRight = Math.floor(weatherRect.left - 10);
     const laneWidth = Math.floor(laneRight - laneLeft);
     const laneCenter = Math.floor((laneLeft + laneRight) / 2);
-    if (laneWidth >= 230) {
-      const preferredWidth = Math.min(320, laneWidth);
+
+    if (laneWidth >= 140) {
+      const dockWidth = Math.min(220, laneWidth);
       dock.style.left = `${laneCenter}px`;
       dock.style.right = "auto";
-      dock.style.width = `${preferredWidth}px`;
-      dock.style.maxWidth = `${preferredWidth}px`;
+      dock.style.width = `${dockWidth}px`;
+      dock.style.maxWidth = `${dockWidth}px`;
       dock.style.transform = "translateX(-50%)";
-      dock.style.top = topLane;
+      dock.style.top = "calc(env(safe-area-inset-top) + 10px)";
+      dock.dataset.aiCompactLane = laneWidth < 210 ? "1" : "0";
       return;
     }
 
     dock.style.left = "50%";
     dock.style.right = "auto";
-    dock.style.width = "min(300px, calc(100vw - 32px))";
+    dock.style.width = "min(220px, calc(100vw - 32px))";
     dock.style.maxWidth = "calc(100vw - 32px)";
-    dock.style.top = fallbackTop;
     dock.style.transform = "translateX(-50%)";
+    dock.style.top = "calc(env(safe-area-inset-top) + 10px)";
+    dock.dataset.aiCompactLane = "1";
   }
 
   function installTopBadgeLayoutObservers() {

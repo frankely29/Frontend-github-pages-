@@ -1957,7 +1957,7 @@ html, body { height: 100%; margin: 0; padding: 0; }
   left: 50%;
   transform: translateX(-50%);
   z-index: 1450;
-  width: min(300px, calc(100vw - 32px));
+  width: min(220px, calc(100vw - 32px));
   max-width: calc(100vw - 32px);
   pointer-events: none;
   display: flex;
@@ -1971,9 +1971,9 @@ html, body { height: 100%; margin: 0; padding: 0; }
   padding: 6px 8px;
   box-shadow: 0 8px 20px rgba(15,23,42,0.10);
   background: rgba(255,255,255,0.25);
-  border: 1px solid rgba(255,255,255,0.40);
+  border: 1px solid rgba(255,255,255,0.42);
   width: 100%;
-  max-width: 320px;
+  max-width: 220px;
   margin: 0 auto;
   backdrop-filter: blur(12px) saturate(135%);
   -webkit-backdrop-filter: blur(12px) saturate(135%);
@@ -1995,6 +1995,32 @@ html, body { height: 100%; margin: 0; padding: 0; }
 .aiAssistantPanel{ margin-top:8px; width:100%; max-height:min(52vh,420px); overflow:auto; border-top:1px solid rgba(15,23,42,0.08); padding-top:8px; }
 .aiAssistantSection{ padding:6px 2px; font-size:12px; color:#0f172a; }
 .aiAssistantList{ margin:4px 0 0 14px; padding:0; }
+
+.aiAssistantWidget--compactLane{
+  padding: 5px 7px;
+}
+.aiAssistantWidget--compactLane .aiAssistantMainRow{
+  gap: 6px;
+  min-height: 30px;
+}
+.aiAssistantWidget--compactLane .aiAssistantIconChip{
+  width: 34px;
+  height: 34px;
+}
+.aiAssistantWidget--compactLane .aiAssistantTickerTrackInner{
+  font-size: 11px;
+}
+.aiAssistantWidget--compactLane .aiAssistantExpandBtn{
+  padding: 2px 7px;
+}
+.aiAssistantWidget--compactLane .aiAssistantMetaRow{
+  gap: 4px;
+  margin-top: 4px;
+}
+.aiAssistantWidget--compactLane .aiAssistantMetaChip{
+  font-size: 9px;
+  padding: 2px 6px;
+}
 .aiAssistantSeverity--positive{ color:#047857; }
 .aiAssistantSeverity--caution{ color:#b45309; }
 .aiAssistantSeverity--move{ color:#b91c1c; }
