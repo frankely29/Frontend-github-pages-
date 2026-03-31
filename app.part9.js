@@ -81,6 +81,7 @@
     onlineBadge.title = ghostedDisplay > 0
       ? `${display} online • ${ghostedDisplay} ghosted`
       : `${display} online`;
+    window.dispatchEvent(new CustomEvent("tlc-top-badges-updated"));
   }
 
   function applyBadgeIconModel() {
@@ -178,6 +179,7 @@
     }
     if (txtEl) txtEl.textContent = text;
     weatherBadge.title = text;
+    window.dispatchEvent(new CustomEvent("tlc-top-badges-updated"));
   }
   function getWeatherLatLng() {
     const userLatLng = core.getUserLatLng?.() || null;
