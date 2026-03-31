@@ -1463,7 +1463,7 @@
   function applyStableZoneFromLocation() {
     const loc = state.lastUserLocation;
     const now = Date.now();
-    if (!loc || !Number.isFinite(loc.lat) || !Number.isFinite(loc.lng)) return;
+    if (!loc || !Number.isFinite(loc.lat) || !Number.isFinite(loc.lng)) return false;
     const feature = internals.resolveZoneFeatureAtLngLat?.({ lat: loc.lat, lng: loc.lng }) || null;
     if (!feature) {
       if (state.activeStableZoneId && state.activeZoneLastSeenTs && now - state.activeZoneLastSeenTs > AI_ASSISTANT_CLEAR_GRACE_MS) {
@@ -1472,35 +1472,51 @@
         state.activeStableBorough = "";
         state.activeStableZoneEnterTs = null;
       }
-      return;
+      return false;
     }
     const signal = buildAssistantFeatureSignal(feature);
     state.activeZoneLastSeenTs = now;
-    if (!signal.locationId) return;
+    if (!signal.locationId) return false;
     if (state.candidateZoneId !== signal.locationId) {
       state.candidateZoneId = signal.locationId;
       state.candidateZoneFirstSeenTs = now;
       state.candidateZoneHits = 1;
-      return;
+      return false;
     }
     state.candidateZoneHits += 1;
     const stableMs = now - (state.candidateZoneFirstSeenTs || now);
     if (state.candidateZoneHits >= AI_ASSISTANT_STABLE_MIN_HITS && stableMs >= AI_ASSISTANT_STABLE_MIN_MS) {
       if (state.activeStableZoneId !== signal.locationId) {
+        const previousZoneId = state.activeStableZoneId;
         state.activeStableZoneId = signal.locationId;
         state.activeStableZoneName = signal.zoneName;
         state.activeStableBorough = signal.borough;
         state.activeStableZoneEnterTs = now;
         state.activeStableZoneDwellMs = 0;
+        state.proposedActionCode = null;
+        state.proposedReasonCode = null;
+        state.proposedReasonText = "";
+        state.proposedMoveTarget = null;
+        state.proposedNetMoveEdge = null;
+        state.proposedWorthThreshold = null;
+        state.proposedSinceTs = null;
+        state.proposedStableHits = 0;
+        if (previousZoneId && state.committedMoveTarget?.locationId) {
+          state.committedMoveTarget = null;
+        }
+        state.assistantMoveTarget = null;
         window.dispatchEvent(new CustomEvent("tlc-ai-assistant-zone-changed", { detail: snapshot() }));
+        window.dispatchEvent(new CustomEvent("tlc-ai-assistant-snapshot-updated", { detail: snapshot() }));
+        return true;
       }
     }
+    return false;
   }
 
   async function recompute(frame) {
     const liveFrame = frame || internals.getCurrentFrame?.() || null;
     state.lastFrameTime = frameTimeIso(liveFrame);
-    applyStableZoneFromLocation();
+    const zoneChanged = applyStableZoneFromLocation();
     state.activeStableZoneDwellMs = state.activeStableZoneEnterTs ? Math.max(0, Date.now() - state.activeStableZoneEnterTs) : 0;
 
     const activeSignal = state.activeStableZoneId
@@ -1583,13 +1599,6 @@
     state.targetViabilityRejectCode = selectedForReason?.viability?.viabilityRejectCode ?? null;
     state.targetViabilityRejectReasonText = selectedForReason?.viability?.viabilityRejectReasonText ?? "";
 
-    const targetPoints = state.assistantMoveTarget ? (byId?.[state.assistantMoveTarget.locationId] || []) : [];
-    state.currentZoneOutlook = interpretOutlookPoints(currentPoints, activeSignal);
-    state.moveTargetOutlook = interpretOutlookPoints(targetPoints, state.assistantMoveTarget);
-    Object.assign(state, state.currentZoneOutlook || {});
-    state.outlookSummaryText = state.currentZoneOutlook?.outlookSummaryText || "Outlook unavailable.";
-    state.moveTargetOutlookSummaryText = state.moveTargetOutlook?.outlookSummaryText || "";
-
     const proposal = deriveProposedRecommendation(
       activeSignal,
       bestWorthwhile,
@@ -1606,6 +1615,14 @@
     state.recommendationConfidenceScore = proposal.recommendationConfidenceScore;
     state.recommendationConfidenceLevel = proposal.recommendationConfidenceLevel;
     stabilizeAssistantRecommendation(proposal, Date.now());
+
+    const outlookMoveTarget = (state.committedMoveTarget || proposal?.moveTarget || null);
+    const targetPoints = outlookMoveTarget ? (byId?.[outlookMoveTarget.locationId] || byId?.[String(outlookMoveTarget.locationId)] || []) : [];
+    state.currentZoneOutlook = interpretOutlookPoints(currentPoints, activeSignal);
+    state.moveTargetOutlook = interpretOutlookPoints(targetPoints, outlookMoveTarget);
+    Object.assign(state, state.currentZoneOutlook || {});
+    state.outlookSummaryText = state.currentZoneOutlook?.outlookSummaryText || "Outlook unavailable.";
+    state.moveTargetOutlookSummaryText = state.moveTargetOutlook?.outlookSummaryText || "";
 
     state.assistantMoveTarget = state.committedMoveTarget || null;
     state.recommendationReasonCode = state.committedReasonCode || proposal.reasonCode;
@@ -1628,6 +1645,9 @@
     applyNavOwnership();
     mirrorRecommendLine();
     renderWidget();
+    if (zoneChanged) {
+      window.dispatchEvent(new CustomEvent("tlc-ai-assistant-snapshot-updated", { detail: snapshot() }));
+    }
     emitSnapshotEvents();
   }
 
