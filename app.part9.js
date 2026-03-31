@@ -45,7 +45,7 @@
     }
 
     if (recommendEl) {
-      recommendEl.textContent = "AI Assistant loading…";
+      recommendEl.textContent = "Recommended: loading assistant…";
     }
     setNavDestination(null);
   }
