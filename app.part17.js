@@ -4,6 +4,14 @@
   const AI_ASSISTANT_CLEAR_GRACE_MS = 5000;
   const AI_ASSISTANT_HEARTBEAT_MS_VISIBLE = 15000;
   const AI_ASSISTANT_HEARTBEAT_MS_HIDDEN = 60000;
+  const AI_ASSISTANT_PROPOSAL_MIN_STABLE_MS = 8000;
+  const AI_ASSISTANT_PROPOSAL_MIN_HITS = 2;
+  const AI_ASSISTANT_STAY_TO_MOVE_EXTRA_BUFFER = 2.5;
+  const AI_ASSISTANT_MOVE_TO_STAY_EXTRA_BUFFER = 1.5;
+  const AI_ASSISTANT_TARGET_REPLACE_EDGE_BUFFER = 3.0;
+  const AI_ASSISTANT_RECOMMENDATION_SWITCH_COOLDOWN_MS = 15000;
+  const AI_ASSISTANT_RECOMMENDATION_MIN_HOLD_MS = 12000;
+  const AI_ASSISTANT_EMERGENCY_BYPASS_EDGE = 6.0;
 
   const runtime = window.FrontendRuntime || null;
   const runtimePolling = runtime?.polling || null;
@@ -98,6 +106,27 @@
     recommendationReasonCode: "collecting_context",
     recommendationReasonText: "Collecting more context.",
     recommendationWorthMoving: false,
+    proposedActionCode: null,
+    proposedReasonCode: null,
+    proposedReasonText: "",
+    proposedMoveTarget: null,
+    proposedNetMoveEdge: null,
+    proposedWorthThreshold: null,
+    proposedSinceTs: null,
+    proposedStableHits: 0,
+    committedActionCode: null,
+    committedReasonCode: null,
+    committedReasonText: "",
+    committedMoveTarget: null,
+    committedSinceTs: null,
+    recommendationConfidenceScore: null,
+    recommendationConfidenceLevel: "low",
+    recommendationSwitchCooldownUntilTs: 0,
+    recommendationMinHoldUntilTs: 0,
+    recommendationStickyTargetId: null,
+    recommendationStickyTargetSinceTs: null,
+    stabilityReasonCode: "",
+    stabilityReasonText: "",
     etaMinutes: null,
     distanceMiles: null,
     stayProjectedRating: null,
@@ -775,6 +804,197 @@
     return deriveNoWasteStayDecision(currentSignal, bestWorthwhileTarget, bestRejectedTarget, currentMetrics, currentTravelMetrics);
   }
 
+  function deriveAssistantRecommendationConfidence(bestEval, currentSignal) {
+    const evalObj = bestEval || {};
+    const margin = (safeNum(evalObj?.netMoveEdge, 0) || 0) - (safeNum(evalObj?.moveWorthThreshold, 0) || 0);
+    const positiveMarginBoost = Math.max(0, Math.min(20, margin * 3.5));
+    const etaMinutes = safeNum(evalObj?.etaMinutes, safeNum(evalObj?.candidateSignal?.etaMinutes, 0)) || 0;
+    const longEtaPenalty = Math.max(0, Math.min(15, (etaMinutes - 5) * 1.2));
+    const confidencePenalty = safeNum(evalObj?.confidencePenalty?.confidencePenalty, 0) || 0;
+    const currentCls = classifyAssistantSignal(currentSignal || {});
+    const currentWeakBoost = (currentCls?.shortTrap || currentCls?.slowNow || (safeNum(currentSignal?.churnPressure, 0) || 0) >= 0.58) ? 8 : 0;
+    let score = 50;
+    score += positiveMarginBoost;
+    if (evalObj?.viability?.viable) score += 10;
+    if (evalObj?.targetPaybackMetrics?.paybackHolds) score += 8;
+    score -= longEtaPenalty;
+    score -= (confidencePenalty * 1.5);
+    score += currentWeakBoost;
+    score = Math.max(0, Math.min(100, Math.round(score)));
+    const level = score >= 75 ? "high" : (score >= 50 ? "medium" : "low");
+    return { recommendationConfidenceScore: score, recommendationConfidenceLevel: level };
+  }
+
+  function deriveProposedRecommendation(currentSignal, bestWorthwhileTarget, bestRejectedTarget, currentMetrics, currentTravelMetrics) {
+    const selected = bestWorthwhileTarget || bestRejectedTarget || null;
+    const baseDecision = deriveAssistantRecommendationReason(
+      currentSignal,
+      currentMetrics || {},
+      bestWorthwhileTarget,
+      bestRejectedTarget,
+      currentTravelMetrics || {}
+    );
+    const confidence = deriveAssistantRecommendationConfidence(selected, currentSignal);
+    return {
+      actionCode: baseDecision.actionCode,
+      reasonCode: baseDecision.reasonCode,
+      reasonText: baseDecision.reasonText,
+      moveTarget: bestWorthwhileTarget
+        ? {
+            ...bestWorthwhileTarget.candidateSignal,
+            etaMinutes: bestWorthwhileTarget.etaMinutes,
+            distanceMiles: bestWorthwhileTarget.distanceMiles,
+            targetArrivalProjectedRating: bestWorthwhileTarget.targetMetrics?.targetArrivalProjectedRating,
+            targetPaybackAvgRating: bestWorthwhileTarget.targetPaybackMetrics?.paybackAvgRating,
+            totalDeadheadCost: bestWorthwhileTarget.deadheadCost?.totalDeadheadCost,
+            moveConfidencePenalty: bestWorthwhileTarget.confidencePenalty?.confidencePenalty,
+            netMoveEdge: bestWorthwhileTarget.netMoveEdge,
+            moveWorthThreshold: bestWorthwhileTarget.moveWorthThreshold,
+            targetViableOnArrival: bestWorthwhileTarget.viability?.viable,
+          }
+        : null,
+      netMoveEdge: selected?.netMoveEdge ?? null,
+      moveWorthThreshold: selected?.moveWorthThreshold ?? null,
+      recommendationWorthMoving: !!baseDecision.worthMoving,
+      recommendationConfidenceScore: confidence.recommendationConfidenceScore,
+      recommendationConfidenceLevel: confidence.recommendationConfidenceLevel,
+    };
+  }
+
+  function buildAssistantRecommendationProposalKey(proposal) {
+    const actionCode = String(proposal?.actionCode || "MONITOR");
+    const reasonCode = String(proposal?.reasonCode || "unknown");
+    const targetId = String(proposal?.moveTarget?.locationId || "none");
+    return `${actionCode}|${reasonCode}|${targetId}`;
+  }
+
+  function isMoveAction(actionCode) {
+    return actionCode === "MOVE_SOON" || actionCode === "LEAVE_NOW";
+  }
+
+  function shouldAssistantBypassStabilityDelay(proposal, currentSignal) {
+    if (!proposal || proposal.actionCode !== "LEAVE_NOW") return false;
+    const urgentReason = ["low_trip_trap_risk", "nearby_zone_about_to_get_busier", "zone_about_to_die"].includes(proposal.reasonCode);
+    if (!urgentReason) return false;
+    const netMoveEdge = safeNum(proposal.netMoveEdge, -Infinity) || -Infinity;
+    const threshold = safeNum(proposal.moveWorthThreshold, Infinity) || Infinity;
+    if (netMoveEdge < (threshold + AI_ASSISTANT_EMERGENCY_BYPASS_EDGE)) return false;
+    return !!currentSignal?.locationId;
+  }
+
+  function commitAssistantRecommendation(proposal, nowTs) {
+    state.committedActionCode = proposal.actionCode;
+    state.committedReasonCode = proposal.reasonCode;
+    state.committedReasonText = proposal.reasonText;
+    state.committedMoveTarget = proposal.moveTarget || null;
+    state.committedSinceTs = nowTs;
+    state.recommendationSwitchCooldownUntilTs = nowTs + AI_ASSISTANT_RECOMMENDATION_SWITCH_COOLDOWN_MS;
+    state.recommendationMinHoldUntilTs = nowTs + AI_ASSISTANT_RECOMMENDATION_MIN_HOLD_MS;
+    if (proposal.moveTarget?.locationId) {
+      const targetId = String(proposal.moveTarget.locationId);
+      if (state.recommendationStickyTargetId !== targetId) {
+        state.recommendationStickyTargetId = targetId;
+        state.recommendationStickyTargetSinceTs = nowTs;
+      }
+    } else {
+      state.recommendationStickyTargetId = null;
+      state.recommendationStickyTargetSinceTs = null;
+    }
+  }
+
+  function stabilizeAssistantRecommendation(proposal, nowTs) {
+    const committedProposal = {
+      actionCode: state.committedActionCode,
+      reasonCode: state.committedReasonCode,
+      moveTarget: state.committedMoveTarget,
+    };
+    const committedKey = buildAssistantRecommendationProposalKey(committedProposal);
+    const proposalKey = buildAssistantRecommendationProposalKey(proposal);
+    state.stabilityReasonCode = "";
+    state.stabilityReasonText = "";
+
+    if (!state.committedActionCode) {
+      commitAssistantRecommendation(proposal, nowTs);
+      return;
+    }
+
+    if (proposalKey === committedKey) {
+      state.committedReasonText = proposal.reasonText;
+      state.committedReasonCode = proposal.reasonCode;
+      state.committedMoveTarget = proposal.moveTarget || state.committedMoveTarget || null;
+      return;
+    }
+
+    const priorProposedKey = buildAssistantRecommendationProposalKey({
+      actionCode: state.proposedActionCode,
+      reasonCode: state.proposedReasonCode,
+      moveTarget: state.proposedMoveTarget,
+    });
+    if (proposalKey !== priorProposedKey) {
+      state.proposedSinceTs = nowTs;
+      state.proposedStableHits = 1;
+    } else {
+      state.proposedStableHits = (safeNum(state.proposedStableHits, 0) || 0) + 1;
+    }
+
+    const isCommittedStay = state.committedActionCode === "STAY" || state.committedActionCode === "STAY_BRIEFLY";
+    if (isCommittedStay && isMoveAction(proposal.actionCode)) {
+      const required = (safeNum(proposal.moveWorthThreshold, 0) || 0) + AI_ASSISTANT_STAY_TO_MOVE_EXTRA_BUFFER;
+      if ((safeNum(proposal.netMoveEdge, -Infinity) || -Infinity) < required) {
+        state.stabilityReasonCode = "move_edge_not_far_enough";
+        state.stabilityReasonText = "Moving is not clearly worth it yet.";
+        return;
+      }
+    }
+
+    if (isMoveAction(state.committedActionCode) && proposal.actionCode === "STAY") {
+      const committedTargetViable = state.committedMoveTarget?.targetViableOnArrival !== false;
+      const committedEdge = safeNum(state.committedMoveTarget?.netMoveEdge, 0) || 0;
+      const committedThreshold = safeNum(state.committedMoveTarget?.moveWorthThreshold, 0) || 0;
+      const allowCancel = !committedTargetViable || committedEdge < (committedThreshold - AI_ASSISTANT_MOVE_TO_STAY_EXTRA_BUFFER) || nowTs >= (safeNum(state.recommendationMinHoldUntilTs, 0) || 0);
+      if (!allowCancel) {
+        state.stabilityReasonCode = "holding_existing_move";
+        state.stabilityReasonText = "Current move target still makes sense.";
+        return;
+      }
+    }
+
+    if (isMoveAction(state.committedActionCode)
+      && state.committedMoveTarget?.locationId
+      && isMoveAction(proposal.actionCode)
+      && proposal.moveTarget?.locationId
+      && String(proposal.moveTarget.locationId) !== String(state.committedMoveTarget.locationId)) {
+      const currentViable = state.committedMoveTarget?.targetViableOnArrival !== false;
+      const currentEdge = safeNum(state.committedMoveTarget?.netMoveEdge, -Infinity) || -Infinity;
+      const newEdge = safeNum(proposal.netMoveEdge, -Infinity) || -Infinity;
+      if (currentViable && newEdge < (currentEdge + AI_ASSISTANT_TARGET_REPLACE_EDGE_BUFFER)) {
+        state.stabilityReasonCode = "current_target_still_better_enough";
+        state.stabilityReasonText = "Current target still makes the most sense.";
+        return;
+      }
+    }
+
+    const bypass = shouldAssistantBypassStabilityDelay(proposal, state.activeStableFeatureSignal);
+    const stableEnough = (nowTs - (safeNum(state.proposedSinceTs, nowTs) || nowTs)) >= AI_ASSISTANT_PROPOSAL_MIN_STABLE_MS
+      && (safeNum(state.proposedStableHits, 0) || 0) >= AI_ASSISTANT_PROPOSAL_MIN_HITS;
+    const cooldownReady = nowTs >= (safeNum(state.recommendationSwitchCooldownUntilTs, 0) || 0);
+    if (!bypass && (!stableEnough || !cooldownReady)) {
+      state.stabilityReasonCode = "proposal_not_stable_yet";
+      state.stabilityReasonText = "Waiting to confirm the recommendation.";
+      return;
+    }
+    commitAssistantRecommendation(proposal, nowTs);
+  }
+
+  function deriveStableRecommendationReason(committedRecommendation, stabilityReasonCode, stabilityReasonText) {
+    if (stabilityReasonCode === "proposal_not_stable_yet" && stabilityReasonText) return "Waiting to confirm the recommendation";
+    if (stabilityReasonCode === "move_edge_not_far_enough") return "Moving is not worth the time";
+    if (stabilityReasonCode === "holding_existing_move") return "Current target still makes sense";
+    if (stabilityReasonCode === "current_target_still_better_enough") return "Current target still makes sense";
+    const reasonText = String(committedRecommendation?.reasonText || "").trim();
+    return reasonText || "Waiting to confirm the recommendation";
+  }
+
   async function fetchOutlook(frame, locationIds, visibleSource) {
     const frameTime = frameTimeIso(frame);
     if (!frameTime || !locationIds.length) return null;
@@ -869,11 +1089,8 @@
     if ((state.finalActionCode === "MOVE_SOON" || state.finalActionCode === "LEAVE_NOW")
       && state.assistantMoveTarget?.zoneName
       && Number.isFinite(state.assistantMoveTarget?.etaMinutes)) {
-      return `Go to ${state.assistantMoveTarget.zoneName} • ${Math.round(state.assistantMoveTarget.etaMinutes)} min • better on arrival`;
+      return `Go to ${state.assistantMoveTarget.zoneName} • ${Math.round(state.assistantMoveTarget.etaMinutes)} min`;
     }
-    if (state.finalActionCode === "STAY" && state.recommendationReasonCode === "moving_not_worth_it") return "Stay here • move not worth it";
-    if (state.finalActionCode === "STAY" && state.recommendationReasonCode === "current_zone_holds") return "Stay here • current zone still holds";
-    if (state.finalActionCode === "STAY" && state.recommendationReasonCode === "decent_rating_zone") return "Stay here for now";
     if (state.finalActionCode === "STAY") return "Stay here for now";
     if (state.finalActionCode === "STAY_BRIEFLY") return "Stay here briefly";
     if (state.finalActionCode === "MONITOR") return "Waiting for clearer signal";
@@ -1072,7 +1289,11 @@
     if ((state.finalActionCode === "MOVE_SOON" || state.finalActionCode === "LEAVE_NOW") && state.assistantMoveTarget?.zoneName && Number.isFinite(state.assistantMoveTarget?.etaMinutes)) {
       mirror += ` • Go to ${state.assistantMoveTarget.zoneName} • ${Math.round(state.assistantMoveTarget.etaMinutes)} min`;
     } else if (state.finalActionCode === "STAY") {
-      mirror += " • Stay here";
+      mirror += " • Stay here for now";
+    } else if (state.finalActionCode === "STAY_BRIEFLY") {
+      mirror += " • Stay here briefly";
+    } else if (state.finalActionCode === "MONITOR") {
+      mirror += " • Waiting for clearer signal";
     }
     recommendLine.textContent = mirror;
   }
@@ -1115,6 +1336,7 @@
         <section class="aiAssistantSection"><strong>Rankings</strong><div>Best now: ${state.citywideBestNow?.zoneName || "—"} • Worst now: ${state.citywideWorstNow?.zoneName || "—"}</div>${buildRankList(state.citywideTop10Best)}${buildRankList(state.boroughTop5Best)}</section>
         ${state.assistantMoveTarget ? `<section class="aiAssistantSection"><strong>Move Target</strong><div>${state.assistantMoveTarget.zoneName} • ${Math.round(state.assistantMoveTarget.etaMinutes || 0)} min • ${state.assistantMoveTarget.distanceMiles.toFixed(1)} mi</div></section>` : ""}
         ${(Number.isFinite(state.stayScenarioValue) || Number.isFinite(state.moveScenarioValue)) ? `<section class="aiAssistantSection"><strong>Move Decision</strong><div>Stay scenario: ${(state.stayScenarioValue || 0).toFixed(1)}</div><div>Move scenario: ${(state.moveScenarioValue || 0).toFixed(1)}</div><div>ETA: ${Math.round(state.etaMinutes || 0)} min</div><div>Deadhead cost: ${(state.totalDeadheadCost || 0).toFixed(1)}</div><div>Confidence penalty: ${(state.moveConfidencePenalty || 0).toFixed(1)}</div><div>Net move edge: ${(state.netMoveEdge || 0) >= 0 ? "+" : ""}${(state.netMoveEdge || 0).toFixed(1)}</div><div>Worth-moving threshold: ${(state.moveWorthThreshold || 0).toFixed(1)}</div></section>` : ""}
+        <section class="aiAssistantSection"><strong>Recommendation Stability</strong><div>Proposed: ${humanActionLabel(state.proposedActionCode)} • ${state.proposedReasonText || "—"}</div><div>Committed: ${humanActionLabel(state.committedActionCode)} • ${state.committedReasonText || "—"}</div><div>Confidence: ${Math.round(state.recommendationConfidenceScore || 0)} (${state.recommendationConfidenceLevel || "low"})</div><div>Stable since: ${state.committedSinceTs ? new Date(state.committedSinceTs).toLocaleTimeString() : "—"}</div><div>Switch cooldown until: ${state.recommendationSwitchCooldownUntilTs ? new Date(state.recommendationSwitchCooldownUntilTs).toLocaleTimeString() : "—"}</div><div>Minimum hold until: ${state.recommendationMinHoldUntilTs ? new Date(state.recommendationMinHoldUntilTs).toLocaleTimeString() : "—"}</div><div>Stability reason: ${state.stabilityReasonText || "Committed recommendation is stable."}</div></section>
         <section class="aiAssistantSection"><small>Assistant uses the same visible Team Joseo score path the map is showing.</small></section>
       </div>
     `;
@@ -1192,6 +1414,12 @@
       state.activeStableZoneId || "",
       state.finalActionCode || "",
       state.finalActionReason || "",
+      state.proposedActionCode || "",
+      state.proposedReasonCode || "",
+      state.committedActionCode || "",
+      state.committedReasonCode || "",
+      state.committedMoveTarget?.locationId || "",
+      state.stabilityReasonCode || "",
       state.dwellRiskCode || "",
       state.dwellEscalationLevel || 0,
       state.assistantMoveTarget?.locationId || "",
@@ -1330,20 +1558,6 @@
     const bestNotWorth = picked.bestRejectedTarget;
     state.bestArrivalAwareCandidate = bestWorthwhile;
     state.bestCandidateNotWorthMoving = bestNotWorth;
-    state.assistantMoveTarget = bestWorthwhile
-      ? {
-          ...bestWorthwhile.candidateSignal,
-          etaMinutes: bestWorthwhile.etaMinutes,
-          distanceMiles: bestWorthwhile.distanceMiles,
-          targetArrivalProjectedRating: bestWorthwhile.targetMetrics?.targetArrivalProjectedRating,
-          targetPaybackAvgRating: bestWorthwhile.targetPaybackMetrics?.paybackAvgRating,
-          totalDeadheadCost: bestWorthwhile.deadheadCost?.totalDeadheadCost,
-          moveConfidencePenalty: bestWorthwhile.confidencePenalty?.confidencePenalty,
-          netMoveEdge: bestWorthwhile.netMoveEdge,
-          moveWorthThreshold: bestWorthwhile.moveWorthThreshold,
-          targetViableOnArrival: bestWorthwhile.viability?.viable,
-        }
-      : null;
 
     const selectedForReason = bestWorthwhile || bestNotWorth;
     state.etaMinutes = selectedForReason?.etaMinutes ?? null;
@@ -1376,13 +1590,34 @@
     state.outlookSummaryText = state.currentZoneOutlook?.outlookSummaryText || "Outlook unavailable.";
     state.moveTargetOutlookSummaryText = state.moveTargetOutlook?.outlookSummaryText || "";
 
-    const decision = deriveAssistantRecommendationReason(activeSignal, selectedForReason?.currentMetrics || {}, bestWorthwhile, bestNotWorth, selectedForReason?.currentTravelMetrics || {});
-    state.finalActionCode = decision.actionCode;
-    state.finalActionReason = decision.reasonText;
-    state.recommendationReasonCode = decision.reasonCode;
-    state.recommendationReasonText = decision.reasonText;
-    state.recommendationWorthMoving = !!decision.worthMoving;
-    state.actionSeverity = (decision.actionCode === "LEAVE_NOW" || decision.actionCode === "MOVE_SOON") ? "move" : (decision.actionCode === "STAY" ? "positive" : "info");
+    const proposal = deriveProposedRecommendation(
+      activeSignal,
+      bestWorthwhile,
+      bestNotWorth,
+      selectedForReason?.currentMetrics || {},
+      selectedForReason?.currentTravelMetrics || {}
+    );
+    state.proposedActionCode = proposal.actionCode;
+    state.proposedReasonCode = proposal.reasonCode;
+    state.proposedReasonText = proposal.reasonText;
+    state.proposedMoveTarget = proposal.moveTarget || null;
+    state.proposedNetMoveEdge = proposal.netMoveEdge;
+    state.proposedWorthThreshold = proposal.moveWorthThreshold;
+    state.recommendationConfidenceScore = proposal.recommendationConfidenceScore;
+    state.recommendationConfidenceLevel = proposal.recommendationConfidenceLevel;
+    stabilizeAssistantRecommendation(proposal, Date.now());
+
+    state.assistantMoveTarget = state.committedMoveTarget || null;
+    state.recommendationReasonCode = state.committedReasonCode || proposal.reasonCode;
+    state.recommendationReasonText = deriveStableRecommendationReason(
+      { reasonText: state.committedReasonText || proposal.reasonText },
+      state.stabilityReasonCode,
+      state.stabilityReasonText
+    );
+    state.recommendationWorthMoving = !!proposal.recommendationWorthMoving;
+    state.finalActionCode = state.committedActionCode || proposal.actionCode;
+    state.finalActionReason = state.recommendationReasonText;
+    state.actionSeverity = (state.finalActionCode === "LEAVE_NOW" || state.finalActionCode === "MOVE_SOON") ? "move" : (state.finalActionCode === "STAY" ? "positive" : "info");
     state.dwellCoachSummaryText = `${humanActionLabel(state.finalActionCode)}: ${state.recommendationReasonText}`;
     state.dwellCoachReasonFragments = [
       `Stay ${(state.stayWindowAvgRating || state.stayProjectedRating || 0).toFixed(1)}`,
@@ -1442,6 +1677,25 @@
     state.activeStableZoneEnterTs = null;
     state.activeStableZoneDwellMs = 0;
     state.assistantMoveTarget = null;
+    state.proposedActionCode = null;
+    state.proposedReasonCode = null;
+    state.proposedReasonText = "";
+    state.proposedMoveTarget = null;
+    state.proposedNetMoveEdge = null;
+    state.proposedWorthThreshold = null;
+    state.proposedSinceTs = null;
+    state.proposedStableHits = 0;
+    state.committedActionCode = null;
+    state.committedReasonCode = null;
+    state.committedReasonText = "";
+    state.committedMoveTarget = null;
+    state.committedSinceTs = null;
+    state.recommendationSwitchCooldownUntilTs = 0;
+    state.recommendationMinHoldUntilTs = 0;
+    state.recommendationStickyTargetId = null;
+    state.recommendationStickyTargetSinceTs = null;
+    state.stabilityReasonCode = "";
+    state.stabilityReasonText = "";
     state.finalActionCode = "MONITOR";
     state.finalActionReason = "Waiting for stable zone.";
     renderWidget();
