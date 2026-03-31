@@ -4,6 +4,7 @@
   const AI_ASSISTANT_CLEAR_GRACE_MS = 5000;
   const AI_ASSISTANT_HEARTBEAT_MS_VISIBLE = 15000;
   const AI_ASSISTANT_HEARTBEAT_MS_HIDDEN = 60000;
+  const AI_ASSISTANT_PRE_STABLE_HEARTBEAT_MS = 2500;
   const AI_ASSISTANT_PROPOSAL_MIN_STABLE_MS = 8000;
   const AI_ASSISTANT_PROPOSAL_MIN_HITS = 2;
   const AI_ASSISTANT_STAY_TO_MOVE_EXTRA_BUFFER = 2.5;
@@ -152,6 +153,7 @@
     frameFeatures: [],
     outlookCache: new Map(),
     outlookAbortController: null,
+    outlookRequestKey: "",
     heartbeatHandle: null,
     heartbeatKey: null,
     touchPauseUntil: 0,
@@ -373,6 +375,46 @@
     return [frameTime || "none", [...locationIds].sort().join(","), visibleSource || "legacy_citywide"].join("|");
   }
 
+  function getAssistantOutlookByLocationId(outlookPayload) {
+    const primary = outlookPayload?.zones_by_location_id;
+    if (primary && typeof primary === "object" && !Array.isArray(primary)) return primary;
+    const legacy = outlookPayload?.by_location_id;
+    if (legacy && typeof legacy === "object" && !Array.isArray(legacy)) return legacy;
+    return {};
+  }
+
+  function extractAssistantOutlookTrack(point, visibleScoreSource) {
+    const tracks = point?.tracks;
+    if (!tracks || typeof tracks !== "object") return null;
+    const exact = String(visibleScoreSource || "").trim();
+    if (exact && tracks[exact]) return tracks[exact];
+    const isV3Family = /_v3(?:$|_)/i.test(exact) || /citywide_v3/i.test(exact);
+    const isLegacyFamily = /(^|_)v2(?:$|_)/i.test(exact) || /legacy|citywide/i.test(exact);
+    if (isV3Family && tracks.citywide_v3_shadow) return tracks.citywide_v3_shadow;
+    if (isLegacyFamily && tracks.citywide_shadow) return tracks.citywide_shadow;
+    return null;
+  }
+
+  function extractAssistantOutlookRaw(point, fallbackSignal, visibleScoreSource) {
+    const fallback = fallbackSignal || {};
+    const track = extractAssistantOutlookTrack(point, visibleScoreSource);
+    const raw = (point?.raw && typeof point.raw === "object") ? point.raw : {};
+    return {
+      rating: safeNum(track?.rating, safeNum(fallback.visibleRating, safeNum(fallback.rating, 0)) || 0) || 0,
+      bucket: String(track?.bucket || fallback.visibleBucket || fallback.bucket || "").trim() || null,
+      busy_now_base: safeNum(raw?.busy_now_base_n_shadow, safeNum(fallback.busyNowBase, 0)) || 0,
+      busy_next_base: safeNum(raw?.busy_next_base_n_shadow, safeNum(fallback.busyNextBase, 0)) || 0,
+      short_trip_penalty: safeNum(raw?.short_trip_penalty_n_shadow, safeNum(fallback.shortTripPenalty, 0)) || 0,
+      long_trip_share_20plus: safeNum(raw?.long_trip_share_20plus, safeNum(fallback.longTripShare20Plus, 0)) || 0,
+      balanced_trip_share: safeNum(raw?.balanced_trip_share_shadow, safeNum(raw?.balanced_trip_share, safeNum(fallback.balancedTripShare, 0))) || 0,
+      churn_pressure: safeNum(raw?.churn_pressure_n_shadow, safeNum(fallback.churnPressure, 0)) || 0,
+      market_saturation_penalty: safeNum(raw?.market_saturation_penalty_n_shadow, safeNum(fallback.marketSaturationPenalty, 0)) || 0,
+      manhattan_core_saturation_penalty: safeNum(raw?.manhattan_core_saturation_penalty_n_shadow, safeNum(fallback.manhattanCoreSaturationPenalty, 0)) || 0,
+      continuation_raw: safeNum(raw?.downstream_next_value_raw, safeNum(fallback.continuationRaw, 0)) || 0,
+      frame_time: String(point?.frame_time || point?.ts || "").trim() || null,
+    };
+  }
+
   function interpretOutlookPoints(points, currentSignal) {
     if (!Array.isArray(points) || !points.length) {
       return {
@@ -396,19 +438,20 @@
 
     const nowRating = currentSignal?.visibleRating || 0;
     points.forEach((p, idx) => {
+      const normalized = extractAssistantOutlookRaw(p, currentSignal, state.visibleScoreSource);
       const pseudo = {
         ...currentSignal,
-        visibleRating: safeNum(p.visible_rating, nowRating) || nowRating,
-        busyNowBase: safeNum(p.busy_now_base, currentSignal?.busyNowBase || 0) || 0,
-        shortTripPenalty: safeNum(p.short_trip_penalty, currentSignal?.shortTripPenalty || 0) || 0,
-        churnPressure: safeNum(p.churn_pressure, currentSignal?.churnPressure || 0) || 0,
-        continuationRaw: safeNum(p.continuation_raw, currentSignal?.continuationRaw || 0) || 0,
-        marketSaturationPenalty: safeNum(p.market_saturation_penalty, currentSignal?.marketSaturationPenalty || 0) || 0,
-        manhattanCoreSaturationPenalty: safeNum(p.manhattan_core_saturation_penalty, currentSignal?.manhattanCoreSaturationPenalty || 0) || 0,
-        longTripShare20Plus: safeNum(p.long_trip_share_20plus, currentSignal?.longTripShare20Plus || 0) || 0,
+        visibleRating: safeNum(normalized.rating, nowRating) || nowRating,
+        busyNowBase: safeNum(normalized.busy_now_base, currentSignal?.busyNowBase || 0) || 0,
+        shortTripPenalty: safeNum(normalized.short_trip_penalty, currentSignal?.shortTripPenalty || 0) || 0,
+        churnPressure: safeNum(normalized.churn_pressure, currentSignal?.churnPressure || 0) || 0,
+        continuationRaw: safeNum(normalized.continuation_raw, currentSignal?.continuationRaw || 0) || 0,
+        marketSaturationPenalty: safeNum(normalized.market_saturation_penalty, currentSignal?.marketSaturationPenalty || 0) || 0,
+        manhattanCoreSaturationPenalty: safeNum(normalized.manhattan_core_saturation_penalty, currentSignal?.manhattanCoreSaturationPenalty || 0) || 0,
+        longTripShare20Plus: safeNum(normalized.long_trip_share_20plus, currentSignal?.longTripShare20Plus || 0) || 0,
       };
       const cls = classifyAssistantSignal(pseudo);
-      const ts = String(p.frame_time || p.ts || "").trim() || null;
+      const ts = normalized.frame_time;
       if (!ts) return;
       if (cls.busyNow && !busyUntilTime) busyUntilTime = ts;
       if (cls.slowNow && !slowUntilTime) slowUntilTime = ts;
@@ -435,22 +478,24 @@
   }
 
   function readOutlookRating(point, fallback = null) {
-    return safeNum(point?.rating, safeNum(point?.visible_rating, fallback));
+    const normalized = extractAssistantOutlookRaw(point, { visibleRating: fallback }, state.visibleScoreSource);
+    return safeNum(normalized?.rating, fallback);
   }
 
   function classifyAssistantFuturePoint(point, baseSignal) {
-    const rating = readOutlookRating(point, safeNum(baseSignal?.visibleRating, 0) || 0) || 0;
+    const normalized = extractAssistantOutlookRaw(point, baseSignal, state.visibleScoreSource);
+    const rating = safeNum(normalized?.rating, safeNum(baseSignal?.visibleRating, 0) || 0) || 0;
     const pseudoSignal = {
       ...baseSignal,
       visibleRating: rating,
-      visibleBucket: String(modeModule.effectiveBucket?.({ bucket: point?.bucket }, null) || point?.bucket || baseSignal?.visibleBucket || "").trim() || null,
-      busyNowBase: safeNum(point?.busy_now_base, safeNum(baseSignal?.busyNowBase, 0) || 0) || 0,
-      shortTripPenalty: safeNum(point?.short_trip_penalty, safeNum(baseSignal?.shortTripPenalty, 0) || 0) || 0,
-      churnPressure: safeNum(point?.churn_pressure, safeNum(baseSignal?.churnPressure, 0) || 0) || 0,
-      continuationRaw: safeNum(point?.continuation_raw, safeNum(baseSignal?.continuationRaw, 0) || 0) || 0,
-      marketSaturationPenalty: safeNum(point?.market_saturation_penalty, safeNum(baseSignal?.marketSaturationPenalty, 0) || 0) || 0,
-      manhattanCoreSaturationPenalty: safeNum(point?.manhattan_core_saturation_penalty, safeNum(baseSignal?.manhattanCoreSaturationPenalty, 0) || 0) || 0,
-      longTripShare20Plus: safeNum(point?.long_trip_share_20plus, safeNum(baseSignal?.longTripShare20Plus, 0) || 0) || 0,
+      visibleBucket: String(modeModule.effectiveBucket?.({ bucket: normalized?.bucket }, null) || normalized?.bucket || baseSignal?.visibleBucket || "").trim() || null,
+      busyNowBase: safeNum(normalized?.busy_now_base, safeNum(baseSignal?.busyNowBase, 0) || 0) || 0,
+      shortTripPenalty: safeNum(normalized?.short_trip_penalty, safeNum(baseSignal?.shortTripPenalty, 0) || 0) || 0,
+      churnPressure: safeNum(normalized?.churn_pressure, safeNum(baseSignal?.churnPressure, 0) || 0) || 0,
+      continuationRaw: safeNum(normalized?.continuation_raw, safeNum(baseSignal?.continuationRaw, 0) || 0) || 0,
+      marketSaturationPenalty: safeNum(normalized?.market_saturation_penalty, safeNum(baseSignal?.marketSaturationPenalty, 0) || 0) || 0,
+      manhattanCoreSaturationPenalty: safeNum(normalized?.manhattan_core_saturation_penalty, safeNum(baseSignal?.manhattanCoreSaturationPenalty, 0) || 0) || 0,
+      longTripShare20Plus: safeNum(normalized?.long_trip_share_20plus, safeNum(baseSignal?.longTripShare20Plus, 0) || 0) || 0,
     };
     const cls = classifyAssistantSignal(pseudoSignal);
     return {
@@ -463,7 +508,7 @@
       hasGoodContinuation: !!cls.continuationGood,
       hasWeakContinuation: !!cls.continuationWeak,
       longTripFriendly: !!cls.longFriendly,
-      frameTime: String(point?.frame_time || point?.ts || "").trim() || null,
+      frameTime: normalized?.frame_time || null,
     };
   }
 
@@ -999,6 +1044,7 @@
     const frameTime = frameTimeIso(frame);
     if (!frameTime || !locationIds.length) return null;
     const key = buildOutlookCacheKey(frameTime, locationIds, visibleSource);
+    state.outlookRequestKey = key;
     if (state.outlookCache.has(key)) return state.outlookCache.get(key);
     if (state.outlookAbortController) state.outlookAbortController.abort();
     const ac = new AbortController();
@@ -1018,15 +1064,19 @@
 
   function buildOutlookPointsByLocation(outlook) {
     const map = {};
-    const byLocation = outlook?.by_location_id;
+    const byLocation = getAssistantOutlookByLocationId(outlook);
     if (byLocation && typeof byLocation === "object" && !Array.isArray(byLocation)) {
-      Object.assign(map, byLocation);
-    }
-    const items = Array.isArray(outlook?.items) ? outlook.items : [];
-    for (const item of items) {
-      const id = String(item?.location_id || item?.locationId || "").trim();
-      if (!id) continue;
-      map[id] = Array.isArray(item?.points) ? item.points : (Array.isArray(item?.horizon_points) ? item.horizon_points : []);
+      for (const [idRaw, zoneEntry] of Object.entries(byLocation)) {
+        const id = String(idRaw || zoneEntry?.location_id || zoneEntry?.locationId || "").trim();
+        if (!id) continue;
+        if (Array.isArray(zoneEntry)) {
+          map[id] = zoneEntry;
+          continue;
+        }
+        map[id] = Array.isArray(zoneEntry?.points)
+          ? zoneEntry.points
+          : (Array.isArray(zoneEntry?.horizon_points) ? zoneEntry.horizon_points : []);
+      }
     }
     return map;
   }
@@ -1283,16 +1333,17 @@
 
   function mirrorRecommendLine() {
     if (!recommendLine) return;
-    const action = humanActionLabel(state.finalActionCode);
-    const reason = state.recommendationReasonText || humanizeAssistantReason(state.finalActionReason);
+    const committedAction = state.committedActionCode || state.finalActionCode || "MONITOR";
+    const action = humanActionLabel(committedAction);
+    const reason = state.committedReasonText || state.recommendationReasonText || humanizeAssistantReason(state.finalActionReason);
     let mirror = `AI Assistant: ${action} • ${reason}`;
-    if ((state.finalActionCode === "MOVE_SOON" || state.finalActionCode === "LEAVE_NOW") && state.assistantMoveTarget?.zoneName && Number.isFinite(state.assistantMoveTarget?.etaMinutes)) {
+    if ((committedAction === "MOVE_SOON" || committedAction === "LEAVE_NOW") && state.assistantMoveTarget?.zoneName && Number.isFinite(state.assistantMoveTarget?.etaMinutes)) {
       mirror += ` • Go to ${state.assistantMoveTarget.zoneName} • ${Math.round(state.assistantMoveTarget.etaMinutes)} min`;
-    } else if (state.finalActionCode === "STAY") {
+    } else if (committedAction === "STAY") {
       mirror += " • Stay here for now";
-    } else if (state.finalActionCode === "STAY_BRIEFLY") {
+    } else if (committedAction === "STAY_BRIEFLY") {
       mirror += " • Stay here briefly";
-    } else if (state.finalActionCode === "MONITOR") {
+    } else if (committedAction === "MONITOR") {
       mirror += " • Waiting for clearer signal";
     }
     recommendLine.textContent = mirror;
@@ -1460,6 +1511,66 @@
     }
   }
 
+  function resetRecommendationStateForZoneChange(previousZoneId) {
+    state.activeStableZoneDwellMs = 0;
+    state.assistantMoveTarget = null;
+    state.bestArrivalAwareCandidate = null;
+    state.bestCandidateNotWorthMoving = null;
+    state.arrivalAwareCandidateShortlist = [];
+    state.currentZoneOutlook = null;
+    state.moveTargetOutlook = null;
+    state.outlookSummaryText = "Outlook unavailable.";
+    state.moveTargetOutlookSummaryText = "";
+    state.etaMinutes = null;
+    state.distanceMiles = null;
+    state.stayProjectedRating = null;
+    state.targetArrivalProjectedRating = null;
+    state.stayWindowAvgRating = null;
+    state.targetWindowAvgRating = null;
+    state.stayWindowMinRating = null;
+    state.targetWindowMinRating = null;
+    state.stayScenarioValue = null;
+    state.moveScenarioValue = null;
+    state.currentTravelWindowAvgRating = null;
+    state.currentTravelWindowMinRating = null;
+    state.targetPaybackAvgRating = null;
+    state.targetPaybackMinRating = null;
+    state.totalDeadheadCost = null;
+    state.moveConfidencePenalty = null;
+    state.confidencePenaltyReasons = [];
+    state.netMoveEdge = null;
+    state.moveWorthThreshold = null;
+    state.targetViableOnArrival = null;
+    state.targetViabilityRejectCode = null;
+    state.targetViabilityRejectReasonText = "";
+    state.proposedActionCode = null;
+    state.proposedReasonCode = null;
+    state.proposedReasonText = "";
+    state.proposedMoveTarget = null;
+    state.proposedNetMoveEdge = null;
+    state.proposedWorthThreshold = null;
+    state.proposedSinceTs = null;
+    state.proposedStableHits = 0;
+    state.committedActionCode = null;
+    state.committedReasonCode = null;
+    state.committedReasonText = "";
+    state.committedMoveTarget = null;
+    state.committedSinceTs = null;
+    state.recommendationSwitchCooldownUntilTs = 0;
+    state.recommendationMinHoldUntilTs = 0;
+    state.recommendationStickyTargetId = null;
+    state.recommendationStickyTargetSinceTs = null;
+    state.recommendationConfidenceScore = null;
+    state.recommendationConfidenceLevel = "low";
+    state.stabilityReasonCode = "";
+    state.stabilityReasonText = "";
+    if (state.outlookAbortController) state.outlookAbortController.abort();
+    if (previousZoneId && String(state.outlookRequestKey || "").includes(String(previousZoneId))) {
+      state.outlookRequestKey = "";
+      state.outlookCache.clear();
+    }
+  }
+
   function applyStableZoneFromLocation() {
     const loc = state.lastUserLocation;
     const now = Date.now();
@@ -1492,19 +1603,7 @@
         state.activeStableZoneName = signal.zoneName;
         state.activeStableBorough = signal.borough;
         state.activeStableZoneEnterTs = now;
-        state.activeStableZoneDwellMs = 0;
-        state.proposedActionCode = null;
-        state.proposedReasonCode = null;
-        state.proposedReasonText = "";
-        state.proposedMoveTarget = null;
-        state.proposedNetMoveEdge = null;
-        state.proposedWorthThreshold = null;
-        state.proposedSinceTs = null;
-        state.proposedStableHits = 0;
-        if (previousZoneId && state.committedMoveTarget?.locationId) {
-          state.committedMoveTarget = null;
-        }
-        state.assistantMoveTarget = null;
+        resetRecommendationStateForZoneChange(previousZoneId);
         window.dispatchEvent(new CustomEvent("tlc-ai-assistant-zone-changed", { detail: snapshot() }));
         window.dispatchEvent(new CustomEvent("tlc-ai-assistant-snapshot-updated", { detail: snapshot() }));
         return true;
@@ -1645,22 +1744,24 @@
     applyNavOwnership();
     mirrorRecommendLine();
     renderWidget();
-    if (zoneChanged) {
-      window.dispatchEvent(new CustomEvent("tlc-ai-assistant-snapshot-updated", { detail: snapshot() }));
-    }
+    if (zoneChanged) window.dispatchEvent(new CustomEvent("tlc-ai-assistant-snapshot-updated", { detail: snapshot() }));
     emitSnapshotEvents();
   }
 
   function startHeartbeat() {
     const hasStable = !!state.activeStableZoneId;
-    const key = `${hasStable}|${document.hidden ? "hidden" : "visible"}`;
+    const hasPreStableContext = !hasStable && (!!state.candidateZoneId || !!state.lastUserLocation);
+    const mode = hasStable ? "stable" : (hasPreStableContext ? "prestable" : "off");
+    const key = `${mode}|${document.hidden ? "hidden" : "visible"}`;
     if (state.heartbeatKey === key) return;
     state.heartbeatKey = key;
     if (state.heartbeatHandle && runtimePolling) runtimePolling.clearInterval(state.heartbeatHandle);
     if (state.heartbeatHandle && !runtimePolling) clearInterval(state.heartbeatHandle);
     state.heartbeatHandle = null;
-    if (!hasStable) return;
-    const ms = document.hidden ? AI_ASSISTANT_HEARTBEAT_MS_HIDDEN : AI_ASSISTANT_HEARTBEAT_MS_VISIBLE;
+    if (mode === "off") return;
+    const ms = hasStable
+      ? (document.hidden ? AI_ASSISTANT_HEARTBEAT_MS_HIDDEN : AI_ASSISTANT_HEARTBEAT_MS_VISIBLE)
+      : AI_ASSISTANT_PRE_STABLE_HEARTBEAT_MS;
     if (runtimePolling) {
       const id = `ai-assistant-heartbeat-${document.hidden ? "hidden" : "visible"}`;
       runtimePolling.setInterval(id, () => recompute().catch(() => {}), ms);
