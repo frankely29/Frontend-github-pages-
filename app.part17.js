@@ -50,6 +50,9 @@
     bestNearbyOverall: null,
     bestNearbyTrapEscape: null,
     bestNearbyLongTrip: null,
+    arrivalAwareCandidateShortlist: [],
+    bestArrivalAwareCandidate: null,
+    bestCandidateNotWorthMoving: null,
     assistantMoveTarget: null,
     baseActionCode: "MONITOR",
     baseActionReason: "Collecting more context.",
@@ -92,6 +95,17 @@
     assistantFeedVersion: 1,
     assistantFeedMaterialKey: "",
     assistantAlertKey: "",
+    recommendationReasonCode: "collecting_context",
+    recommendationReasonText: "Collecting more context.",
+    recommendationWorthMoving: false,
+    etaMinutes: null,
+    distanceMiles: null,
+    stayProjectedRating: null,
+    targetArrivalProjectedRating: null,
+    moveValue: null,
+    stayValue: null,
+    netMoveEdge: null,
+    moveWorthThreshold: null,
     frameFeatures: [],
     outlookCache: new Map(),
     outlookAbortController: null,
@@ -235,6 +249,56 @@
     return out;
   }
 
+  function normalizeAssistantBoroughName(value) {
+    const text = String(value || "").trim().toLowerCase();
+    if (/manhattan/.test(text)) return "manhattan";
+    if (/brooklyn/.test(text)) return "brooklyn";
+    if (/queens/.test(text)) return "queens";
+    if (/bronx/.test(text)) return "bronx";
+    if (/staten/.test(text)) return "staten_island";
+    return "default";
+  }
+
+  function estimateAssistantTravelMinutes(currentSignal, candidateSignal) {
+    const distanceMiles = internals.haversineMiles?.(
+      { lat: currentSignal?.centerLat, lng: currentSignal?.centerLng },
+      { lat: candidateSignal?.centerLat, lng: candidateSignal?.centerLng }
+    ) || Infinity;
+    const boroughKey = normalizeAssistantBoroughName(candidateSignal?.borough);
+    const speedByBorough = {
+      manhattan: 10,
+      brooklyn: 14,
+      queens: 15,
+      bronx: 14,
+      staten_island: 20,
+      default: 14,
+    };
+    const baseSpeedMph = speedByBorough[boroughKey] || speedByBorough.default;
+    const boroughChangePenalty = normalizeAssistantBoroughName(currentSignal?.borough) !== boroughKey ? 2.5 : 0;
+    const manhattanPenalty = boroughKey === "manhattan" ? 1.5 : 0;
+    const rawEta = Math.ceil(2.0 + ((distanceMiles / baseSpeedMph) * 60) + boroughChangePenalty + manhattanPenalty);
+    const etaMinutes = Math.max(3, Math.min(25, Number.isFinite(rawEta) ? rawEta : 25));
+    return { distanceMiles, etaMinutes };
+  }
+
+  function buildArrivalAwareCandidateShortlist(frame, currentSignal) {
+    if (!currentSignal?.locationId) return [];
+    const shortlist = [];
+    for (const feature of (frame?.polygons?.features || [])) {
+      const signal = buildAssistantFeatureSignal(feature);
+      if (!signal?.locationId || signal.locationId === currentSignal.locationId) continue;
+      if (signal.airportExcluded) continue;
+      if (!Number.isFinite(signal.visibleRating)) continue;
+      if (!Number.isFinite(signal.centerLat) || !Number.isFinite(signal.centerLng)) continue;
+      const { distanceMiles, etaMinutes } = estimateAssistantTravelMinutes(currentSignal, signal);
+      if (!Number.isFinite(distanceMiles) || distanceMiles > 5.0) continue;
+      const quickScore = signal.visibleRating - (distanceMiles * 3.0);
+      shortlist.push({ signal, distanceMiles, etaMinutes, quickScore });
+    }
+    shortlist.sort((a, b) => b.quickScore - a.quickScore);
+    return shortlist.slice(0, 8);
+  }
+
   function computeRankings(frame, activeSignal) {
     const signals = (frame?.polygons?.features || []).map(buildAssistantFeatureSignal).filter((s) => s.locationId && Number.isFinite(s.visibleRating) && !s.airportExcluded);
     signals.sort(sortByRatingThenId);
@@ -321,6 +385,114 @@
     return { holdUntilTime, trapUntilTime, busyUntilTime, slowUntilTime, nextImprovementTime, nextWorseningTime, targetStrongUntilTime, outlookSummaryText: summary };
   }
 
+  function getAssistantArrivalBinIndex(etaMinutes, pointCount) {
+    if (!pointCount || pointCount <= 0) return 0;
+    const rawIndex = Math.floor(((safeNum(etaMinutes, 0) || 0) + 10) / 20);
+    return Math.max(0, Math.min(pointCount - 1, rawIndex));
+  }
+
+  function readOutlookRating(point, fallback = null) {
+    return safeNum(point?.rating, safeNum(point?.visible_rating, fallback));
+  }
+
+  function getAssistantArrivalProjection(points, etaMinutes) {
+    if (!Array.isArray(points) || !points.length) {
+      return { arrivalIndex: 0, arrivalPoint: null, nextPoint: null, arrivalProjectedRating: null };
+    }
+    const arrivalIndex = getAssistantArrivalBinIndex(etaMinutes, points.length);
+    const arrivalPoint = points[arrivalIndex] || null;
+    const nextPoint = points[arrivalIndex + 1] || null;
+    const arrivalRating = readOutlookRating(arrivalPoint);
+    const nextRating = readOutlookRating(nextPoint);
+    const arrivalProjectedRating = Number.isFinite(nextRating)
+      ? ((arrivalRating || 0) * 0.65) + (nextRating * 0.35)
+      : arrivalRating;
+    return { arrivalIndex, arrivalPoint, nextPoint, arrivalProjectedRating };
+  }
+
+  function getAssistantStayProjection(currentZonePoints, etaMinutes, currentVisibleRating) {
+    if (!Array.isArray(currentZonePoints) || !currentZonePoints.length) {
+      return {
+        stayArrivalIndex: 0,
+        stayArrivalPoint: null,
+        stayNextPoint: null,
+        stayProjectedRating: safeNum(currentVisibleRating, 0) || 0,
+      };
+    }
+    const stayArrivalIndex = getAssistantArrivalBinIndex(etaMinutes, currentZonePoints.length);
+    const stayArrivalPoint = currentZonePoints[stayArrivalIndex] || null;
+    const stayNextPoint = currentZonePoints[stayArrivalIndex + 1] || null;
+    const stayArrivalRating = readOutlookRating(stayArrivalPoint, currentVisibleRating);
+    const stayNextRating = readOutlookRating(stayNextPoint);
+    const stayProjectedRating = Number.isFinite(stayNextRating)
+      ? ((stayArrivalRating || 0) * 0.70) + (stayNextRating * 0.30)
+      : (stayArrivalRating || 0);
+    return { stayArrivalIndex, stayArrivalPoint, stayNextPoint, stayProjectedRating };
+  }
+
+  function evaluateArrivalAwareMoveCandidate(candidateSignal, currentSignal, candidateOutlookPoints, currentOutlookPoints, etaMinutes, distanceMiles) {
+    const stayProjection = getAssistantStayProjection(currentOutlookPoints, etaMinutes, currentSignal?.visibleRating);
+    const targetProjection = getAssistantArrivalProjection(candidateOutlookPoints, etaMinutes);
+    const stayProjectedRating = safeNum(stayProjection.stayProjectedRating, safeNum(currentSignal?.visibleRating, 0) || 0) || 0;
+    const targetArrivalProjectedRating = safeNum(targetProjection.arrivalProjectedRating, safeNum(candidateSignal?.visibleRating, 0) || 0) || 0;
+    const moveCostScore = (safeNum(etaMinutes, 0) || 0) * 0.65;
+    const stayValue = stayProjectedRating - ((safeNum(currentSignal?.communityCrowdingPenalty, 0) || 0) * 0.75);
+    const moveValue = targetArrivalProjectedRating - ((safeNum(candidateSignal?.communityCrowdingPenalty, 0) || 0) * 0.75) - moveCostScore;
+    const netMoveEdge = moveValue - stayValue;
+    return {
+      candidateSignal,
+      distanceMiles,
+      etaMinutes,
+      stayProjectedRating,
+      targetArrivalProjectedRating,
+      moveValue,
+      stayValue,
+      netMoveEdge,
+      stayProjection,
+      targetProjection,
+    };
+  }
+
+  function getAssistantMoveWorthThreshold(currentSignal, candidateEval, currentClassification) {
+    const eta = safeNum(candidateEval?.etaMinutes, 0) || 0;
+    let threshold = 9.5;
+    if (eta <= 5) threshold = 3.5;
+    else if (eta <= 9) threshold = 5.0;
+    else if (eta <= 14) threshold = 7.0;
+
+    if (currentClassification?.shortTrap || currentClassification?.slowNow) threshold -= 2.0;
+    if ((safeNum(currentSignal?.visibleRating, 0) || 0) >= 48 && !currentClassification?.slowNow) threshold += 2.0;
+    if (eta > 18) threshold += 2.5;
+    if (currentClassification?.continuationGood || currentClassification?.busyNow) threshold += 1.5;
+    return threshold;
+  }
+
+  function deriveArrivalAwareRecommendationDecision(currentSignal, currentClassification, bestCandidateEval) {
+    if (!currentSignal?.locationId) {
+      return { actionCode: "MONITOR", reasonCode: "collecting_context", reasonText: "Collecting more context.", worthMoving: false };
+    }
+    if (!bestCandidateEval || !bestCandidateEval.isWorthMoving) {
+      if ((safeNum(currentSignal.visibleRating, 0) || 0) >= 48) {
+        return { actionCode: "STAY", reasonCode: "moving_not_worth_it", reasonText: "Moving is not worth the time.", worthMoving: false };
+      }
+      return { actionCode: "STAY", reasonCode: "decent_zone_not_worth_move", reasonText: "Decent rating zone.", worthMoving: false };
+    }
+    const stayWeakening = bestCandidateEval.stayProjectedRating + 1.5 < (safeNum(currentSignal.visibleRating, 0) || 0);
+    const targetGettingBusier = (safeNum(bestCandidateEval.targetProjection?.nextPoint?.rating) || safeNum(bestCandidateEval.targetProjection?.nextPoint?.visible_rating, -Infinity))
+      > (safeNum(bestCandidateEval.targetProjection?.arrivalPoint?.rating) || safeNum(bestCandidateEval.targetProjection?.arrivalPoint?.visible_rating, -Infinity));
+
+    if (currentClassification?.shortTrap || currentClassification?.slowNow) {
+      return { actionCode: "MOVE_SOON", reasonCode: "low_trip_trap_risk", reasonText: "Risk of low-trip trap.", worthMoving: true };
+    }
+    if (stayWeakening) {
+      return { actionCode: "MOVE_SOON", reasonCode: "zone_about_to_die", reasonText: "Zone about to cool off.", worthMoving: true };
+    }
+    if (currentClassification?.continuationWeak && bestCandidateEval.targetArrivalProjectedRating > bestCandidateEval.stayProjectedRating && targetGettingBusier) {
+      return { actionCode: "LEAVE_NOW", reasonCode: "nearby_zone_about_to_get_busier", reasonText: "Zone nearby about to get busier.", worthMoving: true };
+    }
+    return { actionCode: "STAY", reasonCode: "moving_not_worth_it", reasonText: "Moving is not worth the time.", worthMoving: false };
+  }
+
   async function fetchOutlook(frame, locationIds, visibleSource) {
     const frameTime = frameTimeIso(frame);
     if (!frameTime || !locationIds.length) return null;
@@ -340,6 +512,21 @@
     } finally {
       if (state.outlookAbortController === ac) state.outlookAbortController = null;
     }
+  }
+
+  function buildOutlookPointsByLocation(outlook) {
+    const map = {};
+    const byLocation = outlook?.by_location_id;
+    if (byLocation && typeof byLocation === "object" && !Array.isArray(byLocation)) {
+      Object.assign(map, byLocation);
+    }
+    const items = Array.isArray(outlook?.items) ? outlook.items : [];
+    for (const item of items) {
+      const id = String(item?.location_id || item?.locationId || "").trim();
+      if (!id) continue;
+      map[id] = Array.isArray(item?.points) ? item.points : (Array.isArray(item?.horizon_points) ? item.horizon_points : []);
+    }
+    return map;
   }
 
 
@@ -399,8 +586,8 @@
   function buildAssistantSecondaryLine() {
     if ((state.finalActionCode === "MOVE_SOON" || state.finalActionCode === "LEAVE_NOW")
       && state.assistantMoveTarget?.zoneName
-      && Number.isFinite(state.assistantMoveTarget?.distanceMiles)) {
-      return `Go to ${state.assistantMoveTarget.zoneName} • ${state.assistantMoveTarget.distanceMiles.toFixed(1)} mi`;
+      && Number.isFinite(state.assistantMoveTarget?.etaMinutes)) {
+      return `Go to ${state.assistantMoveTarget.zoneName} • ${Math.round(state.assistantMoveTarget.etaMinutes)} min`;
     }
     if (state.finalActionCode === "STAY") return "Stay here for now";
     if (state.finalActionCode === "STAY_BRIEFLY") return "Stay here briefly";
@@ -534,10 +721,10 @@
     const primary = buildAssistantPrimaryLine();
     list.push({ key: "action", text: primary, severity: severityForAction(state.finalActionCode) });
 
-    if (state.assistantMoveTarget?.zoneName && Number.isFinite(state.assistantMoveTarget?.distanceMiles)) {
+    if (state.assistantMoveTarget?.zoneName && Number.isFinite(state.assistantMoveTarget?.etaMinutes)) {
       const targetSummary = compactLane
         ? `Target ${state.assistantMoveTarget.zoneName}`
-        : `Go to ${state.assistantMoveTarget.zoneName} • ${state.assistantMoveTarget.distanceMiles.toFixed(1)} mi`;
+        : `Go to ${state.assistantMoveTarget.zoneName} • ${Math.round(state.assistantMoveTarget.etaMinutes || 0)} min`;
       if (!primary.includes(targetSummary)) {
         list.push({ key: "target", text: targetSummary, severity: "info" });
       }
@@ -597,9 +784,9 @@
     const primary = buildAssistantPrimaryLine();
     let mirror = `AI Assistant: ${primary}`;
     if ((state.finalActionCode === "MOVE_SOON" || state.finalActionCode === "LEAVE_NOW") && state.assistantMoveTarget?.zoneName) {
-      mirror += ` • Go to ${state.assistantMoveTarget.zoneName}`;
+      mirror += ` • Go to ${state.assistantMoveTarget.zoneName} • ${Math.round(state.assistantMoveTarget.etaMinutes || 0)} min`;
     } else if (state.finalActionCode === "STAY") {
-      mirror += " • Stay here";
+      mirror += " • Stay here for now";
     }
     recommendLine.textContent = mirror;
   }
@@ -640,7 +827,8 @@
         <section class="aiAssistantSection"><strong>Stay Coach</strong><div>${state.dwellCoachSummaryText}</div><div>${state.dwellCoachReasonFragments.join(" • ")}</div></section>
         <section class="aiAssistantSection"><strong>Outlook</strong><div>${state.outlookSummaryText}</div><div>${state.moveTargetOutlookSummaryText || ""}</div></section>
         <section class="aiAssistantSection"><strong>Rankings</strong><div>Best now: ${state.citywideBestNow?.zoneName || "—"} • Worst now: ${state.citywideWorstNow?.zoneName || "—"}</div>${buildRankList(state.citywideTop10Best)}${buildRankList(state.boroughTop5Best)}</section>
-        ${state.assistantMoveTarget ? `<section class="aiAssistantSection"><strong>Move Target</strong><div>${state.assistantMoveTarget.zoneName} • ${state.assistantMoveTarget.distanceMiles.toFixed(1)} mi • ${Math.round(state.assistantMoveTarget.visibleRating || 0)}</div></section>` : ""}
+        ${state.assistantMoveTarget ? `<section class="aiAssistantSection"><strong>Move Target</strong><div>${state.assistantMoveTarget.zoneName} • ${Math.round(state.assistantMoveTarget.etaMinutes || 0)} min • ${state.assistantMoveTarget.distanceMiles.toFixed(1)} mi</div></section>` : ""}
+        ${(Number.isFinite(state.stayProjectedRating) || Number.isFinite(state.targetArrivalProjectedRating)) ? `<section class="aiAssistantSection"><strong>Move Decision</strong><div>Stay projection: ${Math.round(state.stayProjectedRating || 0)}</div><div>Arrival projection: ${Math.round(state.targetArrivalProjectedRating || 0)}</div><div>ETA: ${Math.round(state.etaMinutes || 0)} min</div><div>Net move edge: ${(state.netMoveEdge || 0) >= 0 ? "+" : ""}${(state.netMoveEdge || 0).toFixed(1)}</div><div>Worth moving threshold: ${(state.moveWorthThreshold || 0).toFixed(1)}</div></section>` : ""}
         <section class="aiAssistantSection"><small>Assistant uses the same visible Team Joseo score path the map is showing.</small></section>
       </div>
     `;
@@ -816,19 +1004,60 @@
     state.bestNearbyOverall = nearby.overall;
     state.bestNearbyTrapEscape = nearby.trap_escape;
     state.bestNearbyLongTrip = nearby.long_trip;
-    state.assistantMoveTarget = (nearby.trap_escape || nearby.overall || nearby.long_trip)?.signal
-      ? { ...(nearby.trap_escape || nearby.overall || nearby.long_trip).signal, distanceMiles: (nearby.trap_escape || nearby.overall || nearby.long_trip).distanceMiles }
-      : null;
+    const shortlist = buildArrivalAwareCandidateShortlist(liveFrame, activeSignal);
+    state.arrivalAwareCandidateShortlist = shortlist;
 
     const cls = activeSignal ? classifyAssistantSignal(activeSignal) : null;
     const base = computeBaseAction(activeSignal, cls);
     state.baseActionCode = base.code;
     state.baseActionReason = base.reason;
 
-    const locationIds = [state.activeStableZoneId, state.assistantMoveTarget?.locationId].filter(Boolean);
+    const locationIds = [state.activeStableZoneId, ...shortlist.map((c) => c.signal.locationId)].filter(Boolean);
     const outlook = await fetchOutlook(liveFrame, locationIds, state.visibleScoreSource);
-    const byId = outlook?.items || outlook?.by_location_id || {};
+    const byId = buildOutlookPointsByLocation(outlook);
     const currentPoints = byId?.[state.activeStableZoneId] || byId?.[String(state.activeStableZoneId)] || [];
+    const evaluated = [];
+    for (const candidate of shortlist) {
+      const targetPoints = byId?.[candidate.signal.locationId] || byId?.[String(candidate.signal.locationId)] || [];
+      const evaluation = evaluateArrivalAwareMoveCandidate(
+        candidate.signal,
+        activeSignal,
+        targetPoints,
+        currentPoints,
+        candidate.etaMinutes,
+        candidate.distanceMiles
+      );
+      evaluation.moveWorthThreshold = getAssistantMoveWorthThreshold(activeSignal, evaluation, cls || {});
+      evaluation.isWorthMoving = evaluation.netMoveEdge >= evaluation.moveWorthThreshold;
+      evaluated.push(evaluation);
+    }
+    evaluated.sort((a, b) => b.netMoveEdge - a.netMoveEdge);
+    const worthwhile = evaluated.filter((it) => it.isWorthMoving);
+    const bestWorthwhile = worthwhile[0] || null;
+    const bestNotWorth = evaluated[0] || null;
+    state.bestArrivalAwareCandidate = bestWorthwhile;
+    state.bestCandidateNotWorthMoving = !bestWorthwhile ? bestNotWorth : null;
+    state.assistantMoveTarget = bestWorthwhile
+      ? {
+          ...bestWorthwhile.candidateSignal,
+          etaMinutes: bestWorthwhile.etaMinutes,
+          distanceMiles: bestWorthwhile.distanceMiles,
+          targetArrivalProjectedRating: bestWorthwhile.targetArrivalProjectedRating,
+          netMoveEdge: bestWorthwhile.netMoveEdge,
+          moveWorthThreshold: bestWorthwhile.moveWorthThreshold,
+        }
+      : null;
+
+    const selectedForReason = bestWorthwhile || bestNotWorth;
+    state.etaMinutes = selectedForReason?.etaMinutes ?? null;
+    state.distanceMiles = selectedForReason?.distanceMiles ?? null;
+    state.stayProjectedRating = selectedForReason?.stayProjectedRating ?? safeNum(activeSignal?.visibleRating, null);
+    state.targetArrivalProjectedRating = selectedForReason?.targetArrivalProjectedRating ?? null;
+    state.moveValue = selectedForReason?.moveValue ?? null;
+    state.stayValue = selectedForReason?.stayValue ?? null;
+    state.netMoveEdge = selectedForReason?.netMoveEdge ?? null;
+    state.moveWorthThreshold = selectedForReason?.moveWorthThreshold ?? null;
+
     const targetPoints = state.assistantMoveTarget ? (byId?.[state.assistantMoveTarget.locationId] || []) : [];
     state.currentZoneOutlook = interpretOutlookPoints(currentPoints, activeSignal);
     state.moveTargetOutlook = interpretOutlookPoints(targetPoints, state.assistantMoveTarget);
@@ -836,7 +1065,20 @@
     state.outlookSummaryText = state.currentZoneOutlook?.outlookSummaryText || "Outlook unavailable.";
     state.moveTargetOutlookSummaryText = state.moveTargetOutlook?.outlookSummaryText || "";
 
-    applyDwellOverride(cls || {});
+    const decision = deriveArrivalAwareRecommendationDecision(activeSignal, cls || {}, bestWorthwhile ? { ...bestWorthwhile, isWorthMoving: true } : null);
+    state.finalActionCode = decision.actionCode;
+    state.finalActionReason = decision.reasonText;
+    state.recommendationReasonCode = decision.reasonCode;
+    state.recommendationReasonText = decision.reasonText;
+    state.recommendationWorthMoving = !!decision.worthMoving;
+    state.actionSeverity = (decision.actionCode === "LEAVE_NOW" || decision.actionCode === "MOVE_SOON") ? "move" : (decision.actionCode === "STAY" ? "positive" : "info");
+    state.dwellCoachSummaryText = `${humanActionLabel(state.finalActionCode)}: ${state.recommendationReasonText}`;
+    state.dwellCoachReasonFragments = [
+      `Stay ${(state.stayProjectedRating || 0).toFixed(1)}`,
+      `Move ${(state.targetArrivalProjectedRating || 0).toFixed(1)}`,
+      `Edge ${(state.netMoveEdge || 0).toFixed(1)}`,
+      `Need ${(state.moveWorthThreshold || 0).toFixed(1)}`
+    ];
     applyNavOwnership();
     mirrorRecommendLine();
     renderWidget();
