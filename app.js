@@ -1377,8 +1377,7 @@ function getZonePopupMetrics(zoomValue) {
 }
 
 function getZoneLocationId(props = {}) {
-  const raw = props?.LocationID ?? props?.locationid ?? props?.locationId ?? "";
-  return String(raw || "").trim();
+  return String(props?.LocationID ?? props?.location_id ?? "").trim() || null;
 }
 
 function popupPointInRing(lng, lat, ring) {
