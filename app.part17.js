@@ -375,7 +375,13 @@
   }
 
   function frameTimeIso(frame) {
-    return String(frame?.frame_time || frame?.frame_iso || frame?.time_iso || frame?.time || "").trim() || null;
+    return String(
+      frame?.frame_time
+      || frame?.frame_iso
+      || frame?.time_iso
+      || frame?.time
+      || ""
+    ).trim() || null;
   }
 
   function buildOutlookCacheKey(frameTime, locationIds, visibleSource) {
@@ -1856,10 +1862,16 @@
     state.currentZoneOutlook = interpretOutlookPoints(currentPoints, activeSignal);
     state.moveTargetOutlook = interpretOutlookPoints(targetPoints, outlookMoveTarget);
     Object.assign(state, state.currentZoneOutlook || {});
+    const hasSuccessfulPayloadForCurrentKey = !!currentOutlookKey
+      && state.lastSuccessfulOutlookKey === currentOutlookKey
+      && !!effectiveOutlook;
     const hasCurrentPoints = Array.isArray(currentPoints) && currentPoints.length > 0;
     if (hasCurrentPoints) {
       state.outlookSummaryText = state.currentZoneOutlook?.outlookSummaryText || "Outlook is mixed.";
       state.moveTargetOutlookSummaryText = state.moveTargetOutlook?.outlookSummaryText || "";
+    } else if (hasSuccessfulPayloadForCurrentKey) {
+      state.outlookSummaryText = "Outlook is mixed.";
+      state.moveTargetOutlookSummaryText = "";
     } else if (state.outlookStatus === "loading") {
       state.outlookSummaryText = "Checking outlook.";
       state.moveTargetOutlookSummaryText = "";
