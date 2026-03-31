@@ -389,9 +389,8 @@
     const exact = String(visibleScoreSource || "").trim();
     if (exact && tracks[exact]) return tracks[exact];
     const isV3Family = /_v3(?:$|_)/i.test(exact) || /citywide_v3/i.test(exact);
-    const isLegacyFamily = /(^|_)v2(?:$|_)/i.test(exact) || /legacy|citywide/i.test(exact);
     if (isV3Family && tracks.citywide_v3_shadow) return tracks.citywide_v3_shadow;
-    if (isLegacyFamily && tracks.citywide_shadow) return tracks.citywide_shadow;
+    if (tracks.citywide_shadow) return tracks.citywide_shadow;
     return null;
   }
 
@@ -948,6 +947,11 @@
   }
 
   function stabilizeAssistantRecommendation(proposal, nowTs) {
+    const previousProposedActionCode = state.proposedActionCode;
+    const previousProposedReasonCode = state.proposedReasonCode;
+    const previousProposedMoveTarget = state.proposedMoveTarget;
+    const previousProposedSinceTs = state.proposedSinceTs;
+    const previousProposedStableHits = safeNum(state.proposedStableHits, 0) || 0;
     const committedProposal = {
       actionCode: state.committedActionCode,
       reasonCode: state.committedReasonCode,
@@ -959,6 +963,14 @@
     state.stabilityReasonText = "";
 
     if (!state.committedActionCode) {
+      state.proposedActionCode = proposal.actionCode;
+      state.proposedReasonCode = proposal.reasonCode;
+      state.proposedReasonText = proposal.reasonText;
+      state.proposedMoveTarget = proposal.moveTarget || null;
+      state.proposedNetMoveEdge = proposal.netMoveEdge;
+      state.proposedWorthThreshold = proposal.moveWorthThreshold;
+      state.proposedSinceTs = nowTs;
+      state.proposedStableHits = 1;
       commitAssistantRecommendation(proposal, nowTs);
       return;
     }
@@ -967,19 +979,40 @@
       state.committedReasonText = proposal.reasonText;
       state.committedReasonCode = proposal.reasonCode;
       state.committedMoveTarget = proposal.moveTarget || state.committedMoveTarget || null;
+      state.proposedActionCode = proposal.actionCode;
+      state.proposedReasonCode = proposal.reasonCode;
+      state.proposedReasonText = proposal.reasonText;
+      state.proposedMoveTarget = proposal.moveTarget || null;
+      state.proposedNetMoveEdge = proposal.netMoveEdge;
+      state.proposedWorthThreshold = proposal.moveWorthThreshold;
+      state.proposedSinceTs = previousProposedSinceTs ?? nowTs;
+      state.proposedStableHits = previousProposedStableHits + 1;
       return;
     }
 
     const priorProposedKey = buildAssistantRecommendationProposalKey({
-      actionCode: state.proposedActionCode,
-      reasonCode: state.proposedReasonCode,
-      moveTarget: state.proposedMoveTarget,
+      actionCode: previousProposedActionCode,
+      reasonCode: previousProposedReasonCode,
+      moveTarget: previousProposedMoveTarget,
     });
     if (proposalKey !== priorProposedKey) {
+      state.proposedActionCode = proposal.actionCode;
+      state.proposedReasonCode = proposal.reasonCode;
+      state.proposedReasonText = proposal.reasonText;
+      state.proposedMoveTarget = proposal.moveTarget || null;
+      state.proposedNetMoveEdge = proposal.netMoveEdge;
+      state.proposedWorthThreshold = proposal.moveWorthThreshold;
       state.proposedSinceTs = nowTs;
       state.proposedStableHits = 1;
     } else {
-      state.proposedStableHits = (safeNum(state.proposedStableHits, 0) || 0) + 1;
+      state.proposedActionCode = proposal.actionCode;
+      state.proposedReasonCode = proposal.reasonCode;
+      state.proposedReasonText = proposal.reasonText;
+      state.proposedMoveTarget = proposal.moveTarget || null;
+      state.proposedNetMoveEdge = proposal.netMoveEdge;
+      state.proposedWorthThreshold = proposal.moveWorthThreshold;
+      state.proposedSinceTs = previousProposedSinceTs ?? nowTs;
+      state.proposedStableHits = previousProposedStableHits + 1;
     }
 
     const isCommittedStay = state.committedActionCode === "STAY" || state.committedActionCode === "STAY_BRIEFLY";
@@ -1077,6 +1110,20 @@
           ? zoneEntry.points
           : (Array.isArray(zoneEntry?.horizon_points) ? zoneEntry.horizon_points : []);
       }
+    }
+    const listPayload = Array.isArray(outlook?.zones)
+      ? outlook.zones
+      : (Array.isArray(outlook?.items) ? outlook.items : []);
+    for (const zoneEntry of listPayload) {
+      const id = String(zoneEntry?.location_id || zoneEntry?.locationId || "").trim();
+      if (!id) continue;
+      if (Array.isArray(zoneEntry)) {
+        map[id] = zoneEntry;
+        continue;
+      }
+      map[id] = Array.isArray(zoneEntry?.points)
+        ? zoneEntry.points
+        : (Array.isArray(zoneEntry?.horizon_points) ? zoneEntry.horizon_points : (map[id] || []));
     }
     return map;
   }
@@ -1512,6 +1559,7 @@
   }
 
   function resetRecommendationStateForZoneChange(previousZoneId) {
+    state.activeStableZoneEnterTs = Date.now();
     state.activeStableZoneDwellMs = 0;
     state.assistantMoveTarget = null;
     state.bestArrivalAwareCandidate = null;
@@ -1564,6 +1612,15 @@
     state.recommendationConfidenceLevel = "low";
     state.stabilityReasonCode = "";
     state.stabilityReasonText = "";
+    state.recommendationReasonCode = "collecting_context";
+    state.recommendationReasonText = "Collecting more context.";
+    state.holdUntilTime = null;
+    state.trapUntilTime = null;
+    state.busyUntilTime = null;
+    state.slowUntilTime = null;
+    state.nextImprovementTime = null;
+    state.nextWorseningTime = null;
+    state.targetStrongUntilTime = null;
     if (state.outlookAbortController) state.outlookAbortController.abort();
     if (previousZoneId && String(state.outlookRequestKey || "").includes(String(previousZoneId))) {
       state.outlookRequestKey = "";
@@ -1705,12 +1762,6 @@
       selectedForReason?.currentMetrics || {},
       selectedForReason?.currentTravelMetrics || {}
     );
-    state.proposedActionCode = proposal.actionCode;
-    state.proposedReasonCode = proposal.reasonCode;
-    state.proposedReasonText = proposal.reasonText;
-    state.proposedMoveTarget = proposal.moveTarget || null;
-    state.proposedNetMoveEdge = proposal.netMoveEdge;
-    state.proposedWorthThreshold = proposal.moveWorthThreshold;
     state.recommendationConfidenceScore = proposal.recommendationConfidenceScore;
     state.recommendationConfidenceLevel = proposal.recommendationConfidenceLevel;
     stabilizeAssistantRecommendation(proposal, Date.now());
