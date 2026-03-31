@@ -398,7 +398,7 @@
       && Number.isFinite(state.assistantMoveTarget?.distanceMiles)) {
       return `${action} • Go to ${state.assistantMoveTarget.zoneName} • ${state.assistantMoveTarget.distanceMiles.toFixed(1)} mi`;
     }
-    return `${action}: ${humanizeAssistantReason(state.finalActionReason)}`;
+    return `${action} • ${humanizeAssistantReason(state.finalActionReason)}`;
   }
 
   function computeBaseAction(currentSignal, cls) {
@@ -575,10 +575,18 @@
   function mirrorRecommendLine() {
     if (!recommendLine) return;
     const action = humanActionLabel(state.finalActionCode);
-    const reason = humanizeAssistantReason(state.finalActionReason);
-    const reasonForMirror = reason ? `${reason.charAt(0).toUpperCase()}${reason.slice(1)}` : "Mixed signals.";
-    const preferTarget = (state.finalActionCode === "MOVE_SOON" || state.finalActionCode === "LEAVE_NOW") && state.assistantMoveTarget?.zoneName;
-    const tail = preferTarget ? `Target: ${state.assistantMoveTarget.zoneName}` : reasonForMirror;
+    let tail = "Mixed signals";
+    if (state.finalActionCode === "MOVE_SOON" && state.assistantMoveTarget?.zoneName) {
+      tail = `Target: ${state.assistantMoveTarget.zoneName}`;
+    } else if (state.finalActionCode === "LEAVE_NOW") {
+      tail = "Better nearby zone";
+    } else if (state.finalActionCode === "STAY") {
+      tail = "Good zone right now";
+    } else if (state.finalActionCode === "MONITOR") {
+      tail = "Mixed signals";
+    } else if (state.finalActionCode === "STAY_BRIEFLY") {
+      tail = "This zone may cool off soon";
+    }
     recommendLine.textContent = `AI Assistant: ${action} • ${tail}`;
   }
 
@@ -665,7 +673,7 @@
     if (!dock || !onlineBadge || !weatherBadge) return;
 
     const topLane = "calc(env(safe-area-inset-top) + 10px)";
-    const fallbackTop = "calc(env(safe-area-inset-top) + 44px)";
+    const fallbackTop = "calc(env(safe-area-inset-top) + 42px)";
 
     const onlineRect = onlineBadge.getBoundingClientRect?.();
     const weatherRect = weatherBadge.getBoundingClientRect?.();
@@ -675,19 +683,21 @@
     const laneLeft = Math.ceil(onlineRect.right + 10);
     const laneRight = Math.floor(weatherRect.left - 10);
     const laneWidth = Math.floor(laneRight - laneLeft);
-    if (laneWidth >= 250) {
-      dock.style.left = `${laneLeft}px`;
-      dock.style.right = `${Math.max(12, window.innerWidth - laneRight)}px`;
-      dock.style.width = `${laneWidth}px`;
-      dock.style.maxWidth = `${laneWidth}px`;
-      dock.style.transform = "none";
+    const laneCenter = Math.floor((laneLeft + laneRight) / 2);
+    if (laneWidth >= 230) {
+      const preferredWidth = Math.min(320, laneWidth);
+      dock.style.left = `${laneCenter}px`;
+      dock.style.right = "auto";
+      dock.style.width = `${preferredWidth}px`;
+      dock.style.maxWidth = `${preferredWidth}px`;
+      dock.style.transform = "translateX(-50%)";
       dock.style.top = topLane;
       return;
     }
 
     dock.style.left = "50%";
     dock.style.right = "auto";
-    dock.style.width = "min(340px, calc(100vw - 32px))";
+    dock.style.width = "min(300px, calc(100vw - 32px))";
     dock.style.maxWidth = "calc(100vw - 32px)";
     dock.style.top = fallbackTop;
     dock.style.transform = "translateX(-50%)";
