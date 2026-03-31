@@ -376,11 +376,11 @@
 
   function frameTimeIso(frame) {
     return String(
-      frame?.frame_time
-      || frame?.frame_iso
-      || frame?.time_iso
-      || frame?.time
-      || ""
+      frame?.frame_time ||
+      frame?.frame_iso ||
+      frame?.time_iso ||
+      frame?.time ||
+      ""
     ).trim() || null;
   }
 
@@ -1864,7 +1864,7 @@
     Object.assign(state, state.currentZoneOutlook || {});
     const hasSuccessfulPayloadForCurrentKey = !!currentOutlookKey
       && state.lastSuccessfulOutlookKey === currentOutlookKey
-      && !!effectiveOutlook;
+      && state.outlookCache.has(currentOutlookKey);
     const hasCurrentPoints = Array.isArray(currentPoints) && currentPoints.length > 0;
     if (hasCurrentPoints) {
       state.outlookSummaryText = state.currentZoneOutlook?.outlookSummaryText || "Outlook is mixed.";
