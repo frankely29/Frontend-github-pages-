@@ -106,10 +106,17 @@
     targetWindowAvgRating: null,
     stayWindowMinRating: null,
     targetWindowMinRating: null,
-    moveValue: null,
-    stayValue: null,
+    moveScenarioValue: null,
+    stayScenarioValue: null,
     netMoveEdge: null,
     moveWorthThreshold: null,
+    currentTravelWindowAvgRating: null,
+    currentTravelWindowMinRating: null,
+    targetPaybackAvgRating: null,
+    targetPaybackMinRating: null,
+    totalDeadheadCost: null,
+    moveConfidencePenalty: null,
+    confidencePenaltyReasons: [],
     targetViableOnArrival: null,
     targetViabilityRejectCode: null,
     targetViabilityRejectReasonText: "",
@@ -559,74 +566,213 @@
     return { viable: true, viabilityRejectCode: null, viabilityRejectReasonText: "" };
   }
 
-  function evaluateArrivalWindowMoveCandidate(candidateSignal, currentSignal, candidatePoints, currentPoints, etaMinutes, distanceMiles) {
+  function deriveTravelWindowMetrics(currentZonePoints, currentSignal, etaMinutes) {
+    const points = Array.isArray(currentZonePoints) ? currentZonePoints : [];
+    if (!points.length) {
+      const fallback = safeNum(currentSignal?.visibleRating, 0) || 0;
+      return {
+        travelWindowPointCount: 1,
+        travelWindowAvgRating: fallback,
+        travelWindowMinRating: fallback,
+        travelWindowTrendDelta: 0,
+        travelWindowBusyCount: 0,
+        travelWindowTrapCount: 0,
+        travelWindowSlowCount: 0,
+      };
+    }
+    const arrivalIndex = getAssistantArrivalBinIndex(etaMinutes, points.length);
+    const travelPoints = points.slice(0, arrivalIndex + 1);
+    const classified = travelPoints.map((p) => classifyAssistantFuturePoint(p, currentSignal)).filter(Boolean);
+    const ratings = classified.map((p) => p.rating).filter((n) => Number.isFinite(n));
+    const currentRating = safeNum(classified[0]?.rating, safeNum(currentSignal?.visibleRating, 0) || 0) || 0;
+    const arrivalRating = safeNum(classified[classified.length - 1]?.rating, currentRating) || currentRating;
+    return {
+      travelWindowPointCount: classified.length || 1,
+      travelWindowAvgRating: ratings.length ? ratings.reduce((sum, n) => sum + n, 0) / ratings.length : currentRating,
+      travelWindowMinRating: ratings.length ? Math.min(...ratings) : currentRating,
+      travelWindowTrendDelta: arrivalRating - currentRating,
+      travelWindowBusyCount: classified.filter((p) => p.isBusy).length,
+      travelWindowTrapCount: classified.filter((p) => p.isTrap).length,
+      travelWindowSlowCount: classified.filter((p) => p.isSlow).length,
+    };
+  }
+
+  function deriveTargetPaybackWindowMetrics(candidatePoints, candidateSignal, etaMinutes) {
+    const points = Array.isArray(candidatePoints) ? candidatePoints : [];
+    if (!points.length) {
+      const fallback = safeNum(candidateSignal?.visibleRating, 0) || 0;
+      return {
+        paybackPointCount: 1,
+        paybackAvgRating: fallback,
+        paybackMinRating: fallback,
+        paybackTrendDelta: 0,
+        paybackBusyCount: 0,
+        paybackTrapCount: 0,
+        paybackSlowCount: 0,
+        paybackHolds: true,
+      };
+    }
+    const arrivalIndex = getAssistantArrivalBinIndex(etaMinutes, points.length);
+    const paybackPoints = points.slice(arrivalIndex, arrivalIndex + 3);
+    const classified = paybackPoints.map((p) => classifyAssistantFuturePoint(p, candidateSignal)).filter(Boolean);
+    const ratings = classified.map((p) => p.rating).filter((n) => Number.isFinite(n));
+    const arrivalRating = safeNum(classified[0]?.rating, safeNum(candidateSignal?.visibleRating, 0) || 0) || 0;
+    const arrivalProjection = getAssistantArrivalProjection(points, etaMinutes);
+    const targetArrivalProjectedRating = safeNum(arrivalProjection?.arrivalProjectedRating, arrivalRating) || arrivalRating;
+    const lastRating = safeNum(classified[classified.length - 1]?.rating, arrivalRating) || arrivalRating;
+    const paybackAvgRating = ratings.length ? ratings.reduce((sum, n) => sum + n, 0) / ratings.length : arrivalRating;
+    const paybackMinRating = ratings.length ? Math.min(...ratings) : arrivalRating;
+    const paybackTrapCount = classified.filter((p) => p.isTrap).length;
+    const paybackSlowCount = classified.filter((p) => p.isSlow).length;
+    return {
+      paybackPointCount: classified.length || 1,
+      paybackAvgRating,
+      paybackMinRating,
+      paybackTrendDelta: lastRating - arrivalRating,
+      paybackBusyCount: classified.filter((p) => p.isBusy).length,
+      paybackTrapCount,
+      paybackSlowCount,
+      paybackHolds: paybackMinRating >= (targetArrivalProjectedRating - 4) && paybackTrapCount === 0 && paybackSlowCount <= 1,
+    };
+  }
+
+  function deriveAssistantDeadheadCost(currentSignal, candidateSignal, etaMinutes, distanceMiles) {
+    const timeCost = (safeNum(etaMinutes, 0) || 0) * 0.60;
+    const distanceCost = (safeNum(distanceMiles, 0) || 0) * 0.45;
+    const currentBorough = normalizeAssistantBoroughName(currentSignal?.borough);
+    const targetBorough = normalizeAssistantBoroughName(candidateSignal?.borough);
+    const boroughSwitchCost = currentBorough && targetBorough && currentBorough !== targetBorough ? 1.5 : 0;
+    const manhattanEntryCost = targetBorough === "manhattan" && currentBorough !== "manhattan" ? 1.5 : 0;
+    return {
+      timeCost,
+      distanceCost,
+      boroughSwitchCost,
+      manhattanEntryCost,
+      totalDeadheadCost: timeCost + distanceCost + boroughSwitchCost + manhattanEntryCost,
+    };
+  }
+
+  function deriveAssistantMoveConfidencePenalty(targetMetrics, viability, etaMinutes) {
+    let confidencePenalty = 0;
+    const confidencePenaltyReasons = [];
+    if (!viability?.viable) { confidencePenalty += 2.0; confidencePenaltyReasons.push("target_not_viable"); }
+    if (!targetMetrics?.paybackHolds) { confidencePenalty += 1.5; confidencePenaltyReasons.push("payback_does_not_hold"); }
+    if ((safeNum(targetMetrics?.paybackTrendDelta, 0) || 0) <= -4) { confidencePenalty += 1.5; confidencePenaltyReasons.push("payback_trending_down"); }
+    if ((safeNum(targetMetrics?.paybackPointCount, 0) || 0) < 2) { confidencePenalty += 1.0; confidencePenaltyReasons.push("insufficient_payback_points"); }
+    if ((safeNum(etaMinutes, 0) || 0) > 14) { confidencePenalty += 1.0; confidencePenaltyReasons.push("long_eta"); }
+    if ((safeNum(targetMetrics?.paybackTrapCount, 0) || 0) > 0) { confidencePenalty += 1.5; confidencePenaltyReasons.push("payback_trap_risk"); }
+    if ((safeNum(targetMetrics?.paybackSlowCount, 0) || 0) > 1) { confidencePenalty += 1.0; confidencePenaltyReasons.push("payback_slow_risk"); }
+    return { confidencePenalty, confidencePenaltyReasons };
+  }
+
+  function evaluateEconomicsAwareMoveCandidate(candidateSignal, currentSignal, candidatePoints, currentPoints, etaMinutes, distanceMiles) {
     const currentMetrics = deriveStayArrivalWindowMetrics(currentPoints, currentSignal, etaMinutes);
     const targetMetrics = deriveTargetArrivalWindowMetrics(candidatePoints, candidateSignal, etaMinutes);
+    const currentTravelMetrics = deriveTravelWindowMetrics(currentPoints, currentSignal, etaMinutes);
+    const targetPaybackMetrics = deriveTargetPaybackWindowMetrics(candidatePoints, candidateSignal, etaMinutes);
+    targetPaybackMetrics.paybackHolds = targetPaybackMetrics.paybackMinRating >= (safeNum(targetMetrics?.targetArrivalProjectedRating, 0) - 4) && targetPaybackMetrics.paybackTrapCount === 0 && targetPaybackMetrics.paybackSlowCount <= 1;
     const viability = isAssistantCandidateViableOnArrival(currentMetrics, targetMetrics, etaMinutes);
-    const moveCostScore = (safeNum(etaMinutes, 0) || 0) * 0.65;
-    const stayValue = (safeNum(currentMetrics?.stayWindowAvgRating, 0) || 0) - ((safeNum(currentSignal?.communityCrowdingPenalty, 0) || 0) * 0.75);
-    const moveValue = (safeNum(targetMetrics?.targetWindowAvgRating, 0) || 0) - ((safeNum(candidateSignal?.communityCrowdingPenalty, 0) || 0) * 0.75) - moveCostScore;
-    const netMoveEdge = moveValue - stayValue;
+    const deadheadCost = deriveAssistantDeadheadCost(currentSignal, candidateSignal, etaMinutes, distanceMiles);
+    const confidencePenalty = deriveAssistantMoveConfidencePenalty(targetPaybackMetrics, viability, etaMinutes);
+    const stayScenarioValue =
+      (0.45 * (safeNum(currentTravelMetrics?.travelWindowAvgRating, 0) || 0)) +
+      (0.55 * (safeNum(currentMetrics?.stayWindowAvgRating, 0) || 0)) -
+      ((safeNum(currentSignal?.communityCrowdingPenalty, 0) || 0) * 0.75);
+    const moveScenarioValue =
+      (0.40 * (safeNum(targetMetrics?.targetArrivalProjectedRating, 0) || 0)) +
+      (0.60 * (safeNum(targetPaybackMetrics?.paybackAvgRating, 0) || 0)) -
+      ((safeNum(candidateSignal?.communityCrowdingPenalty, 0) || 0) * 0.75) -
+      (safeNum(deadheadCost?.totalDeadheadCost, 0) || 0) -
+      (safeNum(confidencePenalty?.confidencePenalty, 0) || 0);
+    const netMoveEdge = moveScenarioValue - stayScenarioValue;
     return {
       candidateSignal,
       distanceMiles,
       etaMinutes,
-      moveValue,
-      stayValue,
+      moveScenarioValue,
+      stayScenarioValue,
       netMoveEdge,
+      currentTravelMetrics,
       currentMetrics,
       targetMetrics,
+      targetPaybackMetrics,
       viability,
+      deadheadCost,
+      confidencePenalty,
     };
   }
 
-  function getAssistantMoveWorthThreshold(currentSignal, currentMetrics, targetMetrics, etaMinutes) {
+  function getAssistantMoveWorthThreshold(currentSignal, currentTravelMetrics, currentMetrics, targetMetrics, targetPaybackMetrics, deadheadCost, etaMinutes) {
     const eta = safeNum(etaMinutes, 0) || 0;
-    let threshold = 9.5;
-    if (eta <= 5) threshold = 3.5;
-    else if (eta <= 9) threshold = 5.0;
-    else if (eta <= 14) threshold = 7.0;
+    let threshold = 10.0;
+    if (eta <= 5) threshold = 4.0;
+    else if (eta <= 9) threshold = 5.5;
+    else if (eta <= 14) threshold = 7.5;
 
     const currentCls = classifyAssistantSignal(currentSignal || {});
     if (currentCls?.shortTrap || currentCls?.slowNow) threshold -= 2.0;
-    if ((safeNum(currentSignal?.visibleRating, 0) || 0) >= 48 && !(currentMetrics?.stayWeakensSoon)) threshold += 2.0;
+    if ((safeNum(currentTravelMetrics?.travelWindowAvgRating, 0) || 0) >= 52) threshold += 1.5;
     if (currentMetrics?.stayHoldsAfterArrival) threshold += 1.5;
-    if (!targetMetrics?.targetHoldsAfterArrival) threshold += 2.0;
-    if (eta > 18) threshold += 2.5;
+    if (!targetPaybackMetrics?.paybackHolds) threshold += 2.0;
+    if ((safeNum(deadheadCost?.totalDeadheadCost, 0) || 0) >= 10) threshold += 1.5;
     if (currentMetrics?.stayWeakensSoon && targetMetrics?.targetImprovesSoon) threshold -= 1.5;
     return threshold;
   }
 
-  function deriveAssistantRecommendationReason(currentSignal, currentMetrics, bestEval, fallbackBestEval) {
+  function chooseBestEconomicsAwareTarget(candidateEvaluations) {
+    const sorted = (Array.isArray(candidateEvaluations) ? candidateEvaluations : []).slice().sort((a, b) => {
+      if (b.netMoveEdge !== a.netMoveEdge) return b.netMoveEdge - a.netMoveEdge;
+      const aPayback = safeNum(a?.targetPaybackMetrics?.paybackAvgRating, 0) || 0;
+      const bPayback = safeNum(b?.targetPaybackMetrics?.paybackAvgRating, 0) || 0;
+      if (bPayback !== aPayback) return bPayback - aPayback;
+      if (a.etaMinutes !== b.etaMinutes) return a.etaMinutes - b.etaMinutes;
+      const aCost = safeNum(a?.deadheadCost?.totalDeadheadCost, Infinity);
+      const bCost = safeNum(b?.deadheadCost?.totalDeadheadCost, Infinity);
+      if (aCost !== bCost) return aCost - bCost;
+      return (safeNum(b?.targetMetrics?.targetArrivalProjectedRating, 0) || 0) - (safeNum(a?.targetMetrics?.targetArrivalProjectedRating, 0) || 0);
+    });
+    const worthwhile = sorted.filter((it) => !!it.viability?.viable && (safeNum(it.netMoveEdge, -Infinity) || -Infinity) >= (safeNum(it.moveWorthThreshold, Infinity) || Infinity));
+    return { bestWorthwhileTarget: worthwhile[0] || null, bestRejectedTarget: sorted[0] || null };
+  }
+
+  function deriveNoWasteStayDecision(currentSignal, bestWorthwhileTarget, bestRejectedTarget, currentMetrics, currentTravelMetrics) {
+    if (bestWorthwhileTarget) return null;
+    if ((safeNum(currentSignal?.visibleRating, 0) || 0) >= 48) {
+      return { actionCode: "STAY", reasonCode: "decent_rating_zone", reasonText: "Decent rating zone", worthMoving: false };
+    }
+    if (bestRejectedTarget && (safeNum(bestRejectedTarget?.netMoveEdge, -Infinity) || -Infinity) < (safeNum(bestRejectedTarget?.moveWorthThreshold, Infinity) || Infinity)) {
+      return { actionCode: "STAY", reasonCode: "moving_not_worth_it", reasonText: "Moving is not worth the time", worthMoving: false };
+    }
+    if (!bestRejectedTarget?.viability?.viable && ["trap_at_arrival", "slow_at_arrival", "saturation_at_arrival", "target_chasey", "long_eta_no_hold"].includes(bestRejectedTarget?.viability?.viabilityRejectCode)) {
+      return { actionCode: "STAY", reasonCode: "target_weak_on_arrival", reasonText: "Target weak by the time you get there", worthMoving: false };
+    }
+    if (currentMetrics?.stayHoldsAfterArrival && (safeNum(currentTravelMetrics?.travelWindowMinRating, 0) || 0) >= 46) {
+      return { actionCode: "STAY", reasonCode: "current_zone_holds", reasonText: "Current zone still holds on arrival", worthMoving: false };
+    }
+    return { actionCode: "STAY", reasonCode: "moving_not_worth_it", reasonText: "Moving is not worth the time", worthMoving: false };
+  }
+
+  function deriveAssistantRecommendationReason(currentSignal, currentMetrics, bestWorthwhileTarget, bestRejectedTarget, currentTravelMetrics) {
     if (!currentSignal?.locationId) {
       return { actionCode: "MONITOR", reasonCode: "collecting_context", reasonText: "Collecting more context.", worthMoving: false };
     }
-    if (bestEval?.isWorthMoving) {
+    if (bestWorthwhileTarget) {
       const currentCls = classifyAssistantSignal(currentSignal || {});
       if (currentCls?.shortTrap || currentMetrics?.stayTrapAtArrival) {
         return { actionCode: "MOVE_SOON", reasonCode: "low_trip_trap_risk", reasonText: "Risk of low-trip trap", worthMoving: true };
       }
       if (currentMetrics?.stayWeakensSoon) {
-        if (currentMetrics?.stayWindowTrendDelta <= -5 && bestEval?.targetMetrics?.targetImprovesSoon && bestEval?.targetMetrics?.targetHoldsAfterArrival) {
+        if (currentMetrics?.stayWindowTrendDelta <= -5 && bestWorthwhileTarget?.targetMetrics?.targetImprovesSoon && bestWorthwhileTarget?.targetMetrics?.targetHoldsAfterArrival) {
           return { actionCode: "LEAVE_NOW", reasonCode: "nearby_zone_about_to_get_busier", reasonText: "Zone nearby about to get busier", worthMoving: true };
         }
         return { actionCode: "MOVE_SOON", reasonCode: "zone_about_to_cool_off", reasonText: "Zone about to cool off", worthMoving: true };
       }
-      return { actionCode: "MOVE_SOON", reasonCode: "zone_about_to_cool_off", reasonText: "Zone about to cool off", worthMoving: true };
-    }
-    if ((safeNum(currentSignal.visibleRating, 0) || 0) >= 48) {
-      return { actionCode: "STAY", reasonCode: "decent_rating_zone", reasonText: "Decent rating zone", worthMoving: false };
-    }
-    if (fallbackBestEval?.viability?.viable === false) {
-      if ((fallbackBestEval?.viability?.viabilityRejectCode || "").includes("chase")) {
-        return { actionCode: "STAY", reasonCode: "moving_not_worth_it", reasonText: "Moving is not worth the time", worthMoving: false };
+      if ((safeNum(bestWorthwhileTarget?.targetPaybackMetrics?.paybackAvgRating, 0) || 0) >= ((safeNum(bestWorthwhileTarget?.targetMetrics?.targetArrivalProjectedRating, 0) || 0) + 2)) {
+        return { actionCode: "MOVE_SOON", reasonCode: "stronger_when_you_arrive", reasonText: "Stronger when you arrive", worthMoving: true };
       }
-      return { actionCode: "STAY", reasonCode: "target_weak_on_arrival", reasonText: "Target weak by the time you get there", worthMoving: false };
+      return { actionCode: "MOVE_SOON", reasonCode: "worth_the_drive_time", reasonText: "Worth the drive time", worthMoving: true };
     }
-    if (fallbackBestEval && fallbackBestEval.netMoveEdge < (fallbackBestEval.moveWorthThreshold || 0)) {
-      return { actionCode: "STAY", reasonCode: "moving_not_worth_it", reasonText: "Moving is not worth the time", worthMoving: false };
-    }
-    return { actionCode: "STAY", reasonCode: "current_zone_holds", reasonText: "Current zone still holds on arrival", worthMoving: false };
+    return deriveNoWasteStayDecision(currentSignal, bestWorthwhileTarget, bestRejectedTarget, currentMetrics, currentTravelMetrics);
   }
 
   async function fetchOutlook(frame, locationIds, visibleSource) {
@@ -723,8 +869,11 @@
     if ((state.finalActionCode === "MOVE_SOON" || state.finalActionCode === "LEAVE_NOW")
       && state.assistantMoveTarget?.zoneName
       && Number.isFinite(state.assistantMoveTarget?.etaMinutes)) {
-      return `Go to ${state.assistantMoveTarget.zoneName} • ${Math.round(state.assistantMoveTarget.etaMinutes)} min`;
+      return `Go to ${state.assistantMoveTarget.zoneName} • ${Math.round(state.assistantMoveTarget.etaMinutes)} min • better on arrival`;
     }
+    if (state.finalActionCode === "STAY" && state.recommendationReasonCode === "moving_not_worth_it") return "Stay here • move not worth it";
+    if (state.finalActionCode === "STAY" && state.recommendationReasonCode === "current_zone_holds") return "Stay here • current zone still holds";
+    if (state.finalActionCode === "STAY" && state.recommendationReasonCode === "decent_rating_zone") return "Stay here for now";
     if (state.finalActionCode === "STAY") return "Stay here for now";
     if (state.finalActionCode === "STAY_BRIEFLY") return "Stay here briefly";
     if (state.finalActionCode === "MONITOR") return "Waiting for clearer signal";
@@ -917,10 +1066,14 @@
 
   function mirrorRecommendLine() {
     if (!recommendLine) return;
-    const primary = buildAssistantPrimaryLine();
-    const secondary = buildAssistantSecondaryLine();
-    let mirror = `AI Assistant: ${primary}`;
-    if (secondary) mirror += ` • ${secondary}`;
+    const action = humanActionLabel(state.finalActionCode);
+    const reason = state.recommendationReasonText || humanizeAssistantReason(state.finalActionReason);
+    let mirror = `AI Assistant: ${action} • ${reason}`;
+    if ((state.finalActionCode === "MOVE_SOON" || state.finalActionCode === "LEAVE_NOW") && state.assistantMoveTarget?.zoneName && Number.isFinite(state.assistantMoveTarget?.etaMinutes)) {
+      mirror += ` • Go to ${state.assistantMoveTarget.zoneName} • ${Math.round(state.assistantMoveTarget.etaMinutes)} min`;
+    } else if (state.finalActionCode === "STAY") {
+      mirror += " • Stay here";
+    }
     recommendLine.textContent = mirror;
   }
 
@@ -961,7 +1114,7 @@
         <section class="aiAssistantSection"><strong>Outlook</strong><div>${state.outlookSummaryText}</div><div>${state.moveTargetOutlookSummaryText || ""}</div></section>
         <section class="aiAssistantSection"><strong>Rankings</strong><div>Best now: ${state.citywideBestNow?.zoneName || "—"} • Worst now: ${state.citywideWorstNow?.zoneName || "—"}</div>${buildRankList(state.citywideTop10Best)}${buildRankList(state.boroughTop5Best)}</section>
         ${state.assistantMoveTarget ? `<section class="aiAssistantSection"><strong>Move Target</strong><div>${state.assistantMoveTarget.zoneName} • ${Math.round(state.assistantMoveTarget.etaMinutes || 0)} min • ${state.assistantMoveTarget.distanceMiles.toFixed(1)} mi</div></section>` : ""}
-        ${(Number.isFinite(state.stayProjectedRating) || Number.isFinite(state.targetArrivalProjectedRating)) ? `<section class="aiAssistantSection"><strong>Move Decision</strong><div>Stay on arrival: ${Math.round(state.stayProjectedRating || 0)}</div><div>Target on arrival: ${Math.round(state.targetArrivalProjectedRating || 0)}</div><div>ETA: ${Math.round(state.etaMinutes || 0)} min</div><div>Net move edge: ${(state.netMoveEdge || 0) >= 0 ? "+" : ""}${(state.netMoveEdge || 0).toFixed(1)}</div><div>Worth-moving threshold: ${(state.moveWorthThreshold || 0).toFixed(1)}</div><div>Arrival viability: ${state.targetViableOnArrival == null ? "n/a" : (state.targetViableOnArrival ? "yes" : "no")}</div></section>` : ""}
+        ${(Number.isFinite(state.stayScenarioValue) || Number.isFinite(state.moveScenarioValue)) ? `<section class="aiAssistantSection"><strong>Move Decision</strong><div>Stay scenario: ${(state.stayScenarioValue || 0).toFixed(1)}</div><div>Move scenario: ${(state.moveScenarioValue || 0).toFixed(1)}</div><div>ETA: ${Math.round(state.etaMinutes || 0)} min</div><div>Deadhead cost: ${(state.totalDeadheadCost || 0).toFixed(1)}</div><div>Confidence penalty: ${(state.moveConfidencePenalty || 0).toFixed(1)}</div><div>Net move edge: ${(state.netMoveEdge || 0) >= 0 ? "+" : ""}${(state.netMoveEdge || 0).toFixed(1)}</div><div>Worth-moving threshold: ${(state.moveWorthThreshold || 0).toFixed(1)}</div></section>` : ""}
         <section class="aiAssistantSection"><small>Assistant uses the same visible Team Joseo score path the map is showing.</small></section>
       </div>
     `;
@@ -1152,7 +1305,7 @@
     const evaluated = [];
     for (const candidate of shortlist) {
       const targetPoints = byId?.[candidate.signal.locationId] || byId?.[String(candidate.signal.locationId)] || [];
-      const evaluation = evaluateArrivalWindowMoveCandidate(
+      const evaluation = evaluateEconomicsAwareMoveCandidate(
         candidate.signal,
         activeSignal,
         targetPoints,
@@ -1160,18 +1313,21 @@
         candidate.etaMinutes,
         candidate.distanceMiles
       );
-      evaluation.moveWorthThreshold = getAssistantMoveWorthThreshold(activeSignal, evaluation.currentMetrics, evaluation.targetMetrics, evaluation.etaMinutes);
+      evaluation.moveWorthThreshold = getAssistantMoveWorthThreshold(
+        activeSignal,
+        evaluation.currentTravelMetrics,
+        evaluation.currentMetrics,
+        evaluation.targetMetrics,
+        evaluation.targetPaybackMetrics,
+        evaluation.deadheadCost,
+        evaluation.etaMinutes
+      );
       evaluation.isWorthMoving = !!evaluation.viability?.viable && evaluation.netMoveEdge >= evaluation.moveWorthThreshold;
       evaluated.push(evaluation);
     }
-    evaluated.sort((a, b) => {
-      if (b.netMoveEdge !== a.netMoveEdge) return b.netMoveEdge - a.netMoveEdge;
-      if (a.etaMinutes !== b.etaMinutes) return a.etaMinutes - b.etaMinutes;
-      return (safeNum(b.targetMetrics?.targetArrivalProjectedRating, 0) || 0) - (safeNum(a.targetMetrics?.targetArrivalProjectedRating, 0) || 0);
-    });
-    const worthwhile = evaluated.filter((it) => it.isWorthMoving);
-    const bestWorthwhile = worthwhile[0] || null;
-    const bestNotWorth = evaluated[0] || null;
+    const picked = chooseBestEconomicsAwareTarget(evaluated);
+    const bestWorthwhile = picked.bestWorthwhileTarget;
+    const bestNotWorth = picked.bestRejectedTarget;
     state.bestArrivalAwareCandidate = bestWorthwhile;
     state.bestCandidateNotWorthMoving = bestNotWorth;
     state.assistantMoveTarget = bestWorthwhile
@@ -1180,7 +1336,9 @@
           etaMinutes: bestWorthwhile.etaMinutes,
           distanceMiles: bestWorthwhile.distanceMiles,
           targetArrivalProjectedRating: bestWorthwhile.targetMetrics?.targetArrivalProjectedRating,
-          targetWindowAvgRating: bestWorthwhile.targetMetrics?.targetWindowAvgRating,
+          targetPaybackAvgRating: bestWorthwhile.targetPaybackMetrics?.paybackAvgRating,
+          totalDeadheadCost: bestWorthwhile.deadheadCost?.totalDeadheadCost,
+          moveConfidencePenalty: bestWorthwhile.confidencePenalty?.confidencePenalty,
           netMoveEdge: bestWorthwhile.netMoveEdge,
           moveWorthThreshold: bestWorthwhile.moveWorthThreshold,
           targetViableOnArrival: bestWorthwhile.viability?.viable,
@@ -1196,8 +1354,15 @@
     state.targetWindowAvgRating = selectedForReason?.targetMetrics?.targetWindowAvgRating ?? null;
     state.stayWindowMinRating = selectedForReason?.currentMetrics?.stayWindowMinRating ?? null;
     state.targetWindowMinRating = selectedForReason?.targetMetrics?.targetWindowMinRating ?? null;
-    state.moveValue = selectedForReason?.moveValue ?? null;
-    state.stayValue = selectedForReason?.stayValue ?? null;
+    state.stayScenarioValue = selectedForReason?.stayScenarioValue ?? null;
+    state.moveScenarioValue = selectedForReason?.moveScenarioValue ?? null;
+    state.currentTravelWindowAvgRating = selectedForReason?.currentTravelMetrics?.travelWindowAvgRating ?? null;
+    state.currentTravelWindowMinRating = selectedForReason?.currentTravelMetrics?.travelWindowMinRating ?? null;
+    state.targetPaybackAvgRating = selectedForReason?.targetPaybackMetrics?.paybackAvgRating ?? null;
+    state.targetPaybackMinRating = selectedForReason?.targetPaybackMetrics?.paybackMinRating ?? null;
+    state.totalDeadheadCost = selectedForReason?.deadheadCost?.totalDeadheadCost ?? null;
+    state.moveConfidencePenalty = selectedForReason?.confidencePenalty?.confidencePenalty ?? null;
+    state.confidencePenaltyReasons = selectedForReason?.confidencePenalty?.confidencePenaltyReasons ?? [];
     state.netMoveEdge = selectedForReason?.netMoveEdge ?? null;
     state.moveWorthThreshold = selectedForReason?.moveWorthThreshold ?? null;
     state.targetViableOnArrival = selectedForReason?.viability?.viable ?? null;
@@ -1211,7 +1376,7 @@
     state.outlookSummaryText = state.currentZoneOutlook?.outlookSummaryText || "Outlook unavailable.";
     state.moveTargetOutlookSummaryText = state.moveTargetOutlook?.outlookSummaryText || "";
 
-    const decision = deriveAssistantRecommendationReason(activeSignal, selectedForReason?.currentMetrics || {}, bestWorthwhile ? { ...bestWorthwhile, isWorthMoving: true } : null, bestNotWorth);
+    const decision = deriveAssistantRecommendationReason(activeSignal, selectedForReason?.currentMetrics || {}, bestWorthwhile, bestNotWorth, selectedForReason?.currentTravelMetrics || {});
     state.finalActionCode = decision.actionCode;
     state.finalActionReason = decision.reasonText;
     state.recommendationReasonCode = decision.reasonCode;
@@ -1221,7 +1386,7 @@
     state.dwellCoachSummaryText = `${humanActionLabel(state.finalActionCode)}: ${state.recommendationReasonText}`;
     state.dwellCoachReasonFragments = [
       `Stay ${(state.stayWindowAvgRating || state.stayProjectedRating || 0).toFixed(1)}`,
-      `Move ${(state.targetWindowAvgRating || state.targetArrivalProjectedRating || 0).toFixed(1)}`,
+      `Move ${(state.targetPaybackAvgRating || state.targetArrivalProjectedRating || 0).toFixed(1)}`,
       `Edge ${(state.netMoveEdge || 0).toFixed(1)}`,
       `Need ${(state.moveWorthThreshold || 0).toFixed(1)}`
     ];
