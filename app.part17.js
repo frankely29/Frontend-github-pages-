@@ -375,7 +375,7 @@
   }
 
   function frameTimeIso(frame) {
-    return String(frame?.frame_time || frame?.frame_iso || frame?.time_iso || "").trim() || null;
+    return String(frame?.frame_time || frame?.frame_iso || frame?.time_iso || frame?.time || "").trim() || null;
   }
 
   function buildOutlookCacheKey(frameTime, locationIds, visibleSource) {
@@ -1769,13 +1769,20 @@
     state.baseActionReason = base.reason;
 
     const locationIds = [state.activeStableZoneId, ...shortlist.map((c) => c.signal.locationId)].filter(Boolean);
-    const currentOutlookKey = buildOutlookCacheKey(state.lastFrameTime, locationIds, state.visibleScoreSource);
+    const hasOutlookContext = !!state.lastFrameTime && locationIds.length > 0;
+    const currentOutlookKey = hasOutlookContext
+      ? buildOutlookCacheKey(state.lastFrameTime, locationIds, state.visibleScoreSource)
+      : "";
     const outlook = await fetchOutlook(liveFrame, locationIds, state.visibleScoreSource);
     let effectiveOutlook = outlook;
+    const hasCachedCurrentKey = !!currentOutlookKey && state.outlookCache.has(currentOutlookKey);
     if (!effectiveOutlook
       && state.outlookStatus === "loading"
       && state.lastSuccessfulOutlookKey === currentOutlookKey
-      && state.outlookCache.has(currentOutlookKey)) {
+      && hasCachedCurrentKey) {
+      effectiveOutlook = state.outlookCache.get(currentOutlookKey) || null;
+    }
+    if (!effectiveOutlook && hasCachedCurrentKey && state.lastSuccessfulOutlookKey === currentOutlookKey) {
       effectiveOutlook = state.outlookCache.get(currentOutlookKey) || null;
     }
     const byId = buildOutlookPointsByLocation(effectiveOutlook);
