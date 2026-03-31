@@ -1177,20 +1177,24 @@
   }
 
   function buildAssistantPrimaryLine() {
-    const action = humanActionLabel(state.finalActionCode);
-    const reason = humanizeAssistantReason(state.finalActionReason);
+    const committedAction = state.committedActionCode || "MONITOR";
+    const committedReason = state.committedReasonText || state.recommendationReasonText || state.finalActionReason;
+    const action = humanActionLabel(committedAction);
+    const reason = humanizeAssistantReason(committedReason);
     return `${action} • ${reason}`;
   }
 
   function buildAssistantSecondaryLine() {
-    if ((state.finalActionCode === "MOVE_SOON" || state.finalActionCode === "LEAVE_NOW")
-      && state.assistantMoveTarget?.zoneName
-      && Number.isFinite(state.assistantMoveTarget?.etaMinutes)) {
-      return `Go to ${state.assistantMoveTarget.zoneName} • ${Math.round(state.assistantMoveTarget.etaMinutes)} min`;
+    const committedAction = state.committedActionCode || "MONITOR";
+    const committedTarget = state.committedMoveTarget || state.assistantMoveTarget || null;
+    if ((committedAction === "MOVE_SOON" || committedAction === "LEAVE_NOW")
+      && committedTarget?.zoneName
+      && Number.isFinite(committedTarget?.etaMinutes)) {
+      return `Go to ${committedTarget.zoneName} • ${Math.round(committedTarget.etaMinutes)} min`;
     }
-    if (state.finalActionCode === "STAY") return "Stay here for now";
-    if (state.finalActionCode === "STAY_BRIEFLY") return "Stay here briefly";
-    if (state.finalActionCode === "MONITOR") return "Waiting for clearer signal";
+    if (committedAction === "STAY") return "Stay here for now";
+    if (committedAction === "STAY_BRIEFLY") return "Stay here briefly";
+    if (committedAction === "MONITOR") return "Waiting for clearer signal";
     return "Waiting for clearer signal";
   }
 
@@ -1558,8 +1562,8 @@
     }
   }
 
-  function resetRecommendationStateForZoneChange(previousZoneId) {
-    state.activeStableZoneEnterTs = Date.now();
+  function resetRecommendationStateForZoneChange(previousZoneId, nowTs = Date.now()) {
+    state.activeStableZoneEnterTs = nowTs;
     state.activeStableZoneDwellMs = 0;
     state.assistantMoveTarget = null;
     state.bestArrivalAwareCandidate = null;
@@ -1614,6 +1618,11 @@
     state.stabilityReasonText = "";
     state.recommendationReasonCode = "collecting_context";
     state.recommendationReasonText = "Collecting more context.";
+    state.baseActionCode = "MONITOR";
+    state.baseActionReason = "Collecting more context.";
+    state.finalActionCode = "MONITOR";
+    state.finalActionReason = "Collecting more context.";
+    state.actionSeverity = "info";
     state.holdUntilTime = null;
     state.trapUntilTime = null;
     state.busyUntilTime = null;
@@ -1659,8 +1668,7 @@
         state.activeStableZoneId = signal.locationId;
         state.activeStableZoneName = signal.zoneName;
         state.activeStableBorough = signal.borough;
-        state.activeStableZoneEnterTs = now;
-        resetRecommendationStateForZoneChange(previousZoneId);
+        resetRecommendationStateForZoneChange(previousZoneId, now);
         window.dispatchEvent(new CustomEvent("tlc-ai-assistant-zone-changed", { detail: snapshot() }));
         window.dispatchEvent(new CustomEvent("tlc-ai-assistant-snapshot-updated", { detail: snapshot() }));
         return true;
