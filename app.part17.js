@@ -810,9 +810,6 @@
 
   function deriveNoWasteStayDecision(currentSignal, bestWorthwhileTarget, bestRejectedTarget, currentMetrics, currentTravelMetrics) {
     if (bestWorthwhileTarget) return null;
-    if ((safeNum(currentSignal?.visibleRating, 0) || 0) >= 48) {
-      return { actionCode: "STAY", reasonCode: "decent_rating_zone", reasonText: "Decent rating zone", worthMoving: false };
-    }
     if (bestRejectedTarget && (safeNum(bestRejectedTarget?.netMoveEdge, -Infinity) || -Infinity) < (safeNum(bestRejectedTarget?.moveWorthThreshold, Infinity) || Infinity)) {
       return { actionCode: "STAY", reasonCode: "moving_not_worth_it", reasonText: "Moving is not worth the time", worthMoving: false };
     }
@@ -821,6 +818,9 @@
     }
     if (currentMetrics?.stayHoldsAfterArrival && (safeNum(currentTravelMetrics?.travelWindowMinRating, 0) || 0) >= 46) {
       return { actionCode: "STAY", reasonCode: "current_zone_holds", reasonText: "Current zone still holds on arrival", worthMoving: false };
+    }
+    if ((safeNum(currentSignal?.visibleRating, 0) || 0) >= 48) {
+      return { actionCode: "STAY", reasonCode: "decent_rating_zone", reasonText: "Decent rating zone", worthMoving: false };
     }
     return { actionCode: "STAY", reasonCode: "moving_not_worth_it", reasonText: "Moving is not worth the time", worthMoving: false };
   }
@@ -949,7 +949,10 @@
   function stabilizeAssistantRecommendation(proposal, nowTs) {
     const previousProposedActionCode = state.proposedActionCode;
     const previousProposedReasonCode = state.proposedReasonCode;
+    const previousProposedReasonText = state.proposedReasonText;
     const previousProposedMoveTarget = state.proposedMoveTarget;
+    const previousProposedNetMoveEdge = state.proposedNetMoveEdge;
+    const previousProposedWorthThreshold = state.proposedWorthThreshold;
     const previousProposedSinceTs = state.proposedSinceTs;
     const previousProposedStableHits = safeNum(state.proposedStableHits, 0) || 0;
     const committedProposal = {
@@ -981,10 +984,10 @@
       state.committedMoveTarget = proposal.moveTarget || state.committedMoveTarget || null;
       state.proposedActionCode = proposal.actionCode;
       state.proposedReasonCode = proposal.reasonCode;
-      state.proposedReasonText = proposal.reasonText;
+      state.proposedReasonText = proposal.reasonText || previousProposedReasonText || "";
       state.proposedMoveTarget = proposal.moveTarget || null;
-      state.proposedNetMoveEdge = proposal.netMoveEdge;
-      state.proposedWorthThreshold = proposal.moveWorthThreshold;
+      state.proposedNetMoveEdge = safeNum(proposal.netMoveEdge, previousProposedNetMoveEdge);
+      state.proposedWorthThreshold = safeNum(proposal.moveWorthThreshold, previousProposedWorthThreshold);
       state.proposedSinceTs = previousProposedSinceTs ?? nowTs;
       state.proposedStableHits = previousProposedStableHits + 1;
       return;
@@ -1097,8 +1100,9 @@
 
   function buildOutlookPointsByLocation(outlook) {
     const map = {};
-    const byLocation = getAssistantOutlookByLocationId(outlook);
-    if (byLocation && typeof byLocation === "object" && !Array.isArray(byLocation)) {
+    const byLocationPayloads = [outlook?.zones_by_location_id, outlook?.by_location_id];
+    for (const byLocation of byLocationPayloads) {
+      if (!byLocation || typeof byLocation !== "object" || Array.isArray(byLocation)) continue;
       for (const [idRaw, zoneEntry] of Object.entries(byLocation)) {
         const id = String(idRaw || zoneEntry?.location_id || zoneEntry?.locationId || "").trim();
         if (!id) continue;
@@ -1108,22 +1112,23 @@
         }
         map[id] = Array.isArray(zoneEntry?.points)
           ? zoneEntry.points
-          : (Array.isArray(zoneEntry?.horizon_points) ? zoneEntry.horizon_points : []);
+          : (Array.isArray(zoneEntry?.horizon_points) ? zoneEntry.horizon_points : (map[id] || []));
       }
     }
-    const listPayload = Array.isArray(outlook?.zones)
-      ? outlook.zones
-      : (Array.isArray(outlook?.items) ? outlook.items : []);
-    for (const zoneEntry of listPayload) {
-      const id = String(zoneEntry?.location_id || zoneEntry?.locationId || "").trim();
-      if (!id) continue;
-      if (Array.isArray(zoneEntry)) {
-        map[id] = zoneEntry;
-        continue;
+    const listPayloads = [outlook?.zones, outlook?.items];
+    for (const listPayload of listPayloads) {
+      if (!Array.isArray(listPayload)) continue;
+      for (const zoneEntry of listPayload) {
+        const id = String(zoneEntry?.location_id || zoneEntry?.locationId || "").trim();
+        if (!id) continue;
+        if (Array.isArray(zoneEntry)) {
+          map[id] = zoneEntry;
+          continue;
+        }
+        map[id] = Array.isArray(zoneEntry?.points)
+          ? zoneEntry.points
+          : (Array.isArray(zoneEntry?.horizon_points) ? zoneEntry.horizon_points : (map[id] || []));
       }
-      map[id] = Array.isArray(zoneEntry?.points)
-        ? zoneEntry.points
-        : (Array.isArray(zoneEntry?.horizon_points) ? zoneEntry.horizon_points : (map[id] || []));
     }
     return map;
   }
