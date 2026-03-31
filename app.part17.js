@@ -154,6 +154,13 @@
     outlookCache: new Map(),
     outlookAbortController: null,
     outlookRequestKey: "",
+    outlookInFlightKey: "",
+    outlookInFlightPromise: null,
+    outlookStatus: "idle",
+    outlookLastErrorCode: "",
+    outlookLastErrorMessage: "",
+    lastSuccessfulOutlookKey: "",
+    lastSuccessfulOutlookAt: 0,
     heartbeatHandle: null,
     heartbeatKey: null,
     touchPauseUntil: 0,
@@ -1081,20 +1088,63 @@
     if (!frameTime || !locationIds.length) return null;
     const key = buildOutlookCacheKey(frameTime, locationIds, visibleSource);
     state.outlookRequestKey = key;
-    if (state.outlookCache.has(key)) return state.outlookCache.get(key);
-    if (state.outlookAbortController) state.outlookAbortController.abort();
+    if (state.outlookCache.has(key)) {
+      state.outlookStatus = "ready";
+      state.outlookLastErrorCode = "";
+      state.outlookLastErrorMessage = "";
+      return state.outlookCache.get(key);
+    }
+    if (state.outlookInFlightKey === key && state.outlookInFlightPromise) {
+      return state.outlookInFlightPromise;
+    }
+    if (state.outlookInFlightPromise && state.outlookInFlightKey && state.outlookInFlightKey !== key && state.outlookAbortController) {
+      state.outlookAbortController.abort();
+    }
     const ac = new AbortController();
     state.outlookAbortController = ac;
+    state.outlookInFlightKey = key;
+    state.outlookStatus = "loading";
+    state.outlookLastErrorCode = "";
+    state.outlookLastErrorMessage = "";
     const apiBase = String(window.API_BASE || window.__TLC_RUNTIME_CONFIG__?.apiBase || "").trim().replace(/\/+$/, "");
     const url = `${apiBase}/assistant/outlook?frame_time=${encodeURIComponent(frameTime)}&location_ids=${encodeURIComponent([...locationIds].sort().join(","))}`;
+    const fetchPromise = (async () => {
+      try {
+        const data = await (internals.fetchJSON?.(url, { signal: ac.signal }) || fetch(url, { signal: ac.signal }).then((r) => r.json()));
+        const payload = data || null;
+        state.outlookCache.set(key, payload);
+        state.outlookRequestKey = key;
+        state.lastSuccessfulOutlookKey = key;
+        state.lastSuccessfulOutlookAt = Date.now();
+        state.outlookStatus = "ready";
+        state.outlookLastErrorCode = "";
+        state.outlookLastErrorMessage = "";
+        return payload;
+      } catch (err) {
+        if (err?.name === "AbortError") {
+          const sameKeyStillActive = state.outlookInFlightKey === key;
+          state.outlookStatus = sameKeyStillActive ? "loading" : "idle";
+          state.outlookLastErrorCode = "aborted";
+          state.outlookLastErrorMessage = "Outlook request restarted.";
+          return null;
+        }
+        state.outlookStatus = "error";
+        state.outlookLastErrorCode = String(err?.status || err?.name || "fetch_failed");
+        state.outlookLastErrorMessage = String(err?.message || "Outlook request failed.");
+        return null;
+      } finally {
+        if (state.outlookInFlightPromise === fetchPromise) {
+          state.outlookInFlightKey = "";
+          state.outlookInFlightPromise = null;
+          if (state.outlookAbortController === ac) state.outlookAbortController = null;
+        }
+      }
+    })();
+    state.outlookInFlightPromise = fetchPromise;
     try {
-      const data = await (internals.fetchJSON?.(url, { signal: ac.signal }) || fetch(url, { signal: ac.signal }).then((r) => r.json()));
-      state.outlookCache.set(key, data || null);
-      return data || null;
+      return await fetchPromise;
     } catch (_err) {
       return null;
-    } finally {
-      if (state.outlookAbortController === ac) state.outlookAbortController = null;
     }
   }
 
@@ -1439,7 +1489,7 @@
       <div class="aiAssistantPanel">
         <section class="aiAssistantSection"><strong>Current Zone</strong><div>${state.activeStableZoneName || "—"} • ${state.activeStableBorough || "—"} • ${Math.round(state.visibleRating || 0)} ${prettyBucket(state.visibleBucket)} • ${state.visibleScoreSourceLabel}</div></section>
         <section class="aiAssistantSection"><strong>Stay Coach</strong><div>${state.dwellCoachSummaryText}</div><div>${state.dwellCoachReasonFragments.join(" • ")}</div></section>
-        <section class="aiAssistantSection"><strong>Outlook</strong><div>${state.outlookSummaryText}</div><div>${state.moveTargetOutlookSummaryText || ""}</div></section>
+        <section class="aiAssistantSection"><strong>Outlook</strong><div>${state.outlookSummaryText}</div><div>${state.moveTargetOutlookSummaryText || ""}</div>${(state.outlookStatus || state.outlookLastErrorCode) ? `<div><small>Status: ${state.outlookStatus || "idle"}${state.outlookLastErrorCode ? ` (${state.outlookLastErrorCode})` : ""}</small></div>` : ""}</section>
         <section class="aiAssistantSection"><strong>Rankings</strong><div>Best now: ${state.citywideBestNow?.zoneName || "—"} • Worst now: ${state.citywideWorstNow?.zoneName || "—"}</div>${buildRankList(state.citywideTop10Best)}${buildRankList(state.boroughTop5Best)}</section>
         ${state.assistantMoveTarget ? `<section class="aiAssistantSection"><strong>Move Target</strong><div>${state.assistantMoveTarget.zoneName} • ${Math.round(state.assistantMoveTarget.etaMinutes || 0)} min • ${state.assistantMoveTarget.distanceMiles.toFixed(1)} mi</div></section>` : ""}
         ${(Number.isFinite(state.stayScenarioValue) || Number.isFinite(state.moveScenarioValue)) ? `<section class="aiAssistantSection"><strong>Move Decision</strong><div>Stay scenario: ${(state.stayScenarioValue || 0).toFixed(1)}</div><div>Move scenario: ${(state.moveScenarioValue || 0).toFixed(1)}</div><div>ETA: ${Math.round(state.etaMinutes || 0)} min</div><div>Deadhead cost: ${(state.totalDeadheadCost || 0).toFixed(1)}</div><div>Confidence penalty: ${(state.moveConfidencePenalty || 0).toFixed(1)}</div><div>Net move edge: ${(state.netMoveEdge || 0) >= 0 ? "+" : ""}${(state.netMoveEdge || 0).toFixed(1)}</div><div>Worth-moving threshold: ${(state.moveWorthThreshold || 0).toFixed(1)}</div></section>` : ""}
@@ -1578,6 +1628,13 @@
     state.moveTargetOutlook = null;
     state.outlookSummaryText = "Outlook unavailable.";
     state.moveTargetOutlookSummaryText = "";
+    state.outlookStatus = "idle";
+    state.outlookLastErrorCode = "";
+    state.outlookLastErrorMessage = "";
+    state.outlookInFlightKey = "";
+    state.outlookInFlightPromise = null;
+    state.lastSuccessfulOutlookKey = "";
+    state.lastSuccessfulOutlookAt = 0;
     state.etaMinutes = null;
     state.distanceMiles = null;
     state.stayProjectedRating = null;
@@ -1712,8 +1769,16 @@
     state.baseActionReason = base.reason;
 
     const locationIds = [state.activeStableZoneId, ...shortlist.map((c) => c.signal.locationId)].filter(Boolean);
+    const currentOutlookKey = buildOutlookCacheKey(state.lastFrameTime, locationIds, state.visibleScoreSource);
     const outlook = await fetchOutlook(liveFrame, locationIds, state.visibleScoreSource);
-    const byId = buildOutlookPointsByLocation(outlook);
+    let effectiveOutlook = outlook;
+    if (!effectiveOutlook
+      && state.outlookStatus === "loading"
+      && state.lastSuccessfulOutlookKey === currentOutlookKey
+      && state.outlookCache.has(currentOutlookKey)) {
+      effectiveOutlook = state.outlookCache.get(currentOutlookKey) || null;
+    }
+    const byId = buildOutlookPointsByLocation(effectiveOutlook);
     const currentPoints = byId?.[state.activeStableZoneId] || byId?.[String(state.activeStableZoneId)] || [];
     const evaluated = [];
     for (const candidate of shortlist) {
@@ -1784,8 +1849,21 @@
     state.currentZoneOutlook = interpretOutlookPoints(currentPoints, activeSignal);
     state.moveTargetOutlook = interpretOutlookPoints(targetPoints, outlookMoveTarget);
     Object.assign(state, state.currentZoneOutlook || {});
-    state.outlookSummaryText = state.currentZoneOutlook?.outlookSummaryText || "Outlook unavailable.";
-    state.moveTargetOutlookSummaryText = state.moveTargetOutlook?.outlookSummaryText || "";
+    const hasCurrentPoints = Array.isArray(currentPoints) && currentPoints.length > 0;
+    if (hasCurrentPoints) {
+      state.outlookSummaryText = state.currentZoneOutlook?.outlookSummaryText || "Outlook is mixed.";
+      state.moveTargetOutlookSummaryText = state.moveTargetOutlook?.outlookSummaryText || "";
+    } else if (state.outlookStatus === "loading") {
+      state.outlookSummaryText = "Checking outlook.";
+      state.moveTargetOutlookSummaryText = "";
+    } else if (state.outlookStatus === "error") {
+      state.outlookSummaryText = "Outlook temporarily unavailable.";
+      state.moveTargetOutlookSummaryText = "";
+    } else {
+      const hasStableContext = !!state.activeStableZoneId && !!state.lastFrameTime;
+      state.outlookSummaryText = hasStableContext ? "Outlook temporarily unavailable." : "Outlook unavailable.";
+      state.moveTargetOutlookSummaryText = "";
+    }
 
     state.assistantMoveTarget = state.committedMoveTarget || null;
     state.recommendationReasonCode = state.committedReasonCode || proposal.reasonCode;
