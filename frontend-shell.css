@@ -1957,7 +1957,7 @@ html, body { height: 100%; margin: 0; padding: 0; }
   left: 50%;
   transform: translateX(-50%);
   z-index: 1450;
-  width: min(420px, calc(100vw - 32px));
+  width: min(340px, calc(100vw - 32px));
   max-width: calc(100vw - 32px);
   pointer-events: none;
   display: flex;
@@ -1973,20 +1973,20 @@ html, body { height: 100%; margin: 0; padding: 0; }
   background: rgba(255,255,255,0.95);
   border: 1px solid rgba(15,23,42,0.08);
   width: 100%;
-  max-width: 420px;
+  max-width: 100%;
   margin: 0 auto;
   backdrop-filter: blur(10px);
 }
 .aiAssistantMainRow{ display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:8px; min-height:34px; }
-.aiAssistantIconChip{ width:38px; height:38px; border-radius:999px; display:inline-grid; place-items:center; flex:0 0 auto; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.35); }
-.aiAssistantIconChip--positive{ background: rgba(16,185,129,0.18); color:#065f46; }
-.aiAssistantIconChip--caution{ background: rgba(245,158,11,0.2); color:#92400e; }
-.aiAssistantIconChip--move{ background: rgba(239,68,68,0.22); color:#991b1b; }
-.aiAssistantIconChip--info{ background: rgba(59,130,246,0.17); color:#1d4ed8; }
+.aiAssistantIconChip{ width:40px; height:40px; border-radius:999px; display:inline-grid; place-items:center; flex:0 0 auto; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.35); }
+.aiAssistantIconChip--positive{ background: rgba(16,185,129,0.26); color:#065f46; }
+.aiAssistantIconChip--caution{ background: rgba(245,158,11,0.3); color:#92400e; }
+.aiAssistantIconChip--move{ background: rgba(239,68,68,0.32); color:#991b1b; }
+.aiAssistantIconChip--info{ background: rgba(59,130,246,0.27); color:#1d4ed8; }
 .aiAssistantTickerViewport{ overflow:hidden; min-width:0; white-space:nowrap; display:flex; align-items:center; }
 .aiAssistantTickerTrack{ display:block; overflow:hidden; }
-.aiAssistantTickerTrackInner{ display:inline-block; font-size:13px; font-weight:800; color:#0f172a; white-space:nowrap; line-height:1.2; }
-.aiAssistantTickerTrack.is-marquee .aiAssistantTickerTrackInner{ animation: aiAssistantMarquee linear 1; animation-fill-mode: both; }
+.aiAssistantTickerTrackInner{ display:inline-block; font-size:12px; font-weight:800; color:#0f172a; white-space:nowrap; line-height:1.2; }
+.aiAssistantTickerTrack.is-marquee .aiAssistantTickerTrackInner{ animation: aiAssistantMarquee linear 1; animation-fill-mode: both; animation-delay:.6s; }
 .aiAssistantMetaRow{ display:flex; flex-wrap:nowrap; overflow-x:auto; overflow-y:hidden; gap:5px; margin-top:5px; padding-bottom:1px; scrollbar-width:none; -ms-overflow-style:none; max-width:100%; }
 .aiAssistantMetaRow::-webkit-scrollbar{ display:none; }
 .aiAssistantMetaChip{ border-radius:999px; padding:2px 7px; font-size:10px; font-weight:800; background: rgba(15,23,42,0.06); color:#0f172a; white-space:nowrap; }

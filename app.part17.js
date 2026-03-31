@@ -14,7 +14,8 @@
 
   const recommendLine = internals.getRecommendEl?.() || document.getElementById("recommendLine");
   const dockMount = document.getElementById("aiAssistantWidgetMount");
-  let assistantDockResizeObserver = null;
+  let topBadgeResizeObserver = null;
+  let topBadgeObserversInstalled = false;
 
   const state = {
     activeStableZoneId: null,
@@ -379,6 +380,27 @@
     return normalized;
   }
 
+  function leadingIconKindFromAction(code) {
+    const map = {
+      STAY: "positive",
+      STAY_BRIEFLY: "caution",
+      MOVE_SOON: "move",
+      LEAVE_NOW: "move",
+      MONITOR: "info",
+    };
+    return map[String(code || "").trim()] || "info";
+  }
+
+  function buildPrimaryHeadline() {
+    const action = humanActionLabel(state.finalActionCode);
+    if ((state.finalActionCode === "MOVE_SOON" || state.finalActionCode === "LEAVE_NOW")
+      && state.assistantMoveTarget?.zoneName
+      && Number.isFinite(state.assistantMoveTarget?.distanceMiles)) {
+      return `${action} • Go to ${state.assistantMoveTarget.zoneName} • ${state.assistantMoveTarget.distanceMiles.toFixed(1)} mi`;
+    }
+    return `${action}: ${humanizeAssistantReason(state.finalActionReason)}`;
+  }
+
   function computeBaseAction(currentSignal, cls) {
     if (!currentSignal) return { code: "MONITOR", reason: "Waiting for stable zone." };
     const overall = state.bestNearbyOverall;
@@ -501,18 +523,14 @@
 
   function buildMessages() {
     const list = [];
-    const actionLabel = humanActionLabel(state.finalActionCode);
-    const actionReason = humanizeAssistantReason(state.finalActionReason);
-    const primaryReason = actionReason ? `${actionReason.charAt(0).toLowerCase()}${actionReason.slice(1)}` : "mixed signals.";
-    const primary = `${actionLabel}: ${primaryReason}`;
+    const primary = buildPrimaryHeadline();
     list.push({ key: "action", text: primary, severity: severityForAction(state.finalActionCode) });
 
     if (state.assistantMoveTarget?.zoneName && Number.isFinite(state.assistantMoveTarget?.distanceMiles)) {
-      list.push({
-        key: "target",
-        text: `Go to ${state.assistantMoveTarget.zoneName} • ${state.assistantMoveTarget.distanceMiles.toFixed(1)} mi`,
-        severity: "info"
-      });
+      const targetSummary = `Go to ${state.assistantMoveTarget.zoneName} • ${state.assistantMoveTarget.distanceMiles.toFixed(1)} mi`;
+      if (!primary.includes(targetSummary)) {
+        list.push({ key: "target", text: targetSummary, severity: "info" });
+      }
     }
 
     if (state.targetStrongUntilTime) {
@@ -521,11 +539,18 @@
     }
 
     const rawOutlook = String(state.outlookSummaryText || "").trim();
-    if (rawOutlook && !/^outlook unavailable\.?$/i.test(rawOutlook)) {
-      list.push({ key: "outlook", text: humanizeAssistantReason(rawOutlook), severity: "info" });
+    const outlookText = humanizeAssistantReason(rawOutlook);
+    const outlookMeaningful = rawOutlook && !/^outlook unavailable\.?$/i.test(rawOutlook) && !/^checking outlook\.?$/i.test(outlookText);
+    if (outlookMeaningful) {
+      list.push({ key: "outlook", text: outlookText, severity: "info" });
     }
-    if (state.moveTargetOutlookSummaryText) list.push({ key: "target_outlook", text: humanizeAssistantReason(state.moveTargetOutlookSummaryText), severity: "info" });
-    if (state.currentZoneCitywideRank) list.push({ key: "rank", text: `Citywide #${state.currentZoneCitywideRank} • ${state.currentBoroughName || "Borough"} #${state.currentZoneBoroughRank || "-"}`, severity: "info" });
+    const targetOutlook = humanizeAssistantReason(state.moveTargetOutlookSummaryText);
+    if (String(targetOutlook || "").trim() && !/^checking outlook\.?$/i.test(targetOutlook)) {
+      list.push({ key: "target_outlook", text: targetOutlook, severity: "info" });
+    }
+    if (state.currentZoneCitywideRank) {
+      list.push({ key: "rank", text: `City #${state.currentZoneCitywideRank}`, severity: "info" });
+    }
 
     const uniq = [];
     const seen = new Set();
@@ -535,6 +560,9 @@
       if (!cleanedText || seen.has(key)) continue;
       seen.add(key);
       uniq.push({ ...m, text: cleanedText });
+    }
+    if (!uniq.length) {
+      uniq.push({ key: "fallback", text: "Monitor: Mixed signals.", severity: "info" });
     }
     state.assistantMessages = uniq;
     if (state.activeMessageIndex >= uniq.length) state.activeMessageIndex = 0;
@@ -558,7 +586,7 @@
     if (!dockMount) return;
     buildMessages();
     const active = state.assistantMessages[state.activeMessageIndex] || { text: "AI Assistant ready.", severity: "info" };
-    const iconType = active.severity || "info";
+    const iconType = leadingIconKindFromAction(state.finalActionCode);
     const chips = [];
     chips.push(`Zone: ${state.activeStableZoneName || "Locating…"}`);
     if (Number.isFinite(state.visibleRating)) chips.push(`Score ${Math.round(state.visibleRating)}`);
@@ -579,8 +607,9 @@
       </div>
     `;
     applyMarqueeIfNeeded();
+    clearMessageRotationTimer();
     scheduleNextMessageRotation();
-    if (dockMount) updateAssistantDockLayout();
+    updateAssistantDockLayout();
   }
 
   function buildRankList(items) {
@@ -607,7 +636,6 @@
     if (!viewport || !track || !inner) return;
     track.classList.remove("is-marquee");
     inner.style.removeProperty("animation-duration");
-    inner.style.removeProperty("animation-delay");
     if (state.marqueeTimeout) {
       clearTimeout(state.marqueeTimeout);
       state.marqueeTimeout = null;
@@ -617,7 +645,6 @@
       const duration = Math.max(10000, Math.min(22000, overflow * 18));
       const delay = 600;
       inner.style.animationDuration = `${duration}ms`;
-      inner.style.animationDelay = `${delay}ms`;
       state.marqueeActive = true;
       state.marqueeDurationMs = duration + delay;
       state.marqueeTimeout = setTimeout(() => {
@@ -643,15 +670,16 @@
     const onlineRect = onlineBadge.getBoundingClientRect?.();
     const weatherRect = weatherBadge.getBoundingClientRect?.();
     if (!onlineRect || !weatherRect) return;
-    if (![onlineRect.right, weatherRect.left].every((n) => Number.isFinite(n))) return;
+    if (![onlineRect.right, weatherRect.left, window.innerWidth].every((n) => Number.isFinite(n))) return;
 
-    const laneLeft = onlineRect.right + 10;
-    const laneRight = weatherRect.left - 10;
-    const laneWidth = laneRight - laneLeft;
-    if (Number.isFinite(laneWidth) && laneWidth >= 260) {
+    const laneLeft = Math.ceil(onlineRect.right + 10);
+    const laneRight = Math.floor(weatherRect.left - 10);
+    const laneWidth = Math.floor(laneRight - laneLeft);
+    if (laneWidth >= 250) {
       dock.style.left = `${laneLeft}px`;
-      dock.style.right = `${Math.max(0, window.innerWidth - laneRight)}px`;
+      dock.style.right = `${Math.max(12, window.innerWidth - laneRight)}px`;
       dock.style.width = `${laneWidth}px`;
+      dock.style.maxWidth = `${laneWidth}px`;
       dock.style.transform = "none";
       dock.style.top = topLane;
       return;
@@ -659,29 +687,30 @@
 
     dock.style.left = "50%";
     dock.style.right = "auto";
-    dock.style.width = "min(420px, calc(100vw - 32px))";
+    dock.style.width = "min(340px, calc(100vw - 32px))";
+    dock.style.maxWidth = "calc(100vw - 32px)";
     dock.style.top = fallbackTop;
     dock.style.transform = "translateX(-50%)";
   }
 
-  function bindDockLayoutObservers() {
+  function installTopBadgeLayoutObservers() {
+    if (topBadgeObserversInstalled) return;
+    topBadgeObserversInstalled = true;
     const onlineBadge = document.getElementById("onlineBadge");
     const weatherBadge = document.getElementById("weatherBadge");
+    if (!onlineBadge || !weatherBadge) return;
 
     const refresh = () => updateAssistantDockLayout();
     window.addEventListener("resize", refresh, { passive: true });
     window.addEventListener("orientationchange", refresh, { passive: true });
-    document.addEventListener("visibilitychange", refresh);
+    window.addEventListener("tlc-top-badges-updated", refresh);
 
     if (typeof ResizeObserver === "function") {
-      if (assistantDockResizeObserver) assistantDockResizeObserver.disconnect();
-      assistantDockResizeObserver = new ResizeObserver(() => updateAssistantDockLayout());
-      if (onlineBadge) assistantDockResizeObserver.observe(onlineBadge);
-      if (weatherBadge) assistantDockResizeObserver.observe(weatherBadge);
+      if (topBadgeResizeObserver) topBadgeResizeObserver.disconnect();
+      topBadgeResizeObserver = new ResizeObserver(() => updateAssistantDockLayout());
+      topBadgeResizeObserver.observe(onlineBadge);
+      topBadgeResizeObserver.observe(weatherBadge);
     }
-
-    if (onlineBadge) new MutationObserver(refresh).observe(onlineBadge, { childList: true, subtree: true, characterData: true, attributes: true });
-    if (weatherBadge) new MutationObserver(refresh).observe(weatherBadge, { childList: true, subtree: true, characterData: true, attributes: true });
 
     updateAssistantDockLayout();
   }
@@ -703,8 +732,11 @@
   function scheduleNextMessageRotation() {
     clearMessageRotationTimer();
     if (!Array.isArray(state.assistantMessages) || state.assistantMessages.length < 2) return;
-    if (shouldPauseRotation()) return;
-    const delay = state.marqueeActive ? Math.max(800, state.marqueeDurationMs || 0) : AI_ASSISTANT_ROTATE_MS;
+    if (shouldPauseRotation()) {
+      state.rotationTimerHandle = setTimeout(() => scheduleNextMessageRotation(), 1000);
+      return;
+    }
+    const delay = state.marqueeActive ? ((state.marqueeDurationMs || 0) + 800) : AI_ASSISTANT_ROTATE_MS;
     state.rotationNextDueAt = Date.now() + delay;
     state.rotationTimerHandle = setTimeout(() => {
       if (!Array.isArray(state.assistantMessages) || state.assistantMessages.length < 2) return;
@@ -943,7 +975,7 @@
   window.getTeamJoseoAiAssistantFeedSnapshot = () => window.TlcAiAssistantModule?.getSnapshot?.() || null;
 
   attachEvents();
-  bindDockLayoutObservers();
+  installTopBadgeLayoutObservers();
   renderWidget();
   mirrorRecommendLine();
   updateAssistantDockLayout();
