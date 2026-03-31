@@ -157,6 +157,20 @@
     return iconMap[icon] || icon;
   }
 
+
+  function extractWeatherTempText(text) {
+    const raw = String(text || "").trim();
+    if (!raw) return "";
+    const bulletParts = raw.split("•").map((part) => part.trim()).filter(Boolean);
+    const tempToken = bulletParts.find((part) => /-?\d+(?:\.\d+)?\s*°\s*[CF]/i.test(part));
+    if (tempToken) {
+      const match = tempToken.match(/-?\d+(?:\.\d+)?\s*°\s*[CF]/i);
+      return match ? match[0].replace(/\s+/g, "") : "";
+    }
+    const fallback = raw.match(/-?\d+(?:\.\d+)?\s*°\s*[CF]/i);
+    return fallback ? fallback[0].replace(/\s+/g, "") : "";
+  }
+
   function setWeatherBadge(icon, text) {
     if (!weatherBadge) return;
     const iconEl = weatherBadge.querySelector(".wxIcon");
@@ -177,8 +191,10 @@
         iconEl.style.removeProperty("line-height");
       }
     }
-    if (txtEl) txtEl.textContent = text;
+    if (txtEl) txtEl.textContent = extractWeatherTempText(text);
     weatherBadge.title = text;
+    weatherBadge.setAttribute("aria-label", text);
+    weatherBadge.classList.add("iconNumberOnly");
     window.dispatchEvent(new CustomEvent("tlc-top-badges-updated"));
   }
   function getWeatherLatLng() {

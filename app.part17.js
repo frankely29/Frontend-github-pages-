@@ -390,21 +390,22 @@
     return document.getElementById("aiAssistantDock")?.dataset?.aiCompactLane === "1";
   }
 
-  function buildPrimaryHeadline() {
+  function buildAssistantPrimaryLine() {
     const action = humanActionLabel(state.finalActionCode);
-    const compactLane = isCompactLaneMode();
-    if (compactLane) {
-      if ((state.finalActionCode === "MOVE_SOON" || state.finalActionCode === "LEAVE_NOW") && state.assistantMoveTarget?.zoneName) {
-        return `${action} • ${state.assistantMoveTarget.zoneName}`;
-      }
-      return `${action} • ${humanizeAssistantReason(state.finalActionReason)}`;
-    }
+    const reason = humanizeAssistantReason(state.finalActionReason);
+    return `${action} • ${reason}`;
+  }
+
+  function buildAssistantSecondaryLine() {
     if ((state.finalActionCode === "MOVE_SOON" || state.finalActionCode === "LEAVE_NOW")
       && state.assistantMoveTarget?.zoneName
       && Number.isFinite(state.assistantMoveTarget?.distanceMiles)) {
-      return `${action} • Go to ${state.assistantMoveTarget.zoneName} • ${state.assistantMoveTarget.distanceMiles.toFixed(1)} mi`;
+      return `Go to ${state.assistantMoveTarget.zoneName} • ${state.assistantMoveTarget.distanceMiles.toFixed(1)} mi`;
     }
-    return `${action} • ${humanizeAssistantReason(state.finalActionReason)}`;
+    if (state.finalActionCode === "STAY") return "Stay here for now";
+    if (state.finalActionCode === "STAY_BRIEFLY") return "Stay here briefly";
+    if (state.finalActionCode === "MONITOR") return "Waiting for clearer signal";
+    return "Waiting for clearer signal";
   }
 
   function computeBaseAction(currentSignal, cls) {
@@ -530,7 +531,7 @@
   function buildMessages() {
     const compactLane = isCompactLaneMode();
     const list = [];
-    const primary = buildPrimaryHeadline();
+    const primary = buildAssistantPrimaryLine();
     list.push({ key: "action", text: primary, severity: severityForAction(state.finalActionCode) });
 
     if (state.assistantMoveTarget?.zoneName && Number.isFinite(state.assistantMoveTarget?.distanceMiles)) {
@@ -593,34 +594,32 @@
 
   function mirrorRecommendLine() {
     if (!recommendLine) return;
-    const action = humanActionLabel(state.finalActionCode);
-    let tail = "Mixed signals";
-    if (state.finalActionCode === "MOVE_SOON" && state.assistantMoveTarget?.zoneName) {
-      tail = `Target: ${state.assistantMoveTarget.zoneName}`;
-    } else if (state.finalActionCode === "LEAVE_NOW") {
-      tail = "Better nearby zone";
+    const primary = buildAssistantPrimaryLine();
+    let mirror = `AI Assistant: ${primary}`;
+    if ((state.finalActionCode === "MOVE_SOON" || state.finalActionCode === "LEAVE_NOW") && state.assistantMoveTarget?.zoneName) {
+      mirror += ` • Go to ${state.assistantMoveTarget.zoneName}`;
     } else if (state.finalActionCode === "STAY") {
-      tail = "Good zone right now";
-    } else if (state.finalActionCode === "MONITOR") {
-      tail = "Mixed signals";
-    } else if (state.finalActionCode === "STAY_BRIEFLY") {
-      tail = "This zone may cool off soon";
+      mirror += " • Stay here";
     }
-    recommendLine.textContent = `AI Assistant: ${action} • ${tail}`;
+    recommendLine.textContent = mirror;
   }
 
   function renderWidget() {
     if (!dockMount) return;
     const compactLane = isCompactLaneMode();
     buildMessages();
-    const active = state.assistantMessages[0] || { text: "AI Assistant ready.", severity: "info" };
+    const primaryLine = buildAssistantPrimaryLine();
+    const secondaryLine = buildAssistantSecondaryLine();
     const iconType = leadingIconKindFromAction(state.finalActionCode);
 
     dockMount.innerHTML = `
       <div class="aiAssistantWidget ${compactLane ? "aiAssistantWidget--compactLane" : ""} ${state.expanded ? "is-expanded" : ""}" id="aiAssistantWidget">
         <div class="aiAssistantMainRow">
           <div class="aiAssistantIconChip aiAssistantIconChip--${iconType}">${iconMarkup(iconType)}</div>
-          <div class="aiAssistantMessageText" id="aiAssistantMessageText">${String(active.text || "").replace(/dwell/gi, "stay")}</div>
+          <div class="aiAssistantMessageStack">
+            <div class="aiAssistantPrimaryText">${String(primaryLine || "").replace(/dwell/gi, "stay")}</div>
+            <div class="aiAssistantSecondaryText">${String(secondaryLine || "").replace(/dwell/gi, "stay")}</div>
+          </div>
           <button class="aiAssistantExpandBtn" type="button" data-ai-action="toggle-expanded" aria-expanded="${state.expanded ? "true" : "false"}">${state.expanded ? "−" : "+"}</button>
         </div>
         ${state.expanded ? buildPanelHtml() : ""}
