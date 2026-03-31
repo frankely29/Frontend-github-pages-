@@ -2,7 +2,6 @@
   const AI_ASSISTANT_STABLE_MIN_MS = 3000;
   const AI_ASSISTANT_STABLE_MIN_HITS = 2;
   const AI_ASSISTANT_CLEAR_GRACE_MS = 5000;
-  const AI_ASSISTANT_ROTATE_MS = 5000;
   const AI_ASSISTANT_HEARTBEAT_MS_VISIBLE = 15000;
   const AI_ASSISTANT_HEARTBEAT_MS_HIDDEN = 60000;
 
@@ -84,8 +83,6 @@
     activeMessageKey: "",
     activeMessageSeverity: "info",
     activeMessageIcon: "info",
-    marqueeActive: false,
-    marqueeDurationMs: 12000,
     rotationPaused: false,
     expanded: false,
     rankingsExpanded: false,
@@ -102,9 +99,7 @@
     heartbeatKey: null,
     touchPauseUntil: 0,
     hoverPaused: false,
-    marqueeTimeout: null,
     rotationTimerHandle: null,
-    rotationNextDueAt: 0,
   };
 
   function safeNum(v, fallback = null) {
@@ -589,7 +584,7 @@
       finalized.push({ key: "fallback", text: "Monitor: Mixed signals.", severity: "info" });
     }
     state.assistantMessages = finalized;
-    if (state.activeMessageIndex >= finalized.length) state.activeMessageIndex = 0;
+    state.activeMessageIndex = 0;
     const active = finalized[state.activeMessageIndex] || { key: "none", text: "AI Assistant ready.", severity: "info" };
     state.activeMessageKey = active.key;
     state.activeMessageSeverity = active.severity;
@@ -618,30 +613,20 @@
     if (!dockMount) return;
     const compactLane = isCompactLaneMode();
     buildMessages();
-    const active = state.assistantMessages[state.activeMessageIndex] || { text: "AI Assistant ready.", severity: "info" };
+    const active = state.assistantMessages[0] || { text: "AI Assistant ready.", severity: "info" };
     const iconType = leadingIconKindFromAction(state.finalActionCode);
-    const chips = [];
-    chips.push(`Zone: ${state.activeStableZoneName || "Locating…"}`);
-    if (!compactLane && Number.isFinite(state.visibleRating)) chips.push(`Score ${Math.round(state.visibleRating)}`);
-    if (!compactLane && state.currentZoneCitywideRank) chips.push(`City #${state.currentZoneCitywideRank}`);
-    chips.push(`Here ${Math.floor((state.activeStableZoneDwellMs || 0) / 60000)}m`);
 
     dockMount.innerHTML = `
       <div class="aiAssistantWidget ${compactLane ? "aiAssistantWidget--compactLane" : ""} ${state.expanded ? "is-expanded" : ""}" id="aiAssistantWidget">
         <div class="aiAssistantMainRow">
           <div class="aiAssistantIconChip aiAssistantIconChip--${iconType}">${iconMarkup(iconType)}</div>
-          <div class="aiAssistantTickerViewport" id="aiAssistantTickerViewport">
-            <div class="aiAssistantTickerTrack" id="aiAssistantTickerTrack"><div class="aiAssistantTickerTrackInner">${String(active.text || "").replace(/dwell/gi, "stay")}</div></div>
-          </div>
+          <div class="aiAssistantMessageText" id="aiAssistantMessageText">${String(active.text || "").replace(/dwell/gi, "stay")}</div>
           <button class="aiAssistantExpandBtn" type="button" data-ai-action="toggle-expanded" aria-expanded="${state.expanded ? "true" : "false"}">${state.expanded ? "−" : "+"}</button>
         </div>
-        <div class="aiAssistantMetaRow">${chips.map((c) => `<span class="aiAssistantMetaChip">${c}</span>`).join("")}</div>
         ${state.expanded ? buildPanelHtml() : ""}
       </div>
     `;
-    applyMarqueeIfNeeded();
     clearMessageRotationTimer();
-    scheduleNextMessageRotation();
     updateAssistantDockLayout();
   }
 
@@ -661,35 +646,6 @@
       </div>
     `;
   }
-
-  function applyMarqueeIfNeeded() {
-    const viewport = document.getElementById("aiAssistantTickerViewport");
-    const track = document.getElementById("aiAssistantTickerTrack");
-    const inner = track?.querySelector(".aiAssistantTickerTrackInner");
-    if (!viewport || !track || !inner) return;
-    track.classList.remove("is-marquee");
-    inner.style.removeProperty("animation-duration");
-    if (state.marqueeTimeout) {
-      clearTimeout(state.marqueeTimeout);
-      state.marqueeTimeout = null;
-    }
-    const overflow = inner.scrollWidth - viewport.clientWidth;
-    if (overflow > 8) {
-      const duration = Math.max(10000, Math.min(22000, overflow * 18));
-      const delay = 600;
-      inner.style.animationDuration = `${duration}ms`;
-      state.marqueeActive = true;
-      state.marqueeDurationMs = duration + delay;
-      state.marqueeTimeout = setTimeout(() => {
-        track.classList.add("is-marquee");
-      }, delay);
-    } else {
-      state.marqueeActive = false;
-      state.marqueeDurationMs = 0;
-    }
-  }
-
-
 
   function updateAssistantDockLayout() {
     const dock = document.getElementById("aiAssistantDock");
@@ -750,38 +706,11 @@
     updateAssistantDockLayout();
   }
 
-  function shouldPauseRotation() {
-    if (state.expanded || state.hoverPaused) return true;
-    if (Date.now() < state.touchPauseUntil) return true;
-    return false;
-  }
-
   function clearMessageRotationTimer() {
     if (state.rotationTimerHandle) {
       clearTimeout(state.rotationTimerHandle);
       state.rotationTimerHandle = null;
     }
-    state.rotationNextDueAt = 0;
-  }
-
-  function scheduleNextMessageRotation() {
-    clearMessageRotationTimer();
-    if (!Array.isArray(state.assistantMessages) || state.assistantMessages.length < 2) return;
-    if (shouldPauseRotation()) {
-      state.rotationTimerHandle = setTimeout(() => scheduleNextMessageRotation(), 1000);
-      return;
-    }
-    const delay = state.marqueeActive ? ((state.marqueeDurationMs || 0) + 800) : AI_ASSISTANT_ROTATE_MS;
-    state.rotationNextDueAt = Date.now() + delay;
-    state.rotationTimerHandle = setTimeout(() => {
-      if (!Array.isArray(state.assistantMessages) || state.assistantMessages.length < 2) return;
-      if (shouldPauseRotation()) {
-        state.rotationTimerHandle = setTimeout(() => scheduleNextMessageRotation(), 800);
-        return;
-      }
-      state.activeMessageIndex = (state.activeMessageIndex + 1) % state.assistantMessages.length;
-      renderWidget();
-    }, delay);
   }
 
   function feedMaterialKey() {
@@ -989,7 +918,7 @@
     });
     if (dockMount) {
       dockMount.addEventListener("mouseenter", () => { state.hoverPaused = true; clearMessageRotationTimer(); });
-      dockMount.addEventListener("mouseleave", () => { state.hoverPaused = false; scheduleNextMessageRotation(); });
+      dockMount.addEventListener("mouseleave", () => { state.hoverPaused = false; });
       dockMount.addEventListener("touchstart", () => { state.touchPauseUntil = Date.now() + 4500; clearMessageRotationTimer(); }, { passive: true });
     }
   }
