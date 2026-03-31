@@ -1879,8 +1879,7 @@
       state.outlookSummaryText = "Outlook temporarily unavailable.";
       state.moveTargetOutlookSummaryText = "";
     } else {
-      const hasStableContext = !!state.activeStableZoneId && !!state.lastFrameTime;
-      state.outlookSummaryText = hasStableContext ? "Outlook temporarily unavailable." : "Outlook unavailable.";
+      state.outlookSummaryText = "Outlook unavailable.";
       state.moveTargetOutlookSummaryText = "";
     }
 
