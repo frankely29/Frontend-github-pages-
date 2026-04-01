@@ -1252,6 +1252,14 @@
     return !!currentSignal?.locationId;
   }
 
+  function isImmediateSafeDegradedStayPromotion(proposal) {
+    if (state.dataQualityMode !== "degraded") return false;
+    if (state.committedActionCode !== "MONITOR") return false;
+    if (!proposal || proposal.actionCode !== "STAY") return false;
+    if (proposal.moveTarget) return false;
+    return ["good_zone_now", "decent_rating_zone", "moving_not_worth_it"].includes(String(proposal.reasonCode || "").trim());
+  }
+
   function commitAssistantRecommendation(proposal, nowTs) {
     state.committedActionCode = proposal.actionCode;
     state.committedReasonCode = proposal.reasonCode;
@@ -1379,6 +1387,13 @@
         state.stabilityReasonText = "Current target still makes the most sense.";
         return;
       }
+    }
+
+    if (isImmediateSafeDegradedStayPromotion(proposal)) {
+      commitAssistantRecommendation(proposal, nowTs);
+      state.stabilityReasonCode = "safe_degraded_stay_promoted";
+      state.stabilityReasonText = "Safe stay fallback promoted immediately.";
+      return;
     }
 
     const bypass = shouldAssistantBypassStabilityDelay(proposal, state.activeStableFeatureSignal);
@@ -1556,8 +1571,19 @@
     return document.getElementById("aiAssistantDock")?.dataset?.aiCompactLane === "1";
   }
 
+  function isSafeDegradedStayFallback() {
+    if (state.dataQualityMode !== "degraded") return false;
+    if (state.finalActionCode !== "STAY") return false;
+    if (state.assistantMoveTarget) return false;
+    return ["good_zone_now", "decent_rating_zone", "moving_not_worth_it"].includes(String(state.recommendationReasonCode || "").trim());
+  }
+
   function buildAssistantPrimaryLine() {
-    if (state.dataQualityMode === "degraded") return "Monitor • Checking outlook.";
+    if (isSafeDegradedStayFallback()) {
+      const reasonText = state.recommendationReasonText || state.committedReasonText || state.finalActionReason;
+      return `Stay • ${humanizeAssistantReason(reasonText)}`;
+    }
+    if (state.dataQualityMode === "degraded" && state.finalActionCode === "MONITOR") return "Monitor • Checking outlook.";
     const committedAction = state.committedActionCode || "MONITOR";
     const committedReason = state.committedReasonText || state.recommendationReasonText || state.finalActionReason;
     const action = humanActionLabel(committedAction);
@@ -1572,7 +1598,8 @@
     const committedAction = state.committedActionCode || "MONITOR";
     const committedTarget = state.committedMoveTarget || state.assistantMoveTarget || null;
     const weakDataMode = state.dataQualityMode === "partial" || state.dataQualityMode === "degraded";
-    if (state.dataQualityMode === "degraded") return "Waiting for clearer signal";
+    if (isSafeDegradedStayFallback()) return "Stay here for now";
+    if (state.dataQualityMode === "degraded" && state.finalActionCode === "MONITOR") return "Waiting for clearer signal";
     if (weakDataMode && (!committedTarget || (safeNum(committedTarget?.etaMinutes, Infinity) || Infinity) > AI_ASSISTANT_NEAR_TARGET_MAX_ETA_MIN)) {
       return committedAction === "STAY" ? "Stay here for now" : "Waiting for clearer signal";
     }
@@ -1780,7 +1807,12 @@
 
   function mirrorRecommendLine() {
     if (!recommendLine) return;
-    if (state.dataQualityMode === "degraded") {
+    if (isSafeDegradedStayFallback()) {
+      const reasonText = state.recommendationReasonText || state.committedReasonText || state.finalActionReason;
+      recommendLine.textContent = `AI Assistant: Stay • ${humanizeAssistantReason(reasonText)} • Stay here for now`;
+      return;
+    }
+    if (state.dataQualityMode === "degraded" && state.finalActionCode === "MONITOR") {
       recommendLine.textContent = "AI Assistant: Monitor • Checking outlook. • Waiting for clearer signal";
       return;
     }
