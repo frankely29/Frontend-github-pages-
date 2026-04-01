@@ -66,6 +66,13 @@
     bestNearbyTrapEscape: null,
     bestNearbyLongTrip: null,
     arrivalAwareCandidateShortlist: [],
+    shortlistCandidateIds: [],
+    shortlistCandidateZones: [],
+    shortlistCandidateEtas: [],
+    sameBoroughNearCandidateCount: 0,
+    crossBoroughNearCandidateCount: 0,
+    farCandidateCount: 0,
+    farCandidatesRejectedForDistance: 0,
     bestArrivalAwareCandidate: null,
     bestCandidateNotWorthMoving: null,
     assistantMoveTarget: null,
@@ -112,6 +119,8 @@
     assistantAlertKey: "",
     recommendationReasonCode: "collecting_context",
     recommendationReasonText: "Collecting more context.",
+    chosenTargetGroup: "none",
+    chosenTargetReasoningMode: "collecting_context",
     recommendationWorthMoving: false,
     proposedActionCode: null,
     proposedReasonCode: null,
@@ -341,7 +350,8 @@
 
   function buildArrivalAwareCandidateShortlist(frame, currentSignal) {
     if (!currentSignal?.locationId) return [];
-    const shortlist = [];
+    const allCandidates = [];
+    const currentBorough = normalizeAssistantBoroughName(currentSignal?.borough);
     for (const feature of (frame?.polygons?.features || [])) {
       const signal = buildAssistantFeatureSignal(feature);
       if (!signal?.locationId || signal.locationId === currentSignal.locationId) continue;
@@ -351,10 +361,44 @@
       const { distanceMiles, etaMinutes } = estimateAssistantTravelMinutes(currentSignal, signal);
       if (!Number.isFinite(distanceMiles) || distanceMiles > 5.0) continue;
       const quickScore = signal.visibleRating - (distanceMiles * 3.0);
-      shortlist.push({ signal, distanceMiles, etaMinutes, quickScore });
+      const isSameBorough = normalizeAssistantBoroughName(signal?.borough) === currentBorough;
+      allCandidates.push({ signal, distanceMiles, etaMinutes, quickScore, isSameBorough });
     }
-    shortlist.sort((a, b) => b.quickScore - a.quickScore);
-    return shortlist.slice(0, 8);
+    const baseTopByQuickScore = allCandidates.slice().sort((a, b) => b.quickScore - a.quickScore).slice(0, 8);
+    const guaranteedNearCandidates = allCandidates
+      .filter((item) =>
+        (safeNum(item?.etaMinutes, Infinity) || Infinity) <= 12
+        && (safeNum(item?.distanceMiles, Infinity) || Infinity) <= 3.5
+        && (safeNum(item?.signal?.visibleRating, -Infinity) || -Infinity) >= ((safeNum(currentSignal?.visibleRating, 0) || 0) + 3)
+      )
+      .sort((a, b) => {
+        if (a.etaMinutes !== b.etaMinutes) return a.etaMinutes - b.etaMinutes;
+        return (safeNum(b?.signal?.visibleRating, 0) || 0) - (safeNum(a?.signal?.visibleRating, 0) || 0);
+      })
+      .slice(0, 4);
+    const guaranteedSameBoroughNearCandidates = allCandidates
+      .filter((item) =>
+        !!item?.isSameBorough
+        && (safeNum(item?.etaMinutes, Infinity) || Infinity) <= 12
+        && (safeNum(item?.signal?.visibleRating, -Infinity) || -Infinity) >= ((safeNum(currentSignal?.visibleRating, 0) || 0) + 2)
+      )
+      .sort((a, b) => {
+        if (a.etaMinutes !== b.etaMinutes) return a.etaMinutes - b.etaMinutes;
+        return (safeNum(b?.signal?.visibleRating, 0) || 0) - (safeNum(a?.signal?.visibleRating, 0) || 0);
+      })
+      .slice(0, 4);
+    const mergedByLocationId = new Map();
+    [baseTopByQuickScore, guaranteedNearCandidates, guaranteedSameBoroughNearCandidates].forEach((bucket) => {
+      (bucket || []).forEach((candidate) => {
+        const id = String(candidate?.signal?.locationId || "").trim();
+        if (!id) return;
+        const existing = mergedByLocationId.get(id);
+        if (!existing || (safeNum(candidate?.quickScore, -Infinity) || -Infinity) > (safeNum(existing?.quickScore, -Infinity) || -Infinity)) {
+          mergedByLocationId.set(id, candidate);
+        }
+      });
+    });
+    return [...mergedByLocationId.values()].sort((a, b) => b.quickScore - a.quickScore).slice(0, 12);
   }
 
   function computeRankings(frame, activeSignal) {
@@ -823,6 +867,47 @@
     return (safeNum(b?.targetMetrics?.targetArrivalProjectedRating, 0) || 0) - (safeNum(a?.targetMetrics?.targetArrivalProjectedRating, 0) || 0);
   }
 
+  function shouldNearTargetDominate(bestNearEval, farEval, currentSignal) {
+    if (!bestNearEval || !farEval) return { dominate: false, code: "", reason: "" };
+    const farEta = safeNum(farEval?.etaMinutes, 0) || 0;
+    const nearEta = safeNum(bestNearEval?.etaMinutes, 0) || 0;
+    const farEdge = safeNum(farEval?.netMoveEdge, -Infinity) || -Infinity;
+    const nearEdge = safeNum(bestNearEval?.netMoveEdge, -Infinity) || -Infinity;
+    const farPayback = safeNum(farEval?.targetPaybackMetrics?.paybackAvgRating, 0) || 0;
+    const nearPayback = safeNum(bestNearEval?.targetPaybackMetrics?.paybackAvgRating, 0) || 0;
+    const farCost = safeNum(farEval?.deadheadCost?.totalDeadheadCost, Infinity) || Infinity;
+    const nearCost = safeNum(bestNearEval?.deadheadCost?.totalDeadheadCost, Infinity) || Infinity;
+    const currentCls = classifyAssistantSignal(currentSignal || {});
+    const metrics = bestNearEval?.currentMetrics || farEval?.currentMetrics || {};
+    const currentCollapsing = !!currentCls?.shortTrap
+      || !!metrics?.stayTrapAtArrival
+      || (!!metrics?.staySlowAtArrival && (safeNum(metrics?.stayWindowMinRating, 100) || 100) < 46)
+      || (safeNum(metrics?.stayWindowTrendDelta, 0) || 0) <= -5;
+    const nearIsSameBorough = !!bestNearEval?.isSameBorough;
+    const nearIsWorthwhile = !!bestNearEval?.isWorthMoving;
+    const farCostJustified = farCost <= (nearCost + 0.8);
+
+    if (nearIsWorthwhile && farEta > 20) {
+      const canOverride = currentCollapsing
+        && farEdge >= (nearEdge + 6.0)
+        && farPayback >= (nearPayback + 4.0);
+      if (!canOverride) return { dominate: true, code: "target_too_far_for_edge", reason: "Target is too far for the edge" };
+    }
+    if (nearIsWorthwhile && nearIsSameBorough && nearEta <= 12 && farEta > 16) {
+      const canOverride = farEdge >= (nearEdge + 5.5) && farPayback >= (nearPayback + 3.5);
+      if (!canOverride) return { dominate: true, code: "same_borough_target_preferred", reason: "Closer same-borough target makes more sense" };
+    }
+    if (nearIsWorthwhile && nearEta <= 10) {
+      const canOverride = farEdge >= (nearEdge + 5.0) && farCostJustified && currentCollapsing;
+      if (!canOverride) return { dominate: true, code: "closer_strong_target_available", reason: "Closer strong zone available" };
+    }
+    if (nearIsWorthwhile && nearEdge >= (safeNum(bestNearEval?.moveWorthThreshold, Infinity) || Infinity)) {
+      const canOverride = farEdge >= (nearEdge + 5.0) && farPayback >= (nearPayback + 3.0) && farCostJustified && currentCollapsing;
+      if (!canOverride) return { dominate: true, code: "far_target_not_worth_time", reason: "Far target is not worth the time" };
+    }
+    return { dominate: false, code: "", reason: "" };
+  }
+
   function isFarTargetStillWorthIt(bestNearEval, farEval, currentSignal, currentMetrics) {
     const eta = safeNum(farEval?.etaMinutes, 0) || 0;
     const nearExists = !!bestNearEval;
@@ -839,6 +924,11 @@
     const nearEdge = safeNum(bestNearEval?.netMoveEdge, -Infinity) || -Infinity;
     const farPayback = safeNum(farEval?.targetPaybackMetrics?.paybackAvgRating, 0) || 0;
     const nearPayback = safeNum(bestNearEval?.targetPaybackMetrics?.paybackAvgRating, 0) || 0;
+    const nearDominance = shouldNearTargetDominate(bestNearEval, farEval, currentSignal);
+
+    if (nearDominance.dominate) {
+      return { ok: false, code: nearDominance.code || "far_target_not_worth_time", reason: nearDominance.reason || "Far target is not worth the time" };
+    }
 
     if (eta > AI_ASSISTANT_FAR_TARGET_HARD_CAP_MIN) {
       if (nearExists) return { ok: false, code: "same_borough_target_preferred", reason: "Closer same-borough target makes more sense" };
@@ -889,6 +979,7 @@
     const bestNearEval = sameBoroughNearCandidates[0] || crossBoroughNearCandidates[0] || null;
 
     const allowedFarCandidates = [];
+    let farCandidatesRejectedForDistance = 0;
     farCandidates.forEach((farEval) => {
       const decision = isFarTargetStillWorthIt(bestNearEval, farEval, currentSignal, farEval?.currentMetrics);
       if (decision.ok) {
@@ -897,8 +988,14 @@
       }
       farEval.rejectionCode = decision.code || "far_target_not_worth_time";
       farEval.rejectionReasonText = decision.reason || "Far target is not worth the time";
+      if (["closer_strong_target_available", "same_borough_target_preferred", "target_too_far_for_edge", "far_target_not_worth_time"].includes(farEval.rejectionCode)) {
+        farCandidatesRejectedForDistance += 1;
+      }
     });
-    const bestWorthwhileTarget = sameBoroughNearCandidates[0] || crossBoroughNearCandidates[0] || allowedFarCandidates.sort(sortPracticalTargetOrder)[0] || null;
+    const bestSameBoroughNear = sameBoroughNearCandidates[0] || null;
+    const bestCrossBoroughNear = crossBoroughNearCandidates[0] || null;
+    const bestFarAllowed = allowedFarCandidates.sort(sortPracticalTargetOrder)[0] || null;
+    const bestWorthwhileTarget = bestSameBoroughNear || bestCrossBoroughNear || bestFarAllowed || null;
 
     const bestRejectedTarget =
       sorted.find((it) => !!it.rejectionCode)
@@ -916,6 +1013,12 @@
       crossBoroughNearCandidates,
       farCandidatesOverSoftCap,
       farCandidatesOverHardCap,
+      farCandidateCount: farCandidates.length,
+      farCandidatesRejectedForDistance,
+      chosenTargetGroup: bestSameBoroughNear ? "same_borough_near" : (bestCrossBoroughNear ? "near" : (bestFarAllowed ? "far_exception" : "none")),
+      chosenTargetReasoningMode: bestSameBoroughNear || bestCrossBoroughNear
+        ? "practical_near_preference"
+        : (bestFarAllowed ? "far_target_exception" : "stay_not_worth_moving"),
     };
   }
 
@@ -1594,6 +1697,15 @@
     return `<ol class="aiAssistantList">${(items || []).map((it) => `<li>${it.zoneName} (${Math.round(it.visibleRating || 0)})</li>`).join("")}</ol>`;
   }
 
+  function compactTargetWhyLine() {
+    if (state.chosenTargetGroup === "same_borough_near") return "Why this target: same-borough practical move";
+    if (state.chosenTargetGroup === "near") return "Why this target: closer strong zone";
+    if (state.chosenTargetGroup === "far_exception") return "Why this target: far target exception";
+    if (state.chosenTargetReasoningMode === "stay_not_worth_moving") return "Why staying: moving is not worth the time";
+    if (state.targetViabilityRejectReasonText) return `Why staying: ${state.targetViabilityRejectReasonText}`;
+    return "Why staying: moving is not worth the time";
+  }
+
   function buildPanelHtml() {
     return `
       <div class="aiAssistantPanel">
@@ -1602,7 +1714,7 @@
         <section class="aiAssistantSection"><strong>Outlook</strong><div>${state.outlookSummaryText}</div><div>${state.moveTargetOutlookSummaryText || ""}</div>${(state.outlookStatus || state.outlookLastErrorCode) ? `<div><small>Status: ${state.outlookStatus || "idle"}${state.outlookLastErrorCode ? ` (${state.outlookLastErrorCode})` : ""}</small></div>` : ""}</section>
         <section class="aiAssistantSection"><strong>Rankings</strong><div>Best now: ${state.citywideBestNow?.zoneName || "—"} • Worst now: ${state.citywideWorstNow?.zoneName || "—"}</div>${buildRankList(state.citywideTop10Best)}${buildRankList(state.boroughTop5Best)}</section>
         ${state.assistantMoveTarget ? `<section class="aiAssistantSection"><strong>Move Target</strong><div>${state.assistantMoveTarget.zoneName} • ${Math.round(state.assistantMoveTarget.etaMinutes || 0)} min • ${state.assistantMoveTarget.distanceMiles.toFixed(1)} mi</div></section>` : ""}
-        ${(Number.isFinite(state.stayScenarioValue) || Number.isFinite(state.moveScenarioValue)) ? `<section class="aiAssistantSection"><strong>Move Decision</strong><div>Stay scenario: ${(state.stayScenarioValue || 0).toFixed(1)}</div><div>Move scenario: ${(state.moveScenarioValue || 0).toFixed(1)}</div><div>ETA: ${Math.round(state.etaMinutes || 0)} min</div><div>Deadhead cost: ${(state.totalDeadheadCost || 0).toFixed(1)}</div><div>Confidence penalty: ${(state.moveConfidencePenalty || 0).toFixed(1)}</div><div>Net move edge: ${(state.netMoveEdge || 0) >= 0 ? "+" : ""}${(state.netMoveEdge || 0).toFixed(1)}</div><div>Worth-moving threshold: ${(state.moveWorthThreshold || 0).toFixed(1)}</div></section>` : ""}
+        ${(Number.isFinite(state.stayScenarioValue) || Number.isFinite(state.moveScenarioValue)) ? `<section class="aiAssistantSection"><strong>Move Decision</strong><div>Stay scenario: ${(state.stayScenarioValue || 0).toFixed(1)}</div><div>Move scenario: ${(state.moveScenarioValue || 0).toFixed(1)}</div><div>ETA: ${Math.round(state.etaMinutes || 0)} min</div><div>Deadhead cost: ${(state.totalDeadheadCost || 0).toFixed(1)}</div><div>Confidence penalty: ${(state.moveConfidencePenalty || 0).toFixed(1)}</div><div>Net move edge: ${(state.netMoveEdge || 0) >= 0 ? "+" : ""}${(state.netMoveEdge || 0).toFixed(1)}</div><div>Worth-moving threshold: ${(state.moveWorthThreshold || 0).toFixed(1)}</div><div><small>${compactTargetWhyLine()}</small></div></section>` : ""}
         <section class="aiAssistantSection"><strong>Recommendation Stability</strong><div>Proposed: ${humanActionLabel(state.proposedActionCode)} • ${state.proposedReasonText || "—"}</div><div>Committed: ${humanActionLabel(state.committedActionCode)} • ${state.committedReasonText || "—"}</div><div>Confidence: ${Math.round(state.recommendationConfidenceScore || 0)} (${state.recommendationConfidenceLevel || "low"})</div><div>Stable since: ${state.committedSinceTs ? new Date(state.committedSinceTs).toLocaleTimeString() : "—"}</div><div>Switch cooldown until: ${state.recommendationSwitchCooldownUntilTs ? new Date(state.recommendationSwitchCooldownUntilTs).toLocaleTimeString() : "—"}</div><div>Minimum hold until: ${state.recommendationMinHoldUntilTs ? new Date(state.recommendationMinHoldUntilTs).toLocaleTimeString() : "—"}</div><div>Stability reason: ${state.stabilityReasonText || "Committed recommendation is stable."}</div></section>
         <section class="aiAssistantSection"><small>Assistant uses the same visible Team Joseo score path the map is showing.</small></section>
       </div>
@@ -1734,6 +1846,13 @@
     state.bestArrivalAwareCandidate = null;
     state.bestCandidateNotWorthMoving = null;
     state.arrivalAwareCandidateShortlist = [];
+    state.shortlistCandidateIds = [];
+    state.shortlistCandidateZones = [];
+    state.shortlistCandidateEtas = [];
+    state.sameBoroughNearCandidateCount = 0;
+    state.crossBoroughNearCandidateCount = 0;
+    state.farCandidateCount = 0;
+    state.farCandidatesRejectedForDistance = 0;
     state.currentZoneOutlook = null;
     state.moveTargetOutlook = null;
     state.outlookSummaryText = "Outlook unavailable.";
@@ -1790,6 +1909,8 @@
     state.stabilityReasonText = "";
     state.recommendationReasonCode = "collecting_context";
     state.recommendationReasonText = "Collecting more context.";
+    state.chosenTargetGroup = "none";
+    state.chosenTargetReasoningMode = "collecting_context";
     state.baseActionCode = "MONITOR";
     state.baseActionReason = "Collecting more context.";
     state.finalActionCode = "MONITOR";
@@ -1872,6 +1993,9 @@
     state.bestNearbyLongTrip = nearby.long_trip;
     const shortlist = buildArrivalAwareCandidateShortlist(liveFrame, activeSignal);
     state.arrivalAwareCandidateShortlist = shortlist;
+    state.shortlistCandidateIds = shortlist.map((c) => String(c?.signal?.locationId || "").trim()).filter(Boolean);
+    state.shortlistCandidateZones = shortlist.map((c) => String(c?.signal?.zoneName || "").trim() || "Unknown zone");
+    state.shortlistCandidateEtas = shortlist.map((c) => Math.round(safeNum(c?.etaMinutes, 0) || 0));
 
     const cls = activeSignal ? classifyAssistantSignal(activeSignal) : null;
     const base = computeBaseAction(activeSignal, cls);
@@ -1923,6 +2047,12 @@
     const picked = chooseBestEconomicsAwareTarget(evaluated, activeSignal);
     const bestWorthwhile = picked.bestWorthwhileTarget;
     const bestNotWorth = picked.bestRejectedTarget;
+    state.chosenTargetGroup = picked.chosenTargetGroup || "none";
+    state.chosenTargetReasoningMode = picked.chosenTargetReasoningMode || "collecting_context";
+    state.sameBoroughNearCandidateCount = Array.isArray(picked.sameBoroughNearCandidates) ? picked.sameBoroughNearCandidates.length : 0;
+    state.crossBoroughNearCandidateCount = Array.isArray(picked.crossBoroughNearCandidates) ? picked.crossBoroughNearCandidates.length : 0;
+    state.farCandidateCount = safeNum(picked.farCandidateCount, 0) || 0;
+    state.farCandidatesRejectedForDistance = safeNum(picked.farCandidatesRejectedForDistance, 0) || 0;
     state.bestArrivalAwareCandidate = bestWorthwhile;
     state.bestCandidateNotWorthMoving = bestNotWorth;
 
