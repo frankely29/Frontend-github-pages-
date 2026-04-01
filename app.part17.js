@@ -13,6 +13,12 @@
   const AI_ASSISTANT_RECOMMENDATION_SWITCH_COOLDOWN_MS = 15000;
   const AI_ASSISTANT_RECOMMENDATION_MIN_HOLD_MS = 12000;
   const AI_ASSISTANT_EMERGENCY_BYPASS_EDGE = 6.0;
+  const AI_ASSISTANT_NEAR_TARGET_MAX_ETA_MIN = 12;
+  const AI_ASSISTANT_FAR_TARGET_SOFT_CAP_MIN = 16;
+  const AI_ASSISTANT_FAR_TARGET_HARD_CAP_MIN = 20;
+  const AI_ASSISTANT_NEAR_TARGET_EDGE_BUFFER = 2.5;
+  const AI_ASSISTANT_FAR_TARGET_EXTRA_EDGE_REQUIRED = 4.0;
+  const AI_ASSISTANT_SAME_BOROUGH_PREFERENCE_BONUS = 1.5;
 
   const runtime = window.FrontendRuntime || null;
   const runtimePolling = runtime?.polling || null;
@@ -805,20 +811,108 @@
     return threshold;
   }
 
-  function chooseBestEconomicsAwareTarget(candidateEvaluations) {
-    const sorted = (Array.isArray(candidateEvaluations) ? candidateEvaluations : []).slice().sort((a, b) => {
-      if (b.netMoveEdge !== a.netMoveEdge) return b.netMoveEdge - a.netMoveEdge;
-      const aPayback = safeNum(a?.targetPaybackMetrics?.paybackAvgRating, 0) || 0;
-      const bPayback = safeNum(b?.targetPaybackMetrics?.paybackAvgRating, 0) || 0;
-      if (bPayback !== aPayback) return bPayback - aPayback;
-      if (a.etaMinutes !== b.etaMinutes) return a.etaMinutes - b.etaMinutes;
-      const aCost = safeNum(a?.deadheadCost?.totalDeadheadCost, Infinity);
-      const bCost = safeNum(b?.deadheadCost?.totalDeadheadCost, Infinity);
-      if (aCost !== bCost) return aCost - bCost;
-      return (safeNum(b?.targetMetrics?.targetArrivalProjectedRating, 0) || 0) - (safeNum(a?.targetMetrics?.targetArrivalProjectedRating, 0) || 0);
-    });
+  function sortPracticalTargetOrder(a, b) {
+    if (b.netMoveEdge !== a.netMoveEdge) return b.netMoveEdge - a.netMoveEdge;
+    const aPayback = safeNum(a?.targetPaybackMetrics?.paybackAvgRating, 0) || 0;
+    const bPayback = safeNum(b?.targetPaybackMetrics?.paybackAvgRating, 0) || 0;
+    if (bPayback !== aPayback) return bPayback - aPayback;
+    if (a.etaMinutes !== b.etaMinutes) return a.etaMinutes - b.etaMinutes;
+    const aCost = safeNum(a?.deadheadCost?.totalDeadheadCost, Infinity);
+    const bCost = safeNum(b?.deadheadCost?.totalDeadheadCost, Infinity);
+    if (aCost !== bCost) return aCost - bCost;
+    return (safeNum(b?.targetMetrics?.targetArrivalProjectedRating, 0) || 0) - (safeNum(a?.targetMetrics?.targetArrivalProjectedRating, 0) || 0);
+  }
+
+  function isFarTargetStillWorthIt(bestNearEval, farEval, currentSignal, currentMetrics) {
+    const eta = safeNum(farEval?.etaMinutes, 0) || 0;
+    const nearExists = !!bestNearEval;
+    const nearIsSameBorough = !!bestNearEval?.isSameBorough;
+    const nearIsWorthwhile = nearExists && !!bestNearEval?.isWorthMoving;
+    const currentCls = classifyAssistantSignal(currentSignal || {});
+    const metrics = currentMetrics || farEval?.currentMetrics || {};
+    const currentCollapsing = !!currentCls?.shortTrap
+      || !!metrics?.stayTrapAtArrival
+      || (!!metrics?.staySlowAtArrival && (safeNum(metrics?.stayWindowMinRating, 100) || 100) < 46)
+      || (safeNum(metrics?.stayWindowTrendDelta, 0) || 0) <= -5;
+    const farEdge = safeNum(farEval?.netMoveEdge, -Infinity) || -Infinity;
+    const farThreshold = safeNum(farEval?.moveWorthThreshold, Infinity) || Infinity;
+    const nearEdge = safeNum(bestNearEval?.netMoveEdge, -Infinity) || -Infinity;
+    const farPayback = safeNum(farEval?.targetPaybackMetrics?.paybackAvgRating, 0) || 0;
+    const nearPayback = safeNum(bestNearEval?.targetPaybackMetrics?.paybackAvgRating, 0) || 0;
+
+    if (eta > AI_ASSISTANT_FAR_TARGET_HARD_CAP_MIN) {
+      if (nearExists) return { ok: false, code: "same_borough_target_preferred", reason: "Closer same-borough target makes more sense" };
+      if (!currentCollapsing || farEdge < (farThreshold + 6.0)) {
+        return { ok: false, code: "target_too_far_for_edge", reason: "Target is too far for the edge" };
+      }
+      return { ok: true };
+    }
+
+    if (eta > AI_ASSISTANT_FAR_TARGET_SOFT_CAP_MIN && nearExists) {
+      let requiredEdgeDelta = AI_ASSISTANT_FAR_TARGET_EXTRA_EDGE_REQUIRED;
+      if (nearIsSameBorough) requiredEdgeDelta += AI_ASSISTANT_SAME_BOROUGH_PREFERENCE_BONUS;
+      if (nearIsWorthwhile) requiredEdgeDelta += AI_ASSISTANT_NEAR_TARGET_EDGE_BUFFER;
+      const dominatesOnEdge = farEdge >= (nearEdge + requiredEdgeDelta);
+      const dominatesOnPayback = farPayback >= (nearPayback + 3.0);
+      if (!dominatesOnEdge || !dominatesOnPayback) {
+        return { ok: false, code: nearIsSameBorough ? "same_borough_target_preferred" : "closer_strong_target_available", reason: nearIsSameBorough ? "Closer same-borough target makes more sense" : "Closer strong zone available" };
+      }
+    }
+
+    if (nearIsWorthwhile) {
+      const requiredNearBeat = nearIsSameBorough
+        ? (AI_ASSISTANT_FAR_TARGET_EXTRA_EDGE_REQUIRED + AI_ASSISTANT_SAME_BOROUGH_PREFERENCE_BONUS)
+        : AI_ASSISTANT_FAR_TARGET_EXTRA_EDGE_REQUIRED;
+      if (farEdge < (nearEdge + requiredNearBeat)) {
+        return { ok: false, code: nearIsSameBorough ? "same_borough_target_preferred" : "closer_strong_target_available", reason: nearIsSameBorough ? "Closer same-borough target makes more sense" : "Closer strong zone available" };
+      }
+    }
+
+    return { ok: true };
+  }
+
+  function chooseBestEconomicsAwareTarget(candidateEvaluations, currentSignal) {
+    const sorted = (Array.isArray(candidateEvaluations) ? candidateEvaluations : []).slice().sort(sortPracticalTargetOrder);
     const worthwhile = sorted.filter((it) => !!it.viability?.viable && (safeNum(it.netMoveEdge, -Infinity) || -Infinity) >= (safeNum(it.moveWorthThreshold, Infinity) || Infinity));
-    return { bestWorthwhileTarget: worthwhile[0] || null, bestRejectedTarget: sorted[0] || null };
+    worthwhile.forEach((item) => {
+      item.isNearTarget = (safeNum(item?.etaMinutes, Infinity) || Infinity) <= AI_ASSISTANT_NEAR_TARGET_MAX_ETA_MIN;
+      item.isSameBorough = normalizeAssistantBoroughName(item?.candidateSignal?.borough) === normalizeAssistantBoroughName(currentSignal?.borough);
+      item.rejectionCode = "";
+      item.rejectionReasonText = "";
+    });
+    const nearCandidates = worthwhile.filter((it) => it.isNearTarget);
+    const sameBoroughNearCandidates = nearCandidates.filter((it) => it.isSameBorough).sort(sortPracticalTargetOrder);
+    const crossBoroughNearCandidates = nearCandidates.filter((it) => !it.isSameBorough).sort(sortPracticalTargetOrder);
+    const farCandidates = worthwhile.filter((it) => !it.isNearTarget).sort(sortPracticalTargetOrder);
+    const farCandidatesOverSoftCap = farCandidates.filter((it) => (safeNum(it?.etaMinutes, 0) || 0) > AI_ASSISTANT_FAR_TARGET_SOFT_CAP_MIN);
+    const farCandidatesOverHardCap = farCandidates.filter((it) => (safeNum(it?.etaMinutes, 0) || 0) > AI_ASSISTANT_FAR_TARGET_HARD_CAP_MIN);
+    const bestNearEval = sameBoroughNearCandidates[0] || crossBoroughNearCandidates[0] || null;
+
+    const allowedFarCandidates = [];
+    farCandidates.forEach((farEval) => {
+      const decision = isFarTargetStillWorthIt(bestNearEval, farEval, currentSignal, farEval?.currentMetrics);
+      if (decision.ok) {
+        allowedFarCandidates.push(farEval);
+        return;
+      }
+      farEval.rejectionCode = decision.code || "far_target_not_worth_time";
+      farEval.rejectionReasonText = decision.reason || "Far target is not worth the time";
+    });
+    const bestWorthwhileTarget = sameBoroughNearCandidates[0] || crossBoroughNearCandidates[0] || allowedFarCandidates.sort(sortPracticalTargetOrder)[0] || null;
+
+    const bestRejectedTarget = sorted.find((it) => !it.isWorthMoving || !it.viability?.viable || !!it.rejectionCode) || sorted[0] || null;
+    if (bestRejectedTarget && !bestRejectedTarget.rejectionCode && bestRejectedTarget.isWorthMoving === false) {
+      bestRejectedTarget.rejectionCode = "far_target_not_worth_time";
+      bestRejectedTarget.rejectionReasonText = "Far target is not worth the time";
+    }
+    return {
+      bestWorthwhileTarget,
+      bestRejectedTarget,
+      sameBoroughNearCandidates,
+      crossBoroughNearCandidates,
+      farCandidatesOverSoftCap,
+      farCandidatesOverHardCap,
+    };
   }
 
   function deriveNoWasteStayDecision(currentSignal, bestWorthwhileTarget, bestRejectedTarget, currentMetrics, currentTravelMetrics) {
@@ -1130,8 +1224,13 @@
         if (err?.name === "AbortError") {
           const sameKeyStillActive = state.outlookInFlightKey === key;
           state.outlookStatus = sameKeyStillActive ? "loading" : "idle";
-          state.outlookLastErrorCode = "aborted";
-          state.outlookLastErrorMessage = "Outlook request restarted.";
+          if (sameKeyStillActive) {
+            state.outlookLastErrorCode = "";
+            state.outlookLastErrorMessage = "";
+          } else {
+            state.outlookLastErrorCode = "aborted";
+            state.outlookLastErrorMessage = "Outlook request restarted.";
+          }
           return null;
         }
         state.outlookStatus = "error";
@@ -1816,7 +1915,7 @@
       evaluation.isWorthMoving = !!evaluation.viability?.viable && evaluation.netMoveEdge >= evaluation.moveWorthThreshold;
       evaluated.push(evaluation);
     }
-    const picked = chooseBestEconomicsAwareTarget(evaluated);
+    const picked = chooseBestEconomicsAwareTarget(evaluated, activeSignal);
     const bestWorthwhile = picked.bestWorthwhileTarget;
     const bestNotWorth = picked.bestRejectedTarget;
     state.bestArrivalAwareCandidate = bestWorthwhile;
@@ -1843,8 +1942,8 @@
     state.netMoveEdge = selectedForReason?.netMoveEdge ?? null;
     state.moveWorthThreshold = selectedForReason?.moveWorthThreshold ?? null;
     state.targetViableOnArrival = selectedForReason?.viability?.viable ?? null;
-    state.targetViabilityRejectCode = selectedForReason?.viability?.viabilityRejectCode ?? null;
-    state.targetViabilityRejectReasonText = selectedForReason?.viability?.viabilityRejectReasonText ?? "";
+    state.targetViabilityRejectCode = selectedForReason?.viability?.viabilityRejectCode ?? selectedForReason?.rejectionCode ?? null;
+    state.targetViabilityRejectReasonText = selectedForReason?.viability?.viabilityRejectReasonText ?? selectedForReason?.rejectionReasonText ?? "";
 
     const proposal = deriveProposedRecommendation(
       activeSignal,
@@ -1878,8 +1977,11 @@
     } else if (state.outlookStatus === "error") {
       state.outlookSummaryText = "Outlook temporarily unavailable.";
       state.moveTargetOutlookSummaryText = "";
-    } else {
+    } else if (!state.activeStableZoneId || !state.lastFrameTime) {
       state.outlookSummaryText = "Outlook unavailable.";
+      state.moveTargetOutlookSummaryText = "";
+    } else {
+      state.outlookSummaryText = "Outlook is mixed.";
       state.moveTargetOutlookSummaryText = "";
     }
 
