@@ -1788,7 +1788,10 @@
         if (found) preferred.push(found);
       }
       finalized = preferred.length ? preferred : uniq.slice(0, 1);
-      if (state.dataQualityMode === "degraded") {
+      if (isSafeDegradedStayFallback()) {
+        const reasonText = state.recommendationReasonText || state.committedReasonText || state.finalActionReason;
+        finalized = [{ key: "action", text: `Stay • ${humanizeAssistantReason(reasonText)}`, severity: "positive" }];
+      } else if (state.dataQualityMode === "degraded" && state.finalActionCode === "MONITOR") {
         finalized = [{ key: "action", text: "Monitor • Checking outlook.", severity: "info" }];
       } else if (state.dataQualityMode === "partial" && !state.assistantMoveTarget) {
         finalized = [{ key: "action", text: "Stay • Moving is not worth the time", severity: "caution" }];
