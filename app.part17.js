@@ -1134,6 +1134,12 @@
       && (sameBorough || obviouslySuperior);
 
     if (dataQualityMode === "degraded" && !strongNearTarget) {
+      if (currentRating >= 58) {
+        return { actionCode: "STAY", reasonCode: "good_zone_now", reasonText: "Good zone right now", worthMoving: false };
+      }
+      if (currentRating >= 45) {
+        return { actionCode: "STAY", reasonCode: "decent_rating_zone", reasonText: "Decent rating zone", worthMoving: false };
+      }
       return { actionCode: "MONITOR", reasonCode: "checking_outlook", reasonText: "Checking outlook.", worthMoving: false };
     }
     if (dataQualityMode === "partial" && !strongNearTarget && currentRating >= 45) {
