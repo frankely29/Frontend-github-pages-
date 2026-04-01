@@ -900,7 +900,11 @@
     });
     const bestWorthwhileTarget = sameBoroughNearCandidates[0] || crossBoroughNearCandidates[0] || allowedFarCandidates.sort(sortPracticalTargetOrder)[0] || null;
 
-    const bestRejectedTarget = sorted.find((it) => !it.isWorthMoving || !it.viability?.viable || !!it.rejectionCode) || sorted[0] || null;
+    const bestRejectedTarget =
+      sorted.find((it) => !!it.rejectionCode)
+      || sorted.find((it) => !it.isWorthMoving || !it.viability?.viable)
+      || sorted[0]
+      || null;
     if (bestRejectedTarget && !bestRejectedTarget.rejectionCode && bestRejectedTarget.isWorthMoving === false) {
       bestRejectedTarget.rejectionCode = "far_target_not_worth_time";
       bestRejectedTarget.rejectionReasonText = "Far target is not worth the time";
@@ -1185,8 +1189,9 @@
 
   async function fetchOutlook(frame, locationIds, visibleSource) {
     const frameTime = frameTimeIso(frame);
-    if (!frameTime || !locationIds.length) return null;
-    const key = buildOutlookCacheKey(frameTime, locationIds, visibleSource);
+    const ids = Array.isArray(locationIds) ? locationIds.filter(Boolean) : [];
+    if (!frameTime || !ids.length) return null;
+    const key = buildOutlookCacheKey(frameTime, ids, visibleSource);
     state.outlookRequestKey = key;
     if (state.outlookCache.has(key)) {
       state.outlookStatus = "ready";
@@ -1207,7 +1212,7 @@
     state.outlookLastErrorCode = "";
     state.outlookLastErrorMessage = "";
     const apiBase = String(window.API_BASE || window.__TLC_RUNTIME_CONFIG__?.apiBase || "").trim().replace(/\/+$/, "");
-    const url = `${apiBase}/assistant/outlook?frame_time=${encodeURIComponent(frameTime)}&location_ids=${encodeURIComponent([...locationIds].sort().join(","))}`;
+    const url = `${apiBase}/assistant/outlook?frame_time=${encodeURIComponent(frameTime)}&location_ids=${encodeURIComponent([...ids].sort().join(","))}`;
     const fetchPromise = (async () => {
       try {
         const data = await (internals.fetchJSON?.(url, { signal: ac.signal }) || fetch(url, { signal: ac.signal }).then((r) => r.json()));
