@@ -21,7 +21,7 @@
 
   <script>
     window.__TLC_FRONTEND_BUILD_ID__ = "__TLC_FRONTEND_BUILD_ID__";
-    window.__TLC_FRONTEND_STATIC_ASSET_REV__ = "phase-c-frontend-assistant-2026-04-01-1";
+    window.__TLC_FRONTEND_STATIC_ASSET_REV__ = "phase-2-frontend-parity-2026-04-01-1";
 
     window.__tlcResolvedBuildId = function __tlcResolvedBuildId() {
       const rawBuildId = String(window.__TLC_FRONTEND_BUILD_ID__ || "").trim();
@@ -372,9 +372,11 @@
       const rawBuild = String(window.__TLC_FRONTEND_BUILD_ID__ || "").trim();
       const buildWasPlaceholder = !rawBuild || rawBuild === "__TLC_FRONTEND_BUILD_ID__";
       const build = String(window.__tlcResolvedBuildId() || "").trim() || "unknown-build";
+      const buildSource = buildWasPlaceholder ? "static-fallback-rev" : "build-id";
       document.documentElement.setAttribute("data-frontend-build", build);
       document.documentElement.setAttribute("data-frontend-build-placeholder", buildWasPlaceholder ? "1" : "0");
       console.log("Team Joseo frontend build:", build);
+      console.log("Team Joseo frontend build source:", buildSource);
 
       if ("serviceWorker" in navigator) {
         navigator.serviceWorker.getRegistrations()
