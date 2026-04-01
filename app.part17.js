@@ -1098,6 +1098,13 @@
     };
   }
 
+  function resolvePreviewTargetSignal(previewTargetLike) {
+    if (!previewTargetLike) return null;
+    if (previewTargetLike.locationId) return previewTargetLike;
+    if (previewTargetLike.candidateSignal) return previewTargetLike.candidateSignal;
+    return null;
+  }
+
   function shouldReuseLastGoodRecommendation(currentZoneId, currentFrameTime, dataQualityMode) {
     if (!currentZoneId || !currentFrameTime) return false;
     if (!(dataQualityMode === "partial" || dataQualityMode === "degraded")) return false;
@@ -2192,9 +2199,9 @@
     state.bestArrivalAwareCandidate = bestWorthwhile;
     state.bestCandidateNotWorthMoving = bestNotWorth;
 
-    const previewTarget = state.committedMoveTarget || bestWorthwhile || bestNotWorth || null;
-    const previewTargetPoints = previewTarget?.locationId
-      ? (byId?.[previewTarget.locationId] || byId?.[String(previewTarget.locationId)] || [])
+    const previewTargetSignal = resolvePreviewTargetSignal(state.committedMoveTarget || bestWorthwhile || bestNotWorth || null);
+    const previewTargetPoints = previewTargetSignal?.locationId
+      ? (byId?.[previewTargetSignal.locationId] || byId?.[String(previewTargetSignal.locationId)] || [])
       : [];
     const dataQuality = deriveAssistantDataQuality(currentPoints, previewTargetPoints, state.outlookStatus, currentOutlookKey);
     Object.assign(state, dataQuality);
@@ -2252,8 +2259,10 @@
       selectedForReason?.currentTravelMetrics || {},
       safeOverrideDecision
     );
-    state.recommendationConfidenceScore = proposal.recommendationConfidenceScore;
-    state.recommendationConfidenceLevel = proposal.recommendationConfidenceLevel;
+    if (!state.usedCachedRecommendationFallback) {
+      state.recommendationConfidenceScore = proposal.recommendationConfidenceScore;
+      state.recommendationConfidenceLevel = proposal.recommendationConfidenceLevel;
+    }
     if (!state.usedCachedRecommendationFallback) {
       stabilizeAssistantRecommendation(proposal, Date.now());
     }
