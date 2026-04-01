@@ -21,6 +21,15 @@
 
   <script>
     window.__TLC_FRONTEND_BUILD_ID__ = "__TLC_FRONTEND_BUILD_ID__";
+    window.__TLC_FRONTEND_STATIC_ASSET_REV__ = "phase-c-frontend-assistant-2026-04-01-1";
+
+    window.__tlcResolvedBuildId = function __tlcResolvedBuildId() {
+      const rawBuildId = String(window.__TLC_FRONTEND_BUILD_ID__ || "").trim();
+      if (!rawBuildId || rawBuildId === "__TLC_FRONTEND_BUILD_ID__") {
+        return String(window.__TLC_FRONTEND_STATIC_ASSET_REV__ || "").trim();
+      }
+      return rawBuildId;
+    };
 
     window.__TLC_LOCAL_CSS_ASSETS__ = [
       "./frontend-shell.css",
@@ -55,7 +64,7 @@
     window.__tlcWithBuildId = function __tlcWithBuildId(path) {
       const raw = String(path || "").trim();
       if (!raw) return raw;
-      const build = String(window.__TLC_FRONTEND_BUILD_ID__ || "").trim();
+      const build = String(window.__tlcResolvedBuildId() || "").trim();
       if (!build) return raw;
       const sep = raw.includes("?") ? "&" : "?";
       return `${raw}${sep}v=${encodeURIComponent(build)}`;
@@ -360,8 +369,11 @@
   </script>
   <script>
     (function () {
-      const build = String(window.__TLC_FRONTEND_BUILD_ID__ || "").trim() || "unknown-build";
+      const rawBuild = String(window.__TLC_FRONTEND_BUILD_ID__ || "").trim();
+      const buildWasPlaceholder = !rawBuild || rawBuild === "__TLC_FRONTEND_BUILD_ID__";
+      const build = String(window.__tlcResolvedBuildId() || "").trim() || "unknown-build";
       document.documentElement.setAttribute("data-frontend-build", build);
+      document.documentElement.setAttribute("data-frontend-build-placeholder", buildWasPlaceholder ? "1" : "0");
       console.log("Team Joseo frontend build:", build);
 
       if ("serviceWorker" in navigator) {
