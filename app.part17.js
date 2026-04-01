@@ -122,6 +122,16 @@
     chosenTargetGroup: "none",
     chosenTargetReasoningMode: "collecting_context",
     recommendationWorthMoving: false,
+    dataQualityMode: "degraded",
+    dataQualityLabel: "degraded",
+    dataQualityReason: "Waiting for outlook context.",
+    currentPointsCount: 0,
+    targetPointsCount: 0,
+    hasRecentSuccessfulOutlook: false,
+    isUsingCachedOutlook: false,
+    isPartialOutlook: false,
+    canTrustFarMoves: false,
+    usedCachedRecommendationFallback: false,
     proposedActionCode: null,
     proposedReasonCode: null,
     proposedReasonText: "",
@@ -176,6 +186,10 @@
     outlookLastErrorMessage: "",
     lastSuccessfulOutlookKey: "",
     lastSuccessfulOutlookAt: 0,
+    lastGoodRecommendationZoneId: "",
+    lastGoodRecommendationFrameTime: "",
+    lastGoodRecommendationSavedAt: 0,
+    lastGoodRecommendationPayload: null,
     heartbeatHandle: null,
     heartbeatKey: null,
     touchPauseUntil: 0,
@@ -1009,6 +1023,7 @@
     return {
       bestWorthwhileTarget,
       bestRejectedTarget,
+      bestNearEval,
       sameBoroughNearCandidates,
       crossBoroughNearCandidates,
       farCandidatesOverSoftCap,
@@ -1037,6 +1052,90 @@
       return { actionCode: "STAY", reasonCode: "decent_rating_zone", reasonText: "Decent rating zone", worthMoving: false };
     }
     return { actionCode: "STAY", reasonCode: "moving_not_worth_it", reasonText: "Moving is not worth the time", worthMoving: false };
+  }
+
+  function deriveAssistantDataQuality(currentPoints, targetPoints, outlookStatus, currentRequestKey) {
+    const currentPointsCount = Array.isArray(currentPoints) ? currentPoints.length : 0;
+    const targetPointsCount = Array.isArray(targetPoints) ? targetPoints.length : 0;
+    const hasCurrent = currentPointsCount >= 1;
+    const hasStrongCurrent = currentPointsCount >= 2;
+    const sparseTarget = targetPointsCount > 0 && targetPointsCount < 2;
+    const sameKeyCached = !!currentRequestKey
+      && state.outlookCache.has(currentRequestKey)
+      && state.lastSuccessfulOutlookKey === currentRequestKey;
+    const hasRecentSuccessfulOutlook = sameKeyCached || !!(state.lastSuccessfulOutlookKey && state.lastSuccessfulOutlookAt > 0);
+    const loadingFromCache = outlookStatus === "loading" && sameKeyCached;
+    const hasUsableOutlook = outlookStatus === "ready" || sameKeyCached;
+    const noSuccessfulForCurrentKey = !!currentRequestKey && state.lastSuccessfulOutlookKey !== currentRequestKey;
+
+    let dataQualityMode = "degraded";
+    let dataQualityReason = "Checking outlook.";
+    if (!hasCurrent || outlookStatus === "error" || noSuccessfulForCurrentKey) {
+      dataQualityMode = "degraded";
+      dataQualityReason = outlookStatus === "error"
+        ? "Outlook temporarily unavailable."
+        : "Checking outlook.";
+    } else if (hasStrongCurrent && hasUsableOutlook && !loadingFromCache && !sparseTarget) {
+      dataQualityMode = "full";
+      dataQualityReason = "Outlook and current-zone signal are complete.";
+    } else {
+      dataQualityMode = "partial";
+      dataQualityReason = loadingFromCache
+        ? "Using cached outlook while refreshing."
+        : "Outlook is partial; using conservative guidance.";
+    }
+
+    return {
+      dataQualityMode,
+      dataQualityLabel: dataQualityMode,
+      dataQualityReason,
+      currentPointsCount,
+      targetPointsCount,
+      hasRecentSuccessfulOutlook,
+      isUsingCachedOutlook: sameKeyCached,
+      isPartialOutlook: dataQualityMode === "partial",
+      canTrustFarMoves: dataQualityMode === "full",
+    };
+  }
+
+  function shouldReuseLastGoodRecommendation(currentZoneId, currentFrameTime, dataQualityMode) {
+    if (!currentZoneId || !currentFrameTime) return false;
+    if (!(dataQualityMode === "partial" || dataQualityMode === "degraded")) return false;
+    if (!state.lastGoodRecommendationPayload) return false;
+    if (!state.lastGoodRecommendationSavedAt) return false;
+    if (String(currentZoneId) !== String(state.lastGoodRecommendationZoneId || "")) return false;
+    if ((Date.now() - state.lastGoodRecommendationSavedAt) > 90000) return false;
+    const frameMs = Date.parse(String(currentFrameTime || ""));
+    const cachedFrameMs = Date.parse(String(state.lastGoodRecommendationFrameTime || ""));
+    if (Number.isFinite(frameMs) && Number.isFinite(cachedFrameMs) && frameMs < (cachedFrameMs - 60000)) return false;
+    return true;
+  }
+
+  function deriveSafeFallbackDecision(currentSignal, dataQualityMode, bestNearEval) {
+    const currentRating = safeNum(currentSignal?.visibleRating, 0) || 0;
+    const nearEval = bestNearEval || null;
+    const nearEta = safeNum(nearEval?.etaMinutes, Infinity) || Infinity;
+    const nearEdge = safeNum(nearEval?.netMoveEdge, -Infinity) || -Infinity;
+    const nearThreshold = safeNum(nearEval?.moveWorthThreshold, Infinity) || Infinity;
+    const nearBeatsBy = nearEdge - nearThreshold;
+    const sameBorough = !!nearEval?.isSameBorough;
+    const obviouslySuperior = (safeNum(nearEval?.targetPaybackMetrics?.paybackAvgRating, 0) || 0) >= (currentRating + 6);
+    const strongNearTarget = !!nearEval
+      && !!nearEval?.viability?.viable
+      && nearEta <= 12
+      && nearBeatsBy >= 2.5
+      && (sameBorough || obviouslySuperior);
+
+    if (dataQualityMode === "degraded" && !strongNearTarget) {
+      return { actionCode: "MONITOR", reasonCode: "checking_outlook", reasonText: "Checking outlook.", worthMoving: false };
+    }
+    if (dataQualityMode === "partial" && !strongNearTarget && currentRating >= 45) {
+      return { actionCode: "STAY", reasonCode: "moving_not_worth_it", reasonText: "Moving is not worth the time", worthMoving: false };
+    }
+    if (dataQualityMode === "partial" && strongNearTarget) {
+      return { actionCode: "MOVE_SOON", reasonCode: "near_target_clear_edge", reasonText: "Near target has a clear edge", worthMoving: true };
+    }
+    return null;
   }
 
   function deriveAssistantRecommendationReason(currentSignal, currentMetrics, bestWorthwhileTarget, bestRejectedTarget, currentTravelMetrics) {
@@ -1083,9 +1182,9 @@
     return { recommendationConfidenceScore: score, recommendationConfidenceLevel: level };
   }
 
-  function deriveProposedRecommendation(currentSignal, bestWorthwhileTarget, bestRejectedTarget, currentMetrics, currentTravelMetrics) {
+  function deriveProposedRecommendation(currentSignal, bestWorthwhileTarget, bestRejectedTarget, currentMetrics, currentTravelMetrics, safeOverrideDecision = null) {
     const selected = bestWorthwhileTarget || bestRejectedTarget || null;
-    const baseDecision = deriveAssistantRecommendationReason(
+    const baseDecision = safeOverrideDecision || deriveAssistantRecommendationReason(
       currentSignal,
       currentMetrics || {},
       bestWorthwhileTarget,
@@ -1445,16 +1544,25 @@
   }
 
   function buildAssistantPrimaryLine() {
+    if (state.dataQualityMode === "degraded") return "Monitor • Checking outlook.";
     const committedAction = state.committedActionCode || "MONITOR";
     const committedReason = state.committedReasonText || state.recommendationReasonText || state.finalActionReason;
     const action = humanActionLabel(committedAction);
     const reason = humanizeAssistantReason(committedReason);
+    if (state.usedCachedRecommendationFallback && state.dataQualityMode !== "full") {
+      return `${action} • ${reason} (recent fallback)`;
+    }
     return `${action} • ${reason}`;
   }
 
   function buildAssistantSecondaryLine() {
     const committedAction = state.committedActionCode || "MONITOR";
     const committedTarget = state.committedMoveTarget || state.assistantMoveTarget || null;
+    const weakDataMode = state.dataQualityMode === "partial" || state.dataQualityMode === "degraded";
+    if (state.dataQualityMode === "degraded") return "Waiting for clearer signal";
+    if (weakDataMode && (!committedTarget || (safeNum(committedTarget?.etaMinutes, Infinity) || Infinity) > AI_ASSISTANT_NEAR_TARGET_MAX_ETA_MIN)) {
+      return committedAction === "STAY" ? "Stay here for now" : "Waiting for clearer signal";
+    }
     if ((committedAction === "MOVE_SOON" || committedAction === "LEAVE_NOW")
       && committedTarget?.zoneName
       && Number.isFinite(committedTarget?.etaMinutes)) {
@@ -1592,7 +1700,9 @@
     const primary = buildAssistantPrimaryLine();
     list.push({ key: "action", text: primary, severity: severityForAction(state.finalActionCode) });
 
-    if (state.assistantMoveTarget?.zoneName && Number.isFinite(state.assistantMoveTarget?.etaMinutes)) {
+    const allowTargetInCompact = state.dataQualityMode === "full"
+      || ((safeNum(state.assistantMoveTarget?.etaMinutes, Infinity) || Infinity) <= AI_ASSISTANT_NEAR_TARGET_MAX_ETA_MIN);
+    if (state.assistantMoveTarget?.zoneName && Number.isFinite(state.assistantMoveTarget?.etaMinutes) && allowTargetInCompact) {
       const targetSummary = compactLane
         ? `Target ${state.assistantMoveTarget.zoneName}`
         : `Go to ${state.assistantMoveTarget.zoneName} • ${Math.round(state.assistantMoveTarget.etaMinutes || 0)} min`;
@@ -1638,6 +1748,11 @@
         if (found) preferred.push(found);
       }
       finalized = preferred.length ? preferred : uniq.slice(0, 1);
+      if (state.dataQualityMode === "degraded") {
+        finalized = [{ key: "action", text: "Monitor • Checking outlook.", severity: "info" }];
+      } else if (state.dataQualityMode === "partial" && !state.assistantMoveTarget) {
+        finalized = [{ key: "action", text: "Stay • Moving is not worth the time", severity: "caution" }];
+      }
     }
     if (!finalized.length) {
       finalized.push({ key: "fallback", text: "Monitor: Mixed signals.", severity: "info" });
@@ -1652,6 +1767,10 @@
 
   function mirrorRecommendLine() {
     if (!recommendLine) return;
+    if (state.dataQualityMode === "degraded") {
+      recommendLine.textContent = "AI Assistant: Monitor • Checking outlook. • Waiting for clearer signal";
+      return;
+    }
     const committedAction = state.committedActionCode || state.finalActionCode || "MONITOR";
     const action = humanActionLabel(committedAction);
     const reason = state.committedReasonText || state.recommendationReasonText || humanizeAssistantReason(state.finalActionReason);
@@ -1707,6 +1826,11 @@
   }
 
   function buildPanelHtml() {
+    const trustModeLine = state.dataQualityMode === "full"
+      ? "Trust mode: full"
+      : (state.usedCachedRecommendationFallback
+          ? `Trust mode: ${state.dataQualityMode} — using recent same-zone fallback`
+          : `Trust mode: ${state.dataQualityMode} — ${humanizeAssistantReason(state.dataQualityReason || "Checking outlook.")}`);
     return `
       <div class="aiAssistantPanel">
         <section class="aiAssistantSection"><strong>Current Zone</strong><div>${state.activeStableZoneName || "—"} • ${state.activeStableBorough || "—"} • ${Math.round(state.visibleRating || 0)} ${prettyBucket(state.visibleBucket)} • ${state.visibleScoreSourceLabel}</div></section>
@@ -1716,6 +1840,7 @@
         ${state.assistantMoveTarget ? `<section class="aiAssistantSection"><strong>Move Target</strong><div>${state.assistantMoveTarget.zoneName} • ${Math.round(state.assistantMoveTarget.etaMinutes || 0)} min • ${state.assistantMoveTarget.distanceMiles.toFixed(1)} mi</div></section>` : ""}
         ${(Number.isFinite(state.stayScenarioValue) || Number.isFinite(state.moveScenarioValue)) ? `<section class="aiAssistantSection"><strong>Move Decision</strong><div>Stay scenario: ${(state.stayScenarioValue || 0).toFixed(1)}</div><div>Move scenario: ${(state.moveScenarioValue || 0).toFixed(1)}</div><div>ETA: ${Math.round(state.etaMinutes || 0)} min</div><div>Deadhead cost: ${(state.totalDeadheadCost || 0).toFixed(1)}</div><div>Confidence penalty: ${(state.moveConfidencePenalty || 0).toFixed(1)}</div><div>Net move edge: ${(state.netMoveEdge || 0) >= 0 ? "+" : ""}${(state.netMoveEdge || 0).toFixed(1)}</div><div>Worth-moving threshold: ${(state.moveWorthThreshold || 0).toFixed(1)}</div><div><small>${compactTargetWhyLine()}</small></div></section>` : ""}
         <section class="aiAssistantSection"><strong>Recommendation Stability</strong><div>Proposed: ${humanActionLabel(state.proposedActionCode)} • ${state.proposedReasonText || "—"}</div><div>Committed: ${humanActionLabel(state.committedActionCode)} • ${state.committedReasonText || "—"}</div><div>Confidence: ${Math.round(state.recommendationConfidenceScore || 0)} (${state.recommendationConfidenceLevel || "low"})</div><div>Stable since: ${state.committedSinceTs ? new Date(state.committedSinceTs).toLocaleTimeString() : "—"}</div><div>Switch cooldown until: ${state.recommendationSwitchCooldownUntilTs ? new Date(state.recommendationSwitchCooldownUntilTs).toLocaleTimeString() : "—"}</div><div>Minimum hold until: ${state.recommendationMinHoldUntilTs ? new Date(state.recommendationMinHoldUntilTs).toLocaleTimeString() : "—"}</div><div>Stability reason: ${state.stabilityReasonText || "Committed recommendation is stable."}</div></section>
+        <section class="aiAssistantSection"><small>${trustModeLine}</small></section>
         <section class="aiAssistantSection"><small>Assistant uses the same visible Team Joseo score path the map is showing.</small></section>
       </div>
     `;
@@ -1909,6 +2034,16 @@
     state.stabilityReasonText = "";
     state.recommendationReasonCode = "collecting_context";
     state.recommendationReasonText = "Collecting more context.";
+    state.dataQualityMode = "degraded";
+    state.dataQualityLabel = "degraded";
+    state.dataQualityReason = "Checking outlook.";
+    state.currentPointsCount = 0;
+    state.targetPointsCount = 0;
+    state.hasRecentSuccessfulOutlook = false;
+    state.isUsingCachedOutlook = false;
+    state.isPartialOutlook = false;
+    state.canTrustFarMoves = false;
+    state.usedCachedRecommendationFallback = false;
     state.chosenTargetGroup = "none";
     state.chosenTargetReasoningMode = "collecting_context";
     state.baseActionCode = "MONITOR";
@@ -2045,7 +2180,8 @@
       evaluated.push(evaluation);
     }
     const picked = chooseBestEconomicsAwareTarget(evaluated, activeSignal);
-    const bestWorthwhile = picked.bestWorthwhileTarget;
+    const bestNearEval = picked.bestNearEval || null;
+    let bestWorthwhile = picked.bestWorthwhileTarget;
     const bestNotWorth = picked.bestRejectedTarget;
     state.chosenTargetGroup = picked.chosenTargetGroup || "none";
     state.chosenTargetReasoningMode = picked.chosenTargetReasoningMode || "collecting_context";
@@ -2055,6 +2191,18 @@
     state.farCandidatesRejectedForDistance = safeNum(picked.farCandidatesRejectedForDistance, 0) || 0;
     state.bestArrivalAwareCandidate = bestWorthwhile;
     state.bestCandidateNotWorthMoving = bestNotWorth;
+
+    const previewTarget = state.committedMoveTarget || bestWorthwhile || bestNotWorth || null;
+    const previewTargetPoints = previewTarget?.locationId
+      ? (byId?.[previewTarget.locationId] || byId?.[String(previewTarget.locationId)] || [])
+      : [];
+    const dataQuality = deriveAssistantDataQuality(currentPoints, previewTargetPoints, state.outlookStatus, currentOutlookKey);
+    Object.assign(state, dataQuality);
+    state.usedCachedRecommendationFallback = false;
+
+    if (!state.canTrustFarMoves && bestWorthwhile && (safeNum(bestWorthwhile?.etaMinutes, Infinity) || Infinity) > AI_ASSISTANT_NEAR_TARGET_MAX_ETA_MIN) {
+      bestWorthwhile = null;
+    }
 
     const selectedForReason = bestWorthwhile || bestNotWorth;
     state.etaMinutes = selectedForReason?.etaMinutes ?? null;
@@ -2080,16 +2228,35 @@
     state.targetViabilityRejectCode = selectedForReason?.viability?.viabilityRejectCode ?? selectedForReason?.rejectionCode ?? null;
     state.targetViabilityRejectReasonText = selectedForReason?.viability?.viabilityRejectReasonText ?? selectedForReason?.rejectionReasonText ?? "";
 
+    const safeOverrideDecision = deriveSafeFallbackDecision(activeSignal, state.dataQualityMode, bestNearEval);
+    const canReuseLastGood = shouldReuseLastGoodRecommendation(state.activeStableZoneId, state.lastFrameTime, state.dataQualityMode);
+    if (canReuseLastGood) {
+      const cached = state.lastGoodRecommendationPayload || null;
+      if (cached) {
+        state.usedCachedRecommendationFallback = true;
+        state.committedActionCode = cached.actionCode || state.committedActionCode || "MONITOR";
+        state.committedReasonCode = cached.reasonCode || state.committedReasonCode || "checking_outlook";
+        state.committedReasonText = cached.reasonText || state.committedReasonText || "Checking outlook.";
+        state.committedMoveTarget = cached.moveTarget || null;
+        state.committedSinceTs = state.committedSinceTs || Date.now();
+        state.recommendationConfidenceScore = cached.recommendationConfidenceScore ?? state.recommendationConfidenceScore;
+        state.recommendationConfidenceLevel = cached.recommendationConfidenceLevel || state.recommendationConfidenceLevel || "low";
+      }
+    }
+
     const proposal = deriveProposedRecommendation(
       activeSignal,
       bestWorthwhile,
       bestNotWorth,
       selectedForReason?.currentMetrics || {},
-      selectedForReason?.currentTravelMetrics || {}
+      selectedForReason?.currentTravelMetrics || {},
+      safeOverrideDecision
     );
     state.recommendationConfidenceScore = proposal.recommendationConfidenceScore;
     state.recommendationConfidenceLevel = proposal.recommendationConfidenceLevel;
-    stabilizeAssistantRecommendation(proposal, Date.now());
+    if (!state.usedCachedRecommendationFallback) {
+      stabilizeAssistantRecommendation(proposal, Date.now());
+    }
 
     const outlookMoveTarget = (state.committedMoveTarget || proposal?.moveTarget || null);
     const targetPoints = outlookMoveTarget ? (byId?.[outlookMoveTarget.locationId] || byId?.[String(outlookMoveTarget.locationId)] || []) : [];
@@ -2120,6 +2287,14 @@
       state.moveTargetOutlookSummaryText = "";
     }
 
+    if (state.dataQualityMode !== "full" && (safeNum(state.committedMoveTarget?.etaMinutes, Infinity) || Infinity) > AI_ASSISTANT_NEAR_TARGET_MAX_ETA_MIN) {
+      state.committedMoveTarget = null;
+      if (isMoveAction(state.committedActionCode)) {
+        state.committedActionCode = "MONITOR";
+        state.committedReasonCode = "checking_outlook";
+        state.committedReasonText = "Checking outlook.";
+      }
+    }
     state.assistantMoveTarget = state.committedMoveTarget || null;
     state.recommendationReasonCode = state.committedReasonCode || proposal.reasonCode;
     state.recommendationReasonText = deriveStableRecommendationReason(
@@ -2131,6 +2306,11 @@
     state.finalActionCode = state.committedActionCode || proposal.actionCode;
     state.finalActionReason = state.recommendationReasonText;
     state.actionSeverity = (state.finalActionCode === "LEAVE_NOW" || state.finalActionCode === "MOVE_SOON") ? "move" : (state.finalActionCode === "STAY" ? "positive" : "info");
+    if (state.dataQualityMode !== "full" && state.finalActionCode === "MOVE_SOON" && !state.assistantMoveTarget) {
+      state.finalActionCode = "MONITOR";
+      state.finalActionReason = "Checking outlook.";
+      state.recommendationReasonText = "Checking outlook.";
+    }
     state.dwellCoachSummaryText = `${humanActionLabel(state.finalActionCode)}: ${state.recommendationReasonText}`;
     state.dwellCoachReasonFragments = [
       `Stay ${(state.stayWindowAvgRating || state.stayProjectedRating || 0).toFixed(1)}`,
@@ -2138,6 +2318,26 @@
       `Edge ${(state.netMoveEdge || 0).toFixed(1)}`,
       `Need ${(state.moveWorthThreshold || 0).toFixed(1)}`
     ];
+
+    const canCacheLastGoodRecommendation = !!state.activeStableZoneId
+      && !!state.committedActionCode
+      && state.dataQualityMode === "full"
+      && (state.recommendationConfidenceLevel === "medium" || state.recommendationConfidenceLevel === "high")
+      && state.committedActionCode !== "MONITOR"
+      && (!isMoveAction(state.committedActionCode) || !!state.committedMoveTarget);
+    if (canCacheLastGoodRecommendation) {
+      state.lastGoodRecommendationZoneId = String(state.activeStableZoneId || "");
+      state.lastGoodRecommendationFrameTime = String(state.lastFrameTime || "");
+      state.lastGoodRecommendationSavedAt = Date.now();
+      state.lastGoodRecommendationPayload = {
+        actionCode: state.committedActionCode,
+        reasonCode: state.committedReasonCode,
+        reasonText: state.committedReasonText,
+        moveTarget: state.committedMoveTarget,
+        recommendationConfidenceScore: state.recommendationConfidenceScore,
+        recommendationConfidenceLevel: state.recommendationConfidenceLevel,
+      };
+    }
     applyNavOwnership();
     mirrorRecommendLine();
     renderWidget();
@@ -2214,6 +2414,16 @@
     state.recommendationStickyTargetSinceTs = null;
     state.stabilityReasonCode = "";
     state.stabilityReasonText = "";
+    state.dataQualityMode = "degraded";
+    state.dataQualityLabel = "degraded";
+    state.dataQualityReason = "Checking outlook.";
+    state.currentPointsCount = 0;
+    state.targetPointsCount = 0;
+    state.hasRecentSuccessfulOutlook = false;
+    state.isUsingCachedOutlook = false;
+    state.isPartialOutlook = false;
+    state.canTrustFarMoves = false;
+    state.usedCachedRecommendationFallback = false;
     state.finalActionCode = "MONITOR";
     state.finalActionReason = "Waiting for stable zone.";
     renderWidget();
