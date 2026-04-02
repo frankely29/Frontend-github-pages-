@@ -222,6 +222,7 @@
     outlookRequestKey: "",
     outlookInFlightKey: "",
     outlookInFlightPromise: null,
+    outlookEnrichRefreshKey: "",
     outlookStatus: "idle",
     outlookLastErrorCode: "",
     outlookLastErrorMessage: "",
@@ -1995,43 +1996,51 @@
   }
 
   function buildAssistantPrimaryLine() {
+    const primary = derivePrimaryDriverDecision();
+    if (primary?.kind === "trap") state.lastTrapMessageAtTs = Date.now();
+    if (primary?.kind === "stay") state.lastStayMessageAtTs = Date.now();
+    if (primary?.kind === "move") state.lastMoveMessageAtTs = Date.now();
+    return primary?.line || "Monitor • Checking more data";
+  }
+
+  function derivePrimaryDriverDecision() {
     if (state.trapModeActive && state.trapNeedsNearbyEscape) {
-      state.lastTrapMessageAtTs = Date.now();
-      return "Monitor • Nearby options not strong enough yet";
+      return { line: "Stay briefly • Nearby options not strong enough yet", kind: "trap" };
     }
     if (state.stabilityReasonCode === "countdown_expired_move_promoted" && isMoveAction(state.finalActionCode)) {
-      return "Move now • Better area is ready";
+      return { line: "Move now • Better nearby area is ready", kind: "move" };
     }
     if (state.countdownActive && state.countdownReasonCode === "trap_risk_rising") {
-      state.lastTrapMessageAtTs = Date.now();
-      if ((safeNum(state.trapSeverityLevel, 0) || 0) >= 3) return "Move soon • You are getting stuck here";
-      return "Stay briefly • Trap risk rising";
+      if ((safeNum(state.trapSeverityLevel, 0) || 0) >= 3) return { line: "Move soon • Trap risk rising", kind: "trap" };
+      return { line: "Stay briefly • Trap risk rising", kind: "trap" };
     }
     if (state.countdownActive && state.countdownReasonCode === "zone_cooling") {
-      return "Stay briefly • Zone may cool off";
+      return { line: "Stay briefly • Area may cool off", kind: "stay" };
     }
     if (state.countdownActive && (state.committedActionCode === "STAY" || state.committedActionCode === "STAY_BRIEFLY")) {
-      state.lastStayMessageAtTs = Date.now();
-      return "Stay • Good zone right now";
+      return { line: "Stay • Good zone right now", kind: "stay" };
     }
-    const safeDegradedStayFallback = isSafeDegradedStayFallback();
-    if (safeDegradedStayFallback) {
-      return safeDegradedStayPrimaryLine();
+    if (isSafeDegradedStayFallback()) {
+      return { line: safeDegradedStayPrimaryLine(), kind: "stay" };
     }
-    if (state.dataQualityMode === "degraded" && state.finalActionCode === "MONITOR" && !safeDegradedStayFallback) {
-      return "Monitor • Checking more data";
-    }
-    const committedAction = state.committedActionCode || "MONITOR";
+    const committedAction = state.committedActionCode || state.finalActionCode || "MONITOR";
     const fallbackReason = state.committedReasonText || state.recommendationReasonText || state.finalActionReason;
     const committedReason = friendlyReasonFromCode(state.committedReasonCode, fallbackReason) || fallbackReason;
     const action = humanActionLabel(committedAction);
     const reason = humanizeAssistantReason(committedReason);
-    if (action === "Stay" || action === "Stay briefly") state.lastStayMessageAtTs = Date.now();
-    if (action === "Move soon" || action === "Leave now") state.lastMoveMessageAtTs = Date.now();
-    if (state.usedCachedRecommendationFallback && state.dataQualityMode !== "full") {
-      return `${action} • ${reason} (recent fallback)`;
+    const isDecisionAction = committedAction === "STAY" || committedAction === "STAY_BRIEFLY" || committedAction === "MOVE_SOON" || committedAction === "LEAVE_NOW";
+    if (isDecisionAction) {
+      const moveLabel = committedAction === "LEAVE_NOW" ? "Move now" : action;
+      if (state.usedCachedRecommendationFallback && state.dataQualityMode !== "full") {
+        return { line: `${moveLabel} • ${reason} (recent fallback)`, kind: committedAction.startsWith("MOVE") || committedAction === "LEAVE_NOW" ? "move" : "stay" };
+      }
+      return { line: `${moveLabel} • ${reason}`, kind: committedAction.startsWith("MOVE") || committedAction === "LEAVE_NOW" ? "move" : "stay" };
     }
-    return `${action} • ${reason}`;
+    if (state.dataQualityMode !== "full" && state.finalActionCode === "MONITOR") {
+      if ((safeNum(state.stayWindowAvgRating, 0) || 0) >= 48) return { line: "Stay • Decent area for now", kind: "stay" };
+      return { line: "Monitor • Checking more data", kind: "monitor" };
+    }
+    return { line: `${action} • ${reason}`, kind: "monitor" };
   }
 
   function buildAssistantSecondaryLine() {
@@ -2703,16 +2712,34 @@
     const currentOutlookKey = hasOutlookContext
       ? buildOutlookCacheKey(state.lastFrameTime, locationIds, state.visibleScoreSource)
       : "";
-    const outlook = await fetchOutlook(liveFrame, locationIds, state.visibleScoreSource);
-    let effectiveOutlook = outlook;
+    let effectiveOutlook = null;
     const hasCachedCurrentKey = !!currentOutlookKey && state.outlookCache.has(currentOutlookKey);
+    if (hasCachedCurrentKey) {
+      effectiveOutlook = state.outlookCache.get(currentOutlookKey) || null;
+      state.outlookStatus = "ready";
+      state.outlookLastErrorCode = "";
+      state.outlookLastErrorMessage = "";
+    } else if (hasOutlookContext) {
+      state.outlookStatus = state.outlookInFlightKey === currentOutlookKey ? "loading" : state.outlookStatus;
+      if (state.outlookEnrichRefreshKey !== currentOutlookKey) {
+        state.outlookEnrichRefreshKey = currentOutlookKey;
+        fetchOutlook(liveFrame, locationIds, state.visibleScoreSource)
+          .then(() => {
+            if (state.outlookEnrichRefreshKey !== currentOutlookKey) return;
+            state.outlookEnrichRefreshKey = "";
+            recompute().catch(() => {});
+          })
+          .catch(() => {
+            state.outlookEnrichRefreshKey = "";
+          });
+      }
+    } else {
+      state.outlookEnrichRefreshKey = "";
+    }
     if (!effectiveOutlook
       && state.outlookStatus === "loading"
       && state.lastSuccessfulOutlookKey === currentOutlookKey
       && hasCachedCurrentKey) {
-      effectiveOutlook = state.outlookCache.get(currentOutlookKey) || null;
-    }
-    if (!effectiveOutlook && hasCachedCurrentKey && state.lastSuccessfulOutlookKey === currentOutlookKey) {
       effectiveOutlook = state.outlookCache.get(currentOutlookKey) || null;
     }
     const byId = buildOutlookPointsByLocation(effectiveOutlook);
