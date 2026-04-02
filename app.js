@@ -111,6 +111,13 @@ const timelineCache = { data: null, loadedAt: 0 };
 const frameCache = new Map();
 const frameCacheOrder = [];
 const FRAME_CACHE_MAX = 8;
+const processedFrameVisualCache = new Map();
+const processedFrameVisualOrder = [];
+const PROCESSED_FRAME_VISUAL_CACHE_MAX = 4;
+let lastZoneLabelFrameSignature = "";
+let lastZoneLabelZoomBucket = "";
+let lastZoneLabelVisualSignature = "";
+let lastZoneLabelVisibilitySignature = "";
 const TIMELINE_CACHE_TTL_MS = 10 * 60 * 1000;
 const FRAME_PREFETCH_DISTANCE = 2;
 const frontendPerfStats = {
@@ -2002,6 +2009,65 @@ function frameSignature(frame) {
   return `${String(frame?.time ?? "")}|${featureCount}`;
 }
 
+function getRenderVisualSignature(modeFlags) {
+  const flags = modeFlags || getModeFlags();
+  const tendency = window.TlcDayTendencyState?.getAdvancedContext?.() || window.TlcDayTendencyState?.advancedContext || null;
+  const tendencySig = tendency
+    ? [
+        tendency.ready_for_frontend_adjustment ? 1 : 0,
+        tendency.global_penalty_points ?? "",
+        tendency.local_penalty_points ?? "",
+        tendency.total_penalty_cap ?? "",
+        tendency.bucket_drop_cap ?? "",
+        tendency.resolved_local_scope || tendency.local_scope || tendency.scope || "",
+      ].join(":")
+    : "none";
+  return [
+    flags.statenIslandMode ? 1 : 0,
+    flags.bronxWashHeightsMode ? 1 : 0,
+    flags.manhattanMode ? 1 : 0,
+    flags.queensMode ? 1 : 0,
+    flags.brooklynMode ? 1 : 0,
+    tendencySig,
+  ].join("|");
+}
+
+function trackProcessedFrameVisualOrder(key) {
+  const existing = processedFrameVisualOrder.indexOf(key);
+  if (existing >= 0) processedFrameVisualOrder.splice(existing, 1);
+  processedFrameVisualOrder.push(key);
+  while (processedFrameVisualOrder.length > PROCESSED_FRAME_VISUAL_CACHE_MAX) {
+    const evict = processedFrameVisualOrder.shift();
+    processedFrameVisualCache.delete(evict);
+  }
+}
+
+function getProcessedFrameVisualFromCache(key) {
+  if (!processedFrameVisualCache.has(key)) return null;
+  const cached = processedFrameVisualCache.get(key);
+  trackProcessedFrameVisualOrder(key);
+  return cached || null;
+}
+
+function rememberProcessedFrameVisual(key, fc) {
+  processedFrameVisualCache.set(key, fc);
+  trackProcessedFrameVisualOrder(key);
+  return fc;
+}
+
+function getZoneLabelZoomBucket() {
+  if (!map || typeof map.getZoom !== "function") return "none";
+  const zoom = Number(map.getZoom());
+  if (!Number.isFinite(zoom)) return "none";
+  return String(Math.floor(zoom * 2) / 2);
+}
+
+function getZoneLabelVisibilitySignature() {
+  if (!map || typeof map.getLayoutProperty !== "function") return "none";
+  const ids = ["zones-labels", "zones-fill", "zones-line"];
+  return ids.map((id) => `${id}:${String(map.getLayoutProperty(id, "visibility") || "visible")}`).join("|");
+}
+
 function prefetchFrame(idx) {
   const normalizedIdx = Number(idx);
   if (!Number.isInteger(normalizedIdx) || normalizedIdx < 0 || normalizedIdx >= timeline.length) return;
@@ -2818,7 +2884,8 @@ async function renderFrame(frame) {
   }
 
   currentFrame = frame;
-  lastRenderedFrameSignature = frameSignature(frame);
+  const currentFrameSig = frameSignature(frame);
+  lastRenderedFrameSignature = currentFrameSig;
 
   // apply modes to mutate props (same as old)
   const modeFlags = getModeFlags();
@@ -2829,18 +2896,26 @@ async function renderFrame(frame) {
   if (modeFlags.manhattanMode) applyManhattanLocalView(frame);
 
   const fc = frame.polygons || { type: "FeatureCollection", features: [] };
-
-  // IMPORTANT FIX: always recompute effectiveColor each render so toggles update instantly
-  for (const f of fc.features) {
-    const props = f.properties || {};
-    const baseCol = effectiveColor(props, f.geometry) || "#66aaff";
-
-    const fillCol =
-      window.TlcModeModule?.effectiveFillColor?.(props, f.geometry) ||
-      baseCol;
-
-    props.effectiveColor = baseCol;
-    props.effectiveFillColor = fillCol;
+  const visualSignature = getRenderVisualSignature(modeFlags);
+  const processedVisualKey = `${currentFrameSig}|${visualSignature}`;
+  let processedFc = getProcessedFrameVisualFromCache(processedVisualKey);
+  if (!processedFc) {
+    for (const f of fc.features) {
+      const props = f.properties || {};
+      const baseCol = effectiveColor(props, f.geometry) || "#66aaff";
+      const fillCol = window.TlcModeModule?.effectiveFillColor?.(props, f.geometry) || baseCol;
+      props.effectiveColor = baseCol;
+      props.effectiveFillColor = fillCol;
+    }
+    processedFc = fc;
+    rememberProcessedFrameVisual(processedVisualKey, processedFc);
+  } else if (processedFc !== fc) {
+    for (let i = 0; i < fc.features.length; i += 1) {
+      const live = fc.features[i]?.properties || {};
+      const cached = processedFc.features?.[i]?.properties || {};
+      live.effectiveColor = cached.effectiveColor || live.effectiveColor || "#66aaff";
+      live.effectiveFillColor = cached.effectiveFillColor || cached.effectiveColor || live.effectiveColor || "#66aaff";
+    }
   }
 
   if (!debugOnce.frame) {
@@ -2848,10 +2923,23 @@ async function renderFrame(frame) {
     debugOnce.frame = true;
   }
 
-  map.getSource("zones").setData(fc);
+  map.getSource("zones").setData(processedFc || fc);
 
   // Labels update (points inside polygons)
-  refreshZoneLabels(frame);
+  const nextZoomBucket = getZoneLabelZoomBucket();
+  const nextVisibilitySig = getZoneLabelVisibilitySignature();
+  const shouldRefreshLabels =
+    lastZoneLabelFrameSignature !== currentFrameSig
+    || lastZoneLabelZoomBucket !== nextZoomBucket
+    || lastZoneLabelVisualSignature !== visualSignature
+    || lastZoneLabelVisibilitySignature !== nextVisibilitySig;
+  if (shouldRefreshLabels) {
+    refreshZoneLabels(frame);
+    lastZoneLabelFrameSignature = currentFrameSig;
+    lastZoneLabelZoomBucket = nextZoomBucket;
+    lastZoneLabelVisualSignature = visualSignature;
+    lastZoneLabelVisibilitySignature = nextVisibilitySig;
+  }
   emitTeamJoseoFrameRendered(frame, fc.features.length);
 
   if (debugEnabled) {

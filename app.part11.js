@@ -45,6 +45,9 @@
   const QUEENS_MIN_ZONES = 8;
   const QUEENS_NEARBY_RADIUS_MI = 1.35;
   const BROOKLYN_MIN_ZONES = 3;
+  const localModeViewCache = new Map();
+  const localModeViewOrder = [];
+  const LOCAL_MODE_VIEW_CACHE_MAX = 6;
 
   const BRONX_WASH_HEIGHTS_MANHATTAN_ZONE_IDS = new Set([
     "41", "42", "74", "75", "116", "127", "128", "151", "152", "166", "243", "244",
@@ -1137,9 +1140,67 @@
     return hexToRgba(baseColor, alpha);
   }
 
+  function getFrameModeCacheSignature(frame) {
+    const frameTime = String(frame?.frame_time || frame?.frame_iso || frame?.time_iso || frame?.time || "").trim();
+    const featureCount = Number(frame?.polygons?.features?.length || 0);
+    return `${frameTime}|${featureCount}`;
+  }
+
+  function getNextBinMapSignature() {
+    const nextMap = core.getNextFramePickupsById?.() || new Map();
+    let size = 0;
+    let sample = "";
+    if (nextMap && typeof nextMap.forEach === "function") {
+      nextMap.forEach((v, k) => {
+        size += 1;
+        if (sample.length < 36) sample += `${k}:${Math.round(Number(v) || 0)},`;
+      });
+    }
+    return `${size}|${sample}`;
+  }
+
+  function trackLocalModeViewCacheKey(key) {
+    const idx = localModeViewOrder.indexOf(key);
+    if (idx >= 0) localModeViewOrder.splice(idx, 1);
+    localModeViewOrder.push(key);
+    while (localModeViewOrder.length > LOCAL_MODE_VIEW_CACHE_MAX) {
+      const evict = localModeViewOrder.shift();
+      localModeViewCache.delete(evict);
+    }
+  }
+
+  function getLocalModeViewCache(key) {
+    if (!localModeViewCache.has(key)) return null;
+    const value = localModeViewCache.get(key);
+    trackLocalModeViewCacheKey(key);
+    return value || null;
+  }
+
+  function setLocalModeViewCache(key, value) {
+    localModeViewCache.set(key, value);
+    trackLocalModeViewCacheKey(key);
+  }
+
+  function applyCachedModePropsToFrame(frame, cachedById) {
+    const feats = frame?.polygons?.features || [];
+    for (const f of feats) {
+      const props = f.properties || {};
+      const id = String(props?.LocationID || "").trim();
+      const patch = cachedById.get(id);
+      if (!patch) continue;
+      Object.assign(props, patch);
+    }
+  }
+
   function applyStatenLocalView(frame) {
     const feats = frame?.polygons?.features || [];
     if (!feats.length) return frame;
+    const cacheKey = `${getFrameModeCacheSignature(frame)}|staten_island|${getNextBinMapSignature()}`;
+    const cached = getLocalModeViewCache(cacheKey);
+    if (cached) {
+      applyCachedModePropsToFrame(frame, cached);
+      return frame;
+    }
 
     const siRatings = [];
     for (const f of feats) {
@@ -1189,6 +1250,18 @@
       props.si_local_bucket = bucket;
       props.si_local_color = color;
     }
+    const byId = new Map();
+    for (const f of feats) {
+      const props = f.properties || {};
+      const id = String(props?.LocationID || "").trim();
+      if (!id) continue;
+      byId.set(id, {
+        si_local_rating: props.si_local_rating,
+        si_local_bucket: props.si_local_bucket,
+        si_local_color: props.si_local_color,
+      });
+    }
+    setLocalModeViewCache(cacheKey, byId);
 
     return frame;
   }
@@ -1196,6 +1269,12 @@
   function applyManhattanLocalView(frame) {
     const feats = frame?.polygons?.features || [];
     if (!feats.length) return frame;
+    const cacheKey = `${getFrameModeCacheSignature(frame)}|manhattan|${getNextBinMapSignature()}`;
+    const cached = getLocalModeViewCache(cacheKey);
+    if (cached) {
+      applyCachedModePropsToFrame(frame, cached);
+      return frame;
+    }
 
     const nextFramePickupsById = core.getNextFramePickupsById?.() || new Map();
     const mPickups = [];
@@ -1303,6 +1382,23 @@
       props.mh_pay_strength = payStrength;
       props.mh_fade_penalty = fadePenalty;
     }
+    const byId = new Map();
+    for (const f of feats) {
+      const props = f.properties || {};
+      const id = String(props?.LocationID || "").trim();
+      if (!id) continue;
+      byId.set(id, {
+        mh_local_score: props.mh_local_score,
+        mh_local_rating: props.mh_local_rating,
+        mh_local_bucket: props.mh_local_bucket,
+        mh_local_color: props.mh_local_color,
+        mh_pickup_strength: props.mh_pickup_strength,
+        mh_next_bin_strength: props.mh_next_bin_strength,
+        mh_pay_strength: props.mh_pay_strength,
+        mh_fade_penalty: props.mh_fade_penalty,
+      });
+    }
+    setLocalModeViewCache(cacheKey, byId);
 
     return frame;
   }
@@ -1310,6 +1406,12 @@
   function applyBronxWashHeightsLocalView(frame) {
     const feats = frame?.polygons?.features || [];
     if (!feats.length) return frame;
+    const cacheKey = `${getFrameModeCacheSignature(frame)}|bronx_wash_heights|${getNextBinMapSignature()}`;
+    const cached = getLocalModeViewCache(cacheKey);
+    if (cached) {
+      applyCachedModePropsToFrame(frame, cached);
+      return frame;
+    }
 
     const nextFramePickupsById = core.getNextFramePickupsById?.() || new Map();
     const scopedPickups = [];
@@ -1401,6 +1503,19 @@
       props.bwh_local_bucket = bucket;
       props.bwh_local_color = color;
     }
+    const byId = new Map();
+    for (const f of feats) {
+      const props = f.properties || {};
+      const id = String(props?.LocationID || "").trim();
+      if (!id) continue;
+      byId.set(id, {
+        bwh_local_rating: props.bwh_local_rating,
+        bwh_local_bucket: props.bwh_local_bucket,
+        bwh_local_color: props.bwh_local_color,
+        bwh_local_score: props.bwh_local_score,
+      });
+    }
+    setLocalModeViewCache(cacheKey, byId);
 
     return frame;
   }
@@ -1408,6 +1523,12 @@
   function applyQueensLocalView(frame) {
     const feats = frame?.polygons?.features || [];
     if (!feats.length) return frame;
+    const cacheKey = `${getFrameModeCacheSignature(frame)}|queens|${getNextBinMapSignature()}`;
+    const cached = getLocalModeViewCache(cacheKey);
+    if (cached) {
+      applyCachedModePropsToFrame(frame, cached);
+      return frame;
+    }
 
     const nextFramePickupsById = core.getNextFramePickupsById?.() || new Map();
     const userLatLng = core.getUserLatLng?.() || null;
@@ -1530,6 +1651,19 @@
       props.qn_local_bucket = bucket;
       props.qn_local_color = color;
     }
+    const byId = new Map();
+    for (const f of feats) {
+      const props = f.properties || {};
+      const id = String(props?.LocationID || "").trim();
+      if (!id) continue;
+      byId.set(id, {
+        qn_local_score: props.qn_local_score,
+        qn_local_rating: props.qn_local_rating,
+        qn_local_bucket: props.qn_local_bucket,
+        qn_local_color: props.qn_local_color,
+      });
+    }
+    setLocalModeViewCache(cacheKey, byId);
 
     return frame;
   }
@@ -1537,6 +1671,12 @@
   function applyBrooklynLocalView(frame) {
     const feats = frame?.polygons?.features || [];
     if (!feats.length) return frame;
+    const cacheKey = `${getFrameModeCacheSignature(frame)}|brooklyn|${getNextBinMapSignature()}`;
+    const cached = getLocalModeViewCache(cacheKey);
+    if (cached) {
+      applyCachedModePropsToFrame(frame, cached);
+      return frame;
+    }
 
     const bkRatings = [];
     for (const f of feats) {
@@ -1606,6 +1746,19 @@
       props.bk_local_bucket = bucket;
       props.bk_local_color = color;
     }
+    const byId = new Map();
+    for (const f of feats) {
+      const props = f.properties || {};
+      const id = String(props?.LocationID || "").trim();
+      if (!id) continue;
+      byId.set(id, {
+        bk_local_score: props.bk_local_score,
+        bk_local_rating: props.bk_local_rating,
+        bk_local_bucket: props.bk_local_bucket,
+        bk_local_color: props.bk_local_color,
+      });
+    }
+    setLocalModeViewCache(cacheKey, byId);
 
     return frame;
   }
