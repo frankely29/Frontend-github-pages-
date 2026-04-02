@@ -1193,7 +1193,7 @@
       return { actionCode: "STAY", reasonCode: "moving_not_worth_it", reasonText: "Other areas are too far right now", worthMoving: false };
     }
     if (dataQualityMode === "partial" && strongNearTarget) {
-      return { actionCode: "MOVE_SOON", reasonCode: "near_target_clear_edge", reasonText: "Near target has a clear edge", worthMoving: true };
+      return { actionCode: "MOVE_SOON", reasonCode: "near_target_clear_edge", reasonText: "Better nearby area is ready", worthMoving: true };
     }
     return null;
   }
@@ -1882,6 +1882,7 @@
     if (!newTarget?.locationId) return false;
     if (!currentTarget?.locationId) return true;
     if (String(currentTarget.locationId) === String(newTarget.locationId)) return false;
+    const changedRecently = (Date.now() - (safeNum(state.lastCountdownTargetChangedAtTs, 0) || 0)) < (2 * 60000);
     const currentEta = safeNum(currentTarget?.etaMinutes, Infinity) || Infinity;
     const newEta = safeNum(newTarget?.etaMinutes, Infinity) || Infinity;
     const currentMoveAdv = safeNum(currentTarget?.netMoveEdge, -Infinity) || -Infinity;
@@ -1889,6 +1890,11 @@
     const currentArrival = safeNum(currentTarget?.targetArrivalProjectedRating, 0) || 0;
     const newArrival = safeNum(newTarget?.targetArrivalProjectedRating, 0) || 0;
     const sameBorough = normalizeAssistantBoroughName(currentTarget?.borough) === normalizeAssistantBoroughName(newTarget?.borough);
+    if (changedRecently) {
+      if ((newMoveAdv - currentMoveAdv) >= 6) return true;
+      if ((newArrival - currentArrival) >= 4 && (currentEta - newEta) >= 3) return true;
+      return false;
+    }
     if (sameBorough && Number.isFinite(currentEta) && Number.isFinite(newEta) && (currentEta - newEta) >= 3) return true;
     if ((newMoveAdv - currentMoveAdv) >= 4) return true;
     if ((newArrival - currentArrival) >= 3 && newEta < currentEta) return true;
@@ -2302,9 +2308,12 @@
     const cautionDataLine = state.dataQualityMode === "degraded"
       ? "Using a cautious recommendation because some live data is missing."
       : (state.dataQualityMode === "partial" ? "Using a cautious recommendation while data refreshes." : "");
-    const showMoveCheck = Number.isFinite(state.stayScenarioValue)
+    const showMoveCheck = !!state.assistantMoveTarget
+      && Number.isFinite(state.stayScenarioValue)
       && Number.isFinite(state.moveScenarioValue)
-      && (Number.isFinite(state.etaMinutes) || Number.isFinite(state.totalDeadheadCost));
+      && Number.isFinite(state.netMoveEdge)
+      && Number.isFinite(state.moveWorthThreshold)
+      && (Math.abs(safeNum(state.netMoveEdge, 0) || 0) >= 0.1 || Math.abs(safeNum(state.moveWorthThreshold, 0) || 0) >= 0.1);
     return `
       <div class="aiAssistantPanel">
         <section class="aiAssistantSection"><strong>Current area</strong><div>${state.activeStableZoneName || "—"} • ${state.activeStableBorough || "—"} • ${Math.round(state.visibleRating || 0)} ${prettyBucket(state.visibleBucket)} • ${state.visibleScoreSourceLabel}</div></section>
@@ -2314,7 +2323,7 @@
         <section class="aiAssistantSection"><strong>What may happen next</strong><div>${state.outlookSummaryText}</div><div>${state.moveTargetOutlookSummaryText || ""}</div>${(state.outlookStatus || state.outlookLastErrorCode) ? `<div><small>Status: ${state.outlookStatus || "idle"}${state.outlookLastErrorCode ? ` (${state.outlookLastErrorCode})` : ""}</small></div>` : ""}</section>
         <section class="aiAssistantSection"><strong>Best areas right now</strong><div>Best now: ${state.citywideBestNow?.zoneName || "—"} • Worst now: ${state.citywideWorstNow?.zoneName || "—"}</div>${buildRankList(state.citywideTop10Best)}${buildRankList(state.boroughTop5Best)}</section>
         ${state.assistantMoveTarget ? `<section class="aiAssistantSection"><strong>Move Target</strong><div>${state.assistantMoveTarget.zoneName} • ${Math.round(state.assistantMoveTarget.etaMinutes || 0)} min • ${state.assistantMoveTarget.distanceMiles.toFixed(1)} mi</div></section>` : ""}
-        ${showMoveCheck ? `<section class="aiAssistantSection"><strong>Move check</strong><div>If you stay: ${(state.stayScenarioValue || 0).toFixed(1)}</div><div>If you move: ${(state.moveScenarioValue || 0).toFixed(1)}</div><div>Drive time: ${Math.round(state.etaMinutes || 0)} min</div><div>Empty drive cost: ${(state.totalDeadheadCost || 0).toFixed(1)}</div><div>Risk cost: ${(state.moveConfidencePenalty || 0).toFixed(1)}</div><div>Move score gap: ${(state.netMoveEdge || 0) >= 0 ? "+" : ""}${(state.netMoveEdge || 0).toFixed(1)}</div><div>Move needed score: ${(state.moveWorthThreshold || 0).toFixed(1)}</div><div><small>${compactTargetWhyLine()}</small></div></section>` : ""}
+        ${showMoveCheck ? `<section class="aiAssistantSection"><strong>Move check</strong><div>Stay outlook: ${(state.stayScenarioValue || 0).toFixed(1)}</div><div>Move outlook: ${(state.moveScenarioValue || 0).toFixed(1)}</div><div>Drive time: ${Math.round(state.etaMinutes || 0)} min</div><div>Empty drive cost: ${(state.totalDeadheadCost || 0).toFixed(1)}</div><div>Move gap: ${(state.netMoveEdge || 0) >= 0 ? "+" : ""}${(state.netMoveEdge || 0).toFixed(1)}</div><div>Move bar: ${(state.moveWorthThreshold || 0).toFixed(1)}</div><div><small>${compactTargetWhyLine()}</small></div></section>` : ""}
         <section class="aiAssistantSection"><strong>Assistant status</strong><div>Proposed: ${humanActionLabel(state.proposedActionCode)} • ${humanizeAssistantReason(friendlyReasonFromCode(state.proposedReasonCode, state.proposedReasonText || "—"))}</div><div>Committed: ${humanActionLabel(state.committedActionCode)} • ${humanizeAssistantReason(friendlyReasonFromCode(state.committedReasonCode, state.committedReasonText || "—"))}</div><div>Confidence: ${Math.round(state.recommendationConfidenceScore || 0)} (${state.recommendationConfidenceLevel || "low"})</div><div>Stable since: ${state.committedSinceTs ? new Date(state.committedSinceTs).toLocaleTimeString() : "—"}</div><div>Switch cooldown until: ${state.recommendationSwitchCooldownUntilTs ? new Date(state.recommendationSwitchCooldownUntilTs).toLocaleTimeString() : "—"}</div><div>Minimum hold until: ${state.recommendationMinHoldUntilTs ? new Date(state.recommendationMinHoldUntilTs).toLocaleTimeString() : "—"}</div><div>Stability reason: ${humanizeAssistantReason(state.stabilityReasonText || "Committed recommendation is stable.")}</div></section>
         ${cautionDataLine ? `<section class="aiAssistantSection"><small>${cautionDataLine}</small></section>` : ""}
         <section class="aiAssistantSection"><small>Assistant uses the same visible Team Joseo score path the map is showing.</small></section>
@@ -2895,22 +2904,32 @@
       state.dataQualityMode,
       trapState
     );
+    const currentCountdownEval = state.countdownTarget?.locationId
+      ? (evaluated.find((it) => String(it?.candidateSignal?.locationId || "") === String(state.countdownTarget.locationId)) || null)
+      : null;
+    let selectedCountdownTarget = countdownCoach?.target || null;
+    if (state.countdownActive && state.countdownTarget?.locationId && selectedCountdownTarget?.locationId) {
+      const canReplace = shouldReplaceCountdownTarget(state.countdownTarget, selectedCountdownTarget);
+      if (!canReplace) selectedCountdownTarget = state.countdownTarget;
+    }
+    const selectedCountdownEval = selectedCountdownTarget?.locationId
+      ? (evaluated.find((it) => String(it?.candidateSignal?.locationId || "") === String(selectedCountdownTarget.locationId)) || null)
+      : null;
     const countdownTargetStillValid = isCountdownTargetStillValid(
-      bestWorthwhile,
+      selectedCountdownEval || currentCountdownEval || bestWorthwhile,
       activeSignal,
       selectedForReason?.currentMetrics || {},
       state.dataQualityMode
     );
-    const nextTargetId = String(countdownCoach?.target?.locationId || "").trim();
+    const nextTargetId = String(selectedCountdownTarget?.locationId || "").trim();
     const activeTargetId = String(state.countdownTarget?.locationId || "").trim();
-    const countdownTargetChanged = shouldReplaceCountdownTarget(state.countdownTarget, countdownCoach.target);
+    const countdownTargetChanged = !!activeTargetId && !!nextTargetId && nextTargetId !== activeTargetId;
     const goodHoldNow = !!selectedForReason?.currentMetrics?.stayHoldsAfterArrival
       && (safeNum(selectedForReason?.currentTravelMetrics?.travelWindowMinRating, 0) || 0) >= 50
       && !selectedForReason?.currentMetrics?.stayWeakensSoon;
     const shouldCancelCountdown = !countdownCoach.eligible
-      || !countdownCoach.target
+      || !selectedCountdownTarget
       || !countdownTargetStillValid
-      || countdownTargetChanged
       || (hasPickupSinceCurrentZoneEntry() && !(trapState?.trapModeActive))
       || goodHoldNow;
     if (shouldCancelCountdown) {
@@ -2930,9 +2949,9 @@
       state.countdownActive = true;
       state.countdownReasonCode = countdownCoach.reasonCode || "";
       state.countdownReasonText = countdownCoach.reasonText || "";
-      state.countdownTarget = countdownCoach.target || null;
+      state.countdownTarget = selectedCountdownTarget || null;
       if (countdownTargetChanged) {
-        state.lastCountdownTargetId = String(countdownCoach?.target?.locationId || "").trim() || null;
+        state.lastCountdownTargetId = String(selectedCountdownTarget?.locationId || "").trim() || null;
         state.lastCountdownTargetChangedAtTs = nowTs;
       }
       state.countdownEscalationLevel = safeNum(countdownCoach.escalationLevel, 0) || 0;
