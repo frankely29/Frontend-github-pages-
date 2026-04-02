@@ -2237,8 +2237,14 @@
   function buildMessages() {
     const compactLane = isCompactLaneMode();
     const list = [];
-    const primary = buildAssistantPrimaryLine();
-    list.push({ key: "action", text: primary, severity: severityForAction(state.finalActionCode) });
+    const primaryDecision = derivePrimaryDriverDecision();
+    const primary = primaryDecision?.line || buildAssistantPrimaryLine();
+    const primarySeverity = primaryDecision?.kind === "move"
+      ? "move"
+      : (primaryDecision?.kind === "stay" || primaryDecision?.kind === "trap")
+        ? "caution"
+        : severityForAction(state.finalActionCode);
+    list.push({ key: "action", text: primary, severity: primarySeverity });
 
     const allowTargetInCompact = state.dataQualityMode === "full"
       || ((safeNum(state.assistantMoveTarget?.etaMinutes, Infinity) || Infinity) <= AI_ASSISTANT_NEAR_TARGET_MAX_ETA_MIN);
@@ -2292,7 +2298,13 @@
         finalized = [{ key: "action", text: safeDegradedStayPrimaryLine(), severity: "positive" }];
       } else if (state.dataQualityMode === "degraded" && state.finalActionCode === "MONITOR") {
         const stayAvg = safeNum(state.stayWindowAvgRating, 0) || 0;
-        finalized = [{ key: "action", text: stayAvg >= 46 ? "Stay • Nearby options not strong enough yet" : "Monitor • Checking more data", severity: stayAvg >= 46 ? "caution" : "info" }];
+        const decisionLine = primaryDecision?.line || primary;
+        const hasDecision = /^(Stay|Stay briefly|Move soon|Move now)\s•/i.test(String(decisionLine || "").trim());
+        finalized = [{
+          key: "action",
+          text: hasDecision ? decisionLine : (stayAvg >= 44 ? "Stay briefly • Nearby options not strong enough yet" : "Monitor • Checking more data"),
+          severity: hasDecision ? primarySeverity : (stayAvg >= 44 ? "caution" : "info")
+        }];
       } else if (state.dataQualityMode === "partial" && !state.assistantMoveTarget) {
         finalized = [{ key: "action", text: "Stay • Other areas are too far right now", severity: "caution" }];
       }
