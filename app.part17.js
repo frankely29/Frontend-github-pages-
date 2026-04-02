@@ -253,6 +253,19 @@
     return labels[text] || (text ? text[0].toUpperCase() + text.slice(1) : "n/a");
   }
 
+  function isStrongOpportunityBucket(value) {
+    const text = String(value || "").trim().toLowerCase();
+    if (!text) return false;
+    return [
+      "purple",
+      "indigo",
+      "green",
+      "highest",
+      "very high",
+      "high",
+    ].includes(text);
+  }
+
   function getZoneId(props) {
     return String(internals.getZoneLocationId?.(props || {}) || props?.LocationID || "").trim() || null;
   }
@@ -452,9 +465,12 @@
         const eta = safeNum(item?.etaMinutes, Infinity) || Infinity;
         const distance = safeNum(item?.distanceMiles, Infinity) || Infinity;
         const visibleRating = safeNum(item?.signal?.visibleRating, -Infinity) || -Infinity;
-        const visibleBucket = String(item?.signal?.visibleBucket || "").trim().toLowerCase();
-        const bucketStrong = ["purple", "indigo", "green"].includes(visibleBucket);
-        const strongProjected = visibleRating >= (currentVisibleRating + 7);
+        const bucketStrong = isStrongOpportunityBucket(item?.signal?.visibleBucket);
+        const strongProjected = visibleRating >= (currentVisibleRating + 5)
+          || (
+            (safeNum(item?.signal?.busyNowBase, 0) || 0) >= 0.54
+            && (safeNum(item?.signal?.continuationRaw, 0) || 0) >= 0.52
+          );
         return !!item?.isSameBorough
           && eta <= 6
           && distance <= 1.2
@@ -1003,8 +1019,7 @@
         if (eta > 6 || distance > 1.2) return false;
         const visibleRating = safeNum(evalObj?.candidateSignal?.visibleRating, -Infinity) || -Infinity;
         if (visibleRating < (currentVisibleRating + 4)) return false;
-        const visibleBucket = String(evalObj?.candidateSignal?.visibleBucket || "").trim().toLowerCase();
-        const strongBucket = ["purple", "indigo", "green"].includes(visibleBucket);
+        const strongBucket = isStrongOpportunityBucket(evalObj?.candidateSignal?.visibleBucket);
         const arrivalProjected = safeNum(evalObj?.targetMetrics?.targetArrivalProjectedRating, 0) || 0;
         const stayProjected = safeNum(evalObj?.currentMetrics?.stayArrivalProjectedRating, currentStayArrival) || currentStayArrival;
         const clearlyBetterOnArrival = arrivalProjected >= (stayProjected + 4);
@@ -1014,7 +1029,13 @@
         if (!evalObj?.targetPaybackMetrics?.paybackHolds) return false;
         return true;
       })
-      .sort((a, b) => sortPracticalTargetOrder(a, b));
+      .sort((a, b) => {
+        const etaDelta = (safeNum(a?.etaMinutes, Infinity) || Infinity) - (safeNum(b?.etaMinutes, Infinity) || Infinity);
+        if (etaDelta !== 0) return etaDelta;
+        const arrivalDelta = (safeNum(b?.targetMetrics?.targetArrivalProjectedRating, 0) || 0) - (safeNum(a?.targetMetrics?.targetArrivalProjectedRating, 0) || 0);
+        if (arrivalDelta !== 0) return arrivalDelta;
+        return sortPracticalTargetOrder(a, b);
+      });
     return options[0] || null;
   }
 
@@ -1023,8 +1044,7 @@
     const eta = safeNum(adjacentEval?.etaMinutes, Infinity) || Infinity;
     const distance = safeNum(adjacentEval?.distanceMiles, Infinity) || Infinity;
     if (eta > 5 || distance > 1.0) return false;
-    const visibleBucket = String(adjacentEval?.candidateSignal?.visibleBucket || "").trim().toLowerCase();
-    const strongBucket = ["purple", "indigo", "green"].includes(visibleBucket);
+    const strongBucket = isStrongOpportunityBucket(adjacentEval?.candidateSignal?.visibleBucket);
     const currentStayArrival = safeNum(adjacentEval?.currentMetrics?.stayArrivalProjectedRating, safeNum(currentSignal?.visibleRating, 0) || 0) || 0;
     const arrivalProjected = safeNum(adjacentEval?.targetMetrics?.targetArrivalProjectedRating, 0) || 0;
     return strongBucket || arrivalProjected >= (currentStayArrival + 4);
