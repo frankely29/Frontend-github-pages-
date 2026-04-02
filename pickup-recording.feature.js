@@ -260,17 +260,18 @@
       if (typeof window.handlePickupProgressionDelta === 'function') {
         window.handlePickupProgressionDelta(res || {});
       }
-      if (isPickupSaveAccepted(res)) {
-        window.dispatchEvent(new CustomEvent('tlc-pickup-recorded', {
-          detail: {
-            tsUnix,
-            zoneId,
-            zoneName: near?.zone_name ?? null,
-            borough: near?.borough ?? null,
-            frameTime: ctx.currentFrame?.time || null,
-          },
-        }));
-      }
+      const accepted = isPickupSaveAccepted(res);
+      if (!accepted) return res;
+
+      window.dispatchEvent(new CustomEvent('tlc-pickup-recorded', {
+        detail: {
+          tsUnix,
+          zoneId,
+          zoneName: near?.zone_name ?? null,
+          borough: near?.borough ?? null,
+          frameTime: ctx.currentFrame?.time || null,
+        },
+      }));
       return res;
     } catch (err) {
       const status = Number(err?.status || 0);
