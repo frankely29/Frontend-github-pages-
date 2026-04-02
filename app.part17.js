@@ -1272,6 +1272,15 @@
     return ["good_zone_now", "decent_rating_zone", "moving_not_worth_it"].includes(String(proposal.reasonCode || "").trim());
   }
 
+  function isImmediateCountdownPromotion(proposal, nowTs) {
+    if (!state.countdownDeadlineTs) return false;
+    if (nowTs < state.countdownDeadlineTs) return false;
+    if (!proposal) return false;
+    if (!["MOVE_SOON", "LEAVE_NOW"].includes(String(proposal.actionCode || ""))) return false;
+    if (!proposal.moveTarget || !state.countdownTarget) return false;
+    return String(proposal.moveTarget.locationId || "") === String(state.countdownTarget.locationId || "");
+  }
+
   function commitAssistantRecommendation(proposal, nowTs) {
     state.committedActionCode = proposal.actionCode;
     state.committedReasonCode = proposal.reasonCode;
@@ -1405,6 +1414,13 @@
       commitAssistantRecommendation(proposal, nowTs);
       state.stabilityReasonCode = "safe_degraded_stay_promoted";
       state.stabilityReasonText = "Safe stay fallback promoted immediately.";
+      return;
+    }
+
+    if (isImmediateCountdownPromotion(proposal, nowTs)) {
+      commitAssistantRecommendation(proposal, nowTs);
+      state.stabilityReasonCode = "countdown_expired_move_promoted";
+      state.stabilityReasonText = "Countdown finished. Move now.";
       return;
     }
 
@@ -1636,6 +1652,31 @@
     state.countdownEscalationLevel = 0;
   }
 
+  function hasPickupSinceCurrentZoneEntry() {
+    if (!state.lastPickupRecordedAtMs || !state.activeStableZoneEnterTs) return false;
+    if (state.lastPickupRecordedAtMs < state.activeStableZoneEnterTs) return false;
+    if (state.lastPickupRecordedZoneId && state.activeStableZoneId
+      && String(state.lastPickupRecordedZoneId) !== String(state.activeStableZoneId)) {
+      return false;
+    }
+    return true;
+  }
+
+  function isCountdownTargetStillValid(targetEval, currentSignal, currentMetrics, dataQualityMode) {
+    if (!targetEval) return false;
+    if (!targetEval?.viability?.viable) return false;
+    if (!targetEval?.targetMetrics?.targetHoldsAfterArrival) return false;
+    if (!targetEval?.targetPaybackMetrics?.paybackHolds) return false;
+    if (targetEval?.targetMetrics?.targetLooksChasey) return false;
+    if (targetEval?.targetMetrics?.targetTooFarForEdge) return false;
+    if (!targetEval?.isNearTarget && !targetEval?.isSameBorough) return false;
+    if (dataQualityMode !== "full" && !targetEval?.isNearTarget) return false;
+    const moveEdge = safeNum(targetEval?.netMoveEdge, -Infinity) || -Infinity;
+    const moveThreshold = safeNum(targetEval?.moveWorthThreshold, Infinity) || Infinity;
+    if (moveEdge < moveThreshold) return false;
+    return isCountdownTargetEconomicallyValid(targetEval, currentSignal, currentMetrics, dataQualityMode);
+  }
+
   function isCountdownTargetEconomicallyValid(target, currentSignal, currentMetrics, dataQualityMode) {
     if (!target) return false;
     const etaMinutes = safeNum(target?.etaMinutes, Infinity) || Infinity;
@@ -1664,9 +1705,7 @@
     const target = bestWorthwhileTarget || null;
     const cls = classifyAssistantSignal(currentSignal || {});
     const hasStableZone = !!state.activeStableZoneId && !!state.activeStableZoneEnterTs;
-    const hasPickupSinceZoneEntry = !!state.lastPickupRecordedAtMs
-      && !!state.activeStableZoneEnterTs
-      && state.lastPickupRecordedAtMs >= state.activeStableZoneEnterTs;
+    const hasPickupSinceZoneEntry = hasPickupSinceCurrentZoneEntry();
     const isUrgentNow = state.finalActionCode === "LEAVE_NOW" || state.finalActionCode === "MOVE_SOON";
     const goodHoldWindow = !!currentMetrics?.stayHoldsAfterArrival
       && (safeNum(currentTravelMetrics?.travelWindowMinRating, 0) || 0) >= 50
@@ -1702,23 +1741,24 @@
       && !currentMetrics?.stayWeakensSoon;
     let durationMin = 5;
     let reasonCode = "wait_then_move";
-    let reasonText = "If no trip in 5 min, move to the stronger nearby zone.";
+    const targetZoneName = String(target?.candidateSignal?.zoneName || "the better nearby area").trim();
+    let reasonText = `If no trip in 5 min, move to ${targetZoneName}`;
     let escalationLevel = 1;
 
     if (trapUrgency) {
       durationMin = 3;
       reasonCode = "trap_risk_rising";
-      reasonText = "Trap risk rising • leave in 3 min if no trip.";
+      reasonText = `If no trip in 3 min, go to ${targetZoneName}`;
       escalationLevel = 2;
     } else if (coolingButDecent) {
       durationMin = 5;
       reasonCode = "zone_cooling";
-      reasonText = "Stay briefly • Zone may cool off.";
+      reasonText = `If no trip in 5 min, move to ${targetZoneName}`;
       escalationLevel = 1;
     } else if (acceptableButWatch) {
-      durationMin = 7;
+      durationMin = 4;
       reasonCode = "good_zone_protection";
-      reasonText = "Stay • Good zone right now.";
+      reasonText = `If no trip in 4 min, move to ${targetZoneName}`;
       escalationLevel = 0;
     }
 
@@ -1742,6 +1782,9 @@
   }
 
   function buildAssistantPrimaryLine() {
+    if (state.stabilityReasonCode === "countdown_expired_move_promoted" && isMoveAction(state.finalActionCode)) {
+      return "Move now • Better area is ready";
+    }
     if (state.countdownActive && state.countdownReasonCode === "trap_risk_rising") {
       return "Move soon • Trap risk rising";
     }
@@ -2536,6 +2579,7 @@
       state.finalActionReason = "Checking more data.";
       state.recommendationReasonText = "Checking more data.";
     }
+    const nowTs = Date.now();
     const countdownCoach = deriveCountdownCoach(
       activeSignal,
       bestWorthwhile,
@@ -2543,30 +2587,48 @@
       selectedForReason?.currentTravelMetrics || {},
       state.dataQualityMode
     );
-    if (!countdownCoach.eligible || !countdownCoach.target) {
+    const countdownTargetStillValid = isCountdownTargetStillValid(
+      bestWorthwhile,
+      activeSignal,
+      selectedForReason?.currentMetrics || {},
+      state.dataQualityMode
+    );
+    const nextTargetId = String(countdownCoach?.target?.locationId || "").trim();
+    const activeTargetId = String(state.countdownTarget?.locationId || "").trim();
+    const countdownTargetChanged = !!activeTargetId && !!nextTargetId && nextTargetId !== activeTargetId;
+    const goodHoldNow = !!selectedForReason?.currentMetrics?.stayHoldsAfterArrival
+      && (safeNum(selectedForReason?.currentTravelMetrics?.travelWindowMinRating, 0) || 0) >= 50
+      && !selectedForReason?.currentMetrics?.stayWeakensSoon;
+    const shouldCancelCountdown = !countdownCoach.eligible
+      || !countdownCoach.target
+      || !countdownTargetStillValid
+      || countdownTargetChanged
+      || hasPickupSinceCurrentZoneEntry()
+      || goodHoldNow;
+    if (shouldCancelCountdown) {
       resetCountdownCoachState();
-      state.countdownHoldWindowReason = countdownCoach.holdWindowReason || "";
+      state.countdownHoldWindowReason = goodHoldNow ? "Stay • Good zone right now" : (countdownCoach.holdWindowReason || "");
     } else {
-      const nextTargetId = String(countdownCoach?.target?.locationId || "").trim();
-      const activeTargetId = String(state.countdownTarget?.locationId || "").trim();
       const countdownChanged = nextTargetId !== activeTargetId
         || String(state.countdownReasonCode || "") !== String(countdownCoach.reasonCode || "");
       if (!state.countdownActive || !state.countdownStartTs || !state.countdownDeadlineTs || countdownChanged) {
-        state.countdownStartTs = Date.now();
+        state.countdownStartTs = nowTs;
         state.countdownDeadlineTs = state.countdownStartTs + ((safeNum(countdownCoach.durationMin, 5) || 5) * 60000);
       }
       state.countdownEligible = true;
       state.countdownActive = true;
       state.countdownReasonCode = countdownCoach.reasonCode || "";
-      state.countdownReasonText = countdownCoach.arrivalNarrowWindow
-        ? `Move in ${safeNum(countdownCoach.durationMin, 5) || 5} min • target stronger by arrival`
-        : (countdownCoach.reasonText || "");
+      state.countdownReasonText = countdownCoach.reasonText || "";
       state.countdownTarget = countdownCoach.target || null;
       state.countdownEscalationLevel = safeNum(countdownCoach.escalationLevel, 0) || 0;
-      state.countdownMinutesRemaining = Math.max(0, Math.ceil((state.countdownDeadlineTs - Date.now()) / 60000));
+      state.countdownMinutesRemaining = Math.max(0, Math.ceil((state.countdownDeadlineTs - nowTs) / 60000));
       if (state.countdownMinutesRemaining <= 0) {
-        state.countdownActive = false;
-        state.countdownMinutesRemaining = 0;
+        if (countdownTargetStillValid && isMoveAction(state.finalActionCode)
+          && String(state.assistantMoveTarget?.locationId || "") === String(state.countdownTarget?.locationId || "")) {
+          state.stabilityReasonCode = "countdown_expired_move_promoted";
+          state.stabilityReasonText = "Countdown finished. Move now.";
+        }
+        resetCountdownCoachState();
       }
     }
     if (!bestWorthwhile && !bestNotWorth) {
