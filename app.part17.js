@@ -125,6 +125,8 @@
     lastCountdownTargetChangedAtTs: 0,
     lastTrapMessageAtTs: 0,
     lastStayMessageAtTs: 0,
+    lastMoveMessageAtTs: 0,
+    quietModeReason: "",
     stableZoneEntryUserLocation: null,
     lastMeaningfulRepositionAtMs: null,
     lastMeaningfulRepositionDistanceMiles: 0,
@@ -1631,7 +1633,7 @@
       .replace(/Short-trip trap detected with nearby escape option\.?/gi, "Trap risk is rising.")
       .replace(/Current zone is slow and nearby zone is materially better\.?/gi, "Better nearby zone is available.")
       .replace(/Current zone has strong demand and continuation\.?/gi, "Good zone right now.")
-      .replace(/Nearby zone has better score; prepare to move\.?/gi, "Move window coming.")
+      .replace(/Nearby zone has better score; prepare to move\.?/gi, "Move soon if no trip.")
       .replace(/Current zone is acceptable; keep monitoring\.?/gi, "Mixed signals.")
       .replace(/Waiting for stable zone\.?/gi, "Learning this area.")
       .replace(/Outlook unavailable\.?/gi, "Checking more data.")
@@ -1926,6 +1928,9 @@
     const blockedByQuietMode = (countdownSuppressed || pickupSuppressed) && !urgentTrap;
 
     if (!eligible || blockedByQuietMode) {
+      if (blockedByQuietMode) {
+        state.quietModeReason = pickupSuppressed ? "pickup_recent" : "hold_improved";
+      }
       return {
         eligible: false,
         active: false,
@@ -2022,6 +2027,7 @@
     const action = humanActionLabel(committedAction);
     const reason = humanizeAssistantReason(committedReason);
     if (action === "Stay" || action === "Stay briefly") state.lastStayMessageAtTs = Date.now();
+    if (action === "Move soon" || action === "Leave now") state.lastMoveMessageAtTs = Date.now();
     if (state.usedCachedRecommendationFallback && state.dataQualityMode !== "full") {
       return `${action} • ${reason} (recent fallback)`;
     }
@@ -2062,7 +2068,11 @@
     }
     if (committedAction === "STAY") return "Stay here for now";
     if (committedAction === "STAY_BRIEFLY") return "Stay here briefly";
-    if (committedAction === "MONITOR") return "Waiting for a clearer signal";
+    if (committedAction === "MONITOR") {
+      if ((safeNum(state.stayWindowAvgRating, 0) || 0) >= 50) return "Stay here for now";
+      if ((safeNum(state.stayWindowAvgRating, 0) || 0) >= 46) return "Nearby options not strong enough yet";
+      return "Waiting for a clearer signal";
+    }
     return "Waiting for a clearer signal";
   }
 
@@ -2243,7 +2253,8 @@
       if (isSafeDegradedStayFallback()) {
         finalized = [{ key: "action", text: safeDegradedStayPrimaryLine(), severity: "positive" }];
       } else if (state.dataQualityMode === "degraded" && state.finalActionCode === "MONITOR") {
-        finalized = [{ key: "action", text: "Monitor • Checking more data", severity: "info" }];
+        const stayAvg = safeNum(state.stayWindowAvgRating, 0) || 0;
+        finalized = [{ key: "action", text: stayAvg >= 46 ? "Stay • Nearby options not strong enough yet" : "Monitor • Checking more data", severity: stayAvg >= 46 ? "caution" : "info" }];
       } else if (state.dataQualityMode === "partial" && !state.assistantMoveTarget) {
         finalized = [{ key: "action", text: "Stay • Other areas are too far right now", severity: "caution" }];
       }
@@ -2317,14 +2328,14 @@
     return `
       <div class="aiAssistantPanel">
         <section class="aiAssistantSection"><strong>Current area</strong><div>${state.activeStableZoneName || "—"} • ${state.activeStableBorough || "—"} • ${Math.round(state.visibleRating || 0)} ${prettyBucket(state.visibleBucket)} • ${state.visibleScoreSourceLabel}</div></section>
-        <section class="aiAssistantSection"><strong>Advice</strong><div>${state.dwellCoachSummaryText}</div><div>Why: ${buildAssistantPrimaryLine()}</div><div>${state.dwellCoachReasonFragments.join(" • ")}</div></section>
+        <section class="aiAssistantSection"><strong>Advice</strong><div>${buildAssistantPrimaryLine()}</div><div>${buildAssistantSecondaryLine()}</div></section>
         <section class="aiAssistantSection"><strong>Countdown</strong><div>${state.countdownActive ? `Countdown active • ${Math.max(1, Math.round(state.countdownMinutesRemaining || 0))} min left` : "Countdown inactive"}</div><div>${state.countdownReasonText || state.countdownHoldWindowReason || "No countdown needed."}</div>${state.countdownActive && state.countdownTarget?.zoneName ? `<div>Target: ${state.countdownTarget.zoneName} • ${Math.round(state.countdownTarget.etaMinutes || 0)} min</div>` : ""}</section>
-        <section class="aiAssistantSection"><strong>Trap check</strong><div>Status: ${["off", "watch", "rising", "strong"][safeNum(state.trapSeverityLevel, 0) || 0]}</div><div>Why: ${state.trapReasonSummary || "No trap signs right now."}</div><div>${state.trapEscapeTarget?.candidateSignal?.zoneName ? `Nearby escape: ${state.trapEscapeTarget.candidateSignal.zoneName} • ${Math.round(state.trapEscapeTarget.etaMinutes || 0)} min` : "Nearby escape: —"}</div></section>
+        ${(state.trapModeActive || (safeNum(state.trapSeverityLevel, 0) || 0) >= 1 || state.trapReasonSummary) ? `<section class="aiAssistantSection"><strong>Trap check</strong><div>${state.trapReasonSummary || "No trap signs right now."}</div>${state.trapEscapeTarget?.candidateSignal?.zoneName ? `<div>Nearby option: ${state.trapEscapeTarget.candidateSignal.zoneName} • ${Math.round(state.trapEscapeTarget.etaMinutes || 0)} min</div>` : ""}</section>` : ""}
         <section class="aiAssistantSection"><strong>What may happen next</strong><div>${state.outlookSummaryText}</div><div>${state.moveTargetOutlookSummaryText || ""}</div>${(state.outlookStatus || state.outlookLastErrorCode) ? `<div><small>Status: ${state.outlookStatus || "idle"}${state.outlookLastErrorCode ? ` (${state.outlookLastErrorCode})` : ""}</small></div>` : ""}</section>
         <section class="aiAssistantSection"><strong>Best areas right now</strong><div>Best now: ${state.citywideBestNow?.zoneName || "—"} • Worst now: ${state.citywideWorstNow?.zoneName || "—"}</div>${buildRankList(state.citywideTop10Best)}${buildRankList(state.boroughTop5Best)}</section>
         ${state.assistantMoveTarget ? `<section class="aiAssistantSection"><strong>Move Target</strong><div>${state.assistantMoveTarget.zoneName} • ${Math.round(state.assistantMoveTarget.etaMinutes || 0)} min • ${state.assistantMoveTarget.distanceMiles.toFixed(1)} mi</div></section>` : ""}
-        ${showMoveCheck ? `<section class="aiAssistantSection"><strong>Move check</strong><div>Stay outlook: ${(state.stayScenarioValue || 0).toFixed(1)}</div><div>Move outlook: ${(state.moveScenarioValue || 0).toFixed(1)}</div><div>Drive time: ${Math.round(state.etaMinutes || 0)} min</div><div>Empty drive cost: ${(state.totalDeadheadCost || 0).toFixed(1)}</div><div>Move gap: ${(state.netMoveEdge || 0) >= 0 ? "+" : ""}${(state.netMoveEdge || 0).toFixed(1)}</div><div>Move bar: ${(state.moveWorthThreshold || 0).toFixed(1)}</div><div><small>${compactTargetWhyLine()}</small></div></section>` : ""}
-        <section class="aiAssistantSection"><strong>Assistant status</strong><div>Proposed: ${humanActionLabel(state.proposedActionCode)} • ${humanizeAssistantReason(friendlyReasonFromCode(state.proposedReasonCode, state.proposedReasonText || "—"))}</div><div>Committed: ${humanActionLabel(state.committedActionCode)} • ${humanizeAssistantReason(friendlyReasonFromCode(state.committedReasonCode, state.committedReasonText || "—"))}</div><div>Confidence: ${Math.round(state.recommendationConfidenceScore || 0)} (${state.recommendationConfidenceLevel || "low"})</div><div>Stable since: ${state.committedSinceTs ? new Date(state.committedSinceTs).toLocaleTimeString() : "—"}</div><div>Switch cooldown until: ${state.recommendationSwitchCooldownUntilTs ? new Date(state.recommendationSwitchCooldownUntilTs).toLocaleTimeString() : "—"}</div><div>Minimum hold until: ${state.recommendationMinHoldUntilTs ? new Date(state.recommendationMinHoldUntilTs).toLocaleTimeString() : "—"}</div><div>Stability reason: ${humanizeAssistantReason(state.stabilityReasonText || "Committed recommendation is stable.")}</div></section>
+        ${showMoveCheck ? `<section class="aiAssistantSection"><strong>Move check</strong><div>Drive time: ${Math.round(state.etaMinutes || 0)} min</div><div><small>${compactTargetWhyLine()}</small></div></section>` : ""}
+        <section class="aiAssistantSection"><strong>Assistant status</strong><div>Proposed: ${humanActionLabel(state.proposedActionCode)} • ${humanizeAssistantReason(friendlyReasonFromCode(state.proposedReasonCode, state.proposedReasonText || "—"))}</div><div>Committed: ${humanActionLabel(state.committedActionCode)} • ${humanizeAssistantReason(friendlyReasonFromCode(state.committedReasonCode, state.committedReasonText || "—"))}</div><div>Signal strength: ${state.recommendationConfidenceLevel || "low"}</div><div>Stable since: ${state.committedSinceTs ? new Date(state.committedSinceTs).toLocaleTimeString() : "—"}</div><div>Switch cooldown until: ${state.recommendationSwitchCooldownUntilTs ? new Date(state.recommendationSwitchCooldownUntilTs).toLocaleTimeString() : "—"}</div><div>Minimum hold until: ${state.recommendationMinHoldUntilTs ? new Date(state.recommendationMinHoldUntilTs).toLocaleTimeString() : "—"}</div><div>Stability reason: ${humanizeAssistantReason(state.stabilityReasonText || "Committed recommendation is stable.")}</div></section>
         ${cautionDataLine ? `<section class="aiAssistantSection"><small>${cautionDataLine}</small></section>` : ""}
         <section class="aiAssistantSection"><small>Assistant uses the same visible Team Joseo score path the map is showing.</small></section>
       </div>
@@ -2573,6 +2584,8 @@
     state.lastCountdownTargetChangedAtTs = 0;
     state.lastTrapMessageAtTs = 0;
     state.lastStayMessageAtTs = 0;
+    state.lastMoveMessageAtTs = 0;
+    state.quietModeReason = "";
     resetCountdownCoachState();
     if (state.outlookAbortController) state.outlookAbortController.abort();
     if (previousZoneId && String(state.outlookRequestKey || "").includes(String(previousZoneId))) {
@@ -2653,6 +2666,7 @@
       state.trapNeedsNearbyEscape = false;
       state.trapEscapeTarget = null;
       state.trapSeverityLevel = 0;
+      state.quietModeReason = "";
     }
     sampleRecentSameZoneMovement(state.activeStableZoneId, state.lastUserLocation);
     const meaningfulRepositioned = isMeaningfulRepositionInSameZone(state.activeStableZoneId, state.lastUserLocation);
@@ -2773,6 +2787,7 @@
     if (!trapState.trapModeActive) state.trapDetectedAtMs = null;
     if (meaningfulRepositioned) {
       state.trapSuppressedUntilTs = Date.now() + AI_ASSISTANT_TRAP_SUPPRESS_MS;
+      state.quietModeReason = "meaningful_reposition";
       state.trapModeActive = false;
       state.trapSeverityLevel = Math.max(0, (safeNum(state.trapSeverityLevel, 0) || 0) - 1);
       if (!state.trapReasonSummary) state.trapReasonSummary = "You made a meaningful move inside this area.";
@@ -2783,6 +2798,7 @@
       if (!state.trapReasonSummary) state.trapReasonSummary = "Nearby options not strong enough yet.";
     }
     if (strongHoldZone && !isUrgentTrapCondition(trapState)) {
+      state.quietModeReason = "good_hold_zone";
       state.trapModeActive = false;
       state.trapSeverityLevel = 0;
       state.trapReasonSummary = "Good zone right now.";
@@ -2935,6 +2951,7 @@
     if (shouldCancelCountdown) {
       if (state.countdownActive && goodHoldNow) {
         state.countdownSuppressedUntilTs = nowTs + AI_ASSISTANT_COUNTDOWN_SUPPRESS_MS;
+        state.quietModeReason = "hold_improved";
       }
       resetCountdownCoachState();
       state.countdownHoldWindowReason = goodHoldNow ? "Stay • Good zone right now" : (countdownCoach.holdWindowReason || "");
@@ -2950,6 +2967,10 @@
       state.countdownReasonCode = countdownCoach.reasonCode || "";
       state.countdownReasonText = countdownCoach.reasonText || "";
       state.countdownTarget = selectedCountdownTarget || null;
+      if (selectedCountdownTarget?.locationId && !state.lastCountdownTargetId) {
+        state.lastCountdownTargetId = String(selectedCountdownTarget.locationId).trim();
+        state.lastCountdownTargetChangedAtTs = nowTs;
+      }
       if (countdownTargetChanged) {
         state.lastCountdownTargetId = String(selectedCountdownTarget?.locationId || "").trim() || null;
         state.lastCountdownTargetChangedAtTs = nowTs;
@@ -2957,12 +2978,19 @@
       state.countdownEscalationLevel = safeNum(countdownCoach.escalationLevel, 0) || 0;
       state.countdownMinutesRemaining = Math.max(0, Math.ceil((state.countdownDeadlineTs - nowTs) / 60000));
       if (state.countdownMinutesRemaining <= 0) {
-        if (countdownTargetStillValid && isMoveAction(state.finalActionCode)
+        const recheckValid = isCountdownTargetStillValid(
+          selectedCountdownEval || currentCountdownEval || bestWorthwhile,
+          activeSignal,
+          selectedForReason?.currentMetrics || {},
+          state.dataQualityMode
+        );
+        if (recheckValid && isMoveAction(state.finalActionCode)
           && String(state.assistantMoveTarget?.locationId || "") === String(state.countdownTarget?.locationId || "")) {
           state.stabilityReasonCode = "countdown_expired_move_promoted";
           state.stabilityReasonText = "Countdown finished. Move now.";
         } else {
           state.countdownSuppressedUntilTs = nowTs + AI_ASSISTANT_COUNTDOWN_SUPPRESS_MS;
+          state.quietModeReason = "countdown_expired_recheck_failed";
           state.finalActionCode = "STAY";
           const tooFar = (safeNum(state.assistantMoveTarget?.etaMinutes, Infinity) || Infinity) > AI_ASSISTANT_NEAR_TARGET_MAX_ETA_MIN;
           state.recommendationReasonCode = tooFar ? "moving_not_worth_it" : "nearby_options_not_strong";
@@ -3116,6 +3144,8 @@
     state.lastCountdownTargetChangedAtTs = 0;
     state.lastTrapMessageAtTs = 0;
     state.lastStayMessageAtTs = 0;
+    state.lastMoveMessageAtTs = 0;
+    state.quietModeReason = "";
     state.finalActionCode = "MONITOR";
     state.finalActionReason = "Waiting for stable zone.";
     renderWidget();
@@ -3142,6 +3172,7 @@
       state.lastPickupRecordedZoneId = detail?.zoneId ? String(detail.zoneId) : null;
       state.countdownSuppressedUntilTs = state.lastPickupRecordedAtMs + AI_ASSISTANT_PICKUP_SUPPRESS_MS;
       state.trapSuppressedUntilTs = state.lastPickupRecordedAtMs + AI_ASSISTANT_PICKUP_SUPPRESS_MS;
+      state.quietModeReason = "pickup_recent";
       if (state.activeStableZoneId && state.lastPickupRecordedZoneId
         && String(state.lastPickupRecordedZoneId) === String(state.activeStableZoneId)) {
         state.sameZonePickupCountSinceEntry = (safeNum(state.sameZonePickupCountSinceEntry, 0) || 0) + 1;
