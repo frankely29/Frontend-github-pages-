@@ -2746,6 +2746,9 @@
       }
       state.lastMeaningfulRepositionAtMs = null;
       state.lastMeaningfulRepositionDistanceMiles = 0;
+      state.trapTimeScore = 0;
+      state.trapPickupScore = 0;
+      state.trapMovementScore = 0;
       state.trapCompositeScore = 0;
       state.trapModeActive = false;
       state.trapDetectedAtMs = null;
@@ -2753,6 +2756,8 @@
       state.trapNeedsNearbyEscape = false;
       state.trapEscapeTarget = null;
       state.trapSeverityLevel = 0;
+      state.countdownSuppressedUntilTs = 0;
+      state.trapSuppressedUntilTs = 0;
       state.quietModeReason = "";
     }
     sampleRecentSameZoneMovement(state.activeStableZoneId, state.lastUserLocation);
@@ -3295,6 +3300,10 @@
         && String(state.lastPickupRecordedZoneId) === String(state.activeStableZoneId)) {
         state.sameZonePickupCountSinceEntry = (safeNum(state.sameZonePickupCountSinceEntry, 0) || 0) + 1;
         state.sameZonePickupCountRolling = (safeNum(state.sameZonePickupCountRolling, 0) || 0) + 1;
+      } else if (state.lastPickupRecordedZoneId && state.activeStableZoneId
+        && String(state.lastPickupRecordedZoneId) !== String(state.activeStableZoneId)) {
+        state.sameZonePickupCountSinceEntry = 0;
+        state.sameZonePickupCountRolling = Math.max(0, Math.floor((safeNum(state.sameZonePickupCountRolling, 0) || 0) * 0.5));
       }
       resetCountdownCoachState();
       forceRefresh();
