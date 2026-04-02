@@ -466,7 +466,7 @@
         const distance = safeNum(item?.distanceMiles, Infinity) || Infinity;
         const visibleRating = safeNum(item?.signal?.visibleRating, -Infinity) || -Infinity;
         const bucketStrong = isStrongOpportunityBucket(item?.signal?.visibleBucket);
-        const strongProjected = visibleRating >= (currentVisibleRating + 5)
+        const projectedArrivalStrong = visibleRating >= (currentVisibleRating + 5)
           || (
             (safeNum(item?.signal?.busyNowBase, 0) || 0) >= 0.54
             && (safeNum(item?.signal?.continuationRaw, 0) || 0) >= 0.52
@@ -475,7 +475,7 @@
           && eta <= 6
           && distance <= 1.2
           && visibleRating >= (currentVisibleRating + 3)
-          && (bucketStrong || strongProjected);
+          && (bucketStrong || projectedArrivalStrong);
       })
       .sort((a, b) => {
         if (a.etaMinutes !== b.etaMinutes) return a.etaMinutes - b.etaMinutes;
@@ -2408,9 +2408,7 @@
     const allowTargetInCompact = state.dataQualityMode === "full"
       || ((safeNum(state.assistantMoveTarget?.etaMinutes, Infinity) || Infinity) <= AI_ASSISTANT_NEAR_TARGET_MAX_ETA_MIN);
     if (state.assistantMoveTarget?.zoneName && Number.isFinite(state.assistantMoveTarget?.etaMinutes) && allowTargetInCompact) {
-      const targetSummary = compactLane
-        ? `Target ${state.assistantMoveTarget.zoneName}`
-        : `Go to ${state.assistantMoveTarget.zoneName} • ${Math.round(state.assistantMoveTarget.etaMinutes || 0)} min`;
+      const targetSummary = `Go to ${state.assistantMoveTarget.zoneName} • ${Math.round(state.assistantMoveTarget.etaMinutes || 0)} min`;
       if (!primary.includes(targetSummary)) {
         list.push({ key: "target", text: targetSummary, severity: "info" });
       }
