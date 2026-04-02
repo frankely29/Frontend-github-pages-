@@ -102,6 +102,18 @@
     dwellCountdownMs: null,
     dwellCoachSummaryText: "Stay timer starting.",
     dwellCoachReasonFragments: [],
+    lastPickupRecordedAtMs: null,
+    lastPickupRecordedZoneId: null,
+    countdownEligible: false,
+    countdownActive: false,
+    countdownStartTs: null,
+    countdownDeadlineTs: null,
+    countdownMinutesRemaining: null,
+    countdownReasonCode: "",
+    countdownReasonText: "",
+    countdownTarget: null,
+    countdownHoldWindowReason: "",
+    countdownEscalationLevel: 0,
     assistantReasonFragments: [],
     assistantMessages: [],
     activeMessageIndex: 0,
@@ -1578,7 +1590,121 @@
     return ["good_zone_now", "decent_rating_zone", "moving_not_worth_it"].includes(String(state.recommendationReasonCode || "").trim());
   }
 
+  function resetCountdownCoachState() {
+    state.countdownEligible = false;
+    state.countdownActive = false;
+    state.countdownStartTs = null;
+    state.countdownDeadlineTs = null;
+    state.countdownMinutesRemaining = null;
+    state.countdownReasonCode = "";
+    state.countdownReasonText = "";
+    state.countdownTarget = null;
+    state.countdownHoldWindowReason = "";
+    state.countdownEscalationLevel = 0;
+  }
+
+  function deriveCountdownCoach(currentSignal, bestWorthwhileTarget, currentMetrics, currentTravelMetrics, dataQualityMode) {
+    const now = Date.now();
+    const minsInZone = dwellMins();
+    const target = bestWorthwhileTarget || null;
+    const cls = classifyAssistantSignal(currentSignal || {});
+    const hasStableZone = !!state.activeStableZoneId && !!state.activeStableZoneEnterTs;
+    const hasPickupSinceZoneEntry = !!state.lastPickupRecordedAtMs
+      && !!state.activeStableZoneEnterTs
+      && state.lastPickupRecordedAtMs >= state.activeStableZoneEnterTs;
+    const isUrgentNow = state.finalActionCode === "LEAVE_NOW" || state.finalActionCode === "MOVE_SOON";
+    const strongSameBoroughNear = !!target
+      && (safeNum(target?.etaMinutes, Infinity) || Infinity) <= AI_ASSISTANT_NEAR_TARGET_MAX_ETA_MIN
+      && normalizeAssistantBoroughName(target?.candidateSignal?.borough) === normalizeAssistantBoroughName(currentSignal?.borough)
+      && !!target?.viability?.viable
+      && !!target?.targetPaybackMetrics?.paybackHolds;
+    const hasTrustworthyQuality = dataQualityMode === "full" || strongSameBoroughNear;
+    const viableOnArrival = !!target?.viability?.viable && !target?.targetMetrics?.targetLooksChasey;
+    const paybackBeatsStay = !!target?.targetPaybackMetrics?.paybackHolds
+      && (safeNum(target?.targetPaybackMetrics?.paybackAvgRating, 0) || 0) > ((safeNum(currentMetrics?.stayWindowAvgRating, 0) || 0) + 1.5)
+      && (safeNum(target?.netMoveEdge, -Infinity) || -Infinity) >= (safeNum(target?.moveWorthThreshold, Infinity) || Infinity);
+    const goodHoldWindow = !!currentMetrics?.stayHoldsAfterArrival
+      && (safeNum(currentTravelMetrics?.travelWindowMinRating, 0) || 0) >= 50
+      && !currentMetrics?.stayWeakensSoon;
+    const noImmediateUrgency = !isUrgentNow;
+
+    const eligible = hasStableZone
+      && minsInZone >= 5
+      && noImmediateUrgency
+      && hasTrustworthyQuality
+      && viableOnArrival
+      && paybackBeatsStay
+      && !hasPickupSinceZoneEntry
+      && !goodHoldWindow;
+
+    if (!eligible) {
+      return {
+        eligible: false,
+        active: false,
+        reasonCode: goodHoldWindow ? "good_hold_window" : "countdown_not_eligible",
+        reasonText: goodHoldWindow ? "Current hold window remains strong." : "Countdown not needed.",
+        target: null,
+        holdWindowReason: goodHoldWindow ? "Stay • Good zone right now" : "",
+        escalationLevel: 0,
+      };
+    }
+
+    const trapUrgency = (safeNum(currentSignal?.shortTripPenalty, 0) || 0) >= 0.62
+      && (safeNum(currentSignal?.churnPressure, 0) || 0) >= 0.58
+      && (safeNum(currentSignal?.continuationRaw, 1) || 1) <= 0.45;
+    const coolingButDecent = (safeNum(currentMetrics?.stayWindowAvgRating, 0) || 0) >= 49
+      && !!currentMetrics?.stayWeakensSoon;
+    let durationMin = 5;
+    let reasonCode = "wait_then_move";
+    let reasonText = "If no trip in 5 min, move to the stronger nearby zone.";
+    let escalationLevel = 1;
+
+    if (trapUrgency) {
+      durationMin = 3;
+      reasonCode = "trap_risk_rising";
+      reasonText = "Trap risk rising • leave in 3 min if no trip.";
+      escalationLevel = 2;
+    } else if (coolingButDecent) {
+      durationMin = 4;
+      reasonCode = "zone_cooling";
+      reasonText = "Zone may cool off; move if no trip in 4 min.";
+      escalationLevel = 1;
+    } else if ((safeNum(currentMetrics?.stayWindowAvgRating, 0) || 0) >= 55 && !currentMetrics?.stayWeakensSoon) {
+      durationMin = 7;
+      reasonCode = "good_zone_protection";
+      reasonText = "Good zone still holding; wait longer before moving.";
+      escalationLevel = 0;
+    }
+
+    return {
+      eligible: true,
+      active: true,
+      durationMin,
+      reasonCode,
+      reasonText,
+      target: target?.candidateSignal
+        ? {
+            ...target.candidateSignal,
+            etaMinutes: target.etaMinutes,
+            distanceMiles: target.distanceMiles,
+          }
+        : null,
+      holdWindowReason: "",
+      escalationLevel,
+      arrivalNarrowWindow: (safeNum(target?.targetMetrics?.targetWindowTrendDelta, 0) || 0) <= -3,
+    };
+  }
+
   function buildAssistantPrimaryLine() {
+    if (state.countdownActive && state.countdownReasonCode === "trap_risk_rising") {
+      return "Move soon • Trap risk rising";
+    }
+    if (state.countdownActive && state.countdownReasonCode === "zone_cooling") {
+      return "Stay briefly • Zone may cool off";
+    }
+    if (state.countdownActive && (state.committedActionCode === "STAY" || state.committedActionCode === "STAY_BRIEFLY")) {
+      return "Stay • Good zone right now";
+    }
     const safeDegradedStayFallback = isSafeDegradedStayFallback();
     if (safeDegradedStayFallback) {
       const reasonText = state.recommendationReasonText || state.committedReasonText || state.finalActionReason;
@@ -1598,6 +1724,18 @@
   }
 
   function buildAssistantSecondaryLine() {
+    if (state.countdownActive && state.countdownTarget?.zoneName) {
+      const minsLeft = Math.max(1, Math.round(state.countdownMinutesRemaining || 0));
+      if (state.countdownReasonCode === "trap_risk_rising") {
+        return `If no trip in ${minsLeft} min, go to ${state.countdownTarget.zoneName}`;
+      }
+      if (state.countdownReasonCode === "zone_cooling") {
+        return state.countdownReasonText.includes("arrival")
+          ? `Move in ${minsLeft} min • target stronger by arrival`
+          : `If no trip in ${minsLeft} min, move to ${state.countdownTarget.zoneName}`;
+      }
+      return `If no trip in ${minsLeft} min, move to ${state.countdownTarget.zoneName}`;
+    }
     const committedAction = state.committedActionCode || "MONITOR";
     const committedTarget = state.committedMoveTarget || state.assistantMoveTarget || null;
     const weakDataMode = state.dataQualityMode === "partial" || state.dataQualityMode === "degraded";
@@ -1816,30 +1954,9 @@
 
   function mirrorRecommendLine() {
     if (!recommendLine) return;
-    const safeDegradedStayFallback = isSafeDegradedStayFallback();
-    if (safeDegradedStayFallback) {
-      const reasonText = state.recommendationReasonText || state.committedReasonText || state.finalActionReason;
-      recommendLine.textContent = `AI Assistant: Stay • ${humanizeAssistantReason(reasonText)} • Stay here for now`;
-      return;
-    }
-    if (state.dataQualityMode === "degraded" && state.finalActionCode === "MONITOR" && !safeDegradedStayFallback) {
-      recommendLine.textContent = "AI Assistant: Monitor • Checking outlook. • Waiting for clearer signal";
-      return;
-    }
-    const committedAction = state.committedActionCode || state.finalActionCode || "MONITOR";
-    const action = humanActionLabel(committedAction);
-    const reason = state.committedReasonText || state.recommendationReasonText || humanizeAssistantReason(state.finalActionReason);
-    let mirror = `AI Assistant: ${action} • ${reason}`;
-    if ((committedAction === "MOVE_SOON" || committedAction === "LEAVE_NOW") && state.assistantMoveTarget?.zoneName && Number.isFinite(state.assistantMoveTarget?.etaMinutes)) {
-      mirror += ` • Go to ${state.assistantMoveTarget.zoneName} • ${Math.round(state.assistantMoveTarget.etaMinutes)} min`;
-    } else if (committedAction === "STAY") {
-      mirror += " • Stay here for now";
-    } else if (committedAction === "STAY_BRIEFLY") {
-      mirror += " • Stay here briefly";
-    } else if (committedAction === "MONITOR") {
-      mirror += " • Waiting for clearer signal";
-    }
-    recommendLine.textContent = mirror;
+    const primary = buildAssistantPrimaryLine();
+    const secondary = buildAssistantSecondaryLine();
+    recommendLine.textContent = `AI Assistant: ${primary} • ${secondary}`;
   }
 
   function renderWidget() {
@@ -1890,6 +2007,7 @@
       <div class="aiAssistantPanel">
         <section class="aiAssistantSection"><strong>Current Zone</strong><div>${state.activeStableZoneName || "—"} • ${state.activeStableBorough || "—"} • ${Math.round(state.visibleRating || 0)} ${prettyBucket(state.visibleBucket)} • ${state.visibleScoreSourceLabel}</div></section>
         <section class="aiAssistantSection"><strong>Stay Coach</strong><div>${state.dwellCoachSummaryText}</div><div>${state.dwellCoachReasonFragments.join(" • ")}</div></section>
+        <section class="aiAssistantSection"><strong>Countdown Coach</strong><div>${state.countdownActive ? `Countdown active • ${Math.max(1, Math.round(state.countdownMinutesRemaining || 0))} min left` : "Countdown inactive"}</div><div>${state.countdownReasonText || state.countdownHoldWindowReason || "No countdown needed."}</div><div>${state.countdownTarget?.zoneName ? `Target: ${state.countdownTarget.zoneName} • ${Math.round(state.countdownTarget.etaMinutes || 0)} min` : "Target: —"}</div></section>
         <section class="aiAssistantSection"><strong>Outlook</strong><div>${state.outlookSummaryText}</div><div>${state.moveTargetOutlookSummaryText || ""}</div>${(state.outlookStatus || state.outlookLastErrorCode) ? `<div><small>Status: ${state.outlookStatus || "idle"}${state.outlookLastErrorCode ? ` (${state.outlookLastErrorCode})` : ""}</small></div>` : ""}</section>
         <section class="aiAssistantSection"><strong>Rankings</strong><div>Best now: ${state.citywideBestNow?.zoneName || "—"} • Worst now: ${state.citywideWorstNow?.zoneName || "—"}</div>${buildRankList(state.citywideTop10Best)}${buildRankList(state.boroughTop5Best)}</section>
         ${state.assistantMoveTarget ? `<section class="aiAssistantSection"><strong>Move Target</strong><div>${state.assistantMoveTarget.zoneName} • ${Math.round(state.assistantMoveTarget.etaMinutes || 0)} min • ${state.assistantMoveTarget.distanceMiles.toFixed(1)} mi</div></section>` : ""}
@@ -1985,6 +2103,9 @@
       state.currentZoneCitywideRank || "",
       state.currentZoneBoroughRank || "",
       state.holdUntilTime || "",
+      state.countdownReasonCode || "",
+      state.countdownTarget?.locationId || "",
+      state.countdownMinutesRemaining || "",
       dwellBucket,
     ].join("|");
   }
@@ -2113,6 +2234,7 @@
     state.nextImprovementTime = null;
     state.nextWorseningTime = null;
     state.targetStrongUntilTime = null;
+    resetCountdownCoachState();
     if (state.outlookAbortController) state.outlookAbortController.abort();
     if (previousZoneId && String(state.outlookRequestKey || "").includes(String(previousZoneId))) {
       state.outlookRequestKey = "";
@@ -2131,6 +2253,7 @@
         state.activeStableZoneName = "";
         state.activeStableBorough = "";
         state.activeStableZoneEnterTs = null;
+        resetCountdownCoachState();
       }
       return false;
     }
@@ -2368,6 +2491,42 @@
       state.finalActionReason = "Checking outlook.";
       state.recommendationReasonText = "Checking outlook.";
     }
+    const countdownCoach = deriveCountdownCoach(
+      activeSignal,
+      bestWorthwhile,
+      selectedForReason?.currentMetrics || {},
+      selectedForReason?.currentTravelMetrics || {},
+      state.dataQualityMode
+    );
+    if (!countdownCoach.eligible || !countdownCoach.target) {
+      resetCountdownCoachState();
+      state.countdownHoldWindowReason = countdownCoach.holdWindowReason || "";
+    } else {
+      if (!state.countdownActive || !state.countdownStartTs || !state.countdownDeadlineTs) {
+        state.countdownStartTs = Date.now();
+        state.countdownDeadlineTs = state.countdownStartTs + ((safeNum(countdownCoach.durationMin, 5) || 5) * 60000);
+      }
+      state.countdownEligible = true;
+      state.countdownActive = true;
+      state.countdownReasonCode = countdownCoach.reasonCode || "";
+      state.countdownReasonText = countdownCoach.arrivalNarrowWindow
+        ? `Move in ${safeNum(countdownCoach.durationMin, 5) || 5} min • target stronger by arrival`
+        : (countdownCoach.reasonText || "");
+      state.countdownTarget = countdownCoach.target || null;
+      state.countdownEscalationLevel = safeNum(countdownCoach.escalationLevel, 0) || 0;
+      state.countdownMinutesRemaining = Math.max(0, Math.ceil((state.countdownDeadlineTs - Date.now()) / 60000));
+      if (state.countdownMinutesRemaining <= 0) {
+        state.countdownActive = false;
+        state.countdownMinutesRemaining = 0;
+      }
+    }
+    if (!bestWorthwhile && !bestNotWorth) {
+      resetCountdownCoachState();
+    }
+    if (state.countdownReasonCode === "good_hold_window" || (state.finalActionCode === "STAY" && !bestWorthwhile)) {
+      resetCountdownCoachState();
+      state.countdownHoldWindowReason = "Stay • Good zone right now";
+    }
     state.dwellCoachSummaryText = `${humanActionLabel(state.finalActionCode)}: ${state.recommendationReasonText}`;
     state.dwellCoachReasonFragments = [
       `Stay ${(state.stayWindowAvgRating || state.stayProjectedRating || 0).toFixed(1)}`,
@@ -2481,6 +2640,9 @@
     state.isPartialOutlook = false;
     state.canTrustFarMoves = false;
     state.usedCachedRecommendationFallback = false;
+    resetCountdownCoachState();
+    state.lastPickupRecordedAtMs = null;
+    state.lastPickupRecordedZoneId = null;
     state.finalActionCode = "MONITOR";
     state.finalActionReason = "Waiting for stable zone.";
     renderWidget();
@@ -2501,6 +2663,13 @@
     window.addEventListener("tlc-user-location-updated", (e) => handleUserLocationUpdate(e?.detail || {}));
     window.addEventListener("team-joseo-frame-rendered", () => forceRefresh());
     window.addEventListener("tlc-mode-changed", () => forceRefresh());
+    window.addEventListener("tlc-pickup-recorded", (e) => {
+      const detail = e?.detail || {};
+      state.lastPickupRecordedAtMs = Date.now();
+      state.lastPickupRecordedZoneId = detail?.zoneId ? String(detail.zoneId) : null;
+      resetCountdownCoachState();
+      forceRefresh();
+    });
     document.addEventListener("visibilitychange", () => { startHeartbeat(); updateAssistantDockLayout(); });
     document.addEventListener("click", (e) => {
       const action = e.target?.closest?.("[data-ai-action]")?.getAttribute("data-ai-action");
