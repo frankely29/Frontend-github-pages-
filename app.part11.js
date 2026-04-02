@@ -20,7 +20,14 @@
   const MANHATTAN_NEXT_BIN_WEIGHT = 0.35;
   const MANHATTAN_PAY_WEIGHT = 0.25;
   const MANHATTAN_FADE_PENALTY_WEIGHT = 0.15;
-  const MANHATTAN_GLOBAL_PENALTY = 0.98;
+  const MANHATTAN_GLOBAL_PENALTY = 0.84;
+  const MANHATTAN_CORE_BASE_PENALTY_POINTS = 8;
+  const MANHATTAN_OUTER_BASE_PENALTY_POINTS = 4;
+  const MANHATTAN_CORE_DYNAMIC_MARKET_PENALTY_POINTS = 6;
+  const MANHATTAN_CORE_DYNAMIC_CORE_PENALTY_POINTS = 8;
+  const MANHATTAN_OUTER_DYNAMIC_MARKET_PENALTY_POINTS = 4;
+  const MANHATTAN_CORE_TOTAL_PENALTY_CAP = 18;
+  const MANHATTAN_OUTER_TOTAL_PENALTY_CAP = 10;
 
   const MANHATTAN_MIN_ZONES = 40;
   const MANHATTAN_CORE_MAX_LAT = 40.795;
@@ -657,6 +664,44 @@
     return false;
   }
 
+  function getManhattanSaturationPenaltyMeta(props, geom, ratingAfterTendency) {
+    if (!isManhattanFeature(props)) {
+      return {
+        manhattanPenaltyApplied: 0,
+        isManhattanCore: false,
+        marketSaturationPenaltyRaw: 0,
+        manhattanCorePenaltyRaw: 0,
+      };
+    }
+
+    const isManhattanCore = isCoreManhattan(props, geom);
+    const marketSaturationPenaltyRaw = Math.max(0, Number(props?.market_saturation_penalty_n_shadow) || 0);
+    const manhattanCorePenaltyRaw = Math.max(0, Number(props?.manhattan_core_saturation_penalty_n_shadow) || 0);
+    const safeRatingAfterTendency = clampRating100(ratingAfterTendency);
+
+    let basePenalty = MANHATTAN_OUTER_BASE_PENALTY_POINTS;
+    let dynamicPenalty = marketSaturationPenaltyRaw * MANHATTAN_OUTER_DYNAMIC_MARKET_PENALTY_POINTS;
+    let penaltyCap = MANHATTAN_OUTER_TOTAL_PENALTY_CAP;
+
+    if (isManhattanCore) {
+      basePenalty = MANHATTAN_CORE_BASE_PENALTY_POINTS;
+      dynamicPenalty =
+        (marketSaturationPenaltyRaw * MANHATTAN_CORE_DYNAMIC_MARKET_PENALTY_POINTS) +
+        (manhattanCorePenaltyRaw * MANHATTAN_CORE_DYNAMIC_CORE_PENALTY_POINTS);
+      penaltyCap = MANHATTAN_CORE_TOTAL_PENALTY_CAP;
+    }
+
+    const rawPenalty = Math.min(penaltyCap, Math.max(0, basePenalty + dynamicPenalty));
+    const manhattanPenaltyApplied = Math.max(0, Math.min(rawPenalty, safeRatingAfterTendency - 1));
+
+    return {
+      manhattanPenaltyApplied,
+      isManhattanCore,
+      marketSaturationPenaltyRaw,
+      manhattanCorePenaltyRaw,
+    };
+  }
+
   function getTendencyAdjustmentMeta(baseRating, props, geom) {
     const fallbackRating = clampRating100(baseRating);
     if (!Number.isFinite(Number(baseRating))) {
@@ -666,6 +711,11 @@
         globalPenaltyApplied: 0,
         localPenaltyApplied: 0,
         totalPenaltyApplied: 0,
+        manhattanPenaltyApplied: 0,
+        totalVisiblePenaltyApplied: 0,
+        isManhattanCore: false,
+        marketSaturationPenaltyRaw: 0,
+        manhattanCorePenaltyRaw: 0,
         localScopeMatch: false,
         localScope: '',
         bucketDropCapTriggered: false,
@@ -680,6 +730,11 @@
         globalPenaltyApplied: 0,
         localPenaltyApplied: 0,
         totalPenaltyApplied: 0,
+        manhattanPenaltyApplied: 0,
+        totalVisiblePenaltyApplied: 0,
+        isManhattanCore: false,
+        marketSaturationPenaltyRaw: 0,
+        manhattanCorePenaltyRaw: 0,
         localScopeMatch: false,
         localScope: '',
         bucketDropCapTriggered: false,
@@ -695,6 +750,11 @@
         globalPenaltyApplied: 0,
         localPenaltyApplied: 0,
         totalPenaltyApplied: 0,
+        manhattanPenaltyApplied: 0,
+        totalVisiblePenaltyApplied: 0,
+        isManhattanCore: false,
+        marketSaturationPenaltyRaw: 0,
+        manhattanCorePenaltyRaw: 0,
         localScopeMatch: false,
         localScope: '',
         bucketDropCapTriggered: false,
@@ -709,6 +769,11 @@
         globalPenaltyApplied: 0,
         localPenaltyApplied: 0,
         totalPenaltyApplied: 0,
+        manhattanPenaltyApplied: 0,
+        totalVisiblePenaltyApplied: 0,
+        isManhattanCore: false,
+        marketSaturationPenaltyRaw: 0,
+        manhattanCorePenaltyRaw: 0,
         localScopeMatch: false,
         localScope: getAdvancedLocalScope(advancedContext),
         bucketDropCapTriggered: false,
@@ -724,13 +789,21 @@
     const totalPenaltyApplied = Math.min(totalPenaltyCap, globalPenaltyApplied + localPenaltyApplied);
     const adjustedBeforeBucketCap = clampRating100(Number(baseRating) - totalPenaltyApplied);
     const bucketCapResult = clampAdjustedRatingToBucketDropCap(Number(baseRating), adjustedBeforeBucketCap, advancedContext.bucket_drop_cap);
+    const manhattanPenaltyMeta = getManhattanSaturationPenaltyMeta(props, geom, bucketCapResult.adjustedRating);
+    const finalAdjustedRating = clampRating100(bucketCapResult.adjustedRating - manhattanPenaltyMeta.manhattanPenaltyApplied);
+    const totalVisiblePenaltyApplied = totalPenaltyApplied + manhattanPenaltyMeta.manhattanPenaltyApplied;
 
     return {
-      adjustedRating: bucketCapResult.adjustedRating,
-      adjustedFiniteRating: bucketCapResult.adjustedRating,
+      adjustedRating: finalAdjustedRating,
+      adjustedFiniteRating: finalAdjustedRating,
       globalPenaltyApplied,
       localPenaltyApplied,
       totalPenaltyApplied,
+      manhattanPenaltyApplied: manhattanPenaltyMeta.manhattanPenaltyApplied,
+      totalVisiblePenaltyApplied,
+      isManhattanCore: manhattanPenaltyMeta.isManhattanCore,
+      marketSaturationPenaltyRaw: manhattanPenaltyMeta.marketSaturationPenaltyRaw,
+      manhattanCorePenaltyRaw: manhattanPenaltyMeta.manhattanCorePenaltyRaw,
       localScopeMatch,
       localScope,
       bucketDropCapTriggered: !!bucketCapResult.bucketDropCapTriggered,
@@ -1786,6 +1859,11 @@
       globalPenaltyApplied: adjustmentMeta.globalPenaltyApplied,
       localPenaltyApplied: adjustmentMeta.localPenaltyApplied,
       totalPenaltyApplied: adjustmentMeta.totalPenaltyApplied,
+      manhattanPenaltyApplied: adjustmentMeta.manhattanPenaltyApplied,
+      totalVisiblePenaltyApplied: adjustmentMeta.totalVisiblePenaltyApplied,
+      isManhattanCore: adjustmentMeta.isManhattanCore,
+      marketSaturationPenaltyRaw: adjustmentMeta.marketSaturationPenaltyRaw,
+      manhattanCorePenaltyRaw: adjustmentMeta.manhattanCorePenaltyRaw,
       localScopeMatch: adjustmentMeta.localScopeMatch,
       bucketDropCapTriggered: adjustmentMeta.bucketDropCapTriggered,
       finalBucket: effectiveBucket(props, geom)
