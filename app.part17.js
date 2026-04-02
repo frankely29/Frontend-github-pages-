@@ -1590,6 +1590,15 @@
     return ["good_zone_now", "decent_rating_zone", "moving_not_worth_it"].includes(String(state.recommendationReasonCode || "").trim());
   }
 
+  function safeDegradedStayPrimaryLine() {
+    const reasonCode = String(state.recommendationReasonCode || "").trim();
+    if (reasonCode === "good_zone_now") return "Stay • Good zone right now";
+    if (reasonCode === "decent_rating_zone") return "Stay • Decent rating zone";
+    if (reasonCode === "moving_not_worth_it") return "Stay • Moving is not worth the time";
+    const reasonText = state.recommendationReasonText || state.committedReasonText || state.finalActionReason;
+    return `Stay • ${humanizeAssistantReason(reasonText)}`;
+  }
+
   function resetCountdownCoachState() {
     state.countdownEligible = false;
     state.countdownActive = false;
@@ -1720,8 +1729,7 @@
     }
     const safeDegradedStayFallback = isSafeDegradedStayFallback();
     if (safeDegradedStayFallback) {
-      const reasonText = state.recommendationReasonText || state.committedReasonText || state.finalActionReason;
-      return `Stay • ${humanizeAssistantReason(reasonText)}`;
+      return safeDegradedStayPrimaryLine();
     }
     if (state.dataQualityMode === "degraded" && state.finalActionCode === "MONITOR" && !safeDegradedStayFallback) {
       return "Monitor • Checking outlook.";
@@ -1946,8 +1954,7 @@
       }
       finalized = preferred.length ? preferred : uniq.slice(0, 1);
       if (isSafeDegradedStayFallback()) {
-        const reasonText = state.recommendationReasonText || state.committedReasonText || state.finalActionReason;
-        finalized = [{ key: "action", text: `Stay • ${humanizeAssistantReason(reasonText)}`, severity: "positive" }];
+        finalized = [{ key: "action", text: safeDegradedStayPrimaryLine(), severity: "positive" }];
       } else if (state.dataQualityMode === "degraded" && state.finalActionCode === "MONITOR") {
         finalized = [{ key: "action", text: "Monitor • Checking outlook.", severity: "info" }];
       } else if (state.dataQualityMode === "partial" && !state.assistantMoveTarget) {
