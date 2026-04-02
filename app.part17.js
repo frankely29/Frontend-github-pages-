@@ -2074,6 +2074,11 @@
       if (state.activeStableZoneId) return { line: "Stay • Nearby options not strong enough yet", kind: "stay" };
       return { line: "Monitor • Checking more data", kind: "monitor" };
     }
+    if (committedAction === "MONITOR") {
+      if ((safeNum(state.stayWindowAvgRating, 0) || 0) >= 50) return { line: "Stay • Good zone right now", kind: "stay" };
+      if ((safeNum(state.stayWindowAvgRating, 0) || 0) >= 46) return { line: "Stay • Decent area for now", kind: "stay" };
+      if (state.activeStableZoneId) return { line: "Stay briefly • Nearby options not strong enough yet", kind: "stay" };
+    }
     return { line: `${action} • ${reason}`, kind: "monitor" };
   }
 
@@ -2365,7 +2370,7 @@
   function compactTargetWhyLine() {
     if (state.chosenTargetGroup === "same_borough_near") return "Why this area: close and easy to reach";
     if (state.chosenTargetGroup === "near") return "Why this area: nearby option looks better";
-    if (state.chosenTargetGroup === "far_exception") return "Why this area: longer drive but better upside";
+    if (state.chosenTargetGroup === "far_exception") return "Why this area: longer drive but stronger area";
     if (state.chosenTargetReasoningMode === "stay_not_worth_moving") return "Why staying: other areas are too far right now";
     if (state.targetViabilityRejectReasonText) return `Why staying: ${humanizeAssistantReason(state.targetViabilityRejectReasonText)}`;
     return "Why staying: other areas are too far right now";
