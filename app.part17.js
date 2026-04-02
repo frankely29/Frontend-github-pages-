@@ -19,6 +19,8 @@
   const AI_ASSISTANT_NEAR_TARGET_EDGE_BUFFER = 2.5;
   const AI_ASSISTANT_FAR_TARGET_EXTRA_EDGE_REQUIRED = 4.0;
   const AI_ASSISTANT_SAME_BOROUGH_PREFERENCE_BONUS = 1.5;
+  const AI_ASSISTANT_MEANINGFUL_REPOSITION_MILES = 0.75;
+  const AI_ASSISTANT_MEANINGFUL_REPOSITION_MIN_MS = 150000;
 
   const runtime = window.FrontendRuntime || null;
   const runtimePolling = runtime?.polling || null;
@@ -114,6 +116,22 @@
     countdownTarget: null,
     countdownHoldWindowReason: "",
     countdownEscalationLevel: 0,
+    stableZoneEntryUserLocation: null,
+    lastMeaningfulRepositionAtMs: null,
+    lastMeaningfulRepositionDistanceMiles: 0,
+    sameZonePickupCountSinceEntry: 0,
+    sameZonePickupCountRolling: 0,
+    trapMovementScore: 0,
+    trapPickupScore: 0,
+    trapTimeScore: 0,
+    trapCompositeScore: 0,
+    trapModeActive: false,
+    trapDetectedAtMs: null,
+    trapReasonSummary: "",
+    trapNeedsNearbyEscape: false,
+    trapEscapeTarget: null,
+    trapSeverityLevel: 0,
+    recentZoneMovementSamples: [],
     assistantReasonFragments: [],
     assistantMessages: [],
     activeMessageIndex: 0,
@@ -1662,6 +1680,133 @@
     return true;
   }
 
+  function sampleRecentSameZoneMovement(currentZoneId, currentUserLocation) {
+    if (!currentZoneId || !currentUserLocation) return;
+    const nextSample = {
+      lat: safeNum(currentUserLocation?.lat),
+      lng: safeNum(currentUserLocation?.lng),
+      ts: safeNum(currentUserLocation?.ts, Date.now()) || Date.now(),
+    };
+    if (!Number.isFinite(nextSample.lat) || !Number.isFinite(nextSample.lng)) return;
+    const samples = Array.isArray(state.recentZoneMovementSamples) ? state.recentZoneMovementSamples : [];
+    const prev = samples.length ? samples[samples.length - 1] : null;
+    if (prev) {
+      const deltaMs = nextSample.ts - (safeNum(prev.ts, nextSample.ts) || nextSample.ts);
+      if (deltaMs < 20000) return;
+    }
+    samples.push(nextSample);
+    const keepAfter = Date.now() - (18 * 60000);
+    state.recentZoneMovementSamples = samples.filter((s) => (safeNum(s?.ts, 0) || 0) >= keepAfter).slice(-24);
+  }
+
+  function isMeaningfulRepositionInSameZone(currentZoneId, currentUserLocation) {
+    if (!currentZoneId || !currentUserLocation) return false;
+    if (!state.activeStableZoneId || String(state.activeStableZoneId) !== String(currentZoneId)) return false;
+    const baseAnchor = state.stableZoneEntryUserLocation;
+    if (!baseAnchor || !Number.isFinite(baseAnchor.lat) || !Number.isFinite(baseAnchor.lng)) return false;
+    const nowMs = Date.now();
+    const elapsedSinceLast = state.lastMeaningfulRepositionAtMs
+      ? nowMs - state.lastMeaningfulRepositionAtMs
+      : Infinity;
+    if (elapsedSinceLast < AI_ASSISTANT_MEANINGFUL_REPOSITION_MIN_MS) return false;
+    const distanceFromAnchor = internals.haversineMiles?.(
+      { lat: baseAnchor.lat, lng: baseAnchor.lng },
+      { lat: currentUserLocation.lat, lng: currentUserLocation.lng }
+    ) || 0;
+    if (!Number.isFinite(distanceFromAnchor) || distanceFromAnchor < AI_ASSISTANT_MEANINGFUL_REPOSITION_MILES) return false;
+    state.lastMeaningfulRepositionAtMs = nowMs;
+    state.lastMeaningfulRepositionDistanceMiles = distanceFromAnchor;
+    state.stableZoneEntryUserLocation = {
+      lat: currentUserLocation.lat,
+      lng: currentUserLocation.lng,
+      ts: safeNum(currentUserLocation.ts, nowMs) || nowMs,
+    };
+    state.sameZonePickupCountRolling = Math.max(0, (safeNum(state.sameZonePickupCountRolling, 0) || 0) - 1);
+    state.trapTimeScore = Math.max(0, (safeNum(state.trapTimeScore, 0) || 0) - 0.75);
+    state.trapMovementScore = Math.max(0, (safeNum(state.trapMovementScore, 0) || 0) - 1.5);
+    return true;
+  }
+
+  function deriveTrapCoachState(currentSignal, currentMetrics, bestWorthwhileTarget) {
+    const minsInZone = dwellMins();
+    const sameZonePickups = safeNum(state.sameZonePickupCountSinceEntry, 0) || 0;
+    const rollingPickups = safeNum(state.sameZonePickupCountRolling, 0) || 0;
+    const nowMs = Date.now();
+    const lastRepositionAgoMs = state.lastMeaningfulRepositionAtMs ? (nowMs - state.lastMeaningfulRepositionAtMs) : Infinity;
+    const repositionedRecently = lastRepositionAgoMs <= (8 * 60000);
+    const recentSamples = Array.isArray(state.recentZoneMovementSamples) ? state.recentZoneMovementSamples : [];
+    const firstSample = recentSamples.length ? recentSamples[0] : null;
+    const lastSample = recentSamples.length ? recentSamples[recentSamples.length - 1] : null;
+    const sampleDistanceMiles = (firstSample && lastSample)
+      ? (internals.haversineMiles?.({ lat: firstSample.lat, lng: firstSample.lng }, { lat: lastSample.lat, lng: lastSample.lng }) || 0)
+      : 0;
+
+    let trapTimeScore = 0;
+    if (minsInZone >= 5) trapTimeScore += 1;
+    if (minsInZone >= 8) trapTimeScore += 1;
+    if (minsInZone >= 12) trapTimeScore += 1;
+    if (minsInZone >= 15) trapTimeScore += 1;
+
+    let trapPickupScore = 0;
+    if (sameZonePickups >= 2) trapPickupScore += 1.5;
+    if (sameZonePickups >= 3) trapPickupScore += 1.5;
+    if (rollingPickups >= 4) trapPickupScore += 0.75;
+
+    let trapMovementScore = 0;
+    if (minsInZone >= 8 && sampleDistanceMiles < 0.4) trapMovementScore += 1;
+    if (minsInZone >= 12 && sampleDistanceMiles < 0.6) trapMovementScore += 1;
+    if (!state.lastMeaningfulRepositionAtMs && minsInZone >= 10) trapMovementScore += 0.75;
+    if (repositionedRecently) trapMovementScore = Math.max(0, trapMovementScore - 1.5);
+
+    const shortTripPenalty = safeNum(currentSignal?.shortTripPenalty, 0) || 0;
+    const churnPressure = safeNum(currentSignal?.churnPressure, 0) || 0;
+    const continuationWeak = (safeNum(currentSignal?.continuationRaw, 1) || 1) <= 0.45;
+    const stayWeakensSoon = !!currentMetrics?.stayWeakensSoon;
+    const stayAvg = safeNum(currentMetrics?.stayWindowAvgRating, safeNum(state.stayWindowAvgRating, 0) || 0) || 0;
+    const stayMin = safeNum(currentMetrics?.stayWindowMinRating, safeNum(state.stayWindowMinRating, 0) || 0) || 0;
+    const zoneScore = (shortTripPenalty >= 0.62 ? 1 : 0)
+      + (churnPressure >= 0.58 ? 1 : 0)
+      + (continuationWeak ? 1 : 0)
+      + (stayWeakensSoon ? 0.75 : 0)
+      + (stayAvg < 50 ? 0.75 : 0)
+      + (stayMin < 47 ? 0.5 : 0);
+
+    const escapeTarget = bestWorthwhileTarget || null;
+    const hasEscape = !!escapeTarget?.candidateSignal;
+    const composite = trapTimeScore + trapPickupScore + trapMovementScore + zoneScore;
+    let trapSeverityLevel = 0;
+    if (composite >= 7.5 && hasEscape) trapSeverityLevel = 3;
+    else if (composite >= 5.5) trapSeverityLevel = 2;
+    else if (composite >= 3.5) trapSeverityLevel = 1;
+    const trapModeActive = trapSeverityLevel >= 2;
+    const trapNeedsNearbyEscape = trapModeActive && !hasEscape;
+
+    let trapReasonSummary = "";
+    if (sameZonePickups >= 2 && minsInZone >= 8) {
+      trapReasonSummary = "You got trips here but you are still stuck in the same area.";
+    } else if (minsInZone >= 10 && trapMovementScore >= 1) {
+      trapReasonSummary = "You have been here too long with no meaningful move.";
+    } else if (shortTripPenalty >= 0.62) {
+      trapReasonSummary = "This area keeps giving short trips.";
+    } else if (trapModeActive && hasEscape) {
+      trapReasonSummary = "Nearby area is more likely to be better.";
+    } else if (trapNeedsNearbyEscape) {
+      trapReasonSummary = "Nearby options are not strong enough yet.";
+    }
+
+    return {
+      trapTimeScore,
+      trapPickupScore,
+      trapMovementScore,
+      trapCompositeScore: composite,
+      trapModeActive,
+      trapSeverityLevel,
+      trapReasonSummary,
+      trapNeedsNearbyEscape,
+      trapEscapeTarget: hasEscape ? escapeTarget : null,
+    };
+  }
+
   function isCountdownTargetStillValid(targetEval, currentSignal, currentMetrics, dataQualityMode) {
     if (!targetEval) return false;
     if (!targetEval?.viability?.viable) return false;
@@ -1699,7 +1844,7 @@
     return paybackHolds && moveEdge >= moveThreshold;
   }
 
-  function deriveCountdownCoach(currentSignal, bestWorthwhileTarget, currentMetrics, currentTravelMetrics, dataQualityMode) {
+  function deriveCountdownCoach(currentSignal, bestWorthwhileTarget, currentMetrics, currentTravelMetrics, dataQualityMode, trapState) {
     const now = Date.now();
     const minsInZone = dwellMins();
     const target = bestWorthwhileTarget || null;
@@ -1717,7 +1862,6 @@
       && minsInZone >= 5
       && noImmediateUrgency
       && targetEconomicallyValid
-      && !hasPickupSinceZoneEntry
       && !goodHoldWindow;
 
     if (!eligible) {
@@ -1732,9 +1876,9 @@
       };
     }
 
-    const trapUrgency = (safeNum(currentSignal?.shortTripPenalty, 0) || 0) >= 0.62
-      && (safeNum(currentSignal?.churnPressure, 0) || 0) >= 0.58
-      && (safeNum(currentSignal?.continuationRaw, 1) || 1) <= 0.45;
+    const trapUrgency = !!trapState?.trapModeActive
+      && (safeNum(trapState?.trapSeverityLevel, 0) || 0) >= 2
+      && !!trapState?.trapEscapeTarget?.candidateSignal;
     const coolingButDecent = (safeNum(currentMetrics?.stayWindowAvgRating, 0) || 0) >= 49
       && !!currentMetrics?.stayWeakensSoon;
     const acceptableButWatch = (safeNum(currentMetrics?.stayWindowAvgRating, 0) || 0) >= 52
@@ -1749,7 +1893,7 @@
       durationMin = 3;
       reasonCode = "trap_risk_rising";
       reasonText = `If no trip in 3 min, go to ${targetZoneName}`;
-      escalationLevel = 2;
+      escalationLevel = (safeNum(trapState?.trapSeverityLevel, 2) || 2) >= 3 ? 3 : 2;
     } else if (coolingButDecent) {
       durationMin = 5;
       reasonCode = "zone_cooling";
@@ -1778,15 +1922,20 @@
       holdWindowReason: "",
       escalationLevel,
       arrivalNarrowWindow: (safeNum(target?.targetMetrics?.targetWindowTrendDelta, 0) || 0) <= -3,
+      trapState: trapState || null,
     };
   }
 
   function buildAssistantPrimaryLine() {
+    if (state.trapModeActive && state.trapNeedsNearbyEscape) {
+      return "Monitor • Nearby options not strong enough yet";
+    }
     if (state.stabilityReasonCode === "countdown_expired_move_promoted" && isMoveAction(state.finalActionCode)) {
       return "Move now • Better area is ready";
     }
     if (state.countdownActive && state.countdownReasonCode === "trap_risk_rising") {
-      return "Move soon • Trap risk rising";
+      if ((safeNum(state.trapSeverityLevel, 0) || 0) >= 3) return "Move soon • You are getting stuck here";
+      return "Stay briefly • Trap risk rising";
     }
     if (state.countdownActive && state.countdownReasonCode === "zone_cooling") {
       return "Stay briefly • Zone may cool off";
@@ -1813,6 +1962,9 @@
   }
 
   function buildAssistantSecondaryLine() {
+    if (state.trapModeActive && state.trapNeedsNearbyEscape) {
+      return "Waiting for a better nearby area";
+    }
     if (state.countdownActive && state.countdownTarget?.zoneName) {
       const minsLeft = Math.max(1, Math.round(state.countdownMinutesRemaining || 0));
       if (state.countdownReasonCode === "trap_risk_rising") {
@@ -2096,6 +2248,7 @@
         <section class="aiAssistantSection"><strong>Current area</strong><div>${state.activeStableZoneName || "—"} • ${state.activeStableBorough || "—"} • ${Math.round(state.visibleRating || 0)} ${prettyBucket(state.visibleBucket)} • ${state.visibleScoreSourceLabel}</div></section>
         <section class="aiAssistantSection"><strong>Advice</strong><div>${state.dwellCoachSummaryText}</div><div>${state.dwellCoachReasonFragments.join(" • ")}</div></section>
         <section class="aiAssistantSection"><strong>Countdown</strong><div>${state.countdownActive ? `Countdown active • ${Math.max(1, Math.round(state.countdownMinutesRemaining || 0))} min left` : "Countdown inactive"}</div><div>${state.countdownReasonText || state.countdownHoldWindowReason || "No countdown needed."}</div><div>${state.countdownTarget?.zoneName ? `Target: ${state.countdownTarget.zoneName} • ${Math.round(state.countdownTarget.etaMinutes || 0)} min` : "Target: —"}</div></section>
+        <section class="aiAssistantSection"><strong>Trap check</strong><div>Status: ${["off", "watch", "rising", "strong"][safeNum(state.trapSeverityLevel, 0) || 0]}</div><div>Why: ${state.trapReasonSummary || "No trap signs right now."}</div><div>${state.trapEscapeTarget?.candidateSignal?.zoneName ? `Nearby escape: ${state.trapEscapeTarget.candidateSignal.zoneName} • ${Math.round(state.trapEscapeTarget.etaMinutes || 0)} min` : "Nearby escape: —"}</div></section>
         <section class="aiAssistantSection"><strong>What may happen next</strong><div>${state.outlookSummaryText}</div><div>${state.moveTargetOutlookSummaryText || ""}</div>${(state.outlookStatus || state.outlookLastErrorCode) ? `<div><small>Status: ${state.outlookStatus || "idle"}${state.outlookLastErrorCode ? ` (${state.outlookLastErrorCode})` : ""}</small></div>` : ""}</section>
         <section class="aiAssistantSection"><strong>Best areas right now</strong><div>Best now: ${state.citywideBestNow?.zoneName || "—"} • Worst now: ${state.citywideWorstNow?.zoneName || "—"}</div>${buildRankList(state.citywideTop10Best)}${buildRankList(state.boroughTop5Best)}</section>
         ${state.assistantMoveTarget ? `<section class="aiAssistantSection"><strong>Move Target</strong><div>${state.assistantMoveTarget.zoneName} • ${Math.round(state.assistantMoveTarget.etaMinutes || 0)} min • ${state.assistantMoveTarget.distanceMiles.toFixed(1)} mi</div></section>` : ""}
@@ -2194,6 +2347,9 @@
       state.countdownReasonCode || "",
       state.countdownTarget?.locationId || "",
       state.countdownMinutesRemaining || "",
+      state.trapSeverityLevel || 0,
+      state.trapEscapeTarget?.candidateSignal?.locationId || "",
+      state.trapModeActive ? 1 : 0,
       dwellBucket,
     ].join("|");
   }
@@ -2322,6 +2478,24 @@
     state.nextImprovementTime = null;
     state.nextWorseningTime = null;
     state.targetStrongUntilTime = null;
+    state.stableZoneEntryUserLocation = state.lastUserLocation && Number.isFinite(state.lastUserLocation.lat) && Number.isFinite(state.lastUserLocation.lng)
+      ? { lat: state.lastUserLocation.lat, lng: state.lastUserLocation.lng, ts: nowTs }
+      : null;
+    state.lastMeaningfulRepositionAtMs = null;
+    state.lastMeaningfulRepositionDistanceMiles = 0;
+    state.sameZonePickupCountSinceEntry = 0;
+    state.sameZonePickupCountRolling = Math.max(0, Math.floor((safeNum(state.sameZonePickupCountRolling, 0) || 0) * 0.5));
+    state.trapMovementScore = 0;
+    state.trapPickupScore = 0;
+    state.trapTimeScore = 0;
+    state.trapCompositeScore = 0;
+    state.trapModeActive = false;
+    state.trapDetectedAtMs = null;
+    state.trapReasonSummary = "";
+    state.trapNeedsNearbyEscape = false;
+    state.trapEscapeTarget = null;
+    state.trapSeverityLevel = 0;
+    state.recentZoneMovementSamples = state.stableZoneEntryUserLocation ? [state.stableZoneEntryUserLocation] : [];
     resetCountdownCoachState();
     if (state.outlookAbortController) state.outlookAbortController.abort();
     if (previousZoneId && String(state.outlookRequestKey || "").includes(String(previousZoneId))) {
@@ -2341,6 +2515,14 @@
         state.activeStableZoneName = "";
         state.activeStableBorough = "";
         state.activeStableZoneEnterTs = null;
+        state.stableZoneEntryUserLocation = null;
+        state.recentZoneMovementSamples = [];
+        state.trapModeActive = false;
+        state.trapCompositeScore = 0;
+        state.trapReasonSummary = "";
+        state.trapEscapeTarget = null;
+        state.trapNeedsNearbyEscape = false;
+        state.trapSeverityLevel = 0;
         resetCountdownCoachState();
       }
       return false;
@@ -2375,6 +2557,28 @@
     const liveFrame = frame || internals.getCurrentFrame?.() || null;
     state.lastFrameTime = frameTimeIso(liveFrame);
     const zoneChanged = applyStableZoneFromLocation();
+    if (zoneChanged) {
+      state.sameZonePickupCountSinceEntry = 0;
+      state.sameZonePickupCountRolling = Math.max(0, Math.floor((safeNum(state.sameZonePickupCountRolling, 0) || 0) * 0.5));
+      state.recentZoneMovementSamples = [];
+      if (state.lastUserLocation && Number.isFinite(state.lastUserLocation.lat) && Number.isFinite(state.lastUserLocation.lng)) {
+        state.stableZoneEntryUserLocation = { lat: state.lastUserLocation.lat, lng: state.lastUserLocation.lng, ts: Date.now() };
+        state.recentZoneMovementSamples = [{ lat: state.lastUserLocation.lat, lng: state.lastUserLocation.lng, ts: Date.now() }];
+      } else {
+        state.stableZoneEntryUserLocation = null;
+      }
+      state.lastMeaningfulRepositionAtMs = null;
+      state.lastMeaningfulRepositionDistanceMiles = 0;
+      state.trapCompositeScore = 0;
+      state.trapModeActive = false;
+      state.trapDetectedAtMs = null;
+      state.trapReasonSummary = "";
+      state.trapNeedsNearbyEscape = false;
+      state.trapEscapeTarget = null;
+      state.trapSeverityLevel = 0;
+    }
+    sampleRecentSameZoneMovement(state.activeStableZoneId, state.lastUserLocation);
+    const meaningfulRepositioned = isMeaningfulRepositionInSameZone(state.activeStableZoneId, state.lastUserLocation);
     state.activeStableZoneDwellMs = state.activeStableZoneEnterTs ? Math.max(0, Date.now() - state.activeStableZoneEnterTs) : 0;
 
     const activeSignal = state.activeStableZoneId
@@ -2471,6 +2675,27 @@
     }
 
     const selectedForReason = bestWorthwhile || bestNotWorth;
+    const trapState = deriveTrapCoachState(
+      activeSignal,
+      selectedForReason?.currentMetrics || {},
+      bestWorthwhile
+    );
+    state.trapTimeScore = trapState.trapTimeScore;
+    state.trapPickupScore = trapState.trapPickupScore;
+    state.trapMovementScore = trapState.trapMovementScore;
+    state.trapCompositeScore = trapState.trapCompositeScore;
+    state.trapModeActive = trapState.trapModeActive;
+    state.trapReasonSummary = trapState.trapReasonSummary;
+    state.trapNeedsNearbyEscape = trapState.trapNeedsNearbyEscape;
+    state.trapEscapeTarget = trapState.trapEscapeTarget;
+    state.trapSeverityLevel = trapState.trapSeverityLevel;
+    if (trapState.trapModeActive && !state.trapDetectedAtMs) state.trapDetectedAtMs = Date.now();
+    if (!trapState.trapModeActive) state.trapDetectedAtMs = null;
+    if (meaningfulRepositioned) {
+      state.trapModeActive = false;
+      state.trapSeverityLevel = Math.max(0, (safeNum(state.trapSeverityLevel, 0) || 0) - 1);
+      if (!state.trapReasonSummary) state.trapReasonSummary = "You made a meaningful move inside this area.";
+    }
     state.etaMinutes = selectedForReason?.etaMinutes ?? null;
     state.distanceMiles = selectedForReason?.distanceMiles ?? null;
     state.stayProjectedRating = selectedForReason?.currentMetrics?.stayArrivalProjectedRating ?? safeNum(activeSignal?.visibleRating, null);
@@ -2585,7 +2810,8 @@
       bestWorthwhile,
       selectedForReason?.currentMetrics || {},
       selectedForReason?.currentTravelMetrics || {},
-      state.dataQualityMode
+      state.dataQualityMode,
+      trapState
     );
     const countdownTargetStillValid = isCountdownTargetStillValid(
       bestWorthwhile,
@@ -2603,7 +2829,7 @@
       || !countdownCoach.target
       || !countdownTargetStillValid
       || countdownTargetChanged
-      || hasPickupSinceCurrentZoneEntry()
+      || (hasPickupSinceCurrentZoneEntry() && !(trapState?.trapModeActive))
       || goodHoldNow;
     if (shouldCancelCountdown) {
       resetCountdownCoachState();
@@ -2754,6 +2980,22 @@
     resetCountdownCoachState();
     state.lastPickupRecordedAtMs = null;
     state.lastPickupRecordedZoneId = null;
+    state.stableZoneEntryUserLocation = null;
+    state.lastMeaningfulRepositionAtMs = null;
+    state.lastMeaningfulRepositionDistanceMiles = 0;
+    state.sameZonePickupCountSinceEntry = 0;
+    state.sameZonePickupCountRolling = 0;
+    state.trapMovementScore = 0;
+    state.trapPickupScore = 0;
+    state.trapTimeScore = 0;
+    state.trapCompositeScore = 0;
+    state.trapModeActive = false;
+    state.trapDetectedAtMs = null;
+    state.trapReasonSummary = "";
+    state.trapNeedsNearbyEscape = false;
+    state.trapEscapeTarget = null;
+    state.trapSeverityLevel = 0;
+    state.recentZoneMovementSamples = [];
     state.finalActionCode = "MONITOR";
     state.finalActionReason = "Waiting for stable zone.";
     renderWidget();
@@ -2778,6 +3020,11 @@
       const detail = e?.detail || {};
       state.lastPickupRecordedAtMs = Date.now();
       state.lastPickupRecordedZoneId = detail?.zoneId ? String(detail.zoneId) : null;
+      if (state.activeStableZoneId && state.lastPickupRecordedZoneId
+        && String(state.lastPickupRecordedZoneId) === String(state.activeStableZoneId)) {
+        state.sameZonePickupCountSinceEntry = (safeNum(state.sameZonePickupCountSinceEntry, 0) || 0) + 1;
+        state.sameZonePickupCountRolling = (safeNum(state.sameZonePickupCountRolling, 0) || 0) + 1;
+      }
       resetCountdownCoachState();
       forceRefresh();
     });
