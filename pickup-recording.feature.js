@@ -202,6 +202,15 @@
     return min > 0 ? `${min}m ${sec}s` : `${sec}s`;
   }
 
+  function isPickupSaveAccepted(payload) {
+    if (!payload || typeof payload !== 'object') return true;
+    if (payload.saved === false) return false;
+    if (payload.ok === false) return false;
+    if (payload.success === false) return false;
+    if (payload.would_save === false) return false;
+    return true;
+  }
+
   async function sendPickupLog() {
     if (pickupSaveInFlight) return;
 
@@ -251,15 +260,17 @@
       if (typeof window.handlePickupProgressionDelta === 'function') {
         window.handlePickupProgressionDelta(res || {});
       }
-      window.dispatchEvent(new CustomEvent('tlc-pickup-recorded', {
-        detail: {
-          tsUnix,
-          zoneId,
-          zoneName: near?.zone_name ?? null,
-          borough: near?.borough ?? null,
-          frameTime: ctx.currentFrame?.time || null,
-        },
-      }));
+      if (isPickupSaveAccepted(res)) {
+        window.dispatchEvent(new CustomEvent('tlc-pickup-recorded', {
+          detail: {
+            tsUnix,
+            zoneId,
+            zoneName: near?.zone_name ?? null,
+            borough: near?.borough ?? null,
+            frameTime: ctx.currentFrame?.time || null,
+          },
+        }));
+      }
       return res;
     } catch (err) {
       const status = Number(err?.status || 0);
