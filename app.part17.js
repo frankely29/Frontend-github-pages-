@@ -1052,18 +1052,18 @@
   function deriveNoWasteStayDecision(currentSignal, bestWorthwhileTarget, bestRejectedTarget, currentMetrics, currentTravelMetrics) {
     if (bestWorthwhileTarget) return null;
     if (bestRejectedTarget && (safeNum(bestRejectedTarget?.netMoveEdge, -Infinity) || -Infinity) < (safeNum(bestRejectedTarget?.moveWorthThreshold, Infinity) || Infinity)) {
-      return { actionCode: "STAY", reasonCode: "moving_not_worth_it", reasonText: "Moving is not worth the time", worthMoving: false };
+      return { actionCode: "STAY", reasonCode: "moving_not_worth_it", reasonText: "Other areas are too far right now", worthMoving: false };
     }
     if (!bestRejectedTarget?.viability?.viable && ["trap_at_arrival", "slow_at_arrival", "saturation_at_arrival", "target_chasey", "long_eta_no_hold"].includes(bestRejectedTarget?.viability?.viabilityRejectCode)) {
-      return { actionCode: "STAY", reasonCode: "target_weak_on_arrival", reasonText: "Target weak by the time you get there", worthMoving: false };
+      return { actionCode: "STAY", reasonCode: "target_weak_on_arrival", reasonText: "Weak when you get there", worthMoving: false };
     }
     if (currentMetrics?.stayHoldsAfterArrival && (safeNum(currentTravelMetrics?.travelWindowMinRating, 0) || 0) >= 46) {
       return { actionCode: "STAY", reasonCode: "current_zone_holds", reasonText: "Current zone still holds on arrival", worthMoving: false };
     }
     if ((safeNum(currentSignal?.visibleRating, 0) || 0) >= 48) {
-      return { actionCode: "STAY", reasonCode: "decent_rating_zone", reasonText: "Decent rating zone", worthMoving: false };
+      return { actionCode: "STAY", reasonCode: "decent_rating_zone", reasonText: "Decent area for now", worthMoving: false };
     }
-    return { actionCode: "STAY", reasonCode: "moving_not_worth_it", reasonText: "Moving is not worth the time", worthMoving: false };
+    return { actionCode: "STAY", reasonCode: "moving_not_worth_it", reasonText: "Other areas are too far right now", worthMoving: false };
   }
 
   function deriveAssistantDataQuality(currentPoints, targetPoints, outlookStatus, currentRequestKey) {
@@ -1081,12 +1081,12 @@
     const noSuccessfulForCurrentKey = !!currentRequestKey && state.lastSuccessfulOutlookKey !== currentRequestKey;
 
     let dataQualityMode = "degraded";
-    let dataQualityReason = "Checking outlook.";
+    let dataQualityReason = "Checking more data.";
     if (!hasCurrent || outlookStatus === "error" || noSuccessfulForCurrentKey) {
       dataQualityMode = "degraded";
       dataQualityReason = outlookStatus === "error"
         ? "Outlook temporarily unavailable."
-        : "Checking outlook.";
+        : "Checking more data.";
     } else if (hasStrongCurrent && hasUsableOutlook && !loadingFromCache && !sparseTarget) {
       dataQualityMode = "full";
       dataQualityReason = "Outlook and current-zone signal are complete.";
@@ -1150,12 +1150,12 @@
         return { actionCode: "STAY", reasonCode: "good_zone_now", reasonText: "Good zone right now", worthMoving: false };
       }
       if (currentRating >= 45) {
-        return { actionCode: "STAY", reasonCode: "decent_rating_zone", reasonText: "Decent rating zone", worthMoving: false };
+        return { actionCode: "STAY", reasonCode: "decent_rating_zone", reasonText: "Decent area for now", worthMoving: false };
       }
-      return { actionCode: "MONITOR", reasonCode: "checking_outlook", reasonText: "Checking outlook.", worthMoving: false };
+      return { actionCode: "MONITOR", reasonCode: "checking_outlook", reasonText: "Checking more data.", worthMoving: false };
     }
     if (dataQualityMode === "partial" && !strongNearTarget && currentRating >= 45) {
-      return { actionCode: "STAY", reasonCode: "moving_not_worth_it", reasonText: "Moving is not worth the time", worthMoving: false };
+      return { actionCode: "STAY", reasonCode: "moving_not_worth_it", reasonText: "Other areas are too far right now", worthMoving: false };
     }
     if (dataQualityMode === "partial" && strongNearTarget) {
       return { actionCode: "MOVE_SOON", reasonCode: "near_target_clear_edge", reasonText: "Near target has a clear edge", worthMoving: true };
@@ -1422,7 +1422,7 @@
 
   function deriveStableRecommendationReason(committedRecommendation, stabilityReasonCode, stabilityReasonText) {
     if (stabilityReasonCode === "proposal_not_stable_yet" && stabilityReasonText) return "Waiting to confirm the recommendation";
-    if (stabilityReasonCode === "move_edge_not_far_enough") return "Moving is not worth the time";
+    if (stabilityReasonCode === "move_edge_not_far_enough") return "Other areas are too far right now";
     if (stabilityReasonCode === "holding_existing_move") return "Current target still makes sense";
     if (stabilityReasonCode === "current_target_still_better_enough") return "Current target still makes sense";
     const reasonText = String(committedRecommendation?.reasonText || "").trim();
@@ -1548,6 +1548,25 @@
     return map[String(code || "").trim()] || "Monitor";
   }
 
+  function friendlyReasonFromCode(reasonCode, fallbackText = "") {
+    const map = {
+      good_zone_now: "Good zone right now",
+      decent_rating_zone: "Decent area for now",
+      moving_not_worth_it: "Other areas are too far right now",
+      low_trip_trap_risk: "Trap risk rising",
+      zone_about_to_cool_off: "Area may cool off",
+      nearby_zone_about_to_get_busier: "Nearby area is getting better",
+      worth_the_drive_time: "Worth the drive right now",
+      stronger_when_you_arrive: "Better when you get there",
+      target_weak_on_arrival: "Weak when you get there",
+      checking_outlook: "Checking more data",
+      collecting_context: "Learning this area",
+      current_zone_holds: "This area still looks better right now",
+      near_target_clear_edge: "Better nearby area is ready",
+    };
+    return map[String(reasonCode || "").trim()] || fallbackText;
+  }
+
   function humanizeAssistantReason(text) {
     const raw = String(text || "").trim();
     if (!raw) return "Mixed signals.";
@@ -1562,8 +1581,13 @@
       .replace(/Current zone has strong demand and continuation\.?/gi, "Good zone right now.")
       .replace(/Nearby zone has better score; prepare to move\.?/gi, "Move window coming.")
       .replace(/Current zone is acceptable; keep monitoring\.?/gi, "Mixed signals.")
-      .replace(/Waiting for stable zone\.?/gi, "Collecting location context.")
-      .replace(/Outlook unavailable\.?/gi, "Checking outlook.")
+      .replace(/Waiting for stable zone\.?/gi, "Learning this area.")
+      .replace(/Outlook unavailable\.?/gi, "Checking more data.")
+      .replace(/Checking outlook\.?/gi, "Checking more data.")
+      .replace(/Collecting more context\.?/gi, "Learning this area.")
+      .replace(/Decent rating zone\.?/gi, "Decent area for now.")
+      .replace(/Moving is not worth the time\.?/gi, "Other areas are too far right now.")
+      .replace(/Target weak by the time you get there\.?/gi, "Weak when you get there.")
       .replace(/dwell/gi, "stay");
     return normalized;
   }
@@ -1593,8 +1617,8 @@
   function safeDegradedStayPrimaryLine() {
     const reasonCode = String(state.recommendationReasonCode || "").trim();
     if (reasonCode === "good_zone_now") return "Stay • Good zone right now";
-    if (reasonCode === "decent_rating_zone") return "Stay • Decent rating zone";
-    if (reasonCode === "moving_not_worth_it") return "Stay • Moving is not worth the time";
+    if (reasonCode === "decent_rating_zone") return "Stay • Decent area for now";
+    if (reasonCode === "moving_not_worth_it") return "Stay • Other areas are too far right now";
     const reasonText = state.recommendationReasonText || state.committedReasonText || state.finalActionReason;
     return `Stay • ${humanizeAssistantReason(reasonText)}`;
   }
@@ -1732,10 +1756,11 @@
       return safeDegradedStayPrimaryLine();
     }
     if (state.dataQualityMode === "degraded" && state.finalActionCode === "MONITOR" && !safeDegradedStayFallback) {
-      return "Monitor • Checking outlook.";
+      return "Monitor • Checking more data";
     }
     const committedAction = state.committedActionCode || "MONITOR";
-    const committedReason = state.committedReasonText || state.recommendationReasonText || state.finalActionReason;
+    const fallbackReason = state.committedReasonText || state.recommendationReasonText || state.finalActionReason;
+    const committedReason = friendlyReasonFromCode(state.committedReasonCode, fallbackReason) || fallbackReason;
     const action = humanActionLabel(committedAction);
     const reason = humanizeAssistantReason(committedReason);
     if (state.usedCachedRecommendationFallback && state.dataQualityMode !== "full") {
@@ -1763,10 +1788,10 @@
     const safeDegradedStayFallback = isSafeDegradedStayFallback();
     if (safeDegradedStayFallback) return "Stay here for now";
     if (state.dataQualityMode === "degraded" && state.finalActionCode === "MONITOR" && !safeDegradedStayFallback) {
-      return "Waiting for clearer signal";
+      return "Waiting for a clearer signal";
     }
     if (weakDataMode && (!committedTarget || (safeNum(committedTarget?.etaMinutes, Infinity) || Infinity) > AI_ASSISTANT_NEAR_TARGET_MAX_ETA_MIN)) {
-      return committedAction === "STAY" ? "Stay here for now" : "Waiting for clearer signal";
+      return committedAction === "STAY" ? "Stay here for now" : "Waiting for a clearer signal";
     }
     if ((committedAction === "MOVE_SOON" || committedAction === "LEAVE_NOW")
       && committedTarget?.zoneName
@@ -1775,8 +1800,8 @@
     }
     if (committedAction === "STAY") return "Stay here for now";
     if (committedAction === "STAY_BRIEFLY") return "Stay here briefly";
-    if (committedAction === "MONITOR") return "Waiting for clearer signal";
-    return "Waiting for clearer signal";
+    if (committedAction === "MONITOR") return "Waiting for a clearer signal";
+    return "Waiting for a clearer signal";
   }
 
   function computeBaseAction(currentSignal, cls) {
@@ -1956,9 +1981,9 @@
       if (isSafeDegradedStayFallback()) {
         finalized = [{ key: "action", text: safeDegradedStayPrimaryLine(), severity: "positive" }];
       } else if (state.dataQualityMode === "degraded" && state.finalActionCode === "MONITOR") {
-        finalized = [{ key: "action", text: "Monitor • Checking outlook.", severity: "info" }];
+        finalized = [{ key: "action", text: "Monitor • Checking more data", severity: "info" }];
       } else if (state.dataQualityMode === "partial" && !state.assistantMoveTarget) {
-        finalized = [{ key: "action", text: "Stay • Moving is not worth the time", severity: "caution" }];
+        finalized = [{ key: "action", text: "Stay • Other areas are too far right now", severity: "caution" }];
       }
     }
     if (!finalized.length) {
@@ -2012,27 +2037,27 @@
     if (state.chosenTargetGroup === "same_borough_near") return "Why this target: same-borough practical move";
     if (state.chosenTargetGroup === "near") return "Why this target: closer strong zone";
     if (state.chosenTargetGroup === "far_exception") return "Why this target: far target exception";
-    if (state.chosenTargetReasoningMode === "stay_not_worth_moving") return "Why staying: moving is not worth the time";
-    if (state.targetViabilityRejectReasonText) return `Why staying: ${state.targetViabilityRejectReasonText}`;
-    return "Why staying: moving is not worth the time";
+    if (state.chosenTargetReasoningMode === "stay_not_worth_moving") return "Why staying: other areas are too far right now";
+    if (state.targetViabilityRejectReasonText) return `Why staying: ${humanizeAssistantReason(state.targetViabilityRejectReasonText)}`;
+    return "Why staying: other areas are too far right now";
   }
 
   function buildPanelHtml() {
     const trustModeLine = state.dataQualityMode === "full"
-      ? "Trust mode: full"
+      ? "Signal quality: full"
       : (state.usedCachedRecommendationFallback
-          ? `Trust mode: ${state.dataQualityMode} — using recent same-zone fallback`
-          : `Trust mode: ${state.dataQualityMode} — ${humanizeAssistantReason(state.dataQualityReason || "Checking outlook.")}`);
+          ? `Signal quality: ${state.dataQualityMode} — using recent same-zone fallback`
+          : `Signal quality: ${state.dataQualityMode} — ${humanizeAssistantReason(state.dataQualityReason || "Checking more data.")}`);
     return `
       <div class="aiAssistantPanel">
-        <section class="aiAssistantSection"><strong>Current Zone</strong><div>${state.activeStableZoneName || "—"} • ${state.activeStableBorough || "—"} • ${Math.round(state.visibleRating || 0)} ${prettyBucket(state.visibleBucket)} • ${state.visibleScoreSourceLabel}</div></section>
-        <section class="aiAssistantSection"><strong>Stay Coach</strong><div>${state.dwellCoachSummaryText}</div><div>${state.dwellCoachReasonFragments.join(" • ")}</div></section>
-        <section class="aiAssistantSection"><strong>Countdown Coach</strong><div>${state.countdownActive ? `Countdown active • ${Math.max(1, Math.round(state.countdownMinutesRemaining || 0))} min left` : "Countdown inactive"}</div><div>${state.countdownReasonText || state.countdownHoldWindowReason || "No countdown needed."}</div><div>${state.countdownTarget?.zoneName ? `Target: ${state.countdownTarget.zoneName} • ${Math.round(state.countdownTarget.etaMinutes || 0)} min` : "Target: —"}</div></section>
-        <section class="aiAssistantSection"><strong>Outlook</strong><div>${state.outlookSummaryText}</div><div>${state.moveTargetOutlookSummaryText || ""}</div>${(state.outlookStatus || state.outlookLastErrorCode) ? `<div><small>Status: ${state.outlookStatus || "idle"}${state.outlookLastErrorCode ? ` (${state.outlookLastErrorCode})` : ""}</small></div>` : ""}</section>
-        <section class="aiAssistantSection"><strong>Rankings</strong><div>Best now: ${state.citywideBestNow?.zoneName || "—"} • Worst now: ${state.citywideWorstNow?.zoneName || "—"}</div>${buildRankList(state.citywideTop10Best)}${buildRankList(state.boroughTop5Best)}</section>
+        <section class="aiAssistantSection"><strong>Current area</strong><div>${state.activeStableZoneName || "—"} • ${state.activeStableBorough || "—"} • ${Math.round(state.visibleRating || 0)} ${prettyBucket(state.visibleBucket)} • ${state.visibleScoreSourceLabel}</div></section>
+        <section class="aiAssistantSection"><strong>Advice</strong><div>${state.dwellCoachSummaryText}</div><div>${state.dwellCoachReasonFragments.join(" • ")}</div></section>
+        <section class="aiAssistantSection"><strong>Countdown</strong><div>${state.countdownActive ? `Countdown active • ${Math.max(1, Math.round(state.countdownMinutesRemaining || 0))} min left` : "Countdown inactive"}</div><div>${state.countdownReasonText || state.countdownHoldWindowReason || "No countdown needed."}</div><div>${state.countdownTarget?.zoneName ? `Target: ${state.countdownTarget.zoneName} • ${Math.round(state.countdownTarget.etaMinutes || 0)} min` : "Target: —"}</div></section>
+        <section class="aiAssistantSection"><strong>What may happen next</strong><div>${state.outlookSummaryText}</div><div>${state.moveTargetOutlookSummaryText || ""}</div>${(state.outlookStatus || state.outlookLastErrorCode) ? `<div><small>Status: ${state.outlookStatus || "idle"}${state.outlookLastErrorCode ? ` (${state.outlookLastErrorCode})` : ""}</small></div>` : ""}</section>
+        <section class="aiAssistantSection"><strong>Best areas right now</strong><div>Best now: ${state.citywideBestNow?.zoneName || "—"} • Worst now: ${state.citywideWorstNow?.zoneName || "—"}</div>${buildRankList(state.citywideTop10Best)}${buildRankList(state.boroughTop5Best)}</section>
         ${state.assistantMoveTarget ? `<section class="aiAssistantSection"><strong>Move Target</strong><div>${state.assistantMoveTarget.zoneName} • ${Math.round(state.assistantMoveTarget.etaMinutes || 0)} min • ${state.assistantMoveTarget.distanceMiles.toFixed(1)} mi</div></section>` : ""}
-        ${(Number.isFinite(state.stayScenarioValue) || Number.isFinite(state.moveScenarioValue)) ? `<section class="aiAssistantSection"><strong>Move Decision</strong><div>Stay scenario: ${(state.stayScenarioValue || 0).toFixed(1)}</div><div>Move scenario: ${(state.moveScenarioValue || 0).toFixed(1)}</div><div>ETA: ${Math.round(state.etaMinutes || 0)} min</div><div>Deadhead cost: ${(state.totalDeadheadCost || 0).toFixed(1)}</div><div>Confidence penalty: ${(state.moveConfidencePenalty || 0).toFixed(1)}</div><div>Net move edge: ${(state.netMoveEdge || 0) >= 0 ? "+" : ""}${(state.netMoveEdge || 0).toFixed(1)}</div><div>Worth-moving threshold: ${(state.moveWorthThreshold || 0).toFixed(1)}</div><div><small>${compactTargetWhyLine()}</small></div></section>` : ""}
-        <section class="aiAssistantSection"><strong>Recommendation Stability</strong><div>Proposed: ${humanActionLabel(state.proposedActionCode)} • ${state.proposedReasonText || "—"}</div><div>Committed: ${humanActionLabel(state.committedActionCode)} • ${state.committedReasonText || "—"}</div><div>Confidence: ${Math.round(state.recommendationConfidenceScore || 0)} (${state.recommendationConfidenceLevel || "low"})</div><div>Stable since: ${state.committedSinceTs ? new Date(state.committedSinceTs).toLocaleTimeString() : "—"}</div><div>Switch cooldown until: ${state.recommendationSwitchCooldownUntilTs ? new Date(state.recommendationSwitchCooldownUntilTs).toLocaleTimeString() : "—"}</div><div>Minimum hold until: ${state.recommendationMinHoldUntilTs ? new Date(state.recommendationMinHoldUntilTs).toLocaleTimeString() : "—"}</div><div>Stability reason: ${state.stabilityReasonText || "Committed recommendation is stable."}</div></section>
+        ${(Number.isFinite(state.stayScenarioValue) || Number.isFinite(state.moveScenarioValue)) ? `<section class="aiAssistantSection"><strong>Move check</strong><div>If you stay: ${(state.stayScenarioValue || 0).toFixed(1)}</div><div>If you move: ${(state.moveScenarioValue || 0).toFixed(1)}</div><div>Drive time: ${Math.round(state.etaMinutes || 0)} min</div><div>Empty drive cost: ${(state.totalDeadheadCost || 0).toFixed(1)}</div><div>Uncertainty cost: ${(state.moveConfidencePenalty || 0).toFixed(1)}</div><div>Move advantage: ${(state.netMoveEdge || 0) >= 0 ? "+" : ""}${(state.netMoveEdge || 0).toFixed(1)}</div><div>Needed to be worth the drive: ${(state.moveWorthThreshold || 0).toFixed(1)}</div><div><small>${compactTargetWhyLine()}</small></div></section>` : ""}
+        <section class="aiAssistantSection"><strong>Assistant status</strong><div>Proposed: ${humanActionLabel(state.proposedActionCode)} • ${humanizeAssistantReason(friendlyReasonFromCode(state.proposedReasonCode, state.proposedReasonText || "—"))}</div><div>Committed: ${humanActionLabel(state.committedActionCode)} • ${humanizeAssistantReason(friendlyReasonFromCode(state.committedReasonCode, state.committedReasonText || "—"))}</div><div>Confidence: ${Math.round(state.recommendationConfidenceScore || 0)} (${state.recommendationConfidenceLevel || "low"})</div><div>Stable since: ${state.committedSinceTs ? new Date(state.committedSinceTs).toLocaleTimeString() : "—"}</div><div>Switch cooldown until: ${state.recommendationSwitchCooldownUntilTs ? new Date(state.recommendationSwitchCooldownUntilTs).toLocaleTimeString() : "—"}</div><div>Minimum hold until: ${state.recommendationMinHoldUntilTs ? new Date(state.recommendationMinHoldUntilTs).toLocaleTimeString() : "—"}</div><div>Stability reason: ${humanizeAssistantReason(state.stabilityReasonText || "Committed recommendation is stable.")}</div></section>
         <section class="aiAssistantSection"><small>${trustModeLine}</small></section>
         <section class="aiAssistantSection"><small>Assistant uses the same visible Team Joseo score path the map is showing.</small></section>
       </div>
@@ -2232,7 +2257,7 @@
     state.recommendationReasonText = "Collecting more context.";
     state.dataQualityMode = "degraded";
     state.dataQualityLabel = "degraded";
-    state.dataQualityReason = "Checking outlook.";
+    state.dataQualityReason = "Checking more data.";
     state.currentPointsCount = 0;
     state.targetPointsCount = 0;
     state.hasRecentSuccessfulOutlook = false;
@@ -2434,7 +2459,7 @@
         state.usedCachedRecommendationFallback = true;
         state.committedActionCode = cached.actionCode || state.committedActionCode || "MONITOR";
         state.committedReasonCode = cached.reasonCode || state.committedReasonCode || "checking_outlook";
-        state.committedReasonText = cached.reasonText || state.committedReasonText || "Checking outlook.";
+        state.committedReasonText = cached.reasonText || state.committedReasonText || "Checking more data.";
         state.committedMoveTarget = cached.moveTarget || null;
         state.committedSinceTs = state.committedSinceTs || Date.now();
         state.recommendationConfidenceScore = cached.recommendationConfidenceScore ?? state.recommendationConfidenceScore;
@@ -2474,7 +2499,7 @@
       state.outlookSummaryText = "Outlook is mixed.";
       state.moveTargetOutlookSummaryText = "";
     } else if (state.outlookStatus === "loading") {
-      state.outlookSummaryText = "Checking outlook.";
+      state.outlookSummaryText = "Checking more data.";
       state.moveTargetOutlookSummaryText = "";
     } else if (state.outlookStatus === "error") {
       state.outlookSummaryText = "Outlook temporarily unavailable.";
@@ -2492,7 +2517,7 @@
       if (isMoveAction(state.committedActionCode)) {
         state.committedActionCode = "MONITOR";
         state.committedReasonCode = "checking_outlook";
-        state.committedReasonText = "Checking outlook.";
+        state.committedReasonText = "Checking more data.";
       }
     }
     state.assistantMoveTarget = state.committedMoveTarget || null;
@@ -2508,8 +2533,8 @@
     state.actionSeverity = (state.finalActionCode === "LEAVE_NOW" || state.finalActionCode === "MOVE_SOON") ? "move" : (state.finalActionCode === "STAY" ? "positive" : "info");
     if (state.dataQualityMode !== "full" && state.finalActionCode === "MOVE_SOON" && !state.assistantMoveTarget) {
       state.finalActionCode = "MONITOR";
-      state.finalActionReason = "Checking outlook.";
-      state.recommendationReasonText = "Checking outlook.";
+      state.finalActionReason = "Checking more data.";
+      state.recommendationReasonText = "Checking more data.";
     }
     const countdownCoach = deriveCountdownCoach(
       activeSignal,
@@ -2656,7 +2681,7 @@
     state.stabilityReasonText = "";
     state.dataQualityMode = "degraded";
     state.dataQualityLabel = "degraded";
-    state.dataQualityReason = "Checking outlook.";
+    state.dataQualityReason = "Checking more data.";
     state.currentPointsCount = 0;
     state.targetPointsCount = 0;
     state.hasRecentSuccessfulOutlook = false;
