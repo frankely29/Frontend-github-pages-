@@ -27,6 +27,8 @@
   const AI_ASSISTANT_TRAP_MESSAGE_COOLDOWN_MS = 75000;
   const AI_ASSISTANT_STAY_MESSAGE_COOLDOWN_MS = 45000;
   const AI_ASSISTANT_MOVE_MESSAGE_COOLDOWN_MS = 30000;
+  const AI_ASSISTANT_FULL_RECOMPUTE_MIN_MS = 900;
+  const AI_ASSISTANT_SAME_ZONE_REPOSITION_MILES = 0.1;
 
   const runtime = window.FrontendRuntime || null;
   const runtimePolling = runtime?.polling || null;
@@ -240,6 +242,25 @@
     touchPauseUntil: 0,
     hoverPaused: false,
     rotationTimerHandle: null,
+    lastFullAssistantRecomputeAtMs: 0,
+    lastFullAssistantRecomputeZoneId: null,
+    lastFullAssistantRecomputeFrameTime: null,
+    lastFullAssistantRecomputeLat: null,
+    lastFullAssistantRecomputeLng: null,
+    lastAssistantRenderKey: "",
+    lastRecommendLineKey: "",
+    lastLightPassPrimaryLine: "",
+    lastLightPassSecondaryLine: "",
+    assistantFrameSignalCache: new Map(),
+    assistantRankingsCache: new Map(),
+    assistantNearbyCandidateCache: new Map(),
+    assistantShortlistCache: new Map(),
+    assistantCandidateEvalCache: new Map(),
+    assistantRecomputeTimer: null,
+    assistantRecomputeRaf: null,
+    assistantRecomputePendingFrame: null,
+    assistantRecomputePendingUrgent: false,
+    assistantRecomputePendingReasons: new Set(),
   };
 
   function safeNum(v, fallback = null) {
@@ -363,10 +384,53 @@
     return score;
   }
 
+  function trimMapCache(map, max = 8) {
+    if (!(map instanceof Map)) return;
+    while (map.size > max) {
+      const first = map.keys().next();
+      if (first?.done) break;
+      map.delete(first.value);
+    }
+  }
+
+  function getAssistantFrameKey(frame) {
+    return `${frameTimeIso(frame) || "none"}|${Number(frame?.polygons?.features?.length || 0)}`;
+  }
+
+  function getAssistantModeTendencySignature() {
+    const flags = modeModule.getModeFlags?.() || {};
+    const tendency = window.TlcDayTendencyState?.getAdvancedContext?.() || window.TlcDayTendencyState?.advancedContext || null;
+    return [
+      flags.statenIslandMode ? 1 : 0,
+      flags.bronxWashHeightsMode ? 1 : 0,
+      flags.manhattanMode ? 1 : 0,
+      flags.queensMode ? 1 : 0,
+      flags.brooklynMode ? 1 : 0,
+      tendency?.ready_for_frontend_adjustment ? 1 : 0,
+      tendency?.resolved_local_scope || tendency?.local_scope || "",
+      tendency?.global_penalty_points ?? "",
+      tendency?.local_penalty_points ?? "",
+    ].join("|");
+  }
+
+  function getSignalsForFrame(frame) {
+    const frameKey = `${getAssistantFrameKey(frame)}|${getAssistantModeTendencySignature()}`;
+    if (state.assistantFrameSignalCache.has(frameKey)) return state.assistantFrameSignalCache.get(frameKey) || [];
+    const signals = (frame?.polygons?.features || [])
+      .map(buildAssistantFeatureSignal)
+      .filter((s) => s.locationId && Number.isFinite(s.visibleRating) && Number.isFinite(s.centerLat) && Number.isFinite(s.centerLng));
+    state.assistantFrameSignalCache.set(frameKey, signals);
+    trimMapCache(state.assistantFrameSignalCache, 6);
+    return signals;
+  }
+
   function computeNearbyAssistantCandidates(frame, currentSignal) {
     const out = { overall: null, trap_escape: null, long_trip: null };
     if (!currentSignal) return out;
-    const all = (frame?.polygons?.features || []).map(buildAssistantFeatureSignal).filter((s) => s.locationId && !s.airportExcluded && Number.isFinite(s.visibleRating) && Number.isFinite(s.centerLat) && Number.isFinite(s.centerLng));
+    const frameKey = getAssistantFrameKey(frame);
+    const cacheKey = `${frameKey}|${currentSignal.locationId}|${getAssistantModeTendencySignature()}`;
+    if (state.assistantNearbyCandidateCache.has(cacheKey)) return state.assistantNearbyCandidateCache.get(cacheKey) || out;
+    const all = getSignalsForFrame(frame).filter((s) => !s.airportExcluded);
     const intents = [
       { key: "overall", radius: 3.5 },
       { key: "trap_escape", radius: 4.5 },
@@ -385,6 +449,8 @@
       }
       out[intent.key] = best;
     }
+    state.assistantNearbyCandidateCache.set(cacheKey, out);
+    trimMapCache(state.assistantNearbyCandidateCache, 10);
     return out;
   }
 
@@ -422,10 +488,12 @@
 
   function buildArrivalAwareCandidateShortlist(frame, currentSignal) {
     if (!currentSignal?.locationId) return [];
+    const frameKey = getAssistantFrameKey(frame);
+    const cacheKey = `${frameKey}|${currentSignal.locationId}|${getAssistantModeTendencySignature()}`;
+    if (state.assistantShortlistCache.has(cacheKey)) return state.assistantShortlistCache.get(cacheKey) || [];
     const allCandidates = [];
     const currentBorough = normalizeAssistantBoroughName(currentSignal?.borough);
-    for (const feature of (frame?.polygons?.features || [])) {
-      const signal = buildAssistantFeatureSignal(feature);
+    for (const signal of getSignalsForFrame(frame)) {
       if (!signal?.locationId || signal.locationId === currentSignal.locationId) continue;
       if (signal.airportExcluded) continue;
       if (!Number.isFinite(signal.visibleRating)) continue;
@@ -495,14 +563,27 @@
         }
       });
     });
-    return [...mergedByLocationId.values()].sort((a, b) => b.quickScore - a.quickScore).slice(0, 12);
+    const shortlist = [...mergedByLocationId.values()].sort((a, b) => b.quickScore - a.quickScore).slice(0, 12);
+    state.assistantShortlistCache.set(cacheKey, shortlist);
+    trimMapCache(state.assistantShortlistCache, 10);
+    return shortlist;
   }
 
   function computeRankings(frame, activeSignal) {
-    const signals = (frame?.polygons?.features || []).map(buildAssistantFeatureSignal).filter((s) => s.locationId && Number.isFinite(s.visibleRating) && !s.airportExcluded);
-    signals.sort(sortByRatingThenId);
+    const frameKey = getAssistantFrameKey(frame);
     const borough = String(activeSignal?.borough || "").trim();
-    const boroughSignals = signals.filter((s) => String(s.borough || "") === borough);
+    const cacheKey = `${frameKey}|${borough}|${getAssistantModeTendencySignature()}`;
+    let cached = state.assistantRankingsCache.get(cacheKey) || null;
+    if (!cached) {
+      const signals = getSignalsForFrame(frame).filter((s) => !s.airportExcluded);
+      signals.sort(sortByRatingThenId);
+      const boroughSignals = signals.filter((s) => String(s.borough || "") === borough);
+      cached = { signals, boroughSignals, borough };
+      state.assistantRankingsCache.set(cacheKey, cached);
+      trimMapCache(state.assistantRankingsCache, 10);
+    }
+    const signals = cached.signals;
+    const boroughSignals = cached.boroughSignals;
 
     state.currentZoneCitywideTotal = signals.length;
     state.currentZoneBoroughTotal = boroughSignals.length;
@@ -2482,6 +2563,9 @@
     if (!recommendLine) return;
     const primary = buildAssistantPrimaryLine();
     const secondary = buildAssistantSecondaryLine();
+    const key = `${primary}|${secondary}`;
+    if (state.lastRecommendLineKey === key) return;
+    state.lastRecommendLineKey = key;
     recommendLine.textContent = `AI Assistant: ${primary} • ${secondary}`;
   }
 
@@ -2492,6 +2576,18 @@
     const primaryLine = buildAssistantPrimaryLine();
     const secondaryLine = buildAssistantSecondaryLine();
     const iconType = leadingIconKindFromAction(state.finalActionCode);
+    const renderKey = [
+      compactLane ? 1 : 0,
+      state.expanded ? 1 : 0,
+      iconType,
+      String(primaryLine || ""),
+      String(secondaryLine || ""),
+      state.expanded ? String(state.assistantMoveTarget?.locationId || "") : "",
+      state.expanded ? String(state.countdownMinutesRemaining || "") : "",
+      state.expanded ? String(state.outlookSummaryText || "") : "",
+    ].join("|");
+    if (state.lastAssistantRenderKey === renderKey) return;
+    state.lastAssistantRenderKey = renderKey;
 
     dockMount.innerHTML = `
       <div class="aiAssistantWidget ${compactLane ? "aiAssistantWidget--compactLane" : ""} ${state.expanded ? "is-expanded" : ""}" id="aiAssistantWidget">
@@ -2856,9 +2952,52 @@
     return false;
   }
 
-  async function recompute(frame) {
+  function shouldRunFullAssistantPass({ zoneChanged, frameChanged, meaningfulRepositioned, urgent = false }) {
+    if (urgent) return true;
+    const now = Date.now();
+    const zoneId = String(state.activeStableZoneId || "");
+    const frameTime = String(state.lastFrameTime || "");
+    if (zoneChanged) return true;
+    if (frameChanged) return true;
+    if (state.lastPickupRecordedAtMs && now - state.lastPickupRecordedAtMs < 1500) return true;
+    if (!state.lastFullAssistantRecomputeAtMs) return true;
+    if (zoneId && zoneId !== String(state.lastFullAssistantRecomputeZoneId || "")) return true;
+    if (frameTime && frameTime !== String(state.lastFullAssistantRecomputeFrameTime || "")) return true;
+    if (meaningfulRepositioned) return true;
+    if (state.lastUserLocation && Number.isFinite(state.lastUserLocation.lat) && Number.isFinite(state.lastUserLocation.lng)
+      && Number.isFinite(state.lastFullAssistantRecomputeLat) && Number.isFinite(state.lastFullAssistantRecomputeLng)) {
+      const moved = internals.haversineMiles?.(
+        { lat: state.lastFullAssistantRecomputeLat, lng: state.lastFullAssistantRecomputeLng },
+        { lat: state.lastUserLocation.lat, lng: state.lastUserLocation.lng }
+      ) || 0;
+      if (moved >= AI_ASSISTANT_SAME_ZONE_REPOSITION_MILES) return true;
+    }
+    return (now - state.lastFullAssistantRecomputeAtMs) >= AI_ASSISTANT_FULL_RECOMPUTE_MIN_MS;
+  }
+
+  function runAssistantLightPass() {
+    const nowTs = Date.now();
+    if (state.countdownActive && state.countdownDeadlineTs) {
+      state.countdownMinutesRemaining = Math.max(0, Math.ceil((state.countdownDeadlineTs - nowTs) / 60000));
+      if (state.countdownMinutesRemaining <= 0) resetCountdownCoachState();
+    }
+    const primary = buildAssistantPrimaryLine();
+    const secondary = buildAssistantSecondaryLine();
+    if (primary !== state.lastLightPassPrimaryLine || secondary !== state.lastLightPassSecondaryLine) {
+      state.lastLightPassPrimaryLine = primary;
+      state.lastLightPassSecondaryLine = secondary;
+      mirrorRecommendLine();
+      renderWidget();
+    }
+    emitSnapshotEvents();
+  }
+
+  async function recompute(frame, options = {}) {
+    const urgent = !!options.urgent;
     const liveFrame = frame || internals.getCurrentFrame?.() || null;
     state.lastFrameTime = frameTimeIso(liveFrame);
+    const prevFrameTime = String(state.lastFullAssistantRecomputeFrameTime || "");
+    const frameChanged = prevFrameTime !== String(state.lastFrameTime || "");
     const zoneChanged = applyStableZoneFromLocation();
     if (zoneChanged) {
       state.sameZonePickupCountSinceEntry = 0;
@@ -2889,9 +3028,14 @@
     sampleRecentSameZoneMovement(state.activeStableZoneId, state.lastUserLocation);
     const meaningfulRepositioned = isMeaningfulRepositionInSameZone(state.activeStableZoneId, state.lastUserLocation);
     state.activeStableZoneDwellMs = state.activeStableZoneEnterTs ? Math.max(0, Date.now() - state.activeStableZoneEnterTs) : 0;
+    if (!shouldRunFullAssistantPass({ zoneChanged, frameChanged, meaningfulRepositioned, urgent })) {
+      runAssistantLightPass();
+      return;
+    }
 
+    const frameSignals = getSignalsForFrame(liveFrame);
     const activeSignal = state.activeStableZoneId
-      ? (liveFrame?.polygons?.features || []).map(buildAssistantFeatureSignal).find((s) => s.locationId === state.activeStableZoneId) || null
+      ? frameSignals.find((s) => s.locationId === state.activeStableZoneId) || null
       : null;
     state.activeStableFeatureSignal = activeSignal;
     state.visibleRating = activeSignal?.visibleRating ?? null;
@@ -2938,7 +3082,7 @@
           .then(() => {
             if (state.outlookEnrichRefreshKey !== currentOutlookKey) return;
             state.outlookEnrichRefreshKey = "";
-            recompute().catch(() => {});
+            scheduleAssistantRecompute({ reason: "outlook-enriched", urgent: false });
           })
           .catch(() => {
             state.outlookEnrichRefreshKey = "";
@@ -2966,28 +3110,34 @@
     }
     const byId = buildOutlookPointsByLocation(effectiveOutlook);
     const currentPoints = byId?.[state.activeStableZoneId] || byId?.[String(state.activeStableZoneId)] || [];
-    const evaluated = [];
-    for (const candidate of shortlist) {
-      const targetPoints = byId?.[candidate.signal.locationId] || byId?.[String(candidate.signal.locationId)] || [];
-      const evaluation = evaluateEconomicsAwareMoveCandidate(
-        candidate.signal,
-        activeSignal,
-        targetPoints,
-        currentPoints,
-        candidate.etaMinutes,
-        candidate.distanceMiles
-      );
-      evaluation.moveWorthThreshold = getAssistantMoveWorthThreshold(
-        activeSignal,
-        evaluation.currentTravelMetrics,
-        evaluation.currentMetrics,
-        evaluation.targetMetrics,
-        evaluation.targetPaybackMetrics,
-        evaluation.deadheadCost,
-        evaluation.etaMinutes
-      );
-      evaluation.isWorthMoving = !!evaluation.viability?.viable && evaluation.netMoveEdge >= evaluation.moveWorthThreshold;
-      evaluated.push(evaluation);
+    const evalCacheKey = `${getAssistantFrameKey(liveFrame)}|${state.activeStableZoneId || "none"}|${state.visibleScoreSource}|${shortlist.map((c) => c.signal.locationId).join(",")}`;
+    let evaluated = state.assistantCandidateEvalCache.get(evalCacheKey) || null;
+    if (!evaluated) {
+      evaluated = [];
+      for (const candidate of shortlist) {
+        const targetPoints = byId?.[candidate.signal.locationId] || byId?.[String(candidate.signal.locationId)] || [];
+        const evaluation = evaluateEconomicsAwareMoveCandidate(
+          candidate.signal,
+          activeSignal,
+          targetPoints,
+          currentPoints,
+          candidate.etaMinutes,
+          candidate.distanceMiles
+        );
+        evaluation.moveWorthThreshold = getAssistantMoveWorthThreshold(
+          activeSignal,
+          evaluation.currentTravelMetrics,
+          evaluation.currentMetrics,
+          evaluation.targetMetrics,
+          evaluation.targetPaybackMetrics,
+          evaluation.deadheadCost,
+          evaluation.etaMinutes
+        );
+        evaluation.isWorthMoving = !!evaluation.viability?.viable && evaluation.netMoveEdge >= evaluation.moveWorthThreshold;
+        evaluated.push(evaluation);
+      }
+      state.assistantCandidateEvalCache.set(evalCacheKey, evaluated);
+      trimMapCache(state.assistantCandidateEvalCache, 10);
     }
     const picked = chooseBestEconomicsAwareTarget(evaluated, activeSignal);
     const bestNearEval = picked.bestNearEval || null;
@@ -3285,8 +3435,54 @@
     applyNavOwnership();
     mirrorRecommendLine();
     renderWidget();
+    state.lastFullAssistantRecomputeAtMs = Date.now();
+    state.lastFullAssistantRecomputeZoneId = state.activeStableZoneId || null;
+    state.lastFullAssistantRecomputeFrameTime = state.lastFrameTime || null;
+    state.lastFullAssistantRecomputeLat = Number.isFinite(state.lastUserLocation?.lat) ? state.lastUserLocation.lat : null;
+    state.lastFullAssistantRecomputeLng = Number.isFinite(state.lastUserLocation?.lng) ? state.lastUserLocation.lng : null;
     if (zoneChanged) window.dispatchEvent(new CustomEvent("tlc-ai-assistant-snapshot-updated", { detail: snapshot() }));
     emitSnapshotEvents();
+  }
+
+  function scheduleAssistantRecompute({ reason = "unknown", urgent = false, frame = null } = {}) {
+    if (frame) state.assistantRecomputePendingFrame = frame;
+    state.assistantRecomputePendingUrgent = state.assistantRecomputePendingUrgent || !!urgent;
+    state.assistantRecomputePendingReasons.add(String(reason || "unknown"));
+    if (urgent) {
+      if (state.assistantRecomputeRaf && typeof cancelAnimationFrame === "function") cancelAnimationFrame(state.assistantRecomputeRaf);
+      if (state.assistantRecomputeTimer) clearTimeout(state.assistantRecomputeTimer);
+      state.assistantRecomputeRaf = null;
+      state.assistantRecomputeTimer = null;
+      const pendingFrame = state.assistantRecomputePendingFrame;
+      state.assistantRecomputePendingFrame = null;
+      const urgentFlag = state.assistantRecomputePendingUrgent;
+      state.assistantRecomputePendingUrgent = false;
+      state.assistantRecomputePendingReasons.clear();
+      recompute(pendingFrame, { urgent: urgentFlag }).catch(() => {});
+      return;
+    }
+    if (state.assistantRecomputeRaf || state.assistantRecomputeTimer) return;
+    if (typeof requestAnimationFrame === "function") {
+      state.assistantRecomputeRaf = requestAnimationFrame(() => {
+        state.assistantRecomputeRaf = null;
+        const pendingFrame = state.assistantRecomputePendingFrame;
+        state.assistantRecomputePendingFrame = null;
+        const urgentFlag = state.assistantRecomputePendingUrgent;
+        state.assistantRecomputePendingUrgent = false;
+        state.assistantRecomputePendingReasons.clear();
+        recompute(pendingFrame, { urgent: urgentFlag }).catch(() => {});
+      });
+    } else {
+      state.assistantRecomputeTimer = setTimeout(() => {
+        state.assistantRecomputeTimer = null;
+        const pendingFrame = state.assistantRecomputePendingFrame;
+        state.assistantRecomputePendingFrame = null;
+        const urgentFlag = state.assistantRecomputePendingUrgent;
+        state.assistantRecomputePendingUrgent = false;
+        state.assistantRecomputePendingReasons.clear();
+        recompute(pendingFrame, { urgent: urgentFlag }).catch(() => {});
+      }, 48);
+    }
   }
 
   function startHeartbeat() {
@@ -3305,10 +3501,10 @@
       : AI_ASSISTANT_PRE_STABLE_HEARTBEAT_MS;
     if (runtimePolling) {
       const id = `ai-assistant-heartbeat-${document.hidden ? "hidden" : "visible"}`;
-      runtimePolling.setInterval(id, () => recompute().catch(() => {}), ms);
+      runtimePolling.setInterval(id, () => scheduleAssistantRecompute({ reason: "heartbeat", urgent: false }), ms);
       state.heartbeatHandle = id;
     } else {
-      state.heartbeatHandle = setInterval(() => { recompute().catch(() => {}); }, ms);
+      state.heartbeatHandle = setInterval(() => { scheduleAssistantRecompute({ reason: "heartbeat", urgent: false }); }, ms);
     }
   }
 
@@ -3323,12 +3519,12 @@
       heading: safeNum(detail?.heading),
       accuracy: safeNum(detail?.accuracy),
     };
-    recompute().catch(() => {});
+    scheduleAssistantRecompute({ reason: "location-updated", urgent: false });
     startHeartbeat();
   }
 
   function updateAssistantForFrame(frame) {
-    recompute(frame).catch(() => {});
+    scheduleAssistantRecompute({ reason: "frame-update", urgent: true, frame });
     startHeartbeat();
   }
 
@@ -3397,12 +3593,20 @@
     state.quietModeReason = "";
     state.finalActionCode = "MONITOR";
     state.finalActionReason = "Waiting for stable zone.";
+    state.lastAssistantRenderKey = "";
+    state.lastRecommendLineKey = "";
+    state.lastLightPassPrimaryLine = "";
+    state.lastLightPassSecondaryLine = "";
+    if (state.assistantRecomputeRaf && typeof cancelAnimationFrame === "function") cancelAnimationFrame(state.assistantRecomputeRaf);
+    if (state.assistantRecomputeTimer) clearTimeout(state.assistantRecomputeTimer);
+    state.assistantRecomputeRaf = null;
+    state.assistantRecomputeTimer = null;
     renderWidget();
     mirrorRecommendLine();
   }
 
   function forceRefresh() {
-    recompute().catch(() => {});
+    scheduleAssistantRecompute({ reason: "force-refresh", urgent: true });
     startHeartbeat();
   }
 
@@ -3413,8 +3617,8 @@
 
   function attachEvents() {
     window.addEventListener("tlc-user-location-updated", (e) => handleUserLocationUpdate(e?.detail || {}));
-    window.addEventListener("team-joseo-frame-rendered", () => forceRefresh());
-    window.addEventListener("tlc-mode-changed", () => forceRefresh());
+    window.addEventListener("team-joseo-frame-rendered", () => scheduleAssistantRecompute({ reason: "frame-rendered", urgent: true }));
+    window.addEventListener("tlc-mode-changed", () => scheduleAssistantRecompute({ reason: "mode-changed", urgent: true }));
     window.addEventListener("tlc-pickup-recorded", (e) => {
       const detail = e?.detail || {};
       state.lastPickupRecordedAtMs = Date.now();
@@ -3432,7 +3636,7 @@
         state.sameZonePickupCountRolling = Math.max(0, Math.floor((safeNum(state.sameZonePickupCountRolling, 0) || 0) * 0.5));
       }
       resetCountdownCoachState();
-      forceRefresh();
+      scheduleAssistantRecompute({ reason: "pickup-recorded", urgent: true });
     });
     document.addEventListener("visibilitychange", () => { startHeartbeat(); updateAssistantDockLayout(); });
     document.addEventListener("click", (e) => {
