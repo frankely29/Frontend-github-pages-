@@ -1603,6 +1603,28 @@
     state.countdownEscalationLevel = 0;
   }
 
+  function isCountdownTargetEconomicallyValid(target, currentSignal, currentMetrics, dataQualityMode) {
+    if (!target) return false;
+    const etaMinutes = safeNum(target?.etaMinutes, Infinity) || Infinity;
+    const sameBorough = normalizeAssistantBoroughName(target?.candidateSignal?.borough) === normalizeAssistantBoroughName(currentSignal?.borough);
+    const nearEnough = etaMinutes <= AI_ASSISTANT_NEAR_TARGET_MAX_ETA_MIN;
+    const withinFarCap = etaMinutes <= AI_ASSISTANT_FAR_TARGET_SOFT_CAP_MIN;
+    const viableOnArrival = !!target?.viability?.viable
+      && !target?.targetMetrics?.targetLooksChasey
+      && !["trap_at_arrival", "slow_at_arrival", "target_chasey", "long_eta_no_hold"].includes(String(target?.viability?.viabilityRejectCode || ""));
+    if (!viableOnArrival) return false;
+    const paybackHolds = !!target?.targetPaybackMetrics?.paybackHolds;
+    const paybackAvg = safeNum(target?.targetPaybackMetrics?.paybackAvgRating, 0) || 0;
+    const stayAvg = safeNum(currentMetrics?.stayWindowAvgRating, 0) || 0;
+    const moveEdge = safeNum(target?.netMoveEdge, -Infinity) || -Infinity;
+    const moveThreshold = safeNum(target?.moveWorthThreshold, Infinity) || Infinity;
+    const clearlySuperior = (paybackAvg - stayAvg) >= 3.0 && moveEdge >= (moveThreshold + 0.8);
+    const sameBoroughPreferencePass = sameBorough && nearEnough;
+    if (!sameBoroughPreferencePass && !(clearlySuperior && withinFarCap)) return false;
+    if (dataQualityMode !== "full" && !sameBoroughPreferencePass) return false;
+    return paybackHolds && moveEdge >= moveThreshold;
+  }
+
   function deriveCountdownCoach(currentSignal, bestWorthwhileTarget, currentMetrics, currentTravelMetrics, dataQualityMode) {
     const now = Date.now();
     const minsInZone = dwellMins();
@@ -1613,27 +1635,16 @@
       && !!state.activeStableZoneEnterTs
       && state.lastPickupRecordedAtMs >= state.activeStableZoneEnterTs;
     const isUrgentNow = state.finalActionCode === "LEAVE_NOW" || state.finalActionCode === "MOVE_SOON";
-    const strongSameBoroughNear = !!target
-      && (safeNum(target?.etaMinutes, Infinity) || Infinity) <= AI_ASSISTANT_NEAR_TARGET_MAX_ETA_MIN
-      && normalizeAssistantBoroughName(target?.candidateSignal?.borough) === normalizeAssistantBoroughName(currentSignal?.borough)
-      && !!target?.viability?.viable
-      && !!target?.targetPaybackMetrics?.paybackHolds;
-    const hasTrustworthyQuality = dataQualityMode === "full" || strongSameBoroughNear;
-    const viableOnArrival = !!target?.viability?.viable && !target?.targetMetrics?.targetLooksChasey;
-    const paybackBeatsStay = !!target?.targetPaybackMetrics?.paybackHolds
-      && (safeNum(target?.targetPaybackMetrics?.paybackAvgRating, 0) || 0) > ((safeNum(currentMetrics?.stayWindowAvgRating, 0) || 0) + 1.5)
-      && (safeNum(target?.netMoveEdge, -Infinity) || -Infinity) >= (safeNum(target?.moveWorthThreshold, Infinity) || Infinity);
     const goodHoldWindow = !!currentMetrics?.stayHoldsAfterArrival
       && (safeNum(currentTravelMetrics?.travelWindowMinRating, 0) || 0) >= 50
       && !currentMetrics?.stayWeakensSoon;
     const noImmediateUrgency = !isUrgentNow;
+    const targetEconomicallyValid = isCountdownTargetEconomicallyValid(target, currentSignal, currentMetrics, dataQualityMode);
 
     const eligible = hasStableZone
       && minsInZone >= 5
       && noImmediateUrgency
-      && hasTrustworthyQuality
-      && viableOnArrival
-      && paybackBeatsStay
+      && targetEconomicallyValid
       && !hasPickupSinceZoneEntry
       && !goodHoldWindow;
 
@@ -1654,6 +1665,8 @@
       && (safeNum(currentSignal?.continuationRaw, 1) || 1) <= 0.45;
     const coolingButDecent = (safeNum(currentMetrics?.stayWindowAvgRating, 0) || 0) >= 49
       && !!currentMetrics?.stayWeakensSoon;
+    const acceptableButWatch = (safeNum(currentMetrics?.stayWindowAvgRating, 0) || 0) >= 52
+      && !currentMetrics?.stayWeakensSoon;
     let durationMin = 5;
     let reasonCode = "wait_then_move";
     let reasonText = "If no trip in 5 min, move to the stronger nearby zone.";
@@ -1665,14 +1678,14 @@
       reasonText = "Trap risk rising • leave in 3 min if no trip.";
       escalationLevel = 2;
     } else if (coolingButDecent) {
-      durationMin = 4;
+      durationMin = 5;
       reasonCode = "zone_cooling";
-      reasonText = "Zone may cool off; move if no trip in 4 min.";
+      reasonText = "Stay briefly • Zone may cool off.";
       escalationLevel = 1;
-    } else if ((safeNum(currentMetrics?.stayWindowAvgRating, 0) || 0) >= 55 && !currentMetrics?.stayWeakensSoon) {
+    } else if (acceptableButWatch) {
       durationMin = 7;
       reasonCode = "good_zone_protection";
-      reasonText = "Good zone still holding; wait longer before moving.";
+      reasonText = "Stay • Good zone right now.";
       escalationLevel = 0;
     }
 
@@ -2502,7 +2515,11 @@
       resetCountdownCoachState();
       state.countdownHoldWindowReason = countdownCoach.holdWindowReason || "";
     } else {
-      if (!state.countdownActive || !state.countdownStartTs || !state.countdownDeadlineTs) {
+      const nextTargetId = String(countdownCoach?.target?.locationId || "").trim();
+      const activeTargetId = String(state.countdownTarget?.locationId || "").trim();
+      const countdownChanged = nextTargetId !== activeTargetId
+        || String(state.countdownReasonCode || "") !== String(countdownCoach.reasonCode || "");
+      if (!state.countdownActive || !state.countdownStartTs || !state.countdownDeadlineTs || countdownChanged) {
         state.countdownStartTs = Date.now();
         state.countdownDeadlineTs = state.countdownStartTs + ((safeNum(countdownCoach.durationMin, 5) || 5) * 60000);
       }
