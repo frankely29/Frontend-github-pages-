@@ -126,6 +126,38 @@ function normalizePickupHotspotIndex(value) {
   return String(value);
 }
 
+function normalizePickupZoneIdList(value) {
+  if (value == null) return [];
+  const rawValues = Array.isArray(value)
+    ? value
+    : (typeof value === "string"
+      ? value.split(/[|,]/g)
+      : [value]);
+  const out = [];
+  for (const rawValue of rawValues) {
+    const zoneId = normalizePickupZoneId(rawValue);
+    if (zoneId == null || out.includes(zoneId)) continue;
+    out.push(zoneId);
+  }
+  return out;
+}
+
+function normalizePickupStringList(value) {
+  if (value == null) return [];
+  const rawValues = Array.isArray(value)
+    ? value
+    : (typeof value === "string"
+      ? value.split(/[|,]/g)
+      : [value]);
+  const out = [];
+  for (const rawValue of rawValues) {
+    const text = String(rawValue ?? "").trim();
+    if (!text || out.includes(text)) continue;
+    out.push(text);
+  }
+  return out;
+}
+
 function pickupHotspotKeyFromParts(zoneId, hotspotId, hotspotIndex) {
   return [zoneId || "", hotspotId || "", hotspotIndex || ""].join("|");
 }
@@ -337,12 +369,18 @@ function pickupHotspotsFingerprint(fc) {
     const intensity = Number(props?.intensity ?? NaN);
     const hotspotId = normalizePickupHotspotId(props?.hotspot_id ?? props?.hotspotId ?? props?.pickup_hotspot_id);
     const hotspotIndex = normalizePickupHotspotIndex(props?.hotspot_index ?? props?.hotspotIndex ?? props?.pickup_hotspot_index);
+    const coveredZoneIds = normalizePickupZoneIdList(props?.covered_zone_ids ?? props?.coveredZoneIds).sort().join(",");
+    const merged = !!(props?.merged || props?.was_merged || props?.is_merged);
+    const hotspotMethod = String(props?.hotspot_method ?? props?.hotspotMethod ?? "");
     const signature = props?.signature;
     if (signature != null && signature !== "") {
       rows.push([
         String(zoneId),
         hotspotId,
         hotspotIndex,
+        coveredZoneIds,
+        merged ? "1" : "0",
+        hotspotMethod,
         String(signature),
         Number.isFinite(sampleSize) ? String(sampleSize) : "",
         Number.isFinite(intensity) ? String(intensity) : "",
@@ -354,6 +392,9 @@ function pickupHotspotsFingerprint(fc) {
       String(zoneId),
       hotspotId,
       hotspotIndex,
+      coveredZoneIds,
+      merged ? "1" : "0",
+      hotspotMethod,
       "",
       Number.isFinite(sampleSize) ? String(sampleSize) : "",
       Number.isFinite(latestCreatedAt) ? String(latestCreatedAt) : "",
@@ -441,15 +482,20 @@ function setPickupOverlayData(fc, items = [], zoneStats = [], zoneHotspots = emp
   for (const feat of validatedZoneHotspots.features) {
     const props = feat?.properties || {};
     const zoneId = normalizePickupZoneId(props.zone_id ?? props.zoneId ?? props.location_id ?? props.LocationID);
-    if (zoneId == null) continue;
+    const coveredZoneIds = normalizePickupZoneIdList(props.covered_zone_ids ?? props.coveredZoneIds);
+    if (!coveredZoneIds.length && zoneId != null) coveredZoneIds.push(zoneId);
+    if (!coveredZoneIds.length) continue;
+    const primaryZoneId = zoneId ?? coveredZoneIds[0];
     const hotspotId = normalizePickupHotspotId(props.hotspot_id ?? props.hotspotId ?? props.pickup_hotspot_id);
     const hotspotIndex = normalizePickupHotspotIndex(props.hotspot_index ?? props.hotspotIndex ?? props.pickup_hotspot_index);
-    hotspotCoveredZoneIds.add(zoneId);
-    zoneHotspotZoneIds.add(zoneId);
-    pickupHotspotZoneIds.add(zoneId);
-    visibleHotspotKeys.add(pickupHotspotKeyFromParts(zoneId, hotspotId, hotspotIndex));
+    for (const coveredZoneId of coveredZoneIds) {
+      hotspotCoveredZoneIds.add(coveredZoneId);
+      zoneHotspotZoneIds.add(coveredZoneId);
+      pickupHotspotZoneIds.add(coveredZoneId);
+      perZoneHotspotCounts[coveredZoneId] = (perZoneHotspotCounts[coveredZoneId] || 0) + 1;
+    }
+    visibleHotspotKeys.add(pickupHotspotKeyFromParts(primaryZoneId, hotspotId, hotspotIndex));
     if (hotspotId) hotspotIds.add(hotspotId);
-    perZoneHotspotCounts[zoneId] = (perZoneHotspotCounts[zoneId] || 0) + 1;
   }
 
   const hotspotFingerprint = pickupHotspotsFingerprint(validatedZoneHotspots);
@@ -1015,10 +1061,19 @@ async function ensurePickupSourceAndLayers() {
         const props = feat.properties || {};
         const zoneName = (props.zone_name || "").trim();
         const borough = (props.borough || "").trim();
+        const coveredZoneNames = normalizePickupStringList(props.covered_zone_names ?? props.coveredZoneNames);
+        const coveredZoneIds = normalizePickupZoneIdList(props.covered_zone_ids ?? props.coveredZoneIds);
         const sampleSize = Number(props.sample_size ?? NaN);
         const safeSampleSize = Number.isFinite(sampleSize) ? sampleSize : 0;
         const hotspotIndexRaw = Number(props.hotspot_index ?? props.hotspotIndex ?? NaN);
         const hotspotLabel = Number.isFinite(hotspotIndexRaw) ? `Hotspot #${Math.max(1, Math.round(hotspotIndexRaw) + 1)}` : "Hotspot";
+        const mergedZoneCount = Number(
+          props.merged_zone_count
+          ?? props.mergedZoneCount
+          ?? props.covered_zone_count
+          ?? props.coveredZoneCount
+          ?? (coveredZoneIds.length || NaN)
+        );
         const mergedCount = Number(
           props.merged_component_count
           ?? props.merged_components_count
@@ -1026,19 +1081,38 @@ async function ensurePickupSourceAndLayers() {
           ?? props.merged_count
           ?? NaN
         );
-        const merged = !!(props.merged || props.was_merged || props.is_merged || (Number.isFinite(mergedCount) && mergedCount > 1));
+        const merged = !!(
+          props.merged
+          || props.was_merged
+          || props.is_merged
+          || (Number.isFinite(mergedZoneCount) && mergedZoneCount > 1)
+          || (Number.isFinite(mergedCount) && mergedCount > 1)
+          || String(props.hotspot_method ?? props.hotspotMethod ?? "") === "cross_zone_merge"
+        );
+        const popupTitle = merged ? "Merged hotspot area" : "Live hotspot area";
         const mergeLine = `<div><b>Merge:</b> ${merged ? "Merged from multiple candidate components" : "Single candidate component"}</div>`;
+        const coveredZoneNamesLine = merged && coveredZoneNames.length
+          ? `<div><b>Covered zones:</b> ${escapeHtml(coveredZoneNames.join(", "))}</div>`
+          : "";
+        const mergedZoneCountLine = merged && Number.isFinite(mergedZoneCount) && mergedZoneCount > 0
+          ? `<div><b>Merged zone count:</b> ${Math.max(1, Math.round(mergedZoneCount))}</div>`
+          : "";
+        const mergedExplainLine = merged
+          ? `<div style="margin-top:6px;">Nearby demand crosses the zone boundary, so this hotspot was merged.</div>`
+          : `<div style="margin-top:6px;">Live hotspot area from recent recorded trips.</div>`;
         new maplibregl.Popup({ closeButton: true, closeOnClick: true, maxWidth: "290px" })
           .setLngLat(e.lngLat)
           .setHTML(`
             <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; font-size:13px;">
-              <div style="font-weight:900; margin-bottom:4px;">Live hotspot area</div>
+              <div style="font-weight:900; margin-bottom:4px;">${escapeHtml(popupTitle)}</div>
               <div><b>Zone:</b> ${escapeHtml(zoneName || `Zone ${props.zone_id || ""}`)}</div>
               ${borough ? `<div><b>Borough:</b> ${escapeHtml(borough)}</div>` : ""}
+              ${coveredZoneNamesLine}
+              ${mergedZoneCountLine}
               <div><b>${escapeHtml(hotspotLabel)}</b></div>
               <div><b>Sample size:</b> ${safeSampleSize}</div>
               ${mergeLine}
-              <div style="margin-top:6px;">Live hotspot area from recent recorded trips.</div>
+              ${mergedExplainLine}
               <div style="opacity:0.8; margin-top:2px;">Dynamic hotspot from latest ${PICKUP_ZONE_SAMPLE_LIMIT} trips max.</div>
             </div>
           `)
