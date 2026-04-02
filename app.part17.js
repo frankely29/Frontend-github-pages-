@@ -446,8 +446,30 @@
         return (safeNum(b?.signal?.visibleRating, 0) || 0) - (safeNum(a?.signal?.visibleRating, 0) || 0);
       })
       .slice(0, 4);
+    const currentVisibleRating = safeNum(currentSignal?.visibleRating, 0) || 0;
+    const guaranteedAdjacentStrongCandidates = allCandidates
+      .filter((item) => {
+        const eta = safeNum(item?.etaMinutes, Infinity) || Infinity;
+        const distance = safeNum(item?.distanceMiles, Infinity) || Infinity;
+        const visibleRating = safeNum(item?.signal?.visibleRating, -Infinity) || -Infinity;
+        const visibleBucket = String(item?.signal?.visibleBucket || "").trim().toLowerCase();
+        const bucketStrong = ["purple", "indigo", "green"].includes(visibleBucket);
+        const strongProjected = visibleRating >= (currentVisibleRating + 7);
+        return !!item?.isSameBorough
+          && eta <= 6
+          && distance <= 1.2
+          && visibleRating >= (currentVisibleRating + 3)
+          && (bucketStrong || strongProjected);
+      })
+      .sort((a, b) => {
+        if (a.etaMinutes !== b.etaMinutes) return a.etaMinutes - b.etaMinutes;
+        const ratingDelta = (safeNum(b?.signal?.visibleRating, 0) || 0) - (safeNum(a?.signal?.visibleRating, 0) || 0);
+        if (ratingDelta !== 0) return ratingDelta;
+        return (safeNum(a?.distanceMiles, Infinity) || Infinity) - (safeNum(b?.distanceMiles, Infinity) || Infinity);
+      })
+      .slice(0, 4);
     const mergedByLocationId = new Map();
-    [baseTopByQuickScore, guaranteedNearCandidates, guaranteedSameBoroughNearCandidates].forEach((bucket) => {
+    [baseTopByQuickScore, guaranteedNearCandidates, guaranteedSameBoroughNearCandidates, guaranteedAdjacentStrongCandidates].forEach((bucket) => {
       (bucket || []).forEach((candidate) => {
         const id = String(candidate?.signal?.locationId || "").trim();
         if (!id) return;
@@ -967,6 +989,79 @@
     return { dominate: false, code: "", reason: "" };
   }
 
+  function findAdjacentStrongNearbyTarget(currentSignal, candidateEvaluations) {
+    const currentBorough = normalizeAssistantBoroughName(currentSignal?.borough);
+    const currentVisibleRating = safeNum(currentSignal?.visibleRating, 0) || 0;
+    const currentStayArrival = safeNum(currentSignal?.visibleRating, 0) || 0;
+    const options = (Array.isArray(candidateEvaluations) ? candidateEvaluations : [])
+      .filter((evalObj) => {
+        if (!evalObj?.candidateSignal?.locationId) return false;
+        const sameBorough = normalizeAssistantBoroughName(evalObj?.candidateSignal?.borough) === currentBorough;
+        if (!sameBorough) return false;
+        const eta = safeNum(evalObj?.etaMinutes, Infinity) || Infinity;
+        const distance = safeNum(evalObj?.distanceMiles, Infinity) || Infinity;
+        if (eta > 6 || distance > 1.2) return false;
+        const visibleRating = safeNum(evalObj?.candidateSignal?.visibleRating, -Infinity) || -Infinity;
+        if (visibleRating < (currentVisibleRating + 4)) return false;
+        const visibleBucket = String(evalObj?.candidateSignal?.visibleBucket || "").trim().toLowerCase();
+        const strongBucket = ["purple", "indigo", "green"].includes(visibleBucket);
+        const arrivalProjected = safeNum(evalObj?.targetMetrics?.targetArrivalProjectedRating, 0) || 0;
+        const stayProjected = safeNum(evalObj?.currentMetrics?.stayArrivalProjectedRating, currentStayArrival) || currentStayArrival;
+        const clearlyBetterOnArrival = arrivalProjected >= (stayProjected + 4);
+        if (!(strongBucket || clearlyBetterOnArrival)) return false;
+        if (!evalObj?.viability?.viable) return false;
+        if (evalObj?.targetMetrics?.targetLooksChasey) return false;
+        if (!evalObj?.targetPaybackMetrics?.paybackHolds) return false;
+        return true;
+      })
+      .sort((a, b) => sortPracticalTargetOrder(a, b));
+    return options[0] || null;
+  }
+
+  function isDriverAlreadyNextToStrongOpportunity(currentSignal, adjacentEval) {
+    if (!currentSignal || !adjacentEval) return false;
+    const eta = safeNum(adjacentEval?.etaMinutes, Infinity) || Infinity;
+    const distance = safeNum(adjacentEval?.distanceMiles, Infinity) || Infinity;
+    if (eta > 5 || distance > 1.0) return false;
+    const visibleBucket = String(adjacentEval?.candidateSignal?.visibleBucket || "").trim().toLowerCase();
+    const strongBucket = ["purple", "indigo", "green"].includes(visibleBucket);
+    const currentStayArrival = safeNum(adjacentEval?.currentMetrics?.stayArrivalProjectedRating, safeNum(currentSignal?.visibleRating, 0) || 0) || 0;
+    const arrivalProjected = safeNum(adjacentEval?.targetMetrics?.targetArrivalProjectedRating, 0) || 0;
+    return strongBucket || arrivalProjected >= (currentStayArrival + 4);
+  }
+
+  function shouldAdjacentStrongTargetDominate(adjacentEval, selectedEval, currentSignal) {
+    if (!adjacentEval) return false;
+    if (!selectedEval || String(selectedEval?.candidateSignal?.locationId || "") === String(adjacentEval?.candidateSignal?.locationId || "")) return true;
+    const adjacentEta = safeNum(adjacentEval?.etaMinutes, Infinity) || Infinity;
+    const selectedEta = safeNum(selectedEval?.etaMinutes, Infinity) || Infinity;
+    if (adjacentEta > 6) return false;
+    const selectedArrival = safeNum(selectedEval?.targetMetrics?.targetArrivalProjectedRating, 0) || 0;
+    const adjacentArrival = safeNum(adjacentEval?.targetMetrics?.targetArrivalProjectedRating, 0) || 0;
+    const selectedMoveEdge = safeNum(selectedEval?.netMoveEdge, -Infinity) || -Infinity;
+    const adjacentMoveEdge = safeNum(adjacentEval?.netMoveEdge, -Infinity) || -Infinity;
+    const selectedPayback = safeNum(selectedEval?.targetPaybackMetrics?.paybackAvgRating, 0) || 0;
+    const adjacentPayback = safeNum(adjacentEval?.targetPaybackMetrics?.paybackAvgRating, 0) || 0;
+    const selectedPaybackHolds = !!selectedEval?.targetPaybackMetrics?.paybackHolds;
+    const currentMetrics = selectedEval?.currentMetrics || adjacentEval?.currentMetrics || {};
+    const currentCls = classifyAssistantSignal(currentSignal || {});
+    const currentWeakeningEnough = !!currentCls?.shortTrap
+      || !!currentMetrics?.stayTrapAtArrival
+      || (!!currentMetrics?.staySlowAtArrival && (safeNum(currentMetrics?.stayWindowMinRating, 100) || 100) < 46)
+      || (safeNum(currentMetrics?.stayWindowTrendDelta, 0) || 0) <= -5
+      || !!currentMetrics?.stayWeakensSoon;
+    const selectedDramaticallyBetterByArrival = selectedArrival >= (adjacentArrival + 4);
+    const overrideAllowed = (selectedMoveEdge >= (adjacentMoveEdge + 6))
+      && selectedDramaticallyBetterByArrival
+      && selectedPaybackHolds
+      && (selectedPayback >= (adjacentPayback + 3))
+      && currentWeakeningEnough;
+    const nearbySafetyActive = isDriverAlreadyNextToStrongOpportunity(currentSignal, adjacentEval);
+    if (nearbySafetyActive) return !overrideAllowed;
+    if (selectedEta >= (adjacentEta + 4) && !selectedDramaticallyBetterByArrival) return true;
+    return !overrideAllowed;
+  }
+
   function isFarTargetStillWorthIt(bestNearEval, farEval, currentSignal, currentMetrics) {
     const eta = safeNum(farEval?.etaMinutes, 0) || 0;
     const nearExists = !!bestNearEval;
@@ -1054,7 +1149,13 @@
     const bestSameBoroughNear = sameBoroughNearCandidates[0] || null;
     const bestCrossBoroughNear = crossBoroughNearCandidates[0] || null;
     const bestFarAllowed = allowedFarCandidates.sort(sortPracticalTargetOrder)[0] || null;
-    const bestWorthwhileTarget = bestSameBoroughNear || bestCrossBoroughNear || bestFarAllowed || null;
+    let bestWorthwhileTarget = bestSameBoroughNear || bestCrossBoroughNear || bestFarAllowed || null;
+    const bestAdjacentStrongTarget = findAdjacentStrongNearbyTarget(currentSignal, worthwhile);
+    if (bestAdjacentStrongTarget && shouldAdjacentStrongTargetDominate(bestAdjacentStrongTarget, bestWorthwhileTarget, currentSignal)) {
+      bestWorthwhileTarget = bestAdjacentStrongTarget;
+      bestWorthwhileTarget.preferredReasonCode = "adjacent_strong_zone_preferred";
+      bestWorthwhileTarget.preferredReasonText = "Closer strong nearby zone makes more sense";
+    }
 
     const bestRejectedTarget =
       sorted.find((it) => !!it.rejectionCode)
@@ -1075,10 +1176,14 @@
       farCandidatesOverHardCap,
       farCandidateCount: farCandidates.length,
       farCandidatesRejectedForDistance,
-      chosenTargetGroup: bestSameBoroughNear ? "same_borough_near" : (bestCrossBoroughNear ? "near" : (bestFarAllowed ? "far_exception" : "none")),
-      chosenTargetReasoningMode: bestSameBoroughNear || bestCrossBoroughNear
+      chosenTargetGroup: bestWorthwhileTarget?.preferredReasonCode === "adjacent_strong_zone_preferred"
+        ? "adjacent_strong_near"
+        : (bestSameBoroughNear ? "same_borough_near" : (bestCrossBoroughNear ? "near" : (bestFarAllowed ? "far_exception" : "none"))),
+      chosenTargetReasoningMode: bestWorthwhileTarget?.preferredReasonCode === "adjacent_strong_zone_preferred"
+        ? "adjacent_strong_zone_preferred"
+        : (bestSameBoroughNear || bestCrossBoroughNear
         ? "practical_near_preference"
-        : (bestFarAllowed ? "far_target_exception" : "stay_not_worth_moving"),
+        : (bestFarAllowed ? "far_target_exception" : "stay_not_worth_moving")),
     };
   }
 
@@ -1231,6 +1336,9 @@
       return { actionCode: "MONITOR", reasonCode: "collecting_context", reasonText: "Collecting more context.", worthMoving: false };
     }
     if (bestWorthwhileTarget) {
+      if (String(bestWorthwhileTarget?.preferredReasonCode || "").trim() === "adjacent_strong_zone_preferred") {
+        return { actionCode: "MOVE_SOON", reasonCode: "near_target_clear_edge", reasonText: "Better nearby area is ready", worthMoving: true };
+      }
       const currentCls = classifyAssistantSignal(currentSignal || {});
       if (currentCls?.shortTrap || currentMetrics?.stayTrapAtArrival) {
         const strongTrapEvidence = hasStrongTrapLanguageEvidence();
