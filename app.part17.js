@@ -2071,6 +2071,7 @@
     if (state.dataQualityMode !== "full" && state.finalActionCode === "MONITOR") {
       if ((safeNum(state.stayWindowAvgRating, 0) || 0) >= 48) return { line: "Stay • Decent area for now", kind: "stay" };
       if ((safeNum(state.stayWindowAvgRating, 0) || 0) >= 44) return { line: "Stay briefly • Nearby options not strong enough yet", kind: "stay" };
+      if (state.activeStableZoneId) return { line: "Stay • Nearby options not strong enough yet", kind: "stay" };
       return { line: "Monitor • Checking more data", kind: "monitor" };
     }
     return { line: `${action} • ${reason}`, kind: "monitor" };
@@ -2304,10 +2305,11 @@
         const stayAvg = safeNum(state.stayWindowAvgRating, 0) || 0;
         const decisionLine = primaryDecision?.line || primary;
         const hasDecision = /^(Stay|Stay briefly|Move soon|Move now)\s•/i.test(String(decisionLine || "").trim());
+        const stableZoneFallback = state.activeStableZoneId ? "Stay • Nearby options not strong enough yet" : "Monitor • Checking more data";
         finalized = [{
           key: "action",
-          text: hasDecision ? decisionLine : (stayAvg >= 44 ? "Stay briefly • Nearby options not strong enough yet" : "Monitor • Checking more data"),
-          severity: hasDecision ? primarySeverity : (stayAvg >= 44 ? "caution" : "info")
+          text: hasDecision ? decisionLine : (stayAvg >= 44 ? "Stay briefly • Nearby options not strong enough yet" : stableZoneFallback),
+          severity: hasDecision ? primarySeverity : (stayAvg >= 44 || state.activeStableZoneId ? "caution" : "info")
         }];
       } else if (state.dataQualityMode === "partial" && !state.assistantMoveTarget) {
         finalized = [{ key: "action", text: "Stay • Other areas are too far right now", severity: "caution" }];
