@@ -1233,7 +1233,11 @@
     if (bestWorthwhileTarget) {
       const currentCls = classifyAssistantSignal(currentSignal || {});
       if (currentCls?.shortTrap || currentMetrics?.stayTrapAtArrival) {
-        return { actionCode: "MOVE_SOON", reasonCode: "low_trip_trap_risk", reasonText: "Risk of low-trip trap", worthMoving: true };
+        const strongTrapEvidence = hasStrongTrapLanguageEvidence();
+        if (strongTrapEvidence) {
+          return { actionCode: "MOVE_SOON", reasonCode: "low_trip_trap_risk", reasonText: "Trap risk rising", worthMoving: true };
+        }
+        return { actionCode: "MOVE_SOON", reasonCode: "zone_about_to_cool_off", reasonText: "Area may cool off", worthMoving: true };
       }
       if (currentMetrics?.stayWeakensSoon) {
         if (currentMetrics?.stayWindowTrendDelta <= -5 && bestWorthwhileTarget?.targetMetrics?.targetImprovesSoon && bestWorthwhileTarget?.targetMetrics?.targetHoldsAfterArrival) {
