@@ -371,6 +371,7 @@ function pickupHotspotsFingerprint(fc) {
     const hotspotIndex = normalizePickupHotspotIndex(props?.hotspot_index ?? props?.hotspotIndex ?? props?.pickup_hotspot_index);
     const coveredZoneIds = normalizePickupZoneIdList(props?.covered_zone_ids ?? props?.coveredZoneIds).sort().join(",");
     const merged = !!(props?.merged || props?.was_merged || props?.is_merged);
+    const mergedZoneCount = Number(props?.merged_zone_count ?? props?.mergedZoneCount ?? props?.covered_zone_count ?? props?.coveredZoneCount ?? NaN);
     const hotspotMethod = String(props?.hotspot_method ?? props?.hotspotMethod ?? "");
     const signature = props?.signature;
     if (signature != null && signature !== "") {
@@ -380,6 +381,7 @@ function pickupHotspotsFingerprint(fc) {
         hotspotIndex,
         coveredZoneIds,
         merged ? "1" : "0",
+        Number.isFinite(mergedZoneCount) ? String(mergedZoneCount) : "",
         hotspotMethod,
         String(signature),
         Number.isFinite(sampleSize) ? String(sampleSize) : "",
@@ -394,6 +396,7 @@ function pickupHotspotsFingerprint(fc) {
       hotspotIndex,
       coveredZoneIds,
       merged ? "1" : "0",
+      Number.isFinite(mergedZoneCount) ? String(mergedZoneCount) : "",
       hotspotMethod,
       "",
       Number.isFinite(sampleSize) ? String(sampleSize) : "",
@@ -477,6 +480,7 @@ function setPickupOverlayData(fc, items = [], zoneStats = [], zoneHotspots = emp
   const hotspotCoveredZoneIds = new Set();
   const zoneHotspotZoneIds = new Set();
   const visibleHotspotKeys = new Set();
+  const visibleHotspotIdIndexKeys = new Set();
   const hotspotIds = new Set();
   const perZoneHotspotCounts = {};
   for (const feat of validatedZoneHotspots.features) {
@@ -488,13 +492,16 @@ function setPickupOverlayData(fc, items = [], zoneStats = [], zoneHotspots = emp
     const primaryZoneId = zoneId ?? coveredZoneIds[0];
     const hotspotId = normalizePickupHotspotId(props.hotspot_id ?? props.hotspotId ?? props.pickup_hotspot_id);
     const hotspotIndex = normalizePickupHotspotIndex(props.hotspot_index ?? props.hotspotIndex ?? props.pickup_hotspot_index);
+    const hotspotIdIndexKey = pickupHotspotKeyFromParts("", hotspotId, hotspotIndex);
     for (const coveredZoneId of coveredZoneIds) {
       hotspotCoveredZoneIds.add(coveredZoneId);
       zoneHotspotZoneIds.add(coveredZoneId);
       pickupHotspotZoneIds.add(coveredZoneId);
       perZoneHotspotCounts[coveredZoneId] = (perZoneHotspotCounts[coveredZoneId] || 0) + 1;
+      visibleHotspotKeys.add(pickupHotspotKeyFromParts(coveredZoneId, hotspotId, hotspotIndex));
     }
     visibleHotspotKeys.add(pickupHotspotKeyFromParts(primaryZoneId, hotspotId, hotspotIndex));
+    visibleHotspotIdIndexKeys.add(hotspotIdIndexKey);
     if (hotspotId) hotspotIds.add(hotspotId);
   }
 
@@ -512,8 +519,13 @@ function setPickupOverlayData(fc, items = [], zoneStats = [], zoneHotspots = emp
   const validatedMicroHotspots = {
     type: "FeatureCollection",
     features: (normalizedMicroHotspots.features || []).filter((feat) => {
-      const key = pickupHotspotKeyFromProps(feat?.properties || {});
-      return visibleHotspotKeys.has(key);
+      const props = feat?.properties || {};
+      const key = pickupHotspotKeyFromProps(props);
+      if (visibleHotspotKeys.has(key)) return true;
+      const hotspotId = normalizePickupHotspotId(props.hotspot_id ?? props.hotspotId ?? props.pickup_hotspot_id);
+      const hotspotIndex = normalizePickupHotspotIndex(props.hotspot_index ?? props.hotspotIndex ?? props.pickup_hotspot_index);
+      const hotspotIdIndexKey = pickupHotspotKeyFromParts("", hotspotId, hotspotIndex);
+      return hotspotIdIndexKeys.has(hotspotIdIndexKey);
     }),
   };
 
@@ -1090,16 +1102,20 @@ async function ensurePickupSourceAndLayers() {
           || String(props.hotspot_method ?? props.hotspotMethod ?? "") === "cross_zone_merge"
         );
         const popupTitle = merged ? "Merged hotspot area" : "Live hotspot area";
-        const mergeLine = `<div><b>Merge:</b> ${merged ? "Merged from multiple candidate components" : "Single candidate component"}</div>`;
-        const coveredZoneNamesLine = merged && coveredZoneNames.length
-          ? `<div><b>Covered zones:</b> ${escapeHtml(coveredZoneNames.join(", "))}</div>`
+        const resolvedCoveredZoneNames = coveredZoneNames.length
+          ? coveredZoneNames
+          : coveredZoneIds
+            .map((id) => (pickupZoneStats.get(String(id))?.zone_name || `Zone ${id}`).trim())
+            .filter(Boolean);
+        const coveredZoneNamesLine = merged && resolvedCoveredZoneNames.length
+          ? `<div><b>Covered zones:</b> ${escapeHtml(resolvedCoveredZoneNames.join(", "))}</div>`
           : "";
         const mergedZoneCountLine = merged && Number.isFinite(mergedZoneCount) && mergedZoneCount > 0
           ? `<div><b>Merged zone count:</b> ${Math.max(1, Math.round(mergedZoneCount))}</div>`
           : "";
         const mergedExplainLine = merged
           ? `<div style="margin-top:6px;">Nearby demand crosses the zone boundary, so this hotspot was merged.</div>`
-          : `<div style="margin-top:6px;">Live hotspot area from recent recorded trips.</div>`;
+          : "";
         new maplibregl.Popup({ closeButton: true, closeOnClick: true, maxWidth: "290px" })
           .setLngLat(e.lngLat)
           .setHTML(`
@@ -1111,7 +1127,6 @@ async function ensurePickupSourceAndLayers() {
               ${mergedZoneCountLine}
               <div><b>${escapeHtml(hotspotLabel)}</b></div>
               <div><b>Sample size:</b> ${safeSampleSize}</div>
-              ${mergeLine}
               ${mergedExplainLine}
               <div style="opacity:0.8; margin-top:2px;">Dynamic hotspot from latest ${PICKUP_ZONE_SAMPLE_LIMIT} trips max.</div>
             </div>
