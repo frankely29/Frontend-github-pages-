@@ -99,6 +99,11 @@ let startupViewportReadyEmitted = false;
 let startupLocalZoomDone = false;
 let startupVisibleViewportFetchReleased = false;
 let startupGpsPriorityTimer = null;
+let startupInitialFrameIndex = null;
+let startupViewportFrameStarted = false;
+let startupViewportFrameRendered = false;
+let startupFullFrameBackfillStarted = false;
+let startupCameraLockEventSent = false;
 let startupInitialCameraLocked = false;
 let startupCameraLockReason = "";
 let startupCameraLockedEventEmitted = false;
@@ -2009,6 +2014,38 @@ async function fetchFrameData(idx, { priority = "active", force = false } = {}) 
   return state.promise;
 }
 
+function getVisibleFrameViewportPath(idx, paddingRatio = 0.18) {
+  const normalizedIdx = Number(idx);
+  if (!Number.isInteger(normalizedIdx) || normalizedIdx < 0 || !map || typeof map.getBounds !== "function") return null;
+  const bounds = map.getBounds?.();
+  if (!bounds || typeof bounds.getSouth !== "function" || typeof bounds.getWest !== "function" || typeof bounds.getNorth !== "function" || typeof bounds.getEast !== "function") {
+    return null;
+  }
+  const minLat = Number(bounds.getSouth());
+  const minLng = Number(bounds.getWest());
+  const maxLat = Number(bounds.getNorth());
+  const maxLng = Number(bounds.getEast());
+  if (![minLat, minLng, maxLat, maxLng].every(Number.isFinite)) return null;
+  const params = new URLSearchParams({
+    min_lat: String(minLat),
+    min_lng: String(minLng),
+    max_lat: String(maxLat),
+    max_lng: String(maxLng),
+    padding_ratio: String(Number.isFinite(Number(paddingRatio)) ? Number(paddingRatio) : 0.18),
+  });
+  return `/frame/${normalizedIdx}/viewport?${params.toString()}`;
+}
+
+async function fetchViewportFrameData(idx, { force = false } = {}) {
+  const path = getVisibleFrameViewportPath(idx);
+  if (!path) return null;
+  try {
+    return await fetchJSON(`${RAILWAY_BASE}${path}`, { cache: force ? "reload" : undefined });
+  } catch (_) {
+    return null;
+  }
+}
+
 function getCachedFrame(idx) {
   if (!frameCache.has(idx)) return null;
   const frame = frameCache.get(idx);
@@ -2884,7 +2921,8 @@ function emitTeamJoseoFrameRendered(frame, featureCount) {
   }));
 }
 
-async function renderFrame(frame) {
+async function renderFrame(frame, options = {}) {
+  const { temporaryViewportSubset = false, skipRecommendationUpdate = false } = options || {};
   if (!map || !mapReady) {
     pendingFrame = frame;
     return;
@@ -2954,6 +2992,9 @@ async function renderFrame(frame) {
     lastZoneLabelVisibilitySignature = nextVisibilitySig;
   }
   emitTeamJoseoFrameRendered(frame, fc.features.length);
+  if (temporaryViewportSubset && debugEnabled) {
+    dbg("dbgFrame", `startup viewport subset rendered (${fc.features.length})`);
+  }
 
   if (debugEnabled) {
     dbg("dbgSetData", `OK features=${fc.features.length}`);
@@ -2983,7 +3024,7 @@ async function renderFrame(frame) {
   if (timeLabel && currentFrame?.time) {
     timeLabel.textContent = `Showing Team Joseo Score At ${formatNYCTimeOnlyLabel(currentFrame.time)}`;
   }
-  updateRecommendation(currentFrame);
+  if (!skipRecommendationUpdate) updateRecommendation(currentFrame);
   markFirstUsableMap("frame rendered");
 }
 
@@ -3028,6 +3069,26 @@ async function loadFrame(idx, { force = false } = {}) {
   return frame;
 }
 
+async function runStartupViewportFrameSequence(idx) {
+  const normalizedIdx = Math.max(0, Number(idx) || 0);
+  if (startupViewportFrameStarted) return;
+  if (!startupInitialCameraLocked) return;
+  if (startupInitialFrameIndex !== null && normalizedIdx !== startupInitialFrameIndex) return;
+  startupViewportFrameStarted = true;
+
+  const viewportFrame = await fetchViewportFrameData(normalizedIdx);
+  const viewportFeatures = viewportFrame?.polygons?.features;
+  if (viewportFrame && Array.isArray(viewportFeatures) && viewportFeatures.length > 0) {
+    await renderFrame(viewportFrame, { temporaryViewportSubset: true, skipRecommendationUpdate: true });
+    startupViewportFrameRendered = true;
+  }
+
+  if (!startupFullFrameBackfillStarted) {
+    startupFullFrameBackfillStarted = true;
+    void loadFrame(normalizedIdx).catch(console.error);
+  }
+}
+
 async function loadTimeline({ force = false } = {}) {
   const timelineStartedAt = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
   const timelineUrl = `${RAILWAY_BASE}/timeline`;
@@ -3059,9 +3120,12 @@ async function loadTimeline({ force = false } = {}) {
     const targetMinWeek = getNextBinNowNYCMinuteOfWeek();
     const idx = pickClosestIndex(minutesOfWeek, targetMinWeek);
     slider.value = String(idx);
+    startupInitialFrameIndex = idx;
 
     bubbleUpdateNow();
-    await loadFrame(idx);
+    if (startupInitialCameraLocked) {
+      void runStartupViewportFrameSequence(idx);
+    }
     const timelineEndedAt = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
     recordPerfMetric("dbgTimelineTiming", `${Math.max(0, Math.round(timelineEndedAt - timelineStartedAt))}ms`);
     runtimePerf?.recordDuration?.("timeline_fetch", timelineEndedAt - timelineStartedAt);
@@ -3091,6 +3155,10 @@ slider?.addEventListener("input", () => {
 window.addEventListener("resize", () => {
   if (timeline.length) setSliderBubbleTextAndPos();
   enforceSaveButtonTheme();
+});
+window.addEventListener("team-joseo-startup-camera-locked", () => {
+  if (startupInitialFrameIndex === null || startupViewportFrameStarted) return;
+  void runStartupViewportFrameSequence(startupInitialFrameIndex);
 });
 window.addEventListener("orientationchange", () => enforceSaveButtonTheme());
 
@@ -3779,6 +3847,7 @@ function startLocationWatch() {
         startupInitialCameraLocked = true;
         startupLocalZoomDone = true;
         startupCameraLockReason = "first-good-gps-fix";
+        emitStartupCameraLocked("first-good-gps-fix");
         if (startupGpsPriorityTimer) {
           clearTimeout(startupGpsPriorityTimer);
           startupGpsPriorityTimer = null;
@@ -4765,6 +4834,8 @@ window.TlcCommunityInternals = {
   hasStartupVisibleViewportFetchReleased: () => !!startupVisibleViewportFetchReleased,
   isStartupCameraLocked: () => !!startupInitialCameraLocked,
   getStartupCameraLockReason: () => startupCameraLockReason || "",
+  isStartupViewportFrameRendered: () => !!startupViewportFrameRendered,
+  hasStartupFullFrameBackfillStarted: () => !!startupFullFrameBackfillStarted,
   waitForStyleReady,
   emptyGeojson,
   geometryCenter,
@@ -4808,12 +4879,16 @@ function setStartupMapCanvasVisibility(visible) {
 }
 
 function emitStartupCameraLocked(reason = "") {
+  if (!startupInitialCameraLocked) startupInitialCameraLocked = true;
+  if (reason) startupCameraLockReason = String(reason);
+  if (startupCameraLockEventSent) return;
+  startupCameraLockEventSent = true;
   if (startupCameraLockedEventEmitted) return;
   startupCameraLockedEventEmitted = true;
   if (typeof window === "undefined" || typeof window.dispatchEvent !== "function") return;
   window.dispatchEvent(new CustomEvent("team-joseo-startup-camera-locked", {
     detail: {
-      reason,
+      reason: startupCameraLockReason || reason,
       hasLiveGps: !!startupFirstGoodGpsFix,
       timelineReady: !!startupTimelineReady,
     },
@@ -4957,6 +5032,7 @@ setNavDestination(null);
       startupInitialCameraLocked = true;
       startupLocalZoomDone = true;
       startupCameraLockReason = "gps-timeout-fallback";
+      emitStartupCameraLocked("gps-timeout-fallback");
       maybeResolveStartupLoading("gps-timeout-fallback");
     };
     if (map && !mapReady) {
