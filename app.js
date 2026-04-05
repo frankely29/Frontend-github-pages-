@@ -99,6 +99,10 @@ let startupViewportReadyEmitted = false;
 let startupLocalZoomDone = false;
 let startupVisibleViewportFetchReleased = false;
 let startupGpsPriorityTimer = null;
+let startupMapCanvasVisible = false;
+let startupInitialCameraLocked = false;
+let startupCameraLockReason = "";
+let startupCameraLockedEventEmitted = false;
 
 const LS_TOKEN = "community_token_v1";
 const LS_EMAIL = "community_email_v1";
@@ -1605,10 +1609,11 @@ function initMap() {
       sprite: "",
     },
     center: [-73.98, 40.73],
-    zoom: 10.2,
+    zoom: STARTUP_INITIAL_USER_ZOOM,
     attributionControl: { position: "bottom-right" },
     localIdeographFontFamily: "sans-serif",
   });
+  setStartupMapCanvasVisibility(false);
 
   map.on("load", () => {
     enforceSaveButtonTheme();
@@ -3772,27 +3777,22 @@ function startLocationWatch() {
         : (Number.isFinite(freshCompass) ? normDeg(freshCompass) : map.getBearing());
 
       if (!gpsFirstFixDone) {
-        if (!startupFirstGoodGpsFix) {
-          startupFirstGoodGpsFix = true;
-          startupGpsPriorityResolved = true;
-          if (startupGpsPriorityTimer) {
-            clearTimeout(startupGpsPriorityTimer);
-            startupGpsPriorityTimer = null;
-          }
-          maybeResolveStartupLoading("first-good-gps-fix");
+        startupFirstGoodGpsFix = true;
+        startupGpsPriorityResolved = true;
+        startupInitialCameraLocked = true;
+        startupLocalZoomDone = true;
+        startupCameraLockReason = "first-good-gps-fix";
+        if (startupGpsPriorityTimer) {
+          clearTimeout(startupGpsPriorityTimer);
+          startupGpsPriorityTimer = null;
         }
         gpsFirstFixDone = true;
-        const targetZoom = Math.max(map.getZoom(), STARTUP_INITIAL_USER_ZOOM);
-        suppressAutoDisableFor(1200, () => map.easeTo({
+        suppressAutoDisableFor(1200, () => map.jumpTo({
           center: [lng, lat],
-          zoom: targetZoom,
+          zoom: STARTUP_INITIAL_USER_ZOOM,
           bearing: targetBearing,
-          duration: 700,
-          essential: true,
         }));
-        map.once("moveend", () => {
-          markStartupLocalZoomDone("first-good-gps-local-zoom");
-        });
+        maybeResolveStartupLoading("first-good-gps-fix");
         lastMapBearingDeg = targetBearing;
         lastRotateTs = Date.now();
       } else if (autoCenter && map) {
@@ -4766,6 +4766,8 @@ window.TlcCommunityInternals = {
   hasStartupFirstGoodGpsFix: () => !!startupFirstGoodGpsFix,
   isStartupTimelineReady: () => !!startupTimelineReady,
   hasStartupVisibleViewportFetchReleased: () => !!startupVisibleViewportFetchReleased,
+  isStartupCameraLocked: () => !!startupInitialCameraLocked,
+  getStartupCameraLockReason: () => startupCameraLockReason || "",
   waitForStyleReady,
   emptyGeojson,
   geometryCenter,
@@ -4795,6 +4797,33 @@ function markFirstUsableMap(reason = "") {
 
 function getMapLoadingEl() {
   return document.getElementById("mapLoading");
+}
+
+function getMapEl() {
+  return document.getElementById("map");
+}
+
+function setStartupMapCanvasVisibility(visible) {
+  const mapEl = getMapEl();
+  if (!mapEl) return;
+  const shouldShow = !!visible && !!startupInitialCameraLocked;
+  if (startupMapCanvasVisible === shouldShow) return;
+  startupMapCanvasVisible = shouldShow;
+  mapEl.style.opacity = shouldShow ? "1" : "0";
+  mapEl.style.visibility = shouldShow ? "visible" : "hidden";
+}
+
+function emitStartupCameraLocked(reason = "") {
+  if (startupCameraLockedEventEmitted) return;
+  startupCameraLockedEventEmitted = true;
+  if (typeof window === "undefined" || typeof window.dispatchEvent !== "function") return;
+  window.dispatchEvent(new CustomEvent("team-joseo-startup-camera-locked", {
+    detail: {
+      reason,
+      hasLiveGps: !!startupFirstGoodGpsFix,
+      timelineReady: !!startupTimelineReady,
+    },
+  }));
 }
 
 function emitStartupViewportReady(reason = "") {
@@ -4841,8 +4870,10 @@ function maybeResolveStartupLoading(reason = "") {
   if (startupLoadingForceHidden) return;
   if (!mapReady) return;
   if (!startupGpsPriorityResolved) return;
-  if (!startupLocalZoomDone) return;
+  if (!startupInitialCameraLocked) return;
+  setStartupMapCanvasVisibility(true);
   hideStartupLoadingOverlay(reason || "startup-ready");
+  emitStartupCameraLocked(startupCameraLockReason || reason || "startup-ready");
 }
 
 function recordBlankMapWarning(reason) {
@@ -4905,6 +4936,7 @@ setNavDestination(null);
 
   const loading = getMapLoadingEl();
   if (loading) loading.style.display = "flex";
+  setStartupMapCanvasVisibility(false);
   if (timeLabel && !startupTimelineReady) {
     timeLabel.textContent = "Showing Team Joseo Score loading…";
   }
@@ -4912,53 +4944,45 @@ setNavDestination(null);
     if (!firstUsableMapRecorded) recordBlankMapWarning("first usable map still pending after 6s");
   }, 6000);
   setTimeout(() => {
-    hideStartupLoadingOverlay("hard-safety-timeout");
+    maybeResolveStartupLoading("hard-safety-timeout");
   }, 12000);
 
   preventBrowserZoomUI();
   initMap();
   startLocationWatch();
   startupGpsPriorityTimer = setTimeout(() => {
-    startupGpsPriorityResolved = true;
     startupGpsPriorityTimer = null;
-    if (map && mapReady && typeof map.getZoom === "function" && map.getZoom() < STARTUP_FALLBACK_ZOOM) {
-      map.once("moveend", () => {
-        markStartupLocalZoomDone("gps-timeout-fallback-zoom");
-      });
-      map.easeTo({
+    if (startupFirstGoodGpsFix) return;
+    const applyTimeoutFallbackLock = () => {
+      if (!map) return;
+      const center = map.getCenter?.();
+      map.jumpTo({
+        center: [center?.lng ?? -73.98, center?.lat ?? 40.73],
         zoom: STARTUP_FALLBACK_ZOOM,
-        duration: 350,
-        essential: true,
       });
-    } else if (map && !mapReady) {
+      startupGpsPriorityResolved = true;
+      startupInitialCameraLocked = true;
+      startupLocalZoomDone = true;
+      startupCameraLockReason = "gps-timeout-fallback";
+      maybeResolveStartupLoading("gps-timeout-fallback");
+    };
+    if (map && !mapReady) {
       map.once("load", () => {
-        markStartupLocalZoomDone("gps-timeout-map-load-fallback");
+        if (!startupFirstGoodGpsFix) applyTimeoutFallbackLock();
       });
-    } else {
-      markStartupLocalZoomDone("gps-timeout-fallback-confirmed");
+      return;
     }
-    maybeResolveStartupLoading("gps-timeout");
+    applyTimeoutFallbackLock();
   }, STARTUP_GPS_PRIORITY_TIMEOUT_MS);
-  let startupTimelineBootStarted = false;
-  const startTimelineBoot = () => {
-    if (startupTimelineBootStarted) return;
-    startupTimelineBootStarted = true;
-    loadTimeline()
-      .then(() => {
-        startupTimelineReady = true;
-      })
-      .catch((err) => {
-        console.error("timeline load failed during boot:", err);
-        if (timeLabel) timeLabel.textContent = `Error: ${err?.message || err}`;
-      });
-  };
-  if (mapReady && startupGpsPriorityResolved && startupLocalZoomDone) {
-    startTimelineBoot();
-  } else if (typeof window !== "undefined") {
-    window.addEventListener("team-joseo-startup-viewport-ready", () => {
-      startTimelineBoot();
-    }, { once: true });
-  }
+  const timelinePromise = loadTimeline()
+    .then(() => {
+      startupTimelineReady = true;
+    })
+    .catch((err) => {
+      console.warn("timeline load failed during boot:", err);
+      if (timeLabel) timeLabel.textContent = `Error: ${err?.message || err}`;
+    });
+  void timelinePromise;
 
   // Community/auth bootstrap moved to app.part10.js
 
