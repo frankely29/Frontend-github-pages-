@@ -86,6 +86,28 @@ let pickupRequestSerial = 0;
 let appliedPickupRequestSerial = 0;
 let presenceRequestSerial = 0;
 let appliedPresenceRequestSerial = 0;
+let pendingStartupPickupFetch = false;
+let pendingStartupPresenceFetch = false;
+
+function startupViewportReadyNow() {
+  return !!core.isStartupViewportReady?.();
+}
+
+function flushStartupViewportDeferredFetches(reason = "startup-viewport-ready") {
+  if (!authHeaderOK()) {
+    pendingStartupPresenceFetch = false;
+    pendingStartupPickupFetch = false;
+    return;
+  }
+  const shouldFlushPresence = pendingStartupPresenceFetch;
+  const shouldFlushPickup = pendingStartupPickupFetch;
+  pendingStartupPresenceFetch = false;
+  pendingStartupPickupFetch = false;
+  if (!shouldFlushPresence && !shouldFlushPickup) return;
+  notePresenceBoost();
+  if (shouldFlushPresence) schedulePresencePoll({ immediate: true, reason });
+  if (shouldFlushPickup) schedulePickupPoll({ immediate: true });
+}
 
 function recordDuplicateGuard(reason) {
   const perf = core.getFrontendPerfStats?.();
@@ -2219,10 +2241,17 @@ function setAuthUI(signedIn, note) {
   }
 
   if (signedIn) {
-    notePresenceBoost();
-    schedulePresencePoll({ immediate: true });
-    schedulePickupPoll({ immediate: true });
+    if (startupViewportReadyNow()) {
+      notePresenceBoost();
+      schedulePresencePoll({ immediate: true });
+      schedulePickupPoll({ immediate: true });
+    } else {
+      pendingStartupPresenceFetch = true;
+      pendingStartupPickupFetch = true;
+    }
   } else {
+    pendingStartupPresenceFetch = false;
+    pendingStartupPickupFetch = false;
     clearPresencePollTimer();
     clearPickupPollTimer();
     clearPickupOverlay();
@@ -3567,6 +3596,12 @@ if (typeof document !== "undefined") {
     } else {
       clearPickupPollTimer();
     }
+  });
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("team-joseo-startup-viewport-ready", () => {
+    flushStartupViewportDeferredFetches("startup-viewport-ready");
   });
 }
 
