@@ -58,6 +58,10 @@ const ROTATE_MIN_MPH = 1.0;
 const ROTATE_MIN_DELTA_DEG = 1.5;
 const ROTATE_RATE_LIMIT_MS = 120;
 const ROTATE_ANIM_MS = 220;
+const STARTUP_GPS_PRIORITY_TIMEOUT_MS = 4500;
+const STARTUP_INITIAL_USER_ZOOM = 13.0;
+const STARTUP_FALLBACK_ZOOM = 12.3;
+const ENABLE_BOOT_ZONE_FIT = false;
 const GPS_ACCURACY_THRESHOLD = 50;
 const PRESENCE_ACCURACY_THRESHOLD = 120;
 const HEADING_MIN_SPEED_MPS = 0.8;
@@ -87,6 +91,11 @@ function dbg(id, text) {
 
 const appBootStartedAt = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
 let firstUsableMapRecorded = false;
+let startupGpsPriorityResolved = false;
+let startupFirstGoodGpsFix = false;
+let startupTimelineReady = false;
+let startupLoadingForceHidden = false;
+let startupGpsPriorityTimer = null;
 
 const LS_TOKEN = "community_token_v1";
 const LS_EMAIL = "community_email_v1";
@@ -1675,8 +1684,7 @@ function initMap() {
 
     scheduleAutoFocusFromInactivity();
 
-    const loading = document.getElementById("mapLoading");
-    if (loading) loading.style.display = "none";
+    maybeResolveStartupLoading("map-ready");
     recordPerfMetric("dbgBlankMap", "map loaded");
 
     map.triggerRepaint();
@@ -2955,7 +2963,7 @@ async function renderFrame(frame) {
   const bounds = getFeatureCollectionBounds(fc);
   if (debugEnabled) dbg("dbgBounds", bounds ? `${bounds.minLng},${bounds.minLat},${bounds.maxLng},${bounds.maxLat}` : "invalid");
 
-  if (fc.features.length > 0 && !didFitToZonesOnce && bounds) {
+  if (ENABLE_BOOT_ZONE_FIT && fc.features.length > 0 && !didFitToZonesOnce && bounds) {
     map.fitBounds(
       [
         [bounds.minLng, bounds.minLat],
@@ -3761,8 +3769,17 @@ function startLocationWatch() {
         : (Number.isFinite(freshCompass) ? normDeg(freshCompass) : map.getBearing());
 
       if (!gpsFirstFixDone) {
+        if (!startupFirstGoodGpsFix) {
+          startupFirstGoodGpsFix = true;
+          startupGpsPriorityResolved = true;
+          if (startupGpsPriorityTimer) {
+            clearTimeout(startupGpsPriorityTimer);
+            startupGpsPriorityTimer = null;
+          }
+          maybeResolveStartupLoading("first-good-gps-fix");
+        }
         gpsFirstFixDone = true;
-        const targetZoom = Math.max(map.getZoom(), 12.5);
+        const targetZoom = Math.max(map.getZoom(), STARTUP_INITIAL_USER_ZOOM);
         suppressAutoDisableFor(1200, () => map.easeTo({
           center: [lng, lat],
           zoom: targetZoom,
@@ -4766,6 +4783,25 @@ function markFirstUsableMap(reason = "") {
   recordPerfMetric("dbgFirstUsableMap", `${elapsedMs}ms${reason ? ` (${reason})` : ""}`);
 }
 
+function getMapLoadingEl() {
+  return document.getElementById("mapLoading");
+}
+
+function hideStartupLoadingOverlay(reason = "") {
+  if (startupLoadingForceHidden) return;
+  startupLoadingForceHidden = true;
+  const loading = getMapLoadingEl();
+  if (loading) loading.style.display = "none";
+  if (reason) recordPerfMetric("dbgBlankMap", `startup overlay hidden: ${reason}`);
+}
+
+function maybeResolveStartupLoading(reason = "") {
+  if (startupLoadingForceHidden) return;
+  if (!startupTimelineReady) return;
+  if (!startupGpsPriorityResolved) return;
+  hideStartupLoadingOverlay(reason || "startup-ready");
+}
+
 function recordBlankMapWarning(reason) {
   frontendPerfStats.blankMapWarnings += 1;
   recordPerfMetric("dbgBlankMap", reason || "warning");
@@ -4824,24 +4860,36 @@ setNavDestination(null);
     }
   }
 
-  const loading = document.getElementById("mapLoading");
+  const loading = getMapLoadingEl();
   if (loading) loading.style.display = "flex";
   window.setTimeout(() => {
     if (!firstUsableMapRecorded) recordBlankMapWarning("first usable map still pending after 6s");
   }, 6000);
   setTimeout(() => {
-    const l = document.getElementById("mapLoading");
-    if (l) l.style.display = "none";
-  }, 7000);
+    hideStartupLoadingOverlay("hard-safety-timeout");
+  }, 12000);
 
   preventBrowserZoomUI();
   initMap();
+  startLocationWatch();
+  startupGpsPriorityTimer = setTimeout(() => {
+    startupGpsPriorityResolved = true;
+    startupGpsPriorityTimer = null;
+    if (map && mapReady && typeof map.getZoom === "function" && map.getZoom() < STARTUP_FALLBACK_ZOOM) {
+      map.easeTo({
+        zoom: STARTUP_FALLBACK_ZOOM,
+        duration: 350,
+        essential: true,
+      });
+    }
+    maybeResolveStartupLoading("gps-timeout");
+  }, STARTUP_GPS_PRIORITY_TIMEOUT_MS);
   await loadTimeline();
+  startupTimelineReady = true;
+  maybeResolveStartupLoading("timeline-ready");
 
   // Community/auth bootstrap moved to app.part10.js
 
-  // Start GPS AFTER map exists
-  startLocationWatch();
   updateWeatherNow().catch(() => {});
 })().catch((err) => {
   console.error(err);
