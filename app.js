@@ -308,7 +308,6 @@ function getNYCPartsFromEpochMs(epochMs) {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-    weekday: "short",
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
@@ -322,14 +321,11 @@ function getNYCPartsFromEpochMs(epochMs) {
   const hour = Number(mapped.hour);
   const minute = Number(mapped.minute);
   const second = Number(mapped.second);
-  const weekdayShort = String(mapped.weekday || "");
   const minuteOfDay = hour * 60 + minute;
   const binMinuteOfDay = Math.floor(minuteOfDay / BIN_MINUTES) * BIN_MINUTES;
-  const mm = String(month).padStart(2, "0");
-  const dd = String(day).padStart(2, "0");
-  const monthKey = `${String(year).padStart(4, "0")}-${mm}`;
-  const monthDayKey = `${mm}-${dd}`;
-  const monthDayBinKey = `${monthDayKey}|${binMinuteOfDay}`;
+  const monthKey = `${month}`;
+  const monthDayKey = `${month}-${day}`;
+  const monthDayBinKey = `${month}-${day}|${binMinuteOfDay}`;
   return {
     year,
     month,
@@ -337,7 +333,6 @@ function getNYCPartsFromEpochMs(epochMs) {
     hour,
     minute,
     second,
-    weekdayShort,
     minuteOfDay,
     binMinuteOfDay,
     monthKey,
@@ -375,31 +370,29 @@ function buildTimelineCalendarMeta(timelineInput, timelineEpochsInput) {
 }
 function chooseBestCalendarMatchedTimelineIndex(metaList, target) {
   if (!Array.isArray(metaList) || metaList.length === 0) return 0;
-  const safeTarget = target && Number.isFinite(target.year) ? target : getNowNYCFrameTarget();
+  const safeTarget = target && Number.isFinite(target.month) ? target : getNowNYCFrameTarget();
   const nowEpochMs = Date.now();
-  const yearRank = (entry) => {
-    const year = Number(entry?.year);
-    const diff = Math.abs(year - safeTarget.year);
-    const isFuture = year > safeTarget.year ? 1 : 0;
-    return [diff, isFuture, -year];
-  };
   const epochDiff = (entry) => Math.abs(Number(entry?.epochMs) - nowEpochMs);
-  const tieBreakYearThenEpoch = (a, b) => {
-    const ay = yearRank(a);
-    const by = yearRank(b);
-    if (ay[0] !== by[0]) return ay[0] - by[0];
-    if (ay[1] !== by[1]) return ay[1] - by[1];
-    if (ay[2] !== by[2]) return ay[2] - by[2];
-    return epochDiff(a) - epochDiff(b);
-  };
-  const chooseBy = (predicate, scoreFn, preferA = tieBreakYearThenEpoch) => {
+  const chooseBy = (predicate, scoreTupleFn) => {
     let best = null;
     for (let i = 0; i < metaList.length; i += 1) {
       const entry = metaList[i];
       if (!predicate(entry)) continue;
-      const score = scoreFn(entry);
-      if (!best || score < best.score || (score === best.score && preferA(entry, best.entry) < 0)) {
-        best = { entry, score };
+      const tuple = scoreTupleFn(entry);
+      if (!best) {
+        best = { entry, tuple };
+        continue;
+      }
+      let isBetter = false;
+      for (let j = 0; j < tuple.length; j += 1) {
+        if (tuple[j] < best.tuple[j]) {
+          isBetter = true;
+          break;
+        }
+        if (tuple[j] > best.tuple[j]) break;
+      }
+      if (isBetter) {
+        best = { entry, tuple };
       }
     }
     return best ? best.entry.idx : -1;
@@ -407,26 +400,32 @@ function chooseBestCalendarMatchedTimelineIndex(metaList, target) {
 
   const monthDayBinIdx = chooseBy(
     (entry) => entry.monthDayBinKey === safeTarget.monthDayBinKey,
-    () => 0
+    (entry) => [-Number(entry.year), epochDiff(entry)]
   );
   if (monthDayBinIdx >= 0) return monthDayBinIdx;
 
   const monthDayIdx = chooseBy(
     (entry) => entry.monthDayKey === safeTarget.monthDayKey,
-    (entry) => Math.abs(Number(entry.binMinuteOfDay) - Number(safeTarget.binMinuteOfDay))
+    (entry) => [
+      Math.abs(Number(entry.binMinuteOfDay) - Number(safeTarget.binMinuteOfDay)),
+      -Number(entry.year),
+      epochDiff(entry),
+    ]
   );
   if (monthDayIdx >= 0) return monthDayIdx;
 
   const monthIdx = chooseBy(
     (entry) => Number(entry.month) === Number(safeTarget.month),
-    (entry) => (
-      Math.abs(Number(entry.day) - Number(safeTarget.day)) * 10000 +
-      Math.abs(Number(entry.binMinuteOfDay) - Number(safeTarget.binMinuteOfDay))
-    )
+    (entry) => [
+      Math.abs(Number(entry.day) - Number(safeTarget.day)),
+      Math.abs(Number(entry.binMinuteOfDay) - Number(safeTarget.binMinuteOfDay)),
+      -Number(entry.year),
+      epochDiff(entry),
+    ]
   );
   if (monthIdx >= 0) return monthIdx;
 
-  return pickClosestTimelineIndexByEpoch(metaList.map((m) => m.epochMs), nowEpochMs);
+  return pickClosestTimelineIndexByEpoch(metaList.map((m) => m.epochMs), Date.now());
 }
 function getNowNYCMinuteOfWeekRounded() {
   const parts = new Intl.DateTimeFormat("en-US", {
