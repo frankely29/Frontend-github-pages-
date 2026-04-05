@@ -95,6 +95,7 @@ let startupGpsPriorityResolved = false;
 let startupFirstGoodGpsFix = false;
 let startupTimelineReady = false;
 let startupLoadingForceHidden = false;
+let startupViewportReadyEmitted = false;
 let startupGpsPriorityTimer = null;
 
 const LS_TOKEN = "community_token_v1";
@@ -4756,6 +4757,9 @@ window.TlcCommunityInternals = {
   getMapPageVisible: () => mapPageIsVisible,
   getPresenceBoostUntil: () => lastPresenceInteractionBoostUntil,
   setPresenceBoostUntil: (value) => { lastPresenceInteractionBoostUntil = Number(value) || 0; },
+  isStartupViewportReady: () => startupLoadingForceHidden || (mapReady && startupGpsPriorityResolved),
+  hasStartupFirstGoodGpsFix: () => !!startupFirstGoodGpsFix,
+  isStartupTimelineReady: () => !!startupTimelineReady,
   waitForStyleReady,
   emptyGeojson,
   geometryCenter,
@@ -4787,17 +4791,31 @@ function getMapLoadingEl() {
   return document.getElementById("mapLoading");
 }
 
+function emitStartupViewportReady(reason = "") {
+  if (startupViewportReadyEmitted) return;
+  startupViewportReadyEmitted = true;
+  if (typeof window === "undefined" || typeof window.dispatchEvent !== "function") return;
+  window.dispatchEvent(new CustomEvent("team-joseo-startup-viewport-ready", {
+    detail: {
+      reason,
+      hasLiveGps: !!startupFirstGoodGpsFix,
+      timelineReady: !!startupTimelineReady,
+    },
+  }));
+}
+
 function hideStartupLoadingOverlay(reason = "") {
   if (startupLoadingForceHidden) return;
   startupLoadingForceHidden = true;
   const loading = getMapLoadingEl();
   if (loading) loading.style.display = "none";
   if (reason) recordPerfMetric("dbgBlankMap", `startup overlay hidden: ${reason}`);
+  emitStartupViewportReady(reason || "startup-ready");
 }
 
 function maybeResolveStartupLoading(reason = "") {
   if (startupLoadingForceHidden) return;
-  if (!startupTimelineReady) return;
+  if (!mapReady) return;
   if (!startupGpsPriorityResolved) return;
   hideStartupLoadingOverlay(reason || "startup-ready");
 }
@@ -4862,6 +4880,9 @@ setNavDestination(null);
 
   const loading = getMapLoadingEl();
   if (loading) loading.style.display = "flex";
+  if (timeLabel && !startupTimelineReady) {
+    timeLabel.textContent = "Showing Team Joseo Score loading…";
+  }
   window.setTimeout(() => {
     if (!firstUsableMapRecorded) recordBlankMapWarning("first usable map still pending after 6s");
   }, 6000);
@@ -4884,9 +4905,14 @@ setNavDestination(null);
     }
     maybeResolveStartupLoading("gps-timeout");
   }, STARTUP_GPS_PRIORITY_TIMEOUT_MS);
-  await loadTimeline();
-  startupTimelineReady = true;
-  maybeResolveStartupLoading("timeline-ready");
+  loadTimeline()
+    .then(() => {
+      startupTimelineReady = true;
+    })
+    .catch((err) => {
+      console.error("timeline load failed during boot:", err);
+      if (timeLabel) timeLabel.textContent = `Error: ${err?.message || err}`;
+    });
 
   // Community/auth bootstrap moved to app.part10.js
 
