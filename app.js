@@ -93,6 +93,9 @@ const appBootStartedAt = (typeof performance !== "undefined" && performance.now)
 let firstUsableMapRecorded = false;
 let startupGpsPriorityResolved = false;
 let startupFirstGoodGpsFix = false;
+let startupLocationPermissionResolved = false;
+let startupLocationTerminalFailure = false;
+let startupVisualFallbackApplied = false;
 let startupTimelineReady = false;
 let startupLoadingForceHidden = false;
 let startupViewportReadyEmitted = false;
@@ -3906,10 +3909,13 @@ function startLocationWatch() {
         : (Number.isFinite(freshCompass) ? normDeg(freshCompass) : map.getBearing());
 
       if (!gpsFirstFixDone) {
+        startupLocationPermissionResolved = true;
         startupFirstGoodGpsFix = true;
         startupGpsPriorityResolved = true;
         startupInitialCameraLocked = true;
         startupLocalZoomDone = true;
+        startupVisualFallbackApplied = false;
+        startupLocationTerminalFailure = false;
         startupCameraLockReason = "first-good-gps-fix";
         emitStartupCameraLocked("first-good-gps-fix");
         if (startupGpsPriorityTimer) {
@@ -3962,6 +3968,16 @@ function startLocationWatch() {
       console.warn("Geolocation error:", err);
       if (recommendEl) recommendEl.textContent = "Recommended: location blocked (enable it)";
       setNavDestination(null);
+      if (startupFirstGoodGpsFix) return;
+      const deniedCode = (typeof err?.PERMISSION_DENIED === "number") ? err.PERMISSION_DENIED : 1;
+      const unavailableCode = (typeof err?.POSITION_UNAVAILABLE === "number") ? err.POSITION_UNAVAILABLE : 2;
+      const timeoutCode = (typeof err?.TIMEOUT === "number") ? err.TIMEOUT : 3;
+      const code = Number(err?.code);
+      let reason = "gps-error-fallback";
+      if (code === deniedCode) reason = "gps-permission-denied";
+      else if (code === unavailableCode) reason = "gps-position-unavailable";
+      else if (code === timeoutCode) reason = "gps-watch-timeout";
+      resolveStartupLocationFailure(reason);
     },
     {
       enableHighAccuracy: true,
@@ -4894,6 +4910,9 @@ window.TlcCommunityInternals = {
   setPresenceBoostUntil: (value) => { lastPresenceInteractionBoostUntil = Number(value) || 0; },
   isStartupViewportReady: () => !!(mapReady && startupGpsPriorityResolved && startupLocalZoomDone),
   hasStartupFirstGoodGpsFix: () => !!startupFirstGoodGpsFix,
+  hasStartupLocationPermissionResolved: () => !!startupLocationPermissionResolved,
+  hasStartupLocationTerminalFailure: () => !!startupLocationTerminalFailure,
+  hasStartupVisualFallbackApplied: () => !!startupVisualFallbackApplied,
   isStartupTimelineReady: () => !!startupTimelineReady,
   hasStartupVisibleViewportFetchReleased: () => !!startupVisibleViewportFetchReleased,
   isStartupCameraLocked: () => !!startupInitialCameraLocked,
@@ -4977,6 +4996,30 @@ function emitStartupViewportReady(reason = "") {
   }));
 }
 
+function resolveStartupLocationFailure(reason = "gps-error-fallback") {
+  if (startupFirstGoodGpsFix) return;
+  if (startupGpsPriorityTimer) {
+    clearTimeout(startupGpsPriorityTimer);
+    startupGpsPriorityTimer = null;
+  }
+  startupLocationPermissionResolved = true;
+  startupLocationTerminalFailure = true;
+  startupGpsPriorityResolved = true;
+  startupInitialCameraLocked = true;
+  startupLocalZoomDone = true;
+  startupVisualFallbackApplied = false;
+  startupCameraLockReason = String(reason || "gps-error-fallback");
+  if (map) {
+    const center = map.getCenter?.();
+    map.jumpTo({
+      center: [center?.lng ?? -73.98, center?.lat ?? 40.73],
+      zoom: STARTUP_FALLBACK_ZOOM,
+    });
+  }
+  emitStartupCameraLocked(startupCameraLockReason);
+  maybeResolveStartupLoading(startupCameraLockReason);
+}
+
 function markStartupVisibleViewportFetchReleased(reason = "") {
   if (startupVisibleViewportFetchReleased) return;
   startupVisibleViewportFetchReleased = true;
@@ -5005,10 +5048,11 @@ function hideStartupLoadingOverlay(reason = "") {
 function maybeResolveStartupLoading(reason = "") {
   if (startupLoadingForceHidden) return;
   if (!mapReady) return;
-  if (!startupGpsPriorityResolved) return;
-  if (!startupInitialCameraLocked) return;
+  if (!startupInitialCameraLocked && !startupVisualFallbackApplied) return;
   hideStartupLoadingOverlay(reason || "startup-ready");
-  emitStartupCameraLocked(startupCameraLockReason || reason || "startup-ready");
+  if (startupInitialCameraLocked) {
+    emitStartupCameraLocked(startupCameraLockReason || reason || "startup-ready");
+  }
 }
 
 function recordBlankMapWarning(reason) {
@@ -5087,8 +5131,8 @@ setNavDestination(null);
   startLocationWatch();
   startupGpsPriorityTimer = setTimeout(() => {
     startupGpsPriorityTimer = null;
-    if (startupFirstGoodGpsFix) return;
-    const applyTimeoutFallbackLock = () => {
+    if (startupFirstGoodGpsFix || startupInitialCameraLocked || startupLocationPermissionResolved) return;
+    const applyTimeoutVisualFallback = () => {
       if (!map) return;
       const center = map.getCenter?.();
       map.jumpTo({
@@ -5096,19 +5140,17 @@ setNavDestination(null);
         zoom: STARTUP_FALLBACK_ZOOM,
       });
       startupGpsPriorityResolved = true;
-      startupInitialCameraLocked = true;
-      startupLocalZoomDone = true;
-      startupCameraLockReason = "gps-timeout-fallback";
-      emitStartupCameraLocked("gps-timeout-fallback");
-      maybeResolveStartupLoading("gps-timeout-fallback");
+      startupVisualFallbackApplied = true;
+      startupCameraLockReason = "gps-timeout-visual-fallback";
+      maybeResolveStartupLoading("gps-timeout-visual-fallback");
     };
     if (map && !mapReady) {
       map.once("load", () => {
-        if (!startupFirstGoodGpsFix) applyTimeoutFallbackLock();
+        if (!startupFirstGoodGpsFix) applyTimeoutVisualFallback();
       });
       return;
     }
-    applyTimeoutFallbackLock();
+    applyTimeoutVisualFallback();
   }, STARTUP_GPS_PRIORITY_TIMEOUT_MS);
   const timelinePromise = loadTimeline()
     .then(() => {
