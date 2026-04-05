@@ -2060,8 +2060,10 @@ function currentFrameIsViewportSubset() {
 }
 
 function getCurrentStartupFrameIndex() {
+  const sliderIdx = Number(slider?.value);
+  if (Number.isInteger(sliderIdx) && sliderIdx >= 0) return sliderIdx;
   if (Number.isInteger(startupInitialFrameIndex) && startupInitialFrameIndex >= 0) return startupInitialFrameIndex;
-  return Math.max(0, Number(slider?.value || 0) || 0);
+  return 0;
 }
 
 function clearStartupFullFrameRetryTimer() {
