@@ -313,19 +313,16 @@ function getNYCPartsFromEpochMs(epochMs) {
     second: "2-digit",
     hour12: false,
   }).formatToParts(new Date(epochMs));
-  const mapped = {};
-  for (const p of parts) mapped[p.type] = p.value;
-  const year = Number(mapped.year);
-  const month = Number(mapped.month);
-  const day = Number(mapped.day);
-  const hour = Number(mapped.hour);
-  const minute = Number(mapped.minute);
-  const second = Number(mapped.second);
+  const map = {};
+  for (const p of parts) map[p.type] = p.value;
+  const year = Number(map.year);
+  const month = Number(map.month);
+  const day = Number(map.day);
+  const hour = Number(map.hour);
+  const minute = Number(map.minute);
+  const second = Number(map.second);
   const minuteOfDay = hour * 60 + minute;
   const binMinuteOfDay = Math.floor(minuteOfDay / BIN_MINUTES) * BIN_MINUTES;
-  const monthKey = `${month}`;
-  const monthDayKey = `${month}-${day}`;
-  const monthDayBinKey = `${month}-${day}|${binMinuteOfDay}`;
   return {
     year,
     month,
@@ -335,95 +332,72 @@ function getNYCPartsFromEpochMs(epochMs) {
     second,
     minuteOfDay,
     binMinuteOfDay,
-    monthKey,
-    monthDayKey,
-    monthDayBinKey,
+    monthKey: `${month}`,
+    monthDayKey: `${month}-${day}`,
+    monthDayBinKey: `${month}-${day}|${binMinuteOfDay}`,
   };
+}
+function buildTimelineCalendarMeta(timeline, timelineEpochMs) {
+  return (timeline || []).map((iso, idx) => {
+    const epochMs = Number(timelineEpochMs?.[idx]);
+    const parts = getNYCPartsFromEpochMs(epochMs);
+    return {
+      idx,
+      iso,
+      epochMs,
+      ...parts,
+    };
+  });
 }
 function getNowNYCFrameTarget() {
   return getNYCPartsFromEpochMs(Date.now());
 }
-function buildTimelineCalendarMeta(timelineInput, timelineEpochsInput) {
-  const out = [];
-  const list = Array.isArray(timelineInput) ? timelineInput : [];
-  const epochs = Array.isArray(timelineEpochsInput) ? timelineEpochsInput : [];
-  for (let idx = 0; idx < list.length; idx += 1) {
-    const iso = list[idx];
-    const epochMs = Number(epochs[idx]);
-    if (!Number.isFinite(epochMs)) continue;
-    const nyc = getNYCPartsFromEpochMs(epochMs);
-    out.push({
-      idx,
-      iso,
-      epochMs,
-      year: nyc.year,
-      month: nyc.month,
-      day: nyc.day,
-      minuteOfDay: nyc.minuteOfDay,
-      binMinuteOfDay: nyc.binMinuteOfDay,
-      monthKey: nyc.monthKey,
-      monthDayKey: nyc.monthDayKey,
-      monthDayBinKey: nyc.monthDayBinKey,
-    });
-  }
-  return out;
-}
 function chooseBestCalendarMatchedTimelineIndex(metaList, target) {
-  if (!Array.isArray(metaList) || metaList.length === 0) return 0;
-  const safeTarget = target && Number.isFinite(target.month) ? target : getNowNYCFrameTarget();
-  const nowEpochMs = Date.now();
-  const epochDiff = (entry) => Math.abs(Number(entry?.epochMs) - nowEpochMs);
-  const chooseBy = (predicate, scoreTupleFn) => {
-    let best = null;
-    for (let i = 0; i < metaList.length; i += 1) {
-      const entry = metaList[i];
-      if (!predicate(entry)) continue;
-      const tuple = scoreTupleFn(entry);
-      if (!best) {
-        best = { entry, tuple };
-        continue;
+  if (!Array.isArray(metaList) || !metaList.length) return 0;
+
+  const sortWithRules = (items, scoreFn) => {
+    return [...items].sort((a, b) => {
+      const sa = scoreFn(a);
+      const sb = scoreFn(b);
+      for (let i = 0; i < Math.max(sa.length, sb.length); i += 1) {
+        const av = sa[i];
+        const bv = sb[i];
+        if (av < bv) return -1;
+        if (av > bv) return 1;
       }
-      let isBetter = false;
-      for (let j = 0; j < tuple.length; j += 1) {
-        if (tuple[j] < best.tuple[j]) {
-          isBetter = true;
-          break;
-        }
-        if (tuple[j] > best.tuple[j]) break;
-      }
-      if (isBetter) {
-        best = { entry, tuple };
-      }
-    }
-    return best ? best.entry.idx : -1;
+      return 0;
+    });
   };
 
-  const monthDayBinIdx = chooseBy(
-    (entry) => entry.monthDayBinKey === safeTarget.monthDayBinKey,
-    (entry) => [-Number(entry.year), epochDiff(entry)]
-  );
-  if (monthDayBinIdx >= 0) return monthDayBinIdx;
+  const exactMonthDayBin = metaList.filter((m) => m.monthDayBinKey === target.monthDayBinKey);
+  if (exactMonthDayBin.length) {
+    return sortWithRules(exactMonthDayBin, (m) => [
+      m.year === target.year ? 0 : 1,
+      -m.year,
+      Math.abs(m.epochMs - Date.now()),
+    ])[0].idx;
+  }
 
-  const monthDayIdx = chooseBy(
-    (entry) => entry.monthDayKey === safeTarget.monthDayKey,
-    (entry) => [
-      Math.abs(Number(entry.binMinuteOfDay) - Number(safeTarget.binMinuteOfDay)),
-      -Number(entry.year),
-      epochDiff(entry),
-    ]
-  );
-  if (monthDayIdx >= 0) return monthDayIdx;
+  const exactMonthDay = metaList.filter((m) => m.monthDayKey === target.monthDayKey);
+  if (exactMonthDay.length) {
+    return sortWithRules(exactMonthDay, (m) => [
+      Math.abs(m.binMinuteOfDay - target.binMinuteOfDay),
+      m.year === target.year ? 0 : 1,
+      -m.year,
+      Math.abs(m.epochMs - Date.now()),
+    ])[0].idx;
+  }
 
-  const monthIdx = chooseBy(
-    (entry) => Number(entry.month) === Number(safeTarget.month),
-    (entry) => [
-      Math.abs(Number(entry.day) - Number(safeTarget.day)),
-      Math.abs(Number(entry.binMinuteOfDay) - Number(safeTarget.binMinuteOfDay)),
-      -Number(entry.year),
-      epochDiff(entry),
-    ]
-  );
-  if (monthIdx >= 0) return monthIdx;
+  const sameMonth = metaList.filter((m) => m.month === target.month);
+  if (sameMonth.length) {
+    return sortWithRules(sameMonth, (m) => [
+      Math.abs(m.day - target.day),
+      Math.abs(m.binMinuteOfDay - target.binMinuteOfDay),
+      m.year === target.year ? 0 : 1,
+      -m.year,
+      Math.abs(m.epochMs - Date.now()),
+    ])[0].idx;
+  }
 
   return pickClosestTimelineIndexByEpoch(metaList.map((m) => m.epochMs), Date.now());
 }
