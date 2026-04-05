@@ -466,17 +466,25 @@ async function fetchJSON(url, opts = {}) {
   }
   const res = await fetch(url, fetchOpts);
   const text = await res.text();
+  let parsed = null;
+  let hasParsedJson = false;
+  if (text) {
+    try {
+      parsed = JSON.parse(text);
+      hasParsedJson = true;
+    } catch (_) {}
+  }
   if (!res.ok) {
+    if (hasParsedJson && isPreparingMonthPayload(parsed)) {
+      return parsed;
+    }
     const err = new Error(`${res.status} ${res.statusText} @ ${url} :: ${text.slice(0, 120)}`);
     err.status = res.status;
     err.url = url;
     throw err;
   }
-  try {
-    return JSON.parse(text);
-  } catch {
-    throw new Error(`Invalid JSON @ ${url} :: ${text.slice(0, 120)}`);
-  }
+  if (hasParsedJson) return parsed;
+  throw new Error(`Invalid JSON @ ${url} :: ${text.slice(0, 120)}`);
 }
 async function postJSON(path, body, token) {
   if (FrontendRuntime?.postJSON) return FrontendRuntime.postJSON(path, body, token);
@@ -3399,10 +3407,12 @@ function timelineMonthMatchesCurrentNYCMonth() {
   if (!active) return false;
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: NYC_TIMEZONE,
+    year: "numeric",
     month: "2-digit",
   }).formatToParts(new Date());
+  const year = Number(parts.find((p) => p.type === "year")?.value || NaN);
   const month = Number(parts.find((p) => p.type === "month")?.value || NaN);
-  return Number.isFinite(month) && month === active.month;
+  return Number.isFinite(year) && Number.isFinite(month) && month === active.month && year === active.year;
 }
 
 async function loadTimeline({ force = false } = {}) {
@@ -3437,7 +3447,7 @@ async function loadTimeline({ force = false } = {}) {
     timelineAvailableMonthKeys = Array.isArray(payload?.available_month_keys) ? payload.available_month_keys : [];
     timelineScope = String(payload?.timeline_scope || "");
     timeline = Array.isArray(payload) ? payload : payload.timeline || [];
-    if (!timeline.length) throw new Error("Timeline empty. Run /generate once on Railway.");
+    if (!timeline.length) throw new Error("Timeline is temporarily unavailable. Retrying shortly.");
 
     if (debugEnabled) dbg("dbgTimeline", `OK ${timelineUrl} count=${timeline.length}`);
 
