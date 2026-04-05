@@ -103,6 +103,9 @@ let startupInitialFrameIndex = null;
 let startupViewportFrameStarted = false;
 let startupViewportFrameRendered = false;
 let startupFullFrameBackfillStarted = false;
+let startupFullFrameBackfillCompleted = false;
+let startupFullFrameRetryCount = 0;
+let startupFullFrameRetryTimer = null;
 let startupCameraLockEventSent = false;
 let startupInitialCameraLocked = false;
 let startupCameraLockReason = "";
@@ -1644,6 +1647,9 @@ function initMap() {
         schedulePresencePoll({ immediate: true, reason: "viewport-change" });
       }
       applyDriverLabelZoomStyles();
+      if (currentFrameIsViewportSubset() || !startupFullFrameBackfillCompleted) {
+        void ensureStartupFullFrameBackfill(getCurrentStartupFrameIndex(), "moveend-promote-full-frame");
+      }
     });
     map.on("zoom", () => {
       if (authHeaderOK()) scheduleAdaptivePresenceRender();
@@ -1658,6 +1664,9 @@ function initMap() {
       }
       applyDriverLabelZoomStyles();
       syncOpenZonePopupMetrics();
+      if (currentFrameIsViewportSubset() || !startupFullFrameBackfillCompleted) {
+        void ensureStartupFullFrameBackfill(getCurrentStartupFrameIndex(), "zoomend-promote-full-frame");
+      }
     });
     map.on("rotateend", () => {
       if (authHeaderOK()) scheduleAdaptivePresenceRender();
@@ -2041,6 +2050,55 @@ async function fetchViewportFrameData(idx, { force = false } = {}) {
   if (!path) return null;
   try {
     return await fetchJSON(`${RAILWAY_BASE}${path}`, { cache: force ? "reload" : undefined });
+  } catch (_) {
+    return null;
+  }
+}
+
+function currentFrameIsViewportSubset() {
+  return !!(currentFrame && currentFrame._viewport_subset === true);
+}
+
+function getCurrentStartupFrameIndex() {
+  if (Number.isInteger(startupInitialFrameIndex) && startupInitialFrameIndex >= 0) return startupInitialFrameIndex;
+  return Math.max(0, Number(slider?.value || 0) || 0);
+}
+
+function clearStartupFullFrameRetryTimer() {
+  if (startupFullFrameRetryTimer) clearTimeout(startupFullFrameRetryTimer);
+  startupFullFrameRetryTimer = null;
+}
+
+function scheduleStartupFullFrameRetry(idx, delayMs, reason = "") {
+  clearStartupFullFrameRetryTimer();
+  const normalizedIdx = Math.max(0, Number(idx) || 0);
+  const timeoutMs = Math.max(0, Number(delayMs) || 0);
+  startupFullFrameRetryTimer = setTimeout(() => {
+    startupFullFrameRetryTimer = null;
+    if (startupFullFrameBackfillCompleted) return;
+    if (!currentFrameIsViewportSubset()) return;
+    if (pendingFrameLoad?.idx === normalizedIdx) return;
+    if (frameRequestState.get(normalizedIdx)?.promise) return;
+    startupFullFrameRetryCount += 1;
+    void ensureStartupFullFrameBackfill(normalizedIdx, reason || "retry");
+  }, timeoutMs);
+}
+
+async function ensureStartupFullFrameBackfill(idx, reason = "") {
+  const normalizedIdx = Math.max(0, Number(idx) || 0);
+  if (!Number.isInteger(normalizedIdx) || normalizedIdx < 0) return null;
+  if (startupFullFrameBackfillCompleted) return null;
+  if (pendingFrameLoad?.idx === normalizedIdx) return pendingFrameLoad.promise || null;
+  if (frameRequestState.get(normalizedIdx)?.promise) return frameRequestState.get(normalizedIdx)?.promise || null;
+  startupFullFrameBackfillStarted = true;
+  if (debugEnabled && reason) dbg("dbgFrame", `startup full-frame backfill (${reason})`);
+  try {
+    const frame = await loadFrame(normalizedIdx);
+    if (frame && frame._viewport_subset !== true && currentFrame?._viewport_subset !== true) {
+      startupFullFrameBackfillCompleted = true;
+      clearStartupFullFrameRetryTimer();
+    }
+    return frame;
   } catch (_) {
     return null;
   }
@@ -2935,6 +2993,10 @@ async function renderFrame(frame, options = {}) {
   }
 
   currentFrame = frame;
+  if (temporaryViewportSubset !== true && frame?._viewport_subset !== true) {
+    startupFullFrameBackfillCompleted = true;
+    clearStartupFullFrameRetryTimer();
+  }
   const currentFrameSig = frameSignature(frame);
   lastRenderedFrameSignature = currentFrameSig;
 
@@ -3081,12 +3143,12 @@ async function runStartupViewportFrameSequence(idx) {
   if (viewportFrame && Array.isArray(viewportFeatures) && viewportFeatures.length > 0) {
     await renderFrame(viewportFrame, { temporaryViewportSubset: true, skipRecommendationUpdate: true });
     startupViewportFrameRendered = true;
+    void ensureStartupFullFrameBackfill(normalizedIdx, "startup-viewport-sequence");
+    scheduleStartupFullFrameRetry(normalizedIdx, 1200, "startup-retry-1");
+    scheduleStartupFullFrameRetry(normalizedIdx, 3200, "startup-retry-2");
+    return;
   }
-
-  if (!startupFullFrameBackfillStarted) {
-    startupFullFrameBackfillStarted = true;
-    void loadFrame(normalizedIdx).catch(console.error);
-  }
+  void ensureStartupFullFrameBackfill(normalizedIdx, "viewport-fetch-failed");
 }
 
 async function loadTimeline({ force = false } = {}) {
@@ -4836,6 +4898,9 @@ window.TlcCommunityInternals = {
   getStartupCameraLockReason: () => startupCameraLockReason || "",
   isStartupViewportFrameRendered: () => !!startupViewportFrameRendered,
   hasStartupFullFrameBackfillStarted: () => !!startupFullFrameBackfillStarted,
+  hasStartupFullFrameBackfillCompleted: () => !!startupFullFrameBackfillCompleted,
+  getStartupFullFrameRetryCount: () => Number(startupFullFrameRetryCount || 0),
+  isCurrentFrameViewportSubset: () => currentFrameIsViewportSubset(),
   waitForStyleReady,
   emptyGeojson,
   geometryCenter,
