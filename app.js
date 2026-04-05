@@ -302,6 +302,126 @@ function formatNYCLabel(iso) {
 function formatNYCTimeOnlyLabel(iso) {
   return formatNYCLabel(iso);
 }
+function getNYCPartsFromEpochMs(epochMs) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: NYC_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date(epochMs));
+  const mapped = {};
+  for (const p of parts) mapped[p.type] = p.value;
+  const year = Number(mapped.year);
+  const month = Number(mapped.month);
+  const day = Number(mapped.day);
+  const hour = Number(mapped.hour);
+  const minute = Number(mapped.minute);
+  const second = Number(mapped.second);
+  const weekdayShort = String(mapped.weekday || "");
+  const binMinuteOfDay = Math.floor((hour * 60 + minute) / BIN_MINUTES) * BIN_MINUTES;
+  const mm = String(month).padStart(2, "0");
+  const dd = String(day).padStart(2, "0");
+  const monthDayKey = `${mm}-${dd}`;
+  const monthDayBinKey = `${monthDayKey}|${binMinuteOfDay}`;
+  return {
+    year,
+    month,
+    day,
+    hour,
+    minute,
+    second,
+    weekdayShort,
+    binMinuteOfDay,
+    monthDayKey,
+    monthDayBinKey,
+  };
+}
+function getNowNYCFrameTarget() {
+  return getNYCPartsFromEpochMs(Date.now());
+}
+function buildTimelineCalendarMeta(timelineInput, timelineEpochsInput) {
+  const out = [];
+  const list = Array.isArray(timelineInput) ? timelineInput : [];
+  const epochs = Array.isArray(timelineEpochsInput) ? timelineEpochsInput : [];
+  for (let idx = 0; idx < list.length; idx += 1) {
+    const iso = list[idx];
+    const epochMs = Number(epochs[idx]);
+    if (!Number.isFinite(epochMs)) continue;
+    const nyc = getNYCPartsFromEpochMs(epochMs);
+    out.push({
+      idx,
+      iso,
+      epochMs,
+      year: nyc.year,
+      month: nyc.month,
+      day: nyc.day,
+      binMinuteOfDay: nyc.binMinuteOfDay,
+      monthDayKey: nyc.monthDayKey,
+      monthDayBinKey: nyc.monthDayBinKey,
+    });
+  }
+  return out;
+}
+function chooseBestCalendarMatchedTimelineIndex(metaList, target) {
+  if (!Array.isArray(metaList) || metaList.length === 0) return 0;
+  const safeTarget = target && Number.isFinite(target.year) ? target : getNowNYCFrameTarget();
+  const nowEpochMs = Date.now();
+  const yearRank = (entry) => {
+    const year = Number(entry?.year);
+    const diff = Math.abs(year - safeTarget.year);
+    const isFuture = year > safeTarget.year ? 1 : 0;
+    return [diff, isFuture, -year];
+  };
+  const epochDiff = (entry) => Math.abs(Number(entry?.epochMs) - nowEpochMs);
+  const tieBreakYearThenEpoch = (a, b) => {
+    const ay = yearRank(a);
+    const by = yearRank(b);
+    if (ay[0] !== by[0]) return ay[0] - by[0];
+    if (ay[1] !== by[1]) return ay[1] - by[1];
+    if (ay[2] !== by[2]) return ay[2] - by[2];
+    return epochDiff(a) - epochDiff(b);
+  };
+  const chooseBy = (predicate, scoreFn, preferA = tieBreakYearThenEpoch) => {
+    let best = null;
+    for (let i = 0; i < metaList.length; i += 1) {
+      const entry = metaList[i];
+      if (!predicate(entry)) continue;
+      const score = scoreFn(entry);
+      if (!best || score < best.score || (score === best.score && preferA(entry, best.entry) < 0)) {
+        best = { entry, score };
+      }
+    }
+    return best ? best.entry.idx : -1;
+  };
+
+  const monthDayBinIdx = chooseBy(
+    (entry) => entry.monthDayBinKey === safeTarget.monthDayBinKey,
+    () => 0
+  );
+  if (monthDayBinIdx >= 0) return monthDayBinIdx;
+
+  const monthDayIdx = chooseBy(
+    (entry) => entry.monthDayKey === safeTarget.monthDayKey,
+    (entry) => Math.abs(Number(entry.binMinuteOfDay) - Number(safeTarget.binMinuteOfDay))
+  );
+  if (monthDayIdx >= 0) return monthDayIdx;
+
+  const monthIdx = chooseBy(
+    (entry) => Number(entry.month) === Number(safeTarget.month),
+    (entry) => (
+      Math.abs(Number(entry.day) - Number(safeTarget.day)) * 10000 +
+      Math.abs(Number(entry.binMinuteOfDay) - Number(safeTarget.binMinuteOfDay))
+    )
+  );
+  if (monthIdx >= 0) return monthIdx;
+
+  return pickClosestTimelineIndexByEpoch(metaList.map((m) => m.epochMs), nowEpochMs);
+}
 function getNowNYCMinuteOfWeekRounded() {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/New_York",
@@ -2021,6 +2141,7 @@ function wireZoneClickPopup() {
    ========================================================= */
 let timeline = [];
 let timelineEpochMs = [];
+let timelineCalendarMeta = [];
 let currentFrame = null;
 let lastUserSliderTs = 0;
 
@@ -3242,12 +3363,14 @@ async function loadTimeline({ force = false } = {}) {
     if (debugEnabled) dbg("dbgTimeline", `OK ${timelineUrl} count=${timeline.length}`);
 
     timelineEpochMs = timeline.map(timelineIsoToEpochMs);
+    timelineCalendarMeta = buildTimelineCalendarMeta(timeline, timelineEpochMs);
 
     slider.min = "0";
     slider.max = String(timeline.length - 1);
     slider.step = "1";
 
-    const idx = pickClosestTimelineIndexByEpoch(timelineEpochMs, Date.now());
+    const target = getNowNYCFrameTarget();
+    const idx = chooseBestCalendarMatchedTimelineIndex(timelineCalendarMeta, target);
     slider.value = String(idx);
     startupInitialFrameIndex = idx;
 
@@ -4076,7 +4199,8 @@ async function tickNYCClockAndAdvanceIfNeeded() {
     if (Date.now() - lastUserSliderTs < USER_SLIDER_GRACE_MS) return;
     if (!timeline.length || !timelineEpochMs.length) return;
 
-    const bestIdx = pickClosestTimelineIndexByEpoch(timelineEpochMs, Date.now());
+    const target = getNowNYCFrameTarget();
+    const bestIdx = chooseBestCalendarMatchedTimelineIndex(timelineCalendarMeta, target);
 
     const curIdx = Number(slider.value || "0");
     if (bestIdx === curIdx) return;
@@ -4090,6 +4214,19 @@ async function tickNYCClockAndAdvanceIfNeeded() {
 }
 if (runtimePolling) runtimePolling.setInterval("app:nyc-clock", tickNYCClockAndAdvanceIfNeeded, NYC_CLOCK_TICK_MS);
 else setInterval(tickNYCClockAndAdvanceIfNeeded, NYC_CLOCK_TICK_MS);
+
+window.getTimelineSelectionDebug = function getTimelineSelectionDebug() {
+  const target = getNowNYCFrameTarget();
+  const idx = chooseBestCalendarMatchedTimelineIndex(timelineCalendarMeta, target);
+  const selected = timelineCalendarMeta[idx] || null;
+  return {
+    target,
+    selected,
+    selectedIso: selected?.iso || null,
+    selectedIdx: idx,
+    timelineLength: timelineCalendarMeta.length,
+  };
+};
 
 document.addEventListener("visibilitychange", () => {
   mapPageIsVisible = !document.hidden;
