@@ -2121,6 +2121,12 @@ function wireZoneClickPopup() {
 let timeline = [];
 let timelineEpochMs = [];
 let timelineCalendarMeta = [];
+let timelineActiveMonthKey = "";
+let timelineAvailableMonthKeys = [];
+let timelineScope = "";
+let timelinePreparingState = null;
+let timelinePrepareRetryTimer = null;
+const TIMELINE_PREPARE_DEFAULT_RETRY_MS = 3000;
 let currentFrame = null;
 let lastUserSliderTs = 0;
 
@@ -2178,8 +2184,11 @@ async function fetchFrameData(idx, { priority = "active", force = false } = {}) 
   const state = { controller, priority, promise: null };
   if (priority === "active") frameLoadAbortController = controller;
   frontendPerfStats.frameCacheMisses += 1;
-  state.promise = fetchJSON(`${RAILWAY_BASE}/frame/${normalizedIdx}`, { signal: controller.signal, cache: force ? "reload" : undefined })
-    .then((frame) => rememberFrame(normalizedIdx, frame))
+  state.promise = fetchJSON(`${RAILWAY_BASE}${buildFramePathWithMonthKey(normalizedIdx)}`, { signal: controller.signal, cache: force ? "reload" : undefined })
+    .then((frame) => {
+      if (isPreparingMonthPayload(frame)) return frame;
+      return rememberFrame(normalizedIdx, frame);
+    })
     .finally(() => {
       const latest = frameRequestState.get(normalizedIdx);
       if (latest?.controller === controller) frameRequestState.delete(normalizedIdx);
@@ -2189,7 +2198,15 @@ async function fetchFrameData(idx, { priority = "active", force = false } = {}) 
   return state.promise;
 }
 
-function getVisibleFrameViewportPath(idx, paddingRatio = 0.18) {
+function buildFramePathWithMonthKey(idx) {
+  const normalizedIdx = Number(idx);
+  if (!Number.isInteger(normalizedIdx) || normalizedIdx < 0) return "/frame/0";
+  if (!timelineActiveMonthKey) return `/frame/${normalizedIdx}`;
+  const params = new URLSearchParams({ month_key: String(timelineActiveMonthKey) });
+  return `/frame/${normalizedIdx}?${params.toString()}`;
+}
+
+function buildViewportFramePathWithMonthKey(idx, paddingRatio = 0.18) {
   const normalizedIdx = Number(idx);
   if (!Number.isInteger(normalizedIdx) || normalizedIdx < 0 || !map || typeof map.getBounds !== "function") return null;
   const bounds = map.getBounds?.();
@@ -2208,11 +2225,12 @@ function getVisibleFrameViewportPath(idx, paddingRatio = 0.18) {
     max_lng: String(maxLng),
     padding_ratio: String(Number.isFinite(Number(paddingRatio)) ? Number(paddingRatio) : 0.18),
   });
+  if (timelineActiveMonthKey) params.set("month_key", String(timelineActiveMonthKey));
   return `/frame/${normalizedIdx}/viewport?${params.toString()}`;
 }
 
 async function fetchViewportFrameData(idx, { force = false } = {}) {
-  const path = getVisibleFrameViewportPath(idx);
+  const path = buildViewportFramePathWithMonthKey(idx);
   if (!path) return null;
   try {
     return await fetchJSON(`${RAILWAY_BASE}${path}`, { cache: force ? "reload" : undefined });
@@ -3264,7 +3282,7 @@ async function renderFrame(frame, options = {}) {
 async function loadFrame(idx, { force = false } = {}) {
   const frameStartedAt = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
   const normalizedIdx = Math.max(0, Number(idx) || 0);
-  const frameUrl = `${RAILWAY_BASE}/frame/${normalizedIdx}`;
+  const frameUrl = `${RAILWAY_BASE}${buildFramePathWithMonthKey(normalizedIdx)}`;
   if (pendingFrameLoad?.idx === normalizedIdx && pendingFrameLoad?.promise && !force) return pendingFrameLoad.promise;
   const cachedFrame = !force ? getCachedFrame(normalizedIdx) : null;
   if (!force && normalizedIdx === lastRenderedFrameIndex && cachedFrame && lastRenderedFrameSignature === frameSignature(cachedFrame)) {
@@ -3278,6 +3296,15 @@ async function loadFrame(idx, { force = false } = {}) {
     const promise = fetchFrameData(normalizedIdx, { priority: "active", force });
     pendingFrameLoad = { idx: normalizedIdx, promise };
     frame = await promise;
+  }
+  if (isPreparingMonthPayload(frame)) {
+    applyTimelinePreparingUi(frame);
+    const retryMs = Number(frame?.retry_after_sec) > 0
+      ? Number(frame.retry_after_sec) * 1000
+      : TIMELINE_PREPARE_DEFAULT_RETRY_MS;
+    scheduleTimelinePrepareRetry(retryMs);
+    if (pendingFrameLoad?.idx === normalizedIdx) pendingFrameLoad = null;
+    return currentFrame || null;
   }
 
   if (debugEnabled) {
@@ -3319,10 +3346,70 @@ async function runStartupViewportFrameSequence(idx) {
   void ensureStartupFullFrameBackfill(normalizedIdx, "viewport-fetch-failed");
 }
 
+function parseMonthKey(text) {
+  const value = String(text || "").trim();
+  const match = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(value);
+  if (!match) return null;
+  return { year: Number(match[1]), month: Number(match[2]) };
+}
+
+function formatMonthKeyForUi(monthKey) {
+  const parsed = parseMonthKey(monthKey);
+  if (!parsed) return String(monthKey || "");
+  const dt = new Date(Date.UTC(parsed.year, parsed.month - 1, 1));
+  const monthName = dt.toLocaleString("en-US", { month: "long", timeZone: "UTC" });
+  return `${monthName} ${parsed.year}`;
+}
+
+function isPreparingMonthPayload(payload) {
+  return !!(payload && typeof payload === "object" && payload.status === "preparing_month" && payload.target_month_key);
+}
+
+function clearTimelinePrepareRetryTimer() {
+  if (timelinePrepareRetryTimer) clearTimeout(timelinePrepareRetryTimer);
+  timelinePrepareRetryTimer = null;
+}
+
+function scheduleTimelinePrepareRetry(delayMs = TIMELINE_PREPARE_DEFAULT_RETRY_MS) {
+  if (timelinePrepareRetryTimer) return;
+  const retryMs = Math.max(250, Number(delayMs) || TIMELINE_PREPARE_DEFAULT_RETRY_MS);
+  timelinePrepareRetryTimer = setTimeout(() => {
+    timelinePrepareRetryTimer = null;
+    void loadTimeline({ force: true }).catch((err) => {
+      console.warn("timeline prepare retry failed:", err);
+    });
+  }, retryMs);
+}
+
+function applyTimelinePreparingUi(payload) {
+  timelinePreparingState = payload;
+  const targetMonthKey = String(payload?.target_month_key || "");
+  const label = String(payload?.target_month_label || "").trim() || formatMonthKeyForUi(targetMonthKey);
+  if (timeLabel) timeLabel.textContent = `Preparing ${label} historical data…`;
+  if (recommendEl) recommendEl.textContent = "Monitor • Preparing historical month";
+}
+
+function clearTimelinePreparingUi({ clearRetryTimer = false } = {}) {
+  timelinePreparingState = null;
+  if (clearRetryTimer) clearTimelinePrepareRetryTimer();
+}
+
+function timelineMonthMatchesCurrentNYCMonth() {
+  const active = parseMonthKey(timelineActiveMonthKey);
+  if (!active) return false;
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: NYC_TIMEZONE,
+    month: "2-digit",
+  }).formatToParts(new Date());
+  const month = Number(parts.find((p) => p.type === "month")?.value || NaN);
+  return Number.isFinite(month) && month === active.month;
+}
+
 async function loadTimeline({ force = false } = {}) {
   const timelineStartedAt = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
   const timelineUrl = `${RAILWAY_BASE}/timeline`;
-  const canReuseTimeline = !force && timelineCache.data && (Date.now() - Number(timelineCache.loadedAt || 0) < TIMELINE_CACHE_TTL_MS);
+  const cacheFresh = timelineCache.data && (Date.now() - Number(timelineCache.loadedAt || 0) < TIMELINE_CACHE_TTL_MS);
+  const canReuseTimeline = !!(!force && cacheFresh && (!timelineActiveMonthKey || timelineMonthMatchesCurrentNYCMonth()));
   if (canReuseTimeline) frontendPerfStats.timelineCacheHits += 1;
   else frontendPerfStats.timelineCacheMisses += 1;
   if (!canReuseTimeline && timelineLoadPromise) return timelineLoadPromise;
@@ -3331,12 +3418,25 @@ async function loadTimeline({ force = false } = {}) {
       try { timelineLoadAbortController.abort(); } catch (_) {}
     }
     timelineLoadAbortController = new AbortController();
-    const t = canReuseTimeline
+    const payload = canReuseTimeline
       ? timelineCache.data
       : await fetchJSON(timelineUrl, { signal: timelineLoadAbortController.signal, cache: force ? "reload" : undefined });
-    timelineCache.data = t;
+    if (isPreparingMonthPayload(payload)) {
+      applyTimelinePreparingUi(payload);
+      const retryMs = Number(payload?.retry_after_sec) > 0
+        ? Number(payload.retry_after_sec) * 1000
+        : TIMELINE_PREPARE_DEFAULT_RETRY_MS;
+      scheduleTimelinePrepareRetry(retryMs);
+      return null;
+    }
+
+    clearTimelinePreparingUi({ clearRetryTimer: true });
+    timelineCache.data = payload;
     timelineCache.loadedAt = Date.now();
-    timeline = Array.isArray(t) ? t : t.timeline || [];
+    timelineActiveMonthKey = String(payload?.active_month_key || "");
+    timelineAvailableMonthKeys = Array.isArray(payload?.available_month_keys) ? payload.available_month_keys : [];
+    timelineScope = String(payload?.timeline_scope || "");
+    timeline = Array.isArray(payload) ? payload : payload.timeline || [];
     if (!timeline.length) throw new Error("Timeline empty. Run /generate once on Railway.");
 
     if (debugEnabled) dbg("dbgTimeline", `OK ${timelineUrl} count=${timeline.length}`);
@@ -4176,7 +4276,12 @@ async function tickNYCClockAndAdvanceIfNeeded() {
   try {
     if (document.hidden) return;
     if (Date.now() - lastUserSliderTs < USER_SLIDER_GRACE_MS) return;
+    if (timelinePreparingState) return;
     if (!timeline.length || !timelineEpochMs.length) return;
+    if (!timelineMonthMatchesCurrentNYCMonth()) {
+      await loadTimeline({ force: true });
+      return;
+    }
 
     const target = getNowNYCFrameTarget();
     const bestIdx = chooseBestCalendarMatchedTimelineIndex(timelineCalendarMeta, target);
@@ -4210,6 +4315,9 @@ window.getTimelineSelectionDebug = function getTimelineSelectionDebug() {
 document.addEventListener("visibilitychange", () => {
   mapPageIsVisible = !document.hidden;
   if (document.visibilityState === "visible") {
+    if (timelinePreparingState || !timelineMonthMatchesCurrentNYCMonth()) {
+      void loadTimeline({ force: true }).catch(() => {});
+    }
     refreshCurrentFrame().catch(() => {});
     tickNYCClockAndAdvanceIfNeeded().catch(() => {});
     updateWeatherNow().catch(() => {});
@@ -5330,12 +5438,12 @@ setNavDestination(null);
     applyTimeoutVisualFallback();
   }, STARTUP_GPS_PRIORITY_TIMEOUT_MS);
   const timelinePromise = loadTimeline()
-    .then(() => {
-      startupTimelineReady = true;
+    .then((loadedTimeline) => {
+      startupTimelineReady = Array.isArray(loadedTimeline) && loadedTimeline.length > 0;
     })
     .catch((err) => {
       console.warn("timeline load failed during boot:", err);
-      if (timeLabel) timeLabel.textContent = `Error: ${err?.message || err}`;
+      if (!timelinePreparingState && timeLabel) timeLabel.textContent = `Error: ${err?.message || err}`;
     });
   void timelinePromise;
 
@@ -5344,5 +5452,5 @@ setNavDestination(null);
   updateWeatherNow().catch(() => {});
 })().catch((err) => {
   console.error(err);
-  if (timeLabel) timeLabel.textContent = `Error: ${err?.message || err}`;
+  if (!timelinePreparingState && timeLabel) timeLabel.textContent = `Error: ${err?.message || err}`;
 });
