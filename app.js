@@ -340,12 +340,11 @@ function getNYCPartsFromEpochMs(epochMs) {
 function buildTimelineCalendarMeta(timeline, timelineEpochMs) {
   return (timeline || []).map((iso, idx) => {
     const epochMs = Number(timelineEpochMs?.[idx]);
-    const parts = getNYCPartsFromEpochMs(epochMs);
     return {
       idx,
       iso,
       epochMs,
-      ...parts,
+      ...getNYCPartsFromEpochMs(epochMs),
     };
   });
 }
@@ -354,14 +353,15 @@ function getNowNYCFrameTarget() {
 }
 function chooseBestCalendarMatchedTimelineIndex(metaList, target) {
   if (!Array.isArray(metaList) || !metaList.length) return 0;
+  const nowEpoch = Date.now();
 
-  const sortWithRules = (items, scoreFn) => {
+  const sortWithRules = (items, keyFn) => {
     return [...items].sort((a, b) => {
-      const sa = scoreFn(a);
-      const sb = scoreFn(b);
-      for (let i = 0; i < Math.max(sa.length, sb.length); i += 1) {
-        const av = sa[i];
-        const bv = sb[i];
+      const ka = keyFn(a);
+      const kb = keyFn(b);
+      for (let i = 0; i < Math.max(ka.length, kb.length); i += 1) {
+        const av = ka[i];
+        const bv = kb[i];
         if (av < bv) return -1;
         if (av > bv) return 1;
       }
@@ -374,7 +374,7 @@ function chooseBestCalendarMatchedTimelineIndex(metaList, target) {
     return sortWithRules(exactMonthDayBin, (m) => [
       m.year === target.year ? 0 : 1,
       -m.year,
-      Math.abs(m.epochMs - Date.now()),
+      Math.abs(m.epochMs - nowEpoch),
     ])[0].idx;
   }
 
@@ -384,7 +384,7 @@ function chooseBestCalendarMatchedTimelineIndex(metaList, target) {
       Math.abs(m.binMinuteOfDay - target.binMinuteOfDay),
       m.year === target.year ? 0 : 1,
       -m.year,
-      Math.abs(m.epochMs - Date.now()),
+      Math.abs(m.epochMs - nowEpoch),
     ])[0].idx;
   }
 
@@ -395,11 +395,11 @@ function chooseBestCalendarMatchedTimelineIndex(metaList, target) {
       Math.abs(m.binMinuteOfDay - target.binMinuteOfDay),
       m.year === target.year ? 0 : 1,
       -m.year,
-      Math.abs(m.epochMs - Date.now()),
+      Math.abs(m.epochMs - nowEpoch),
     ])[0].idx;
   }
 
-  return pickClosestTimelineIndexByEpoch(metaList.map((m) => m.epochMs), Date.now());
+  return pickClosestTimelineIndexByEpoch(metaList.map((m) => m.epochMs), nowEpoch);
 }
 function getNowNYCMinuteOfWeekRounded() {
   const parts = new Intl.DateTimeFormat("en-US", {
