@@ -99,7 +99,6 @@ let startupViewportReadyEmitted = false;
 let startupLocalZoomDone = false;
 let startupVisibleViewportFetchReleased = false;
 let startupGpsPriorityTimer = null;
-let startupMapCanvasVisible = false;
 let startupInitialCameraLocked = false;
 let startupCameraLockReason = "";
 let startupCameraLockedEventEmitted = false;
@@ -1613,8 +1612,6 @@ function initMap() {
     attributionControl: { position: "bottom-right" },
     localIdeographFontFamily: "sans-serif",
   });
-  setStartupMapCanvasVisibility(false);
-
   map.on("load", () => {
     enforceSaveButtonTheme();
     mapReady = true;
@@ -4806,11 +4803,8 @@ function getMapEl() {
 function setStartupMapCanvasVisibility(visible) {
   const mapEl = getMapEl();
   if (!mapEl) return;
-  const shouldShow = !!visible && !!startupInitialCameraLocked;
-  if (startupMapCanvasVisible === shouldShow) return;
-  startupMapCanvasVisible = shouldShow;
-  mapEl.style.opacity = shouldShow ? "1" : "0";
-  mapEl.style.visibility = shouldShow ? "visible" : "hidden";
+  mapEl.style.opacity = "1";
+  mapEl.style.visibility = "visible";
 }
 
 function emitStartupCameraLocked(reason = "") {
@@ -4871,7 +4865,6 @@ function maybeResolveStartupLoading(reason = "") {
   if (!mapReady) return;
   if (!startupGpsPriorityResolved) return;
   if (!startupInitialCameraLocked) return;
-  setStartupMapCanvasVisibility(true);
   hideStartupLoadingOverlay(reason || "startup-ready");
   emitStartupCameraLocked(startupCameraLockReason || reason || "startup-ready");
 }
@@ -4936,7 +4929,7 @@ setNavDestination(null);
 
   const loading = getMapLoadingEl();
   if (loading) loading.style.display = "flex";
-  setStartupMapCanvasVisibility(false);
+  setStartupMapCanvasVisibility(true);
   if (timeLabel && !startupTimelineReady) {
     timeLabel.textContent = "Showing Team Joseo Score loading…";
   }
