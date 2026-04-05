@@ -32,9 +32,10 @@ const PRESENCE_BOOST_WINDOW_MS = 25 * 1000;
 const PRESENCE_ACCURACY_THRESHOLD = 120;
 const PICKUP_RECENT_LIMIT = 30;
 const PICKUP_ZONE_SAMPLE_LIMIT = 100;
-const PICKUP_REFRESH_DEBOUNCE_MS = 350;
-const PICKUP_FETCH_COOLDOWN_MS = 1200;
-const PICKUP_POLL_MS = 30 * 1000;
+const PICKUP_REFRESH_DEBOUNCE_MS = 120;
+const PICKUP_FETCH_COOLDOWN_MS = 500;
+const PICKUP_POLL_MS = 12 * 1000;
+const PICKUP_LAST_GOOD_OVERLAY_GRACE_MS = 15000;
 const PICKUP_MICRO_HOTSPOT_MIN_ZOOM = 10.2;
 const PRESENCE_VIEWPORT_BUFFER_RATIO = 0.18;
 const PRESENCE_VIEWPORT_MIN_BUFFER_DEG = 0.01;
@@ -67,6 +68,10 @@ let lastPickupFetchMs = 0;
 let lastPickupFetchKey = "";
 let lastPickupViewportKey = "";
 let lastPickupViewportGateKey = "";
+let lastGoodZoneHotspotsFc = emptyGeojson();
+let lastGoodMicroHotspotsFc = emptyGeojson();
+let lastGoodZoneStats = [];
+let lastGoodHotspotOverlaySavedAtMs = 0;
 let pickupHotspotZoneIds = new Set();
 let pickupPointsSourceFingerprint = "";
 let pickupHotspotsSourceFingerprint = "";
@@ -104,6 +109,7 @@ function clearPickupOverlayCache() {
   pickupRefreshInFlight = false;
   pickupRefreshQueued = false;
   pickupRefreshQueuedForce = false;
+  clearLastGoodHotspotOverlay();
   emitPickupHotspotZoneShieldUpdate();
 }
 
@@ -423,6 +429,55 @@ function pickupPointsFingerprintFromFeatures(fc) {
   return rows.join(";;");
 }
 
+function cloneFeatureCollection(fc) {
+  const features = Array.isArray(fc?.features) ? fc.features : [];
+  return {
+    type: "FeatureCollection",
+    features: features.map((feat) => ({
+      type: "Feature",
+      geometry: feat?.geometry
+        ? {
+          type: feat.geometry.type,
+          coordinates: Array.isArray(feat.geometry.coordinates)
+            ? JSON.parse(JSON.stringify(feat.geometry.coordinates))
+            : feat.geometry.coordinates,
+        }
+        : null,
+      properties: (feat?.properties && typeof feat.properties === "object")
+        ? { ...feat.properties }
+        : {},
+    })),
+  };
+}
+
+function hasVisibleHotspotOverlay(zoneHotspots, microHotspots) {
+  const zoneCount = Array.isArray(zoneHotspots?.features) ? zoneHotspots.features.length : 0;
+  if (zoneCount > 0) return true;
+  const microCount = Array.isArray(microHotspots?.features) ? microHotspots.features.length : 0;
+  return microCount > 0;
+}
+
+function saveLastGoodHotspotOverlay(zoneHotspots, microHotspots, zoneStats) {
+  lastGoodZoneHotspotsFc = cloneFeatureCollection(zoneHotspots);
+  lastGoodMicroHotspotsFc = cloneFeatureCollection(microHotspots);
+  lastGoodZoneStats = Array.isArray(zoneStats)
+    ? zoneStats.map((row) => ((row && typeof row === "object") ? { ...row } : row))
+    : [];
+  lastGoodHotspotOverlaySavedAtMs = Date.now();
+}
+
+function getLastGoodHotspotOverlayAgeMs() {
+  if (!lastGoodHotspotOverlaySavedAtMs) return Infinity;
+  return Math.max(0, Date.now() - lastGoodHotspotOverlaySavedAtMs);
+}
+
+function clearLastGoodHotspotOverlay() {
+  lastGoodZoneHotspotsFc = emptyGeojson();
+  lastGoodMicroHotspotsFc = emptyGeojson();
+  lastGoodZoneStats = [];
+  lastGoodHotspotOverlaySavedAtMs = 0;
+}
+
 function setPickupOverlayData(fc, items = [], zoneStats = [], zoneHotspots = emptyGeojson(), microHotspots = emptyGeojson()) {
   pickupZoneStats = new Map();
   pickupHotspotZoneIds = new Set();
@@ -584,6 +639,7 @@ function setPickupOverlayData(fc, items = [], zoneStats = [], zoneHotspots = emp
 }
 
 function clearPickupOverlay() {
+  clearLastGoodHotspotOverlay();
   setPickupOverlayData(emptyGeojson(), [], [], emptyGeojson(), emptyGeojson());
 }
 
@@ -1627,12 +1683,14 @@ async function refreshPickupOverlay({ force = false } = {}) {
   lastPickupFetchMs = now;
 
   try {
+    let usedLastGoodHotspotOverlayFallback = false;
+    let lastGoodHotspotOverlayAgeMs = getLastGoodHotspotOverlayAgeMs();
     const data = await getJSONAuth(path, communityToken, { signal: pickupOverlayAbortController.signal });
     if (requestSerial < appliedPickupRequestSerial) return;
     frontendPerfStats.pickupFetchesCompleted += 1;
     const items = Array.isArray(data) ? data : data?.items || [];
-    const zoneStats = Array.isArray(data?.zone_stats) ? data.zone_stats : [];
-    const zoneHotspots = (data?.zone_hotspots && data.zone_hotspots.type === "FeatureCollection" && Array.isArray(data.zone_hotspots.features))
+    let zoneStats = Array.isArray(data?.zone_stats) ? data.zone_stats : [];
+    let zoneHotspots = (data?.zone_hotspots && data.zone_hotspots.type === "FeatureCollection" && Array.isArray(data.zone_hotspots.features))
       ? data.zone_hotspots
       : emptyGeojson();
     const hotspotPolygonZoneIds = new Set();
@@ -1653,12 +1711,40 @@ async function refreshPickupOverlay({ force = false } = {}) {
       ].join("|");
       if (!mergedMicroByKey.has(key)) mergedMicroByKey.set(key, feat);
     }
-    const microHotspots = { type: "FeatureCollection", features: Array.from(mergedMicroByKey.values()) };
+    let microHotspots = { type: "FeatureCollection", features: Array.from(mergedMicroByKey.values()) };
+    if (hasVisibleHotspotOverlay(zoneHotspots, microHotspots)) {
+      saveLastGoodHotspotOverlay(zoneHotspots, microHotspots, zoneStats);
+      lastGoodHotspotOverlayAgeMs = 0;
+    }
+    const currentOverlayEmpty = !hasVisibleHotspotOverlay(zoneHotspots, microHotspots);
+    const hasPickupContext = (Array.isArray(items) && items.length > 0) || (Array.isArray(zoneStats) && zoneStats.length > 0);
+    lastGoodHotspotOverlayAgeMs = getLastGoodHotspotOverlayAgeMs();
+    if (
+      currentOverlayEmpty &&
+      hasPickupContext &&
+      lastGoodHotspotOverlaySavedAtMs > 0 &&
+      lastGoodHotspotOverlayAgeMs <= PICKUP_LAST_GOOD_OVERLAY_GRACE_MS
+    ) {
+      zoneHotspots = cloneFeatureCollection(lastGoodZoneHotspotsFc);
+      microHotspots = cloneFeatureCollection(lastGoodMicroHotspotsFc);
+      if (!Array.isArray(zoneStats) || !zoneStats.length) {
+        zoneStats = Array.isArray(lastGoodZoneStats)
+          ? lastGoodZoneStats.map((row) => ((row && typeof row === "object") ? { ...row } : row))
+          : [];
+      }
+      usedLastGoodHotspotOverlayFallback = hasVisibleHotspotOverlay(zoneHotspots, microHotspots);
+    }
     const zoneHotspotCount = zoneHotspots?.features?.length ?? 0;
     const normalizedMicroHotspotCount = microHotspots?.features?.length ?? 0;
     const fc = buildPickupFeatureCollection(items);
     appliedPickupRequestSerial = requestSerial;
     setPickupOverlayData(fc, items, zoneStats, zoneHotspots, microHotspots);
+    window.__pickupDebug = {
+      ...(window.__pickupDebug || {}),
+      usedLastGoodHotspotOverlayFallback,
+      lastGoodHotspotOverlayAgeMs: Number.isFinite(lastGoodHotspotOverlayAgeMs) ? lastGoodHotspotOverlayAgeMs : null,
+      lastGoodHotspotOverlayGraceMs: PICKUP_LAST_GOOD_OVERLAY_GRACE_MS,
+    };
     const coveredZonesCount = window.__pickupDebug?.hotspotCoveredZoneIds?.length ?? 0;
     const visibleDotsCount = window.__pickupDebug?.visiblePickupDotCount ?? 0;
     console.log(
@@ -1674,6 +1760,12 @@ async function refreshPickupOverlay({ force = false } = {}) {
       clearAuth();
       return;
     }
+    window.__pickupDebug = {
+      ...(window.__pickupDebug || {}),
+      usedLastGoodHotspotOverlayFallback: false,
+      lastGoodHotspotOverlayAgeMs: Number.isFinite(getLastGoodHotspotOverlayAgeMs()) ? getLastGoodHotspotOverlayAgeMs() : null,
+      lastGoodHotspotOverlayGraceMs: PICKUP_LAST_GOOD_OVERLAY_GRACE_MS,
+    };
     console.warn(`/events/pickups/recent failed (${path}):`, e);
   } finally {
     const endedAt = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
@@ -1692,10 +1784,14 @@ async function refreshPickupOverlay({ force = false } = {}) {
 }
 
 function schedulePickupOverlayRefresh({ force = false } = {}) {
+  let viewportGateChanged = false;
   if (!force) {
     const nextViewportGateKey = getPrecisePickupViewportGateKey();
     if (nextViewportGateKey && nextViewportGateKey === lastPickupViewportGateKey) return;
-    if (nextViewportGateKey) lastPickupViewportGateKey = nextViewportGateKey;
+    if (nextViewportGateKey) {
+      viewportGateChanged = true;
+      lastPickupViewportGateKey = nextViewportGateKey;
+    }
   }
   if (runtimePolling) runtimePolling.clear("app:pickup-refresh");
   if (pickupRefreshTimer) clearTimeout(pickupRefreshTimer);
@@ -1704,10 +1800,12 @@ function schedulePickupOverlayRefresh({ force = false } = {}) {
     refreshPickupOverlay({ force }).catch((e) => console.warn("/events/pickups/recent refresh scheduler failed:", e));
   };
   if (runtimePolling) {
-    pickupRefreshTimer = runtimePolling.setTimeout("app:pickup-refresh", runner, force ? 0 : PICKUP_REFRESH_DEBOUNCE_MS);
+    const delay = force ? 0 : (viewportGateChanged ? 80 : PICKUP_REFRESH_DEBOUNCE_MS);
+    pickupRefreshTimer = runtimePolling.setTimeout("app:pickup-refresh", runner, delay);
     return;
   }
-  pickupRefreshTimer = setTimeout(runner, force ? 0 : PICKUP_REFRESH_DEBOUNCE_MS);
+  const delay = force ? 0 : (viewportGateChanged ? 80 : PICKUP_REFRESH_DEBOUNCE_MS);
+  pickupRefreshTimer = setTimeout(runner, delay);
 }
 
 function clearPickupPollTimer() {
