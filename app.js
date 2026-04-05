@@ -223,21 +223,84 @@ function minuteOfWeekFromIso(iso) {
   const dow_m = dowMon0FromIso(iso);
   return dow_m * 1440 + (h * 60 + m);
 }
+const NYC_TIMEZONE = "America/New_York";
+function getTimeZoneOffsetMs(epochMs, timeZone) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date(epochMs));
+  const mapped = {};
+  for (const p of parts) mapped[p.type] = p.value;
+  const asUtc = Date.UTC(
+    Number(mapped.year),
+    Number(mapped.month) - 1,
+    Number(mapped.day),
+    Number(mapped.hour),
+    Number(mapped.minute),
+    Number(mapped.second)
+  );
+  return asUtc - epochMs;
+}
+function nycLocalToEpochMs({ Y, M, D, h, m, s }) {
+  let guess = Date.UTC(Y, M - 1, D, h, m, s || 0);
+  for (let i = 0; i < 4; i += 1) {
+    const offset = getTimeZoneOffsetMs(guess, NYC_TIMEZONE);
+    guess = Date.UTC(Y, M - 1, D, h, m, s || 0) - offset;
+  }
+  return guess;
+}
+function timelineIsoToEpochMs(iso) {
+  const text = String(iso || "");
+  if (!text) return NaN;
+  if (/[zZ]|[+\-]\d{2}:?\d{2}$/.test(text)) {
+    const parsed = Date.parse(text);
+    return Number.isFinite(parsed) ? parsed : NaN;
+  }
+  try {
+    const parts = parseIsoNoTz(text);
+    return nycLocalToEpochMs(parts);
+  } catch (_) {
+    const parsed = Date.parse(text);
+    return Number.isFinite(parsed) ? parsed : NaN;
+  }
+}
+function pickClosestTimelineIndexByEpoch(frameEpochs, targetEpochMs) {
+  if (!Array.isArray(frameEpochs) || frameEpochs.length === 0) return 0;
+  if (!Number.isFinite(targetEpochMs)) return 0;
+  let bestIdx = 0;
+  let bestDiff = Infinity;
+  for (let i = 0; i < frameEpochs.length; i += 1) {
+    const ts = Number(frameEpochs[i]);
+    if (!Number.isFinite(ts)) continue;
+    const diff = Math.abs(ts - targetEpochMs);
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      bestIdx = i;
+    }
+  }
+  return bestIdx;
+}
 function formatNYCLabel(iso) {
-  const { h, m } = parseIsoNoTz(iso);
-  const dow_m = dowMon0FromIso(iso);
-  const names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-  const hr12 = ((h + 11) % 12) + 1;
-  const ampm = h >= 12 ? "PM" : "AM";
-  const mm = String(m).padStart(2, "0");
-  return `${names[dow_m]} ${hr12}:${mm} ${ampm}`;
+  const epochMs = timelineIsoToEpochMs(iso);
+  if (!Number.isFinite(epochMs)) return String(iso || "");
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: NYC_TIMEZONE,
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).format(new Date(epochMs));
 }
 function formatNYCTimeOnlyLabel(iso) {
-  const { h, m } = parseIsoNoTz(iso);
-  const hr12 = ((h + 11) % 12) + 1;
-  const ampm = h >= 12 ? "PM" : "AM";
-  const mm = String(m).padStart(2, "0");
-  return `${hr12}:${mm} ${ampm}`;
+  return formatNYCLabel(iso);
 }
 function getNowNYCMinuteOfWeekRounded() {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -1957,7 +2020,7 @@ function wireZoneClickPopup() {
    Timeline / frames
    ========================================================= */
 let timeline = [];
-let minutesOfWeek = [];
+let timelineEpochMs = [];
 let currentFrame = null;
 let lastUserSliderTs = 0;
 
@@ -3089,7 +3152,7 @@ async function renderFrame(frame, options = {}) {
   if (debugEnabled) dbg("dbgFit", didFitToZonesOnce);
 
   if (timeLabel && currentFrame?.time) {
-    timeLabel.textContent = `Showing Team Joseo Score At ${formatNYCTimeOnlyLabel(currentFrame.time)}`;
+    timeLabel.textContent = `Showing Team Joseo Score At ${formatNYCLabel(currentFrame.time)}`;
   }
   if (!skipRecommendationUpdate) updateRecommendation(currentFrame);
   markFirstUsableMap("frame rendered");
@@ -3178,14 +3241,13 @@ async function loadTimeline({ force = false } = {}) {
 
     if (debugEnabled) dbg("dbgTimeline", `OK ${timelineUrl} count=${timeline.length}`);
 
-    minutesOfWeek = timeline.map(minuteOfWeekFromIso);
+    timelineEpochMs = timeline.map(timelineIsoToEpochMs);
 
     slider.min = "0";
     slider.max = String(timeline.length - 1);
     slider.step = "1";
 
-    const targetMinWeek = getNextBinNowNYCMinuteOfWeek();
-    const idx = pickClosestIndex(minutesOfWeek, targetMinWeek);
+    const idx = pickClosestTimelineIndexByEpoch(timelineEpochMs, Date.now());
     slider.value = String(idx);
     startupInitialFrameIndex = idx;
 
@@ -4012,10 +4074,9 @@ async function tickNYCClockAndAdvanceIfNeeded() {
   try {
     if (document.hidden) return;
     if (Date.now() - lastUserSliderTs < USER_SLIDER_GRACE_MS) return;
-    if (!timeline.length || !minutesOfWeek.length) return;
+    if (!timeline.length || !timelineEpochMs.length) return;
 
-    const targetMinWeek = getNextBinNowNYCMinuteOfWeek();
-    const bestIdx = pickClosestIndex(minutesOfWeek, targetMinWeek);
+    const bestIdx = pickClosestTimelineIndexByEpoch(timelineEpochMs, Date.now());
 
     const curIdx = Number(slider.value || "0");
     if (bestIdx === curIdx) return;
