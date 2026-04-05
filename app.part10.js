@@ -89,21 +89,17 @@ let appliedPresenceRequestSerial = 0;
 let pendingStartupPickupFetch = false;
 let pendingStartupPresenceFetch = false;
 
-function startupViewportReadyNow() {
-  return !!core.isStartupViewportReady?.();
+function startupCameraLockedNow() {
+  return !!core.isStartupCameraLocked?.();
 }
 
-function startupVisibleFetchReleasedNow() {
-  return !!core.hasStartupVisibleViewportFetchReleased?.();
-}
-
-function flushStartupViewportDeferredFetches(reason = "startup-viewport-ready") {
+function flushStartupCameraDeferredFetches(reason = "startup-camera-locked") {
   if (!authHeaderOK()) {
     pendingStartupPresenceFetch = false;
     pendingStartupPickupFetch = false;
     return;
   }
-  if (!startupViewportReadyNow() || !startupVisibleFetchReleasedNow()) return;
+  if (!startupCameraLockedNow()) return;
   const shouldFlushPresence = pendingStartupPresenceFetch;
   const shouldFlushPickup = pendingStartupPickupFetch;
   pendingStartupPresenceFetch = false;
@@ -2246,9 +2242,9 @@ function setAuthUI(signedIn, note) {
   }
 
   if (signedIn) {
-    if (startupViewportReadyNow() && startupVisibleFetchReleasedNow()) {
+    if (startupCameraLockedNow()) {
       notePresenceBoost();
-      schedulePresencePoll({ immediate: true, reason: "startup-visible-ready" });
+      schedulePresencePoll({ immediate: true, reason: "startup-camera-locked" });
       schedulePickupPoll({ immediate: true });
     } else {
       pendingStartupPresenceFetch = true;
@@ -3605,11 +3601,8 @@ if (typeof document !== "undefined") {
 }
 
 if (typeof window !== "undefined") {
-  window.addEventListener("team-joseo-startup-viewport-ready", () => {
-    flushStartupViewportDeferredFetches("startup-viewport-ready");
-  });
-  window.addEventListener("team-joseo-startup-visible-fetch-released", () => {
-    flushStartupViewportDeferredFetches("startup-visible-fetch-released");
+  window.addEventListener("team-joseo-startup-camera-locked", () => {
+    flushStartupCameraDeferredFetches("startup-camera-locked");
   });
 }
 
