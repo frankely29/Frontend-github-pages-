@@ -323,9 +323,11 @@ function getNYCPartsFromEpochMs(epochMs) {
   const minute = Number(mapped.minute);
   const second = Number(mapped.second);
   const weekdayShort = String(mapped.weekday || "");
-  const binMinuteOfDay = Math.floor((hour * 60 + minute) / BIN_MINUTES) * BIN_MINUTES;
+  const minuteOfDay = hour * 60 + minute;
+  const binMinuteOfDay = Math.floor(minuteOfDay / BIN_MINUTES) * BIN_MINUTES;
   const mm = String(month).padStart(2, "0");
   const dd = String(day).padStart(2, "0");
+  const monthKey = `${String(year).padStart(4, "0")}-${mm}`;
   const monthDayKey = `${mm}-${dd}`;
   const monthDayBinKey = `${monthDayKey}|${binMinuteOfDay}`;
   return {
@@ -336,7 +338,9 @@ function getNYCPartsFromEpochMs(epochMs) {
     minute,
     second,
     weekdayShort,
+    minuteOfDay,
     binMinuteOfDay,
+    monthKey,
     monthDayKey,
     monthDayBinKey,
   };
@@ -360,7 +364,9 @@ function buildTimelineCalendarMeta(timelineInput, timelineEpochsInput) {
       year: nyc.year,
       month: nyc.month,
       day: nyc.day,
+      minuteOfDay: nyc.minuteOfDay,
       binMinuteOfDay: nyc.binMinuteOfDay,
+      monthKey: nyc.monthKey,
       monthDayKey: nyc.monthDayKey,
       monthDayBinKey: nyc.monthDayBinKey,
     });
