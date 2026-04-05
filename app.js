@@ -96,6 +96,8 @@ let startupFirstGoodGpsFix = false;
 let startupTimelineReady = false;
 let startupLoadingForceHidden = false;
 let startupViewportReadyEmitted = false;
+let startupLocalZoomDone = false;
+let startupVisibleViewportFetchReleased = false;
 let startupGpsPriorityTimer = null;
 
 const LS_TOKEN = "community_token_v1";
@@ -3788,6 +3790,9 @@ function startLocationWatch() {
           duration: 700,
           essential: true,
         }));
+        map.once("moveend", () => {
+          markStartupLocalZoomDone("first-good-gps-local-zoom");
+        });
         lastMapBearingDeg = targetBearing;
         lastRotateTs = Date.now();
       } else if (autoCenter && map) {
@@ -4757,9 +4762,10 @@ window.TlcCommunityInternals = {
   getMapPageVisible: () => mapPageIsVisible,
   getPresenceBoostUntil: () => lastPresenceInteractionBoostUntil,
   setPresenceBoostUntil: (value) => { lastPresenceInteractionBoostUntil = Number(value) || 0; },
-  isStartupViewportReady: () => startupLoadingForceHidden || (mapReady && startupGpsPriorityResolved),
+  isStartupViewportReady: () => !!(mapReady && startupGpsPriorityResolved && startupLocalZoomDone),
   hasStartupFirstGoodGpsFix: () => !!startupFirstGoodGpsFix,
   isStartupTimelineReady: () => !!startupTimelineReady,
+  hasStartupVisibleViewportFetchReleased: () => !!startupVisibleViewportFetchReleased,
   waitForStyleReady,
   emptyGeojson,
   geometryCenter,
@@ -4799,9 +4805,26 @@ function emitStartupViewportReady(reason = "") {
     detail: {
       reason,
       hasLiveGps: !!startupFirstGoodGpsFix,
+      mapReady: !!mapReady,
+      localZoomDone: !!startupLocalZoomDone,
       timelineReady: !!startupTimelineReady,
     },
   }));
+}
+
+function markStartupVisibleViewportFetchReleased(reason = "") {
+  if (startupVisibleViewportFetchReleased) return;
+  startupVisibleViewportFetchReleased = true;
+  if (typeof window === "undefined" || typeof window.dispatchEvent !== "function") return;
+  window.dispatchEvent(new CustomEvent("team-joseo-startup-visible-fetch-released", {
+    detail: { reason: String(reason || "") },
+  }));
+}
+
+function markStartupLocalZoomDone(reason = "") {
+  if (startupLocalZoomDone) return;
+  startupLocalZoomDone = true;
+  maybeResolveStartupLoading(reason || "startup-local-zoom-done");
 }
 
 function hideStartupLoadingOverlay(reason = "") {
@@ -4811,12 +4834,14 @@ function hideStartupLoadingOverlay(reason = "") {
   if (loading) loading.style.display = "none";
   if (reason) recordPerfMetric("dbgBlankMap", `startup overlay hidden: ${reason}`);
   emitStartupViewportReady(reason || "startup-ready");
+  markStartupVisibleViewportFetchReleased(reason || "startup-ready");
 }
 
 function maybeResolveStartupLoading(reason = "") {
   if (startupLoadingForceHidden) return;
   if (!mapReady) return;
   if (!startupGpsPriorityResolved) return;
+  if (!startupLocalZoomDone) return;
   hideStartupLoadingOverlay(reason || "startup-ready");
 }
 
@@ -4897,22 +4922,43 @@ setNavDestination(null);
     startupGpsPriorityResolved = true;
     startupGpsPriorityTimer = null;
     if (map && mapReady && typeof map.getZoom === "function" && map.getZoom() < STARTUP_FALLBACK_ZOOM) {
+      map.once("moveend", () => {
+        markStartupLocalZoomDone("gps-timeout-fallback-zoom");
+      });
       map.easeTo({
         zoom: STARTUP_FALLBACK_ZOOM,
         duration: 350,
         essential: true,
       });
+    } else if (map && !mapReady) {
+      map.once("load", () => {
+        markStartupLocalZoomDone("gps-timeout-map-load-fallback");
+      });
+    } else {
+      markStartupLocalZoomDone("gps-timeout-fallback-confirmed");
     }
     maybeResolveStartupLoading("gps-timeout");
   }, STARTUP_GPS_PRIORITY_TIMEOUT_MS);
-  loadTimeline()
-    .then(() => {
-      startupTimelineReady = true;
-    })
-    .catch((err) => {
-      console.error("timeline load failed during boot:", err);
-      if (timeLabel) timeLabel.textContent = `Error: ${err?.message || err}`;
-    });
+  let startupTimelineBootStarted = false;
+  const startTimelineBoot = () => {
+    if (startupTimelineBootStarted) return;
+    startupTimelineBootStarted = true;
+    loadTimeline()
+      .then(() => {
+        startupTimelineReady = true;
+      })
+      .catch((err) => {
+        console.error("timeline load failed during boot:", err);
+        if (timeLabel) timeLabel.textContent = `Error: ${err?.message || err}`;
+      });
+  };
+  if (mapReady && startupGpsPriorityResolved && startupLocalZoomDone) {
+    startTimelineBoot();
+  } else if (typeof window !== "undefined") {
+    window.addEventListener("team-joseo-startup-viewport-ready", () => {
+      startTimelineBoot();
+    }, { once: true });
+  }
 
   // Community/auth bootstrap moved to app.part10.js
 

@@ -93,12 +93,17 @@ function startupViewportReadyNow() {
   return !!core.isStartupViewportReady?.();
 }
 
+function startupVisibleFetchReleasedNow() {
+  return !!core.hasStartupVisibleViewportFetchReleased?.();
+}
+
 function flushStartupViewportDeferredFetches(reason = "startup-viewport-ready") {
   if (!authHeaderOK()) {
     pendingStartupPresenceFetch = false;
     pendingStartupPickupFetch = false;
     return;
   }
+  if (!startupViewportReadyNow() || !startupVisibleFetchReleasedNow()) return;
   const shouldFlushPresence = pendingStartupPresenceFetch;
   const shouldFlushPickup = pendingStartupPickupFetch;
   pendingStartupPresenceFetch = false;
@@ -2241,9 +2246,9 @@ function setAuthUI(signedIn, note) {
   }
 
   if (signedIn) {
-    if (startupViewportReadyNow()) {
+    if (startupViewportReadyNow() && startupVisibleFetchReleasedNow()) {
       notePresenceBoost();
-      schedulePresencePoll({ immediate: true });
+      schedulePresencePoll({ immediate: true, reason: "startup-visible-ready" });
       schedulePickupPoll({ immediate: true });
     } else {
       pendingStartupPresenceFetch = true;
@@ -3602,6 +3607,9 @@ if (typeof document !== "undefined") {
 if (typeof window !== "undefined") {
   window.addEventListener("team-joseo-startup-viewport-ready", () => {
     flushStartupViewportDeferredFetches("startup-viewport-ready");
+  });
+  window.addEventListener("team-joseo-startup-visible-fetch-released", () => {
+    flushStartupViewportDeferredFetches("startup-visible-fetch-released");
   });
 }
 
