@@ -207,9 +207,27 @@ if (legendEl && legendToggleBtn) {
    Time helpers
    ========================================================= */
 function parseIsoNoTz(iso) {
-  const [d, t] = iso.split("T");
-  const [Y, M, D] = d.split("-").map(Number);
-  const [h, m, s] = t.split(":").map(Number);
+  const raw = String(iso ?? "").trim();
+  const match = raw.match(
+    /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+\-]\d{2}:?\d{2})?$/i
+  );
+  if (!match) {
+    throw new Error(`Failed to parse timestamp: "${iso}"`);
+  }
+  const [, yStr, moStr, dStr, hStr, miStr, sStr] = match;
+  const Y = Number(yStr);
+  const M = Number(moStr);
+  const D = Number(dStr);
+  const h = Number(hStr);
+  const m = Number(miStr);
+  const s = Number(sStr);
+  if (
+    !Number.isFinite(Y) || !Number.isFinite(M) || !Number.isFinite(D) ||
+    !Number.isFinite(h) || !Number.isFinite(m) || !Number.isFinite(s) ||
+    M < 1 || M > 12 || D < 1 || D > 31 || h < 0 || h > 23 || m < 0 || m > 59 || s < 0 || s > 59
+  ) {
+    throw new Error(`Failed to parse timestamp: "${iso}"`);
+  }
   return { Y, M, D, h, m, s };
 }
 function dowMon0FromIso(iso) {
@@ -3498,6 +3516,26 @@ async function loadTimeline({ force = false } = {}) {
     if (!timeline.length) throw new Error("Timeline is temporarily unavailable. Retrying shortly.");
 
     if (debugEnabled) dbg("dbgTimeline", `OK ${timelineUrl} count=${timeline.length}`);
+
+    try {
+      timeline.map(minuteOfWeekFromIso);
+    } catch (err) {
+      let firstBadTimelineEntry = null;
+      for (const entry of timeline) {
+        try {
+          minuteOfWeekFromIso(entry);
+        } catch (_) {
+          firstBadTimelineEntry = entry;
+          break;
+        }
+      }
+      console.error(
+        "[timeline] Failed to parse timeline entry for minute-of-week calculation.",
+        { firstBadTimelineEntry, totalEntries: timeline.length },
+        err
+      );
+      throw err;
+    }
 
     timelineEpochMs = timeline.map(timelineIsoToEpochMs);
     timelineCalendarMeta = buildTimelineCalendarMeta(timeline, timelineEpochMs);
