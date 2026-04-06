@@ -207,12 +207,14 @@ if (legendEl && legendToggleBtn) {
    Time helpers
    ========================================================= */
 function parseIsoNoTz(iso) {
-  const raw = String(iso ?? "").trim();
-  const match = raw.match(
-    /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+\-]\d{2}:?\d{2})?$/i
-  );
+  const rawInput = String(iso ?? "");
+  const trimmed = rawInput.trim();
+  const normalizedSeparator = trimmed.replace(/^(\d{4}-\d{2}-\d{2})\s+/, "$1T");
+  const withoutTimezone = normalizedSeparator.replace(/(?:Z|[+\-]\d{2}:?\d{2})$/i, "");
+  const normalized = withoutTimezone.replace(/\.\d+$/, "");
+  const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})$/);
   if (!match) {
-    throw new Error(`Failed to parse timestamp: "${iso}"`);
+    throw new Error(`Failed to parse timestamp "${rawInput}" (normalized="${normalized}")`);
   }
   const [, yStr, moStr, dStr, hStr, miStr, sStr] = match;
   const Y = Number(yStr);
@@ -226,7 +228,7 @@ function parseIsoNoTz(iso) {
     !Number.isFinite(h) || !Number.isFinite(m) || !Number.isFinite(s) ||
     M < 1 || M > 12 || D < 1 || D > 31 || h < 0 || h > 23 || m < 0 || m > 59 || s < 0 || s > 59
   ) {
-    throw new Error(`Failed to parse timestamp: "${iso}"`);
+    throw new Error(`Failed to parse timestamp "${rawInput}" (normalized="${normalized}")`);
   }
   return { Y, M, D, h, m, s };
 }
@@ -3534,7 +3536,10 @@ async function loadTimeline({ force = false } = {}) {
         { firstBadTimelineEntry, totalEntries: timeline.length },
         err
       );
-      throw err;
+      throw new Error(
+        `[timeline] Invalid timeline timestamp entry: "${firstBadTimelineEntry ?? "unknown"}"`,
+        { cause: err }
+      );
     }
 
     timelineEpochMs = timeline.map(timelineIsoToEpochMs);
