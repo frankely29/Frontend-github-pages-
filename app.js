@@ -2134,6 +2134,8 @@ let timelineAvailableMonthKeys = [];
 let timelineScope = "";
 let timelinePreparingState = null;
 let timelinePrepareRetryTimer = null;
+let framePrepareRetryTimer = null;
+let framePrepareRetryIdx = null;
 const TIMELINE_PREPARE_DEFAULT_RETRY_MS = 3000;
 let currentFrame = null;
 let lastUserSliderTs = 0;
@@ -2241,7 +2243,16 @@ async function fetchViewportFrameData(idx, { force = false } = {}) {
   const path = buildViewportFramePathWithMonthKey(idx);
   if (!path) return null;
   try {
-    return await fetchJSON(`${RAILWAY_BASE}${path}`, { cache: force ? "reload" : undefined });
+    const payload = await fetchJSON(`${RAILWAY_BASE}${path}`, { cache: force ? "reload" : undefined });
+    if (isPreparingMonthPayload(payload)) {
+      applyTimelinePreparingUi(payload);
+      const retryMs = Number(payload?.retry_after_sec) > 0
+        ? Number(payload.retry_after_sec) * 1000
+        : TIMELINE_PREPARE_DEFAULT_RETRY_MS;
+      scheduleFramePrepareRetry(idx, retryMs);
+      return currentFrame || payload;
+    }
+    return payload;
   } catch (_) {
     return null;
   }
@@ -3310,7 +3321,10 @@ async function loadFrame(idx, { force = false } = {}) {
     const retryMs = Number(frame?.retry_after_sec) > 0
       ? Number(frame.retry_after_sec) * 1000
       : TIMELINE_PREPARE_DEFAULT_RETRY_MS;
-    scheduleTimelinePrepareRetry(retryMs);
+    scheduleFramePrepareRetry(normalizedIdx, retryMs);
+    if (String(frame?.status || "") === "preparing_month") {
+      scheduleTimelinePrepareRetry(retryMs);
+    }
     if (pendingFrameLoad?.idx === normalizedIdx) pendingFrameLoad = null;
     return currentFrame || null;
   }
@@ -3322,6 +3336,7 @@ async function loadFrame(idx, { force = false } = {}) {
   }
 
   await renderFrame(frame);
+  clearFramePrepareRetryTimer();
   if (pendingFrameLoad?.idx === normalizedIdx) pendingFrameLoad = null;
   lastRenderedFrameIndex = normalizedIdx;
   for (let delta = 1; delta <= FRAME_PREFETCH_DISTANCE; delta += 1) {
@@ -3370,12 +3385,24 @@ function formatMonthKeyForUi(monthKey) {
 }
 
 function isPreparingMonthPayload(payload) {
-  return !!(payload && typeof payload === "object" && payload.status === "preparing_month" && payload.target_month_key);
+  if (!payload || typeof payload !== "object") return false;
+  const status = String(payload.status || "");
+  if (status === "preparing_frame") return true;
+  if (status === "preparing_month") {
+    return !!(payload.target_month_key || payload.target_month_label);
+  }
+  return false;
 }
 
 function clearTimelinePrepareRetryTimer() {
   if (timelinePrepareRetryTimer) clearTimeout(timelinePrepareRetryTimer);
   timelinePrepareRetryTimer = null;
+}
+
+function clearFramePrepareRetryTimer() {
+  if (framePrepareRetryTimer) clearTimeout(framePrepareRetryTimer);
+  framePrepareRetryTimer = null;
+  framePrepareRetryIdx = null;
 }
 
 function scheduleTimelinePrepareRetry(delayMs = TIMELINE_PREPARE_DEFAULT_RETRY_MS) {
@@ -3389,10 +3416,31 @@ function scheduleTimelinePrepareRetry(delayMs = TIMELINE_PREPARE_DEFAULT_RETRY_M
   }, retryMs);
 }
 
+function scheduleFramePrepareRetry(idx, delayMs = TIMELINE_PREPARE_DEFAULT_RETRY_MS) {
+  const normalizedIdx = Math.max(0, Number(idx) || 0);
+  if (framePrepareRetryTimer && framePrepareRetryIdx === normalizedIdx) return;
+  clearFramePrepareRetryTimer();
+  const retryMs = Math.max(250, Number(delayMs) || TIMELINE_PREPARE_DEFAULT_RETRY_MS);
+  framePrepareRetryIdx = normalizedIdx;
+  framePrepareRetryTimer = setTimeout(() => {
+    framePrepareRetryTimer = null;
+    framePrepareRetryIdx = null;
+    void loadFrame(normalizedIdx, { force: true }).catch((err) => {
+      console.warn("frame prepare retry failed:", err);
+    });
+  }, retryMs);
+}
+
 function applyTimelinePreparingUi(payload) {
   timelinePreparingState = payload;
   const targetMonthKey = String(payload?.target_month_key || "");
   const label = String(payload?.target_month_label || "").trim() || formatMonthKeyForUi(targetMonthKey);
+  const status = String(payload?.status || "");
+  if (status === "preparing_frame") {
+    if (timeLabel) timeLabel.textContent = `Preparing ${label} frame…`;
+    if (recommendEl) recommendEl.textContent = "Monitor • Preparing frame";
+    return;
+  }
   if (timeLabel) timeLabel.textContent = `Preparing ${label} historical data…`;
   if (recommendEl) recommendEl.textContent = "Monitor • Preparing historical month";
 }
