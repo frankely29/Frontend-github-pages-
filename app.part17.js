@@ -231,6 +231,22 @@
     outlookStatus: "idle",
     outlookLastErrorCode: "",
     outlookLastErrorMessage: "",
+    guidanceStatus: "idle",
+    guidanceCache: new Map(),
+    guidanceInFlightKey: "",
+    guidanceInFlightPromise: null,
+    guidanceAbortController: null,
+    guidanceLastErrorCode: "",
+    guidanceLastErrorMessage: "",
+    serverGuidance: null,
+    serverGuidanceUpdatedAt: 0,
+    guidanceSource: "local",
+    lastGuidanceRequestKey: "",
+    lastSuccessfulGuidanceKey: "",
+    lastSuccessfulGuidanceAt: 0,
+    guidanceEnrichRefreshKey: "",
+    lastGuidancePrimaryLine: "",
+    lastGuidanceSecondaryLine: "",
     lastSuccessfulOutlookKey: "",
     lastSuccessfulOutlookAt: 0,
     lastGoodRecommendationZoneId: "",
@@ -410,6 +426,33 @@
       tendency?.resolved_local_scope || tendency?.local_scope || "",
       tendency?.global_penalty_points ?? "",
       tendency?.local_penalty_points ?? "",
+    ].join("|");
+  }
+
+  function getAssistantGuidanceModeFlags() {
+    const flags = modeModule.getModeFlags?.() || {};
+    return {
+      statenIslandMode: !!flags.statenIslandMode,
+      bronxWashHeightsMode: !!flags.bronxWashHeightsMode,
+      queensMode: !!flags.queensMode,
+      brooklynMode: !!flags.brooklynMode,
+    };
+  }
+
+  function buildGuidanceCacheKey(frameTime, userLocation, modeFlags) {
+    if (!frameTime) return "";
+    const lat = safeNum(userLocation?.lat);
+    const lng = safeNum(userLocation?.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return "";
+    const flags = modeFlags || {};
+    return [
+      frameTime,
+      lat.toFixed(5),
+      lng.toFixed(5),
+      flags.statenIslandMode ? 1 : 0,
+      flags.bronxWashHeightsMode ? 1 : 0,
+      flags.queensMode ? 1 : 0,
+      flags.brooklynMode ? 1 : 0,
     ].join("|");
   }
 
@@ -1792,6 +1835,122 @@
     }
   }
 
+  function normalizeServerGuidance(payload) {
+    if (!payload || typeof payload !== "object") return null;
+    const actionRaw = String(payload.action || "").trim().toLowerCase();
+    const actionMap = {
+      hold: "HOLD",
+      micro_reposition: "MICRO_REPOSITION",
+      move_nearby: "MOVE_NEARBY",
+      wait_dispatch: "WAIT_DISPATCH",
+    };
+    const actionCode = actionMap[actionRaw] || "";
+    if (!actionCode) return null;
+    const targetZone = (payload.target_zone && typeof payload.target_zone === "object") ? payload.target_zone : null;
+    const currentZone = (payload.current_zone && typeof payload.current_zone === "object") ? payload.current_zone : null;
+    return {
+      actionCode,
+      confidence: safeNum(payload.confidence),
+      message: String(payload.message || "").trim(),
+      reasonCodes: Array.isArray(payload.reason_codes) ? payload.reason_codes.map((it) => String(it || "").trim()).filter(Boolean) : [],
+      currentZone: currentZone ? {
+        id: String(currentZone.id || currentZone.location_id || currentZone.locationId || "").trim(),
+        name: String(currentZone.name || currentZone.zone_name || currentZone.zoneName || "").trim(),
+      } : null,
+      targetZone: targetZone ? {
+        id: String(targetZone.id || targetZone.location_id || targetZone.locationId || "").trim(),
+        name: String(targetZone.name || targetZone.zone_name || targetZone.zoneName || "").trim(),
+        centerLat: safeNum(targetZone.center_lat ?? targetZone.centerLat ?? targetZone.lat),
+        centerLng: safeNum(targetZone.center_lng ?? targetZone.centerLng ?? targetZone.lng),
+      } : null,
+      triplessMinutes: safeNum(payload.tripless_minutes),
+      stationaryMinutes: safeNum(payload.stationary_minutes),
+      movementMinutes: safeNum(payload.movement_minutes),
+      dispatchUncertainty: safeNum(payload.dispatch_uncertainty),
+      moveCooldownUntilTs: safeNum(payload.move_cooldown_until_unix),
+      holdUntilTs: safeNum(payload.hold_until_unix),
+    };
+  }
+
+  async function fetchGuidance(frame, userLocation, modeFlags) {
+    const frameTime = frameTimeIso(frame);
+    const key = buildGuidanceCacheKey(frameTime, userLocation, modeFlags);
+    state.lastGuidanceRequestKey = key;
+    if (!frameTime || !key) return null;
+    if (state.guidanceCache.has(key)) {
+      state.guidanceStatus = "ready";
+      state.guidanceLastErrorCode = "";
+      state.guidanceLastErrorMessage = "";
+      return state.guidanceCache.get(key);
+    }
+    if (state.guidanceInFlightKey === key && state.guidanceInFlightPromise) return state.guidanceInFlightPromise;
+    if (state.guidanceInFlightPromise && state.guidanceInFlightKey && state.guidanceInFlightKey !== key && state.guidanceAbortController) {
+      state.guidanceAbortController.abort();
+    }
+    const ac = new AbortController();
+    state.guidanceAbortController = ac;
+    state.guidanceInFlightKey = key;
+    state.guidanceStatus = "loading";
+    state.guidanceLastErrorCode = "";
+    state.guidanceLastErrorMessage = "";
+    const apiBase = String(window.API_BASE || window.__TLC_RUNTIME_CONFIG__?.apiBase || "").trim().replace(/\/+$/, "");
+    const params = new URLSearchParams({
+      frame_time: frameTime,
+      lat: String(userLocation.lat),
+      lng: String(userLocation.lng),
+      staten_island_mode: modeFlags?.statenIslandMode ? "1" : "0",
+      bronx_wash_heights_mode: modeFlags?.bronxWashHeightsMode ? "1" : "0",
+      queens_mode: modeFlags?.queensMode ? "1" : "0",
+      brooklyn_mode: modeFlags?.brooklynMode ? "1" : "0",
+    });
+    const url = `${apiBase}/assistant/guidance?${params.toString()}`;
+    const fetchPromise = (async () => {
+      try {
+        const resp = await fetch(url, { signal: ac.signal, credentials: "include" });
+        if (resp.status === 401 || resp.status === 403) {
+          state.guidanceStatus = "error";
+          state.guidanceLastErrorCode = String(resp.status);
+          state.guidanceLastErrorMessage = "Guidance requires signed-in account context.";
+          return null;
+        }
+        if (!resp.ok) {
+          state.guidanceStatus = "error";
+          state.guidanceLastErrorCode = String(resp.status || "fetch_failed");
+          state.guidanceLastErrorMessage = `Guidance request failed (${resp.status}).`;
+          return null;
+        }
+        const data = await resp.json();
+        const payload = data || null;
+        state.guidanceCache.set(key, payload);
+        trimMapCache(state.guidanceCache, 18);
+        state.lastSuccessfulGuidanceKey = key;
+        state.lastSuccessfulGuidanceAt = Date.now();
+        state.guidanceStatus = "ready";
+        state.guidanceLastErrorCode = "";
+        state.guidanceLastErrorMessage = "";
+        return payload;
+      } catch (err) {
+        if (err?.name === "AbortError") return null;
+        state.guidanceStatus = "error";
+        state.guidanceLastErrorCode = String(err?.status || err?.name || "fetch_failed");
+        state.guidanceLastErrorMessage = String(err?.message || "Guidance request failed.");
+        return null;
+      } finally {
+        if (state.guidanceInFlightPromise === fetchPromise) {
+          state.guidanceInFlightKey = "";
+          state.guidanceInFlightPromise = null;
+          if (state.guidanceAbortController === ac) state.guidanceAbortController = null;
+        }
+      }
+    })();
+    state.guidanceInFlightPromise = fetchPromise;
+    try {
+      return await fetchPromise;
+    } catch (_err) {
+      return null;
+    }
+  }
+
   function buildOutlookPointsByLocation(outlook) {
     const map = {};
     const byLocationPayloads = [outlook?.zones_by_location_id, outlook?.by_location_id];
@@ -2236,6 +2395,7 @@
 
   function buildAssistantPrimaryLine() {
     const primary = derivePrimaryDriverDecision();
+    state.lastGuidancePrimaryLine = primary?.line || "";
     if (primary?.kind === "trap") state.lastTrapMessageAtTs = Date.now();
     if (primary?.kind === "stay") state.lastStayMessageAtTs = Date.now();
     if (primary?.kind === "move") state.lastMoveMessageAtTs = Date.now();
@@ -2258,6 +2418,8 @@
   }
 
   function derivePrimaryDriverDecision() {
+    const serverPrimary = deriveServerPrimaryDecision();
+    if (serverPrimary) return serverPrimary;
     if (state.trapModeActive && state.trapNeedsNearbyEscape) {
       return { line: "Stay briefly • Nearby options not strong enough yet", kind: "trap" };
     }
@@ -2312,45 +2474,119 @@
     return { line: `${action} • ${reason}`, kind: "monitor" };
   }
 
+  function activeServerGuidance() {
+    const guidance = state.serverGuidance;
+    if (!guidance || !guidance.actionCode) return null;
+    if (!state.serverGuidanceUpdatedAt) return null;
+    if (Date.now() - state.serverGuidanceUpdatedAt > (5 * 60000)) return null;
+    return guidance;
+  }
+
+  function deriveServerPrimaryDecision() {
+    const guidance = activeServerGuidance();
+    if (!guidance) return null;
+    const targetName = guidance?.targetZone?.name || "nearby zone";
+    if (guidance.actionCode === "HOLD") return { line: "Stay in current area", kind: "stay" };
+    if (guidance.actionCode === "MICRO_REPOSITION") return { line: "Micro-reposition nearby", kind: "stay" };
+    if (guidance.actionCode === "MOVE_NEARBY") return { line: `Move toward ${targetName}`, kind: "move" };
+    if (guidance.actionCode === "WAIT_DISPATCH") return { line: "Wait for dispatch", kind: "monitor" };
+    return null;
+  }
+
+  function buildServerSecondaryLine(guidance) {
+    if (!guidance) return "";
+    const clueParts = [];
+    if (Number.isFinite(guidance.triplessMinutes)) clueParts.push(`Tripless: ${Math.max(0, Math.round(guidance.triplessMinutes))}m`);
+    if (Number.isFinite(guidance.moveCooldownUntilTs)) {
+      const mins = Math.max(0, Math.round((guidance.moveCooldownUntilTs * 1000 - Date.now()) / 60000));
+      if (mins > 0) clueParts.push(`Move cooldown: ${mins}m`);
+    }
+    if (Number.isFinite(guidance.holdUntilTs)) {
+      const mins = Math.max(0, Math.round((guidance.holdUntilTs * 1000 - Date.now()) / 60000));
+      if (mins > 0) clueParts.push(`Hold: ${mins}m`);
+    }
+    if (Number.isFinite(guidance.dispatchUncertainty)) clueParts.push(`Dispatch: ${Math.round(guidance.dispatchUncertainty * 100)}% uncertain`);
+    const base = guidance.message || "Local demand signal is mixed right now.";
+    const compact = clueParts.length ? `${base} • ${clueParts[0]}` : base;
+    return compact.replace(/\bdwell\b/gi, "stay");
+  }
+
   function buildAssistantSecondaryLine() {
+    const server = activeServerGuidance();
+    if (server) {
+      const line = buildServerSecondaryLine(server);
+      if (line) {
+        state.lastGuidanceSecondaryLine = line;
+        return line;
+      }
+    }
     if (state.trapModeActive && state.trapNeedsNearbyEscape) {
+      state.lastGuidanceSecondaryLine = "Waiting for a better nearby area";
       return "Waiting for a better nearby area";
     }
     if (state.countdownActive && state.countdownTarget?.zoneName) {
       const minsLeft = Math.max(1, Math.round(state.countdownMinutesRemaining || 0));
       if (state.countdownReasonCode === "trap_risk_rising") {
-        return `If no trip in ${minsLeft} min, go to ${state.countdownTarget.zoneName}`;
+        const line = `If no trip in ${minsLeft} min, go to ${state.countdownTarget.zoneName}`;
+        state.lastGuidanceSecondaryLine = line;
+        return line;
       }
       if (state.countdownReasonCode === "zone_cooling") {
-        return state.countdownReasonText.includes("arrival")
+        const line = state.countdownReasonText.includes("arrival")
           ? `Move in ${minsLeft} min • target stronger by arrival`
           : `If no trip in ${minsLeft} min, move to ${state.countdownTarget.zoneName}`;
+        state.lastGuidanceSecondaryLine = line;
+        return line;
       }
-      return `If no trip in ${minsLeft} min, move to ${state.countdownTarget.zoneName}`;
+      const line = `If no trip in ${minsLeft} min, move to ${state.countdownTarget.zoneName}`;
+      state.lastGuidanceSecondaryLine = line;
+      return line;
     }
     const committedAction = state.committedActionCode || "MONITOR";
     const committedTarget = state.committedMoveTarget || state.assistantMoveTarget || null;
     const weakDataMode = state.dataQualityMode === "partial" || state.dataQualityMode === "degraded";
     const safeDegradedStayFallback = isSafeDegradedStayFallback();
-    if (safeDegradedStayFallback) return "Stay here for now";
+    if (safeDegradedStayFallback) {
+      state.lastGuidanceSecondaryLine = "Stay here for now";
+      return "Stay here for now";
+    }
     if (state.dataQualityMode === "degraded" && state.finalActionCode === "MONITOR" && !safeDegradedStayFallback) {
+      state.lastGuidanceSecondaryLine = "Waiting for a clearer signal";
       return "Waiting for a clearer signal";
     }
     if (weakDataMode && (!committedTarget || (safeNum(committedTarget?.etaMinutes, Infinity) || Infinity) > AI_ASSISTANT_NEAR_TARGET_MAX_ETA_MIN)) {
-      return committedAction === "STAY" ? "Stay here for now" : "Waiting for a clearer signal";
+      const line = committedAction === "STAY" ? "Stay here for now" : "Waiting for a clearer signal";
+      state.lastGuidanceSecondaryLine = line;
+      return line;
     }
     if ((committedAction === "MOVE_SOON" || committedAction === "LEAVE_NOW")
       && committedTarget?.zoneName
       && Number.isFinite(committedTarget?.etaMinutes)) {
-      return `Go to ${committedTarget.zoneName} • ${Math.round(committedTarget.etaMinutes)} min`;
+      const line = `Go to ${committedTarget.zoneName} • ${Math.round(committedTarget.etaMinutes)} min`;
+      state.lastGuidanceSecondaryLine = line;
+      return line;
     }
-    if (committedAction === "STAY") return "Stay here for now";
-    if (committedAction === "STAY_BRIEFLY") return "Stay here briefly";
+    if (committedAction === "STAY") {
+      state.lastGuidanceSecondaryLine = "Stay here for now";
+      return "Stay here for now";
+    }
+    if (committedAction === "STAY_BRIEFLY") {
+      state.lastGuidanceSecondaryLine = "Stay here briefly";
+      return "Stay here briefly";
+    }
     if (committedAction === "MONITOR") {
-      if ((safeNum(state.stayWindowAvgRating, 0) || 0) >= 50) return "Stay here for now";
-      if ((safeNum(state.stayWindowAvgRating, 0) || 0) >= 46) return "Nearby options not strong enough yet";
+      if ((safeNum(state.stayWindowAvgRating, 0) || 0) >= 50) {
+        state.lastGuidanceSecondaryLine = "Stay here for now";
+        return "Stay here for now";
+      }
+      if ((safeNum(state.stayWindowAvgRating, 0) || 0) >= 46) {
+        state.lastGuidanceSecondaryLine = "Nearby options not strong enough yet";
+        return "Nearby options not strong enough yet";
+      }
+      state.lastGuidanceSecondaryLine = "Waiting for a clearer signal";
       return "Waiting for a clearer signal";
     }
+    state.lastGuidanceSecondaryLine = "Waiting for a clearer signal";
     return "Waiting for a clearer signal";
   }
 
@@ -2445,12 +2681,23 @@
   }
 
   function applyNavOwnership() {
-    const target = state.assistantMoveTarget;
-    if ((state.finalActionCode === "LEAVE_NOW" || state.finalActionCode === "MOVE_SOON") && target) {
-      window.TlcMapUiModule?.setNavDestination?.({ lat: target.centerLat, lng: target.centerLng, name: target.zoneName });
+    const server = activeServerGuidance();
+    if (server) {
+      if (server.actionCode === "MOVE_NEARBY"
+        && Number.isFinite(server?.targetZone?.centerLat)
+        && Number.isFinite(server?.targetZone?.centerLng)) {
+        window.TlcMapUiModule?.setNavDestination?.({
+          lat: server.targetZone.centerLat,
+          lng: server.targetZone.centerLng,
+          name: server?.targetZone?.name || "Nearby zone",
+        });
+        return;
+      }
+      window.TlcMapUiModule?.setNavDestination?.(null);
       return;
     }
-    if (state.finalActionCode === "STAY_BRIEFLY" && target) {
+    const target = state.assistantMoveTarget;
+    if ((state.finalActionCode === "LEAVE_NOW" || state.finalActionCode === "MOVE_SOON") && target) {
       window.TlcMapUiModule?.setNavDestination?.({ lat: target.centerLat, lng: target.centerLng, name: target.zoneName });
       return;
     }
@@ -2575,7 +2822,10 @@
     buildMessages();
     const primaryLine = buildAssistantPrimaryLine();
     const secondaryLine = buildAssistantSecondaryLine();
-    const iconType = leadingIconKindFromAction(state.finalActionCode);
+    const serverAction = activeServerGuidance()?.actionCode || "";
+    const iconType = serverAction === "MOVE_NEARBY"
+      ? "move"
+      : (serverAction === "HOLD" ? "positive" : (serverAction === "MICRO_REPOSITION" || serverAction === "WAIT_DISPATCH" ? "caution" : leadingIconKindFromAction(state.finalActionCode)));
     const renderKey = [
       compactLane ? 1 : 0,
       state.expanded ? 1 : 0,
@@ -2632,12 +2882,23 @@
     const outlookStatusLine = (state.outlookStatus || state.outlookLastErrorCode)
       ? `<div><small>${state.outlookStatus === "loading" ? "Refreshing live outlook data." : (state.outlookStatus === "error" ? "Live outlook data is temporarily unavailable." : "Live outlook data updated.")}</small></div>`
       : "";
+    const serverGuidance = activeServerGuidance();
+    const guidanceStatusLine = state.guidanceStatus
+      ? `<div><small>${state.guidanceSource === "server" ? "Using account-aware server guidance." : (state.guidanceStatus === "loading" ? "Checking account-aware guidance." : "Using local guidance while account context is unavailable.")}</small></div>`
+      : "";
+    const guidanceMetricLine = serverGuidance
+      ? `<div>${[
+          Number.isFinite(serverGuidance.triplessMinutes) ? `Tripless: ${Math.round(serverGuidance.triplessMinutes)}m` : "",
+          Number.isFinite(serverGuidance.stationaryMinutes) ? `Still: ${Math.round(serverGuidance.stationaryMinutes)}m` : "",
+          Number.isFinite(serverGuidance.movementMinutes) ? `Moved: ${Math.round(serverGuidance.movementMinutes)}m` : "",
+        ].filter(Boolean).slice(0, 2).join(" • ")}</div>`
+      : "";
     const committedActionText = humanActionLabel(state.committedActionCode);
     const committedReasonText = humanizeAssistantReason(friendlyReasonFromCode(state.committedReasonCode, state.committedReasonText || "—"));
     return `
       <div class="aiAssistantPanel">
         <section class="aiAssistantSection"><strong>Current area</strong><div>${state.activeStableZoneName || "—"} • ${state.activeStableBorough || "—"} • ${Math.round(state.visibleRating || 0)} ${prettyBucket(state.visibleBucket)} • ${state.visibleScoreSourceLabel}</div></section>
-        <section class="aiAssistantSection"><strong>Advice</strong><div>${buildAssistantPrimaryLine()}</div><div>${buildAssistantSecondaryLine()}</div></section>
+        <section class="aiAssistantSection"><strong>Advice</strong><div>${buildAssistantPrimaryLine()}</div><div>${buildAssistantSecondaryLine()}</div>${serverGuidance?.targetZone?.name ? `<div>Target zone: ${serverGuidance.targetZone.name}</div>` : ""}${guidanceMetricLine}${guidanceStatusLine}</section>
         <section class="aiAssistantSection"><strong>Countdown</strong><div>${state.countdownActive ? `Countdown active • ${Math.max(1, Math.round(state.countdownMinutesRemaining || 0))} min left` : "Countdown inactive"}</div><div>${state.countdownReasonText || state.countdownHoldWindowReason || "No countdown needed."}</div>${state.countdownActive && state.countdownTarget?.zoneName ? `<div>Target: ${state.countdownTarget.zoneName} • ${Math.round(state.countdownTarget.etaMinutes || 0)} min</div>` : ""}</section>
         ${(state.trapModeActive || (safeNum(state.trapSeverityLevel, 0) || 0) >= 2 || state.trapReasonSummary) ? `<section class="aiAssistantSection"><strong>Area check</strong><div>${state.trapReasonSummary || "No trap signs right now."}</div>${state.trapEscapeTarget?.candidateSignal?.zoneName ? `<div>Nearby option: ${state.trapEscapeTarget.candidateSignal.zoneName} • ${Math.round(state.trapEscapeTarget.etaMinutes || 0)} min</div>` : ""}</section>` : ""}
         <section class="aiAssistantSection"><strong>What may happen next</strong><div>${state.outlookSummaryText}</div>${state.moveTargetOutlookSummaryText ? `<div>${state.moveTargetOutlookSummaryText}</div>` : ""}${outlookStatusLine}</section>
@@ -2746,10 +3007,24 @@
   }
 
   function snapshot() {
+    const server = activeServerGuidance();
     return {
       ...state,
+      guidanceSource: state.guidanceSource,
+      guidanceStatus: state.guidanceStatus,
+      serverGuidanceAction: server?.actionCode || "",
+      serverGuidanceConfidence: server?.confidence ?? null,
+      serverGuidanceReasonCodes: Array.isArray(server?.reasonCodes) ? [...server.reasonCodes] : [],
+      serverGuidanceTriplessMinutes: server?.triplessMinutes ?? null,
+      serverGuidanceStationaryMinutes: server?.stationaryMinutes ?? null,
+      serverGuidanceMovementMinutes: server?.movementMinutes ?? null,
+      serverGuidanceDispatchUncertainty: server?.dispatchUncertainty ?? null,
+      serverGuidanceTargetZoneId: server?.targetZone?.id || "",
+      serverGuidanceTargetZoneName: server?.targetZone?.name || "",
       outlookCache: undefined,
       outlookAbortController: undefined,
+      guidanceCache: undefined,
+      guidanceAbortController: undefined,
       heartbeatHandle: undefined,
       frameFeatures: undefined,
     };
@@ -2796,6 +3071,16 @@
     state.outlookStatus = "idle";
     state.outlookLastErrorCode = "";
     state.outlookLastErrorMessage = "";
+    state.guidanceStatus = "idle";
+    state.guidanceLastErrorCode = "";
+    state.guidanceLastErrorMessage = "";
+    state.serverGuidance = null;
+    state.serverGuidanceUpdatedAt = 0;
+    state.guidanceSource = "local";
+    state.lastGuidanceRequestKey = "";
+    state.lastSuccessfulGuidanceKey = "";
+    state.lastSuccessfulGuidanceAt = 0;
+    state.guidanceEnrichRefreshKey = "";
     state.outlookInFlightKey = "";
     state.outlookInFlightPromise = null;
     state.lastSuccessfulOutlookKey = "";
@@ -3061,6 +3346,44 @@
     state.baseActionReason = base.reason;
 
     const localFastDecision = derivePrimaryDriverDecisionLocalFast(activeSignal, nearby.overall);
+    const modeFlags = getAssistantGuidanceModeFlags();
+    const guidanceKey = buildGuidanceCacheKey(state.lastFrameTime, state.lastUserLocation, modeFlags);
+    state.lastGuidanceRequestKey = guidanceKey;
+    let effectiveGuidance = null;
+    if (guidanceKey && state.guidanceCache.has(guidanceKey)) {
+      effectiveGuidance = normalizeServerGuidance(state.guidanceCache.get(guidanceKey));
+      state.guidanceStatus = "ready";
+      state.guidanceLastErrorCode = "";
+      state.guidanceLastErrorMessage = "";
+      state.lastSuccessfulGuidanceKey = guidanceKey;
+      state.lastSuccessfulGuidanceAt = Date.now();
+    } else if (guidanceKey) {
+      state.guidanceStatus = state.guidanceInFlightKey === guidanceKey ? "loading" : state.guidanceStatus;
+      if (state.guidanceEnrichRefreshKey !== guidanceKey) {
+        state.guidanceEnrichRefreshKey = guidanceKey;
+        fetchGuidance(liveFrame, state.lastUserLocation, modeFlags)
+          .then((payload) => {
+            if (state.guidanceEnrichRefreshKey !== guidanceKey) return;
+            state.guidanceEnrichRefreshKey = "";
+            if (payload) scheduleAssistantRecompute({ reason: "guidance-enriched", urgent: false });
+          })
+          .catch(() => {
+            state.guidanceEnrichRefreshKey = "";
+          });
+      }
+    } else {
+      state.guidanceEnrichRefreshKey = "";
+      state.guidanceStatus = "idle";
+    }
+    if (effectiveGuidance) {
+      state.serverGuidance = effectiveGuidance;
+      state.serverGuidanceUpdatedAt = Date.now();
+      state.guidanceSource = "server";
+    } else {
+      state.serverGuidance = null;
+      state.serverGuidanceUpdatedAt = 0;
+      state.guidanceSource = "local";
+    }
 
     const locationIds = [state.activeStableZoneId, ...shortlist.map((c) => c.signal.locationId)].filter(Boolean);
     const hasOutlookContext = !!state.lastFrameTime && locationIds.length > 0;
@@ -3564,6 +3887,18 @@
     state.isPartialOutlook = false;
     state.canTrustFarMoves = false;
     state.usedCachedRecommendationFallback = false;
+    state.guidanceStatus = "idle";
+    state.guidanceLastErrorCode = "";
+    state.guidanceLastErrorMessage = "";
+    state.serverGuidance = null;
+    state.serverGuidanceUpdatedAt = 0;
+    state.guidanceSource = "local";
+    state.lastGuidanceRequestKey = "";
+    state.lastSuccessfulGuidanceKey = "";
+    state.lastSuccessfulGuidanceAt = 0;
+    state.guidanceEnrichRefreshKey = "";
+    state.lastGuidancePrimaryLine = "";
+    state.lastGuidanceSecondaryLine = "";
     resetCountdownCoachState();
     state.lastPickupRecordedAtMs = null;
     state.lastPickupRecordedZoneId = null;
