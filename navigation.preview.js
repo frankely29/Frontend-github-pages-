@@ -125,6 +125,7 @@
     const miles = Number(meters) / METERS_PER_MILE;
     if (!Number.isFinite(miles)) return "--";
     if (miles >= 10) return `${miles.toFixed(1)} mi`;
+    if (miles >= 1) return `${miles.toFixed(1)} mi`;
     return `${miles.toFixed(2)} mi`;
   }
 
@@ -141,6 +142,14 @@
     return String(state.currentRouteStatus || "Idle");
   }
 
+  function shouldShowMeta(metaText) {
+    const status = String(state.currentRouteStatus || "Idle").trim().toLowerCase();
+    const hasSummary = !!(state.currentRouteSummary?.durationSeconds && state.currentRouteSummary?.distanceMeters);
+    if (hasSummary) return true;
+    if (!metaText) return false;
+    return status !== "idle";
+  }
+
   function updateQuickUi() {
     const { stack, input, meta } = getQuickEls();
     if (stack) stack.hidden = false;
@@ -148,8 +157,11 @@
       input.value = state.currentDestination.name;
     }
     if (meta) {
-      meta.textContent = buildMetaText();
-      meta.title = meta.textContent;
+      const metaText = buildMetaText();
+      const showMeta = shouldShowMeta(metaText);
+      meta.hidden = !showMeta;
+      meta.textContent = showMeta ? metaText : "";
+      meta.title = showMeta ? metaText : "";
     }
   }
 
