@@ -35,6 +35,7 @@
         navBtn.href = "#";
         setNavDisabled(true);
       }
+      window.TlcNavigationTurnModule?.stopNavigation?.();
       window.TlcNavigationPreviewModule?.clearPreview?.({ source, clearInput: false });
       return;
     }
