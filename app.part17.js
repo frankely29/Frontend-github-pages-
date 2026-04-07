@@ -1846,8 +1846,11 @@
     };
     const actionCode = actionMap[actionRaw] || "";
     if (!actionCode) return null;
+    if (typeof payload.message !== "string") return null;
     const targetZone = (payload.target_zone && typeof payload.target_zone === "object") ? payload.target_zone : null;
     const currentZone = (payload.current_zone && typeof payload.current_zone === "object") ? payload.current_zone : null;
+    if (payload.reason_codes != null && !Array.isArray(payload.reason_codes)) return null;
+    if (payload.confidence != null && !Number.isFinite(Number(payload.confidence))) return null;
     return {
       actionCode,
       confidence: safeNum(payload.confidence),
@@ -2504,6 +2507,8 @@
     if (!guidance) return "";
     const clueParts = [];
     if (Number.isFinite(guidance.triplessMinutes)) clueParts.push(`Tripless: ${Math.max(0, Math.round(guidance.triplessMinutes))}m`);
+    if (Number.isFinite(guidance.stationaryMinutes)) clueParts.push(`Still: ${Math.max(0, Math.round(guidance.stationaryMinutes))}m`);
+    if (Number.isFinite(guidance.movementMinutes)) clueParts.push(`Moved: ${Math.max(0, Math.round(guidance.movementMinutes))}m`);
     if (Number.isFinite(guidance.moveCooldownUntilTs)) {
       const mins = Math.max(0, Math.round((guidance.moveCooldownUntilTs * 1000 - Date.now()) / 60000));
       if (mins > 0) clueParts.push(`Move cooldown: ${mins}m`);
@@ -2900,12 +2905,19 @@
           Number.isFinite(serverGuidance.movementMinutes) ? `Moved: ${Math.round(serverGuidance.movementMinutes)}m` : "",
         ].filter(Boolean).slice(0, 2).join(" • ")}</div>`
       : "";
+    const guidanceTimingLine = serverGuidance
+      ? `<div>${[
+          Number.isFinite(serverGuidance.dispatchUncertainty) ? `Dispatch uncertainty: ${Math.round(serverGuidance.dispatchUncertainty * 100)}%` : "",
+          Number.isFinite(serverGuidance.moveCooldownUntilTs) ? `Move cooldown until ${new Date(serverGuidance.moveCooldownUntilTs * 1000).toLocaleTimeString()}` : "",
+          Number.isFinite(serverGuidance.holdUntilTs) ? `Hold until ${new Date(serverGuidance.holdUntilTs * 1000).toLocaleTimeString()}` : "",
+        ].filter(Boolean).slice(0, 2).join(" • ")}</div>`
+      : "";
     const committedActionText = humanActionLabel(state.committedActionCode);
     const committedReasonText = humanizeAssistantReason(friendlyReasonFromCode(state.committedReasonCode, state.committedReasonText || "—"));
     return `
       <div class="aiAssistantPanel">
         <section class="aiAssistantSection"><strong>Current area</strong><div>${state.activeStableZoneName || "—"} • ${state.activeStableBorough || "—"} • ${Math.round(state.visibleRating || 0)} ${prettyBucket(state.visibleBucket)} • ${state.visibleScoreSourceLabel}</div></section>
-        <section class="aiAssistantSection"><strong>Advice</strong><div>${buildAssistantPrimaryLine()}</div><div>${buildAssistantSecondaryLine()}</div>${serverGuidance?.targetZone?.name ? `<div>Target zone: ${serverGuidance.targetZone.name}</div>` : ""}${guidanceMetricLine}${guidanceStatusLine}</section>
+        <section class="aiAssistantSection"><strong>Advice</strong><div>${buildAssistantPrimaryLine()}</div><div>${buildAssistantSecondaryLine()}</div>${serverGuidance?.targetZone?.name ? `<div>Target zone: ${serverGuidance.targetZone.name}</div>` : ""}${guidanceMetricLine}${guidanceTimingLine}${guidanceStatusLine}</section>
         <section class="aiAssistantSection"><strong>Countdown</strong><div>${state.countdownActive ? `Countdown active • ${Math.max(1, Math.round(state.countdownMinutesRemaining || 0))} min left` : "Countdown inactive"}</div><div>${state.countdownReasonText || state.countdownHoldWindowReason || "No countdown needed."}</div>${state.countdownActive && state.countdownTarget?.zoneName ? `<div>Target: ${state.countdownTarget.zoneName} • ${Math.round(state.countdownTarget.etaMinutes || 0)} min</div>` : ""}</section>
         ${(state.trapModeActive || (safeNum(state.trapSeverityLevel, 0) || 0) >= 2 || state.trapReasonSummary) ? `<section class="aiAssistantSection"><strong>Area check</strong><div>${state.trapReasonSummary || "No trap signs right now."}</div>${state.trapEscapeTarget?.candidateSignal?.zoneName ? `<div>Nearby option: ${state.trapEscapeTarget.candidateSignal.zoneName} • ${Math.round(state.trapEscapeTarget.etaMinutes || 0)} min</div>` : ""}</section>` : ""}
         <section class="aiAssistantSection"><strong>What may happen next</strong><div>${state.outlookSummaryText}</div>${state.moveTargetOutlookSummaryText ? `<div>${state.moveTargetOutlookSummaryText}</div>` : ""}${outlookStatusLine}</section>
