@@ -1,72 +1,74 @@
-.routePreviewCard {
+.navQuickStack {
   position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 58px);
   right: 12px;
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 106px);
   z-index: 610;
-  min-width: 220px;
-  max-width: min(300px, calc(100vw - 24px));
-  border-radius: 12px;
-  border: 1px solid rgba(148, 163, 184, 0.32);
-  background: rgba(8, 16, 32, 0.92);
-  color: #e2e8f0;
-  box-shadow: 0 12px 28px rgba(2, 6, 23, 0.55);
-  backdrop-filter: blur(6px);
-  padding: 10px 12px;
-  font-size: 12px;
+  width: min(280px, calc(100vw - 24px));
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 10px;
+  background: rgba(8, 16, 32, 0.6);
+  backdrop-filter: blur(4px);
+  box-shadow: 0 8px 16px rgba(2, 6, 23, 0.3);
+  padding: 6px;
 }
 
-.routePreviewHead {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+.navQuickRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 6px;
 }
 
-.routePreviewDestination {
-  font-weight: 700;
-  font-size: 13px;
-  line-height: 1.2;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.routePreviewClearBtn {
-  border: 1px solid rgba(248, 113, 113, 0.6);
-  background: rgba(127, 29, 29, 0.25);
-  color: #fecaca;
+.navQuickInput {
+  min-width: 0;
+  height: 30px;
   border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  background: rgba(15, 23, 42, 0.82);
+  color: #e2e8f0;
+  font-size: 12px;
+  padding: 0 8px;
+}
+
+.navQuickInput::placeholder {
+  color: rgba(226, 232, 240, 0.65);
+}
+
+.navQuickBtn {
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid rgba(56, 189, 248, 0.45);
+  background: rgba(30, 41, 59, 0.86);
+  color: #bae6fd;
   font-size: 11px;
-  font-weight: 600;
-  line-height: 1;
-  padding: 6px 8px;
+  font-weight: 700;
+  padding: 0 9px;
   cursor: pointer;
 }
 
-.routePreviewMetrics {
-  margin-top: 8px;
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px 12px;
+.navQuickBtn.navQuickClear {
+  border-color: rgba(248, 113, 113, 0.55);
+  color: #fecaca;
 }
 
-.routePreviewMetric {
+.navQuickMeta {
+  margin-top: 5px;
+  font-size: 11px;
   color: #cbd5e1;
-  font-weight: 600;
-}
-
-.routePreviewStatus {
-  margin-top: 6px;
-  color: #94a3b8;
+  min-height: 1.25em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 @media (max-width: 720px) {
-  .routePreviewCard {
-    left: 12px;
-    right: 12px;
-    bottom: calc(env(safe-area-inset-bottom, 0px) + 94px);
-    max-width: none;
-    min-width: 0;
+  .navQuickStack {
+    top: calc(env(safe-area-inset-top, 0px) + 54px);
+    right: 10px;
+    left: auto;
+    width: min(260px, calc(100vw - 20px));
+  }
+
+  .navQuickBtn {
+    padding: 0 8px;
   }
 }
