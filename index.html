@@ -275,13 +275,19 @@
     <span class="wxTxt">Weather…</span>
   </div>
 
-  <div id="navQuickStack" class="navQuickStack" aria-live="polite">
-    <div class="navQuickRow">
-      <input id="navQuickInput" class="navQuickInput" type="text" placeholder="Navigate to…" autocomplete="off" spellcheck="false" />
-      <button id="navQuickGo" class="navQuickBtn" type="button" aria-label="Search destination" title="Search destination">➤</button>
-      <button id="navQuickClear" class="navQuickBtn navQuickClear" type="button" aria-label="Clear route" title="Clear route">✕</button>
+  <div id="navQuickStack" class="navQuickStack" data-open="0" aria-live="polite">
+    <button id="navQuickToggle" class="navQuickToggle" type="button" aria-label="Navigation" aria-expanded="false" aria-controls="navQuickTray">
+      <span class="navQuickToggleIcon" aria-hidden="true">➜</span>
+      <span id="navQuickToggleText" class="navQuickToggleText">Nav</span>
+    </button>
+    <div id="navQuickTray" class="navQuickTray" hidden>
+      <div class="navQuickRow">
+        <input id="navQuickInput" class="navQuickInput" type="text" placeholder="Navigate to…" autocomplete="off" spellcheck="false" />
+        <button id="navQuickGo" class="navQuickBtn" type="button" aria-label="Search destination" title="Search destination">➤</button>
+        <button id="navQuickClear" class="navQuickBtn navQuickClear" type="button" aria-label="Clear route" title="Clear route">✕</button>
+      </div>
+      <div id="navQuickMeta" class="navQuickMeta" hidden>Waiting for destination</div>
     </div>
-    <div id="navQuickMeta" class="navQuickMeta" hidden>Waiting for destination</div>
   </div>
 
   <!--
