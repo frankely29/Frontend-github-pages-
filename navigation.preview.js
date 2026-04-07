@@ -302,7 +302,7 @@
     const normalized = {
       geometryGeoJSON: {
         type: "Feature",
-        properties: { mode: state.currentProfile },
+        properties: { mode: state.currentProfile, distanceMeters: Number(route.distance || 0), durationSeconds: Number(route.duration || 0) },
         geometry: {
           type: "LineString",
           coordinates: route.geometry.coordinates,
@@ -327,6 +327,7 @@
       setRouteGeojson(null);
       state.currentRouteSummary = null;
       syncNavQuickUiState();
+      emitPreviewUpdated();
       return;
     }
 
@@ -335,6 +336,7 @@
       setRouteGeojson(null);
       state.currentRouteSummary = null;
       setStatus("Waiting for location");
+      emitPreviewUpdated();
       return;
     }
 
@@ -361,16 +363,44 @@
       setStatus("Route ready");
       maybeAutoCollapse();
       syncNavQuickUiState();
+      emitPreviewUpdated();
     } catch (error) {
       if (error?.name === "AbortError") return;
       console.warn("navigation preview route fetch failed:", error);
       state.currentRouteSummary = null;
       setStatus("Route unavailable");
+      emitPreviewUpdated();
     }
   }
 
   function shouldApplyDestinationUpdate(source = "assistant") {
     return !(state.destinationSource === "manual" && source !== "manual");
+  }
+
+
+  function getRouteBundle() {
+    return {
+      destination: state.currentDestination ? { ...state.currentDestination } : null,
+      destinationSource: state.destinationSource || null,
+      routeFeature: state.currentRouteGeoJSON || null,
+      routeSummary: state.currentRouteSummary ? { ...state.currentRouteSummary } : null,
+      steps: Array.isArray(state.currentRouteSummary?.steps) ? state.currentRouteSummary.steps.slice() : [],
+      status: state.currentRouteStatus,
+      profile: state.currentProfile,
+      lastFetchKey: state.lastFetchKey || "",
+    };
+  }
+
+  function emitPreviewUpdated() {
+    window.dispatchEvent(new CustomEvent("tlc-nav-preview-updated", {
+      detail: { routeBundle: getRouteBundle() },
+    }));
+  }
+
+  function emitPreviewCleared() {
+    window.dispatchEvent(new CustomEvent("tlc-nav-preview-cleared", {
+      detail: { routeBundle: getRouteBundle() },
+    }));
   }
 
   function clearPreview(options = {}) {
@@ -399,6 +429,7 @@
     }
     syncNavQuickUiState();
     setUiOpen(false);
+    emitPreviewCleared();
   }
 
   async function searchAndSetPreviewDestination(query) {
@@ -450,6 +481,7 @@
     state.currentDestination = normalizedDest;
     state.destinationSource = source === "manual" ? "manual" : "assistant";
     setStatus("Preparing preview…");
+    emitPreviewUpdated();
     updateMarker();
     void runPreviewRefresh(true);
   }
@@ -560,6 +592,7 @@
     shouldApplyDestinationUpdate,
     isManualOverrideActive: () => state.destinationSource === "manual",
     getSnapshot,
+    getRouteBundle,
   };
 
   window.getTeamJoseoNavigationPreviewSnapshot = function getTeamJoseoNavigationPreviewSnapshot() {

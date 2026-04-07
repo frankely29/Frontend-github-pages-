@@ -35,13 +35,15 @@
       "./frontend-shell.css",
       "./index.extracted.css",
       "./admin.panel.css",
-      "./navigation.preview.css"
+      "./navigation.preview.css",
+      "./navigation.turnbyturn.css"
     ];
 
     window.__TLC_LOCAL_JS_ASSETS__ = [
       "./runtime.shared.js",
       "./app.js",
       "./navigation.preview.js",
+      "./navigation.turnbyturn.js",
       "./app.part4.js",
       "./app.part6.js",
       "./app.part7.js",
@@ -287,6 +289,16 @@
         <button id="navQuickClear" class="navQuickBtn navQuickClear" type="button" aria-label="Clear route" title="Clear route">✕</button>
       </div>
       <div id="navQuickMeta" class="navQuickMeta" hidden>Waiting for destination</div>
+      <div id="navTurnCard" class="navTurnCard" hidden>
+        <div id="navTurnPrimary" class="navTurnPrimary">Route preview ready</div>
+        <div id="navTurnSecondary" class="navTurnSecondary">Tap Start for in-map guidance</div>
+        <div id="navTurnMeta" class="navTurnMeta">Remaining -- • ETA --</div>
+        <div class="navTurnRow">
+          <button id="navTurnStartBtn" class="navTurnBtn" type="button">Start</button>
+          <button id="navTurnStopBtn" class="navTurnBtn stop" type="button" hidden>Stop</button>
+          <button id="navTurnRecenterBtn" class="navTurnBtn" type="button" hidden>Recenter</button>
+        </div>
+      </div>
     </div>
   </div>
 

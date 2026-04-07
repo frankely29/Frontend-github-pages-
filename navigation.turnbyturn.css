@@ -1,0 +1,62 @@
+.navTurnCard {
+  margin-top: 6px;
+  width: min(176px, calc(100vw - 30px));
+  border: 1px solid rgba(14, 116, 144, 0.26);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(6px) saturate(1.1);
+  -webkit-backdrop-filter: blur(6px) saturate(1.1);
+  box-shadow: 0 6px 12px rgba(15, 23, 42, 0.11);
+  padding: 6px;
+}
+
+.navTurnPrimary {
+  font-size: 10px;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.35;
+}
+
+.navTurnSecondary {
+  margin-top: 3px;
+  font-size: 9px;
+  color: #075985;
+  line-height: 1.3;
+}
+
+.navTurnMeta {
+  margin-top: 4px;
+  font-size: 9px;
+  color: #334155;
+  line-height: 1.25;
+}
+
+.navTurnRow {
+  margin-top: 6px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.navTurnBtn {
+  height: 24px;
+  border-radius: 999px;
+  border: 1px solid rgba(14, 116, 144, 0.28);
+  background: rgba(255, 255, 255, 0.94);
+  color: #0f172a;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 0 6px;
+  cursor: pointer;
+}
+
+.navTurnBtn.stop {
+  border-color: rgba(220, 38, 38, 0.32);
+  color: #991b1b;
+}
+
+@media (max-width: 720px) {
+  .navTurnCard {
+    width: min(168px, calc(100vw - 22px));
+  }
+}
