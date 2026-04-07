@@ -267,6 +267,8 @@
 
     const origin = getUserOrigin();
     if (!origin) {
+      setRouteGeojson(null);
+      state.currentRouteSummary = null;
       setStatus("Waiting for location");
       return;
     }
