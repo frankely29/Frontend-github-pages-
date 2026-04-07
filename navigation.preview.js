@@ -163,12 +163,12 @@
     const status = String(state.currentRouteStatus || "Idle").trim().toLowerCase();
     if (status.startsWith("calculating") || status.startsWith("searching") || status.startsWith("preparing")) return "...";
     if (status.startsWith("waiting for location")) return "Loc";
-    return "Nav";
+    return "Navigate";
   }
 
   function setUiOpen(open) {
     state.uiOpen = !!open;
-    updateQuickUi();
+    syncNavQuickUiState();
   }
 
   function maybeAutoCollapseAfterDelay() {
@@ -181,7 +181,7 @@
     }, 2400);
   }
 
-  function updateQuickUi() {
+  function syncNavQuickUiState() {
     const { stack, toggleBtn, toggleText, tray, input, meta } = getQuickEls();
     if (stack) stack.hidden = false;
     if (stack) stack.dataset.open = state.uiOpen ? "1" : "0";
@@ -200,9 +200,22 @@
     }
   }
 
+  function closeNavQuickOnOutsidePress(event) {
+    if (!state.uiOpen) return;
+    const { stack } = getQuickEls();
+    const target = event?.target;
+    if (!target || !(target instanceof Element)) return;
+    if (stack?.contains(target)) return;
+    setUiOpen(false);
+  }
+
+  function maybeAutoCollapse() {
+    maybeAutoCollapseAfterDelay();
+  }
+
   function setStatus(text) {
     state.currentRouteStatus = String(text || "Idle");
-    updateQuickUi();
+    syncNavQuickUiState();
   }
 
   function setRouteGeojson(routeFeature) {
@@ -313,7 +326,7 @@
     if (!state.currentDestination) {
       setRouteGeojson(null);
       state.currentRouteSummary = null;
-      updateQuickUi();
+      syncNavQuickUiState();
       return;
     }
 
@@ -346,8 +359,8 @@
       updateMarker();
       focusRoute(normalized.geometryGeoJSON);
       setStatus("Route ready");
-      maybeAutoCollapseAfterDelay();
-      updateQuickUi();
+      maybeAutoCollapse();
+      syncNavQuickUiState();
     } catch (error) {
       if (error?.name === "AbortError") return;
       console.warn("navigation preview route fetch failed:", error);
@@ -384,7 +397,7 @@
       const { input } = getQuickEls();
       if (input) input.value = "";
     }
-    updateQuickUi();
+    syncNavQuickUiState();
     setUiOpen(false);
   }
 
@@ -446,7 +459,7 @@
   }
 
   function bindUi() {
-    const { stack, toggleBtn, input, goBtn, clearBtn } = getQuickEls();
+    const { toggleBtn, input, goBtn, clearBtn } = getQuickEls();
 
     if (toggleBtn && !toggleBtn.dataset.boundNavPreview) {
       toggleBtn.dataset.boundNavPreview = "1";
@@ -487,13 +500,7 @@
 
     if (document?.body && !document.body.dataset.boundNavPreviewOutside) {
       document.body.dataset.boundNavPreviewOutside = "1";
-      document.addEventListener("pointerdown", (event) => {
-        if (!state.uiOpen) return;
-        const target = event.target;
-        if (!target || !(target instanceof Element)) return;
-        if (stack?.contains(target)) return;
-        setUiOpen(false);
-      });
+      document.addEventListener("pointerdown", closeNavQuickOnOutsidePress);
     }
   }
 
@@ -504,7 +511,7 @@
 
     const boot = () => {
       ensureRouteLayers();
-      updateQuickUi();
+      syncNavQuickUiState();
       if (state.currentDestination) {
         void runPreviewRefresh(true);
       }

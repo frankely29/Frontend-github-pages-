@@ -1,6 +1,6 @@
 .navQuickStack {
   position: fixed;
-  top: calc(env(safe-area-inset-top, 0px) + 96px);
+  top: calc(env(safe-area-inset-top, 0px) + 38px);
   right: 12px;
   z-index: 610;
   width: auto;
@@ -25,7 +25,7 @@
   font-weight: 700;
   line-height: 1;
   letter-spacing: 0.01em;
-  padding: 0 9px;
+  padding: 0 10px;
   cursor: pointer;
 }
 
@@ -35,7 +35,7 @@
 }
 
 .navQuickToggleText {
-  min-width: 20px;
+  min-width: 54px;
   text-align: center;
 }
 
@@ -121,8 +121,8 @@
 
 @media (max-width: 720px) {
   .navQuickStack {
-    top: calc(env(safe-area-inset-top, 0px) + 92px);
-    right: 10px;
+    top: calc(env(safe-area-inset-top, 0px) + 36px);
+    right: 12px;
     left: auto;
   }
 
