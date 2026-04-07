@@ -29,6 +29,8 @@
     lastRefreshAt: 0,
     locationPollTimer: null,
     userInteracted: false,
+    uiOpen: false,
+    autoCollapseTimer: null,
   };
 
   function emptyGeojson() {
@@ -114,6 +116,9 @@
   function getQuickEls() {
     return {
       stack: document.getElementById("navQuickStack"),
+      toggleBtn: document.getElementById("navQuickToggle"),
+      toggleText: document.getElementById("navQuickToggleText"),
+      tray: document.getElementById("navQuickTray"),
       input: document.getElementById("navQuickInput"),
       goBtn: document.getElementById("navQuickGo"),
       clearBtn: document.getElementById("navQuickClear"),
@@ -150,9 +155,39 @@
     return status !== "idle";
   }
 
+  function buildToggleText() {
+    if (state.currentRouteSummary?.durationSeconds) {
+      const mins = Math.max(1, Math.round(Number(state.currentRouteSummary.durationSeconds) / 60));
+      if (Number.isFinite(mins)) return `${mins}m`;
+    }
+    const status = String(state.currentRouteStatus || "Idle").trim().toLowerCase();
+    if (status.startsWith("calculating") || status.startsWith("searching") || status.startsWith("preparing")) return "...";
+    if (status.startsWith("waiting for location")) return "Loc";
+    return "Nav";
+  }
+
+  function setUiOpen(open) {
+    state.uiOpen = !!open;
+    updateQuickUi();
+  }
+
+  function maybeAutoCollapseAfterDelay() {
+    if (state.autoCollapseTimer) clearTimeout(state.autoCollapseTimer);
+    state.autoCollapseTimer = setTimeout(() => {
+      const { input } = getQuickEls();
+      const active = document.activeElement;
+      if (active && input && active === input) return;
+      setUiOpen(false);
+    }, 2400);
+  }
+
   function updateQuickUi() {
-    const { stack, input, meta } = getQuickEls();
+    const { stack, toggleBtn, toggleText, tray, input, meta } = getQuickEls();
     if (stack) stack.hidden = false;
+    if (stack) stack.dataset.open = state.uiOpen ? "1" : "0";
+    if (toggleBtn) toggleBtn.setAttribute("aria-expanded", state.uiOpen ? "true" : "false");
+    if (tray) tray.hidden = !state.uiOpen;
+    if (toggleText) toggleText.textContent = buildToggleText();
     if (input && state.currentDestination?.name && state.destinationSource !== "manual") {
       input.value = state.currentDestination.name;
     }
@@ -311,6 +346,7 @@
       updateMarker();
       focusRoute(normalized.geometryGeoJSON);
       setStatus("Route ready");
+      maybeAutoCollapseAfterDelay();
       updateQuickUi();
     } catch (error) {
       if (error?.name === "AbortError") return;
@@ -349,6 +385,7 @@
       if (input) input.value = "";
     }
     updateQuickUi();
+    setUiOpen(false);
   }
 
   async function searchAndSetPreviewDestination(query) {
@@ -409,11 +446,19 @@
   }
 
   function bindUi() {
-    const { input, goBtn, clearBtn } = getQuickEls();
+    const { stack, toggleBtn, input, goBtn, clearBtn } = getQuickEls();
+
+    if (toggleBtn && !toggleBtn.dataset.boundNavPreview) {
+      toggleBtn.dataset.boundNavPreview = "1";
+      toggleBtn.addEventListener("click", () => {
+        setUiOpen(!state.uiOpen);
+      });
+    }
 
     if (goBtn && !goBtn.dataset.boundNavPreview) {
       goBtn.dataset.boundNavPreview = "1";
       goBtn.addEventListener("click", () => {
+        setUiOpen(true);
         void searchAndSetPreviewDestination(input?.value || "");
       });
     }
@@ -423,8 +468,10 @@
       input.addEventListener("keydown", (event) => {
         if (event.key !== "Enter") return;
         event.preventDefault();
+        setUiOpen(true);
         void searchAndSetPreviewDestination(input.value || "");
       });
+      input.addEventListener("focus", () => setUiOpen(true));
     }
 
     if (clearBtn && !clearBtn.dataset.boundNavPreview) {
@@ -435,6 +482,17 @@
         try {
           window.TlcMapUiModule?.setNavDestination?.(null, { source: wasManual ? "manual" : "assistant" });
         } catch (_) {}
+      });
+    }
+
+    if (document?.body && !document.body.dataset.boundNavPreviewOutside) {
+      document.body.dataset.boundNavPreviewOutside = "1";
+      document.addEventListener("pointerdown", (event) => {
+        if (!state.uiOpen) return;
+        const target = event.target;
+        if (!target || !(target instanceof Element)) return;
+        if (stack?.contains(target)) return;
+        setUiOpen(false);
       });
     }
   }
