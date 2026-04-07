@@ -1921,6 +1921,13 @@
         }
         const data = await resp.json();
         const payload = data || null;
+        const normalized = normalizeServerGuidance(payload);
+        if (!normalized) {
+          state.guidanceStatus = "error";
+          state.guidanceLastErrorCode = "malformed_payload";
+          state.guidanceLastErrorMessage = "Guidance payload was malformed; using local guidance.";
+          return null;
+        }
         state.guidanceCache.set(key, payload);
         trimMapCache(state.guidanceCache, 18);
         state.lastSuccessfulGuidanceKey = key;
@@ -3352,11 +3359,17 @@
     let effectiveGuidance = null;
     if (guidanceKey && state.guidanceCache.has(guidanceKey)) {
       effectiveGuidance = normalizeServerGuidance(state.guidanceCache.get(guidanceKey));
-      state.guidanceStatus = "ready";
-      state.guidanceLastErrorCode = "";
-      state.guidanceLastErrorMessage = "";
-      state.lastSuccessfulGuidanceKey = guidanceKey;
-      state.lastSuccessfulGuidanceAt = Date.now();
+      if (effectiveGuidance) {
+        state.guidanceStatus = "ready";
+        state.guidanceLastErrorCode = "";
+        state.guidanceLastErrorMessage = "";
+        state.lastSuccessfulGuidanceKey = guidanceKey;
+        state.lastSuccessfulGuidanceAt = Date.now();
+      } else {
+        state.guidanceStatus = "error";
+        state.guidanceLastErrorCode = "malformed_cached_payload";
+        state.guidanceLastErrorMessage = "Cached guidance payload was malformed; using local guidance.";
+      }
     } else if (guidanceKey) {
       state.guidanceStatus = state.guidanceInFlightKey === guidanceKey ? "loading" : state.guidanceStatus;
       if (state.guidanceEnrichRefreshKey !== guidanceKey) {
