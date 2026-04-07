@@ -34,12 +34,14 @@
     window.__TLC_LOCAL_CSS_ASSETS__ = [
       "./frontend-shell.css",
       "./index.extracted.css",
-      "./admin.panel.css"
+      "./admin.panel.css",
+      "./navigation.preview.css"
     ];
 
     window.__TLC_LOCAL_JS_ASSETS__ = [
       "./runtime.shared.js",
       "./app.js",
+      "./navigation.preview.js",
       "./app.part4.js",
       "./app.part6.js",
       "./app.part7.js",
@@ -290,6 +292,18 @@
 
   <div id="aiAssistantDock" class="aiAssistantDock" aria-live="polite" aria-atomic="false">
     <div id="aiAssistantWidgetMount" class="aiAssistantWidgetMount"></div>
+  </div>
+
+  <div id="routePreviewCard" class="routePreviewCard" hidden aria-live="polite">
+    <div class="routePreviewHead">
+      <div id="routePreviewDestination" class="routePreviewDestination">Destination</div>
+      <button id="routePreviewClearBtn" class="routePreviewClearBtn" type="button">Clear route</button>
+    </div>
+    <div class="routePreviewMetrics">
+      <span id="routePreviewEta" class="routePreviewMetric">ETA: --</span>
+      <span id="routePreviewDistance" class="routePreviewMetric">Distance: --</span>
+    </div>
+    <div id="routePreviewStatus" class="routePreviewStatus">Waiting for destination</div>
   </div>
 
   <div id="radioModal" class="radioModal" aria-hidden="true">

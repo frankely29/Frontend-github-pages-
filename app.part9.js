@@ -23,17 +23,22 @@
   }
   function setNavDestination(dest) {
     recommendedDest = dest || null;
-    if (!navBtn) return;
 
     if (!recommendedDest) {
-      navBtn.href = "#";
-      setNavDisabled(true);
+      if (navBtn) {
+        navBtn.href = "#";
+        setNavDisabled(true);
+      }
+      window.TlcNavigationPreviewModule?.clearPreview?.();
       return;
     }
 
-    const { lat, lng } = recommendedDest;
-    navBtn.href = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${lat},${lng}`)}&travelmode=driving`;
-    setNavDisabled(false);
+    if (navBtn) {
+      const { lat, lng } = recommendedDest;
+      navBtn.href = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${lat},${lng}`)}&travelmode=driving`;
+      setNavDisabled(false);
+    }
+    window.TlcNavigationPreviewModule?.setPreviewDestination?.(recommendedDest);
   }
   function hasRecommendedDestination() {
     return !!recommendedDest;

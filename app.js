@@ -1818,6 +1818,7 @@ function initMap() {
     mapReady = true;
     map.resize();
     applyNightBasemap(!!window.TlcMapUiModule?.getWeatherState?.()?.isNight);
+    window.TlcNavigationPreviewModule?.init?.(map);
 
     ensureZonesSourceAndLayers().catch((e) => console.warn("zones source/layers init failed:", e));
 
@@ -4195,6 +4196,7 @@ function startLocationWatch() {
       }
 
       userLatLng = { lat, lng };
+      window.TlcNavigationPreviewModule?.refreshPreviewFromUserLocation?.();
 
       const hasUsableAccuracy = !Number.isFinite(accuracy) || accuracy <= GPS_ACCURACY_THRESHOLD || !gpsFirstFixDone;
       if (!hasUsableAccuracy) {
