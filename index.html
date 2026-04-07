@@ -275,6 +275,15 @@
     <span class="wxTxt">Weather…</span>
   </div>
 
+  <div id="navQuickStack" class="navQuickStack" aria-live="polite">
+    <div class="navQuickRow">
+      <input id="navQuickInput" class="navQuickInput" type="text" placeholder="Navigate to…" autocomplete="off" spellcheck="false" />
+      <button id="navQuickGo" class="navQuickBtn" type="button">Go</button>
+      <button id="navQuickClear" class="navQuickBtn navQuickClear" type="button">Clear</button>
+    </div>
+    <div id="navQuickMeta" class="navQuickMeta">Waiting for destination</div>
+  </div>
+
   <!--
     Online users badge.  This small pill shows the number of drivers
     currently online.  It appears on the opposite side of the map
@@ -292,18 +301,6 @@
 
   <div id="aiAssistantDock" class="aiAssistantDock" aria-live="polite" aria-atomic="false">
     <div id="aiAssistantWidgetMount" class="aiAssistantWidgetMount"></div>
-  </div>
-
-  <div id="routePreviewCard" class="routePreviewCard" hidden aria-live="polite">
-    <div class="routePreviewHead">
-      <div id="routePreviewDestination" class="routePreviewDestination">Destination</div>
-      <button id="routePreviewClearBtn" class="routePreviewClearBtn" type="button">Clear route</button>
-    </div>
-    <div class="routePreviewMetrics">
-      <span id="routePreviewEta" class="routePreviewMetric">ETA: --</span>
-      <span id="routePreviewDistance" class="routePreviewMetric">Distance: --</span>
-    </div>
-    <div id="routePreviewStatus" class="routePreviewStatus">Waiting for destination</div>
   </div>
 
   <div id="radioModal" class="radioModal" aria-hidden="true">

@@ -8,10 +8,12 @@
   const METERS_PER_MILE = 1609.344;
 
   const ROUTE_ENDPOINT = String(window.__TLC_NAV_PREVIEW_ROUTE_ENDPOINT__ || "https://router.project-osrm.org/route/v1").trim().replace(/\/+$/, "");
+  const GEOCODE_ENDPOINT = String(window.__TLC_NAV_PREVIEW_GEOCODE_ENDPOINT__ || "https://nominatim.openstreetmap.org/search").trim().replace(/\/+$/, "");
 
   const state = {
     map: null,
     currentDestination: null,
+    destinationSource: null,
     currentRouteGeoJSON: null,
     currentRouteSummary: null,
     currentRouteStatus: "Idle",
@@ -109,21 +111,14 @@
     return true;
   }
 
-  function getCardEls() {
+  function getQuickEls() {
     return {
-      card: document.getElementById("routePreviewCard"),
-      destination: document.getElementById("routePreviewDestination"),
-      eta: document.getElementById("routePreviewEta"),
-      distance: document.getElementById("routePreviewDistance"),
-      status: document.getElementById("routePreviewStatus"),
-      clearBtn: document.getElementById("routePreviewClearBtn"),
+      stack: document.getElementById("navQuickStack"),
+      input: document.getElementById("navQuickInput"),
+      goBtn: document.getElementById("navQuickGo"),
+      clearBtn: document.getElementById("navQuickClear"),
+      meta: document.getElementById("navQuickMeta"),
     };
-  }
-
-  function setCardVisibility(visible) {
-    const { card } = getCardEls();
-    if (!card) return;
-    card.hidden = !visible;
   }
 
   function formatDistanceMiles(meters) {
@@ -139,18 +134,28 @@
     return `${mins} min`;
   }
 
-  function updateCard() {
-    const { destination, eta, distance, status } = getCardEls();
-    if (destination) destination.textContent = state.currentDestination?.name || "Destination";
-    if (eta) eta.textContent = `ETA: ${formatEta(state.currentRouteSummary?.durationSeconds)}`;
-    if (distance) distance.textContent = `Distance: ${formatDistanceMiles(state.currentRouteSummary?.distanceMeters)}`;
-    if (status) status.textContent = String(state.currentRouteStatus || "Idle");
-    setCardVisibility(!!state.currentDestination);
+  function buildMetaText() {
+    if (state.currentRouteSummary?.durationSeconds && state.currentRouteSummary?.distanceMeters) {
+      return `${formatEta(state.currentRouteSummary.durationSeconds)} • ${formatDistanceMiles(state.currentRouteSummary.distanceMeters)}`;
+    }
+    return String(state.currentRouteStatus || "Idle");
+  }
+
+  function updateQuickUi() {
+    const { stack, input, meta } = getQuickEls();
+    if (stack) stack.hidden = false;
+    if (input && state.currentDestination?.name && state.destinationSource !== "manual") {
+      input.value = state.currentDestination.name;
+    }
+    if (meta) {
+      meta.textContent = buildMetaText();
+      meta.title = meta.textContent;
+    }
   }
 
   function setStatus(text) {
     state.currentRouteStatus = String(text || "Idle");
-    updateCard();
+    updateQuickUi();
   }
 
   function setRouteGeojson(routeFeature) {
@@ -261,7 +266,7 @@
     if (!state.currentDestination) {
       setRouteGeojson(null);
       state.currentRouteSummary = null;
-      updateCard();
+      updateQuickUi();
       return;
     }
 
@@ -294,20 +299,32 @@
       updateMarker();
       focusRoute(normalized.geometryGeoJSON);
       setStatus("Route ready");
-      updateCard();
+      updateQuickUi();
     } catch (error) {
       if (error?.name === "AbortError") return;
       console.warn("navigation preview route fetch failed:", error);
+      state.currentRouteSummary = null;
       setStatus("Route unavailable");
     }
   }
 
-  function clearPreview() {
+  function shouldApplyDestinationUpdate(source = "assistant") {
+    return !(state.destinationSource === "manual" && source !== "manual");
+  }
+
+  function clearPreview(options = {}) {
+    const source = String(options?.source || "assistant");
+    const clearInput = !!options?.clearInput;
+    if (source !== "manual" && state.destinationSource === "manual") {
+      return;
+    }
+
     if (state.routeAbortController) {
       state.routeAbortController.abort();
       state.routeAbortController = null;
     }
     state.currentDestination = null;
+    state.destinationSource = null;
     state.currentRouteGeoJSON = null;
     state.currentRouteSummary = null;
     state.currentRouteStatus = "Idle";
@@ -315,18 +332,61 @@
     state.lastFetchKey = "";
     setRouteGeojson(null);
     updateMarker();
-    updateCard();
-    setCardVisibility(false);
+    if (clearInput) {
+      const { input } = getQuickEls();
+      if (input) input.value = "";
+    }
+    updateQuickUi();
   }
 
-  function setPreviewDestination(dest) {
+  async function searchAndSetPreviewDestination(query) {
+    const q = String(query || "").trim();
+    if (!q) {
+      setStatus("Type a destination");
+      return null;
+    }
+
+    setStatus("Searching…");
+    const url = `${GEOCODE_ENDPOINT}?q=${encodeURIComponent(q)}&format=jsonv2&limit=1`;
+
+    try {
+      const core = getCore();
+      const payload = await (core.fetchJSON?.(url, { headers: { "Accept-Language": "en" } }) || fetch(url).then((r) => r.json()));
+      const candidate = Array.isArray(payload) ? payload[0] : null;
+      const lat = Number(candidate?.lat);
+      const lng = Number(candidate?.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        setStatus("Route unavailable");
+        return null;
+      }
+      const name = String(candidate?.display_name || q).trim() || q;
+      const normalized = { lat, lng, name };
+      setPreviewDestination(normalized, { source: "manual" });
+      try {
+        window.TlcMapUiModule?.setNavDestination?.(normalized, { source: "manual" });
+      } catch (_) {}
+      return normalized;
+    } catch (error) {
+      console.warn("navigation preview geocode failed:", error);
+      setStatus("Route unavailable");
+      return null;
+    }
+  }
+
+  function setPreviewDestination(dest, options = {}) {
+    const source = String(options?.source || "assistant");
     const normalizedDest = normalizeDestination(dest);
     if (!normalizedDest) {
-      clearPreview();
+      clearPreview({ source, clearInput: false });
       return;
     }
+
+    if (!shouldApplyDestinationUpdate(source)) {
+      return;
+    }
+
     state.currentDestination = normalizedDest;
-    setCardVisibility(true);
+    state.destinationSource = source === "manual" ? "manual" : "assistant";
     setStatus("Preparing preview…");
     updateMarker();
     void runPreviewRefresh(true);
@@ -337,13 +397,31 @@
   }
 
   function bindUi() {
-    const { clearBtn } = getCardEls();
+    const { input, goBtn, clearBtn } = getQuickEls();
+
+    if (goBtn && !goBtn.dataset.boundNavPreview) {
+      goBtn.dataset.boundNavPreview = "1";
+      goBtn.addEventListener("click", () => {
+        void searchAndSetPreviewDestination(input?.value || "");
+      });
+    }
+
+    if (input && !input.dataset.boundNavPreview) {
+      input.dataset.boundNavPreview = "1";
+      input.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        void searchAndSetPreviewDestination(input.value || "");
+      });
+    }
+
     if (clearBtn && !clearBtn.dataset.boundNavPreview) {
       clearBtn.dataset.boundNavPreview = "1";
       clearBtn.addEventListener("click", () => {
-        clearPreview();
+        const wasManual = state.destinationSource === "manual";
+        clearPreview({ source: wasManual ? "manual" : "assistant", clearInput: true });
         try {
-          window.TlcMapUiModule?.setNavDestination?.(null);
+          window.TlcMapUiModule?.setNavDestination?.(null, { source: wasManual ? "manual" : "assistant" });
         } catch (_) {}
       });
     }
@@ -356,7 +434,7 @@
 
     const boot = () => {
       ensureRouteLayers();
-      updateCard();
+      updateQuickUi();
       if (state.currentDestination) {
         void runPreviewRefresh(true);
       }
@@ -384,6 +462,7 @@
   function getSnapshot() {
     return {
       destination: state.currentDestination,
+      destinationSource: state.destinationSource,
       hasRoute: !!state.currentRouteGeoJSON,
       distanceMeters: state.currentRouteSummary?.distanceMeters ?? null,
       durationSeconds: state.currentRouteSummary?.durationSeconds ?? null,
@@ -400,12 +479,16 @@
     setPreviewDestination,
     clearPreview,
     refreshPreviewFromUserLocation,
+    searchAndSetPreviewDestination,
+    shouldApplyDestinationUpdate,
+    isManualOverrideActive: () => state.destinationSource === "manual",
     getSnapshot,
   };
 
   window.getTeamJoseoNavigationPreviewSnapshot = function getTeamJoseoNavigationPreviewSnapshot() {
     return window.TlcNavigationPreviewModule?.getSnapshot?.() || {
       destination: null,
+      destinationSource: null,
       hasRoute: false,
       distanceMeters: null,
       durationSeconds: null,

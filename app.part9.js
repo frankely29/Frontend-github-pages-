@@ -21,15 +21,21 @@
     if (!navBtn) return;
     navBtn.classList.toggle("disabled", !!disabled);
   }
-  function setNavDestination(dest) {
+  function setNavDestination(dest, options = {}) {
+    const source = String(options?.source || "assistant");
+    const shouldApply = window.TlcNavigationPreviewModule?.shouldApplyDestinationUpdate?.(source);
     recommendedDest = dest || null;
+
+    if (!shouldApply) {
+      return;
+    }
 
     if (!recommendedDest) {
       if (navBtn) {
         navBtn.href = "#";
         setNavDisabled(true);
       }
-      window.TlcNavigationPreviewModule?.clearPreview?.();
+      window.TlcNavigationPreviewModule?.clearPreview?.({ source, clearInput: false });
       return;
     }
 
@@ -38,7 +44,7 @@
       navBtn.href = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${lat},${lng}`)}&travelmode=driving`;
       setNavDisabled(false);
     }
-    window.TlcNavigationPreviewModule?.setPreviewDestination?.(recommendedDest);
+    window.TlcNavigationPreviewModule?.setPreviewDestination?.(recommendedDest, { source });
   }
   function hasRecommendedDestination() {
     return !!recommendedDest;
@@ -396,6 +402,7 @@
   window.TlcMapUiModule = {
     setNavDisabled,
     setNavDestination,
+    getNavDestination: () => recommendedDest,
     hasRecommendedDestination,
     updateRecommendation,
     updateOnlineBadge,
