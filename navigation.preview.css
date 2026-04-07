@@ -1,0 +1,72 @@
+.routePreviewCard {
+  position: fixed;
+  right: 12px;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 106px);
+  z-index: 610;
+  min-width: 220px;
+  max-width: min(300px, calc(100vw - 24px));
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  background: rgba(8, 16, 32, 0.92);
+  color: #e2e8f0;
+  box-shadow: 0 12px 28px rgba(2, 6, 23, 0.55);
+  backdrop-filter: blur(6px);
+  padding: 10px 12px;
+  font-size: 12px;
+}
+
+.routePreviewHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.routePreviewDestination {
+  font-weight: 700;
+  font-size: 13px;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.routePreviewClearBtn {
+  border: 1px solid rgba(248, 113, 113, 0.6);
+  background: rgba(127, 29, 29, 0.25);
+  color: #fecaca;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 6px 8px;
+  cursor: pointer;
+}
+
+.routePreviewMetrics {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+}
+
+.routePreviewMetric {
+  color: #cbd5e1;
+  font-weight: 600;
+}
+
+.routePreviewStatus {
+  margin-top: 6px;
+  color: #94a3b8;
+}
+
+@media (max-width: 720px) {
+  .routePreviewCard {
+    left: 12px;
+    right: 12px;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 94px);
+    max-width: none;
+    min-width: 0;
+  }
+}
