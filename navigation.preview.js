@@ -271,6 +271,7 @@
     } catch (error) {
       if (error?.name === "AbortError") return null;
       console.warn("navigation preview route fetch failed:", error);
+      setRouteGeojson(null);
       state.currentRouteSummary = null;
       setStatus("Route unavailable");
       emitPreviewUpdated();
@@ -377,16 +378,16 @@
     }
   }
 
-  function setPreviewDestination(dest, options = {}) {
+  async function setPreviewDestination(dest, options = {}) {
     const source = String(options?.source || "manual");
     const normalizedDest = normalizeDestination(dest);
     if (!normalizedDest) {
       clearPreview({ clearInput: false });
-      return Promise.resolve(null);
+      return null;
     }
 
     if (!shouldApplyDestinationUpdate(source)) {
-      return Promise.resolve(null);
+      return null;
     }
 
     state.currentDestination = normalizedDest;
@@ -394,7 +395,7 @@
     setStatus("Preparing preview…");
     emitPreviewUpdated();
     updateMarker();
-    return runPreviewRefresh(true);
+    return await runPreviewRefresh(true);
   }
 
   function refreshPreviewFromUserLocation() {
