@@ -411,8 +411,7 @@
 
   function startNavigation() {
     if (state.active) return true;
-    if (!state.currentRouteFeature?.geometry?.coordinates?.length) return false;
-    if (!state.manualDestination) return false;
+    if (!canStart()) return false;
 
     state.active = true;
     state.navigationStatus = "active";
@@ -429,10 +428,14 @@
     }
 
     updateCard();
+    window.dispatchEvent(new CustomEvent("tlc-nav-started", {
+      detail: { snapshot: getSnapshot() },
+    }));
     return true;
   }
 
   function stopNavigation() {
+    const wasActive = state.active;
     state.active = false;
     state.navigationStatus = state.arrivalState === "arrived" ? "arrived" : "stopped";
     state.followModeEnabled = false;
@@ -441,6 +444,19 @@
     state.rerouteInFlight = false;
     deactivateBuildingTintMode();
     updateCard();
+    if (wasActive) {
+      window.dispatchEvent(new CustomEvent("tlc-nav-stopped", {
+        detail: { snapshot: getSnapshot() },
+      }));
+    }
+  }
+
+  function isActive() {
+    return !!state.active;
+  }
+
+  function canStart() {
+    return !!state.currentRouteFeature?.geometry?.coordinates?.length && !!state.manualDestination;
   }
 
   function toggleNavigation() {
@@ -538,6 +554,8 @@
     startNavigation,
     stopNavigation,
     toggleNavigation,
+    isActive,
+    canStart,
     onPreviewRouteUpdated,
     onUserLocationUpdate,
     getSnapshot,

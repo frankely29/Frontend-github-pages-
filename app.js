@@ -1825,6 +1825,7 @@ function initMap() {
     map.resize();
     applyNightBasemap(!!window.TlcMapUiModule?.getWeatherState?.()?.isNight);
     window.TlcNavigationPreviewModule?.init?.(map);
+    window.TlcManualNavigationModule?.init?.();
     window.TlcNavigationTurnModule?.init?.(map);
 
     ensureZonesSourceAndLayers().catch((e) => console.warn("zones source/layers init failed:", e));

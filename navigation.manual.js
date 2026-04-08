@@ -47,58 +47,49 @@
     }
   }
 
-  function updateMetaFromPreview() {
+  function buildMetaText() {
     const preview = window.TlcNavigationPreviewModule?.getSnapshot?.() || {};
-    state.status = String(preview.status || "Idle");
-    state.routePreviewReady = preview.status === "Route ready";
-    state.routeActive = !!preview.hasRoute;
-
-    const { meta } = getQuickEls();
-    if (!meta) return;
-
     const durationSeconds = Number(preview.durationSeconds);
     const distanceMeters = Number(preview.distanceMeters);
-
     if (Number.isFinite(durationSeconds) && Number.isFinite(distanceMeters) && durationSeconds > 0 && distanceMeters > 0) {
       const miles = distanceMeters / 1609.344;
       const mins = Math.max(1, Math.round(durationSeconds / 60));
-      const text = `${mins} min • ${miles >= 1 ? miles.toFixed(1) : miles.toFixed(2)} mi`;
-      meta.hidden = false;
-      meta.textContent = text;
-      meta.title = text;
-      return;
+      return `${mins} min • ${miles >= 1 ? miles.toFixed(1) : miles.toFixed(2)} mi`;
     }
-
-    if (state.status && state.status !== "Idle") {
-      meta.hidden = false;
-      meta.textContent = state.status;
-      meta.title = state.status;
-      return;
-    }
-
-    meta.hidden = true;
-    meta.textContent = "";
-    meta.title = "";
+    return String(state.status || "Idle");
   }
 
   function syncUi() {
-    const { stack, toggleBtn, toggleText, tray, input } = getQuickEls();
+    const { stack, toggleBtn, toggleText, tray, input, meta } = getQuickEls();
     if (stack) {
       stack.hidden = false;
       stack.dataset.open = state.uiOpen ? "1" : "0";
     }
     if (toggleBtn) toggleBtn.setAttribute("aria-expanded", state.uiOpen ? "true" : "false");
     if (tray) tray.hidden = !state.uiOpen;
-    if (toggleText) toggleText.textContent = "Navigate";
+    if (toggleText) {
+      if (state.status === "Searching…" || state.status === "Preparing preview…") toggleText.textContent = "...";
+      else if (state.routePreviewReady) toggleText.textContent = "Route";
+      else toggleText.textContent = "Navigate";
+    }
     if (input && state.manualDestinationLabel && document.activeElement !== input) {
       input.value = state.manualDestinationLabel;
     }
-    updateMetaFromPreview();
+    if (meta) {
+      const text = buildMetaText();
+      meta.hidden = !text || text === "Idle";
+      meta.textContent = meta.hidden ? "" : text;
+      meta.title = meta.hidden ? "" : text;
+    }
   }
 
   function open() {
     state.uiOpen = true;
     syncUi();
+    window.requestAnimationFrame(() => {
+      const { input } = getQuickEls();
+      input?.focus?.();
+    });
   }
 
   function close() {
@@ -111,8 +102,6 @@
     if (!normalized) return null;
     state.manualDestination = normalized;
     state.manualDestinationLabel = normalized.name;
-    state.routeActive = false;
-    state.routePreviewReady = false;
     updateExternalNav();
     syncUi();
     return normalized;
@@ -122,34 +111,61 @@
     const q = String(query || "").trim();
     if (!q) {
       state.status = "Type a destination";
-      updateMetaFromPreview();
+      syncUi();
       return null;
     }
+
     state.lastManualQuery = q;
     state.status = "Searching…";
-    updateMetaFromPreview();
+    syncUi();
 
-    const normalized = await window.TlcNavigationPreviewModule?.searchAndSetPreviewDestination?.(q);
-    const accepted = setManualDestination(normalized);
-    if (!accepted) {
+    const result = await window.TlcNavigationPreviewModule?.searchAndSetPreviewDestination?.(q);
+    if (!result?.destination || !result?.routeBundle?.routeFeature) {
+      state.routeActive = false;
+      state.routePreviewReady = false;
       state.status = "Route unavailable";
-      updateMetaFromPreview();
+      syncUi();
       return null;
     }
 
+    const accepted = setManualDestination(result.destination);
+    if (!accepted) {
+      state.routeActive = false;
+      state.routePreviewReady = false;
+      state.status = "Route unavailable";
+      syncUi();
+      return null;
+    }
+
+    state.routePreviewReady = true;
+    state.routeActive = true;
     state.status = "Preparing preview…";
-    updateMetaFromPreview();
+    syncUi();
+
+    const started = window.TlcNavigationTurnModule?.startNavigation?.() === true;
+    if (!started) {
+      state.status = "Preview ready";
+      syncUi();
+      return accepted;
+    }
+
+    state.status = "Navigating…";
+    syncUi();
+    window.setTimeout(() => {
+      if (state.uiOpen) close();
+    }, 900);
     return accepted;
   }
 
   function clear() {
+    window.TlcNavigationTurnModule?.stopNavigation?.();
+    window.TlcNavigationPreviewModule?.clearPreview?.({ clearInput: true });
     state.manualDestination = null;
     state.manualDestinationLabel = "";
     state.routeActive = false;
     state.routePreviewReady = false;
     state.externalNavUrl = "";
     state.status = "Idle";
-    window.TlcNavigationPreviewModule?.clearPreview?.({ clearInput: true });
     updateExternalNav();
     const { input } = getQuickEls();
     if (input) input.value = "";
@@ -178,7 +194,7 @@
   }
 
   function bindUi() {
-    const { stack, toggleBtn, tray, input, goBtn, clearBtn } = getQuickEls();
+    const { stack, toggleBtn, input, goBtn, clearBtn } = getQuickEls();
 
     if (toggleBtn && !toggleBtn.dataset.boundManualNav) {
       toggleBtn.dataset.boundManualNav = "1";
@@ -215,7 +231,6 @@
         if (!state.uiOpen) return;
         const target = event?.target;
         if (stack && target instanceof Node && stack.contains(target)) return;
-        if (tray && target instanceof Node && tray.contains(target)) return;
         close();
       };
       ["pointerdown", "touchstart", "mousedown"].forEach((eventName) => {
@@ -223,12 +238,21 @@
       });
     }
 
-    window.addEventListener("tlc-nav-preview-updated", () => {
-      updateMetaFromPreview();
-      const preview = window.TlcNavigationPreviewModule?.getSnapshot?.() || {};
-      state.routeActive = !!preview.hasRoute;
-      state.routePreviewReady = preview.status === "Route ready";
-      state.status = String(preview.status || state.status || "Idle");
+    window.addEventListener("tlc-nav-preview-updated", (event) => {
+      const routeBundle = event?.detail?.routeBundle || null;
+      if (routeBundle?.destinationSource === "manual") {
+        state.routePreviewReady = routeBundle.status === "Route ready";
+      }
+      syncUi();
+    });
+
+    window.addEventListener("tlc-nav-preview-failed", () => {
+      state.routePreviewReady = false;
+      state.routeActive = false;
+      if (state.status === "Searching…" || state.status === "Preparing preview…") {
+        state.status = "Route unavailable";
+      }
+      syncUi();
     });
 
     window.addEventListener("tlc-nav-preview-cleared", () => {
@@ -237,7 +261,24 @@
       if (!state.manualDestination) {
         state.status = "Idle";
       }
-      updateMetaFromPreview();
+      syncUi();
+    });
+
+    window.addEventListener("tlc-nav-started", () => {
+      state.routeActive = true;
+      state.status = "Navigating…";
+      syncUi();
+    });
+
+    window.addEventListener("tlc-nav-stopped", () => {
+      if (state.manualDestination && state.routePreviewReady) {
+        state.routeActive = true;
+        state.status = "Preview ready";
+      } else {
+        state.routeActive = false;
+        if (!state.manualDestination) state.status = "Idle";
+      }
+      syncUi();
     });
   }
 
