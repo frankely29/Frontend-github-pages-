@@ -456,7 +456,9 @@
   }
 
   function canStart() {
-    return !!state.currentRouteFeature?.geometry?.coordinates?.length && !!state.manualDestination;
+    const hasRoute = !!state.currentRouteFeature?.geometry?.coordinates?.length;
+    const hasManualDestination = !!state.manualDestination;
+    return hasRoute && hasManualDestination;
   }
 
   function toggleNavigation() {
