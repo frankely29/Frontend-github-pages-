@@ -153,7 +153,14 @@
     const hasSummary = !!(state.currentRouteSummary?.durationSeconds && state.currentRouteSummary?.distanceMeters);
     if (hasSummary) return true;
     if (!metaText) return false;
-    return status !== "idle";
+    if (!status || status === "idle") return false;
+    return (
+      status.startsWith("calculating route") ||
+      status.startsWith("route ready") ||
+      status.startsWith("waiting for location") ||
+      status.startsWith("route unavailable") ||
+      status.startsWith("search error")
+    );
   }
 
   function buildToggleText() {
@@ -189,13 +196,13 @@
     const nextOpen = !!open;
     state.uiOpen = nextOpen;
     if (nextOpen) {
-      state.suppressCloseUntilTs = Date.now() + 180;
+      state.suppressCloseUntilTs = Date.now() + 200;
     }
     syncQuickUiOpenState();
   }
 
   function isEventInsideQuickStack(target) {
-    if (!target || !(target instanceof Element)) return false;
+    if (!target || !(target instanceof Node)) return false;
     const { stack } = getQuickEls();
     return !!stack?.contains(target);
   }
@@ -489,7 +496,7 @@
       return normalized;
     } catch (error) {
       console.warn("navigation preview geocode failed:", error);
-      setStatus("Route unavailable");
+      setStatus("Search error");
       return null;
     }
   }
@@ -558,6 +565,11 @@
         void searchAndSetPreviewDestination(input.value || "");
       });
       input.addEventListener("focus", () => setUiOpen(true));
+      input.addEventListener("focusout", (event) => {
+        if (isEventInsideQuickStack(event?.relatedTarget)) {
+          event.stopPropagation();
+        }
+      });
     }
 
     if (clearBtn && !clearBtn.dataset.boundNavPreview) {
@@ -570,6 +582,15 @@
         try {
           window.TlcMapUiModule?.setNavDestination?.(null, { source: wasManual ? "manual" : "assistant" });
         } catch (_) {}
+      });
+    }
+
+    if (tray && !tray.dataset.boundNavPreviewFocus) {
+      tray.dataset.boundNavPreviewFocus = "1";
+      tray.addEventListener("focusout", (event) => {
+        if (isEventInsideQuickStack(event?.relatedTarget)) {
+          event.stopPropagation();
+        }
       });
     }
 
