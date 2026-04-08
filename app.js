@@ -1824,6 +1824,8 @@ function initMap() {
     mapReady = true;
     map.resize();
     applyNightBasemap(!!window.TlcMapUiModule?.getWeatherState?.()?.isNight);
+    // Explicit navigation init order:
+    // 1) preview service, 2) manual widget owner, 3) turn-by-turn engine.
     window.TlcNavigationPreviewModule?.init?.(map);
     window.TlcManualNavigationModule?.init?.();
     window.TlcNavigationTurnModule?.init?.(map);

@@ -131,7 +131,11 @@
     try {
       const result = await window.TlcNavigationPreviewModule?.searchAndSetPreviewDestination?.(q);
       if (searchToken !== state.activeSearchToken) return null;
-      if (!result?.destination || !result?.routeBundle?.routeFeature) {
+      if (
+        !result?.destination ||
+        !result?.routeBundle?.routeFeature ||
+        String(result?.routeBundle?.destinationSource || "") !== "manual"
+      ) {
         state.routeActive = false;
         state.routePreviewReady = false;
         state.status = "Route unavailable";

@@ -406,17 +406,19 @@
     if (!map || typeof map.getSource !== "function") return;
     state.map = map;
 
-    const boot = () => {
+    const boot = async () => {
       ensureRouteLayers();
       if (state.currentDestination) {
-        void runPreviewRefresh(true);
+        await runPreviewRefresh(true);
       }
     };
 
     if (map.isStyleLoaded?.()) {
-      boot();
+      void boot();
     } else {
-      map.once("load", boot);
+      map.once("load", () => {
+        void boot();
+      });
     }
 
     map.on?.("styledata", () => {
