@@ -40,7 +40,11 @@
     lastKnownLocation: null,
     offRouteSamples: 0,
     lastFollowCameraAt: 0,
-    hotspotFillOpacityOriginal: new Map(),
+    navigationStreetModeEnabled: false,
+    navigationStreetModeFallback: false,
+    hotspotPaintOriginal: new Map(),
+    routePaintOriginal: new Map(),
+    hotspotLayerRestoreAnchors: new Map(),
   };
 
   function getEls() {
@@ -214,22 +218,161 @@
     }
   }
 
-  function setHotspotsDimmed(dimmed) {
+  function getRoadAnchorLayerId() {
+    const layers = state.map?.getStyle?.()?.layers;
+    if (!Array.isArray(layers)) return null;
+    const roadLike = layers.find((layer) => {
+      const id = String(layer?.id || "").toLowerCase();
+      if (!id) return false;
+      return (
+        id.includes("road") ||
+        id.includes("street") ||
+        id.includes("highway") ||
+        id.includes("transport")
+      );
+    });
+    return roadLike?.id || null;
+  }
+
+  function getNavigationHotspotLayerIds() {
+    const map = state.map;
+    const layers = map?.getStyle?.()?.layers;
+    if (!Array.isArray(layers)) return [];
+    const zonesFill = map.getLayer?.("zones-fill");
+    if (!zonesFill) return [];
+    const hotspotSourceId = zonesFill.source || null;
+    return layers
+      .filter((layer) => {
+        if (!layer?.id) return false;
+        if (layer.id === "zones-fill") return true;
+        const sameSource = hotspotSourceId && layer.source === hotspotSourceId;
+        const isHotspotCompanionType = layer.type === "fill" || layer.type === "line";
+        return !!(sameSource && isHotspotCompanionType);
+      })
+      .map((layer) => layer.id);
+  }
+
+  function cachePaintProperty(bucket, layerId, prop) {
+    const map = state.map;
+    if (!map?.getLayer?.(layerId)) return;
+    const key = `${layerId}:${prop}`;
+    if (bucket.has(key)) return;
+    bucket.set(key, map.getPaintProperty(layerId, prop));
+  }
+
+  function restorePaintProperty(bucket, layerId, prop) {
+    const map = state.map;
+    if (!map?.getLayer?.(layerId)) return;
+    const key = `${layerId}:${prop}`;
+    if (!bucket.has(key)) return;
+    const original = bucket.get(key);
+    map.setPaintProperty(layerId, prop, original == null ? null : original);
+    bucket.delete(key);
+  }
+
+  function applyNavigationRouteCorridorStyle() {
+    const map = state.map;
+    if (!map?.getStyle?.()) return;
+
+    if (map.getLayer?.(PREVIEW_CASING_LAYER_ID)) {
+      cachePaintProperty(state.routePaintOriginal, PREVIEW_CASING_LAYER_ID, "line-color");
+      cachePaintProperty(state.routePaintOriginal, PREVIEW_CASING_LAYER_ID, "line-opacity");
+      cachePaintProperty(state.routePaintOriginal, PREVIEW_CASING_LAYER_ID, "line-width");
+      map.setPaintProperty(PREVIEW_CASING_LAYER_ID, "line-color", "rgba(241, 245, 249, 0.95)");
+      map.setPaintProperty(PREVIEW_CASING_LAYER_ID, "line-opacity", 0.98);
+      map.setPaintProperty(PREVIEW_CASING_LAYER_ID, "line-width", ["interpolate", ["linear"], ["zoom"], 10, 9, 15, 13, 18, 16]);
+    }
+
+    if (map.getLayer?.(PREVIEW_LINE_LAYER_ID)) {
+      cachePaintProperty(state.routePaintOriginal, PREVIEW_LINE_LAYER_ID, "line-color");
+      cachePaintProperty(state.routePaintOriginal, PREVIEW_LINE_LAYER_ID, "line-opacity");
+      cachePaintProperty(state.routePaintOriginal, PREVIEW_LINE_LAYER_ID, "line-width");
+      map.setPaintProperty(PREVIEW_LINE_LAYER_ID, "line-color", "#0ea5e9");
+      map.setPaintProperty(PREVIEW_LINE_LAYER_ID, "line-opacity", 0.99);
+      map.setPaintProperty(PREVIEW_LINE_LAYER_ID, "line-width", ["interpolate", ["linear"], ["zoom"], 10, 4.5, 15, 6.5, 18, 8.5]);
+    }
+  }
+
+  function restoreNavigationRouteCorridorStyle() {
+    restorePaintProperty(state.routePaintOriginal, PREVIEW_CASING_LAYER_ID, "line-color");
+    restorePaintProperty(state.routePaintOriginal, PREVIEW_CASING_LAYER_ID, "line-opacity");
+    restorePaintProperty(state.routePaintOriginal, PREVIEW_CASING_LAYER_ID, "line-width");
+    restorePaintProperty(state.routePaintOriginal, PREVIEW_LINE_LAYER_ID, "line-color");
+    restorePaintProperty(state.routePaintOriginal, PREVIEW_LINE_LAYER_ID, "line-opacity");
+    restorePaintProperty(state.routePaintOriginal, PREVIEW_LINE_LAYER_ID, "line-width");
+  }
+
+  function applyNavigationHotspotPaint() {
     const map = state.map;
     if (!map?.getLayer?.("zones-fill")) return;
-    if (dimmed) {
-      if (!state.hotspotFillOpacityOriginal.has("zones-fill")) {
-        state.hotspotFillOpacityOriginal.set("zones-fill", map.getPaintProperty("zones-fill", "fill-opacity"));
+    cachePaintProperty(state.hotspotPaintOriginal, "zones-fill", "fill-opacity");
+    const current = map.getPaintProperty("zones-fill", "fill-opacity");
+    if (typeof current === "number") {
+      map.setPaintProperty("zones-fill", "fill-opacity", Math.max(0.45, Math.min(0.85, current)));
+    } else {
+      map.setPaintProperty("zones-fill", "fill-opacity", 0.65);
+    }
+  }
+
+  function restoreNavigationHotspotPaint() {
+    restorePaintProperty(state.hotspotPaintOriginal, "zones-fill", "fill-opacity");
+  }
+
+  function applyStreetFirstLayerOrder() {
+    const map = state.map;
+    const layers = map?.getStyle?.()?.layers;
+    if (!Array.isArray(layers)) return false;
+    const roadAnchorId = getRoadAnchorLayerId();
+    if (!roadAnchorId || !map.getLayer?.(roadAnchorId)) return false;
+
+    const hotspotLayerIds = getNavigationHotspotLayerIds();
+    if (!hotspotLayerIds.length) return false;
+
+    const layerIds = layers.map((layer) => layer.id);
+    hotspotLayerIds.forEach((layerId) => {
+      if (!map.getLayer?.(layerId)) return;
+      if (!state.hotspotLayerRestoreAnchors.has(layerId)) {
+        const idx = layerIds.indexOf(layerId);
+        const beforeId = idx >= 0 ? layerIds.slice(idx + 1).find((id) => id && id !== layerId) || null : null;
+        state.hotspotLayerRestoreAnchors.set(layerId, { beforeId });
       }
-      map.setPaintProperty("zones-fill", "fill-opacity", 0.2);
+      map.moveLayer(layerId, roadAnchorId);
+    });
+    return true;
+  }
+
+  function restoreStreetFirstLayerOrder() {
+    const map = state.map;
+    if (!map?.getStyle?.()) return;
+    const entries = Array.from(state.hotspotLayerRestoreAnchors.entries());
+    entries.forEach(([layerId, anchors]) => {
+      if (!map.getLayer?.(layerId)) return;
+      const beforeId = anchors?.beforeId;
+      if (beforeId && map.getLayer?.(beforeId)) {
+        map.moveLayer(layerId, beforeId);
+      }
+    });
+    state.hotspotLayerRestoreAnchors.clear();
+  }
+
+  function setNavigationStreetMode(enabled) {
+    const map = state.map;
+    if (!map?.getStyle?.()) return;
+    const next = !!enabled;
+    state.navigationStreetModeEnabled = next;
+
+    if (next) {
+      applyNavigationHotspotPaint();
+      state.navigationStreetModeFallback = !applyStreetFirstLayerOrder();
+      applyNavigationRouteCorridorStyle();
+      ensurePreviewRouteOnTop();
       return;
     }
 
-    if (state.hotspotFillOpacityOriginal.has("zones-fill")) {
-      const original = state.hotspotFillOpacityOriginal.get("zones-fill");
-      map.setPaintProperty("zones-fill", "fill-opacity", original == null ? 1 : original);
-      state.hotspotFillOpacityOriginal.delete("zones-fill");
-    }
+    restoreStreetFirstLayerOrder();
+    restoreNavigationHotspotPaint();
+    restoreNavigationRouteCorridorStyle();
+    state.navigationStreetModeFallback = false;
   }
 
   function updateCard() {
@@ -417,7 +560,7 @@
     state.followModeEnabled = true;
     state.sessionId += 1;
     resetActiveProgress();
-    setHotspotsDimmed(true);
+    setNavigationStreetMode(true);
     ensurePreviewRouteOnTop();
 
     if (state.lastKnownLocation) {
@@ -437,7 +580,7 @@
     state.offRoute = false;
     state.offRouteSamples = 0;
     state.rerouteInFlight = false;
-    setHotspotsDimmed(false);
+    setNavigationStreetMode(false);
     updateCard();
   }
 
@@ -481,7 +624,7 @@
     if (state.map?.on) {
       state.map.on("styledata", () => {
         if (state.active) {
-          setHotspotsDimmed(true);
+          setNavigationStreetMode(true);
           ensurePreviewRouteOnTop();
         }
       });
