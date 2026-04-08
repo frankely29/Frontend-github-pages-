@@ -213,17 +213,17 @@
     }
   }
 
-  function activateStreetMode() {
-    window.TlcNavigationStreetModeModule?.activate?.();
+  function activateBuildingTintMode() {
+    window.TlcNavigationBuildingTintModule?.activate?.();
     ensurePreviewRouteOnTop();
   }
 
-  function deactivateStreetMode() {
-    window.TlcNavigationStreetModeModule?.deactivate?.();
+  function deactivateBuildingTintMode() {
+    window.TlcNavigationBuildingTintModule?.deactivate?.();
   }
 
-  function reapplyStreetModeIfNeeded() {
-    window.TlcNavigationStreetModeModule?.reapplyIfNeeded?.();
+  function reapplyBuildingTintModeIfNeeded() {
+    window.TlcNavigationBuildingTintModule?.reapplyIfNeeded?.();
     ensurePreviewRouteOnTop();
   }
 
@@ -376,6 +376,7 @@
     }
 
     if (state.active && state.lastKnownLocation) {
+      window.TlcNavigationBuildingTintModule?.refreshForViewport?.(true);
       refreshProgressFromLocation(state.lastKnownLocation);
     }
 
@@ -399,6 +400,9 @@
     const ll = toLatLng(location);
     if (!ll) return;
     state.lastKnownLocation = ll;
+    if (state.active) {
+      window.TlcNavigationBuildingTintModule?.refreshForViewport?.();
+    }
     refreshProgressFromLocation(ll);
   }
 
@@ -412,7 +416,7 @@
     state.followModeEnabled = true;
     state.sessionId += 1;
     resetActiveProgress();
-    activateStreetMode();
+    activateBuildingTintMode();
     ensurePreviewRouteOnTop();
 
     if (state.lastKnownLocation) {
@@ -432,7 +436,7 @@
     state.offRoute = false;
     state.offRouteSamples = 0;
     state.rerouteInFlight = false;
-    deactivateStreetMode();
+    deactivateBuildingTintMode();
     updateCard();
   }
 
@@ -447,6 +451,7 @@
   function recenterNavigationCamera() {
     state.lastFollowCameraAt = 0;
     maybeFollowCamera();
+    if (state.active) window.TlcNavigationBuildingTintModule?.refreshForViewport?.();
   }
 
   function bindUi() {
@@ -471,17 +476,17 @@
 
   function init(map) {
     state.map = map || null;
-    window.TlcNavigationStreetModeModule?.init?.(state.map);
+    window.TlcNavigationBuildingTintModule?.init?.(state.map);
     bindUi();
 
     if (state.map?.on) {
       state.map.on("styledata", () => {
         if (state.active) {
-          reapplyStreetModeIfNeeded();
+          reapplyBuildingTintModeIfNeeded();
         }
       });
       state.map.on("idle", () => {
-        if (state.active) reapplyStreetModeIfNeeded();
+        if (state.active) reapplyBuildingTintModeIfNeeded();
       });
     }
 
