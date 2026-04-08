@@ -1,7 +1,7 @@
 .navQuickStack {
   position: fixed;
-  top: calc(env(safe-area-inset-top, 0px) + 38px);
-  right: 12px;
+  top: calc(env(safe-area-inset-top, 0px) + 34px);
+  right: 8px;
   z-index: 610;
   width: auto;
   border: 0;
@@ -13,29 +13,30 @@
 .navQuickToggle {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  height: 26px;
+  gap: 5px;
+  min-height: 22px;
   border-radius: 999px;
-  border: 1px solid rgba(148, 163, 184, 0.34);
-  background: rgba(255, 255, 255, 0.84);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  background: rgba(255, 255, 255, 0.8);
   backdrop-filter: blur(6px) saturate(1.15);
   -webkit-backdrop-filter: blur(6px) saturate(1.15);
   color: #0f172a;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   line-height: 1;
   letter-spacing: 0.01em;
-  padding: 0 10px;
+  padding: 0 8px;
   cursor: pointer;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.08);
 }
 
 .navQuickToggleIcon {
   color: #0284c7;
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .navQuickToggleText {
-  min-width: 54px;
+  min-width: 44px;
   text-align: center;
 }
 
@@ -121,8 +122,8 @@
 
 @media (max-width: 720px) {
   .navQuickStack {
-    top: calc(env(safe-area-inset-top, 0px) + 36px);
-    right: 12px;
+    top: calc(env(safe-area-inset-top, 0px) + 34px);
+    right: 8px;
     left: auto;
   }
 
