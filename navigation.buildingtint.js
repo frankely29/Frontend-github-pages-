@@ -5,6 +5,7 @@
   const BUILDING_TINT_LAYER_ID = "tlc-nav-building-tint-layer";
   const EXPLICIT_HOTSPOT_FILL_IDS = ["zones-fill"];
   const REFRESH_THROTTLE_MS = 700;
+  const MIN_BUILDING_TINT_FEATURES_FOR_SUPPRESSION = 8;
 
   const state = {
     map: null,
@@ -16,6 +17,9 @@
     buildingLayerAnchorId: null,
     hotspotSourceId: null,
     hotspotFillLayerIds: [],
+    hotspotOutlineLayerIds: [],
+    hotspotSourceLayerIds: [],
+    hotspotFeatureSnapshot: [],
     roadLayerIds: [],
     streetLabelLayerIds: [],
     originalLayerOrder: null,
@@ -26,6 +30,7 @@
     lastRefreshAt: 0,
     refreshInFlight: false,
     buildingTintFeatureCount: 0,
+    zoneFillSuppressed: false,
   };
 
   function getStyleLayers() {
@@ -72,6 +77,14 @@
     return !!(hotspotSourceId && layer.source === hotspotSourceId);
   }
 
+
+  function isHotspotOutlineLayer(layer, hotspotSourceId) {
+    if (!layer || layer.type !== "line") return false;
+    const tokens = readLayerTokens(layer);
+    if (/(zone|hotspot)/.test(tokens) && /(outline|border|stroke|line)/.test(tokens)) return true;
+    return !!(hotspotSourceId && layer.source === hotspotSourceId && /(zone|hotspot)/.test(tokens));
+  }
+
   function detectStyleDependencies() {
     const layers = getStyleLayers();
     const buildingCandidates = [];
@@ -80,6 +93,8 @@
 
     let hotspotSourceId = hasLayer("zones-fill") ? (state.map.getLayer("zones-fill")?.source || null) : null;
     const hotspotFillLayerIds = [];
+    const hotspotOutlineLayerIds = [];
+    const hotspotSourceLayerIds = new Set();
 
     layers.forEach((layer) => {
       if (!layer?.id) return;
@@ -92,6 +107,11 @@
       if (isHotspotFillLayer(layer, hotspotSourceId)) {
         hotspotFillLayerIds.push(layer.id);
         hotspotSourceId = hotspotSourceId || layer.source || null;
+        if (layer["source-layer"]) hotspotSourceLayerIds.add(layer["source-layer"]);
+      }
+      if (isHotspotOutlineLayer(layer, hotspotSourceId)) {
+        hotspotOutlineLayerIds.push(layer.id);
+        if (layer["source-layer"]) hotspotSourceLayerIds.add(layer["source-layer"]);
       }
     });
 
@@ -108,6 +128,8 @@
     state.buildingLayerAnchorId = preferredBuilding?.id || null;
     state.hotspotSourceId = hotspotSourceId;
     state.hotspotFillLayerIds = hotspotFillLayerIds;
+    state.hotspotOutlineLayerIds = hotspotOutlineLayerIds;
+    state.hotspotSourceLayerIds = Array.from(hotspotSourceLayerIds);
     state.roadLayerIds = roadLayerIds;
     state.streetLabelLayerIds = streetLabelLayerIds;
     state.supported = !!(state.buildingSourceId && state.buildingSourceLayer);
@@ -159,6 +181,20 @@
     state.originalLayerOrder = null;
   }
 
+
+  function restorePaintKeys(keys) {
+    keys.forEach((key) => {
+      const value = state.originalPaint.get(key);
+      if (typeof value === "undefined") return;
+      const sep = key.indexOf(":");
+      const layerId = key.slice(0, sep);
+      const prop = key.slice(sep + 1);
+      if (!hasLayer(layerId)) return;
+      state.map.setPaintProperty(layerId, prop, value == null ? null : value);
+      state.originalPaint.delete(key);
+    });
+  }
+
   function getViewportKey() {
     if (!state.map) return "";
     const center = state.map.getCenter?.();
@@ -201,6 +237,8 @@
       source.setData({ type: "FeatureCollection", features: [] });
     }
     state.buildingTintFeatureCount = 0;
+    state.hotspotFeatureSnapshot = [];
+    state.zoneFillSuppressed = false;
   }
 
   function extractColorFromFeature(feature) {
@@ -332,7 +370,25 @@
     return !!(c && bounds.contains([c[0], c[1]]));
   }
 
-  function getHotspotFeatures() {
+  function getHotspotFeaturesFromSource() {
+    if (!state.hotspotSourceId || !state.map?.querySourceFeatures) return [];
+    const sourceLayers = state.hotspotSourceLayerIds.filter(Boolean);
+    try {
+      if (sourceLayers.length) {
+        const acc = [];
+        sourceLayers.forEach((sourceLayer) => {
+          const features = state.map.querySourceFeatures(state.hotspotSourceId, { sourceLayer }) || [];
+          acc.push(...features);
+        });
+        return acc;
+      }
+      return state.map.querySourceFeatures(state.hotspotSourceId) || [];
+    } catch (_err) {
+      return [];
+    }
+  }
+
+  function getHotspotFeaturesFromRenderedLayers() {
     const layerIds = state.hotspotFillLayerIds.filter((id) => hasLayer(id));
     if (!layerIds.length) return [];
     try {
@@ -340,6 +396,42 @@
     } catch (_err) {
       return [];
     }
+  }
+
+  function getActiveHotspotFeatures() {
+    const sourceFeatures = getHotspotFeaturesFromSource();
+    if (sourceFeatures.length) {
+      state.hotspotFeatureSnapshot = sourceFeatures;
+      return sourceFeatures;
+    }
+
+    if (Array.isArray(state.hotspotFeatureSnapshot) && state.hotspotFeatureSnapshot.length) {
+      return state.hotspotFeatureSnapshot;
+    }
+
+    const rendered = getHotspotFeaturesFromRenderedLayers();
+    if (rendered.length) state.hotspotFeatureSnapshot = rendered;
+    return rendered;
+  }
+
+  function suppressZoneFillForNavigation() {
+    state.hotspotFillLayerIds.forEach((layerId) => {
+      if (!hasLayer(layerId)) return;
+      setPaint(layerId, "fill-opacity", 0);
+    });
+    state.hotspotOutlineLayerIds.forEach((layerId) => {
+      if (!hasLayer(layerId)) return;
+      setPaint(layerId, "line-opacity", 0);
+    });
+    state.zoneFillSuppressed = true;
+  }
+
+  function restoreZoneFillAfterNavigationSuppression() {
+    const keys = [];
+    state.hotspotFillLayerIds.forEach((layerId) => keys.push(`${layerId}:fill-opacity`));
+    state.hotspotOutlineLayerIds.forEach((layerId) => keys.push(`${layerId}:line-opacity`));
+    restorePaintKeys(keys);
+    state.zoneFillSuppressed = false;
   }
 
   function assignHotspot(buildingPoint, hotspotFeatures) {
@@ -364,7 +456,7 @@
         hotspotColor: hotspotMeta.color,
         hotspotBucket: hotspotMeta.bucket,
         hotspotRating: hotspotMeta.rating,
-        hotspotOpacity: 0.36,
+        hotspotOpacity: 0.42,
       },
     };
   }
@@ -389,13 +481,6 @@
     if (hasLayer(PREVIEW_LINE_LAYER_ID)) state.map.moveLayer(PREVIEW_LINE_LAYER_ID);
   }
 
-  function minimizeZoneFillForNavigation() {
-    state.hotspotFillLayerIds.forEach((layerId) => {
-      if (!hasLayer(layerId)) return;
-      setPaint(layerId, "fill-opacity", 0.08);
-    });
-  }
-
   function refreshForViewport(force = false) {
     if (!state.active || !state.supported || !state.map?.getStyle?.()) return false;
     const now = Date.now();
@@ -413,10 +498,11 @@
         sourceLayer: state.buildingSourceLayer,
       }) || [];
 
-      const hotspotFeatures = getHotspotFeatures();
+      const hotspotFeatures = getActiveHotspotFeatures();
       if (!hotspotFeatures.length) {
         state.fallbackModeUsed = true;
         clearBuildingTintData();
+        restoreZoneFillAfterNavigationSuppression();
         window.TlcNavigationStreetModeModule?.activate?.();
         return false;
       }
@@ -450,12 +536,22 @@
 
       state.lastViewportKey = viewportKey;
       state.lastRefreshAt = now;
-      state.fallbackModeUsed = false;
+
+      if (state.buildingTintFeatureCount >= MIN_BUILDING_TINT_FEATURES_FOR_SUPPRESSION) {
+        state.fallbackModeUsed = false;
+        window.TlcNavigationStreetModeModule?.deactivate?.();
+        suppressZoneFillForNavigation();
+      } else {
+        state.fallbackModeUsed = true;
+        restoreZoneFillAfterNavigationSuppression();
+        window.TlcNavigationStreetModeModule?.activate?.();
+      }
+
       moveLayersForNavigationReadability();
-      minimizeZoneFillForNavigation();
       return true;
     } catch (_err) {
       state.fallbackModeUsed = true;
+      restoreZoneFillAfterNavigationSuppression();
       window.TlcNavigationStreetModeModule?.activate?.();
       return false;
     } finally {
@@ -478,7 +574,6 @@
 
     try {
       ensureBuildingTintLayer();
-      minimizeZoneFillForNavigation();
       moveLayersForNavigationReadability();
       state.active = true;
       state.fallbackModeUsed = false;
@@ -496,6 +591,7 @@
     if (!state.map?.getStyle?.()) return false;
 
     clearBuildingTintData();
+    restoreZoneFillAfterNavigationSuppression();
     if (hasLayer(state.buildingTintLayerId)) {
       state.map.removeLayer(state.buildingTintLayerId);
     }
@@ -516,6 +612,8 @@
     state.lastRefreshAt = 0;
     state.refreshInFlight = false;
     state.buildingTintFeatureCount = 0;
+    state.hotspotFeatureSnapshot = [];
+    state.zoneFillSuppressed = false;
 
     window.TlcNavigationStreetModeModule?.deactivate?.();
     return true;
@@ -533,7 +631,6 @@
 
     ensureBuildingTintLayer();
     moveLayersForNavigationReadability();
-    minimizeZoneFillForNavigation();
     return refreshForViewport(false);
   }
 
@@ -553,11 +650,14 @@
       buildingTintFeatureCount: Number(state.buildingTintFeatureCount || 0),
       hotspotSourceId: state.hotspotSourceId,
       hotspotFillLayerIds: state.hotspotFillLayerIds.slice(),
+      hotspotOutlineLayerIds: state.hotspotOutlineLayerIds.slice(),
+      hotspotSourceLayerIds: state.hotspotSourceLayerIds.slice(),
       roadLayerIds: state.roadLayerIds.slice(),
       streetLabelLayerIds: state.streetLabelLayerIds.slice(),
       buildingTintLayerId: state.buildingTintLayerId,
       lastViewportKey: state.lastViewportKey,
       refreshInFlight: !!state.refreshInFlight,
+      zoneFillSuppressed: !!state.zoneFillSuppressed,
     };
   }
 
@@ -580,11 +680,14 @@
       buildingTintFeatureCount: 0,
       hotspotSourceId: null,
       hotspotFillLayerIds: [],
+      hotspotOutlineLayerIds: [],
+      hotspotSourceLayerIds: [],
       roadLayerIds: [],
       streetLabelLayerIds: [],
       buildingTintLayerId: BUILDING_TINT_LAYER_ID,
       lastViewportKey: "",
       refreshInFlight: false,
+      zoneFillSuppressed: false,
     };
   };
 })();
