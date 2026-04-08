@@ -10,7 +10,7 @@
   const wxCanvas = document.getElementById("wxCanvas");
   const wxCtx = wxCanvas ? wxCanvas.getContext("2d") : null;
 
-  let recommendedDest = null;
+  let manualDest = null;
   let wxState = { kind: "none", intensity: 0, isNight: false, tempF: null, label: "Weather…", lastLat: null, lastLng: null };
   let lastWeatherRefreshAt = 0;
   let wxParticles = [];
@@ -23,32 +23,31 @@
   }
   function setNavDestination(dest, options = {}) {
     const source = String(options?.source || "assistant");
-    const shouldApply = window.TlcNavigationPreviewModule?.shouldApplyDestinationUpdate?.(source);
-    recommendedDest = dest || null;
-
-    if (!shouldApply) {
+    if (source !== "manual") {
       return;
     }
+    manualDest = dest || null;
 
-    if (!recommendedDest) {
+    if (!manualDest) {
       if (navBtn) {
         navBtn.href = "#";
         setNavDisabled(true);
       }
       window.TlcNavigationTurnModule?.stopNavigation?.();
-      window.TlcNavigationPreviewModule?.clearPreview?.({ source, clearInput: false });
       return;
     }
 
     if (navBtn) {
-      const { lat, lng } = recommendedDest;
+      const { lat, lng } = manualDest;
       navBtn.href = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${lat},${lng}`)}&travelmode=driving`;
       setNavDisabled(false);
     }
-    window.TlcNavigationPreviewModule?.setPreviewDestination?.(recommendedDest, { source });
+  }
+  function setManualNavDestination(dest) {
+    setNavDestination(dest, { source: "manual" });
   }
   function hasRecommendedDestination() {
-    return !!recommendedDest;
+    return !!manualDest;
   }
   function updateRecommendation(frame) {
     if (window.TlcAiAssistantModule?.updateAssistantForFrame) {
@@ -59,7 +58,6 @@
     if (recommendEl) {
       recommendEl.textContent = "AI Assistant: loading guidance…";
     }
-    setNavDestination(null);
   }
 
 
@@ -403,7 +401,8 @@
   window.TlcMapUiModule = {
     setNavDisabled,
     setNavDestination,
-    getNavDestination: () => recommendedDest,
+    setManualNavDestination,
+    getNavDestination: () => manualDest,
     hasRecommendedDestination,
     updateRecommendation,
     updateOnlineBadge,
