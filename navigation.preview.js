@@ -191,14 +191,17 @@
   }
 
   function syncQuickUiOpenState() {
-    syncNavQuickUiState();
+    const { stack, toggleBtn, tray } = getQuickEls();
+    if (stack) stack.dataset.open = state.uiOpen ? "1" : "0";
+    if (toggleBtn) toggleBtn.setAttribute("aria-expanded", state.uiOpen ? "true" : "false");
+    if (tray) tray.hidden = !state.uiOpen;
   }
 
   function setUiOpen(open) {
     const nextOpen = !!open;
     state.uiOpen = nextOpen;
     if (nextOpen) {
-      state.suppressCloseUntilTs = Date.now() + 200;
+      state.suppressCloseUntilTs = Date.now() + 250;
     }
     syncQuickUiOpenState();
   }
@@ -210,7 +213,7 @@
     if (event?.stopPropagation) event.stopPropagation();
   }
 
-  function hasRecentInternalInteraction(windowMs = 250) {
+  function hasRecentInternalInteraction(windowMs = 200) {
     return (Date.now() - Number(state.lastInternalInteractAt || 0)) < windowMs;
   }
 
@@ -238,8 +241,15 @@
   }
 
   function syncNavQuickUiState() {
-    // Widget UI state is owned by TlcManualNavigationModule.
-    return;
+    const { toggleText, meta } = getQuickEls();
+    if (toggleText) toggleText.textContent = buildToggleText();
+    if (meta) {
+      const metaText = buildMetaText();
+      meta.textContent = metaText;
+      meta.hidden = !shouldShowMeta(metaText);
+    }
+    syncQuickUiOpenState();
+    bindUi();
   }
 
   function closeNavQuickOnOutsidePress(event) {
@@ -532,7 +542,7 @@
     const bindInternalPress = (el, key) => {
       if (!el || el.dataset[key]) return;
       el.dataset[key] = "1";
-      ["pointerdown", "touchstart", "mousedown", "click"].forEach((eventName) => {
+      ["pointerdown", "touchstart", "mousedown"].forEach((eventName) => {
         el.addEventListener(eventName, markInternalInteraction);
       });
     };
@@ -547,8 +557,18 @@
     if (toggleBtn && !toggleBtn.dataset.boundNavPreview) {
       toggleBtn.dataset.boundNavPreview = "1";
       toggleBtn.addEventListener("click", (event) => {
-        markInternalInteraction(event);
-        setUiOpen(!state.uiOpen);
+        event.preventDefault();
+        event.stopPropagation();
+        state.uiOpen = !state.uiOpen;
+        state.suppressCloseUntilTs = Date.now() + 250;
+        state.lastInternalInteractAt = Date.now();
+        syncQuickUiOpenState();
+        if (state.uiOpen) {
+          window.requestAnimationFrame(() => {
+            const { input: quickInput } = getQuickEls();
+            quickInput?.focus?.();
+          });
+        }
       });
     }
 
@@ -588,11 +608,11 @@
         state.inputFocused = true;
         state.lastInternalInteractAt = now;
         state.suppressCloseUntilTs = now + 250;
-        setUiOpen(true);
+        state.uiOpen = true;
+        syncQuickUiOpenState();
       });
-      input.addEventListener("blur", (event) => {
+      input.addEventListener("blur", () => {
         state.inputFocused = false;
-        markInternalInteraction(event);
       });
     }
 
@@ -613,7 +633,7 @@
       const handleDocPress = (event) => {
         closeNavQuickOnOutsidePress(event);
       };
-      ["pointerdown", "touchstart", "mousedown"].forEach((eventName) => {
+      ["pointerdown", "touchstart"].forEach((eventName) => {
         document.addEventListener(eventName, handleDocPress);
       });
     }
@@ -624,6 +644,8 @@
     state.map = map;
 
     const boot = () => {
+      bindUi();
+      syncQuickUiOpenState();
       ensureRouteLayers();
       syncNavQuickUiState();
       positionQuickStackBelowWeather();

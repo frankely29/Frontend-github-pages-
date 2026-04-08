@@ -2,12 +2,26 @@
   position: fixed;
   top: calc(env(safe-area-inset-top, 0px) + 34px);
   right: 8px;
-  z-index: 610;
+  z-index: 1200;
   width: auto;
   border: 0;
   background: transparent;
   box-shadow: none;
   padding: 0;
+}
+
+
+.navQuickStack,
+#navQuickStack,
+.navQuickToggle,
+#navQuickToggle,
+.navQuickTray,
+#navQuickTray,
+.navQuickInput,
+#navQuickInput,
+#navQuickGo,
+#navQuickClear {
+  pointer-events: auto;
 }
 
 .navQuickToggle {
