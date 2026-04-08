@@ -5,7 +5,6 @@
   const REFRESH_DISTANCE_MILES = 0.1;
   const REFRESH_INTERVAL_MS = 60 * 1000;
   const LOCATION_POLL_MS = 15000;
-  const METERS_PER_MILE = 1609.344;
 
   const ROUTE_ENDPOINT = String(window.__TLC_NAV_PREVIEW_ROUTE_ENDPOINT__ || "https://router.project-osrm.org/route/v1").trim().replace(/\/+$/, "");
   const GEOCODE_ENDPOINT = String(window.__TLC_NAV_PREVIEW_GEOCODE_ENDPOINT__ || "https://nominatim.openstreetmap.org/search").trim().replace(/\/+$/, "");
@@ -29,11 +28,6 @@
     lastRefreshAt: 0,
     locationPollTimer: null,
     userInteracted: false,
-    uiOpen: false,
-    suppressCloseUntilTs: 0,
-    autoCollapseTimer: null,
-    inputFocused: false,
-    lastInternalInteractAt: 0,
   };
 
   function emptyGeojson() {
@@ -116,160 +110,8 @@
     return true;
   }
 
-  function getQuickEls() {
-    return {
-      stack: document.getElementById("navQuickStack"),
-      toggleBtn: document.getElementById("navQuickToggle"),
-      toggleText: document.getElementById("navQuickToggleText"),
-      tray: document.getElementById("navQuickTray"),
-      input: document.getElementById("navQuickInput"),
-      goBtn: document.getElementById("navQuickGo"),
-      clearBtn: document.getElementById("navQuickClear"),
-      meta: document.getElementById("navQuickMeta"),
-    };
-  }
-
-  function formatDistanceMiles(meters) {
-    const miles = Number(meters) / METERS_PER_MILE;
-    if (!Number.isFinite(miles)) return "--";
-    if (miles >= 10) return `${miles.toFixed(1)} mi`;
-    if (miles >= 1) return `${miles.toFixed(1)} mi`;
-    return `${miles.toFixed(2)} mi`;
-  }
-
-  function formatEta(seconds) {
-    const mins = Math.max(1, Math.round(Number(seconds) / 60));
-    if (!Number.isFinite(mins)) return "--";
-    return `${mins} min`;
-  }
-
-  function buildMetaText() {
-    if (state.currentRouteSummary?.durationSeconds && state.currentRouteSummary?.distanceMeters) {
-      return `${formatEta(state.currentRouteSummary.durationSeconds)} • ${formatDistanceMiles(state.currentRouteSummary.distanceMeters)}`;
-    }
-    return String(state.currentRouteStatus || "Idle");
-  }
-
-  function shouldShowMeta(metaText) {
-    const status = String(state.currentRouteStatus || "Idle").trim().toLowerCase();
-    const hasSummary = !!(state.currentRouteSummary?.durationSeconds && state.currentRouteSummary?.distanceMeters);
-    if (hasSummary) return true;
-    if (!metaText) return false;
-    if (!status || status === "idle") return false;
-    return (
-      status.startsWith("calculating route") ||
-      status.startsWith("route ready") ||
-      status.startsWith("waiting for location") ||
-      status.startsWith("route unavailable") ||
-      status.startsWith("search error")
-    );
-  }
-
-  function buildToggleText() {
-    if (state.currentRouteSummary?.durationSeconds) {
-      const mins = Math.max(1, Math.round(Number(state.currentRouteSummary.durationSeconds) / 60));
-      if (Number.isFinite(mins)) return `${mins}m`;
-    }
-    const status = String(state.currentRouteStatus || "Idle").trim().toLowerCase();
-    if (status.startsWith("calculating") || status.startsWith("searching") || status.startsWith("preparing")) return "...";
-    if (status.startsWith("waiting for location")) return "Loc";
-    return "Navigate";
-  }
-
-  function positionQuickStackBelowWeather() {
-    const { stack } = getQuickEls();
-    if (!stack) return;
-    const weatherBadge = document.getElementById("weatherBadge");
-    if (!weatherBadge || typeof weatherBadge.getBoundingClientRect !== "function") return;
-    const rect = weatherBadge.getBoundingClientRect();
-    if (!rect || !Number.isFinite(rect.top) || !Number.isFinite(rect.bottom) || !Number.isFinite(rect.right)) return;
-    const gapPx = 6;
-    const rightInsetPx = Math.max(8, Math.round(window.innerWidth - rect.right));
-    const topPx = Math.max(0, Math.round(rect.bottom + gapPx));
-    stack.style.top = `${topPx}px`;
-    stack.style.right = `${rightInsetPx}px`;
-  }
-
-  function syncQuickUiOpenState() {
-    const { stack, toggleBtn, tray } = getQuickEls();
-    if (stack) stack.dataset.open = state.uiOpen ? "1" : "0";
-    if (toggleBtn) toggleBtn.setAttribute("aria-expanded", state.uiOpen ? "true" : "false");
-    if (tray) tray.hidden = !state.uiOpen;
-  }
-
-  function setUiOpen(open) {
-    const nextOpen = !!open;
-    state.uiOpen = nextOpen;
-    if (nextOpen) {
-      state.suppressCloseUntilTs = Date.now() + 250;
-    }
-    syncQuickUiOpenState();
-  }
-
-  function markInternalInteraction(event) {
-    const now = Date.now();
-    state.lastInternalInteractAt = now;
-    state.suppressCloseUntilTs = now + 250;
-    if (event?.stopPropagation) event.stopPropagation();
-  }
-
-  function hasRecentInternalInteraction(windowMs = 200) {
-    return (Date.now() - Number(state.lastInternalInteractAt || 0)) < windowMs;
-  }
-
-  function isEventInsideQuickStack(target) {
-    if (!target || !(target instanceof Node)) return false;
-    const { stack } = getQuickEls();
-    return !!stack?.contains(target);
-  }
-
-  function isEventInsideQuickStackPath(event) {
-    const { stack } = getQuickEls();
-    if (!stack || !event || typeof event.composedPath !== "function") return false;
-    const path = event.composedPath();
-    return Array.isArray(path) && path.includes(stack);
-  }
-
-  function maybeAutoCollapseAfterDelay() {
-    if (state.autoCollapseTimer) clearTimeout(state.autoCollapseTimer);
-    state.autoCollapseTimer = setTimeout(() => {
-      const { input } = getQuickEls();
-      const active = document.activeElement;
-      if (active && input && active === input) return;
-      setUiOpen(false);
-    }, 2400);
-  }
-
-  function syncNavQuickUiState() {
-    const { toggleText, meta } = getQuickEls();
-    if (toggleText) toggleText.textContent = buildToggleText();
-    if (meta) {
-      const metaText = buildMetaText();
-      meta.textContent = metaText;
-      meta.hidden = !shouldShowMeta(metaText);
-    }
-    syncQuickUiOpenState();
-    bindUi();
-  }
-
-  function closeNavQuickOnOutsidePress(event) {
-    if (!state.uiOpen) return;
-    if (Date.now() < Number(state.suppressCloseUntilTs || 0)) return;
-    if (state.inputFocused) return;
-    const target = event?.target;
-    if (isEventInsideQuickStack(target)) return;
-    if (isEventInsideQuickStackPath(event)) return;
-    if (hasRecentInternalInteraction()) return;
-    setUiOpen(false);
-  }
-
-  function maybeAutoCollapse() {
-    maybeAutoCollapseAfterDelay();
-  }
-
   function setStatus(text) {
     state.currentRouteStatus = String(text || "Idle");
-    syncNavQuickUiState();
   }
 
   function setRouteGeojson(routeFeature) {
@@ -380,9 +222,8 @@
     if (!state.currentDestination) {
       setRouteGeojson(null);
       state.currentRouteSummary = null;
-      syncNavQuickUiState();
       emitPreviewUpdated();
-      return;
+      return null;
     }
 
     const origin = getUserOrigin();
@@ -391,14 +232,22 @@
       state.currentRouteSummary = null;
       setStatus("Waiting for location");
       emitPreviewUpdated();
-      return;
+      emitPreviewFailed(state.currentRouteStatus, state.currentDestination);
+      return null;
     }
 
     const now = Date.now();
     const movedMiles = state.lastOrigin ? haversineMiles(state.lastOrigin, origin) : Infinity;
     const staleMs = now - Number(state.lastRefreshAt || 0);
     const shouldRefresh = force || !state.lastOrigin || movedMiles >= REFRESH_DISTANCE_MILES || staleMs >= REFRESH_INTERVAL_MS;
-    if (!shouldRefresh) return;
+    if (!shouldRefresh) {
+      if (state.currentRouteGeoJSON && state.currentRouteSummary) {
+        const readyBundle = getRouteBundle();
+        emitPreviewReady();
+        return readyBundle;
+      }
+      return null;
+    }
 
     state.lastOrigin = origin;
     state.lastRefreshAt = now;
@@ -415,15 +264,18 @@
       updateMarker();
       focusRoute(normalized.geometryGeoJSON);
       setStatus("Route ready");
-      maybeAutoCollapse();
-      syncNavQuickUiState();
+      const readyBundle = getRouteBundle();
       emitPreviewUpdated();
+      emitPreviewReady();
+      return readyBundle;
     } catch (error) {
-      if (error?.name === "AbortError") return;
+      if (error?.name === "AbortError") return null;
       console.warn("navigation preview route fetch failed:", error);
       state.currentRouteSummary = null;
       setStatus("Route unavailable");
       emitPreviewUpdated();
+      emitPreviewFailed(state.currentRouteStatus, state.currentDestination);
+      return null;
     }
   }
 
@@ -457,9 +309,22 @@
     }));
   }
 
-  function clearPreview(options = {}) {
-    const clearInput = !!options?.clearInput;
+  function emitPreviewReady() {
+    window.dispatchEvent(new CustomEvent("tlc-nav-preview-ready", {
+      detail: { routeBundle: getRouteBundle() },
+    }));
+  }
 
+  function emitPreviewFailed(status, destination) {
+    window.dispatchEvent(new CustomEvent("tlc-nav-preview-failed", {
+      detail: {
+        status: String(status || "Route unavailable"),
+        destination: destination ? { ...destination } : null,
+      },
+    }));
+  }
+
+  function clearPreview(_options = {}) {
     if (state.routeAbortController) {
       state.routeAbortController.abort();
       state.routeAbortController = null;
@@ -473,11 +338,7 @@
     state.lastFetchKey = "";
     setRouteGeojson(null);
     updateMarker();
-    if (clearInput) {
-      const { input } = getQuickEls();
-      if (input) input.value = "";
-    }
-    syncNavQuickUiState();
+
     emitPreviewCleared();
   }
 
@@ -485,6 +346,7 @@
     const q = String(query || "").trim();
     if (!q) {
       setStatus("Type a destination");
+      emitPreviewFailed(state.currentRouteStatus, null);
       return null;
     }
 
@@ -499,15 +361,18 @@
       const lng = Number(candidate?.lon);
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
         setStatus("Route unavailable");
+        emitPreviewFailed(state.currentRouteStatus, null);
         return null;
       }
       const name = String(candidate?.display_name || q).trim() || q;
       const normalized = { lat, lng, name };
-      setPreviewDestination(normalized, { source: "manual" });
-      return normalized;
+      const routeBundle = await setPreviewDestination(normalized, { source: "manual" });
+      if (!routeBundle?.routeFeature) return null;
+      return { destination: normalized, routeBundle };
     } catch (error) {
       console.warn("navigation preview geocode failed:", error);
       setStatus("Search error");
+      emitPreviewFailed(state.currentRouteStatus, null);
       return null;
     }
   }
@@ -517,11 +382,11 @@
     const normalizedDest = normalizeDestination(dest);
     if (!normalizedDest) {
       clearPreview({ clearInput: false });
-      return;
+      return Promise.resolve(null);
     }
 
     if (!shouldApplyDestinationUpdate(source)) {
-      return;
+      return Promise.resolve(null);
     }
 
     state.currentDestination = normalizedDest;
@@ -529,114 +394,11 @@
     setStatus("Preparing preview…");
     emitPreviewUpdated();
     updateMarker();
-    void runPreviewRefresh(true);
+    return runPreviewRefresh(true);
   }
 
   function refreshPreviewFromUserLocation() {
-    void runPreviewRefresh(false);
-  }
-
-  function bindUi() {
-    const { stack, toggleBtn, tray, input, goBtn, clearBtn } = getQuickEls();
-
-    const bindInternalPress = (el, key) => {
-      if (!el || el.dataset[key]) return;
-      el.dataset[key] = "1";
-      ["pointerdown", "touchstart", "mousedown"].forEach((eventName) => {
-        el.addEventListener(eventName, markInternalInteraction);
-      });
-    };
-
-    bindInternalPress(stack, "boundNavPreviewInternal");
-    bindInternalPress(toggleBtn, "boundNavPreviewInternal");
-    bindInternalPress(tray, "boundNavPreviewInternal");
-    bindInternalPress(input, "boundNavPreviewInternal");
-    bindInternalPress(goBtn, "boundNavPreviewInternal");
-    bindInternalPress(clearBtn, "boundNavPreviewInternal");
-
-    if (toggleBtn && !toggleBtn.dataset.boundNavPreview) {
-      toggleBtn.dataset.boundNavPreview = "1";
-      toggleBtn.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        state.uiOpen = !state.uiOpen;
-        state.suppressCloseUntilTs = Date.now() + 250;
-        state.lastInternalInteractAt = Date.now();
-        syncQuickUiOpenState();
-        if (state.uiOpen) {
-          window.requestAnimationFrame(() => {
-            const { input: quickInput } = getQuickEls();
-            quickInput?.focus?.();
-          });
-        }
-      });
-    }
-
-    if (tray && !tray.dataset.boundNavPreview) {
-      tray.dataset.boundNavPreview = "1";
-      tray.addEventListener("click", (event) => markInternalInteraction(event));
-    }
-
-    if (goBtn && !goBtn.dataset.boundNavPreview) {
-      goBtn.dataset.boundNavPreview = "1";
-      goBtn.addEventListener("click", (event) => {
-        markInternalInteraction(event);
-        setUiOpen(true);
-        void searchAndSetPreviewDestination(input?.value || "");
-      });
-    }
-
-    if (input && !input.dataset.boundNavPreview) {
-      input.dataset.boundNavPreview = "1";
-      input.addEventListener("click", (event) => {
-        markInternalInteraction(event);
-        setUiOpen(true);
-      });
-      input.addEventListener("keydown", (event) => {
-        markInternalInteraction(event);
-        setUiOpen(true);
-        if (event.key !== "Enter") return;
-        event.preventDefault();
-        void searchAndSetPreviewDestination(input.value || "");
-      });
-      input.addEventListener("input", (event) => {
-        markInternalInteraction(event);
-        setUiOpen(true);
-      });
-      input.addEventListener("focus", () => {
-        const now = Date.now();
-        state.inputFocused = true;
-        state.lastInternalInteractAt = now;
-        state.suppressCloseUntilTs = now + 250;
-        state.uiOpen = true;
-        syncQuickUiOpenState();
-      });
-      input.addEventListener("blur", () => {
-        state.inputFocused = false;
-      });
-    }
-
-    if (clearBtn && !clearBtn.dataset.boundNavPreview) {
-      clearBtn.dataset.boundNavPreview = "1";
-      clearBtn.addEventListener("click", (event) => {
-        markInternalInteraction(event);
-        const wasManual = state.destinationSource === "manual";
-        clearPreview({ source: wasManual ? "manual" : "assistant", clearInput: true });
-        try {
-          window.TlcMapUiModule?.setNavDestination?.(null, { source: wasManual ? "manual" : "assistant" });
-        } catch (_) {}
-      });
-    }
-
-    if (document?.body && !document.body.dataset.boundNavPreviewOutside) {
-      document.body.dataset.boundNavPreviewOutside = "1";
-      const handleDocPress = (event) => {
-        closeNavQuickOnOutsidePress(event);
-      };
-      ["pointerdown", "touchstart"].forEach((eventName) => {
-        document.addEventListener(eventName, handleDocPress);
-      });
-    }
+    return runPreviewRefresh(false);
   }
 
   function init(map) {
@@ -644,11 +406,7 @@
     state.map = map;
 
     const boot = () => {
-      bindUi();
-      syncQuickUiOpenState();
       ensureRouteLayers();
-      syncNavQuickUiState();
-      positionQuickStackBelowWeather();
       if (state.currentDestination) {
         void runPreviewRefresh(true);
       }
@@ -671,10 +429,6 @@
       clearInterval(state.locationPollTimer);
     }
     state.locationPollTimer = setInterval(refreshPreviewFromUserLocation, LOCATION_POLL_MS);
-    window.TlcManualNavigationModule?.init?.();
-    window.addEventListener("resize", positionQuickStackBelowWeather);
-    window.addEventListener("orientationchange", positionQuickStackBelowWeather);
-    window.addEventListener("tlc-top-badges-updated", positionQuickStackBelowWeather);
   }
 
   function getSnapshot() {
