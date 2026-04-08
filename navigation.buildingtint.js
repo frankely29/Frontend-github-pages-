@@ -14,6 +14,7 @@
     fallbackModeUsed: false,
     buildingSourceId: null,
     buildingSourceLayer: null,
+    blockSourceLayer: null,
     buildingLayerAnchorId: null,
     hotspotSourceId: null,
     hotspotFillLayerIds: [],
@@ -22,6 +23,7 @@
     hotspotFeatureSnapshot: [],
     roadLayerIds: [],
     streetLabelLayerIds: [],
+    landLayerIds: [],
     originalLayerOrder: null,
     originalPaint: new Map(),
     buildingTintSourceId: BUILDING_TINT_SOURCE_ID,
@@ -123,10 +125,11 @@
     const preferredBuilding = buildingCandidates.find((layer) => layer.type === "fill")
       || buildingCandidates.find((layer) => layer.type === "fill-extrusion")
       || null;
-    const vectorBuildingConfig = window.TlcNavigationVectorOverlayModule?.getBuildingQueryConfig?.() || null;
+    const vectorBuildingConfig = window.TlcNavigationVectorBasemapModule?.getBuildingQueryConfig?.() || null;
 
     state.buildingSourceId = vectorBuildingConfig?.sourceId || preferredBuilding?.source || null;
     state.buildingSourceLayer = vectorBuildingConfig?.sourceLayer || preferredBuilding?.["source-layer"] || null;
+    state.blockSourceLayer = vectorBuildingConfig?.blockSourceLayer || vectorBuildingConfig?.landLayerIds?.[0] || "landuse";
     state.buildingLayerAnchorId = vectorBuildingConfig?.buildingLayerIds?.[0] || preferredBuilding?.id || null;
     state.hotspotSourceId = hotspotSourceId;
     state.hotspotFillLayerIds = hotspotFillLayerIds;
@@ -134,6 +137,7 @@
     state.hotspotSourceLayerIds = Array.from(hotspotSourceLayerIds);
     state.roadLayerIds = vectorBuildingConfig?.roadLayerIds?.length ? vectorBuildingConfig.roadLayerIds.slice() : roadLayerIds;
     state.streetLabelLayerIds = vectorBuildingConfig?.roadLabelLayerIds?.length ? vectorBuildingConfig.roadLabelLayerIds.slice() : streetLabelLayerIds;
+    state.landLayerIds = vectorBuildingConfig?.landLayerIds?.length ? vectorBuildingConfig.landLayerIds.slice() : [];
     state.usingVectorOverlayGeometry = !!vectorBuildingConfig;
     state.supported = !!(state.buildingSourceId && state.buildingSourceLayer);
     state.fallbackModeUsed = !state.supported;
@@ -464,6 +468,14 @@
     };
   }
 
+  function getCarrierQueryConfig() {
+    const zoom = Number(state.map?.getZoom?.() || 0);
+    if (zoom >= 16 || !state.blockSourceLayer) {
+      return { sourceLayer: state.buildingSourceLayer, opacity: 0.44 };
+    }
+    return { sourceLayer: state.blockSourceLayer, opacity: 0.30 };
+  }
+
   function moveLayersForNavigationReadability() {
     if (hasLayer(state.buildingTintLayerId)) {
       const roadAnchor = state.roadLayerIds.find((id) => hasLayer(id))
@@ -497,7 +509,8 @@
 
     state.refreshInFlight = true;
     try {
-      const queryOptions = state.buildingSourceLayer ? { sourceLayer: state.buildingSourceLayer } : undefined;
+      const carrier = getCarrierQueryConfig();
+      const queryOptions = carrier?.sourceLayer ? { sourceLayer: carrier.sourceLayer } : undefined;
       const rawBuildings = state.map.querySourceFeatures(state.buildingSourceId, queryOptions) || [];
 
       const hotspotFeatures = getActiveHotspotFeatures();
@@ -524,7 +537,9 @@
         if (!point) return;
         const hotspotMeta = assignHotspot(point, hotspotFeatures);
         if (!hotspotMeta?.color) return;
-        tintedFeatures.push(buildTintFeature(buildingFeature, hotspotMeta));
+        const tintFeature = buildTintFeature(buildingFeature, hotspotMeta);
+        tintFeature.properties.hotspotOpacity = carrier?.opacity ?? 0.42;
+        tintedFeatures.push(tintFeature);
       });
 
       const source = state.map.getSource(state.buildingTintSourceId);
@@ -539,7 +554,8 @@
       state.lastViewportKey = viewportKey;
       state.lastRefreshAt = now;
 
-      if (state.buildingTintFeatureCount >= MIN_BUILDING_TINT_FEATURES_FOR_SUPPRESSION) {
+      const minFeaturesForSuppression = state.usingVectorOverlayGeometry ? 1 : MIN_BUILDING_TINT_FEATURES_FOR_SUPPRESSION;
+      if (state.buildingTintFeatureCount >= minFeaturesForSuppression) {
         state.fallbackModeUsed = false;
         window.TlcNavigationStreetModeModule?.deactivate?.();
         suppressZoneFillForNavigation();
@@ -609,6 +625,7 @@
     state.fallbackModeUsed = false;
     state.buildingSourceId = null;
     state.buildingSourceLayer = null;
+    state.blockSourceLayer = null;
     state.buildingLayerAnchorId = null;
     state.lastViewportKey = "";
     state.lastRefreshAt = 0;
@@ -617,6 +634,7 @@
     state.hotspotFeatureSnapshot = [];
     state.zoneFillSuppressed = false;
     state.usingVectorOverlayGeometry = false;
+    state.landLayerIds = [];
 
     window.TlcNavigationStreetModeModule?.deactivate?.();
     return true;
@@ -650,6 +668,7 @@
       fallbackModeUsed: !!state.fallbackModeUsed,
       buildingSourceId: state.buildingSourceId,
       buildingSourceLayer: state.buildingSourceLayer,
+      blockSourceLayer: state.blockSourceLayer,
       buildingTintFeatureCount: Number(state.buildingTintFeatureCount || 0),
       hotspotSourceId: state.hotspotSourceId,
       hotspotFillLayerIds: state.hotspotFillLayerIds.slice(),
@@ -657,6 +676,7 @@
       hotspotSourceLayerIds: state.hotspotSourceLayerIds.slice(),
       roadLayerIds: state.roadLayerIds.slice(),
       streetLabelLayerIds: state.streetLabelLayerIds.slice(),
+      landLayerIds: state.landLayerIds.slice(),
       usingVectorOverlayGeometry: !!state.usingVectorOverlayGeometry,
       buildingTintLayerId: state.buildingTintLayerId,
       lastViewportKey: state.lastViewportKey,
@@ -681,6 +701,7 @@
       fallbackModeUsed: true,
       buildingSourceId: null,
       buildingSourceLayer: null,
+      blockSourceLayer: null,
       buildingTintFeatureCount: 0,
       hotspotSourceId: null,
       hotspotFillLayerIds: [],
@@ -688,6 +709,7 @@
       hotspotSourceLayerIds: [],
       roadLayerIds: [],
       streetLabelLayerIds: [],
+      landLayerIds: [],
       usingVectorOverlayGeometry: false,
       buildingTintLayerId: BUILDING_TINT_LAYER_ID,
       lastViewportKey: "",
