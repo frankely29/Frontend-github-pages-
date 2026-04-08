@@ -30,6 +30,7 @@
     locationPollTimer: null,
     userInteracted: false,
     uiOpen: false,
+    suppressCloseUntilTs: 0,
     autoCollapseTimer: null,
   };
 
@@ -166,9 +167,37 @@
     return "Navigate";
   }
 
-  function setUiOpen(open) {
-    state.uiOpen = !!open;
+  function positionQuickStackBelowWeather() {
+    const { stack } = getQuickEls();
+    if (!stack) return;
+    const weatherBadge = document.getElementById("weatherBadge");
+    if (!weatherBadge || typeof weatherBadge.getBoundingClientRect !== "function") return;
+    const rect = weatherBadge.getBoundingClientRect();
+    if (!rect || !Number.isFinite(rect.top) || !Number.isFinite(rect.bottom) || !Number.isFinite(rect.right)) return;
+    const gapPx = 6;
+    const rightInsetPx = Math.max(8, Math.round(window.innerWidth - rect.right));
+    const topPx = Math.max(0, Math.round(rect.bottom + gapPx));
+    stack.style.top = `${topPx}px`;
+    stack.style.right = `${rightInsetPx}px`;
+  }
+
+  function syncQuickUiOpenState() {
     syncNavQuickUiState();
+  }
+
+  function setUiOpen(open) {
+    const nextOpen = !!open;
+    state.uiOpen = nextOpen;
+    if (nextOpen) {
+      state.suppressCloseUntilTs = Date.now() + 180;
+    }
+    syncQuickUiOpenState();
+  }
+
+  function isEventInsideQuickStack(target) {
+    if (!target || !(target instanceof Element)) return false;
+    const { stack } = getQuickEls();
+    return !!stack?.contains(target);
   }
 
   function maybeAutoCollapseAfterDelay() {
@@ -202,10 +231,9 @@
 
   function closeNavQuickOnOutsidePress(event) {
     if (!state.uiOpen) return;
-    const { stack } = getQuickEls();
+    if (Date.now() < Number(state.suppressCloseUntilTs || 0)) return;
     const target = event?.target;
-    if (!target || !(target instanceof Element)) return;
-    if (stack?.contains(target)) return;
+    if (isEventInsideQuickStack(target)) return;
     setUiOpen(false);
   }
 
@@ -491,18 +519,28 @@
   }
 
   function bindUi() {
-    const { toggleBtn, input, goBtn, clearBtn } = getQuickEls();
+    const { toggleBtn, tray, input, goBtn, clearBtn } = getQuickEls();
 
     if (toggleBtn && !toggleBtn.dataset.boundNavPreview) {
       toggleBtn.dataset.boundNavPreview = "1";
-      toggleBtn.addEventListener("click", () => {
+      toggleBtn.addEventListener("pointerdown", (event) => event.stopPropagation());
+      toggleBtn.addEventListener("click", (event) => {
+        event.stopPropagation();
         setUiOpen(!state.uiOpen);
       });
     }
 
+    if (tray && !tray.dataset.boundNavPreview) {
+      tray.dataset.boundNavPreview = "1";
+      tray.addEventListener("pointerdown", (event) => event.stopPropagation());
+      tray.addEventListener("click", (event) => event.stopPropagation());
+    }
+
     if (goBtn && !goBtn.dataset.boundNavPreview) {
       goBtn.dataset.boundNavPreview = "1";
-      goBtn.addEventListener("click", () => {
+      goBtn.addEventListener("pointerdown", (event) => event.stopPropagation());
+      goBtn.addEventListener("click", (event) => {
+        event.stopPropagation();
         setUiOpen(true);
         void searchAndSetPreviewDestination(input?.value || "");
       });
@@ -510,9 +548,12 @@
 
     if (input && !input.dataset.boundNavPreview) {
       input.dataset.boundNavPreview = "1";
+      input.addEventListener("pointerdown", (event) => event.stopPropagation());
+      input.addEventListener("click", (event) => event.stopPropagation());
       input.addEventListener("keydown", (event) => {
         if (event.key !== "Enter") return;
         event.preventDefault();
+        event.stopPropagation();
         setUiOpen(true);
         void searchAndSetPreviewDestination(input.value || "");
       });
@@ -521,7 +562,9 @@
 
     if (clearBtn && !clearBtn.dataset.boundNavPreview) {
       clearBtn.dataset.boundNavPreview = "1";
-      clearBtn.addEventListener("click", () => {
+      clearBtn.addEventListener("pointerdown", (event) => event.stopPropagation());
+      clearBtn.addEventListener("click", (event) => {
+        event.stopPropagation();
         const wasManual = state.destinationSource === "manual";
         clearPreview({ source: wasManual ? "manual" : "assistant", clearInput: true });
         try {
@@ -544,6 +587,7 @@
     const boot = () => {
       ensureRouteLayers();
       syncNavQuickUiState();
+      positionQuickStackBelowWeather();
       if (state.currentDestination) {
         void runPreviewRefresh(true);
       }
@@ -566,6 +610,9 @@
       clearInterval(state.locationPollTimer);
     }
     state.locationPollTimer = setInterval(refreshPreviewFromUserLocation, LOCATION_POLL_MS);
+    window.addEventListener("resize", positionQuickStackBelowWeather);
+    window.addEventListener("orientationchange", positionQuickStackBelowWeather);
+    window.addEventListener("tlc-top-badges-updated", positionQuickStackBelowWeather);
   }
 
   function getSnapshot() {
