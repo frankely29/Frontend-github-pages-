@@ -238,22 +238,8 @@
   }
 
   function syncNavQuickUiState() {
-    const { stack, toggleBtn, toggleText, tray, input, meta } = getQuickEls();
-    if (stack) stack.hidden = false;
-    if (stack) stack.dataset.open = state.uiOpen ? "1" : "0";
-    if (toggleBtn) toggleBtn.setAttribute("aria-expanded", state.uiOpen ? "true" : "false");
-    if (tray) tray.hidden = !state.uiOpen;
-    if (toggleText) toggleText.textContent = buildToggleText();
-    if (input && state.currentDestination?.name && state.destinationSource !== "manual") {
-      input.value = state.currentDestination.name;
-    }
-    if (meta) {
-      const metaText = buildMetaText();
-      const showMeta = shouldShowMeta(metaText);
-      meta.hidden = !showMeta;
-      meta.textContent = showMeta ? metaText : "";
-      meta.title = showMeta ? metaText : "";
-    }
+    // Widget UI state is owned by TlcManualNavigationModule.
+    return;
   }
 
   function closeNavQuickOnOutsidePress(event) {
@@ -431,8 +417,8 @@
     }
   }
 
-  function shouldApplyDestinationUpdate(source = "assistant") {
-    return !(state.destinationSource === "manual" && source !== "manual");
+  function shouldApplyDestinationUpdate(source = "manual") {
+    return String(source || "manual") === "manual";
   }
 
 
@@ -462,11 +448,7 @@
   }
 
   function clearPreview(options = {}) {
-    const source = String(options?.source || "assistant");
     const clearInput = !!options?.clearInput;
-    if (source !== "manual" && state.destinationSource === "manual") {
-      return;
-    }
 
     if (state.routeAbortController) {
       state.routeAbortController.abort();
@@ -486,7 +468,6 @@
       if (input) input.value = "";
     }
     syncNavQuickUiState();
-    setUiOpen(false);
     emitPreviewCleared();
   }
 
@@ -513,9 +494,6 @@
       const name = String(candidate?.display_name || q).trim() || q;
       const normalized = { lat, lng, name };
       setPreviewDestination(normalized, { source: "manual" });
-      try {
-        window.TlcMapUiModule?.setNavDestination?.(normalized, { source: "manual" });
-      } catch (_) {}
       return normalized;
     } catch (error) {
       console.warn("navigation preview geocode failed:", error);
@@ -525,10 +503,10 @@
   }
 
   function setPreviewDestination(dest, options = {}) {
-    const source = String(options?.source || "assistant");
+    const source = String(options?.source || "manual");
     const normalizedDest = normalizeDestination(dest);
     if (!normalizedDest) {
-      clearPreview({ source, clearInput: false });
+      clearPreview({ clearInput: false });
       return;
     }
 
@@ -537,7 +515,7 @@
     }
 
     state.currentDestination = normalizedDest;
-    state.destinationSource = source === "manual" ? "manual" : "assistant";
+    state.destinationSource = "manual";
     setStatus("Preparing preview…");
     emitPreviewUpdated();
     updateMarker();
@@ -644,7 +622,6 @@
   function init(map) {
     if (!map || typeof map.getSource !== "function") return;
     state.map = map;
-    bindUi();
 
     const boot = () => {
       ensureRouteLayers();
@@ -672,6 +649,7 @@
       clearInterval(state.locationPollTimer);
     }
     state.locationPollTimer = setInterval(refreshPreviewFromUserLocation, LOCATION_POLL_MS);
+    window.TlcManualNavigationModule?.init?.();
     window.addEventListener("resize", positionQuickStackBelowWeather);
     window.addEventListener("orientationchange", positionQuickStackBelowWeather);
     window.addEventListener("tlc-top-badges-updated", positionQuickStackBelowWeather);

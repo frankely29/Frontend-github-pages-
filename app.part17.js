@@ -2693,27 +2693,9 @@
   }
 
   function applyNavOwnership() {
-    const server = activeServerGuidance();
-    if (server) {
-      if (server.actionCode === "MOVE_NEARBY"
-        && Number.isFinite(server?.targetZone?.centerLat)
-        && Number.isFinite(server?.targetZone?.centerLng)) {
-        window.TlcMapUiModule?.setNavDestination?.({
-          lat: server.targetZone.centerLat,
-          lng: server.targetZone.centerLng,
-          name: server?.targetZone?.name || "Nearby zone",
-        });
-        return;
-      }
-      window.TlcMapUiModule?.setNavDestination?.(null);
-      return;
-    }
-    const target = state.assistantMoveTarget;
-    if ((state.finalActionCode === "LEAVE_NOW" || state.finalActionCode === "MOVE_SOON") && target) {
-      window.TlcMapUiModule?.setNavDestination?.({ lat: target.centerLat, lng: target.centerLng, name: target.zoneName });
-      return;
-    }
-    window.TlcMapUiModule?.setNavDestination?.(null);
+    // Phase 1: recommendations are advisory only.
+    // Navigation ownership is manual and handled by TlcManualNavigationModule.
+    return;
   }
 
   function iconMarkup(kind) {
