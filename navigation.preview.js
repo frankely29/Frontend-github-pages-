@@ -32,6 +32,9 @@
     uiOpen: false,
     suppressCloseUntilTs: 0,
     autoCollapseTimer: null,
+    inputFocused: false,
+    lastInternalInteractAt: 0,
+    pendingOutsideClose: false,
   };
 
   function emptyGeojson() {
@@ -201,10 +204,29 @@
     syncQuickUiOpenState();
   }
 
+  function markInternalInteraction(event) {
+    const now = Date.now();
+    state.lastInternalInteractAt = now;
+    state.pendingOutsideClose = false;
+    state.suppressCloseUntilTs = now + 250;
+    if (event?.stopPropagation) event.stopPropagation();
+  }
+
+  function hasRecentInternalInteraction(windowMs = 250) {
+    return (Date.now() - Number(state.lastInternalInteractAt || 0)) < windowMs;
+  }
+
   function isEventInsideQuickStack(target) {
     if (!target || !(target instanceof Node)) return false;
     const { stack } = getQuickEls();
     return !!stack?.contains(target);
+  }
+
+  function isEventInsideQuickStackPath(event) {
+    const { stack } = getQuickEls();
+    if (!stack || !event || typeof event.composedPath !== "function") return false;
+    const path = event.composedPath();
+    return Array.isArray(path) && path.includes(stack);
   }
 
   function maybeAutoCollapseAfterDelay() {
@@ -239,8 +261,12 @@
   function closeNavQuickOnOutsidePress(event) {
     if (!state.uiOpen) return;
     if (Date.now() < Number(state.suppressCloseUntilTs || 0)) return;
+    if (state.inputFocused) return;
     const target = event?.target;
     if (isEventInsideQuickStack(target)) return;
+    if (isEventInsideQuickStackPath(event)) return;
+    if (!state.pendingOutsideClose) return;
+    if (hasRecentInternalInteraction()) return;
     setUiOpen(false);
   }
 
@@ -526,28 +552,40 @@
   }
 
   function bindUi() {
-    const { toggleBtn, tray, input, goBtn, clearBtn } = getQuickEls();
+    const { stack, toggleBtn, tray, input, goBtn, clearBtn } = getQuickEls();
+
+    const bindInternalPress = (el, key) => {
+      if (!el || el.dataset[key]) return;
+      el.dataset[key] = "1";
+      ["pointerdown", "touchstart", "mousedown"].forEach((eventName) => {
+        el.addEventListener(eventName, markInternalInteraction);
+      });
+    };
+
+    bindInternalPress(stack, "boundNavPreviewInternal");
+    bindInternalPress(toggleBtn, "boundNavPreviewInternal");
+    bindInternalPress(tray, "boundNavPreviewInternal");
+    bindInternalPress(input, "boundNavPreviewInternal");
+    bindInternalPress(goBtn, "boundNavPreviewInternal");
+    bindInternalPress(clearBtn, "boundNavPreviewInternal");
 
     if (toggleBtn && !toggleBtn.dataset.boundNavPreview) {
       toggleBtn.dataset.boundNavPreview = "1";
-      toggleBtn.addEventListener("pointerdown", (event) => event.stopPropagation());
       toggleBtn.addEventListener("click", (event) => {
-        event.stopPropagation();
+        markInternalInteraction(event);
         setUiOpen(!state.uiOpen);
       });
     }
 
     if (tray && !tray.dataset.boundNavPreview) {
       tray.dataset.boundNavPreview = "1";
-      tray.addEventListener("pointerdown", (event) => event.stopPropagation());
-      tray.addEventListener("click", (event) => event.stopPropagation());
+      tray.addEventListener("click", (event) => markInternalInteraction(event));
     }
 
     if (goBtn && !goBtn.dataset.boundNavPreview) {
       goBtn.dataset.boundNavPreview = "1";
-      goBtn.addEventListener("pointerdown", (event) => event.stopPropagation());
       goBtn.addEventListener("click", (event) => {
-        event.stopPropagation();
+        markInternalInteraction(event);
         setUiOpen(true);
         void searchAndSetPreviewDestination(input?.value || "");
       });
@@ -555,28 +593,42 @@
 
     if (input && !input.dataset.boundNavPreview) {
       input.dataset.boundNavPreview = "1";
-      input.addEventListener("pointerdown", (event) => event.stopPropagation());
-      input.addEventListener("click", (event) => event.stopPropagation());
+      input.addEventListener("click", (event) => {
+        markInternalInteraction(event);
+        setUiOpen(true);
+      });
       input.addEventListener("keydown", (event) => {
+        markInternalInteraction(event);
+        setUiOpen(true);
         if (event.key !== "Enter") return;
         event.preventDefault();
-        event.stopPropagation();
-        setUiOpen(true);
         void searchAndSetPreviewDestination(input.value || "");
       });
-      input.addEventListener("focus", () => setUiOpen(true));
+      input.addEventListener("focus", () => {
+        state.inputFocused = true;
+        state.lastInternalInteractAt = Date.now();
+        setUiOpen(true);
+      });
       input.addEventListener("focusout", (event) => {
-        if (isEventInsideQuickStack(event?.relatedTarget)) {
-          event.stopPropagation();
-        }
+        const nextTarget = event?.relatedTarget;
+        state.inputFocused = false;
+        if (isEventInsideQuickStack(nextTarget)) return;
+        setTimeout(() => {
+          const active = document.activeElement;
+          const activeInsideStack = isEventInsideQuickStack(active);
+          if (activeInsideStack) return;
+          if (state.inputFocused) return;
+          if (hasRecentInternalInteraction()) return;
+          if (!state.pendingOutsideClose) return;
+          setUiOpen(false);
+        }, 0);
       });
     }
 
     if (clearBtn && !clearBtn.dataset.boundNavPreview) {
       clearBtn.dataset.boundNavPreview = "1";
-      clearBtn.addEventListener("pointerdown", (event) => event.stopPropagation());
       clearBtn.addEventListener("click", (event) => {
-        event.stopPropagation();
+        markInternalInteraction(event);
         const wasManual = state.destinationSource === "manual";
         clearPreview({ source: wasManual ? "manual" : "assistant", clearInput: true });
         try {
@@ -588,15 +640,29 @@
     if (tray && !tray.dataset.boundNavPreviewFocus) {
       tray.dataset.boundNavPreviewFocus = "1";
       tray.addEventListener("focusout", (event) => {
-        if (isEventInsideQuickStack(event?.relatedTarget)) {
-          event.stopPropagation();
-        }
+        const nextTarget = event?.relatedTarget;
+        if (isEventInsideQuickStack(nextTarget)) return;
+        setTimeout(() => {
+          const active = document.activeElement;
+          if (isEventInsideQuickStack(active)) return;
+          if (state.inputFocused) return;
+          if (hasRecentInternalInteraction()) return;
+          if (!state.pendingOutsideClose) return;
+          setUiOpen(false);
+        }, 0);
       });
     }
 
     if (document?.body && !document.body.dataset.boundNavPreviewOutside) {
       document.body.dataset.boundNavPreviewOutside = "1";
-      document.addEventListener("pointerdown", closeNavQuickOnOutsidePress);
+      const handleDocPress = (event) => {
+        const outside = !isEventInsideQuickStack(event?.target) && !isEventInsideQuickStackPath(event);
+        state.pendingOutsideClose = outside;
+        closeNavQuickOnOutsidePress(event);
+      };
+      ["pointerdown", "touchstart", "mousedown"].forEach((eventName) => {
+        document.addEventListener(eventName, handleDocPress);
+      });
     }
   }
 
