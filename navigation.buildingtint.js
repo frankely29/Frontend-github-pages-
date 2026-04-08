@@ -31,6 +31,7 @@
     refreshInFlight: false,
     buildingTintFeatureCount: 0,
     zoneFillSuppressed: false,
+    usingVectorOverlayGeometry: false,
   };
 
   function getStyleLayers() {
@@ -122,16 +123,18 @@
     const preferredBuilding = buildingCandidates.find((layer) => layer.type === "fill")
       || buildingCandidates.find((layer) => layer.type === "fill-extrusion")
       || null;
+    const vectorBuildingConfig = window.TlcNavigationVectorOverlayModule?.getBuildingQueryConfig?.() || null;
 
-    state.buildingSourceId = preferredBuilding?.source || null;
-    state.buildingSourceLayer = preferredBuilding?.["source-layer"] || null;
-    state.buildingLayerAnchorId = preferredBuilding?.id || null;
+    state.buildingSourceId = vectorBuildingConfig?.sourceId || preferredBuilding?.source || null;
+    state.buildingSourceLayer = vectorBuildingConfig?.sourceLayer || preferredBuilding?.["source-layer"] || null;
+    state.buildingLayerAnchorId = vectorBuildingConfig?.buildingLayerIds?.[0] || preferredBuilding?.id || null;
     state.hotspotSourceId = hotspotSourceId;
     state.hotspotFillLayerIds = hotspotFillLayerIds;
     state.hotspotOutlineLayerIds = hotspotOutlineLayerIds;
     state.hotspotSourceLayerIds = Array.from(hotspotSourceLayerIds);
-    state.roadLayerIds = roadLayerIds;
-    state.streetLabelLayerIds = streetLabelLayerIds;
+    state.roadLayerIds = vectorBuildingConfig?.roadLayerIds?.length ? vectorBuildingConfig.roadLayerIds.slice() : roadLayerIds;
+    state.streetLabelLayerIds = vectorBuildingConfig?.roadLabelLayerIds?.length ? vectorBuildingConfig.roadLabelLayerIds.slice() : streetLabelLayerIds;
+    state.usingVectorOverlayGeometry = !!vectorBuildingConfig;
     state.supported = !!(state.buildingSourceId && state.buildingSourceLayer);
     state.fallbackModeUsed = !state.supported;
   }
@@ -494,9 +497,8 @@
 
     state.refreshInFlight = true;
     try {
-      const rawBuildings = state.map.querySourceFeatures(state.buildingSourceId, {
-        sourceLayer: state.buildingSourceLayer,
-      }) || [];
+      const queryOptions = state.buildingSourceLayer ? { sourceLayer: state.buildingSourceLayer } : undefined;
+      const rawBuildings = state.map.querySourceFeatures(state.buildingSourceId, queryOptions) || [];
 
       const hotspotFeatures = getActiveHotspotFeatures();
       if (!hotspotFeatures.length) {
@@ -614,6 +616,7 @@
     state.buildingTintFeatureCount = 0;
     state.hotspotFeatureSnapshot = [];
     state.zoneFillSuppressed = false;
+    state.usingVectorOverlayGeometry = false;
 
     window.TlcNavigationStreetModeModule?.deactivate?.();
     return true;
@@ -654,6 +657,7 @@
       hotspotSourceLayerIds: state.hotspotSourceLayerIds.slice(),
       roadLayerIds: state.roadLayerIds.slice(),
       streetLabelLayerIds: state.streetLabelLayerIds.slice(),
+      usingVectorOverlayGeometry: !!state.usingVectorOverlayGeometry,
       buildingTintLayerId: state.buildingTintLayerId,
       lastViewportKey: state.lastViewportKey,
       refreshInFlight: !!state.refreshInFlight,
@@ -684,6 +688,7 @@
       hotspotSourceLayerIds: [],
       roadLayerIds: [],
       streetLabelLayerIds: [],
+      usingVectorOverlayGeometry: false,
       buildingTintLayerId: BUILDING_TINT_LAYER_ID,
       lastViewportKey: "",
       refreshInFlight: false,

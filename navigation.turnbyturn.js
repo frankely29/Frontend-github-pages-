@@ -214,15 +214,18 @@
   }
 
   function activateBuildingTintMode() {
+    window.TlcNavigationVectorOverlayModule?.activate?.();
     window.TlcNavigationBuildingTintModule?.activate?.();
     ensurePreviewRouteOnTop();
   }
 
   function deactivateBuildingTintMode() {
     window.TlcNavigationBuildingTintModule?.deactivate?.();
+    window.TlcNavigationVectorOverlayModule?.deactivate?.();
   }
 
   function reapplyBuildingTintModeIfNeeded() {
+    window.TlcNavigationVectorOverlayModule?.reapplyIfNeeded?.();
     window.TlcNavigationBuildingTintModule?.reapplyIfNeeded?.();
     ensurePreviewRouteOnTop();
   }
@@ -476,6 +479,7 @@
 
   function init(map) {
     state.map = map || null;
+    window.TlcNavigationVectorOverlayModule?.init?.(state.map);
     window.TlcNavigationBuildingTintModule?.init?.(state.map);
     bindUi();
 

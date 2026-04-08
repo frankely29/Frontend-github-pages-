@@ -47,6 +47,13 @@ const runtimePerf = FrontendRuntime?.perf || null;
 const REFRESH_MS = 5 * 60 * 1000;
 const NYC_CLOCK_TICK_MS = 60 * 1000;
 const USER_SLIDER_GRACE_MS = 25 * 1000;
+window.__TLC_NAV_VECTOR_OVERLAY_CONFIG__ = Object.assign(
+  {
+    sourceId: "tlc-nav-vector",
+    sourceUrl: "https://demotiles.maplibre.org/tiles/tiles.json",
+  },
+  (typeof window !== "undefined" && window.__TLC_NAV_VECTOR_OVERLAY_CONFIG__) || {}
+);
 
 let map; // global MapLibre instance
 let pendingFrame = null;
