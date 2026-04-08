@@ -410,7 +410,7 @@
   }
 
   function startNavigation() {
-    if (state.active) return true;
+    if (state.active) return false;
     if (!canStart()) return false;
 
     state.active = true;

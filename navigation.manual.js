@@ -152,6 +152,9 @@
       state.routeActive = true;
       syncUi();
 
+      if (window.TlcNavigationTurnModule?.isActive?.()) {
+        window.TlcNavigationTurnModule?.stopNavigation?.();
+      }
       const started = window.TlcNavigationTurnModule?.startNavigation?.() === true;
       if (!started) {
         state.status = "Preview ready";
