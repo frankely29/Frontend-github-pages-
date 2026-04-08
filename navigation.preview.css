@@ -81,14 +81,16 @@
 
 .navQuickInput {
   min-width: 0;
-  height: 24px;
+  height: 26px;
   border-radius: 999px;
   border: 1px solid rgba(148, 163, 184, 0.26);
   background: rgba(255, 255, 255, 0.68);
   color: #0f172a;
-  font-size: 10px;
+  font-size: 16px;
   font-weight: 500;
-  padding: 0 8px;
+  line-height: 1.1;
+  padding: 0 7px;
+  -webkit-text-size-adjust: 100%;
 }
 
 .navQuickInput::placeholder {
