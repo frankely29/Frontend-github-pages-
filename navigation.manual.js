@@ -9,6 +9,8 @@
     lastManualQuery: "",
     status: "Idle",
     source: "manual",
+    searchInFlight: false,
+    activeSearchToken: 0,
   };
 
   function getQuickEls() {
@@ -108,6 +110,10 @@
   }
 
   async function searchAndPreview(query) {
+    if (state.searchInFlight) {
+      return null;
+    }
+
     const q = String(query || "").trim();
     if (!q) {
       state.status = "Type a destination";
@@ -115,49 +121,60 @@
       return null;
     }
 
+    const searchToken = state.activeSearchToken + 1;
+    state.activeSearchToken = searchToken;
+    state.searchInFlight = true;
     state.lastManualQuery = q;
     state.status = "Searching…";
     syncUi();
 
-    const result = await window.TlcNavigationPreviewModule?.searchAndSetPreviewDestination?.(q);
-    if (!result?.destination || !result?.routeBundle?.routeFeature) {
-      state.routeActive = false;
-      state.routePreviewReady = false;
-      state.status = "Route unavailable";
-      syncUi();
-      return null;
-    }
+    try {
+      const result = await window.TlcNavigationPreviewModule?.searchAndSetPreviewDestination?.(q);
+      if (searchToken !== state.activeSearchToken) return null;
+      if (!result?.destination || !result?.routeBundle?.routeFeature) {
+        state.routeActive = false;
+        state.routePreviewReady = false;
+        state.status = "Route unavailable";
+        syncUi();
+        return null;
+      }
 
-    const accepted = setManualDestination(result.destination);
-    if (!accepted) {
-      state.routeActive = false;
-      state.routePreviewReady = false;
-      state.status = "Route unavailable";
-      syncUi();
-      return null;
-    }
+      const accepted = setManualDestination(result.destination);
+      if (!accepted) {
+        state.routeActive = false;
+        state.routePreviewReady = false;
+        state.status = "Route unavailable";
+        syncUi();
+        return null;
+      }
 
-    state.routePreviewReady = true;
-    state.routeActive = true;
-    state.status = "Preparing preview…";
-    syncUi();
-
-    const started = window.TlcNavigationTurnModule?.startNavigation?.() === true;
-    if (!started) {
-      state.status = "Preview ready";
+      state.routePreviewReady = true;
+      state.routeActive = true;
       syncUi();
+
+      const started = window.TlcNavigationTurnModule?.startNavigation?.() === true;
+      if (!started) {
+        state.status = "Preview ready";
+        syncUi();
+        return accepted;
+      }
+
+      state.status = "Navigating…";
+      syncUi();
+      window.setTimeout(() => {
+        if (state.uiOpen) close();
+      }, 900);
       return accepted;
+    } finally {
+      if (searchToken === state.activeSearchToken) {
+        state.searchInFlight = false;
+      }
     }
-
-    state.status = "Navigating…";
-    syncUi();
-    window.setTimeout(() => {
-      if (state.uiOpen) close();
-    }, 900);
-    return accepted;
   }
 
   function clear() {
+    state.activeSearchToken += 1;
+    state.searchInFlight = false;
     window.TlcNavigationTurnModule?.stopNavigation?.();
     window.TlcNavigationPreviewModule?.clearPreview?.({ clearInput: true });
     state.manualDestination = null;
