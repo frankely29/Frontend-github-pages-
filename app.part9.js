@@ -394,6 +394,20 @@
     return wxState;
   }
 
+
+  window.addEventListener("tlc-nav-preview-updated", (event) => {
+    const bundle = event?.detail?.routeBundle || null;
+    const source = String(bundle?.destinationSource || "");
+    const dest = bundle?.destination || null;
+    if (source === "manual" && dest) {
+      setManualNavDestination(dest);
+      return;
+    }
+    if (!dest) {
+      setManualNavDestination(null);
+    }
+  });
+
   window.getTeamJoseoRecommendationAudit = function getTeamJoseoRecommendationAudit() {
     return window.getTeamJoseoAiAssistantSnapshot?.() || null;
   };
