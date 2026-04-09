@@ -217,6 +217,12 @@
     };
   }
 
+  function isManualPreviewReady(routeBundle) {
+    if (!routeBundle || String(routeBundle.destinationSource || "") !== "manual") return false;
+    const hasRouteFeature = !!routeBundle?.routeFeature?.geometry?.coordinates?.length;
+    return hasRouteFeature && String(routeBundle.status || "").toLowerCase() === "route ready";
+  }
+
   function bindUi() {
     const { stack, toggleBtn, input, goBtn, clearBtn } = getQuickEls();
 
@@ -264,9 +270,13 @@
 
     window.addEventListener("tlc-nav-preview-updated", (event) => {
       const routeBundle = event?.detail?.routeBundle || null;
-      if (routeBundle?.destinationSource === "manual") {
-        state.routePreviewReady = routeBundle.status === "Route ready";
-      }
+      state.routePreviewReady = isManualPreviewReady(routeBundle);
+      syncUi();
+    });
+
+    window.addEventListener("tlc-nav-preview-ready", (event) => {
+      const routeBundle = event?.detail?.routeBundle || null;
+      state.routePreviewReady = isManualPreviewReady(routeBundle);
       syncUi();
     });
 
