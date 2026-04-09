@@ -250,13 +250,17 @@
 
   function extractColorFromFeature(feature) {
     const props = feature?.properties || {};
+    const style = props.style && typeof props.style === "object" ? props.style : null;
     return String(
-      props.zoneColor
-      || props.color
-      || props.fill
+      props.effectiveColor
+      || style?.fillColor
+      || style?.color
       || props.fillColor
-      || props.hex
+      || props.fill
       || props.hotspotColor
+      || props.zoneColor
+      || props.color
+      || props.hex
       || ""
     ).trim();
   }
