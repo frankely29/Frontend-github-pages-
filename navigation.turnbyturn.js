@@ -40,6 +40,9 @@
     lastKnownLocation: null,
     offRouteSamples: 0,
     lastFollowCameraAt: 0,
+    liveMapSyncRaf: 0,
+    lastLiveMapSyncReason: "",
+    runtimeSyncListenersBound: false,
   };
 
   function getEls() {
@@ -228,6 +231,21 @@
     window.TlcNavigationVectorBasemapModule?.reapplyIfNeeded?.();
     window.TlcNavigationBuildingTintModule?.reapplyIfNeeded?.();
     ensurePreviewRouteOnTop();
+  }
+
+  function scheduleActiveNavigationTintSync(reason) {
+    state.lastLiveMapSyncReason = String(reason || "");
+    if (!state.active) return false;
+    if (state.liveMapSyncRaf) {
+      cancelAnimationFrame(state.liveMapSyncRaf);
+    }
+    state.liveMapSyncRaf = requestAnimationFrame(() => {
+      state.liveMapSyncRaf = 0;
+      if (!state.active) return;
+      window.TlcNavigationBuildingTintModule?.refreshForViewport?.(true);
+      ensurePreviewRouteOnTop();
+    });
+    return true;
   }
 
   function updateCard() {
@@ -442,6 +460,11 @@
     state.offRoute = false;
     state.offRouteSamples = 0;
     state.rerouteInFlight = false;
+    if (state.liveMapSyncRaf) {
+      cancelAnimationFrame(state.liveMapSyncRaf);
+    }
+    state.liveMapSyncRaf = 0;
+    state.lastLiveMapSyncReason = "";
     deactivateBuildingTintMode();
     updateCard();
     if (wasActive) {
@@ -524,6 +547,16 @@
       onUserLocationUpdate(event?.detail || null);
     });
 
+    if (!state.runtimeSyncListenersBound) {
+      state.runtimeSyncListenersBound = true;
+      window.addEventListener("team-joseo-frame-rendered", () => {
+        scheduleActiveNavigationTintSync("frame-rendered");
+      });
+      window.addEventListener("tlc-mode-changed", () => {
+        scheduleActiveNavigationTintSync("mode-changed");
+      });
+    }
+
     const routeBundle = window.TlcNavigationPreviewModule?.getRouteBundle?.();
     if (routeBundle) {
       onPreviewRouteUpdated(routeBundle);
@@ -548,6 +581,7 @@
       arrivalState: state.arrivalState,
       followModeEnabled: !!state.followModeEnabled,
       sessionId: state.sessionId,
+      lastLiveMapSyncReason: state.lastLiveMapSyncReason || "",
     };
   }
 
