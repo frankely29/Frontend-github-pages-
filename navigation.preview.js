@@ -242,9 +242,12 @@
     const shouldRefresh = force || !state.lastOrigin || movedMiles >= REFRESH_DISTANCE_MILES || staleMs >= REFRESH_INTERVAL_MS;
     if (!shouldRefresh) {
       if (state.currentRouteGeoJSON && state.currentRouteSummary) {
-        const readyBundle = getRouteBundle();
+        const routeBundle = getRouteBundle();
         emitPreviewReady();
-        return readyBundle;
+        return {
+          destination: state.currentDestination ? { ...state.currentDestination } : null,
+          routeBundle,
+        };
       }
       return null;
     }
@@ -264,10 +267,13 @@
       updateMarker();
       focusRoute(normalized.geometryGeoJSON);
       setStatus("Route ready");
-      const readyBundle = getRouteBundle();
+      const routeBundle = getRouteBundle();
       emitPreviewUpdated();
       emitPreviewReady();
-      return readyBundle;
+      return {
+        destination: state.currentDestination ? { ...state.currentDestination } : null,
+        routeBundle,
+      };
     } catch (error) {
       if (error?.name === "AbortError") return null;
       console.warn("navigation preview route fetch failed:", error);
@@ -367,9 +373,9 @@
       }
       const name = String(candidate?.display_name || q).trim() || q;
       const normalized = { lat, lng, name };
-      const routeBundle = await setPreviewDestination(normalized, { source: "manual" });
-      if (!routeBundle?.routeFeature) return null;
-      return { destination: normalized, routeBundle };
+      const result = await setPreviewDestination(normalized, { source: "manual" });
+      if (!result?.routeBundle?.routeFeature) return null;
+      return result;
     } catch (error) {
       console.warn("navigation preview geocode failed:", error);
       setStatus("Search error");
