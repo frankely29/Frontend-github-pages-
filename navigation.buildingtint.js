@@ -555,7 +555,7 @@
       state.lastRefreshAt = now;
 
       const minFeaturesForSuppression = state.usingVectorOverlayGeometry ? 1 : MIN_BUILDING_TINT_FEATURES_FOR_SUPPRESSION;
-      if (state.buildingTintFeatureCount >= minFeaturesForSuppression && state.usingVectorOverlayGeometry) {
+      if (state.buildingTintFeatureCount >= minFeaturesForSuppression) {
         state.fallbackModeUsed = false;
         window.TlcNavigationStreetModeModule?.deactivate?.();
         suppressZoneFillForNavigation();
