@@ -159,11 +159,11 @@
       if (window.TlcNavigationTurnModule?.isActive?.()) {
         window.TlcNavigationTurnModule?.stopNavigation?.();
       }
-      const started = window.TlcNavigationTurnModule?.startNavigation?.() === true;
+      const started = !!window.TlcNavigationTurnModule?.startNavigation?.();
       if (!started) {
         state.status = "Preview ready";
         syncUi();
-        return accepted;
+        return result;
       }
 
       state.status = "Navigating…";
@@ -171,7 +171,7 @@
       window.setTimeout(() => {
         if (state.uiOpen) close();
       }, 900);
-      return accepted;
+      return result;
     } finally {
       if (searchToken === state.activeSearchToken) {
         state.searchInFlight = false;
