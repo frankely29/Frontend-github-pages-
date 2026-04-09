@@ -382,47 +382,54 @@
   }
 
   function getHotspotFeaturesFromSource() {
-    if (!state.hotspotSourceId || !state.map?.querySourceFeatures) return [];
+    if (!state.hotspotSourceId || !state.map?.querySourceFeatures) return null;
     const sourceLayers = state.hotspotSourceLayerIds.filter(Boolean);
     try {
       if (sourceLayers.length) {
         const acc = [];
         sourceLayers.forEach((sourceLayer) => {
-          const features = state.map.querySourceFeatures(state.hotspotSourceId, { sourceLayer }) || [];
-          acc.push(...features);
+          const features = state.map.querySourceFeatures(state.hotspotSourceId, { sourceLayer });
+          if (Array.isArray(features)) acc.push(...features);
         });
         return acc;
       }
-      return state.map.querySourceFeatures(state.hotspotSourceId) || [];
+      const features = state.map.querySourceFeatures(state.hotspotSourceId);
+      return Array.isArray(features) ? features : [];
     } catch (_err) {
-      return [];
+      return null;
     }
   }
 
   function getHotspotFeaturesFromRenderedLayers() {
+    if (!state.map?.queryRenderedFeatures) return null;
     const layerIds = state.hotspotFillLayerIds.filter((id) => hasLayer(id));
-    if (!layerIds.length) return [];
+    if (!layerIds.length) return null;
     try {
-      return state.map.queryRenderedFeatures(undefined, { layers: layerIds }) || [];
+      const rendered = state.map.queryRenderedFeatures(undefined, { layers: layerIds });
+      return Array.isArray(rendered) ? rendered : [];
     } catch (_err) {
-      return [];
+      return null;
     }
   }
 
   function getActiveHotspotFeatures() {
     const sourceFeatures = getHotspotFeaturesFromSource();
-    if (sourceFeatures.length) {
+    if (Array.isArray(sourceFeatures)) {
       state.hotspotFeatureSnapshot = sourceFeatures;
       return sourceFeatures;
+    }
+
+    const rendered = getHotspotFeaturesFromRenderedLayers();
+    if (Array.isArray(rendered)) {
+      state.hotspotFeatureSnapshot = rendered;
+      return rendered;
     }
 
     if (Array.isArray(state.hotspotFeatureSnapshot) && state.hotspotFeatureSnapshot.length) {
       return state.hotspotFeatureSnapshot;
     }
 
-    const rendered = getHotspotFeaturesFromRenderedLayers();
-    if (rendered.length) state.hotspotFeatureSnapshot = rendered;
-    return rendered;
+    return [];
   }
 
   function suppressZoneFillForNavigation() {
