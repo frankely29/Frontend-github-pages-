@@ -12,6 +12,7 @@
     searchInFlight: false,
     activeSearchToken: 0,
   };
+  let manualNavInitialized = false;
 
   function getQuickEls() {
     return {
@@ -317,8 +318,20 @@
   }
 
   function init() {
+    if (manualNavInitialized) return;
+    manualNavInitialized = true;
     bindUi();
     syncUi();
+  }
+
+  function initManualNavigationWhenDomReady() {
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", () => {
+        window.TlcManualNavigationModule?.init?.();
+      }, { once: true });
+      return;
+    }
+    window.TlcManualNavigationModule?.init?.();
   }
 
   window.TlcManualNavigationModule = {
@@ -345,4 +358,6 @@
       lastManualQuery: "",
     };
   };
+
+  initManualNavigationWhenDomReady();
 })();
