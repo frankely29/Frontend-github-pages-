@@ -234,14 +234,14 @@
   }
 
   function colorFromLocalRating(r) {
-    const x = Math.max(1, Math.min(100, Math.round(r)));
-    if (x >= 87) return { bucket: "green", color: "#00b050" };
-    if (x >= 73) return { bucket: "purple", color: "#8000ff" };
-    if (x >= 60) return { bucket: "indigo", color: "#4b3cff" };
-    if (x >= 48) return { bucket: "blue", color: "#0066ff" };
-    if (x >= 40) return { bucket: "sky", color: "#66ccff" };
-    if (x >= 33) return { bucket: "yellow", color: "#ffd400" };
-    if (x >= 25) return { bucket: "orange", color: "#ff8c00" };
+    const x = Math.max(0, Math.min(100, Math.round(r)));
+    if (x >= 83) return { bucket: "green", color: "#00b050" };
+    if (x >= 75) return { bucket: "purple", color: "#8000ff" };
+    if (x >= 68) return { bucket: "indigo", color: "#4b3cff" };
+    if (x >= 60) return { bucket: "blue", color: "#0066ff" };
+    if (x >= 50) return { bucket: "sky", color: "#66ccff" };
+    if (x >= 40) return { bucket: "yellow", color: "#ffd400" };
+    if (x >= 30) return { bucket: "orange", color: "#ff8c00" };
     return { bucket: "red", color: "#e60000" };
   }
 

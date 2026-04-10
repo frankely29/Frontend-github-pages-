@@ -1191,14 +1191,14 @@ function colorsPanelHTML() {
   const modeFlags = getModeFlags();
   const swatch = (fill) => `<svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true" focusable="false" style="display:inline-block;vertical-align:middle;flex:0 0 12px;forced-color-adjust:none;-webkit-print-color-adjust:exact;print-color-adjust:exact;"><rect x="0.5" y="0.5" width="11" height="11" rx="3" fill="${fill}" stroke="rgba(0,0,0,0.15)"/></svg>`;
   const rows = `
-      <div style="display:flex;align-items:center;gap:8px;">${swatch("#00b050")}Green = 87–100 Highest</div>
-      <div style="display:flex;align-items:center;gap:8px;">${swatch("#8000ff")}Purple = 73–86 Very High</div>
-      <div style="display:flex;align-items:center;gap:8px;">${swatch("#4b3cff")}Indigo = 60–72 High</div>
-      <div style="display:flex;align-items:center;gap:8px;">${swatch("#0066ff")}Blue = 48–59 Medium</div>
-      <div style="display:flex;align-items:center;gap:8px;">${swatch("#66ccff")}Sky Blue = 40–47 Normal</div>
-      <div style="display:flex;align-items:center;gap:8px;">${swatch("#ffd400")}Yellow = 33–39 Below Normal</div>
-      <div style="display:flex;align-items:center;gap:8px;">${swatch("#ff8c00")}Orange = 25–32 Low</div>
-      <div style="display:flex;align-items:center;gap:8px;">${swatch("#e60000")}Red = 1–24 Very Low / Avoid</div>
+      <div style="display:flex;align-items:center;gap:8px;">${swatch("#00b050")}Green = 83–100 Highest</div>
+      <div style="display:flex;align-items:center;gap:8px;">${swatch("#8000ff")}Purple = 75–82 Very High</div>
+      <div style="display:flex;align-items:center;gap:8px;">${swatch("#4b3cff")}Indigo = 68–74 High</div>
+      <div style="display:flex;align-items:center;gap:8px;">${swatch("#0066ff")}Blue = 60–67 Medium</div>
+      <div style="display:flex;align-items:center;gap:8px;">${swatch("#66ccff")}Sky Blue = 50–59 Normal</div>
+      <div style="display:flex;align-items:center;gap:8px;">${swatch("#ffd400")}Yellow = 40–49 Below Normal</div>
+      <div style="display:flex;align-items:center;gap:8px;">${swatch("#ff8c00")}Orange = 30–39 Low</div>
+      <div style="display:flex;align-items:center;gap:8px;">${swatch("#e60000")}Red = 0–29 Very Low / Avoid</div>
   `;
 
   return `
