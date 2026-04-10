@@ -668,6 +668,7 @@ const recommendEl = document.getElementById("recommendLine");
 const navBtn = document.getElementById("navBtn");
 
 let userLatLng = null;
+let routeableNavLatLng = null;
 
 /* =========================================================
    MOVED TO app.part9.js
@@ -707,6 +708,7 @@ window.TlcMapUiInternals = {
   getRecommendEl: () => recommendEl,
   getNavButton: () => navBtn,
   getUserLatLng: () => userLatLng,
+  getRouteableLatLng: () => routeableNavLatLng || userLatLng,
   getSpecialModes: () => getModeFlags(),
   getCurrentFrame: getCurrentFrameForAssistant,
   effectiveBucket,
@@ -4196,6 +4198,8 @@ function startLocationWatch() {
       const ts = pos.timestamp || Date.now();
 
       lastGpsAccuracyM = typeof accuracy === "number" && Number.isFinite(accuracy) ? accuracy : null;
+      routeableNavLatLng = { lat, lng };
+      window.TlcNavigationPreviewModule?.refreshPreviewFromUserLocation?.();
 
       // Ignore noisy fixes after the initial lock. Otherwise a brief accuracy
       // spike (e.g. 120-300m) can make the marker/presence jump and then snap
@@ -4206,7 +4210,6 @@ function startLocationWatch() {
       }
 
       userLatLng = { lat, lng };
-      window.TlcNavigationPreviewModule?.refreshPreviewFromUserLocation?.();
 
       const hasUsableAccuracy = !Number.isFinite(accuracy) || accuracy <= GPS_ACCURACY_THRESHOLD || !gpsFirstFixDone;
       if (!hasUsableAccuracy) {

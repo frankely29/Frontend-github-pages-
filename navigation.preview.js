@@ -54,7 +54,8 @@
   }
 
   function getUserOrigin() {
-    const origin = getCore().getUserLatLng?.();
+    const core = getCore();
+    const origin = core.getRouteableLatLng?.() || core.getUserLatLng?.();
     return toLatLng(origin);
   }
 
