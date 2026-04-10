@@ -132,11 +132,7 @@
     try {
       const result = await window.TlcNavigationPreviewModule?.searchAndSetPreviewDestination?.(q);
       if (searchToken !== state.activeSearchToken) return null;
-      if (
-        !result?.destination ||
-        !result?.routeBundle?.routeFeature ||
-        String(result?.routeBundle?.destinationSource || "") !== "manual"
-      ) {
+      if (!result?.destination || String(result?.routeBundle?.destinationSource || "") !== "manual") {
         state.routeActive = false;
         state.routePreviewReady = false;
         state.status = "Route unavailable";
@@ -153,25 +149,12 @@
         return null;
       }
 
-      state.routePreviewReady = true;
-      state.routeActive = true;
+      const previewStatus = String(result?.routeBundle?.statusReason || result?.routeBundle?.status || "");
+      const previewReady = !!result?.routeBundle?.startReady || isManualPreviewReady(result?.routeBundle);
+      state.routePreviewReady = previewReady;
+      state.routeActive = false;
+      state.status = previewReady ? "Preview ready" : (previewStatus || "Waiting for location");
       syncUi();
-
-      if (window.TlcNavigationTurnModule?.isActive?.()) {
-        window.TlcNavigationTurnModule?.stopNavigation?.();
-      }
-      const started = !!window.TlcNavigationTurnModule?.startNavigation?.();
-      if (!started) {
-        state.status = "Preview ready";
-        syncUi();
-        return result;
-      }
-
-      state.status = "Navigating…";
-      syncUi();
-      window.setTimeout(() => {
-        if (state.uiOpen) close();
-      }, 900);
       return result;
     } finally {
       if (searchToken === state.activeSearchToken) {
@@ -272,12 +255,20 @@
     window.addEventListener("tlc-nav-preview-updated", (event) => {
       const routeBundle = event?.detail?.routeBundle || null;
       state.routePreviewReady = isManualPreviewReady(routeBundle);
+      if (!state.routeActive && state.manualDestination) {
+        state.status = state.routePreviewReady
+          ? "Preview ready"
+          : String(routeBundle?.statusReason || routeBundle?.status || "Waiting for location");
+      }
       syncUi();
     });
 
     window.addEventListener("tlc-nav-preview-ready", (event) => {
       const routeBundle = event?.detail?.routeBundle || null;
       state.routePreviewReady = isManualPreviewReady(routeBundle);
+      if (!state.routeActive && state.manualDestination && state.routePreviewReady) {
+        state.status = "Preview ready";
+      }
       syncUi();
     });
 
@@ -307,12 +298,19 @@
 
     window.addEventListener("tlc-nav-stopped", () => {
       if (state.manualDestination && state.routePreviewReady) {
-        state.routeActive = true;
+        state.routeActive = false;
         state.status = "Preview ready";
       } else {
         state.routeActive = false;
         if (!state.manualDestination) state.status = "Idle";
       }
+      syncUi();
+    });
+
+    window.addEventListener("tlc-nav-start-failed", (event) => {
+      state.routeActive = false;
+      const reason = String(event?.detail?.reason || "").trim();
+      if (reason) state.status = reason;
       syncUi();
     });
   }
