@@ -43,6 +43,9 @@
     liveMapSyncRaf: 0,
     lastLiveMapSyncReason: "",
     runtimeSyncListenersBound: false,
+    lastStartFailureReason: "",
+    hasPreviewRoute: false,
+    hasPreviewDestination: false,
   };
 
   function getEls() {
@@ -252,14 +255,15 @@
     const { card, primary, secondary, meta, startBtn, stopBtn, recenterBtn } = getEls();
     if (!card) return;
 
-    const hasPreviewRoute = !!state.currentRouteFeature?.geometry?.coordinates?.length;
-    card.hidden = !hasPreviewRoute && !state.active;
+    const readiness = getStartReadiness();
+    const hasPreviewRoute = !!state.hasPreviewRoute;
+    card.hidden = !hasPreviewRoute && !state.active && !state.hasPreviewDestination;
     if (card.hidden) return;
 
     if (!state.active) {
-      if (primary) primary.textContent = hasPreviewRoute ? "Route preview ready" : "Manual route required";
+      if (primary) primary.textContent = readiness.canStart ? "Route preview ready" : (readiness.reason || "Manual route required");
       if (secondary) secondary.textContent = state.manualDestination?.name || "Type a destination to start";
-      if (meta) meta.textContent = "Tap Start for turn-by-turn";
+      if (meta) meta.textContent = readiness.canStart ? "Tap Start for turn-by-turn" : (readiness.routeStatus || "Waiting for preview");
     } else {
       if (primary) primary.textContent = state.currentStepInstruction || "Continue on route";
       if (secondary) {
@@ -273,7 +277,10 @@
       }
     }
 
-    if (startBtn) startBtn.hidden = state.active || !hasPreviewRoute;
+    if (startBtn) {
+      startBtn.hidden = state.active || !state.hasPreviewDestination;
+      startBtn.disabled = !readiness.canStart;
+    }
     if (stopBtn) stopBtn.hidden = !state.active;
     if (recenterBtn) recenterBtn.hidden = !state.active;
   }
@@ -389,6 +396,11 @@
     state.currentRouteFeature = routeBundle?.routeFeature || null;
     state.currentRouteSummary = routeBundle?.routeSummary ? { ...routeBundle.routeSummary } : null;
     state.currentSteps = Array.isArray(routeBundle?.steps) ? routeBundle.steps.slice() : [];
+    state.hasPreviewRoute = !!routeBundle?.routeFeature?.geometry?.coordinates?.length;
+    state.hasPreviewDestination = !!destination;
+    if (state.hasPreviewRoute) {
+      state.lastStartFailureReason = "";
+    }
     preprocessRouteMetrics();
 
     if (!state.currentRouteFeature && state.active) {
@@ -413,8 +425,57 @@
     state.routeCumulativeMeters = [];
     state.routeTotalMeters = 0;
     state.routeTotalDurationSeconds = 0;
+    state.hasPreviewRoute = false;
+    state.hasPreviewDestination = false;
+    state.lastStartFailureReason = "";
     stopNavigation();
     updateCard();
+  }
+
+  function syncNavigationInputsFromPreview() {
+    const routeBundle = window.TlcNavigationPreviewModule?.getRouteBundle?.() || null;
+    if (!routeBundle) return;
+    const destination = toLatLng(routeBundle?.destination);
+    const fallbackDestination = toLatLng(window.TlcManualNavigationModule?.getCurrentDestination?.());
+
+    if (!state.manualDestination && (destination || fallbackDestination)) {
+      const src = destination || fallbackDestination;
+      state.manualDestination = {
+        ...src,
+        name: routeBundle?.destination?.name || window.TlcManualNavigationModule?.getCurrentDestination?.()?.name || "Selected destination",
+      };
+    }
+
+    if (routeBundle?.routeFeature?.geometry?.coordinates?.length) {
+      state.currentRouteFeature = routeBundle.routeFeature;
+      state.currentRouteSummary = routeBundle?.routeSummary ? { ...routeBundle.routeSummary } : null;
+      state.currentSteps = Array.isArray(routeBundle?.steps) ? routeBundle.steps.slice() : [];
+      preprocessRouteMetrics();
+    }
+
+    state.hasPreviewRoute = !!routeBundle?.routeFeature?.geometry?.coordinates?.length;
+    state.hasPreviewDestination = !!destination || !!state.manualDestination;
+  }
+
+  function getStartReadiness() {
+    const previewSnapshot = window.TlcNavigationPreviewModule?.getSnapshot?.() || {};
+    const routeStatus = String(previewSnapshot?.statusReason || previewSnapshot?.status || "").trim();
+    const hasDestination = !!state.manualDestination || !!previewSnapshot?.destinationReady || !!state.hasPreviewDestination;
+    const hasRoute = !!state.currentRouteFeature?.geometry?.coordinates?.length || !!previewSnapshot?.routeReady || !!state.hasPreviewRoute;
+
+    if (!hasDestination) {
+      return { canStart: false, reason: "Type a destination", hasRoute, hasDestination, routeStatus };
+    }
+    if (!hasRoute) {
+      return {
+        canStart: false,
+        reason: routeStatus || "Searching…",
+        hasRoute: false,
+        hasDestination: true,
+        routeStatus,
+      };
+    }
+    return { canStart: true, reason: "", hasRoute: true, hasDestination: true, routeStatus };
   }
 
   function onUserLocationUpdate(location) {
@@ -429,7 +490,20 @@
 
   function startNavigation() {
     if (state.active) return false;
-    if (!canStart()) return false;
+    syncNavigationInputsFromPreview();
+    const readiness = getStartReadiness();
+    if (!readiness.canStart) {
+      state.lastStartFailureReason = readiness.reason;
+      updateCard();
+      window.dispatchEvent(new CustomEvent("tlc-nav-start-failed", {
+        detail: {
+          reason: readiness.reason,
+          snapshot: getSnapshot(),
+        },
+      }));
+      return false;
+    }
+    state.lastStartFailureReason = "";
 
     state.active = true;
     state.navigationStatus = "active";
@@ -479,9 +553,8 @@
   }
 
   function canStart() {
-    const hasRoute = !!state.currentRouteFeature?.geometry?.coordinates?.length;
-    const hasManualDestination = !!state.manualDestination;
-    return hasRoute && hasManualDestination;
+    syncNavigationInputsFromPreview();
+    return !!getStartReadiness().canStart;
   }
 
   function toggleNavigation() {
@@ -566,6 +639,7 @@
   }
 
   function getSnapshot() {
+    const readiness = getStartReadiness();
     return {
       active: !!state.active,
       navigationStatus: state.navigationStatus,
@@ -582,6 +656,10 @@
       followModeEnabled: !!state.followModeEnabled,
       sessionId: state.sessionId,
       lastLiveMapSyncReason: state.lastLiveMapSyncReason || "",
+      canStart: !!readiness.canStart,
+      hasPreviewRoute: !!state.hasPreviewRoute,
+      hasPreviewDestination: !!state.hasPreviewDestination,
+      lastStartFailureReason: state.lastStartFailureReason || "",
     };
   }
 
@@ -613,6 +691,10 @@
       arrivalState: "none",
       followModeEnabled: false,
       sessionId: 0,
+      canStart: false,
+      hasPreviewRoute: false,
+      hasPreviewDestination: false,
+      lastStartFailureReason: "",
     };
   };
 })();

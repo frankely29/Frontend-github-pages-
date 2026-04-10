@@ -293,6 +293,10 @@
 
 
   function getRouteBundle() {
+    const destinationReady = !!state.currentDestination;
+    const originReady = !!getUserOrigin();
+    const routeReady = !!state.currentRouteGeoJSON;
+    const statusReason = String(state.currentRouteStatus || "Idle");
     return {
       destination: state.currentDestination ? { ...state.currentDestination } : null,
       destinationSource: state.destinationSource || null,
@@ -300,6 +304,11 @@
       routeSummary: state.currentRouteSummary ? { ...state.currentRouteSummary } : null,
       steps: Array.isArray(state.currentRouteSummary?.steps) ? state.currentRouteSummary.steps.slice() : [],
       status: state.currentRouteStatus,
+      destinationReady,
+      originReady,
+      routeReady,
+      startReady: destinationReady && originReady && routeReady,
+      statusReason,
       profile: state.currentProfile,
       lastFetchKey: state.lastFetchKey || "",
     };
@@ -374,9 +383,7 @@
       }
       const name = String(candidate?.display_name || q).trim() || q;
       const normalized = { lat, lng, name };
-      const result = await setPreviewDestination(normalized, { source: "manual" });
-      if (!result?.routeBundle?.routeFeature) return null;
-      return result;
+      return await setPreviewDestination(normalized, { source: "manual" });
     } catch (error) {
       console.warn("navigation preview geocode failed:", error);
       setStatus("Search error");
@@ -442,6 +449,10 @@
   }
 
   function getSnapshot() {
+    const destinationReady = !!state.currentDestination;
+    const originReady = !!getUserOrigin();
+    const routeReady = !!state.currentRouteGeoJSON;
+    const statusReason = String(state.currentRouteStatus || "Idle");
     return {
       destination: state.currentDestination,
       destinationSource: state.destinationSource,
@@ -449,6 +460,11 @@
       distanceMeters: state.currentRouteSummary?.distanceMeters ?? null,
       durationSeconds: state.currentRouteSummary?.durationSeconds ?? null,
       status: state.currentRouteStatus,
+      destinationReady,
+      originReady,
+      routeReady,
+      startReady: destinationReady && originReady && routeReady,
+      statusReason,
       sourceReady: !!state.map?.getSource?.(state.currentSourceId),
       lineLayerReady: !!state.map?.getLayer?.(state.currentLineLayerId),
       markerReady: !!state.currentMarker,
@@ -476,6 +492,11 @@
       distanceMeters: null,
       durationSeconds: null,
       status: "Unavailable",
+      destinationReady: false,
+      originReady: false,
+      routeReady: false,
+      startReady: false,
+      statusReason: "Unavailable",
       sourceReady: false,
       lineLayerReady: false,
       markerReady: false,
