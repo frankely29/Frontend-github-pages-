@@ -23,6 +23,8 @@
     currentLineLayerId: LINE_LAYER_ID,
     currentCasingLayerId: CASING_LAYER_ID,
     currentMarker: null,
+    lastSuccessfulOrigin: null,
+    lastSuccessfulRefreshAt: 0,
     lastOrigin: null,
     lastFetchKey: "",
     routeAbortController: null,
@@ -281,9 +283,9 @@
     }
 
     const now = Date.now();
-    const movedMiles = state.lastOrigin ? haversineMiles(state.lastOrigin, origin) : Infinity;
-    const staleMs = now - Number(state.lastRefreshAt || 0);
-    const shouldRefresh = force || !state.lastOrigin || movedMiles >= REFRESH_DISTANCE_MILES || staleMs >= REFRESH_INTERVAL_MS;
+    const movedMiles = state.lastSuccessfulOrigin ? haversineMiles(state.lastSuccessfulOrigin, origin) : Infinity;
+    const staleMs = now - Number(state.lastSuccessfulRefreshAt || 0);
+    const shouldRefresh = force || !state.lastSuccessfulOrigin || movedMiles >= REFRESH_DISTANCE_MILES || staleMs >= REFRESH_INTERVAL_MS;
     if (!shouldRefresh) {
       if (state.currentRouteGeoJSON && state.currentRouteSummary) {
         const routeBundle = getRouteBundle();
@@ -311,6 +313,8 @@
       setRouteGeojson(normalized.geometryGeoJSON);
       updateMarker();
       focusRoute(normalized.geometryGeoJSON);
+      state.lastSuccessfulOrigin = origin;
+      state.lastSuccessfulRefreshAt = now;
       setStatus("Route ready");
       const routeBundle = getRouteBundle();
       emitPreviewUpdated();
@@ -403,6 +407,8 @@
     state.currentRouteGeoJSON = null;
     state.currentRouteSummary = null;
     state.currentRouteStatus = "Idle";
+    state.lastSuccessfulOrigin = null;
+    state.lastSuccessfulRefreshAt = 0;
     state.lastOrigin = null;
     state.lastFetchKey = "";
     setRouteGeojson(null);
