@@ -133,9 +133,13 @@
       const result = await window.TlcNavigationPreviewModule?.searchAndSetPreviewDestination?.(q);
       if (searchToken !== state.activeSearchToken) return null;
       if (!result?.destination || String(result?.routeBundle?.destinationSource || "") !== "manual") {
+        const previewSnapshot = window.TlcNavigationPreviewModule?.getSnapshot?.() || {};
+        if (String(previewSnapshot.destinationSource || "") === "manual" && previewSnapshot.destination) {
+          setManualDestination(previewSnapshot.destination);
+        }
+        state.routePreviewReady = !!previewSnapshot.routeReady && String(previewSnapshot.destinationSource || "") === "manual";
         state.routeActive = false;
-        state.routePreviewReady = false;
-        state.status = "Route unavailable";
+        state.status = String(previewSnapshot.statusReason || previewSnapshot.status || "Route unavailable");
         syncUi();
         return null;
       }
@@ -255,10 +259,10 @@
     window.addEventListener("tlc-nav-preview-updated", (event) => {
       const routeBundle = event?.detail?.routeBundle || null;
       state.routePreviewReady = isManualPreviewReady(routeBundle);
-      if (!state.routeActive && state.manualDestination) {
+      if (!state.routeActive && String(routeBundle?.destinationSource || "") === "manual") {
         state.status = state.routePreviewReady
           ? "Preview ready"
-          : String(routeBundle?.statusReason || routeBundle?.status || "Waiting for location");
+          : String(routeBundle?.statusReason || routeBundle?.status || state.status || "Waiting for location");
       }
       syncUi();
     });
@@ -272,12 +276,10 @@
       syncUi();
     });
 
-    window.addEventListener("tlc-nav-preview-failed", () => {
+    window.addEventListener("tlc-nav-preview-failed", (event) => {
       state.routePreviewReady = false;
       state.routeActive = false;
-      if (state.status === "Searching…" || state.status === "Preparing preview…") {
-        state.status = "Route unavailable";
-      }
+      state.status = String(event?.detail?.status || ((state.status === "Searching…" || state.status === "Preparing preview…") ? "Route unavailable" : state.status));
       syncUi();
     });
 
