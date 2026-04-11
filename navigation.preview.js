@@ -393,6 +393,20 @@
     }));
   }
 
+  function resetPreviewForNewManualSearch() {
+    if (state.routeAbortController) {
+      state.routeAbortController.abort();
+      state.routeAbortController = null;
+    }
+    state.currentDestination = null;
+    state.destinationSource = null;
+    state.currentRouteGeoJSON = null;
+    state.currentRouteSummary = null;
+    state.lastFetchKey = "";
+    setRouteGeojson(null);
+    updateMarker();
+  }
+
   function clearPreview(_options = {}) {
     if (state.routeAbortController) {
       state.routeAbortController.abort();
@@ -421,6 +435,7 @@
     }
 
     setStatus("Searching…");
+    resetPreviewForNewManualSearch();
     emitPreviewUpdated();
     const url = `${GEOCODE_ENDPOINT}?q=${encodeURIComponent(q)}&format=jsonv2&limit=1`;
 
