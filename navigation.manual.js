@@ -134,12 +134,18 @@
       if (searchToken !== state.activeSearchToken) return null;
       if (!result?.destination || String(result?.routeBundle?.destinationSource || "") !== "manual") {
         const previewSnapshot = window.TlcNavigationPreviewModule?.getSnapshot?.() || {};
-        if (String(previewSnapshot.destinationSource || "") === "manual" && previewSnapshot.destination) {
+        const previewStatus = String(previewSnapshot.statusReason || previewSnapshot.status || "").trim();
+        const canAdoptPreviewDestination = String(previewSnapshot.destinationSource || "") === "manual"
+          && !!previewSnapshot.destination
+          && previewStatus !== "Destination not found"
+          && previewStatus !== "Search error"
+          && previewStatus !== "Search timed out";
+        if (canAdoptPreviewDestination) {
           setManualDestination(previewSnapshot.destination);
         }
         state.routePreviewReady = !!previewSnapshot.routeReady && String(previewSnapshot.destinationSource || "") === "manual";
         state.routeActive = false;
-        state.status = String(previewSnapshot.statusReason || previewSnapshot.status || "Route unavailable");
+        state.status = String(previewStatus || "Route unavailable");
         syncUi();
         return null;
       }
