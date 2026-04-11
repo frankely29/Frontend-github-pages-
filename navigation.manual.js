@@ -71,7 +71,7 @@
     if (toggleBtn) toggleBtn.setAttribute("aria-expanded", state.uiOpen ? "true" : "false");
     if (tray) tray.hidden = !state.uiOpen;
     if (toggleText) {
-      if (state.status === "Searching…" || state.status === "Preparing preview…") toggleText.textContent = "...";
+      if (state.status === "Searching…" || state.status === "Preparing preview…" || state.status === "Calculating route…") toggleText.textContent = "...";
       else if (state.routePreviewReady) toggleText.textContent = "Route";
       else toggleText.textContent = "Navigate";
     }
