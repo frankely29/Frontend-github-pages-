@@ -25,11 +25,9 @@
     currentMarker: null,
     lastSuccessfulOrigin: null,
     lastSuccessfulRefreshAt: 0,
-    lastOrigin: null,
     lastFetchKey: "",
     routeAbortController: null,
     routeCache: new Map(),
-    lastRefreshAt: 0,
     locationPollTimer: null,
     userInteracted: false,
   };
@@ -298,8 +296,6 @@
       return null;
     }
 
-    state.lastOrigin = origin;
-    state.lastRefreshAt = now;
     setStatus("Calculating route…");
     emitPreviewUpdated();
 
@@ -409,7 +405,6 @@
     state.currentRouteStatus = "Idle";
     state.lastSuccessfulOrigin = null;
     state.lastSuccessfulRefreshAt = 0;
-    state.lastOrigin = null;
     state.lastFetchKey = "";
     setRouteGeojson(null);
     updateMarker();
@@ -439,7 +434,8 @@
       const lat = Number(candidate?.lat);
       const lng = Number(candidate?.lon);
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-        setStatus("Route unavailable");
+        setStatus("Destination not found");
+        emitPreviewUpdated();
         emitPreviewFailed(state.currentRouteStatus, null);
         return null;
       }
