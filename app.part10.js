@@ -2197,18 +2197,79 @@ function signOutNow({ reload = false } = {}) {
 }
 
 let lastProgressionSyncSignedInState = null;
-function maybeSyncProgressionLifecycleForAuthState(signedIn) {
+let pendingProgressionSyncSignedInState = null;
+let progressionSyncRetryTimer = 0;
+
+function clearProgressionSyncRetryTimer() {
+  if (!progressionSyncRetryTimer) return;
+  clearTimeout(progressionSyncRetryTimer);
+  progressionSyncRetryTimer = 0;
+}
+
+function getProgressionSyncModule() {
+  const maybeSyncProgressionOnSignInState = window.TlcDriverProfileModule?.maybeSyncProgressionOnSignInState;
+  return typeof maybeSyncProgressionOnSignInState === "function" ? maybeSyncProgressionOnSignInState : null;
+}
+
+function schedulePendingProgressionSyncRetry() {
+  if (progressionSyncRetryTimer) return;
+  progressionSyncRetryTimer = window.setTimeout(() => {
+    progressionSyncRetryTimer = 0;
+    if (pendingProgressionSyncSignedInState !== null) {
+      maybeSyncProgressionLifecycleForAuthState(pendingProgressionSyncSignedInState, { forceRetry: true });
+    }
+  }, 400);
+}
+
+function maybeSyncProgressionLifecycleForAuthState(signedIn, options = {}) {
   const nextSignedIn = !!signedIn;
-  if (lastProgressionSyncSignedInState === nextSignedIn) return;
-  lastProgressionSyncSignedInState = nextSignedIn;
+  const forceRetry = !!options.forceRetry;
+  const syncProgression = getProgressionSyncModule();
+
+  if (!syncProgression) {
+    pendingProgressionSyncSignedInState = nextSignedIn;
+    schedulePendingProgressionSyncRetry();
+    return;
+  }
+
+  if (!forceRetry && lastProgressionSyncSignedInState === nextSignedIn) return;
   try {
-    const maybePromise = window.TlcDriverProfileModule?.maybeSyncProgressionOnSignInState?.();
+    const maybePromise = syncProgression();
+    lastProgressionSyncSignedInState = nextSignedIn;
+    pendingProgressionSyncSignedInState = null;
+    clearProgressionSyncRetryTimer();
     if (maybePromise && typeof maybePromise.catch === "function") {
       maybePromise.catch((err) => console.warn("Progression sync gate failed:", err));
     }
   } catch (err) {
     console.warn("Progression sync gate failed:", err);
   }
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("focus", () => {
+    if (pendingProgressionSyncSignedInState !== null) {
+      maybeSyncProgressionLifecycleForAuthState(pendingProgressionSyncSignedInState, { forceRetry: true });
+    }
+  });
+
+  if (typeof window.getProgressionSyncGateDebugState !== "function") {
+    window.getProgressionSyncGateDebugState = function() {
+      return {
+        lastProgressionSyncSignedInState,
+        pendingProgressionSyncSignedInState,
+        retryScheduled: !!progressionSyncRetryTimer,
+      };
+    };
+  }
+}
+
+if (typeof document !== "undefined") {
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && pendingProgressionSyncSignedInState !== null) {
+      maybeSyncProgressionLifecycleForAuthState(pendingProgressionSyncSignedInState, { forceRetry: true });
+    }
+  });
 }
 
 function setAuthUI(signedIn, note) {
