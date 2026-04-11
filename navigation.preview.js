@@ -421,6 +421,7 @@
     }
 
     setStatus("Searching…");
+    emitPreviewUpdated();
     const url = `${GEOCODE_ENDPOINT}?q=${encodeURIComponent(q)}&format=jsonv2&limit=1`;
 
     try {
