@@ -8,6 +8,8 @@
 
   const ROUTE_ENDPOINT = String(window.__TLC_NAV_PREVIEW_ROUTE_ENDPOINT__ || "https://router.project-osrm.org/route/v1").trim().replace(/\/+$/, "");
   const GEOCODE_ENDPOINT = String(window.__TLC_NAV_PREVIEW_GEOCODE_ENDPOINT__ || "https://nominatim.openstreetmap.org/search").trim().replace(/\/+$/, "");
+  const GEOCODE_TIMEOUT_MS = 12000;
+  const ROUTE_TIMEOUT_MS = 15000;
 
   const state = {
     map: null,
@@ -51,6 +53,45 @@
 
   function getCore() {
     return window.TlcMapUiInternals || {};
+  }
+
+  function createPreviewTimeoutError(message) {
+    const error = new Error(String(message || "Request timed out"));
+    error.name = "TlcNavigationTimeoutError";
+    error.code = "TLC_NAV_TIMEOUT";
+    return error;
+  }
+
+  async function fetchJsonWithTimeout(url, opts = {}, timeoutMs, timeoutMessage, externalController = null) {
+    const core = getCore();
+    const ownController = externalController || new AbortController();
+    const signal = ownController.signal;
+    let timedOut = false;
+    const timeoutId = setTimeout(() => {
+      timedOut = true;
+      ownController.abort();
+    }, Math.max(0, Number(timeoutMs) || 0));
+
+    try {
+      if (core.fetchJSON) {
+        return await core.fetchJSON(url, { ...opts, signal });
+      }
+      const response = await fetch(url, { ...opts, signal });
+      if (!response.ok) {
+        throw new Error(`Request failed (${response.status})`);
+      }
+      return await response.json();
+    } catch (error) {
+      if (error?.name === "AbortError") {
+        if (timedOut) {
+          throw createPreviewTimeoutError(timeoutMessage);
+        }
+        throw error;
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeoutId);
+    }
   }
 
   function getUserOrigin() {
@@ -186,11 +227,13 @@
     state.routeAbortController = controller;
 
     const url = `${ROUTE_ENDPOINT}/${encodeURIComponent(state.currentProfile)}/${encodeURIComponent(origin.lng)},${encodeURIComponent(origin.lat)};${encodeURIComponent(destination.lng)},${encodeURIComponent(destination.lat)}?overview=full&geometries=geojson&steps=true`;
-    const response = await fetch(url, { signal: controller.signal });
-    if (!response.ok) {
-      throw new Error(`Route preview request failed (${response.status})`);
-    }
-    const payload = await response.json();
+    const payload = await fetchJsonWithTimeout(
+      url,
+      {},
+      ROUTE_TIMEOUT_MS,
+      "Route preview timed out",
+      controller,
+    );
     const route = Array.isArray(payload?.routes) ? payload.routes[0] : null;
     if (!route?.geometry?.coordinates?.length) {
       throw new Error("No route geometry returned");
@@ -256,6 +299,7 @@
     state.lastOrigin = origin;
     state.lastRefreshAt = now;
     setStatus("Calculating route…");
+    emitPreviewUpdated();
 
     try {
       const normalized = await fetchRoutePreview(origin, state.currentDestination);
@@ -276,6 +320,14 @@
         routeBundle,
       };
     } catch (error) {
+      if (error?.code === "TLC_NAV_TIMEOUT") {
+        setRouteGeojson(null);
+        state.currentRouteSummary = null;
+        setStatus(String(error.message || "Route preview timed out"));
+        emitPreviewUpdated();
+        emitPreviewFailed(state.currentRouteStatus, state.currentDestination);
+        return null;
+      }
       if (error?.name === "AbortError") return null;
       console.warn("navigation preview route fetch failed:", error);
       setRouteGeojson(null);
@@ -371,8 +423,12 @@
     const url = `${GEOCODE_ENDPOINT}?q=${encodeURIComponent(q)}&format=jsonv2&limit=1`;
 
     try {
-      const core = getCore();
-      const payload = await (core.fetchJSON?.(url, { headers: { "Accept-Language": "en" } }) || fetch(url).then((r) => r.json()));
+      const payload = await fetchJsonWithTimeout(
+        url,
+        { headers: { "Accept-Language": "en" } },
+        GEOCODE_TIMEOUT_MS,
+        "Search timed out",
+      );
       const candidate = Array.isArray(payload) ? payload[0] : null;
       const lat = Number(candidate?.lat);
       const lng = Number(candidate?.lon);
@@ -385,6 +441,12 @@
       const normalized = { lat, lng, name };
       return await setPreviewDestination(normalized, { source: "manual" });
     } catch (error) {
+      if (error?.code === "TLC_NAV_TIMEOUT") {
+        setStatus("Search timed out");
+        emitPreviewUpdated();
+        emitPreviewFailed(state.currentRouteStatus, null);
+        return null;
+      }
       console.warn("navigation preview geocode failed:", error);
       setStatus("Search error");
       emitPreviewFailed(state.currentRouteStatus, null);
