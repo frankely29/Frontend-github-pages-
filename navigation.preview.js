@@ -451,6 +451,7 @@
       }
       console.warn("navigation preview geocode failed:", error);
       setStatus("Search error");
+      emitPreviewUpdated();
       emitPreviewFailed(state.currentRouteStatus, null);
       return null;
     }
