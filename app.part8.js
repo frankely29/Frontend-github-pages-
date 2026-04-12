@@ -3036,7 +3036,7 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     });
     const panelOpen = isChatPanelOpen() && activeChatTab === 'public';
     if (panelOpen) {
-      renderChatMessages(merged, { replace: true });
+      renderChatMessages(merged, { replace: true, forceStickToBottom: false });
       markChatReadThroughLatestLoaded();
       if (killFeedContainer) killFeedContainer.style.display = 'none';
     } else {
@@ -4234,7 +4234,7 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     if (scope === 'public') {
       const merged = upsertPublicChatMessages(appliedMessages);
       advanceChatWatermarksFromMessages(appliedMessages);
-      renderChatMessages(merged, { replace: true });
+      renderChatMessages(merged, { replace: true, forceStickToBottom: true });
       const latestVoice = appliedMessages.filter((msg) => msg.messageType === 'voice');
       if (latestVoice.length) {
         window.setTimeout(() => {
@@ -4749,7 +4749,7 @@ function bindVoiceComposerControls(surface, optionsFactory) {
   }
 
   // Render messages and manage scroll position
-  function renderChatMessages(messages, { replace = false } = {}) {
+  function renderChatMessages(messages, { replace = false, forceStickToBottom = false } = {}) {
     pruneExpiredChatState();
     const listEl = document.getElementById('chatList');
     if (!listEl) return;
@@ -4763,6 +4763,7 @@ function bindVoiceComposerControls(surface, optionsFactory) {
       }
       return;
     }
+    const previousScrollTop = listEl.scrollTop;
     const nearBottom = isChatNearBottom(listEl, 80);
     void preserveVoicePlaybackAcrossRender(() => {
       if (replace) chatSeenKeys = new Set();
@@ -4782,7 +4783,8 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     });
     bindVoicePlayers(listEl);
     void prefetchVoiceBlobUrls(nextMessages.filter((msg) => msg.messageType === 'voice'));
-    if (nearBottom || replace) listEl.scrollTop = listEl.scrollHeight;
+    if (forceStickToBottom || nearBottom) listEl.scrollTop = listEl.scrollHeight;
+    else listEl.scrollTop = previousScrollTop;
   }
 
 
@@ -4815,7 +4817,7 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     }
     const msgs = setPublicChatMessages(Array.isArray(result.messages) ? result.messages : []);
     seedChatIncomingAudioBaseline(msgs);
-    renderChatMessages(msgs, { replace: true });
+    renderChatMessages(msgs, { replace: true, forceStickToBottom: true });
     chatInitialHistoryLoaded = true;
     chatHiddenBaselineReady = true;
     chatInitialHistoryRetryQueued = false;
@@ -4880,7 +4882,7 @@ function bindVoiceComposerControls(surface, optionsFactory) {
         killFeedBootstrapPollConsumed = true;
       }
       if (panelOpen) {
-        renderChatMessages(mergedMsgs, { replace: true });
+        renderChatMessages(mergedMsgs, { replace: true, forceStickToBottom: false });
         markChatReadThroughLatestLoaded();
         if (killFeedContainer) killFeedContainer.style.display = 'none';
       } else {
@@ -5022,7 +5024,7 @@ function bindVoiceComposerControls(surface, optionsFactory) {
         if (sentMessages.length > 0) {
           sentMessages.forEach(rememberOutgoingChatEcho);
           seedChatIncomingAudioBaseline(sentMessages);
-          renderChatMessages(upsertPublicChatMessages(sentMessages), { replace: true });
+          renderChatMessages(upsertPublicChatMessages(sentMessages), { replace: true, forceStickToBottom: true });
         }
         chatInput.value = '';
         await playChatTone('outgoing');
