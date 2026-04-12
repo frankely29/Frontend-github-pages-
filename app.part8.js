@@ -2291,6 +2291,14 @@ function bindVoiceComposerControls(surface, optionsFactory) {
   let killFeedBootstrapPollConsumed = false;
 
   let activeChatTab = 'public';
+  let publicChatViewMode = 'messages';
+  let privateChatViewModeByUserId = Object.create(null);
+  let publicPhotoItems = [];
+  let publicPhotoHasMore = false;
+  let publicPhotoBeforeId = null;
+  let privatePhotoItemsByUserId = Object.create(null);
+  let privatePhotoHasMoreByUserId = Object.create(null);
+  let privatePhotoBeforeIdByUserId = Object.create(null);
   let privateThreads = [];
   let privateActiveUserId = null;
   let privateActiveDisplayName = '';
@@ -2507,6 +2515,7 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     const raw = String(value || '').trim().toLowerCase();
     if (!raw) return fallback;
     if (raw.includes('voice') || raw.includes('audio')) return 'voice';
+    if (raw.includes('image') || raw.includes('photo') || raw.includes('picture')) return 'image';
     return raw;
   }
 
@@ -2522,6 +2531,11 @@ function bindVoiceComposerControls(surface, optionsFactory) {
 
   function normalizeAudioUrl(raw) {
     const url = raw?.audio_url || raw?.voice_url || raw?.media_url || raw?.file_url || raw?.attachment_url || raw?.audioUrl || raw?.voiceUrl || raw?.mediaUrl || '';
+    return resolveChatAssetUrl(url);
+  }
+
+  function normalizeImageUrl(raw) {
+    const url = raw?.image_url || raw?.imageUrl || raw?.photo_url || raw?.photoUrl || raw?.media_image_url || raw?.mediaImageUrl || '';
     return resolveChatAssetUrl(url);
   }
 
@@ -2548,7 +2562,9 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     const displayName = String(raw?.displayName || raw?.display_name || raw?.user_name || raw?.name || raw?.sender_display_name || raw?.recipient_display_name || raw?.other_display_name || fallbackDisplayName).trim() || fallbackDisplayName;
     const text = String(raw?.text || raw?.message || raw?.body || '').trim();
     const audioUrl = normalizeAudioUrl(raw);
-    const messageType = normalizeMessageType(raw?.message_type || raw?.messageType || raw?.type, audioUrl ? 'voice' : 'text');
+    const imageUrl = normalizeImageUrl(raw);
+    const fallbackType = imageUrl ? 'image' : (audioUrl ? 'voice' : 'text');
+    const messageType = normalizeMessageType(raw?.message_type || raw?.messageType || raw?.type, fallbackType);
     const sender = senderUserId == null ? null : String(senderUserId);
     const recipient = recipientUserId == null ? null : String(recipientUserId);
     const fallbackUserId = options.scope === 'public' ? sender : (sender || recipient);
@@ -2565,6 +2581,7 @@ function bindVoiceComposerControls(surface, optionsFactory) {
       isOwn: !!(explicitOwn || ownById || ownByName),
       displayName,
       audioUrl,
+      imageUrl,
       audioDurationMs: normalizeAudioDurationMs(raw),
       audioMimeType: normalizeAudioMimeType(raw),
       userId: fallbackUserId == null ? null : String(fallbackUserId),
@@ -3576,27 +3593,57 @@ function bindVoiceComposerControls(surface, optionsFactory) {
 
 
 
+  function messageHasImage(msg) {
+    return normalizeMessageType(msg?.messageType, msg?.imageUrl ? 'image' : (msg?.audioUrl ? 'voice' : 'text')) === 'image'
+      || !!String(msg?.imageUrl || '').trim();
+  }
+
+  function renderChatImageCard(message, bubbleClass = 'chatBubbleOther') {
+    const imageUrl = escapeHtml(String(message?.imageUrl || ''));
+    const caption = String(message?.text || '').trim();
+    return `<div class="${bubbleClass} chatImageCard"><img src="${imageUrl}" alt="Chat photo" loading="lazy" class="chatImageThumb" data-chat-image-viewer="${imageUrl}" style="max-width:220px;max-height:220px;border-radius:12px;display:block;cursor:pointer;" />${caption ? `<div class="chatImageCaption">${escapeHtml(caption)}</div>` : ''}</div>`;
+  }
+
   function renderPublicMessageRow(message) {
     const msg = normalizePublicChatMessage(message);
     const own = !!msg?.isOwn;
     const safeName = escapeHtml(msg.displayName || 'Driver');
     const time = escapeHtml(formatChatTime(msg.createdAt));
     const bubbleClass = own ? 'chatBubbleSelf' : 'chatBubbleOther';
+    const hasImage = messageHasImage(msg);
     const body = msg.messageType === 'voice'
       ? renderVoiceNotePlayer(msg, 'public')
+      : hasImage
+        ? renderChatImageCard(msg, `${bubbleClass} chatPublicTextBubble`)
       : `<div class="${bubbleClass} chatPublicTextBubble">${escapeHtml(String(msg.text || ''))}</div>`;
-    return `<div class="chatMsgRow ${own ? 'self' : 'other'}${msg.messageType === 'voice' ? ' chatMsgRowVoice' : ''}" data-chat-row="public" data-message-key="${escapeHtml(getVoiceMessageDomKey(msg))}" data-message-id="${escapeHtml(String(msg?.id ?? ''))}" data-message-scope="public" data-audio-url="${escapeHtml(String(msg?.audioUrl || ''))}"><div class="chatMsgNameLine"><strong class="chatMsgName">${safeName}</strong></div><div class="chatMsgBubbleWrap">${body}</div><div class="chatMsgTime">${time}</div></div>`;
+    return `<div class="chatMsgRow ${own ? 'self' : 'other'}${msg.messageType === 'voice' ? ' chatMsgRowVoice' : ''}" data-chat-row="public" data-message-key="${escapeHtml(getVoiceMessageDomKey(msg))}" data-message-id="${escapeHtml(String(msg?.id ?? ''))}" data-message-scope="public" data-audio-url="${escapeHtml(String(msg?.audioUrl || ''))}" data-image-url="${escapeHtml(String(msg?.imageUrl || ''))}"><div class="chatMsgNameLine"><strong class="chatMsgName">${safeName}</strong></div><div class="chatMsgBubbleWrap">${body}</div><div class="chatMsgTime">${time}</div></div>`;
   }
 
   function renderPrivateConversationRow(message, scope = 'private') {
     const msg = normalizePrivateChatMessage(message, currentChatSelfUserId());
     const own = !!msg?.isOwn;
     const cls = own ? 'chatBubbleSelf' : 'chatBubbleOther';
+    const hasImage = messageHasImage(msg);
     const body = msg?.messageType === 'voice'
       ? renderVoiceNotePlayer(msg, scope === 'profile-dm' ? 'driverProfile' : 'private')
+      : hasImage
+        ? renderChatImageCard(msg, cls)
       : `<div class="${cls}">${escapeHtml(String(msg?.text || ''))}</div>`;
     const t = escapeHtml(formatChatTime(msg?.createdAt));
-    return `<div class="chatPrivateMsgRow ${own ? 'self' : 'other'}" data-chat-row="${escapeHtml(scope)}" data-message-key="${escapeHtml(getVoiceMessageDomKey(msg))}" data-message-id="${escapeHtml(String(msg?.id ?? ''))}" data-message-scope="${escapeHtml(scope)}" data-audio-url="${escapeHtml(String(msg?.audioUrl || ''))}">${body}<div class="chatMsgTime">${t}</div></div>`;
+    return `<div class="chatPrivateMsgRow ${own ? 'self' : 'other'}" data-chat-row="${escapeHtml(scope)}" data-message-key="${escapeHtml(getVoiceMessageDomKey(msg))}" data-message-id="${escapeHtml(String(msg?.id ?? ''))}" data-message-scope="${escapeHtml(scope)}" data-audio-url="${escapeHtml(String(msg?.audioUrl || ''))}" data-image-url="${escapeHtml(String(msg?.imageUrl || ''))}">${body}<div class="chatMsgTime">${t}</div></div>`;
+  }
+
+  function bindChatImageViewer(root = document) {
+    if (!root || root.dataset.chatImageViewerBound === '1') return;
+    root.dataset.chatImageViewerBound = '1';
+    root.addEventListener('click', (event) => {
+      const target = event.target?.closest?.('[data-chat-image-viewer]');
+      if (!target) return;
+      const url = String(target.getAttribute('data-chat-image-viewer') || '').trim();
+      if (!url) return;
+      event.preventDefault();
+      window.open(url, '_blank', 'noopener');
+    });
   }
 
 
@@ -3627,8 +3674,9 @@ function bindVoiceComposerControls(surface, optionsFactory) {
         changed = true;
       } else {
         const nextAudioUrl = String(message?.audioUrl || '').trim();
+        const nextImageUrl = String(message?.imageUrl || '').trim();
         const sameVoiceRow = shouldReuseVoiceRow(buildVoicePlayerMessageFromDataset(existing.querySelector?.('[data-voice-player]') || existing), message);
-        const sameTextRow = row.dataset.audioUrl === nextAudioUrl && row.outerHTML === nextHtml;
+        const sameTextRow = row.dataset.audioUrl === nextAudioUrl && String(row.dataset.imageUrl || '').trim() === nextImageUrl && row.outerHTML === nextHtml;
         if (!sameVoiceRow && !sameTextRow) {
           row = createNodeFromHtml(nextHtml);
           changed = true;
@@ -3742,12 +3790,19 @@ function bindVoiceComposerControls(surface, optionsFactory) {
         </div>
         <div class="chatBody">
           <div id="chatPublicView" class="chatTabContent ${activeChatTab === 'public' ? '' : 'hidden'}">
-            <div id="chatList" class="chatList" aria-live="polite"></div>
+            <div class="chatSubTabs" style="display:flex;gap:8px;margin-bottom:8px;">
+              <button id="chatPublicModeMessages" class="chipBtn ${publicChatViewMode === 'messages' ? 'active' : ''}" type="button">Messages</button>
+              <button id="chatPublicModePhotos" class="chipBtn ${publicChatViewMode === 'photos' ? 'active' : ''}" type="button">Photos</button>
+            </div>
+            <div id="chatList" class="chatList ${publicChatViewMode === 'messages' ? '' : 'hidden'}" aria-live="polite"></div>
+            <div id="chatPublicPhotosView" class="${publicChatViewMode === 'photos' ? '' : 'hidden'}"></div>
           </div>
           <div id="chatPublicComposer" class="chatComposerWrap ${activeChatTab === 'public' ? '' : 'hidden'}">
             <div class="chatComposer">
               <input id="chatInput" type="text" class="chatInput" placeholder="Message drivers…" maxlength="600" />
               <button id="chatSendBtn" class="chipBtn" type="button">Send</button>
+              <button id="chatPublicPhotoBtn" class="chipBtn" type="button" title="Upload photo">📷</button>
+              <input id="chatPublicPhotoInput" type="file" accept="image/jpeg,image/png,image/webp,image/gif" hidden />
             </div>
             ${buildVoiceComposer('public')}
           </div>
@@ -3766,7 +3821,7 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     if (id !== undefined && id !== null) return `id:${id}`;
     const t = msg?.createdAt || msg?.created_at || '';
     const n = msg?.displayName || msg?.display_name || msg?.user_name || msg?.name || '';
-    const body = msg?.text || msg?.message || msg?.audioUrl || '';
+    const body = msg?.text || msg?.message || msg?.audioUrl || msg?.imageUrl || '';
     return `fallback:${t}|${n}|${body}`;
   }
   function formatChatTime(ts) {
@@ -3935,7 +3990,9 @@ function bindVoiceComposerControls(surface, optionsFactory) {
       const latest = messages[messages.length - 1] || {};
       nextThreads.push({
         ...thread,
-        previewText: latest?.messageType === 'voice' ? '🎤 Voice note' : String(latest?.text || thread?.previewText || '').trim(),
+        previewText: latest?.messageType === 'voice'
+          ? '🎤 Voice note'
+          : (messageHasImage(latest) ? '📷 Photo' : String(latest?.text || thread?.previewText || '').trim()),
         lastAt: latest?.createdAt || thread?.lastAt || null,
         lastSenderUserId: latest?.senderUserId || thread?.lastSenderUserId || null,
         unreadCount: Number(privateUnreadByUserId[uid] || 0),
@@ -3963,7 +4020,7 @@ function bindVoiceComposerControls(surface, optionsFactory) {
 
   function getMessageMergeKey(msg) {
     if (msg?.id != null) return `id:${msg.id}`;
-    return `fallback:${msg?.createdAt || ''}|${msg?.senderUserId || msg?.userId || ''}|${msg?.recipientUserId || ''}|${msg?.text || ''}|${msg?.audioUrl || ''}`;
+    return `fallback:${msg?.createdAt || ''}|${msg?.senderUserId || msg?.userId || ''}|${msg?.recipientUserId || ''}|${msg?.text || ''}|${msg?.audioUrl || ''}|${msg?.imageUrl || ''}`;
   }
 
   function messageCompletenessScore(msg) {
@@ -3974,6 +4031,7 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     if (String(msg?.displayName || '').trim()) score += 1;
     if (normalizeMessageType(msg?.messageType, msg?.audioUrl ? 'voice' : 'text') === 'voice') score += 2;
     if (String(msg?.audioUrl || '').trim()) score += 6;
+    if (String(msg?.imageUrl || '').trim()) score += 6;
     if (Number.isFinite(Number(msg?.audioDurationMs))) score += 1;
     if (String(msg?.audioMimeType || '').trim()) score += 1;
     if (String(msg?.senderUserId || '').trim()) score += 1;
@@ -4000,12 +4058,13 @@ function bindVoiceComposerControls(surface, optionsFactory) {
       ...fallback,
       ...preferred,
       id: parseMessageId(preferred?.id ?? fallback?.id),
-      messageType: normalizeMessageType(preferred?.messageType || fallback?.messageType, preferred?.audioUrl || fallback?.audioUrl ? 'voice' : 'text'),
+      messageType: normalizeMessageType(preferred?.messageType || fallback?.messageType, preferred?.imageUrl || fallback?.imageUrl ? 'image' : (preferred?.audioUrl || fallback?.audioUrl ? 'voice' : 'text')),
       text: String(preferred?.text || fallback?.text || '').trim(),
       createdAt: preferred?.createdAt || fallback?.createdAt || null,
       isOwn: preferred?.isOwn === true || fallback?.isOwn === true,
       displayName: String(preferred?.displayName || fallback?.displayName || 'Driver').trim() || 'Driver',
       audioUrl: String(preferred?.audioUrl || fallback?.audioUrl || '').trim(),
+      imageUrl: String(preferred?.imageUrl || fallback?.imageUrl || '').trim(),
       audioDurationMs: normalizeAudioDurationMs(preferred) ?? normalizeAudioDurationMs(fallback),
       audioMimeType: String(preferred?.audioMimeType || fallback?.audioMimeType || '').trim(),
       userId: preferred?.userId || fallback?.userId || null,
@@ -4034,6 +4093,13 @@ function bindVoiceComposerControls(surface, optionsFactory) {
 
   function upsertPublicChatMessages(messages = []) {
     publicChatMessages = upsertChatMessages(publicChatMessages, messages);
+    const photoMessages = (Array.isArray(messages) ? messages : []).filter((msg) => messageHasImage(msg));
+    if (photoMessages.length) {
+      publicPhotoItems = upsertChatMessages(publicPhotoItems, photoMessages).sort(compareChatMessages).reverse();
+      const oldest = publicPhotoItems[publicPhotoItems.length - 1];
+      publicPhotoBeforeId = oldest?.id ?? publicPhotoBeforeId;
+      renderPublicPhotosView();
+    }
     pruneExpiredChatState();
     pruneVoiceAssetCache();
     return publicChatMessages;
@@ -4043,6 +4109,13 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     const uid = String(otherUserId || '');
     if (!uid) return [];
     privateMessagesByUserId[uid] = upsertChatMessages(privateMessagesByUserId[uid] || [], messages);
+    const photoMessages = (Array.isArray(messages) ? messages : []).filter((msg) => messageHasImage(msg));
+    if (photoMessages.length) {
+      privatePhotoItemsByUserId[uid] = upsertChatMessages(privatePhotoItemsByUserId[uid] || [], photoMessages).sort(compareChatMessages).reverse();
+      const oldest = (privatePhotoItemsByUserId[uid] || [])[privatePhotoItemsByUserId[uid].length - 1];
+      privatePhotoBeforeIdByUserId[uid] = oldest?.id ?? privatePhotoBeforeIdByUserId[uid] ?? null;
+      if (privateActiveUserId === uid) renderPrivatePhotosView(uid);
+    }
     pruneExpiredChatState();
     const merged = privateMessagesByUserId[uid] || [];
     const latestId = merged.reduce((max, msg) => {
@@ -4064,7 +4137,9 @@ function bindVoiceComposerControls(surface, optionsFactory) {
       otherUserId: uid,
       displayName: String(options.displayName || (privateActiveUserId === uid && privateActiveDisplayName) || existing?.displayName || latest?.displayName || 'Driver').trim() || 'Driver',
       avatarUrl: existing?.avatarUrl || '',
-      previewText: latest?.messageType === 'voice' ? '🎤 Voice note' : String(latest?.text || existing?.previewText || '').trim(),
+      previewText: latest?.messageType === 'voice'
+        ? '🎤 Voice note'
+        : (messageHasImage(latest) ? '📷 Photo' : String(latest?.text || existing?.previewText || '').trim()),
       lastAt: latest?.createdAt || existing?.lastAt || null,
       lastSenderUserId: latest?.senderUserId || existing?.lastSenderUserId || null,
       unreadCount: Number(privateUnreadByUserId[uid] || 0),
@@ -4201,6 +4276,42 @@ function bindVoiceComposerControls(surface, optionsFactory) {
       token,
       mimeType,
     );
+  }
+
+  function buildChatImageUploadFile(file) {
+    const fallbackType = String(file?.type || 'image/jpeg').trim() || 'image/jpeg';
+    const ext = fallbackType.includes('png')
+      ? 'png'
+      : (fallbackType.includes('webp')
+        ? 'webp'
+        : (fallbackType.includes('gif')
+          ? 'gif'
+          : 'jpg'));
+    return file instanceof File ? file : new File([file], `photo-${Date.now()}.${ext}`, { type: fallbackType });
+  }
+
+  async function chatSendPublicImage(file, options = {}) {
+    const token = getCommunityToken();
+    if (!token) throw new Error('Not signed in');
+    const room = String(options.room || CHAT_ROOM || 'global').trim() || 'global';
+    const upload = buildChatImageUploadFile(file);
+    const form = new FormData();
+    form.append('file', upload, upload.name);
+    const caption = String(options.caption || '').trim();
+    if (caption) form.append('text', caption);
+    return postMultipartAuth(`/chat/rooms/${encodeURIComponent(room)}/image`, form, token);
+  }
+
+  async function chatSendPrivateImage(otherUserId, file, options = {}) {
+    const token = getCommunityToken();
+    const uid = String(otherUserId || '').trim();
+    if (!token || !uid) throw new Error('Private chat unavailable');
+    const upload = buildChatImageUploadFile(file);
+    const form = new FormData();
+    form.append('file', upload, upload.name);
+    const caption = String(options.caption || '').trim();
+    if (caption) form.append('text', caption);
+    return postMultipartAuth(`/chat/private/${encodeURIComponent(uid)}/image`, form, token);
   }
 
   async function refreshVoiceUploadFallback(scope, options = {}) {
@@ -4395,9 +4506,63 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     return (messages || []).map((msg) => renderPrivateConversationRow(msg, 'private')).join('');
   }
 
+  function renderPhotoGallery(items = [], emptyText = 'No photos yet.') {
+    if (!Array.isArray(items) || !items.length) return `<div class="chatEmpty">${escapeHtml(emptyText)}</div>`;
+    return `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px;">${items.map((msg) => {
+      const url = escapeHtml(String(msg?.imageUrl || ''));
+      const label = escapeHtml(formatChatTime(msg?.createdAt) || '');
+      return `<button type="button" class="chatPhotoTile" data-chat-image-viewer="${url}" style="padding:0;border:0;background:none;cursor:pointer;"><img src="${url}" alt="Chat photo" loading="lazy" style="width:100%;height:110px;object-fit:cover;border-radius:10px;display:block;" /><span style="display:block;font-size:11px;opacity:.75;margin-top:2px;text-align:left;">${label}</span></button>`;
+    }).join('')}</div>`;
+  }
+
+  function updatePublicModeButtons() {
+    const messagesBtn = document.getElementById('chatPublicModeMessages');
+    const photosBtn = document.getElementById('chatPublicModePhotos');
+    messagesBtn?.classList.toggle('active', publicChatViewMode === 'messages');
+    photosBtn?.classList.toggle('active', publicChatViewMode === 'photos');
+  }
+
+  function updatePrivateModeButtons(uid) {
+    const mode = privateChatViewModeByUserId[uid] || 'messages';
+    const messagesBtn = document.getElementById('chatPrivateModeMessages');
+    const photosBtn = document.getElementById('chatPrivateModePhotos');
+    messagesBtn?.classList.toggle('active', mode === 'messages');
+    photosBtn?.classList.toggle('active', mode === 'photos');
+  }
+
+  function renderPublicPhotosView() {
+    const wrap = document.getElementById('chatPublicPhotosView');
+    if (!wrap) return;
+    wrap.innerHTML = `${renderPhotoGallery(publicPhotoItems, 'No public photos yet.')}${publicPhotoHasMore ? '<div style="margin-top:8px;"><button id="chatPublicPhotosLoadMore" class="chipBtn" type="button">Load more</button></div>' : ''}`;
+    const loadMoreBtn = document.getElementById('chatPublicPhotosLoadMore');
+    if (loadMoreBtn && loadMoreBtn.dataset.bound !== '1') {
+      loadMoreBtn.dataset.bound = '1';
+      loadMoreBtn.addEventListener('click', async () => {
+        if (!publicPhotoHasMore) return;
+        const result = await chatFetchPublicImages({ limit: 50, beforeId: publicPhotoBeforeId || null });
+        publicPhotoItems = upsertChatMessages(publicPhotoItems, result.items || []).sort(compareChatMessages).reverse();
+        publicPhotoHasMore = !!result.hasMore;
+        const oldest = publicPhotoItems[publicPhotoItems.length - 1];
+        publicPhotoBeforeId = oldest?.id ?? publicPhotoBeforeId;
+        renderPublicPhotosView();
+      });
+    }
+  }
+
+  function renderPrivatePhotosView(userId) {
+    const uid = String(userId || '');
+    const wrap = document.getElementById('chatPrivatePhotosView');
+    if (!wrap || !uid) return;
+    const items = privatePhotoItemsByUserId[uid] || [];
+    const hasMore = !!privatePhotoHasMoreByUserId[uid];
+    wrap.innerHTML = `${renderPhotoGallery(items, 'No private photos yet.')}${hasMore ? '<div style="margin-top:8px;"><button id="chatPrivatePhotosLoadMore" class="chipBtn" type="button">Load more</button></div>' : ''}`;
+  }
+
   function bindPrivateConversationComposer(userId) {
     const sendBtn = document.getElementById('chatPrivateSendBtn');
     const input = document.getElementById('chatPrivateInput');
+    const photoBtn = document.getElementById('chatPrivatePhotoBtn');
+    const photoInput = document.getElementById('chatPrivatePhotoInput');
     if (sendBtn && sendBtn.dataset.boundUserId === String(userId || '')) return;
     if (sendBtn) sendBtn.dataset.boundUserId = String(userId || '');
     if (input) input.dataset.boundUserId = String(userId || '');
@@ -4469,6 +4634,31 @@ function bindVoiceComposerControls(surface, optionsFactory) {
         await playChatTone('outgoing');
       },
     }));
+    if (photoBtn && photoBtn.dataset.boundUserId !== String(userId || '')) {
+      photoBtn.dataset.boundUserId = String(userId || '');
+      photoBtn.addEventListener('click', () => photoInput?.click());
+    }
+    if (photoInput && photoInput.dataset.boundUserId !== String(userId || '')) {
+      photoInput.dataset.boundUserId = String(userId || '');
+      photoInput.addEventListener('change', async () => {
+        const file = photoInput.files && photoInput.files[0];
+        if (!file || !userId) return;
+        photoBtn.disabled = true;
+        try {
+          const response = await chatSendPrivateImage(userId, file);
+          const sent = normalizePrivateMessagesPayload(response);
+          if (sent.length) mergePrivateMessages(userId, sent);
+          else await chatPollPrivateActiveThread({ visible: true, forceFull: false });
+          renderPrivateConversation();
+        } catch (err) {
+          console.warn('private image send failed', err);
+          alert(err?.message || 'Photo failed to send.');
+        } finally {
+          photoInput.value = '';
+          photoBtn.disabled = false;
+        }
+      });
+    }
   }
 
   function renderPrivateConversation() {
@@ -4480,12 +4670,14 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     pruneExpiredChatState();
     const messages = privateMessagesByUserId[privateActiveUserId] || [];
     if (!wrap.querySelector('.chatPrivateConversation')) {
-      wrap.innerHTML = `<div class="chatPrivateConversation"><div class="chatPrivateHeader"><button id="chatPrivateBackBtn" class="chatPrivateBackBtn" type="button">Back</button><div class="chatPrivateTitle">${escapeHtml(privateActiveDisplayName || 'Private chat')}</div></div><div id="chatPrivateConversationList" class="chatList"></div><div class="chatComposer chatComposerPrivate"><input id="chatPrivateInput" type="text" class="chatInput" placeholder="Message privately…" maxlength="600"><button id="chatPrivateSendBtn" class="chipBtn" type="button">Send</button></div>${buildVoiceComposer('private', 'chatVoiceComposerPrivate')}</div>`;
+      wrap.innerHTML = `<div class="chatPrivateConversation"><div class="chatPrivateHeader"><button id="chatPrivateBackBtn" class="chatPrivateBackBtn" type="button">Back</button><div class="chatPrivateTitle">${escapeHtml(privateActiveDisplayName || 'Private chat')}</div></div><div class="chatSubTabs" style="display:flex;gap:8px;margin-bottom:8px;"><button id="chatPrivateModeMessages" class="chipBtn" type="button">Messages</button><button id="chatPrivateModePhotos" class="chipBtn" type="button">Photos</button></div><div id="chatPrivateConversationList" class="chatList"></div><div id="chatPrivatePhotosView" class="hidden"></div><div class="chatComposer chatComposerPrivate"><input id="chatPrivateInput" type="text" class="chatInput" placeholder="Message privately…" maxlength="600"><button id="chatPrivateSendBtn" class="chipBtn" type="button">Send</button><button id="chatPrivatePhotoBtn" class="chipBtn" type="button" title="Upload photo">📷</button><input id="chatPrivatePhotoInput" type="file" accept="image/jpeg,image/png,image/webp,image/gif" hidden></div>${buildVoiceComposer('private', 'chatVoiceComposerPrivate')}</div>`;
     } else {
       const titleEl = wrap.querySelector('.chatPrivateTitle');
       if (titleEl) titleEl.textContent = privateActiveDisplayName || 'Private chat';
     }
     const list = document.getElementById('chatPrivateConversationList');
+    const mode = privateChatViewModeByUserId[privateActiveUserId] || 'messages';
+    privateChatViewModeByUserId[privateActiveUserId] = mode;
     void preserveVoicePlaybackAcrossRender(() => {
       reconcileMessageList(list, messages, {
         scope: 'private',
@@ -4497,6 +4689,40 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     if (list) {
       if (shouldStickToBottom || !prevList) list.scrollTop = list.scrollHeight;
       else list.scrollTop = preserveScrollTop;
+    }
+    renderPrivatePhotosView(privateActiveUserId);
+    syncPrivateChatModeUi(privateActiveUserId);
+    const messagesBtn = document.getElementById('chatPrivateModeMessages');
+    const photosBtn = document.getElementById('chatPrivateModePhotos');
+    if (messagesBtn && messagesBtn.dataset.boundUserId !== String(privateActiveUserId)) {
+      messagesBtn.dataset.boundUserId = String(privateActiveUserId);
+      messagesBtn.addEventListener('click', () => {
+        privateChatViewModeByUserId[privateActiveUserId] = 'messages';
+        syncPrivateChatModeUi(privateActiveUserId);
+      });
+    }
+    if (photosBtn && photosBtn.dataset.boundUserId !== String(privateActiveUserId)) {
+      photosBtn.dataset.boundUserId = String(privateActiveUserId);
+      photosBtn.addEventListener('click', async () => {
+        privateChatViewModeByUserId[privateActiveUserId] = 'photos';
+        await ensurePrivatePhotoCache(privateActiveUserId);
+        renderPrivatePhotosView(privateActiveUserId);
+        syncPrivateChatModeUi(privateActiveUserId);
+      });
+    }
+    const loadMoreBtn = document.getElementById('chatPrivatePhotosLoadMore');
+    if (loadMoreBtn && loadMoreBtn.dataset.boundUserId !== String(privateActiveUserId)) {
+      loadMoreBtn.dataset.boundUserId = String(privateActiveUserId);
+      loadMoreBtn.addEventListener('click', async () => {
+        const uid = String(privateActiveUserId || '');
+        if (!uid || !privatePhotoHasMoreByUserId[uid]) return;
+        const result = await chatFetchPrivateImages(uid, { limit: 50, beforeId: privatePhotoBeforeIdByUserId[uid] || null });
+        privatePhotoItemsByUserId[uid] = upsertChatMessages(privatePhotoItemsByUserId[uid] || [], result.items || []).sort(compareChatMessages).reverse();
+        privatePhotoHasMoreByUserId[uid] = !!result.hasMore;
+        const oldest = (privatePhotoItemsByUserId[uid] || [])[privatePhotoItemsByUserId[uid].length - 1];
+        privatePhotoBeforeIdByUserId[uid] = oldest?.id ?? privatePhotoBeforeIdByUserId[uid] ?? null;
+        renderPrivatePhotosView(uid);
+      });
     }
     const backBtn = document.getElementById('chatPrivateBackBtn');
     if (backBtn && backBtn.dataset.bound !== '1') {
@@ -4728,6 +4954,14 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     privateBackendThreadIds = new Set();
     privateActiveUserId = null;
     privateActiveDisplayName = '';
+    publicChatViewMode = 'messages';
+    privateChatViewModeByUserId = Object.create(null);
+    publicPhotoItems = [];
+    publicPhotoHasMore = false;
+    publicPhotoBeforeId = null;
+    privatePhotoItemsByUserId = Object.create(null);
+    privatePhotoHasMoreByUserId = Object.create(null);
+    privatePhotoBeforeIdByUserId = Object.create(null);
     privateMessagesByUserId = Object.create(null);
     privateUnreadByUserId = Object.create(null);
     privateLastMessageIdByUserId = Object.create(null);
@@ -4807,6 +5041,39 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     }
   }
 
+  function normalizeImageMessagesPayload(payload, scope = 'public') {
+    const items = Array.isArray(payload?.items) ? payload.items : (Array.isArray(payload) ? payload : []);
+    const normalized = items.map((raw) => (scope === 'private'
+      ? normalizePrivateChatMessage(raw, currentChatSelfUserId())
+      : normalizePublicChatMessage(raw)))
+      .filter((msg) => messageHasImage(msg));
+    return {
+      items: normalized.sort(compareChatMessages).reverse(),
+      hasMore: payload?.has_more === true || payload?.hasMore === true,
+    };
+  }
+
+  async function chatFetchPublicImages({ limit = 50, beforeId = null } = {}) {
+    const token = getCommunityToken();
+    if (!token) return { items: [], hasMore: false };
+    const qs = new URLSearchParams();
+    qs.set('limit', String(Math.max(1, Number(limit) || 50)));
+    if (beforeId !== null && beforeId !== undefined && String(beforeId).trim() !== '') qs.set('before_id', String(beforeId));
+    const data = await getJSONAuth(`/chat/rooms/${encodeURIComponent(String(CHAT_ROOM || 'global'))}/images?${qs.toString()}`, token);
+    return normalizeImageMessagesPayload(data, 'public');
+  }
+
+  async function chatFetchPrivateImages(otherUserId, { limit = 50, beforeId = null } = {}) {
+    const token = getCommunityToken();
+    const uid = String(otherUserId || '').trim();
+    if (!token || !uid) return { items: [], hasMore: false };
+    const qs = new URLSearchParams();
+    qs.set('limit', String(Math.max(1, Number(limit) || 50)));
+    if (beforeId !== null && beforeId !== undefined && String(beforeId).trim() !== '') qs.set('before_id', String(beforeId));
+    const data = await getJSONAuth(`/chat/private/${encodeURIComponent(uid)}/images?${qs.toString()}`, token);
+    return normalizeImageMessagesPayload(data, 'private');
+  }
+
   async function chatLoadInitial() {
     chatInitialHistoryLoadAttempted = true;
     const result = await chatFetchMessages({ limit: 60 });
@@ -4837,6 +5104,44 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     const token = getCommunityToken();
     if (!token) throw new Error('Not signed in');
     return postJSON(`/chat/rooms/${CHAT_ROOM}`, { text }, token);
+  }
+
+  function syncPublicChatModeUi() {
+    const list = document.getElementById('chatList');
+    const photos = document.getElementById('chatPublicPhotosView');
+    list?.classList.toggle('hidden', publicChatViewMode !== 'messages');
+    photos?.classList.toggle('hidden', publicChatViewMode !== 'photos');
+    updatePublicModeButtons();
+  }
+
+  function syncPrivateChatModeUi(userId) {
+    const uid = String(userId || '');
+    const mode = privateChatViewModeByUserId[uid] || 'messages';
+    const list = document.getElementById('chatPrivateConversationList');
+    const photos = document.getElementById('chatPrivatePhotosView');
+    list?.classList.toggle('hidden', mode !== 'messages');
+    photos?.classList.toggle('hidden', mode !== 'photos');
+    updatePrivateModeButtons(uid);
+  }
+
+  async function ensurePublicPhotoCache({ force = false } = {}) {
+    if (!force && publicPhotoItems.length) return;
+    const result = await chatFetchPublicImages({ limit: 50, beforeId: null });
+    publicPhotoItems = upsertChatMessages([], result.items || []).sort(compareChatMessages).reverse();
+    publicPhotoHasMore = !!result.hasMore;
+    const oldest = publicPhotoItems[publicPhotoItems.length - 1];
+    publicPhotoBeforeId = oldest?.id ?? null;
+  }
+
+  async function ensurePrivatePhotoCache(userId, { force = false } = {}) {
+    const uid = String(userId || '');
+    if (!uid) return;
+    if (!force && Array.isArray(privatePhotoItemsByUserId[uid]) && privatePhotoItemsByUserId[uid].length) return;
+    const result = await chatFetchPrivateImages(uid, { limit: 50, beforeId: null });
+    privatePhotoItemsByUserId[uid] = upsertChatMessages([], result.items || []).sort(compareChatMessages).reverse();
+    privatePhotoHasMoreByUserId[uid] = !!result.hasMore;
+    const oldest = (privatePhotoItemsByUserId[uid] || [])[privatePhotoItemsByUserId[uid].length - 1];
+    privatePhotoBeforeIdByUserId[uid] = oldest?.id ?? null;
   }
 
   async function chatPollOnce() {
@@ -4982,6 +5287,10 @@ function bindVoiceComposerControls(surface, optionsFactory) {
 
     const chatInput = document.getElementById('chatInput');
     const chatSendBtn = document.getElementById('chatSendBtn');
+    const publicPhotoBtn = document.getElementById('chatPublicPhotoBtn');
+    const publicPhotoInput = document.getElementById('chatPublicPhotoInput');
+    const publicModeMessages = document.getElementById('chatPublicModeMessages');
+    const publicModePhotos = document.getElementById('chatPublicModePhotos');
     if (!chatInput || !chatSendBtn) return;
     chatInput.style.fontSize = '16px';
     chatInput.setAttribute('autocapitalize', 'sentences');
@@ -5054,7 +5363,53 @@ function bindVoiceComposerControls(surface, optionsFactory) {
         await chatPollOnce();
       },
     }));
+    if (publicModeMessages && publicModeMessages.dataset.bound !== '1') {
+      publicModeMessages.dataset.bound = '1';
+      publicModeMessages.addEventListener('click', () => {
+        publicChatViewMode = 'messages';
+        syncPublicChatModeUi();
+      });
+    }
+    if (publicModePhotos && publicModePhotos.dataset.bound !== '1') {
+      publicModePhotos.dataset.bound = '1';
+      publicModePhotos.addEventListener('click', async () => {
+        publicChatViewMode = 'photos';
+        await ensurePublicPhotoCache();
+        renderPublicPhotosView();
+        syncPublicChatModeUi();
+      });
+    }
+    if (publicPhotoBtn && publicPhotoBtn.dataset.bound !== '1') {
+      publicPhotoBtn.dataset.bound = '1';
+      publicPhotoBtn.addEventListener('click', () => publicPhotoInput?.click());
+    }
+    if (publicPhotoInput && publicPhotoInput.dataset.bound !== '1') {
+      publicPhotoInput.dataset.bound = '1';
+      publicPhotoInput.addEventListener('change', async () => {
+        const file = publicPhotoInput.files && publicPhotoInput.files[0];
+        if (!file) return;
+        publicPhotoBtn.disabled = true;
+        try {
+          const response = await chatSendPublicImage(file, { room: CHAT_ROOM });
+          const sentMessages = normalizePublicMessagesPayload(response);
+          if (sentMessages.length > 0) {
+            renderChatMessages(upsertPublicChatMessages(sentMessages), { replace: true, forceStickToBottom: true });
+          } else {
+            await chatPollOnce();
+          }
+        } catch (e) {
+          console.warn('public image send failed:', e);
+          alert(e?.message || 'Photo failed to send.');
+        } finally {
+          publicPhotoInput.value = '';
+          publicPhotoBtn.disabled = false;
+        }
+      });
+    }
+    syncPublicChatModeUi();
+    renderPublicPhotosView();
     bindVoicePlayers(document.getElementById('chatList') || document);
+    bindChatImageViewer(document);
 
     chatLoadInitial()
       .then((result) => {
