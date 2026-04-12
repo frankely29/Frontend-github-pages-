@@ -2686,6 +2686,30 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     recentOutgoingChatEchoes.set(fp, Date.now() + CHAT_OUTGOING_ECHO_SUPPRESS_MS);
   }
 
+  function dmEchoScopeKey(otherUserId = null) {
+    const explicitOther = String(otherUserId == null ? '' : otherUserId).trim();
+    if (explicitOther) return `dm:${explicitOther}`;
+    const profileUserId = String(driverProfileState?.userId || '').trim();
+    if (profileUserId && driverProfileState?.open && !driverProfileState?.isSelf) return `dm:${profileUserId}`;
+    const activeUserId = String(privateActiveUserId || '').trim();
+    if (activeUserId) return `dm:${activeUserId}`;
+    return 'dm:unknown';
+  }
+
+  function rememberOutgoingDmEcho(textOrMsg, otherUserId = null) {
+    pruneOutgoingEchoMap(recentOutgoingDmEchoes);
+    const text = typeof textOrMsg === 'string'
+      ? textOrMsg
+      : (textOrMsg?.text || textOrMsg?.message || '');
+    const userId = typeof textOrMsg === 'string'
+      ? currentChatSelfUserId()
+      : (msgUserId(textOrMsg) || currentChatSelfUserId());
+    const fp = makeOutgoingEchoFingerprint(text, userId);
+    if (!fp) return;
+    const scopeKey = dmEchoScopeKey(otherUserId);
+    recentOutgoingDmEchoes.set(`${scopeKey}|${fp}`, Date.now() + CHAT_OUTGOING_ECHO_SUPPRESS_MS);
+  }
+
   function isSuppressedOutgoingChatEcho(msg) {
     pruneOutgoingEchoMap(recentOutgoingChatEchoes);
     const fp = makeOutgoingEchoFingerprint(
@@ -4408,7 +4432,7 @@ function bindVoiceComposerControls(surface, optionsFactory) {
       try {
         await primeChatSoundSystem('private-send-click');
         const response = await chatSendPrivateMessage(userId, { text });
-        rememberOutgoingDmEcho(text);
+        rememberOutgoingDmEcho(text, userId);
         const sent = normalizePrivateMessagesPayload(response);
         if (sent.length) mergePrivateMessages(userId, sent);
         else await chatPollPrivateActiveThread({ visible: true, forceFull: false });
@@ -5049,9 +5073,7 @@ function bindVoiceComposerControls(surface, optionsFactory) {
 
 
   function currentDriverProfileDmScope() {
-    return driverProfileState && driverProfileState.userId
-      ? `dm:${driverProfileState.userId}`
-      : 'dm:unknown';
+    return dmEchoScopeKey();
   }
 
   function isSuppressedOutgoingDmEcho(msg) {
@@ -5061,7 +5083,16 @@ function bindVoiceComposerControls(surface, optionsFactory) {
       msgUserId(msg) || currentChatSelfUserId()
     );
     if (!fp) return false;
-    return recentOutgoingDmEchoes.has(`${currentDriverProfileDmScope()}|${fp}`);
+    const selfUserId = String(currentChatSelfUserId() || '').trim();
+    const senderUserId = String(msg?.senderUserId ?? msg?.sender_user_id ?? '').trim();
+    const recipientUserId = String(msg?.recipientUserId ?? msg?.recipient_user_id ?? '').trim();
+    let counterpartyUserId = '';
+    if (selfUserId && senderUserId && senderUserId === selfUserId) counterpartyUserId = recipientUserId;
+    else if (selfUserId && recipientUserId && recipientUserId === selfUserId) counterpartyUserId = senderUserId;
+    else if (senderUserId && senderUserId !== selfUserId) counterpartyUserId = senderUserId;
+    else if (recipientUserId && recipientUserId !== selfUserId) counterpartyUserId = recipientUserId;
+    const scopeKey = dmEchoScopeKey(counterpartyUserId || null);
+    return recentOutgoingDmEchoes.has(`${scopeKey}|${fp}`);
   }
 
   function scheduleDriverProfileDmPoll(opts = {}) { return window.TlcDriverProfileModule?.scheduleDriverProfileDmPoll?.(opts); }
@@ -5155,6 +5186,7 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     currentChatSelfUserId,
     msgUserId,
     makeOutgoingEchoFingerprint,
+    rememberOutgoingDmEcho,
     pruneOutgoingEchoMap,
     isOwnMessage,
     prefetchVoiceBlobUrls,
