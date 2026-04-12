@@ -2247,6 +2247,7 @@ function bindVoiceComposerControls(surface, optionsFactory) {
 
   const VOICE_NOTE_MAX_MS = 120000;
   const CHAT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+  const PRIVATE_CHAT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
 
 
@@ -2302,6 +2303,16 @@ function bindVoiceComposerControls(surface, optionsFactory) {
   let chatPollAbortController = null;
   let privateThreadAbortController = null;
   const privateMessageAbortControllers = new Map();
+  const privateDirectoryState = {
+    open: false,
+    query: '',
+    loading: false,
+    error: '',
+    items: [],
+    offset: 0,
+    limit: 50,
+    hasMore: false,
+  };
   let driverProfilePollInFlight = false;
   const chatLiveRuntime = {
     capabilitiesCheckedAt: 0,
@@ -2972,7 +2983,10 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     });
     privateThreads = Array.from(nextById.values()).sort((a, b) => String(privateThreadTime(b)).localeCompare(String(privateThreadTime(a))));
     renderPrivateTabUnread();
-    if (activeChatTab === 'private' && !privateActiveUserId) renderPrivateThreadList();
+    if (activeChatTab === 'private' && !privateActiveUserId) {
+      if (privateDirectoryState.open) renderPrivateComposePicker();
+      else renderPrivateThreadList();
+    }
     updateChatUnreadBadge();
   }
 
@@ -3810,18 +3824,23 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     return Number.isFinite(parsed) ? parsed : NaN;
   }
 
-  function isMessageExpired(message, now = Date.now()) {
-    const createdAtMs = parseChatCreatedAtMs(message?.createdAt || message?.created_at || null);
-    if (!Number.isFinite(createdAtMs)) return false;
-    return createdAtMs <= (now - CHAT_RETENTION_MS);
+  function chatRetentionMsForScope(scope = 'public') {
+    if (scope === 'private' || scope === 'profile-dm') return PRIVATE_CHAT_RETENTION_MS;
+    return CHAT_RETENTION_MS;
   }
 
-  function pruneExpiredMessageList(list, now = Date.now()) {
+  function isMessageExpired(message, now = Date.now(), scope = 'public') {
+    const createdAtMs = parseChatCreatedAtMs(message?.createdAt || message?.created_at || null);
+    if (!Number.isFinite(createdAtMs)) return false;
+    return createdAtMs <= (now - chatRetentionMsForScope(scope));
+  }
+
+  function pruneExpiredMessageList(list, now = Date.now(), scope = 'public') {
     const source = Array.isArray(list) ? list : [];
     const kept = [];
     const removed = [];
     source.forEach((message) => {
-      if (isMessageExpired(message, now)) removed.push(message);
+      if (isMessageExpired(message, now, scope)) removed.push(message);
       else kept.push(message);
     });
     return { kept, removed };
@@ -3858,14 +3877,14 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     const now = Date.now();
     const removedMessages = [];
 
-    const publicResult = pruneExpiredMessageList(publicChatMessages, now);
+    const publicResult = pruneExpiredMessageList(publicChatMessages, now, 'public');
     publicChatMessages = publicResult.kept;
     removedMessages.push(...publicResult.removed);
 
     const retainedThreadIds = new Set(privateBackendThreadIds || []);
     const nextPrivateMessages = Object.create(null);
     Object.entries(privateMessagesByUserId || {}).forEach(([uid, list]) => {
-      const result = pruneExpiredMessageList(list, now);
+      const result = pruneExpiredMessageList(list, now, 'private');
       if (result.kept.length) nextPrivateMessages[uid] = result.kept;
       removedMessages.push(...result.removed);
       if (result.kept.length) {
@@ -3901,7 +3920,7 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     privateThreads = nextThreads.sort((a, b) => String(privateThreadTime(b)).localeCompare(String(privateThreadTime(a))));
 
     if (driverProfileState && Array.isArray(driverProfileState.messages)) {
-      const driverResult = pruneExpiredMessageList(driverProfileState.messages, now);
+      const driverResult = pruneExpiredMessageList(driverProfileState.messages, now, 'profile-dm');
       driverProfileState.messages = driverResult.kept;
       removedMessages.push(...driverResult.removed);
       driverProfileState.latestMessageId = driverProfileState.messages.reduce((max, msg) => Math.max(max, Number(msg?.id || 0)), 0) || null;
@@ -4071,6 +4090,34 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     }
   }
 
+  async function chatFetchPrivateDirectory({ q = '', limit = 50, offset = 0 } = {}) {
+    const token = getCommunityToken();
+    if (!token) return { items: [], limit: Number(limit) || 50, offset: Number(offset) || 0, has_more: false, query: String(q || '') };
+    const qs = new URLSearchParams();
+    qs.set('q', String(q || '').trim());
+    qs.set('limit', String(Math.max(1, Number(limit) || 50)));
+    qs.set('offset', String(Math.max(0, Number(offset) || 0)));
+    const data = await getJSONAuth(`/chat/private/users?${qs.toString()}`, token);
+    const rawItems = Array.isArray(data?.items) ? data.items : (Array.isArray(data) ? data : []);
+    const items = rawItems
+      .map((item) => {
+        const id = item?.id != null ? String(item.id) : '';
+        if (!id) return null;
+        return {
+          id,
+          display_name: String(item?.display_name || item?.displayName || item?.name || `Driver ${id}`).trim() || `Driver ${id}`,
+        };
+      })
+      .filter(Boolean);
+    return {
+      items,
+      limit: Math.max(1, Number(data?.limit ?? limit) || 50),
+      offset: Math.max(0, Number(data?.offset ?? offset) || 0),
+      has_more: !!data?.has_more,
+      query: String(data?.query ?? q ?? ''),
+    };
+  }
+
   async function chatFetchPrivateMessages(otherUserId, { limit = 50, sinceId = null, markRead = true, signal = null, supersede = false } = {}) {
     const token = getCommunityToken();
     if (!token || !otherUserId) return [];
@@ -4207,7 +4254,117 @@ function bindVoiceComposerControls(surface, optionsFactory) {
       btn.addEventListener('click', () => openPrivateConversation(btn.getAttribute('data-private-thread'), btn.getAttribute('data-private-name') || ''));
     });
     const newBtn = document.getElementById('chatPrivateNewMessageBtn');
-    if (newBtn) newBtn.addEventListener('click', promptNewPrivateMessageThread);
+    if (newBtn) newBtn.addEventListener('click', () => { void openPrivateComposePicker(); });
+  }
+
+  function renderPrivateComposePicker() {
+    const wrap = document.getElementById('chatPrivateWrap');
+    if (!wrap) return;
+    const query = String(privateDirectoryState.query || '');
+    const hasQuery = query.trim().length > 0;
+    const items = Array.isArray(privateDirectoryState.items) ? privateDirectoryState.items : [];
+    const rows = items.map((item) => {
+      const name = String(item?.display_name || 'Driver').trim() || 'Driver';
+      const id = String(item?.id || '');
+      const initials = name.slice(0, 2).toUpperCase();
+      return `<button type="button" class="chatPrivateThreadRow" data-private-directory-user="${escapeHtml(id)}" data-private-directory-name="${escapeHtml(name)}"><span class="chatPrivateThreadAvatar">${escapeHtml(initials)}</span><span class="chatPrivateThreadBody"><span class="chatPrivateThreadName">${escapeHtml(name)}</span><span class="chatPrivateThreadPreview">ID: ${escapeHtml(id)}</span></span></button>`;
+    }).join('');
+    const emptyState = hasQuery ? 'No matching drivers' : 'No drivers available yet';
+    const loadMoreDisabled = privateDirectoryState.loading ? 'disabled' : '';
+    wrap.innerHTML = `<div class="chatPrivateThreadList"><div class="chatPrivateThreadToolbar"><button id="chatPrivateComposeBackBtn" class="chipBtn" type="button">Back</button></div><div class="chatComposer chatComposerPrivate"><input id="chatPrivateDirectoryInput" type="text" class="chatInput" placeholder="Search drivers by name…" value="${escapeHtml(query)}" maxlength="80"><button id="chatPrivateDirectorySearchBtn" class="chipBtn" type="button"${privateDirectoryState.loading ? ' disabled' : ''}>Search</button></div><div class="chatPrivateThreadToolbar"><button id="chatPrivateShowAllBtn" class="chipBtn" type="button"${privateDirectoryState.loading ? ' disabled' : ''}>Show all drivers</button></div>${privateDirectoryState.error ? `<div class="chatEmpty">${escapeHtml(privateDirectoryState.error)}</div>` : (rows || `<div class="chatEmpty">${escapeHtml(emptyState)}</div>`)}${privateDirectoryState.hasMore ? `<div class="chatPrivateThreadToolbar"><button id="chatPrivateDirectoryLoadMoreBtn" class="chipBtn" type="button" ${loadMoreDisabled}>${privateDirectoryState.loading ? 'Loading…' : 'Load more'}</button></div>` : ''}</div>`;
+
+    const backBtn = document.getElementById('chatPrivateComposeBackBtn');
+    if (backBtn) {
+      backBtn.addEventListener('click', () => {
+        privateDirectoryState.open = false;
+        privateDirectoryState.error = '';
+        renderPrivateThreadList();
+      });
+    }
+    const searchBtn = document.getElementById('chatPrivateDirectorySearchBtn');
+    const input = document.getElementById('chatPrivateDirectoryInput');
+    const runSearch = async () => {
+      const nextQuery = String(input?.value || '').trim();
+      await openPrivateComposePicker({ query: nextQuery, loadAll: !nextQuery });
+    };
+    if (searchBtn) searchBtn.addEventListener('click', () => { void runSearch(); });
+    if (input) {
+      input.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          void runSearch();
+        }
+      });
+    }
+    const showAllBtn = document.getElementById('chatPrivateShowAllBtn');
+    if (showAllBtn) showAllBtn.addEventListener('click', () => { void openPrivateComposePicker({ loadAll: true }); });
+    const loadMoreBtn = document.getElementById('chatPrivateDirectoryLoadMoreBtn');
+    if (loadMoreBtn) loadMoreBtn.addEventListener('click', () => { void loadMorePrivateDirectoryResults(); });
+    wrap.querySelectorAll('[data-private-directory-user]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const userId = button.getAttribute('data-private-directory-user');
+        const displayName = button.getAttribute('data-private-directory-name') || '';
+        privateDirectoryState.open = false;
+        privateDirectoryState.error = '';
+        openPrivateConversation(userId, displayName);
+      });
+    });
+  }
+
+  async function openPrivateComposePicker({ query = '', loadAll = false } = {}) {
+    const nextQuery = loadAll ? '' : String(query || '').trim();
+    privateDirectoryState.open = true;
+    privateDirectoryState.query = nextQuery;
+    privateDirectoryState.loading = true;
+    privateDirectoryState.error = '';
+    privateDirectoryState.offset = 0;
+    privateDirectoryState.items = [];
+    privateDirectoryState.hasMore = false;
+    renderPrivateComposePicker();
+    try {
+      const result = await chatFetchPrivateDirectory({
+        q: nextQuery,
+        limit: privateDirectoryState.limit,
+        offset: 0,
+      });
+      privateDirectoryState.items = Array.isArray(result?.items) ? result.items : [];
+      privateDirectoryState.offset = Number(result?.offset || 0);
+      privateDirectoryState.limit = Math.max(1, Number(result?.limit || privateDirectoryState.limit) || 50);
+      privateDirectoryState.hasMore = !!result?.has_more;
+      privateDirectoryState.query = String(result?.query ?? nextQuery ?? '');
+    } catch (err) {
+      console.warn('private directory fetch failed', err);
+      privateDirectoryState.error = err?.message || 'Unable to load drivers.';
+    } finally {
+      privateDirectoryState.loading = false;
+      if (privateDirectoryState.open) renderPrivateComposePicker();
+    }
+  }
+
+  async function loadMorePrivateDirectoryResults() {
+    if (!privateDirectoryState.open || privateDirectoryState.loading || !privateDirectoryState.hasMore) return;
+    privateDirectoryState.loading = true;
+    privateDirectoryState.error = '';
+    renderPrivateComposePicker();
+    const nextOffset = Number(privateDirectoryState.offset || 0) + Number(privateDirectoryState.limit || 50);
+    try {
+      const result = await chatFetchPrivateDirectory({
+        q: String(privateDirectoryState.query || ''),
+        limit: privateDirectoryState.limit,
+        offset: nextOffset,
+      });
+      const appended = Array.isArray(result?.items) ? result.items : [];
+      privateDirectoryState.items = privateDirectoryState.items.concat(appended);
+      privateDirectoryState.offset = Number(result?.offset || nextOffset);
+      privateDirectoryState.limit = Math.max(1, Number(result?.limit || privateDirectoryState.limit) || 50);
+      privateDirectoryState.hasMore = !!result?.has_more;
+    } catch (err) {
+      console.warn('private directory load-more failed', err);
+      privateDirectoryState.error = err?.message || 'Unable to load more drivers.';
+    } finally {
+      privateDirectoryState.loading = false;
+      if (privateDirectoryState.open) renderPrivateComposePicker();
+    }
   }
 
   function renderPrivateConversationMessages(messages) {
@@ -4359,6 +4516,7 @@ function bindVoiceComposerControls(surface, optionsFactory) {
       cancelChatVoiceRecording('Recording canceled');
     }
     const uid = String(userId);
+    privateDirectoryState.open = false;
     privateActiveUserId = uid;
     privateActiveDisplayName = String(displayName || privateActiveDisplayName || privateThreads.find((thread) => thread.otherUserId === uid)?.displayName || 'Driver').trim() || 'Driver';
     privateUnreadByUserId[uid] = 0;
@@ -4394,7 +4552,10 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     privateThreads = Array.from(nextById.values()).sort((a, b) => String(privateThreadTime(b)).localeCompare(String(privateThreadTime(a))));
     pruneExpiredChatState();
     renderPrivateTabUnread();
-    if (activeChatTab === 'private' && !privateActiveUserId) renderPrivateThreadList();
+    if (activeChatTab === 'private' && !privateActiveUserId) {
+      if (privateDirectoryState.open) renderPrivateComposePicker();
+      else renderPrivateThreadList();
+    }
     updateChatUnreadBadge();
   }
 
@@ -4466,6 +4627,8 @@ function bindVoiceComposerControls(surface, optionsFactory) {
       if (privateActiveUserId) {
         renderPrivateConversation();
         chatPollPrivateActiveThread({ visible: true, forceFull: false }).catch((err) => console.warn('private conversation refresh failed', err));
+      } else if (privateDirectoryState.open) {
+        renderPrivateComposePicker();
       } else {
         renderPrivateThreadList();
       }
@@ -4475,34 +4638,7 @@ function bindVoiceComposerControls(surface, optionsFactory) {
   }
 
   function promptNewPrivateMessageThread() {
-    const known = [];
-    if (Array.isArray(window.lastDrivers) && window.lastDrivers.length) known.push(...window.lastDrivers);
-    if (Array.isArray(window.visibleDrivers) && window.visibleDrivers.length) known.push(...window.visibleDrivers);
-    if (Array.isArray(window.drivers) && window.drivers.length) known.push(...window.drivers);
-    const meId = window?.me?.id != null ? String(window.me.id) : '';
-    const candidates = [];
-    const seen = new Set();
-    for (const drv of known) {
-      const id = drv?.id != null ? String(drv.id) : '';
-      if (!id || id === meId || seen.has(id)) continue;
-      seen.add(id);
-      candidates.push({ id, name: String(drv?.display_name || drv?.name || `Driver ${id}`).trim() || `Driver ${id}` });
-    }
-    if (!candidates.length) {
-      alert('No active drivers available yet.');
-      return;
-    }
-    const sample = candidates.slice(0, 12).map((c, i) => `${i + 1}. ${c.name}`).join('\n');
-    const input = window.prompt(`Start a new message with\n${sample}\n\nEnter number or user ID:`);
-    if (!input) return;
-    const trimmed = String(input).trim();
-    const idx = Number(trimmed);
-    const picked = Number.isFinite(idx) && idx >= 1 && idx <= candidates.length
-      ? candidates[idx - 1]
-      : candidates.find((c) => c.id === trimmed);
-    if (!picked) return;
-    privateActiveDisplayName = picked.name;
-    openPrivateConversation(picked.id, picked.name);
+    void openPrivateComposePicker();
   }
 
   function getPrivatePollIntervalMs() {
