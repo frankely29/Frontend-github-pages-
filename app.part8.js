@@ -137,9 +137,9 @@ const CHAT_VOICE_BUSY_PHASES = new Set(['preparing', 'requesting', 'recording', 
 
 const VOICE_BLOB_FETCH_RETRY_DELAYS_MS = [0, 350, 900, 1800];
 
-const CHAT_VOICE_IDLE_STATUS = 'Tap mic to record (max 1:00)';
+const CHAT_VOICE_IDLE_STATUS = 'Tap mic to record (max 2:00)';
 
-const CHAT_VOICE_MAX_REACHED_STATUS = '1:00 max reached. Tap Send or Cancel.';
+const CHAT_VOICE_MAX_REACHED_STATUS = '2:00 max reached. Tap Send or Cancel.';
 
 const CHAT_VOICE_TEXT_LOCK_PLACEHOLDER = 'Send or cancel voice note first';
 
@@ -2213,8 +2213,8 @@ function bindVoiceComposerControls(surface, optionsFactory) {
   };
 
 
-  const VOICE_NOTE_MAX_MS = 60000;
-  const CHAT_RETENTION_MS = 24 * 60 * 60 * 1000;
+  const VOICE_NOTE_MAX_MS = 120000;
+  const CHAT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
 
 
