@@ -205,6 +205,7 @@ const voicePlaybackRuntime = {
   };
 
 let scheduledRadioResumeAfterVoice = 0;
+let lastChatVoiceDrawerStateKey = '';
 
 function clearScheduledRadioResumeAfterVoice() {
     if (scheduledRadioResumeAfterVoice) {
@@ -1535,6 +1536,36 @@ function hasChatVoiceDraft(scope) {
     return !!getChatVoiceDraft(scope);
   }
 
+function emitChatVoiceDrawerStateChangedIfNeeded() {
+    const voiceBusy = isChatVoiceBusy();
+    const hasDraft = !!(
+      hasChatVoiceDraft('public')
+      || hasChatVoiceDraft('private')
+      || hasChatVoiceDraft('profile-dm')
+    );
+    const paused = voiceBusy || hasDraft;
+    const nextStateKey = [
+      paused ? '1' : '0',
+      String(chatVoiceState.phase || 'idle'),
+      String(chatVoiceState.scope || ''),
+      String(chatVoiceDraftState.status || 'idle'),
+      String(chatVoiceDraftState.scope || ''),
+    ].join('|');
+    if (nextStateKey === lastChatVoiceDrawerStateKey) return;
+    lastChatVoiceDrawerStateKey = nextStateKey;
+    window.dispatchEvent(new CustomEvent('tlc-chat-voice-state-changed', {
+      detail: {
+        paused,
+        voiceBusy,
+        hasDraft,
+        phase: String(chatVoiceState.phase || 'idle'),
+        activeScope: String(chatVoiceState.scope || ''),
+        draftStatus: String(chatVoiceDraftState.status || 'idle'),
+        draftScope: String(chatVoiceDraftState.scope || ''),
+      }
+    }));
+  }
+
 function clearChatVoiceDraft(reason = 'clear') {
     const audio = syncVoiceRuntimeAudioRef();
     if (chatVoiceDraftState.objectUrl && String(audio?.currentSrc || audio?.src || '') === chatVoiceDraftState.objectUrl) {
@@ -1714,6 +1745,7 @@ function syncAllVoiceRecorderUis() {
     syncVoiceRecorderUi('public');
     syncVoiceRecorderUi('private');
     syncVoiceRecorderUi('driverProfile');
+    emitChatVoiceDrawerStateChangedIfNeeded();
   }
 
 function stopChatVoiceTracks() {

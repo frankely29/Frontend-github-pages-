@@ -786,8 +786,23 @@ function clearDrawerAutoMinimizeTimer() {
   }
 }
 
+function isChatVoiceDrawerAutoMinimizePaused() {
+  if (openPanelKey !== "chat") return false;
+  const voiceBusy = !!window.TlcChatInternals?.isChatVoiceBusy?.();
+  const hasDraft = !!(
+    window.TlcChatInternals?.hasChatVoiceDraft?.("public")
+    || window.TlcChatInternals?.hasChatVoiceDraft?.("private")
+    || window.TlcChatInternals?.hasChatVoiceDraft?.("profile-dm")
+  );
+  return voiceBusy || hasDraft;
+}
+
 function touchDrawerAutoMinimizeTimer() {
   if (!openPanelKey) {
+    clearDrawerAutoMinimizeTimer();
+    return;
+  }
+  if (isChatVoiceDrawerAutoMinimizePaused()) {
     clearDrawerAutoMinimizeTimer();
     return;
   }
@@ -797,6 +812,15 @@ function touchDrawerAutoMinimizeTimer() {
     if (!openPanelKey) return;
     closeDrawer();
   }, autoMinimizeMs);
+}
+
+function syncDrawerAutoMinimizeFromChatVoiceState() {
+  if (openPanelKey !== "chat") return;
+  if (isChatVoiceDrawerAutoMinimizePaused()) {
+    clearDrawerAutoMinimizeTimer();
+  } else {
+    touchDrawerAutoMinimizeTimer();
+  }
 }
 
 function bindDrawerAutoMinimizeActivity() {
@@ -922,6 +946,7 @@ dockBackdrop?.addEventListener("click", closeDrawer);
 dockDrawerClose?.addEventListener("click", closeDrawer);
 dockDrawer?.addEventListener("click", (e) => e.stopPropagation());
 bindDrawerAutoMinimizeActivity();
+window.addEventListener("tlc-chat-voice-state-changed", syncDrawerAutoMinimizeFromChatVoiceState);
 
 function musicPanelHTML() {
   return `
