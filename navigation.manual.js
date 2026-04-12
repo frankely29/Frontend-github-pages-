@@ -110,6 +110,15 @@
     return normalized;
   }
 
+  function resetLocalManualStateForNewSearch() {
+    state.manualDestination = null;
+    state.manualDestinationLabel = "";
+    state.routeActive = false;
+    state.routePreviewReady = false;
+    state.externalNavUrl = "";
+    updateExternalNav();
+  }
+
   async function searchAndPreview(query) {
     if (state.searchInFlight) {
       return null;
@@ -127,6 +136,7 @@
     state.searchInFlight = true;
     state.lastManualQuery = q;
     state.status = "Searching…";
+    resetLocalManualStateForNewSearch();
     syncUi();
 
     try {
@@ -283,6 +293,17 @@
     });
 
     window.addEventListener("tlc-nav-preview-failed", (event) => {
+      const failureStatus = String(event?.detail?.status || "").trim();
+      if (
+        failureStatus === "Destination not found"
+        || failureStatus === "Search error"
+        || failureStatus === "Search timed out"
+      ) {
+        resetLocalManualStateForNewSearch();
+        state.status = failureStatus;
+        syncUi();
+        return;
+      }
       state.routePreviewReady = false;
       state.routeActive = false;
       state.status = String(event?.detail?.status || ((state.status === "Searching…" || state.status === "Preparing preview…") ? "Route unavailable" : state.status));
