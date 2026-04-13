@@ -1053,7 +1053,7 @@ function shouldReuseVoiceRow(oldMsg, newMsg) {
 function shouldReuseImageRow(row, message, scope = 'public') {
     if (!row || !message) return false;
     if (!messageHasImage(message)) return false;
-    return row.dataset.messageKey === getVoiceMessageDomKey(message)
+    return String(row.dataset.messageKey || '') === String(getVoiceMessageDomKey(message) || '')
       && String(row.dataset.messageId || '') === String(message?.id ?? '')
       && String(row.dataset.messageScope || '') === String(scope || '')
       && String(row.dataset.imageUrl || '').trim() === String(message?.imageUrl || '').trim();
@@ -4437,9 +4437,13 @@ function bindVoiceComposerControls(surface, optionsFactory) {
       } else {
         const nextAudioUrl = String(message?.audioUrl || '').trim();
         const nextImageUrl = String(message?.imageUrl || '').trim();
+        const isImageMessage = messageHasImage(message);
         const sameVoiceRow = shouldReuseVoiceRow(buildVoicePlayerMessageFromDataset(existing.querySelector?.('[data-voice-player]') || existing), message);
         const sameImageRow = shouldReuseImageRow(existing, message, scope);
-        const sameTextRow = row.dataset.audioUrl === nextAudioUrl && String(row.dataset.imageUrl || '').trim() === nextImageUrl && row.outerHTML === nextHtml;
+        const sameTextRow = !isImageMessage
+          && row.dataset.audioUrl === nextAudioUrl
+          && String(row.dataset.imageUrl || '').trim() === nextImageUrl
+          && row.outerHTML === nextHtml;
         if (!sameVoiceRow && !sameImageRow && !sameTextRow) {
           row = createNodeFromHtml(nextHtml);
           changed = true;
