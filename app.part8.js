@@ -1402,10 +1402,34 @@ async function ensureImageBlobUrl(message, attempt = 0) {
   return promise;
 }
 
+function captureChatScrollAnchor(listEl) {
+  if (!listEl) return null;
+  const scrollTop = Number(listEl.scrollTop || 0);
+  const scrollHeight = Number(listEl.scrollHeight || 0);
+  const clientHeight = Number(listEl.clientHeight || 0);
+  const distanceFromBottom = scrollHeight - (scrollTop + clientHeight);
+  return {
+    scrollTop,
+    scrollHeight,
+    nearBottom: distanceFromBottom <= 56,
+  };
+}
+
+function restoreChatScrollAnchor(listEl, anchor) {
+  if (!listEl || !anchor) return;
+  if (anchor.nearBottom) {
+    listEl.scrollTop = Math.max(0, listEl.scrollHeight - listEl.clientHeight);
+    return;
+  }
+  const delta = Number(listEl.scrollHeight || 0) - Number(anchor.scrollHeight || 0);
+  listEl.scrollTop = Math.max(0, Number(anchor.scrollTop || 0) + delta);
+}
+
 function syncChatImageNode(imgEl, message) {
   if (!imgEl || !message) return;
   const key = getImageAssetCacheKey(message);
   const fallbackEl = imgEl.closest('.chatImageCard')?.querySelector('.chatImageFallback') || null;
+  const chatListEl = imgEl.closest('.chatList');
   imgEl.dataset.imageCacheKey = key;
 
   const applyError = () => {
@@ -1426,6 +1450,13 @@ function syncChatImageNode(imgEl, message) {
       : imgEl.closest('[data-chat-image-viewer]');
     viewerTarget?.setAttribute('data-chat-image-viewer', blobUrl);
   };
+  const hydrationAnchor = captureChatScrollAnchor(chatListEl);
+  const restoreAfterHydrationLayout = () => {
+    if (!chatListEl || !hydrationAnchor) return;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => restoreChatScrollAnchor(chatListEl, hydrationAnchor));
+    });
+  };
 
   const cached = imageAssetCache.get(key);
   if (cached?.status === 'ready' && cached.blobUrl) {
@@ -1442,13 +1473,16 @@ function syncChatImageNode(imgEl, message) {
     if (imgEl.dataset.imageCacheKey !== key) return;
     if (!blobUrl) {
       applyError();
+      restoreAfterHydrationLayout();
       return;
     }
     applyReady(blobUrl);
+    restoreAfterHydrationLayout();
   }).catch(() => {
     if (!imgEl.isConnected) return;
     if (imgEl.dataset.imageCacheKey !== key) return;
     applyError();
+    restoreAfterHydrationLayout();
   });
 }
 
@@ -2537,7 +2571,22 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     restoreChatDrawer: false,
     restoreChatTab: 'public',
     restorePrivateUserId: '',
+    itemKey: '',
     touchStartX: 0,
+    touchStartY: 0,
+    zoom: 1,
+    minZoom: 1,
+    maxZoom: 4,
+    panX: 0,
+    panY: 0,
+    dragging: false,
+    dragStartX: 0,
+    dragStartY: 0,
+    dragOriginX: 0,
+    dragOriginY: 0,
+    pinchStartDistance: 0,
+    pinchStartZoom: 1,
+    lastTapAt: 0,
   };
   const chatImageViewerBoundRoots = new WeakSet();
   let chatPhotoViewerKeyboardBound = false;
@@ -3900,6 +3949,89 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     return ensureImageBlobUrl(message);
   }
 
+  function chatPhotoDistance(touchA, touchB) {
+    if (!touchA || !touchB) return 0;
+    const dx = Number(touchA.clientX || 0) - Number(touchB.clientX || 0);
+    const dy = Number(touchA.clientY || 0) - Number(touchB.clientY || 0);
+    return Math.hypot(dx, dy);
+  }
+
+  function resetChatPhotoViewerTransform() {
+    chatPhotoViewerState.zoom = 1;
+    chatPhotoViewerState.panX = 0;
+    chatPhotoViewerState.panY = 0;
+    chatPhotoViewerState.dragging = false;
+    chatPhotoViewerState.dragStartX = 0;
+    chatPhotoViewerState.dragStartY = 0;
+    chatPhotoViewerState.dragOriginX = 0;
+    chatPhotoViewerState.dragOriginY = 0;
+    chatPhotoViewerState.pinchStartDistance = 0;
+    chatPhotoViewerState.pinchStartZoom = chatPhotoViewerState.zoom;
+  }
+
+  function clampChatPhotoViewerTransform() {
+    const mount = document.getElementById('chatPhotoViewerMount');
+    const stageEl = mount?.querySelector?.('[data-chat-photo-stage]');
+    const imgEl = mount?.querySelector?.('[data-chat-photo-image]');
+    if (!stageEl || !imgEl) return;
+    const zoom = Math.max(chatPhotoViewerState.minZoom, Math.min(chatPhotoViewerState.maxZoom, Number(chatPhotoViewerState.zoom) || 1));
+    chatPhotoViewerState.zoom = zoom;
+    if (zoom <= 1) {
+      chatPhotoViewerState.panX = 0;
+      chatPhotoViewerState.panY = 0;
+      return;
+    }
+    const stageRect = stageEl.getBoundingClientRect();
+    const baseWidth = Number(imgEl.clientWidth || 0);
+    const baseHeight = Number(imgEl.clientHeight || 0);
+    if (!stageRect.width || !stageRect.height || !baseWidth || !baseHeight) return;
+    const scaledWidth = baseWidth * zoom;
+    const scaledHeight = baseHeight * zoom;
+    const maxPanX = Math.max(0, (scaledWidth - Math.min(stageRect.width, scaledWidth)) / 2);
+    const maxPanY = Math.max(0, (scaledHeight - Math.min(stageRect.height, scaledHeight)) / 2);
+    chatPhotoViewerState.panX = Math.max(-maxPanX, Math.min(maxPanX, Number(chatPhotoViewerState.panX) || 0));
+    chatPhotoViewerState.panY = Math.max(-maxPanY, Math.min(maxPanY, Number(chatPhotoViewerState.panY) || 0));
+  }
+
+  function applyChatPhotoViewerTransform() {
+    const mount = document.getElementById('chatPhotoViewerMount');
+    const stageEl = mount?.querySelector?.('[data-chat-photo-stage]');
+    const imgEl = mount?.querySelector?.('[data-chat-photo-image]');
+    if (!imgEl || !stageEl) return;
+    clampChatPhotoViewerTransform();
+    const zoom = Number(chatPhotoViewerState.zoom || 1);
+    const panX = Number(chatPhotoViewerState.panX || 0);
+    const panY = Number(chatPhotoViewerState.panY || 0);
+    imgEl.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
+    imgEl.style.cursor = zoom > 1 ? (chatPhotoViewerState.dragging ? 'grabbing' : 'grab') : 'zoom-in';
+    stageEl.dataset.zoomed = zoom > 1 ? '1' : '0';
+  }
+
+  function setChatPhotoViewerZoom(nextZoom, anchorX = null, anchorY = null) {
+    const mount = document.getElementById('chatPhotoViewerMount');
+    const imgEl = mount?.querySelector?.('[data-chat-photo-image]');
+    const prevZoom = Math.max(chatPhotoViewerState.minZoom, Math.min(chatPhotoViewerState.maxZoom, Number(chatPhotoViewerState.zoom) || 1));
+    const clampedZoom = Math.max(chatPhotoViewerState.minZoom, Math.min(chatPhotoViewerState.maxZoom, Number(nextZoom) || 1));
+    if (!imgEl || !Number.isFinite(clampedZoom)) return;
+    if (anchorX != null && anchorY != null && prevZoom > 0) {
+      const rect = imgEl.getBoundingClientRect();
+      const centerX = rect.left + rect.width / 2;
+      const centerY = rect.top + rect.height / 2;
+      const offsetX = Number(anchorX) - centerX;
+      const offsetY = Number(anchorY) - centerY;
+      const ratio = clampedZoom / prevZoom;
+      chatPhotoViewerState.panX = Number(chatPhotoViewerState.panX || 0) + offsetX * (1 - ratio);
+      chatPhotoViewerState.panY = Number(chatPhotoViewerState.panY || 0) + offsetY * (1 - ratio);
+    }
+    chatPhotoViewerState.zoom = clampedZoom;
+    if (clampedZoom <= 1) {
+      chatPhotoViewerState.panX = 0;
+      chatPhotoViewerState.panY = 0;
+      chatPhotoViewerState.dragging = false;
+    }
+    applyChatPhotoViewerTransform();
+  }
+
   function ensureChatPhotoViewerMount() {
     let mount = document.getElementById('chatPhotoViewerMount');
     if (mount) return mount;
@@ -3931,17 +4063,112 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     mount.querySelector('[data-chat-photo-prev]')?.addEventListener('click', () => moveChatPhotoViewer(-1));
     mount.querySelector('[data-chat-photo-next]')?.addEventListener('click', () => moveChatPhotoViewer(1));
     const stage = mount.querySelector('[data-chat-photo-stage]');
+    const image = mount.querySelector('[data-chat-photo-image]');
     if (stage) {
       stage.addEventListener('touchstart', (event) => {
-        chatPhotoViewerState.touchStartX = Number(event.changedTouches?.[0]?.clientX || 0);
-      }, { passive: true });
+        if (!chatPhotoViewerState.open) return;
+        if (event.touches?.length === 2) {
+          chatPhotoViewerState.pinchStartDistance = chatPhotoDistance(event.touches[0], event.touches[1]);
+          chatPhotoViewerState.pinchStartZoom = Number(chatPhotoViewerState.zoom || 1);
+          chatPhotoViewerState.dragging = false;
+          return;
+        }
+        const firstTouch = event.touches?.[0] || event.changedTouches?.[0];
+        chatPhotoViewerState.touchStartX = Number(firstTouch?.clientX || 0);
+        chatPhotoViewerState.touchStartY = Number(firstTouch?.clientY || 0);
+        const now = Date.now();
+        if (now - Number(chatPhotoViewerState.lastTapAt || 0) <= 280) {
+          const nextZoom = Number(chatPhotoViewerState.zoom || 1) > 1 ? 1 : 2;
+          setChatPhotoViewerZoom(nextZoom, firstTouch?.clientX, firstTouch?.clientY);
+          chatPhotoViewerState.lastTapAt = 0;
+          event.preventDefault();
+          return;
+        }
+        chatPhotoViewerState.lastTapAt = now;
+        if (Number(chatPhotoViewerState.zoom || 1) > 1) {
+          chatPhotoViewerState.dragging = true;
+          chatPhotoViewerState.dragStartX = Number(firstTouch?.clientX || 0);
+          chatPhotoViewerState.dragStartY = Number(firstTouch?.clientY || 0);
+          chatPhotoViewerState.dragOriginX = Number(chatPhotoViewerState.panX || 0);
+          chatPhotoViewerState.dragOriginY = Number(chatPhotoViewerState.panY || 0);
+        }
+      }, { passive: false });
+      stage.addEventListener('touchmove', (event) => {
+        if (!chatPhotoViewerState.open) return;
+        if (event.touches?.length === 2 && Number(chatPhotoViewerState.pinchStartDistance || 0) > 0) {
+          const currentDistance = chatPhotoDistance(event.touches[0], event.touches[1]);
+          if (currentDistance > 0) {
+            const midpointX = (Number(event.touches[0]?.clientX || 0) + Number(event.touches[1]?.clientX || 0)) / 2;
+            const midpointY = (Number(event.touches[0]?.clientY || 0) + Number(event.touches[1]?.clientY || 0)) / 2;
+            const scaleRatio = currentDistance / Number(chatPhotoViewerState.pinchStartDistance || currentDistance);
+            setChatPhotoViewerZoom(Number(chatPhotoViewerState.pinchStartZoom || 1) * scaleRatio, midpointX, midpointY);
+          }
+          event.preventDefault();
+          return;
+        }
+        if (Number(chatPhotoViewerState.zoom || 1) > 1 && chatPhotoViewerState.dragging && event.touches?.length === 1) {
+          const touch = event.touches[0];
+          const deltaX = Number(touch?.clientX || 0) - Number(chatPhotoViewerState.dragStartX || 0);
+          const deltaY = Number(touch?.clientY || 0) - Number(chatPhotoViewerState.dragStartY || 0);
+          chatPhotoViewerState.panX = Number(chatPhotoViewerState.dragOriginX || 0) + deltaX;
+          chatPhotoViewerState.panY = Number(chatPhotoViewerState.dragOriginY || 0) + deltaY;
+          applyChatPhotoViewerTransform();
+          event.preventDefault();
+        }
+      }, { passive: false });
       stage.addEventListener('touchend', (event) => {
-        const endX = Number(event.changedTouches?.[0]?.clientX || 0);
-        const delta = endX - Number(chatPhotoViewerState.touchStartX || 0);
-        if (Math.abs(delta) < 45) return;
-        moveChatPhotoViewer(delta < 0 ? 1 : -1);
+        if (!chatPhotoViewerState.open) return;
+        if (event.touches?.length < 2) chatPhotoViewerState.pinchStartDistance = 0;
+        const endTouch = event.changedTouches?.[0] || null;
+        const endX = Number(endTouch?.clientX || 0);
+        const endY = Number(endTouch?.clientY || 0);
+        const deltaX = endX - Number(chatPhotoViewerState.touchStartX || 0);
+        const deltaY = endY - Number(chatPhotoViewerState.touchStartY || 0);
+        chatPhotoViewerState.dragging = false;
+        if (Number(chatPhotoViewerState.zoom || 1) > 1) return;
+        if (Math.abs(deltaX) < 45 || Math.abs(deltaX) <= Math.abs(deltaY)) return;
+        moveChatPhotoViewer(deltaX < 0 ? 1 : -1);
       }, { passive: true });
+      stage.addEventListener('wheel', (event) => {
+        if (!chatPhotoViewerState.open) return;
+        const wheelDelta = Number(event.deltaY || 0);
+        if (!Number.isFinite(wheelDelta)) return;
+        const factor = Math.exp(-wheelDelta * 0.0015);
+        setChatPhotoViewerZoom(Number(chatPhotoViewerState.zoom || 1) * factor, event.clientX, event.clientY);
+        event.preventDefault();
+      }, { passive: false });
     }
+    if (image) {
+      image.addEventListener('dblclick', (event) => {
+        if (!chatPhotoViewerState.open) return;
+        const nextZoom = Number(chatPhotoViewerState.zoom || 1) > 1 ? 1 : 2;
+        setChatPhotoViewerZoom(nextZoom, event.clientX, event.clientY);
+        event.preventDefault();
+      });
+      image.addEventListener('mousedown', (event) => {
+        if (!chatPhotoViewerState.open || Number(chatPhotoViewerState.zoom || 1) <= 1) return;
+        chatPhotoViewerState.dragging = true;
+        chatPhotoViewerState.dragStartX = Number(event.clientX || 0);
+        chatPhotoViewerState.dragStartY = Number(event.clientY || 0);
+        chatPhotoViewerState.dragOriginX = Number(chatPhotoViewerState.panX || 0);
+        chatPhotoViewerState.dragOriginY = Number(chatPhotoViewerState.panY || 0);
+        applyChatPhotoViewerTransform();
+        event.preventDefault();
+      });
+    }
+    window.addEventListener('mousemove', (event) => {
+      if (!chatPhotoViewerState.open || !chatPhotoViewerState.dragging || Number(chatPhotoViewerState.zoom || 1) <= 1) return;
+      const deltaX = Number(event.clientX || 0) - Number(chatPhotoViewerState.dragStartX || 0);
+      const deltaY = Number(event.clientY || 0) - Number(chatPhotoViewerState.dragStartY || 0);
+      chatPhotoViewerState.panX = Number(chatPhotoViewerState.dragOriginX || 0) + deltaX;
+      chatPhotoViewerState.panY = Number(chatPhotoViewerState.dragOriginY || 0) + deltaY;
+      applyChatPhotoViewerTransform();
+    });
+    window.addEventListener('mouseup', () => {
+      if (!chatPhotoViewerState.dragging) return;
+      chatPhotoViewerState.dragging = false;
+      applyChatPhotoViewerTransform();
+    });
     if (!chatPhotoViewerKeyboardBound) {
       chatPhotoViewerKeyboardBound = true;
       document.addEventListener('keydown', (event) => {
@@ -3982,14 +4209,21 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     const counterEl = mount.querySelector('[data-chat-photo-counter]');
     const prevBtn = mount.querySelector('[data-chat-photo-prev]');
     const nextBtn = mount.querySelector('[data-chat-photo-next]');
+    const nextItemKey = `${String(item?.id || '')}|${String(item?.imageUrl || '')}`;
+    if (chatPhotoViewerState.itemKey !== nextItemKey) {
+      chatPhotoViewerState.itemKey = nextItemKey;
+      resetChatPhotoViewerTransform();
+    }
     if (imgEl) {
       const cacheKey = getImageAssetCacheKey(item);
       imgEl.dataset.viewerImageCacheKey = cacheKey;
       const cached = imageAssetCache.get(cacheKey);
       if (cached?.status === 'ready' && cached?.blobUrl) {
         imgEl.src = String(cached.blobUrl || '');
+        applyChatPhotoViewerTransform();
       } else {
         imgEl.removeAttribute('src');
+        applyChatPhotoViewerTransform();
         ensureViewerImageBlobUrl(item).then((blobUrl) => {
           if (!imgEl.isConnected) return;
           if (!chatPhotoViewerState.open) return;
@@ -3999,11 +4233,13 @@ function bindVoiceComposerControls(surface, optionsFactory) {
             imgEl.removeAttribute('src');
             imgEl.alt = 'Photo unavailable';
             imgEl.title = 'Photo unavailable';
+            applyChatPhotoViewerTransform();
             return;
           }
           imgEl.src = blobUrl;
           imgEl.removeAttribute('title');
           imgEl.alt = String(item.displayName || 'Chat photo');
+          applyChatPhotoViewerTransform();
         }).catch(() => {
           if (!imgEl.isConnected) return;
           if (!chatPhotoViewerState.open) return;
@@ -4012,9 +4248,13 @@ function bindVoiceComposerControls(surface, optionsFactory) {
           imgEl.removeAttribute('src');
           imgEl.alt = 'Photo unavailable';
           imgEl.title = 'Photo unavailable';
+          applyChatPhotoViewerTransform();
         });
       }
       imgEl.alt = String(item.displayName || 'Chat photo');
+      if (!imgEl.complete) {
+        imgEl.onload = () => applyChatPhotoViewerTransform();
+      }
     }
     if (senderEl) senderEl.textContent = String(item.displayName || 'Driver');
     if (timeEl) timeEl.textContent = formatChatTime(item.createdAt);
@@ -4032,7 +4272,10 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     chatPhotoViewerState.open = false;
     chatPhotoViewerState.index = -1;
     chatPhotoViewerState.items = [];
+    chatPhotoViewerState.itemKey = '';
     chatPhotoViewerState.touchStartX = 0;
+    chatPhotoViewerState.touchStartY = 0;
+    resetChatPhotoViewerTransform();
     renderChatPhotoViewer();
     if (!restoreChat || !chatPhotoViewerState.restoreChatDrawer) {
       chatPhotoViewerState.restoreChatDrawer = false;
@@ -4067,6 +4310,7 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     const nextIndex = Math.max(0, Math.min(chatPhotoViewerState.items.length - 1, Number(chatPhotoViewerState.index || 0) + Number(delta || 0)));
     if (nextIndex === chatPhotoViewerState.index) return;
     chatPhotoViewerState.index = nextIndex;
+    resetChatPhotoViewerTransform();
     renderChatPhotoViewer();
   }
 
@@ -4090,7 +4334,10 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     chatPhotoViewerState.userId = String(userId || '');
     chatPhotoViewerState.items = items;
     chatPhotoViewerState.index = index;
+    chatPhotoViewerState.itemKey = '';
     chatPhotoViewerState.touchStartX = 0;
+    chatPhotoViewerState.touchStartY = 0;
+    resetChatPhotoViewerTransform();
     ensureChatPhotoViewerMount();
     renderChatPhotoViewer();
   }
@@ -4104,7 +4351,7 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     const privateUserId = scope === 'private'
       ? String(message?.chatTargetUserId || message?.chatUserId || privateActiveUserId || '')
       : '';
-    return `<div class="${bubbleClass} chatImageCard"><img src="${escapeHtml(initialSrc)}" alt="Chat photo" loading="lazy" class="chatImageThumb" data-chat-image="1" data-chat-image-viewer="1" data-message-id="${escapeHtml(String(message?.id ?? ''))}" data-image-url="${escapeHtml(rawImageUrl)}" data-image-mime-type="${escapeHtml(String(message?.imageMimeType || ''))}" data-created-at="${escapeHtml(String(message?.createdAt || ''))}" data-photo-scope="${escapeHtml(scope)}" data-photo-source="messages" data-photo-user-id="${escapeHtml(privateUserId)}" style="max-width:220px;max-height:220px;border-radius:12px;display:block;cursor:pointer;" /><div class="chatImageFallback ${initialSrc ? 'hidden' : ''}" style="font-size:12px;opacity:0.8;">Photo unavailable</div>${caption ? `<div class="chatImageCaption">${escapeHtml(caption)}</div>` : ''}</div>`;
+    return `<div class="${bubbleClass} chatImageCard"><div class="chatImageViewport"><img src="${escapeHtml(initialSrc)}" alt="Chat photo" loading="lazy" class="chatImageThumb" data-chat-image="1" data-chat-image-viewer="1" data-message-id="${escapeHtml(String(message?.id ?? ''))}" data-image-url="${escapeHtml(rawImageUrl)}" data-image-mime-type="${escapeHtml(String(message?.imageMimeType || ''))}" data-created-at="${escapeHtml(String(message?.createdAt || ''))}" data-photo-scope="${escapeHtml(scope)}" data-photo-source="messages" data-photo-user-id="${escapeHtml(privateUserId)}" /><div class="chatImageFallback ${initialSrc ? 'hidden' : ''}">Photo unavailable</div></div>${caption ? `<div class="chatImageCaption">${escapeHtml(caption)}</div>` : ''}</div>`;
   }
 
   function renderPublicMessageRow(message) {
