@@ -2553,6 +2553,11 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     return String(mime || '').trim();
   }
 
+  function normalizeImageMimeType(raw) {
+    const mime = raw?.image_mime_type || raw?.photo_mime_type || raw?.imageMimeType || raw?.photoMimeType || '';
+    return String(mime || '').trim();
+  }
+
   function normalizeCanonicalChatMessage(raw, options = {}) {
     const meId = String(options.meId || currentChatSelfUserId() || '');
     const meDisplayName = currentChatSelfDisplayName();
@@ -2584,6 +2589,7 @@ function bindVoiceComposerControls(surface, optionsFactory) {
       imageUrl,
       audioDurationMs: normalizeAudioDurationMs(raw),
       audioMimeType: normalizeAudioMimeType(raw),
+      imageMimeType: normalizeImageMimeType(raw),
       userId: fallbackUserId == null ? null : String(fallbackUserId),
       senderUserId: sender,
       recipientUserId: recipient,
@@ -2609,10 +2615,13 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     const otherUserId = raw?.other_user_id ?? raw?.otherUserId ?? raw?.user_id ?? raw?.userId ?? raw?.recipient_user_id ?? raw?.recipientUserId ?? null;
     const displayName = String(raw?.other_display_name || raw?.display_name || raw?.name || raw?.user_name || 'Driver').trim() || 'Driver';
     const audioUrl = normalizeAudioUrl(raw);
-    const threadMessageType = normalizeMessageType(raw?.last_message_type || raw?.message_type || raw?.type, audioUrl ? 'voice' : 'text');
+    const imageUrl = normalizeImageUrl(raw);
+    const threadMessageType = normalizeMessageType(raw?.last_message_type || raw?.message_type || raw?.type, imageUrl ? 'image' : (audioUrl ? 'voice' : 'text'));
     const previewText = threadMessageType === 'voice'
       ? '🎤 Voice note'
-      : String(raw?.last_message_text || raw?.last_text || raw?.last_message || raw?.text || '').trim();
+      : (threadMessageType === 'image'
+        ? '🖼 Photo'
+        : String(raw?.last_message_text || raw?.last_text || raw?.last_message || raw?.text || '').trim());
     const avatarUrl = String(raw?.avatar_url || raw?.avatarUrl || raw?.other_avatar_url || raw?.otherAvatarUrl || '').trim();
     const lastAt = raw?.last_message_at || raw?.last_created_at || raw?.created_at || raw?.createdAt || raw?.timestamp || raw?.ts || null;
     const lastSenderUserId = raw?.last_sender_user_id ?? raw?.lastSenderUserId ?? null;
@@ -3992,7 +4001,7 @@ function bindVoiceComposerControls(surface, optionsFactory) {
         ...thread,
         previewText: latest?.messageType === 'voice'
           ? '🎤 Voice note'
-          : (messageHasImage(latest) ? '📷 Photo' : String(latest?.text || thread?.previewText || '').trim()),
+          : (messageHasImage(latest) ? '🖼 Photo' : String(latest?.text || thread?.previewText || '').trim()),
         lastAt: latest?.createdAt || thread?.lastAt || null,
         lastSenderUserId: latest?.senderUserId || thread?.lastSenderUserId || null,
         unreadCount: Number(privateUnreadByUserId[uid] || 0),
@@ -4139,7 +4148,7 @@ function bindVoiceComposerControls(surface, optionsFactory) {
       avatarUrl: existing?.avatarUrl || '',
       previewText: latest?.messageType === 'voice'
         ? '🎤 Voice note'
-        : (messageHasImage(latest) ? '📷 Photo' : String(latest?.text || existing?.previewText || '').trim()),
+        : (messageHasImage(latest) ? '🖼 Photo' : String(latest?.text || existing?.previewText || '').trim()),
       lastAt: latest?.createdAt || existing?.lastAt || null,
       lastSenderUserId: latest?.senderUserId || existing?.lastSenderUserId || null,
       unreadCount: Number(privateUnreadByUserId[uid] || 0),
