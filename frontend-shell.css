@@ -1320,6 +1320,9 @@ html, body { height: 100%; margin: 0; padding: 0; }
       padding:20px;
       z-index:7600;
     }
+    .chatPhotoViewerBackdrop.hidden{
+      display:none !important;
+    }
     .chatPhotoViewerCard{
       width:min(88vw,900px);
       max-height:78vh;
