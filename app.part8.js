@@ -1050,6 +1050,15 @@ function shouldReuseVoiceRow(oldMsg, newMsg) {
       && String(oldMsg?.text || '') === String(newMsg?.text || '');
   }
 
+function shouldReuseImageRow(row, message, scope = 'public') {
+    if (!row || !message) return false;
+    if (!messageHasImage(message)) return false;
+    return row.dataset.messageKey === getVoiceMessageDomKey(message)
+      && String(row.dataset.messageId || '') === String(message?.id ?? '')
+      && String(row.dataset.messageScope || '') === String(scope || '')
+      && String(row.dataset.imageUrl || '').trim() === String(message?.imageUrl || '').trim();
+  }
+
 function escapeCssValue(value) {
     const raw = String(value || '');
     if (window.CSS && typeof window.CSS.escape === 'function') return window.CSS.escape(raw);
@@ -1440,6 +1449,8 @@ function syncChatImageNode(imgEl, message) {
   const applyError = () => {
     const anchor = captureChatScrollAnchor(listEl);
     imgEl.removeAttribute('src');
+    imgEl.removeAttribute('data-resolved-image-src');
+    imgEl.dataset.imageResolved = '0';
     imgEl.style.display = fallbackEl ? 'none' : '';
     if (fallbackEl) fallbackEl.classList.remove('hidden');
     afterChatImageLayout(() => restoreChatScrollAnchor(listEl, anchor));
@@ -1451,12 +1462,10 @@ function syncChatImageNode(imgEl, message) {
       return;
     }
     imgEl.src = blobUrl;
+    imgEl.dataset.resolvedImageSrc = blobUrl;
+    imgEl.dataset.imageResolved = '1';
     imgEl.style.display = '';
     if (fallbackEl) fallbackEl.classList.add('hidden');
-    const viewerTarget = imgEl.hasAttribute('data-chat-image-viewer')
-      ? imgEl
-      : imgEl.closest('[data-chat-image-viewer]');
-    viewerTarget?.setAttribute('data-chat-image-viewer', blobUrl);
     afterChatImageLayout(() => restoreChatScrollAnchor(listEl, anchor));
   };
 
@@ -4429,8 +4438,9 @@ function bindVoiceComposerControls(surface, optionsFactory) {
         const nextAudioUrl = String(message?.audioUrl || '').trim();
         const nextImageUrl = String(message?.imageUrl || '').trim();
         const sameVoiceRow = shouldReuseVoiceRow(buildVoicePlayerMessageFromDataset(existing.querySelector?.('[data-voice-player]') || existing), message);
+        const sameImageRow = shouldReuseImageRow(existing, message, scope);
         const sameTextRow = row.dataset.audioUrl === nextAudioUrl && String(row.dataset.imageUrl || '').trim() === nextImageUrl && row.outerHTML === nextHtml;
-        if (!sameVoiceRow && !sameTextRow) {
+        if (!sameVoiceRow && !sameImageRow && !sameTextRow) {
           row = createNodeFromHtml(nextHtml);
           changed = true;
         }
