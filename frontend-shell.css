@@ -1185,6 +1185,12 @@ html, body { height: 100%; margin: 0; padding: 0; }
     .chatTabContent{ display:flex; flex-direction:column; flex:1; min-height:0; overflow:hidden; }
     .chatTabContent.hidden{ display:none; }
     .chatComposerWrap.hidden{ display:none; }
+    #chatList.hidden,
+    #chatPublicPhotosView.hidden,
+    #chatPrivateConversationList.hidden,
+    #chatPrivatePhotosView.hidden{
+      display:none !important;
+    }
     .chatPrivateTabUnread{ margin-left:6px; display:none; min-width:16px; height:16px; line-height:16px; border-radius:999px; background:#d91f33; color:#fff; font-size:10px; font-weight:900; padding:0 4px; }
     .chatPrivateTabUnread.show{ display:inline-block; }
     .chatSignedOut{
