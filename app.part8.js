@@ -2527,6 +2527,17 @@ function bindVoiceComposerControls(surface, optionsFactory) {
   let privateActiveDisplayName = '';
   let privateBackendThreadIds = new Set();
   let privateMessagesByUserId = Object.create(null);
+  const chatPhotoViewerState = {
+    open: false,
+    scope: '',
+    source: '',
+    userId: '',
+    items: [],
+    index: -1,
+    touchStartX: 0,
+  };
+  const chatImageViewerBoundRoots = new WeakSet();
+  let chatPhotoViewerKeyboardBound = false;
   let privateUnreadByUserId = Object.create(null);
   let privateLastMessageIdByUserId = Object.create(null);
   let privateThreadPollTimer = null;
@@ -3848,12 +3859,179 @@ function bindVoiceComposerControls(surface, optionsFactory) {
       || !!String(msg?.imageUrl || '').trim();
   }
 
+  function buildPhotoViewerItems({ scope, source, userId = '' } = {}) {
+    const normalizedScope = String(scope || '').toLowerCase() === 'private' ? 'private' : 'public';
+    const normalizedSource = String(source || '').toLowerCase() === 'photos' ? 'photos' : 'messages';
+    const uid = String(userId || '');
+    let rawItems = [];
+    if (normalizedScope === 'public' && normalizedSource === 'messages') rawItems = Array.isArray(publicChatMessages) ? publicChatMessages : [];
+    if (normalizedScope === 'public' && normalizedSource === 'photos') rawItems = Array.isArray(publicPhotoItems) ? publicPhotoItems : [];
+    if (normalizedScope === 'private' && normalizedSource === 'messages') rawItems = Array.isArray(privateMessagesByUserId[uid]) ? privateMessagesByUserId[uid] : [];
+    if (normalizedScope === 'private' && normalizedSource === 'photos') rawItems = Array.isArray(privatePhotoItemsByUserId[uid]) ? privatePhotoItemsByUserId[uid] : [];
+    return rawItems.map((item) => (normalizedScope === 'private'
+      ? normalizePrivateChatMessage(item, currentChatSelfUserId())
+      : normalizePublicChatMessage(item)))
+      .filter((msg) => messageHasImage(msg) && String(msg?.imageUrl || '').trim())
+      .map((msg) => ({
+        id: msg?.id == null ? '' : String(msg.id),
+        imageUrl: String(msg?.imageUrl || '').trim(),
+        imageMimeType: String(msg?.imageMimeType || '').trim(),
+        displayName: String(msg?.displayName || 'Driver').trim() || 'Driver',
+        createdAt: msg?.createdAt || '',
+        text: String(msg?.text || '').trim(),
+      }));
+  }
+
+  function currentChatPhotoViewerItem() {
+    const index = Number(chatPhotoViewerState.index);
+    if (!Number.isFinite(index) || index < 0) return null;
+    return chatPhotoViewerState.items[index] || null;
+  }
+
+  function ensureChatPhotoViewerMount() {
+    let mount = document.getElementById('chatPhotoViewerMount');
+    if (mount) return mount;
+    mount = document.createElement('div');
+    mount.id = 'chatPhotoViewerMount';
+    mount.className = 'chatPhotoViewerBackdrop hidden';
+    mount.innerHTML = `<div class="chatPhotoViewerCard" role="dialog" aria-modal="true" aria-label="Chat photo viewer">
+      <div class="chatPhotoViewerHeader">
+        <div class="chatPhotoViewerMeta">
+          <strong class="chatPhotoViewerSender" data-chat-photo-sender></strong>
+          <span class="chatPhotoViewerTimestamp" data-chat-photo-time></span>
+        </div>
+        <button type="button" class="chatPhotoViewerCloseBtn" data-chat-photo-close aria-label="Close photo viewer">×</button>
+      </div>
+      <div class="chatPhotoViewerStage" data-chat-photo-stage>
+        <button type="button" class="chatPhotoViewerNavBtn prev" data-chat-photo-prev aria-label="Previous photo">‹</button>
+        <img class="chatPhotoViewerImage" data-chat-photo-image alt="Chat photo preview" />
+        <button type="button" class="chatPhotoViewerNavBtn next" data-chat-photo-next aria-label="Next photo">›</button>
+      </div>
+      <div class="chatPhotoViewerFooter">
+        <div class="chatPhotoViewerCaption" data-chat-photo-caption></div>
+        <div class="chatPhotoViewerCounter" data-chat-photo-counter></div>
+      </div>
+    </div>`;
+    document.body.appendChild(mount);
+    mount.addEventListener('click', (event) => {
+      if (event.target === mount || event.target?.closest?.('[data-chat-photo-close]')) closeChatPhotoViewer();
+    });
+    mount.querySelector('[data-chat-photo-prev]')?.addEventListener('click', () => moveChatPhotoViewer(-1));
+    mount.querySelector('[data-chat-photo-next]')?.addEventListener('click', () => moveChatPhotoViewer(1));
+    const stage = mount.querySelector('[data-chat-photo-stage]');
+    if (stage) {
+      stage.addEventListener('touchstart', (event) => {
+        chatPhotoViewerState.touchStartX = Number(event.changedTouches?.[0]?.clientX || 0);
+      }, { passive: true });
+      stage.addEventListener('touchend', (event) => {
+        const endX = Number(event.changedTouches?.[0]?.clientX || 0);
+        const delta = endX - Number(chatPhotoViewerState.touchStartX || 0);
+        if (Math.abs(delta) < 45) return;
+        moveChatPhotoViewer(delta < 0 ? 1 : -1);
+      }, { passive: true });
+    }
+    if (!chatPhotoViewerKeyboardBound) {
+      chatPhotoViewerKeyboardBound = true;
+      document.addEventListener('keydown', (event) => {
+        if (!chatPhotoViewerState.open) return;
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          closeChatPhotoViewer();
+          return;
+        }
+        if (event.key === 'ArrowLeft') {
+          event.preventDefault();
+          moveChatPhotoViewer(-1);
+          return;
+        }
+        if (event.key === 'ArrowRight') {
+          event.preventDefault();
+          moveChatPhotoViewer(1);
+        }
+      });
+    }
+    return mount;
+  }
+
+  function renderChatPhotoViewer() {
+    const mount = ensureChatPhotoViewerMount();
+    const item = currentChatPhotoViewerItem();
+    const shouldShow = !!(chatPhotoViewerState.open && item);
+    mount.classList.toggle('hidden', !shouldShow);
+    if (!shouldShow) {
+      document.body.classList.remove('chatPhotoViewerOpen');
+      return;
+    }
+    document.body.classList.add('chatPhotoViewerOpen');
+    const imgEl = mount.querySelector('[data-chat-photo-image]');
+    const senderEl = mount.querySelector('[data-chat-photo-sender]');
+    const timeEl = mount.querySelector('[data-chat-photo-time]');
+    const captionEl = mount.querySelector('[data-chat-photo-caption]');
+    const counterEl = mount.querySelector('[data-chat-photo-counter]');
+    const prevBtn = mount.querySelector('[data-chat-photo-prev]');
+    const nextBtn = mount.querySelector('[data-chat-photo-next]');
+    if (imgEl) {
+      imgEl.src = String(item.imageUrl || '');
+      imgEl.alt = String(item.displayName || 'Chat photo');
+    }
+    if (senderEl) senderEl.textContent = String(item.displayName || 'Driver');
+    if (timeEl) timeEl.textContent = formatChatTime(item.createdAt);
+    if (captionEl) {
+      captionEl.textContent = String(item.text || '');
+      captionEl.classList.toggle('hidden', !String(item.text || '').trim());
+    }
+    if (counterEl) counterEl.textContent = `${chatPhotoViewerState.index + 1} / ${chatPhotoViewerState.items.length}`;
+    if (prevBtn) prevBtn.disabled = chatPhotoViewerState.index <= 0;
+    if (nextBtn) nextBtn.disabled = chatPhotoViewerState.index >= chatPhotoViewerState.items.length - 1;
+  }
+
+  function closeChatPhotoViewer() {
+    if (!chatPhotoViewerState.open) return;
+    chatPhotoViewerState.open = false;
+    chatPhotoViewerState.index = -1;
+    chatPhotoViewerState.items = [];
+    chatPhotoViewerState.touchStartX = 0;
+    renderChatPhotoViewer();
+  }
+
+  function moveChatPhotoViewer(delta) {
+    if (!chatPhotoViewerState.open || !Array.isArray(chatPhotoViewerState.items) || !chatPhotoViewerState.items.length) return;
+    const nextIndex = Math.max(0, Math.min(chatPhotoViewerState.items.length - 1, Number(chatPhotoViewerState.index || 0) + Number(delta || 0)));
+    if (nextIndex === chatPhotoViewerState.index) return;
+    chatPhotoViewerState.index = nextIndex;
+    renderChatPhotoViewer();
+  }
+
+  function openChatPhotoViewer({ scope, source, userId = '', messageId = null, imageUrl = '' } = {}) {
+    const items = buildPhotoViewerItems({ scope, source, userId });
+    if (!items.length) return;
+    const messageIdText = messageId == null ? '' : String(messageId);
+    const imageUrlText = String(imageUrl || '').trim();
+    let index = -1;
+    if (messageIdText) index = items.findIndex((item) => String(item.id || '') === messageIdText);
+    if (index < 0 && imageUrlText) index = items.findIndex((item) => String(item.imageUrl || '') === imageUrlText);
+    if (index < 0) return;
+    chatPhotoViewerState.open = true;
+    chatPhotoViewerState.scope = String(scope || '').toLowerCase() === 'private' ? 'private' : 'public';
+    chatPhotoViewerState.source = String(source || '').toLowerCase() === 'photos' ? 'photos' : 'messages';
+    chatPhotoViewerState.userId = String(userId || '');
+    chatPhotoViewerState.items = items;
+    chatPhotoViewerState.index = index;
+    chatPhotoViewerState.touchStartX = 0;
+    ensureChatPhotoViewerMount();
+    renderChatPhotoViewer();
+  }
+
   function renderChatImageCard(message, bubbleClass = 'chatBubbleOther') {
     const rawImageUrl = String(message?.imageUrl || '').trim();
     const cacheEntry = imageAssetCache.get(getImageAssetCacheKey(message));
     const initialSrc = cacheEntry?.status === 'ready' && cacheEntry?.blobUrl ? String(cacheEntry.blobUrl) : '';
     const caption = String(message?.text || '').trim();
-    return `<div class="${bubbleClass} chatImageCard"><img src="${escapeHtml(initialSrc)}" alt="Chat photo" loading="lazy" class="chatImageThumb" data-chat-image="1" data-message-id="${escapeHtml(String(message?.id ?? ''))}" data-image-url="${escapeHtml(rawImageUrl)}" data-image-mime-type="${escapeHtml(String(message?.imageMimeType || ''))}" data-created-at="${escapeHtml(String(message?.createdAt || ''))}" data-chat-image-viewer="${escapeHtml(initialSrc || rawImageUrl)}" style="max-width:220px;max-height:220px;border-radius:12px;display:block;cursor:pointer;" /><div class="chatImageFallback ${initialSrc ? 'hidden' : ''}" style="font-size:12px;opacity:0.8;">Photo unavailable</div>${caption ? `<div class="chatImageCaption">${escapeHtml(caption)}</div>` : ''}</div>`;
+    const scope = String(message?.scope || '').toLowerCase() === 'private' ? 'private' : 'public';
+    const privateUserId = scope === 'private'
+      ? String(message?.chatTargetUserId || message?.chatUserId || privateActiveUserId || '')
+      : '';
+    return `<div class="${bubbleClass} chatImageCard"><img src="${escapeHtml(initialSrc)}" alt="Chat photo" loading="lazy" class="chatImageThumb" data-chat-image="1" data-chat-image-viewer="1" data-message-id="${escapeHtml(String(message?.id ?? ''))}" data-image-url="${escapeHtml(rawImageUrl)}" data-image-mime-type="${escapeHtml(String(message?.imageMimeType || ''))}" data-created-at="${escapeHtml(String(message?.createdAt || ''))}" data-photo-scope="${escapeHtml(scope)}" data-photo-source="messages" data-photo-user-id="${escapeHtml(privateUserId)}" style="max-width:220px;max-height:220px;border-radius:12px;display:block;cursor:pointer;" /><div class="chatImageFallback ${initialSrc ? 'hidden' : ''}" style="font-size:12px;opacity:0.8;">Photo unavailable</div>${caption ? `<div class="chatImageCaption">${escapeHtml(caption)}</div>` : ''}</div>`;
   }
 
   function renderPublicMessageRow(message) {
@@ -3866,7 +4044,7 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     const body = msg.messageType === 'voice'
       ? renderVoiceNotePlayer(msg, 'public')
       : hasImage
-        ? renderChatImageCard(msg, `${bubbleClass} chatPublicTextBubble`)
+        ? renderChatImageCard({ ...msg, scope: 'public' }, `${bubbleClass} chatPublicTextBubble`)
       : `<div class="${bubbleClass} chatPublicTextBubble">${escapeHtml(String(msg.text || ''))}</div>`;
     return `<div class="chatMsgRow ${own ? 'self' : 'other'}${msg.messageType === 'voice' ? ' chatMsgRowVoice' : ''}" data-chat-row="public" data-message-key="${escapeHtml(getVoiceMessageDomKey(msg))}" data-message-id="${escapeHtml(String(msg?.id ?? ''))}" data-message-scope="public" data-audio-url="${escapeHtml(String(msg?.audioUrl || ''))}" data-image-url="${escapeHtml(String(msg?.imageUrl || ''))}"><div class="chatMsgNameLine"><strong class="chatMsgName">${safeName}</strong></div><div class="chatMsgBubbleWrap">${body}</div><div class="chatMsgTime">${time}</div></div>`;
   }
@@ -3879,22 +4057,26 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     const body = msg?.messageType === 'voice'
       ? renderVoiceNotePlayer(msg, scope === 'profile-dm' ? 'driverProfile' : 'private')
       : hasImage
-        ? renderChatImageCard(msg, cls)
+        ? renderChatImageCard({ ...msg, scope: 'private', chatTargetUserId: String(msg?.chatTargetUserId || privateActiveUserId || '') }, cls)
       : `<div class="${cls}">${escapeHtml(String(msg?.text || ''))}</div>`;
     const t = escapeHtml(formatChatTime(msg?.createdAt));
     return `<div class="chatPrivateMsgRow ${own ? 'self' : 'other'}" data-chat-row="${escapeHtml(scope)}" data-message-key="${escapeHtml(getVoiceMessageDomKey(msg))}" data-message-id="${escapeHtml(String(msg?.id ?? ''))}" data-message-scope="${escapeHtml(scope)}" data-audio-url="${escapeHtml(String(msg?.audioUrl || ''))}" data-image-url="${escapeHtml(String(msg?.imageUrl || ''))}">${body}<div class="chatMsgTime">${t}</div></div>`;
   }
 
   function bindChatImageViewer(root = document) {
-    if (!root || root.dataset.chatImageViewerBound === '1') return;
-    root.dataset.chatImageViewerBound = '1';
+    if (!root || chatImageViewerBoundRoots.has(root)) return;
+    chatImageViewerBoundRoots.add(root);
     root.addEventListener('click', (event) => {
       const target = event.target?.closest?.('[data-chat-image-viewer]');
       if (!target) return;
-      const url = String(target.getAttribute('data-chat-image-viewer') || '').trim();
-      if (!url) return;
       event.preventDefault();
-      window.open(url, '_blank', 'noopener');
+      openChatPhotoViewer({
+        scope: String(target.getAttribute('data-photo-scope') || 'public'),
+        source: String(target.getAttribute('data-photo-source') || 'messages'),
+        userId: String(target.getAttribute('data-photo-user-id') || ''),
+        messageId: String(target.getAttribute('data-message-id') || ''),
+        imageUrl: String(target.getAttribute('data-image-url') || ''),
+      });
     });
   }
 
@@ -4770,14 +4952,15 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     return (messages || []).map((msg) => renderPrivateConversationRow(msg, 'private')).join('');
   }
 
-  function renderPhotoGallery(items = [], emptyText = 'No photos yet.') {
+  function renderPhotoGallery(items = [], emptyText = 'No photos yet.', { scope = 'public', source = 'photos', userId = '' } = {}) {
     if (!Array.isArray(items) || !items.length) return `<div class="chatEmpty">${escapeHtml(emptyText)}</div>`;
     return `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px;">${items.map((msg) => {
       const rawImageUrl = String(msg?.imageUrl || '').trim();
       const cacheEntry = imageAssetCache.get(getImageAssetCacheKey(msg));
       const initialSrc = cacheEntry?.status === 'ready' && cacheEntry?.blobUrl ? String(cacheEntry.blobUrl) : '';
       const label = escapeHtml(formatChatTime(msg?.createdAt) || '');
-      return `<button type="button" class="chatPhotoTile" data-chat-image-viewer="${escapeHtml(initialSrc || rawImageUrl)}" style="padding:0;border:0;background:none;cursor:pointer;"><img src="${escapeHtml(initialSrc)}" alt="Chat photo" loading="lazy" data-chat-image="1" data-message-id="${escapeHtml(String(msg?.id ?? ''))}" data-image-url="${escapeHtml(rawImageUrl)}" data-image-mime-type="${escapeHtml(String(msg?.imageMimeType || ''))}" data-created-at="${escapeHtml(String(msg?.createdAt || ''))}" style="width:100%;height:110px;object-fit:cover;border-radius:10px;display:block;" /><span style="display:block;font-size:11px;opacity:.75;margin-top:2px;text-align:left;">${label}</span></button>`;
+      const sender = escapeHtml(String(msg?.displayName || 'Driver').trim() || 'Driver');
+      return `<button type="button" class="chatPhotoTile" data-chat-image-viewer="1" data-message-id="${escapeHtml(String(msg?.id ?? ''))}" data-image-url="${escapeHtml(rawImageUrl)}" data-photo-scope="${escapeHtml(String(scope || 'public'))}" data-photo-source="${escapeHtml(String(source || 'photos'))}" data-photo-user-id="${escapeHtml(String(userId || ''))}" style="padding:0;border:0;background:none;cursor:pointer;"><img src="${escapeHtml(initialSrc)}" alt="Chat photo" loading="lazy" data-chat-image="1" data-message-id="${escapeHtml(String(msg?.id ?? ''))}" data-image-url="${escapeHtml(rawImageUrl)}" data-image-mime-type="${escapeHtml(String(msg?.imageMimeType || ''))}" data-created-at="${escapeHtml(String(msg?.createdAt || ''))}" style="width:100%;height:110px;object-fit:cover;border-radius:10px;display:block;" /><span style="display:block;font-size:11px;font-weight:800;opacity:.85;margin-top:3px;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${sender}</span><span style="display:block;font-size:11px;opacity:.75;margin-top:1px;text-align:left;">${label}</span></button>`;
     }).join('')}</div>`;
   }
 
@@ -4799,7 +4982,7 @@ function bindVoiceComposerControls(surface, optionsFactory) {
   function renderPublicPhotosView() {
     const wrap = document.getElementById('chatPublicPhotosView');
     if (!wrap) return;
-    wrap.innerHTML = `${renderPhotoGallery(publicPhotoItems, 'No public photos yet.')}${publicPhotoHasMore ? '<div style="margin-top:8px;"><button id="chatPublicPhotosLoadMore" class="chipBtn" type="button">Load more</button></div>' : ''}`;
+    wrap.innerHTML = `${renderPhotoGallery(publicPhotoItems, 'No public photos yet.', { scope: 'public', source: 'photos' })}${publicPhotoHasMore ? '<div style="margin-top:8px;"><button id="chatPublicPhotosLoadMore" class="chipBtn" type="button">Load more</button></div>' : ''}`;
     bindChatImageViewer(wrap);
     bindRenderedChatImages(wrap);
     const loadMoreBtn = document.getElementById('chatPublicPhotosLoadMore');
@@ -4823,7 +5006,7 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     if (!wrap || !uid) return;
     const items = privatePhotoItemsByUserId[uid] || [];
     const hasMore = !!privatePhotoHasMoreByUserId[uid];
-    wrap.innerHTML = `${renderPhotoGallery(items, 'No private photos yet.')}${hasMore ? '<div style="margin-top:8px;"><button id="chatPrivatePhotosLoadMore" class="chipBtn" type="button">Load more</button></div>' : ''}`;
+    wrap.innerHTML = `${renderPhotoGallery(items, 'No private photos yet.', { scope: 'private', source: 'photos', userId: uid })}${hasMore ? '<div style="margin-top:8px;"><button id="chatPrivatePhotosLoadMore" class="chipBtn" type="button">Load more</button></div>' : ''}`;
     bindChatImageViewer(wrap);
     bindRenderedChatImages(wrap);
   }
