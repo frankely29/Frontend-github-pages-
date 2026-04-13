@@ -1404,8 +1404,8 @@ html, body { height: 100%; margin: 0; padding: 0; }
       display:flex;
       align-items:center;
       justify-content:center;
-      min-height:280px;
-      max-height:calc(86vh - 132px);
+      min-height:320px;
+      max-height:calc(86vh - 118px);
       padding:12px 44px;
       background:#0f172a;
       overflow:hidden;
@@ -1422,6 +1422,9 @@ html, body { height: 100%; margin: 0; padding: 0; }
       background:#0b1220;
       transform-origin:center center;
       transition:transform 0.08s linear;
+      will-change:transform;
+      user-select:none;
+      -webkit-user-drag:none;
     }
     .chatPhotoViewerNavBtn{
       position:absolute;
@@ -1470,7 +1473,7 @@ html, body { height: 100%; margin: 0; padding: 0; }
     @media (max-width: 640px){
       .chatPhotoViewerBackdrop{ padding:10px; }
       .chatPhotoViewerCard{ width:min(94vw, 1100px); max-height:86vh; }
-      .chatPhotoViewerStage{ max-height:calc(86vh - 132px); min-height:240px; padding:8px 40px; }
+      .chatPhotoViewerStage{ max-height:calc(86vh - 118px); min-height:260px; padding:8px 40px; }
       .chatPhotoViewerFooter{ flex-direction:column; gap:6px; }
       .chatPhotoViewerCounter{ align-self:flex-end; }
     }
