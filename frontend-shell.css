@@ -1314,42 +1314,46 @@ html, body { height: 100%; margin: 0; padding: 0; }
       display:flex;
       flex-direction:column;
       gap:6px;
-      padding:0;
-      max-width:min(100%, 240px);
+      width:clamp(140px,58vw,220px);
+      max-width:100%;
     }
     .chatImageViewport{
-      width:clamp(140px, 58vw, 220px);
-      height:clamp(120px, 40vw, 220px);
-      border-radius:12px;
-      overflow:hidden;
-      background:linear-gradient(180deg,#dbe5f1,#cbd5e1);
       position:relative;
+      width:100%;
+      height:clamp(120px,40vw,220px);
+      overflow:hidden;
+      border-radius:12px;
+      background:rgba(15,23,42,0.06);
     }
     .chatImageThumb{
       width:100%;
       height:100%;
       object-fit:cover;
       display:block;
+      border-radius:12px;
       cursor:pointer;
+      background:transparent;
     }
     .chatImageFallback{
       position:absolute;
       inset:0;
-      display:grid;
-      place-items:center;
+      display:flex;
+      align-items:center;
+      justify-content:center;
       padding:10px;
       text-align:center;
       font-size:12px;
-      font-weight:700;
-      color:#334155;
-      background:rgba(241,245,249,0.92);
+      font-weight:800;
+      color:#475569;
+      background:rgba(255,255,255,0.72);
+    }
+    .chatImageFallback.hidden{
+      display:none !important;
     }
     .chatImageCaption{
       font-size:12px;
       line-height:1.3;
       word-break:break-word;
-      color:inherit;
-      opacity:.96;
     }
     .chatPhotoViewerBackdrop{
       position:fixed;

@@ -1404,40 +1404,48 @@ async function ensureImageBlobUrl(message, attempt = 0) {
 
 function captureChatScrollAnchor(listEl) {
   if (!listEl) return null;
-  const scrollTop = Number(listEl.scrollTop || 0);
-  const scrollHeight = Number(listEl.scrollHeight || 0);
-  const clientHeight = Number(listEl.clientHeight || 0);
-  const distanceFromBottom = scrollHeight - (scrollTop + clientHeight);
   return {
-    scrollTop,
-    scrollHeight,
-    nearBottom: distanceFromBottom <= 56,
+    previousScrollTop: listEl.scrollTop,
+    previousScrollHeight: listEl.scrollHeight,
+    nearBottom: isChatNearBottom(listEl, 80),
   };
 }
 
 function restoreChatScrollAnchor(listEl, anchor) {
   if (!listEl || !anchor) return;
   if (anchor.nearBottom) {
-    listEl.scrollTop = Math.max(0, listEl.scrollHeight - listEl.clientHeight);
+    listEl.scrollTop = listEl.scrollHeight;
     return;
   }
-  const delta = Number(listEl.scrollHeight || 0) - Number(anchor.scrollHeight || 0);
-  listEl.scrollTop = Math.max(0, Number(anchor.scrollTop || 0) + delta);
+  const delta = listEl.scrollHeight - Number(anchor.previousScrollHeight || 0);
+  listEl.scrollTop = Number(anchor.previousScrollTop || 0) + delta;
+}
+
+function afterChatImageLayout(callback) {
+  if (typeof callback !== 'function') return;
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      callback();
+    });
+  });
 }
 
 function syncChatImageNode(imgEl, message) {
   if (!imgEl || !message) return;
   const key = getImageAssetCacheKey(message);
   const fallbackEl = imgEl.closest('.chatImageCard')?.querySelector('.chatImageFallback') || null;
-  const chatListEl = imgEl.closest('.chatList');
+  const listEl = imgEl.closest('.chatList');
   imgEl.dataset.imageCacheKey = key;
 
   const applyError = () => {
+    const anchor = captureChatScrollAnchor(listEl);
     imgEl.removeAttribute('src');
     imgEl.style.display = fallbackEl ? 'none' : '';
     if (fallbackEl) fallbackEl.classList.remove('hidden');
+    afterChatImageLayout(() => restoreChatScrollAnchor(listEl, anchor));
   };
   const applyReady = (blobUrl) => {
+    const anchor = captureChatScrollAnchor(listEl);
     if (!blobUrl) {
       applyError();
       return;
@@ -1449,12 +1457,7 @@ function syncChatImageNode(imgEl, message) {
       ? imgEl
       : imgEl.closest('[data-chat-image-viewer]');
     viewerTarget?.setAttribute('data-chat-image-viewer', blobUrl);
-  };
-  const restoreAfterHydrationLayout = (anchor) => {
-    if (!chatListEl || !anchor) return;
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => restoreChatScrollAnchor(chatListEl, anchor));
-    });
+    afterChatImageLayout(() => restoreChatScrollAnchor(listEl, anchor));
   };
 
   const cached = imageAssetCache.get(key);
@@ -1467,22 +1470,18 @@ function syncChatImageNode(imgEl, message) {
     return;
   }
 
-  const hydrationAnchor = captureChatScrollAnchor(chatListEl);
   ensureImageBlobUrl(message).then((blobUrl) => {
     if (!imgEl.isConnected) return;
     if (imgEl.dataset.imageCacheKey !== key) return;
     if (!blobUrl) {
       applyError();
-      restoreAfterHydrationLayout(hydrationAnchor);
       return;
     }
     applyReady(blobUrl);
-    restoreAfterHydrationLayout(hydrationAnchor);
   }).catch(() => {
     if (!imgEl.isConnected) return;
     if (imgEl.dataset.imageCacheKey !== key) return;
     applyError();
-    restoreAfterHydrationLayout(hydrationAnchor);
   });
 }
 
