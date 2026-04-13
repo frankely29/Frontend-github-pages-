@@ -3891,6 +3891,15 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     return chatPhotoViewerState.items[index] || null;
   }
 
+  async function ensureViewerImageBlobUrl(item) {
+    const message = {
+      id: item?.id,
+      imageUrl: String(item?.imageUrl || '').trim(),
+      imageMimeType: String(item?.imageMimeType || '').trim(),
+    };
+    return ensureImageBlobUrl(message);
+  }
+
   function ensureChatPhotoViewerMount() {
     let mount = document.getElementById('chatPhotoViewerMount');
     if (mount) return mount;
@@ -3974,7 +3983,37 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     const prevBtn = mount.querySelector('[data-chat-photo-prev]');
     const nextBtn = mount.querySelector('[data-chat-photo-next]');
     if (imgEl) {
-      imgEl.src = String(item.imageUrl || '');
+      const cacheKey = getImageAssetCacheKey(item);
+      imgEl.dataset.viewerImageCacheKey = cacheKey;
+      const cached = imageAssetCache.get(cacheKey);
+      if (cached?.status === 'ready' && cached?.blobUrl) {
+        imgEl.src = String(cached.blobUrl || '');
+      } else {
+        imgEl.removeAttribute('src');
+        ensureViewerImageBlobUrl(item).then((blobUrl) => {
+          if (!imgEl.isConnected) return;
+          if (!chatPhotoViewerState.open) return;
+          if (currentChatPhotoViewerItem() !== item) return;
+          if (imgEl.dataset.viewerImageCacheKey !== cacheKey) return;
+          if (!blobUrl) {
+            imgEl.removeAttribute('src');
+            imgEl.alt = 'Photo unavailable';
+            imgEl.title = 'Photo unavailable';
+            return;
+          }
+          imgEl.src = blobUrl;
+          imgEl.removeAttribute('title');
+          imgEl.alt = String(item.displayName || 'Chat photo');
+        }).catch(() => {
+          if (!imgEl.isConnected) return;
+          if (!chatPhotoViewerState.open) return;
+          if (currentChatPhotoViewerItem() !== item) return;
+          if (imgEl.dataset.viewerImageCacheKey !== cacheKey) return;
+          imgEl.removeAttribute('src');
+          imgEl.alt = 'Photo unavailable';
+          imgEl.title = 'Photo unavailable';
+        });
+      }
       imgEl.alt = String(item.displayName || 'Chat photo');
     }
     if (senderEl) senderEl.textContent = String(item.displayName || 'Driver');
