@@ -2534,6 +2534,9 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     userId: '',
     items: [],
     index: -1,
+    restoreChatDrawer: false,
+    restoreChatTab: 'public',
+    restorePrivateUserId: '',
     touchStartX: 0,
   };
   const chatImageViewerBoundRoots = new WeakSet();
@@ -3985,13 +3988,39 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     if (nextBtn) nextBtn.disabled = chatPhotoViewerState.index >= chatPhotoViewerState.items.length - 1;
   }
 
-  function closeChatPhotoViewer() {
+  function closeChatPhotoViewer({ restoreChat = true } = {}) {
     if (!chatPhotoViewerState.open) return;
     chatPhotoViewerState.open = false;
     chatPhotoViewerState.index = -1;
     chatPhotoViewerState.items = [];
     chatPhotoViewerState.touchStartX = 0;
     renderChatPhotoViewer();
+    if (!restoreChat || !chatPhotoViewerState.restoreChatDrawer) {
+      chatPhotoViewerState.restoreChatDrawer = false;
+      chatPhotoViewerState.restoreChatTab = 'public';
+      chatPhotoViewerState.restorePrivateUserId = '';
+      return;
+    }
+    const restoreTab = chatPhotoViewerState.restoreChatTab === 'private' ? 'private' : 'public';
+    const restorePrivateUserId = String(chatPhotoViewerState.restorePrivateUserId || '');
+    chatPhotoViewerState.restoreChatDrawer = false;
+    chatPhotoViewerState.restoreChatTab = 'public';
+    chatPhotoViewerState.restorePrivateUserId = '';
+    if (typeof window.openDrawer === 'function' && typeof window.chatPanelHTML === 'function') {
+      window.openDrawer('chat', 'Chat', window.chatPanelHTML());
+      if (typeof window.wireChatPanel === 'function') window.wireChatPanel();
+      if (restoreTab === 'private') {
+        switchChatTab('private');
+        if (restorePrivateUserId) {
+          const restoreName = privateThreads.find((thread) => String(privateThreadUserId(thread) || '') === restorePrivateUserId)?.displayName
+            || privateActiveDisplayName
+            || 'Driver';
+          void openPrivateConversation(restorePrivateUserId, restoreName, { markRead: false });
+        }
+      } else {
+        switchChatTab('public');
+      }
+    }
   }
 
   function moveChatPhotoViewer(delta) {
@@ -4011,6 +4040,11 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     if (messageIdText) index = items.findIndex((item) => String(item.id || '') === messageIdText);
     if (index < 0 && imageUrlText) index = items.findIndex((item) => String(item.imageUrl || '') === imageUrlText);
     if (index < 0) return;
+    const wasChatOpen = typeof window.getOpenPanelKey === 'function' && window.getOpenPanelKey() === 'chat';
+    chatPhotoViewerState.restoreChatDrawer = wasChatOpen;
+    chatPhotoViewerState.restoreChatTab = activeChatTab === 'private' ? 'private' : 'public';
+    chatPhotoViewerState.restorePrivateUserId = String(privateActiveUserId || '');
+    if (wasChatOpen && typeof window.closeDrawer === 'function') window.closeDrawer();
     chatPhotoViewerState.open = true;
     chatPhotoViewerState.scope = String(scope || '').toLowerCase() === 'private' ? 'private' : 'public';
     chatPhotoViewerState.source = String(source || '').toLowerCase() === 'photos' ? 'photos' : 'messages';
