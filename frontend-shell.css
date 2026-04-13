@@ -1210,6 +1210,13 @@ html, body { height: 100%; margin: 0; padding: 0; }
       color:#111827;
       -webkit-overflow-scrolling: touch;
     }
+    .chatList,
+    .chatPrivateThreadList,
+    #chatPrivateConversationList,
+    #driverProfileDmList{
+      overscroll-behavior: contain;
+      touch-action: pan-y;
+    }
     .chatEmpty{
       font-size: 12px;
       font-weight: 700;
