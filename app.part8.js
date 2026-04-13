@@ -178,6 +178,7 @@ const chatVoiceDraftState = {
   };
 
 const voiceAssetCache = new Map();
+const imageAssetCache = new Map();
 
 function getSharedAudioCoordinator() {
     return window.TlcSharedAudio || null;
@@ -967,6 +968,12 @@ function getVoiceAssetCacheKey(message) {
     return `${messageId === null ? 'unknown' : messageId}::${audioUrl}`;
   }
 
+function getImageAssetCacheKey(message) {
+    const messageId = parseMessageId(message?.id);
+    const imageUrl = String(message?.imageUrl || '').trim();
+    return `${messageId === null ? 'unknown' : messageId}::${imageUrl}`;
+  }
+
 function getVoiceMessageDomKey(message) {
     return getMessageMergeKey(message);
   }
@@ -1005,6 +1012,31 @@ function releaseVoiceBlobUrl(messageId, reason = 'release') {
         try { URL.revokeObjectURL(blobUrl); } catch (_) {}
       }
       voiceAssetCache.delete(key);
+    }
+  }
+
+function isChatImageRendered(messageId, imageUrl = '') {
+    if (messageId === null || messageId === undefined || messageId === '') return false;
+    const selector = `[data-chat-image="1"][data-message-id="${String(messageId)}"]`;
+    const nodes = document.querySelectorAll?.(selector);
+    if (!nodes || !nodes.length) return false;
+    if (!imageUrl) return true;
+    return Array.from(nodes).some((node) => String(node?.dataset?.imageUrl || '').trim() === String(imageUrl).trim());
+  }
+
+function releaseImageBlobUrl(messageId, imageUrl = '') {
+    const targetId = parseMessageId(messageId);
+    if (targetId === null) return;
+    for (const [key, entry] of imageAssetCache.entries()) {
+      if (!key.startsWith(`${targetId}::`)) continue;
+      const sourceImageUrl = String(key.split('::').slice(1).join('::') || '').trim();
+      if (imageUrl && sourceImageUrl !== String(imageUrl).trim()) continue;
+      if (isChatImageRendered(targetId, sourceImageUrl)) continue;
+      const blobUrl = String(entry?.blobUrl || '').trim();
+      if (blobUrl) {
+        try { URL.revokeObjectURL(blobUrl); } catch (_) {}
+      }
+      imageAssetCache.delete(key);
     }
   }
 
@@ -1113,6 +1145,16 @@ function revokeVoiceBlobUrls() {
     voiceAssetCache.clear();
   }
 
+function revokeImageBlobUrls() {
+    for (const entry of imageAssetCache.values()) {
+      const blobUrl = String(entry?.blobUrl || '').trim();
+      if (blobUrl) {
+        try { URL.revokeObjectURL(blobUrl); } catch (_) {}
+      }
+    }
+    imageAssetCache.clear();
+  }
+
 function collectTrackedVoiceMessages() {
     const messages = [];
     const publicMessages = Array.isArray(publicChatMessages) ? publicChatMessages : [];
@@ -1131,6 +1173,44 @@ function collectTrackedVoiceMessages() {
     return messages.filter((msg) => normalizeMessageType(msg?.messageType, msg?.audioUrl ? 'voice' : 'text') === 'voice');
   }
 
+function collectTrackedImageMessages() {
+    const messages = [];
+    const publicMessages = Array.isArray(publicChatMessages) ? publicChatMessages : [];
+    const privateMessages = privateMessagesByUserId || Object.create(null);
+
+    if (publicMessages.length) messages.push(...publicMessages);
+
+    Object.values(privateMessages).forEach((list) => {
+      if (Array.isArray(list)) messages.push(...list);
+    });
+
+    if (Array.isArray(driverProfileState?.messages)) {
+      messages.push(...driverProfileState.messages);
+    }
+
+    if (Array.isArray(publicPhotoItems)) messages.push(...publicPhotoItems);
+    Object.values(privatePhotoItemsByUserId || {}).forEach((list) => {
+      if (Array.isArray(list)) messages.push(...list);
+    });
+
+    return messages.filter((msg) => messageHasImage(msg));
+  }
+
+function pruneImageAssetCache(messages = collectTrackedImageMessages()) {
+    const activeKeys = new Set((messages || [])
+      .map((message) => getImageAssetCacheKey(message))
+      .filter((key) => !key.endsWith('::')));
+    for (const [key, entry] of imageAssetCache.entries()) {
+      if (activeKeys.has(key)) continue;
+      const messageId = parseMessageId(key.split('::')[0]);
+      if (messageId !== null) releaseImageBlobUrl(messageId);
+      else if (entry?.blobUrl) {
+        try { URL.revokeObjectURL(entry.blobUrl); } catch (_) {}
+        imageAssetCache.delete(key);
+      }
+    }
+  }
+
 function pruneVoiceAssetCache(messages = collectTrackedVoiceMessages()) {
     const activeKeys = new Set((messages || [])
       .map((message) => getVoiceAssetCacheKey(message))
@@ -1147,6 +1227,12 @@ function pruneVoiceAssetCache(messages = collectTrackedVoiceMessages()) {
   }
 
 function waitVoiceBlobRetryDelay(ms) {
+    return new Promise((resolve) => {
+      window.setTimeout(resolve, Math.max(0, Number(ms) || 0));
+    });
+  }
+
+function waitImageBlobRetryDelay(ms) {
     return new Promise((resolve) => {
       window.setTimeout(resolve, Math.max(0, Number(ms) || 0));
     });
@@ -1240,6 +1326,143 @@ async function ensureVoiceBlobUrl(message, attempt = 0) {
 
   promise.finally(() => refreshVoicePlayersForMessage(message));
   return promise;
+}
+
+async function ensureImageBlobUrl(message, attempt = 0) {
+  const imageUrl = String(message?.imageUrl || '').trim();
+  const key = getImageAssetCacheKey(message);
+
+  if (!imageUrl) {
+    imageAssetCache.set(key, {
+      status: 'error',
+      blobUrl: '',
+      mimeType: String(message?.imageMimeType || '').trim(),
+      error: 'Photo unavailable',
+    });
+    return '';
+  }
+
+  const cached = imageAssetCache.get(key);
+  if (cached?.status === 'ready' && cached.blobUrl) return cached.blobUrl;
+  if (cached?.status === 'loading' && cached.promise) return cached.promise;
+
+  const token = getCommunityToken();
+
+  const promise = (async () => {
+    try {
+      const headers = new Headers();
+      if (token) headers.set('Authorization', `Bearer ${token}`);
+
+      const response = await fetch(imageUrl, {
+        method: 'GET',
+        headers,
+        cache: 'no-store',
+      });
+
+      if (!response.ok) throw new Error(`Image fetch failed (${response.status})`);
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+
+      const next = {
+        status: 'ready',
+        blobUrl,
+        mimeType: blob.type || String(message?.imageMimeType || '').trim(),
+        error: '',
+      };
+      const previous = imageAssetCache.get(key);
+      if (previous?.blobUrl && previous.blobUrl !== blobUrl) {
+        try { URL.revokeObjectURL(previous.blobUrl); } catch (_) {}
+      }
+      imageAssetCache.set(key, next);
+      return blobUrl;
+    } catch (_) {
+      const nextAttempt = Number(attempt) + 1;
+      if (nextAttempt < 2) {
+        imageAssetCache.delete(key);
+        await waitImageBlobRetryDelay(250);
+        return ensureImageBlobUrl(message, nextAttempt);
+      }
+      imageAssetCache.set(key, {
+        status: 'error',
+        blobUrl: '',
+        mimeType: String(message?.imageMimeType || '').trim(),
+        error: 'Photo unavailable',
+      });
+      return '';
+    }
+  })();
+
+  imageAssetCache.set(key, {
+    status: 'loading',
+    blobUrl: '',
+    mimeType: String(message?.imageMimeType || '').trim(),
+    error: '',
+    promise,
+  });
+  return promise;
+}
+
+function syncChatImageNode(imgEl, message) {
+  if (!imgEl || !message) return;
+  const key = getImageAssetCacheKey(message);
+  const fallbackEl = imgEl.closest('.chatImageCard')?.querySelector('.chatImageFallback') || null;
+  imgEl.dataset.imageCacheKey = key;
+
+  const applyError = () => {
+    imgEl.removeAttribute('src');
+    imgEl.style.display = fallbackEl ? 'none' : '';
+    if (fallbackEl) fallbackEl.classList.remove('hidden');
+  };
+  const applyReady = (blobUrl) => {
+    if (!blobUrl) {
+      applyError();
+      return;
+    }
+    imgEl.src = blobUrl;
+    imgEl.style.display = '';
+    if (fallbackEl) fallbackEl.classList.add('hidden');
+    const viewerTarget = imgEl.hasAttribute('data-chat-image-viewer')
+      ? imgEl
+      : imgEl.closest('[data-chat-image-viewer]');
+    viewerTarget?.setAttribute('data-chat-image-viewer', blobUrl);
+  };
+
+  const cached = imageAssetCache.get(key);
+  if (cached?.status === 'ready' && cached.blobUrl) {
+    applyReady(cached.blobUrl);
+    return;
+  }
+  if (cached?.status === 'error') {
+    applyError();
+    return;
+  }
+
+  ensureImageBlobUrl(message).then((blobUrl) => {
+    if (!imgEl.isConnected) return;
+    if (imgEl.dataset.imageCacheKey !== key) return;
+    if (!blobUrl) {
+      applyError();
+      return;
+    }
+    applyReady(blobUrl);
+  }).catch(() => {
+    if (!imgEl.isConnected) return;
+    if (imgEl.dataset.imageCacheKey !== key) return;
+    applyError();
+  });
+}
+
+function bindRenderedChatImages(root = document) {
+  if (!root?.querySelectorAll) return;
+  root.querySelectorAll('[data-chat-image="1"]').forEach((imgEl) => {
+    const message = {
+      id: parseMessageId(imgEl.dataset.messageId),
+      imageUrl: String(imgEl.dataset.imageUrl || '').trim(),
+      imageMimeType: String(imgEl.dataset.imageMimeType || '').trim(),
+      createdAt: String(imgEl.dataset.createdAt || '').trim(),
+    };
+    syncChatImageNode(imgEl, message);
+  });
 }
 
 function prefetchVoiceBlobUrls(messages = []) {
@@ -3626,9 +3849,11 @@ function bindVoiceComposerControls(surface, optionsFactory) {
   }
 
   function renderChatImageCard(message, bubbleClass = 'chatBubbleOther') {
-    const imageUrl = escapeHtml(String(message?.imageUrl || ''));
+    const rawImageUrl = String(message?.imageUrl || '').trim();
+    const cacheEntry = imageAssetCache.get(getImageAssetCacheKey(message));
+    const initialSrc = cacheEntry?.status === 'ready' && cacheEntry?.blobUrl ? String(cacheEntry.blobUrl) : '';
     const caption = String(message?.text || '').trim();
-    return `<div class="${bubbleClass} chatImageCard"><img src="${imageUrl}" alt="Chat photo" loading="lazy" class="chatImageThumb" data-chat-image-viewer="${imageUrl}" style="max-width:220px;max-height:220px;border-radius:12px;display:block;cursor:pointer;" onerror="this.style.display='none';this.closest('.chatImageCard')?.querySelector('.chatImageFallback')?.classList.remove('hidden');" /><div class="chatImageFallback hidden" style="font-size:12px;opacity:0.8;">Photo unavailable</div>${caption ? `<div class="chatImageCaption">${escapeHtml(caption)}</div>` : ''}</div>`;
+    return `<div class="${bubbleClass} chatImageCard"><img src="${escapeHtml(initialSrc)}" alt="Chat photo" loading="lazy" class="chatImageThumb" data-chat-image="1" data-message-id="${escapeHtml(String(message?.id ?? ''))}" data-image-url="${escapeHtml(rawImageUrl)}" data-image-mime-type="${escapeHtml(String(message?.imageMimeType || ''))}" data-created-at="${escapeHtml(String(message?.createdAt || ''))}" data-chat-image-viewer="${escapeHtml(initialSrc || rawImageUrl)}" style="max-width:220px;max-height:220px;border-radius:12px;display:block;cursor:pointer;" /><div class="chatImageFallback ${initialSrc ? 'hidden' : ''}" style="font-size:12px;opacity:0.8;">Photo unavailable</div>${caption ? `<div class="chatImageCaption">${escapeHtml(caption)}</div>` : ''}</div>`;
   }
 
   function renderPublicMessageRow(message) {
@@ -3979,6 +4204,16 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     if (removedIds.size) syncAllVoicePlayers();
   }
 
+  function pruneExpiredImageAssets(removedMessages = []) {
+    const removed = Array.isArray(removedMessages) ? removedMessages : [];
+    if (!removed.length) return;
+    removed.forEach((message) => {
+      const messageId = parseMessageId(message?.id);
+      if (messageId === null) return;
+      releaseImageBlobUrl(messageId, String(message?.imageUrl || '').trim());
+    });
+  }
+
   function pruneExpiredChatState() {
     const now = Date.now();
     const removedMessages = [];
@@ -4035,7 +4270,9 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     }
 
     pruneExpiredVoiceAssets(removedMessages);
+    pruneExpiredImageAssets(removedMessages);
     pruneVoiceAssetCache();
+    pruneImageAssetCache();
 
     const latestPublicId = publicChatMessages.reduce((max, msg) => Math.max(max, Number(msg?.id || 0)), 0) || null;
     chatLatestMessageId = latestPublicId;
@@ -4536,9 +4773,11 @@ function bindVoiceComposerControls(surface, optionsFactory) {
   function renderPhotoGallery(items = [], emptyText = 'No photos yet.') {
     if (!Array.isArray(items) || !items.length) return `<div class="chatEmpty">${escapeHtml(emptyText)}</div>`;
     return `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px;">${items.map((msg) => {
-      const url = escapeHtml(String(msg?.imageUrl || ''));
+      const rawImageUrl = String(msg?.imageUrl || '').trim();
+      const cacheEntry = imageAssetCache.get(getImageAssetCacheKey(msg));
+      const initialSrc = cacheEntry?.status === 'ready' && cacheEntry?.blobUrl ? String(cacheEntry.blobUrl) : '';
       const label = escapeHtml(formatChatTime(msg?.createdAt) || '');
-      return `<button type="button" class="chatPhotoTile" data-chat-image-viewer="${url}" style="padding:0;border:0;background:none;cursor:pointer;"><img src="${url}" alt="Chat photo" loading="lazy" style="width:100%;height:110px;object-fit:cover;border-radius:10px;display:block;" /><span style="display:block;font-size:11px;opacity:.75;margin-top:2px;text-align:left;">${label}</span></button>`;
+      return `<button type="button" class="chatPhotoTile" data-chat-image-viewer="${escapeHtml(initialSrc || rawImageUrl)}" style="padding:0;border:0;background:none;cursor:pointer;"><img src="${escapeHtml(initialSrc)}" alt="Chat photo" loading="lazy" data-chat-image="1" data-message-id="${escapeHtml(String(msg?.id ?? ''))}" data-image-url="${escapeHtml(rawImageUrl)}" data-image-mime-type="${escapeHtml(String(msg?.imageMimeType || ''))}" data-created-at="${escapeHtml(String(msg?.createdAt || ''))}" style="width:100%;height:110px;object-fit:cover;border-radius:10px;display:block;" /><span style="display:block;font-size:11px;opacity:.75;margin-top:2px;text-align:left;">${label}</span></button>`;
     }).join('')}</div>`;
   }
 
@@ -4561,6 +4800,8 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     const wrap = document.getElementById('chatPublicPhotosView');
     if (!wrap) return;
     wrap.innerHTML = `${renderPhotoGallery(publicPhotoItems, 'No public photos yet.')}${publicPhotoHasMore ? '<div style="margin-top:8px;"><button id="chatPublicPhotosLoadMore" class="chipBtn" type="button">Load more</button></div>' : ''}`;
+    bindChatImageViewer(wrap);
+    bindRenderedChatImages(wrap);
     const loadMoreBtn = document.getElementById('chatPublicPhotosLoadMore');
     if (loadMoreBtn && loadMoreBtn.dataset.bound !== '1') {
       loadMoreBtn.dataset.bound = '1';
@@ -4583,6 +4824,8 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     const items = privatePhotoItemsByUserId[uid] || [];
     const hasMore = !!privatePhotoHasMoreByUserId[uid];
     wrap.innerHTML = `${renderPhotoGallery(items, 'No private photos yet.')}${hasMore ? '<div style="margin-top:8px;"><button id="chatPrivatePhotosLoadMore" class="chipBtn" type="button">Load more</button></div>' : ''}`;
+    bindChatImageViewer(wrap);
+    bindRenderedChatImages(wrap);
   }
 
   function bindPrivateConversationComposer(userId) {
@@ -4763,6 +5006,8 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     }
     bindPrivateConversationComposer(privateActiveUserId);
     bindVoicePlayers(wrap);
+    bindChatImageViewer(wrap);
+    bindRenderedChatImages(wrap);
     void prefetchVoiceBlobUrls(messages.filter((msg) => msg?.messageType === 'voice'));
   }
 
@@ -4781,6 +5026,8 @@ function bindVoiceComposerControls(surface, optionsFactory) {
       });
     });
     bindVoicePlayers(dmList);
+    bindChatImageViewer(dmList);
+    bindRenderedChatImages(dmList);
     void prefetchVoiceBlobUrls((messages || []).filter((msg) => msg?.messageType === 'voice'));
     if (nearBottom) dmList.scrollTop = dmList.scrollHeight;
     else dmList.scrollTop = previousScrollTop;
@@ -4974,6 +5221,7 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     chatLatestMessageId = null;
     publicChatMessages = [];
     revokeVoiceBlobUrls();
+    revokeImageBlobUrls();
     chatLastReadId = loadChatLastReadId();
     chatSeenKeys = new Set();
     unreadChatCount = 0;
@@ -5043,6 +5291,8 @@ function bindVoiceComposerControls(surface, optionsFactory) {
       if (id !== null) chatLatestMessageId = chatLatestMessageId === null ? id : Math.max(chatLatestMessageId, id);
     });
     bindVoicePlayers(listEl);
+    bindChatImageViewer(listEl);
+    bindRenderedChatImages(listEl);
     void prefetchVoiceBlobUrls(nextMessages.filter((msg) => msg.messageType === 'voice'));
     if (forceStickToBottom || nearBottom) listEl.scrollTop = listEl.scrollHeight;
     else listEl.scrollTop = previousScrollTop;
@@ -5437,6 +5687,7 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     renderPublicPhotosView();
     bindVoicePlayers(document.getElementById('chatList') || document);
     bindChatImageViewer(document);
+    bindRenderedChatImages(document);
 
     chatLoadInitial()
       .then((result) => {
