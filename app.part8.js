@@ -2535,7 +2535,19 @@ function bindVoiceComposerControls(surface, optionsFactory) {
   }
 
   function normalizeImageUrl(raw) {
-    const url = raw?.image_url || raw?.imageUrl || raw?.photo_url || raw?.photoUrl || raw?.media_image_url || raw?.mediaImageUrl || '';
+    const url = raw?.image_url
+      || raw?.imageUrl
+      || raw?.media_url
+      || raw?.mediaUrl
+      || raw?.file_url
+      || raw?.fileUrl
+      || raw?.attachment_url
+      || raw?.attachmentUrl
+      || raw?.photo_url
+      || raw?.photoUrl
+      || raw?.media_image_url
+      || raw?.mediaImageUrl
+      || '';
     return resolveChatAssetUrl(url);
   }
 
@@ -2554,7 +2566,13 @@ function bindVoiceComposerControls(surface, optionsFactory) {
   }
 
   function normalizeImageMimeType(raw) {
-    const mime = raw?.image_mime_type || raw?.photo_mime_type || raw?.imageMimeType || raw?.photoMimeType || '';
+    const mime = raw?.image_mime_type
+      || raw?.imageMimeType
+      || raw?.mime_type
+      || raw?.mimeType
+      || raw?.photo_mime_type
+      || raw?.photoMimeType
+      || '';
     return String(mime || '').trim();
   }
 
@@ -3610,7 +3628,7 @@ function bindVoiceComposerControls(surface, optionsFactory) {
   function renderChatImageCard(message, bubbleClass = 'chatBubbleOther') {
     const imageUrl = escapeHtml(String(message?.imageUrl || ''));
     const caption = String(message?.text || '').trim();
-    return `<div class="${bubbleClass} chatImageCard"><img src="${imageUrl}" alt="Chat photo" loading="lazy" class="chatImageThumb" data-chat-image-viewer="${imageUrl}" style="max-width:220px;max-height:220px;border-radius:12px;display:block;cursor:pointer;" />${caption ? `<div class="chatImageCaption">${escapeHtml(caption)}</div>` : ''}</div>`;
+    return `<div class="${bubbleClass} chatImageCard"><img src="${imageUrl}" alt="Chat photo" loading="lazy" class="chatImageThumb" data-chat-image-viewer="${imageUrl}" style="max-width:220px;max-height:220px;border-radius:12px;display:block;cursor:pointer;" onerror="this.style.display='none';this.closest('.chatImageCard')?.querySelector('.chatImageFallback')?.classList.remove('hidden');" /><div class="chatImageFallback hidden" style="font-size:12px;opacity:0.8;">Photo unavailable</div>${caption ? `<div class="chatImageCaption">${escapeHtml(caption)}</div>` : ''}</div>`;
   }
 
   function renderPublicMessageRow(message) {
