@@ -2605,6 +2605,14 @@ function bindVoiceComposerControls(surface, optionsFactory) {
   let chatPollAbortController = null;
   let privateThreadAbortController = null;
   const privateMessageAbortControllers = new Map();
+  const chatScrollRuntime = {
+    publicActiveUntil: 0,
+    privateActiveUntilByUserId: Object.create(null),
+    profileActiveUntil: 0,
+    pendingPublicRender: null,
+    pendingPrivateRenderByUserId: Object.create(null),
+    pendingProfileRender: null,
+  };
   const privateDirectoryState = {
     open: false,
     query: '',
@@ -4802,6 +4810,94 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     return `fallback:${msg?.createdAt || ''}|${msg?.senderUserId || msg?.userId || ''}|${msg?.recipientUserId || ''}|${msg?.text || ''}|${msg?.audioUrl || ''}|${msg?.imageUrl || ''}`;
   }
 
+  function buildMessageRenderSignature(messages = []) {
+    const list = Array.isArray(messages) ? messages : [];
+    return list.map((msg) => {
+      const id = msg?.id == null ? '' : String(msg.id);
+      const key = getMessageMergeKey(msg);
+      const type = String(msg?.messageType || '');
+      const audioUrl = String(msg?.audioUrl || '');
+      const imageUrl = String(msg?.imageUrl || '');
+      const text = String(msg?.text || '');
+      return `${id}|${key}|${type}|${audioUrl}|${imageUrl}|${text}`;
+    }).join('||');
+  }
+
+  function markChatScrollActive(scope, userId = '') {
+    const until = Date.now() + 260;
+    if (scope === 'public') {
+      chatScrollRuntime.publicActiveUntil = until;
+      return;
+    }
+    if (scope === 'profile-dm') {
+      chatScrollRuntime.profileActiveUntil = until;
+      return;
+    }
+    const uid = String(userId || '');
+    if (uid) chatScrollRuntime.privateActiveUntilByUserId[uid] = until;
+  }
+
+  function isChatScrollActive(scope, userId = '') {
+    const now = Date.now();
+    if (scope === 'public') return now < Number(chatScrollRuntime.publicActiveUntil || 0);
+    if (scope === 'profile-dm') return now < Number(chatScrollRuntime.profileActiveUntil || 0);
+    const uid = String(userId || '');
+    return uid ? now < Number(chatScrollRuntime.privateActiveUntilByUserId[uid] || 0) : false;
+  }
+
+  function queueDeferredChatRenderFlush(scope, userId = '') {
+    const delay = 280;
+    if (scope === 'public') {
+      if (chatScrollRuntime.pendingPublicRender?.timer) clearTimeout(chatScrollRuntime.pendingPublicRender.timer);
+      if (!chatScrollRuntime.pendingPublicRender) chatScrollRuntime.pendingPublicRender = {};
+      chatScrollRuntime.pendingPublicRender.timer = setTimeout(() => {
+        if (isChatScrollActive('public')) return;
+        const pending = chatScrollRuntime.pendingPublicRender?.messages;
+        chatScrollRuntime.pendingPublicRender = null;
+        if (pending) renderChatMessages(pending, { replace: true, forceStickToBottom: false, source: 'deferred' });
+      }, delay);
+      return;
+    }
+    if (scope === 'profile-dm') {
+      if (chatScrollRuntime.pendingProfileRender?.timer) clearTimeout(chatScrollRuntime.pendingProfileRender.timer);
+      if (!chatScrollRuntime.pendingProfileRender) chatScrollRuntime.pendingProfileRender = {};
+      chatScrollRuntime.pendingProfileRender.timer = setTimeout(() => {
+        if (isChatScrollActive('profile-dm')) return;
+        const pending = chatScrollRuntime.pendingProfileRender?.messages;
+        chatScrollRuntime.pendingProfileRender = null;
+        if (pending) updateDriverProfileDmList(pending);
+      }, delay);
+      return;
+    }
+    const uid = String(userId || '');
+    if (!uid) return;
+    const existing = chatScrollRuntime.pendingPrivateRenderByUserId[uid];
+    chatScrollRuntime.pendingPrivateRenderByUserId[uid] = {
+      ...(existing || {}),
+      messages: existing?.messages,
+      timer: setTimeout(() => {
+        if (isChatScrollActive('private', uid)) return;
+        const pending = chatScrollRuntime.pendingPrivateRenderByUserId[uid]?.messages;
+        delete chatScrollRuntime.pendingPrivateRenderByUserId[uid];
+        if (pending && privateActiveUserId === uid) renderPrivateConversation();
+      }, delay),
+    };
+    if (existing?.timer) clearTimeout(existing.timer);
+  }
+
+  function bindChatScrollActivity(listEl, scope, userId = '') {
+    if (!listEl || listEl.dataset.chatScrollBound === '1') return;
+    listEl.dataset.chatScrollBound = '1';
+    const mark = () => {
+      markChatScrollActive(scope, userId);
+      queueDeferredChatRenderFlush(scope, userId);
+    };
+    listEl.addEventListener('scroll', mark, { passive: true });
+    listEl.addEventListener('touchstart', mark, { passive: true });
+    listEl.addEventListener('touchmove', mark, { passive: true });
+    listEl.addEventListener('wheel', mark, { passive: true });
+  }
+
   function messageCompletenessScore(msg) {
     let score = 0;
     if (parseMessageId(msg?.id) !== null) score += 10;
@@ -5462,8 +5558,21 @@ function bindVoiceComposerControls(surface, optionsFactory) {
       if (titleEl) titleEl.textContent = privateActiveDisplayName || 'Private chat';
     }
     const list = document.getElementById('chatPrivateConversationList');
+    bindChatScrollActivity(list, 'private', privateActiveUserId);
     const mode = privateChatViewModeByUserId[privateActiveUserId] || 'messages';
     privateChatViewModeByUserId[privateActiveUserId] = mode;
+    const uid = String(privateActiveUserId || '');
+    if (isChatScrollActive('private', uid)) {
+      if (!chatScrollRuntime.pendingPrivateRenderByUserId[uid]) chatScrollRuntime.pendingPrivateRenderByUserId[uid] = {};
+      chatScrollRuntime.pendingPrivateRenderByUserId[uid].messages = messages;
+      queueDeferredChatRenderFlush('private', uid);
+      return;
+    }
+    const nextSignature = buildMessageRenderSignature(messages);
+    const lastSignatureUserId = String(list?.dataset.renderSignatureUserId || '');
+    if (list && lastSignatureUserId !== uid) list.dataset.renderSignature = '';
+    const lastSignature = String(list?.dataset.renderSignature || '');
+    if (lastSignature === nextSignature) return;
     void preserveVoicePlaybackAcrossRender(() => {
       reconcileMessageList(list, messages, {
         scope: 'private',
@@ -5472,6 +5581,10 @@ function bindVoiceComposerControls(surface, optionsFactory) {
         emptyHtml: '<div class="chatEmpty">No messages yet.</div>',
       });
     });
+    if (list) {
+      list.dataset.renderSignature = nextSignature;
+      list.dataset.renderSignatureUserId = uid;
+    }
     if (list) {
       if (shouldStickToBottom || !prevList) list.scrollTop = list.scrollHeight;
       else list.scrollTop = preserveScrollTop;
@@ -5531,6 +5644,16 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     pruneExpiredChatState();
     const dmList = document.getElementById('driverProfileDmList');
     if (!dmList) return false;
+    bindChatScrollActivity(dmList, 'profile-dm');
+    if (isChatScrollActive('profile-dm')) {
+      if (!chatScrollRuntime.pendingProfileRender) chatScrollRuntime.pendingProfileRender = {};
+      chatScrollRuntime.pendingProfileRender.messages = messages;
+      queueDeferredChatRenderFlush('profile-dm');
+      return false;
+    }
+    const nextSignature = buildMessageRenderSignature(messages);
+    const lastSignature = String(dmList.dataset.renderSignature || '');
+    if (lastSignature === nextSignature) return false;
     const previousScrollTop = dmList.scrollTop;
     const nearBottom = isChatNearBottom(dmList, 80);
     void preserveVoicePlaybackAcrossRender(() => {
@@ -5541,6 +5664,7 @@ function bindVoiceComposerControls(surface, optionsFactory) {
         emptyHtml: '<div class="driverProfileStatus">No private messages yet.</div>',
       });
     });
+    dmList.dataset.renderSignature = nextSignature;
     bindVoicePlayers(dmList);
     bindChatImageViewer(dmList);
     bindRenderedChatImages(dmList);
@@ -5778,16 +5902,27 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     pruneExpiredChatState();
     const listEl = document.getElementById('chatList');
     if (!listEl) return;
+    bindChatScrollActivity(listEl, 'public');
     const nextMessages = Array.isArray(messages) ? messages.map((msg) => normalizePublicChatMessage(msg)) : [];
     if (!nextMessages.length) {
       if (replace) {
         chatSeenKeys = new Set();
         listEl.innerHTML = '';
         listEl.dataset.hasMessages = '0';
+        listEl.dataset.renderSignature = '';
         setChatStatus('No messages yet.');
       }
       return;
     }
+    if (isChatScrollActive('public') && !forceStickToBottom) {
+      if (!chatScrollRuntime.pendingPublicRender) chatScrollRuntime.pendingPublicRender = {};
+      chatScrollRuntime.pendingPublicRender.messages = nextMessages;
+      queueDeferredChatRenderFlush('public');
+      return;
+    }
+    const nextSignature = buildMessageRenderSignature(nextMessages);
+    const lastSignature = String(listEl.dataset.renderSignature || '');
+    if (lastSignature === nextSignature) return;
     const previousScrollTop = listEl.scrollTop;
     const nearBottom = isChatNearBottom(listEl, 80);
     void preserveVoicePlaybackAcrossRender(() => {
@@ -5798,6 +5933,7 @@ function bindVoiceComposerControls(surface, optionsFactory) {
         replace,
       });
     });
+    listEl.dataset.renderSignature = nextSignature;
     nextMessages.forEach((msg) => {
       const key = chatMsgKey(msg);
       chatSeenKeys.add(key);
@@ -5980,7 +6116,7 @@ function bindVoiceComposerControls(surface, optionsFactory) {
         killFeedBootstrapPollConsumed = true;
       }
       if (panelOpen) {
-        renderChatMessages(mergedMsgs, { replace: true, forceStickToBottom: false });
+        if (loadedMsgs.length > 0) renderChatMessages(mergedMsgs, { replace: true, forceStickToBottom: false });
         markChatReadThroughLatestLoaded();
         if (killFeedContainer) killFeedContainer.style.display = 'none';
       } else {
