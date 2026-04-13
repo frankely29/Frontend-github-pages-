@@ -1318,11 +1318,11 @@ html, body { height: 100%; margin: 0; padding: 0; }
       align-items:center;
       justify-content:center;
       padding:20px;
-      z-index:3100;
+      z-index:7600;
     }
     .chatPhotoViewerCard{
-      width:min(86vw,900px);
-      max-height:76vh;
+      width:min(88vw,900px);
+      max-height:78vh;
       background:#ffffff;
       border-radius:16px;
       border:1px solid rgba(15,23,42,0.16);
@@ -1361,16 +1361,17 @@ html, body { height: 100%; margin: 0; padding: 0; }
       align-items:center;
       justify-content:center;
       min-height:220px;
-      max-height:calc(76vh - 132px);
+      max-height:calc(78vh - 132px);
       padding:12px 44px;
       background:#0f172a;
     }
     .chatPhotoViewerImage{
-      max-width:100%;
-      max-height:100%;
       width:auto;
       height:auto;
+      max-width:100%;
+      max-height:min(62vh,560px);
       object-fit:contain;
+      aspect-ratio:auto;
       border-radius:10px;
       background:#0b1220;
     }
