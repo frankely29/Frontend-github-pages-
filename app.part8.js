@@ -182,7 +182,6 @@ const chatVoiceGestureState = {
     locked: false,
     scope: '',
     pointerId: null,
-    captureEl: null,
     startX: 0,
     startY: 0,
     currentX: 0,
@@ -196,10 +195,6 @@ const chatVoiceGestureState = {
     canceled: false,
     sentOnRelease: false,
     sessionId: 0,
-    suppressClickUntil: 0,
-    autoSendScope: '',
-    autoSendOptions: null,
-    holdingStartedAt: 0,
   };
 
 const chatVoiceComposerMode = {
@@ -1946,142 +1941,233 @@ function syncVoiceComposerSendButton(scope) {
     sendBtn.disabled = isRecordingScope || isUploadingDraft;
   }
 
-function getVoiceComposerMode(scope) {
-    const key = voiceScopeStateKey(scope);
-    return chatVoiceComposerMode[key] || 'idle';
-  }
-
-function setVoiceComposerMode(scope, mode) {
-    const key = voiceScopeStateKey(scope);
-    if (!key) return;
-    const nextMode = ['idle', 'holding', 'locked', 'review', 'uploading', 'error'].includes(mode) ? mode : 'idle';
-    chatVoiceComposerMode[key] = nextMode;
-  }
-
-function renderVoiceComposerSurface(scope) {
-    const domKey = voiceScopeDomKey(scope);
-    const mode = getVoiceComposerMode(scope);
-    const composerEl = document.getElementById(`${domKey}VoiceComposer`);
-    const mainRowEl = document.getElementById(`${domKey}ComposerMainRow`);
-    const host = getVoiceModeHost(scope);
-    if (composerEl) {
-      composerEl.dataset.voiceMode = mode;
-      composerEl.classList.toggle('chatComposerModeIdle', mode === 'idle');
-      composerEl.classList.toggle('chatComposerModeHolding', mode === 'holding');
-      composerEl.classList.toggle('chatComposerModeLocked', mode === 'locked');
-      composerEl.classList.toggle('chatComposerModeReview', mode === 'review');
-      composerEl.classList.toggle('chatComposerModeUploading', mode === 'uploading');
-      composerEl.classList.toggle('chatComposerModeError', mode === 'error');
-      composerEl.classList.toggle('chatComposerVoiceHolding', mode === 'holding');
-      composerEl.classList.toggle('chatComposerVoiceLocked', mode === 'locked');
-      composerEl.classList.toggle('chatComposerVoiceReview', mode === 'review' || mode === 'uploading' || mode === 'error');
-    }
-    if (mainRowEl) mainRowEl.hidden = mode !== 'idle';
-    if (host) host.hidden = mode === 'idle';
+function getVoiceComposerScopeKey(scope) {
+    const s = String(scope || '').trim().toLowerCase();
+    if (s === 'profile-dm' || s === 'driverprofile' || s === 'driverProfile') return 'profile-dm';
+    if (s === 'private') return 'private';
+    return 'public';
   }
 
 function getVoiceModeHost(scope) {
-    const key = voiceScopeStateKey(scope);
-    if (key === 'public') return document.getElementById('publicVoiceModeHost');
+    const key = getVoiceComposerScopeKey(scope);
     if (key === 'private') return document.getElementById('privateVoiceModeHost');
     if (key === 'profile-dm') return document.getElementById('driverProfileVoiceModeHost');
-    return null;
+    return document.getElementById('publicVoiceModeHost');
+  }
+
+function getVoiceComposerMode(scope) {
+    const key = getVoiceComposerScopeKey(scope);
+    return String(chatVoiceComposerMode[key] || 'idle');
+  }
+
+function setVoiceComposerMode(scope, mode) {
+    const key = getVoiceComposerScopeKey(scope);
+    chatVoiceComposerMode[key] = String(mode || 'idle');
+  }
+
+function setComposerControlsHidden(scope, hidden) {
+    const key = getVoiceComposerScopeKey(scope);
+
+    if (key === 'public') {
+      const input = document.getElementById('chatInput');
+      const send = document.getElementById('chatSendBtn');
+      const photo = document.getElementById('chatPublicPhotoBtn');
+      const mic = document.getElementById('publicVoiceStartBtn');
+      if (input) input.classList.toggle('hidden', !!hidden);
+      if (send) send.classList.toggle('hidden', !!hidden);
+      if (photo) photo.classList.toggle('hidden', !!hidden);
+      if (mic) mic.classList.toggle('hidden', !!hidden);
+      return;
+    }
+
+    if (key === 'private') {
+      const input = document.getElementById('chatPrivateInput');
+      const send = document.getElementById('chatPrivateSendBtn');
+      const photo = document.getElementById('chatPrivatePhotoBtn');
+      const mic = document.getElementById('privateVoiceStartBtn');
+      if (input) input.classList.toggle('hidden', !!hidden);
+      if (send) send.classList.toggle('hidden', !!hidden);
+      if (photo) photo.classList.toggle('hidden', !!hidden);
+      if (mic) mic.classList.toggle('hidden', !!hidden);
+      return;
+    }
+
+    if (key === 'profile-dm') {
+      const input = document.getElementById('driverProfileInput');
+      const send = document.getElementById('driverProfileSendBtn');
+      const photo = document.getElementById('driverProfilePhotoBtn');
+      const mic = document.getElementById('driverProfileVoiceStartBtn');
+      if (input) input.classList.toggle('hidden', !!hidden);
+      if (send) send.classList.toggle('hidden', !!hidden);
+      if (photo) photo.classList.toggle('hidden', !!hidden);
+      if (mic) mic.classList.toggle('hidden', !!hidden);
+    }
+  }
+
+function getVoiceRecordingTimerText(scope) {
+    const key = getVoiceComposerScopeKey(scope);
+    const isActiveScope = String(chatVoiceState.scope || '') === key;
+    if (!isActiveScope) return '0:00';
+    return formatChatVoiceDuration(Number(chatVoiceState.durationMs || 0));
+  }
+
+function applyVoiceThumbTransform() {
+    const scope = getVoiceComposerScopeKey(chatVoiceGestureState.scope);
+    const thumb = document.getElementById(`${scope}VoiceThumb`);
+    if (!thumb) return;
+    const x = Number(chatVoiceGestureState.thumbOffsetX || 0);
+    const y = Number(chatVoiceGestureState.thumbOffsetY || 0);
+    thumb.style.transform = `translate(${x}px, ${y}px)`;
+  }
+
+function bindLockedVoiceControls(scope) {
+    const key = getVoiceComposerScopeKey(scope);
+    const stopBtn = document.getElementById(`${key}VoiceStopBtn`);
+    const cancelBtn = document.getElementById(`${key}VoiceCancelBtn`);
+
+    if (stopBtn && stopBtn.dataset.bound !== '1') {
+      stopBtn.dataset.bound = '1';
+      stopBtn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        await stopChatVoiceRecording();
+      });
+    }
+
+    if (cancelBtn && cancelBtn.dataset.bound !== '1') {
+      cancelBtn.dataset.bound = '1';
+      cancelBtn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        await discardChatVoiceDraft(key, 'Voice note discarded');
+        resetVoiceGestureState();
+        setVoiceComposerMode(key, 'idle');
+        renderVoiceComposerSurface(key);
+      });
+    }
+  }
+
+function bindReviewVoiceControls(scope) {
+    const key = getVoiceComposerScopeKey(scope);
+    const previewBtn = document.getElementById(`${key}VoiceDraftPreviewBtn`);
+    const sendBtn = document.getElementById(`${key}VoiceDraftSendBtn`);
+    const cancelBtn = document.getElementById(`${key}VoiceDraftCancelBtn`);
+
+    if (previewBtn && previewBtn.dataset.bound !== '1') {
+      previewBtn.dataset.bound = '1';
+      previewBtn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        await toggleChatVoiceDraftPreview(key, previewBtn);
+      });
+    }
+
+    if (sendBtn && sendBtn.dataset.bound !== '1') {
+      sendBtn.dataset.bound = '1';
+      sendBtn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const options = getVoiceScopeSendOptions(key);
+        await sendChatVoiceDraft(key, options);
+        resetVoiceGestureState();
+        setVoiceComposerMode(key, 'idle');
+        renderVoiceComposerSurface(key);
+      });
+    }
+
+    if (cancelBtn && cancelBtn.dataset.bound !== '1') {
+      cancelBtn.dataset.bound = '1';
+      cancelBtn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        await discardChatVoiceDraft(key, 'Voice note discarded');
+        resetVoiceGestureState();
+        setVoiceComposerMode(key, 'idle');
+        renderVoiceComposerSurface(key);
+      });
+    }
+  }
+
+function renderVoiceComposerSurface(scope) {
+    const key = getVoiceComposerScopeKey(scope);
+    const host = getVoiceModeHost(key);
+    if (!host) return;
+
+    const mode = getVoiceComposerMode(key);
+    const timerText = getVoiceRecordingTimerText(key);
+    const draft = getChatVoiceDraft(key);
+
+    if (mode === 'idle') {
+      host.hidden = true;
+      host.innerHTML = '';
+      setComposerControlsHidden(key, false);
+      return;
+    }
+
+    setComposerControlsHidden(key, true);
+    host.hidden = false;
+
+    if (mode === 'holding') {
+      host.innerHTML = `
+      <div class="chatVoiceHoldStage" data-voice-mode="holding">
+        <div class="chatVoiceHoldTimer">${escapeHtml(timerText)}</div>
+        <div class="chatVoiceHoldHint"><span class="chatVoiceHoldArrow">←</span> slide to cancel</div>
+        <div class="chatVoiceLockRail">
+          <div class="chatVoiceLockIcon">🔒</div>
+        </div>
+        <button type="button" class="chatVoiceMicThumb" id="${key}VoiceThumb" aria-label="Recording mic"></button>
+      </div>
+    `;
+      applyVoiceThumbTransform();
+      return;
+    }
+
+    if (mode === 'locked') {
+      host.innerHTML = `
+      <div class="chatVoiceLockedStrip" data-voice-mode="locked">
+        <div class="chatVoiceLockedTimer">${escapeHtml(timerText)}</div>
+        <button type="button" class="chatVoiceInlineBtn danger" id="${key}VoiceCancelBtn">Delete</button>
+        <button type="button" class="chatVoiceInlineBtn strong" id="${key}VoiceStopBtn">Stop</button>
+      </div>
+    `;
+      bindLockedVoiceControls(key);
+      return;
+    }
+
+    if (mode === 'review') {
+      host.innerHTML = `
+      <div class="chatVoiceReviewStrip" data-voice-mode="review">
+        <button type="button" class="chatVoiceInlineBtn" id="${key}VoiceDraftPreviewBtn">Play</button>
+        <div class="chatVoiceReviewDuration" id="${key}VoiceDraftDuration">${escapeHtml(formatChatVoiceDuration(Number(draft?.durationMs || 0)))}</div>
+        <button type="button" class="chatVoiceInlineBtn danger" id="${key}VoiceDraftCancelBtn">Delete</button>
+        <button type="button" class="chatVoiceInlineBtn strong" id="${key}VoiceDraftSendBtn">Send</button>
+      </div>
+    `;
+      bindReviewVoiceControls(key);
+      return;
+    }
+
+    if (mode === 'uploading') {
+      host.innerHTML = `<div class="chatVoiceStatusStrip">Uploading voice note…</div>`;
+      return;
+    }
+
+    if (mode === 'error') {
+      host.innerHTML = `<div class="chatVoiceStatusStrip error">Voice note failed. Tap mic to try again.</div>`;
+      return;
+    }
   }
 
 function syncVoiceRecorderUi(scope) {
-    const domKey = voiceScopeDomKey(scope);
-    const stateScope = voiceScopeStateKey(scope);
-    const isActive = !!stateScope && chatVoiceState.scope === stateScope;
-    const phase = String(chatVoiceState.phase || 'idle');
-    const isRecording = isActive && phase === 'recording';
-    const isBusyRow = isActive && (phase === 'recording' || phase === 'stopping' || phase === 'requesting' || phase === 'preparing');
-    const isStopping = isActive && phase === 'stopping';
-    const isHoldingGesture = isRecording && chatVoiceGestureState.active && chatVoiceGestureState.scope === stateScope && !chatVoiceGestureState.locked;
-    const isLockedRecording = isRecording && chatVoiceGestureState.locked && chatVoiceGestureState.scope === stateScope;
-    const draft = getChatVoiceDraft(scope);
-    const isDraftReady = !!draft && draft.status === 'ready';
-    const isDraftSending = !!draft && draft.status === 'sending';
-    const startBtn = document.getElementById(`${domKey}VoiceStartBtn`);
-    const host = getVoiceModeHost(scope);
-    const canStart = !isBusyRow && !isDraftSending;
-    const hasError = !!String((draft?.error || (isActive ? chatVoiceState.errorText : '')) || '').trim();
-    let mode = getVoiceComposerMode(scope);
-    if (!['idle', 'holding', 'locked', 'review', 'uploading', 'error'].includes(mode)) mode = 'idle';
-    if (mode === 'holding' && !isHoldingGesture) mode = 'idle';
-    if (mode === 'locked' && !isLockedRecording && !isDraftReady) mode = 'idle';
-    if (mode === 'review' && !isDraftReady) mode = 'idle';
-    if (mode === 'uploading' && !isDraftSending) mode = 'idle';
-    if (mode === 'error' && !hasError && !isDraftReady) mode = 'idle';
-    if (mode === 'idle' && isDraftSending) mode = 'uploading';
-    if (mode === 'idle' && isDraftReady) mode = 'review';
-    if (mode === 'idle' && hasError) mode = 'error';
-    setVoiceComposerMode(scope, mode);
-    renderVoiceComposerSurface(scope);
-    if (startBtn) {
-      startBtn.hidden = mode !== 'idle';
-      startBtn.disabled = !canStart;
-      startBtn.classList.toggle('busy', !canStart && !isDraftReady);
-      startBtn.classList.toggle('recording', isRecording || isLockedRecording);
-      startBtn.textContent = '🎤';
+    const key = getVoiceComposerScopeKey(scope);
+    const mode = getVoiceComposerMode(key);
+    const host = getVoiceModeHost(key);
+    if (mode === 'idle') {
+      if (host) host.hidden = true;
+      renderVoiceComposerSurface(key);
+      return;
     }
-    const timerText = isRecording
-      ? formatChatVoiceDuration(chatVoiceState.durationMs)
-      : (isDraftReady || isDraftSending ? formatChatVoiceDuration(draft?.durationMs || 0) : '0:00');
-    document.querySelectorAll(`#${domKey}VoiceComposer [data-voice-record-timer]`).forEach((el) => {
-      el.textContent = timerText;
-    });
-    if (host) {
-      if (mode === 'holding') {
-        const deltaX = Number(chatVoiceGestureState.deltaX || 0);
-        const deltaY = Number(chatVoiceGestureState.deltaY || 0);
-        const thumbOffsetX = Number(chatVoiceGestureState.thumbOffsetX || 0);
-        const thumbOffsetY = Number(chatVoiceGestureState.thumbOffsetY || 0);
-        const cancelProgress = Math.max(0, Math.min(1, Math.abs(Math.min(0, deltaX)) / Math.max(1, Number(chatVoiceGestureState.cancelThresholdPx || 96))));
-        const lockProgress = Math.max(0, Math.min(1, Math.abs(Math.min(0, deltaY)) / Math.max(1, Number(chatVoiceGestureState.lockThresholdPx || 78))));
-        host.innerHTML = `
-          <div class="chatVoiceHoldStage" data-voice-surface="${domKey}">
-            <div class="chatVoiceHoldTimer" data-voice-record-timer="1">${escapeHtml(timerText)}</div>
-            <div class="chatVoiceHoldHint" style="opacity:${Math.max(0.15, 1 - cancelProgress).toFixed(2)};"><span class="chatVoiceHoldArrow">←</span> slide to cancel</div>
-            <div class="chatVoiceLockRail${lockProgress >= 1 ? ' active' : ''}">
-              <div class="chatVoiceLockIcon">🔒</div>
-            </div>
-            <button id="${domKey}VoiceThumb" class="chatVoiceMicThumb" type="button" aria-label="Recording mic" style="transform:translate(${thumbOffsetX.toFixed(2)}px, ${thumbOffsetY.toFixed(2)}px);">🎤</button>
-          </div>
-        `;
-      } else if (mode === 'locked') {
-        host.innerHTML = `
-          <div class="chatVoiceLockedStrip">
-            <div class="chatVoiceHoldTimer chatVoiceLockedTimer" data-voice-record-timer="1">${escapeHtml(timerText)}</div>
-            <button class="chatVoiceInlineBtn" id="${domKey}VoiceStopBtn" type="button"${isStopping ? ' disabled' : ''}>Stop</button>
-            <button class="chatVoiceInlineBtn" id="${domKey}VoiceCancelBtn" type="button"${isStopping ? ' disabled' : ''}>Delete</button>
-          </div>
-        `;
-      } else if (mode === 'review') {
-        host.innerHTML = `
-          <div class="chatVoiceReviewStrip">
-            <button class="chatVoiceInlineBtn" id="${domKey}VoiceDraftPreviewBtn" type="button"${isDraftSending ? ' disabled' : ''}>Play</button>
-            <div id="${domKey}VoiceDraftDuration">${escapeHtml(formatChatVoiceDuration(draft?.durationMs || 0))}</div>
-            <button class="chatVoiceInlineBtn" id="${domKey}VoiceDraftSendBtn" type="button"${!isDraftReady || isDraftSending ? ' disabled' : ''}>Send</button>
-            <button class="chatVoiceInlineBtn" id="${domKey}VoiceDraftCancelBtn" type="button"${isDraftSending ? ' disabled' : ''}>Delete</button>
-          </div>
-        `;
-      } else if (mode === 'uploading') {
-        host.innerHTML = `<div class="chatVoiceLockedStrip"><div class="chatVoiceLoading">Sending voice note…</div></div>`;
-      } else if (mode === 'error') {
-        const message = String((draft?.error || (isActive ? chatVoiceState.errorText : '')) || 'Voice recording failed.');
-        host.innerHTML = `<div class="chatVoiceLockedStrip"><div class="chatVoiceError">${escapeHtml(message)}</div><button class="chatVoiceInlineBtn" id="${domKey}VoiceErrorDismissBtn" type="button">Dismiss</button></div>`;
-      } else {
-        host.innerHTML = '';
-      }
-      if (mode === 'review') {
-        const draftAudio = syncVoiceRuntimeAudioRef();
-        const previewPlaying = !!(draft?.objectUrl && voicePlaybackRuntime.lastUserAction === `draft:${stateScope}` && !draftAudio?.paused && String(draftAudio?.currentSrc || draftAudio?.src || '') === draft.objectUrl);
-        const draftPreviewBtn = document.getElementById(`${domKey}VoiceDraftPreviewBtn`);
-        if (draftPreviewBtn) draftPreviewBtn.textContent = previewPlaying ? 'Pause' : 'Play';
-      }
-    }
-    syncVoiceComposerTextLock(scope);
-    syncVoiceComposerSendButton(scope);
+    renderVoiceComposerSurface(key);
   }
 
 function resetVoiceGestureState() {
@@ -2089,7 +2175,6 @@ function resetVoiceGestureState() {
     chatVoiceGestureState.locked = false;
     chatVoiceGestureState.scope = '';
     chatVoiceGestureState.pointerId = null;
-    chatVoiceGestureState.captureEl = null;
     chatVoiceGestureState.startX = 0;
     chatVoiceGestureState.startY = 0;
     chatVoiceGestureState.currentX = 0;
@@ -2100,21 +2185,22 @@ function resetVoiceGestureState() {
     chatVoiceGestureState.thumbOffsetY = 0;
     chatVoiceGestureState.canceled = false;
     chatVoiceGestureState.sentOnRelease = false;
-    chatVoiceGestureState.autoSendScope = '';
-    chatVoiceGestureState.autoSendOptions = null;
-    chatVoiceGestureState.holdingStartedAt = 0;
   }
 
-function beginVoiceGesture(scope, pointerEvent, options = {}) {
-    const stateScope = voiceScopeStateKey(scope);
-    if (!stateScope) return false;
+async function beginVoiceHoldGesture(scope, event, optionsFactory) {
+    const key = getVoiceComposerScopeKey(scope);
+    if (chatVoiceGestureState.active) return;
+    const options = typeof optionsFactory === 'function' ? optionsFactory() : {};
+    const started = await startChatVoiceRecording(key, options);
+    if (!started) return;
+
+    chatVoiceGestureState.sessionId += 1;
     chatVoiceGestureState.active = true;
     chatVoiceGestureState.locked = false;
-    chatVoiceGestureState.scope = stateScope;
-    chatVoiceGestureState.pointerId = pointerEvent?.pointerId ?? null;
-    chatVoiceGestureState.captureEl = pointerEvent?.captureEl || null;
-    chatVoiceGestureState.startX = Number(pointerEvent?.clientX || 0);
-    chatVoiceGestureState.startY = Number(pointerEvent?.clientY || 0);
+    chatVoiceGestureState.scope = key;
+    chatVoiceGestureState.pointerId = event.pointerId ?? null;
+    chatVoiceGestureState.startX = Number(event.clientX || 0);
+    chatVoiceGestureState.startY = Number(event.clientY || 0);
     chatVoiceGestureState.currentX = chatVoiceGestureState.startX;
     chatVoiceGestureState.currentY = chatVoiceGestureState.startY;
     chatVoiceGestureState.deltaX = 0;
@@ -2123,82 +2209,161 @@ function beginVoiceGesture(scope, pointerEvent, options = {}) {
     chatVoiceGestureState.thumbOffsetY = 0;
     chatVoiceGestureState.canceled = false;
     chatVoiceGestureState.sentOnRelease = false;
-    chatVoiceGestureState.sessionId = Number(chatVoiceGestureState.sessionId || 0) + 1;
-    chatVoiceGestureState.autoSendScope = stateScope;
-    chatVoiceGestureState.autoSendOptions = options || {};
-    chatVoiceGestureState.holdingStartedAt = Date.now();
-    setVoiceComposerMode(scope, 'holding');
-    return true;
+
+    if (event.currentTarget?.setPointerCapture && event.pointerId != null) {
+      try { event.currentTarget.setPointerCapture(event.pointerId); } catch (_) {}
+    }
+
+    setVoiceComposerMode(key, 'holding');
+    renderVoiceComposerSurface(key);
   }
 
-function releaseVoiceGestureCapture(pointerId = null) {
-    const captureEl = chatVoiceGestureState.captureEl;
-    if (!captureEl || typeof captureEl.releasePointerCapture !== 'function') return;
-    const activePointerId = pointerId ?? chatVoiceGestureState.pointerId;
-    if (activePointerId == null || activePointerId === 'touch') return;
-    try { captureEl.releasePointerCapture(activePointerId); } catch (_) {}
-  }
-
-async function cancelVoiceGestureRecording(reason = 'Recording canceled') {
-    const scope = chatVoiceGestureState.scope || chatVoiceState.scope || 'public';
-    chatVoiceGestureState.canceled = true;
-    releaseVoiceGestureCapture();
-    await cancelChatVoiceRecording(reason);
-    setVoiceComposerMode(scope, 'idle');
-    resetVoiceGestureState();
-  }
-
-function updateVoiceGesture(pointerEvent) {
+function updateVoiceHoldGesture(event) {
     if (!chatVoiceGestureState.active || chatVoiceGestureState.locked) return;
-    chatVoiceGestureState.currentX = Number(pointerEvent?.clientX || chatVoiceGestureState.currentX || 0);
-    chatVoiceGestureState.currentY = Number(pointerEvent?.clientY || chatVoiceGestureState.currentY || 0);
-    const deltaX = chatVoiceGestureState.currentX - chatVoiceGestureState.startX;
-    const deltaY = chatVoiceGestureState.currentY - chatVoiceGestureState.startY;
-    chatVoiceGestureState.deltaX = deltaX;
-    chatVoiceGestureState.deltaY = deltaY;
-    chatVoiceGestureState.thumbOffsetX = Math.min(0, deltaX);
-    chatVoiceGestureState.thumbOffsetY = Math.min(0, deltaY);
-    if (deltaY <= -Math.abs(Number(chatVoiceGestureState.lockThresholdPx || 78))) {
-      chatVoiceGestureState.locked = true;
-      setVoiceComposerMode(chatVoiceGestureState.scope, 'locked');
-      releaseVoiceGestureCapture();
-      syncAllVoiceRecorderUis();
+    const dx = Number(event.clientX || 0) - Number(chatVoiceGestureState.startX || 0);
+    const dy = Number(event.clientY || 0) - Number(chatVoiceGestureState.startY || 0);
+
+    chatVoiceGestureState.currentX = Number(event.clientX || 0);
+    chatVoiceGestureState.currentY = Number(event.clientY || 0);
+    chatVoiceGestureState.deltaX = dx;
+    chatVoiceGestureState.deltaY = dy;
+
+    chatVoiceGestureState.thumbOffsetX = Math.min(0, dx);
+    chatVoiceGestureState.thumbOffsetY = Math.min(0, dy);
+    applyVoiceThumbTransform();
+
+    if (dx <= -Number(chatVoiceGestureState.cancelThresholdPx || 96)) {
+      void cancelVoiceHoldGesture();
       return;
     }
-    if (deltaX <= -Math.abs(Number(chatVoiceGestureState.cancelThresholdPx || 96))) {
-      void cancelVoiceGestureRecording('Recording canceled');
-      return;
+
+    if (dy <= -Number(chatVoiceGestureState.lockThresholdPx || 78)) {
+      lockVoiceHoldGesture(event.currentTarget);
     }
-    syncAllVoiceRecorderUis();
   }
 
-async function finishVoiceGesture() {
+async function cancelVoiceHoldGesture() {
+    const scope = getVoiceComposerScopeKey(chatVoiceGestureState.scope);
+    chatVoiceGestureState.canceled = true;
+    await cancelChatVoiceRecording('Recording canceled');
+    resetVoiceGestureState();
+    setVoiceComposerMode(scope, 'idle');
+    renderVoiceComposerSurface(scope);
+  }
+
+function lockVoiceHoldGesture(target) {
+    const scope = getVoiceComposerScopeKey(chatVoiceGestureState.scope);
+    chatVoiceGestureState.locked = true;
+    if (target?.releasePointerCapture && chatVoiceGestureState.pointerId != null) {
+      try { target.releasePointerCapture(chatVoiceGestureState.pointerId); } catch (_) {}
+    }
+    setVoiceComposerMode(scope, 'locked');
+    renderVoiceComposerSurface(scope);
+  }
+
+async function finishVoiceHoldGesture(event) {
     if (!chatVoiceGestureState.active) return;
-    const scope = chatVoiceGestureState.scope;
+    const scope = getVoiceComposerScopeKey(chatVoiceGestureState.scope);
+
     if (chatVoiceGestureState.canceled) {
       resetVoiceGestureState();
+      setVoiceComposerMode(scope, 'idle');
+      renderVoiceComposerSurface(scope);
       return;
     }
+
     if (chatVoiceGestureState.locked) {
-      chatVoiceGestureState.active = false;
-      releaseVoiceGestureCapture();
-      chatVoiceGestureState.pointerId = null;
-      setVoiceComposerMode(scope, 'locked');
-      syncAllVoiceRecorderUis();
       return;
     }
+
     chatVoiceGestureState.sentOnRelease = true;
-    setVoiceComposerMode(scope, 'uploading');
-    releaseVoiceGestureCapture();
+
+    if (event.currentTarget?.releasePointerCapture && chatVoiceGestureState.pointerId != null) {
+      try { event.currentTarget.releasePointerCapture(chatVoiceGestureState.pointerId); } catch (_) {}
+    }
+
     await stopChatVoiceRecording();
-    chatVoiceGestureState.active = false;
-    chatVoiceGestureState.pointerId = null;
+  }
+
+function getVoiceScopeSendOptions(scope) {
+    const key = getVoiceComposerScopeKey(scope);
+    if (key === 'private') {
+      const userId = privateActiveUserId;
+      return {
+        userId,
+        onUploaded: async (response) => {
+          const previousLatestId = privateLastMessageIdByUserId[String(userId)] || null;
+          const merged = await integrateUploadedVoiceMessage('private', response, { previousLatestId, otherUserId: userId, markRead: true, displayName: privateActiveDisplayName });
+          if (!merged.length) await chatPollPrivateActiveThread({ visible: true, forceFull: false });
+          renderPrivateConversation();
+          renderPrivateTabUnread();
+          updateChatUnreadBadge();
+          await playChatTone('outgoing');
+        },
+      };
+    }
+    if (key === 'profile-dm') {
+      return {
+        userId: driverProfileState.userId,
+        onUploaded: async (response) => {
+          await handleDriverProfileVoiceUploaded(response);
+        },
+      };
+    }
+    return {
+      room: CHAT_ROOM,
+      onUploaded: async (response) => {
+        await handlePublicVoiceUploaded(response);
+      },
+    };
+  }
+
+function bindVoiceHoldMicButton(button, scope, optionsFactory) {
+    if (!button || button.dataset.voiceHoldBound === '1') return;
+    button.dataset.voiceHoldBound = '1';
+
+    let suppressClick = false;
+
+    button.addEventListener('pointerdown', async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      suppressClick = true;
+      await beginVoiceHoldGesture(scope, event, optionsFactory);
+    });
+
+    button.addEventListener('pointermove', (event) => {
+      if (!chatVoiceGestureState.active) return;
+      if (getVoiceComposerScopeKey(chatVoiceGestureState.scope) !== getVoiceComposerScopeKey(scope)) return;
+      event.preventDefault();
+      updateVoiceHoldGesture(event);
+    });
+
+    button.addEventListener('pointerup', async (event) => {
+      if (!chatVoiceGestureState.active) return;
+      if (getVoiceComposerScopeKey(chatVoiceGestureState.scope) !== getVoiceComposerScopeKey(scope)) return;
+      event.preventDefault();
+      await finishVoiceHoldGesture(event);
+    });
+
+    button.addEventListener('pointercancel', async (event) => {
+      if (!chatVoiceGestureState.active) return;
+      if (getVoiceComposerScopeKey(chatVoiceGestureState.scope) !== getVoiceComposerScopeKey(scope)) return;
+      event.preventDefault();
+      await cancelVoiceHoldGesture();
+    });
+
+    button.addEventListener('click', (event) => {
+      if (!suppressClick) return;
+      event.preventDefault();
+      event.stopPropagation();
+      suppressClick = false;
+    });
   }
 
 function syncAllVoiceRecorderUis() {
     syncVoiceRecorderUi('public');
     syncVoiceRecorderUi('private');
-    syncVoiceRecorderUi('driverProfile');
+    syncVoiceRecorderUi('profile-dm');
     emitChatVoiceDrawerStateChangedIfNeeded();
   }
 
@@ -2260,7 +2425,7 @@ async function uploadChatVoiceNote(scope, blob, durationMs, options = {}) {
 
 async function sendChatVoiceDraft(scope, options = {}) {
     const normalizedScope = voiceScopeStateKey(scope);
-    const domScope = normalizedScope === 'profile-dm' ? 'driverProfile' : normalizedScope;
+    const domScope = normalizedScope;
     const draft = getChatVoiceDraft(scope);
     if (!draft || draft.status !== 'ready' || !draft.blob) return false;
     chatVoiceDraftState.status = 'sending';
@@ -2297,7 +2462,7 @@ async function sendChatVoiceDraft(scope, options = {}) {
 async function discardChatVoiceDraft(scope, reason = 'Voice note discarded') {
     const normalizedScope = voiceScopeStateKey(scope);
     if (!normalizedScope) return false;
-    const domScope = normalizedScope === 'profile-dm' ? 'driverProfile' : normalizedScope;
+    const domScope = normalizedScope;
     const draft = getChatVoiceDraft(scope);
     if (!draft && chatVoiceState.scope !== normalizedScope) return false;
     clearChatVoiceDraft('discard');
@@ -2347,7 +2512,7 @@ async function toggleChatVoiceDraftPreview(scope, button) {
 
 async function startChatVoiceRecording(scope, options = {}) {
     const normalizedScope = voiceScopeStateKey(scope);
-    const domScope = normalizedScope === 'profile-dm' ? 'driverProfile' : normalizedScope;
+    const domScope = normalizedScope;
     if (!normalizedScope) return false;
     if (!chatSupportsVoiceRecording()) {
       setVoiceRecorderStatus(domScope, CHAT_VOICE_IDLE_STATUS, 'Voice notes are not supported on this browser.');
@@ -2391,15 +2556,14 @@ async function startChatVoiceRecording(scope, options = {}) {
         const finalizeScope = chatVoiceState.scope || normalizedScope;
         const finalizeOptions = { ...options, room: chatVoiceState.room || options.room, userId: chatVoiceState.otherUserId || options.userId };
         void (async () => {
-          const domTarget = finalizeScope === 'profile-dm' ? 'driverProfile' : finalizeScope;
+          const domTarget = finalizeScope;
           const durationMs = Math.max(0, Date.now() - Number(chatVoiceState.startedAt || 0));
           const chunks = chatVoiceState.chunks.slice();
           const mimeType = chatVoiceState.mimeType || chatVoiceState.recorder?.mimeType || 'audio/mp4';
           const startedAt = chatVoiceState.startedAt || Date.now();
           const canceled = !!chatVoiceState.cancelRequested;
           const wasLockedCapture = !!(chatVoiceGestureState.locked && chatVoiceGestureState.scope === finalizeScope);
-          const shouldSendOnRelease = !!chatVoiceGestureState.sentOnRelease && !wasLockedCapture;
-          const shouldAutoSend = shouldSendOnRelease || (!wasLockedCapture && !chatVoiceGestureState.locked);
+          const shouldSendOnRelease = !!chatVoiceGestureState.sentOnRelease;
           if (canceled || !chunks.length) {
             await restoreChatAudioAfterCapture('voice-stop-cancel');
             clearChatVoiceDraft('stop-cancel');
@@ -2418,21 +2582,32 @@ async function startChatVoiceRecording(scope, options = {}) {
             userId: finalizeOptions.userId,
           });
           await restoreChatAudioAfterCapture('voice-stop-draft-ready');
-          if (shouldAutoSend) {
-            setVoiceComposerMode(domTarget, 'uploading');
-            setVoiceRecorderStatus(domTarget, 'Sending voice note…', '');
-            syncAllVoiceRecorderUis();
+          if (chatVoiceGestureState.sentOnRelease === true && chatVoiceGestureState.locked === false) {
             try {
               await sendChatVoiceDraft(finalizeScope, {
-                ...chatVoiceGestureState.autoSendOptions,
                 room: finalizeOptions.room,
                 userId: finalizeOptions.userId,
+                ...getVoiceScopeSendOptions(finalizeScope),
               });
             } catch (_) {}
-            chatVoiceGestureState.sentOnRelease = false;
+            clearChatVoiceDraft('release-sent');
+            resetVoiceGestureState();
             setVoiceComposerMode(domTarget, 'idle');
-            setVoiceRecorderStatus(domTarget, CHAT_VOICE_IDLE_STATUS, '');
-            syncAllVoiceRecorderUis();
+            renderVoiceComposerSurface(domTarget);
+            return;
+          }
+          if (!wasLockedCapture && !shouldSendOnRelease) {
+            try {
+              await sendChatVoiceDraft(finalizeScope, {
+                room: finalizeOptions.room,
+                userId: finalizeOptions.userId,
+                ...getVoiceScopeSendOptions(finalizeScope),
+              });
+            } catch (_) {}
+            clearChatVoiceDraft('auto-stop-sent');
+            resetVoiceGestureState();
+            setVoiceComposerMode(domTarget, 'idle');
+            renderVoiceComposerSurface(domTarget);
             return;
           }
           setVoiceComposerMode(domTarget, 'review');
@@ -2451,6 +2626,10 @@ async function startChatVoiceRecording(scope, options = {}) {
         syncAllVoiceRecorderUis();
         if (elapsed >= VOICE_NOTE_MAX_MS && chatVoiceState.recorder?.state === 'recording') {
           chatVoiceState.durationMs = VOICE_NOTE_MAX_MS;
+          const activeScope = getVoiceComposerScopeKey(chatVoiceGestureState.scope);
+          if (chatVoiceGestureState.active && !chatVoiceGestureState.locked && activeScope === getVoiceComposerScopeKey(chatVoiceState.scope)) {
+            chatVoiceGestureState.sentOnRelease = true;
+          }
           void stopChatVoiceRecording();
         }
       }, 250);
@@ -2484,7 +2663,7 @@ async function stopChatVoiceRecording() {
       return true;
     } catch (err) {
       await restoreChatAudioAfterCapture('voice-stop-error');
-      const domScope = chatVoiceState.scope === 'profile-dm' ? 'driverProfile' : chatVoiceState.scope;
+      const domScope = chatVoiceState.scope;
       setVoiceRecorderStatus(domScope, CHAT_VOICE_IDLE_STATUS, 'Voice note failed to stop cleanly.');
       syncAllVoiceRecorderUis();
       return false;
@@ -2493,7 +2672,7 @@ async function stopChatVoiceRecording() {
 
 async function cancelChatVoiceRecording(reason = 'Recording canceled') {
     const activeScope = chatVoiceState.scope;
-    const domScope = activeScope === 'profile-dm' ? 'driverProfile' : activeScope;
+    const domScope = activeScope;
     chatVoiceState.cancelRequested = true;
     chatVoiceState.chunks = [];
     if (domScope) setVoiceComposerMode(domScope, 'idle');
@@ -2531,149 +2710,29 @@ function stopActiveVoiceRecording(scope) {
     return stopChatVoiceRecording();
   }
 
+  async function handlePublicVoiceUploaded(response) {
+    const previousLatestId = chatLatestMessageId;
+    const merged = await integrateUploadedVoiceMessage('public', response, { previousLatestId, room: CHAT_ROOM });
+    if (Array.isArray(merged) && merged.length) seedChatIncomingAudioBaseline(merged);
+    await playChatTone('outgoing');
+    await chatPollOnce();
+  }
+
+  async function handleDriverProfileVoiceUploaded(response) {
+    const userId = String(driverProfileState.userId || '');
+    if (!userId) return;
+    const previousLatestId = driverProfileState.latestMessageId || null;
+    const merged = await integrateUploadedVoiceMessage('profile-dm', response, { previousLatestId, otherUserId: userId, markRead: true, displayName: driverProfileState.displayName || 'Driver' });
+    if (!merged.length) {
+      await chatPollPrivateActiveThread({ visible: true, forceFull: false });
+    }
+    updateDriverProfileDmList(driverProfileState.messages || []);
+    await playChatTone('outgoing');
+  }
+
   function bindVoiceComposerControls(surface, optionsFactory) {
     const startBtn = document.getElementById(`${surface}VoiceStartBtn`);
-    const host = getVoiceModeHost(surface);
-    if (startBtn?.dataset.voiceComposerBound === '1') {
-      syncVoiceRecorderUi(surface);
-      return;
-    }
-    if (startBtn) startBtn.dataset.voiceComposerBound = '1';
-    const stopEvent = (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-    };
-    startBtn?.addEventListener('click', async (event) => {
-      if (Date.now() < Number(chatVoiceGestureState.suppressClickUntil || 0)) {
-        event.preventDefault();
-        event.stopPropagation();
-        return;
-      }
-      event.preventDefault();
-      event.stopPropagation();
-    });
-    startBtn?.addEventListener('pointerdown', async (event) => {
-      if (event.pointerType === 'mouse' && event.button !== 0) return;
-      if (isChatVoiceBusy() || chatVoiceGestureState.active) return;
-      const options = typeof optionsFactory === 'function' ? optionsFactory() : {};
-      event.preventDefault();
-      event.stopPropagation();
-      startBtn.setPointerCapture?.(event.pointerId);
-      chatVoiceGestureState.suppressClickUntil = Date.now() + 700;
-      const started = await startChatVoiceRecording(surface, options);
-      if (!started) return;
-      beginVoiceGesture(surface, { ...event, captureEl: startBtn }, options);
-      syncAllVoiceRecorderUis();
-    });
-    if (typeof window.PointerEvent === 'undefined') {
-      startBtn?.addEventListener('touchstart', async (event) => {
-        if (chatVoiceGestureState.active || isChatVoiceBusy()) return;
-        const touch = event.changedTouches && event.changedTouches[0];
-        if (!touch) return;
-        const options = typeof optionsFactory === 'function' ? optionsFactory() : {};
-        event.preventDefault();
-        event.stopPropagation();
-        chatVoiceGestureState.suppressClickUntil = Date.now() + 700;
-        const started = await startChatVoiceRecording(surface, options);
-        if (!started) return;
-        beginVoiceGesture(surface, {
-          pointerId: 'touch',
-          clientX: touch.clientX,
-          clientY: touch.clientY,
-          captureEl: startBtn,
-        }, options);
-        syncAllVoiceRecorderUis();
-      }, { passive: false });
-    }
-    startBtn?.addEventListener('pointermove', (event) => {
-      if (!chatVoiceGestureState.active || chatVoiceGestureState.pointerId !== event.pointerId) return;
-      event.preventDefault();
-      updateVoiceGesture(event);
-    });
-    if (typeof window.PointerEvent === 'undefined') {
-      startBtn?.addEventListener('touchmove', (event) => {
-        if (!chatVoiceGestureState.active || chatVoiceGestureState.pointerId !== 'touch') return;
-        const touch = event.changedTouches && event.changedTouches[0];
-        if (!touch) return;
-        event.preventDefault();
-        updateVoiceGesture({
-          clientX: touch.clientX,
-          clientY: touch.clientY,
-        });
-      }, { passive: false });
-    }
-    startBtn?.addEventListener('pointerup', async (event) => {
-      if (chatVoiceGestureState.pointerId !== event.pointerId) return;
-      event.preventDefault();
-      chatVoiceGestureState.suppressClickUntil = Date.now() + 700;
-      await finishVoiceGesture();
-    });
-    if (typeof window.PointerEvent === 'undefined') {
-      startBtn?.addEventListener('touchend', async (event) => {
-        if (chatVoiceGestureState.pointerId !== 'touch') return;
-        event.preventDefault();
-        event.stopPropagation();
-        chatVoiceGestureState.suppressClickUntil = Date.now() + 700;
-        await finishVoiceGesture();
-      }, { passive: false });
-    }
-    startBtn?.addEventListener('pointercancel', async (event) => {
-      if (chatVoiceGestureState.pointerId !== event.pointerId) return;
-      chatVoiceGestureState.suppressClickUntil = Date.now() + 700;
-      await cancelVoiceGestureRecording('Recording canceled');
-    });
-    if (typeof window.PointerEvent === 'undefined') {
-      startBtn?.addEventListener('touchcancel', async (event) => {
-        if (chatVoiceGestureState.pointerId !== 'touch') return;
-        event.preventDefault();
-        event.stopPropagation();
-        chatVoiceGestureState.suppressClickUntil = Date.now() + 700;
-        await cancelVoiceGestureRecording('Recording canceled');
-      }, { passive: false });
-    }
-    host?.addEventListener('click', async (event) => {
-      const target = event.target?.closest?.('button');
-      if (!target) return;
-      if (target.id === `${surface}VoiceStopBtn`) {
-        stopEvent(event);
-        setVoiceComposerMode(surface, 'locked');
-        void stopActiveVoiceRecording(surface);
-        chatVoiceGestureState.active = false;
-        return;
-      }
-      if (target.id === `${surface}VoiceCancelBtn`) {
-        stopEvent(event);
-        chatVoiceGestureState.canceled = true;
-        setVoiceComposerMode(surface, 'idle');
-        void cancelVoiceRecording(surface);
-        return;
-      }
-      if (target.id === `${surface}VoiceDraftCancelBtn`) {
-        stopEvent(event);
-        setVoiceComposerMode(surface, 'idle');
-        void discardChatVoiceDraft(surface);
-        return;
-      }
-      if (target.id === `${surface}VoiceDraftSendBtn`) {
-        stopEvent(event);
-        const options = typeof optionsFactory === 'function' ? optionsFactory() : {};
-        try {
-          await sendChatVoiceDraft(surface, options);
-        } catch (_) {}
-        return;
-      }
-      if (target.id === `${surface}VoiceDraftPreviewBtn`) {
-        stopEvent(event);
-        void toggleChatVoiceDraftPreview(surface, target);
-      }
-      if (target.id === `${surface}VoiceErrorDismissBtn`) {
-        stopEvent(event);
-        setVoiceComposerMode(surface, 'idle');
-        setVoiceRecorderStatus(surface, CHAT_VOICE_IDLE_STATUS, '');
-        chatVoiceDraftState.error = '';
-        syncAllVoiceRecorderUis();
-      }
-    });
+    bindVoiceHoldMicButton(startBtn, surface, optionsFactory);
     syncVoiceRecorderUi(surface);
   }
 
