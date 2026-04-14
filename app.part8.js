@@ -189,6 +189,19 @@ const chatVoiceImmediateSendState = {
     'profile-dm': false,
   };
 
+const chatVoiceHoldState = {
+    active: false,
+    scope: '',
+    startX: 0,
+    startY: 0,
+    currentX: 0,
+    cancelThresholdPx: 100,
+    canceled: false,
+    holdTimerId: null,
+    holdDelayMs: 180,
+    started: false,
+  };
+
 const voiceAssetCache = new Map();
 const imageAssetCache = new Map();
 
@@ -2007,6 +2020,51 @@ function getVoiceRecordingTimerText(scope) {
     return formatChatVoiceDuration(Number(chatVoiceState.durationMs || 0));
   }
 
+function renderHoldToTalkOverlay(scope) {
+    const key = getVoiceSimpleScopeKey(scope);
+    const host = getVoiceSimpleHost(key);
+    if (!host) return;
+
+    const timerText = getVoiceRecordingTimerText(key);
+
+    setComposerControlsHidden(key, true);
+    host.hidden = false;
+    host.innerHTML = `
+    <div class="chatVoiceHoldOverlay" id="${key}VoiceHoldOverlay" data-voice-mode="hold-recording">
+      <div class="chatVoiceHoldSlideHint" id="${key}VoiceSlideHint">
+        <span class="chatVoiceSlideArrow">⟵</span> slide to cancel
+      </div>
+      <div class="chatVoiceHoldTimer" id="${key}VoiceTimer">${escapeHtml(timerText)}</div>
+      <div class="chatVoiceHoldMicPulse" id="${key}VoiceHoldMic">
+        <span class="chatVoiceHoldMicIcon">🎤</span>
+      </div>
+    </div>
+  `;
+  }
+
+function updateHoldToTalkSlide(scope, deltaX) {
+    const key = getVoiceSimpleScopeKey(scope);
+    const overlay = document.getElementById(`${key}VoiceHoldOverlay`);
+    const slideHint = document.getElementById(`${key}VoiceSlideHint`);
+    if (!overlay) return;
+
+    const clampedDelta = Math.max(0, Math.min(deltaX, 200));
+    const cancelThreshold = chatVoiceHoldState.cancelThresholdPx;
+    const ratio = clampedDelta / cancelThreshold;
+
+    if (slideHint) {
+      slideHint.style.opacity = String(Math.max(0, 1 - ratio * 1.5));
+    }
+
+    if (clampedDelta >= cancelThreshold) {
+      overlay.classList.add('cancel-active');
+      chatVoiceHoldState.canceled = true;
+    } else {
+      overlay.classList.remove('cancel-active');
+      chatVoiceHoldState.canceled = false;
+    }
+  }
+
 function renderSimpleVoiceSurface(scope) {
     const key = getVoiceSimpleScopeKey(scope);
     const host = getVoiceSimpleHost(key);
@@ -2027,15 +2085,7 @@ function renderSimpleVoiceSurface(scope) {
     host.hidden = false;
 
     if (mode === 'recording') {
-      host.innerHTML = `
-      <div class="chatVoiceSimpleStrip" data-voice-mode="recording">
-        <div class="chatVoiceSimpleTimer" id="${key}VoiceTimer">${escapeHtml(timerText)}</div>
-        <button type="button" class="chatVoiceSimpleBtn danger" id="${key}VoiceCancelBtn">Cancel</button>
-        <button type="button" class="chatVoiceSimpleBtn" id="${key}VoiceStopBtn">Stop</button>
-        <button type="button" class="chatVoiceSimpleBtn strong" id="${key}VoiceSendNowBtn">Send</button>
-      </div>
-    `;
-      bindSimpleRecordingControls(key);
+      renderHoldToTalkOverlay(key);
       return;
     }
 
@@ -2128,18 +2178,128 @@ function bindSimpleVoiceStartButton(button, scope) {
     if (!button || button.dataset.simpleVoiceBound === '1') return;
     button.dataset.simpleVoiceBound = '1';
 
-    button.addEventListener('click', async (event) => {
-      event.preventDefault();
-      event.stopPropagation();
+    const key = getVoiceSimpleScopeKey(scope);
 
-      const key = getVoiceSimpleScopeKey(scope);
-      const options = getVoiceScopeSendOptions(key);
-      const started = await startChatVoiceRecording(key, options);
-      if (!started) return;
+    function getClientX(e) {
+      if (e.touches && e.touches.length > 0) return e.touches[0].clientX;
+      if (typeof e.clientX === 'number') return e.clientX;
+      return 0;
+    }
+    function getClientY(e) {
+      if (e.touches && e.touches.length > 0) return e.touches[0].clientY;
+      if (typeof e.clientY === 'number') return e.clientY;
+      return 0;
+    }
 
-      setImmediateVoiceSend(key, false);
-      setVoiceSimpleMode(key, 'recording');
-      renderSimpleVoiceSurface(key);
+    async function beginHold(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (isChatVoiceBusy()) return;
+      if (chatVoiceHoldState.active) return;
+
+      chatVoiceHoldState.active = true;
+      chatVoiceHoldState.scope = key;
+      chatVoiceHoldState.startX = getClientX(e);
+      chatVoiceHoldState.startY = getClientY(e);
+      chatVoiceHoldState.currentX = chatVoiceHoldState.startX;
+      chatVoiceHoldState.canceled = false;
+      chatVoiceHoldState.started = false;
+
+      // Short delay before actually starting recording to distinguish tap from hold
+      chatVoiceHoldState.holdTimerId = window.setTimeout(async () => {
+        chatVoiceHoldState.holdTimerId = null;
+        if (!chatVoiceHoldState.active || chatVoiceHoldState.canceled) return;
+
+        const options = getVoiceScopeSendOptions(key);
+        const started = await startChatVoiceRecording(key, options);
+        if (!started) {
+          chatVoiceHoldState.active = false;
+          chatVoiceHoldState.started = false;
+          return;
+        }
+        chatVoiceHoldState.started = true;
+        setImmediateVoiceSend(key, true);
+        setVoiceSimpleMode(key, 'recording');
+        renderHoldToTalkOverlay(key);
+        button.classList.add('recording');
+      }, chatVoiceHoldState.holdDelayMs);
+    }
+
+    function moveHold(e) {
+      if (!chatVoiceHoldState.active || !chatVoiceHoldState.started) return;
+      chatVoiceHoldState.currentX = getClientX(e);
+      const deltaX = chatVoiceHoldState.startX - chatVoiceHoldState.currentX;
+      updateHoldToTalkSlide(key, deltaX);
+    }
+
+    async function endHold() {
+      if (!chatVoiceHoldState.active) return;
+
+      // If hold timer is still pending (very short tap), cancel it — do nothing
+      if (chatVoiceHoldState.holdTimerId) {
+        window.clearTimeout(chatVoiceHoldState.holdTimerId);
+        chatVoiceHoldState.holdTimerId = null;
+        chatVoiceHoldState.active = false;
+        return;
+      }
+
+      const wasCanceled = chatVoiceHoldState.canceled;
+      const wasStarted = chatVoiceHoldState.started;
+      const deltaX = chatVoiceHoldState.startX - chatVoiceHoldState.currentX;
+      const slidCancelDistance = deltaX > chatVoiceHoldState.cancelThresholdPx;
+
+      chatVoiceHoldState.active = false;
+      chatVoiceHoldState.started = false;
+      button.classList.remove('recording');
+
+      if (!wasStarted) return;
+
+      if (wasCanceled || slidCancelDistance) {
+        // User slid left past threshold — cancel recording
+        setImmediateVoiceSend(key, false);
+        await cancelChatVoiceRecording('Slide to cancel');
+        setVoiceSimpleMode(key, 'idle');
+        renderSimpleVoiceSurface(key);
+        return;
+      }
+
+      // User released without sliding — auto-send
+      setImmediateVoiceSend(key, true);
+      await stopChatVoiceRecording();
+      // stopChatVoiceRecording will see immediateVoiceSend=true and auto-send via the existing recorder 'stop' handler
+    }
+
+    // Touch events (mobile)
+    button.addEventListener('touchstart', beginHold, { passive: false });
+    button.addEventListener('touchmove', moveHold, { passive: true });
+    button.addEventListener('touchend', endHold, { passive: false });
+    button.addEventListener('touchcancel', async () => {
+      if (!chatVoiceHoldState.active) return;
+      if (chatVoiceHoldState.holdTimerId) {
+        window.clearTimeout(chatVoiceHoldState.holdTimerId);
+        chatVoiceHoldState.holdTimerId = null;
+      }
+      chatVoiceHoldState.active = false;
+      button.classList.remove('recording');
+      if (chatVoiceHoldState.started) {
+        setImmediateVoiceSend(key, false);
+        await cancelChatVoiceRecording('Touch canceled');
+        setVoiceSimpleMode(key, 'idle');
+        renderSimpleVoiceSurface(key);
+      }
+    }, { passive: false });
+
+    // Mouse events (desktop fallback)
+    button.addEventListener('mousedown', beginHold);
+    document.addEventListener('mousemove', moveHold);
+    document.addEventListener('mouseup', endHold);
+
+    // Prevent context menu on long press (mobile)
+    button.addEventListener('contextmenu', (e) => {
+      if (chatVoiceHoldState.active) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
     });
   }
 
@@ -2227,8 +2387,17 @@ function bindSimpleDraftControls(scope) {
 
 function syncVoiceRecorderUi(scope) {
     const key = getVoiceSimpleScopeKey(scope);
+    const mode = getVoiceSimpleMode(key);
+
+    // During hold-to-talk recording, only update the timer — do NOT re-render the overlay
+    if (mode === 'recording' && chatVoiceHoldState.active && chatVoiceHoldState.started) {
+      const timerEl = document.getElementById(`${key}VoiceTimer`);
+      if (timerEl) timerEl.textContent = getVoiceRecordingTimerText(key);
+      return;
+    }
+
     renderSimpleVoiceSurface(key);
-    if (getVoiceSimpleMode(key) === 'recording') {
+    if (mode === 'recording') {
       const timerEl = document.getElementById(`${key}VoiceTimer`);
       if (timerEl) timerEl.textContent = getVoiceRecordingTimerText(key);
     }
@@ -2482,6 +2651,13 @@ async function startChatVoiceRecording(scope, options = {}) {
         syncAllVoiceRecorderUis();
         if (elapsed >= VOICE_NOTE_MAX_MS && chatVoiceState.recorder?.state === 'recording') {
           chatVoiceState.durationMs = VOICE_NOTE_MAX_MS;
+          // End hold state if hold-to-talk was active
+          if (chatVoiceHoldState.active && chatVoiceHoldState.started) {
+            chatVoiceHoldState.active = false;
+            chatVoiceHoldState.started = false;
+            const micBtn = document.querySelector(`[data-chat-voice-trigger="1"]`);
+            if (micBtn) micBtn.classList.remove('recording');
+          }
           setImmediateVoiceSend(domScope, false);
           void stopChatVoiceRecording();
         }
