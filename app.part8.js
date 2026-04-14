@@ -1247,6 +1247,8 @@ function waitImageBlobRetryDelay(ms) {
     });
   }
 
+const INLINE_IMAGE_ERROR_RETRY_COOLDOWN_MS = 2500;
+
 async function ensureVoiceBlobUrl(message, attempt = 0) {
   const audioUrl = String(message?.audioUrl || '').trim();
   const key = getVoiceAssetCacheKey(message);
@@ -1347,6 +1349,7 @@ async function ensureImageBlobUrl(message, attempt = 0) {
       blobUrl: '',
       mimeType: String(message?.imageMimeType || '').trim(),
       error: 'Photo unavailable',
+      errorAt: Date.now(),
     });
     return '';
   }
@@ -1396,6 +1399,7 @@ async function ensureImageBlobUrl(message, attempt = 0) {
         blobUrl: '',
         mimeType: String(message?.imageMimeType || '').trim(),
         error: 'Photo unavailable',
+        errorAt: Date.now(),
       });
       return '';
     }
@@ -1474,9 +1478,18 @@ function syncChatImageNode(imgEl, message) {
     applyReady(cached.blobUrl);
     return;
   }
+  const isInlineConversationImage = !!imgEl.closest('.chatMsgRow, .chatPrivateMsgRow');
   if (cached?.status === 'error') {
     applyError();
-    return;
+    const now = Date.now();
+    const lastRetryAt = Number(imgEl.dataset.inlineImageRetryAt || 0);
+    const errorAt = Number(cached?.errorAt || 0);
+    const recentlyErrored = errorAt > 0 && (now - errorAt) < INLINE_IMAGE_ERROR_RETRY_COOLDOWN_MS;
+    const recentlyRetried = lastRetryAt > 0 && (now - lastRetryAt) < INLINE_IMAGE_ERROR_RETRY_COOLDOWN_MS;
+    if (!isInlineConversationImage || recentlyErrored || recentlyRetried) {
+      return;
+    }
+    imgEl.dataset.inlineImageRetryAt = String(now);
   }
 
   ensureImageBlobUrl(message).then((blobUrl) => {
@@ -2545,6 +2558,7 @@ function bindVoiceComposerControls(surface, optionsFactory) {
   let unreadChatCount = 0;
   let unreadPrivateCount = 0;
   let chatInitialHistoryLoaded = false;
+  let chatInitialLoadPromise = null;
   let chatInitialHistoryLoadAttempted = false;
   let chatInitialHistoryRetryQueued = false;
   let chatHiddenBaselineReady = false;
@@ -6040,13 +6054,30 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     return normalizeImageMessagesPayload(data, 'private');
   }
 
+  async function ensureChatPanelInitialLoad() {
+    if (chatInitialHistoryLoaded) {
+      return { ok: true, reason: 'already_loaded', messages: publicChatMessages };
+    }
+    if (chatInitialLoadPromise) return chatInitialLoadPromise;
+
+    chatInitialLoadPromise = (async () => {
+      const result = await chatLoadInitial();
+      return result;
+    })().finally(() => {
+      chatInitialLoadPromise = null;
+    });
+
+    return chatInitialLoadPromise;
+  }
+
   async function chatLoadInitial() {
     chatInitialHistoryLoadAttempted = true;
     const result = await chatFetchMessages({ limit: 60 });
     if (!result?.ok) {
-      if (result?.reason === 'not_ready') setChatStatus('Loading chat...');
-      else setChatStatus('Chat unavailable right now.');
-      return { ok: false, messages: [] };
+      const reason = result?.reason || 'failed';
+      if (reason === 'not_ready') setChatStatus('Loading chat...');
+      else if (reason !== 'aborted') setChatStatus('Chat unavailable right now.');
+      return { ok: false, reason, messages: [] };
     }
     const msgs = setPublicChatMessages(Array.isArray(result.messages) ? result.messages : []);
     seedChatIncomingAudioBaseline(msgs);
@@ -6117,7 +6148,8 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     try {
       const panelOpen = isChatPanelOpen();
       if (panelOpen && !chatInitialHistoryLoaded) {
-        await chatLoadInitial();
+        const initial = await ensureChatPanelInitialLoad();
+        if (!initial?.ok && initial?.reason === 'aborted') return;
         return;
       }
       const msgs = await chatFetchIncremental({ panelOpen });
@@ -6219,7 +6251,11 @@ function bindVoiceComposerControls(surface, optionsFactory) {
       }
       if (isChatPanelOpen() && chatInitialHistoryLoadAttempted && !chatInitialHistoryLoaded && !chatInitialHistoryRetryQueued) {
         chatInitialHistoryRetryQueued = true;
-        chatLoadInitial().catch((e) => {
+        ensureChatPanelInitialLoad().then((result) => {
+          if (!result?.ok && result?.reason && result.reason !== 'not_ready' && result.reason !== 'aborted') {
+            setChatStatus('Chat unavailable right now.');
+          }
+        }).catch((e) => {
           console.warn('chat initial retry failed:', e);
           setChatStatus('Chat unavailable right now.');
         }).finally(() => {
@@ -6378,9 +6414,11 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     bindChatImageViewer(document);
     bindRenderedChatImages(document);
 
-    chatLoadInitial()
+    ensureChatPanelInitialLoad()
       .then((result) => {
         if (result?.ok) return chatPollOnce();
+        if (result?.reason === 'aborted') return null;
+        setChatStatus('Chat unavailable right now.');
         return null;
       })
       .catch((e) => {
