@@ -177,6 +177,14 @@ const chatVoiceDraftState = {
     error: '',
   };
 
+const chatVoiceGestureState = {
+    dragging: false,
+    startX: 0,
+    currentX: 0,
+    activeScope: '',
+    thresholdPx: 108,
+  };
+
 const voiceAssetCache = new Map();
 const imageAssetCache = new Map();
 
@@ -932,16 +940,10 @@ function voiceNoteLabel(message) {
 function buildVoiceComposer(surface, extraClass = '') {
     return `<div class="chatVoiceComposer ${extraClass}" data-voice-surface="${surface}">
       <div class="chatVoiceRail">
-        <div class="chatVoiceIdleRow" id="${surface}VoiceIdleRow">
-          <button class="chatVoiceBtn chatVoiceStartBtn" id="${surface}VoiceStartBtn" type="button" aria-label="Record voice note" data-chat-voice-trigger="1">🎤</button>
-          <div class="chatVoiceStatus" id="${surface}VoiceStatus" aria-live="polite">${CHAT_VOICE_IDLE_STATUS}</div>
-          <div class="chatVoiceTimer" id="${surface}VoiceTimer">0:00</div>
-        </div>
-
         <div class="chatVoiceRecordBar" id="${surface}VoiceRecordRow" hidden>
           <div class="chatVoiceRecordMic" aria-hidden="true">🎤</div>
           <div class="chatVoiceRecordTimer" data-voice-record-timer="1">0:00</div>
-          <div class="chatVoiceRecordHint">slide to cancel</div>
+          <div class="chatVoiceRecordHint">slide left to cancel</div>
           <button class="chatVoiceChipBtn" id="${surface}VoiceCancelBtn" type="button" aria-label="Cancel voice note" data-chat-voice-trigger="1" hidden>Cancel</button>
           <button class="chatVoiceBtn recording" id="${surface}VoiceStopBtn" type="button" aria-label="Stop voice note" data-chat-voice-trigger="1" hidden>Stop</button>
         </div>
@@ -956,6 +958,8 @@ function buildVoiceComposer(surface, extraClass = '') {
           </div>
         </div>
       </div>
+      <div class="chatVoiceStatus" id="${surface}VoiceStatus" aria-live="polite" hidden>${CHAT_VOICE_IDLE_STATUS}</div>
+      <div class="chatVoiceTimer" id="${surface}VoiceTimer" hidden>0:00</div>
       <div class="chatVoiceLoading" id="${surface}VoiceUpload" hidden></div>
       <div class="chatVoiceError" id="${surface}VoiceError" hidden></div>
     </div>`;
@@ -1966,8 +1970,8 @@ function syncVoiceRecorderUi(scope) {
     const draftSendBtn = document.getElementById(`${domKey}VoiceDraftSendBtn`);
     const draftCancelBtn = document.getElementById(`${domKey}VoiceDraftCancelBtn`);
     const draftPreviewBtn = document.getElementById(`${domKey}VoiceDraftPreviewBtn`);
-    const idleRow = document.getElementById(`${domKey}VoiceIdleRow`);
     const recordRow = document.getElementById(`${domKey}VoiceRecordRow`);
+    const statusVisible = isBusyRow || isDraftSending;
     const canStart = !isBusyRow && !isDraftSending;
     if (startBtn) {
       startBtn.hidden = isBusyRow || isDraftReady || isDraftSending;
@@ -2002,14 +2006,26 @@ function syncVoiceRecorderUi(scope) {
       else if (isDraftSending) statusEl.textContent = 'Uploading voice note…';
       else if (isDraftReady) statusEl.textContent = String(chatVoiceState.statusText || 'Voice note ready. Tap Send to send the voice note.').trim() || 'Voice note ready. Tap Send to send the voice note.';
       else if (!statusEl.textContent.trim()) statusEl.textContent = CHAT_VOICE_IDLE_STATUS;
+      statusEl.hidden = !statusVisible;
     }
     if (errorEl) {
       const nextError = String((draft?.error || (isActive ? chatVoiceState.errorText : '')) || '').trim();
       errorEl.textContent = nextError;
       errorEl.hidden = !nextError;
     }
-    if (idleRow) idleRow.hidden = isBusyRow || isDraftReady || isDraftSending;
     if (recordRow) recordRow.hidden = !isBusyRow;
+    if (recordRow && !isBusyRow) {
+      recordRow.style.removeProperty('--voice-slide-offset');
+      recordRow.style.removeProperty('--voice-slide-progress');
+      const hint = recordRow.querySelector('.chatVoiceRecordHint');
+      if (hint) hint.style.opacity = '';
+      if (chatVoiceGestureState.activeScope === stateScope) {
+        chatVoiceGestureState.dragging = false;
+        chatVoiceGestureState.startX = 0;
+        chatVoiceGestureState.currentX = 0;
+        chatVoiceGestureState.activeScope = '';
+      }
+    }
     if (draftWrap) draftWrap.hidden = !(isDraftReady || isDraftSending);
     if (draftDurationEl) draftDurationEl.textContent = formatChatVoiceDuration(draft?.durationMs || 0);
     if (draftSendBtn) {
@@ -2030,6 +2046,60 @@ function syncVoiceRecorderUi(scope) {
     }
     syncVoiceComposerTextLock(scope);
     syncVoiceComposerSendButton(scope);
+  }
+
+function beginVoiceSlideCancel(scope, clientX) {
+    const stateScope = voiceScopeStateKey(scope);
+    if (!stateScope || chatVoiceState.scope !== stateScope || chatVoiceState.phase !== 'recording') return false;
+    chatVoiceGestureState.dragging = true;
+    chatVoiceGestureState.startX = Number(clientX || 0);
+    chatVoiceGestureState.currentX = Number(clientX || 0);
+    chatVoiceGestureState.activeScope = stateScope;
+    updateVoiceSlideCancel(scope, clientX);
+    return true;
+  }
+
+function updateVoiceSlideCancel(scope, clientX) {
+    const domKey = voiceScopeDomKey(scope);
+    const recordRow = document.getElementById(`${domKey}VoiceRecordRow`);
+    const hint = recordRow?.querySelector('.chatVoiceRecordHint');
+    if (!recordRow) return;
+    if (!chatVoiceGestureState.dragging || chatVoiceGestureState.activeScope !== voiceScopeStateKey(scope)) {
+      recordRow.style.removeProperty('--voice-slide-offset');
+      recordRow.style.removeProperty('--voice-slide-progress');
+      if (hint) hint.style.opacity = '';
+      return;
+    }
+    chatVoiceGestureState.currentX = Number(clientX || chatVoiceGestureState.currentX || 0);
+    const delta = Math.min(0, chatVoiceGestureState.currentX - chatVoiceGestureState.startX);
+    const travel = Math.max(0, Math.abs(delta));
+    const offset = Math.max(-130, delta);
+    const progress = Math.max(0, Math.min(1, travel / chatVoiceGestureState.thresholdPx));
+    recordRow.style.setProperty('--voice-slide-offset', `${Math.round(offset)}px`);
+    recordRow.style.setProperty('--voice-slide-progress', String(progress.toFixed(3)));
+    if (hint) hint.style.opacity = String((1 - (progress * 0.55)).toFixed(3));
+  }
+
+async function endVoiceSlideCancel(scope) {
+    const stateScope = voiceScopeStateKey(scope);
+    if (!chatVoiceGestureState.dragging || chatVoiceGestureState.activeScope !== stateScope) return;
+    const domKey = voiceScopeDomKey(scope);
+    const recordRow = document.getElementById(`${domKey}VoiceRecordRow`);
+    const hint = recordRow?.querySelector('.chatVoiceRecordHint');
+    const delta = Math.min(0, Number(chatVoiceGestureState.currentX || 0) - Number(chatVoiceGestureState.startX || 0));
+    const travel = Math.max(0, Math.abs(delta));
+    chatVoiceGestureState.dragging = false;
+    chatVoiceGestureState.startX = 0;
+    chatVoiceGestureState.currentX = 0;
+    chatVoiceGestureState.activeScope = '';
+    if (recordRow) {
+      recordRow.style.removeProperty('--voice-slide-offset');
+      recordRow.style.removeProperty('--voice-slide-progress');
+    }
+    if (hint) hint.style.opacity = '';
+    if (travel >= chatVoiceGestureState.thresholdPx) {
+      await cancelVoiceRecording(scope);
+    }
   }
 
 function syncAllVoiceRecorderUis() {
@@ -2338,13 +2408,14 @@ function stopActiveVoiceRecording(scope) {
     return stopChatVoiceRecording();
   }
 
-function bindVoiceComposerControls(surface, optionsFactory) {
+  function bindVoiceComposerControls(surface, optionsFactory) {
     const startBtn = document.getElementById(`${surface}VoiceStartBtn`);
     const stopBtn = document.getElementById(`${surface}VoiceStopBtn`);
     const cancelBtn = document.getElementById(`${surface}VoiceCancelBtn`);
     const draftPreviewBtn = document.getElementById(`${surface}VoiceDraftPreviewBtn`);
     const draftCancelBtn = document.getElementById(`${surface}VoiceDraftCancelBtn`);
     const draftSendBtn = document.getElementById(`${surface}VoiceDraftSendBtn`);
+    const recordRow = document.getElementById(`${surface}VoiceRecordRow`);
     if (startBtn?.dataset.voiceComposerBound === '1') {
       syncVoiceRecorderUi(surface);
       return;
@@ -2382,6 +2453,22 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     draftPreviewBtn?.addEventListener('click', (event) => {
       stopEvent(event);
       void toggleChatVoiceDraftPreview(surface, draftPreviewBtn);
+    });
+    recordRow?.addEventListener('pointerdown', (event) => {
+      if (event.pointerType === 'mouse' && event.button !== 0) return;
+      if (!beginVoiceSlideCancel(surface, event.clientX)) return;
+      recordRow.setPointerCapture?.(event.pointerId);
+    });
+    recordRow?.addEventListener('pointermove', (event) => {
+      updateVoiceSlideCancel(surface, event.clientX);
+    });
+    recordRow?.addEventListener('pointerup', (event) => {
+      recordRow.releasePointerCapture?.(event.pointerId);
+      void endVoiceSlideCancel(surface);
+    });
+    recordRow?.addEventListener('pointercancel', (event) => {
+      recordRow.releasePointerCapture?.(event.pointerId);
+      void endVoiceSlideCancel(surface);
     });
     syncVoiceRecorderUi(surface);
   }
@@ -4641,6 +4728,7 @@ function bindVoiceComposerControls(surface, optionsFactory) {
               <input id="chatInput" type="text" class="chatInput" placeholder="Message drivers…" maxlength="600" />
               <button id="chatSendBtn" class="chipBtn" type="button">Send</button>
               <button id="chatPublicPhotoBtn" class="chipBtn" type="button" title="Upload photo">📷</button>
+              <button id="publicVoiceStartBtn" class="chatVoiceInlineBtn" type="button" aria-label="Record voice note" data-chat-voice-trigger="1">🎤</button>
               <input id="chatPublicPhotoInput" type="file" accept="image/jpeg,image/png,image/webp,image/gif" hidden />
             </div>
             ${buildVoiceComposer('public')}
@@ -5616,7 +5704,7 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     pruneExpiredChatState();
     const messages = privateMessagesByUserId[privateActiveUserId] || [];
     if (!wrap.querySelector('.chatPrivateConversation')) {
-      wrap.innerHTML = `<div class="chatPrivateConversation"><div class="chatPrivateHeader"><button id="chatPrivateBackBtn" class="chatPrivateBackBtn" type="button">Back</button><div class="chatPrivateTitle">${escapeHtml(privateActiveDisplayName || 'Private chat')}</div></div><div class="chatSubTabs" style="display:flex;gap:8px;margin-bottom:8px;"><button id="chatPrivateModeMessages" class="chipBtn" type="button">Messages</button><button id="chatPrivateModePhotos" class="chipBtn" type="button">Photos</button></div><div id="chatPrivateConversationList" class="chatList"></div><div id="chatPrivatePhotosView" class="hidden"></div><div class="chatComposer chatComposerPrivate"><input id="chatPrivateInput" type="text" class="chatInput" placeholder="Message privately…" maxlength="600"><button id="chatPrivateSendBtn" class="chipBtn" type="button">Send</button><button id="chatPrivatePhotoBtn" class="chipBtn" type="button" title="Upload photo">📷</button><input id="chatPrivatePhotoInput" type="file" accept="image/jpeg,image/png,image/webp,image/gif" hidden></div>${buildVoiceComposer('private', 'chatVoiceComposerPrivate')}</div>`;
+      wrap.innerHTML = `<div class="chatPrivateConversation"><div class="chatPrivateHeader"><button id="chatPrivateBackBtn" class="chatPrivateBackBtn" type="button">Back</button><div class="chatPrivateTitle">${escapeHtml(privateActiveDisplayName || 'Private chat')}</div></div><div class="chatSubTabs" style="display:flex;gap:8px;margin-bottom:8px;"><button id="chatPrivateModeMessages" class="chipBtn" type="button">Messages</button><button id="chatPrivateModePhotos" class="chipBtn" type="button">Photos</button></div><div id="chatPrivateConversationList" class="chatList"></div><div id="chatPrivatePhotosView" class="hidden"></div><div class="chatComposer chatComposerPrivate"><input id="chatPrivateInput" type="text" class="chatInput" placeholder="Message privately…" maxlength="600"><button id="chatPrivateSendBtn" class="chipBtn" type="button">Send</button><button id="chatPrivatePhotoBtn" class="chipBtn" type="button" title="Upload photo">📷</button><button id="privateVoiceStartBtn" class="chatVoiceInlineBtn" type="button" aria-label="Record voice note" data-chat-voice-trigger="1">🎤</button><input id="chatPrivatePhotoInput" type="file" accept="image/jpeg,image/png,image/webp,image/gif" hidden></div>${buildVoiceComposer('private', 'chatVoiceComposerPrivate')}</div>`;
     } else {
       const titleEl = wrap.querySelector('.chatPrivateTitle');
       if (titleEl) titleEl.textContent = privateActiveDisplayName || 'Private chat';
