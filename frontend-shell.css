@@ -2009,6 +2009,16 @@ html, body { height: 100%; margin: 0; padding: 0; }
     .dockDrawer.panelChat.open {
       transform: translateX(-50%) translateY(0);
     }
+    .dockDrawer.panelChat.chatPhotoViewerSuppressed{
+      opacity: 0 !important;
+      visibility: hidden !important;
+      pointer-events: none !important;
+    }
+    .dockBackdrop.chatPhotoViewerSuppressed{
+      opacity: 0 !important;
+      visibility: hidden !important;
+      pointer-events: none !important;
+    }
     .dockDrawer.panelChat .dockDrawerHeader,
     .dockDrawer.panelChat .dockDrawerBody {
       position: relative;

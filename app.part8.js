@@ -2579,6 +2579,8 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     restoreChatDrawer: false,
     restoreChatTab: 'public',
     restorePrivateUserId: '',
+    suppressedChatDrawer: null,
+    suppressedChatBackdrop: null,
     itemKey: '',
     touchStartX: 0,
     touchStartY: 0,
@@ -4283,6 +4285,33 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     if (nextBtn) nextBtn.disabled = chatPhotoViewerState.index >= chatPhotoViewerState.items.length - 1;
   }
 
+  function getLiveChatDrawerElements() {
+    const drawer = document.querySelector('.dockDrawer.panelChat.open');
+    const backdrop = document.querySelector('.dockBackdrop.open');
+    return { drawer, backdrop };
+  }
+
+  function suppressChatDrawerForPhotoViewer() {
+    const { drawer, backdrop } = getLiveChatDrawerElements();
+    if (!drawer) return false;
+    chatPhotoViewerState.suppressedChatDrawer = drawer;
+    chatPhotoViewerState.suppressedChatBackdrop = backdrop || null;
+    drawer.classList.add('chatPhotoViewerSuppressed');
+    if (backdrop) backdrop.classList.add('chatPhotoViewerSuppressed');
+    return true;
+  }
+
+  function restoreSuppressedChatDrawerFromPhotoViewer() {
+    const drawer = chatPhotoViewerState.suppressedChatDrawer;
+    const backdrop = chatPhotoViewerState.suppressedChatBackdrop;
+    if (!drawer) return false;
+    drawer.classList.remove('chatPhotoViewerSuppressed');
+    if (backdrop) backdrop.classList.remove('chatPhotoViewerSuppressed');
+    chatPhotoViewerState.suppressedChatDrawer = null;
+    chatPhotoViewerState.suppressedChatBackdrop = null;
+    return true;
+  }
+
   function closeChatPhotoViewer({ restoreChat = true } = {}) {
     if (!chatPhotoViewerState.open) return;
     chatPhotoViewerState.open = false;
@@ -4294,6 +4323,12 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     resetChatPhotoViewerTransform();
     renderChatPhotoViewer();
     if (!restoreChat || !chatPhotoViewerState.restoreChatDrawer) {
+      chatPhotoViewerState.restoreChatDrawer = false;
+      chatPhotoViewerState.restoreChatTab = 'public';
+      chatPhotoViewerState.restorePrivateUserId = '';
+      return;
+    }
+    if (restoreSuppressedChatDrawerFromPhotoViewer()) {
       chatPhotoViewerState.restoreChatDrawer = false;
       chatPhotoViewerState.restoreChatTab = 'public';
       chatPhotoViewerState.restorePrivateUserId = '';
@@ -4343,7 +4378,9 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     chatPhotoViewerState.restoreChatDrawer = wasChatOpen;
     chatPhotoViewerState.restoreChatTab = activeChatTab === 'private' ? 'private' : 'public';
     chatPhotoViewerState.restorePrivateUserId = String(privateActiveUserId || '');
-    if (wasChatOpen && typeof window.closeDrawer === 'function') window.closeDrawer();
+    chatPhotoViewerState.suppressedChatDrawer = null;
+    chatPhotoViewerState.suppressedChatBackdrop = null;
+    if (wasChatOpen) suppressChatDrawerForPhotoViewer();
     chatPhotoViewerState.open = true;
     chatPhotoViewerState.scope = String(scope || '').toLowerCase() === 'private' ? 'private' : 'public';
     chatPhotoViewerState.source = String(source || '').toLowerCase() === 'photos' ? 'photos' : 'messages';
