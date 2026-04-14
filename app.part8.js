@@ -189,6 +189,8 @@ const chatVoiceGestureState = {
     currentY: 0,
     deltaX: 0,
     deltaY: 0,
+    thumbOffsetX: 0,
+    thumbOffsetY: 0,
     cancelThresholdPx: 96,
     lockThresholdPx: 78,
     canceled: false,
@@ -2088,12 +2090,16 @@ function syncVoiceRecorderUi(scope) {
     const statusVisible = isDraftSending;
     const canStart = !isBusyRow && !isDraftSending;
     const hasError = !!String((draft?.error || (isActive ? chatVoiceState.errorText : '')) || '').trim();
-    let mode = 'idle';
-    if (isHoldingGesture) mode = 'holding';
-    else if (isLockedRecording) mode = 'locked';
-    else if (isDraftSending) mode = 'uploading';
-    else if (isDraftReady) mode = 'review';
-    else if (hasError) mode = 'error';
+    let mode = getVoiceComposerMode(scope);
+    if (!['idle', 'holding', 'locked', 'review', 'uploading', 'error'].includes(mode)) mode = 'idle';
+    if (mode === 'holding' && !isHoldingGesture) mode = 'idle';
+    if (mode === 'locked' && !isLockedRecording && !isDraftReady) mode = 'idle';
+    if (mode === 'review' && !isDraftReady) mode = 'idle';
+    if (mode === 'uploading' && !isDraftSending) mode = 'idle';
+    if (mode === 'error' && !hasError && !isDraftReady) mode = 'idle';
+    if (mode === 'idle' && isDraftSending) mode = 'uploading';
+    if (mode === 'idle' && isDraftReady) mode = 'review';
+    if (mode === 'idle' && hasError) mode = 'error';
     setVoiceComposerMode(scope, mode);
     renderVoiceComposerSurface(scope);
     if (startBtn) {
@@ -2128,10 +2134,10 @@ function syncVoiceRecorderUi(scope) {
     }
     if (activeStrip) {
       if (mode === 'holding') {
-        const deltaX = Number(chatVoiceGestureState.currentX || 0) - Number(chatVoiceGestureState.startX || 0);
-        const deltaY = Number(chatVoiceGestureState.currentY || 0) - Number(chatVoiceGestureState.startY || 0);
-        const thumbOffsetX = Math.min(0, deltaX);
-        const thumbOffsetY = Math.min(0, deltaY);
+        const deltaX = Number(chatVoiceGestureState.deltaX || 0);
+        const deltaY = Number(chatVoiceGestureState.deltaY || 0);
+        const thumbOffsetX = Number(chatVoiceGestureState.thumbOffsetX || 0);
+        const thumbOffsetY = Number(chatVoiceGestureState.thumbOffsetY || 0);
         const cancelProgress = Math.abs(Math.min(0, deltaX)) / Math.max(1, Number(chatVoiceGestureState.cancelThresholdPx || 96));
         const lockProgress = Math.abs(Math.min(0, deltaY)) / Math.max(1, Number(chatVoiceGestureState.lockThresholdPx || 78));
         renderVoiceActiveStrip(domKey, 'holding', {
@@ -2185,6 +2191,8 @@ function resetVoiceGestureState() {
     chatVoiceGestureState.currentY = 0;
     chatVoiceGestureState.deltaX = 0;
     chatVoiceGestureState.deltaY = 0;
+    chatVoiceGestureState.thumbOffsetX = 0;
+    chatVoiceGestureState.thumbOffsetY = 0;
     chatVoiceGestureState.canceled = false;
     chatVoiceGestureState.sentOnRelease = false;
     chatVoiceGestureState.autoSendScope = '';
@@ -2206,12 +2214,15 @@ function beginVoiceGesture(scope, pointerEvent, options = {}) {
     chatVoiceGestureState.currentY = chatVoiceGestureState.startY;
     chatVoiceGestureState.deltaX = 0;
     chatVoiceGestureState.deltaY = 0;
+    chatVoiceGestureState.thumbOffsetX = 0;
+    chatVoiceGestureState.thumbOffsetY = 0;
     chatVoiceGestureState.canceled = false;
     chatVoiceGestureState.sentOnRelease = false;
     chatVoiceGestureState.sessionId = Number(chatVoiceGestureState.sessionId || 0) + 1;
     chatVoiceGestureState.autoSendScope = stateScope;
     chatVoiceGestureState.autoSendOptions = options || {};
     chatVoiceGestureState.holdingStartedAt = Date.now();
+    setVoiceComposerMode(scope, 'holding');
     return true;
   }
 
@@ -2224,10 +2235,10 @@ function releaseVoiceGestureCapture(pointerId = null) {
   }
 
 async function cancelVoiceGestureRecording(reason = 'Recording canceled') {
-    const activeScope = chatVoiceGestureState.scope || chatVoiceState.scope;
     chatVoiceGestureState.canceled = true;
     releaseVoiceGestureCapture();
     await cancelChatVoiceRecording(reason);
+    setVoiceComposerMode(chatVoiceState.scope || 'public', 'idle');
     resetVoiceGestureState();
   }
 
@@ -2239,8 +2250,11 @@ function updateVoiceGesture(pointerEvent) {
     const deltaY = chatVoiceGestureState.currentY - chatVoiceGestureState.startY;
     chatVoiceGestureState.deltaX = deltaX;
     chatVoiceGestureState.deltaY = deltaY;
+    chatVoiceGestureState.thumbOffsetX = Math.min(0, deltaX);
+    chatVoiceGestureState.thumbOffsetY = Math.min(0, deltaY);
     if (deltaY <= -Math.abs(Number(chatVoiceGestureState.lockThresholdPx || 78))) {
       chatVoiceGestureState.locked = true;
+      setVoiceComposerMode(chatVoiceGestureState.scope, 'locked');
       releaseVoiceGestureCapture();
       syncAllVoiceRecorderUis();
       return;
@@ -2263,10 +2277,12 @@ async function finishVoiceGesture() {
       chatVoiceGestureState.active = false;
       releaseVoiceGestureCapture();
       chatVoiceGestureState.pointerId = null;
+      setVoiceComposerMode(scope, 'locked');
       syncAllVoiceRecorderUis();
       return;
     }
     chatVoiceGestureState.sentOnRelease = true;
+    setVoiceComposerMode(scope, 'uploading');
     releaseVoiceGestureCapture();
     await stopChatVoiceRecording();
     chatVoiceGestureState.active = false;
@@ -2343,6 +2359,7 @@ async function sendChatVoiceDraft(scope, options = {}) {
     if (!draft || draft.status !== 'ready' || !draft.blob) return false;
     chatVoiceDraftState.status = 'sending';
     chatVoiceDraftState.error = '';
+    setVoiceComposerMode(domScope, 'uploading');
     setVoiceRecorderStatus(domScope, 'Uploading voice note…', '');
     syncAllVoiceRecorderUis();
     try {
@@ -2356,6 +2373,7 @@ async function sendChatVoiceDraft(scope, options = {}) {
         await options.onUploaded(response, { blob: draft.blob, durationMs: draft.durationMs, scope: normalizedScope });
       }
       clearChatVoiceDraft('sent');
+      setVoiceComposerMode(domScope, 'idle');
       setVoiceRecorderStatus(domScope, CHAT_VOICE_IDLE_STATUS, '');
       syncAllVoiceRecorderUis();
       return true;
@@ -2363,6 +2381,7 @@ async function sendChatVoiceDraft(scope, options = {}) {
       console.warn('voice note upload failed', err);
       chatVoiceDraftState.status = 'ready';
       chatVoiceDraftState.error = 'Voice upload failed. Please try again.';
+      setVoiceComposerMode(domScope, 'error');
       setVoiceRecorderStatus(domScope, 'Voice note ready', chatVoiceDraftState.error);
       syncAllVoiceRecorderUis();
       throw err;
@@ -2376,6 +2395,7 @@ async function discardChatVoiceDraft(scope, reason = 'Voice note discarded') {
     const draft = getChatVoiceDraft(scope);
     if (!draft && chatVoiceState.scope !== normalizedScope) return false;
     clearChatVoiceDraft('discard');
+    setVoiceComposerMode(domScope, 'idle');
     setVoiceRecorderStatus(domScope, CHAT_VOICE_IDLE_STATUS, '');
     syncAllVoiceRecorderUis();
     return true;
@@ -2441,6 +2461,7 @@ async function startChatVoiceRecording(scope, options = {}) {
     chatVoiceState.mimeType = chooseChatVoiceMimeType();
     chatVoiceState.cancelRequested = false;
     chatVoiceState.durationMs = 0;
+    setVoiceComposerMode(domScope, 'holding');
     setVoiceRecorderStatus(domScope, 'Requesting microphone…', '');
     syncAllVoiceRecorderUis();
 
@@ -2472,10 +2493,11 @@ async function startChatVoiceRecording(scope, options = {}) {
           const canceled = !!chatVoiceState.cancelRequested;
           const wasLockedCapture = !!(chatVoiceGestureState.locked && chatVoiceGestureState.scope === finalizeScope);
           const shouldSendOnRelease = !!chatVoiceGestureState.sentOnRelease && !wasLockedCapture;
-          const shouldAutoSend = !wasLockedCapture || shouldSendOnRelease;
+          const shouldAutoSend = shouldSendOnRelease || (!wasLockedCapture && !chatVoiceGestureState.locked);
           if (canceled || !chunks.length) {
             await restoreChatAudioAfterCapture('voice-stop-cancel');
             clearChatVoiceDraft('stop-cancel');
+            setVoiceComposerMode(domTarget, 'idle');
             setVoiceRecorderStatus(domTarget, CHAT_VOICE_IDLE_STATUS, '');
             syncAllVoiceRecorderUis();
             return;
@@ -2491,6 +2513,7 @@ async function startChatVoiceRecording(scope, options = {}) {
           });
           await restoreChatAudioAfterCapture('voice-stop-draft-ready');
           if (shouldAutoSend) {
+            setVoiceComposerMode(domTarget, 'uploading');
             setVoiceRecorderStatus(domTarget, 'Sending voice note…', '');
             syncAllVoiceRecorderUis();
             try {
@@ -2501,10 +2524,12 @@ async function startChatVoiceRecording(scope, options = {}) {
               });
             } catch (_) {}
             chatVoiceGestureState.sentOnRelease = false;
+            setVoiceComposerMode(domTarget, 'idle');
             setVoiceRecorderStatus(domTarget, CHAT_VOICE_IDLE_STATUS, '');
             syncAllVoiceRecorderUis();
             return;
           }
+          setVoiceComposerMode(domTarget, 'review');
           setVoiceRecorderStatus(domTarget, safeDurationMs >= VOICE_NOTE_MAX_MS ? CHAT_VOICE_MAX_REACHED_STATUS : 'Voice note ready. Tap Send to send the voice note.', '');
           syncAllVoiceRecorderUis();
         })().catch((err) => {
@@ -2536,6 +2561,7 @@ async function startChatVoiceRecording(scope, options = {}) {
       }
       const friendlyMessage = mapChatVoiceError(err);
       chatVoiceState.lastError = friendlyMessage;
+      setVoiceComposerMode(domScope, 'error');
       setVoiceRecorderStatus(domScope, CHAT_VOICE_IDLE_STATUS, friendlyMessage);
       syncAllVoiceRecorderUis();
       return false;
@@ -2564,6 +2590,7 @@ async function cancelChatVoiceRecording(reason = 'Recording canceled') {
     const domScope = activeScope === 'profile-dm' ? 'driverProfile' : activeScope;
     chatVoiceState.cancelRequested = true;
     chatVoiceState.chunks = [];
+    if (domScope) setVoiceComposerMode(domScope, 'idle');
     if (domScope) setVoiceRecorderStatus(domScope, reason, '');
     if (chatVoiceState.recorder && chatVoiceState.recorder.state === 'recording') {
       chatVoiceState.phase = 'stopping';
@@ -2621,7 +2648,7 @@ function stopActiveVoiceRecording(scope) {
     });
     startBtn?.addEventListener('pointerdown', async (event) => {
       if (event.pointerType === 'mouse' && event.button !== 0) return;
-      if (isChatVoiceBusy()) return;
+      if (isChatVoiceBusy() || chatVoiceGestureState.active) return;
       const options = typeof optionsFactory === 'function' ? optionsFactory() : {};
       event.preventDefault();
       event.stopPropagation();
@@ -2632,69 +2659,78 @@ function stopActiveVoiceRecording(scope) {
       beginVoiceGesture(surface, { ...event, captureEl: startBtn }, options);
       syncAllVoiceRecorderUis();
     });
-    startBtn?.addEventListener('touchstart', async (event) => {
-      if (chatVoiceGestureState.active || isChatVoiceBusy()) return;
-      const touch = event.changedTouches && event.changedTouches[0];
-      if (!touch) return;
-      const options = typeof optionsFactory === 'function' ? optionsFactory() : {};
-      event.preventDefault();
-      event.stopPropagation();
-      chatVoiceGestureState.suppressClickUntil = Date.now() + 700;
-      const started = await startChatVoiceRecording(surface, options);
-      if (!started) return;
-      beginVoiceGesture(surface, {
-        pointerId: 'touch',
-        clientX: touch.clientX,
-        clientY: touch.clientY,
-        captureEl: startBtn,
-      }, options);
-      syncAllVoiceRecorderUis();
-    }, { passive: false });
+    if (typeof window.PointerEvent === 'undefined') {
+      startBtn?.addEventListener('touchstart', async (event) => {
+        if (chatVoiceGestureState.active || isChatVoiceBusy()) return;
+        const touch = event.changedTouches && event.changedTouches[0];
+        if (!touch) return;
+        const options = typeof optionsFactory === 'function' ? optionsFactory() : {};
+        event.preventDefault();
+        event.stopPropagation();
+        chatVoiceGestureState.suppressClickUntil = Date.now() + 700;
+        const started = await startChatVoiceRecording(surface, options);
+        if (!started) return;
+        beginVoiceGesture(surface, {
+          pointerId: 'touch',
+          clientX: touch.clientX,
+          clientY: touch.clientY,
+          captureEl: startBtn,
+        }, options);
+        syncAllVoiceRecorderUis();
+      }, { passive: false });
+    }
     startBtn?.addEventListener('pointermove', (event) => {
       if (!chatVoiceGestureState.active || chatVoiceGestureState.pointerId !== event.pointerId) return;
       event.preventDefault();
       updateVoiceGesture(event);
     });
-    startBtn?.addEventListener('touchmove', (event) => {
-      if (!chatVoiceGestureState.active || chatVoiceGestureState.pointerId !== 'touch') return;
-      const touch = event.changedTouches && event.changedTouches[0];
-      if (!touch) return;
-      event.preventDefault();
-      updateVoiceGesture({
-        clientX: touch.clientX,
-        clientY: touch.clientY,
-      });
-    }, { passive: false });
+    if (typeof window.PointerEvent === 'undefined') {
+      startBtn?.addEventListener('touchmove', (event) => {
+        if (!chatVoiceGestureState.active || chatVoiceGestureState.pointerId !== 'touch') return;
+        const touch = event.changedTouches && event.changedTouches[0];
+        if (!touch) return;
+        event.preventDefault();
+        updateVoiceGesture({
+          clientX: touch.clientX,
+          clientY: touch.clientY,
+        });
+      }, { passive: false });
+    }
     startBtn?.addEventListener('pointerup', async (event) => {
       if (chatVoiceGestureState.pointerId !== event.pointerId) return;
       event.preventDefault();
       chatVoiceGestureState.suppressClickUntil = Date.now() + 700;
       await finishVoiceGesture();
     });
-    startBtn?.addEventListener('touchend', async (event) => {
-      if (chatVoiceGestureState.pointerId !== 'touch') return;
-      event.preventDefault();
-      event.stopPropagation();
-      chatVoiceGestureState.suppressClickUntil = Date.now() + 700;
-      await finishVoiceGesture();
-    }, { passive: false });
+    if (typeof window.PointerEvent === 'undefined') {
+      startBtn?.addEventListener('touchend', async (event) => {
+        if (chatVoiceGestureState.pointerId !== 'touch') return;
+        event.preventDefault();
+        event.stopPropagation();
+        chatVoiceGestureState.suppressClickUntil = Date.now() + 700;
+        await finishVoiceGesture();
+      }, { passive: false });
+    }
     startBtn?.addEventListener('pointercancel', async (event) => {
       if (chatVoiceGestureState.pointerId !== event.pointerId) return;
       chatVoiceGestureState.suppressClickUntil = Date.now() + 700;
       await cancelVoiceGestureRecording('Recording canceled');
     });
-    startBtn?.addEventListener('touchcancel', async (event) => {
-      if (chatVoiceGestureState.pointerId !== 'touch') return;
-      event.preventDefault();
-      event.stopPropagation();
-      chatVoiceGestureState.suppressClickUntil = Date.now() + 700;
-      await cancelVoiceGestureRecording('Recording canceled');
-    }, { passive: false });
+    if (typeof window.PointerEvent === 'undefined') {
+      startBtn?.addEventListener('touchcancel', async (event) => {
+        if (chatVoiceGestureState.pointerId !== 'touch') return;
+        event.preventDefault();
+        event.stopPropagation();
+        chatVoiceGestureState.suppressClickUntil = Date.now() + 700;
+        await cancelVoiceGestureRecording('Recording canceled');
+      }, { passive: false });
+    }
     host?.addEventListener('click', async (event) => {
       const target = event.target?.closest?.('button');
       if (!target) return;
       if (target.id === `${surface}VoiceStopBtn`) {
         stopEvent(event);
+        setVoiceComposerMode(surface, 'locked');
         void stopActiveVoiceRecording(surface);
         chatVoiceGestureState.active = false;
         return;
@@ -2702,11 +2738,13 @@ function stopActiveVoiceRecording(scope) {
       if (target.id === `${surface}VoiceCancelBtn`) {
         stopEvent(event);
         chatVoiceGestureState.canceled = true;
+        setVoiceComposerMode(surface, 'idle');
         void cancelVoiceRecording(surface);
         return;
       }
       if (target.id === `${surface}VoiceDraftCancelBtn`) {
         stopEvent(event);
+        setVoiceComposerMode(surface, 'idle');
         void discardChatVoiceDraft(surface);
         return;
       }
@@ -2724,6 +2762,7 @@ function stopActiveVoiceRecording(scope) {
       }
       if (target.id === `${surface}VoiceErrorDismissBtn`) {
         stopEvent(event);
+        setVoiceComposerMode(surface, 'idle');
         setVoiceRecorderStatus(surface, CHAT_VOICE_IDLE_STATUS, '');
         chatVoiceDraftState.error = '';
         syncAllVoiceRecorderUis();
