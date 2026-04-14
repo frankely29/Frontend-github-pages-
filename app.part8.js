@@ -986,7 +986,7 @@ function renderVoiceActiveStrip(surface, mode, data = {}) {
       strip.style.setProperty('--voice-mic-thumb-x', `${thumbOffsetX.toFixed(2)}px`);
       strip.style.setProperty('--voice-mic-thumb-y', `${thumbOffsetY.toFixed(2)}px`);
       strip.innerHTML = `
-        <div class="chatVoiceHoldSurface">
+        <div class="chatVoiceHoldStage chatVoiceHoldSurface">
           <div class="chatVoiceHoldTimer chatVoiceRecordTimer" data-voice-record-timer="1">${escapeHtml(timerText)}</div>
           <div class="chatVoiceHoldHint"><span class="chatVoiceHoldArrow" aria-hidden="true">←</span> slide to cancel</div>
           <div class="chatVoiceLockRail" aria-hidden="true">
