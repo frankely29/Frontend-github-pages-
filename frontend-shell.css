@@ -1292,6 +1292,10 @@ html, body { height: 100%; margin: 0; padding: 0; }
     .chatVoiceInlineBtn.recording{ background:#dc2626; color:#fff; }
     .chatComposerMainRow{ display:flex; align-items:center; gap:6px; width:100%; }
     .chatComposerVoiceMode{ min-height:40px; }
+    .chatComposerModeIdle .chatComposerMainRow{ display:flex; }
+    .chatComposerModeHolding .chatComposerMainRow,
+    .chatComposerModeLocked .chatComposerMainRow,
+    .chatComposerModeReview .chatComposerMainRow{ display:none !important; }
     .chatComposerVoiceMode[data-voice-mode="idle"] .chatComposerMainRow{ display:flex; }
     .chatComposerVoiceHolding,
     .chatComposerVoiceLocked,
@@ -1354,6 +1358,17 @@ html, body { height: 100%; margin: 0; padding: 0; }
       color:#f8fafc;
       border-radius:12px;
       padding:6px 8px;
+    }
+    .chatComposerModeHolding .chatVoiceGestureHudInline{
+      min-height:34px;
+      border:1px solid rgba(71,85,105,0.55);
+      border-radius:10px;
+      padding:6px 8px;
+      background:rgba(2,6,23,0.45);
+    }
+    .chatComposerModeLocked .chatVoiceLockedInline,
+    .chatComposerModeReview .chatVoiceReviewInline{
+      min-height:34px;
     }
     .chatVoiceActiveStrip .chatVoiceInlineBtn{
       border:none;

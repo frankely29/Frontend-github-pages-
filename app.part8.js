@@ -950,7 +950,7 @@ function voiceNoteLabel(message) {
   }
 
 function buildVoiceComposer(surface, extraClass = '') {
-    return `<div class="chatVoiceComposerCompat ${extraClass}" data-voice-surface="${surface}" aria-hidden="true" hidden></div>`;
+    return '';
   }
 
 function ensureChatVoiceGestureHud(scope) {
@@ -2055,6 +2055,10 @@ function syncVoiceRecorderUi(scope) {
     else if (isDraftReady || isDraftSending) mode = 'review';
     if (composerEl) {
       composerEl.dataset.voiceMode = mode;
+      composerEl.classList.toggle('chatComposerModeIdle', mode === 'idle');
+      composerEl.classList.toggle('chatComposerModeHolding', mode === 'holding');
+      composerEl.classList.toggle('chatComposerModeLocked', mode === 'locked');
+      composerEl.classList.toggle('chatComposerModeReview', mode === 'review');
       composerEl.classList.toggle('chatComposerVoiceHolding', mode === 'holding');
       composerEl.classList.toggle('chatComposerVoiceLocked', mode === 'locked');
       composerEl.classList.toggle('chatComposerVoiceReview', mode === 'review');
@@ -2404,7 +2408,9 @@ async function startChatVoiceRecording(scope, options = {}) {
           const mimeType = chatVoiceState.mimeType || chatVoiceState.recorder?.mimeType || 'audio/mp4';
           const startedAt = chatVoiceState.startedAt || Date.now();
           const canceled = !!chatVoiceState.cancelRequested;
-          const shouldSendOnRelease = !!chatVoiceGestureState.sentOnRelease && !chatVoiceGestureState.locked;
+          const wasLockedCapture = !!(chatVoiceGestureState.locked && chatVoiceGestureState.scope === finalizeScope);
+          const shouldSendOnRelease = !!chatVoiceGestureState.sentOnRelease && !wasLockedCapture;
+          const shouldAutoSend = !wasLockedCapture || shouldSendOnRelease;
           if (canceled || !chunks.length) {
             await restoreChatAudioAfterCapture('voice-stop-cancel');
             clearChatVoiceDraft('stop-cancel');
@@ -2422,7 +2428,7 @@ async function startChatVoiceRecording(scope, options = {}) {
             userId: finalizeOptions.userId,
           });
           await restoreChatAudioAfterCapture('voice-stop-draft-ready');
-          if (shouldSendOnRelease) {
+          if (shouldAutoSend) {
             setVoiceRecorderStatus(domTarget, 'Sending voice note…', '');
             syncAllVoiceRecorderUis();
             try {
