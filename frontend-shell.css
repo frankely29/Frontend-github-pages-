@@ -1445,7 +1445,7 @@ html, body { height: 100%; margin: 0; padding: 0; }
     .chatVoiceLockedStrip .chatVoiceInlineBtn,
     .chatVoiceReviewStrip .chatVoiceInlineBtn{ touch-action:none; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
 
-    .chatVoiceStatusStrip{ width:100%; min-height:36px; display:flex; align-items:center; justify-content:center; padding:6px 10px; border-radius:12px; background:#f1f5f9; color:#1e293b; font-size:11px; font-weight:800; }
+    .chatVoiceStatusStrip{ width:100%; min-height:36px; display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 10px; border-radius:12px; background:#f1f5f9; color:#1e293b; font-size:11px; font-weight:800; }
     .chatVoiceStatusStrip.error{ background:rgba(254,226,226,0.9); color:#991b1b; }
     .chatVoiceLockedTimer,
     .chatVoiceReviewDuration{ min-width:42px; font-size:12px; font-weight:900; color:#0f172a; }
