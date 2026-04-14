@@ -1303,9 +1303,12 @@ html, body { height: 100%; margin: 0; padding: 0; }
     .chatComposerVoiceHolding,
     .chatComposerVoiceLocked,
     .chatComposerVoiceReview{
-      background:rgba(15,23,42,0.96);
       border-radius:14px;
       padding:6px 8px;
+    }
+    .chatComposerVoiceHolding{
+      background:transparent;
+      padding:4px 0;
     }
     .chatComposerVoiceLocked,
     .chatComposerVoiceReview{
@@ -1347,6 +1350,7 @@ html, body { height: 100%; margin: 0; padding: 0; }
     .chatVoiceTimer,
     .chatVoiceRecordTimer{ flex:0 0 auto; font-size:11px; color:#f8fafc; font-weight:900; min-width:38px; text-align:right; }
     .chatVoiceActiveStrip{ display:flex; align-items:center; gap:8px; min-height:36px; width:100%; padding:2px 0; border-radius:12px; }
+    .chatVoiceHoldStage{ width:100%; }
     .chatVoiceHoldingStrip{
       touch-action:none;
       user-select:none;
