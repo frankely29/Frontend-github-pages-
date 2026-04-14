@@ -2162,7 +2162,7 @@ function renderVoiceComposerSurface(scope) {
   if (mode === 'error') {
       host.innerHTML = `
       <div class="chatVoiceStatusStrip error">
-        <span>Voice note failed.</span>
+        <span>Voice note failed. Tap mic to try again.</span>
         <button type="button" class="chatVoiceInlineBtn" id="${key}VoiceErrorDismissBtn">Dismiss</button>
       </div>
     `;
@@ -2180,16 +2180,19 @@ function renderVoiceComposerSurface(scope) {
     }
   }
 
+function updateVoiceComposerTimerText(scope) {
+    const key = getVoiceComposerScopeKey(scope);
+    const timerText = getVoiceRecordingTimerText(key);
+    const holdTimer = document.querySelector(`#${key}VoiceThumb`)?.closest('[data-voice-mode="holding"]')?.querySelector('.chatVoiceHoldTimer');
+    if (holdTimer) holdTimer.textContent = timerText;
+    const lockedTimer = document.querySelector(`[data-voice-mode="locked"] .chatVoiceLockedTimer`);
+    if (lockedTimer && document.getElementById(`${key}VoiceStopBtn`)) lockedTimer.textContent = timerText;
+  }
+
 function syncVoiceRecorderUi(scope) {
     const key = getVoiceComposerScopeKey(scope);
-    const mode = getVoiceComposerMode(key);
-    const host = getVoiceModeHost(key);
-    if (mode === 'idle') {
-      if (host) host.hidden = true;
-      renderVoiceComposerSurface(key);
-      return;
-    }
     renderVoiceComposerSurface(key);
+    updateVoiceComposerTimerText(key);
   }
 
 function resetVoiceGestureState() {
