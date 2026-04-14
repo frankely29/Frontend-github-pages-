@@ -2233,9 +2233,6 @@ function updateVoiceHoldGesture(event) {
     applyVoiceThumbTransform();
 
   if (dx <= -Number(chatVoiceGestureState.cancelThresholdPx || 96)) {
-      if (event.currentTarget?.releasePointerCapture && chatVoiceGestureState.pointerId != null) {
-        try { event.currentTarget.releasePointerCapture(chatVoiceGestureState.pointerId); } catch (_) {}
-      }
       void cancelVoiceHoldGesture();
       return;
     }
@@ -2247,6 +2244,10 @@ function updateVoiceHoldGesture(event) {
 
 async function cancelVoiceHoldGesture() {
     const scope = getVoiceComposerScopeKey(chatVoiceGestureState.scope);
+    const micBtn = document.getElementById(`${scope}VoiceStartBtn`);
+    if (micBtn?.releasePointerCapture && chatVoiceGestureState.pointerId != null) {
+      try { micBtn.releasePointerCapture(chatVoiceGestureState.pointerId); } catch (_) {}
+    }
     chatVoiceGestureState.canceled = true;
     await cancelChatVoiceRecording('Recording canceled');
     resetVoiceGestureState();
@@ -2379,9 +2380,6 @@ function bindVoiceHoldMicButton(button, scope, optionsFactory) {
       if (!chatVoiceGestureState.active) return;
       if (getVoiceComposerScopeKey(chatVoiceGestureState.scope) !== getVoiceComposerScopeKey(scope)) return;
       event.preventDefault();
-      if (event.currentTarget?.releasePointerCapture && chatVoiceGestureState.pointerId != null) {
-        try { event.currentTarget.releasePointerCapture(chatVoiceGestureState.pointerId); } catch (_) {}
-      }
       await cancelVoiceHoldGesture();
     });
 

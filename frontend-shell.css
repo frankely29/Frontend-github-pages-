@@ -1408,7 +1408,7 @@ html, body { height: 100%; margin: 0; padding: 0; }
       background:#dc2626;
       color:#fff;
       box-shadow:0 3px 12px rgba(220,38,38,0.35);
-      transform:translate(var(--voice-mic-thumb-x, 0px), var(--voice-mic-thumb-y, 0px));
+      transform:translate(0, 0);
       transition:transform .09s linear;
       touch-action:none;
       user-select:none;
