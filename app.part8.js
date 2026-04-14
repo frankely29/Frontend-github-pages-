@@ -187,6 +187,8 @@ const chatVoiceGestureState = {
     startY: 0,
     currentX: 0,
     currentY: 0,
+    deltaX: 0,
+    deltaY: 0,
     cancelThresholdPx: 96,
     lockThresholdPx: 78,
     canceled: false,
@@ -973,17 +975,24 @@ function renderVoiceActiveStrip(surface, mode, data = {}) {
       const timerText = String(data.timerText || '0:00');
       const cancelProgress = Math.max(0, Math.min(1, Number(data.cancelProgress || 0)));
       const lockProgress = Math.max(0, Math.min(1, Number(data.lockProgress || 0)));
+      const thumbOffsetX = Number(data.thumbOffsetX || 0);
+      const thumbOffsetY = Number(data.thumbOffsetY || 0);
       strip.classList.add('recording', 'holding', 'chatVoiceHoldingStrip');
       strip.classList.remove('draft', 'chatVoiceLockedInline', 'chatVoiceReviewInline', 'chatVoiceReviewStrip');
       strip.hidden = false;
       strip.style.setProperty('--voice-hold-cancel-progress', String(cancelProgress.toFixed(3)));
+      strip.style.setProperty('--voice-mic-thumb-x', `${thumbOffsetX.toFixed(2)}px`);
+      strip.style.setProperty('--voice-mic-thumb-y', `${thumbOffsetY.toFixed(2)}px`);
       strip.innerHTML = `
-        <div class="chatVoiceHoldingTimer chatVoiceRecordTimer" data-voice-record-timer="1">${escapeHtml(timerText)}</div>
-        <div class="chatVoiceHoldingHint"><span class="chatVoiceHoldingArrow" aria-hidden="true">←</span> slide to cancel</div>
-        <div class="chatVoiceLockRail" aria-hidden="true">
-          <div class="chatVoiceLockThumb" style="--voice-lock-progress:${lockProgress.toFixed(3)};">
-            <span class="chatVoiceLockIcon">🔒</span>
+        <div class="chatVoiceHoldSurface">
+          <div class="chatVoiceHoldTimer chatVoiceRecordTimer" data-voice-record-timer="1">${escapeHtml(timerText)}</div>
+          <div class="chatVoiceHoldHint"><span class="chatVoiceHoldArrow" aria-hidden="true">←</span> slide to cancel</div>
+          <div class="chatVoiceLockRail" aria-hidden="true">
+            <div class="chatVoiceLockThumb" style="--voice-lock-progress:${lockProgress.toFixed(3)};">
+              <span class="chatVoiceLockIcon">🔒</span>
+            </div>
           </div>
+          <div class="chatVoiceMicThumb" aria-hidden="true">🎤</div>
         </div>
       `;
       return strip;
@@ -991,7 +1000,7 @@ function renderVoiceActiveStrip(surface, mode, data = {}) {
     if (mode === 'locked') {
       const timerText = String(data.timerText || '0:00');
       const isStopping = !!data.isStopping;
-      strip.classList.add('recording', 'chatVoiceLockedInline');
+      strip.classList.add('recording', 'chatVoiceLockedInline', 'chatVoiceLockedStrip');
       strip.classList.remove('draft', 'holding', 'chatVoiceHoldingStrip', 'chatVoiceReviewInline', 'chatVoiceReviewStrip');
       strip.hidden = false;
       strip.innerHTML = `
@@ -1006,7 +1015,7 @@ function renderVoiceActiveStrip(surface, mode, data = {}) {
       const isSending = !!data.isSending;
       const previewPlaying = !!data.previewPlaying;
       strip.classList.add('draft', 'chatVoiceReviewInline', 'chatVoiceReviewStrip');
-      strip.classList.remove('recording', 'chatVoiceLockedInline', 'holding', 'chatVoiceHoldingStrip');
+      strip.classList.remove('recording', 'chatVoiceLockedInline', 'chatVoiceLockedStrip', 'holding', 'chatVoiceHoldingStrip');
       strip.hidden = false;
       strip.innerHTML = `
         <button class="chatVoiceInlineBtn" id="${surface}VoiceDraftPreviewBtn" type="button" data-chat-voice-trigger="1"${isSending ? ' disabled' : ''}>${previewPlaying ? 'Pause' : 'Play'}</button>
@@ -1018,7 +1027,7 @@ function renderVoiceActiveStrip(surface, mode, data = {}) {
       return strip;
     }
     if (mode === 'uploading') {
-      strip.classList.remove('recording', 'holding', 'chatVoiceHoldingStrip', 'chatVoiceLockedInline', 'chatVoiceReviewInline', 'chatVoiceReviewStrip');
+      strip.classList.remove('recording', 'holding', 'chatVoiceHoldingStrip', 'chatVoiceLockedInline', 'chatVoiceLockedStrip', 'chatVoiceReviewInline', 'chatVoiceReviewStrip');
       strip.classList.add('draft', 'chatVoiceReviewInline', 'chatVoiceReviewStrip');
       strip.hidden = false;
       strip.innerHTML = `
@@ -1029,7 +1038,7 @@ function renderVoiceActiveStrip(surface, mode, data = {}) {
     }
     if (mode === 'error') {
       const message = String(data.message || 'Voice recording failed.');
-      strip.classList.remove('recording', 'holding', 'chatVoiceHoldingStrip', 'chatVoiceLockedInline');
+      strip.classList.remove('recording', 'holding', 'chatVoiceHoldingStrip', 'chatVoiceLockedInline', 'chatVoiceLockedStrip');
       strip.classList.add('draft', 'chatVoiceReviewInline', 'chatVoiceReviewStrip');
       strip.hidden = false;
       strip.innerHTML = `
@@ -2121,12 +2130,16 @@ function syncVoiceRecorderUi(scope) {
       if (mode === 'holding') {
         const deltaX = Number(chatVoiceGestureState.currentX || 0) - Number(chatVoiceGestureState.startX || 0);
         const deltaY = Number(chatVoiceGestureState.currentY || 0) - Number(chatVoiceGestureState.startY || 0);
+        const thumbOffsetX = Math.min(0, deltaX);
+        const thumbOffsetY = Math.min(0, deltaY);
         const cancelProgress = Math.abs(Math.min(0, deltaX)) / Math.max(1, Number(chatVoiceGestureState.cancelThresholdPx || 96));
         const lockProgress = Math.abs(Math.min(0, deltaY)) / Math.max(1, Number(chatVoiceGestureState.lockThresholdPx || 78));
         renderVoiceActiveStrip(domKey, 'holding', {
           timerText,
           cancelProgress,
           lockProgress,
+          thumbOffsetX,
+          thumbOffsetY,
         });
       } else if (mode === 'locked') {
         renderVoiceActiveStrip(domKey, 'locked', {
@@ -2170,6 +2183,8 @@ function resetVoiceGestureState() {
     chatVoiceGestureState.startY = 0;
     chatVoiceGestureState.currentX = 0;
     chatVoiceGestureState.currentY = 0;
+    chatVoiceGestureState.deltaX = 0;
+    chatVoiceGestureState.deltaY = 0;
     chatVoiceGestureState.canceled = false;
     chatVoiceGestureState.sentOnRelease = false;
     chatVoiceGestureState.autoSendScope = '';
@@ -2189,6 +2204,8 @@ function beginVoiceGesture(scope, pointerEvent, options = {}) {
     chatVoiceGestureState.startY = Number(pointerEvent?.clientY || 0);
     chatVoiceGestureState.currentX = chatVoiceGestureState.startX;
     chatVoiceGestureState.currentY = chatVoiceGestureState.startY;
+    chatVoiceGestureState.deltaX = 0;
+    chatVoiceGestureState.deltaY = 0;
     chatVoiceGestureState.canceled = false;
     chatVoiceGestureState.sentOnRelease = false;
     chatVoiceGestureState.sessionId = Number(chatVoiceGestureState.sessionId || 0) + 1;
@@ -2220,6 +2237,8 @@ function updateVoiceGesture(pointerEvent) {
     chatVoiceGestureState.currentY = Number(pointerEvent?.clientY || chatVoiceGestureState.currentY || 0);
     const deltaX = chatVoiceGestureState.currentX - chatVoiceGestureState.startX;
     const deltaY = chatVoiceGestureState.currentY - chatVoiceGestureState.startY;
+    chatVoiceGestureState.deltaX = deltaX;
+    chatVoiceGestureState.deltaY = deltaY;
     if (deltaY <= -Math.abs(Number(chatVoiceGestureState.lockThresholdPx || 78))) {
       chatVoiceGestureState.locked = true;
       releaseVoiceGestureCapture();
@@ -2662,14 +2681,14 @@ function stopActiveVoiceRecording(scope) {
     startBtn?.addEventListener('pointercancel', async (event) => {
       if (chatVoiceGestureState.pointerId !== event.pointerId) return;
       chatVoiceGestureState.suppressClickUntil = Date.now() + 700;
-      await finishVoiceGesture();
+      await cancelVoiceGestureRecording('Recording canceled');
     });
     startBtn?.addEventListener('touchcancel', async (event) => {
       if (chatVoiceGestureState.pointerId !== 'touch') return;
       event.preventDefault();
       event.stopPropagation();
       chatVoiceGestureState.suppressClickUntil = Date.now() + 700;
-      await finishVoiceGesture();
+      await cancelVoiceGestureRecording('Recording canceled');
     }, { passive: false });
     host?.addEventListener('click', async (event) => {
       const target = event.target?.closest?.('button');

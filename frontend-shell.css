@@ -1348,19 +1348,31 @@ html, body { height: 100%; margin: 0; padding: 0; }
     .chatVoiceRecordTimer{ flex:0 0 auto; font-size:11px; color:#f8fafc; font-weight:900; min-width:38px; text-align:right; }
     .chatVoiceActiveStrip{ display:flex; align-items:center; gap:8px; min-height:36px; width:100%; padding:2px 0; border-radius:12px; }
     .chatVoiceHoldingStrip{
-      transform:translateX(calc(var(--voice-hold-cancel-progress, 0) * -18px));
-      transition:transform .1s linear;
       touch-action:none;
       user-select:none;
+      -webkit-user-select:none;
+      -webkit-touch-callout:none;
     }
-    .chatVoiceHoldingTimer{
+    .chatVoiceHoldSurface{
+      position:relative;
+      display:grid;
+      grid-template-columns:auto 1fr auto;
+      align-items:center;
+      gap:10px;
+      width:100%;
+      min-height:40px;
+      padding-right:42px;
+    }
+    .chatVoiceHoldingTimer,
+    .chatVoiceHoldTimer{
       color:#fff;
       min-width:42px;
       font-size:13px;
       font-weight:900;
       text-align:left;
     }
-    .chatVoiceHoldingHint{
+    .chatVoiceHoldingHint,
+    .chatVoiceHoldHint{
       flex:1;
       min-width:0;
       text-align:center;
@@ -1375,7 +1387,8 @@ html, body { height: 100%; margin: 0; padding: 0; }
       text-overflow:ellipsis;
       user-select:none;
     }
-    .chatVoiceHoldingArrow{ margin-right:4px; color:#93c5fd; }
+    .chatVoiceHoldingArrow,
+    .chatVoiceHoldArrow{ margin-right:4px; color:#93c5fd; }
     .chatVoiceLockRail{
       width:24px;
       height:44px;
@@ -1389,6 +1402,8 @@ html, body { height: 100%; margin: 0; padding: 0; }
       flex:0 0 auto;
       touch-action:none;
       user-select:none;
+      -webkit-user-select:none;
+      -webkit-touch-callout:none;
     }
     .chatVoiceLockThumb{
       width:16px;
@@ -1401,6 +1416,29 @@ html, body { height: 100%; margin: 0; padding: 0; }
       transition:transform .1s linear;
     }
     .chatVoiceLockIcon{ font-size:9px; line-height:1; color:#0f172a; }
+    .chatVoiceMicThumb{
+      position:absolute;
+      right:0;
+      bottom:1px;
+      width:34px;
+      height:34px;
+      border-radius:999px;
+      display:grid;
+      place-items:center;
+      font-size:15px;
+      font-weight:900;
+      line-height:1;
+      background:#dc2626;
+      color:#fff;
+      box-shadow:0 3px 12px rgba(220,38,38,0.35);
+      transform:translate(var(--voice-mic-thumb-x, 0px), var(--voice-mic-thumb-y, 0px));
+      transition:transform .09s linear;
+      touch-action:none;
+      user-select:none;
+      -webkit-user-select:none;
+      -webkit-touch-callout:none;
+      pointer-events:none;
+    }
     .chatVoiceLockedInline,
     .chatVoiceReviewInline{
       border:1px solid rgba(148,163,184,0.45);
