@@ -137,7 +137,7 @@ const CHAT_VOICE_BUSY_PHASES = new Set(['preparing', 'requesting', 'recording', 
 
 const VOICE_BLOB_FETCH_RETRY_DELAYS_MS = [0, 350, 900, 1800];
 
-const CHAT_VOICE_IDLE_STATUS = 'Tap mic to record (max 2:00)';
+const CHAT_VOICE_IDLE_STATUS = 'Hold mic to record (max 2:00)';
 
 const CHAT_VOICE_MAX_REACHED_STATUS = '2:00 max reached. Tap Send or Cancel.';
 
@@ -2561,11 +2561,38 @@ function stopActiveVoiceRecording(scope) {
       beginVoiceGesture(surface, event, options);
       syncAllVoiceRecorderUis();
     });
+    startBtn?.addEventListener('touchstart', async (event) => {
+      if (chatVoiceGestureState.active || isChatVoiceBusy()) return;
+      const touch = event.changedTouches && event.changedTouches[0];
+      if (!touch) return;
+      const options = typeof optionsFactory === 'function' ? optionsFactory() : {};
+      event.preventDefault();
+      event.stopPropagation();
+      chatVoiceGestureState.suppressClickUntil = Date.now() + 700;
+      const started = await startChatVoiceRecording(surface, options);
+      if (!started) return;
+      beginVoiceGesture(surface, {
+        pointerId: 'touch',
+        clientX: touch.clientX,
+        clientY: touch.clientY,
+      }, options);
+      syncAllVoiceRecorderUis();
+    }, { passive: false });
     startBtn?.addEventListener('pointermove', (event) => {
       if (!chatVoiceGestureState.active || chatVoiceGestureState.pointerId !== event.pointerId) return;
       event.preventDefault();
       updateVoiceGesture(event);
     });
+    startBtn?.addEventListener('touchmove', (event) => {
+      if (!chatVoiceGestureState.active || chatVoiceGestureState.pointerId !== 'touch') return;
+      const touch = event.changedTouches && event.changedTouches[0];
+      if (!touch) return;
+      event.preventDefault();
+      updateVoiceGesture({
+        clientX: touch.clientX,
+        clientY: touch.clientY,
+      });
+    }, { passive: false });
     startBtn?.addEventListener('pointerup', async (event) => {
       if (chatVoiceGestureState.pointerId !== event.pointerId) return;
       event.preventDefault();
@@ -2573,12 +2600,26 @@ function stopActiveVoiceRecording(scope) {
       chatVoiceGestureState.suppressClickUntil = Date.now() + 700;
       await finishVoiceGesture();
     });
+    startBtn?.addEventListener('touchend', async (event) => {
+      if (chatVoiceGestureState.pointerId !== 'touch') return;
+      event.preventDefault();
+      event.stopPropagation();
+      chatVoiceGestureState.suppressClickUntil = Date.now() + 700;
+      await finishVoiceGesture();
+    }, { passive: false });
     startBtn?.addEventListener('pointercancel', async (event) => {
       if (chatVoiceGestureState.pointerId !== event.pointerId) return;
       startBtn.releasePointerCapture?.(event.pointerId);
       chatVoiceGestureState.suppressClickUntil = Date.now() + 700;
       await finishVoiceGesture();
     });
+    startBtn?.addEventListener('touchcancel', async (event) => {
+      if (chatVoiceGestureState.pointerId !== 'touch') return;
+      event.preventDefault();
+      event.stopPropagation();
+      chatVoiceGestureState.suppressClickUntil = Date.now() + 700;
+      await finishVoiceGesture();
+    }, { passive: false });
     host?.addEventListener('click', async (event) => {
       const target = event.target?.closest?.('button');
       if (!target) return;
