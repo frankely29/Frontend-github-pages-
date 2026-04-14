@@ -1284,6 +1284,8 @@ html, body { height: 100%; margin: 0; padding: 0; }
       background:rgba(37,99,235,0.12);
       color:#1d4ed8;
       flex:0 0 auto;
+      touch-action:none;
+      user-select:none;
     }
     .chatMediaInlineBtn{ font-size:16px; }
     .chatMediaInlineBtn:disabled{ opacity:.62; }
@@ -1295,7 +1297,9 @@ html, body { height: 100%; margin: 0; padding: 0; }
     .chatComposerModeIdle .chatComposerMainRow{ display:flex; }
     .chatComposerModeHolding .chatComposerMainRow,
     .chatComposerModeLocked .chatComposerMainRow,
-    .chatComposerModeReview .chatComposerMainRow{ display:none !important; }
+    .chatComposerModeReview .chatComposerMainRow,
+    .chatComposerModeUploading .chatComposerMainRow,
+    .chatComposerModeError .chatComposerMainRow{ display:none !important; }
     .chatComposerVoiceHolding,
     .chatComposerVoiceLocked,
     .chatComposerVoiceReview{
@@ -1346,6 +1350,8 @@ html, body { height: 100%; margin: 0; padding: 0; }
     .chatVoiceHoldingStrip{
       transform:translateX(calc(var(--voice-hold-cancel-progress, 0) * -18px));
       transition:transform .1s linear;
+      touch-action:none;
+      user-select:none;
     }
     .chatVoiceHoldingTimer{
       color:#fff;
@@ -1367,6 +1373,7 @@ html, body { height: 100%; margin: 0; padding: 0; }
       white-space:nowrap;
       overflow:hidden;
       text-overflow:ellipsis;
+      user-select:none;
     }
     .chatVoiceHoldingArrow{ margin-right:4px; color:#93c5fd; }
     .chatVoiceLockRail{
@@ -1380,6 +1387,8 @@ html, body { height: 100%; margin: 0; padding: 0; }
       justify-content:center;
       padding:3px 0;
       flex:0 0 auto;
+      touch-action:none;
+      user-select:none;
     }
     .chatVoiceLockThumb{
       width:16px;
