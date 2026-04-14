@@ -931,28 +931,31 @@ function voiceNoteLabel(message) {
 
 function buildVoiceComposer(surface, extraClass = '') {
     return `<div class="chatVoiceComposer ${extraClass}" data-voice-surface="${surface}">
-      <div class="chatVoicePreview">
-        <button class="chatVoiceBtn" id="${surface}VoiceStartBtn" type="button" aria-label="Record voice note" data-chat-voice-trigger="1">🎤</button>
-        <button class="chatVoiceBtn recording" id="${surface}VoiceStopBtn" type="button" aria-label="Stop voice note" hidden data-chat-voice-trigger="1">Stop</button>
-        <button class="chatVoiceBtn" id="${surface}VoiceCancelBtn" type="button" aria-label="Cancel voice note" hidden data-chat-voice-trigger="1">Cancel</button>
-        <div class="chatVoiceMeta">
+      <div class="chatVoiceRail">
+        <div class="chatVoiceIdleRow" id="${surface}VoiceIdleRow">
+          <button class="chatVoiceBtn chatVoiceStartBtn" id="${surface}VoiceStartBtn" type="button" aria-label="Record voice note" data-chat-voice-trigger="1">🎤</button>
           <div class="chatVoiceStatus" id="${surface}VoiceStatus" aria-live="polite">${CHAT_VOICE_IDLE_STATUS}</div>
           <div class="chatVoiceTimer" id="${surface}VoiceTimer">0:00</div>
-          <div class="chatVoiceStatus" id="${surface}VoiceUpload" hidden></div>
-          <div class="chatVoiceError" id="${surface}VoiceError" hidden></div>
+        </div>
+
+        <div class="chatVoiceRecordBar" id="${surface}VoiceRecordRow" hidden>
+          <div class="chatVoiceRecordMic" aria-hidden="true">🎤</div>
+          <div class="chatVoiceRecordTimer" data-voice-record-timer="1">0:00</div>
+          <div class="chatVoiceRecordHint">slide to cancel</div>
+          <button class="chatVoiceChipBtn" id="${surface}VoiceCancelBtn" type="button" aria-label="Cancel voice note" data-chat-voice-trigger="1" hidden>Cancel</button>
+          <button class="chatVoiceBtn recording" id="${surface}VoiceStopBtn" type="button" aria-label="Stop voice note" data-chat-voice-trigger="1" hidden>Stop</button>
+        </div>
+
+        <div class="chatVoiceDraftBar" id="${surface}VoiceDraft" hidden>
+          <button class="chatVoiceDraftPlay" id="${surface}VoiceDraftPreviewBtn" type="button" data-chat-voice-trigger="1">Play</button>
+          <div class="chatVoiceMiniWave" aria-hidden="true"></div>
+          <div class="chatVoiceDraftMetaCompact" id="${surface}VoiceDraftDuration">0:00</div>
+          <button class="chatVoiceChipBtn" id="${surface}VoiceDraftCancelBtn" type="button" data-chat-voice-trigger="1">Cancel</button>
+          <button class="chatVoiceChipBtn send" id="${surface}VoiceDraftSendBtn" type="button" data-chat-voice-trigger="1">Send</button>
         </div>
       </div>
-      <div class="chatVoiceDraft" id="${surface}VoiceDraft" hidden>
-        <div class="chatVoiceDraftTitle">Voice note ready. Tap Send to send the voice note.</div>
-        <div class="chatVoiceDraftMeta">
-          <span class="chatVoiceDraftDuration" id="${surface}VoiceDraftDuration">0:00</span>
-        </div>
-        <div class="chatVoiceDraftActions">
-          <button class="chatVoiceBtn" id="${surface}VoiceDraftPreviewBtn" type="button" data-chat-voice-trigger="1">Play</button>
-          <button class="chatVoiceBtn" id="${surface}VoiceDraftCancelBtn" type="button" data-chat-voice-trigger="1">Cancel</button>
-          <button class="chatVoiceBtn" id="${surface}VoiceDraftSendBtn" type="button" data-chat-voice-trigger="1">Send</button>
-        </div>
-      </div>
+      <div class="chatVoiceLoading" id="${surface}VoiceUpload" hidden></div>
+      <div class="chatVoiceError" id="${surface}VoiceError" hidden></div>
     </div>`;
   }
 
@@ -1942,8 +1945,10 @@ function syncVoiceRecorderUi(scope) {
     const domKey = voiceScopeDomKey(scope);
     const stateScope = voiceScopeStateKey(scope);
     const isActive = !!stateScope && chatVoiceState.scope === stateScope;
-    const isRecording = isActive && chatVoiceState.phase === 'recording';
-    const isStopping = isActive && chatVoiceState.phase === 'stopping';
+    const phase = String(chatVoiceState.phase || 'idle');
+    const isRecording = isActive && phase === 'recording';
+    const isBusyRow = isActive && (phase === 'recording' || phase === 'stopping' || phase === 'requesting' || phase === 'preparing');
+    const isStopping = isActive && phase === 'stopping';
     const draft = getChatVoiceDraft(scope);
     const isDraftReady = !!draft && draft.status === 'ready';
     const isDraftSending = !!draft && draft.status === 'sending';
@@ -1959,35 +1964,39 @@ function syncVoiceRecorderUi(scope) {
     const draftSendBtn = document.getElementById(`${domKey}VoiceDraftSendBtn`);
     const draftCancelBtn = document.getElementById(`${domKey}VoiceDraftCancelBtn`);
     const draftPreviewBtn = document.getElementById(`${domKey}VoiceDraftPreviewBtn`);
-    const canStart = !isRecording && !isStopping && !isDraftSending;
+    const idleRow = document.getElementById(`${domKey}VoiceIdleRow`);
+    const recordRow = document.getElementById(`${domKey}VoiceRecordRow`);
+    const canStart = !isBusyRow && !isDraftSending;
     if (startBtn) {
-      startBtn.hidden = isRecording || isStopping;
+      startBtn.hidden = isBusyRow || isDraftReady || isDraftSending;
       startBtn.disabled = !canStart;
       startBtn.classList.toggle('busy', !canStart && !isDraftReady);
       startBtn.classList.toggle('recording', isRecording);
-      startBtn.textContent = isDraftReady ? 'Re-record' : '🎤';
+      startBtn.textContent = '🎤';
     }
     if (stopBtn) {
-      stopBtn.hidden = !isRecording;
+      stopBtn.hidden = !isBusyRow;
       stopBtn.disabled = !isRecording;
       stopBtn.classList.toggle('busy', isStopping);
     }
     if (cancelBtn) {
-      cancelBtn.hidden = !(isRecording || isStopping);
+      cancelBtn.hidden = !isBusyRow;
       cancelBtn.disabled = isStopping;
       cancelBtn.classList.toggle('busy', isStopping);
     }
-    if (timerEl) {
-      timerEl.textContent = isRecording
-        ? formatChatVoiceDuration(chatVoiceState.durationMs)
-        : (isDraftReady || isDraftSending ? formatChatVoiceDuration(draft?.durationMs || 0) : '0:00');
-    }
+    const timerText = isRecording
+      ? formatChatVoiceDuration(chatVoiceState.durationMs)
+      : (isDraftReady || isDraftSending ? formatChatVoiceDuration(draft?.durationMs || 0) : '0:00');
+    if (timerEl) timerEl.textContent = timerText;
+    document.querySelectorAll(`[data-voice-surface="${domKey}"] [data-voice-record-timer]`).forEach((el) => {
+      el.textContent = timerText;
+    });
     if (uploadEl) {
       uploadEl.hidden = !isDraftSending;
       uploadEl.textContent = isDraftSending ? 'Uploading voice note…' : '';
     }
     if (statusEl) {
-      if (isRecording) statusEl.textContent = 'Recording voice note…';
+      if (isBusyRow) statusEl.textContent = 'Recording voice note…';
       else if (isDraftSending) statusEl.textContent = 'Uploading voice note…';
       else if (isDraftReady) statusEl.textContent = String(chatVoiceState.statusText || 'Voice note ready. Tap Send to send the voice note.').trim() || 'Voice note ready. Tap Send to send the voice note.';
       else if (!statusEl.textContent.trim()) statusEl.textContent = CHAT_VOICE_IDLE_STATUS;
@@ -1997,6 +2006,8 @@ function syncVoiceRecorderUi(scope) {
       errorEl.textContent = nextError;
       errorEl.hidden = !nextError;
     }
+    if (idleRow) idleRow.hidden = isBusyRow || isDraftReady || isDraftSending;
+    if (recordRow) recordRow.hidden = !isBusyRow;
     if (draftWrap) draftWrap.hidden = !(isDraftReady || isDraftSending);
     if (draftDurationEl) draftDurationEl.textContent = formatChatVoiceDuration(draft?.durationMs || 0);
     if (draftSendBtn) {
