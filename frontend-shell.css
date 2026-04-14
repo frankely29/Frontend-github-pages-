@@ -1302,36 +1302,22 @@ html, body { height: 100%; margin: 0; padding: 0; }
     .chatComposerModeError .chatComposerMainRow{ display:none !important; }
     .chatComposerVoiceHolding,
     .chatComposerVoiceLocked,
-    .chatComposerVoiceReview{
-      border-radius:14px;
-      padding:6px 8px;
-    }
-    .chatComposerVoiceHolding{
-      background:transparent;
-      padding:4px 0;
-    }
-    .chatComposerVoiceLocked,
-    .chatComposerVoiceReview{
-      background:rgba(15,23,42,0.92);
-    }
+    .chatComposerVoiceReview{ border-radius:14px; padding:4px 0; background:transparent; }
     .chatVoiceComposer,
     .chatVoiceComposerPrivate,
     .chatVoiceComposerCompat{ display:none !important; }
-    .chatVoicePopoverHost,
-    .chatVoicePopoverHostInline{
-      position:relative;
+    .chatVoiceModeHost{
+      width:100%;
+      min-height:42px;
       display:flex;
       align-items:center;
-      justify-content:flex-start;
-      gap:6px;
-      width:100%;
-      max-width:100%;
-      margin:0;
+      justify-content:stretch;
+      touch-action:none;
+      user-select:none;
+      -webkit-user-select:none;
+      -webkit-touch-callout:none;
     }
-    .chatVoicePopoverHost[hidden],
-    .chatVoicePopoverHostInline[hidden]{ display:none !important; }
-    .chatVoicePopoverHost > *,
-    .chatVoicePopoverHostInline > *{ pointer-events:auto; width:100%; }
+    .chatVoiceModeHost[hidden]{ display:none !important; }
     .chatVoiceSrOnly{
       position:absolute !important;
       width:1px !important;
@@ -1348,61 +1334,53 @@ html, body { height: 100%; margin: 0; padding: 0; }
     .chatVoiceBtn.busy{ opacity:.65; }
     .chatVoiceStatus{ min-width:0; font-size:11px; color:#475569; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     .chatVoiceTimer,
-    .chatVoiceRecordTimer{ flex:0 0 auto; font-size:11px; color:#f8fafc; font-weight:900; min-width:38px; text-align:right; }
-    .chatVoiceActiveStrip{ display:flex; align-items:center; gap:8px; min-height:36px; width:100%; padding:2px 0; border-radius:12px; }
-    .chatVoiceHoldStage{ width:100%; }
-    .chatVoiceHoldingStrip{
-      touch-action:none;
-      user-select:none;
-      -webkit-user-select:none;
-      -webkit-touch-callout:none;
-    }
-    .chatVoiceHoldSurface{
+    .chatVoiceRecordTimer{ flex:0 0 auto; font-size:11px; color:#0f172a; font-weight:900; min-width:38px; text-align:right; }
+    .chatVoiceHoldStage{
       position:relative;
       display:grid;
       grid-template-columns:auto 1fr auto;
       align-items:center;
       gap:10px;
       width:100%;
-      min-height:40px;
+      min-height:42px;
       padding-right:42px;
       touch-action:none;
       user-select:none;
       -webkit-user-select:none;
       -webkit-touch-callout:none;
+      border:1px solid rgba(148,163,184,0.35);
+      border-radius:14px;
+      background:#f8fafc;
+      padding-left:10px;
     }
-    .chatVoiceHoldingTimer,
     .chatVoiceHoldTimer{
-      color:#fff;
+      color:#0f172a;
       min-width:42px;
       font-size:13px;
       font-weight:900;
       text-align:left;
     }
-    .chatVoiceHoldingHint,
     .chatVoiceHoldHint{
       flex:1;
       min-width:0;
       text-align:center;
-      color:rgba(226,232,240,0.95);
+      color:#334155;
       font-size:11px;
       font-weight:800;
       letter-spacing:.02em;
-      opacity:calc(1 - var(--voice-hold-cancel-progress, 0) * .72);
       transition:opacity .1s linear;
       white-space:nowrap;
       overflow:hidden;
       text-overflow:ellipsis;
       user-select:none;
     }
-    .chatVoiceHoldingArrow,
     .chatVoiceHoldArrow{ margin-right:4px; color:#93c5fd; }
     .chatVoiceLockRail{
       width:24px;
       height:44px;
       border-radius:999px;
       border:1px solid rgba(148,163,184,0.55);
-      background:rgba(2,6,23,0.55);
+      background:#e2e8f0;
       display:flex;
       align-items:flex-end;
       justify-content:center;
@@ -1413,17 +1391,8 @@ html, body { height: 100%; margin: 0; padding: 0; }
       -webkit-user-select:none;
       -webkit-touch-callout:none;
     }
-    .chatVoiceLockThumb{
-      width:16px;
-      height:16px;
-      border-radius:50%;
-      background:rgba(148,163,184,0.92);
-      display:grid;
-      place-items:center;
-      transform:translateY(calc(var(--voice-lock-progress, 0) * -20px));
-      transition:transform .1s linear;
-    }
-    .chatVoiceLockIcon{ font-size:9px; line-height:1; color:#0f172a; }
+    .chatVoiceLockRail.active{ border-color:#1d4ed8; box-shadow:0 0 0 2px rgba(29,78,216,0.18); }
+    .chatVoiceLockIcon{ font-size:12px; line-height:1; color:#0f172a; }
     .chatVoiceMicThumb{
       position:absolute;
       right:0;
@@ -1446,35 +1415,35 @@ html, body { height: 100%; margin: 0; padding: 0; }
       -webkit-user-select:none;
       -webkit-touch-callout:none;
       pointer-events:none;
-    }
-    .chatVoiceLockedInline,
-    .chatVoiceReviewInline{
-      border:1px solid rgba(148,163,184,0.45);
-      background:rgba(15,23,42,0.55);
-      color:#f8fafc;
-      border-radius:12px;
-      padding:6px 8px;
+      border:none;
     }
     .chatVoiceLockedStrip,
-    .chatVoiceReviewStrip{ min-height:34px; }
-    .chatComposerModeLocked .chatVoiceLockedInline,
-    .chatComposerModeReview .chatVoiceReviewInline{
-      min-height:34px;
+    .chatVoiceReviewStrip{
+      min-height:36px;
+      width:100%;
+      display:flex;
+      align-items:center;
+      gap:8px;
+      padding:4px 8px;
+      border:1px solid rgba(148,163,184,0.35);
+      border-radius:14px;
+      background:#f8fafc;
+      color:#0f172a;
     }
-    .chatVoiceActiveStrip .chatVoiceInlineBtn{
+    .chatVoiceModeHost .chatVoiceInlineBtn{
       border:none;
       border-radius:999px;
       padding:5px 10px;
       font-size:10px;
       font-weight:900;
       background:rgba(148,163,184,0.25);
-      color:#e2e8f0;
+      color:#0f172a;
       flex:0 0 auto;
       width:auto;
       height:auto;
     }
-    .chatVoiceActiveStrip .chatVoiceInlineBtn.recording{ background:#dc2626; color:#fff; box-shadow:0 2px 8px rgba(220,38,38,0.30); }
-    .chatVoiceActiveStrip .chatVoiceInlineBtn.send{ background:#1d4ed8; color:#fff; box-shadow:0 2px 8px rgba(29,78,216,0.30); }
+    .chatVoiceLockedStrip .chatVoiceInlineBtn,
+    .chatVoiceReviewStrip .chatVoiceInlineBtn{ touch-action:none; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
     .chatVoiceRecordMic{ width:24px; height:24px; border-radius:50%; display:grid; place-items:center; background:rgba(220,38,38,0.16); color:#dc2626; font-size:12px; }
     .chatVoiceRecordHint{ flex:1; min-width:0; text-align:center; font-size:10px; font-weight:800; letter-spacing:.04em; text-transform:lowercase; color:rgba(51,65,85,0.86); transition:opacity .12s linear; }
     .chatVoiceChipBtn{ border:none; border-radius:999px; padding:5px 10px; font-size:10px; font-weight:900; background:rgba(148,163,184,0.18); color:#334155; }

@@ -964,94 +964,6 @@ function buildVoiceComposer(surface, extraClass = '') {
     return '';
   }
 
-function renderVoiceActiveStrip(surface, mode, data = {}) {
-    const strip = document.getElementById(`${surface}VoiceActiveStrip`);
-    if (!strip) return null;
-    if (mode === 'none') {
-      strip.innerHTML = '';
-      strip.classList.remove('recording', 'draft', 'holding', 'chatVoiceHoldingStrip', 'chatVoiceLockedStrip', 'chatVoiceDraftStrip', 'chatVoiceLockedInline', 'chatVoiceReviewInline', 'chatVoiceReviewStrip');
-      strip.hidden = true;
-      return strip;
-    }
-    if (mode === 'holding') {
-      const timerText = String(data.timerText || '0:00');
-      const cancelProgress = Math.max(0, Math.min(1, Number(data.cancelProgress || 0)));
-      const lockProgress = Math.max(0, Math.min(1, Number(data.lockProgress || 0)));
-      const thumbOffsetX = Number(data.thumbOffsetX || 0);
-      const thumbOffsetY = Number(data.thumbOffsetY || 0);
-      strip.classList.add('recording', 'holding', 'chatVoiceHoldingStrip');
-      strip.classList.remove('draft', 'chatVoiceLockedInline', 'chatVoiceReviewInline', 'chatVoiceReviewStrip');
-      strip.hidden = false;
-      strip.style.setProperty('--voice-hold-cancel-progress', String(cancelProgress.toFixed(3)));
-      strip.style.setProperty('--voice-mic-thumb-x', `${thumbOffsetX.toFixed(2)}px`);
-      strip.style.setProperty('--voice-mic-thumb-y', `${thumbOffsetY.toFixed(2)}px`);
-      strip.innerHTML = `
-        <div class="chatVoiceHoldStage chatVoiceHoldSurface">
-          <div class="chatVoiceHoldTimer chatVoiceRecordTimer" data-voice-record-timer="1">${escapeHtml(timerText)}</div>
-          <div class="chatVoiceHoldHint"><span class="chatVoiceHoldArrow" aria-hidden="true">←</span> slide to cancel</div>
-          <div class="chatVoiceLockRail" aria-hidden="true">
-            <div class="chatVoiceLockThumb" style="--voice-lock-progress:${lockProgress.toFixed(3)};">
-              <span class="chatVoiceLockIcon">🔒</span>
-            </div>
-          </div>
-          <div class="chatVoiceMicThumb" aria-hidden="true">🎤</div>
-        </div>
-      `;
-      return strip;
-    }
-    if (mode === 'locked') {
-      const timerText = String(data.timerText || '0:00');
-      const isStopping = !!data.isStopping;
-      strip.classList.add('recording', 'chatVoiceLockedInline', 'chatVoiceLockedStrip');
-      strip.classList.remove('draft', 'holding', 'chatVoiceHoldingStrip', 'chatVoiceReviewInline', 'chatVoiceReviewStrip');
-      strip.hidden = false;
-      strip.innerHTML = `
-        <div class="chatVoiceRecordTimer" data-voice-record-timer="1">${escapeHtml(timerText)}</div>
-        <button class="chatVoiceInlineBtn" id="${surface}VoiceCancelBtn" type="button" aria-label="Delete voice note" data-chat-voice-trigger="1"${isStopping ? ' disabled' : ''}>Delete</button>
-        <button class="chatVoiceInlineBtn recording" id="${surface}VoiceStopBtn" type="button" aria-label="Stop voice note" data-chat-voice-trigger="1"${isStopping ? ' disabled' : ''}>Stop</button>
-      `;
-      return strip;
-    }
-    if (mode === 'draft') {
-      const timerText = String(data.timerText || '0:00');
-      const isSending = !!data.isSending;
-      const previewPlaying = !!data.previewPlaying;
-      strip.classList.add('draft', 'chatVoiceReviewInline', 'chatVoiceReviewStrip');
-      strip.classList.remove('recording', 'chatVoiceLockedInline', 'chatVoiceLockedStrip', 'holding', 'chatVoiceHoldingStrip');
-      strip.hidden = false;
-      strip.innerHTML = `
-        <button class="chatVoiceInlineBtn" id="${surface}VoiceDraftPreviewBtn" type="button" data-chat-voice-trigger="1"${isSending ? ' disabled' : ''}>${previewPlaying ? 'Pause' : 'Play'}</button>
-        <div class="chatVoiceInlineWave" aria-hidden="true"></div>
-        <div class="chatVoiceDraftMetaCompact" id="${surface}VoiceDraftDuration">${escapeHtml(timerText)}</div>
-        <button class="chatVoiceInlineBtn" id="${surface}VoiceDraftCancelBtn" type="button" data-chat-voice-trigger="1"${isSending ? ' disabled' : ''}>Delete</button>
-        <button class="chatVoiceInlineBtn send" id="${surface}VoiceDraftSendBtn" type="button" data-chat-voice-trigger="1"${isSending ? ' disabled' : ''}>Send</button>
-      `;
-      return strip;
-    }
-    if (mode === 'uploading') {
-      strip.classList.remove('recording', 'holding', 'chatVoiceHoldingStrip', 'chatVoiceLockedInline', 'chatVoiceLockedStrip', 'chatVoiceReviewInline', 'chatVoiceReviewStrip');
-      strip.classList.add('draft', 'chatVoiceReviewInline', 'chatVoiceReviewStrip');
-      strip.hidden = false;
-      strip.innerHTML = `
-        <div class="chatVoiceInlineWave" aria-hidden="true"></div>
-        <div class="chatVoiceDraftMetaCompact">Uploading…</div>
-      `;
-      return strip;
-    }
-    if (mode === 'error') {
-      const message = String(data.message || 'Voice recording failed.');
-      strip.classList.remove('recording', 'holding', 'chatVoiceHoldingStrip', 'chatVoiceLockedInline', 'chatVoiceLockedStrip');
-      strip.classList.add('draft', 'chatVoiceReviewInline', 'chatVoiceReviewStrip');
-      strip.hidden = false;
-      strip.innerHTML = `
-        <div class="chatVoiceError">${escapeHtml(message)}</div>
-        <button class="chatVoiceInlineBtn" id="${surface}VoiceErrorDismissBtn" type="button" data-chat-voice-trigger="1">Dismiss</button>
-      `;
-      return strip;
-    }
-    return strip;
-  }
-
 function isCompleteVoiceMessage(message) {
     return parseMessageId(message?.id) !== null
       && normalizeMessageType(message?.messageType, message?.audioUrl ? 'voice' : 'text') === 'voice'
@@ -2051,7 +1963,7 @@ function renderVoiceComposerSurface(scope) {
     const mode = getVoiceComposerMode(scope);
     const composerEl = document.getElementById(`${domKey}VoiceComposer`);
     const mainRowEl = document.getElementById(`${domKey}ComposerMainRow`);
-    const host = document.getElementById(`${domKey}VoiceHost`);
+    const host = getVoiceModeHost(scope);
     if (composerEl) {
       composerEl.dataset.voiceMode = mode;
       composerEl.classList.toggle('chatComposerModeIdle', mode === 'idle');
@@ -2068,6 +1980,14 @@ function renderVoiceComposerSurface(scope) {
     if (host) host.hidden = mode === 'idle';
   }
 
+function getVoiceModeHost(scope) {
+    const key = voiceScopeStateKey(scope);
+    if (key === 'public') return document.getElementById('publicVoiceModeHost');
+    if (key === 'private') return document.getElementById('privateVoiceModeHost');
+    if (key === 'profile-dm') return document.getElementById('driverProfileVoiceModeHost');
+    return null;
+  }
+
 function syncVoiceRecorderUi(scope) {
     const domKey = voiceScopeDomKey(scope);
     const stateScope = voiceScopeStateKey(scope);
@@ -2082,12 +2002,7 @@ function syncVoiceRecorderUi(scope) {
     const isDraftReady = !!draft && draft.status === 'ready';
     const isDraftSending = !!draft && draft.status === 'sending';
     const startBtn = document.getElementById(`${domKey}VoiceStartBtn`);
-    const timerEl = document.getElementById(`${domKey}VoiceTimer`);
-    const uploadEl = document.getElementById(`${domKey}VoiceUpload`);
-    const statusEl = document.getElementById(`${domKey}VoiceStatus`);
-    const errorEl = document.getElementById(`${domKey}VoiceError`);
-    const activeStrip = document.getElementById(`${domKey}VoiceActiveStrip`);
-    const statusVisible = isDraftSending;
+    const host = getVoiceModeHost(scope);
     const canStart = !isBusyRow && !isDraftSending;
     const hasError = !!String((draft?.error || (isActive ? chatVoiceState.errorText : '')) || '').trim();
     let mode = getVoiceComposerMode(scope);
@@ -2112,67 +2027,57 @@ function syncVoiceRecorderUi(scope) {
     const timerText = isRecording
       ? formatChatVoiceDuration(chatVoiceState.durationMs)
       : (isDraftReady || isDraftSending ? formatChatVoiceDuration(draft?.durationMs || 0) : '0:00');
-    if (timerEl) timerEl.textContent = timerText;
-    document.querySelectorAll(`[data-voice-surface="${domKey}"] [data-voice-record-timer]`).forEach((el) => {
+    document.querySelectorAll(`#${domKey}VoiceComposer [data-voice-record-timer]`).forEach((el) => {
       el.textContent = timerText;
     });
-    if (uploadEl) {
-      uploadEl.hidden = !isDraftSending;
-      uploadEl.textContent = isDraftSending ? 'Uploading voice note…' : '';
-    }
-    if (statusEl) {
-      if (isBusyRow) statusEl.textContent = 'Recording voice note…';
-      else if (isDraftSending) statusEl.textContent = 'Uploading voice note…';
-      else if (isDraftReady) statusEl.textContent = String(chatVoiceState.statusText || 'Voice note ready. Tap Send to send the voice note.').trim() || 'Voice note ready. Tap Send to send the voice note.';
-      else if (!statusEl.textContent.trim()) statusEl.textContent = CHAT_VOICE_IDLE_STATUS;
-      statusEl.hidden = !statusVisible;
-    }
-    if (errorEl) {
-      const nextError = String((draft?.error || (isActive ? chatVoiceState.errorText : '')) || '').trim();
-      errorEl.textContent = nextError;
-      errorEl.hidden = !nextError;
-    }
-    if (activeStrip) {
+    if (host) {
       if (mode === 'holding') {
         const deltaX = Number(chatVoiceGestureState.deltaX || 0);
         const deltaY = Number(chatVoiceGestureState.deltaY || 0);
         const thumbOffsetX = Number(chatVoiceGestureState.thumbOffsetX || 0);
         const thumbOffsetY = Number(chatVoiceGestureState.thumbOffsetY || 0);
-        const cancelProgress = Math.abs(Math.min(0, deltaX)) / Math.max(1, Number(chatVoiceGestureState.cancelThresholdPx || 96));
-        const lockProgress = Math.abs(Math.min(0, deltaY)) / Math.max(1, Number(chatVoiceGestureState.lockThresholdPx || 78));
-        renderVoiceActiveStrip(domKey, 'holding', {
-          timerText,
-          cancelProgress,
-          lockProgress,
-          thumbOffsetX,
-          thumbOffsetY,
-        });
+        const cancelProgress = Math.max(0, Math.min(1, Math.abs(Math.min(0, deltaX)) / Math.max(1, Number(chatVoiceGestureState.cancelThresholdPx || 96))));
+        const lockProgress = Math.max(0, Math.min(1, Math.abs(Math.min(0, deltaY)) / Math.max(1, Number(chatVoiceGestureState.lockThresholdPx || 78))));
+        host.innerHTML = `
+          <div class="chatVoiceHoldStage" data-voice-surface="${domKey}">
+            <div class="chatVoiceHoldTimer" data-voice-record-timer="1">${escapeHtml(timerText)}</div>
+            <div class="chatVoiceHoldHint" style="opacity:${Math.max(0.15, 1 - cancelProgress).toFixed(2)};"><span class="chatVoiceHoldArrow">←</span> slide to cancel</div>
+            <div class="chatVoiceLockRail${lockProgress >= 1 ? ' active' : ''}">
+              <div class="chatVoiceLockIcon">🔒</div>
+            </div>
+            <button id="${domKey}VoiceThumb" class="chatVoiceMicThumb" type="button" aria-label="Recording mic" style="transform:translate(${thumbOffsetX.toFixed(2)}px, ${thumbOffsetY.toFixed(2)}px);">🎤</button>
+          </div>
+        `;
       } else if (mode === 'locked') {
-        renderVoiceActiveStrip(domKey, 'locked', {
-          timerText,
-          isStopping,
-        });
+        host.innerHTML = `
+          <div class="chatVoiceLockedStrip">
+            <div class="chatVoiceHoldTimer chatVoiceLockedTimer" data-voice-record-timer="1">${escapeHtml(timerText)}</div>
+            <button class="chatVoiceInlineBtn" id="${domKey}VoiceStopBtn" type="button"${isStopping ? ' disabled' : ''}>Stop</button>
+            <button class="chatVoiceInlineBtn" id="${domKey}VoiceCancelBtn" type="button"${isStopping ? ' disabled' : ''}>Delete</button>
+          </div>
+        `;
       } else if (mode === 'review') {
+        host.innerHTML = `
+          <div class="chatVoiceReviewStrip">
+            <button class="chatVoiceInlineBtn" id="${domKey}VoiceDraftPreviewBtn" type="button"${isDraftSending ? ' disabled' : ''}>Play</button>
+            <div id="${domKey}VoiceDraftDuration">${escapeHtml(formatChatVoiceDuration(draft?.durationMs || 0))}</div>
+            <button class="chatVoiceInlineBtn" id="${domKey}VoiceDraftSendBtn" type="button"${!isDraftReady || isDraftSending ? ' disabled' : ''}>Send</button>
+            <button class="chatVoiceInlineBtn" id="${domKey}VoiceDraftCancelBtn" type="button"${isDraftSending ? ' disabled' : ''}>Delete</button>
+          </div>
+        `;
+      } else if (mode === 'uploading') {
+        host.innerHTML = `<div class="chatVoiceLockedStrip"><div class="chatVoiceLoading">Sending voice note…</div></div>`;
+      } else if (mode === 'error') {
+        const message = String((draft?.error || (isActive ? chatVoiceState.errorText : '')) || 'Voice recording failed.');
+        host.innerHTML = `<div class="chatVoiceLockedStrip"><div class="chatVoiceError">${escapeHtml(message)}</div><button class="chatVoiceInlineBtn" id="${domKey}VoiceErrorDismissBtn" type="button">Dismiss</button></div>`;
+      } else {
+        host.innerHTML = '';
+      }
+      if (mode === 'review') {
         const draftAudio = syncVoiceRuntimeAudioRef();
         const previewPlaying = !!(draft?.objectUrl && voicePlaybackRuntime.lastUserAction === `draft:${stateScope}` && !draftAudio?.paused && String(draftAudio?.currentSrc || draftAudio?.src || '') === draft.objectUrl);
-        renderVoiceActiveStrip(domKey, 'draft', {
-          timerText: formatChatVoiceDuration(draft?.durationMs || 0),
-          isSending: isDraftSending,
-          previewPlaying,
-        });
         const draftPreviewBtn = document.getElementById(`${domKey}VoiceDraftPreviewBtn`);
-        if (draftPreviewBtn) {
-          draftPreviewBtn.dataset.previewPlaying = previewPlaying ? '1' : '0';
-          draftPreviewBtn.disabled = !draft?.objectUrl || isDraftSending;
-        }
-        const draftSendBtn = document.getElementById(`${domKey}VoiceDraftSendBtn`);
-        if (draftSendBtn) draftSendBtn.disabled = !isDraftReady || isDraftSending;
-      } else if (mode === 'uploading') {
-        renderVoiceActiveStrip(domKey, 'uploading');
-      } else if (mode === 'error') {
-        renderVoiceActiveStrip(domKey, 'error', { message: draft?.error || (isActive ? chatVoiceState.errorText : '') });
-      } else {
-        renderVoiceActiveStrip(domKey, 'none');
+        if (draftPreviewBtn) draftPreviewBtn.textContent = previewPlaying ? 'Pause' : 'Play';
       }
     }
     syncVoiceComposerTextLock(scope);
@@ -2235,10 +2140,11 @@ function releaseVoiceGestureCapture(pointerId = null) {
   }
 
 async function cancelVoiceGestureRecording(reason = 'Recording canceled') {
+    const scope = chatVoiceGestureState.scope || chatVoiceState.scope || 'public';
     chatVoiceGestureState.canceled = true;
     releaseVoiceGestureCapture();
     await cancelChatVoiceRecording(reason);
-    setVoiceComposerMode(chatVoiceState.scope || 'public', 'idle');
+    setVoiceComposerMode(scope, 'idle');
     resetVoiceGestureState();
   }
 
@@ -2627,7 +2533,7 @@ function stopActiveVoiceRecording(scope) {
 
   function bindVoiceComposerControls(surface, optionsFactory) {
     const startBtn = document.getElementById(`${surface}VoiceStartBtn`);
-    const host = document.getElementById(`${surface}VoiceHost`);
+    const host = getVoiceModeHost(surface);
     if (startBtn?.dataset.voiceComposerBound === '1') {
       syncVoiceRecorderUi(surface);
       return;
@@ -5030,13 +4936,7 @@ function stopActiveVoiceRecording(scope) {
                 <button id="publicVoiceStartBtn" class="chatVoiceInlineBtn" type="button" aria-label="Record voice note" data-chat-voice-trigger="1">🎤</button>
                 <input id="chatPublicPhotoInput" type="file" accept="image/jpeg,image/png,image/webp,image/gif" hidden />
               </div>
-              <div class="chatVoicePopoverHost chatVoicePopoverHostInline" id="publicVoiceHost" hidden data-voice-surface="public">
-                <div class="chatVoiceActiveStrip" id="publicVoiceActiveStrip" hidden></div>
-                <div class="chatVoiceLoading" id="publicVoiceUpload" hidden></div>
-                <div class="chatVoiceError" id="publicVoiceError" hidden></div>
-                <span id="publicVoiceStatus" class="chatVoiceSrOnly" aria-live="polite">${CHAT_VOICE_IDLE_STATUS}</span>
-                <span id="publicVoiceTimer" class="chatVoiceSrOnly">0:00</span>
-              </div>
+              <div id="publicVoiceModeHost" class="chatVoiceModeHost" hidden></div>
             </div>
           </div>
           <div id="chatPrivateView" class="chatTabContent ${activeChatTab === 'private' ? '' : 'hidden'}">
@@ -6010,7 +5910,7 @@ function stopActiveVoiceRecording(scope) {
     pruneExpiredChatState();
     const messages = privateMessagesByUserId[privateActiveUserId] || [];
     if (!wrap.querySelector('.chatPrivateConversation')) {
-      wrap.innerHTML = `<div class="chatPrivateConversation"><div class="chatPrivateHeader"><button id="chatPrivateBackBtn" class="chatPrivateBackBtn" type="button">Back</button><div class="chatPrivateTitle">${escapeHtml(privateActiveDisplayName || 'Private chat')}</div></div><div class="chatSubTabs" style="display:flex;gap:8px;margin-bottom:8px;"><button id="chatPrivateModeMessages" class="chipBtn" type="button">Messages</button><button id="chatPrivateModePhotos" class="chipBtn" type="button">Photos</button></div><div id="chatPrivateConversationList" class="chatList"></div><div id="chatPrivatePhotosView" class="hidden"></div><div class="chatComposer chatComposerPrivate chatComposerVoiceMode" id="privateVoiceComposer" data-voice-surface="private" data-voice-mode="idle"><div class="chatComposerMainRow" id="privateComposerMainRow"><input id="chatPrivateInput" type="text" class="chatInput" placeholder="Message privately…" maxlength="600"><button id="chatPrivateSendBtn" class="chipBtn" type="button">Send</button><button id="chatPrivatePhotoBtn" class="chipBtn chatMediaInlineBtn" type="button" title="Upload photo">📷</button><button id="privateVoiceStartBtn" class="chatVoiceInlineBtn" type="button" aria-label="Record voice note" data-chat-voice-trigger="1">🎤</button><input id="chatPrivatePhotoInput" type="file" accept="image/jpeg,image/png,image/webp,image/gif" hidden></div><div class="chatVoicePopoverHost chatVoicePopoverHostInline" id="privateVoiceHost" hidden data-voice-surface="private"><div class="chatVoiceActiveStrip" id="privateVoiceActiveStrip" hidden></div><div class="chatVoiceLoading" id="privateVoiceUpload" hidden></div><div class="chatVoiceError" id="privateVoiceError" hidden></div><span id="privateVoiceStatus" class="chatVoiceSrOnly" aria-live="polite">${CHAT_VOICE_IDLE_STATUS}</span><span id="privateVoiceTimer" class="chatVoiceSrOnly">0:00</span></div></div></div>`;
+      wrap.innerHTML = `<div class="chatPrivateConversation"><div class="chatPrivateHeader"><button id="chatPrivateBackBtn" class="chatPrivateBackBtn" type="button">Back</button><div class="chatPrivateTitle">${escapeHtml(privateActiveDisplayName || 'Private chat')}</div></div><div class="chatSubTabs" style="display:flex;gap:8px;margin-bottom:8px;"><button id="chatPrivateModeMessages" class="chipBtn" type="button">Messages</button><button id="chatPrivateModePhotos" class="chipBtn" type="button">Photos</button></div><div id="chatPrivateConversationList" class="chatList"></div><div id="chatPrivatePhotosView" class="hidden"></div><div class="chatComposer chatComposerPrivate chatComposerVoiceMode" id="privateVoiceComposer" data-voice-surface="private" data-voice-mode="idle"><div class="chatComposerMainRow" id="privateComposerMainRow"><input id="chatPrivateInput" type="text" class="chatInput" placeholder="Message privately…" maxlength="600"><button id="chatPrivateSendBtn" class="chipBtn" type="button">Send</button><button id="chatPrivatePhotoBtn" class="chipBtn chatMediaInlineBtn" type="button" title="Upload photo">📷</button><button id="privateVoiceStartBtn" class="chatVoiceInlineBtn" type="button" aria-label="Record voice note" data-chat-voice-trigger="1">🎤</button><input id="chatPrivatePhotoInput" type="file" accept="image/jpeg,image/png,image/webp,image/gif" hidden></div><div id="privateVoiceModeHost" class="chatVoiceModeHost" hidden></div></div></div>`;
     } else {
       const titleEl = wrap.querySelector('.chatPrivateTitle');
       if (titleEl) titleEl.textContent = privateActiveDisplayName || 'Private chat';
