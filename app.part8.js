@@ -5977,18 +5977,8 @@ function stopActiveVoiceRecording(scope) {
         sendNow();
       }
     });
-    bindVoiceComposerControls('private', () => ({
-      userId,
-      onUploaded: async (response) => {
-        const previousLatestId = privateLastMessageIdByUserId[String(userId)] || null;
-        const merged = await integrateUploadedVoiceMessage('private', response, { previousLatestId, otherUserId: userId, markRead: true, displayName: privateActiveDisplayName });
-        if (!merged.length) await chatPollPrivateActiveThread({ visible: true, forceFull: false });
-        renderPrivateConversation();
-        renderPrivateTabUnread();
-        updateChatUnreadBadge();
-        await playChatTone('outgoing');
-      },
-    }));
+    bindVoiceHoldMicButton(document.getElementById('privateVoiceStartBtn'), 'private', () => ({ userId }));
+    syncVoiceRecorderUi('private');
     if (photoBtn && photoBtn.dataset.boundUserId !== String(userId || '')) {
       photoBtn.dataset.boundUserId = String(userId || '');
       photoBtn.addEventListener('click', () => photoInput?.click());
@@ -6785,16 +6775,8 @@ function stopActiveVoiceRecording(scope) {
       chatInput.dataset.chatEnterBound = '1';
       chatInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); sendNow(); } });
     }
-    bindVoiceComposerControls('public', () => ({
-      room: CHAT_ROOM,
-      onUploaded: async (response) => {
-        const previousLatestId = chatLatestMessageId;
-        const merged = await integrateUploadedVoiceMessage('public', response, { previousLatestId, room: CHAT_ROOM });
-        if (Array.isArray(merged) && merged.length) seedChatIncomingAudioBaseline(merged);
-        await playChatTone('outgoing');
-        await chatPollOnce();
-      },
-    }));
+    bindVoiceHoldMicButton(document.getElementById('publicVoiceStartBtn'), 'public', () => ({ room: CHAT_ROOM }));
+    syncVoiceRecorderUi('public');
     if (publicModeMessages && publicModeMessages.dataset.bound !== '1') {
       publicModeMessages.dataset.bound = '1';
       publicModeMessages.addEventListener('click', () => {
