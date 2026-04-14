@@ -2020,6 +2020,13 @@ function applyVoiceThumbTransform() {
     thumb.style.transform = `translate(${x}px, ${y}px)`;
   }
 
+function getVoiceStartButtonForScope(scope) {
+    const key = getVoiceComposerScopeKey(scope);
+    if (key === 'private') return document.getElementById('privateVoiceStartBtn');
+    if (key === 'profile-dm') return document.getElementById('driverProfileVoiceStartBtn');
+    return document.getElementById('publicVoiceStartBtn');
+  }
+
 function bindLockedVoiceControls(scope) {
     const key = getVoiceComposerScopeKey(scope);
     const stopBtn = document.getElementById(`${key}VoiceStopBtn`);
@@ -2152,8 +2159,23 @@ function renderVoiceComposerSurface(scope) {
       return;
     }
 
-    if (mode === 'error') {
-      host.innerHTML = `<div class="chatVoiceStatusStrip error">Voice note failed. Tap mic to try again.</div>`;
+  if (mode === 'error') {
+      host.innerHTML = `
+      <div class="chatVoiceStatusStrip error">
+        <span>Voice note failed.</span>
+        <button type="button" class="chatVoiceInlineBtn" id="${key}VoiceErrorDismissBtn">Dismiss</button>
+      </div>
+    `;
+      const dismissBtn = document.getElementById(`${key}VoiceErrorDismissBtn`);
+      if (dismissBtn && dismissBtn.dataset.bound !== '1') {
+        dismissBtn.dataset.bound = '1';
+        dismissBtn.addEventListener('click', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          setVoiceComposerMode(key, 'idle');
+          renderVoiceComposerSurface(key);
+        });
+      }
       return;
     }
   }
@@ -2244,7 +2266,7 @@ function updateVoiceHoldGesture(event) {
 
 async function cancelVoiceHoldGesture() {
     const scope = getVoiceComposerScopeKey(chatVoiceGestureState.scope);
-    const micBtn = document.getElementById(`${scope}VoiceStartBtn`);
+    const micBtn = getVoiceStartButtonForScope(scope);
     if (micBtn?.releasePointerCapture && chatVoiceGestureState.pointerId != null) {
       try { micBtn.releasePointerCapture(chatVoiceGestureState.pointerId); } catch (_) {}
     }
