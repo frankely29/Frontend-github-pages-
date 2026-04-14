@@ -939,7 +939,7 @@ function voiceNoteLabel(message) {
 
 function buildVoiceComposer(surface, extraClass = '') {
     return `<div class="chatVoiceComposer ${extraClass}" data-voice-surface="${surface}">
-      <div class="chatVoicePopoverHost" id="${surface}VoiceHost" hidden data-voice-surface="${surface}">
+      <div class="chatVoicePopoverHost chatVoicePopoverHostInline" id="${surface}VoiceHost" hidden data-voice-surface="${surface}">
         <div class="chatVoiceActiveStrip" id="${surface}VoiceActiveStrip" hidden></div>
         <div class="chatVoiceLoading" id="${surface}VoiceUpload" hidden></div>
         <div class="chatVoiceError" id="${surface}VoiceError" hidden></div>
