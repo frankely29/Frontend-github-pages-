@@ -6074,10 +6074,14 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     chatInitialHistoryLoadAttempted = true;
     const result = await chatFetchMessages({ limit: 60 });
     if (!result?.ok) {
-      const reason = result?.reason || 'failed';
-      if (reason === 'not_ready') setChatStatus('Loading chat...');
-      else if (reason !== 'aborted') setChatStatus('Chat unavailable right now.');
-      return { ok: false, reason, messages: [] };
+      if (result?.reason === 'not_ready') {
+        setChatStatus('Loading chat...');
+      } else if (result?.reason === 'aborted') {
+        return { ok: false, reason: 'aborted', messages: [] };
+      } else {
+        setChatStatus('Chat unavailable right now.');
+      }
+      return { ok: false, reason: result?.reason || 'failed', messages: [] };
     }
     const msgs = setPublicChatMessages(Array.isArray(result.messages) ? result.messages : []);
     seedChatIncomingAudioBaseline(msgs);
@@ -6149,7 +6153,10 @@ function bindVoiceComposerControls(surface, optionsFactory) {
       const panelOpen = isChatPanelOpen();
       if (panelOpen && !chatInitialHistoryLoaded) {
         const initial = await ensureChatPanelInitialLoad();
-        if (!initial?.ok && initial?.reason === 'aborted') return;
+        if (!initial?.ok) {
+          if (initial?.reason === 'aborted') return;
+          return;
+        }
         return;
       }
       const msgs = await chatFetchIncremental({ panelOpen });
