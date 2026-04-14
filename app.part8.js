@@ -187,14 +187,19 @@ const chatVoiceGestureState = {
     currentX: 0,
     currentY: 0,
     cancelThresholdPx: 96,
-    lockThresholdPx: 72,
+    lockThresholdPx: 78,
     canceled: false,
     sentOnRelease: false,
-    hudVisible: false,
     suppressClickUntil: 0,
     autoSendScope: '',
     autoSendOptions: null,
     holdingStartedAt: 0,
+  };
+
+const chatVoiceComposerMode = {
+    public: 'idle',
+    private: 'idle',
+    'profile-dm': 'idle',
   };
 
 const voiceAssetCache = new Map();
@@ -953,72 +958,42 @@ function buildVoiceComposer(surface, extraClass = '') {
     return '';
   }
 
-function ensureChatVoiceGestureHud(scope) {
-    const domKey = voiceScopeDomKey(scope);
-    const host = document.getElementById(`${domKey}VoiceHost`);
-    if (!host) return null;
-    let hud = document.getElementById(`${domKey}VoiceGestureHud`);
-    if (!hud) {
-      hud = document.createElement('div');
-      hud.id = `${domKey}VoiceGestureHud`;
-      hud.className = 'chatVoiceGestureHud';
-      hud.hidden = true;
-      host.appendChild(hud);
-    }
-    return hud;
-  }
-
-function showChatVoiceGestureHud(scope) {
-    const hud = ensureChatVoiceGestureHud(scope);
-    if (!hud) return;
-    hud.hidden = false;
-    chatVoiceGestureState.hudVisible = true;
-    updateChatVoiceGestureHud(scope);
-  }
-
-function hideChatVoiceGestureHud(scope) {
-    const domKey = voiceScopeDomKey(scope || chatVoiceGestureState.scope || 'public');
-    const hud = document.getElementById(`${domKey}VoiceGestureHud`);
-    if (hud) hud.hidden = true;
-    chatVoiceGestureState.hudVisible = false;
-  }
-
-function updateChatVoiceGestureHud(scope) {
-    const domKey = voiceScopeDomKey(scope);
-    const hud = ensureChatVoiceGestureHud(scope);
-    if (!hud) return;
-    const timerText = formatChatVoiceDuration(chatVoiceState.durationMs || 0);
-    const deltaX = Number(chatVoiceGestureState.currentX || 0) - Number(chatVoiceGestureState.startX || 0);
-    const cancelProgress = Math.max(0, Math.min(1, Math.abs(Math.min(0, deltaX)) / Number(chatVoiceGestureState.cancelThresholdPx || 1)));
-    hud.style.setProperty('--voice-gesture-cancel-progress', String(cancelProgress.toFixed(3)));
-    hud.innerHTML = `
-      <div class="chatVoiceGestureHudInner chatVoiceGestureHudInline" data-voice-surface="${domKey}">
-        <div class="chatVoiceGestureMic" aria-hidden="true">🎤</div>
-        <div class="chatVoiceGestureTimer" data-voice-record-timer="1">${escapeHtml(timerText)}</div>
-        <div class="chatVoiceGestureHint">slide left to cancel</div>
-        <div class="chatVoiceGestureLockHint">slide up to lock</div>
-      </div>
-    `;
-  }
-
 function renderVoiceActiveStrip(surface, mode, data = {}) {
     const strip = document.getElementById(`${surface}VoiceActiveStrip`);
     if (!strip) return null;
     if (mode === 'none') {
       strip.innerHTML = '';
-      strip.classList.remove('recording', 'draft', 'chatVoiceLockedStrip', 'chatVoiceDraftStrip', 'chatVoiceLockedInline', 'chatVoiceReviewInline');
+      strip.classList.remove('recording', 'draft', 'holding', 'chatVoiceHoldingStrip', 'chatVoiceLockedStrip', 'chatVoiceDraftStrip', 'chatVoiceLockedInline', 'chatVoiceReviewInline', 'chatVoiceReviewStrip');
       strip.hidden = true;
+      return strip;
+    }
+    if (mode === 'holding') {
+      const timerText = String(data.timerText || '0:00');
+      const cancelProgress = Math.max(0, Math.min(1, Number(data.cancelProgress || 0)));
+      const lockProgress = Math.max(0, Math.min(1, Number(data.lockProgress || 0)));
+      strip.classList.add('recording', 'holding', 'chatVoiceHoldingStrip');
+      strip.classList.remove('draft', 'chatVoiceLockedInline', 'chatVoiceReviewInline', 'chatVoiceReviewStrip');
+      strip.hidden = false;
+      strip.style.setProperty('--voice-hold-cancel-progress', String(cancelProgress.toFixed(3)));
+      strip.innerHTML = `
+        <div class="chatVoiceHoldingTimer chatVoiceRecordTimer" data-voice-record-timer="1">${escapeHtml(timerText)}</div>
+        <div class="chatVoiceHoldingHint"><span class="chatVoiceHoldingArrow" aria-hidden="true">←</span> slide to cancel</div>
+        <div class="chatVoiceLockRail" aria-hidden="true">
+          <div class="chatVoiceLockThumb" style="--voice-lock-progress:${lockProgress.toFixed(3)};">
+            <span class="chatVoiceLockIcon">🔒</span>
+          </div>
+        </div>
+      `;
       return strip;
     }
     if (mode === 'locked') {
       const timerText = String(data.timerText || '0:00');
       const isStopping = !!data.isStopping;
       strip.classList.add('recording', 'chatVoiceLockedInline');
-      strip.classList.remove('draft', 'chatVoiceReviewInline');
+      strip.classList.remove('draft', 'holding', 'chatVoiceHoldingStrip', 'chatVoiceReviewInline', 'chatVoiceReviewStrip');
       strip.hidden = false;
       strip.innerHTML = `
-        <div class="chatVoiceRecordMic" aria-hidden="true">🎤</div>
-        <div class="chatVoiceGestureTimer chatVoiceRecordTimer" data-voice-record-timer="1">${escapeHtml(timerText)}</div>
+        <div class="chatVoiceRecordTimer" data-voice-record-timer="1">${escapeHtml(timerText)}</div>
         <button class="chatVoiceInlineBtn" id="${surface}VoiceCancelBtn" type="button" aria-label="Delete voice note" data-chat-voice-trigger="1"${isStopping ? ' disabled' : ''}>Delete</button>
         <button class="chatVoiceInlineBtn recording" id="${surface}VoiceStopBtn" type="button" aria-label="Stop voice note" data-chat-voice-trigger="1"${isStopping ? ' disabled' : ''}>Stop</button>
       `;
@@ -1028,8 +1003,8 @@ function renderVoiceActiveStrip(surface, mode, data = {}) {
       const timerText = String(data.timerText || '0:00');
       const isSending = !!data.isSending;
       const previewPlaying = !!data.previewPlaying;
-      strip.classList.add('draft', 'chatVoiceReviewInline');
-      strip.classList.remove('recording', 'chatVoiceLockedInline');
+      strip.classList.add('draft', 'chatVoiceReviewInline', 'chatVoiceReviewStrip');
+      strip.classList.remove('recording', 'chatVoiceLockedInline', 'holding', 'chatVoiceHoldingStrip');
       strip.hidden = false;
       strip.innerHTML = `
         <button class="chatVoiceInlineBtn" id="${surface}VoiceDraftPreviewBtn" type="button" data-chat-voice-trigger="1"${isSending ? ' disabled' : ''}>${previewPlaying ? 'Pause' : 'Play'}</button>
@@ -2025,6 +2000,38 @@ function syncVoiceComposerSendButton(scope) {
     sendBtn.disabled = isRecordingScope || isUploadingDraft;
   }
 
+function getVoiceComposerMode(scope) {
+    const key = voiceScopeStateKey(scope);
+    return chatVoiceComposerMode[key] || 'idle';
+  }
+
+function setVoiceComposerMode(scope, mode) {
+    const key = voiceScopeStateKey(scope);
+    if (!key) return;
+    const nextMode = ['idle', 'holding', 'locked', 'review'].includes(mode) ? mode : 'idle';
+    chatVoiceComposerMode[key] = nextMode;
+  }
+
+function renderVoiceComposerSurface(scope) {
+    const domKey = voiceScopeDomKey(scope);
+    const mode = getVoiceComposerMode(scope);
+    const composerEl = document.getElementById(`${domKey}VoiceComposer`);
+    const mainRowEl = document.getElementById(`${domKey}ComposerMainRow`);
+    const host = document.getElementById(`${domKey}VoiceHost`);
+    if (composerEl) {
+      composerEl.dataset.voiceMode = mode;
+      composerEl.classList.toggle('chatComposerModeIdle', mode === 'idle');
+      composerEl.classList.toggle('chatComposerModeHolding', mode === 'holding');
+      composerEl.classList.toggle('chatComposerModeLocked', mode === 'locked');
+      composerEl.classList.toggle('chatComposerModeReview', mode === 'review');
+      composerEl.classList.toggle('chatComposerVoiceHolding', mode === 'holding');
+      composerEl.classList.toggle('chatComposerVoiceLocked', mode === 'locked');
+      composerEl.classList.toggle('chatComposerVoiceReview', mode === 'review');
+    }
+    if (mainRowEl) mainRowEl.hidden = mode !== 'idle';
+    if (host) host.hidden = mode === 'idle';
+  }
+
 function syncVoiceRecorderUi(scope) {
     const domKey = voiceScopeDomKey(scope);
     const stateScope = voiceScopeStateKey(scope);
@@ -2043,27 +2050,15 @@ function syncVoiceRecorderUi(scope) {
     const uploadEl = document.getElementById(`${domKey}VoiceUpload`);
     const statusEl = document.getElementById(`${domKey}VoiceStatus`);
     const errorEl = document.getElementById(`${domKey}VoiceError`);
-    const host = document.getElementById(`${domKey}VoiceHost`);
     const activeStrip = document.getElementById(`${domKey}VoiceActiveStrip`);
-    const composerEl = document.getElementById(`${domKey}VoiceComposer`);
-    const mainRowEl = document.getElementById(`${domKey}ComposerMainRow`);
     const statusVisible = isDraftSending;
     const canStart = !isBusyRow && !isDraftSending;
     let mode = 'idle';
     if (isHoldingGesture) mode = 'holding';
     else if (isLockedRecording) mode = 'locked';
     else if (isDraftReady || isDraftSending) mode = 'review';
-    if (composerEl) {
-      composerEl.dataset.voiceMode = mode;
-      composerEl.classList.toggle('chatComposerModeIdle', mode === 'idle');
-      composerEl.classList.toggle('chatComposerModeHolding', mode === 'holding');
-      composerEl.classList.toggle('chatComposerModeLocked', mode === 'locked');
-      composerEl.classList.toggle('chatComposerModeReview', mode === 'review');
-      composerEl.classList.toggle('chatComposerVoiceHolding', mode === 'holding');
-      composerEl.classList.toggle('chatComposerVoiceLocked', mode === 'locked');
-      composerEl.classList.toggle('chatComposerVoiceReview', mode === 'review');
-    }
-    if (mainRowEl) mainRowEl.hidden = mode !== 'idle';
+    setVoiceComposerMode(scope, mode);
+    renderVoiceComposerSurface(scope);
     if (startBtn) {
       startBtn.hidden = mode !== 'idle';
       startBtn.disabled = !canStart;
@@ -2094,12 +2089,18 @@ function syncVoiceRecorderUi(scope) {
       errorEl.textContent = nextError;
       errorEl.hidden = !nextError;
     }
-    const showHud = isHoldingGesture;
-    if (showHud) showChatVoiceGestureHud(scope);
-    else hideChatVoiceGestureHud(scope);
-    if (host) host.hidden = mode === 'idle';
     if (activeStrip) {
-      if (!isLockedRecording && !isDraftReady && !isDraftSending) {
+      if (isHoldingGesture) {
+        const deltaX = Number(chatVoiceGestureState.currentX || 0) - Number(chatVoiceGestureState.startX || 0);
+        const deltaY = Number(chatVoiceGestureState.currentY || 0) - Number(chatVoiceGestureState.startY || 0);
+        const cancelProgress = Math.abs(Math.min(0, deltaX)) / Math.max(1, Number(chatVoiceGestureState.cancelThresholdPx || 96));
+        const lockProgress = Math.abs(Math.min(0, deltaY)) / Math.max(1, Number(chatVoiceGestureState.lockThresholdPx || 78));
+        renderVoiceActiveStrip(domKey, 'holding', {
+          timerText,
+          cancelProgress,
+          lockProgress,
+        });
+      } else if (!isLockedRecording && !isDraftReady && !isDraftSending) {
         renderVoiceActiveStrip(domKey, 'none');
       } else if (isLockedRecording) {
         renderVoiceActiveStrip(domKey, 'locked', {
@@ -2138,7 +2139,6 @@ function resetVoiceGestureState() {
     chatVoiceGestureState.currentY = 0;
     chatVoiceGestureState.canceled = false;
     chatVoiceGestureState.sentOnRelease = false;
-    chatVoiceGestureState.hudVisible = false;
     chatVoiceGestureState.autoSendScope = '';
     chatVoiceGestureState.autoSendOptions = null;
     chatVoiceGestureState.holdingStartedAt = 0;
@@ -2160,14 +2160,12 @@ function beginVoiceGesture(scope, pointerEvent, options = {}) {
     chatVoiceGestureState.autoSendScope = stateScope;
     chatVoiceGestureState.autoSendOptions = options || {};
     chatVoiceGestureState.holdingStartedAt = Date.now();
-    showChatVoiceGestureHud(scope);
     return true;
   }
 
 async function cancelVoiceGestureRecording(reason = 'Recording canceled') {
     const activeScope = chatVoiceGestureState.scope || chatVoiceState.scope;
     chatVoiceGestureState.canceled = true;
-    hideChatVoiceGestureHud(activeScope);
     await cancelChatVoiceRecording(reason);
     resetVoiceGestureState();
   }
@@ -2178,9 +2176,8 @@ function updateVoiceGesture(pointerEvent) {
     chatVoiceGestureState.currentY = Number(pointerEvent?.clientY || chatVoiceGestureState.currentY || 0);
     const deltaX = chatVoiceGestureState.currentX - chatVoiceGestureState.startX;
     const deltaY = chatVoiceGestureState.currentY - chatVoiceGestureState.startY;
-    if (deltaY <= -Math.abs(Number(chatVoiceGestureState.lockThresholdPx || 72))) {
+    if (deltaY <= -Math.abs(Number(chatVoiceGestureState.lockThresholdPx || 78))) {
       chatVoiceGestureState.locked = true;
-      hideChatVoiceGestureHud(chatVoiceGestureState.scope);
       syncAllVoiceRecorderUis();
       return;
     }
@@ -2188,13 +2185,12 @@ function updateVoiceGesture(pointerEvent) {
       void cancelVoiceGestureRecording('Recording canceled');
       return;
     }
-    updateChatVoiceGestureHud(chatVoiceGestureState.scope);
+    syncAllVoiceRecorderUis();
   }
 
 async function finishVoiceGesture() {
     if (!chatVoiceGestureState.active) return;
     const scope = chatVoiceGestureState.scope;
-    hideChatVoiceGestureHud(scope);
     if (chatVoiceGestureState.canceled) {
       resetVoiceGestureState();
       return;
@@ -2482,7 +2478,6 @@ async function startChatVoiceRecording(scope, options = {}) {
 
 async function stopChatVoiceRecording() {
     if (!chatVoiceState.recorder || chatVoiceState.phase !== 'recording') return false;
-    hideChatVoiceGestureHud(chatVoiceState.scope);
     chatVoiceState.phase = 'stopping';
     chatVoiceState.durationMs = Math.max(0, Date.now() - Number(chatVoiceState.startedAt || 0));
     syncAllVoiceRecorderUis();
@@ -2502,7 +2497,6 @@ async function cancelChatVoiceRecording(reason = 'Recording canceled') {
     const activeScope = chatVoiceState.scope;
     const domScope = activeScope === 'profile-dm' ? 'driverProfile' : activeScope;
     chatVoiceState.cancelRequested = true;
-    hideChatVoiceGestureHud(activeScope);
     chatVoiceState.chunks = [];
     if (domScope) setVoiceRecorderStatus(domScope, reason, '');
     if (chatVoiceState.recorder && chatVoiceState.recorder.state === 'recording') {
