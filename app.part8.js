@@ -2183,10 +2183,11 @@ function renderVoiceComposerSurface(scope) {
 function updateVoiceComposerTimerText(scope) {
     const key = getVoiceComposerScopeKey(scope);
     const timerText = getVoiceRecordingTimerText(key);
-    const holdTimer = document.querySelector(`#${key}VoiceThumb`)?.closest('[data-voice-mode="holding"]')?.querySelector('.chatVoiceHoldTimer');
+    const host = getVoiceModeHost(key);
+    const holdTimer = host?.querySelector(`#${key}VoiceThumb`)?.closest('[data-voice-mode="holding"]')?.querySelector('.chatVoiceHoldTimer');
     if (holdTimer) holdTimer.textContent = timerText;
-    const lockedTimer = document.querySelector(`[data-voice-mode="locked"] .chatVoiceLockedTimer`);
-    if (lockedTimer && document.getElementById(`${key}VoiceStopBtn`)) lockedTimer.textContent = timerText;
+    const lockedTimer = host?.querySelector('[data-voice-mode="locked"] .chatVoiceLockedTimer');
+    if (lockedTimer) lockedTimer.textContent = timerText;
   }
 
 function syncVoiceRecorderUi(scope) {
