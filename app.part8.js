@@ -6076,12 +6076,13 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     if (!result?.ok) {
       if (result?.reason === 'not_ready') {
         setChatStatus('Loading chat...');
+        return { ok: false, reason: 'not_ready', messages: [] };
       } else if (result?.reason === 'aborted') {
         return { ok: false, reason: 'aborted', messages: [] };
       } else {
         setChatStatus('Chat unavailable right now.');
+        return { ok: false, reason: result?.reason || 'failed', messages: [] };
       }
-      return { ok: false, reason: result?.reason || 'failed', messages: [] };
     }
     const msgs = setPublicChatMessages(Array.isArray(result.messages) ? result.messages : []);
     seedChatIncomingAudioBaseline(msgs);
@@ -6420,6 +6421,22 @@ function bindVoiceComposerControls(surface, optionsFactory) {
     bindVoicePlayers(document.getElementById('chatList') || document);
     bindChatImageViewer(document);
     bindRenderedChatImages(document);
+
+    if (
+      chatInitialHistoryLoaded
+      && Array.isArray(publicChatMessages)
+      && publicChatMessages.length > 0
+    ) {
+      renderChatMessages(publicChatMessages, { replace: true, forceStickToBottom: false });
+      bindVoicePlayers(document.getElementById('chatList') || document);
+      bindChatImageViewer(document);
+      bindRenderedChatImages(document);
+      scheduleChatPoll({ immediate: true });
+      schedulePrivatePoll({ immediate: true });
+      switchChatTab(activeChatTab);
+      markChatReadThroughLatestLoaded();
+      return;
+    }
 
     ensureChatPanelInitialLoad()
       .then((result) => {
