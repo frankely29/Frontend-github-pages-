@@ -940,28 +940,56 @@ function voiceNoteLabel(message) {
 function buildVoiceComposer(surface, extraClass = '') {
     return `<div class="chatVoiceComposer ${extraClass}" data-voice-surface="${surface}">
       <div class="chatVoicePopoverHost" id="${surface}VoiceHost" hidden data-voice-surface="${surface}">
-        <div class="chatVoiceRecordBar" id="${surface}VoiceRecordRow" hidden>
-          <div class="chatVoiceRecordMic" aria-hidden="true">🎤</div>
-          <div class="chatVoiceRecordTimer" data-voice-record-timer="1">0:00</div>
-          <div class="chatVoiceRecordHint">slide left to cancel</div>
-          <button class="chatVoiceChipBtn" id="${surface}VoiceCancelBtn" type="button" aria-label="Cancel voice note" data-chat-voice-trigger="1" hidden>Cancel</button>
-          <button class="chatVoiceBtn recording" id="${surface}VoiceStopBtn" type="button" aria-label="Stop voice note" data-chat-voice-trigger="1" hidden>Stop</button>
-        </div>
-        <div class="chatVoiceDraftBar" id="${surface}VoiceDraft" hidden>
-          <button class="chatVoiceDraftPlay" id="${surface}VoiceDraftPreviewBtn" type="button" data-chat-voice-trigger="1">Play</button>
-          <div class="chatVoiceMiniWave" aria-hidden="true"></div>
-          <div class="chatVoiceDraftMetaCompact" id="${surface}VoiceDraftDuration">0:00</div>
-          <div class="chatVoiceDraftActionsCompact">
-            <button class="chatVoiceChipBtn" id="${surface}VoiceDraftCancelBtn" type="button" data-chat-voice-trigger="1">Cancel</button>
-            <button class="chatVoiceChipBtn send" id="${surface}VoiceDraftSendBtn" type="button" data-chat-voice-trigger="1">Send</button>
-          </div>
-        </div>
+        <div class="chatVoiceActiveStrip" id="${surface}VoiceActiveStrip" hidden></div>
         <div class="chatVoiceLoading" id="${surface}VoiceUpload" hidden></div>
         <div class="chatVoiceError" id="${surface}VoiceError" hidden></div>
         <span id="${surface}VoiceStatus" class="chatVoiceSrOnly" aria-live="polite">${CHAT_VOICE_IDLE_STATUS}</span>
         <span id="${surface}VoiceTimer" class="chatVoiceSrOnly">0:00</span>
       </div>
     </div>`;
+  }
+
+function renderVoiceActiveStrip(surface, mode, data = {}) {
+    const strip = document.getElementById(`${surface}VoiceActiveStrip`);
+    if (!strip) return null;
+    if (mode === 'none') {
+      strip.innerHTML = '';
+      strip.classList.remove('recording', 'draft');
+      strip.hidden = true;
+      return strip;
+    }
+    if (mode === 'recording') {
+      const timerText = String(data.timerText || '0:00');
+      const isStopping = !!data.isStopping;
+      strip.classList.add('recording');
+      strip.classList.remove('draft');
+      strip.hidden = false;
+      strip.innerHTML = `
+        <div class="chatVoiceRecordMic" aria-hidden="true">🎤</div>
+        <div class="chatVoiceRecordTimer" data-voice-record-timer="1">${escapeHtml(timerText)}</div>
+        <div class="chatVoiceRecordHint">slide left to cancel</div>
+        <button class="chatVoiceChipBtn" id="${surface}VoiceCancelBtn" type="button" aria-label="Cancel voice note" data-chat-voice-trigger="1"${isStopping ? ' disabled' : ''}>Cancel</button>
+        <button class="chatVoiceBtn recording" id="${surface}VoiceStopBtn" type="button" aria-label="Stop voice note" data-chat-voice-trigger="1"${isStopping ? ' disabled' : ''}>Stop</button>
+      `;
+      return strip;
+    }
+    if (mode === 'draft') {
+      const timerText = String(data.timerText || '0:00');
+      const isSending = !!data.isSending;
+      const previewPlaying = !!data.previewPlaying;
+      strip.classList.add('draft');
+      strip.classList.remove('recording');
+      strip.hidden = false;
+      strip.innerHTML = `
+        <button class="chatVoiceDraftPlay" id="${surface}VoiceDraftPreviewBtn" type="button" data-chat-voice-trigger="1"${isSending ? ' disabled' : ''}>${previewPlaying ? 'Pause' : 'Play'}</button>
+        <div class="chatVoiceMiniWave" aria-hidden="true"></div>
+        <div class="chatVoiceDraftMetaCompact" id="${surface}VoiceDraftDuration">${escapeHtml(timerText)}</div>
+        <button class="chatVoiceChipBtn" id="${surface}VoiceDraftCancelBtn" type="button" data-chat-voice-trigger="1"${isSending ? ' disabled' : ''}>Cancel</button>
+        <button class="chatVoiceChipBtn send" id="${surface}VoiceDraftSendBtn" type="button" data-chat-voice-trigger="1"${isSending ? ' disabled' : ''}>Send</button>
+      `;
+      return strip;
+    }
+    return strip;
   }
 
 function isCompleteVoiceMessage(message) {
@@ -1958,19 +1986,12 @@ function syncVoiceRecorderUi(scope) {
     const isDraftReady = !!draft && draft.status === 'ready';
     const isDraftSending = !!draft && draft.status === 'sending';
     const startBtn = document.getElementById(`${domKey}VoiceStartBtn`);
-    const stopBtn = document.getElementById(`${domKey}VoiceStopBtn`);
-    const cancelBtn = document.getElementById(`${domKey}VoiceCancelBtn`);
     const timerEl = document.getElementById(`${domKey}VoiceTimer`);
     const uploadEl = document.getElementById(`${domKey}VoiceUpload`);
     const statusEl = document.getElementById(`${domKey}VoiceStatus`);
     const errorEl = document.getElementById(`${domKey}VoiceError`);
-    const draftWrap = document.getElementById(`${domKey}VoiceDraft`);
-    const draftDurationEl = document.getElementById(`${domKey}VoiceDraftDuration`);
-    const draftSendBtn = document.getElementById(`${domKey}VoiceDraftSendBtn`);
-    const draftCancelBtn = document.getElementById(`${domKey}VoiceDraftCancelBtn`);
-    const draftPreviewBtn = document.getElementById(`${domKey}VoiceDraftPreviewBtn`);
-    const recordRow = document.getElementById(`${domKey}VoiceRecordRow`);
     const host = document.getElementById(`${domKey}VoiceHost`);
+    const activeStrip = document.getElementById(`${domKey}VoiceActiveStrip`);
     const statusVisible = isBusyRow || isDraftSending;
     const canStart = !isBusyRow && !isDraftSending;
     if (startBtn) {
@@ -1979,16 +2000,6 @@ function syncVoiceRecorderUi(scope) {
       startBtn.classList.toggle('busy', !canStart && !isDraftReady);
       startBtn.classList.toggle('recording', isRecording);
       startBtn.textContent = '🎤';
-    }
-    if (stopBtn) {
-      stopBtn.hidden = !isBusyRow;
-      stopBtn.disabled = !isRecording;
-      stopBtn.classList.toggle('busy', isStopping);
-    }
-    if (cancelBtn) {
-      cancelBtn.hidden = !isBusyRow;
-      cancelBtn.disabled = isStopping;
-      cancelBtn.classList.toggle('busy', isStopping);
     }
     const timerText = isRecording
       ? formatChatVoiceDuration(chatVoiceState.durationMs)
@@ -2014,36 +2025,36 @@ function syncVoiceRecorderUi(scope) {
       errorEl.hidden = !nextError;
     }
     if (host) host.hidden = !(isBusyRow || isDraftReady || isDraftSending);
-    if (recordRow) recordRow.hidden = !isBusyRow;
-    if (recordRow && !isBusyRow) {
-      recordRow.style.removeProperty('--voice-slide-offset');
-      recordRow.style.removeProperty('--voice-slide-progress');
-      const hint = recordRow.querySelector('.chatVoiceRecordHint');
-      if (hint) hint.style.opacity = '';
-      if (chatVoiceGestureState.activeScope === stateScope) {
-        chatVoiceGestureState.dragging = false;
-        chatVoiceGestureState.startX = 0;
-        chatVoiceGestureState.currentX = 0;
-        chatVoiceGestureState.activeScope = '';
+    if (activeStrip) {
+      if (!isBusyRow && !isDraftReady && !isDraftSending) {
+        renderVoiceActiveStrip(domKey, 'none');
+        if (chatVoiceGestureState.activeScope === stateScope) {
+          chatVoiceGestureState.dragging = false;
+          chatVoiceGestureState.startX = 0;
+          chatVoiceGestureState.currentX = 0;
+          chatVoiceGestureState.activeScope = '';
+        }
+      } else if (isBusyRow) {
+        renderVoiceActiveStrip(domKey, 'recording', {
+          timerText,
+          isStopping,
+        });
+      } else {
+        const draftAudio = syncVoiceRuntimeAudioRef();
+        const previewPlaying = !!(draft?.objectUrl && voicePlaybackRuntime.lastUserAction === `draft:${stateScope}` && !draftAudio?.paused && String(draftAudio?.currentSrc || draftAudio?.src || '') === draft.objectUrl);
+        renderVoiceActiveStrip(domKey, 'draft', {
+          timerText: formatChatVoiceDuration(draft?.durationMs || 0),
+          isSending: isDraftSending,
+          previewPlaying,
+        });
+        const draftPreviewBtn = document.getElementById(`${domKey}VoiceDraftPreviewBtn`);
+        if (draftPreviewBtn) {
+          draftPreviewBtn.dataset.previewPlaying = previewPlaying ? '1' : '0';
+          draftPreviewBtn.disabled = !draft?.objectUrl || isDraftSending;
+        }
+        const draftSendBtn = document.getElementById(`${domKey}VoiceDraftSendBtn`);
+        if (draftSendBtn) draftSendBtn.disabled = !isDraftReady || isDraftSending;
       }
-    }
-    if (draftWrap) draftWrap.hidden = !(isDraftReady || isDraftSending);
-    if (draftDurationEl) draftDurationEl.textContent = formatChatVoiceDuration(draft?.durationMs || 0);
-    if (draftSendBtn) {
-      draftSendBtn.disabled = !isDraftReady || isDraftSending;
-      draftSendBtn.hidden = !isDraftReady && !isDraftSending;
-    }
-    if (draftCancelBtn) {
-      draftCancelBtn.disabled = isDraftSending;
-      draftCancelBtn.hidden = !isDraftReady && !isDraftSending;
-    }
-    if (draftPreviewBtn) {
-      const draftAudio = syncVoiceRuntimeAudioRef();
-      const previewPlaying = !!(draft?.objectUrl && voicePlaybackRuntime.lastUserAction === `draft:${stateScope}` && !draftAudio?.paused && String(draftAudio?.currentSrc || draftAudio?.src || '') === draft.objectUrl);
-      draftPreviewBtn.dataset.previewPlaying = previewPlaying ? '1' : '0';
-      draftPreviewBtn.hidden = !isDraftReady && !isDraftSending;
-      draftPreviewBtn.disabled = !draft?.objectUrl || isDraftSending;
-      draftPreviewBtn.textContent = previewPlaying ? 'Pause' : 'Play';
     }
     syncVoiceComposerTextLock(scope);
     syncVoiceComposerSendButton(scope);
@@ -2062,7 +2073,7 @@ function beginVoiceSlideCancel(scope, clientX) {
 
 function updateVoiceSlideCancel(scope, clientX) {
     const domKey = voiceScopeDomKey(scope);
-    const recordRow = document.getElementById(`${domKey}VoiceRecordRow`);
+    const recordRow = document.getElementById(`${domKey}VoiceActiveStrip`);
     const hint = recordRow?.querySelector('.chatVoiceRecordHint');
     if (!recordRow) return;
     if (!chatVoiceGestureState.dragging || chatVoiceGestureState.activeScope !== voiceScopeStateKey(scope)) {
@@ -2085,7 +2096,7 @@ async function endVoiceSlideCancel(scope) {
     const stateScope = voiceScopeStateKey(scope);
     if (!chatVoiceGestureState.dragging || chatVoiceGestureState.activeScope !== stateScope) return;
     const domKey = voiceScopeDomKey(scope);
-    const recordRow = document.getElementById(`${domKey}VoiceRecordRow`);
+    const recordRow = document.getElementById(`${domKey}VoiceActiveStrip`);
     const hint = recordRow?.querySelector('.chatVoiceRecordHint');
     const delta = Math.min(0, Number(chatVoiceGestureState.currentX || 0) - Number(chatVoiceGestureState.startX || 0));
     const travel = Math.max(0, Math.abs(delta));
@@ -2411,12 +2422,8 @@ function stopActiveVoiceRecording(scope) {
 
   function bindVoiceComposerControls(surface, optionsFactory) {
     const startBtn = document.getElementById(`${surface}VoiceStartBtn`);
-    const stopBtn = document.getElementById(`${surface}VoiceStopBtn`);
-    const cancelBtn = document.getElementById(`${surface}VoiceCancelBtn`);
-    const draftPreviewBtn = document.getElementById(`${surface}VoiceDraftPreviewBtn`);
-    const draftCancelBtn = document.getElementById(`${surface}VoiceDraftCancelBtn`);
-    const draftSendBtn = document.getElementById(`${surface}VoiceDraftSendBtn`);
-    const recordRow = document.getElementById(`${surface}VoiceRecordRow`);
+    const host = document.getElementById(`${surface}VoiceHost`);
+    const activeStrip = document.getElementById(`${surface}VoiceActiveStrip`);
     if (startBtn?.dataset.voiceComposerBound === '1') {
       syncVoiceRecorderUi(surface);
       return;
@@ -2432,43 +2439,52 @@ function stopActiveVoiceRecording(scope) {
       const options = typeof optionsFactory === 'function' ? optionsFactory() : {};
       await startChatVoiceRecording(surface, options);
     });
-    stopBtn?.addEventListener('click', (event) => {
-      stopEvent(event);
-      void stopActiveVoiceRecording(surface);
+    host?.addEventListener('click', async (event) => {
+      const target = event.target?.closest?.('button');
+      if (!target) return;
+      if (target.id === `${surface}VoiceStopBtn`) {
+        stopEvent(event);
+        void stopActiveVoiceRecording(surface);
+        return;
+      }
+      if (target.id === `${surface}VoiceCancelBtn`) {
+        stopEvent(event);
+        void cancelVoiceRecording(surface);
+        return;
+      }
+      if (target.id === `${surface}VoiceDraftCancelBtn`) {
+        stopEvent(event);
+        void discardChatVoiceDraft(surface);
+        return;
+      }
+      if (target.id === `${surface}VoiceDraftSendBtn`) {
+        stopEvent(event);
+        const options = typeof optionsFactory === 'function' ? optionsFactory() : {};
+        try {
+          await sendChatVoiceDraft(surface, options);
+        } catch (_) {}
+        return;
+      }
+      if (target.id === `${surface}VoiceDraftPreviewBtn`) {
+        stopEvent(event);
+        void toggleChatVoiceDraftPreview(surface, target);
+      }
     });
-    cancelBtn?.addEventListener('click', (event) => {
-      stopEvent(event);
-      void cancelVoiceRecording(surface);
-    });
-    draftCancelBtn?.addEventListener('click', (event) => {
-      stopEvent(event);
-      void discardChatVoiceDraft(surface);
-    });
-    draftSendBtn?.addEventListener('click', async (event) => {
-      stopEvent(event);
-      const options = typeof optionsFactory === 'function' ? optionsFactory() : {};
-      try {
-        await sendChatVoiceDraft(surface, options);
-      } catch (_) {}
-    });
-    draftPreviewBtn?.addEventListener('click', (event) => {
-      stopEvent(event);
-      void toggleChatVoiceDraftPreview(surface, draftPreviewBtn);
-    });
-    recordRow?.addEventListener('pointerdown', (event) => {
+    activeStrip?.addEventListener('pointerdown', (event) => {
+      if (!event.target?.closest?.('.chatVoiceActiveStrip.recording')) return;
       if (event.pointerType === 'mouse' && event.button !== 0) return;
       if (!beginVoiceSlideCancel(surface, event.clientX)) return;
-      recordRow.setPointerCapture?.(event.pointerId);
+      activeStrip.setPointerCapture?.(event.pointerId);
     });
-    recordRow?.addEventListener('pointermove', (event) => {
+    activeStrip?.addEventListener('pointermove', (event) => {
       updateVoiceSlideCancel(surface, event.clientX);
     });
-    recordRow?.addEventListener('pointerup', (event) => {
-      recordRow.releasePointerCapture?.(event.pointerId);
+    activeStrip?.addEventListener('pointerup', (event) => {
+      activeStrip.releasePointerCapture?.(event.pointerId);
       void endVoiceSlideCancel(surface);
     });
-    recordRow?.addEventListener('pointercancel', (event) => {
-      recordRow.releasePointerCapture?.(event.pointerId);
+    activeStrip?.addEventListener('pointercancel', (event) => {
+      activeStrip.releasePointerCapture?.(event.pointerId);
       void endVoiceSlideCancel(surface);
     });
     syncVoiceRecorderUi(surface);
