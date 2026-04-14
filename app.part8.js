@@ -939,29 +939,27 @@ function voiceNoteLabel(message) {
 
 function buildVoiceComposer(surface, extraClass = '') {
     return `<div class="chatVoiceComposer ${extraClass}" data-voice-surface="${surface}">
-      <div class="chatVoicePopoverHost" data-voice-surface="${surface}">
-        <div class="chatVoicePopover" id="${surface}VoicePopover" hidden>
-          <div class="chatVoiceRecordBar" id="${surface}VoiceRecordRow" hidden>
-            <div class="chatVoiceRecordMic" aria-hidden="true">🎤</div>
-            <div class="chatVoiceRecordTimer" data-voice-record-timer="1">0:00</div>
-            <div class="chatVoiceRecordHint">slide left to cancel</div>
-            <button class="chatVoiceChipBtn" id="${surface}VoiceCancelBtn" type="button" aria-label="Cancel voice note" data-chat-voice-trigger="1" hidden>Cancel</button>
-            <button class="chatVoiceBtn recording" id="${surface}VoiceStopBtn" type="button" aria-label="Stop voice note" data-chat-voice-trigger="1" hidden>Stop</button>
-          </div>
-          <div class="chatVoiceDraftBar" id="${surface}VoiceDraft" hidden>
-            <button class="chatVoiceDraftPlay" id="${surface}VoiceDraftPreviewBtn" type="button" data-chat-voice-trigger="1">Play</button>
-            <div class="chatVoiceMiniWave" aria-hidden="true"></div>
-            <div class="chatVoiceDraftMetaCompact" id="${surface}VoiceDraftDuration">0:00</div>
-            <div class="chatVoiceDraftActionsCompact">
-              <button class="chatVoiceChipBtn" id="${surface}VoiceDraftCancelBtn" type="button" data-chat-voice-trigger="1">Cancel</button>
-              <button class="chatVoiceChipBtn send" id="${surface}VoiceDraftSendBtn" type="button" data-chat-voice-trigger="1">Send</button>
-            </div>
+      <div class="chatVoicePopoverHost" id="${surface}VoiceHost" hidden data-voice-surface="${surface}">
+        <div class="chatVoiceRecordBar" id="${surface}VoiceRecordRow" hidden>
+          <div class="chatVoiceRecordMic" aria-hidden="true">🎤</div>
+          <div class="chatVoiceRecordTimer" data-voice-record-timer="1">0:00</div>
+          <div class="chatVoiceRecordHint">slide left to cancel</div>
+          <button class="chatVoiceChipBtn" id="${surface}VoiceCancelBtn" type="button" aria-label="Cancel voice note" data-chat-voice-trigger="1" hidden>Cancel</button>
+          <button class="chatVoiceBtn recording" id="${surface}VoiceStopBtn" type="button" aria-label="Stop voice note" data-chat-voice-trigger="1" hidden>Stop</button>
+        </div>
+        <div class="chatVoiceDraftBar" id="${surface}VoiceDraft" hidden>
+          <button class="chatVoiceDraftPlay" id="${surface}VoiceDraftPreviewBtn" type="button" data-chat-voice-trigger="1">Play</button>
+          <div class="chatVoiceMiniWave" aria-hidden="true"></div>
+          <div class="chatVoiceDraftMetaCompact" id="${surface}VoiceDraftDuration">0:00</div>
+          <div class="chatVoiceDraftActionsCompact">
+            <button class="chatVoiceChipBtn" id="${surface}VoiceDraftCancelBtn" type="button" data-chat-voice-trigger="1">Cancel</button>
+            <button class="chatVoiceChipBtn send" id="${surface}VoiceDraftSendBtn" type="button" data-chat-voice-trigger="1">Send</button>
           </div>
         </div>
-        <div class="chatVoiceStatus" id="${surface}VoiceStatus" aria-live="polite" hidden>${CHAT_VOICE_IDLE_STATUS}</div>
-        <div class="chatVoiceTimer" id="${surface}VoiceTimer" hidden>0:00</div>
         <div class="chatVoiceLoading" id="${surface}VoiceUpload" hidden></div>
         <div class="chatVoiceError" id="${surface}VoiceError" hidden></div>
+        <span id="${surface}VoiceStatus" class="chatVoiceSrOnly" aria-live="polite">${CHAT_VOICE_IDLE_STATUS}</span>
+        <span id="${surface}VoiceTimer" class="chatVoiceSrOnly">0:00</span>
       </div>
     </div>`;
   }
@@ -1972,7 +1970,7 @@ function syncVoiceRecorderUi(scope) {
     const draftCancelBtn = document.getElementById(`${domKey}VoiceDraftCancelBtn`);
     const draftPreviewBtn = document.getElementById(`${domKey}VoiceDraftPreviewBtn`);
     const recordRow = document.getElementById(`${domKey}VoiceRecordRow`);
-    const popoverEl = document.getElementById(`${domKey}VoicePopover`);
+    const host = document.getElementById(`${domKey}VoiceHost`);
     const statusVisible = isBusyRow || isDraftSending;
     const canStart = !isBusyRow && !isDraftSending;
     if (startBtn) {
@@ -2015,11 +2013,7 @@ function syncVoiceRecorderUi(scope) {
       errorEl.textContent = nextError;
       errorEl.hidden = !nextError;
     }
-    if (popoverEl) {
-      popoverEl.hidden = !(isBusyRow || isDraftReady || isDraftSending);
-      popoverEl.classList.toggle('recording', isBusyRow);
-      popoverEl.classList.toggle('draft', !isBusyRow && (isDraftReady || isDraftSending));
-    }
+    if (host) host.hidden = !(isBusyRow || isDraftReady || isDraftSending);
     if (recordRow) recordRow.hidden = !isBusyRow;
     if (recordRow && !isBusyRow) {
       recordRow.style.removeProperty('--voice-slide-offset');
