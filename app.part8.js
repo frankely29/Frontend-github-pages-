@@ -950,8 +950,10 @@ function buildVoiceComposer(surface, extraClass = '') {
           <button class="chatVoiceDraftPlay" id="${surface}VoiceDraftPreviewBtn" type="button" data-chat-voice-trigger="1">Play</button>
           <div class="chatVoiceMiniWave" aria-hidden="true"></div>
           <div class="chatVoiceDraftMetaCompact" id="${surface}VoiceDraftDuration">0:00</div>
-          <button class="chatVoiceChipBtn" id="${surface}VoiceDraftCancelBtn" type="button" data-chat-voice-trigger="1">Cancel</button>
-          <button class="chatVoiceChipBtn send" id="${surface}VoiceDraftSendBtn" type="button" data-chat-voice-trigger="1">Send</button>
+          <div class="chatVoiceDraftActionsCompact">
+            <button class="chatVoiceChipBtn" id="${surface}VoiceDraftCancelBtn" type="button" data-chat-voice-trigger="1">Cancel</button>
+            <button class="chatVoiceChipBtn send" id="${surface}VoiceDraftSendBtn" type="button" data-chat-voice-trigger="1">Send</button>
+          </div>
         </div>
       </div>
       <div class="chatVoiceLoading" id="${surface}VoiceUpload" hidden></div>
