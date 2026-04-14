@@ -2232,8 +2232,11 @@ function updateVoiceHoldGesture(event) {
     chatVoiceGestureState.thumbOffsetY = Math.min(0, dy);
     applyVoiceThumbTransform();
 
-    if (dx <= -Number(chatVoiceGestureState.cancelThresholdPx || 96)) {
-      void cancelVoiceHoldGesture(event.currentTarget);
+  if (dx <= -Number(chatVoiceGestureState.cancelThresholdPx || 96)) {
+      if (event.currentTarget?.releasePointerCapture && chatVoiceGestureState.pointerId != null) {
+        try { event.currentTarget.releasePointerCapture(chatVoiceGestureState.pointerId); } catch (_) {}
+      }
+      void cancelVoiceHoldGesture();
       return;
     }
 
@@ -2242,11 +2245,8 @@ function updateVoiceHoldGesture(event) {
     }
   }
 
-async function cancelVoiceHoldGesture(target) {
+async function cancelVoiceHoldGesture() {
     const scope = getVoiceComposerScopeKey(chatVoiceGestureState.scope);
-    if (target?.releasePointerCapture && chatVoiceGestureState.pointerId != null) {
-      try { target.releasePointerCapture(chatVoiceGestureState.pointerId); } catch (_) {}
-    }
     chatVoiceGestureState.canceled = true;
     await cancelChatVoiceRecording('Recording canceled');
     resetVoiceGestureState();
@@ -2379,7 +2379,10 @@ function bindVoiceHoldMicButton(button, scope, optionsFactory) {
       if (!chatVoiceGestureState.active) return;
       if (getVoiceComposerScopeKey(chatVoiceGestureState.scope) !== getVoiceComposerScopeKey(scope)) return;
       event.preventDefault();
-      await cancelVoiceHoldGesture(event.currentTarget);
+      if (event.currentTarget?.releasePointerCapture && chatVoiceGestureState.pointerId != null) {
+        try { event.currentTarget.releasePointerCapture(chatVoiceGestureState.pointerId); } catch (_) {}
+      }
+      await cancelVoiceHoldGesture();
     });
 
     button.addEventListener('click', (event) => {
