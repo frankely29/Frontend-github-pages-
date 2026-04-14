@@ -2233,7 +2233,7 @@ function updateVoiceHoldGesture(event) {
     applyVoiceThumbTransform();
 
     if (dx <= -Number(chatVoiceGestureState.cancelThresholdPx || 96)) {
-      void cancelVoiceHoldGesture();
+      void cancelVoiceHoldGesture(event.currentTarget);
       return;
     }
 
@@ -2242,8 +2242,11 @@ function updateVoiceHoldGesture(event) {
     }
   }
 
-async function cancelVoiceHoldGesture() {
+async function cancelVoiceHoldGesture(target) {
     const scope = getVoiceComposerScopeKey(chatVoiceGestureState.scope);
+    if (target?.releasePointerCapture && chatVoiceGestureState.pointerId != null) {
+      try { target.releasePointerCapture(chatVoiceGestureState.pointerId); } catch (_) {}
+    }
     chatVoiceGestureState.canceled = true;
     await cancelChatVoiceRecording('Recording canceled');
     resetVoiceGestureState();
@@ -2287,13 +2290,31 @@ async function finishVoiceHoldGesture(event) {
 
 function getVoiceScopeSendOptions(scope) {
     const key = getVoiceComposerScopeKey(scope);
-    if (key === 'private') {
-      const userId = privateActiveUserId;
+
+    if (key === 'public') {
       return {
-        userId,
+        room: CHAT_ROOM,
         onUploaded: async (response) => {
-          const previousLatestId = privateLastMessageIdByUserId[String(userId)] || null;
-          const merged = await integrateUploadedVoiceMessage('private', response, { previousLatestId, otherUserId: userId, markRead: true, displayName: privateActiveDisplayName });
+          const previousLatestId = chatLatestMessageId;
+          const merged = await integrateUploadedVoiceMessage('public', response, { previousLatestId, room: CHAT_ROOM });
+          if (Array.isArray(merged) && merged.length) seedChatIncomingAudioBaseline(merged);
+          await playChatTone('outgoing');
+          await chatPollOnce();
+        },
+      };
+    }
+
+    if (key === 'private') {
+      return {
+        userId: privateActiveUserId,
+        onUploaded: async (response) => {
+          const previousLatestId = privateLastMessageIdByUserId[String(privateActiveUserId)] || null;
+          const merged = await integrateUploadedVoiceMessage('private', response, {
+            previousLatestId,
+            otherUserId: privateActiveUserId,
+            markRead: true,
+            displayName: privateActiveDisplayName,
+          });
           if (!merged.length) await chatPollPrivateActiveThread({ visible: true, forceFull: false });
           renderPrivateConversation();
           renderPrivateTabUnread();
@@ -2304,18 +2325,27 @@ function getVoiceScopeSendOptions(scope) {
     }
     if (key === 'profile-dm') {
       return {
-        userId: driverProfileState.userId,
+        userId: String(driverProfileState?.userId || ''),
         onUploaded: async (response) => {
-          await handleDriverProfileVoiceUploaded(response);
+          const uid = String(driverProfileState?.userId || '');
+          const previousLatestId = privateLastMessageIdByUserId[uid] || null;
+          const merged = await integrateUploadedVoiceMessage('private', response, {
+            previousLatestId,
+            otherUserId: uid,
+            markRead: true,
+            displayName: driverProfileState?.displayName || '',
+          });
+          if (!merged.length) await pollDriverProfileDmOnce();
+          if (uid) {
+            driverProfileState.messages = privateMessagesByUserId[uid] || merged;
+            updateDriverProfileDmList(driverProfileState.messages);
+          }
+          await playChatTone('outgoing');
         },
       };
     }
-    return {
-      room: CHAT_ROOM,
-      onUploaded: async (response) => {
-        await handlePublicVoiceUploaded(response);
-      },
-    };
+
+    return {};
   }
 
 function bindVoiceHoldMicButton(button, scope, optionsFactory) {
@@ -2349,7 +2379,7 @@ function bindVoiceHoldMicButton(button, scope, optionsFactory) {
       if (!chatVoiceGestureState.active) return;
       if (getVoiceComposerScopeKey(chatVoiceGestureState.scope) !== getVoiceComposerScopeKey(scope)) return;
       event.preventDefault();
-      await cancelVoiceHoldGesture();
+      await cancelVoiceHoldGesture(event.currentTarget);
     });
 
     button.addEventListener('click', (event) => {
