@@ -137,7 +137,7 @@ const CHAT_VOICE_BUSY_PHASES = new Set(['preparing', 'requesting', 'recording', 
 
 const VOICE_BLOB_FETCH_RETRY_DELAYS_MS = [0, 350, 900, 1800];
 
-const CHAT_VOICE_IDLE_STATUS = 'Hold mic to record (max 2:00)';
+const CHAT_VOICE_IDLE_STATUS = 'Tap mic to record (max 2:00)';
 
 const CHAT_VOICE_MAX_REACHED_STATUS = '2:00 max reached. Tap Send or Cancel.';
 
