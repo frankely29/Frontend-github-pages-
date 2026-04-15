@@ -32,6 +32,8 @@
     routeCache: new Map(),
     locationPollTimer: null,
     userInteracted: false,
+    refreshInFlight: false,
+    refreshQueuedForce: false,
   };
 
   function isTurnByTurnActive() {
@@ -294,6 +296,13 @@
       return null;
     }
 
+    if (state.refreshInFlight) {
+      if (force) {
+        state.refreshQueuedForce = true;
+      }
+      return null;
+    }
+
     const origin = getUserOrigin();
     if (!origin) {
       if (!isTurnByTurnActive()) {
@@ -324,6 +333,7 @@
 
     setStatus("Calculating route…");
     emitPreviewUpdated();
+    state.refreshInFlight = true;
 
     try {
       const normalized = await fetchRoutePreviewWithRetry(origin, state.currentDestination);
@@ -372,6 +382,18 @@
         emitPreviewFailed(state.currentRouteStatus, state.currentDestination);
       }
       return null;
+    } finally {
+      state.refreshInFlight = false;
+      if (state.refreshQueuedForce && state.currentDestination) {
+        state.refreshQueuedForce = false;
+        setTimeout(() => {
+          if (state.currentDestination && !state.refreshInFlight) {
+            void runPreviewRefresh(true);
+          }
+        }, 200);
+      } else {
+        state.refreshQueuedForce = false;
+      }
     }
   }
 
@@ -434,6 +456,8 @@
       state.routeAbortController.abort();
       state.routeAbortController = null;
     }
+    state.refreshInFlight = false;
+    state.refreshQueuedForce = false;
     state.currentDestination = null;
     state.destinationSource = null;
     state.currentRouteGeoJSON = null;
@@ -448,6 +472,8 @@
       state.routeAbortController.abort();
       state.routeAbortController = null;
     }
+    state.refreshInFlight = false;
+    state.refreshQueuedForce = false;
     state.currentDestination = null;
     state.destinationSource = null;
     state.currentRouteGeoJSON = null;
