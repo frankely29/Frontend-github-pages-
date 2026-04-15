@@ -456,23 +456,10 @@
       .leaderboardTierLine .rankBadgeIconWrap.compact{width:18px;height:18px;flex:0 0 auto;box-shadow:inset 0 0 0 1px rgba(255,255,255,.35),0 1px 4px rgba(2,6,23,.2)}
       .leaderboardTierLine .rankBadgeIconWrap.compact svg{width:16px;height:16px}
       body:has(#dockDrawer .leaderboardPanelWrap) #dockBackdrop{z-index:9050;background:rgba(0,0,0,.12)}
-      #dockDrawer:has(.leaderboardPanelWrap){
-        left:50%;
-        top:clamp(54px,8dvh,86px);
-        bottom:calc(env(safe-area-inset-bottom,0px) + 108px);
-        width:min(363px,94vw);
-        max-height:none;
-        height:auto;
-        z-index:9100;
-        transform:translate(-50%,16px);
-        opacity:0;
-        pointer-events:none;
-      }
-      #dockDrawer:has(.leaderboardPanelWrap).open{transform:translate(-50%,0);opacity:1;pointer-events:auto}
-      .leaderboardPanelWrap{gap:7px;max-height:min(69vh,552px);overflow:hidden;padding:8px}
+      .leaderboardPanelWrap{gap:7px;overflow:hidden;padding:8px;height:100%;min-height:0}
       .leaderboardPanelControls{display:flex;flex-direction:column;gap:5px;flex:0 0 auto}
       .leaderboardTabs .chipBtn{justify-content:center}
-      .leaderboardPanelBody{display:flex;flex-direction:column;gap:7px;min-height:0;overflow-y:auto;padding-right:2px}
+      .leaderboardPanelBody{display:flex;flex-direction:column;gap:7px;flex:1;min-height:0;overflow-y:auto;padding-right:2px}
       .leaderboardPanelBody>div{flex:0 0 auto}
       .leaderboardSectionTitle{font:900 11px/1.2 system-ui;margin-bottom:4px}
       .leaderboardList{gap:4px;margin-top:2px}
