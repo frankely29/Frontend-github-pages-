@@ -3854,6 +3854,7 @@ function autoCenterAndAutoZoom() {
   // If autoCenter is disabled, do nothing.  Without this check the map may
   // keep snapping back to the user's location and appear to “shake.”
   if (!autoCenter) return;
+  if (window.TlcNavigationTurnModule?.isActive?.()) return;
 
   const now = Date.now();
   if (now - lastAutoFitMs < 2500) return;
@@ -3928,6 +3929,7 @@ function syncCenterButton() {
 
 function refreshAutoCenterCamera({ forceZoom = false } = {}) {
   if (!map || !autoCenter) return;
+  if (window.TlcNavigationTurnModule?.isActive?.()) return;
   const c = getSelfCenterLngLat();
   if (!c) return;
   if (forceZoom) armAutoFocusZoomWindow();
@@ -3970,6 +3972,7 @@ function setAutoCenterEnabled(next, reason = "manual") {
 function handleAutoFocusInactivityTimeout() {
   if (!map || !mapReady) return;
   if (!getSelfCenterLngLat()) return;
+  if (window.TlcNavigationTurnModule?.isActive?.()) return;
   if (autoCenter) {
     refreshAutoCenterCamera({ forceZoom: true });
     return;
@@ -4189,6 +4192,7 @@ function maybeRotateMapTo(deg) {
   if (!ROTATE_ENABLED) return;
   if (!map || !mapReady) return;
   if (!autoCenter) return;
+  if (window.TlcNavigationTurnModule?.isActive?.()) return;
 
   const now = Date.now();
   if (now - lastRotateTs < ROTATE_RATE_LIMIT_MS) return;
