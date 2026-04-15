@@ -2784,6 +2784,7 @@ function stopActiveVoiceRecording(scope) {
     buildVoiceComposer,
     seedChatIncomingAudioBaseline,
     collectFreshIncomingMessagesForAudio,
+    shouldPlayIncomingToneForMessages,
     testChatIncomingSound,
     testChatOutgoingSound,
     getChatSoundDebugState,
@@ -3161,6 +3162,23 @@ function stopActiveVoiceRecording(scope) {
     if (raw.includes('voice') || raw.includes('audio')) return 'voice';
     if (raw.includes('image') || raw.includes('photo') || raw.includes('picture')) return 'image';
     return raw;
+  }
+
+  function isTextOnlyChatMessage(msg) {
+    if (!msg) return false;
+    const type = normalizeMessageType(
+      msg?.messageType,
+      msg?.imageUrl ? 'image' : (msg?.audioUrl ? 'voice' : 'text')
+    );
+    return type === 'text'
+      && !String(msg?.audioUrl || '').trim()
+      && !String(msg?.imageUrl || '').trim();
+  }
+
+  function shouldPlayIncomingToneForMessages(messages = []) {
+    const list = Array.isArray(messages) ? messages : [];
+    if (!list.length) return false;
+    return list.some((msg) => !isTextOnlyChatMessage(msg));
   }
 
   function resolveChatAssetUrl(url) {
@@ -3731,7 +3749,7 @@ function stopActiveVoiceRecording(scope) {
       if (killFeedContainer) killFeedContainer.style.display = 'flex';
       showKillFeed(normalized);
     }
-    if (freshIncoming.length > 0) void playChatTone('incoming');
+    if (freshIncoming.length > 0 && shouldPlayIncomingToneForMessages(freshIncoming)) void playChatTone('incoming');
     if (!panelOpen && !maybeInitializeChatReadBaseline()) rebuildUnreadBadgeFromMessages(publicChatMessages);
   }
 
@@ -3765,7 +3783,7 @@ function stopActiveVoiceRecording(scope) {
     });
     renderPrivateTabUnread();
     updateChatUnreadBadge();
-    if (freshIncoming.length > 0 && !visible) void playChatTone('incoming');
+    if (freshIncoming.length > 0 && !visible && shouldPlayIncomingToneForMessages(freshIncoming)) void playChatTone('incoming');
   }
 
   function safeParseLiveEvent(event) {
@@ -4064,7 +4082,6 @@ function stopActiveVoiceRecording(scope) {
   async function onChatFirstInteraction(evt) {
     const target = evt?.target;
     if (target && typeof target.closest === 'function' && target.closest('[data-chat-voice-trigger]')) return;
-    await primeChatSoundSystem(evt?.type || 'interaction');
     await ensureChatNotificationsBootstrapped(evt?.type || 'interaction');
   }
 
@@ -5857,7 +5874,6 @@ function stopActiveVoiceRecording(scope) {
       if (!text || !userId || !sendBtn) return;
       sendBtn.disabled = true;
       try {
-        await primeChatSoundSystem('private-send-click');
         const response = await chatSendPrivateMessage(userId, { text });
         rememberOutgoingDmEcho(text, userId);
         const sent = normalizePrivateMessagesPayload(response);
@@ -5869,7 +5885,6 @@ function stopActiveVoiceRecording(scope) {
         renderPrivateConversation();
         renderPrivateTabUnread();
         updateChatUnreadBadge();
-        await playChatTone('outgoing');
       } catch (err) {
         console.warn('private send failed', err);
         alert(err?.message || 'Message failed to send.');
@@ -6119,7 +6134,7 @@ function stopActiveVoiceRecording(scope) {
       privateUnreadByUserId[uid] = 0;
     } else if (unseenIncoming.length) {
       privateUnreadByUserId[uid] = Number(privateUnreadByUserId[uid] || 0) + unseenIncoming.length;
-      if (collectFreshIncomingDriverProfileDm(incoming).length > 0) void playChatTone('incoming');
+      if (shouldPlayIncomingToneForMessages(collectFreshIncomingDriverProfileDm(incoming))) void playChatTone('incoming');
     }
     privateUpsertThreadFromMessages(uid, privateMessagesByUserId[uid] || merged, { displayName: privateActiveDisplayName });
     if (activeChatTab === 'private' && privateActiveUserId === uid) renderPrivateConversation();
@@ -6504,7 +6519,7 @@ function stopActiveVoiceRecording(scope) {
       advanceChatWatermarksFromMessages(loadedMsgs);
       const hadIncomingAudioBaseline = chatSoundState.baselineReady;
       const freshIncoming = hadIncomingAudioBaseline ? collectFreshIncomingMessagesForAudio(loadedMsgs) : [];
-      if (freshIncoming.length > 0) void playChatTone('incoming');
+      if (freshIncoming.length > 0 && shouldPlayIncomingToneForMessages(freshIncoming)) void playChatTone('incoming');
       if (!hadIncomingAudioBaseline && loadedMsgs.length) seedChatIncomingAudioBaseline(loadedMsgs);
       if (!killFeedBootstrapReady) {
         seedKillFeedSeenKeys(loadedMsgs);
@@ -6654,7 +6669,6 @@ function stopActiveVoiceRecording(scope) {
       if (!textValue) return;
       chatSendBtn.disabled = true;
       try {
-        await primeChatSoundSystem('chat-send-click');
         await ensureChatNotificationsBootstrapped('chat-send-click');
         const msg = await chatSend(textValue);
         rememberOutgoingChatEcho(textValue);
@@ -6665,7 +6679,6 @@ function stopActiveVoiceRecording(scope) {
           renderChatMessages(upsertPublicChatMessages(sentMessages), { replace: true, forceStickToBottom: true });
         }
         chatInput.value = '';
-        await playChatTone('outgoing');
         await chatPollOnce();
       } catch (e) {
         console.warn('chat send failed:', e);

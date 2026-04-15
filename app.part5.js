@@ -1375,7 +1375,6 @@
       driverProfileState.error = '';
       if (sendBtn) sendBtn.disabled = true;
       try {
-        await chatInternals.primeChatSoundSystem?.('dm-send-click');
         const sent = await sendDriverProfileDm(driverProfileState.userId, { text: textValue });
         rememberOutgoingDmEcho(textValue);
         input.value = '';
@@ -1392,7 +1391,6 @@
         chatInternals.privateUnreadByUserId[String(driverProfileState.userId)] = 0;
         chatInternals.renderPrivateTabUnread?.();
         chatInternals.updateChatUnreadBadge?.();
-        await chatInternals.playChatTone?.('outgoing');
         chatInternals.updateDriverProfileDmList?.(driverProfileState.messages);
       } catch (err) {
         driverProfileState.error = err?.message || 'Message failed to send.';
@@ -1514,8 +1512,10 @@
         markRead: true
       });
       if (!incoming.length) return;
+      const freshIncoming = collectFreshIncomingDriverProfileDm(incoming);
       const hasIncomingFromOther = driverProfileState.dmInitialLoadComplete
-        && collectFreshIncomingDriverProfileDm(incoming).length > 0;
+        && freshIncoming.length > 0
+        && (chatInternals.shouldPlayIncomingToneForMessages?.(freshIncoming) ?? true);
       appendDriverProfileMessages(incoming);
       chatInternals.privateUnreadByUserId[String(driverProfileState.userId)] = 0;
       chatInternals.renderPrivateTabUnread?.();
