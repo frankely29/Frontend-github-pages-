@@ -192,14 +192,9 @@ const chatVoiceImmediateSendState = {
 const chatVoiceHoldState = {
     active: false,
     scope: '',
-    startX: 0,
-    startY: 0,
-    currentX: 0,
-    cancelThresholdPx: 100,
-    canceled: false,
+    started: false,
     holdTimerId: null,
     holdDelayMs: 180,
-    started: false,
   };
 
 const voiceAssetCache = new Map();
@@ -2047,42 +2042,63 @@ function renderHoldToTalkOverlay(scope) {
     if (!host) return;
 
     const timerText = getVoiceRecordingTimerText(key);
-    const mainRow = getComposerMainRowElement(key);
+
+    // Hide the entire composer main row
+    const mainRowId = key === 'private' ? 'privateComposerMainRow'
+      : key === 'profile-dm' ? 'driverProfileComposerMainRow'
+      : 'publicComposerMainRow';
+    const mainRow = document.getElementById(mainRowId);
     if (mainRow) mainRow.classList.add('hidden');
+
     host.hidden = false;
     host.innerHTML = `
     <div class="chatVoiceHoldOverlay" id="${key}VoiceHoldOverlay" data-voice-mode="hold-recording">
-      <div class="chatVoiceHoldSlideHint" id="${key}VoiceSlideHint">
-        <span class="chatVoiceSlideArrow">&larr;</span> slide to cancel
-      </div>
+      <button type="button" class="chatVoiceHoldCancelBtn" id="${key}VoiceHoldCancelBtn">Cancel</button>
       <div class="chatVoiceHoldTimer" id="${key}VoiceTimer">${escapeHtml(timerText)}</div>
       <div class="chatVoiceHoldMicPulse" id="${key}VoiceHoldMic">
         <span class="chatVoiceHoldMicIcon">&#127908;</span>
       </div>
     </div>
   `;
-  }
 
-function updateHoldToTalkSlide(scope, deltaX) {
-    const key = getVoiceSimpleScopeKey(scope);
-    const overlay = document.getElementById(`${key}VoiceHoldOverlay`);
-    const slideHint = document.getElementById(`${key}VoiceSlideHint`);
-    if (!overlay) return;
+    // Bind the Cancel button
+    const cancelBtn = document.getElementById(`${key}VoiceHoldCancelBtn`);
+    if (cancelBtn) {
+      cancelBtn.addEventListener('touchstart', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        // Stop the hold state so endHold won't also fire auto-send
+        chatVoiceHoldState.active = false;
+        chatVoiceHoldState.started = false;
+        // Remove recording style from mic button
+        const micBtnId = key === 'private' ? 'privateVoiceStartBtn'
+          : key === 'profile-dm' ? 'driverProfileVoiceStartBtn'
+          : 'publicVoiceStartBtn';
+        const micBtn = document.getElementById(micBtnId);
+        if (micBtn) micBtn.classList.remove('recording');
+        // Cancel the recording
+        setImmediateVoiceSend(key, false);
+        await cancelChatVoiceRecording('User tapped cancel');
+        setVoiceSimpleMode(key, 'idle');
+        renderSimpleVoiceSurface(key);
+      }, { passive: false });
 
-    const clampedDelta = Math.max(0, Math.min(deltaX, 200));
-    const cancelThreshold = chatVoiceHoldState.cancelThresholdPx;
-    const ratio = clampedDelta / cancelThreshold;
-
-    if (slideHint) {
-      slideHint.style.opacity = String(Math.max(0, 1 - ratio * 1.5));
-    }
-
-    if (clampedDelta >= cancelThreshold) {
-      overlay.classList.add('cancel-active');
-      chatVoiceHoldState.canceled = true;
-    } else {
-      overlay.classList.remove('cancel-active');
-      chatVoiceHoldState.canceled = false;
+      cancelBtn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        // Desktop fallback
+        chatVoiceHoldState.active = false;
+        chatVoiceHoldState.started = false;
+        const micBtnId = key === 'private' ? 'privateVoiceStartBtn'
+          : key === 'profile-dm' ? 'driverProfileVoiceStartBtn'
+          : 'publicVoiceStartBtn';
+        const micBtn = document.getElementById(micBtnId);
+        if (micBtn) micBtn.classList.remove('recording');
+        setImmediateVoiceSend(key, false);
+        await cancelChatVoiceRecording('User clicked cancel');
+        setVoiceSimpleMode(key, 'idle');
+        renderSimpleVoiceSurface(key);
+      });
     }
   }
 
@@ -2205,17 +2221,6 @@ function bindSimpleVoiceStartButton(button, scope) {
 
     const key = getVoiceSimpleScopeKey(scope);
 
-    function getClientX(e) {
-      if (e.touches && e.touches.length > 0) return e.touches[0].clientX;
-      if (typeof e.clientX === 'number') return e.clientX;
-      return 0;
-    }
-    function getClientY(e) {
-      if (e.touches && e.touches.length > 0) return e.touches[0].clientY;
-      if (typeof e.clientY === 'number') return e.clientY;
-      return 0;
-    }
-
     async function beginHold(e) {
       e.preventDefault();
       e.stopPropagation();
@@ -2224,16 +2229,12 @@ function bindSimpleVoiceStartButton(button, scope) {
 
       chatVoiceHoldState.active = true;
       chatVoiceHoldState.scope = key;
-      chatVoiceHoldState.startX = getClientX(e);
-      chatVoiceHoldState.startY = getClientY(e);
-      chatVoiceHoldState.currentX = chatVoiceHoldState.startX;
-      chatVoiceHoldState.canceled = false;
       chatVoiceHoldState.started = false;
 
-      // Short delay before actually starting recording to distinguish tap from hold
+      // Short delay before starting recording to distinguish tap from hold
       chatVoiceHoldState.holdTimerId = window.setTimeout(async () => {
         chatVoiceHoldState.holdTimerId = null;
-        if (!chatVoiceHoldState.active || chatVoiceHoldState.canceled) return;
+        if (!chatVoiceHoldState.active) return;
 
         const options = getVoiceScopeSendOptions(key);
         const started = await startChatVoiceRecording(key, options);
@@ -2250,14 +2251,7 @@ function bindSimpleVoiceStartButton(button, scope) {
       }, chatVoiceHoldState.holdDelayMs);
     }
 
-    function moveHold(e) {
-      if (!chatVoiceHoldState.active || !chatVoiceHoldState.started) return;
-      chatVoiceHoldState.currentX = getClientX(e);
-      const deltaX = chatVoiceHoldState.startX - chatVoiceHoldState.currentX;
-      updateHoldToTalkSlide(key, deltaX);
-    }
-
-    async function endHold() {
+    async function endHold(e) {
       if (!chatVoiceHoldState.active) return;
 
       // If hold timer is still pending (very short tap), cancel it — do nothing
@@ -2268,39 +2262,28 @@ function bindSimpleVoiceStartButton(button, scope) {
         return;
       }
 
-      const wasCanceled = chatVoiceHoldState.canceled;
       const wasStarted = chatVoiceHoldState.started;
-      const deltaX = chatVoiceHoldState.startX - chatVoiceHoldState.currentX;
-      const slidCancelDistance = deltaX > chatVoiceHoldState.cancelThresholdPx;
-
       chatVoiceHoldState.active = false;
       chatVoiceHoldState.started = false;
       button.classList.remove('recording');
 
       if (!wasStarted) {
-        const mainRow = getComposerMainRowElement(key);
+        // Restore main row if hold started but recording never did
+        const mainRowId = key === 'private' ? 'privateComposerMainRow'
+          : key === 'profile-dm' ? 'driverProfileComposerMainRow'
+          : 'publicComposerMainRow';
+        const mainRow = document.getElementById(mainRowId);
         if (mainRow) mainRow.classList.remove('hidden');
         return;
       }
 
-      if (wasCanceled || slidCancelDistance) {
-        // User slid left past threshold — cancel recording
-        setImmediateVoiceSend(key, false);
-        await cancelChatVoiceRecording('Slide to cancel');
-        setVoiceSimpleMode(key, 'idle');
-        renderSimpleVoiceSurface(key);
-        return;
-      }
-
-      // User released without sliding — auto-send
+      // User released without pressing Cancel — auto-send
       setImmediateVoiceSend(key, true);
       await stopChatVoiceRecording();
-      // stopChatVoiceRecording will see immediateVoiceSend=true and auto-send via the existing recorder 'stop' handler
     }
 
     // Touch events (mobile)
     button.addEventListener('touchstart', beginHold, { passive: false });
-    button.addEventListener('touchmove', moveHold, { passive: true });
     button.addEventListener('touchend', endHold, { passive: false });
     button.addEventListener('touchcancel', async () => {
       if (!chatVoiceHoldState.active) return;
@@ -2310,10 +2293,14 @@ function bindSimpleVoiceStartButton(button, scope) {
       }
       const wasStarted = chatVoiceHoldState.started;
       chatVoiceHoldState.active = false;
-      button.classList.remove('recording');
-      const mainRow = getComposerMainRowElement(key);
-      if (mainRow) mainRow.classList.remove('hidden');
       chatVoiceHoldState.started = false;
+      button.classList.remove('recording');
+      // Restore composer main row
+      const mainRowId = key === 'private' ? 'privateComposerMainRow'
+        : key === 'profile-dm' ? 'driverProfileComposerMainRow'
+        : 'publicComposerMainRow';
+      const mainRow = document.getElementById(mainRowId);
+      if (mainRow) mainRow.classList.remove('hidden');
       if (wasStarted) {
         setImmediateVoiceSend(key, false);
         await cancelChatVoiceRecording('Touch canceled');
@@ -2324,7 +2311,6 @@ function bindSimpleVoiceStartButton(button, scope) {
 
     // Mouse events (desktop fallback)
     button.addEventListener('mousedown', beginHold);
-    document.addEventListener('mousemove', moveHold);
     document.addEventListener('mouseup', endHold);
 
     // Prevent context menu on long press (mobile)
