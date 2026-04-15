@@ -277,6 +277,17 @@
     return true;
   }
 
+  function collapseNavTrayDuringNavigation(collapse) {
+    const tray = document.getElementById("navQuickTray");
+    const toggle = document.getElementById("navQuickToggle");
+    if (collapse) {
+      if (tray) tray.hidden = true;
+      if (toggle) toggle.hidden = true;
+    } else if (toggle) {
+      toggle.hidden = false;
+    }
+  }
+
   function updateCard() {
     const {
       card, primary, secondary, meta, startBtn, stopBtn, recenterBtn,
@@ -286,8 +297,14 @@
 
     const readiness = getStartReadiness();
     const hasPreviewRoute = !!state.hasPreviewRoute;
-    card.hidden = !hasPreviewRoute && !state.active && !state.hasPreviewDestination;
-    if (card.hidden) return;
+    if (state.active && banner && !banner.hidden) {
+      card.hidden = true;
+      collapseNavTrayDuringNavigation(true);
+    } else {
+      card.hidden = !hasPreviewRoute && !state.active && !state.hasPreviewDestination;
+      collapseNavTrayDuringNavigation(false);
+    }
+    if (card.hidden && !(state.active && banner && !banner.hidden)) return;
 
     if (!state.active) {
       if (primary) primary.textContent = readiness.canStart ? "Route preview ready" : (readiness.reason || "Manual route required");
@@ -567,6 +584,7 @@
     state.lastStartFailureReason = "";
 
     state.active = true;
+    document.body.classList.add("tlc-nav-active");
     state.navigationStatus = "active";
     state.followModeEnabled = true;
     state.sessionId += 1;
@@ -590,6 +608,7 @@
   function stopNavigation() {
     const wasActive = state.active;
     state.active = false;
+    document.body.classList.remove("tlc-nav-active");
     state.navigationStatus = state.arrivalState === "arrived" ? "arrived" : "stopped";
     state.followModeEnabled = false;
     state.offRoute = false;
@@ -601,6 +620,8 @@
     state.liveMapSyncRaf = 0;
     state.lastLiveMapSyncReason = "";
     deactivateBuildingTintMode();
+    const { banner } = getEls();
+    if (banner) banner.hidden = true;
     updateCard();
     if (wasActive) {
       window.dispatchEvent(new CustomEvent("tlc-nav-stopped", {
