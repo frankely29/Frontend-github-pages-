@@ -1,6 +1,6 @@
 (function () {
   const DEFAULT_SOURCE_ID = "tlc-nav-vector";
-  const DEFAULT_SOURCE_URL = "https://demotiles.maplibre.org/tiles/tiles.json";
+  const DEFAULT_SOURCE_URL = "https://tiles.openfreemap.org/planet";
   const LAYER_IDS = {
     blocks: "tlc-nav-base-blocks",
     water: "tlc-nav-base-water",
@@ -27,6 +27,8 @@
     fallbackModeUsed: false,
     buildingSourceLayer: "building",
     blockSourceLayer: "landuse",
+    _sourceDataBound: false,
+    _sourceDataHandler: null,
   };
 
   function hasLayer(id) {
@@ -106,11 +108,14 @@
     if (hasSource(descriptor.sourceId)) return true;
 
     const sourceDef = { type: "vector" };
-    if (descriptor.tiles?.length) {
+    if (descriptor.sourceUrl) {
+      sourceDef.url = descriptor.sourceUrl;
+    } else if (descriptor.tiles?.length) {
       sourceDef.tiles = descriptor.tiles.slice();
       sourceDef.tileSize = descriptor.tileSize;
     } else {
-      sourceDef.url = descriptor.sourceUrl;
+      sourceDef.tiles = ["https://tiles.openfreemap.org/planet/{z}/{x}/{y}.pbf"];
+      sourceDef.tileSize = 512;
     }
     state.map.addSource(descriptor.sourceId, sourceDef);
     return true;
@@ -268,6 +273,17 @@
     rememberLayerOrder();
     try {
       ensureVectorSource();
+      const sourceId = state.vectorSourceId;
+      const onSourceData = (e) => {
+        if (e?.sourceId !== sourceId || !e?.isSourceLoaded) return;
+        if (!state.active) return;
+        window.TlcNavigationBuildingTintModule?.refreshForViewport?.(true);
+      };
+      if (!state._sourceDataBound) {
+        state.map.on("sourcedata", onSourceData);
+        state._sourceDataBound = true;
+        state._sourceDataHandler = onSourceData;
+      }
       ensureVectorLayers();
       state.supported = !!(hasSource(state.vectorSourceId) && state.overlayReady);
       state.fallbackModeUsed = !state.supported;
@@ -285,6 +301,11 @@
 
   function deactivate() {
     if (!state.map?.getStyle?.()) return false;
+    if (state._sourceDataBound && state._sourceDataHandler) {
+      state.map.off("sourcedata", state._sourceDataHandler);
+      state._sourceDataBound = false;
+      state._sourceDataHandler = null;
+    }
     removeVectorLayers();
     if (hasSource(state.vectorSourceId)) state.map.removeSource(state.vectorSourceId);
     restoreLayerOrder();
