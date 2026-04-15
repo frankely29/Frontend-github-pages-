@@ -2020,23 +2020,44 @@ function getVoiceRecordingTimerText(scope) {
     return formatChatVoiceDuration(Number(chatVoiceState.durationMs || 0));
   }
 
+function getComposerMainRowId(scope) {
+    const key = getVoiceSimpleScopeKey(scope);
+    if (key === 'private') return 'privateComposerMainRow';
+    if (key === 'profile-dm') return 'driverProfileComposerMainRow';
+    return 'publicComposerMainRow';
+  }
+
+function getComposerMainRowElement(scope) {
+    const key = getVoiceSimpleScopeKey(scope);
+    const mainRowId = getComposerMainRowId(key);
+    let row = document.getElementById(mainRowId);
+    if (row) return row;
+    if (key === 'profile-dm') {
+      const profileInput = document.getElementById('driverProfileInput');
+      row = profileInput?.closest?.('.chatComposerMainRow') || null;
+      if (row && !row.id) row.id = mainRowId;
+      return row;
+    }
+    return null;
+  }
+
 function renderHoldToTalkOverlay(scope) {
     const key = getVoiceSimpleScopeKey(scope);
     const host = getVoiceSimpleHost(key);
     if (!host) return;
 
     const timerText = getVoiceRecordingTimerText(key);
-
-    setComposerControlsHidden(key, true);
+    const mainRow = getComposerMainRowElement(key);
+    if (mainRow) mainRow.classList.add('hidden');
     host.hidden = false;
     host.innerHTML = `
     <div class="chatVoiceHoldOverlay" id="${key}VoiceHoldOverlay" data-voice-mode="hold-recording">
       <div class="chatVoiceHoldSlideHint" id="${key}VoiceSlideHint">
-        <span class="chatVoiceSlideArrow">⟵</span> slide to cancel
+        <span class="chatVoiceSlideArrow">&larr;</span> slide to cancel
       </div>
       <div class="chatVoiceHoldTimer" id="${key}VoiceTimer">${escapeHtml(timerText)}</div>
       <div class="chatVoiceHoldMicPulse" id="${key}VoiceHoldMic">
-        <span class="chatVoiceHoldMicIcon">🎤</span>
+        <span class="chatVoiceHoldMicIcon">&#127908;</span>
       </div>
     </div>
   `;
@@ -2077,10 +2098,14 @@ function renderSimpleVoiceSurface(scope) {
     if (mode === 'idle') {
       host.hidden = true;
       host.innerHTML = '';
+      const mainRow = getComposerMainRowElement(key);
+      if (mainRow) mainRow.classList.remove('hidden');
       setComposerControlsHidden(key, false);
       return;
     }
 
+    const mainRow = getComposerMainRowElement(key);
+    if (mainRow) mainRow.classList.add('hidden');
     setComposerControlsHidden(key, true);
     host.hidden = false;
 
@@ -2252,7 +2277,11 @@ function bindSimpleVoiceStartButton(button, scope) {
       chatVoiceHoldState.started = false;
       button.classList.remove('recording');
 
-      if (!wasStarted) return;
+      if (!wasStarted) {
+        const mainRow = getComposerMainRowElement(key);
+        if (mainRow) mainRow.classList.remove('hidden');
+        return;
+      }
 
       if (wasCanceled || slidCancelDistance) {
         // User slid left past threshold — cancel recording
@@ -2279,9 +2308,13 @@ function bindSimpleVoiceStartButton(button, scope) {
         window.clearTimeout(chatVoiceHoldState.holdTimerId);
         chatVoiceHoldState.holdTimerId = null;
       }
+      const wasStarted = chatVoiceHoldState.started;
       chatVoiceHoldState.active = false;
       button.classList.remove('recording');
-      if (chatVoiceHoldState.started) {
+      const mainRow = getComposerMainRowElement(key);
+      if (mainRow) mainRow.classList.remove('hidden');
+      chatVoiceHoldState.started = false;
+      if (wasStarted) {
         setImmediateVoiceSend(key, false);
         await cancelChatVoiceRecording('Touch canceled');
         setVoiceSimpleMode(key, 'idle');

@@ -1,4 +1,5 @@
 html, body { height: 100%; margin: 0; padding: 0; }
+.hidden { display: none !important; }
     #map {
       position: fixed;
       inset: 0;
@@ -1372,6 +1373,7 @@ html, body { height: 100%; margin: 0; padding: 0; }
       min-height: 44px;
       user-select: none;
       -webkit-user-select: none;
+      box-sizing: border-box;
     }
     @keyframes chatVoiceHoldFadeIn {
       from { opacity: 0; transform: scale(0.96); }
