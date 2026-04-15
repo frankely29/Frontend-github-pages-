@@ -57,6 +57,13 @@
       startBtn: document.getElementById("navTurnStartBtn"),
       stopBtn: document.getElementById("navTurnStopBtn"),
       recenterBtn: document.getElementById("navTurnRecenterBtn"),
+      banner: document.getElementById("navActiveBanner"),
+      bannerPrimary: document.getElementById("navBannerPrimary"),
+      bannerIcon: document.getElementById("navBannerIcon"),
+      bannerDistance: document.getElementById("navBannerDistance"),
+      bannerMeta: document.getElementById("navBannerMeta"),
+      bannerStop: document.getElementById("navBannerStop"),
+      bannerRecenter: document.getElementById("navBannerRecenter"),
     };
   }
 
@@ -103,6 +110,25 @@
     if (type === "arrive") return "Arrive at destination";
     const label = `${type.charAt(0).toUpperCase()}${type.slice(1)}${modifier ? ` ${modifier}` : ""}${roadName ? ` onto ${roadName}` : ""}`;
     return label.trim() || "Continue on route";
+  }
+
+  function getManeuverArrow(step) {
+    const maneuver = step?.maneuver || {};
+    const type = String(maneuver.type || "").toLowerCase();
+    const modifier = String(maneuver.modifier || "").toLowerCase();
+    if (type === "arrive") return "🏁";
+    if (type === "depart") return "➜";
+    if (modifier.includes("left") && modifier.includes("sharp")) return "↰";
+    if (modifier.includes("right") && modifier.includes("sharp")) return "↱";
+    if (modifier.includes("left") && modifier.includes("slight")) return "↖";
+    if (modifier.includes("right") && modifier.includes("slight")) return "↗";
+    if (modifier.includes("left")) return "←";
+    if (modifier.includes("right")) return "→";
+    if (modifier.includes("straight")) return "↑";
+    if (type === "roundabout" || type === "rotary") return "↻";
+    if (type === "merge") return "↗";
+    if (type === "fork") return "⑂";
+    return "➜";
   }
 
   function deriveStepRanges(rawSteps, totalMeters) {
@@ -252,7 +278,10 @@
   }
 
   function updateCard() {
-    const { card, primary, secondary, meta, startBtn, stopBtn, recenterBtn } = getEls();
+    const {
+      card, primary, secondary, meta, startBtn, stopBtn, recenterBtn,
+      banner, bannerPrimary, bannerIcon, bannerDistance, bannerMeta
+    } = getEls();
     if (!card) return;
 
     const readiness = getStartReadiness();
@@ -283,6 +312,24 @@
     }
     if (stopBtn) stopBtn.hidden = !state.active;
     if (recenterBtn) recenterBtn.hidden = !state.active;
+
+    // Update the active navigation banner
+    if (banner) {
+      banner.hidden = !state.active;
+      if (state.active) {
+        if (bannerPrimary) bannerPrimary.textContent = state.currentStepInstruction || "Continue on route";
+        if (bannerIcon) bannerIcon.textContent = getManeuverArrow(state.currentSteps?.[state.currentStepIndex]);
+        if (bannerDistance) {
+          if (state.arrivalState === "arrived") bannerDistance.textContent = "Arrived at destination";
+          else if (state.arrivalState === "approaching") bannerDistance.textContent = `Approaching • ${formatMeters(state.distanceToNextManeuverMeters)}`;
+          else if (state.rerouteInFlight) bannerDistance.textContent = "Off route • Re-routing…";
+          else bannerDistance.textContent = `Next in ${formatMeters(state.distanceToNextManeuverMeters)}`;
+        }
+        if (bannerMeta) {
+          bannerMeta.textContent = `Remaining ${formatMeters(state.remainingDistanceMeters)} • ETA ${formatEta(state.remainingDurationSeconds)}`;
+        }
+      }
+    }
   }
 
   function maybeFollowCamera() {
@@ -295,14 +342,28 @@
     const zoom = Math.max(15.5, Number(state.map.getZoom?.() || FOLLOW_ZOOM_DEFAULT));
     state.lastFollowCameraAt = now;
 
-    state.map.easeTo({
-      center: [target.lng, target.lat],
-      zoom: Math.min(17.0, zoom),
-      pitch: FOLLOW_PITCH_DEFAULT,
-      offset: [0, Math.round((window.innerHeight || 0) * 0.18)],
-      duration: 550,
-      essential: true,
-    });
+    const suppressMs = 750;
+    if (typeof window.suppressAutoDisableFor === "function") {
+      window.suppressAutoDisableFor(suppressMs, () => {
+        state.map.easeTo({
+          center: [target.lng, target.lat],
+          zoom: Math.min(17.0, zoom),
+          pitch: FOLLOW_PITCH_DEFAULT,
+          offset: [0, Math.round((window.innerHeight || 0) * 0.18)],
+          duration: 550,
+          essential: true,
+        });
+      });
+    } else {
+      state.map.easeTo({
+        center: [target.lng, target.lat],
+        zoom: Math.min(17.0, zoom),
+        pitch: FOLLOW_PITCH_DEFAULT,
+        offset: [0, Math.round((window.innerHeight || 0) * 0.18)],
+        duration: 550,
+        essential: true,
+      });
+    }
   }
 
   function evaluateArrival() {
@@ -566,6 +627,7 @@
   }
 
   function recenterNavigationCamera() {
+    state.followModeEnabled = true;
     state.lastFollowCameraAt = 0;
     maybeFollowCamera();
     if (state.active) window.TlcNavigationBuildingTintModule?.refreshForViewport?.();
@@ -588,6 +650,17 @@
     if (recenterBtn && !recenterBtn.dataset.boundTurnNav) {
       recenterBtn.dataset.boundTurnNav = "1";
       recenterBtn.addEventListener("click", recenterNavigationCamera);
+    }
+    const { bannerStop, bannerRecenter } = getEls();
+    if (bannerStop && !bannerStop.dataset.boundTurnNav) {
+      bannerStop.dataset.boundTurnNav = "1";
+      bannerStop.addEventListener("click", () => {
+        stopNavigation();
+      });
+    }
+    if (bannerRecenter && !bannerRecenter.dataset.boundTurnNav) {
+      bannerRecenter.dataset.boundTurnNav = "1";
+      bannerRecenter.addEventListener("click", recenterNavigationCamera);
     }
   }
 
