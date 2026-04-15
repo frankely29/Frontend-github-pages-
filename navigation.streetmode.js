@@ -171,12 +171,11 @@
   function applyFallbackVisuals() {
     state.hotspotFillLayerIds.forEach((layerId) => {
       if (!hasMapLayer(layerId)) return;
-      const current = state.map.getPaintProperty(layerId, "fill-opacity");
-      if (typeof current === "number") {
-        setPaintProperty(layerId, "fill-opacity", Math.max(0.58, Math.min(0.88, current)));
-      } else {
-        setPaintProperty(layerId, "fill-opacity", 0.7);
-      }
+      setPaintProperty(layerId, "fill-opacity", 0.35);
+    });
+    state.hotspotOutlineLayerIds.forEach((layerId) => {
+      if (!hasMapLayer(layerId)) return;
+      setPaintProperty(layerId, "line-opacity", 0.4);
     });
   }
 
@@ -216,12 +215,12 @@
       state.hotspotFillLayerIds.forEach((layerId) => {
         if (!hasMapLayer(layerId)) return;
         cachePaintProperty(layerId, "fill-opacity");
-        state.map.setPaintProperty(layerId, "fill-opacity", 0.38);
+        state.map.setPaintProperty(layerId, "fill-opacity", 0.35);
       });
       state.hotspotOutlineLayerIds.forEach((layerId) => {
         if (!hasMapLayer(layerId)) return;
         cachePaintProperty(layerId, "line-opacity");
-        state.map.setPaintProperty(layerId, "line-opacity", 0.7);
+        state.map.setPaintProperty(layerId, "line-opacity", 0.4);
       });
     }
     applyRouteCorridorStyle(state.fallbackModeUsed);

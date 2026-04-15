@@ -5,7 +5,7 @@
   const BUILDING_TINT_LAYER_ID = "tlc-nav-building-tint-layer";
   const EXPLICIT_HOTSPOT_FILL_IDS = ["zones-fill"];
   const REFRESH_THROTTLE_MS = 700;
-  const MIN_BUILDING_TINT_FEATURES_FOR_SUPPRESSION = 8;
+  const MIN_BUILDING_TINT_FEATURES_FOR_SUPPRESSION = 1;
   const TILE_LOAD_RETRY_MS = 1200;
   const TILE_LOAD_MAX_RETRIES = 5;
 
@@ -440,20 +440,33 @@
   function suppressZoneFillForNavigation() {
     state.hotspotFillLayerIds.forEach((layerId) => {
       if (!hasLayer(layerId)) return;
-      setPaint(layerId, "fill-opacity", 0);
+      setPaint(layerId, "fill-opacity", 0.35);
     });
     state.hotspotOutlineLayerIds.forEach((layerId) => {
       if (!hasLayer(layerId)) return;
-      setPaint(layerId, "line-opacity", 0);
+      setPaint(layerId, "line-opacity", 0.4);
     });
     state.zoneFillSuppressed = true;
   }
 
   function restoreZoneFillAfterNavigationSuppression() {
-    const keys = [];
-    state.hotspotFillLayerIds.forEach((layerId) => keys.push(`${layerId}:fill-opacity`));
-    state.hotspotOutlineLayerIds.forEach((layerId) => keys.push(`${layerId}:line-opacity`));
-    restorePaintKeys(keys);
+    if (!state.active) {
+      const keys = [];
+      state.hotspotFillLayerIds.forEach((layerId) => keys.push(`${layerId}:fill-opacity`));
+      state.hotspotOutlineLayerIds.forEach((layerId) => keys.push(`${layerId}:line-opacity`));
+      restorePaintKeys(keys);
+      state.zoneFillSuppressed = false;
+      return;
+    }
+
+    state.hotspotFillLayerIds.forEach((layerId) => {
+      if (!hasLayer(layerId)) return;
+      setPaint(layerId, "fill-opacity", 0.35);
+    });
+    state.hotspotOutlineLayerIds.forEach((layerId) => {
+      if (!hasLayer(layerId)) return;
+      setPaint(layerId, "line-opacity", 0.4);
+    });
     state.zoneFillSuppressed = false;
   }
 
@@ -648,6 +661,7 @@
       state.tileLoadRetryTimer = 0;
     }
     state.tileLoadRetryCount = 0;
+    state.active = false;
     clearBuildingTintData();
     restoreZoneFillAfterNavigationSuppression();
     if (hasLayer(state.buildingTintLayerId)) {
@@ -660,7 +674,6 @@
     restorePaint();
     restoreLayerOrder();
 
-    state.active = false;
     state.supported = false;
     state.fallbackModeUsed = false;
     state.buildingSourceId = null;
