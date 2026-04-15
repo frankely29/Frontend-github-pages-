@@ -38,6 +38,8 @@
     routeTotalMeters: 0,
     routeTotalDurationSeconds: 0,
     lastKnownLocation: null,
+    lastKnownHeadingDeg: null,
+    lastKnownHeadingSource: "none",
     offRouteSamples: 0,
     lastFollowCameraAt: 0,
     liveMapSyncRaf: 0,
@@ -77,8 +79,10 @@
   function formatMeters(meters) {
     const v = Number(meters);
     if (!Number.isFinite(v)) return "--";
-    if (v < 1000) return `${Math.max(1, Math.round(v))} m`;
-    return `${(v / 1000).toFixed(1)} km`;
+    const feet = v * 3.28084;
+    const miles = v / 1609.34;
+    if (miles >= 0.2) return `${miles.toFixed(1)} mi`;
+    return `${Math.max(10, Math.round(feet / 10) * 10)} ft`;
   }
 
   function formatEta(seconds) {
@@ -220,6 +224,36 @@
     return best;
   }
 
+  function deriveRouteHeadingAtProgress(alongMeters) {
+    const coords = state.currentRouteFeature?.geometry?.coordinates;
+    const cumulative = state.routeCumulativeMeters;
+    if (!Array.isArray(coords) || coords.length < 2 || !Array.isArray(cumulative) || cumulative.length < 2) return null;
+
+    let segIdx = 0;
+    for (let i = 0; i < cumulative.length - 1; i += 1) {
+      if (alongMeters <= cumulative[i + 1]) {
+        segIdx = i;
+        break;
+      }
+      segIdx = i;
+    }
+
+    const aLng = Number(coords[segIdx][0]);
+    const aLat = Number(coords[segIdx][1]);
+    const bLng = Number(coords[segIdx + 1]?.[0] ?? aLng);
+    const bLat = Number(coords[segIdx + 1]?.[1] ?? aLat);
+
+    const toRad = (v) => (v * Math.PI) / 180;
+    const toDeg = (v) => (v * 180) / Math.PI;
+    const dLng = toRad(bLng - aLng);
+    const lat1 = toRad(aLat);
+    const lat2 = toRad(bLat);
+    const y = Math.sin(dLng) * Math.cos(lat2);
+    const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+    const bearing = (toDeg(Math.atan2(y, x)) + 360) % 360;
+    return Number.isFinite(bearing) ? bearing : null;
+  }
+
   function updateStepProgress(alongMeters) {
     const steps = Array.isArray(state.currentSteps) ? state.currentSteps : [];
     let idx = 0;
@@ -341,10 +375,20 @@
         if (bannerPrimary) bannerPrimary.textContent = state.currentStepInstruction || "Continue on route";
         if (bannerIcon) bannerIcon.textContent = getManeuverArrow(state.currentSteps?.[state.currentStepIndex]);
         if (bannerDistance) {
-          if (state.arrivalState === "arrived") bannerDistance.textContent = "Arrived at destination";
-          else if (state.arrivalState === "approaching") bannerDistance.textContent = `Approaching • ${formatMeters(state.distanceToNextManeuverMeters)}`;
-          else if (state.rerouteInFlight) bannerDistance.textContent = "Off route • Re-routing…";
-          else bannerDistance.textContent = `Next in ${formatMeters(state.distanceToNextManeuverMeters)}`;
+          const nextStep = state.currentSteps?.[state.currentStepIndex + 1];
+          const nextStreetName = String(nextStep?.name || "").trim();
+          const distanceText = formatMeters(state.distanceToNextManeuverMeters);
+          if (state.arrivalState === "arrived") {
+            bannerDistance.textContent = "Arrived at destination";
+          } else if (state.arrivalState === "approaching") {
+            bannerDistance.textContent = `Approaching • ${distanceText}`;
+          } else if (state.rerouteInFlight) {
+            bannerDistance.textContent = "Off route • Re-routing…";
+          } else {
+            bannerDistance.textContent = nextStreetName
+              ? `${distanceText} → ${nextStreetName}`
+              : `Next in ${distanceText}`;
+          }
         }
         if (bannerMeta) {
           bannerMeta.textContent = `Remaining ${formatMeters(state.remainingDistanceMeters)} • ETA ${formatEta(state.remainingDurationSeconds)}`;
@@ -363,27 +407,28 @@
     const zoom = Math.max(15.5, Number(state.map.getZoom?.() || FOLLOW_ZOOM_DEFAULT));
     state.lastFollowCameraAt = now;
 
+    const bearing = Number.isFinite(state.lastKnownHeadingDeg)
+      ? state.lastKnownHeadingDeg
+      : (Number.isFinite(state.snappedProgressMeters)
+        ? (deriveRouteHeadingAtProgress(state.snappedProgressMeters) ?? state.map.getBearing())
+        : state.map.getBearing());
+
     const suppressMs = 750;
+    const easeOpts = {
+      center: [target.lng, target.lat],
+      zoom: Math.min(17.0, zoom),
+      bearing,
+      pitch: FOLLOW_PITCH_DEFAULT,
+      offset: [0, Math.round((window.innerHeight || 0) * 0.18)],
+      duration: 550,
+      essential: true,
+    };
     if (typeof window.suppressAutoDisableFor === "function") {
       window.suppressAutoDisableFor(suppressMs, () => {
-        state.map.easeTo({
-          center: [target.lng, target.lat],
-          zoom: Math.min(17.0, zoom),
-          pitch: FOLLOW_PITCH_DEFAULT,
-          offset: [0, Math.round((window.innerHeight || 0) * 0.18)],
-          duration: 550,
-          essential: true,
-        });
+        state.map.easeTo(easeOpts);
       });
     } else {
-      state.map.easeTo({
-        center: [target.lng, target.lat],
-        zoom: Math.min(17.0, zoom),
-        pitch: FOLLOW_PITCH_DEFAULT,
-        offset: [0, Math.round((window.innerHeight || 0) * 0.18)],
-        duration: 550,
-        essential: true,
-      });
+      state.map.easeTo(easeOpts);
     }
   }
 
@@ -462,6 +507,13 @@
     }
 
     updateStepProgress(snapped.alongMeters);
+    if (!Number.isFinite(state.lastKnownHeadingDeg) || state.lastKnownHeadingSource !== "gps") {
+      const routeHeading = deriveRouteHeadingAtProgress(snapped.alongMeters);
+      if (Number.isFinite(routeHeading)) {
+        state.lastKnownHeadingDeg = routeHeading;
+        state.lastKnownHeadingSource = "route";
+      }
+    }
     evaluateArrival();
     maybeReroute();
     maybeFollowCamera();
@@ -479,6 +531,7 @@
     state.snappedProgressMeters = 0;
     state.offRoute = false;
     state.offRouteSamples = 0;
+    state.lastKnownHeadingSource = "none";
     state.rerouteInFlight = false;
     state.arrivalState = "none";
   }
@@ -594,6 +647,11 @@
     const ll = toLatLng(location);
     if (!ll) return;
     state.lastKnownLocation = ll;
+    const rawHeading = Number(location?.heading);
+    if (Number.isFinite(rawHeading)) {
+      state.lastKnownHeadingDeg = rawHeading;
+      state.lastKnownHeadingSource = "gps";
+    }
     if (state.active) {
       window.TlcNavigationBuildingTintModule?.refreshForViewport?.();
     }
@@ -647,6 +705,8 @@
     state.followModeEnabled = false;
     state.offRoute = false;
     state.offRouteSamples = 0;
+    state.lastKnownHeadingDeg = null;
+    state.lastKnownHeadingSource = "none";
     state.rerouteInFlight = false;
     if (state.liveMapSyncRaf) {
       cancelAnimationFrame(state.liveMapSyncRaf);
@@ -789,6 +849,8 @@
       followModeEnabled: !!state.followModeEnabled,
       sessionId: state.sessionId,
       lastLiveMapSyncReason: state.lastLiveMapSyncReason || "",
+      lastKnownHeadingDeg: state.lastKnownHeadingDeg,
+      lastKnownHeadingSource: state.lastKnownHeadingSource || "none",
       canStart: !!readiness.canStart,
       hasPreviewRoute: !!state.hasPreviewRoute,
       hasPreviewDestination: !!state.hasPreviewDestination,
@@ -823,6 +885,8 @@
       lastRerouteAt: 0,
       arrivalState: "none",
       followModeEnabled: false,
+      lastKnownHeadingDeg: null,
+      lastKnownHeadingSource: "none",
       sessionId: 0,
       canStart: false,
       hasPreviewRoute: false,
