@@ -2956,6 +2956,9 @@ function stopActiveVoiceRecording(scope) {
     pendingPrivateRenderByUserId: Object.create(null),
     pendingProfileRender: null,
   };
+  const chatScrollJumpRuntime = {
+    forceToLatest: Object.create(null),
+  };
   const privateDirectoryState = {
     open: false,
     query: '',
@@ -5006,6 +5009,88 @@ function stopActiveVoiceRecording(scope) {
     if (!listEl) return true;
     return listEl.scrollHeight - listEl.scrollTop - listEl.clientHeight <= px;
   }
+  function scrollChatListToLatest(listEl, behavior = 'smooth') {
+    if (!listEl) return;
+    if (typeof listEl.scrollTo === 'function') {
+      listEl.scrollTo({ top: listEl.scrollHeight, behavior });
+      return;
+    }
+    listEl.scrollTop = listEl.scrollHeight;
+  }
+  function getChatScrollKey(scope, userId = '') {
+    const normalizedScope = String(scope || 'public').trim();
+    if (normalizedScope === 'private') {
+      return `private:${String(userId || '').trim()}`;
+    }
+    if (normalizedScope === 'profile-dm') return 'profile-dm';
+    return 'public';
+  }
+  function markChatForceToLatest(scope, userId = '') {
+    chatScrollJumpRuntime.forceToLatest[getChatScrollKey(scope, userId)] = true;
+  }
+  function consumeChatForceToLatest(scope, userId = '') {
+    const key = getChatScrollKey(scope, userId);
+    const active = chatScrollJumpRuntime.forceToLatest[key] === true;
+    delete chatScrollJumpRuntime.forceToLatest[key];
+    return active;
+  }
+  function getChatJumpHost(listEl, scope = 'public') {
+    if (!listEl) return null;
+    const normalizedScope = String(scope || 'public').trim();
+    if (normalizedScope === 'public') return listEl.parentElement || listEl;
+    return listEl.parentElement || listEl;
+  }
+  function getChatJumpBottomOffsetPx(hostEl) {
+    if (!hostEl) return 10;
+    const composer = hostEl.querySelector('.chatComposerWrap, .chatComposerPrivate, .driverProfileComposer, [data-driver-profile-composer]');
+    if (!composer) return 10;
+    const rect = composer.getBoundingClientRect?.();
+    const height = Number(rect?.height || composer.offsetHeight || 0);
+    return Math.max(10, Math.round(height) + 8);
+  }
+  function ensureChatJumpToLatestButton(listEl, scope = 'public', userId = '') {
+    if (!listEl) return null;
+    const host = getChatJumpHost(listEl, scope);
+    if (!host) return null;
+    const key = getChatScrollKey(scope, userId);
+    host.classList.add('chatScrollJumpHost');
+    let btn = host.querySelector(`[data-chat-jump-latest="${key}"]`);
+    if (!btn) {
+      btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'chatScrollToLatestBtn';
+      btn.setAttribute('data-chat-jump-latest', key);
+      btn.setAttribute('aria-label', 'Jump to latest message');
+      btn.innerHTML = '<span aria-hidden="true">↓</span>';
+      btn.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        scrollChatListToLatest(listEl, 'smooth');
+        updateChatJumpToLatestButton(listEl, scope, userId);
+      });
+      host.appendChild(btn);
+    }
+    btn.style.bottom = `${getChatJumpBottomOffsetPx(host)}px`;
+    return btn;
+  }
+  function hideChatJumpToLatestButton(listEl, scope = 'public', userId = '') {
+    const host = getChatJumpHost(listEl, scope);
+    const key = getChatScrollKey(scope, userId);
+    const btn = host?.querySelector?.(`[data-chat-jump-latest="${key}"]`);
+    if (!btn) return;
+    btn.classList.remove('show');
+    btn.setAttribute('aria-hidden', 'true');
+  }
+  function updateChatJumpToLatestButton(listEl, scope = 'public', userId = '') {
+    const btn = ensureChatJumpToLatestButton(listEl, scope, userId);
+    if (!btn || !listEl) return;
+    const hiddenByMode = listEl.classList.contains('hidden') || listEl.offsetParent === null;
+    const shouldShow = !hiddenByMode
+      && listEl.scrollHeight > (listEl.clientHeight + 40)
+      && !isChatNearBottom(listEl, 80);
+    btn.classList.toggle('show', shouldShow);
+    btn.setAttribute('aria-hidden', shouldShow ? 'false' : 'true');
+  }
   function setChatStatus(text) {
     const listEl = document.getElementById('chatList');
     if (!listEl || listEl.dataset.hasMessages === '1') return;
@@ -5288,11 +5373,14 @@ function stopActiveVoiceRecording(scope) {
     const mark = () => {
       markChatScrollActive(scope, userId);
       queueDeferredChatRenderFlush(scope, userId);
+      updateChatJumpToLatestButton(listEl, scope, userId);
     };
     listEl.addEventListener('scroll', mark, { passive: true });
     listEl.addEventListener('touchstart', mark, { passive: true });
     listEl.addEventListener('touchmove', mark, { passive: true });
     listEl.addEventListener('wheel', mark, { passive: true });
+    ensureChatJumpToLatestButton(listEl, scope, userId);
+    updateChatJumpToLatestButton(listEl, scope, userId);
   }
 
   function messageCompletenessScore(msg) {
@@ -5877,12 +5965,16 @@ function stopActiveVoiceRecording(scope) {
         const response = await chatSendPrivateMessage(userId, { text });
         rememberOutgoingDmEcho(text, userId);
         const sent = normalizePrivateMessagesPayload(response);
+        markChatForceToLatest('private', userId);
         if (sent.length) mergePrivateMessages(userId, sent);
-        else await chatPollPrivateActiveThread({ visible: true, forceFull: false });
+        else {
+          markChatForceToLatest('private', userId);
+          await chatPollPrivateActiveThread({ visible: true, forceFull: false });
+        }
         if (input) input.value = '';
         privateUnreadByUserId[String(userId)] = 0;
         privateUpsertThreadFromMessages(userId, privateMessagesByUserId[String(userId)] || sent, { displayName: privateActiveDisplayName });
-        renderPrivateConversation();
+        renderPrivateConversation({ forceStickToBottom: true });
         renderPrivateTabUnread();
         updateChatUnreadBadge();
       } catch (err) {
@@ -5928,12 +6020,14 @@ function stopActiveVoiceRecording(scope) {
     }
   }
 
-  function renderPrivateConversation() {
+  function renderPrivateConversation(options = {}) {
     const wrap = document.getElementById('chatPrivateWrap');
     if (!wrap || !privateActiveUserId) return;
+    const forceStickToBottom = !!options.forceStickToBottom;
+    const forcedToLatest = forceStickToBottom || consumeChatForceToLatest('private', privateActiveUserId);
     const prevList = document.getElementById('chatPrivateConversationList');
     const preserveScrollTop = prevList ? prevList.scrollTop : 0;
-    const shouldStickToBottom = isChatNearBottom(prevList, 80);
+    const shouldStickToBottom = forcedToLatest || isChatNearBottom(prevList, 80);
     pruneExpiredChatState();
     const messages = privateMessagesByUserId[privateActiveUserId] || [];
     if (!wrap.querySelector('.chatPrivateConversation')) {
@@ -5947,17 +6041,24 @@ function stopActiveVoiceRecording(scope) {
     const mode = privateChatViewModeByUserId[privateActiveUserId] || 'messages';
     privateChatViewModeByUserId[privateActiveUserId] = mode;
     const uid = String(privateActiveUserId || '');
-    if (isChatScrollActive('private', uid)) {
+    if (isChatScrollActive('private', uid) && !forcedToLatest) {
       if (!chatScrollRuntime.pendingPrivateRenderByUserId[uid]) chatScrollRuntime.pendingPrivateRenderByUserId[uid] = {};
       chatScrollRuntime.pendingPrivateRenderByUserId[uid].messages = messages;
       queueDeferredChatRenderFlush('private', uid);
+      if (mode === 'messages') updateChatJumpToLatestButton(list, 'private', privateActiveUserId);
+      else hideChatJumpToLatestButton(list, 'private', privateActiveUserId);
       return;
     }
     const nextSignature = buildMessageRenderSignature(messages);
     const lastSignatureUserId = String(list?.dataset.renderSignatureUserId || '');
     if (list && lastSignatureUserId !== uid) list.dataset.renderSignature = '';
     const lastSignature = String(list?.dataset.renderSignature || '');
-    if (lastSignature === nextSignature) return;
+    if (lastSignature === nextSignature) {
+      const mode = privateChatViewModeByUserId[privateActiveUserId] || 'messages';
+      if (mode === 'messages') updateChatJumpToLatestButton(list, 'private', privateActiveUserId);
+      else hideChatJumpToLatestButton(list, 'private', privateActiveUserId);
+      return;
+    }
     void preserveVoicePlaybackAcrossRender(() => {
       reconcileMessageList(list, messages, {
         scope: 'private',
@@ -5971,9 +6072,11 @@ function stopActiveVoiceRecording(scope) {
       list.dataset.renderSignatureUserId = uid;
     }
     if (list) {
-      if (shouldStickToBottom || !prevList) list.scrollTop = list.scrollHeight;
+      if (shouldStickToBottom || !prevList) scrollChatListToLatest(list, 'auto');
       else list.scrollTop = preserveScrollTop;
     }
+    if (mode === 'messages') updateChatJumpToLatestButton(list, 'private', privateActiveUserId);
+    else hideChatJumpToLatestButton(list, 'private', privateActiveUserId);
     renderPrivatePhotosView(privateActiveUserId);
     syncPrivateChatModeUi(privateActiveUserId);
     const messagesBtn = document.getElementById('chatPrivateModeMessages');
@@ -6025,22 +6128,29 @@ function stopActiveVoiceRecording(scope) {
     void prefetchVoiceBlobUrls(messages.filter((msg) => msg?.messageType === 'voice'));
   }
 
-  function updateDriverProfileDmList(messages = driverProfileState.messages || []) {
+  function updateDriverProfileDmList(messages = driverProfileState.messages || [], options = {}) {
+    const forceStickToBottom = !!options.forceStickToBottom;
+    const forcedToLatest = forceStickToBottom || consumeChatForceToLatest('profile-dm');
     pruneExpiredChatState();
     const dmList = document.getElementById('driverProfileDmList');
     if (!dmList) return false;
     bindChatScrollActivity(dmList, 'profile-dm');
-    if (isChatScrollActive('profile-dm')) {
+    if (isChatScrollActive('profile-dm') && !forcedToLatest) {
       if (!chatScrollRuntime.pendingProfileRender) chatScrollRuntime.pendingProfileRender = {};
       chatScrollRuntime.pendingProfileRender.messages = messages;
       queueDeferredChatRenderFlush('profile-dm');
+      updateChatJumpToLatestButton(dmList, 'profile-dm');
       return false;
     }
     const nextSignature = buildMessageRenderSignature(messages);
     const lastSignature = String(dmList.dataset.renderSignature || '');
-    if (lastSignature === nextSignature) return false;
+    if (lastSignature === nextSignature) {
+      updateChatJumpToLatestButton(dmList, 'profile-dm');
+      return false;
+    }
     const previousScrollTop = dmList.scrollTop;
     const nearBottom = isChatNearBottom(dmList, 80);
+    const shouldStickToBottom = forcedToLatest || nearBottom;
     void preserveVoicePlaybackAcrossRender(() => {
       reconcileMessageList(dmList, messages, {
         scope: 'profile-dm',
@@ -6054,8 +6164,9 @@ function stopActiveVoiceRecording(scope) {
     bindChatImageViewer(dmList);
     bindRenderedChatImages(dmList);
     void prefetchVoiceBlobUrls((messages || []).filter((msg) => msg?.messageType === 'voice'));
-    if (nearBottom) dmList.scrollTop = dmList.scrollHeight;
+    if (shouldStickToBottom) scrollChatListToLatest(dmList, 'auto');
     else dmList.scrollTop = previousScrollTop;
+    updateChatJumpToLatestButton(dmList, 'profile-dm');
     return true;
   }
 
@@ -6288,6 +6399,7 @@ function stopActiveVoiceRecording(scope) {
     const listEl = document.getElementById('chatList');
     if (!listEl) return;
     bindChatScrollActivity(listEl, 'public');
+    const forcedToLatest = forceStickToBottom || consumeChatForceToLatest('public');
     const nextMessages = Array.isArray(messages) ? messages.map((msg) => normalizePublicChatMessage(msg)) : [];
     if (!nextMessages.length) {
       if (replace) {
@@ -6297,9 +6409,10 @@ function stopActiveVoiceRecording(scope) {
         listEl.dataset.renderSignature = '';
         setChatStatus('No messages yet.');
       }
+      updateChatJumpToLatestButton(listEl, 'public');
       return;
     }
-    if (isChatScrollActive('public') && !forceStickToBottom) {
+    if (isChatScrollActive('public') && !forcedToLatest) {
       if (!chatScrollRuntime.pendingPublicRender) chatScrollRuntime.pendingPublicRender = {};
       chatScrollRuntime.pendingPublicRender.messages = nextMessages;
       queueDeferredChatRenderFlush('public');
@@ -6307,9 +6420,13 @@ function stopActiveVoiceRecording(scope) {
     }
     const nextSignature = buildMessageRenderSignature(nextMessages);
     const lastSignature = String(listEl.dataset.renderSignature || '');
-    if (lastSignature === nextSignature) return;
+    if (lastSignature === nextSignature) {
+      updateChatJumpToLatestButton(listEl, 'public');
+      return;
+    }
     const previousScrollTop = listEl.scrollTop;
     const nearBottom = isChatNearBottom(listEl, 80);
+    const shouldStickToBottom = forcedToLatest || nearBottom;
     void preserveVoicePlaybackAcrossRender(() => {
       if (replace) chatSeenKeys = new Set();
       reconcileMessageList(listEl, nextMessages, {
@@ -6331,8 +6448,9 @@ function stopActiveVoiceRecording(scope) {
     bindChatImageViewer(listEl);
     bindRenderedChatImages(listEl);
     void prefetchVoiceBlobUrls(nextMessages.filter((msg) => msg.messageType === 'voice'));
-    if (forceStickToBottom || nearBottom) listEl.scrollTop = listEl.scrollHeight;
+    if (shouldStickToBottom) scrollChatListToLatest(listEl, 'auto');
     else listEl.scrollTop = previousScrollTop;
+    updateChatJumpToLatestButton(listEl, 'public');
   }
 
 
@@ -6447,6 +6565,8 @@ function stopActiveVoiceRecording(scope) {
     const photos = document.getElementById('chatPublicPhotosView');
     list?.classList.toggle('hidden', publicChatViewMode !== 'messages');
     photos?.classList.toggle('hidden', publicChatViewMode !== 'photos');
+    if (publicChatViewMode === 'messages') updateChatJumpToLatestButton(list, 'public');
+    else hideChatJumpToLatestButton(list, 'public');
     updatePublicModeButtons();
   }
 
@@ -6457,6 +6577,8 @@ function stopActiveVoiceRecording(scope) {
     const photos = document.getElementById('chatPrivatePhotosView');
     list?.classList.toggle('hidden', mode !== 'messages');
     photos?.classList.toggle('hidden', mode !== 'photos');
+    if (mode === 'messages') updateChatJumpToLatestButton(list, 'private', uid);
+    else hideChatJumpToLatestButton(list, 'private', uid);
     updatePrivateModeButtons(uid);
   }
 
@@ -6674,11 +6796,13 @@ function stopActiveVoiceRecording(scope) {
         rememberOutgoingChatEcho(textValue);
         const sentMessages = normalizePublicMessagesPayload(msg);
         if (sentMessages.length > 0) {
+          markChatForceToLatest('public');
           sentMessages.forEach(rememberOutgoingChatEcho);
           seedChatIncomingAudioBaseline(sentMessages);
           renderChatMessages(upsertPublicChatMessages(sentMessages), { replace: true, forceStickToBottom: true });
         }
         chatInput.value = '';
+        markChatForceToLatest('public');
         await chatPollOnce();
       } catch (e) {
         console.warn('chat send failed:', e);
@@ -6902,6 +7026,7 @@ function stopActiveVoiceRecording(scope) {
     prefetchVoiceBlobUrls,
     isChatVoiceBusy,
     getVoiceRecorderState,
+    markChatForceToLatest,
     leaderboardBadgeMeta: (...args) => window.leaderboardBadgeMeta?.(...args),
     leaderboardBadgePriority: (...args) => window.leaderboardBadgePriority?.(...args),
     normalizeLeaderboardBadge: (...args) => window.normalizeLeaderboardBadge?.(...args),
