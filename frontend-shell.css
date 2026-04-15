@@ -2170,6 +2170,35 @@ html, body { height: 100%; margin: 0; padding: 0; }
     .dockDrawer.panelChat.open {
       transform: translateX(-50%) translateY(0);
     }
+
+    body.chatKeyboardMode #dock,
+    body.chatKeyboardMode .sliderWrap,
+    body.chatKeyboardMode .mapControlStack,
+    body.chatKeyboardMode .killFeed {
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 180ms ease, transform 180ms ease;
+    }
+    body.chatKeyboardMode #dock {
+      transform: translateX(-50%) translateY(16px);
+    }
+    body.chatKeyboardMode .mapControlStack,
+    body.chatKeyboardMode .sliderWrap {
+      transform: translateY(16px);
+    }
+    body.chatKeyboardMode .killFeed {
+      transform: translateX(-50%) translateY(16px);
+    }
+
+    body.chatKeyboardMode .dockDrawer.panelChat {
+      bottom: calc(env(safe-area-inset-bottom, 0px) + 6px);
+    }
+    body.chatKeyboardMode .dockDrawer.panelChat .dockDrawerBody,
+    body.chatKeyboardMode .dockDrawer.panelChat .dockDrawerBody .panelBlock.chatPanelWrap,
+    body.chatKeyboardMode .dockDrawer.panelChat .chatBody {
+      padding-bottom: 0;
+      margin-bottom: 0;
+    }
     .dockDrawer.panelChat.chatPhotoViewerSuppressed{
       opacity: 0 !important;
       visibility: hidden !important;

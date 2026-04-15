@@ -778,6 +778,8 @@ const DRAWER_AUTO_MINIMIZE_MS_BY_PANEL = {
 
 let openPanelKey = null;
 let drawerAutoMinimizeTimer = null;
+let chatKeyboardMode = false;
+let chatKeyboardModeSyncTimer = null;
 
 function clearDrawerAutoMinimizeTimer() {
   if (drawerAutoMinimizeTimer) {
@@ -834,6 +836,78 @@ function bindDrawerAutoMinimizeActivity() {
   }
 }
 
+function isTextEntryControl(el) {
+  if (!(el instanceof Element)) return false;
+  if (el instanceof HTMLTextAreaElement) return true;
+  if (el instanceof HTMLElement && el.isContentEditable) return true;
+  if (!(el instanceof HTMLInputElement)) return false;
+  const type = String(el.type || "text").toLowerCase();
+  const nonTextTypes = new Set([
+    "button",
+    "submit",
+    "reset",
+    "checkbox",
+    "radio",
+    "range",
+    "file",
+    "hidden",
+    "color",
+    "date",
+    "datetime-local",
+    "month",
+    "time",
+    "week",
+    "image",
+  ]);
+  return !nonTextTypes.has(type);
+}
+
+function isChatDrawerTextEntryTarget(el) {
+  if (openPanelKey !== "chat") return false;
+  if (!isTextEntryControl(el)) return false;
+  return !!el?.closest?.(".dockDrawer.panelChat");
+}
+
+function getVisualKeyboardInsetPx() {
+  const vv = window.visualViewport;
+  if (!vv) return 0;
+  const rawInset = window.innerHeight - (vv.height + vv.offsetTop);
+  const inset = Math.max(0, rawInset);
+  return inset >= 60 ? inset : 0;
+}
+
+function setChatKeyboardMode(active) {
+  const isActive = !!active;
+  chatKeyboardMode = isActive;
+  document.body.classList.toggle("chatKeyboardMode", isActive);
+}
+
+function syncChatKeyboardModeFromActiveElement() {
+  const activeEl = document.activeElement;
+  const hasChatTextFocus = isChatDrawerTextEntryTarget(activeEl);
+  if (window.visualViewport) {
+    setChatKeyboardMode(hasChatTextFocus && getVisualKeyboardInsetPx() > 0);
+    return;
+  }
+  setChatKeyboardMode(hasChatTextFocus);
+}
+
+function scheduleChatKeyboardModeSync() {
+  if (chatKeyboardModeSyncTimer) {
+    clearTimeout(chatKeyboardModeSyncTimer);
+  }
+  chatKeyboardModeSyncTimer = setTimeout(() => {
+    chatKeyboardModeSyncTimer = null;
+    syncChatKeyboardModeFromActiveElement();
+  }, 40);
+}
+
+function blurChatDrawerFocusedFieldIfNeeded() {
+  const activeEl = document.activeElement;
+  if (!isChatDrawerTextEntryTarget(activeEl)) return;
+  if (typeof activeEl.blur === "function") activeEl.blur();
+}
+
 function syncDrawerPanelPosition() {
   if (!dockDrawer) return;
   dockDrawer.classList.remove("panelChat", "panelMusic");
@@ -868,10 +942,13 @@ function openDrawer(key, title, html) {
     window.syncChatPollingState();
   }
   touchDrawerAutoMinimizeTimer();
+  scheduleChatKeyboardModeSync();
 }
 
 function closeDrawer() {
   clearDrawerAutoMinimizeTimer();
+  blurChatDrawerFocusedFieldIfNeeded();
+  setChatKeyboardMode(false);
   openPanelKey = null;
   dockDrawer?.classList.remove("open");
   dockBackdrop?.classList.remove("open");
@@ -898,6 +975,35 @@ window.closeDrawer = closeDrawer;
 window.toggleDrawer = toggleDrawer;
 window.bindDockToggle = bindDockToggle;
 window.getOpenPanelKey = () => openPanelKey;
+
+document.addEventListener("focusin", (event) => {
+  const target = event.target;
+  if (isChatDrawerTextEntryTarget(target)) {
+    if (!window.visualViewport) setChatKeyboardMode(true);
+    scheduleChatKeyboardModeSync();
+  }
+}, true);
+
+document.addEventListener("focusout", () => {
+  scheduleChatKeyboardModeSync();
+}, true);
+
+if (window.visualViewport) {
+  window.visualViewport.addEventListener("resize", scheduleChatKeyboardModeSync);
+  window.visualViewport.addEventListener("scroll", scheduleChatKeyboardModeSync);
+}
+
+window.addEventListener("orientationchange", () => {
+  scheduleChatKeyboardModeSync();
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    setChatKeyboardMode(false);
+    return;
+  }
+  scheduleChatKeyboardModeSync();
+});
 
 function leaderboardPerfDebugState() {
   window.__mapPerfDebug = window.__mapPerfDebug || frontendPerfStats;
