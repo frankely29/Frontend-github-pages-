@@ -3828,6 +3828,7 @@ function suppressAutoDisableFor(ms, fn) {
   suppressAutoDisableUntil = Date.now() + ms;
   fn();
 }
+window.suppressAutoDisableFor = suppressAutoDisableFor;
 
 const AUTO_ZOOM_MIN = 11.0;
 const AUTO_ZOOM_MAX = 14.0;
@@ -3993,6 +3994,7 @@ if (btnCenter) {
 function disableAutoCenterBecauseUserIsExploring() {
   if (Date.now() < suppressAutoDisableUntil) return;
   if (!autoCenter) return;
+  if (window.TlcNavigationTurnModule?.isActive?.()) return;
   setAutoCenterEnabled(false, "manual");
   markUserActivity();
 }
@@ -4368,6 +4370,18 @@ function startLocationWatch() {
       // back, which looks like the map is "confused".
       if (Number.isFinite(accuracy) && accuracy > PRESENCE_ACCURACY_THRESHOLD) {
         setNavVisual(false);
+        // Still notify navigation module during poor GPS — it needs continuous updates
+        if (window.TlcNavigationTurnModule?.isActive?.()) {
+          window.dispatchEvent(new CustomEvent("tlc-user-location-updated", {
+            detail: {
+              lat,
+              lng,
+              ts: ts || Date.now(),
+              heading: Number.isFinite(lastHeadingDeg) ? lastHeadingDeg : null,
+              accuracy,
+            }
+          }));
+        }
         return;
       }
 

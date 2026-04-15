@@ -4,7 +4,7 @@
   const LINE_LAYER_ID = "tlc-nav-preview-line";
   const REFRESH_DISTANCE_MILES = 0.1;
   const REFRESH_INTERVAL_MS = 60 * 1000;
-  const LOCATION_POLL_MS = 15000;
+  const LOCATION_POLL_MS = 4000;
 
   const ROUTE_ENDPOINT = String(window.__TLC_NAV_PREVIEW_ROUTE_ENDPOINT__ || "https://router.project-osrm.org/route/v1").trim().replace(/\/+$/, "");
   const GEOCODE_ENDPOINT = String(window.__TLC_NAV_PREVIEW_GEOCODE_ENDPOINT__ || "https://nominatim.openstreetmap.org/search").trim().replace(/\/+$/, "");
@@ -326,6 +326,14 @@
         setStatus(String(error.message || "Route preview timed out"));
         emitPreviewUpdated();
         emitPreviewFailed(state.currentRouteStatus, state.currentDestination);
+        // Auto-retry after timeout
+        if (state.currentDestination) {
+          setTimeout(() => {
+            if (state.currentDestination && !state.currentRouteGeoJSON) {
+              runPreviewRefresh(true);
+            }
+          }, 5000);
+        }
         return null;
       }
       if (error?.name === "AbortError") return null;
@@ -335,6 +343,14 @@
       setStatus("Route unavailable");
       emitPreviewUpdated();
       emitPreviewFailed(state.currentRouteStatus, state.currentDestination);
+      // Auto-retry after failure
+      if (state.currentDestination) {
+        setTimeout(() => {
+          if (state.currentDestination && !state.currentRouteGeoJSON) {
+            runPreviewRefresh(true);
+          }
+        }, 5000);
+      }
       return null;
     }
   }
@@ -527,6 +543,12 @@
       clearInterval(state.locationPollTimer);
     }
     state.locationPollTimer = setInterval(refreshPreviewFromUserLocation, LOCATION_POLL_MS);
+
+    window.addEventListener("tlc-user-location-updated", () => {
+      if (state.currentDestination && !state.currentRouteGeoJSON) {
+        runPreviewRefresh(true);
+      }
+    });
   }
 
   function getSnapshot() {
