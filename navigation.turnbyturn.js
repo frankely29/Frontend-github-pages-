@@ -297,14 +297,14 @@
 
     const readiness = getStartReadiness();
     const hasPreviewRoute = !!state.hasPreviewRoute;
-    if (state.active && banner && !banner.hidden) {
+    if (state.active) {
       card.hidden = true;
       collapseNavTrayDuringNavigation(true);
     } else {
-      card.hidden = !hasPreviewRoute && !state.active && !state.hasPreviewDestination;
+      card.hidden = !hasPreviewRoute && !state.hasPreviewDestination;
       collapseNavTrayDuringNavigation(false);
     }
-    if (card.hidden && !(state.active && banner && !banner.hidden)) return;
+    if (card.hidden && !state.active) return;
 
     if (!state.active) {
       if (primary) primary.textContent = readiness.canStart ? "Route preview ready" : (readiness.reason || "Manual route required");
