@@ -32,6 +32,10 @@
     userInteracted: false,
   };
 
+  function isTurnByTurnActive() {
+    return !!window.TlcNavigationTurnModule?.isActive?.();
+  }
+
   function emptyGeojson() {
     return { type: "FeatureCollection", features: [] };
   }
@@ -272,11 +276,13 @@
 
     const origin = getUserOrigin();
     if (!origin) {
-      setRouteGeojson(null);
-      state.currentRouteSummary = null;
-      setStatus("Waiting for location");
-      emitPreviewUpdated();
-      emitPreviewFailed(state.currentRouteStatus, state.currentDestination);
+      if (!isTurnByTurnActive()) {
+        setRouteGeojson(null);
+        state.currentRouteSummary = null;
+        setStatus("Waiting for location");
+        emitPreviewUpdated();
+        emitPreviewFailed(state.currentRouteStatus, state.currentDestination);
+      }
       return null;
     }
 
@@ -321,11 +327,15 @@
       };
     } catch (error) {
       if (error?.code === "TLC_NAV_TIMEOUT") {
-        setRouteGeojson(null);
-        state.currentRouteSummary = null;
-        setStatus(String(error.message || "Route preview timed out"));
+        if (!isTurnByTurnActive()) {
+          setRouteGeojson(null);
+          state.currentRouteSummary = null;
+        }
+        setStatus(isTurnByTurnActive() ? "Route refresh failed — using last route" : String(error.message || "Route preview timed out"));
         emitPreviewUpdated();
-        emitPreviewFailed(state.currentRouteStatus, state.currentDestination);
+        if (!isTurnByTurnActive()) {
+          emitPreviewFailed(state.currentRouteStatus, state.currentDestination);
+        }
         // Auto-retry after timeout
         if (state.currentDestination) {
           setTimeout(() => {
@@ -338,11 +348,17 @@
       }
       if (error?.name === "AbortError") return null;
       console.warn("navigation preview route fetch failed:", error);
-      setRouteGeojson(null);
-      state.currentRouteSummary = null;
-      setStatus("Route unavailable");
+      if (!isTurnByTurnActive()) {
+        setRouteGeojson(null);
+        state.currentRouteSummary = null;
+        setStatus("Route unavailable");
+      } else {
+        setStatus("Route refresh failed — using last route");
+      }
       emitPreviewUpdated();
-      emitPreviewFailed(state.currentRouteStatus, state.currentDestination);
+      if (!isTurnByTurnActive()) {
+        emitPreviewFailed(state.currentRouteStatus, state.currentDestination);
+      }
       // Auto-retry after failure
       if (state.currentDestination) {
         setTimeout(() => {

@@ -4,7 +4,7 @@
   const BUILDING_TINT_SOURCE_ID = "tlc-nav-building-tint-source";
   const BUILDING_TINT_LAYER_ID = "tlc-nav-building-tint-layer";
   const EXPLICIT_HOTSPOT_FILL_IDS = ["zones-fill"];
-  const REFRESH_THROTTLE_MS = 700;
+  const REFRESH_THROTTLE_MS = 1500;
   const MIN_BUILDING_TINT_FEATURES_FOR_SUPPRESSION = 1;
   const TILE_LOAD_RETRY_MS = 1200;
   const TILE_LOAD_MAX_RETRIES = 5;
@@ -556,10 +556,13 @@
 
       const hotspotFeatures = getActiveHotspotFeatures();
       if (!hotspotFeatures.length) {
+        const wasTinting = !state.fallbackModeUsed;
         state.fallbackModeUsed = true;
         clearBuildingTintData();
-        restoreZoneFillAfterNavigationSuppression();
-        window.TlcNavigationStreetModeModule?.activate?.();
+        if (wasTinting) {
+          restoreZoneFillAfterNavigationSuppression();
+          window.TlcNavigationStreetModeModule?.activate?.();
+        }
         scheduleTileLoadRetry();
         return false;
       }
@@ -598,18 +601,26 @@
 
       const minFeaturesForSuppression = state.usingVectorOverlayGeometry ? 1 : MIN_BUILDING_TINT_FEATURES_FOR_SUPPRESSION;
       if (state.buildingTintFeatureCount >= minFeaturesForSuppression) {
+        const wasFallback = state.fallbackModeUsed;
         state.fallbackModeUsed = false;
         state.tileLoadRetryCount = 0;
         if (state.tileLoadRetryTimer) {
           clearTimeout(state.tileLoadRetryTimer);
           state.tileLoadRetryTimer = 0;
         }
-        window.TlcNavigationStreetModeModule?.deactivate?.();
-        suppressZoneFillForNavigation();
+        if (wasFallback) {
+          window.TlcNavigationStreetModeModule?.deactivate?.();
+        }
+        if (!state.zoneFillSuppressed) {
+          suppressZoneFillForNavigation();
+        }
       } else {
+        const wasTinting = !state.fallbackModeUsed;
         state.fallbackModeUsed = true;
-        restoreZoneFillAfterNavigationSuppression();
-        window.TlcNavigationStreetModeModule?.activate?.();
+        if (wasTinting) {
+          restoreZoneFillAfterNavigationSuppression();
+          window.TlcNavigationStreetModeModule?.activate?.();
+        }
         scheduleTileLoadRetry();
       }
 
