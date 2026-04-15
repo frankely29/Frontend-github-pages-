@@ -1809,6 +1809,22 @@ function hasChatVoiceDraft(scope) {
     return !!getChatVoiceDraft(scope);
   }
 
+function isVoiceDraftPreviewPlaying(scope) {
+    const normalizedScope = voiceScopeStateKey(scope);
+    const draft = getChatVoiceDraft(scope);
+    const audio = syncVoiceRuntimeAudioRef();
+    return !!(
+      normalizedScope
+      && draft
+      && draft.objectUrl
+      && voicePlaybackRuntime.activeScope === normalizedScope
+      && voicePlaybackRuntime.activeBlobUrl === draft.objectUrl
+      && audio
+      && !audio.paused
+      && !audio.ended
+    );
+  }
+
 function emitChatVoiceDrawerStateChangedIfNeeded() {
     const voiceBusy = isChatVoiceBusy();
     const hasDraft = !!(
@@ -2053,7 +2069,7 @@ function renderHoldToTalkOverlay(scope) {
       <div class="chatVoiceHoldOverlay" id="${key}VoiceHoldOverlay">
         <button type="button" class="chatVoiceHoldCancelBtn" id="${key}VoiceHoldCancelBtn">Cancel</button>
         <div class="chatVoiceHoldTimer" id="${key}VoiceTimer">${escapeHtml(timerText)}</div>
-        <button type="button" class="chatVoiceHoldSendBtn" id="${key}VoiceHoldSendBtn">Send</button>
+        <button type="button" class="chatVoiceHoldStopBtn" id="${key}VoiceHoldStopBtn">Stop</button>
       </div>
     `;
 
@@ -2072,15 +2088,15 @@ function renderHoldToTalkOverlay(scope) {
       });
     }
 
-    // Bind Send button
-    const sendBtn = document.getElementById(`${key}VoiceHoldSendBtn`);
-    if (sendBtn) {
-      sendBtn.addEventListener('click', async (e) => {
+    // Bind Stop button
+    const stopBtn = document.getElementById(`${key}VoiceHoldStopBtn`);
+    if (stopBtn) {
+      stopBtn.addEventListener('click', async (e) => {
         e.preventDefault();
         e.stopPropagation();
         chatVoiceHoldState.active = false;
         chatVoiceHoldState.started = false;
-        setImmediateVoiceSend(key, true);
+        setImmediateVoiceSend(key, false);
         await stopChatVoiceRecording();
       });
     }
@@ -2115,12 +2131,13 @@ function renderSimpleVoiceSurface(scope) {
     }
 
     if (mode === 'draft') {
+      const previewLabel = isVoiceDraftPreviewPlaying(key) ? 'Pause' : 'Play';
       host.innerHTML = `
-      <div class="chatVoiceSimpleStrip" data-voice-mode="draft">
-        <button type="button" class="chatVoiceSimpleBtn" id="${key}VoiceDraftPreviewBtn">Play</button>
-        <div class="chatVoiceSimpleDuration" id="${key}VoiceDraftDuration">${escapeHtml(formatChatVoiceDuration(Number(draft?.durationMs || 0)))}</div>
-        <button type="button" class="chatVoiceSimpleBtn danger" id="${key}VoiceDraftCancelBtn">Delete</button>
-        <button type="button" class="chatVoiceSimpleBtn strong" id="${key}VoiceDraftSendBtn">Send</button>
+      <div class="chatVoiceHoldOverlay chatVoiceHoldOverlay--review" id="${key}VoiceHoldOverlay" data-voice-mode="draft">
+        <button type="button" class="chatVoiceHoldCancelBtn" id="${key}VoiceDraftCancelBtn">Cancel</button>
+        <button type="button" class="chatVoiceHoldPlayBtn" id="${key}VoiceDraftPreviewBtn">${escapeHtml(previewLabel)}</button>
+        <div class="chatVoiceHoldTimer" id="${key}VoiceDraftDuration">${escapeHtml(formatChatVoiceDuration(Number(draft?.durationMs || 0)))}</div>
+        <button type="button" class="chatVoiceHoldSendBtn" id="${key}VoiceDraftSendBtn">Send</button>
       </div>
     `;
       bindSimpleDraftControls(key);
@@ -2444,7 +2461,6 @@ async function toggleChatVoiceDraftPreview(scope, button) {
       if (voicePlaybackRuntime.lastUserAction === `draft:${normalizedScope}` && !audio.paused && String(audio.currentSrc || audio.src || '') === draft.objectUrl) {
         voicePlaybackRuntime.lastPauseReason = 'user';
         stopSharedVoicePlayback('user', { resetPosition: false, clearActive: false, resumeRadio: false });
-        if (button) button.dataset.previewPlaying = '0';
         syncVoiceRecorderUi(scope);
         return true;
       }
@@ -2461,11 +2477,9 @@ async function toggleChatVoiceDraftPreview(scope, button) {
         audioUrl: draft.objectUrl,
         blobUrl: draft.objectUrl,
       });
-      if (button) button.dataset.previewPlaying = started ? '1' : '0';
       syncVoiceRecorderUi(scope);
       return !!started;
     } catch (err) {
-      if (button) button.dataset.previewPlaying = '0';
       chatVoiceDraftState.error = 'Unable to preview voice note right now.';
       syncVoiceRecorderUi(scope);
       return false;
