@@ -209,6 +209,21 @@
     if (state.fallbackModeUsed) applyFallbackVisuals();
 
     promoteRoadLabelsAndRoute();
+    // Last-resort fallback: if no vector road layers found (raster basemap),
+    // reduce zone fill opacity so raster streets show through
+    if (!state.roadLayerIds.length) {
+      state.fallbackModeUsed = true;
+      state.hotspotFillLayerIds.forEach((layerId) => {
+        if (!hasMapLayer(layerId)) return;
+        cachePaintProperty(layerId, "fill-opacity");
+        state.map.setPaintProperty(layerId, "fill-opacity", 0.38);
+      });
+      state.hotspotOutlineLayerIds.forEach((layerId) => {
+        if (!hasMapLayer(layerId)) return;
+        cachePaintProperty(layerId, "line-opacity");
+        state.map.setPaintProperty(layerId, "line-opacity", 0.7);
+      });
+    }
     applyRouteCorridorStyle(state.fallbackModeUsed);
     state.active = true;
     return true;

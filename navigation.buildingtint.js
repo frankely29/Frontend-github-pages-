@@ -6,6 +6,8 @@
   const EXPLICIT_HOTSPOT_FILL_IDS = ["zones-fill"];
   const REFRESH_THROTTLE_MS = 700;
   const MIN_BUILDING_TINT_FEATURES_FOR_SUPPRESSION = 8;
+  const TILE_LOAD_RETRY_MS = 1200;
+  const TILE_LOAD_MAX_RETRIES = 5;
 
   const state = {
     map: null,
@@ -34,6 +36,8 @@
     buildingTintFeatureCount: 0,
     zoneFillSuppressed: false,
     usingVectorOverlayGeometry: false,
+    tileLoadRetryCount: 0,
+    tileLoadRetryTimer: 0,
   };
 
   function getStyleLayers() {
@@ -228,9 +232,9 @@
         type: "fill",
         source: state.buildingTintSourceId,
         paint: {
-          "fill-color": ["coalesce", ["get", "hotspotColor"], "rgba(59,130,246,0.35)"],
-          "fill-opacity": ["coalesce", ["get", "hotspotOpacity"], 0.34],
-          "fill-outline-color": "rgba(255,255,255,0.12)",
+          "fill-color": ["coalesce", ["get", "hotspotColor"], "rgba(59,130,246,0.55)"],
+          "fill-opacity": ["coalesce", ["get", "hotspotOpacity"], 0.62],
+          "fill-outline-color": "rgba(255,255,255,0.18)",
         },
       }, firstRoad || undefined);
     }
@@ -475,7 +479,7 @@
         hotspotColor: hotspotMeta.color,
         hotspotBucket: hotspotMeta.bucket,
         hotspotRating: hotspotMeta.rating,
-        hotspotOpacity: 0.42,
+        hotspotOpacity: 0.65,
       },
     };
   }
@@ -483,9 +487,9 @@
   function getCarrierQueryConfig() {
     const zoom = Number(state.map?.getZoom?.() || 0);
     if (zoom >= 16 || !state.blockSourceLayer) {
-      return { sourceLayer: state.buildingSourceLayer, opacity: 0.44, mode: "building" };
+      return { sourceLayer: state.buildingSourceLayer, opacity: 0.68, mode: "building" };
     }
-    return { sourceLayer: state.blockSourceLayer, opacity: 0.30, mode: "block" };
+    return { sourceLayer: state.blockSourceLayer, opacity: 0.50, mode: "block" };
   }
 
   function moveLayersForNavigationReadability() {
@@ -506,6 +510,18 @@
 
     if (hasLayer(PREVIEW_CASING_LAYER_ID)) state.map.moveLayer(PREVIEW_CASING_LAYER_ID);
     if (hasLayer(PREVIEW_LINE_LAYER_ID)) state.map.moveLayer(PREVIEW_LINE_LAYER_ID);
+  }
+
+  function scheduleTileLoadRetry() {
+    if (!state.active || !state.supported) return;
+    if (state.tileLoadRetryCount >= TILE_LOAD_MAX_RETRIES) return;
+    if (state.tileLoadRetryTimer) clearTimeout(state.tileLoadRetryTimer);
+    state.tileLoadRetryTimer = setTimeout(() => {
+      state.tileLoadRetryTimer = 0;
+      if (!state.active) return;
+      state.tileLoadRetryCount += 1;
+      refreshForViewport(true);
+    }, TILE_LOAD_RETRY_MS);
   }
 
   function refreshForViewport(force = false) {
@@ -531,6 +547,7 @@
         clearBuildingTintData();
         restoreZoneFillAfterNavigationSuppression();
         window.TlcNavigationStreetModeModule?.activate?.();
+        scheduleTileLoadRetry();
         return false;
       }
 
@@ -569,12 +586,18 @@
       const minFeaturesForSuppression = state.usingVectorOverlayGeometry ? 1 : MIN_BUILDING_TINT_FEATURES_FOR_SUPPRESSION;
       if (state.buildingTintFeatureCount >= minFeaturesForSuppression) {
         state.fallbackModeUsed = false;
+        state.tileLoadRetryCount = 0;
+        if (state.tileLoadRetryTimer) {
+          clearTimeout(state.tileLoadRetryTimer);
+          state.tileLoadRetryTimer = 0;
+        }
         window.TlcNavigationStreetModeModule?.deactivate?.();
         suppressZoneFillForNavigation();
       } else {
         state.fallbackModeUsed = true;
         restoreZoneFillAfterNavigationSuppression();
         window.TlcNavigationStreetModeModule?.activate?.();
+        scheduleTileLoadRetry();
       }
 
       moveLayersForNavigationReadability();
@@ -620,6 +643,11 @@
   function deactivate() {
     if (!state.map?.getStyle?.()) return false;
 
+    if (state.tileLoadRetryTimer) {
+      clearTimeout(state.tileLoadRetryTimer);
+      state.tileLoadRetryTimer = 0;
+    }
+    state.tileLoadRetryCount = 0;
     clearBuildingTintData();
     restoreZoneFillAfterNavigationSuppression();
     if (hasLayer(state.buildingTintLayerId)) {
@@ -694,6 +722,8 @@
       lastViewportKey: state.lastViewportKey,
       refreshInFlight: !!state.refreshInFlight,
       zoneFillSuppressed: !!state.zoneFillSuppressed,
+      tileLoadRetryCount: Number(state.tileLoadRetryCount || 0),
+      tileLoadRetryTimer: Number(state.tileLoadRetryTimer || 0),
     };
   }
 
@@ -727,6 +757,8 @@
       lastViewportKey: "",
       refreshInFlight: false,
       zoneFillSuppressed: false,
+      tileLoadRetryCount: 0,
+      tileLoadRetryTimer: 0,
     };
   };
 })();
