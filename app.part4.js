@@ -1013,7 +1013,7 @@
         </div>` : ''}
         <div class="gamesStatus ${gamesState.error ? 'err' : ''}">${escapeHtml(gamesState.status || '')}</div>
         ${renderGamesDiagnostics()}
-        <div id="gamesContent"></div>
+        <div id="gamesContent" class="gamesContent"></div>
       </div>
     `;
   }

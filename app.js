@@ -914,8 +914,8 @@ function blurChatDrawerFocusedFieldIfNeeded() {
 
 function syncDrawerPanelPosition() {
   if (!dockDrawer) return;
-  dockDrawer.classList.remove("panelChat", "panelMusic");
-  dockBackdrop?.classList.remove("panelChat", "panelMusic");
+  dockDrawer.classList.remove("panelChat", "panelMusic", "panelGames", "panelLeaderboard");
+  dockBackdrop?.classList.remove("panelChat", "panelMusic", "panelGames", "panelLeaderboard");
   if (openPanelKey === "chat") {
     dockDrawer.classList.add("panelChat");
     dockBackdrop?.classList.add("panelChat");
@@ -923,6 +923,14 @@ function syncDrawerPanelPosition() {
   if (openPanelKey === "music") {
     dockDrawer.classList.add("panelMusic");
     dockBackdrop?.classList.add("panelMusic");
+  }
+  if (openPanelKey === "games") {
+    dockDrawer.classList.add("panelGames");
+    dockBackdrop?.classList.add("panelGames");
+  }
+  if (openPanelKey === "leaderboard") {
+    dockDrawer.classList.add("panelLeaderboard");
+    dockBackdrop?.classList.add("panelLeaderboard");
   }
 }
 
