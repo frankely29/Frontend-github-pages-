@@ -1227,8 +1227,12 @@
     const s = gamesState.chess;
     const legalSet = new Set(s.legalTargets.map((m) => `${m.r},${m.c}`));
     host.innerHTML = `
-      <div class="gamesStatus">${escapeHtml(s.message)}</div>
-      <div class="gamesBoard" id="gamesChessBoard"></div>
+      <div class="gamesChessWrap">
+        <div class="gamesStatus">${escapeHtml(s.message)}</div>
+        <div class="gamesChessStage">
+          <div class="gamesBoard" id="gamesChessBoard"></div>
+        </div>
+      </div>
     `;
     const boardEl = document.getElementById('gamesChessBoard');
     if (!boardEl) return;
