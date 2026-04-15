@@ -193,8 +193,6 @@ const chatVoiceHoldState = {
     active: false,
     scope: '',
     started: false,
-    holdTimerId: null,
-    holdDelayMs: 180,
   };
 
 const voiceAssetCache = new Map();
@@ -2024,14 +2022,17 @@ function getComposerMainRowId(scope) {
 
 function getComposerMainRowElement(scope) {
     const key = getVoiceSimpleScopeKey(scope);
-    const mainRowId = getComposerMainRowId(key);
-    let row = document.getElementById(mainRowId);
-    if (row) return row;
-    if (key === 'profile-dm') {
-      const profileInput = document.getElementById('driverProfileInput');
-      row = profileInput?.closest?.('.chatComposerMainRow') || null;
+    const mainRowId = key === 'private' ? 'privateComposerMainRow'
+      : key === 'profile-dm' ? 'driverProfileComposerMainRow'
+      : 'publicComposerMainRow';
+    const el = document.getElementById(mainRowId);
+    if (el) return el;
+    // Fallback: find by class within the voice composer parent
+    const host = getVoiceSimpleHost(key);
+    if (host?.parentElement) {
+      const row = host.parentElement.querySelector('.chatComposerMainRow');
       if (row && !row.id) row.id = mainRowId;
-      return row;
+      return row || null;
     }
     return null;
   }
@@ -2044,60 +2045,43 @@ function renderHoldToTalkOverlay(scope) {
     const timerText = getVoiceRecordingTimerText(key);
 
     // Hide the entire composer main row
-    const mainRowId = key === 'private' ? 'privateComposerMainRow'
-      : key === 'profile-dm' ? 'driverProfileComposerMainRow'
-      : 'publicComposerMainRow';
-    const mainRow = document.getElementById(mainRowId);
+    const mainRow = getComposerMainRowElement(key);
     if (mainRow) mainRow.classList.add('hidden');
 
     host.hidden = false;
     host.innerHTML = `
-    <div class="chatVoiceHoldOverlay" id="${key}VoiceHoldOverlay" data-voice-mode="hold-recording">
-      <button type="button" class="chatVoiceHoldCancelBtn" id="${key}VoiceHoldCancelBtn">Cancel</button>
-      <div class="chatVoiceHoldTimer" id="${key}VoiceTimer">${escapeHtml(timerText)}</div>
-      <div class="chatVoiceHoldMicPulse" id="${key}VoiceHoldMic">
-        <span class="chatVoiceHoldMicIcon">&#127908;</span>
+      <div class="chatVoiceHoldOverlay" id="${key}VoiceHoldOverlay">
+        <button type="button" class="chatVoiceHoldCancelBtn" id="${key}VoiceHoldCancelBtn">Cancel</button>
+        <div class="chatVoiceHoldTimer" id="${key}VoiceTimer">${escapeHtml(timerText)}</div>
+        <button type="button" class="chatVoiceHoldSendBtn" id="${key}VoiceHoldSendBtn">Send</button>
       </div>
-    </div>
-  `;
+    `;
 
-    // Bind the Cancel button
+    // Bind Cancel button
     const cancelBtn = document.getElementById(`${key}VoiceHoldCancelBtn`);
     if (cancelBtn) {
-      cancelBtn.addEventListener('touchstart', async (e) => {
+      cancelBtn.addEventListener('click', async (e) => {
         e.preventDefault();
         e.stopPropagation();
-        // Stop the hold state so endHold won't also fire auto-send
         chatVoiceHoldState.active = false;
         chatVoiceHoldState.started = false;
-        // Remove recording style from mic button
-        const micBtnId = key === 'private' ? 'privateVoiceStartBtn'
-          : key === 'profile-dm' ? 'driverProfileVoiceStartBtn'
-          : 'publicVoiceStartBtn';
-        const micBtn = document.getElementById(micBtnId);
-        if (micBtn) micBtn.classList.remove('recording');
-        // Cancel the recording
         setImmediateVoiceSend(key, false);
         await cancelChatVoiceRecording('User tapped cancel');
         setVoiceSimpleMode(key, 'idle');
         renderSimpleVoiceSurface(key);
-      }, { passive: false });
+      });
+    }
 
-      cancelBtn.addEventListener('click', async (e) => {
+    // Bind Send button
+    const sendBtn = document.getElementById(`${key}VoiceHoldSendBtn`);
+    if (sendBtn) {
+      sendBtn.addEventListener('click', async (e) => {
         e.preventDefault();
         e.stopPropagation();
-        // Desktop fallback
         chatVoiceHoldState.active = false;
         chatVoiceHoldState.started = false;
-        const micBtnId = key === 'private' ? 'privateVoiceStartBtn'
-          : key === 'profile-dm' ? 'driverProfileVoiceStartBtn'
-          : 'publicVoiceStartBtn';
-        const micBtn = document.getElementById(micBtnId);
-        if (micBtn) micBtn.classList.remove('recording');
-        setImmediateVoiceSend(key, false);
-        await cancelChatVoiceRecording('User clicked cancel');
-        setVoiceSimpleMode(key, 'idle');
-        renderSimpleVoiceSurface(key);
+        setImmediateVoiceSend(key, true);
+        await stopChatVoiceRecording();
       });
     }
   }
@@ -2219,106 +2203,23 @@ function bindSimpleVoiceStartButton(button, scope) {
     if (!button || button.dataset.simpleVoiceBound === '1') return;
     button.dataset.simpleVoiceBound = '1';
 
-    const key = getVoiceSimpleScopeKey(scope);
+    button.addEventListener('click', async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
 
-    async function beginHold(e) {
-      e.preventDefault();
-      e.stopPropagation();
+      const key = getVoiceSimpleScopeKey(scope);
       if (isChatVoiceBusy()) return;
-      if (chatVoiceHoldState.active) return;
+
+      const options = getVoiceScopeSendOptions(key);
+      const started = await startChatVoiceRecording(key, options);
+      if (!started) return;
 
       chatVoiceHoldState.active = true;
       chatVoiceHoldState.scope = key;
-      chatVoiceHoldState.started = false;
-
-      // Short delay before starting recording to distinguish tap from hold
-      chatVoiceHoldState.holdTimerId = window.setTimeout(async () => {
-        chatVoiceHoldState.holdTimerId = null;
-        if (!chatVoiceHoldState.active) return;
-
-        const options = getVoiceScopeSendOptions(key);
-        const started = await startChatVoiceRecording(key, options);
-        if (!started) {
-          chatVoiceHoldState.active = false;
-          chatVoiceHoldState.started = false;
-          return;
-        }
-        chatVoiceHoldState.started = true;
-        setImmediateVoiceSend(key, true);
-        setVoiceSimpleMode(key, 'recording');
-        renderHoldToTalkOverlay(key);
-        button.classList.add('recording');
-      }, chatVoiceHoldState.holdDelayMs);
-    }
-
-    async function endHold(e) {
-      if (!chatVoiceHoldState.active) return;
-
-      // If hold timer is still pending (very short tap), cancel it — do nothing
-      if (chatVoiceHoldState.holdTimerId) {
-        window.clearTimeout(chatVoiceHoldState.holdTimerId);
-        chatVoiceHoldState.holdTimerId = null;
-        chatVoiceHoldState.active = false;
-        return;
-      }
-
-      const wasStarted = chatVoiceHoldState.started;
-      chatVoiceHoldState.active = false;
-      chatVoiceHoldState.started = false;
-      button.classList.remove('recording');
-
-      if (!wasStarted) {
-        // Restore main row if hold started but recording never did
-        const mainRowId = key === 'private' ? 'privateComposerMainRow'
-          : key === 'profile-dm' ? 'driverProfileComposerMainRow'
-          : 'publicComposerMainRow';
-        const mainRow = document.getElementById(mainRowId);
-        if (mainRow) mainRow.classList.remove('hidden');
-        return;
-      }
-
-      // User released without pressing Cancel — auto-send
-      setImmediateVoiceSend(key, true);
-      await stopChatVoiceRecording();
-    }
-
-    // Touch events (mobile)
-    button.addEventListener('touchstart', beginHold, { passive: false });
-    button.addEventListener('touchend', endHold, { passive: false });
-    button.addEventListener('touchcancel', async () => {
-      if (!chatVoiceHoldState.active) return;
-      if (chatVoiceHoldState.holdTimerId) {
-        window.clearTimeout(chatVoiceHoldState.holdTimerId);
-        chatVoiceHoldState.holdTimerId = null;
-      }
-      const wasStarted = chatVoiceHoldState.started;
-      chatVoiceHoldState.active = false;
-      chatVoiceHoldState.started = false;
-      button.classList.remove('recording');
-      // Restore composer main row
-      const mainRowId = key === 'private' ? 'privateComposerMainRow'
-        : key === 'profile-dm' ? 'driverProfileComposerMainRow'
-        : 'publicComposerMainRow';
-      const mainRow = document.getElementById(mainRowId);
-      if (mainRow) mainRow.classList.remove('hidden');
-      if (wasStarted) {
-        setImmediateVoiceSend(key, false);
-        await cancelChatVoiceRecording('Touch canceled');
-        setVoiceSimpleMode(key, 'idle');
-        renderSimpleVoiceSurface(key);
-      }
-    }, { passive: false });
-
-    // Mouse events (desktop fallback)
-    button.addEventListener('mousedown', beginHold);
-    document.addEventListener('mouseup', endHold);
-
-    // Prevent context menu on long press (mobile)
-    button.addEventListener('contextmenu', (e) => {
-      if (chatVoiceHoldState.active) {
-        e.preventDefault();
-        e.stopPropagation();
-      }
+      chatVoiceHoldState.started = true;
+      setImmediateVoiceSend(key, false);
+      setVoiceSimpleMode(key, 'recording');
+      renderHoldToTalkOverlay(key);
     });
   }
 
@@ -2408,7 +2309,7 @@ function syncVoiceRecorderUi(scope) {
     const key = getVoiceSimpleScopeKey(scope);
     const mode = getVoiceSimpleMode(key);
 
-    // During hold-to-talk recording, only update the timer — do NOT re-render the overlay
+    // During active recording, only update the timer — do NOT re-render the overlay
     if (mode === 'recording' && chatVoiceHoldState.active && chatVoiceHoldState.started) {
       const timerEl = document.getElementById(`${key}VoiceTimer`);
       if (timerEl) timerEl.textContent = getVoiceRecordingTimerText(key);

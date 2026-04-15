@@ -1361,7 +1361,7 @@ html, body { height: 100%; margin: 0; padding: 0; }
       font-weight:800;
     }
     .chatVoiceSimpleStatus.error{ background:rgba(254,226,226,0.9); color:#991b1b; }
-    /* ── Hold-to-talk recording overlay ── */
+    /* ── Voice recording overlay ── */
     .chatVoiceHoldOverlay {
       width: 100%;
       display: flex;
@@ -1372,30 +1372,22 @@ html, body { height: 100%; margin: 0; padding: 0; }
       background: #fff1f2;
       border: 1.5px solid rgba(220, 38, 38, 0.22);
       min-height: 44px;
-      user-select: none;
-      -webkit-user-select: none;
       box-sizing: border-box;
-      animation: chatVoiceHoldFadeIn 0.15s ease-out;
-    }
-    @keyframes chatVoiceHoldFadeIn {
-      from { opacity: 0; }
-      to { opacity: 1; }
     }
     .chatVoiceHoldCancelBtn {
       border: none;
       border-radius: 999px;
-      padding: 6px 14px;
+      padding: 7px 14px;
       font-size: 12px;
       font-weight: 800;
       background: rgba(220, 38, 38, 0.12);
       color: #dc2626;
       flex: 0 0 auto;
       cursor: pointer;
-      touch-action: manipulation;
       -webkit-tap-highlight-color: transparent;
     }
     .chatVoiceHoldCancelBtn:active {
-      background: rgba(220, 38, 38, 0.25);
+      background: rgba(220, 38, 38, 0.28);
     }
     .chatVoiceHoldTimer {
       flex: 1;
@@ -1403,27 +1395,23 @@ html, body { height: 100%; margin: 0; padding: 0; }
       font-size: 14px;
       font-weight: 900;
       color: #dc2626;
-      text-align: right;
+      text-align: center;
       font-variant-numeric: tabular-nums;
     }
-    .chatVoiceHoldMicPulse {
-      width: 34px;
-      height: 34px;
-      border-radius: 50%;
-      display: grid;
-      place-items: center;
-      background: rgba(220, 38, 38, 0.14);
+    .chatVoiceHoldSendBtn {
+      border: none;
+      border-radius: 999px;
+      padding: 7px 14px;
+      font-size: 12px;
+      font-weight: 800;
+      background: #2563eb;
+      color: #fff;
       flex: 0 0 auto;
-      position: relative;
-      animation: chatVoiceHoldMicGlow 1.8s ease-in-out infinite;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
     }
-    @keyframes chatVoiceHoldMicGlow {
-      0%, 100% { background: rgba(220, 38, 38, 0.14); }
-      50% { background: rgba(220, 38, 38, 0.28); }
-    }
-    .chatVoiceHoldMicIcon {
-      font-size: 16px;
-      line-height: 1;
+    .chatVoiceHoldSendBtn:active {
+      background: #1d4ed8;
     }
 
 .chatVoiceRecordMic{ width:24px; height:24px; border-radius:50%; display:grid; place-items:center; background:rgba(220,38,38,0.16); color:#dc2626; font-size:12px; }
