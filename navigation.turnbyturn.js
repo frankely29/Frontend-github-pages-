@@ -262,16 +262,20 @@
     ensurePreviewRouteOnTop();
   }
 
+  let lastTintSyncAt = 0;
   function scheduleActiveNavigationTintSync(reason) {
     state.lastLiveMapSyncReason = String(reason || "");
     if (!state.active) return false;
+    const now = Date.now();
+    if (now - lastTintSyncAt < 2000) return false;
     if (state.liveMapSyncRaf) {
       cancelAnimationFrame(state.liveMapSyncRaf);
     }
     state.liveMapSyncRaf = requestAnimationFrame(() => {
       state.liveMapSyncRaf = 0;
       if (!state.active) return;
-      window.TlcNavigationBuildingTintModule?.refreshForViewport?.(true);
+      lastTintSyncAt = Date.now();
+      window.TlcNavigationBuildingTintModule?.refreshForViewport?.(false);
       ensurePreviewRouteOnTop();
     });
     return true;
@@ -466,25 +470,39 @@
   function onPreviewRouteUpdated(routeBundle) {
     const source = String(routeBundle?.destinationSource || "");
     const destination = toLatLng(routeBundle?.destination);
+    const incomingRouteFeature = routeBundle?.routeFeature || null;
+    const hasIncomingRoute = !!incomingRouteFeature?.geometry?.coordinates?.length;
 
-    state.manualDestination = source === "manual" && destination
+    const nextManualDestination = source === "manual" && destination
       ? { ...routeBundle.destination }
       : null;
+    const hasIncomingDestination = !!destination;
 
-    state.currentRouteFeature = routeBundle?.routeFeature || null;
+    if (!hasIncomingRoute && state.active) {
+      // Do not stop navigation on transient null routes — keep using the last known route.
+      // Only stop if the preview was explicitly cleared (handled by onPreviewRouteCleared).
+      state.hasPreviewRoute = false;
+      state.hasPreviewDestination = hasIncomingDestination;
+      state.manualDestination = nextManualDestination;
+      if (!state.hasPreviewDestination && !state.manualDestination) {
+        stopNavigation();
+        return;
+      }
+      // Transient failure — skip update but keep navigating with existing route state.
+      updateCard();
+      return;
+    }
+
+    state.manualDestination = nextManualDestination;
+    state.currentRouteFeature = incomingRouteFeature;
     state.currentRouteSummary = routeBundle?.routeSummary ? { ...routeBundle.routeSummary } : null;
     state.currentSteps = Array.isArray(routeBundle?.steps) ? routeBundle.steps.slice() : [];
-    state.hasPreviewRoute = !!routeBundle?.routeFeature?.geometry?.coordinates?.length;
-    state.hasPreviewDestination = !!destination;
+    state.hasPreviewRoute = hasIncomingRoute;
+    state.hasPreviewDestination = hasIncomingDestination;
     if (state.hasPreviewRoute) {
       state.lastStartFailureReason = "";
     }
     preprocessRouteMetrics();
-
-    if (!state.currentRouteFeature && state.active) {
-      stopNavigation();
-      return;
-    }
 
     if (state.active && state.lastKnownLocation) {
       window.TlcNavigationBuildingTintModule?.refreshForViewport?.(true);
@@ -697,8 +715,13 @@
           reapplyBuildingTintModeIfNeeded();
         }
       });
+      let lastIdleReapplyAt = 0;
       state.map.on("idle", () => {
-        if (state.active) reapplyBuildingTintModeIfNeeded();
+        if (!state.active) return;
+        const now = Date.now();
+        if (now - lastIdleReapplyAt < 3000) return;
+        lastIdleReapplyAt = now;
+        reapplyBuildingTintModeIfNeeded();
       });
     }
 
