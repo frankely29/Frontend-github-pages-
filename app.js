@@ -915,8 +915,15 @@ function blurChatDrawerFocusedFieldIfNeeded() {
 function syncDrawerPanelPosition() {
   if (!dockDrawer) return;
   dockDrawer.classList.remove("panelChat", "panelMusic");
-  if (openPanelKey === "chat") dockDrawer.classList.add("panelChat");
-  if (openPanelKey === "music") dockDrawer.classList.add("panelMusic");
+  dockBackdrop?.classList.remove("panelChat", "panelMusic");
+  if (openPanelKey === "chat") {
+    dockDrawer.classList.add("panelChat");
+    dockBackdrop?.classList.add("panelChat");
+  }
+  if (openPanelKey === "music") {
+    dockDrawer.classList.add("panelMusic");
+    dockBackdrop?.classList.add("panelMusic");
+  }
 }
 
 function syncDockActiveButton() {
