@@ -1218,6 +1218,39 @@ html, body { height: 100%; margin: 0; padding: 0; }
       overscroll-behavior: contain;
       touch-action: pan-y;
     }
+    .chatScrollJumpHost {
+      position: relative;
+    }
+    .chatScrollToLatestBtn {
+      position: absolute;
+      right: 10px;
+      width: 34px;
+      height: 34px;
+      border: 1px solid rgba(37, 99, 235, 0.18);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.96);
+      color: #1d4ed8;
+      box-shadow: 0 8px 20px rgba(15, 23, 42, 0.18);
+      display: grid;
+      place-items: center;
+      padding: 0;
+      font-size: 18px;
+      font-weight: 900;
+      line-height: 1;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(8px) scale(0.96);
+      transition: opacity 180ms ease, transform 180ms ease;
+      z-index: 4;
+    }
+    .chatScrollToLatestBtn.show {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translateY(0) scale(1);
+    }
+    .chatScrollToLatestBtn:active {
+      transform: translateY(0) scale(0.97);
+    }
     .chatEmpty{
       font-size: 12px;
       font-weight: 700;

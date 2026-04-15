@@ -1379,11 +1379,13 @@
         rememberOutgoingDmEcho(textValue);
         input.value = '';
         const sentMessages = normalizeDriverMessages(sent);
+        chatInternals.markChatForceToLatest?.('profile-dm');
         if (sentMessages.length) {
           sentMessages.forEach(rememberOutgoingDmEcho);
           seedDriverProfileDmAudioBaseline(sentMessages);
           appendDriverProfileMessages(sentMessages);
         } else {
+          chatInternals.markChatForceToLatest?.('profile-dm');
           const refreshed = await fetchDriverProfileDmThread(driverProfileState.userId, { limit: 30, markRead: true });
           appendDriverProfileMessages(refreshed, { replace: true });
           seedDriverProfileDmAudioBaseline(driverProfileState.messages);
@@ -1391,7 +1393,7 @@
         chatInternals.privateUnreadByUserId[String(driverProfileState.userId)] = 0;
         chatInternals.renderPrivateTabUnread?.();
         chatInternals.updateChatUnreadBadge?.();
-        chatInternals.updateDriverProfileDmList?.(driverProfileState.messages);
+        chatInternals.updateDriverProfileDmList?.(driverProfileState.messages, { forceStickToBottom: true });
       } catch (err) {
         driverProfileState.error = err?.message || 'Message failed to send.';
         const errorEl = body.querySelector('.driverProfileError');
