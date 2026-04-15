@@ -779,7 +779,7 @@ const DRAWER_AUTO_MINIMIZE_MS_BY_PANEL = {
 let openPanelKey = null;
 let drawerAutoMinimizeTimer = null;
 let chatKeyboardMode = false;
-let chatKeyboardModeSyncTimer = null;
+let chatKeyboardSyncRaf = 0;
 
 function clearDrawerAutoMinimizeTimer() {
   if (drawerAutoMinimizeTimer) {
@@ -838,11 +838,12 @@ function bindDrawerAutoMinimizeActivity() {
 
 function isTextEntryControl(el) {
   if (!(el instanceof Element)) return false;
-  if (el instanceof HTMLTextAreaElement) return true;
-  if (el instanceof HTMLElement && el.isContentEditable) return true;
-  if (!(el instanceof HTMLInputElement)) return false;
-  const type = String(el.type || "text").toLowerCase();
-  const nonTextTypes = new Set([
+  if (el.matches("textarea")) return true;
+  if (el.hasAttribute("contenteditable")) return true;
+  if (!el.matches("input")) return false;
+
+  const type = String(el.getAttribute("type") || "text").toLowerCase().trim();
+  const blocked = new Set([
     "button",
     "submit",
     "reset",
@@ -856,56 +857,59 @@ function isTextEntryControl(el) {
     "datetime-local",
     "month",
     "time",
-    "week",
-    "image",
+    "week"
   ]);
-  return !nonTextTypes.has(type);
+  return !blocked.has(type);
 }
 
 function isChatDrawerTextEntryTarget(el) {
   if (openPanelKey !== "chat") return false;
   if (!isTextEntryControl(el)) return false;
-  return !!el?.closest?.(".dockDrawer.panelChat");
+  return !!el.closest(".dockDrawer.panelChat");
 }
 
 function getVisualKeyboardInsetPx() {
   const vv = window.visualViewport;
   if (!vv) return 0;
-  const rawInset = window.innerHeight - (vv.height + vv.offsetTop);
-  const inset = Math.max(0, rawInset);
-  return inset >= 60 ? inset : 0;
+  const inset = Math.max(0, window.innerHeight - (vv.height + vv.offsetTop));
+  return inset > 60 ? inset : 0;
 }
 
 function setChatKeyboardMode(active) {
-  const isActive = !!active;
-  chatKeyboardMode = isActive;
-  document.body.classList.toggle("chatKeyboardMode", isActive);
+  const next = !!active;
+  if (chatKeyboardMode === next) return;
+  chatKeyboardMode = next;
+  document.body.classList.toggle("chatKeyboardMode", next);
 }
 
 function syncChatKeyboardModeFromActiveElement() {
-  const activeEl = document.activeElement;
-  const hasChatTextFocus = isChatDrawerTextEntryTarget(activeEl);
-  if (window.visualViewport) {
-    setChatKeyboardMode(hasChatTextFocus && getVisualKeyboardInsetPx() > 0);
+  const active = document.activeElement;
+  const focusedChatInput = isChatDrawerTextEntryTarget(active);
+
+  if (!focusedChatInput) {
+    setChatKeyboardMode(false);
     return;
   }
-  setChatKeyboardMode(hasChatTextFocus);
+
+  // IMPORTANT:
+  // Do not wait for keyboard proof before enabling mode.
+  // Focus inside the chat drawer is enough to enter chat keyboard mode.
+  setChatKeyboardMode(true);
 }
 
 function scheduleChatKeyboardModeSync() {
-  if (chatKeyboardModeSyncTimer) {
-    clearTimeout(chatKeyboardModeSyncTimer);
-  }
-  chatKeyboardModeSyncTimer = setTimeout(() => {
-    chatKeyboardModeSyncTimer = null;
+  if (chatKeyboardSyncRaf) cancelAnimationFrame(chatKeyboardSyncRaf);
+  chatKeyboardSyncRaf = requestAnimationFrame(() => {
+    chatKeyboardSyncRaf = 0;
     syncChatKeyboardModeFromActiveElement();
-  }, 40);
+  });
 }
 
 function blurChatDrawerFocusedFieldIfNeeded() {
-  const activeEl = document.activeElement;
-  if (!isChatDrawerTextEntryTarget(activeEl)) return;
-  if (typeof activeEl.blur === "function") activeEl.blur();
+  const active = document.activeElement;
+  if (isChatDrawerTextEntryTarget(active) && typeof active.blur === "function") {
+    try { active.blur(); } catch (_) {}
+  }
 }
 
 function syncDrawerPanelPosition() {
@@ -977,9 +981,8 @@ window.bindDockToggle = bindDockToggle;
 window.getOpenPanelKey = () => openPanelKey;
 
 document.addEventListener("focusin", (event) => {
-  const target = event.target;
-  if (isChatDrawerTextEntryTarget(target)) {
-    if (!window.visualViewport) setChatKeyboardMode(true);
+  if (isChatDrawerTextEntryTarget(event.target)) {
+    setChatKeyboardMode(true);
     scheduleChatKeyboardModeSync();
   }
 }, true);
@@ -994,16 +997,29 @@ if (window.visualViewport) {
 }
 
 window.addEventListener("orientationchange", () => {
+  setChatKeyboardMode(false);
   scheduleChatKeyboardModeSync();
 });
 
 document.addEventListener("visibilitychange", () => {
-  if (document.hidden) {
+  if (document.visibilityState === "hidden") {
     setChatKeyboardMode(false);
     return;
   }
   scheduleChatKeyboardModeSync();
 });
+
+
+window.getChatKeyboardLayoutDebug = function getChatKeyboardLayoutDebug() {
+  return {
+    openPanelKey,
+    chatKeyboardMode,
+    activeTag: document.activeElement?.tagName || "",
+    activeType: document.activeElement?.getAttribute?.("type") || "",
+    activeInsideChat: isChatDrawerTextEntryTarget(document.activeElement),
+    visualKeyboardInsetPx: getVisualKeyboardInsetPx()
+  };
+};
 
 function leaderboardPerfDebugState() {
   window.__mapPerfDebug = window.__mapPerfDebug || frontendPerfStats;
