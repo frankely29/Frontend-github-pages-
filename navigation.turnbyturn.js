@@ -29,7 +29,7 @@
     offRoute: false,
     rerouteInFlight: false,
     lastRerouteAt: 0,
-    rerouteCooldownMs: 12000,
+    rerouteCooldownMs: 6000,
     arrivalState: "none",
     followModeEnabled: false,
     sessionId: 0,
@@ -411,15 +411,31 @@
     state.lastRerouteAt = now;
     updateCard();
 
-    window.TlcNavigationPreviewModule?.setPreviewDestination?.(state.manualDestination, { source: "manual" });
-
-    window.setTimeout(() => {
-      state.rerouteInFlight = false;
-      if (state.active && state.arrivalState !== "arrived") {
+    const sessionAtStart = state.sessionId;
+    const rerouteAsync = async () => {
+      try {
+        const result = await window.TlcNavigationPreviewModule?.setPreviewDestination?.(
+          state.manualDestination,
+          { source: "manual" }
+        );
+        if (sessionAtStart !== state.sessionId || !state.active) return;
+        state.rerouteInFlight = false;
+        if (result?.routeBundle?.routeFeature) {
+          state.offRoute = false;
+          state.offRouteSamples = 0;
+          state.navigationStatus = "active";
+        } else {
+          state.navigationStatus = "active";
+        }
+        updateCard();
+      } catch (_err) {
+        if (sessionAtStart !== state.sessionId || !state.active) return;
+        state.rerouteInFlight = false;
         state.navigationStatus = "active";
+        updateCard();
       }
-      updateCard();
-    }, 1400);
+    };
+    rerouteAsync();
   }
 
   function refreshProgressFromLocation(location) {

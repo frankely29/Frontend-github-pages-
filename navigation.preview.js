@@ -9,7 +9,9 @@
   const ROUTE_ENDPOINT = String(window.__TLC_NAV_PREVIEW_ROUTE_ENDPOINT__ || "https://router.project-osrm.org/route/v1").trim().replace(/\/+$/, "");
   const GEOCODE_ENDPOINT = String(window.__TLC_NAV_PREVIEW_GEOCODE_ENDPOINT__ || "https://nominatim.openstreetmap.org/search").trim().replace(/\/+$/, "");
   const GEOCODE_TIMEOUT_MS = 12000;
-  const ROUTE_TIMEOUT_MS = 15000;
+  const ROUTE_TIMEOUT_MS = 8000;
+  const ROUTE_RETRY_ATTEMPTS = 3;
+  const ROUTE_RETRY_BASE_DELAY_MS = 2000;
 
   const state = {
     map: null,
@@ -266,6 +268,24 @@
     return normalized;
   }
 
+  async function fetchRoutePreviewWithRetry(origin, destination) {
+    let lastError = null;
+    for (let attempt = 0; attempt < ROUTE_RETRY_ATTEMPTS; attempt += 1) {
+      try {
+        return await fetchRoutePreview(origin, destination);
+      } catch (error) {
+        lastError = error;
+        if (error?.name === "AbortError") throw error;
+        if (attempt < ROUTE_RETRY_ATTEMPTS - 1) {
+          const delay = ROUTE_RETRY_BASE_DELAY_MS * (attempt + 1);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          if (!state.currentDestination) throw error;
+        }
+      }
+    }
+    throw lastError;
+  }
+
   async function runPreviewRefresh(force = false) {
     if (!state.currentDestination) {
       setRouteGeojson(null);
@@ -306,7 +326,7 @@
     emitPreviewUpdated();
 
     try {
-      const normalized = await fetchRoutePreview(origin, state.currentDestination);
+      const normalized = await fetchRoutePreviewWithRetry(origin, state.currentDestination);
       state.currentRouteSummary = {
         distanceMeters: normalized.distanceMeters,
         durationSeconds: normalized.durationSeconds,
@@ -336,14 +356,6 @@
         if (!isTurnByTurnActive()) {
           emitPreviewFailed(state.currentRouteStatus, state.currentDestination);
         }
-        // Auto-retry after timeout
-        if (state.currentDestination) {
-          setTimeout(() => {
-            if (state.currentDestination && !state.currentRouteGeoJSON) {
-              runPreviewRefresh(true);
-            }
-          }, 5000);
-        }
         return null;
       }
       if (error?.name === "AbortError") return null;
@@ -358,14 +370,6 @@
       emitPreviewUpdated();
       if (!isTurnByTurnActive()) {
         emitPreviewFailed(state.currentRouteStatus, state.currentDestination);
-      }
-      // Auto-retry after failure
-      if (state.currentDestination) {
-        setTimeout(() => {
-          if (state.currentDestination && !state.currentRouteGeoJSON) {
-            runPreviewRefresh(true);
-          }
-        }, 5000);
       }
       return null;
     }
@@ -560,10 +564,16 @@
     }
     state.locationPollTimer = setInterval(refreshPreviewFromUserLocation, LOCATION_POLL_MS);
 
+    let pendingGpsRetryTimer = null;
     window.addEventListener("tlc-user-location-updated", () => {
-      if (state.currentDestination && !state.currentRouteGeoJSON) {
-        runPreviewRefresh(true);
-      }
+      if (!state.currentDestination || state.currentRouteGeoJSON) return;
+      if (pendingGpsRetryTimer) return;
+      pendingGpsRetryTimer = setTimeout(() => {
+        pendingGpsRetryTimer = null;
+        if (state.currentDestination && !state.currentRouteGeoJSON && getUserOrigin()) {
+          runPreviewRefresh(true);
+        }
+      }, 500);
     });
   }
 
