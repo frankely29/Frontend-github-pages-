@@ -502,209 +502,6 @@
     return window.TlcDayTendencyState?.getAdvancedContext?.() || window.TlcDayTendencyState?.advancedContext || null;
   }
 
-  function getTendencyConfidenceFactor(payload) {
-    const confidence = Number(payload?.confidence);
-    if (!Number.isFinite(confidence)) return 1;
-    return Math.max(0.35, Math.min(1, confidence));
-  }
-
-  function getLowTendencyFactor(payload) {
-    const score = Number(payload?.score);
-    if (!Number.isFinite(score)) return 0;
-    if (score >= 80) return 0;
-    return Math.max(0, Math.min(1, (80 - score) / 80));
-  }
-
-  function normalizeBoroughName(value) {
-    return String(value || '').trim().toLowerCase();
-  }
-
-  function normalizeTendencyScope(value) {
-    const scope = String(value || '').trim().toLowerCase().replace(/[-\s]+/g, '_');
-    if (!scope) return '';
-    if (scope === 'real_location') return '';
-    if (scope === 'citywide') return 'citywide';
-    if (scope === 'manhattan_mode') return 'manhattan';
-    if (scope === 'staten_island_mode') return 'staten_island';
-    if (scope === 'queens_mode') return 'queens';
-    if (scope === 'brooklyn_mode') return 'brooklyn';
-    if (scope === 'bronx_wash_heights_mode') return 'bronx_wash_heights';
-    if (scope === 'statenisland') return 'staten_island';
-    if (scope === 'bronxwashheights') return 'bronx_wash_heights';
-    return scope;
-  }
-
-  function isSpecialTendencyScope(scope) {
-    return (
-      scope === 'staten_island' ||
-      scope === 'manhattan' ||
-      scope === 'queens' ||
-      scope === 'brooklyn' ||
-      scope === 'bronx_wash_heights'
-    );
-  }
-
-  function getFeatureBoroughName(props) {
-    return normalizeBoroughName(props?.borough);
-  }
-
-  function getTendencyScopeWeight(props, geom, payload) {
-    if (!payload) return 0;
-
-    const payloadScope = normalizeTendencyScope(payload?.scope || payload?.source_mode);
-    if (payloadScope === 'staten_island') return isStatenIslandFeature(props) ? 1 : 0;
-    if (payloadScope === 'manhattan') return isManhattanModeZone(props, geom) ? 1 : 0;
-    if (payloadScope === 'queens') return isQueensModeZone(props) ? 1 : 0;
-    if (payloadScope === 'brooklyn') return isBrooklynModeZone(props) ? 1 : 0;
-    if (payloadScope === 'bronx_wash_heights') return isBronxWashHeightsModeZone(props) ? 1 : 0;
-
-    const payloadBorough = normalizeBoroughName(payload?.source_borough || payload?.borough);
-    if (payloadBorough) {
-      return getFeatureBoroughName(props) === payloadBorough ? 1 : 0;
-    }
-
-    if (!payloadScope || payloadScope === 'citywide' || !isSpecialTendencyScope(payloadScope)) {
-      return 0;
-    }
-
-    return 0;
-  }
-
-
-  const BUCKET_THRESHOLDS = [
-    { bucket: 'green', minRating: 87, rank: 0 },
-    { bucket: 'purple', minRating: 73, rank: 1 },
-    { bucket: 'indigo', minRating: 60, rank: 2 },
-    { bucket: 'blue', minRating: 48, rank: 3 },
-    { bucket: 'sky', minRating: 40, rank: 4 },
-    { bucket: 'yellow', minRating: 33, rank: 5 },
-    { bucket: 'orange', minRating: 25, rank: 6 },
-    { bucket: 'red', minRating: 1, rank: 7 },
-  ];
-
-  const BUCKET_MIN_BY_NAME = BUCKET_THRESHOLDS.reduce((acc, item) => {
-    acc[item.bucket] = item.minRating;
-    return acc;
-  }, {});
-
-  const BUCKET_RANK_BY_NAME = BUCKET_THRESHOLDS.reduce((acc, item) => {
-    acc[item.bucket] = item.rank;
-    return acc;
-  }, {});
-
-  function getBucketRank(bucket) {
-    const key = String(bucket || '').trim().toLowerCase();
-    if (!key) return null;
-    return Number.isFinite(BUCKET_RANK_BY_NAME[key]) ? BUCKET_RANK_BY_NAME[key] : null;
-  }
-
-  function getBucketMinRating(bucket) {
-    const key = String(bucket || '').trim().toLowerCase();
-    if (!key) return null;
-    return Number.isFinite(BUCKET_MIN_BY_NAME[key]) ? BUCKET_MIN_BY_NAME[key] : null;
-  }
-
-  function clampAdjustedRatingToBucketDropCap(baseRating, adjustedRating, bucketDropCap) {
-    const baseBucket = getBucketForRating(baseRating);
-    const baseRank = getBucketRank(baseBucket);
-    if (!Number.isFinite(baseRank)) {
-      return { adjustedRating, bucketDropCapTriggered: false, minAllowedRating: null, baseBucket, adjustedBucket: getBucketForRating(adjustedRating) };
-    }
-    const cap = Number.isFinite(Number(bucketDropCap)) ? Math.max(0, Math.floor(Number(bucketDropCap))) : 1;
-    const maxAllowedRank = Math.min(7, baseRank + cap);
-    const minAllowedBucket = BUCKET_THRESHOLDS.find((item) => item.rank === maxAllowedRank)?.bucket || 'red';
-    const minAllowedRating = getBucketMinRating(minAllowedBucket) || 1;
-    if (adjustedRating >= minAllowedRating) {
-      return { adjustedRating, bucketDropCapTriggered: false, minAllowedRating, baseBucket, adjustedBucket: getBucketForRating(adjustedRating) };
-    }
-    return {
-      adjustedRating: minAllowedRating,
-      bucketDropCapTriggered: true,
-      minAllowedRating,
-      baseBucket,
-      adjustedBucket: getBucketForRating(minAllowedRating),
-    };
-  }
-
-  function normalizeLocalScope(value) {
-    const key = String(value || '').trim().toLowerCase().replace(/[-\s]+/g, '_');
-    if (!key || key === 'citywide' || key === 'none' || key === 'null') return '';
-    if (key === 'manhattan_mode') return 'manhattan_mode';
-    if (key === 'staten_island_mode') return 'staten_island_mode';
-    if (key === 'bronx_wash_heights_mode') return 'bronx_wash_heights_mode';
-    if (key === 'queens_mode') return 'queens_mode';
-    if (key === 'brooklyn_mode') return 'brooklyn_mode';
-    if (key === 'manhattan') return 'manhattan';
-    if (key === 'queens') return 'queens';
-    if (key === 'brooklyn') return 'brooklyn';
-    if (key === 'staten_island' || key === 'statenisland') return 'staten_island';
-    if (key === 'bronx_wash_heights' || key === 'bronxwashheights') return 'bronx_wash_heights';
-    return key;
-  }
-
-  function getAdvancedLocalScope(advancedContext) {
-    return normalizeLocalScope(
-      advancedContext?.resolved_local_scope ||
-      advancedContext?.local_scope ||
-      advancedContext?.scope ||
-      advancedContext?.scope_key ||
-      advancedContext?.local_scope_key
-    );
-  }
-
-  function isFeatureInAdvancedLocalScope(scope, props, geom) {
-    if (!scope || scope === 'citywide') return false;
-    if (scope === 'manhattan_mode') return isManhattanModeZone(props, geom);
-    if (scope === 'staten_island_mode') return isStatenIslandFeature(props);
-    if (scope === 'bronx_wash_heights_mode') return isBronxWashHeightsModeZone(props);
-    if (scope === 'queens_mode') return isQueensModeZone(props);
-    if (scope === 'brooklyn_mode') return isBrooklynModeZone(props);
-    if (scope === 'manhattan') return isManhattanFeature(props);
-    if (scope === 'queens') return isQueensFeature(props);
-    if (scope === 'brooklyn') return isBrooklynFeature(props);
-    if (scope === 'staten_island') return isStatenIslandFeature(props);
-    if (scope === 'bronx_wash_heights') return isBronxWashHeightsModeZone(props);
-    return false;
-  }
-
-  function getManhattanSaturationPenaltyMeta(props, geom, ratingAfterTendency) {
-    if (!isManhattanFeature(props)) {
-      return {
-        manhattanPenaltyApplied: 0,
-        isManhattanCore: false,
-        marketSaturationPenaltyRaw: 0,
-        manhattanCorePenaltyRaw: 0,
-      };
-    }
-
-    const isManhattanCore = isCoreManhattan(props, geom);
-    const marketSaturationPenaltyRaw = Math.max(0, Number(props?.market_saturation_penalty_n_shadow) || 0);
-    const manhattanCorePenaltyRaw = Math.max(0, Number(props?.manhattan_core_saturation_penalty_n_shadow) || 0);
-    const safeRatingAfterTendency = clampRating100(ratingAfterTendency);
-
-    let basePenalty = MANHATTAN_OUTER_BASE_PENALTY_POINTS;
-    let dynamicPenalty = marketSaturationPenaltyRaw * MANHATTAN_OUTER_DYNAMIC_MARKET_PENALTY_POINTS;
-    let penaltyCap = MANHATTAN_OUTER_TOTAL_PENALTY_CAP;
-
-    if (isManhattanCore) {
-      basePenalty = MANHATTAN_CORE_BASE_PENALTY_POINTS;
-      dynamicPenalty =
-        (marketSaturationPenaltyRaw * MANHATTAN_CORE_DYNAMIC_MARKET_PENALTY_POINTS) +
-        (manhattanCorePenaltyRaw * MANHATTAN_CORE_DYNAMIC_CORE_PENALTY_POINTS);
-      penaltyCap = MANHATTAN_CORE_TOTAL_PENALTY_CAP;
-    }
-
-    const rawPenalty = Math.min(penaltyCap, Math.max(0, basePenalty + dynamicPenalty));
-    const manhattanPenaltyApplied = Math.max(0, Math.min(rawPenalty, safeRatingAfterTendency - 1));
-
-    return {
-      manhattanPenaltyApplied,
-      isManhattanCore,
-      marketSaturationPenaltyRaw,
-      manhattanCorePenaltyRaw,
-    };
-  }
-
   function getTendencyAdjustmentMeta(baseRating, props, geom) {
     if (!Number.isFinite(Number(baseRating))) {
       return {
@@ -1037,26 +834,8 @@
     return 1;
   }
 
-  function hexToRgba(color, alpha) {
-    const raw = String(color || '').trim();
-    const match = raw.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
-    if (!match) return color;
-    const hex = match[1];
-    const normalized = hex.length === 3
-      ? hex.split('').map((ch) => ch + ch).join('')
-      : hex;
-    const r = parseInt(normalized.slice(0, 2), 16);
-    const g = parseInt(normalized.slice(2, 4), 16);
-    const b = parseInt(normalized.slice(4, 6), 16);
-    const safeAlpha = Math.max(0, Math.min(1, Number(alpha)));
-    return `rgba(${r}, ${g}, ${b}, ${safeAlpha})`;
-  }
-
   function effectiveFillColor(props, geom) {
-    const baseColor = effectiveColor(props, geom);
-    const alpha = getTendencyFillAlpha(props, geom);
-    if (alpha >= 0.999) return baseColor;
-    return hexToRgba(baseColor, alpha);
+    return effectiveColor(props, geom);
   }
 
   function getFrameModeCacheSignature(frame) {
@@ -1802,10 +1581,6 @@
     return null;
   }
 
-  window.addEventListener('tlc-day-tendency-updated', () => {
-    core.renderCurrentFrame?.();
-  });
-
   if (btnManhattan) {
     btnManhattan.addEventListener("pointerdown", (e) => e.stopPropagation());
     btnManhattan.addEventListener("touchstart", (e) => e.stopPropagation(), { passive: true });
@@ -1868,9 +1643,9 @@
     const baseRating = getModeAwareBaseRating(props, geom);
     const adjustmentMeta = getTendencyAdjustmentMeta(baseRating, props, geom);
     const finalRating = effectiveRating(props, geom);
-    const scopeWeight = getTendencyScopeWeight(props, geom, payload);
-    const lowTendencyFactor = getLowTendencyFactor(payload);
-    const fillAlpha = getTendencyFillAlpha(props, geom);
+    const scopeWeight = 0;
+    const lowTendencyFactor = 0;
+    const fillAlpha = 1;
     const baseColor = effectiveColor(props, geom);
     const fillColor = effectiveFillColor(props, geom);
     return {
