@@ -397,6 +397,91 @@
     return text || null;
   }
 
+  function getCurrentFrameTimeLabel() {
+    const iso = getCurrentFrameTimeIso();
+    if (!iso) return null;
+    return String(window.TlcMapUiInternals?.formatNYCTimeOnlyLabel?.(iso) || '').trim() || iso;
+  }
+
+  function getFeaturePropsAndGeom(feature) {
+    if (!feature || typeof feature !== 'object') return { props: null, geom: null };
+    return {
+      props: feature.properties || feature.props || null,
+      geom: feature.geometry || feature.geom || null,
+    };
+  }
+
+  function resolveVisibleZoneScorePayload(latLng) {
+    const mapUi = window.TlcMapUiInternals || null;
+    const modeModule = window.TlcModeModule || null;
+    if (!mapUi?.resolveZoneFeatureAtLngLat || !modeModule) return null;
+    const feature = mapUi.resolveZoneFeatureAtLngLat({ lng: latLng.lng, lat: latLng.lat }) || null;
+    if (!feature) return null;
+    const { props, geom } = getFeaturePropsAndGeom(feature);
+    if (!props) return null;
+
+    const visibleRating = Number(modeModule.effectiveRating?.(props, geom));
+    if (!Number.isFinite(visibleRating)) return null;
+    const safeScore = Math.max(0, Math.min(100, visibleRating));
+    const visibleBucket = String(modeModule.effectiveBucket?.(props, geom) || '').trim() || null;
+    const visibleScoreSource = String(modeModule.getVisibleScoreSourceForFeature?.(props, geom) || '').trim() || 'legacy_citywide';
+    const visibleScoreSourceLabel = String(modeModule.getVisibleScoreSourceLabel?.(props, geom) || '').trim() || 'Team Joseo score';
+    const borough = String(props.borough || props.Borough || '').trim();
+    const zoneName = String(props.zone || props.Zone || props.zone_name || props.zoneName || '').trim();
+    const locationId = String(props.LocationID || props.location_id || props.locationId || '').trim();
+    const localTimeLabel = getCurrentFrameTimeLabel();
+
+    const payload = {
+      status: 'ok',
+      score: safeScore,
+      meter_pct: Math.max(0, Math.min(1, safeScore / 100)),
+      band: safeScore < 40 ? 'low' : (safeScore >= 60 ? 'high' : 'normal'),
+      label: safeScore < 40 ? 'Low' : (safeScore >= 60 ? 'High' : 'Normal'),
+      confidence: 1,
+      borough,
+      source_borough: borough,
+      scope: visibleScoreSource,
+      scope_label: visibleScoreSourceLabel,
+      source_mode: 'frontend_visible_zone_score',
+      explain: 'Live visible Team Joseo zone score',
+      local_time_label: localTimeLabel || '',
+      zone_name: zoneName || undefined,
+      location_id: locationId || undefined,
+      bucket: visibleBucket || undefined,
+    };
+
+    const frameContext = {
+      source: 'frontend_visible_zone_score',
+      frame_time: getCurrentFrameTimeIso() || null,
+      resolved_scope: {
+        scope: visibleScoreSource,
+        scope_label: visibleScoreSourceLabel,
+      },
+      active_zone: {
+        location_id: locationId || null,
+        zone_name: zoneName || null,
+        borough: borough || null,
+      }
+    };
+
+    const advancedContext = {
+      source_of_truth: 'frontend_visible_zone_score',
+      source: 'frontend_visible_zone_score',
+      ready_for_frontend_adjustment: false,
+      global_penalty_points: 0,
+      local_penalty_points: 0,
+      total_penalty_cap: 0,
+      bucket_drop_cap: 0,
+      local_scope: visibleScoreSource,
+      local_scope_label: visibleScoreSourceLabel,
+      local_scope_kind: 'frontend_visible_scope',
+      local_source_borough: borough || '',
+      local_source_mode: 'frontend_visible_zone_score',
+    };
+
+    return { payload, frameContext, advancedContext };
+  }
+
   function normalizeRouteErrorStatus(error) {
     const status = Number(error?.status);
     return Number.isFinite(status) ? status : null;
@@ -585,6 +670,22 @@
     positionDayTendencyRoot();
   }
 
+  function applyNoZoneResolvedState() {
+    const root = ensureDayTendencyRoot();
+    if (!root) return;
+    if (STATE.score) STATE.score.textContent = '--';
+    if (STATE.band) STATE.band.textContent = 'Waiting...';
+    if (STATE.marker) STATE.marker.style.bottom = '50%';
+    if (STATE.borough) {
+      STATE.borough.textContent = '';
+      STATE.borough.hidden = true;
+    }
+    root.title = 'Waiting for an active visible zone score at current location.';
+    root.setAttribute('aria-label', 'Waiting for active visible zone score at current location.');
+    root.hidden = false;
+    positionDayTendencyRoot();
+  }
+
   function scheduleRetryIfNeeded(payload, hadError) {
     const status = String(payload?.status || '').toLowerCase();
     const explain = String(payload?.explain || '').toLowerCase();
@@ -635,60 +736,23 @@
     let hadError = false;
 
     try {
-      const base = apiBase();
-      if (!base) throw new Error('API base missing');
-      const modeFlags = getCurrentModeFlags();
-      const frameTime = getCurrentFrameTimeIso();
-      STATE.lastRequestedFrameTime = frameTime;
-      const baseParams = {
-        lat: String(latLng.lat),
-        lng: String(latLng.lng),
-        manhattan_mode: String(modeFlags.manhattan_mode),
-        staten_island_mode: String(modeFlags.staten_island_mode),
-        bronx_wash_heights_mode: String(modeFlags.bronx_wash_heights_mode),
-        queens_mode: String(modeFlags.queens_mode),
-        brooklyn_mode: String(modeFlags.brooklyn_mode),
-      };
-
-      let usedTodayFallback = false;
-      const canUseFrameRoute = !!frameTime && canRetryFrameRouteNow();
-      if (canUseFrameRoute) {
-        try {
-          const frameParams = new URLSearchParams({ ...baseParams, frame_time: frameTime });
-          const frameQuery = `?${frameParams.toString()}`;
-          const frameRes = await fetchJSONWithTimeout(`${base}/day_tendency/frame_context${frameQuery}`, 10000, abortController.signal);
-          frameContext = frameRes || null;
-          advancedContext = frameRes?.advanced_context || null;
-          payload = pickVisiblePayloadFromFrameContext(frameRes);
-          STATE.frameRouteFailureCount = 0;
-          STATE.frameRouteRetryAfterMs = 0;
-          STATE.lastFetchRoute = 'frame_context';
-        } catch (error) {
-          if (abortController.signal.aborted) return;
-          if (!isFrameContextRouteUnavailable(error)) throw error;
-          STATE.frameRouteFailureCount = Number(STATE.frameRouteFailureCount || 0) + 1;
-          STATE.frameRouteRetryAfterMs = Date.now() + 30000;
-          usedTodayFallback = true;
-        }
-      } else {
-        usedTodayFallback = true;
+      STATE.lastRequestedFrameTime = getCurrentFrameTimeIso();
+      const localDerived = resolveVisibleZoneScorePayload(latLng);
+      if (localDerived) {
+        payload = normalizeDayTendencyPayload(localDerived.payload);
+        frameContext = localDerived.frameContext;
+        advancedContext = localDerived.advancedContext;
       }
-
-      if (usedTodayFallback) {
-        const fallbackParams = new URLSearchParams(baseParams);
-        const fallbackQuery = `?${fallbackParams.toString()}`;
-        const todayRes = await fetchJSONWithTimeout(`${base}/day_tendency/today${fallbackQuery}`, 10000, abortController.signal);
-        payload = normalizeDayTendencyPayload(todayRes);
-        frameContext = null;
-        advancedContext = null;
-        STATE.lastFetchRoute = 'today_fallback';
-      }
+      STATE.frameRouteFailureCount = 0;
+      STATE.frameRouteRetryAfterMs = 0;
+      STATE.lastFetchRoute = 'frontend_visible_zone_score';
 
       if (requestSeq !== STATE.requestSeq) return;
       STATE.lastQueryLat = latLng.lat;
       STATE.lastQueryLng = latLng.lng;
       STATE.lastQueryAt = Date.now();
-      applyDayTendencyPayload(payload);
+      if (payload) applyDayTendencyPayload(payload);
+      else applyNoZoneResolvedState();
       publishDayTendencyState({ payload, frameContext, advancedContext, route: STATE.lastFetchRoute });
     } catch (error) {
       if (abortController.signal.aborted || requestSeq !== STATE.requestSeq) return;

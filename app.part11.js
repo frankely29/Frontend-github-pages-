@@ -706,7 +706,6 @@
   }
 
   function getTendencyAdjustmentMeta(baseRating, props, geom) {
-    const fallbackRating = clampRating100(baseRating);
     if (!Number.isFinite(Number(baseRating))) {
       return {
         adjustedRating: NaN,
@@ -726,91 +725,22 @@
       };
     }
 
-    if (isAirportZone(props)) {
-      return {
-        adjustedRating: fallbackRating,
-        adjustedFiniteRating: fallbackRating,
-        globalPenaltyApplied: 0,
-        localPenaltyApplied: 0,
-        totalPenaltyApplied: 0,
-        manhattanPenaltyApplied: 0,
-        totalVisiblePenaltyApplied: 0,
-        isManhattanCore: false,
-        marketSaturationPenaltyRaw: 0,
-        manhattanCorePenaltyRaw: 0,
-        localScopeMatch: false,
-        localScope: '',
-        bucketDropCapTriggered: false,
-        reason: 'airport_zone',
-      };
-    }
-
-    const advancedContext = getLiveDayTendencyAdvancedContext();
-    if (!advancedContext) {
-      return {
-        adjustedRating: fallbackRating,
-        adjustedFiniteRating: fallbackRating,
-        globalPenaltyApplied: 0,
-        localPenaltyApplied: 0,
-        totalPenaltyApplied: 0,
-        manhattanPenaltyApplied: 0,
-        totalVisiblePenaltyApplied: 0,
-        isManhattanCore: false,
-        marketSaturationPenaltyRaw: 0,
-        manhattanCorePenaltyRaw: 0,
-        localScopeMatch: false,
-        localScope: '',
-        bucketDropCapTriggered: false,
-        reason: 'missing_advanced_context',
-      };
-    }
-
-    if (!advancedContext.ready_for_frontend_adjustment) {
-      return {
-        adjustedRating: fallbackRating,
-        adjustedFiniteRating: fallbackRating,
-        globalPenaltyApplied: 0,
-        localPenaltyApplied: 0,
-        totalPenaltyApplied: 0,
-        manhattanPenaltyApplied: 0,
-        totalVisiblePenaltyApplied: 0,
-        isManhattanCore: false,
-        marketSaturationPenaltyRaw: 0,
-        manhattanCorePenaltyRaw: 0,
-        localScopeMatch: false,
-        localScope: getAdvancedLocalScope(advancedContext),
-        bucketDropCapTriggered: false,
-        reason: 'advanced_context_not_ready',
-      };
-    }
-
-    const globalPenaltyApplied = Math.max(0, Number(advancedContext.global_penalty_points) || 0);
-    const localScope = getAdvancedLocalScope(advancedContext);
-    const localScopeMatch = isFeatureInAdvancedLocalScope(localScope, props, geom);
-    const localPenaltyApplied = localScopeMatch ? Math.max(0, Number(advancedContext.local_penalty_points) || 0) : 0;
-    const totalPenaltyCap = Math.max(0, Number(advancedContext.total_penalty_cap) || 0);
-    const totalPenaltyApplied = Math.min(totalPenaltyCap, globalPenaltyApplied + localPenaltyApplied);
-    const adjustedBeforeBucketCap = clampRating100(Number(baseRating) - totalPenaltyApplied);
-    const bucketCapResult = clampAdjustedRatingToBucketDropCap(Number(baseRating), adjustedBeforeBucketCap, advancedContext.bucket_drop_cap);
-    const manhattanPenaltyMeta = getManhattanSaturationPenaltyMeta(props, geom, bucketCapResult.adjustedRating);
-    const finalAdjustedRating = clampRating100(bucketCapResult.adjustedRating - manhattanPenaltyMeta.manhattanPenaltyApplied);
-    const totalVisiblePenaltyApplied = totalPenaltyApplied + manhattanPenaltyMeta.manhattanPenaltyApplied;
-
+    const clampedBaseRating = clampRating100(baseRating);
     return {
-      adjustedRating: finalAdjustedRating,
-      adjustedFiniteRating: finalAdjustedRating,
-      globalPenaltyApplied,
-      localPenaltyApplied,
-      totalPenaltyApplied,
-      manhattanPenaltyApplied: manhattanPenaltyMeta.manhattanPenaltyApplied,
-      totalVisiblePenaltyApplied,
-      isManhattanCore: manhattanPenaltyMeta.isManhattanCore,
-      marketSaturationPenaltyRaw: manhattanPenaltyMeta.marketSaturationPenaltyRaw,
-      manhattanCorePenaltyRaw: manhattanPenaltyMeta.manhattanCorePenaltyRaw,
-      localScopeMatch,
-      localScope,
-      bucketDropCapTriggered: !!bucketCapResult.bucketDropCapTriggered,
-      reason: 'adjusted',
+      adjustedRating: clampedBaseRating,
+      adjustedFiniteRating: clampedBaseRating,
+      globalPenaltyApplied: 0,
+      localPenaltyApplied: 0,
+      totalPenaltyApplied: 0,
+      manhattanPenaltyApplied: 0,
+      totalVisiblePenaltyApplied: 0,
+      isManhattanCore: false,
+      marketSaturationPenaltyRaw: 0,
+      manhattanCorePenaltyRaw: 0,
+      localScopeMatch: false,
+      localScope: '',
+      bucketDropCapTriggered: false,
+      reason: 'map_visible_score_single_source_of_truth',
     };
   }
 
@@ -1104,18 +1034,7 @@
   }
 
   function getTendencyFillAlpha(props, geom) {
-    const advancedContext = getLiveDayTendencyAdvancedContext();
-    if (advancedContext?.ready_for_frontend_adjustment && !isAirportZone(props)) return 1;
-    const payload = getLiveDayTendencyPayload();
-    if (!payload) return 1;
-    const scopeWeight = getTendencyScopeWeight(props, geom, payload);
-    if (scopeWeight <= 0) return 1;
-    const lowFactor = getLowTendencyFactor(payload);
-    if (lowFactor <= 0) return 1;
-    const confidence = getTendencyConfidenceFactor(payload);
-    const dimStrength = lowFactor * confidence * scopeWeight;
-    const alpha = 1 - (dimStrength * 0.18);
-    return Math.max(0.82, Math.min(1, alpha));
+    return 1;
   }
 
   function hexToRgba(color, alpha) {

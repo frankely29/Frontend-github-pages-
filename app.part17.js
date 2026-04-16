@@ -176,6 +176,8 @@
     hasRecentSuccessfulOutlook: false,
     isUsingCachedOutlook: false,
     isPartialOutlook: false,
+    currentAlignedTrackMissing: true,
+    targetAlignedTrackMissing: true,
     canTrustFarMoves: false,
     usedCachedRecommendationFallback: false,
     proposedActionCode: null,
@@ -667,20 +669,47 @@
     return {};
   }
 
+  const ASSISTANT_VISIBLE_SOURCE_TRACK_FAMILIES = {
+    citywide_v3_shadow: ["citywide_v3_shadow", "citywide_shadow"],
+    citywide_shadow: ["citywide_shadow"],
+    legacy_citywide: ["citywide_v3_shadow", "citywide_shadow"],
+    manhattan_v3_shadow: ["manhattan_v3_shadow", "manhattan_shadow"],
+    manhattan_shadow: ["manhattan_shadow"],
+    manhattan_mode_legacy: ["manhattan_v3_shadow", "manhattan_shadow"],
+    bronx_wash_heights_v3_shadow: ["bronx_wash_heights_v3_shadow", "bronx_wash_heights_shadow"],
+    bronx_wash_heights_shadow: ["bronx_wash_heights_shadow"],
+    bronx_wash_heights_mode_legacy: ["bronx_wash_heights_v3_shadow", "bronx_wash_heights_shadow"],
+    queens_v3_shadow: ["queens_v3_shadow", "queens_shadow"],
+    queens_shadow: ["queens_shadow"],
+    queens_mode_legacy: ["queens_v3_shadow", "queens_shadow"],
+    brooklyn_v3_shadow: ["brooklyn_v3_shadow", "brooklyn_shadow"],
+    brooklyn_shadow: ["brooklyn_shadow"],
+    brooklyn_mode_legacy: ["brooklyn_v3_shadow", "brooklyn_shadow"],
+    staten_island_v3_shadow: ["staten_island_v3_shadow", "staten_island_shadow"],
+    staten_island_shadow: ["staten_island_shadow"],
+    staten_island_mode_legacy: ["staten_island_v3_shadow", "staten_island_shadow"],
+  };
+
   function extractAssistantOutlookTrack(point, visibleScoreSource) {
     const tracks = point?.tracks;
-    if (!tracks || typeof tracks !== "object") return null;
-    const exact = String(visibleScoreSource || "").trim();
-    if (exact && tracks[exact]) return tracks[exact];
-    const isV3Family = /_v3(?:$|_)/i.test(exact) || /citywide_v3/i.test(exact);
-    if (isV3Family && tracks.citywide_v3_shadow) return tracks.citywide_v3_shadow;
-    if (tracks.citywide_shadow) return tracks.citywide_shadow;
-    return null;
+    if (!tracks || typeof tracks !== "object") return { track: null, trackSourceKey: "", trackAligned: false, trackMissing: true };
+    const sourceKey = String(visibleScoreSource || "").trim() || "legacy_citywide";
+    const exactTrack = tracks[sourceKey];
+    if (exactTrack) {
+      return { track: exactTrack, trackSourceKey: sourceKey, trackAligned: true, trackMissing: false };
+    }
+    const fallbackKeys = ASSISTANT_VISIBLE_SOURCE_TRACK_FAMILIES[sourceKey] || ASSISTANT_VISIBLE_SOURCE_TRACK_FAMILIES.legacy_citywide;
+    const fallbackKey = (fallbackKeys || []).find((key) => !!tracks[key]) || "";
+    if (fallbackKey) {
+      return { track: tracks[fallbackKey], trackSourceKey: fallbackKey, trackAligned: true, trackMissing: false };
+    }
+    return { track: null, trackSourceKey: sourceKey, trackAligned: false, trackMissing: true };
   }
 
   function extractAssistantOutlookRaw(point, fallbackSignal, visibleScoreSource) {
     const fallback = fallbackSignal || {};
-    const track = extractAssistantOutlookTrack(point, visibleScoreSource);
+    const trackMeta = extractAssistantOutlookTrack(point, visibleScoreSource);
+    const track = trackMeta?.track || null;
     const raw = (point?.raw && typeof point.raw === "object") ? point.raw : {};
     return {
       rating: safeNum(track?.rating, safeNum(fallback.visibleRating, safeNum(fallback.rating, 0)) || 0) || 0,
@@ -695,6 +724,9 @@
       manhattan_core_saturation_penalty: safeNum(raw?.manhattan_core_saturation_penalty_n_shadow, safeNum(fallback.manhattanCoreSaturationPenalty, 0)) || 0,
       continuation_raw: safeNum(raw?.downstream_next_value_raw, safeNum(fallback.continuationRaw, 0)) || 0,
       frame_time: String(point?.frame_time || point?.ts || "").trim() || null,
+      trackSourceKey: String(trackMeta?.trackSourceKey || "").trim() || null,
+      trackAligned: !!trackMeta?.trackAligned,
+      trackMissing: !!trackMeta?.trackMissing,
     };
   }
 
@@ -792,6 +824,9 @@
       hasWeakContinuation: !!cls.continuationWeak,
       longTripFriendly: !!cls.longFriendly,
       frameTime: normalized?.frame_time || null,
+      trackSourceKey: normalized?.trackSourceKey || null,
+      trackAligned: !!normalized?.trackAligned,
+      trackMissing: !!normalized?.trackMissing,
     };
   }
 
@@ -826,6 +861,8 @@
         stayImprovesSoon: false,
         stayWeakensSoon: false,
         stayHoldsAfterArrival: true,
+        stayTrackAligned: false,
+        stayTrackMissing: true,
       };
     }
     const stayArrivalIndex = getAssistantArrivalBinIndex(etaMinutes, points.length);
@@ -856,6 +893,8 @@
       stayImprovesSoon: stayWindowTrendDelta >= 3,
       stayWeakensSoon: stayWindowTrendDelta <= -3,
       stayHoldsAfterArrival,
+      stayTrackAligned: !windowClassified.some((p) => p.trackMissing),
+      stayTrackMissing: windowClassified.some((p) => p.trackMissing),
     };
   }
 
@@ -876,6 +915,8 @@
         targetWeakensSoon: false,
         targetHoldsAfterArrival: true,
         targetLooksChasey: false,
+        targetTrackAligned: false,
+        targetTrackMissing: true,
       };
     }
     const targetArrivalIndex = getAssistantArrivalBinIndex(etaMinutes, points.length);
@@ -908,10 +949,13 @@
       targetWeakensSoon: targetWindowTrendDelta <= -3,
       targetHoldsAfterArrival,
       targetLooksChasey,
+      targetTrackAligned: !windowClassified.some((p) => p.trackMissing),
+      targetTrackMissing: windowClassified.some((p) => p.trackMissing),
     };
   }
 
   function isAssistantCandidateViableOnArrival(currentMetrics, targetMetrics, etaMinutes) {
+    if (targetMetrics?.targetTrackMissing) return { viable: false, viabilityRejectCode: "source_track_missing", viabilityRejectReasonText: "Future score for this mode is not ready yet." };
     if (targetMetrics?.targetTrapAtArrival) return { viable: false, viabilityRejectCode: "trap_at_arrival", viabilityRejectReasonText: "Target weak by arrival." };
     if (targetMetrics?.targetSlowAtArrival && (safeNum(targetMetrics?.targetArrivalProjectedRating, 0) || 0) < 52) return { viable: false, viabilityRejectCode: "slow_at_arrival", viabilityRejectReasonText: "Target weak by arrival." };
     if (targetMetrics?.targetSaturationAtArrival && (safeNum(targetMetrics?.targetArrivalProjectedRating, 0) || 0) < 56) return { viable: false, viabilityRejectCode: "saturation_at_arrival", viabilityRejectReasonText: "Target weak by arrival." };
@@ -1371,7 +1415,7 @@
       const stay = deriveStayReasonText(currentSignal, currentMetrics, currentTravelMetrics, bestRejectedTarget);
       return { actionCode: "STAY", reasonCode: stay.reasonCode, reasonText: stay.reasonText, worthMoving: false };
     }
-    if (!bestRejectedTarget?.viability?.viable && ["trap_at_arrival", "slow_at_arrival", "saturation_at_arrival", "target_chasey", "long_eta_no_hold"].includes(bestRejectedTarget?.viability?.viabilityRejectCode)) {
+    if (!bestRejectedTarget?.viability?.viable && ["source_track_missing", "trap_at_arrival", "slow_at_arrival", "saturation_at_arrival", "target_chasey", "long_eta_no_hold"].includes(bestRejectedTarget?.viability?.viabilityRejectCode)) {
       return { actionCode: "STAY", reasonCode: "target_weak_on_arrival", reasonText: "Weak when you get there", worthMoving: false };
     }
     const stay = deriveStayReasonText(currentSignal, currentMetrics, currentTravelMetrics, bestRejectedTarget);
@@ -1391,14 +1435,21 @@
     const loadingFromCache = outlookStatus === "loading" && sameKeyCached;
     const hasUsableOutlook = outlookStatus === "ready" || sameKeyCached;
     const noSuccessfulForCurrentKey = !!currentRequestKey && state.lastSuccessfulOutlookKey !== currentRequestKey;
+    const currentAlignedTrackMissing = hasMissingAlignedOutlookTrack(currentPoints);
+    const targetAlignedTrackMissing = hasMissingAlignedOutlookTrack(targetPoints);
 
     let dataQualityMode = "degraded";
     let dataQualityReason = "Checking more data.";
-    if (!hasCurrent || outlookStatus === "error" || noSuccessfulForCurrentKey) {
+    if (!hasCurrent || outlookStatus === "error" || noSuccessfulForCurrentKey || currentAlignedTrackMissing) {
       dataQualityMode = "degraded";
-      dataQualityReason = outlookStatus === "error"
+      dataQualityReason = currentAlignedTrackMissing
+        ? "Future score for this mode is not ready yet."
+        : outlookStatus === "error"
         ? "Outlook temporarily unavailable."
         : "Checking more data.";
+    } else if (targetAlignedTrackMissing) {
+      dataQualityMode = "partial";
+      dataQualityReason = "Target future score for this mode is not ready yet.";
     } else if (hasStrongCurrent && hasUsableOutlook && !loadingFromCache && !sparseTarget) {
       dataQualityMode = "full";
       dataQualityReason = "Outlook and current-zone signal are complete.";
@@ -1418,8 +1469,19 @@
       hasRecentSuccessfulOutlook,
       isUsingCachedOutlook: sameKeyCached,
       isPartialOutlook: dataQualityMode === "partial",
-      canTrustFarMoves: dataQualityMode === "full",
+      canTrustFarMoves: dataQualityMode === "full" && !currentAlignedTrackMissing && !targetAlignedTrackMissing,
+      currentAlignedTrackMissing,
+      targetAlignedTrackMissing,
     };
+  }
+
+  function hasMissingAlignedOutlookTrack(points) {
+    const list = Array.isArray(points) ? points : [];
+    if (!list.length) return true;
+    return list.some((point) => {
+      const meta = extractAssistantOutlookTrack(point, state.visibleScoreSource);
+      return !!meta?.trackMissing;
+    });
   }
 
   function resolvePreviewTargetSignal(previewTargetLike) {
@@ -2269,7 +2331,7 @@
     const withinFarCap = etaMinutes <= AI_ASSISTANT_FAR_TARGET_SOFT_CAP_MIN;
     const viableOnArrival = !!target?.viability?.viable
       && !target?.targetMetrics?.targetLooksChasey
-      && !["trap_at_arrival", "slow_at_arrival", "target_chasey", "long_eta_no_hold"].includes(String(target?.viability?.viabilityRejectCode || ""));
+      && !["source_track_missing", "trap_at_arrival", "slow_at_arrival", "target_chasey", "long_eta_no_hold"].includes(String(target?.viability?.viabilityRejectCode || ""));
     if (!viableOnArrival) return false;
     const paybackHolds = !!target?.targetPaybackMetrics?.paybackHolds;
     const paybackAvg = safeNum(target?.targetPaybackMetrics?.paybackAvgRating, 0) || 0;
@@ -2428,8 +2490,6 @@
   }
 
   function derivePrimaryDriverDecision() {
-    const serverPrimary = deriveServerPrimaryDecision();
-    if (serverPrimary) return serverPrimary;
     if (state.trapModeActive && state.trapNeedsNearbyEscape) {
       return { line: "Stay briefly • Nearby options not strong enough yet", kind: "trap" };
     }
@@ -2524,14 +2584,6 @@
   }
 
   function buildAssistantSecondaryLine() {
-    const server = activeServerGuidance();
-    if (server) {
-      const line = buildServerSecondaryLine(server);
-      if (line) {
-        state.lastGuidanceSecondaryLine = line;
-        return line;
-      }
-    }
     if (state.trapModeActive && state.trapNeedsNearbyEscape) {
       state.lastGuidanceSecondaryLine = "Waiting for a better nearby area";
       return "Waiting for a better nearby area";
@@ -2816,10 +2868,7 @@
     buildMessages();
     const primaryLine = buildAssistantPrimaryLine();
     const secondaryLine = buildAssistantSecondaryLine();
-    const serverAction = activeServerGuidance()?.actionCode || "";
-    const iconType = serverAction === "MOVE_NEARBY"
-      ? "move"
-      : (serverAction === "HOLD" ? "positive" : (serverAction === "MICRO_REPOSITION" || serverAction === "WAIT_DISPATCH" ? "caution" : leadingIconKindFromAction(state.finalActionCode)));
+    const iconType = leadingIconKindFromAction(state.finalActionCode);
     const renderKey = [
       compactLane ? 1 : 0,
       state.expanded ? 1 : 0,
@@ -2894,12 +2943,16 @@
           Number.isFinite(serverGuidance.holdUntilTs) ? `Hold until ${new Date(serverGuidance.holdUntilTs * 1000).toLocaleTimeString()}` : "",
         ].filter(Boolean).slice(0, 2).join(" • ")}</div>`
       : "";
+    const serverSupplementLine = serverGuidance
+      ? `<section class="aiAssistantSection"><strong>Server context (supplemental)</strong><div>${buildServerSecondaryLine(serverGuidance) || "No supplemental message."}</div>${serverGuidance?.targetZone?.name ? `<div>Target zone: ${serverGuidance.targetZone.name}</div>` : ""}${guidanceMetricLine}${guidanceTimingLine}${guidanceStatusLine}</section>`
+      : (guidanceStatusLine ? `<section class="aiAssistantSection"><strong>Server context (supplemental)</strong>${guidanceStatusLine}</section>` : "");
     const committedActionText = humanActionLabel(state.committedActionCode);
     const committedReasonText = humanizeAssistantReason(friendlyReasonFromCode(state.committedReasonCode, state.committedReasonText || "—"));
     return `
       <div class="aiAssistantPanel">
         <section class="aiAssistantSection"><strong>Current area</strong><div>${state.activeStableZoneName || "—"} • ${state.activeStableBorough || "—"} • ${Math.round(state.visibleRating || 0)} ${prettyBucket(state.visibleBucket)} • ${state.visibleScoreSourceLabel}</div></section>
-        <section class="aiAssistantSection"><strong>Advice</strong><div>${buildAssistantPrimaryLine()}</div><div>${buildAssistantSecondaryLine()}</div>${serverGuidance?.targetZone?.name ? `<div>Target zone: ${serverGuidance.targetZone.name}</div>` : ""}${guidanceMetricLine}${guidanceTimingLine}${guidanceStatusLine}</section>
+        <section class="aiAssistantSection"><strong>Advice</strong><div>${buildAssistantPrimaryLine()}</div><div>${buildAssistantSecondaryLine()}</div></section>
+        ${serverSupplementLine}
         <section class="aiAssistantSection"><strong>Countdown</strong><div>${state.countdownActive ? `Countdown active • ${Math.max(1, Math.round(state.countdownMinutesRemaining || 0))} min left` : "Countdown inactive"}</div><div>${state.countdownReasonText || state.countdownHoldWindowReason || "No countdown needed."}</div>${state.countdownActive && state.countdownTarget?.zoneName ? `<div>Target: ${state.countdownTarget.zoneName} • ${Math.round(state.countdownTarget.etaMinutes || 0)} min</div>` : ""}</section>
         ${(state.trapModeActive || (safeNum(state.trapSeverityLevel, 0) || 0) >= 2 || state.trapReasonSummary) ? `<section class="aiAssistantSection"><strong>Area check</strong><div>${state.trapReasonSummary || "No trap signs right now."}</div>${state.trapEscapeTarget?.candidateSignal?.zoneName ? `<div>Nearby option: ${state.trapEscapeTarget.candidateSignal.zoneName} • ${Math.round(state.trapEscapeTarget.etaMinutes || 0)} min</div>` : ""}</section>` : ""}
         <section class="aiAssistantSection"><strong>What may happen next</strong><div>${state.outlookSummaryText}</div>${state.moveTargetOutlookSummaryText ? `<div>${state.moveTargetOutlookSummaryText}</div>` : ""}${outlookStatusLine}</section>
@@ -3559,7 +3612,14 @@
     const canReuseLastGood = shouldReuseLastGoodRecommendation(state.activeStableZoneId, state.lastFrameTime, state.dataQualityMode);
     if (canReuseLastGood) {
       const cached = state.lastGoodRecommendationPayload || null;
+      const sourceTrackMissingNow = state.currentAlignedTrackMissing
+        || state.targetAlignedTrackMissing
+        || String(state.targetViabilityRejectCode || "") === "source_track_missing";
+      const cachedIsMove = isMoveAction(cached?.actionCode);
       if (cached) {
+        if (cachedIsMove && sourceTrackMissingNow) {
+          state.usedCachedRecommendationFallback = false;
+        } else {
         state.usedCachedRecommendationFallback = true;
         state.committedActionCode = cached.actionCode || state.committedActionCode || "MONITOR";
         state.committedReasonCode = cached.reasonCode || state.committedReasonCode || "checking_outlook";
@@ -3568,6 +3628,7 @@
         state.committedSinceTs = state.committedSinceTs || Date.now();
         state.recommendationConfidenceScore = cached.recommendationConfidenceScore ?? state.recommendationConfidenceScore;
         state.recommendationConfidenceLevel = cached.recommendationConfidenceLevel || state.recommendationConfidenceLevel || "low";
+        }
       }
     }
 
@@ -3635,6 +3696,17 @@
     state.finalActionCode = state.committedActionCode || proposal.actionCode;
     state.finalActionReason = state.recommendationReasonText;
     state.actionSeverity = (state.finalActionCode === "LEAVE_NOW" || state.finalActionCode === "MOVE_SOON") ? "move" : (state.finalActionCode === "STAY" ? "positive" : "info");
+    const sourceTrackMissingNow = state.currentAlignedTrackMissing
+      || state.targetAlignedTrackMissing
+      || String(state.targetViabilityRejectCode || "") === "source_track_missing";
+    if (sourceTrackMissingNow && isMoveAction(state.finalActionCode)) {
+      state.finalActionCode = "STAY";
+      state.finalActionReason = "Future score for this mode is not ready yet.";
+      state.recommendationReasonCode = "source_track_missing";
+      state.recommendationReasonText = "Future score for this mode is not ready yet.";
+      state.committedMoveTarget = null;
+      state.assistantMoveTarget = null;
+    }
     if (state.dataQualityMode !== "full" && state.finalActionCode === "MOVE_SOON" && !state.assistantMoveTarget) {
       state.finalActionCode = "MONITOR";
       state.finalActionReason = "Checking more data.";
@@ -3748,6 +3820,7 @@
       && state.dataQualityMode === "full"
       && (state.recommendationConfidenceLevel === "medium" || state.recommendationConfidenceLevel === "high")
       && state.committedActionCode !== "MONITOR"
+      && String(state.targetViabilityRejectCode || "") !== "source_track_missing"
       && (!isMoveAction(state.committedActionCode) || !!state.committedMoveTarget);
     if (canCacheLastGoodRecommendation) {
       state.lastGoodRecommendationZoneId = String(state.activeStableZoneId || "");
