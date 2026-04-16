@@ -417,17 +417,12 @@
 
   function getAssistantModeTendencySignature() {
     const flags = modeModule.getModeFlags?.() || {};
-    const tendency = window.TlcDayTendencyState?.getAdvancedContext?.() || window.TlcDayTendencyState?.advancedContext || null;
     return [
       flags.statenIslandMode ? 1 : 0,
       flags.bronxWashHeightsMode ? 1 : 0,
       flags.manhattanMode ? 1 : 0,
       flags.queensMode ? 1 : 0,
       flags.brooklynMode ? 1 : 0,
-      tendency?.ready_for_frontend_adjustment ? 1 : 0,
-      tendency?.resolved_local_scope || tendency?.local_scope || "",
-      tendency?.global_penalty_points ?? "",
-      tendency?.local_penalty_points ?? "",
     ].join("|");
   }
 
@@ -659,14 +654,6 @@
 
   function buildOutlookCacheKey(frameTime, locationIds, visibleSource) {
     return [frameTime || "none", [...locationIds].sort().join(","), visibleSource || "legacy_citywide"].join("|");
-  }
-
-  function getAssistantOutlookByLocationId(outlookPayload) {
-    const primary = outlookPayload?.zones_by_location_id;
-    if (primary && typeof primary === "object" && !Array.isArray(primary)) return primary;
-    const legacy = outlookPayload?.by_location_id;
-    if (legacy && typeof legacy === "object" && !Array.isArray(legacy)) return legacy;
-    return {};
   }
 
   const ASSISTANT_VISIBLE_SOURCE_TRACK_FAMILIES = {
@@ -2550,17 +2537,6 @@
     if (!state.serverGuidanceUpdatedAt) return null;
     if (Date.now() - state.serverGuidanceUpdatedAt > (5 * 60000)) return null;
     return guidance;
-  }
-
-  function deriveServerPrimaryDecision() {
-    const guidance = activeServerGuidance();
-    if (!guidance) return null;
-    const targetName = guidance?.targetZone?.name || "nearby zone";
-    if (guidance.actionCode === "HOLD") return { line: "Stay in current area", kind: "stay" };
-    if (guidance.actionCode === "MICRO_REPOSITION") return { line: "Micro-reposition nearby", kind: "stay" };
-    if (guidance.actionCode === "MOVE_NEARBY") return { line: `Move toward ${targetName}`, kind: "move" };
-    if (guidance.actionCode === "WAIT_DISPATCH") return { line: "Wait for dispatch", kind: "monitor" };
-    return null;
   }
 
   function buildServerSecondaryLine(guidance) {

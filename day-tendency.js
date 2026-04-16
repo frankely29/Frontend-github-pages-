@@ -24,14 +24,6 @@
   const DAY_TENDENCY_MATERIAL_MOVE_METERS = 300;
   const DAY_TENDENCY_FIRST_FIX_CHECK_MS = 1500;
   const DAY_TENDENCY_FIRST_FIX_POLL_KEY = 'day-tendency:first-fix';
-  const MODE_FLAG_KEYS = {
-    manhattan_mode: 'manhattan_mode_enabled',
-    staten_island_mode: 'staten_island_mode_enabled',
-    bronx_wash_heights_mode: 'bronx_wash_heights_mode',
-    queens_mode: 'queens_mode_enabled',
-    brooklyn_mode: 'brooklyn_mode_enabled',
-  };
-
   const STATE = {
     root: null,
     marker: null,
@@ -59,44 +51,8 @@
     lastPublishedKey: null,
     lastRequestedFrameTime: null,
     lastFetchRoute: null,
-    frameRouteRetryAfterMs: 0,
-    frameRouteFailureCount: 0,
     frameRenderDebounceTimer: null,
   };
-
-  function apiBase() {
-    if (typeof runtime?.resolveApiBase === 'function') {
-      return String(runtime.resolveApiBase()).replace(/\/$/, '');
-    }
-    const source =
-      (typeof window !== 'undefined' && window.API_BASE !== undefined)
-        ? window.API_BASE
-        : ((typeof window !== 'undefined' && window.__TLC_RUNTIME_CONFIG__?.apiBase !== undefined)
-            ? window.__TLC_RUNTIME_CONFIG__.apiBase
-            : '');
-    return String(source || '').replace(/\/$/, '');
-  }
-
-  async function fetchJSONWithTimeout(url, timeoutMs = 10000, signal = null) {
-    if (runtime?.fetchJSON) {
-      return runtime.fetchJSON(url, { method: 'GET', headers: { Accept: 'application/json' }, timeoutMs, signal });
-    }
-    const controller = signal ? null : new AbortController();
-    const timeout = setTimeout(() => (controller ? controller.abort() : null), timeoutMs);
-    try {
-      const res = await fetch(url, {
-        method: 'GET',
-        headers: { Accept: 'application/json' },
-        signal: signal || controller?.signal,
-      });
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
-      }
-      return await res.json();
-    } finally {
-      clearTimeout(timeout);
-    }
-  }
 
   function ensureDayTendencyStyles() {
     if (document.getElementById('dayTendencyStyles')) return;
@@ -301,35 +257,6 @@
     return null;
   }
 
-  function readModeFlagValue(storageKey) {
-    try {
-      return (localStorage.getItem(storageKey) || '0') === '1' ? 1 : 0;
-    } catch (_) {
-      return 0;
-    }
-  }
-
-  function getCurrentModeFlags() {
-    const liveFlags = window.TlcModeModule?.getModeFlags?.();
-    if (liveFlags) {
-      return {
-        manhattan_mode: liveFlags.manhattanMode ? 1 : 0,
-        staten_island_mode: liveFlags.statenIslandMode ? 1 : 0,
-        bronx_wash_heights_mode: liveFlags.bronxWashHeightsMode ? 1 : 0,
-        queens_mode: liveFlags.queensMode ? 1 : 0,
-        brooklyn_mode: liveFlags.brooklynMode ? 1 : 0,
-      };
-    }
-
-    return {
-      manhattan_mode: readModeFlagValue(MODE_FLAG_KEYS.manhattan_mode),
-      staten_island_mode: readModeFlagValue(MODE_FLAG_KEYS.staten_island_mode),
-      bronx_wash_heights_mode: readModeFlagValue(MODE_FLAG_KEYS.bronx_wash_heights_mode),
-      queens_mode: readModeFlagValue(MODE_FLAG_KEYS.queens_mode),
-      brooklyn_mode: readModeFlagValue(MODE_FLAG_KEYS.brooklyn_mode),
-    };
-  }
-
   function haversineMeters(a, b) {
     const toRad = (x) => (x * Math.PI) / 180;
     const R = 6371000;
@@ -482,35 +409,6 @@
     return { payload, frameContext, advancedContext };
   }
 
-  function normalizeRouteErrorStatus(error) {
-    const status = Number(error?.status);
-    return Number.isFinite(status) ? status : null;
-  }
-
-  function isFrameContextRouteUnavailable(error) {
-    const status = normalizeRouteErrorStatus(error);
-    if (status === 404 || status === 400) return true;
-    const message = String(error?.message || '').toLowerCase();
-    return (
-      message.includes('failed to fetch') ||
-      message.includes('networkerror') ||
-      message.includes('network request failed') ||
-      message.includes('load failed')
-    );
-  }
-
-  function canRetryFrameRouteNow() {
-    return Date.now() >= Number(STATE.frameRouteRetryAfterMs || 0);
-  }
-
-  function pickVisiblePayloadFromFrameContext(frameContextResponse) {
-    const local = normalizeDayTendencyPayload(frameContextResponse?.local_context);
-    if (local && String(local.status || '').toLowerCase() === 'ok') return local;
-    const global = normalizeDayTendencyPayload(frameContextResponse?.global_context);
-    if (global && String(global.status || '').toLowerCase() === 'ok') return global;
-    return null;
-  }
-
   function buildDayTendencyPublishKey(normalizedPayload) {
     if (!normalizedPayload) return 'null';
     return [
@@ -530,8 +428,7 @@
     ].join('|');
   }
 
-  // the meter UI is separate from map coloring.
-  // app.part11.js consumes this shared payload to bias the final mode-aware rating.
+  // The meter now derives from the active visible Team Joseo zone score and publishes compatible shared state for debug/inspection.
   function publishDayTendencyState({ payload, frameContext = null, advancedContext = null, route = null } = {}) {
     const normalizedPayload = normalizeDayTendencyPayload(payload);
     const payloadKey = buildDayTendencyPublishKey(normalizedPayload);
@@ -743,8 +640,6 @@
         frameContext = localDerived.frameContext;
         advancedContext = localDerived.advancedContext;
       }
-      STATE.frameRouteFailureCount = 0;
-      STATE.frameRouteRetryAfterMs = 0;
       STATE.lastFetchRoute = 'frontend_visible_zone_score';
 
       if (requestSeq !== STATE.requestSeq) return;
@@ -902,9 +797,9 @@
       hasRenderedRealPayload: !!STATE.hasRenderedRealPayload,
       lastRequestedFrameTime: STATE.lastRequestedFrameTime || null,
       lastFetchRoute: STATE.lastFetchRoute || null,
-      frameRouteFailureCount: Number(STATE.frameRouteFailureCount || 0),
-      frameRouteRetryAfterMs: Number(STATE.frameRouteRetryAfterMs || 0),
-      canRetryFrameRouteNow: canRetryFrameRouteNow()
+      frameRouteFailureCount: 0,
+      frameRouteRetryAfterMs: 0,
+      canRetryFrameRouteNow: true
     };
   };
 
