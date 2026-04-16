@@ -12,7 +12,7 @@ const frontendBuildId = [Date.now().toString(36), process.pid.toString(36), cryp
 const indexHtmlTemplate = fs.readFileSync(indexHtmlPath, "utf8");
 const indexHtml = indexHtmlTemplate.replace(/"__TLC_FRONTEND_BUILD_ID__"/, JSON.stringify(frontendBuildId));
 
-const noStorePaths = new Set(["/", "/index.html"]);
+const noStorePaths = new Set(["/", "/index.html", "/manifest.webmanifest", "/sw.js"]);
 const htmlShellPattern = /\.html?$/i;
 const staticAssetPattern = /\.(?:css|js|mjs|json|svg|png|jpg|jpeg|gif|webp|ico|woff2?|ttf)$/i;
 
@@ -51,6 +51,19 @@ app.use((req, res, next) => {
 app.get(["/", "/index.html"], (req, res) => {
   res.type("html");
   res.send(indexHtml);
+});
+
+app.get("/manifest.webmanifest", (req, res) => {
+  res.set("Cache-Control", "no-store, no-cache, must-revalidate");
+  res.set("Content-Type", "application/manifest+json");
+  res.sendFile(path.join(rootDir, "manifest.webmanifest"));
+});
+
+app.get("/sw.js", (req, res) => {
+  res.set("Cache-Control", "no-store, no-cache, must-revalidate");
+  res.set("Content-Type", "application/javascript");
+  res.set("Service-Worker-Allowed", "/");
+  res.sendFile(path.join(rootDir, "sw.js"));
 });
 
 app.use(express.static(rootDir, {

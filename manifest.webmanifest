@@ -1,0 +1,11 @@
+{
+  "name": "Team Joseo Map",
+  "short_name": "Joseo Map",
+  "description": "NYC TLC Hotspot Map for Drivers",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a"
+}
