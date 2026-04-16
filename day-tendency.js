@@ -21,6 +21,7 @@
   const DAY_TENDENCY_REFRESH_MS = 30 * 60 * 1000;
   const DAY_TENDENCY_RETRY_MS = 10 * 1000;
   const DAY_TENDENCY_MOVE_CHECK_MS = 30 * 1000;
+  const DAY_TENDENCY_BENCHMARK_TTL_MS = 10 * 60 * 1000;
   const DAY_TENDENCY_MATERIAL_MOVE_METERS = 300;
   const DAY_TENDENCY_FIRST_FIX_CHECK_MS = 1500;
   const DAY_TENDENCY_FIRST_FIX_POLL_KEY = 'day-tendency:first-fix';
@@ -51,6 +52,8 @@
     lastPublishedKey: null,
     lastRequestedFrameTime: null,
     lastFetchRoute: null,
+    benchmarkCache: new Map(),
+    benchmarkCacheMonthKey: null,
     frameRenderDebounceTimer: null,
   };
 
@@ -318,6 +321,27 @@
     return clamped.toFixed(precision);
   }
 
+  function clampScore100(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return null;
+    return Math.max(0, Math.min(100, n));
+  }
+
+  function readBenchmarkNumeric(value) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function getMonthLabelFromKey(monthKey) {
+    const text = String(monthKey || '').trim();
+    const match = /^(\d{4})-(\d{2})$/.exec(text);
+    if (!match) return text || 'Active month';
+    const year = Number(match[1]);
+    const month = Number(match[2]) - 1;
+    const dt = new Date(Date.UTC(year, month, 1));
+    return dt.toLocaleString('en-US', { month: 'long', timeZone: 'UTC' });
+  }
+
   function getCurrentFrameTimeIso() {
     const value = window.TlcModeInternals?.getCurrentFrame?.()?.time;
     const text = String(value || '').trim();
@@ -349,63 +373,193 @@
 
     const visibleRating = Number(modeModule.effectiveRating?.(props, geom));
     if (!Number.isFinite(visibleRating)) return null;
-    const safeScore = Math.max(0, Math.min(100, visibleRating));
+    const safeScore = clampScore100(visibleRating);
+    if (!Number.isFinite(safeScore)) return null;
     const visibleBucket = String(modeModule.effectiveBucket?.(props, geom) || '').trim() || null;
     const visibleScoreSource = String(modeModule.getVisibleScoreSourceForFeature?.(props, geom) || '').trim() || 'legacy_citywide';
     const visibleScoreSourceLabel = String(modeModule.getVisibleScoreSourceLabel?.(props, geom) || '').trim() || 'Team Joseo score';
+    const benchmarkFamily = String(modeModule.getMonthBenchmarkFamilyForFeature?.(props, geom) || 'citywide_all').trim() || 'citywide_all';
+    const benchmarkFamilyLabel = String(modeModule.getMonthBenchmarkFamilyLabel?.(props, geom) || 'Citywide monthly benchmark').trim() || 'Citywide monthly benchmark';
     const borough = String(props.borough || props.Borough || '').trim();
     const zoneName = String(props.zone || props.Zone || props.zone_name || props.zoneName || '').trim();
     const locationId = String(props.LocationID || props.location_id || props.locationId || '').trim();
     const localTimeLabel = getCurrentFrameTimeLabel();
 
+    return {
+      visibleScore: safeScore,
+      visibleBucket,
+      visibleScoreSource,
+      visibleScoreSourceLabel,
+      borough,
+      zoneName,
+      locationId,
+      localTimeLabel: localTimeLabel || '',
+      frameTime: getCurrentFrameTimeIso() || null,
+      benchmarkFamily,
+      benchmarkFamilyLabel
+    };
+  }
+
+  function getMonthBenchmarkEndpoint(frameTimeIso) {
+    const runtimeApi = window.FrontendRuntime || null;
+    const params = new URLSearchParams();
+    if (frameTimeIso) params.set('frame_time', String(frameTimeIso));
+    const path = `/day_tendency/month_benchmark${params.toString() ? `?${params.toString()}` : ''}`;
+    if (typeof runtimeApi?.toAbsoluteUrl === 'function') return runtimeApi.toAbsoluteUrl(path);
+    const base = String(runtimeApi?.resolveApiBase?.() || window.API_BASE || '').trim().replace(/\/+$/, '');
+    return `${base}${path}`;
+  }
+
+  function resolveBenchmarkRow(payload, familyKey) {
+    if (!payload || !familyKey) return null;
+    const directFamily = String(payload?.benchmark_family || payload?.family_key || '').trim();
+    if (directFamily && directFamily === familyKey) {
+      const directAvg = readBenchmarkNumeric(payload?.average_rating ?? payload?.monthly_average_score ?? payload?.benchmark_average_rating);
+      if (Number.isFinite(directAvg)) {
+        return {
+          monthKey: String(payload?.month_key || '').trim() || null,
+          averageRating: directAvg,
+          sampleCount: Number(payload?.sample_zone_frames ?? payload?.benchmark_sample_count ?? payload?.sample_count ?? 0) || 0,
+        };
+      }
+    }
+    const familiesMap = payload?.families || payload?.benchmark_families || payload?.family_benchmarks;
+    if (familiesMap && typeof familiesMap === 'object' && !Array.isArray(familiesMap)) {
+      const row = familiesMap[familyKey];
+      const avg = readBenchmarkNumeric(row?.average_rating ?? row?.monthly_average_score ?? row?.benchmark_average_rating);
+      if (Number.isFinite(avg)) {
+        return {
+          monthKey: String(payload?.month_key || row?.month_key || '').trim() || null,
+          averageRating: avg,
+          sampleCount: Number(row?.sample_zone_frames ?? row?.benchmark_sample_count ?? row?.sample_count ?? 0) || 0,
+        };
+      }
+    }
+    const familiesList = Array.isArray(payload?.families)
+      ? payload.families
+      : (Array.isArray(payload?.benchmark_families) ? payload.benchmark_families : []);
+    for (const item of familiesList) {
+      if (String(item?.family_key || item?.benchmark_family || '').trim() !== familyKey) continue;
+      const avg = readBenchmarkNumeric(item?.average_rating ?? item?.monthly_average_score ?? item?.benchmark_average_rating);
+      if (!Number.isFinite(avg)) continue;
+      return {
+        monthKey: String(payload?.month_key || item?.month_key || '').trim() || null,
+        averageRating: avg,
+        sampleCount: Number(item?.sample_zone_frames ?? item?.benchmark_sample_count ?? item?.sample_count ?? 0) || 0,
+      };
+    }
+    return null;
+  }
+
+  async function fetchMonthBenchmark({ familyKey, frameTimeIso, force = false } = {}) {
+    if (!familyKey) return null;
+    const monthHint = String(frameTimeIso || '').trim().slice(0, 7) || null;
+    if (monthHint && STATE.benchmarkCacheMonthKey && STATE.benchmarkCacheMonthKey !== monthHint) {
+      STATE.benchmarkCache.clear();
+    }
+    if (monthHint) STATE.benchmarkCacheMonthKey = monthHint;
+
+    const cacheKey = `${monthHint || 'unknown'}|${familyKey}`;
+    const cached = STATE.benchmarkCache.get(cacheKey);
+    if (!force && cached && (Date.now() - cached.fetchedAt) < DAY_TENDENCY_BENCHMARK_TTL_MS) {
+      return cached.value;
+    }
+
+    const endpoint = getMonthBenchmarkEndpoint(frameTimeIso);
+    const res = await fetch(endpoint, { method: 'GET', cache: 'no-store' });
+    if (!res.ok) throw new Error(`Month benchmark request failed (${res.status})`);
+    const payload = await res.json();
+    const row = resolveBenchmarkRow(payload, familyKey);
+    if (!row || !Number.isFinite(Number(row.averageRating))) throw new Error(`Missing month benchmark for family ${familyKey}`);
+    const monthKey = String(row.monthKey || payload?.month_key || monthHint || '').trim() || monthHint || '';
+    const value = {
+      monthKey,
+      averageRating: clampScore100(row.averageRating),
+      sampleCount: Number(row.sampleCount || 0) || 0,
+    };
+    if (monthKey && STATE.benchmarkCacheMonthKey && STATE.benchmarkCacheMonthKey !== monthKey) {
+      STATE.benchmarkCache.clear();
+    }
+    if (monthKey) STATE.benchmarkCacheMonthKey = monthKey;
+    const normalizedCacheKey = `${monthKey || monthHint || 'unknown'}|${familyKey}`;
+    STATE.benchmarkCache.set(normalizedCacheKey, { fetchedAt: Date.now(), value });
+    return value;
+  }
+
+  function buildBenchmarkComparedPayload(local, benchmark) {
+    const rawVisibleScore = clampScore100(local?.visibleScore);
+    const monthlyBenchmarkScore = clampScore100(benchmark?.averageRating);
+    if (!Number.isFinite(rawVisibleScore) || !Number.isFinite(monthlyBenchmarkScore)) return null;
+    const tendencyScore = clampScore100(50 + (rawVisibleScore - monthlyBenchmarkScore));
+    if (!Number.isFinite(tendencyScore)) return null;
+    const band = tendencyScore < 40 ? 'low' : (tendencyScore >= 60 ? 'high' : 'normal');
+    const label = band === 'low' ? 'Low' : (band === 'high' ? 'High' : 'Normal');
+    const benchmarkMonthLabel = getMonthLabelFromKey(benchmark?.monthKey);
+    const explain = `Current ${Math.round(rawVisibleScore)} vs ${benchmarkMonthLabel} benchmark ${Math.round(monthlyBenchmarkScore)}`;
+    const sourceMode = 'frontend_visible_zone_vs_month_benchmark';
     const payload = {
       status: 'ok',
-      score: safeScore,
-      meter_pct: Math.max(0, Math.min(1, safeScore / 100)),
-      band: safeScore < 40 ? 'low' : (safeScore >= 60 ? 'high' : 'normal'),
-      label: safeScore < 40 ? 'Low' : (safeScore >= 60 ? 'High' : 'Normal'),
+      score: tendencyScore,
+      meter_pct: tendencyScore / 100,
+      band,
+      label,
       confidence: 1,
-      borough,
-      source_borough: borough,
-      scope: visibleScoreSource,
-      scope_label: visibleScoreSourceLabel,
-      source_mode: 'frontend_visible_zone_score',
-      explain: 'Live visible Team Joseo zone score',
-      local_time_label: localTimeLabel || '',
-      zone_name: zoneName || undefined,
-      location_id: locationId || undefined,
-      bucket: visibleBucket || undefined,
+      borough: local?.borough || '',
+      source_borough: local?.borough || '',
+      scope: local?.visibleScoreSource || '',
+      scope_label: local?.visibleScoreSourceLabel || '',
+      source_mode: sourceMode,
+      explain,
+      local_time_label: local?.localTimeLabel || '',
+      zone_name: local?.zoneName || undefined,
+      location_id: local?.locationId || undefined,
+      bucket: local?.visibleBucket || undefined,
+      raw_visible_score: rawVisibleScore,
+      monthly_benchmark_score: monthlyBenchmarkScore,
+      benchmark_family: local?.benchmarkFamily || 'citywide_all',
+      benchmark_family_label: local?.benchmarkFamilyLabel || 'Citywide monthly benchmark',
+      benchmark_month_key: benchmark?.monthKey || '',
+      benchmark_sample_count: Number(benchmark?.sampleCount || 0) || 0,
     };
-
     const frameContext = {
-      source: 'frontend_visible_zone_score',
-      frame_time: getCurrentFrameTimeIso() || null,
+      source: sourceMode,
+      frame_time: local?.frameTime || null,
       resolved_scope: {
-        scope: visibleScoreSource,
-        scope_label: visibleScoreSourceLabel,
+        scope: local?.visibleScoreSource || '',
+        scope_label: local?.visibleScoreSourceLabel || '',
       },
       active_zone: {
-        location_id: locationId || null,
-        zone_name: zoneName || null,
-        borough: borough || null,
+        location_id: local?.locationId || null,
+        zone_name: local?.zoneName || null,
+        borough: local?.borough || null,
+      },
+      benchmark: {
+        family_key: payload.benchmark_family,
+        family_label: payload.benchmark_family_label,
+        month_key: payload.benchmark_month_key || null,
+        average_rating: monthlyBenchmarkScore,
+        sample_zone_frames: payload.benchmark_sample_count,
       }
     };
-
     const advancedContext = {
-      source_of_truth: 'frontend_visible_zone_score',
-      source: 'frontend_visible_zone_score',
+      source_of_truth: sourceMode,
+      source: sourceMode,
       ready_for_frontend_adjustment: false,
       global_penalty_points: 0,
       local_penalty_points: 0,
       total_penalty_cap: 0,
       bucket_drop_cap: 0,
-      local_scope: visibleScoreSource,
-      local_scope_label: visibleScoreSourceLabel,
+      local_scope: local?.visibleScoreSource || '',
+      local_scope_label: local?.visibleScoreSourceLabel || '',
       local_scope_kind: 'frontend_visible_scope',
-      local_source_borough: borough || '',
-      local_source_mode: 'frontend_visible_zone_score',
+      local_source_borough: local?.borough || '',
+      local_source_mode: sourceMode,
+      benchmark_family: payload.benchmark_family,
+      benchmark_family_label: payload.benchmark_family_label,
+      benchmark_month_key: payload.benchmark_month_key || '',
+      raw_visible_score: rawVisibleScore,
+      monthly_benchmark_score: monthlyBenchmarkScore,
     };
-
     return { payload, frameContext, advancedContext };
   }
 
@@ -513,8 +667,8 @@
       : 0;
     const localTimeLabel = String(payload?.local_time_label || '').trim();
     const timeBlockContext = localTimeLabel
-      ? `Typical ${localTimeLabel} time blocks in this dataset`
-      : 'Typical time blocks in this dataset';
+      ? `Compared against active ${localTimeLabel} month benchmark`
+      : 'Compared against active month benchmark';
     const explain = payload.explain ? ` • ${payload.explain}` : '';
 
     if (STATE.score) STATE.score.textContent = roundedScore;
@@ -539,7 +693,7 @@
     root.title = `${label} • Score ${numericScore}/100${borough ? ` • Borough ${borough}` : ''}${scopeLabel ? ` • Scope ${scopeLabel}` : ''}${scope ? ` • Scope key ${scope}` : ''}${sourceBorough ? ` • Source borough ${sourceBorough}` : ''}${sourceMode ? ` • Source mode ${sourceMode}` : ''} • Confidence ${confidencePct}% • ${timeBlockContext}${explain}`;
     root.setAttribute(
       'aria-label',
-      `Current time block tendency expected ${String(label).toLowerCase()}, score ${roundedScore} out of 100${
+      `Current month-benchmark tendency ${String(label).toLowerCase()}, score ${roundedScore} out of 100${
         borough ? `, borough ${borough}` : ''
       }, confidence ${confidencePct} percent${
         localTimeLabel ? ` for ${localTimeLabel}` : ''
@@ -579,6 +733,18 @@
     }
     root.title = 'Waiting for an active visible zone score at current location.';
     root.setAttribute('aria-label', 'Waiting for active visible zone score at current location.');
+    root.hidden = false;
+    positionDayTendencyRoot();
+  }
+
+  function applyBenchmarkWaitingState() {
+    const root = ensureDayTendencyRoot();
+    if (!root) return;
+    if (STATE.score) STATE.score.textContent = '--';
+    if (STATE.band) STATE.band.textContent = 'Waiting...';
+    if (STATE.marker) STATE.marker.style.bottom = '50%';
+    root.title = 'Waiting for active month benchmark comparison data.';
+    root.setAttribute('aria-label', 'Waiting for active month benchmark comparison data.');
     root.hidden = false;
     positionDayTendencyRoot();
   }
@@ -635,18 +801,27 @@
     try {
       STATE.lastRequestedFrameTime = getCurrentFrameTimeIso();
       const localDerived = resolveVisibleZoneScorePayload(latLng);
-      if (localDerived) {
-        payload = normalizeDayTendencyPayload(localDerived.payload);
-        frameContext = localDerived.frameContext;
-        advancedContext = localDerived.advancedContext;
+      if (localDerived?.benchmarkFamily) {
+        const benchmark = await fetchMonthBenchmark({
+          familyKey: localDerived.benchmarkFamily,
+          frameTimeIso: localDerived.frameTime || STATE.lastRequestedFrameTime || null,
+          force,
+        });
+        const compared = buildBenchmarkComparedPayload(localDerived, benchmark);
+        if (compared) {
+          payload = normalizeDayTendencyPayload(compared.payload);
+          frameContext = compared.frameContext;
+          advancedContext = compared.advancedContext;
+        }
       }
-      STATE.lastFetchRoute = 'frontend_visible_zone_score';
+      STATE.lastFetchRoute = 'month_benchmark_compare';
 
       if (requestSeq !== STATE.requestSeq) return;
       STATE.lastQueryLat = latLng.lat;
       STATE.lastQueryLng = latLng.lng;
       STATE.lastQueryAt = Date.now();
       if (payload) applyDayTendencyPayload(payload);
+      else if (localDerived) applyBenchmarkWaitingState();
       else applyNoZoneResolvedState();
       publishDayTendencyState({ payload, frameContext, advancedContext, route: STATE.lastFetchRoute });
     } catch (error) {
