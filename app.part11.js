@@ -1581,6 +1581,48 @@
     return null;
   }
 
+  function getMonthBenchmarkFamilyForFeature(props, geom) {
+    if (isStatenIslandFeature(props)) return "mode_staten_island";
+
+    if (manhattanMode && isManhattanModeZone(props, geom)) return "mode_manhattan";
+    if (bronxWashHeightsMode && isBronxWashHeightsModeZone(props)) return "mode_bronx_wash_heights";
+    if (queensMode && isQueensModeZone(props)) return "mode_queens";
+    if (brooklynMode && isBrooklynModeZone(props)) return "mode_brooklyn";
+
+    if (isManhattanModeZone(props, geom)) return "auto_manhattan_citywide";
+    if (isBronxWashHeightsModeZone(props)) return "auto_bronx_wash_heights_citywide";
+    if (isQueensModeZone(props)) return "auto_queens_citywide";
+    if (isBrooklynModeZone(props)) return "auto_brooklyn_citywide";
+    return "citywide_all";
+  }
+
+  function getMonthBenchmarkFamilyLabel(props, geom) {
+    const family = getMonthBenchmarkFamilyForFeature(props, geom);
+    switch (family) {
+      case "mode_staten_island":
+        return "Staten Island monthly benchmark";
+      case "mode_manhattan":
+        return "Manhattan mode monthly benchmark";
+      case "mode_bronx_wash_heights":
+        return "Bronx/Wash Heights mode monthly benchmark";
+      case "mode_queens":
+        return "Queens mode monthly benchmark";
+      case "mode_brooklyn":
+        return "Brooklyn mode monthly benchmark";
+      case "auto_manhattan_citywide":
+        return "Manhattan core monthly benchmark";
+      case "auto_bronx_wash_heights_citywide":
+        return "Bronx/Wash Heights monthly benchmark";
+      case "auto_queens_citywide":
+        return "Queens monthly benchmark";
+      case "auto_brooklyn_citywide":
+        return "Brooklyn monthly benchmark";
+      case "citywide_all":
+      default:
+        return "Citywide monthly benchmark";
+    }
+  }
+
   if (btnManhattan) {
     btnManhattan.addEventListener("pointerdown", (e) => e.stopPropagation());
     btnManhattan.addEventListener("touchstart", (e) => e.stopPropagation(), { passive: true });
@@ -1738,6 +1780,8 @@
     effectiveRating,
     getTendencyFillAlpha,
     getActiveSpecialModeTagForFeature,
+    getMonthBenchmarkFamilyForFeature,
+    getMonthBenchmarkFamilyLabel,
     getVisibleScoreSourceForFeature,
     getVisibleScoreSourceLabel,
     getVisibleScoreTechnicalSourceLabel,
