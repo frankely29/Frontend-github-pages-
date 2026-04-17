@@ -1906,11 +1906,11 @@
       message: String(payload.message || "").trim(),
       reasonCodes: Array.isArray(payload.reason_codes) ? payload.reason_codes.map((it) => String(it || "").trim()).filter(Boolean) : [],
       currentZone: currentZone ? {
-        id: String(currentZone.id || currentZone.location_id || currentZone.locationId || "").trim(),
+        id: String(currentZone.id || currentZone.zone_id || currentZone.location_id || currentZone.locationId || "").trim(),
         name: String(currentZone.name || currentZone.zone_name || currentZone.zoneName || "").trim(),
       } : null,
       targetZone: targetZone ? {
-        id: String(targetZone.id || targetZone.location_id || targetZone.locationId || "").trim(),
+        id: String(targetZone.id || targetZone.zone_id || targetZone.location_id || targetZone.locationId || "").trim(),
         name: String(targetZone.name || targetZone.zone_name || targetZone.zoneName || "").trim(),
         centerLat: safeNum(targetZone.center_lat ?? targetZone.centerLat ?? targetZone.lat),
         centerLng: safeNum(targetZone.center_lng ?? targetZone.centerLng ?? targetZone.lng),
@@ -1945,7 +1945,6 @@
     state.guidanceStatus = "loading";
     state.guidanceLastErrorCode = "";
     state.guidanceLastErrorMessage = "";
-    const apiBase = String(window.API_BASE || window.__TLC_RUNTIME_CONFIG__?.apiBase || "").trim().replace(/\/+$/, "");
     const params = new URLSearchParams({
       frame_time: frameTime,
       lat: String(userLocation.lat),
@@ -1955,24 +1954,11 @@
       queens_mode: modeFlags?.queensMode ? "1" : "0",
       brooklyn_mode: modeFlags?.brooklynMode ? "1" : "0",
     });
-    const url = `${apiBase}/assistant/guidance?${params.toString()}`;
+    const token = window.TlcCommunityInternals?.getCommunityTokenState?.() || "";
+    const guidancePath = `/assistant/guidance?${params.toString()}`;
     const fetchPromise = (async () => {
       try {
-        const resp = await fetch(url, { signal: ac.signal, credentials: "include" });
-        if (resp.status === 401 || resp.status === 403) {
-          state.guidanceStatus = "error";
-          state.guidanceLastErrorCode = String(resp.status);
-          state.guidanceLastErrorMessage = "Guidance requires signed-in account context.";
-          return null;
-        }
-        if (!resp.ok) {
-          state.guidanceStatus = "error";
-          state.guidanceLastErrorCode = String(resp.status || "fetch_failed");
-          state.guidanceLastErrorMessage = `Guidance request failed (${resp.status}).`;
-          return null;
-        }
-        const data = await resp.json();
-        const payload = data || null;
+        const payload = await getJSONAuth(guidancePath, token, { signal: ac.signal, cache: "no-store" });
         const normalized = normalizeServerGuidance(payload);
         if (!normalized) {
           state.guidanceStatus = "error";
@@ -1989,6 +1975,12 @@
         state.guidanceLastErrorMessage = "";
         return payload;
       } catch (err) {
+        if (err?.status === 401 || err?.status === 403) {
+          state.guidanceStatus = "error";
+          state.guidanceLastErrorCode = String(err.status);
+          state.guidanceLastErrorMessage = "Guidance requires signed-in account context.";
+          return null;
+        }
         if (err?.name === "AbortError") return null;
         state.guidanceStatus = "error";
         state.guidanceLastErrorCode = String(err?.status || err?.name || "fetch_failed");
