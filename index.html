@@ -12,7 +12,68 @@
   <meta name="theme-color" content="#0f172a" />
   <meta name="mobile-web-app-capable" content="yes" />
   <link rel="manifest" href="/manifest.webmanifest" />
-  <link rel="apple-touch-icon" id="appleTouchIcon" href="data:," />
+  <link rel="apple-touch-icon" id="novaIcon" sizes="180x180" href="data:," />
+  <script>
+  (function(){
+    try {
+      var s = 180;
+      var c = document.createElement("canvas");
+      c.width = s; c.height = s;
+      var x = c.getContext("2d");
+      if (!x) return;
+      var cx = s/2, cy = s*0.395, r = s*0.42;
+      // Rounded rect background
+      var br = s*0.185;
+      x.beginPath();
+      x.moveTo(br,0); x.lineTo(s-br,0); x.quadraticCurveTo(s,0,s,br);
+      x.lineTo(s,s-br); x.quadraticCurveTo(s,s,s-br,s);
+      x.lineTo(br,s); x.quadraticCurveTo(0,s,0,s-br);
+      x.lineTo(0,br); x.quadraticCurveTo(0,0,br,0);
+      x.closePath(); x.fillStyle="#0a0e1a"; x.fill();
+      // Stars
+      x.fillStyle="rgba(248,250,252,0.25)";
+      [[0.17,0.15,0.005],[0.81,0.18,0.004],[0.85,0.75,0.004],[0.15,0.79,0.005],[0.23,0.50,0.003],[0.77,0.46,0.003]].forEach(function(p){
+        x.beginPath(); x.arc(s*p[0],s*p[1],s*p[2],0,Math.PI*2); x.fill();
+      });
+      // Diagonal rays
+      x.globalAlpha=0.25; x.fillStyle="#38bdf8";
+      x.beginPath(); x.moveTo(cx-r*0.58,cy-r*0.58); x.lineTo(cx-r*0.12,cy-r*0.12); x.lineTo(cx-r*0.17,cy-r*0.05); x.lineTo(cx-r*0.22,cy-r*0.10); x.closePath(); x.fill();
+      x.beginPath(); x.moveTo(cx+r*0.58,cy-r*0.58); x.lineTo(cx+r*0.12,cy-r*0.12); x.lineTo(cx+r*0.17,cy-r*0.05); x.lineTo(cx+r*0.22,cy-r*0.10); x.closePath(); x.fill();
+      x.globalAlpha=0.18; x.fillStyle="#1e40af";
+      x.beginPath(); x.moveTo(cx-r*0.58,cy+r*0.58); x.lineTo(cx-r*0.12,cy+r*0.12); x.lineTo(cx-r*0.17,cy+r*0.05); x.lineTo(cx-r*0.22,cy+r*0.10); x.closePath(); x.fill();
+      x.beginPath(); x.moveTo(cx+r*0.58,cy+r*0.58); x.lineTo(cx+r*0.12,cy+r*0.12); x.lineTo(cx+r*0.17,cy+r*0.05); x.lineTo(cx+r*0.22,cy+r*0.10); x.closePath(); x.fill();
+      x.globalAlpha=1;
+      // Top ray
+      x.fillStyle="#38bdf8";
+      x.beginPath(); x.moveTo(cx,cy-r); x.lineTo(cx+r*0.08,cy-r*0.10); x.lineTo(cx,cy+r*0.03); x.lineTo(cx-r*0.08,cy-r*0.10); x.closePath(); x.fill();
+      // Bottom ray
+      x.fillStyle="#1e40af";
+      x.beginPath(); x.moveTo(cx,cy+r*0.75); x.lineTo(cx+r*0.08,cy+r*0.10); x.lineTo(cx,cy-r*0.03); x.lineTo(cx-r*0.08,cy+r*0.10); x.closePath(); x.fill();
+      // Left ray
+      x.fillStyle="#0ea5e9";
+      x.beginPath(); x.moveTo(cx-r*0.85,cy); x.lineTo(cx-r*0.08,cy-r*0.08); x.lineTo(cx+r*0.03,cy); x.lineTo(cx-r*0.08,cy+r*0.08); x.closePath(); x.fill();
+      // Right ray
+      x.fillStyle="#0ea5e9";
+      x.beginPath(); x.moveTo(cx+r*0.85,cy); x.lineTo(cx+r*0.08,cy-r*0.08); x.lineTo(cx-r*0.03,cy); x.lineTo(cx+r*0.08,cy+r*0.08); x.closePath(); x.fill();
+      // Inner glow
+      x.globalAlpha=0.15; x.fillStyle="#38bdf8";
+      x.beginPath(); x.arc(cx,cy,r*0.16,0,Math.PI*2); x.fill();
+      x.globalAlpha=0.25;
+      x.beginPath(); x.arc(cx,cy,r*0.09,0,Math.PI*2); x.fill();
+      // White core
+      x.globalAlpha=1; x.fillStyle="#f8fafc";
+      x.beginPath(); x.arc(cx,cy,r*0.05,0,Math.PI*2); x.fill();
+      // NOVA text
+      x.fillStyle="#e2e8f0"; x.textAlign="center"; x.textBaseline="middle";
+      x.font="800 "+Math.round(s*0.115)+"px system-ui,-apple-system,sans-serif";
+      x.fillText("NOVA",cx,s*0.88);
+      // Set as icon
+      var d = c.toDataURL("image/png");
+      var el = document.getElementById("novaIcon");
+      if (el) el.href = d;
+    } catch(e){}
+  })();
+  </script>
 
   <link rel="dns-prefetch" href="https://unpkg.com" />
   <link rel="preconnect" href="https://unpkg.com" crossorigin />
@@ -508,180 +569,6 @@
       loadScriptSequentially(0);
     })();
   </script>
-
-<script>
-(function generateNovaIcon() {
-  try {
-    var sizes = [180, 192, 512];
-    var firstBlobUrl = "";
-
-    sizes.forEach(function(size) {
-      var c = document.createElement("canvas");
-      c.width = size;
-      c.height = size;
-      var ctx = c.getContext("2d");
-      if (!ctx) return;
-
-      var cx = size / 2;
-      var cy = size * 0.395;
-      var r = size * 0.42;
-
-      // Background
-      var bgR = size * 0.185;
-      ctx.beginPath();
-      ctx.moveTo(bgR, 0);
-      ctx.lineTo(size - bgR, 0);
-      ctx.quadraticCurveTo(size, 0, size, bgR);
-      ctx.lineTo(size, size - bgR);
-      ctx.quadraticCurveTo(size, size, size - bgR, size);
-      ctx.lineTo(bgR, size);
-      ctx.quadraticCurveTo(0, size, 0, size - bgR);
-      ctx.lineTo(0, bgR);
-      ctx.quadraticCurveTo(0, 0, bgR, 0);
-      ctx.closePath();
-      ctx.fillStyle = "#0a0e1a";
-      ctx.fill();
-
-      // Tiny background stars
-      ctx.fillStyle = "rgba(248,250,252,0.25)";
-      ctx.beginPath(); ctx.arc(size*0.17, size*0.15, size*0.005, 0, Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.arc(size*0.81, size*0.18, size*0.004, 0, Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.arc(size*0.85, size*0.75, size*0.004, 0, Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.arc(size*0.15, size*0.79, size*0.005, 0, Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.arc(size*0.23, size*0.50, size*0.003, 0, Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.arc(size*0.77, size*0.46, size*0.003, 0, Math.PI*2); ctx.fill();
-
-      // Diagonal rays (subtle, behind main rays)
-      ctx.globalAlpha = 0.25;
-      ctx.fillStyle = "#38bdf8";
-      ctx.beginPath();
-      ctx.moveTo(cx - r*0.58, cy - r*0.58);
-      ctx.lineTo(cx - r*0.12, cy - r*0.12);
-      ctx.lineTo(cx - r*0.17, cy - r*0.05);
-      ctx.lineTo(cx - r*0.22, cy - r*0.10);
-      ctx.closePath();
-      ctx.fill();
-
-      ctx.beginPath();
-      ctx.moveTo(cx + r*0.58, cy - r*0.58);
-      ctx.lineTo(cx + r*0.12, cy - r*0.12);
-      ctx.lineTo(cx + r*0.17, cy - r*0.05);
-      ctx.lineTo(cx + r*0.22, cy - r*0.10);
-      ctx.closePath();
-      ctx.fill();
-
-      ctx.globalAlpha = 0.18;
-      ctx.fillStyle = "#1e40af";
-      ctx.beginPath();
-      ctx.moveTo(cx - r*0.58, cy + r*0.58);
-      ctx.lineTo(cx - r*0.12, cy + r*0.12);
-      ctx.lineTo(cx - r*0.17, cy + r*0.05);
-      ctx.lineTo(cx - r*0.22, cy + r*0.10);
-      ctx.closePath();
-      ctx.fill();
-
-      ctx.beginPath();
-      ctx.moveTo(cx + r*0.58, cy + r*0.58);
-      ctx.lineTo(cx + r*0.12, cy + r*0.12);
-      ctx.lineTo(cx + r*0.17, cy + r*0.05);
-      ctx.lineTo(cx + r*0.22, cy + r*0.10);
-      ctx.closePath();
-      ctx.fill();
-
-      ctx.globalAlpha = 1;
-
-      // Top ray (brightest blue)
-      ctx.fillStyle = "#38bdf8";
-      ctx.beginPath();
-      ctx.moveTo(cx, cy - r);
-      ctx.lineTo(cx + r*0.08, cy - r*0.10);
-      ctx.lineTo(cx, cy + r*0.03);
-      ctx.lineTo(cx - r*0.08, cy - r*0.10);
-      ctx.closePath();
-      ctx.fill();
-
-      // Bottom ray (deep navy)
-      ctx.fillStyle = "#1e40af";
-      ctx.beginPath();
-      ctx.moveTo(cx, cy + r*0.75);
-      ctx.lineTo(cx + r*0.08, cy + r*0.10);
-      ctx.lineTo(cx, cy - r*0.03);
-      ctx.lineTo(cx - r*0.08, cy + r*0.10);
-      ctx.closePath();
-      ctx.fill();
-
-      // Left ray (sky blue)
-      ctx.fillStyle = "#0ea5e9";
-      ctx.beginPath();
-      ctx.moveTo(cx - r*0.85, cy);
-      ctx.lineTo(cx - r*0.08, cy - r*0.08);
-      ctx.lineTo(cx + r*0.03, cy);
-      ctx.lineTo(cx - r*0.08, cy + r*0.08);
-      ctx.closePath();
-      ctx.fill();
-
-      // Right ray (sky blue)
-      ctx.fillStyle = "#0ea5e9";
-      ctx.beginPath();
-      ctx.moveTo(cx + r*0.85, cy);
-      ctx.lineTo(cx + r*0.08, cy - r*0.08);
-      ctx.lineTo(cx - r*0.03, cy);
-      ctx.lineTo(cx + r*0.08, cy + r*0.08);
-      ctx.closePath();
-      ctx.fill();
-
-      // Inner glow
-      ctx.globalAlpha = 0.15;
-      ctx.fillStyle = "#38bdf8";
-      ctx.beginPath();
-      ctx.arc(cx, cy, r*0.16, 0, Math.PI*2);
-      ctx.fill();
-
-      ctx.globalAlpha = 0.25;
-      ctx.beginPath();
-      ctx.arc(cx, cy, r*0.09, 0, Math.PI*2);
-      ctx.fill();
-
-      // White core
-      ctx.globalAlpha = 1;
-      ctx.fillStyle = "#f8fafc";
-      ctx.beginPath();
-      ctx.arc(cx, cy, r*0.05, 0, Math.PI*2);
-      ctx.fill();
-
-      // "NOVA" text at bottom
-      ctx.fillStyle = "#e2e8f0";
-      ctx.font = "800 " + Math.round(size * 0.115) + "px system-ui, -apple-system, sans-serif";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.letterSpacing = Math.round(size * 0.03) + "px";
-      ctx.fillText("NOVA", cx, size * 0.88);
-
-      // Convert to blob URL
-      c.toBlob(function(blob) {
-        if (!blob) return;
-        var url = URL.createObjectURL(blob);
-
-        // Set apple-touch-icon (use 180px version)
-        if (size === 180 && !firstBlobUrl) {
-          firstBlobUrl = url;
-          var link = document.getElementById("appleTouchIcon");
-          if (link) {
-            link.href = url;
-          } else {
-            var newLink = document.createElement("link");
-            newLink.rel = "apple-touch-icon";
-            newLink.href = url;
-            document.head.appendChild(newLink);
-          }
-        }
-      }, "image/png");
-    });
-  } catch (e) {
-    console.warn("Nova icon generation failed:", e);
-  }
-})();
-</script>
 
 <script>
   if ("serviceWorker" in navigator) {
