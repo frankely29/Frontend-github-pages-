@@ -749,6 +749,32 @@
     positionDayTendencyRoot();
   }
 
+  function applyBenchmarkUnavailableState(localDerived = null) {
+    const root = ensureDayTendencyRoot();
+    if (!root) return;
+    if (STATE.score) STATE.score.textContent = '--';
+    const hasGpsFix = !!STATE.hasInitialGpsFix;
+    if (STATE.band) STATE.band.textContent = hasGpsFix ? 'Waiting...' : 'Locating...';
+    if (STATE.marker) STATE.marker.style.bottom = '50%';
+    const borough = String(localDerived?.borough || '').trim();
+    if (STATE.borough) {
+      if (borough) {
+        STATE.borough.textContent = borough;
+        STATE.borough.hidden = false;
+      } else {
+        STATE.borough.textContent = '';
+        STATE.borough.hidden = true;
+      }
+    }
+    const title = hasGpsFix
+      ? 'Month benchmark unavailable; waiting to retry.'
+      : 'Waiting for active month benchmark comparison data.';
+    root.title = title;
+    root.setAttribute('aria-label', title);
+    root.hidden = false;
+    positionDayTendencyRoot();
+  }
+
   function scheduleRetryIfNeeded(payload, hadError) {
     const status = String(payload?.status || '').toLowerCase();
     const explain = String(payload?.explain || '').toLowerCase();
@@ -794,13 +820,14 @@
     STATE.isRefreshing = true;
 
     let payload = null;
+    let localDerived = null;
     let frameContext = null;
     let advancedContext = null;
     let hadError = false;
 
     try {
       STATE.lastRequestedFrameTime = getCurrentFrameTimeIso();
-      const localDerived = resolveVisibleZoneScorePayload(latLng);
+      localDerived = resolveVisibleZoneScorePayload(latLng);
       if (localDerived?.benchmarkFamily) {
         const benchmark = await fetchMonthBenchmark({
           familyKey: localDerived.benchmarkFamily,
@@ -828,7 +855,7 @@
       if (abortController.signal.aborted || requestSeq !== STATE.requestSeq) return;
       hadError = true;
       publishDayTendencyState({ payload: null, frameContext: null, advancedContext: null, route: null });
-      if (!STATE.hasRenderedRealPayload && STATE.root) STATE.root.hidden = true;
+      applyBenchmarkUnavailableState(localDerived);
     } finally {
       if (requestSeq === STATE.activeRequestSeq) {
         STATE.isRefreshing = false;
@@ -972,6 +999,10 @@
       hasRenderedRealPayload: !!STATE.hasRenderedRealPayload,
       lastRequestedFrameTime: STATE.lastRequestedFrameTime || null,
       lastFetchRoute: STATE.lastFetchRoute || null,
+      benchmarkCacheMonthKey: STATE.benchmarkCacheMonthKey || null,
+      benchmarkCacheSize: Number(STATE.benchmarkCache?.size || 0),
+      hasRoot: !!STATE.root,
+      rootHidden: !!STATE.root?.hidden,
       frameRouteFailureCount: 0,
       frameRouteRetryAfterMs: 0,
       canRetryFrameRouteNow: true
