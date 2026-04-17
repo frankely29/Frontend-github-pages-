@@ -1,10 +1,10 @@
-html, body { height: 100%; margin: 0; padding: 0; }
+html, body { height: 100%; margin: 0; padding: 0; background: #e5e5e5; }
 .hidden { display: none !important; }
     #map {
       position: fixed;
       inset: 0;
-      height: 100vh;
-      width: 100vw;
+      height: 100%;
+      width: 100%;
     }
 
     /* =========================================================
@@ -126,6 +126,7 @@ html, body { height: 100%; margin: 0; padding: 0; }
       filter: none !important;
       opacity: 1 !important;
     }
+    body.night { background: #1a1a2e; }
 
     /* ---------- Side panel content ---------- */
     .legend {
