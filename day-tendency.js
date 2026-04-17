@@ -55,6 +55,8 @@
     benchmarkCache: new Map(),
     benchmarkCacheMonthKey: null,
     frameRenderDebounceTimer: null,
+    benchmarkFailureCount: 0,
+    lastBenchmarkFailureAt: 0,
   };
 
   function ensureDayTendencyStyles() {
@@ -753,8 +755,7 @@
     const root = ensureDayTendencyRoot();
     if (!root) return;
     if (STATE.score) STATE.score.textContent = '--';
-    const hasGpsFix = !!STATE.hasInitialGpsFix;
-    if (STATE.band) STATE.band.textContent = hasGpsFix ? 'Waiting...' : 'Locating...';
+    if (STATE.band) STATE.band.textContent = 'Unavailable';
     if (STATE.marker) STATE.marker.style.bottom = '50%';
     const borough = String(localDerived?.borough || '').trim();
     if (STATE.borough) {
@@ -766,11 +767,9 @@
         STATE.borough.hidden = true;
       }
     }
-    const title = hasGpsFix
-      ? 'Month benchmark unavailable; waiting to retry.'
-      : 'Waiting for active month benchmark comparison data.';
+    const title = 'Month benchmark unavailable; retrying benchmark fetch.';
     root.title = title;
-    root.setAttribute('aria-label', title);
+    root.setAttribute('aria-label', 'Month benchmark unavailable, retrying fetch.');
     root.hidden = false;
     positionDayTendencyRoot();
   }
@@ -836,6 +835,8 @@
         });
         const compared = buildBenchmarkComparedPayload(localDerived, benchmark);
         if (compared) {
+          STATE.benchmarkFailureCount = 0;
+          STATE.lastBenchmarkFailureAt = 0;
           payload = normalizeDayTendencyPayload(compared.payload);
           frameContext = compared.frameContext;
           advancedContext = compared.advancedContext;
@@ -854,8 +855,12 @@
     } catch (error) {
       if (abortController.signal.aborted || requestSeq !== STATE.requestSeq) return;
       hadError = true;
+      STATE.benchmarkFailureCount = Number(STATE.benchmarkFailureCount || 0) + 1;
+      STATE.lastBenchmarkFailureAt = Date.now();
       publishDayTendencyState({ payload: null, frameContext: null, advancedContext: null, route: null });
-      applyBenchmarkUnavailableState(localDerived);
+      if (STATE.benchmarkFailureCount >= 2) applyBenchmarkUnavailableState(localDerived);
+      else if (localDerived) applyBenchmarkWaitingState();
+      else applyNoZoneResolvedState();
     } finally {
       if (requestSeq === STATE.activeRequestSeq) {
         STATE.isRefreshing = false;
@@ -999,6 +1004,8 @@
       hasRenderedRealPayload: !!STATE.hasRenderedRealPayload,
       lastRequestedFrameTime: STATE.lastRequestedFrameTime || null,
       lastFetchRoute: STATE.lastFetchRoute || null,
+      benchmarkFailureCount: Number(STATE.benchmarkFailureCount || 0),
+      lastBenchmarkFailureAt: STATE.lastBenchmarkFailureAt || 0,
       benchmarkCacheMonthKey: STATE.benchmarkCacheMonthKey || null,
       benchmarkCacheSize: Number(STATE.benchmarkCache?.size || 0),
       hasRoot: !!STATE.root,
