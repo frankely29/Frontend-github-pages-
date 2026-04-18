@@ -1627,6 +1627,12 @@
   }
   function renderAdminTests(container, _payload, helpers) {
     const c = helpers?.components || window.AdminComponents;
+    const AUTO_RUN_SECTION_ID = 'adminAutoRunResultsMount';
+    const autoRunState = {
+      loading: false,
+      error: '',
+      data: null,
+    };
     const resultState = {};
     const rebuildState = {
       status: 'idle',
@@ -1672,6 +1678,7 @@
     `).join('');
 
     container.innerHTML = `
+      <div id="${AUTO_RUN_SECTION_ID}"></div>
       <div id="adminSyntheticLoadMount"></div>
       <div class="adminSection">
         <div class="adminSectionHead wrap">
@@ -1835,6 +1842,139 @@
     });
 
     paintRebuildStatus();
+
+    function renderAutoRunSection() {
+      const mount = container.querySelector(`#${AUTO_RUN_SECTION_ID}`);
+      if (!mount) return;
+
+      if (autoRunState.loading) {
+        mount.innerHTML = `
+          <section class="adminSection">
+            <div class="adminSectionHead wrap">
+              <h4>Auto-Run Tests (after redeploy)</h4>
+              <button type="button" class="adminBtn" id="adminAutoRunRefreshBtn" disabled>Loading...</button>
+            </div>
+            <div class="adminMuted">Loading auto-run results...</div>
+          </section>
+        `;
+        return;
+      }
+
+      if (autoRunState.error) {
+        mount.innerHTML = `
+          <section class="adminSection">
+            <div class="adminSectionHead wrap">
+              <h4>Auto-Run Tests (after redeploy)</h4>
+              <button type="button" class="adminBtn" id="adminAutoRunRefreshBtn">Refresh Auto Results</button>
+            </div>
+            <div class="adminError">${c.esc(autoRunState.error)}</div>
+          </section>
+        `;
+        attachAutoRunHandlers();
+        return;
+      }
+
+      const data = autoRunState.data || {};
+      const items = Array.isArray(data.items) ? data.items : [];
+      const totalCount = Number(data.total_count || 0);
+      const failCount = Number(data.fail_count || 0);
+      const ranAtUnix = Number(data.ran_at_unix || 0);
+      const ranAtLabel = ranAtUnix > 0
+        ? new Date(ranAtUnix * 1000).toLocaleString()
+        : 'Never (auto-run has not executed yet in this process)';
+      const buildId = data.backend_build_id ? String(data.backend_build_id) : '—';
+
+      const overallTone = (totalCount === 0)
+        ? 'warn'
+        : (failCount === 0 ? 'yes' : 'no');
+      const overallLabel = (totalCount === 0)
+        ? 'Pending'
+        : (failCount === 0 ? `All ${totalCount} passed` : `${failCount} of ${totalCount} failed`);
+
+      const cards = items.map((item) => {
+        const status = item.ok ? 'pass' : 'fail';
+        const badge = c.statusBadge
+          ? c.statusBadge(status)
+          : c.badge(item.ok ? 'Pass' : 'Fail', item.ok ? 'yes' : 'no');
+        const label = c.esc(item.label || item.key || 'Unknown test');
+        const summary = c.esc(item.summary || '');
+        const checkedAt = c.esc(item.checked_at || '');
+        const elapsed = Number(item.elapsed_ms || 0);
+        const detailsJson = JSON.stringify(item.details || {}, null, 2);
+        const errorText = item.error ? String(item.error) : '';
+
+        const failDetailsHtml = item.ok
+          ? ''
+          : c.collapsible(
+              'Why it failed',
+              `<pre class="adminPre">${c.esc(
+                (errorText ? `Error: ${errorText}
+
+` : '') + detailsJson
+              )}</pre>`,
+              'adminAutoRunFailDetails'
+            );
+
+        return `
+          <article class="adminUserCard adminTestCard" data-auto-run-key="${c.esc(item.key || '')}">
+            <div class="adminRowBetween">
+              <strong>${label}</strong>
+              ${badge}
+            </div>
+            <div class="adminMuted">${summary || '&nbsp;'}</div>
+            <div class="adminMuted">Checked at: ${checkedAt} • Took ${elapsed} ms</div>
+            ${failDetailsHtml}
+          </article>
+        `;
+      }).join('');
+
+      mount.innerHTML = `
+        <section class="adminSection">
+          <div class="adminSectionHead wrap">
+            <div>
+              <h4>Auto-Run Tests (after redeploy)</h4>
+              <div class="adminMuted">Ran automatically at backend startup. Module-memory only; resets on redeploy.</div>
+            </div>
+            ${c.badge ? c.badge(overallLabel, overallTone) : ''}
+          </div>
+          <div class="adminMuted">Last run: ${c.esc(ranAtLabel)} • Build: ${c.esc(buildId)}</div>
+          <div class="adminRow wrap" style="margin-top:8px">
+            <button type="button" class="adminBtn" id="adminAutoRunRefreshBtn">Refresh Auto Results</button>
+          </div>
+          <div class="adminList" style="margin-top:12px">
+            ${cards || '<div class="adminMuted">No auto-run results yet. Redeploy the backend or wait for startup to complete.</div>'}
+          </div>
+        </section>
+      `;
+      attachAutoRunHandlers();
+    }
+
+    function attachAutoRunHandlers() {
+      const refreshBtn = container.querySelector('#adminAutoRunRefreshBtn');
+      if (refreshBtn) {
+        refreshBtn.addEventListener('click', () => fetchAutoRunResults());
+      }
+    }
+
+    async function fetchAutoRunResults() {
+      autoRunState.loading = true;
+      autoRunState.error = '';
+      renderAutoRunSection();
+      try {
+        const data = await helpers.request('/admin/tests/auto_run_results');
+        autoRunState.data = data || {};
+        autoRunState.error = '';
+      } catch (error) {
+        autoRunState.error = error?.message || 'Unable to load auto-run results.';
+        autoRunState.data = null;
+      } finally {
+        autoRunState.loading = false;
+        renderAutoRunSection();
+      }
+    }
+
+    // Kick off initial fetch when Tests tab opens.
+    fetchAutoRunResults();
   }
 
   window.AdminTests = { renderAdminTests };
