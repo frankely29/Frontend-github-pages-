@@ -129,6 +129,7 @@
       "./app.part2.js",
       "./app.part9.js",
       "./app.part10.js",
+      "./subscription.paywall.js",
       "./app.part11.js",
       "./app.part14.js",
       "./app.part15.js",
@@ -198,6 +199,44 @@
       </div>
     </div>
   </div>
+
+  <!-- STAGE 3: Paywall overlay. Hidden by default. Shown when HTTP 402 is received
+       from any authenticated backend call. DORMANT until Stage 4B flips ENFORCE_TRIAL=true. -->
+  <div id="paywallOverlay" class="paywallOverlay" aria-hidden="true" role="dialog" aria-labelledby="paywallTitle">
+    <div class="paywallCard">
+      <div class="paywallHead" id="paywallTitle">Team Joseo Map — Subscribe to continue</div>
+      <div class="paywallBody">
+        <p class="paywallMessage" data-paywall-message>
+          Your Team Joseo Map access requires an active subscription.
+        </p>
+        <ul class="paywallBenefits">
+          <li>Live hotspot map with real-time demand signals</li>
+          <li>Day-tendency scoring for every neighborhood</li>
+          <li>Driver community + chat + leaderboard</li>
+          <li>NYC-verified TLC data pipeline</li>
+        </ul>
+        <div class="paywallPrice">$8 / week</div>
+        <div class="paywallActions">
+          <button type="button" class="paywallBtn paywallBtnPrimary" data-paywall-checkout-btn>
+            Subscribe ($8/week)
+          </button>
+          <button type="button" class="paywallBtn paywallBtnSecondary" data-paywall-portal-btn>
+            Manage subscription
+          </button>
+        </div>
+        <div class="paywallFooter">
+          <span>Secure checkout by Paddle • Cancel anytime</span>
+          <button type="button" class="paywallBtnDismiss" data-paywall-dismiss-btn aria-label="Close">
+            &times;
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- STAGE 3: Trial countdown pill. Shown when user is signed-in on an active trial.
+       Hidden for paid users, comped users, admins, signed-out users, expired users. -->
+  <div id="trialCountdownPill" class="trialCountdownPill" hidden aria-hidden="true"></div>
 
   <div id="panelColors" class="sidePanel" aria-label="Score legend">
     <h3 class="panelTitle">Team Joseo Score Colors</h3>

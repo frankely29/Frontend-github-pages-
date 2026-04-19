@@ -2509,3 +2509,189 @@ html, body { height: 100%; margin: 0; padding: 0; background: #e5e5e5; }
 .aiAssistantSeverity--caution{ color:#b45309; }
 .aiAssistantSeverity--move{ color:#b91c1c; }
 .aiAssistantSeverity--info{ color:#1d4ed8; }
+
+
+/* =========================================================
+   STAGE 3: PAYWALL OVERLAY (signed-in, unpaid)
+   Separate from .lockedOverlay which is for signed-out users.
+   DORMANT until ENFORCE_TRIAL=true (Stage 4B flip).
+   ========================================================= */
+.paywallOverlay{
+  position: fixed;
+  inset: 0;
+  z-index: 2100;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.52);
+  padding: 16px;
+  padding-top: calc(16px + env(safe-area-inset-top));
+  padding-bottom: calc(16px + env(safe-area-inset-bottom));
+  font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
+}
+.paywallOverlay.show{ display: flex; }
+
+.paywallCard{
+  width: min(480px, 96vw);
+  background: #0f172a;
+  color: #f1f5f9;
+  border-radius: 18px;
+  box-shadow: 0 24px 60px rgba(0,0,0,0.45);
+  border: 1px solid rgba(255,255,255,0.12);
+  overflow: hidden;
+}
+
+.paywallHead{
+  padding: 16px 18px;
+  border-bottom: 1px solid rgba(255,255,255,0.12);
+  font-weight: 900;
+  font-size: 16px;
+  color: #f8fafc;
+}
+
+.paywallBody{
+  padding: 16px 18px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #e2e8f0;
+}
+
+.paywallMessage{
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.paywallBenefits{
+  list-style: none;
+  padding: 0;
+  margin: 0 0 16px 0;
+  font-size: 13px;
+}
+
+.paywallBenefits li{
+  padding: 6px 0 6px 22px;
+  position: relative;
+}
+
+.paywallBenefits li::before{
+  content: "✓";
+  position: absolute;
+  left: 0;
+  color: #60a5fa;
+  font-weight: 900;
+}
+
+.paywallPrice{
+  font-size: 22px;
+  font-weight: 900;
+  color: #60a5fa;
+  text-align: center;
+  margin: 14px 0;
+}
+
+.paywallActions{
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.paywallBtn{
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: none;
+  font-size: 14px;
+  font-weight: 900;
+  cursor: pointer;
+  transition: transform 60ms ease, opacity 120ms ease;
+}
+
+.paywallBtn:active{
+  transform: scale(0.98);
+}
+
+.paywallBtn:disabled{
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.paywallBtnPrimary{
+  background: #3b82f6;
+  color: white;
+}
+
+.paywallBtnPrimary:hover:not(:disabled){
+  background: #2563eb;
+}
+
+.paywallBtnSecondary{
+  background: rgba(255,255,255,0.08);
+  color: #e2e8f0;
+  border: 1px solid rgba(255,255,255,0.15);
+}
+
+.paywallBtnSecondary:hover:not(:disabled){
+  background: rgba(255,255,255,0.14);
+}
+
+.paywallFooter{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.paywallBtnDismiss{
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 20px;
+  cursor: pointer;
+  padding: 0 8px;
+  line-height: 1;
+}
+
+.paywallBtnDismiss:hover{
+  color: #f1f5f9;
+}
+
+/* =========================================================
+   STAGE 3: TRIAL COUNTDOWN PILL
+   Shown in a dock-adjacent position for users on active trials.
+   ========================================================= */
+.trialCountdownPill{
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 12px);
+  right: 12px;
+  z-index: 1800;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(30, 41, 59, 0.88);
+  color: #e2e8f0;
+  font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial;
+  font-size: 11px;
+  font-weight: 900;
+  border: 1px solid rgba(255,255,255,0.14);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+  pointer-events: none;
+}
+
+.trialCountdownPill.warning{
+  background: rgba(217, 119, 6, 0.92);
+  color: white;
+}
+
+.trialCountdownPill.urgent{
+  background: rgba(220, 38, 38, 0.92);
+  color: white;
+  animation: trialUrgentPulse 2s ease-in-out infinite;
+}
+
+@keyframes trialUrgentPulse{
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.72; }
+}
