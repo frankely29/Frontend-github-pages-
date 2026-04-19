@@ -484,6 +484,19 @@ function shouldBypassBrowserCache(url) {
   return /\/presence\/|\/events\/pickups\/recent|\/chat\/|\/auth\/|\/me(\b|\/)/.test(text);
 }
 
+function getCommunityAuthHeaders() {
+  try {
+    if (FrontendRuntime?.getToken && FrontendRuntime?.authHeaders) {
+      const token = FrontendRuntime.getToken();
+      return token ? FrontendRuntime.authHeaders(token) : {};
+    }
+    const token = (typeof localStorage !== "undefined") ? (localStorage.getItem("community_token_v1") || "") : "";
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  } catch (_) {
+    return {};
+  }
+}
+
 async function fetchJSON(url, opts = {}) {
   if (FrontendRuntime?.fetchJSON) return FrontendRuntime.fetchJSON(url, opts);
   const fetchOpts = { mode: "cors", ...opts };
@@ -2389,7 +2402,11 @@ async function fetchFrameData(idx, { priority = "active", force = false } = {}) 
   const state = { controller, priority, promise: null };
   if (priority === "active") frameLoadAbortController = controller;
   frontendPerfStats.frameCacheMisses += 1;
-  state.promise = fetchJSON(`${RAILWAY_BASE}${buildFramePathWithMonthKey(normalizedIdx)}`, { signal: controller.signal, cache: force ? "reload" : undefined })
+  state.promise = fetchJSON(`${RAILWAY_BASE}${buildFramePathWithMonthKey(normalizedIdx)}`, {
+    signal: controller.signal,
+    cache: force ? "reload" : undefined,
+    headers: getCommunityAuthHeaders(),
+  })
     .then((frame) => {
       if (isPreparingMonthPayload(frame)) return frame;
       return rememberFrame(normalizedIdx, frame);
@@ -2438,7 +2455,10 @@ async function fetchViewportFrameData(idx, { force = false } = {}) {
   const path = buildViewportFramePathWithMonthKey(idx);
   if (!path) return null;
   try {
-    const payload = await fetchJSON(`${RAILWAY_BASE}${path}`, { cache: force ? "reload" : undefined });
+    const payload = await fetchJSON(`${RAILWAY_BASE}${path}`, {
+      cache: force ? "reload" : undefined,
+      headers: getCommunityAuthHeaders(),
+    });
     if (isPreparingMonthPayload(payload)) {
       applyTimelinePreparingUi(payload);
       const retryMs = Number(payload?.retry_after_sec) > 0
@@ -3673,7 +3693,11 @@ async function loadTimeline({ force = false } = {}) {
     timelineLoadAbortController = new AbortController();
     const payload = canReuseTimeline
       ? timelineCache.data
-      : await fetchJSON(timelineUrl, { signal: timelineLoadAbortController.signal, cache: force ? "reload" : undefined });
+      : await fetchJSON(timelineUrl, {
+        signal: timelineLoadAbortController.signal,
+        cache: force ? "reload" : undefined,
+        headers: getCommunityAuthHeaders(),
+      });
     if (isPreparingMonthPayload(payload)) {
       applyTimelinePreparingUi(payload);
       const retryMs = Number(payload?.retry_after_sec) > 0

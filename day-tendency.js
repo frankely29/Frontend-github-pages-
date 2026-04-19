@@ -412,6 +412,18 @@
     return `${base}${path}`;
   }
 
+  function getDayTendencyAuthHeaders() {
+    const headers = { Accept: 'application/json' };
+    try {
+      const runtimeApi = window.FrontendRuntime || null;
+      const token = runtimeApi?.getToken
+        ? runtimeApi.getToken()
+        : (typeof localStorage !== 'undefined' ? (localStorage.getItem('community_token_v1') || '') : '');
+      if (token) headers.Authorization = `Bearer ${token}`;
+    } catch (_) {}
+    return headers;
+  }
+
   function resolveBenchmarkRow(payload, familyKey) {
     if (!payload || !familyKey) return null;
     const directFamily = String(payload?.benchmark_family || payload?.family_key || '').trim();
@@ -468,7 +480,7 @@
     }
 
     const endpoint = getMonthBenchmarkEndpoint(frameTimeIso);
-    const res = await fetch(endpoint, { method: 'GET', cache: 'no-store' });
+    const res = await fetch(endpoint, { method: 'GET', cache: 'no-store', headers: getDayTendencyAuthHeaders() });
     if (!res.ok) throw new Error(`Month benchmark request failed (${res.status})`);
     const payload = await res.json();
     const row = resolveBenchmarkRow(payload, familyKey);
