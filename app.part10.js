@@ -2020,6 +2020,10 @@ function syncAdminPortalSession() {
 
 window.syncAdminPortalSession = syncAdminPortalSession;
 
+if (typeof window !== "undefined") {
+  window.loadMe = loadMe;
+}
+
 // other drivers markers
 const otherMarkers = new Map(); // user_id -> marker
 const driverMarkerVisualSignature = new Map();
@@ -2336,6 +2340,13 @@ function clearAuth() {
   me = null;
   localStorage.removeItem(LS_TOKEN);
   localStorage.removeItem("community_token");
+  try {
+    if (typeof window !== "undefined" && window.dispatchEvent) {
+      window.dispatchEvent(new CustomEvent("tlc:auth-state-changed", {
+        detail: { me: null, signedIn: false },
+      }));
+    }
+  } catch (_) {}
   syncCommunityIdentityGlobals();
   // Reset chat state if a new chat implementation exists.
   if (typeof window !== "undefined") {
@@ -2388,6 +2399,13 @@ async function loadMe() {
     syncGhostUI();
     refreshNavNameLabel();
     syncAdminPortalSession();
+    try {
+      if (typeof window !== "undefined" && window.dispatchEvent) {
+        window.dispatchEvent(new CustomEvent("tlc:auth-state-changed", {
+          detail: { me, signedIn: !!(communityToken && me) },
+        }));
+      }
+    } catch (_) {}
     return me;
   } catch (e) {
     console.warn("/me failed:", e);
@@ -2418,6 +2436,13 @@ async function loadMe() {
     refreshNavNameLabel();
     syncGhostUI();
     syncAdminPortalSession();
+    try {
+      if (typeof window !== "undefined" && window.dispatchEvent) {
+        window.dispatchEvent(new CustomEvent("tlc:auth-state-changed", {
+          detail: { me, signedIn: !!(communityToken && me) },
+        }));
+      }
+    } catch (_) {}
     return me;
   }
 }

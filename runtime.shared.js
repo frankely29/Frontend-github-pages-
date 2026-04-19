@@ -41,7 +41,7 @@
 
   function shouldBypassBrowserCache(urlOrPath) {
     const text = String(urlOrPath || '');
-    return /\/(presence\/|events\/pickups\/recent|chat\/|auth\/|me(\b|\/)|day_tendency\/(today|frame_context)|admin\/)/.test(text);
+    return /\/(presence\/|events\/pickups\/recent|chat\/|auth\/|me(\b|\/)|day_tendency\/(today|frame_context)|admin\/|subscription\/)/.test(text);
   }
 
   function getToken(storageKey = 'community_token_v1') {
@@ -103,6 +103,26 @@
       const text = await res.text();
       if (!res.ok) {
         const payload = parsePayload(text);
+
+        if (res.status === 402) {
+          try {
+            if (typeof window !== 'undefined' && window.dispatchEvent) {
+              const detail = {
+                status: 402,
+                url: absoluteUrl,
+                payload,
+                detail: payload?.detail || null,
+                reason: (payload?.detail && typeof payload.detail === 'object' ? payload.detail.reason : null)
+                  || payload?.reason
+                  || null,
+              };
+              window.dispatchEvent(new CustomEvent('tlc:payment-required', { detail }));
+            }
+          } catch (_) {
+            // Never let event dispatch break the original error flow.
+          }
+        }
+
         const message = payload?.detail?.detail || payload?.detail?.message || payload?.message || `${res.status} ${res.statusText}`;
         throw assignErrorMeta(new Error(String(message || 'Request failed')), {
           status: res.status,
