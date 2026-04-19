@@ -1586,6 +1586,20 @@
     return "Hold OK";
   }
 
+  function getAssistantAuthHeaders(existingHeaders = {}) {
+    try {
+      const runtimeApi = window.FrontendRuntime || null;
+      if (runtimeApi?.getToken && runtimeApi?.authHeaders) {
+        const token = runtimeApi.getToken();
+        return token ? { ...existingHeaders, ...runtimeApi.authHeaders(token) } : { ...existingHeaders };
+      }
+      const token = (typeof localStorage !== "undefined") ? (localStorage.getItem("community_token_v1") || "") : "";
+      return token ? { ...existingHeaders, Authorization: `Bearer ${token}` } : { ...existingHeaders };
+    } catch (_) {
+      return { ...existingHeaders };
+    }
+  }
+
   async function fetchAssistantOutlook(frameTime, locationIds) {
     const requestKey = buildOutlookRequestKey(frameTime, locationIds);
     if (!frameTime || !Array.isArray(locationIds) || !locationIds.length) {
@@ -1612,7 +1626,11 @@
       const apiBase = typeof window.FrontendRuntime?.resolveApiBase === "function" ? String(window.FrontendRuntime.resolveApiBase() || "") : "";
       const path = `/assistant/outlook?frame_time=${encodeURIComponent(frameTime)}&location_ids=${encodedIds}`;
       const url = apiBase ? `${apiBase}${path}` : path;
-      const payload = await window.TlcMapUiInternals?.fetchJSON?.(url, { signal: controller.signal, cache: "no-store" });
+      const payload = await window.TlcMapUiInternals?.fetchJSON?.(url, {
+        signal: controller.signal,
+        cache: "no-store",
+        headers: getAssistantAuthHeaders(),
+      });
       if (token !== state.outlookRequestToken) return null;
       state.outlookCache[requestKey] = payload || {};
       state.outlookCacheKey = requestKey;

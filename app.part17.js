@@ -36,6 +36,19 @@
   const modeModule = window.TlcModeModule || {};
   const crowdModule = window.TlcCommunityCrowdingModule || {};
 
+  function getAssistantAuthHeaders(existingHeaders = {}) {
+    try {
+      if (runtime?.getToken && runtime?.authHeaders) {
+        const token = runtime.getToken();
+        return token ? { ...existingHeaders, ...runtime.authHeaders(token) } : { ...existingHeaders };
+      }
+      const token = (typeof localStorage !== "undefined") ? (localStorage.getItem("community_token_v1") || "") : "";
+      return token ? { ...existingHeaders, Authorization: `Bearer ${token}` } : { ...existingHeaders };
+    } catch (_) {
+      return { ...existingHeaders };
+    }
+  }
+
   const recommendLine = internals.getRecommendEl?.() || document.getElementById("recommendLine");
   const dockMount = document.getElementById("aiAssistantWidgetMount");
   let topBadgeResizeObserver = null;
@@ -1841,7 +1854,10 @@
     const url = `${apiBase}/assistant/outlook?frame_time=${encodeURIComponent(frameTime)}&location_ids=${encodeURIComponent([...ids].sort().join(","))}`;
     const fetchPromise = (async () => {
       try {
-        const data = await (internals.fetchJSON?.(url, { signal: ac.signal }) || fetch(url, { signal: ac.signal }).then((r) => r.json()));
+        const data = await (
+          internals.fetchJSON?.(url, { signal: ac.signal, headers: getAssistantAuthHeaders() })
+          || fetch(url, { signal: ac.signal, headers: getAssistantAuthHeaders() }).then((r) => r.json())
+        );
         const payload = data || null;
         state.outlookCache.set(key, payload);
         state.outlookRequestKey = key;
