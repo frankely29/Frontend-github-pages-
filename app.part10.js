@@ -2276,6 +2276,182 @@ if (typeof document !== "undefined") {
   });
 }
 
+// STAGE 5: refresh subscription settings when auth state changes (e.g., after loadMe)
+if (typeof window !== "undefined") {
+  window.addEventListener("tlc:auth-state-changed", () => {
+    try { renderSubscriptionSettings(); } catch (_) {}
+  });
+}
+
+/* =========================================================
+   STAGE 5: Subscription settings panel rendering
+   ========================================================= */
+function formatSubscriptionDate(unixSeconds) {
+  try {
+    const d = new Date(Number(unixSeconds) * 1000);
+    if (Number.isNaN(d.getTime())) return "—";
+    return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  } catch (_) {
+    return "—";
+  }
+}
+
+function renderSubscriptionSettings() {
+  const block = document.getElementById("subscriptionSettingsBlock");
+  if (!block) return;
+
+  const signedIn = !!(authHeaderOK() && me);
+  if (!signedIn) {
+    block.hidden = true;
+    block.setAttribute("aria-hidden", "true");
+    return;
+  }
+
+  const sub = me?.subscription || {};
+  const status = String(sub?.status || "").toLowerCase() || (me?.is_admin ? "admin" : "none");
+  const hasAccess = !!sub?.has_access || !!me?.is_admin;
+
+  const statusEl = document.getElementById("subscriptionStatusValue");
+  const periodRow = document.getElementById("subscriptionPeriodRow");
+  const periodLabel = document.getElementById("subscriptionPeriodLabel");
+  const periodValue = document.getElementById("subscriptionPeriodValue");
+  const trialRow = document.getElementById("subscriptionTrialRow");
+  const trialValue = document.getElementById("subscriptionTrialValue");
+  const actionBtn = document.getElementById("subscriptionActionBtn");
+  const footerNote = document.getElementById("subscriptionFooterNote");
+
+  if (periodRow) periodRow.hidden = true;
+  if (trialRow) trialRow.hidden = true;
+  if (actionBtn) actionBtn.hidden = true;
+  if (footerNote) footerNote.hidden = true;
+
+  let statusLabel = "Unknown";
+  let statusClass = "";
+
+  if (me?.is_admin) {
+    statusLabel = "Admin (full access)";
+    statusClass = "admin";
+  } else if (status === "active") {
+    statusLabel = "Active subscription";
+    statusClass = "active";
+  } else if (status === "comp") {
+    const reason = String(sub?.comp_reason || "");
+    statusLabel = reason.startsWith("grandfathered")
+      ? "Grandfathered (free)"
+      : "Complimentary access";
+    statusClass = "comp";
+  } else if (status === "trial" || status === "none" || status === "null" || !status) {
+    statusLabel = "Free trial";
+    statusClass = "trial";
+  } else if (status === "past_due") {
+    statusLabel = "Payment past due";
+    statusClass = "past_due";
+  } else if (status === "cancelled" || status === "canceled") {
+    statusLabel = hasAccess ? "Cancelled (access until period end)" : "Cancelled";
+    statusClass = "cancelled";
+  } else if (status === "expired") {
+    statusLabel = "Subscription expired";
+    statusClass = "expired";
+  } else {
+    statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
+    statusClass = "unknown";
+  }
+
+  if (statusEl) {
+    statusEl.textContent = statusLabel;
+    statusEl.className = `subscriptionStatusValue ${statusClass}`;
+  }
+
+  const periodEndUnix = Number(sub?.current_period_end || 0);
+  const compUntilUnix = Number(sub?.comp_until || 0);
+  const trialInfo = (window.TlcPaywallModule && window.TlcPaywallModule.getTrialInfo)
+    ? window.TlcPaywallModule.getTrialInfo()
+    : { onTrial: false, daysRemaining: null };
+
+  if (status === "active" && periodEndUnix > 0) {
+    if (periodLabel) periodLabel.textContent = "Next renewal";
+    if (periodValue) periodValue.textContent = formatSubscriptionDate(periodEndUnix);
+    if (periodRow) periodRow.hidden = false;
+  } else if ((status === "cancelled" || status === "canceled") && periodEndUnix > 0 && hasAccess) {
+    if (periodLabel) periodLabel.textContent = "Access until";
+    if (periodValue) periodValue.textContent = formatSubscriptionDate(periodEndUnix);
+    if (periodRow) periodRow.hidden = false;
+  } else if (status === "comp" && compUntilUnix > 0) {
+    if (periodLabel) periodLabel.textContent = "Comp ends";
+    if (periodValue) periodValue.textContent = formatSubscriptionDate(compUntilUnix);
+    if (periodRow) periodRow.hidden = false;
+  } else if (trialInfo.onTrial && trialInfo.daysRemaining !== null) {
+    if (trialValue) {
+      trialValue.textContent = trialInfo.daysRemaining === 0
+        ? "Today"
+        : trialInfo.daysRemaining === 1
+          ? "In 1 day"
+          : `In ${trialInfo.daysRemaining} days`;
+      trialValue.classList.toggle("urgent", trialInfo.daysRemaining <= 1);
+      trialValue.classList.toggle("warning", trialInfo.daysRemaining > 1 && trialInfo.daysRemaining <= 3);
+    }
+    if (trialRow) trialRow.hidden = false;
+  }
+
+  let actionLabel = "";
+  let actionHandler = null;
+
+  if (me?.is_admin) {
+    // Admins don't need to subscribe/manage.
+  } else if (status === "active") {
+    actionLabel = "Manage subscription";
+    actionHandler = () => window.TlcPaywallModule?.openPortal?.();
+  } else if (status === "comp") {
+    const daysUntilComp = compUntilUnix > 0
+      ? Math.max(0, Math.floor((compUntilUnix - (Date.now() / 1000)) / 86400))
+      : null;
+    if (daysUntilComp !== null && daysUntilComp <= 7) {
+      actionLabel = "Subscribe to continue after comp";
+      actionHandler = () => window.TlcPaywallModule?.triggerCheckout?.();
+    }
+  } else if (status === "past_due") {
+    actionLabel = "Update payment";
+    actionHandler = () => window.TlcPaywallModule?.openPortal?.();
+  } else if (status === "cancelled" || status === "canceled") {
+    actionLabel = "Reactivate";
+    actionHandler = () => window.TlcPaywallModule?.openPortal?.();
+  } else if (status === "expired" || status === "trial" || status === "none" || !status) {
+    actionLabel = "Subscribe ($8/week)";
+    actionHandler = () => window.TlcPaywallModule?.triggerCheckout?.();
+  }
+
+  if (actionBtn && actionLabel && actionHandler) {
+    actionBtn.textContent = actionLabel;
+    actionBtn.hidden = false;
+    if (actionBtn.__tlcHandler) {
+      actionBtn.removeEventListener("click", actionBtn.__tlcHandler);
+    }
+    const newHandler = (ev) => {
+      ev.preventDefault();
+      try { actionHandler(); } catch (err) { console.warn("Subscription action failed:", err); }
+    };
+    actionBtn.addEventListener("click", newHandler);
+    actionBtn.__tlcHandler = newHandler;
+  }
+
+  if (footerNote) {
+    if (status === "past_due") {
+      footerNote.textContent = "Your last payment didn't go through. Update your payment method to keep access.";
+      footerNote.hidden = false;
+    } else if ((status === "cancelled" || status === "canceled") && hasAccess) {
+      footerNote.textContent = "You've cancelled, but you still have access until the end of the paid period.";
+      footerNote.hidden = false;
+    }
+  }
+
+  block.hidden = false;
+  block.setAttribute("aria-hidden", "false");
+}
+
+if (typeof window !== "undefined") {
+  window.renderSubscriptionSettings = renderSubscriptionSettings;
+}
+
 function setAuthUI(signedIn, note) {
   if (btnAuth) btnAuth.textContent = signedIn ? "Sign out" : "Sign in";
   if (communityNote) {
@@ -2333,6 +2509,9 @@ function setAuthUI(signedIn, note) {
   }
 
   maybeSyncProgressionLifecycleForAuthState(signedIn);
+
+  // STAGE 5: refresh subscription settings whenever auth UI is updated
+  try { renderSubscriptionSettings(); } catch (_) {}
 }
 
 function clearAuth() {
