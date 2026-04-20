@@ -1183,6 +1183,7 @@
     if (typeof window.initMapIdentityProfileControls === 'function') {
       window.initMapIdentityProfileControls();
     }
+    try { if (typeof window.renderSubscriptionSettings === 'function') window.renderSubscriptionSettings(); } catch (_) {}
   }
 
   function renderDriverProfileModal() {
@@ -1251,6 +1252,29 @@
         <button class="driverProfileActionBtn" id="driverProfileChangePwdBtn" type="button">Change Password</button>
         <button class="driverProfileActionBtn danger" id="driverProfileDeleteAccountBtn" type="button">Delete Account</button>
         <button class="driverProfileActionBtn" id="driverProfileSignOutBtn" type="button">Sign Out</button>
+      </div>
+      <div class="panelBlock subscriptionSettingsBlock" hidden aria-hidden="true">
+        <div class="subscriptionSettingsHeader">Subscription</div>
+        <div class="subscriptionSettingsBody">
+          <div class="subscriptionStatusRow">
+            <span class="subscriptionStatusLabel">Status</span>
+            <span class="subscriptionStatusValue subscriptionStatusTopValue">—</span>
+          </div>
+          <div class="subscriptionStatusRow subscriptionPeriodRow" hidden>
+            <span class="subscriptionStatusLabel subscriptionPeriodLabel">Next renewal</span>
+            <span class="subscriptionStatusValue subscriptionPeriodValue">—</span>
+          </div>
+          <div class="subscriptionStatusRow subscriptionTrialRow" hidden>
+            <span class="subscriptionStatusLabel">Trial ends</span>
+            <span class="subscriptionStatusValue subscriptionTrialValue">—</span>
+          </div>
+          <div class="subscriptionActions">
+            <button type="button" class="modeBtn subscriptionActionBtn" hidden>
+              Subscribe
+            </button>
+          </div>
+          <div class="subscriptionFooterNote" hidden></div>
+        </div>
       </div>
       <div class="driverProfileSectionTitle">Map identity</div>
       <div class="driverProfileMapIdentity"><div id="profileMapIdentitySection"></div></div>
