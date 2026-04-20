@@ -25,6 +25,7 @@
       "./admin.system.js",
       "./admin.trips.js",
       "./admin.tests.js",
+      "./admin.comps.js",
       "./admin.panel.js",
     ],
   };

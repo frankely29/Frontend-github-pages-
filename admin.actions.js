@@ -32,6 +32,39 @@
       fetchUserDetail(userId) {
         return request(`/admin/users/${encodeURIComponent(userId)}`);
       },
+      grantComp(userId, durationUnit, durationValue, reason) {
+        return request(`/admin/users/${encodeURIComponent(userId)}/comp/grant`, {
+          method: 'POST',
+          body: {
+            duration_unit: String(durationUnit),
+            duration_value: Number(durationValue),
+            reason: String(reason || ''),
+          },
+        });
+      },
+      extendComp(userId, durationUnit, durationValue) {
+        return request(`/admin/users/${encodeURIComponent(userId)}/comp/extend`, {
+          method: 'POST',
+          body: {
+            duration_unit: String(durationUnit),
+            duration_value: Number(durationValue),
+          },
+        });
+      },
+      revokeComp(userId) {
+        return request(`/admin/users/${encodeURIComponent(userId)}/comp/revoke`, {
+          method: 'POST',
+          body: {},
+        });
+      },
+      listComps({ limit = 100, offset = 0, search = '' } = {}) {
+        const params = new URLSearchParams();
+        params.set('limit', String(limit));
+        params.set('offset', String(offset));
+        const trimmed = String(search || '').trim();
+        if (trimmed) params.set('search', trimmed);
+        return request(`/admin/comps?${params.toString()}`);
+      },
     };
   }
 
