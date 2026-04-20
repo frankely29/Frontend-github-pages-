@@ -2297,33 +2297,26 @@ function formatSubscriptionDate(unixSeconds) {
 }
 
 function renderSubscriptionSettings() {
-  const block = document.getElementById("subscriptionSettingsBlock");
-  if (!block) return;
+  const blocks = document.querySelectorAll(".subscriptionSettingsBlock");
+  if (!blocks || !blocks.length) return;
 
   const signedIn = !!(authHeaderOK() && me);
   if (!signedIn) {
-    block.hidden = true;
-    block.setAttribute("aria-hidden", "true");
+    blocks.forEach((block) => {
+      block.hidden = true;
+      block.setAttribute("aria-hidden", "true");
+    });
     return;
   }
 
   const sub = me?.subscription || {};
   const status = String(sub?.status || "").toLowerCase() || (me?.is_admin ? "admin" : "none");
   const hasAccess = !!sub?.has_access || !!me?.is_admin;
-
-  const statusEl = document.getElementById("subscriptionStatusValue");
-  const periodRow = document.getElementById("subscriptionPeriodRow");
-  const periodLabel = document.getElementById("subscriptionPeriodLabel");
-  const periodValue = document.getElementById("subscriptionPeriodValue");
-  const trialRow = document.getElementById("subscriptionTrialRow");
-  const trialValue = document.getElementById("subscriptionTrialValue");
-  const actionBtn = document.getElementById("subscriptionActionBtn");
-  const footerNote = document.getElementById("subscriptionFooterNote");
-
-  if (periodRow) periodRow.hidden = true;
-  if (trialRow) trialRow.hidden = true;
-  if (actionBtn) actionBtn.hidden = true;
-  if (footerNote) footerNote.hidden = true;
+  const periodEndUnix = Number(sub?.current_period_end || 0);
+  const compUntilUnix = Number(sub?.comp_until || 0);
+  const trialInfo = (window.TlcPaywallModule && window.TlcPaywallModule.getTrialInfo)
+    ? window.TlcPaywallModule.getTrialInfo()
+    : { onTrial: false, daysRemaining: null };
 
   let statusLabel = "Unknown";
   let statusClass = "";
@@ -2357,42 +2350,6 @@ function renderSubscriptionSettings() {
     statusClass = "unknown";
   }
 
-  if (statusEl) {
-    statusEl.textContent = statusLabel;
-    statusEl.className = `subscriptionStatusValue ${statusClass}`;
-  }
-
-  const periodEndUnix = Number(sub?.current_period_end || 0);
-  const compUntilUnix = Number(sub?.comp_until || 0);
-  const trialInfo = (window.TlcPaywallModule && window.TlcPaywallModule.getTrialInfo)
-    ? window.TlcPaywallModule.getTrialInfo()
-    : { onTrial: false, daysRemaining: null };
-
-  if (status === "active" && periodEndUnix > 0) {
-    if (periodLabel) periodLabel.textContent = "Next renewal";
-    if (periodValue) periodValue.textContent = formatSubscriptionDate(periodEndUnix);
-    if (periodRow) periodRow.hidden = false;
-  } else if ((status === "cancelled" || status === "canceled") && periodEndUnix > 0 && hasAccess) {
-    if (periodLabel) periodLabel.textContent = "Access until";
-    if (periodValue) periodValue.textContent = formatSubscriptionDate(periodEndUnix);
-    if (periodRow) periodRow.hidden = false;
-  } else if (status === "comp" && compUntilUnix > 0) {
-    if (periodLabel) periodLabel.textContent = "Comp ends";
-    if (periodValue) periodValue.textContent = formatSubscriptionDate(compUntilUnix);
-    if (periodRow) periodRow.hidden = false;
-  } else if (trialInfo.onTrial && trialInfo.daysRemaining !== null) {
-    if (trialValue) {
-      trialValue.textContent = trialInfo.daysRemaining === 0
-        ? "Today"
-        : trialInfo.daysRemaining === 1
-          ? "In 1 day"
-          : `In ${trialInfo.daysRemaining} days`;
-      trialValue.classList.toggle("urgent", trialInfo.daysRemaining <= 1);
-      trialValue.classList.toggle("warning", trialInfo.daysRemaining > 1 && trialInfo.daysRemaining <= 3);
-    }
-    if (trialRow) trialRow.hidden = false;
-  }
-
   let actionLabel = "";
   let actionHandler = null;
 
@@ -2420,33 +2377,80 @@ function renderSubscriptionSettings() {
     actionHandler = () => window.TlcPaywallModule?.triggerCheckout?.();
   }
 
-  if (actionBtn && actionLabel && actionHandler) {
-    actionBtn.textContent = actionLabel;
-    actionBtn.hidden = false;
-    if (actionBtn.__tlcHandler) {
-      actionBtn.removeEventListener("click", actionBtn.__tlcHandler);
-    }
-    const newHandler = (ev) => {
-      ev.preventDefault();
-      try { actionHandler(); } catch (err) { console.warn("Subscription action failed:", err); }
-    };
-    actionBtn.addEventListener("click", newHandler);
-    actionBtn.__tlcHandler = newHandler;
-  }
+  blocks.forEach((block) => {
+    const statusEl = block.querySelector(".subscriptionStatusTopValue");
+    const periodRow = block.querySelector(".subscriptionPeriodRow");
+    const periodLabel = block.querySelector(".subscriptionPeriodLabel");
+    const periodValue = block.querySelector(".subscriptionPeriodValue");
+    const trialRow = block.querySelector(".subscriptionTrialRow");
+    const trialValue = block.querySelector(".subscriptionTrialValue");
+    const actionBtn = block.querySelector(".subscriptionActionBtn");
+    const footerNote = block.querySelector(".subscriptionFooterNote");
 
-  if (footerNote) {
-    if (status === "past_due") {
-      footerNote.textContent = "Your last payment didn't go through. Update your payment method to keep access.";
-      footerNote.hidden = false;
-    } else if ((status === "cancelled" || status === "canceled") && hasAccess) {
-      footerNote.textContent = "You've cancelled, but you still have access until the end of the paid period.";
-      footerNote.hidden = false;
-    }
-  }
+    if (periodRow) periodRow.hidden = true;
+    if (trialRow) trialRow.hidden = true;
+    if (actionBtn) actionBtn.hidden = true;
+    if (footerNote) footerNote.hidden = true;
 
-  block.hidden = false;
-  block.setAttribute("aria-hidden", "false");
+    if (statusEl) {
+      statusEl.textContent = statusLabel;
+      statusEl.className = `subscriptionStatusValue subscriptionStatusTopValue ${statusClass}`;
+    }
+
+    if (status === "active" && periodEndUnix > 0) {
+      if (periodLabel) periodLabel.textContent = "Next renewal";
+      if (periodValue) periodValue.textContent = formatSubscriptionDate(periodEndUnix);
+      if (periodRow) periodRow.hidden = false;
+    } else if ((status === "cancelled" || status === "canceled") && periodEndUnix > 0 && hasAccess) {
+      if (periodLabel) periodLabel.textContent = "Access until";
+      if (periodValue) periodValue.textContent = formatSubscriptionDate(periodEndUnix);
+      if (periodRow) periodRow.hidden = false;
+    } else if (status === "comp" && compUntilUnix > 0) {
+      if (periodLabel) periodLabel.textContent = "Comp ends";
+      if (periodValue) periodValue.textContent = formatSubscriptionDate(compUntilUnix);
+      if (periodRow) periodRow.hidden = false;
+    } else if (trialInfo.onTrial && trialInfo.daysRemaining !== null) {
+      if (trialValue) {
+        trialValue.textContent = trialInfo.daysRemaining === 0
+          ? "Today"
+          : trialInfo.daysRemaining === 1
+            ? "In 1 day"
+            : `In ${trialInfo.daysRemaining} days`;
+        trialValue.classList.toggle("urgent", trialInfo.daysRemaining <= 1);
+        trialValue.classList.toggle("warning", trialInfo.daysRemaining > 1 && trialInfo.daysRemaining <= 3);
+      }
+      if (trialRow) trialRow.hidden = false;
+    }
+
+    if (actionBtn && actionLabel && actionHandler) {
+      actionBtn.textContent = actionLabel;
+      actionBtn.hidden = false;
+      if (actionBtn.__tlcHandler) {
+        actionBtn.removeEventListener("click", actionBtn.__tlcHandler);
+      }
+      const newHandler = (ev) => {
+        ev.preventDefault();
+        try { actionHandler(); } catch (err) { console.warn("Subscription action failed:", err); }
+      };
+      actionBtn.addEventListener("click", newHandler);
+      actionBtn.__tlcHandler = newHandler;
+    }
+
+    if (footerNote) {
+      if (status === "past_due") {
+        footerNote.textContent = "Your last payment didn't go through. Update your payment method to keep access.";
+        footerNote.hidden = false;
+      } else if ((status === "cancelled" || status === "canceled") && hasAccess) {
+        footerNote.textContent = "You've cancelled, but you still have access until the end of the paid period.";
+        footerNote.hidden = false;
+      }
+    }
+
+    block.hidden = false;
+    block.setAttribute("aria-hidden", "false");
+  });
 }
+
 
 if (typeof window !== "undefined") {
   window.renderSubscriptionSettings = renderSubscriptionSettings;
