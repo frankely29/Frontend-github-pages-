@@ -19,6 +19,39 @@
     return !!value;
   }
 
+  function paddleDashboardUrl(customerId) {
+    const id = String(customerId || '').trim();
+    if (!id) return '';
+    // Paddle environment detection: runtime config first, fall back to production.
+    // Production: vendors.paddle.com
+    // Sandbox: sandbox-vendors.paddle.com
+    const env = String(window.__TLC_RUNTIME_CONFIG__?.paddleEnvironment || 'production').toLowerCase();
+    const base = env === 'sandbox'
+      ? 'https://sandbox-vendors.paddle.com'
+      : 'https://vendors.paddle.com';
+    return `${base}/customers/${encodeURIComponent(id)}`;
+  }
+
+  function formatUnixSecondsToDate(unixSeconds, c) {
+    const n = Number(unixSeconds);
+    if (!Number.isFinite(n) || n <= 0) return '—';
+    try {
+      return c.formatDateTime(new Date(n * 1000).toISOString());
+    } catch (_) {
+      return '—';
+    }
+  }
+
+  function subscriptionStatusBadgeTone(status) {
+    const s = String(status || '').toLowerCase();
+    if (s === 'active') return 'yes';
+    if (s === 'trial' || s === 'trialing') return 'muted';
+    if (s === 'past_due') return 'warn';
+    if (s === 'cancelled' || s === 'canceled' || s === 'expired') return 'no';
+    if (s === 'comp') return 'muted';
+    return 'muted';
+  }
+
   function openCompModal({ mode, userId, onDone }) {
     const actions = window.AdminActions?.createAdminActions
       ? null // resolved via helpers in caller
@@ -201,10 +234,42 @@
             </div>
           `;
 
+        const subStatusNormalized = String(record?.subscription_status || '').toLowerCase();
+        const hasPaidSubscriptionState = subStatusNormalized && subStatusNormalized !== 'comp' && subStatusNormalized !== 'none' && subStatusNormalized !== 'null';
+        const paddleCustomerId = record?.subscription_customer_id || '';
+        const paddleSubscriptionId = record?.subscription_id || '';
+        const paddleUrl = paddleCustomerId ? paddleDashboardUrl(paddleCustomerId) : '';
+
+        const paidSubscriptionSectionHtml = hasPaidSubscriptionState
+          ? `
+            <div class="adminPaidSubscriptionSection">
+              <div style="font-weight:700;margin:12px 0 6px;">Paid Subscription</div>
+              <div class="adminRow wrap" style="margin-bottom:6px;">
+                ${c.badge(subStatusNormalized.toUpperCase(), subscriptionStatusBadgeTone(subStatusNormalized))}
+                ${record?.subscription_provider ? c.badge(String(record.subscription_provider).toUpperCase(), 'muted') : ''}
+              </div>
+              <div class="adminKV"><span>Customer ID</span><strong>${c.esc(paddleCustomerId || '—')}</strong></div>
+              <div class="adminKV"><span>Subscription ID</span><strong>${c.esc(paddleSubscriptionId || '—')}</strong></div>
+              <div class="adminKV"><span>Current period end</span><strong>${c.esc(formatUnixSecondsToDate(record?.subscription_current_period_end, c))}</strong></div>
+              <div class="adminKV"><span>Trial expires</span><strong>${c.esc(formatUnixSecondsToDate(record?.trial_expires_at, c))}</strong></div>
+              <div class="adminKV"><span>Last updated</span><strong>${c.esc(formatUnixSecondsToDate(record?.subscription_updated_at, c))}</strong></div>
+              ${paddleUrl ? `
+                <div class="adminControlGrid" style="margin-top:8px;">
+                  <a class="adminBtn" href="${c.esc(paddleUrl)}" target="_blank" rel="noopener">Open in Paddle Dashboard</a>
+                </div>
+                <div class="adminMuted" style="margin-top:6px;font-size:0.85em;">Cancel, refund, and billing history are managed in Paddle.</div>
+              ` : `
+                <div class="adminMuted" style="margin-top:6px;">No Paddle customer ID yet.</div>
+              `}
+            </div>
+          `
+          : '';
+
         target.innerHTML = `
           <div class="adminCard compact">
             ${pickupSummary}
             ${compSectionHtml}
+            ${paidSubscriptionSectionHtml}
             ${c.keyValueRows(record)}
             ${c.collapsible('Raw JSON', `<pre class="adminPre">${c.esc(JSON.stringify(record, null, 2))}</pre>`)}
           </div>
