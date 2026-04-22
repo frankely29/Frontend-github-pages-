@@ -37,6 +37,21 @@
     return fallback;
   }
 
+  function escapeHtml(value) {
+    if (typeof window !== 'undefined' && typeof window.escapeHtml === 'function') {
+      try { return window.escapeHtml(value); } catch (_) {}
+    }
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  function safeHtml(value, fallback = '') {
+    return escapeHtml(toSafeString(value, fallback));
+  }
   function extractPickupErrorMessage(err) {
     const candidates = [
       err?.detail?.detail,
@@ -346,9 +361,15 @@
 
     boardEl.innerHTML = list.map((r) => {
       const state = r.is_voided ? 'VOIDED' : 'ACTIVE';
-      const reason = r.void_reason ? `Reason: ${toSafeString(r.void_reason, 'n/a')}` : '';
-      const delBtn = r.is_voided ? '' : `<button type="button" class="adminBtn" data-pickup-void="${String(r.id)}">Delete Fake Trip</button>`;
-      return `<article class="adminUserCard"><div class="adminRowBetween"><strong>#${String(r.id)} • ${toSafeString(r.display_name, `User ${toSafeString(r.user_id, 'n/a')}`)}</strong><span class="adminPill ${r.is_voided ? 'no' : 'yes'}">${state}</span></div><div class="adminMuted">Zone: ${toSafeString(r.zone_name, toSafeString(r.zone_id, 'n/a'))} • Borough: ${toSafeString(r.borough, 'n/a')}</div><div class="adminMuted">Created: ${toSafeString(r.created_at, 'n/a')} • Guard: ${toSafeString(r.guard_reason, 'n/a')}</div>${reason ? `<div class="adminMuted">${reason}</div>` : ''}<div class="adminRow wrap" style="margin-top:8px">${delBtn}</div></article>`;
+      const nameFallback = `User ${safeHtml(r.user_id, 'n/a')}`;
+      const name = r.display_name ? safeHtml(r.display_name) : nameFallback;
+      const zone = safeHtml(r.zone_name, toSafeString(r.zone_id, 'n/a'));
+      const borough = safeHtml(r.borough, 'n/a');
+      const created = safeHtml(r.created_at, 'n/a');
+      const guard = safeHtml(r.guard_reason, 'n/a');
+      const reason = r.void_reason ? `Reason: ${safeHtml(r.void_reason, 'n/a')}` : '';
+      const delBtn = r.is_voided ? '' : `<button type="button" class="adminBtn" data-pickup-void="${escapeHtml(r.id)}">Delete Fake Trip</button>`;
+      return `<article class="adminUserCard"><div class="adminRowBetween"><strong>#${escapeHtml(r.id)} • ${name}</strong><span class="adminPill ${r.is_voided ? 'no' : 'yes'}">${state}</span></div><div class="adminMuted">Zone: ${zone} • Borough: ${borough}</div><div class="adminMuted">Created: ${created} • Guard: ${guard}</div>${reason ? `<div class="adminMuted">${reason}</div>` : ''}<div class="adminRow wrap" style="margin-top:8px">${delBtn}</div></article>`;
     }).join('');
 
     boardEl.querySelectorAll('[data-pickup-void]').forEach((btn) => {
