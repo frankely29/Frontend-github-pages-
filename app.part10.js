@@ -2312,8 +2312,8 @@ function renderSubscriptionSettings() {
   const sub = me?.subscription || {};
   const status = String(sub?.status || "").toLowerCase() || (me?.is_admin ? "admin" : "none");
   const hasAccess = !!sub?.has_access || !!me?.is_admin;
-  const periodEndUnix = Number(sub?.current_period_end || 0);
-  const compUntilUnix = Number(sub?.comp_until || 0);
+  const periodEndUnix = Number(sub?.subscription_current_period_end || 0);
+  const compUntilUnix = Number(sub?.comp_expires_at || 0);
   const trialInfo = (window.TlcPaywallModule && window.TlcPaywallModule.getTrialInfo)
     ? window.TlcPaywallModule.getTrialInfo()
     : { onTrial: false, daysRemaining: null };
