@@ -517,6 +517,11 @@ async function fetchJSON(url, opts = {}) {
     if (hasParsedJson && isPreparingMonthPayload(parsed)) {
       return parsed;
     }
+    if (res.status === 402 && typeof window !== "undefined" && typeof window.dispatchEvent === "function") {
+      try {
+        window.dispatchEvent(new CustomEvent("tlc:payment-required", { detail: { status: 402, url, payload: parsed } }));
+      } catch (_) {}
+    }
     const err = new Error(`${res.status} ${res.statusText} @ ${url} :: ${text.slice(0, 120)}`);
     err.status = res.status;
     err.url = url;

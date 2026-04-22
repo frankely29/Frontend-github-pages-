@@ -92,6 +92,14 @@
 
     if (res.ok) return payload || {};
 
+    if (res.status === 402 && typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+      try {
+        window.dispatchEvent(new CustomEvent('tlc:payment-required', {
+          detail: { status: 402, url: resolveApiUrl(path), payload },
+        }));
+      } catch (_) {}
+    }
+
     const message =
       toSafeString(payload?.detail?.detail) ||
       toSafeString(payload?.detail?.message) ||
@@ -124,6 +132,13 @@
       }
     }
     if (!res.ok) {
+      if (res.status === 402 && typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+        try {
+          window.dispatchEvent(new CustomEvent('tlc:payment-required', {
+            detail: { status: 402, url: resolveApiUrl(path), payload },
+          }));
+        } catch (_) {}
+      }
       throw createErrorWithMeta(
         toSafeString(payload?.message) || toSafeString(res.statusText) || 'Request failed',
         { status: res.status, payload, code: payload?.code || null, detail: payload?.detail || payload || null }
