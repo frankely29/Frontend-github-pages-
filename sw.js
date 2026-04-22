@@ -37,10 +37,18 @@ const CACHEABLE_ASSET_PATTERN = /\.(js|css|woff2?|ttf|svg|ico|webmanifest)(\?|$)
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(PRECACHE_URLS).catch((err) => {
-        console.warn("SW precache partial failure:", err);
-      });
+    caches.open(CACHE_NAME).then(async (cache) => {
+      // Use per-URL cache.add so one bad URL doesn't zero out the rest of
+      // the precache (cache.addAll is atomic; addAll rejects on any single
+      // failure). This keeps the shell fallback usable even if one asset
+      // is temporarily 404 during a deploy.
+      await Promise.all(
+        PRECACHE_URLS.map((url) =>
+          cache.add(url).catch((err) => {
+            console.warn("SW precache miss for", url, err);
+          })
+        )
+      );
     })
   );
   self.skipWaiting();
@@ -105,8 +113,17 @@ self.addEventListener("fetch", (event) => {
           }
           return response;
         })
-        .catch(() => {
-          return caches.match("/") || caches.match(event.request);
+        .catch(async () => {
+          const shell = await caches.match("/");
+          if (shell) return shell;
+          const exact = await caches.match(event.request);
+          if (exact) return exact;
+          // Final fallback: return a proper Response so respondWith doesn't
+          // resolve to undefined (which would be an opaque network error).
+          return new Response(
+            "Offline — no cached content available. Reconnect to load the app.",
+            { status: 503, headers: { "Content-Type": "text/plain; charset=utf-8" } }
+          );
         })
     );
     return;
