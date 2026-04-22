@@ -20,7 +20,7 @@
 
   function hasActiveSubscription() {
     const sub = getSubscriptionFromMe();
-    return !!(sub && (sub.status === 'active' || sub.status === 'comp' || sub.has_access === true));
+    return !!(sub && (sub.status === 'active' || sub.status === 'comp'));
   }
 
   function getTrialInfo() {
@@ -209,8 +209,13 @@
 
   function handleAuthStateChanged() {
     renderTrialCountdown();
-    if (visible && hasActiveSubscription()) {
-      hide();
+    if (visible) {
+      const meObj = (typeof window !== 'undefined') ? window.me : null;
+      const sub = getSubscriptionFromMe();
+      const hasAnyAccess = !!(meObj?.is_admin) || hasActiveSubscription() || !!(sub && sub.has_access === true);
+      if (hasAnyAccess) {
+        hide();
+      }
     }
   }
 
