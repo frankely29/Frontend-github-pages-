@@ -25,6 +25,13 @@
     return String(Math.max(0, Math.floor(diff / 86400)));
   }
 
+  function daysRemainingLabel(comp) {
+    const value = daysRemaining(comp);
+    if (value === '∞') return 'No expiry';
+    if (value === 'expired') return 'Expired';
+    return `${value} days left`;
+  }
+
   async function loadAndRender(container, helpers, searchText) {
     const c = helpers?.components || window.AdminComponents;
     const actions = helpers?.actions;
@@ -57,7 +64,7 @@
           <article class="adminUserCard" data-comp-user-id="${c.esc(userId)}">
             <div class="adminRowBetween">
               <strong>${c.esc(displayName)}</strong>
-              <span>${c.badge(`${daysRemaining(comp)} days left`, 'muted')}</span>
+              <span>${c.badge(daysRemainingLabel(comp), 'muted')}</span>
             </div>
             <div class="adminMuted">${c.esc(email)} • ID ${c.esc(userId)}</div>
             <div class="adminKV"><span>Reason</span><strong>${c.esc(reason)}</strong></div>
