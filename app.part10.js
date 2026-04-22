@@ -2606,26 +2606,10 @@ async function loadMe() {
       return null;
     }
 
-    const fallbackDisplayName = (localStorage.getItem(LS_DISPLAY_NAME) || "").trim();
-    const fallbackEmail = (localStorage.getItem(LS_EMAIL) || "").trim();
-    me = {
-      ...(me || {}),
-      id: me?.id ?? localStorage.getItem("community_me_id_v1") ?? null,
-      display_name: fallbackDisplayName || me?.display_name || fallbackEmail.split("@")[0] || "Driver",
-      email: me?.email || fallbackEmail || null,
-      is_admin: !!me?.is_admin,
-    };
-    syncCommunityIdentityGlobals();
-    refreshNavNameLabel();
-    syncGhostUI();
-    syncAdminPortalSession();
-    try {
-      if (typeof window !== "undefined" && window.dispatchEvent) {
-        window.dispatchEvent(new CustomEvent("tlc:auth-state-changed", {
-          detail: { me, signedIn: !!(communityToken && me) },
-        }));
-      }
-    } catch (_) {}
+    // Transient /me failure (5xx, network error, non-suspension 403).
+    // Do not synthesize a partial `me` from localStorage — it would lie about
+    // subscription state to paywall consumers. Leave `me` unchanged and let
+    // the next trigger (visibilitychange, user action, periodic retry) refetch.
     return me;
   }
 }
@@ -3862,7 +3846,10 @@ async function bootstrapCommunityModule() {
 if (typeof document !== "undefined") {
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") {
-      if (authHeaderOK()) schedulePickupPoll({ immediate: true });
+      if (authHeaderOK()) {
+        loadMe().catch(() => {});
+        schedulePickupPoll({ immediate: true });
+      }
     } else {
       clearPickupPollTimer();
     }

@@ -106,7 +106,14 @@
     const shouldBypassCache = opts.cache === 'no-store' || /\/(auth|me|chat|presence)\b/.test(String(url || ''));
     const res = await fetch(url, { mode: 'cors', ...(shouldBypassCache ? { cache: 'no-store' } : {}), ...opts });
     const text = await res.text();
-    if (!res.ok) throw new Error(text || `${res.status} ${res.statusText}`);
+    if (!res.ok) {
+      if (res.status === 402 && typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+        try {
+          window.dispatchEvent(new CustomEvent('tlc:payment-required', { detail: { status: 402, url } }));
+        } catch (_) {}
+      }
+      throw new Error(text || `${res.status} ${res.statusText}`);
+    }
     return text ? JSON.parse(text) : {};
   }
 

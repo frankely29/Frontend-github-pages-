@@ -86,6 +86,11 @@
       }
       const response = await fetch(url, { ...opts, signal });
       if (!response.ok) {
+        if (response.status === 402 && typeof window !== "undefined" && typeof window.dispatchEvent === "function") {
+          try {
+            window.dispatchEvent(new CustomEvent("tlc:payment-required", { detail: { status: 402, url } }));
+          } catch (_) {}
+        }
         throw new Error(`Request failed (${response.status})`);
       }
       return await response.json();
