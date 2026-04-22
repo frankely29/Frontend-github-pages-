@@ -309,6 +309,30 @@
     window.addEventListener('tlc:payment-required', handlePaymentRequired);
     window.addEventListener('tlc:auth-state-changed', handleAuthStateChanged);
 
+    // When a page is restored from bfcache (user hit "back" from Paddle
+    // checkout without completing), module-level flags like pendingCheckout
+    // stay true and the Subscribe button is stuck on "Connecting to Paddle…".
+    // Reset in-flight flags and restore the button so the user can retry.
+    window.addEventListener('pageshow', (event) => {
+      if (!event.persisted) return;
+      pendingCheckout = false;
+      pendingPortal = false;
+      const checkoutBtn = document.querySelector('[data-paywall-checkout-btn]');
+      if (checkoutBtn) {
+        checkoutBtn.disabled = false;
+        if (/connecting to paddle/i.test(checkoutBtn.textContent || '')) {
+          checkoutBtn.textContent = 'Subscribe ($8/week)';
+        }
+      }
+      const portalBtn = document.querySelector('[data-paywall-portal-btn]');
+      if (portalBtn) {
+        portalBtn.disabled = false;
+        if (/opening portal/i.test(portalBtn.textContent || '')) {
+          portalBtn.textContent = 'Manage subscription';
+        }
+      }
+    });
+
     const tryWire = () => {
       wireCheckoutButton();
       wirePortalButton();
