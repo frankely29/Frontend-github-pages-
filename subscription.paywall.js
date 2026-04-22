@@ -293,7 +293,9 @@
       btn.addEventListener('click', (ev) => {
         ev.preventDefault();
         const meObj = (typeof window !== 'undefined') ? window.me : null;
-        if (meObj?.is_admin || hasActiveSubscription()) {
+        const sub = getSubscriptionFromMe();
+        const hasAnyAccess = !!(meObj?.is_admin) || hasActiveSubscription() || !!(sub && sub.has_access === true);
+        if (hasAnyAccess) {
           hide();
         }
       });

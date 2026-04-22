@@ -90,6 +90,13 @@
       payload = null;
     }
     if (!res.ok) {
+      if (res.status === 402 && typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+        try {
+          window.dispatchEvent(new CustomEvent('tlc:payment-required', {
+            detail: { status: 402, url: apiUrl(path), payload },
+          }));
+        } catch (_) {}
+      }
       const err = new Error(payload?.detail || payload?.message || text || `${res.status} ${res.statusText}`);
       err.status = res.status;
       err.payload = payload;
