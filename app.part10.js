@@ -2699,8 +2699,12 @@ async function doLogin(email, password, desiredGhostMode) {
   const token = data?.token || data?.access_token || "";
   if (!token) throw new Error("Login success but token missing.");
   communityToken = token;
-  localStorage.setItem(LS_TOKEN, token);
-  localStorage.setItem(LS_EMAIL, email);
+  try {
+    localStorage.setItem(LS_TOKEN, token);
+    localStorage.setItem(LS_EMAIL, email);
+  } catch (e) {
+    console.warn("Failed to persist session to localStorage:", e);
+  }
   seedSelfStateFromAuthResponse(data, email);
   await loadMe();
   syncCommunityIdentityGlobals();
@@ -2721,8 +2725,12 @@ async function doSignup(email, password, desiredGhostMode) {
   const token = data?.token || data?.access_token || "";
   if (!token) throw new Error("Signup success but token missing.");
   communityToken = token;
-  localStorage.setItem(LS_TOKEN, token);
-  localStorage.setItem(LS_EMAIL, email);
+  try {
+    localStorage.setItem(LS_TOKEN, token);
+    localStorage.setItem(LS_EMAIL, email);
+  } catch (e) {
+    console.warn("Failed to persist session to localStorage:", e);
+  }
   seedSelfStateFromAuthResponse(data, email);
   await loadMe();
   syncCommunityIdentityGlobals();
@@ -3218,6 +3226,7 @@ function clusterPresenceByScreenPosition(rows, selfPos) {
 
 function ensurePresenceLiteSourceAndLayers() {
   if (!map || !mapReady) return false;
+  if (typeof map.isStyleLoaded === 'function' && !map.isStyleLoaded()) return false;
   let createdPresenceLiteArtifacts = false;
   if (!map.getSource('presence-lite')) {
     map.addSource('presence-lite', { type: 'geojson', data: emptyGeojson() });
