@@ -2416,8 +2416,8 @@ function renderSubscriptionSettings() {
           : trialInfo.daysRemaining === 1
             ? "In 1 day"
             : `In ${trialInfo.daysRemaining} days`;
-        trialValue.classList.toggle("urgent", trialInfo.daysRemaining <= 1);
-        trialValue.classList.toggle("warning", trialInfo.daysRemaining > 1 && trialInfo.daysRemaining <= 3);
+        trialValue.classList.toggle("urgent", trialInfo.daysRemaining <= 2);
+        trialValue.classList.toggle("warning", trialInfo.daysRemaining > 2 && trialInfo.daysRemaining <= 4);
       }
       if (trialRow) trialRow.hidden = false;
     }

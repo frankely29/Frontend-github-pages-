@@ -1856,7 +1856,15 @@
       try {
         const data = await (
           internals.fetchJSON?.(url, { signal: ac.signal, headers: getAssistantAuthHeaders() })
-          || fetch(url, { signal: ac.signal, headers: getAssistantAuthHeaders() }).then((r) => r.json())
+          || (async () => {
+            const r = await fetch(url, { signal: ac.signal, headers: getAssistantAuthHeaders() });
+            if (r.status === 402 && typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+              try {
+                window.dispatchEvent(new CustomEvent('tlc:payment-required', { detail: { status: 402, url } }));
+              } catch (_) {}
+            }
+            return r.json();
+          })()
         );
         const payload = data || null;
         state.outlookCache.set(key, payload);

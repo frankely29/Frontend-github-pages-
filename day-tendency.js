@@ -481,7 +481,14 @@
 
     const endpoint = getMonthBenchmarkEndpoint(frameTimeIso);
     const res = await fetch(endpoint, { method: 'GET', cache: 'no-store', headers: getDayTendencyAuthHeaders() });
-    if (!res.ok) throw new Error(`Month benchmark request failed (${res.status})`);
+    if (!res.ok) {
+      if (res.status === 402 && typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+        try {
+          window.dispatchEvent(new CustomEvent('tlc:payment-required', { detail: { status: 402, url: endpoint } }));
+        } catch (_) {}
+      }
+      throw new Error(`Month benchmark request failed (${res.status})`);
+    }
     const payload = await res.json();
     const row = resolveBenchmarkRow(payload, familyKey);
     if (!row || !Number.isFinite(Number(row.averageRating))) throw new Error(`Missing month benchmark for family ${familyKey}`);
