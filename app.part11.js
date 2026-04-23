@@ -130,11 +130,15 @@
   }
 
   function persistSpecialModeState() {
-    localStorage.setItem(LS_KEY_BRONX_WASH_HEIGHTS, bronxWashHeightsMode ? "1" : "0");
-    localStorage.setItem(LS_KEY_MANHATTAN, manhattanMode ? "1" : "0");
-    localStorage.setItem(LS_KEY_STATEN, statenIslandMode ? "1" : "0");
-    localStorage.setItem(LS_KEY_QUEENS, queensMode ? "1" : "0");
-    localStorage.setItem(LS_KEY_BROOKLYN, brooklynMode ? "1" : "0");
+    try {
+      localStorage.setItem(LS_KEY_BRONX_WASH_HEIGHTS, bronxWashHeightsMode ? "1" : "0");
+      localStorage.setItem(LS_KEY_MANHATTAN, manhattanMode ? "1" : "0");
+      localStorage.setItem(LS_KEY_STATEN, statenIslandMode ? "1" : "0");
+      localStorage.setItem(LS_KEY_QUEENS, queensMode ? "1" : "0");
+      localStorage.setItem(LS_KEY_BROOKLYN, brooklynMode ? "1" : "0");
+    } catch (e) {
+      console.warn("Failed to persist map-mode state:", e);
+    }
   }
 
   function ensureManhattanButton() {
