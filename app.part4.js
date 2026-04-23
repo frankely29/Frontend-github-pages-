@@ -1085,11 +1085,23 @@
   }
 
   function renderChallengeAvatar(row = {}) {
+    // Render the fallback first so we never need to interpolate HTML-escaped
+    // user data into an inline event handler. An onerror that contained
+    // ${initials} was XSS-prone: the HTML-escape step produces entities like
+    // &#39;, the browser decodes them before handing the attribute to the JS
+    // parser, and a ' in display_name then breaks out of the JS string.
+    // Here the onerror is a fixed string with no interpolated data.
     const initials = escapeHtml((row.display_name || 'D').slice(0, 2).toUpperCase());
-    const fallback = `<span class="gamesUserAvatarFallback" aria-hidden="true" style="display:inline-flex;align-items:center;justify-content:center;width:100%;height:100%;border-radius:999px;background:rgba(148,163,184,.2);color:#e2e8f0;font-size:.72rem;font-weight:700;line-height:1;">${initials}</span>`;
+    const fallback = `<span class="gamesUserAvatarFallback" aria-hidden="true" style="display:inline-flex;position:absolute;inset:0;align-items:center;justify-content:center;border-radius:999px;background:rgba(148,163,184,.2);color:#e2e8f0;font-size:.72rem;font-weight:700;line-height:1;">${initials}</span>`;
     const hasRealAvatar = !!(row.avatar_version || row.avatar_url);
-    if (!hasRealAvatar || !row.avatar_thumb_url) return fallback;
-    return `<img src="${escapeHtml(row.avatar_thumb_url)}" alt="" loading="lazy" onerror="this.onerror=null;this.outerHTML='${fallback.replace(/"/g, '&quot;')}';">`;
+    const wrapperOpen = '<span style="position:relative;display:inline-block;width:28px;height:28px;">';
+    const wrapperClose = '</span>';
+    if (!hasRealAvatar || !row.avatar_thumb_url) {
+      return `${wrapperOpen}${fallback}${wrapperClose}`;
+    }
+    // Fallback sits behind the image. On load error, the image removes itself
+    // (harmless fixed handler, no interpolated data) and the fallback shows.
+    return `${wrapperOpen}${fallback}<img src="${escapeHtml(row.avatar_thumb_url)}" alt="" loading="lazy" style="position:absolute;inset:0;width:100%;height:100%;border-radius:999px;object-fit:cover;" onerror="this.remove()">${wrapperClose}`;
   }
 
   function wireGamesPanel() {

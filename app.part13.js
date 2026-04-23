@@ -2230,7 +2230,9 @@
     const intervalMs = document.visibilityState === "hidden" ? AI_ASSISTANT_HEARTBEAT_MS_HIDDEN : AI_ASSISTANT_HEARTBEAT_MS_VISIBLE;
     if (state.assistantHeartbeatTimer) return;
     state.assistantHeartbeatTimer = setInterval(() => {
-      refresh().catch(() => {});
+      refresh().catch((err) => {
+        console.warn("Assistant heartbeat refresh failed:", err);
+      });
     }, intervalMs);
   }
 
