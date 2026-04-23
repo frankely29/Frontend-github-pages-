@@ -2892,7 +2892,7 @@
   }
 
   function buildRankList(items) {
-    return `<ol class="aiAssistantList">${(items || []).map((it) => `<li>${it.zoneName} (${Math.round(it.visibleRating || 0)})</li>`).join("")}</ol>`;
+    return `<ol class="aiAssistantList">${(items || []).map((it) => `<li>${escapeHtml(it.zoneName || "")} (${Math.round(it.visibleRating || 0)})</li>`).join("")}</ol>`;
   }
 
   function compactTargetWhyLine() {
@@ -2936,23 +2936,28 @@
         ].filter(Boolean).slice(0, 2).join(" • ")}</div>`
       : "";
     const serverSupplementLine = serverGuidance
-      ? `<section class="aiAssistantSection"><strong>Server context (supplemental)</strong><div>${buildServerSecondaryLine(serverGuidance) || "No supplemental message."}</div>${serverGuidance?.targetZone?.name ? `<div>Target zone: ${serverGuidance.targetZone.name}</div>` : ""}${guidanceMetricLine}${guidanceTimingLine}${guidanceStatusLine}</section>`
+      ? `<section class="aiAssistantSection"><strong>Server context (supplemental)</strong><div>${escapeHtml(buildServerSecondaryLine(serverGuidance) || "No supplemental message.")}</div>${serverGuidance?.targetZone?.name ? `<div>Target zone: ${escapeHtml(String(serverGuidance.targetZone.name))}</div>` : ""}${guidanceMetricLine}${guidanceTimingLine}${guidanceStatusLine}</section>`
       : (guidanceStatusLine ? `<section class="aiAssistantSection"><strong>Server context (supplemental)</strong>${guidanceStatusLine}</section>` : "");
     const committedActionText = humanActionLabel(state.committedActionCode);
     const committedReasonText = humanizeAssistantReason(friendlyReasonFromCode(state.committedReasonCode, state.committedReasonText || "—"));
+    // All interpolations of server-sourced text (zone names, borough, summary
+    // strings) are run through escapeHtml. Zone names originate from the
+    // taxi-zones GeoJSON which is admin-uploadable (POST /upload_zones_geojson);
+    // without escaping, an admin-controlled zone name containing HTML would
+    // execute as script in every user's browser.
     return `
       <div class="aiAssistantPanel">
-        <section class="aiAssistantSection"><strong>Current area</strong><div>${state.activeStableZoneName || "—"} • ${state.activeStableBorough || "—"} • ${Math.round(state.visibleRating || 0)} ${prettyBucket(state.visibleBucket)} • ${state.visibleScoreSourceLabel}</div></section>
-        <section class="aiAssistantSection"><strong>Advice</strong><div>${buildAssistantPrimaryLine()}</div><div>${buildAssistantSecondaryLine()}</div></section>
+        <section class="aiAssistantSection"><strong>Current area</strong><div>${escapeHtml(state.activeStableZoneName || "—")} • ${escapeHtml(state.activeStableBorough || "—")} • ${Math.round(state.visibleRating || 0)} ${escapeHtml(prettyBucket(state.visibleBucket) || "")} • ${escapeHtml(state.visibleScoreSourceLabel || "")}</div></section>
+        <section class="aiAssistantSection"><strong>Advice</strong><div>${escapeHtml(buildAssistantPrimaryLine() || "")}</div><div>${escapeHtml(buildAssistantSecondaryLine() || "")}</div></section>
         ${serverSupplementLine}
-        <section class="aiAssistantSection"><strong>Countdown</strong><div>${state.countdownActive ? `Countdown active • ${Math.max(1, Math.round(state.countdownMinutesRemaining || 0))} min left` : "Countdown inactive"}</div><div>${state.countdownReasonText || state.countdownHoldWindowReason || "No countdown needed."}</div>${state.countdownActive && state.countdownTarget?.zoneName ? `<div>Target: ${state.countdownTarget.zoneName} • ${Math.round(state.countdownTarget.etaMinutes || 0)} min</div>` : ""}</section>
-        ${(state.trapModeActive || (safeNum(state.trapSeverityLevel, 0) || 0) >= 2 || state.trapReasonSummary) ? `<section class="aiAssistantSection"><strong>Area check</strong><div>${state.trapReasonSummary || "No trap signs right now."}</div>${state.trapEscapeTarget?.candidateSignal?.zoneName ? `<div>Nearby option: ${state.trapEscapeTarget.candidateSignal.zoneName} • ${Math.round(state.trapEscapeTarget.etaMinutes || 0)} min</div>` : ""}</section>` : ""}
-        <section class="aiAssistantSection"><strong>What may happen next</strong><div>${state.outlookSummaryText}</div>${state.moveTargetOutlookSummaryText ? `<div>${state.moveTargetOutlookSummaryText}</div>` : ""}${outlookStatusLine}</section>
-        <section class="aiAssistantSection"><strong>Best areas right now</strong><div>Best now: ${state.citywideBestNow?.zoneName || "—"} • Worst now: ${state.citywideWorstNow?.zoneName || "—"}</div>${buildRankList(state.citywideTop10Best)}${buildRankList(state.boroughTop5Best)}</section>
-        ${state.assistantMoveTarget ? `<section class="aiAssistantSection"><strong>Nearby option</strong><div>${state.assistantMoveTarget.zoneName} • ${Math.round(state.assistantMoveTarget.etaMinutes || 0)} min • ${state.assistantMoveTarget.distanceMiles.toFixed(1)} mi</div></section>` : ""}
-        ${showMoveCheck ? `<section class="aiAssistantSection"><strong>If you decide to move</strong><div>Drive time: ${Math.round(state.etaMinutes || 0)} min</div><div><small>${compactTargetWhyLine()}</small></div></section>` : ""}
-        <section class="aiAssistantSection"><strong>Assistant status</strong><div>Current advice: ${committedActionText} • ${committedReasonText}</div><div>Last update: ${state.committedSinceTs ? new Date(state.committedSinceTs).toLocaleTimeString() : "—"}</div></section>
-        ${cautionDataLine ? `<section class="aiAssistantSection"><small>${cautionDataLine}</small></section>` : ""}
+        <section class="aiAssistantSection"><strong>Countdown</strong><div>${state.countdownActive ? `Countdown active • ${Math.max(1, Math.round(state.countdownMinutesRemaining || 0))} min left` : "Countdown inactive"}</div><div>${escapeHtml(state.countdownReasonText || state.countdownHoldWindowReason || "No countdown needed.")}</div>${state.countdownActive && state.countdownTarget?.zoneName ? `<div>Target: ${escapeHtml(state.countdownTarget.zoneName)} • ${Math.round(state.countdownTarget.etaMinutes || 0)} min</div>` : ""}</section>
+        ${(state.trapModeActive || (safeNum(state.trapSeverityLevel, 0) || 0) >= 2 || state.trapReasonSummary) ? `<section class="aiAssistantSection"><strong>Area check</strong><div>${escapeHtml(state.trapReasonSummary || "No trap signs right now.")}</div>${state.trapEscapeTarget?.candidateSignal?.zoneName ? `<div>Nearby option: ${escapeHtml(state.trapEscapeTarget.candidateSignal.zoneName)} • ${Math.round(state.trapEscapeTarget.etaMinutes || 0)} min</div>` : ""}</section>` : ""}
+        <section class="aiAssistantSection"><strong>What may happen next</strong><div>${escapeHtml(state.outlookSummaryText || "")}</div>${state.moveTargetOutlookSummaryText ? `<div>${escapeHtml(state.moveTargetOutlookSummaryText)}</div>` : ""}${outlookStatusLine}</section>
+        <section class="aiAssistantSection"><strong>Best areas right now</strong><div>Best now: ${escapeHtml(state.citywideBestNow?.zoneName || "—")} • Worst now: ${escapeHtml(state.citywideWorstNow?.zoneName || "—")}</div>${buildRankList(state.citywideTop10Best)}${buildRankList(state.boroughTop5Best)}</section>
+        ${state.assistantMoveTarget ? `<section class="aiAssistantSection"><strong>Nearby option</strong><div>${escapeHtml(state.assistantMoveTarget.zoneName || "")} • ${Math.round(state.assistantMoveTarget.etaMinutes || 0)} min • ${state.assistantMoveTarget.distanceMiles.toFixed(1)} mi</div></section>` : ""}
+        ${showMoveCheck ? `<section class="aiAssistantSection"><strong>If you decide to move</strong><div>Drive time: ${Math.round(state.etaMinutes || 0)} min</div><div><small>${escapeHtml(compactTargetWhyLine() || "")}</small></div></section>` : ""}
+        <section class="aiAssistantSection"><strong>Assistant status</strong><div>Current advice: ${escapeHtml(committedActionText || "")} • ${escapeHtml(committedReasonText || "")}</div><div>Last update: ${state.committedSinceTs ? new Date(state.committedSinceTs).toLocaleTimeString() : "—"}</div></section>
+        ${cautionDataLine ? `<section class="aiAssistantSection"><small>${escapeHtml(cautionDataLine)}</small></section>` : ""}
         <section class="aiAssistantSection"><small>Assistant uses the same visible Team Joseo score path the map is showing.</small></section>
       </div>
     `;
