@@ -1236,10 +1236,14 @@ function wireModesPanel() {
     e.preventDefault();
     if (!authHeaderOK()) return;
     const nextGhost = !Boolean(me?.ghost_mode);
-    updateMeProfile({ ghost_mode: nextGhost }).then(() => {
-      openDrawer("modes", "Modes", modesPanelHTML());
-      wireModesPanel();
-    });
+    updateMeProfile({ ghost_mode: nextGhost })
+      .then(() => {
+        openDrawer("modes", "Modes", modesPanelHTML());
+        wireModesPanel();
+      })
+      .catch((err) => {
+        console.warn("Ghost-mode toggle failed:", err);
+      });
   });
 
   document.getElementById("dockPoliceBtn")?.addEventListener("click", (e) => {

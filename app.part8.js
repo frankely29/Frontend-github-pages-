@@ -3683,7 +3683,6 @@ function stopActiveVoiceRecording(scope) {
     }
     if (chatLiveRuntime.pendingPrivateThreadReconcile.has(uid)) return;
     const timer = setTimeout(async () => {
-      chatLiveRuntime.pendingPrivateThreadReconcile.delete(uid);
       chatLiveRuntime.private.lastReconcileAt = Date.now();
       try {
         if (privateActiveUserId === uid) {
@@ -3692,7 +3691,12 @@ function stopActiveVoiceRecording(scope) {
         if (driverProfileState.open && String(driverProfileState.userId || '') === uid && !driverProfileState.isSelf) {
           await pollDriverProfileDmOnce();
         }
-      } catch (_) {}
+      } catch (_) {
+      } finally {
+        // Keep sentinel in the map until async work completes so concurrent
+        // schedule() calls coalesce instead of racing on the same uid.
+        chatLiveRuntime.pendingPrivateThreadReconcile.delete(uid);
+      }
     }, Math.max(0, delay));
     chatLiveRuntime.pendingPrivateThreadReconcile.set(uid, timer);
   }
