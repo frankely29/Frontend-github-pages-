@@ -275,10 +275,20 @@
     window.addEventListener("tlc-nav-preview-updated", (event) => {
       const routeBundle = event?.detail?.routeBundle || null;
       state.routePreviewReady = isManualPreviewReady(routeBundle);
-      if (!state.routeActive && String(routeBundle?.destinationSource || "") === "manual") {
+      const manualSource = String(routeBundle?.destinationSource || "") === "manual";
+      if (!state.routeActive && manualSource) {
         state.status = state.routePreviewReady
           ? "Preview ready"
           : String(routeBundle?.statusReason || routeBundle?.status || state.status || "Waiting for location");
+        // When a manual route finishes computing, re-open the tray so the
+        // Start Nav button (inside navTurnCard inside navQuickTray) is
+        // visible even if an outside-click closed the tray mid-fetch.
+        // Without this, tapping the map to recenter while the route was
+        // loading would hide the Start button permanently until the user
+        // re-opened the Navigate tray manually.
+        if (state.routePreviewReady && !state.uiOpen) {
+          state.uiOpen = true;
+        }
       }
       syncUi();
     });
@@ -288,6 +298,12 @@
       state.routePreviewReady = isManualPreviewReady(routeBundle);
       if (!state.routeActive && state.manualDestination && state.routePreviewReady) {
         state.status = "Preview ready";
+        // Same re-open guard as above — preview-ready is the authoritative
+        // "route finished computing" signal, so force the tray open here
+        // too in case preview-updated fired without the ready flag.
+        if (!state.uiOpen) {
+          state.uiOpen = true;
+        }
       }
       syncUi();
     });
