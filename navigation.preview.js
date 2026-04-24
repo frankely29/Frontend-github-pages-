@@ -9,9 +9,15 @@
   const ROUTE_ENDPOINT = String(window.__TLC_NAV_PREVIEW_ROUTE_ENDPOINT__ || "https://router.project-osrm.org/route/v1").trim().replace(/\/+$/, "");
   const GEOCODE_ENDPOINT = String(window.__TLC_NAV_PREVIEW_GEOCODE_ENDPOINT__ || "https://nominatim.openstreetmap.org/search").trim().replace(/\/+$/, "");
   const GEOCODE_TIMEOUT_MS = 12000;
-  const ROUTE_TIMEOUT_MS = 8000;
-  const ROUTE_RETRY_ATTEMPTS = 3;
-  const ROUTE_RETRY_BASE_DELAY_MS = 2000;
+  // The public OSRM demo server (router.project-osrm.org) typically answers
+  // in 1-3 s when it's healthy and not at all when it's overloaded. The old
+  // 8 s × 3 attempts + 2 s + 4 s linear backoff meant a failed route could
+  // stall the UI for ~30 s showing "Calculating route…". Tighter bounds
+  // here surface the outcome in under 11 s worst case while preserving the
+  // healthy-path latency (a 1-3 s response is unaffected by timeout cuts).
+  const ROUTE_TIMEOUT_MS = 4500;
+  const ROUTE_RETRY_ATTEMPTS = 2;
+  const ROUTE_RETRY_BASE_DELAY_MS = 800;
 
   const state = {
     map: null,
@@ -239,7 +245,10 @@
     const controller = new AbortController();
     state.routeAbortController = controller;
 
-    const url = `${ROUTE_ENDPOINT}/${encodeURIComponent(state.currentProfile)}/${encodeURIComponent(origin.lng)},${encodeURIComponent(origin.lat)};${encodeURIComponent(destination.lng)},${encodeURIComponent(destination.lat)}?overview=full&geometries=geojson&steps=true`;
+    // alternatives=false + annotations=false skip work the UI never renders.
+    // overview=full and steps=true stay — the map draws the full polyline and
+    // turn-by-turn consumes steps[].maneuver + per-step distances.
+    const url = `${ROUTE_ENDPOINT}/${encodeURIComponent(state.currentProfile)}/${encodeURIComponent(origin.lng)},${encodeURIComponent(origin.lat)};${encodeURIComponent(destination.lng)},${encodeURIComponent(destination.lat)}?overview=full&geometries=geojson&steps=true&alternatives=false&annotations=false`;
     const payload = await fetchJsonWithTimeout(
       url,
       {},
