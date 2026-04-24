@@ -781,9 +781,42 @@
 
   function init(map) {
     state.map = map || null;
-    window.TlcNavigationVectorBasemapModule?.init?.(state.map);
-    window.TlcNavigationBuildingTintModule?.init?.(state.map);
+
+    // Register the preview-event listeners FIRST, before any submodule init
+    // call that could throw synchronously. If the vector-basemap or
+    // building-tint init failed (missing layer, malformed style, etc.), the
+    // exception would propagate out of init() and skip the listener
+    // registration below — leaving turn-by-turn deaf to preview events and
+    // navTurnCard permanently hidden even after a successful route. Binding
+    // listeners first ensures the Start Nav button shows up regardless of
+    // any downstream init hiccup.
+    window.addEventListener("tlc-nav-preview-updated", (event) => {
+      onPreviewRouteUpdated(event?.detail?.routeBundle || null);
+    });
+
+    window.addEventListener("tlc-nav-preview-cleared", () => {
+      onPreviewRouteCleared();
+    });
+
+    window.addEventListener("tlc-user-location-updated", (event) => {
+      onUserLocationUpdate(event?.detail || null);
+    });
+
     bindUi();
+
+    // Submodule inits are wrapped in try/catch so a failure in a purely
+    // visual module (vector basemap, building tint) cannot abort the core
+    // nav wiring above.
+    try {
+      window.TlcNavigationVectorBasemapModule?.init?.(state.map);
+    } catch (err) {
+      console.warn("VectorBasemapModule init failed:", err);
+    }
+    try {
+      window.TlcNavigationBuildingTintModule?.init?.(state.map);
+    } catch (err) {
+      console.warn("BuildingTintModule init failed:", err);
+    }
 
     if (state.map?.on) {
       state.map.on("styledata", () => {
@@ -801,17 +834,9 @@
       });
     }
 
-    window.addEventListener("tlc-nav-preview-updated", (event) => {
-      onPreviewRouteUpdated(event?.detail?.routeBundle || null);
-    });
-
-    window.addEventListener("tlc-nav-preview-cleared", () => {
-      onPreviewRouteCleared();
-    });
-
-    window.addEventListener("tlc-user-location-updated", (event) => {
-      onUserLocationUpdate(event?.detail || null);
-    });
+    // (preview-updated, preview-cleared, and user-location-updated
+    // listeners were moved to the top of init() so a submodule init throw
+    // doesn't leave them unregistered.)
 
     if (!state.runtimeSyncListenersBound) {
       state.runtimeSyncListenersBound = true;
