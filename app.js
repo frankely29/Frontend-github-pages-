@@ -2437,17 +2437,10 @@ function buildFramePathWithMonthKey(idx) {
   return `/frame/${normalizedIdx}?${params.toString()}`;
 }
 
-function buildViewportFramePathWithMonthKey(idx, paddingRatio = 0.18) {
+function _buildViewportPath(idx, bbox, paddingRatio = 0.18) {
   const normalizedIdx = Number(idx);
-  if (!Number.isInteger(normalizedIdx) || normalizedIdx < 0 || !map || typeof map.getBounds !== "function") return null;
-  const bounds = map.getBounds?.();
-  if (!bounds || typeof bounds.getSouth !== "function" || typeof bounds.getWest !== "function" || typeof bounds.getNorth !== "function" || typeof bounds.getEast !== "function") {
-    return null;
-  }
-  const minLat = Number(bounds.getSouth());
-  const minLng = Number(bounds.getWest());
-  const maxLat = Number(bounds.getNorth());
-  const maxLng = Number(bounds.getEast());
+  if (!Number.isInteger(normalizedIdx) || normalizedIdx < 0) return null;
+  const { minLat, minLng, maxLat, maxLng } = bbox || {};
   if (![minLat, minLng, maxLat, maxLng].every(Number.isFinite)) return null;
   const params = new URLSearchParams({
     min_lat: String(minLat),
@@ -2460,8 +2453,56 @@ function buildViewportFramePathWithMonthKey(idx, paddingRatio = 0.18) {
   return `/frame/${normalizedIdx}/viewport?${params.toString()}`;
 }
 
-async function fetchViewportFrameData(idx, { force = false } = {}) {
-  const path = buildViewportFramePathWithMonthKey(idx);
+function buildViewportFramePathWithMonthKey(idx, paddingRatio = 0.18) {
+  if (!map || typeof map.getBounds !== "function") return null;
+  const bounds = map.getBounds?.();
+  if (!bounds || typeof bounds.getSouth !== "function" || typeof bounds.getWest !== "function" || typeof bounds.getNorth !== "function" || typeof bounds.getEast !== "function") {
+    return null;
+  }
+  const bbox = {
+    minLat: Number(bounds.getSouth()),
+    minLng: Number(bounds.getWest()),
+    maxLat: Number(bounds.getNorth()),
+    maxLng: Number(bounds.getEast()),
+  };
+  return _buildViewportPath(idx, bbox, paddingRatio);
+}
+
+// Half-side (in meters) of the tight bbox that paints zones immediately
+// around the user on first load before the full viewport arrives. 600m
+// yields a ~1.2km box covering ~5-10 NYC taxi zones — small payload, fast
+// first paint, clear outward-expansion effect when the wide response lands.
+const NEAR_USER_HALF_SIDE_METERS = 600;
+
+// Convert a (lat, lng) center plus half-side-in-meters into a lat/lng bbox.
+// Uses the standard local-plane approximation (1° lat ≈ 111320m; 1° lng
+// shrinks by cos(lat)). Safe for the ≤1km spans used here.
+function computeNearUserBbox(latLng, halfSideMeters = NEAR_USER_HALF_SIDE_METERS) {
+  const lat = Number(latLng?.lat);
+  const lng = Number(latLng?.lng);
+  const halfSide = Number(halfSideMeters);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || !Number.isFinite(halfSide) || halfSide <= 0) return null;
+  const latDegPerMeter = 1 / 111320;
+  const cosLat = Math.cos((lat * Math.PI) / 180);
+  if (!Number.isFinite(cosLat) || cosLat === 0) return null;
+  const lngDegPerMeter = 1 / (111320 * cosLat);
+  const dLat = halfSide * latDegPerMeter;
+  const dLng = halfSide * lngDegPerMeter;
+  // Clamp to valid lat/lng ranges so a user near a pole or the antimeridian
+  // can't produce an out-of-range bbox that the backend would reject.
+  return {
+    minLat: Math.max(-90, lat - dLat),
+    minLng: Math.max(-180, lng - dLng),
+    maxLat: Math.min(90, lat + dLat),
+    maxLng: Math.min(180, lng + dLng),
+  };
+}
+
+function buildExplicitBboxFramePath(idx, bbox, paddingRatio = 0) {
+  return _buildViewportPath(idx, bbox, paddingRatio);
+}
+
+async function _fetchViewportPath(path, idx, force) {
   if (!path) return null;
   try {
     const payload = await fetchJSON(`${RAILWAY_BASE}${path}`, {
@@ -2480,6 +2521,16 @@ async function fetchViewportFrameData(idx, { force = false } = {}) {
   } catch (_) {
     return null;
   }
+}
+
+async function fetchViewportFrameData(idx, { force = false } = {}) {
+  const path = buildViewportFramePathWithMonthKey(idx);
+  return _fetchViewportPath(path, idx, force);
+}
+
+async function fetchExplicitBboxFrameData(idx, bbox, { force = false, paddingRatio = 0 } = {}) {
+  const path = buildExplicitBboxFramePath(idx, bbox, paddingRatio);
+  return _fetchViewportPath(path, idx, force);
 }
 
 function currentFrameIsViewportSubset() {
@@ -3409,7 +3460,11 @@ function emitTeamJoseoFrameRendered(frame, featureCount) {
 }
 
 async function renderFrame(frame, options = {}) {
-  const { temporaryViewportSubset = false, skipRecommendationUpdate = false } = options || {};
+  const {
+    temporaryViewportSubset = false,
+    skipRecommendationUpdate = false,
+    suppressBootFit = false,
+  } = options || {};
   if (!map || !mapReady) {
     pendingFrame = frame;
     return;
@@ -3500,7 +3555,7 @@ async function renderFrame(frame, options = {}) {
   const bounds = getFeatureCollectionBounds(fc);
   if (debugEnabled) dbg("dbgBounds", bounds ? `${bounds.minLng},${bounds.minLat},${bounds.maxLng},${bounds.maxLat}` : "invalid");
 
-  if (ENABLE_BOOT_ZONE_FIT && fc.features.length > 0 && !didFitToZonesOnce && bounds) {
+  if (ENABLE_BOOT_ZONE_FIT && !suppressBootFit && fc.features.length > 0 && !didFitToZonesOnce && bounds) {
     map.fitBounds(
       [
         [bounds.minLng, bounds.minLat],
@@ -3580,17 +3635,74 @@ async function runStartupViewportFrameSequence(idx) {
   if (startupInitialFrameIndex !== null && normalizedIdx !== startupInitialFrameIndex) return;
   startupViewportFrameStarted = true;
 
-  const viewportFrame = await fetchViewportFrameData(normalizedIdx);
-  const viewportFeatures = viewportFrame?.polygons?.features;
-  if (viewportFrame && Array.isArray(viewportFeatures) && viewportFeatures.length > 0) {
-    await renderFrame(viewportFrame, { temporaryViewportSubset: true, skipRecommendationUpdate: true });
-    startupViewportFrameRendered = true;
-    void ensureStartupFullFrameBackfill(normalizedIdx, "startup-viewport-sequence");
-    scheduleStartupFullFrameRetry(normalizedIdx, 1200, "startup-retry-1");
-    scheduleStartupFullFrameRetry(normalizedIdx, 3200, "startup-retry-2");
+  const nearBbox = userLatLng ? computeNearUserBbox(userLatLng) : null;
+
+  // No user location yet (4.5s GPS timeout path, default mid-Manhattan
+  // camera): keep the existing single-fetch flow. A tight bbox around the
+  // default center would waste bytes for users actually elsewhere.
+  if (!nearBbox) {
+    const viewportFrame = await fetchViewportFrameData(normalizedIdx);
+    const viewportFeatures = viewportFrame?.polygons?.features;
+    if (viewportFrame && Array.isArray(viewportFeatures) && viewportFeatures.length > 0) {
+      await renderFrame(viewportFrame, { temporaryViewportSubset: true, skipRecommendationUpdate: true });
+      startupViewportFrameRendered = true;
+      void ensureStartupFullFrameBackfill(normalizedIdx, "startup-viewport-sequence");
+      scheduleStartupFullFrameRetry(normalizedIdx, 1200, "startup-retry-1");
+      scheduleStartupFullFrameRetry(normalizedIdx, 3200, "startup-retry-2");
+      return;
+    }
+    void ensureStartupFullFrameBackfill(normalizedIdx, "viewport-fetch-failed");
     return;
   }
-  void ensureStartupFullFrameBackfill(normalizedIdx, "viewport-fetch-failed");
+
+  // User location is known: fetch a tight bbox around the user AND the full
+  // viewport concurrently. Paint whichever returns first. The tight bbox
+  // typically lands first (small payload) and gives the user "you are here"
+  // zones immediately; when the wide response arrives it replaces the tight
+  // set with a strict superset, so visually the painted area expands outward
+  // from the user's location.
+  let tightRendered = false;
+  let wideRendered = false;
+  let backfillKicked = false;
+
+  const kickBackfillOnce = (reason) => {
+    if (backfillKicked) return;
+    backfillKicked = true;
+    startupViewportFrameRendered = true;
+    void ensureStartupFullFrameBackfill(normalizedIdx, reason);
+    scheduleStartupFullFrameRetry(normalizedIdx, 1200, "startup-retry-1");
+    scheduleStartupFullFrameRetry(normalizedIdx, 3200, "startup-retry-2");
+  };
+
+  const tightPromise = fetchExplicitBboxFrameData(normalizedIdx, nearBbox).then(async (frame) => {
+    const features = frame?.polygons?.features;
+    if (!frame || !Array.isArray(features) || features.length === 0) return;
+    // If the wide fetch already painted, the tight set is a strict subset —
+    // skip it to avoid regressing to a smaller painted area.
+    if (wideRendered) return;
+    await renderFrame(frame, {
+      temporaryViewportSubset: true,
+      skipRecommendationUpdate: true,
+      suppressBootFit: true,
+    });
+    tightRendered = true;
+    if (debugEnabled) dbg("dbgFrame", `startup tight render (near-user, ${features.length})`);
+    kickBackfillOnce("startup-viewport-sequence-tight");
+  }).catch(() => {});
+
+  const widePromise = fetchViewportFrameData(normalizedIdx).then(async (frame) => {
+    const features = frame?.polygons?.features;
+    if (!frame || !Array.isArray(features) || features.length === 0) return;
+    await renderFrame(frame, { temporaryViewportSubset: true, skipRecommendationUpdate: true });
+    wideRendered = true;
+    kickBackfillOnce("startup-viewport-sequence-wide");
+  }).catch(() => {});
+
+  await Promise.all([tightPromise, widePromise]);
+
+  if (!tightRendered && !wideRendered) {
+    void ensureStartupFullFrameBackfill(normalizedIdx, "viewport-fetch-failed");
+  }
 }
 
 function parseMonthKey(text) {
