@@ -291,6 +291,17 @@
         }
       }
       syncUi();
+      // Belt-and-suspenders: push the same bundle straight into the
+      // turn-by-turn module. If its window listener missed the event for any
+      // reason (listener not yet bound, handler threw mid-path, event loop
+      // race on slow mobile), this direct call still flips
+      // state.hasPreviewDestination so navTurnCard and the Start Nav button
+      // appear. onPreviewRouteUpdated is idempotent.
+      try {
+        window.TlcNavigationTurnModule?.onPreviewRouteUpdated?.(routeBundle);
+      } catch (err) {
+        console.warn("TlcNavigationTurnModule.onPreviewRouteUpdated failed:", err);
+      }
     });
 
     window.addEventListener("tlc-nav-preview-ready", (event) => {
@@ -306,6 +317,11 @@
         }
       }
       syncUi();
+      try {
+        window.TlcNavigationTurnModule?.onPreviewRouteUpdated?.(routeBundle);
+      } catch (err) {
+        console.warn("TlcNavigationTurnModule.onPreviewRouteUpdated failed:", err);
+      }
     });
 
     window.addEventListener("tlc-nav-preview-failed", (event) => {

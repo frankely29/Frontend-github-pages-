@@ -333,6 +333,24 @@
     } = getEls();
     if (!card) return;
 
+    // Reconcile from the preview module before reading state — if our
+    // window event listener missed a dispatch (race during bind, handler
+    // threw mid-path, etc.), the preview module is still the source of
+    // truth. This makes navTurnCard visibility correct even when the event
+    // pipeline drops a message.
+    if (!state.active) {
+      try {
+        const snapshot = window.TlcNavigationPreviewModule?.getSnapshot?.();
+        if (snapshot?.destinationReady && !state.hasPreviewDestination) {
+          syncNavigationInputsFromPreview();
+        } else if (snapshot?.routeReady && !state.hasPreviewRoute) {
+          syncNavigationInputsFromPreview();
+        }
+      } catch (err) {
+        console.warn("navTurnCard preview reconcile failed:", err);
+      }
+    }
+
     const readiness = getStartReadiness();
     const hasPreviewRoute = !!state.hasPreviewRoute;
     if (state.active) {
@@ -791,6 +809,15 @@
     // listeners first ensures the Start Nav button shows up regardless of
     // any downstream init hiccup.
     window.addEventListener("tlc-nav-preview-updated", (event) => {
+      onPreviewRouteUpdated(event?.detail?.routeBundle || null);
+    });
+
+    // `tlc-nav-preview-ready` is the authoritative "route fetch succeeded"
+    // signal. Listen for it as a second chance in case `-updated` was missed
+    // (e.g. the listener hadn't been bound yet at emission time, or the event
+    // handler threw before reaching updateCard). Calling onPreviewRouteUpdated
+    // here is idempotent — same routeBundle shape, same state mutation.
+    window.addEventListener("tlc-nav-preview-ready", (event) => {
       onPreviewRouteUpdated(event?.detail?.routeBundle || null);
     });
 
