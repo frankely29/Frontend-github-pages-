@@ -11,6 +11,16 @@
   const ARRIVAL_APPROACHING_METERS = 120;
   const ARRIVAL_REACHED_METERS = 28;
 
+  // Accuracy tuning — a noisy GPS fix (e.g. 120m reported accuracy in an
+  // urban canyon) should not advance step progression or trip a reroute.
+  // These constants keep turn-by-turn calm through transient GPS degradation.
+  const POOR_ACCURACY_SKIP_METERS = 90;       // Drop fixes worse than this once we have a snap.
+  const OFF_ROUTE_ACCURACY_PAD_METERS = 20;   // Inflate off-route threshold by (accuracy - pad).
+  const PROGRESS_BACKWARDS_TOLERANCE_METERS = 12;
+  const PROGRESS_BACKWARDS_MIN_ACCURACY_METERS = 25; // Only clamp backwards when accuracy > this.
+  const DISTANCE_TO_MANEUVER_EMA_ALPHA = 0.55; // Light smoothing on banner distance.
+  const DISTANCE_TO_MANEUVER_SNAP_THRESHOLD = 40; // Below this, show raw distance (no lag near turn).
+
   const state = {
     active: false,
     map: null,
@@ -26,6 +36,8 @@
     remainingDurationSeconds: null,
     snappedPoint: null,
     snappedProgressMeters: 0,
+    smoothedDistanceToNextManeuverMeters: null,
+    lastAccuracyMeters: null,
     offRoute: false,
     rerouteInFlight: false,
     lastRerouteAt: 0,
@@ -261,11 +273,36 @@
       idx = i;
       if (alongMeters <= Number(steps[i]._endDistance || 0)) break;
     }
+    const prevIdx = state.currentStepIndex;
     state.currentStepIndex = idx;
     const step = steps[idx] || null;
     state.currentStepInstruction = step?._instruction || "Continue on route";
     const stepEnd = Number(step?._endDistance || state.routeTotalMeters);
-    state.distanceToNextManeuverMeters = Math.max(0, stepEnd - alongMeters);
+    const rawDistance = Math.max(0, stepEnd - alongMeters);
+
+    // Reset EMA whenever the current maneuver changes so the new countdown
+    // starts from the true value, not a stale smoothed one.
+    if (idx !== prevIdx) {
+      state.smoothedDistanceToNextManeuverMeters = null;
+    }
+
+    // Close to the turn, use the raw distance — a smoothed lag of even 10m
+    // matters when the user is about to turn. Far from the turn, blend to
+    // damp GPS jitter from flickering the banner reading.
+    if (rawDistance <= DISTANCE_TO_MANEUVER_SNAP_THRESHOLD) {
+      state.smoothedDistanceToNextManeuverMeters = rawDistance;
+      state.distanceToNextManeuverMeters = rawDistance;
+    } else {
+      const priorRaw = state.smoothedDistanceToNextManeuverMeters;
+      // Direct-check null/undefined — `Number(null)` is 0 (finite), so a
+      // Number.isFinite guard alone would pull the EMA toward 0 on first use.
+      const hasPrior = priorRaw !== null && priorRaw !== undefined && Number.isFinite(priorRaw);
+      const smoothed = hasPrior
+        ? (DISTANCE_TO_MANEUVER_EMA_ALPHA * rawDistance + (1 - DISTANCE_TO_MANEUVER_EMA_ALPHA) * priorRaw)
+        : rawDistance;
+      state.smoothedDistanceToNextManeuverMeters = smoothed;
+      state.distanceToNextManeuverMeters = smoothed;
+    }
   }
 
   function ensurePreviewRouteOnTop() {
@@ -504,17 +541,54 @@
   function refreshProgressFromLocation(location) {
     if (!state.active || !state.currentRouteFeature) return;
 
+    const accuracyM = Number(location?.accuracy);
+    const hasAccuracy = Number.isFinite(accuracyM) && accuracyM > 0;
+    state.lastAccuracyMeters = hasAccuracy ? accuracyM : null;
+
+    // Drop very poor fixes once a snap is established. A 120m-accuracy fix
+    // in an urban canyon can flip the step index and fake an off-route
+    // condition, even though the vehicle hasn't actually moved off the
+    // real road. Keep the last known position and wait for a better fix.
+    if (hasAccuracy && accuracyM > POOR_ACCURACY_SKIP_METERS && state.snappedPoint) {
+      return;
+    }
+
+    const priorAlongMeters = Number.isFinite(state.snappedProgressMeters)
+      ? state.snappedProgressMeters
+      : null;
+
     const snapped = snapToRoute(location);
     if (!snapped) return;
 
+    // Monotone forward-progress clamp: when GPS is noisy, ignore backwards
+    // jumps so the step index and distance-to-turn don't flicker.
+    // Allow legitimate backwards movement when accuracy is good (<= pad).
+    let effectiveAlong = snapped.alongMeters;
+    if (
+      priorAlongMeters !== null
+      && effectiveAlong < priorAlongMeters - PROGRESS_BACKWARDS_TOLERANCE_METERS
+      && hasAccuracy
+      && accuracyM > PROGRESS_BACKWARDS_MIN_ACCURACY_METERS
+    ) {
+      effectiveAlong = priorAlongMeters;
+    }
+
     state.snappedPoint = snapped.point;
-    state.snappedProgressMeters = snapped.alongMeters;
-    state.remainingDistanceMeters = Math.max(0, state.routeTotalMeters - snapped.alongMeters);
+    state.snappedProgressMeters = effectiveAlong;
+    state.remainingDistanceMeters = Math.max(0, state.routeTotalMeters - effectiveAlong);
     state.remainingDurationSeconds = state.routeTotalMeters > 0
       ? Math.max(0, Math.round((state.remainingDistanceMeters / state.routeTotalMeters) * Number(state.routeTotalDurationSeconds || 0)))
       : 0;
 
-    if (snapped.distanceFromRouteMeters > OFF_ROUTE_METERS) {
+    // Accuracy-aware off-route threshold. A fix with 40m accuracy could
+    // legitimately project 40m off the line even on-road; require the
+    // snap distance to exceed the base threshold plus the uncertainty
+    // above the pad before treating as off-route.
+    const offRoutePad = hasAccuracy
+      ? Math.max(0, accuracyM - OFF_ROUTE_ACCURACY_PAD_METERS)
+      : 0;
+    const offRouteThreshold = OFF_ROUTE_METERS + offRoutePad;
+    if (snapped.distanceFromRouteMeters > offRouteThreshold) {
       state.offRouteSamples += 1;
     } else {
       state.offRouteSamples = 0;
@@ -524,7 +598,7 @@
       state.offRoute = true;
     }
 
-    updateStepProgress(snapped.alongMeters);
+    updateStepProgress(effectiveAlong);
     if (!Number.isFinite(state.lastKnownHeadingDeg) || state.lastKnownHeadingSource !== "gps") {
       const routeHeading = deriveRouteHeadingAtProgress(snapped.alongMeters);
       if (Number.isFinite(routeHeading)) {
@@ -543,6 +617,8 @@
     state.currentStepIndex = 0;
     state.currentStepInstruction = "";
     state.distanceToNextManeuverMeters = null;
+    state.smoothedDistanceToNextManeuverMeters = null;
+    state.lastAccuracyMeters = null;
     state.remainingDistanceMeters = state.routeTotalMeters || null;
     state.remainingDurationSeconds = state.routeTotalDurationSeconds || null;
     state.snappedPoint = null;
@@ -673,7 +749,14 @@
     if (state.active) {
       window.TlcNavigationBuildingTintModule?.refreshForViewport?.();
     }
-    refreshProgressFromLocation(ll);
+    // Preserve accuracy on the object passed to refreshProgressFromLocation
+    // so the accuracy-aware logic (poor-fix skip, monotone clamp, off-route
+    // threshold) can read it. toLatLng strips everything but lat/lng.
+    const rawAccuracy = Number(location?.accuracy);
+    const locForProgress = Number.isFinite(rawAccuracy) && rawAccuracy > 0
+      ? { ...ll, accuracy: rawAccuracy }
+      : ll;
+    refreshProgressFromLocation(locForProgress);
   }
 
   function startNavigation() {
