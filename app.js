@@ -2488,11 +2488,13 @@ function computeNearUserBbox(latLng, halfSideMeters = NEAR_USER_HALF_SIDE_METERS
   const lngDegPerMeter = 1 / (111320 * cosLat);
   const dLat = halfSide * latDegPerMeter;
   const dLng = halfSide * lngDegPerMeter;
+  // Clamp to valid lat/lng ranges so a user near a pole or the antimeridian
+  // can't produce an out-of-range bbox that the backend would reject.
   return {
-    minLat: lat - dLat,
-    minLng: lng - dLng,
-    maxLat: lat + dLat,
-    maxLng: lng + dLng,
+    minLat: Math.max(-90, lat - dLat),
+    minLng: Math.max(-180, lng - dLng),
+    maxLat: Math.min(90, lat + dLat),
+    maxLng: Math.min(180, lng + dLng),
   };
 }
 
