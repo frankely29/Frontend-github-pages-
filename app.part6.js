@@ -6,7 +6,7 @@
   const MAP_IDENTITY_MODE_AVATAR = 'avatar';
   const MAP_IDENTITY_IMG_SIZE = 160;
   const MAP_IDENTITY_CROP_VIEW_SIZE = 220;
-  const MAP_IDENTITY_MIN_ZOOM = 10;
+  const MAP_IDENTITY_MIN_ZOOM = 8;
   const MAP_IDENTITY_MAX_ZOOM = 16;
   let mapIdentityTempAvatarDataUrl = '';
   let mapIdentitySavedAvatarDataUrl = '';
@@ -96,10 +96,10 @@
     const t = mapIdentityZoomT(zoomValue);
     const smooth = t * t * (3 - 2 * t);
     const emphasize = Math.pow(smooth, 0.9);
-    const avatarPx = +(18 + (52 - 18) * emphasize).toFixed(2);
-    const tipSizePx = +(4 + (8 - 4) * emphasize).toFixed(2);
-    const crownPx = clampMapIdentity(Math.round(avatarPx * 1.00), 24, 44);
-    const podiumPx = clampMapIdentity(Math.round(avatarPx * 0.80), 24, 36);
+    const avatarPx = +(12 + (52 - 12) * emphasize).toFixed(2);
+    const tipSizePx = +(3 + (8 - 3) * emphasize).toFixed(2);
+    const crownPx = clampMapIdentity(Math.round(avatarPx * 1.00), 14, 44);
+    const podiumPx = clampMapIdentity(Math.round(avatarPx * 0.80), 14, 36);
     return {
       avatarPx,
       crownPx,
@@ -119,8 +119,8 @@
   function mapIdentityBadgeSizeConfig(avatarPx) {
     const baseAvatar = Number(avatarPx);
     const safeAvatarPx = Number.isFinite(baseAvatar) ? baseAvatar : 28;
-    const crownPx = clampMapIdentity(Math.round(safeAvatarPx * 1.00), 24, 44);
-    const podiumPx = clampMapIdentity(Math.round(safeAvatarPx * 0.80), 24, 36);
+    const crownPx = clampMapIdentity(Math.round(safeAvatarPx * 1.00), 14, 44);
+    const podiumPx = clampMapIdentity(Math.round(safeAvatarPx * 0.80), 14, 36);
     return {
       crownPx,
       podiumPx,
