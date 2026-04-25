@@ -96,10 +96,10 @@
     const t = mapIdentityZoomT(zoomValue);
     const smooth = t * t * (3 - 2 * t);
     const emphasize = Math.pow(smooth, 0.9);
-    const avatarPx = +(12 + (52 - 12) * emphasize).toFixed(2);
-    const tipSizePx = +(3 + (8 - 3) * emphasize).toFixed(2);
-    const crownPx = clampMapIdentity(Math.round(avatarPx * 1.00), 14, 44);
-    const podiumPx = clampMapIdentity(Math.round(avatarPx * 0.80), 14, 36);
+    const avatarPx = +(8 + (52 - 8) * emphasize).toFixed(2);
+    const tipSizePx = +(2 + (8 - 2) * emphasize).toFixed(2);
+    const crownPx = clampMapIdentity(Math.round(avatarPx * 1.00), 10, 44);
+    const podiumPx = clampMapIdentity(Math.round(avatarPx * 0.80), 10, 36);
     return {
       avatarPx,
       crownPx,
@@ -119,8 +119,8 @@
   function mapIdentityBadgeSizeConfig(avatarPx) {
     const baseAvatar = Number(avatarPx);
     const safeAvatarPx = Number.isFinite(baseAvatar) ? baseAvatar : 28;
-    const crownPx = clampMapIdentity(Math.round(safeAvatarPx * 1.00), 14, 44);
-    const podiumPx = clampMapIdentity(Math.round(safeAvatarPx * 0.80), 14, 36);
+    const crownPx = clampMapIdentity(Math.round(safeAvatarPx * 1.00), 10, 44);
+    const podiumPx = clampMapIdentity(Math.round(safeAvatarPx * 0.80), 10, 36);
     return {
       crownPx,
       podiumPx,
