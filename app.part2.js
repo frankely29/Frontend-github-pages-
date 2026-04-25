@@ -170,7 +170,7 @@
   function renderLeaderboardBadgeSvg(code, options = {}) {
     const meta = leaderboardBadgeMeta(code);
     if (!meta.code) return '';
-    const size = Math.max(12, Number(options?.size) || (options?.compact ? 18 : 20));
+    const size = Math.max(12, Number(options?.size) || (meta.code === 'crown' ? (options?.compact ? 24 : 28) : (options?.compact ? 18 : 20)));
     const classes = ['leaderboardBadgeSvg', meta.toneClass, options?.mapWearable ? 'is-map' : '', options?.compact ? 'is-compact' : '']
       .filter(Boolean)
       .join(' ');
