@@ -492,10 +492,79 @@
     return { minLng, minLat, maxLng, maxLat };
   }
 
+  // Cache of (bbox, polygon-coords-ring, source feature) entries for each
+  // zone polygon in the current frame. Lets snapLatLngToZoneInterior do a
+  // single bbox pre-filter pass instead of hammering pointInPolygon on all
+  // 263+ zones for every presence row.
+  let _snapZoneEntriesCache = null;
+  let _snapZoneEntriesSig = null;
+
+  function _frameSig(frame) {
+    const features = frame?.polygons?.features;
+    return `${String(frame?.time ?? "")}|${Number(features?.length ?? 0)}`;
+  }
+
+  function _buildZoneSnapEntries(frame) {
+    const sig = _frameSig(frame);
+    if (_snapZoneEntriesCache && _snapZoneEntriesSig === sig) return _snapZoneEntriesCache;
+    const features = Array.isArray(frame?.polygons?.features) ? frame.polygons.features : [];
+    const out = [];
+    for (const f of features) {
+      const geom = f?.geometry;
+      if (!geom) continue;
+      const polys = geom.type === "Polygon" ? [geom.coordinates]
+        : geom.type === "MultiPolygon" ? geom.coordinates
+        : null;
+      if (!polys) continue;
+      for (const poly of polys) {
+        const bb = bboxFromCoords(poly);
+        if (!bb) continue;
+        out.push({ bb, poly, feature: f });
+      }
+    }
+    _snapZoneEntriesCache = out;
+    _snapZoneEntriesSig = sig;
+    return out;
+  }
+
+  // If (ptLat, ptLng) is inside any zone polygon in `frame`, returns null
+  // (caller keeps the original GPS coords). Otherwise returns an interior
+  // point of the *nearest* zone — guaranteed to be inside its polygon.
+  // Used to keep presence avatars from drifting into water / over edges.
+  function snapLatLngToZoneInterior(ptLat, ptLng, frame) {
+    if (!Number.isFinite(ptLat) || !Number.isFinite(ptLng)) return null;
+    const entries = _buildZoneSnapEntries(frame);
+    if (!entries.length) return null;
+
+    for (const { bb, poly } of entries) {
+      if (ptLng < bb.minLng || ptLng > bb.maxLng) continue;
+      if (ptLat < bb.minLat || ptLat > bb.maxLat) continue;
+      if (pointInPolygonLngLat(ptLng, ptLat, poly)) return null;
+    }
+
+    let best = null;
+    let bestDist = Infinity;
+    for (const entry of entries) {
+      const cx = (entry.bb.minLng + entry.bb.maxLng) / 2;
+      const cy = (entry.bb.minLat + entry.bb.maxLat) / 2;
+      const dlat = cy - ptLat;
+      const dlng = cx - ptLng;
+      const d = dlat * dlat + dlng * dlng;
+      if (d < bestDist) {
+        bestDist = d;
+        best = entry;
+      }
+    }
+    if (!best) return null;
+    const interior = findInteriorPointForGeometry(best.feature.geometry);
+    return interior || null;
+  }
+
   window.TlcZoneLabelModule = {
     ensureZonesSourceAndLayers,
     refreshZoneLabels,
-    getFeatureCollectionBounds
+    getFeatureCollectionBounds,
+    snapLatLngToZoneInterior,
   };
 
   function announceZoneOwnerReady() {

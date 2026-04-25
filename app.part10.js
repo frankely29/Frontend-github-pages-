@@ -3437,6 +3437,24 @@ function renderAdaptivePresenceFromCache() {
   const rows = Array.isArray(cachedPresenceRows) ? cachedPresenceRows : [];
   const boundsObj = getPresenceRenderBounds();
   const viewportRows = boundsObj ? rows.filter((row) => rowInPresenceRenderBounds(row, boundsObj)) : rows.slice();
+
+  // Snap any presence row whose GPS coords fall outside every zone polygon
+  // (typical when a user is on a bridge, pier, or near the coastline) to
+  // the nearest zone's interior point. Avatars must always render inside
+  // a zone — drifting into water looks broken, and the relative-size
+  // mismatch becomes more visible when many users share a small zone.
+  const zoneSnap = window.TlcZoneLabelModule?.snapLatLngToZoneInterior;
+  if (typeof zoneSnap === "function" && currentFrame?.polygons?.features?.length) {
+    for (const row of viewportRows) {
+      if (!Number.isFinite(row?.lat) || !Number.isFinite(row?.lng)) continue;
+      const snap = zoneSnap(row.lat, row.lng, currentFrame);
+      if (snap && Number.isFinite(snap.lat) && Number.isFinite(snap.lng)) {
+        row.lat = snap.lat;
+        row.lng = snap.lng;
+      }
+    }
+  }
+
   if (presenceFocusedUserId && !viewportRows.some((row) => String(row?.uid) === String(presenceFocusedUserId))) {
     presenceFocusedUserId = null;
   }
