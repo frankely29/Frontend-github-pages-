@@ -279,19 +279,71 @@
       </svg>`;
     } else if (meta.code === 'silver') {
       svg = `<svg class="${classes}" viewBox="0 0 64 64" width="${size}" height="${size}" role="img" aria-label="${title}" focusable="false">
-        <path d="M22 6h20l-2.4 14H24.4L22 6Z" fill="#e2e8f0" stroke="#475569" stroke-width="2.2"/>
-        <path d="M24.5 20h15L35 29.5h-6L24.5 20Z" fill="#cbd5e1" stroke="#475569" stroke-width="2"/>
-        <path d="M32 30 47 18v16c0 10.8-6.3 18.2-15 22-8.7-3.8-15-11.2-15-22V18L32 30Z" fill="#d1d9e6" stroke="#475569" stroke-width="2.8" stroke-linejoin="round"/>
-        <circle cx="32" cy="36" r="8" fill="#f8fafc" stroke="#64748b" stroke-width="2.2"/>
-        <path d="m28.4 36.2 2.3 2.5 4.8-5" fill="none" stroke="#64748b" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+        <defs>
+          <linearGradient id="silverDiscMain" x1="14" y1="22" x2="50" y2="58" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#fafbfc"/>
+            <stop offset="0.4" stop-color="#cbd5e1"/>
+            <stop offset="0.75" stop-color="#94a3b8"/>
+            <stop offset="1" stop-color="#475569"/>
+          </linearGradient>
+          <linearGradient id="silverDiscInner" x1="32" y1="26" x2="32" y2="58" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#f1f5f9"/>
+            <stop offset="0.6" stop-color="#cbd5e1"/>
+            <stop offset="1" stop-color="#64748b"/>
+          </linearGradient>
+          <linearGradient id="silverRibbon" x1="32" y1="2" x2="32" y2="26" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#60a5fa"/>
+            <stop offset="0.55" stop-color="#3b82f6"/>
+            <stop offset="1" stop-color="#1e3a8a"/>
+          </linearGradient>
+        </defs>
+        <g id="silverRibbons">
+          <path d="M16,4 L26,4 L33,24 L25,28 Z" fill="url(#silverRibbon)" stroke="#1e3a8a" stroke-width="1" stroke-linejoin="round"/>
+          <path d="M48,4 L38,4 L31,24 L39,28 Z" fill="url(#silverRibbon)" stroke="#1e3a8a" stroke-width="1" stroke-linejoin="round"/>
+          <path d="M22,4 L24,12" fill="none" stroke="rgba(255,255,255,.45)" stroke-width="0.9" stroke-linecap="round"/>
+          <path d="M42,4 L40,12" fill="none" stroke="rgba(255,255,255,.45)" stroke-width="0.9" stroke-linecap="round"/>
+        </g>
+        <g id="silverDisc">
+          <circle cx="32" cy="42" r="18" fill="url(#silverDiscMain)" stroke="#334155" stroke-width="1.6"/>
+          <circle cx="32" cy="42" r="14" fill="url(#silverDiscInner)" stroke="#64748b" stroke-width="0.9"/>
+          <path d="M22,34 q3,-5 9,-7.5" fill="none" stroke="rgba(255,255,255,.7)" stroke-width="1.8" stroke-linecap="round"/>
+          <path d="M32,30 L33.1,32.4 L35.7,32.4 L33.6,33.9 L34.4,36.2 L32,34.7 L29.6,36.2 L30.4,33.9 L28.3,32.4 L30.9,32.4 Z" fill="#1e293b" opacity="0.55"/>
+          <text x="32" y="51" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,'SF Pro Display','Segoe UI',Roboto,sans-serif" font-size="16" font-weight="900" fill="#1e293b" stroke="rgba(255,255,255,.45)" stroke-width="0.5" paint-order="stroke">2</text>
+        </g>
       </svg>`;
     } else {
       svg = `<svg class="${classes}" viewBox="0 0 64 64" width="${size}" height="${size}" role="img" aria-label="${title}" focusable="false">
-        <path d="M22 6h20l-2.4 14H24.4L22 6Z" fill="#f8d0a2" stroke="#6b3f1f" stroke-width="2.2"/>
-        <path d="M24.5 20h15L35 29.5h-6L24.5 20Z" fill="#d89051" stroke="#6b3f1f" stroke-width="2"/>
-        <path d="M32 30 47 18v16c0 10.8-6.3 18.2-15 22-8.7-3.8-15-11.2-15-22V18L32 30Z" fill="#ce8a51" stroke="#6b3f1f" stroke-width="2.8" stroke-linejoin="round"/>
-        <circle cx="32" cy="36" r="8" fill="#f6cfaa" stroke="#7b4b27" stroke-width="2.2"/>
-        <path d="M32 31v10M27 36h10" fill="none" stroke="#7b4b27" stroke-width="2.2" stroke-linecap="round"/>
+        <defs>
+          <linearGradient id="bronzeDiscMain" x1="14" y1="22" x2="50" y2="58" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#fde2c0"/>
+            <stop offset="0.4" stop-color="#e8a76b"/>
+            <stop offset="0.75" stop-color="#a45c1a"/>
+            <stop offset="1" stop-color="#5a2a08"/>
+          </linearGradient>
+          <linearGradient id="bronzeDiscInner" x1="32" y1="26" x2="32" y2="58" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#fbd2a3"/>
+            <stop offset="0.6" stop-color="#d89051"/>
+            <stop offset="1" stop-color="#7b4b27"/>
+          </linearGradient>
+          <linearGradient id="bronzeRibbon" x1="32" y1="2" x2="32" y2="26" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#fb923c"/>
+            <stop offset="0.55" stop-color="#dc2626"/>
+            <stop offset="1" stop-color="#7c1d1d"/>
+          </linearGradient>
+        </defs>
+        <g id="bronzeRibbons">
+          <path d="M16,4 L26,4 L33,24 L25,28 Z" fill="url(#bronzeRibbon)" stroke="#7c1d1d" stroke-width="1" stroke-linejoin="round"/>
+          <path d="M48,4 L38,4 L31,24 L39,28 Z" fill="url(#bronzeRibbon)" stroke="#7c1d1d" stroke-width="1" stroke-linejoin="round"/>
+          <path d="M22,4 L24,12" fill="none" stroke="rgba(255,255,255,.45)" stroke-width="0.9" stroke-linecap="round"/>
+          <path d="M42,4 L40,12" fill="none" stroke="rgba(255,255,255,.45)" stroke-width="0.9" stroke-linecap="round"/>
+        </g>
+        <g id="bronzeDisc">
+          <circle cx="32" cy="42" r="18" fill="url(#bronzeDiscMain)" stroke="#5a2a08" stroke-width="1.6"/>
+          <circle cx="32" cy="42" r="14" fill="url(#bronzeDiscInner)" stroke="#7b4b27" stroke-width="0.9"/>
+          <path d="M22,34 q3,-5 9,-7.5" fill="none" stroke="rgba(255,236,210,.7)" stroke-width="1.8" stroke-linecap="round"/>
+          <path d="M32,30 L33.1,32.4 L35.7,32.4 L33.6,33.9 L34.4,36.2 L32,34.7 L29.6,36.2 L30.4,33.9 L28.3,32.4 L30.9,32.4 Z" fill="#5a2a08" opacity="0.6"/>
+          <text x="32" y="51" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,'SF Pro Display','Segoe UI',Roboto,sans-serif" font-size="16" font-weight="900" fill="#5a2a08" stroke="rgba(255,236,210,.45)" stroke-width="0.5" paint-order="stroke">3</text>
+        </g>
       </svg>`;
     }
     if (!options?.withLabel) return svg;
