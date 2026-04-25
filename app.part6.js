@@ -104,7 +104,7 @@
       avatarPx,
       crownPx,
       podiumPx,
-      crownLiftPx: Math.round(crownPx * 0.82),
+      crownLiftPx: Math.round(crownPx * 0.55),
       rootPx: +(30 + (66 - 30) * emphasize).toFixed(2),
       tipSizePx,
       tipOrbitPx: +((avatarPx * 0.5) - 1 + (tipSizePx * 0.1)).toFixed(2),
@@ -124,7 +124,7 @@
     return {
       crownPx,
       podiumPx,
-      crownLiftPx: Math.round(crownPx * 0.82)
+      crownLiftPx: Math.round(crownPx * 0.55)
     };
   }
 
