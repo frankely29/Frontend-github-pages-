@@ -35,10 +35,12 @@
   // hand-tuned values; consolidating here so the gradient is visible at a
   // glance and any future tuning has one source of truth. Each constant
   // documents which decision branch consumes it.
-  const RATING_TIER_GOOD_NOW             = 56;  // "good_zone_now" gate (current rating)
-  const RATING_TIER_DECENT_FLOOR         = 48;  // "decent_rating_zone" gate (current rating)
-  const RATING_TIER_DEGRADED_GOOD        = 58;  // degraded-data fallback "good" floor
-  const RATING_TIER_DEGRADED_DECENT      = 45;  // degraded-data fallback "decent" floor
+  const RATING_TIER_EXCELLENT            = 83;  // "excellent_zone_now" gate — green/Highest map tier
+  const RATING_TIER_GOOD_NOW             = 68;  // "good_zone_now" gate — indigo/High map tier
+  const RATING_TIER_DECENT_FLOOR         = 60;  // "decent_rating_zone" gate — blue/Medium map tier
+  const RATING_TIER_BELOW_AVERAGE_FLOOR  = 50;  // "below_average_now" floor — sky/Normal map tier
+  const RATING_TIER_DEGRADED_GOOD        = 65;  // degraded-data fallback "good" floor (slightly relaxed from full-mode 68)
+  const RATING_TIER_DEGRADED_DECENT      = 50;  // degraded-data fallback "decent" floor
   const RATING_TIER_TARGET_SATURATION    = 56;  // arrival-projected gate for saturation_at_arrival
   const RATING_TIER_TARGET_SLOW          = 52;  // arrival-projected gate for slow_at_arrival
   const RATING_TIER_HOLDS_AFTER_ARRIVAL  = 50;  // travel-window min rating ("holds")
@@ -1413,8 +1415,19 @@
   function deriveStayReasonText(currentSignal, currentMetrics, currentTravelMetrics, bestRejectedTarget) {
     const currentRating = safeNum(currentSignal?.visibleRating, 0) || 0;
     const holds = !!currentMetrics?.stayHoldsAfterArrival && (safeNum(currentTravelMetrics?.travelWindowMinRating, 0) || 0) >= RATING_TIER_HOLDS_AFTER_ARRIVAL;
-    if (holds && currentRating >= RATING_TIER_GOOD_NOW) return { reasonCode: "good_zone_now", reasonText: "Good zone right now" };
-    if (holds || currentRating >= RATING_TIER_DECENT_FLOOR) return { reasonCode: "decent_rating_zone", reasonText: "Decent area for now" };
+    // Recommendation tiers aligned with the map's color tiers:
+    //   Excellent  → green tier  (rating >= 83)
+    //   Good       → indigo tier (rating >= 68)
+    //   Decent     → blue tier   (rating >= 60)
+    //   Below      → sky / yellow / lower (rating < 60)
+    // The "holds" gate (forecast suggests rating sticks past arrival) also
+    // qualifies a zone as Decent — a stable but moderate rating is still
+    // worth staying in over a wobbly higher one.
+    if (currentRating >= RATING_TIER_EXCELLENT) return { reasonCode: "excellent_zone_now", reasonText: "Excellent zone right now" };
+    if (currentRating >= RATING_TIER_GOOD_NOW && holds) return { reasonCode: "good_zone_now", reasonText: "Good zone right now" };
+    if (currentRating >= RATING_TIER_GOOD_NOW) return { reasonCode: "good_zone_now", reasonText: "Good zone right now" };
+    if (currentRating >= RATING_TIER_DECENT_FLOOR || holds) return { reasonCode: "decent_rating_zone", reasonText: "Decent area for now" };
+    if (currentRating >= RATING_TIER_BELOW_AVERAGE_FLOOR) return { reasonCode: "below_average_now", reasonText: "Below average right now" };
     const rejectedEta = safeNum(bestRejectedTarget?.etaMinutes, Infinity) || Infinity;
     if (Number.isFinite(rejectedEta) && rejectedEta > AI_ASSISTANT_NEAR_TARGET_MAX_ETA_MIN) {
       return { reasonCode: "moving_not_worth_it", reasonText: "Nearby zones too far to be worth it" };
@@ -1685,7 +1698,7 @@
     if (state.committedActionCode !== "MONITOR") return false;
     if (!proposal || proposal.actionCode !== "STAY") return false;
     if (proposal.moveTarget) return false;
-    return ["good_zone_now", "decent_rating_zone", "moving_not_worth_it"].includes(String(proposal.reasonCode || "").trim());
+    return ["excellent_zone_now", "good_zone_now", "decent_rating_zone", "below_average_now", "moving_not_worth_it"].includes(String(proposal.reasonCode || "").trim());
   }
 
   function isImmediateCountdownPromotion(proposal, nowTs) {
@@ -2128,8 +2141,10 @@
 
   function friendlyReasonFromCode(reasonCode, fallbackText = "") {
     const map = {
+      excellent_zone_now: "Excellent zone right now",
       good_zone_now: "Good zone right now",
       decent_rating_zone: "Decent area for now",
+      below_average_now: "Below average right now",
       moving_not_worth_it: "Nearby zones too far to be worth it",
       low_trip_trap_risk: "Trap risk rising",
       zone_about_to_cool_off: "Demand here may drop soon",
@@ -2190,14 +2205,16 @@
     if (state.dataQualityMode !== "degraded") return false;
     if (state.finalActionCode !== "STAY") return false;
     if (state.assistantMoveTarget) return false;
-    return ["good_zone_now", "decent_rating_zone", "moving_not_worth_it"].includes(String(state.recommendationReasonCode || "").trim());
+    return ["excellent_zone_now", "good_zone_now", "decent_rating_zone", "below_average_now", "moving_not_worth_it"].includes(String(state.recommendationReasonCode || "").trim());
   }
 
   function safeDegradedStayPrimaryLine() {
     const reasonCode = String(state.recommendationReasonCode || "").trim();
+    if (reasonCode === "excellent_zone_now") return "Stay • Excellent zone right now";
     if (reasonCode === "good_zone_now") return "Stay • Good zone right now";
     if (reasonCode === "decent_rating_zone") return "Stay • Decent area for now";
-    if (reasonCode === "moving_not_worth_it") return "Stay • Other areas are too far right now";
+    if (reasonCode === "below_average_now") return "Stay • Below average right now";
+    if (reasonCode === "moving_not_worth_it") return "Stay • Nearby zones too far to be worth it";
     if (reasonCode === "nearby_options_not_strong") return "Stay briefly • Nearby options not strong enough yet";
     const reasonText = state.recommendationReasonText || state.committedReasonText || state.finalActionReason;
     return `Stay • ${humanizeAssistantReason(reasonText)}`;
@@ -2538,8 +2555,10 @@
     if (ratingGap >= 8 && nearbyEta <= AI_ASSISTANT_NEAR_TARGET_MAX_ETA_MIN) {
       return { actionCode: "MOVE_SOON", reasonText: "Better nearby area is ready" };
     }
+    if (currentRating >= RATING_TIER_EXCELLENT) return { actionCode: "STAY", reasonText: "Excellent zone right now" };
     if (currentRating >= RATING_TIER_GOOD_NOW) return { actionCode: "STAY", reasonText: "Good zone right now" };
     if (currentRating >= RATING_TIER_DECENT_FLOOR) return { actionCode: "STAY", reasonText: "Decent area for now" };
+    if (currentRating >= RATING_TIER_BELOW_AVERAGE_FLOOR) return { actionCode: "STAY", reasonText: "Below average right now" };
     if (state.activeStableZoneId) return { actionCode: "STAY_BRIEFLY", reasonText: "Nearby options not strong enough yet" };
     return { actionCode: "MONITOR", reasonText: "Checking more data." };
   }
@@ -2580,14 +2599,20 @@
       return { line: `${moveLabel} • ${reason}`, kind: committedAction.startsWith("MOVE") || committedAction === "LEAVE_NOW" ? "move" : "stay" };
     }
     if (state.dataQualityMode !== "full" && state.finalActionCode === "MONITOR") {
-      if ((safeNum(state.stayWindowAvgRating, 0) || 0) >= 48) return { line: "Stay • Decent area for now", kind: "stay" };
-      if ((safeNum(state.stayWindowAvgRating, 0) || 0) >= 44) return { line: "Stay briefly • Nearby options not strong enough yet", kind: "stay" };
-      if (state.activeStableZoneId) return { line: "Stay • Nearby options not strong enough yet", kind: "stay" };
+      const stayAvg = safeNum(state.stayWindowAvgRating, 0) || 0;
+      if (stayAvg >= RATING_TIER_EXCELLENT) return { line: "Stay • Excellent zone right now", kind: "stay" };
+      if (stayAvg >= RATING_TIER_GOOD_NOW) return { line: "Stay • Good zone right now", kind: "stay" };
+      if (stayAvg >= RATING_TIER_DECENT_FLOOR) return { line: "Stay • Decent area for now", kind: "stay" };
+      if (stayAvg >= RATING_TIER_BELOW_AVERAGE_FLOOR) return { line: "Stay • Below average right now", kind: "stay" };
+      if (state.activeStableZoneId) return { line: "Stay briefly • Nearby options not strong enough yet", kind: "stay" };
       return { line: "Monitor • Checking more data", kind: "monitor" };
     }
     if (committedAction === "MONITOR") {
-      if ((safeNum(state.stayWindowAvgRating, 0) || 0) >= 50) return { line: "Stay • Good zone right now", kind: "stay" };
-      if ((safeNum(state.stayWindowAvgRating, 0) || 0) >= 46) return { line: "Stay • Decent area for now", kind: "stay" };
+      const stayAvg = safeNum(state.stayWindowAvgRating, 0) || 0;
+      if (stayAvg >= RATING_TIER_EXCELLENT) return { line: "Stay • Excellent zone right now", kind: "stay" };
+      if (stayAvg >= RATING_TIER_GOOD_NOW) return { line: "Stay • Good zone right now", kind: "stay" };
+      if (stayAvg >= RATING_TIER_DECENT_FLOOR) return { line: "Stay • Decent area for now", kind: "stay" };
+      if (stayAvg >= RATING_TIER_BELOW_AVERAGE_FLOOR) return { line: "Stay • Below average right now", kind: "stay" };
       if (state.activeStableZoneId) {
         const hasUsefulDecision = state.countdownActive
           || state.finalActionCode === "STAY"
