@@ -1414,19 +1414,18 @@
 
   function deriveStayReasonText(currentSignal, currentMetrics, currentTravelMetrics, bestRejectedTarget) {
     const currentRating = safeNum(currentSignal?.visibleRating, 0) || 0;
-    const holds = !!currentMetrics?.stayHoldsAfterArrival && (safeNum(currentTravelMetrics?.travelWindowMinRating, 0) || 0) >= RATING_TIER_HOLDS_AFTER_ARRIVAL;
-    // Recommendation tiers aligned with the map's color tiers:
+    // Recommendation tier mirrors the rating bucket (and so the map color)
+    // EXACTLY. Stability ("holds after arrival") affects whether the engine
+    // recommends STAY elsewhere, but it must NOT promote the LABEL — a
+    // sky-tier zone that happens to be stable is still sky, not decent.
     //   Excellent  → green tier  (rating >= 83)
     //   Good       → indigo tier (rating >= 68)
     //   Decent     → blue tier   (rating >= 60)
-    //   Below      → sky / yellow / lower (rating < 60)
-    // The "holds" gate (forecast suggests rating sticks past arrival) also
-    // qualifies a zone as Decent — a stable but moderate rating is still
-    // worth staying in over a wobbly higher one.
+    //   Below avg  → sky tier    (rating >= 50)
+    //   else       → yellow / orange / red — fall through to context copy
     if (currentRating >= RATING_TIER_EXCELLENT) return { reasonCode: "excellent_zone_now", reasonText: "Excellent zone right now" };
-    if (currentRating >= RATING_TIER_GOOD_NOW && holds) return { reasonCode: "good_zone_now", reasonText: "Good zone right now" };
     if (currentRating >= RATING_TIER_GOOD_NOW) return { reasonCode: "good_zone_now", reasonText: "Good zone right now" };
-    if (currentRating >= RATING_TIER_DECENT_FLOOR || holds) return { reasonCode: "decent_rating_zone", reasonText: "Decent area for now" };
+    if (currentRating >= RATING_TIER_DECENT_FLOOR) return { reasonCode: "decent_rating_zone", reasonText: "Decent area for now" };
     if (currentRating >= RATING_TIER_BELOW_AVERAGE_FLOOR) return { reasonCode: "below_average_now", reasonText: "Below average right now" };
     const rejectedEta = safeNum(bestRejectedTarget?.etaMinutes, Infinity) || Infinity;
     if (Number.isFinite(rejectedEta) && rejectedEta > AI_ASSISTANT_NEAR_TARGET_MAX_ETA_MIN) {
@@ -1568,11 +1567,20 @@
       && (sameBorough || obviouslySuperior);
 
     if (dataQualityMode === "degraded" && !strongNearTarget) {
+      // Degraded mode: still recommend STAY for sky-or-better, but the LABEL
+      // must match the rating bucket. Don't call sky "decent" just because
+      // the alternatives are unknowable.
+      if (currentRating >= RATING_TIER_EXCELLENT) {
+        return { actionCode: "STAY", reasonCode: "excellent_zone_now", reasonText: "Excellent zone right now", worthMoving: false };
+      }
       if (currentRating >= RATING_TIER_DEGRADED_GOOD) {
         return { actionCode: "STAY", reasonCode: "good_zone_now", reasonText: "Good zone right now", worthMoving: false };
       }
-      if (currentRating >= RATING_TIER_DEGRADED_DECENT) {
+      if (currentRating >= RATING_TIER_DECENT_FLOOR) {
         return { actionCode: "STAY", reasonCode: "decent_rating_zone", reasonText: "Decent area for now", worthMoving: false };
+      }
+      if (currentRating >= RATING_TIER_DEGRADED_DECENT) {
+        return { actionCode: "STAY", reasonCode: "below_average_now", reasonText: "Below average right now", worthMoving: false };
       }
       return { actionCode: "MONITOR", reasonCode: "checking_outlook", reasonText: "Checking more data.", worthMoving: false };
     }
@@ -2653,13 +2661,29 @@
   }
 
   function buildAssistantSecondaryLine() {
-    // Personalize the "stay" lines with the user's current zone name when
-    // we know it (`state.activeStableZoneName` is already maintained by the
-    // engine). Falls back to the literal phrase when the name is empty so
-    // we never render a half-template like "Stay in  for now".
+    // The PRIMARY line already says "Stay • {tier label}". To avoid double
+    // language ("Stay • Decent area for now" + "Stay in Middle Village for
+    // now"), the secondary line should DESCRIBE the zone instead of
+    // restating the verb. We pull the tier adjective from the same reason
+    // code the primary line uses — that keeps both lines in sync.
+    //
+    // Falls back to the older "Stay in X" phrasing when the zone name is
+    // empty so we never render a half-template like "X is  right now".
     const zoneName = String(state.activeStableZoneName || "").trim();
-    const stayHereLine = zoneName ? `Stay in ${zoneName} for now` : "Stay here for now";
-    const stayBrieflyLine = zoneName ? `Stay in ${zoneName} briefly` : "Stay here briefly";
+    const reasonCode = String(state.recommendationReasonCode || "").trim();
+    const tierAdjective = (
+      reasonCode === "excellent_zone_now" ? "excellent" :
+      reasonCode === "good_zone_now" ? "good" :
+      reasonCode === "decent_rating_zone" ? "decent" :
+      reasonCode === "below_average_now" ? "below average" :
+      ""
+    );
+    const stayHereLine = zoneName
+      ? (tierAdjective ? `${zoneName} is ${tierAdjective} right now` : `Best option in ${zoneName} for now`)
+      : (tierAdjective ? `${tierAdjective.charAt(0).toUpperCase()}${tierAdjective.slice(1)} area right now` : "Best option here for now");
+    const stayBrieflyLine = zoneName
+      ? (tierAdjective ? `${zoneName} is ${tierAdjective} — staying briefly` : `Staying briefly in ${zoneName}`)
+      : "Staying briefly here";
 
     if (state.trapModeActive && state.trapNeedsNearbyEscape) {
       state.lastGuidanceSecondaryLine = "Waiting for a better nearby area";
