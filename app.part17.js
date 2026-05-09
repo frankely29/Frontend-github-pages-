@@ -9,6 +9,11 @@
   const AI_ASSISTANT_PROPOSAL_MIN_HITS = 2;
   const AI_ASSISTANT_STAY_TO_MOVE_EXTRA_BUFFER = 2.5;
   const AI_ASSISTANT_MOVE_TO_STAY_EXTRA_BUFFER = 1.5;
+  // How long a STAY proposal must persist before it's allowed to override an
+  // already-committed MOVE recommendation, even when the move target is still
+  // technically viable. Closes the asymmetric-hysteresis gap where MOVE got
+  // stuck because the only escape was target-unviability.
+  const AI_ASSISTANT_SUSTAINED_STAY_MIN_MS = 6000;
   const AI_ASSISTANT_TARGET_REPLACE_EDGE_BUFFER = 3.0;
   const AI_ASSISTANT_RECOMMENDATION_SWITCH_COOLDOWN_MS = 15000;
   const AI_ASSISTANT_RECOMMENDATION_MIN_HOLD_MS = 12000;
@@ -25,6 +30,19 @@
   const AI_ASSISTANT_TRAP_SUPPRESS_MS = 3 * 60000;
   const AI_ASSISTANT_PICKUP_SUPPRESS_MS = 4 * 60000;
   const AI_ASSISTANT_TRAP_MESSAGE_COOLDOWN_MS = 75000;
+
+  // Rating tiers used by the decision engine. Numbers preserved from prior
+  // hand-tuned values; consolidating here so the gradient is visible at a
+  // glance and any future tuning has one source of truth. Each constant
+  // documents which decision branch consumes it.
+  const RATING_TIER_GOOD_NOW             = 56;  // "good_zone_now" gate (current rating)
+  const RATING_TIER_DECENT_FLOOR         = 48;  // "decent_rating_zone" gate (current rating)
+  const RATING_TIER_DEGRADED_GOOD        = 58;  // degraded-data fallback "good" floor
+  const RATING_TIER_DEGRADED_DECENT      = 45;  // degraded-data fallback "decent" floor
+  const RATING_TIER_TARGET_SATURATION    = 56;  // arrival-projected gate for saturation_at_arrival
+  const RATING_TIER_TARGET_SLOW          = 52;  // arrival-projected gate for slow_at_arrival
+  const RATING_TIER_HOLDS_AFTER_ARRIVAL  = 50;  // travel-window min rating ("holds")
+  const RATING_TIER_STAY_WINDOW_FLOOR    = 46;  // stay-window min rating gate
   const AI_ASSISTANT_STAY_MESSAGE_COOLDOWN_MS = 45000;
   const AI_ASSISTANT_MOVE_MESSAGE_COOLDOWN_MS = 30000;
   const AI_ASSISTANT_FULL_RECOMPUTE_MIN_MS = 900;
@@ -210,6 +228,9 @@
     recommendationConfidenceLevel: "low",
     recommendationSwitchCooldownUntilTs: 0,
     recommendationMinHoldUntilTs: 0,
+    // Timestamp the engine first saw a sustained STAY proposal while a MOVE
+    // was committed. Used by the MOVE→STAY hysteresis fix at line ~1771.
+    stayProposalSinceTs: 0,
     recommendationStickyTargetId: null,
     recommendationStickyTargetSinceTs: null,
     stabilityReasonCode: "",
@@ -957,11 +978,11 @@
   function isAssistantCandidateViableOnArrival(currentMetrics, targetMetrics, etaMinutes) {
     if (targetMetrics?.targetTrackMissing) return { viable: false, viabilityRejectCode: "source_track_missing", viabilityRejectReasonText: "Future score for this mode is not ready yet." };
     if (targetMetrics?.targetTrapAtArrival) return { viable: false, viabilityRejectCode: "trap_at_arrival", viabilityRejectReasonText: "Target weak by arrival." };
-    if (targetMetrics?.targetSlowAtArrival && (safeNum(targetMetrics?.targetArrivalProjectedRating, 0) || 0) < 52) return { viable: false, viabilityRejectCode: "slow_at_arrival", viabilityRejectReasonText: "Target weak by arrival." };
-    if (targetMetrics?.targetSaturationAtArrival && (safeNum(targetMetrics?.targetArrivalProjectedRating, 0) || 0) < 56) return { viable: false, viabilityRejectCode: "saturation_at_arrival", viabilityRejectReasonText: "Target weak by arrival." };
+    if (targetMetrics?.targetSlowAtArrival && (safeNum(targetMetrics?.targetArrivalProjectedRating, 0) || 0) < RATING_TIER_TARGET_SLOW) return { viable: false, viabilityRejectCode: "slow_at_arrival", viabilityRejectReasonText: "Target weak by arrival." };
+    if (targetMetrics?.targetSaturationAtArrival && (safeNum(targetMetrics?.targetArrivalProjectedRating, 0) || 0) < RATING_TIER_TARGET_SATURATION) return { viable: false, viabilityRejectCode: "saturation_at_arrival", viabilityRejectReasonText: "Target weak by arrival." };
     if (targetMetrics?.targetLooksChasey) return { viable: false, viabilityRejectCode: "target_chasey", viabilityRejectReasonText: "Move is chasing a short spike." };
     if ((safeNum(etaMinutes, 0) || 0) > 12 && !targetMetrics?.targetHoldsAfterArrival) return { viable: false, viabilityRejectCode: "long_eta_no_hold", viabilityRejectReasonText: "Target may cool off before you get there." };
-    if ((safeNum(targetMetrics?.targetWindowMinRating, 0) || 0) < 48 && (safeNum(currentMetrics?.stayWindowMinRating, 0) || 0) >= 48) {
+    if ((safeNum(targetMetrics?.targetWindowMinRating, 0) || 0) < RATING_TIER_DECENT_FLOOR && (safeNum(currentMetrics?.stayWindowMinRating, 0) || 0) >= RATING_TIER_DECENT_FLOOR) {
       return { viable: false, viabilityRejectCode: "current_holds_better", viabilityRejectReasonText: "Current zone holds better than the target." };
     }
     return { viable: true, viabilityRejectCode: null, viabilityRejectReasonText: "" };
@@ -1053,6 +1074,14 @@
     };
   }
 
+  // Maximum cumulative confidence penalty deducted from a candidate's
+  // moveScenarioValue. The seven flags below are additive (worst case 9.5);
+  // letting them stack unbounded killed otherwise-strong moves whenever a
+  // target carried multiple yellow signals. Capping at 4.0 preserves the
+  // signal of "this target has multiple risks" without letting the penalty
+  // dominate the actual rating math.
+  const ASSISTANT_CONFIDENCE_PENALTY_CAP = 4.0;
+
   function deriveAssistantMoveConfidencePenalty(targetMetrics, viability, etaMinutes) {
     let confidencePenalty = 0;
     const confidencePenaltyReasons = [];
@@ -1063,7 +1092,13 @@
     if ((safeNum(etaMinutes, 0) || 0) > 14) { confidencePenalty += 1.0; confidencePenaltyReasons.push("long_eta"); }
     if ((safeNum(targetMetrics?.paybackTrapCount, 0) || 0) > 0) { confidencePenalty += 1.5; confidencePenaltyReasons.push("payback_trap_risk"); }
     if ((safeNum(targetMetrics?.paybackSlowCount, 0) || 0) > 1) { confidencePenalty += 1.0; confidencePenaltyReasons.push("payback_slow_risk"); }
-    return { confidencePenalty, confidencePenaltyReasons };
+    const rawConfidencePenalty = confidencePenalty;
+    const cappedConfidencePenalty = Math.min(confidencePenalty, ASSISTANT_CONFIDENCE_PENALTY_CAP);
+    return {
+      confidencePenalty: cappedConfidencePenalty,
+      rawConfidencePenalty,
+      confidencePenaltyReasons,
+    };
   }
 
   function evaluateEconomicsAwareMoveCandidate(candidateSignal, currentSignal, candidatePoints, currentPoints, etaMinutes, distanceMiles) {
@@ -1146,7 +1181,7 @@
     const metrics = bestNearEval?.currentMetrics || farEval?.currentMetrics || {};
     const currentCollapsing = !!currentCls?.shortTrap
       || !!metrics?.stayTrapAtArrival
-      || (!!metrics?.staySlowAtArrival && (safeNum(metrics?.stayWindowMinRating, 100) || 100) < 46)
+      || (!!metrics?.staySlowAtArrival && (safeNum(metrics?.stayWindowMinRating, 100) || 100) < RATING_TIER_STAY_WINDOW_FLOOR)
       || (safeNum(metrics?.stayWindowTrendDelta, 0) || 0) <= -5;
     const nearIsSameBorough = !!bestNearEval?.isSameBorough;
     const nearIsWorthwhile = !!bestNearEval?.isWorthMoving;
@@ -1235,7 +1270,7 @@
     const currentCls = classifyAssistantSignal(currentSignal || {});
     const currentWeakeningEnough = !!currentCls?.shortTrap
       || !!currentMetrics?.stayTrapAtArrival
-      || (!!currentMetrics?.staySlowAtArrival && (safeNum(currentMetrics?.stayWindowMinRating, 100) || 100) < 46)
+      || (!!currentMetrics?.staySlowAtArrival && (safeNum(currentMetrics?.stayWindowMinRating, 100) || 100) < RATING_TIER_STAY_WINDOW_FLOOR)
       || (safeNum(currentMetrics?.stayWindowTrendDelta, 0) || 0) <= -5
       || !!currentMetrics?.stayWeakensSoon;
     const selectedDramaticallyBetterByArrival = selectedArrival >= (adjacentArrival + 4);
@@ -1259,7 +1294,7 @@
     const metrics = currentMetrics || farEval?.currentMetrics || {};
     const currentCollapsing = !!currentCls?.shortTrap
       || !!metrics?.stayTrapAtArrival
-      || (!!metrics?.staySlowAtArrival && (safeNum(metrics?.stayWindowMinRating, 100) || 100) < 46)
+      || (!!metrics?.staySlowAtArrival && (safeNum(metrics?.stayWindowMinRating, 100) || 100) < RATING_TIER_STAY_WINDOW_FLOOR)
       || (safeNum(metrics?.stayWindowTrendDelta, 0) || 0) <= -5;
     const farEdge = safeNum(farEval?.netMoveEdge, -Infinity) || -Infinity;
     const farThreshold = safeNum(farEval?.moveWorthThreshold, Infinity) || Infinity;
@@ -1377,12 +1412,12 @@
 
   function deriveStayReasonText(currentSignal, currentMetrics, currentTravelMetrics, bestRejectedTarget) {
     const currentRating = safeNum(currentSignal?.visibleRating, 0) || 0;
-    const holds = !!currentMetrics?.stayHoldsAfterArrival && (safeNum(currentTravelMetrics?.travelWindowMinRating, 0) || 0) >= 50;
-    if (holds && currentRating >= 56) return { reasonCode: "good_zone_now", reasonText: "Good zone right now" };
-    if (holds || currentRating >= 48) return { reasonCode: "decent_rating_zone", reasonText: "Decent area for now" };
+    const holds = !!currentMetrics?.stayHoldsAfterArrival && (safeNum(currentTravelMetrics?.travelWindowMinRating, 0) || 0) >= RATING_TIER_HOLDS_AFTER_ARRIVAL;
+    if (holds && currentRating >= RATING_TIER_GOOD_NOW) return { reasonCode: "good_zone_now", reasonText: "Good zone right now" };
+    if (holds || currentRating >= RATING_TIER_DECENT_FLOOR) return { reasonCode: "decent_rating_zone", reasonText: "Decent area for now" };
     const rejectedEta = safeNum(bestRejectedTarget?.etaMinutes, Infinity) || Infinity;
     if (Number.isFinite(rejectedEta) && rejectedEta > AI_ASSISTANT_NEAR_TARGET_MAX_ETA_MIN) {
-      return { reasonCode: "moving_not_worth_it", reasonText: "Other areas are too far right now" };
+      return { reasonCode: "moving_not_worth_it", reasonText: "Nearby zones too far to be worth it" };
     }
     return { reasonCode: "nearby_options_not_strong", reasonText: "Nearby options not strong enough yet" };
   }
@@ -1416,7 +1451,7 @@
       return { actionCode: "STAY", reasonCode: stay.reasonCode, reasonText: stay.reasonText, worthMoving: false };
     }
     if (!bestRejectedTarget?.viability?.viable && ["source_track_missing", "trap_at_arrival", "slow_at_arrival", "saturation_at_arrival", "target_chasey", "long_eta_no_hold"].includes(bestRejectedTarget?.viability?.viabilityRejectCode)) {
-      return { actionCode: "STAY", reasonCode: "target_weak_on_arrival", reasonText: "Weak when you get there", worthMoving: false };
+      return { actionCode: "STAY", reasonCode: "target_weak_on_arrival", reasonText: "Nearby targets weaken by arrival", worthMoving: false };
     }
     const stay = deriveStayReasonText(currentSignal, currentMetrics, currentTravelMetrics, bestRejectedTarget);
     return { actionCode: "STAY", reasonCode: stay.reasonCode, reasonText: stay.reasonText, worthMoving: false };
@@ -1520,16 +1555,16 @@
       && (sameBorough || obviouslySuperior);
 
     if (dataQualityMode === "degraded" && !strongNearTarget) {
-      if (currentRating >= 58) {
+      if (currentRating >= RATING_TIER_DEGRADED_GOOD) {
         return { actionCode: "STAY", reasonCode: "good_zone_now", reasonText: "Good zone right now", worthMoving: false };
       }
-      if (currentRating >= 45) {
+      if (currentRating >= RATING_TIER_DEGRADED_DECENT) {
         return { actionCode: "STAY", reasonCode: "decent_rating_zone", reasonText: "Decent area for now", worthMoving: false };
       }
       return { actionCode: "MONITOR", reasonCode: "checking_outlook", reasonText: "Checking more data.", worthMoving: false };
     }
-    if (dataQualityMode === "partial" && !strongNearTarget && currentRating >= 45) {
-      return { actionCode: "STAY", reasonCode: "moving_not_worth_it", reasonText: "Other areas are too far right now", worthMoving: false };
+    if (dataQualityMode === "partial" && !strongNearTarget && currentRating >= RATING_TIER_DEGRADED_DECENT) {
+      return { actionCode: "STAY", reasonCode: "moving_not_worth_it", reasonText: "Nearby zones too far to be worth it", worthMoving: false };
     }
     if (dataQualityMode === "partial" && strongNearTarget) {
       return { actionCode: "MOVE_SOON", reasonCode: "near_target_clear_edge", reasonText: "Better nearby area is ready", worthMoving: true };
@@ -1551,7 +1586,7 @@
         if (strongTrapEvidence) {
           return { actionCode: "MOVE_SOON", reasonCode: "low_trip_trap_risk", reasonText: "Trap risk rising", worthMoving: true };
         }
-        return { actionCode: "MOVE_SOON", reasonCode: "zone_about_to_cool_off", reasonText: "Area may cool off", worthMoving: true };
+        return { actionCode: "MOVE_SOON", reasonCode: "zone_about_to_cool_off", reasonText: "Demand here may drop soon", worthMoving: true };
       }
       if (currentMetrics?.stayWeakensSoon) {
         if (currentMetrics?.stayWindowTrendDelta <= -5 && bestWorthwhileTarget?.targetMetrics?.targetImprovesSoon && bestWorthwhileTarget?.targetMetrics?.targetHoldsAfterArrival) {
@@ -1765,15 +1800,32 @@
     }
 
     if (isMoveAction(state.committedActionCode) && proposal.actionCode === "STAY") {
+      // Track how long this STAY proposal has been sustained. Without this,
+      // the engine would only release a committed MOVE when the target became
+      // unviable or its edge fell below threshold — so a STAY proposal that
+      // simply won the math could get stuck waiting forever. Sustained-STAY
+      // is the symmetric counterpart to STAY→MOVE's stable-proposal gate.
+      if (!state.stayProposalSinceTs) {
+        state.stayProposalSinceTs = nowTs;
+      }
+      const stayHasBeenWinning = (nowTs - (safeNum(state.stayProposalSinceTs, nowTs) || nowTs)) >= AI_ASSISTANT_SUSTAINED_STAY_MIN_MS;
       const committedTargetViable = state.committedMoveTarget?.targetViableOnArrival !== false;
       const committedEdge = safeNum(state.committedMoveTarget?.netMoveEdge, 0) || 0;
       const committedThreshold = safeNum(state.committedMoveTarget?.moveWorthThreshold, 0) || 0;
-      const allowCancel = !committedTargetViable || committedEdge < (committedThreshold - AI_ASSISTANT_MOVE_TO_STAY_EXTRA_BUFFER) || nowTs >= (safeNum(state.recommendationMinHoldUntilTs, 0) || 0);
+      const allowCancel = !committedTargetViable
+        || committedEdge < (committedThreshold - AI_ASSISTANT_MOVE_TO_STAY_EXTRA_BUFFER)
+        || nowTs >= (safeNum(state.recommendationMinHoldUntilTs, 0) || 0)
+        || stayHasBeenWinning;
       if (!allowCancel) {
         state.stabilityReasonCode = "holding_existing_move";
         state.stabilityReasonText = "Current move target still makes sense.";
         return;
       }
+    } else {
+      // Reset the sustained-STAY clock whenever the proposal isn't STAY (or
+      // we're not currently committed to MOVE) so the timer starts fresh next
+      // time the engine sees a STAY proposal during a committed MOVE.
+      state.stayProposalSinceTs = 0;
     }
 
     if (isMoveAction(state.committedActionCode)
@@ -1819,7 +1871,7 @@
 
   function deriveStableRecommendationReason(committedRecommendation, stabilityReasonCode, stabilityReasonText) {
     if (stabilityReasonCode === "proposal_not_stable_yet" && stabilityReasonText) return "Waiting to confirm the recommendation";
-    if (stabilityReasonCode === "move_edge_not_far_enough") return "Other areas are too far right now";
+    if (stabilityReasonCode === "move_edge_not_far_enough") return "Nearby zones too far to be worth it";
     if (stabilityReasonCode === "holding_existing_move") return "Current target still makes sense";
     if (stabilityReasonCode === "current_target_still_better_enough") return "Current target still makes sense";
     const reasonText = String(committedRecommendation?.reasonText || "").trim();
@@ -2078,13 +2130,13 @@
     const map = {
       good_zone_now: "Good zone right now",
       decent_rating_zone: "Decent area for now",
-      moving_not_worth_it: "Other areas are too far right now",
+      moving_not_worth_it: "Nearby zones too far to be worth it",
       low_trip_trap_risk: "Trap risk rising",
-      zone_about_to_cool_off: "Area may cool off",
+      zone_about_to_cool_off: "Demand here may drop soon",
       nearby_zone_about_to_get_busier: "Nearby area is getting better",
       worth_the_drive_time: "Worth the drive right now",
-      stronger_when_you_arrive: "Better when you get there",
-      target_weak_on_arrival: "Weak when you get there",
+      stronger_when_you_arrive: "Target stronger by arrival",
+      target_weak_on_arrival: "Nearby targets weaken by arrival",
       checking_outlook: "Checking more data",
       collecting_context: "Waiting for a clearer signal",
       current_zone_holds: "This area still looks better right now",
@@ -2113,8 +2165,8 @@
       .replace(/Checking outlook\.?/gi, "Checking more data.")
       .replace(/Collecting more context\.?/gi, "Learning this area.")
       .replace(/Decent rating zone\.?/gi, "Decent area for now.")
-      .replace(/Moving is not worth the time\.?/gi, "Other areas are too far right now.")
-      .replace(/Target weak by the time you get there\.?/gi, "Weak when you get there.")
+      .replace(/Moving is not worth the time\.?/gi, "Nearby zones too far to be worth it.")
+      .replace(/Target weak by the time you get there\.?/gi, "Nearby targets weaken by arrival.")
       .replace(/dwell/gi, "stay");
     return normalized;
   }
@@ -2285,7 +2337,7 @@
 
     let trapReasonSummary = "";
     if (!strongEvidence && composite >= 3.8) {
-      trapReasonSummary = "Area may cool off soon.";
+      trapReasonSummary = "Demand here may drop soon.";
     } else if (sameZonePickups >= 2 && minsInZone >= 8) {
       trapReasonSummary = "You got trips here but you are still stuck in the same area.";
     } else if (minsInZone >= 10 && trapMovementScore >= 1) {
@@ -2486,8 +2538,8 @@
     if (ratingGap >= 8 && nearbyEta <= AI_ASSISTANT_NEAR_TARGET_MAX_ETA_MIN) {
       return { actionCode: "MOVE_SOON", reasonText: "Better nearby area is ready" };
     }
-    if (currentRating >= 56) return { actionCode: "STAY", reasonText: "Good zone right now" };
-    if (currentRating >= 48) return { actionCode: "STAY", reasonText: "Decent area for now" };
+    if (currentRating >= RATING_TIER_GOOD_NOW) return { actionCode: "STAY", reasonText: "Good zone right now" };
+    if (currentRating >= RATING_TIER_DECENT_FLOOR) return { actionCode: "STAY", reasonText: "Decent area for now" };
     if (state.activeStableZoneId) return { actionCode: "STAY_BRIEFLY", reasonText: "Nearby options not strong enough yet" };
     return { actionCode: "MONITOR", reasonText: "Checking more data." };
   }
@@ -2576,6 +2628,14 @@
   }
 
   function buildAssistantSecondaryLine() {
+    // Personalize the "stay" lines with the user's current zone name when
+    // we know it (`state.activeStableZoneName` is already maintained by the
+    // engine). Falls back to the literal phrase when the name is empty so
+    // we never render a half-template like "Stay in  for now".
+    const zoneName = String(state.activeStableZoneName || "").trim();
+    const stayHereLine = zoneName ? `Stay in ${zoneName} for now` : "Stay here for now";
+    const stayBrieflyLine = zoneName ? `Stay in ${zoneName} briefly` : "Stay here briefly";
+
     if (state.trapModeActive && state.trapNeedsNearbyEscape) {
       state.lastGuidanceSecondaryLine = "Waiting for a better nearby area";
       return "Waiting for a better nearby area";
@@ -2603,15 +2663,15 @@
     const weakDataMode = state.dataQualityMode === "partial" || state.dataQualityMode === "degraded";
     const safeDegradedStayFallback = isSafeDegradedStayFallback();
     if (safeDegradedStayFallback) {
-      state.lastGuidanceSecondaryLine = "Stay here for now";
-      return "Stay here for now";
+      state.lastGuidanceSecondaryLine = stayHereLine;
+      return stayHereLine;
     }
     if (state.dataQualityMode === "degraded" && state.finalActionCode === "MONITOR" && !safeDegradedStayFallback) {
       state.lastGuidanceSecondaryLine = "Waiting for a clearer signal";
       return "Waiting for a clearer signal";
     }
     if (weakDataMode && (!committedTarget || (safeNum(committedTarget?.etaMinutes, Infinity) || Infinity) > AI_ASSISTANT_NEAR_TARGET_MAX_ETA_MIN)) {
-      const line = committedAction === "STAY" ? "Stay here for now" : "Waiting for a clearer signal";
+      const line = committedAction === "STAY" ? stayHereLine : "Waiting for a clearer signal";
       state.lastGuidanceSecondaryLine = line;
       return line;
     }
@@ -2623,17 +2683,17 @@
       return line;
     }
     if (committedAction === "STAY") {
-      state.lastGuidanceSecondaryLine = "Stay here for now";
-      return "Stay here for now";
+      state.lastGuidanceSecondaryLine = stayHereLine;
+      return stayHereLine;
     }
     if (committedAction === "STAY_BRIEFLY") {
-      state.lastGuidanceSecondaryLine = "Stay here briefly";
-      return "Stay here briefly";
+      state.lastGuidanceSecondaryLine = stayBrieflyLine;
+      return stayBrieflyLine;
     }
     if (committedAction === "MONITOR") {
       if ((safeNum(state.stayWindowAvgRating, 0) || 0) >= 50) {
-        state.lastGuidanceSecondaryLine = "Stay here for now";
-        return "Stay here for now";
+        state.lastGuidanceSecondaryLine = stayHereLine;
+        return stayHereLine;
       }
       if ((safeNum(state.stayWindowAvgRating, 0) || 0) >= 46) {
         state.lastGuidanceSecondaryLine = "Nearby options not strong enough yet";
@@ -2904,6 +2964,32 @@
     return "Why staying: other areas are too far right now";
   }
 
+  // Build the top 1-3 evidence bullets that drove the current advice.
+  // Renders in the expanded panel so a driver can sanity-check the advice
+  // against the live numbers (current rating, best target, data quality,
+  // trap signal). All values come straight from state — no new computation.
+  function buildAssistantEvidenceBullets() {
+    const out = [];
+    const cur = Math.round(safeNum(state.visibleRating, 0) || 0);
+    if (cur > 0) {
+      const bucket = prettyBucket(state.visibleBucket) || "";
+      out.push(bucket ? `Current zone rating ${cur} (${bucket})` : `Current zone rating ${cur}`);
+    }
+    const tgt = state.committedMoveTarget || state.assistantMoveTarget;
+    if (tgt && Number.isFinite(safeNum(tgt.arrivalProjectedRating, NaN)) && Number.isFinite(safeNum(tgt.etaMinutes, NaN))) {
+      out.push(`Best nearby target ${Math.round(tgt.arrivalProjectedRating)} by arrival, ${Math.round(tgt.etaMinutes)} min away`);
+    }
+    if (state.dataQualityMode === "degraded") {
+      out.push("Data quality: degraded — using fallback");
+    } else if (state.dataQualityMode === "partial") {
+      out.push("Data quality: partial");
+    }
+    if (state.trapModeActive) {
+      out.push("Trap risk detected nearby");
+    }
+    return out.slice(0, 3);
+  }
+
   function buildPanelHtml() {
     const cautionDataLine = state.dataQualityMode === "degraded"
       ? "Using a cautious recommendation because some live data is missing."
@@ -2945,10 +3031,15 @@
     // taxi-zones GeoJSON which is admin-uploadable (POST /upload_zones_geojson);
     // without escaping, an admin-controlled zone name containing HTML would
     // execute as script in every user's browser.
+    const evidenceBullets = buildAssistantEvidenceBullets();
+    const evidenceSection = evidenceBullets.length
+      ? `<section class="aiAssistantSection"><strong>Why this advice</strong><ul class="aiAssistantList">${evidenceBullets.map((b) => `<li>${escapeHtml(b)}</li>`).join("")}</ul></section>`
+      : "";
     return `
       <div class="aiAssistantPanel">
         <section class="aiAssistantSection"><strong>Current area</strong><div>${escapeHtml(state.activeStableZoneName || "—")} • ${escapeHtml(state.activeStableBorough || "—")} • ${Math.round(state.visibleRating || 0)} ${escapeHtml(prettyBucket(state.visibleBucket) || "")} • ${escapeHtml(state.visibleScoreSourceLabel || "")}</div></section>
         <section class="aiAssistantSection"><strong>Advice</strong><div>${escapeHtml(buildAssistantPrimaryLine() || "")}</div><div>${escapeHtml(buildAssistantSecondaryLine() || "")}</div></section>
+        ${evidenceSection}
         ${serverSupplementLine}
         <section class="aiAssistantSection"><strong>Countdown</strong><div>${state.countdownActive ? `Countdown active • ${Math.max(1, Math.round(state.countdownMinutesRemaining || 0))} min left` : "Countdown inactive"}</div><div>${escapeHtml(state.countdownReasonText || state.countdownHoldWindowReason || "No countdown needed.")}</div>${state.countdownActive && state.countdownTarget?.zoneName ? `<div>Target: ${escapeHtml(state.countdownTarget.zoneName)} • ${Math.round(state.countdownTarget.etaMinutes || 0)} min</div>` : ""}</section>
         ${(state.trapModeActive || (safeNum(state.trapSeverityLevel, 0) || 0) >= 2 || state.trapReasonSummary) ? `<section class="aiAssistantSection"><strong>Area check</strong><div>${escapeHtml(state.trapReasonSummary || "No trap signs right now.")}</div>${state.trapEscapeTarget?.candidateSignal?.zoneName ? `<div>Nearby option: ${escapeHtml(state.trapEscapeTarget.candidateSignal.zoneName)} • ${Math.round(state.trapEscapeTarget.etaMinutes || 0)} min</div>` : ""}</section>` : ""}
@@ -3792,7 +3883,7 @@
           state.finalActionCode = "STAY";
           const tooFar = (safeNum(state.assistantMoveTarget?.etaMinutes, Infinity) || Infinity) > AI_ASSISTANT_NEAR_TARGET_MAX_ETA_MIN;
           state.recommendationReasonCode = tooFar ? "moving_not_worth_it" : "nearby_options_not_strong";
-          state.recommendationReasonText = tooFar ? "Other areas are too far right now" : "Nearby options not strong enough yet";
+          state.recommendationReasonText = tooFar ? "Nearby zones too far to be worth it" : "Nearby options not strong enough yet";
           state.finalActionReason = state.recommendationReasonText;
         }
         resetCountdownCoachState();
