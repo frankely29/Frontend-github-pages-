@@ -38,6 +38,7 @@
     const expires = Number(meObj.trial_expires_at || 0);
     if (!expires) return { onTrial: false, daysRemaining: null };
     const now = Math.floor(Date.now() / 1000);
+    if (expires <= now) return { onTrial: false, daysRemaining: null };
     const remaining = Math.max(0, Math.floor((expires - now) / 86400));
     return { onTrial: true, daysRemaining: remaining };
   }
