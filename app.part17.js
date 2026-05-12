@@ -978,12 +978,31 @@
   }
 
   function isAssistantCandidateViableOnArrival(currentMetrics, targetMetrics, etaMinutes) {
+    // Comparative-override: when the user is sitting in a below-decent zone
+    // (yellow / orange / red) and a candidate target is meaningfully better
+    // EVEN AT ITS ARRIVAL-PROJECTED rating, "weakening" gates that look at
+    // the target in isolation should NOT reject the move — a fragile blue
+    // target still beats a stable yellow one. Without this, the engine kept
+    // saying "Nearby targets weaken by arrival" when the user was in yellow
+    // and an adjacent blue zone was projected to dip into sky (still better
+    // than yellow).
+    //
+    // Safety gates that aren't about absolute rating fragility
+    // (source_track_missing, trap_at_arrival, target_chasey) stay strict —
+    // trap and chase signals indicate a target that's actively bad to move
+    // into, regardless of how weak the current zone is.
+    const currentStayAvg = safeNum(currentMetrics?.stayWindowAvgRating, 0) || 0;
+    const targetArrivalRating = safeNum(targetMetrics?.targetArrivalProjectedRating, 0) || 0;
+    const currentIsBelowDecent = currentStayAvg > 0 && currentStayAvg < RATING_TIER_DECENT_FLOOR;
+    const targetMeaningfullyBetter = (targetArrivalRating - currentStayAvg) >= 8;
+    const relaxArrivalFragilityGates = currentIsBelowDecent && targetMeaningfullyBetter;
+
     if (targetMetrics?.targetTrackMissing) return { viable: false, viabilityRejectCode: "source_track_missing", viabilityRejectReasonText: "Future score for this mode is not ready yet." };
     if (targetMetrics?.targetTrapAtArrival) return { viable: false, viabilityRejectCode: "trap_at_arrival", viabilityRejectReasonText: "Target weak by arrival." };
-    if (targetMetrics?.targetSlowAtArrival && (safeNum(targetMetrics?.targetArrivalProjectedRating, 0) || 0) < RATING_TIER_TARGET_SLOW) return { viable: false, viabilityRejectCode: "slow_at_arrival", viabilityRejectReasonText: "Target weak by arrival." };
-    if (targetMetrics?.targetSaturationAtArrival && (safeNum(targetMetrics?.targetArrivalProjectedRating, 0) || 0) < RATING_TIER_TARGET_SATURATION) return { viable: false, viabilityRejectCode: "saturation_at_arrival", viabilityRejectReasonText: "Target weak by arrival." };
+    if (targetMetrics?.targetSlowAtArrival && (safeNum(targetMetrics?.targetArrivalProjectedRating, 0) || 0) < RATING_TIER_TARGET_SLOW && !relaxArrivalFragilityGates) return { viable: false, viabilityRejectCode: "slow_at_arrival", viabilityRejectReasonText: "Target weak by arrival." };
+    if (targetMetrics?.targetSaturationAtArrival && (safeNum(targetMetrics?.targetArrivalProjectedRating, 0) || 0) < RATING_TIER_TARGET_SATURATION && !relaxArrivalFragilityGates) return { viable: false, viabilityRejectCode: "saturation_at_arrival", viabilityRejectReasonText: "Target weak by arrival." };
     if (targetMetrics?.targetLooksChasey) return { viable: false, viabilityRejectCode: "target_chasey", viabilityRejectReasonText: "Move is chasing a short spike." };
-    if ((safeNum(etaMinutes, 0) || 0) > 12 && !targetMetrics?.targetHoldsAfterArrival) return { viable: false, viabilityRejectCode: "long_eta_no_hold", viabilityRejectReasonText: "Target may cool off before you get there." };
+    if ((safeNum(etaMinutes, 0) || 0) > 12 && !targetMetrics?.targetHoldsAfterArrival && !relaxArrivalFragilityGates) return { viable: false, viabilityRejectCode: "long_eta_no_hold", viabilityRejectReasonText: "Target may cool off before you get there." };
     if ((safeNum(targetMetrics?.targetWindowMinRating, 0) || 0) < RATING_TIER_DECENT_FLOOR && (safeNum(currentMetrics?.stayWindowMinRating, 0) || 0) >= RATING_TIER_DECENT_FLOOR) {
       return { viable: false, viabilityRejectCode: "current_holds_better", viabilityRejectReasonText: "Current zone holds better than the target." };
     }
