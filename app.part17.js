@@ -1482,7 +1482,20 @@
       return { actionCode: "STAY", reasonCode: stay.reasonCode, reasonText: stay.reasonText, worthMoving: false };
     }
     if (!bestRejectedTarget?.viability?.viable && ["source_track_missing", "trap_at_arrival", "slow_at_arrival", "saturation_at_arrival", "target_chasey", "long_eta_no_hold"].includes(bestRejectedTarget?.viability?.viabilityRejectCode)) {
-      return { actionCode: "STAY", reasonCode: "target_weak_on_arrival", reasonText: "Nearby targets weaken by arrival", worthMoving: false };
+      // "Nearby targets weaken by arrival" implies the current zone is OK
+      // and surroundings are dropping. That's misleading when the user is
+      // sitting in a below-decent zone (yellow / orange / red) — the truth
+      // is that the current zone is also weak, and nothing nearby happens
+      // to be enough better to justify moving. Surface the honest tier
+      // label in that case instead, so the user reads "Below average right
+      // now" instead of being told the surroundings are the problem.
+      const currentStayAvg = safeNum(currentMetrics?.stayWindowAvgRating, 0) || 0;
+      const currentVisibleRating = safeNum(currentSignal?.visibleRating, 0) || 0;
+      const currentIsBelowDecent = (currentStayAvg > 0 && currentStayAvg < RATING_TIER_DECENT_FLOOR)
+        || (currentVisibleRating > 0 && currentVisibleRating < RATING_TIER_DECENT_FLOOR);
+      if (!currentIsBelowDecent) {
+        return { actionCode: "STAY", reasonCode: "target_weak_on_arrival", reasonText: "Nearby targets weaken by arrival", worthMoving: false };
+      }
     }
     const stay = deriveStayReasonText(currentSignal, currentMetrics, currentTravelMetrics, bestRejectedTarget);
     return { actionCode: "STAY", reasonCode: stay.reasonCode, reasonText: stay.reasonText, worthMoving: false };
