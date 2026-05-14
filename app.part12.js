@@ -527,10 +527,56 @@
     return out;
   }
 
+  // Find the closest point on the polygon's boundary to (ptLng, ptLat),
+  // then nudge it slightly inward so the result is strictly inside the
+  // polygon. Lets us snap an off-zone GPS fix to a point right next to
+  // where the user actually is — much better than collapsing them to the
+  // zone centroid (which causes visible "teleports" when two close users
+  // straddle a polygon edge).
+  function _nearestInteriorPoint(ptLng, ptLat, polyCoords, bb) {
+    const outer = polyCoords?.[0];
+    if (!Array.isArray(outer) || outer.length < 2) return null;
+    let bestX = null;
+    let bestY = null;
+    let bestDist = Infinity;
+    for (let i = 0; i < outer.length - 1; i += 1) {
+      const ax = outer[i][0];
+      const ay = outer[i][1];
+      const bx = outer[i + 1][0];
+      const by = outer[i + 1][1];
+      const dx = bx - ax;
+      const dy = by - ay;
+      const lenSq = dx * dx + dy * dy;
+      let t = lenSq > 0 ? ((ptLng - ax) * dx + (ptLat - ay) * dy) / lenSq : 0;
+      if (t < 0) t = 0;
+      else if (t > 1) t = 1;
+      const projX = ax + t * dx;
+      const projY = ay + t * dy;
+      const ddx = ptLng - projX;
+      const ddy = ptLat - projY;
+      const d = ddx * ddx + ddy * ddy;
+      if (d < bestDist) {
+        bestDist = d;
+        bestX = projX;
+        bestY = projY;
+      }
+    }
+    if (bestX === null) return null;
+    const cx = (bb.minLng + bb.maxLng) / 2;
+    const cy = (bb.minLat + bb.maxLat) / 2;
+    for (const t of [0.001, 0.005, 0.02, 0.08]) {
+      const nx = bestX + (cx - bestX) * t;
+      const ny = bestY + (cy - bestY) * t;
+      if (pointInPolygonLngLat(nx, ny, polyCoords)) return { lng: nx, lat: ny };
+    }
+    return { lng: cx, lat: cy };
+  }
+
   // If (ptLat, ptLng) is inside any zone polygon in `frame`, returns null
-  // (caller keeps the original GPS coords). Otherwise returns an interior
-  // point of the *nearest* zone — guaranteed to be inside its polygon.
-  // Used to keep presence avatars from drifting into water / over edges.
+  // (caller keeps the original GPS coords). Otherwise returns the closest
+  // point inside the *nearest* zone polygon — the smallest possible nudge
+  // that pulls the avatar back over land. Avoids the "teleport to centroid"
+  // jumps that earlier versions caused.
   function snapLatLngToZoneInterior(ptLat, ptLng, frame) {
     if (!Number.isFinite(ptLat) || !Number.isFinite(ptLng)) return null;
     const entries = _buildZoneSnapEntries(frame);
@@ -556,6 +602,8 @@
       }
     }
     if (!best) return null;
+    const near = _nearestInteriorPoint(ptLng, ptLat, best.poly, best.bb);
+    if (near) return near;
     const interior = findInteriorPointForGeometry(best.feature.geometry);
     return interior || null;
   }
