@@ -49,6 +49,14 @@
   const AI_ASSISTANT_MOVE_MESSAGE_COOLDOWN_MS = 30000;
   const AI_ASSISTANT_FULL_RECOMPUTE_MIN_MS = 900;
   const AI_ASSISTANT_SAME_ZONE_REPOSITION_MILES = 0.1;
+  // Cache TTLs. Without these, the outlook/guidance caches return the same
+  // payload forever for a given frame_time key. When the user sits in the
+  // same zone, the heartbeat keeps recomputing but never gets fresh server
+  // data, so the recommendation banner stays frozen until the user manually
+  // refreshes. Treating entries older than the TTL as cache misses lets the
+  // 15-second heartbeat actually pull fresh data.
+  const AI_ASSISTANT_OUTLOOK_CACHE_TTL_MS = 60000;
+  const AI_ASSISTANT_GUIDANCE_CACHE_TTL_MS = 60000;
 
   const runtime = window.FrontendRuntime || null;
   const runtimePolling = runtime?.polling || null;
@@ -261,6 +269,7 @@
     targetViabilityRejectReasonText: "",
     frameFeatures: [],
     outlookCache: new Map(),
+    outlookCacheStamps: new Map(),
     outlookAbortController: null,
     outlookRequestKey: "",
     outlookInFlightKey: "",
@@ -271,6 +280,7 @@
     outlookLastErrorMessage: "",
     guidanceStatus: "idle",
     guidanceCache: new Map(),
+    guidanceCacheStamps: new Map(),
     guidanceInFlightKey: "",
     guidanceInFlightPromise: null,
     guidanceAbortController: null,
@@ -1937,7 +1947,9 @@
     if (!frameTime || !ids.length) return null;
     const key = buildOutlookCacheKey(frameTime, ids, visibleSource);
     state.outlookRequestKey = key;
-    if (state.outlookCache.has(key)) {
+    const cachedStamp = state.outlookCacheStamps.get(key) || 0;
+    const cacheFresh = cachedStamp && (Date.now() - cachedStamp) < AI_ASSISTANT_OUTLOOK_CACHE_TTL_MS;
+    if (state.outlookCache.has(key) && cacheFresh) {
       state.outlookStatus = "ready";
       state.outlookLastErrorCode = "";
       state.outlookLastErrorMessage = "";
@@ -1973,6 +1985,7 @@
         );
         const payload = data || null;
         state.outlookCache.set(key, payload);
+        state.outlookCacheStamps.set(key, Date.now());
         state.outlookRequestKey = key;
         state.lastSuccessfulOutlookKey = key;
         state.lastSuccessfulOutlookAt = Date.now();
@@ -2058,7 +2071,9 @@
     const key = buildGuidanceCacheKey(frameTime, userLocation, modeFlags);
     state.lastGuidanceRequestKey = key;
     if (!frameTime || !key) return null;
-    if (state.guidanceCache.has(key)) {
+    const cachedStamp = state.guidanceCacheStamps.get(key) || 0;
+    const cacheFresh = cachedStamp && (Date.now() - cachedStamp) < AI_ASSISTANT_GUIDANCE_CACHE_TTL_MS;
+    if (state.guidanceCache.has(key) && cacheFresh) {
       state.guidanceStatus = "ready";
       state.guidanceLastErrorCode = "";
       state.guidanceLastErrorMessage = "";
@@ -2096,7 +2111,9 @@
           return null;
         }
         state.guidanceCache.set(key, payload);
+        state.guidanceCacheStamps.set(key, Date.now());
         trimMapCache(state.guidanceCache, 18);
+        trimMapCache(state.guidanceCacheStamps, 18);
         state.lastSuccessfulGuidanceKey = key;
         state.lastSuccessfulGuidanceAt = Date.now();
         state.guidanceStatus = "ready";
@@ -3245,8 +3262,10 @@
       serverGuidanceTargetZoneId: server?.targetZone?.id || "",
       serverGuidanceTargetZoneName: server?.targetZone?.name || "",
       outlookCache: undefined,
+      outlookCacheStamps: undefined,
       outlookAbortController: undefined,
       guidanceCache: undefined,
+      guidanceCacheStamps: undefined,
       guidanceAbortController: undefined,
       heartbeatHandle: undefined,
       frameFeatures: undefined,
@@ -3573,7 +3592,9 @@
     const guidanceKey = buildGuidanceCacheKey(state.lastFrameTime, state.lastUserLocation, modeFlags);
     state.lastGuidanceRequestKey = guidanceKey;
     let effectiveGuidance = null;
-    if (guidanceKey && state.guidanceCache.has(guidanceKey)) {
+    const guidanceStamp = guidanceKey ? (state.guidanceCacheStamps.get(guidanceKey) || 0) : 0;
+    const guidanceCacheFresh = guidanceStamp && (Date.now() - guidanceStamp) < AI_ASSISTANT_GUIDANCE_CACHE_TTL_MS;
+    if (guidanceKey && state.guidanceCache.has(guidanceKey) && guidanceCacheFresh) {
       effectiveGuidance = normalizeServerGuidance(state.guidanceCache.get(guidanceKey));
       if (effectiveGuidance) {
         state.guidanceStatus = "ready";
@@ -3620,7 +3641,9 @@
       ? buildOutlookCacheKey(state.lastFrameTime, locationIds, state.visibleScoreSource)
       : "";
     let effectiveOutlook = null;
-    const hasCachedCurrentKey = !!currentOutlookKey && state.outlookCache.has(currentOutlookKey);
+    const outlookStamp = currentOutlookKey ? (state.outlookCacheStamps.get(currentOutlookKey) || 0) : 0;
+    const outlookCacheFresh = outlookStamp && (Date.now() - outlookStamp) < AI_ASSISTANT_OUTLOOK_CACHE_TTL_MS;
+    const hasCachedCurrentKey = !!currentOutlookKey && state.outlookCache.has(currentOutlookKey) && outlookCacheFresh;
     if (hasCachedCurrentKey) {
       effectiveOutlook = state.outlookCache.get(currentOutlookKey) || null;
       state.outlookStatus = "ready";
