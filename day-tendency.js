@@ -386,6 +386,10 @@
     const zoneName = String(props.zone || props.Zone || props.zone_name || props.zoneName || '').trim();
     const locationId = String(props.LocationID || props.location_id || props.locationId || '').trim();
     const localTimeLabel = getCurrentFrameTimeLabel();
+    const rawSaturationPenalty = Number(props.market_saturation_penalty_n_shadow ?? props.market_saturation_penalty_n ?? 0);
+    const marketSaturationPenalty = Number.isFinite(rawSaturationPenalty)
+      ? Math.max(0, Math.min(1, rawSaturationPenalty))
+      : 0;
 
     return {
       visibleScore: safeScore,
@@ -398,7 +402,8 @@
       localTimeLabel: localTimeLabel || '',
       frameTime: getCurrentFrameTimeIso() || null,
       benchmarkFamily,
-      benchmarkFamilyLabel
+      benchmarkFamilyLabel,
+      marketSaturationPenalty
     };
   }
 
@@ -511,12 +516,27 @@
     const rawVisibleScore = clampScore100(local?.visibleScore);
     const monthlyBenchmarkScore = clampScore100(benchmark?.averageRating);
     if (!Number.isFinite(rawVisibleScore) || !Number.isFinite(monthlyBenchmarkScore)) return null;
-    const tendencyScore = clampScore100(50 + (rawVisibleScore - monthlyBenchmarkScore));
+    // Subtract a saturation-driven deduction so a high-demand-but-oversupplied
+    // zone doesn't read "high" while the driver gets no trips. The backend
+    // already bakes the time-of-day curve into marketSaturationPenalty, so
+    // this is a single multiplicative term — no duplicated curve to drift.
+    // Ceiling of 16 points: a fully-saturated zone with raw==benchmark moves
+    // 50 -> 34, which demotes "high" to mid-"normal" rather than skipping
+    // bands entirely.
+    const SATURATION_TENDENCY_POINTS = 16;
+    const saturationPenalty = Number(local?.marketSaturationPenalty);
+    const saturationDeduction = Number.isFinite(saturationPenalty)
+      ? Math.max(0, Math.min(1, saturationPenalty)) * SATURATION_TENDENCY_POINTS
+      : 0;
+    const tendencyScore = clampScore100(50 + (rawVisibleScore - monthlyBenchmarkScore) - saturationDeduction);
     if (!Number.isFinite(tendencyScore)) return null;
     const band = tendencyScore < 40 ? 'low' : (tendencyScore >= 60 ? 'high' : 'normal');
     const label = band === 'low' ? 'Low' : (band === 'high' ? 'High' : 'Normal');
     const benchmarkMonthLabel = getMonthLabelFromKey(benchmark?.monthKey);
-    const explain = `Current ${Math.round(rawVisibleScore)} vs ${benchmarkMonthLabel} benchmark ${Math.round(monthlyBenchmarkScore)}`;
+    const explainBase = `Current ${Math.round(rawVisibleScore)} vs ${benchmarkMonthLabel} benchmark ${Math.round(monthlyBenchmarkScore)}`;
+    const explain = saturationDeduction >= 3
+      ? `${explainBase} • saturation -${Math.round(saturationDeduction)}`
+      : explainBase;
     const sourceMode = 'frontend_visible_zone_vs_month_benchmark';
     const payload = {
       status: 'ok',
