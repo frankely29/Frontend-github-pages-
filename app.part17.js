@@ -21,6 +21,29 @@
   const AI_ASSISTANT_NEAR_TARGET_MAX_ETA_MIN = 12;
   const AI_ASSISTANT_FAR_TARGET_SOFT_CAP_MIN = 16;
   const AI_ASSISTANT_FAR_TARGET_HARD_CAP_MIN = 20;
+  // Rating-tier-aware ETA expansion. When the current zone is in a bad tier,
+  // a 15-minute drive to a much better zone is worth more than staying put
+  // — but the static 12-min "too far" filter rejects it and falls back to
+  // "Stay". These thresholds let the matcher search further when the
+  // current zone is in Avoid (red) / Low (orange) / Below (yellow) tiers.
+  //   <30  Avoid           : up to 25 min
+  //   30-39 Low            : up to 20 min
+  //   40-49 Below Normal   : up to 16 min
+  //   50+  Normal+         : 12 min (default)
+  function effectiveNearTargetMaxEtaMinForRating(rating) {
+    const r = Number(rating);
+    if (!Number.isFinite(r)) return AI_ASSISTANT_NEAR_TARGET_MAX_ETA_MIN;
+    if (r < 30) return 25;
+    if (r < 40) return 20;
+    if (r < 50) return 16;
+    return AI_ASSISTANT_NEAR_TARGET_MAX_ETA_MIN;
+  }
+  // Stationary-too-long trigger. Sky-or-better zones are fine to camp in
+  // until a strong nearby option shows up, but a driver who has been
+  // motionless past this many minutes should hear about any better nearby
+  // option even if the score advantage is modest.
+  const AI_ASSISTANT_STATIONARY_ESCAPE_MIN = 10;
+  const AI_ASSISTANT_STATIONARY_ESCAPE_MIN_GAP = 4;
   const AI_ASSISTANT_NEAR_TARGET_EDGE_BUFFER = 2.5;
   const AI_ASSISTANT_FAR_TARGET_EXTRA_EDGE_REQUIRED = 4.0;
   const AI_ASSISTANT_SAME_BOROUGH_PREFERENCE_BONUS = 1.5;
@@ -1363,7 +1386,9 @@
     const sorted = (Array.isArray(candidateEvaluations) ? candidateEvaluations : []).slice().sort(sortPracticalTargetOrder);
     const worthwhile = sorted.filter((it) => !!it.viability?.viable && (safeNum(it.netMoveEdge, -Infinity) || -Infinity) >= (safeNum(it.moveWorthThreshold, Infinity) || Infinity));
     worthwhile.forEach((item) => {
-      item.isNearTarget = (safeNum(item?.etaMinutes, Infinity) || Infinity) <= AI_ASSISTANT_NEAR_TARGET_MAX_ETA_MIN;
+      // Tier-aware "near" classification: a 16-min target from a Red-tier
+      // zone counts as "near" because anything is better than staying.
+      item.isNearTarget = (safeNum(item?.etaMinutes, Infinity) || Infinity) <= effectiveNearTargetMaxEtaMinForRating(currentSignal?.visibleRating);
       item.isSameBorough = normalizeAssistantBoroughName(item?.candidateSignal?.borough) === normalizeAssistantBoroughName(currentSignal?.borough);
       item.rejectionCode = "";
       item.rejectionReasonText = "";
@@ -2577,8 +2602,39 @@
     };
   }
 
+  // Make sure the user-facing primary line is honest about the current
+  // zone's rating. The deeper recommendation pipeline can return
+  // "Stay • Good zone right now" or "Stay • Decent area for now" in
+  // fallback paths that look at the stay-window AVERAGE rating, not the
+  // rating displayed on the map right now. That contradicts what the
+  // driver sees: a red zone with a "Stay • Good zone right now" chip
+  // erodes trust.
+  //
+  // Tier policy:
+  //   visibleRating < 30  (Red / Avoid)        : never "Stay" — Monitor with escape hint
+  //   30 <= visibleRating < 40 (Orange / Low)  : "Stay briefly" with below-average wording
+  //   40 <= visibleRating < 50 (Yellow / Below): "Stay briefly" with below-average wording
+  //   visibleRating >= 50 (Sky / Medium / ...) : leave as-is
+  function honestlyMatchPrimaryDecisionToRating(primary) {
+    if (!primary || typeof primary.line !== "string") return primary;
+    const rating = safeNum(state.visibleRating, null);
+    if (!Number.isFinite(rating)) return primary; // no current rating; trust pipeline
+    if (primary.kind !== "stay") return primary;
+    if (rating >= 50) return primary;
+    if (rating < 30) {
+      return {
+        line: "Monitor • This area is weak — watch for trip or move when possible",
+        kind: "monitor",
+      };
+    }
+    return {
+      line: "Stay briefly • Area is below average right now",
+      kind: "stay",
+    };
+  }
+
   function buildAssistantPrimaryLine() {
-    const primary = derivePrimaryDriverDecision();
+    const primary = honestlyMatchPrimaryDecisionToRating(derivePrimaryDriverDecision());
     state.lastGuidancePrimaryLine = primary?.line || "";
     if (primary?.kind === "trap") state.lastTrapMessageAtTs = Date.now();
     if (primary?.kind === "stay") state.lastStayMessageAtTs = Date.now();
@@ -2790,10 +2846,29 @@
   function computeBaseAction(currentSignal, cls) {
     if (!currentSignal) return { code: "MONITOR", reason: "Waiting for stable zone." };
     const overall = state.bestNearbyOverall;
+    const currentRating = safeNum(currentSignal?.visibleRating, 0) || 0;
     const scoreAdvantage = overall ? ((overall.signal.visibleRating || 0) - (currentSignal.visibleRating || 0)) : 0;
     state.scoreAdvantageVsCurrent = scoreAdvantage;
     if (cls.shortTrap && state.bestNearbyTrapEscape) return { code: "MOVE_SOON", reason: "Short-trip trap detected with nearby escape option." };
     if (cls.slowNow && scoreAdvantage >= 7 && overall) return { code: "MOVE_SOON", reason: "Current zone is slow and nearby zone is materially better." };
+    // Bad-tier escape: in Avoid / Low / Below zones (rating < 50), any
+    // nearby zone with a meaningful advantage triggers MOVE_SOON. The
+    // 12-min "too far" filter is also widened for these tiers (see
+    // effectiveNearTargetMaxEtaMinForRating), so this catches the case
+    // where the only escape is a longer drive but the current zone is
+    // bad enough that the drive is worth it.
+    if (overall && currentRating < 50 && scoreAdvantage >= 8) {
+      return { code: "MOVE_SOON", reason: "Better nearby area; current zone is below average." };
+    }
+    // Stationary-too-long escalation: a driver who has been parked past
+    // AI_ASSISTANT_STATIONARY_ESCAPE_MIN minutes in a sub-strong zone
+    // should hear about even modestly-better nearby options. Sky and
+    // above (rating >= 60) we leave alone — drivers in strong zones
+    // are still earning by waiting.
+    const dwellMin = dwellMins();
+    if (overall && currentRating < 60 && dwellMin >= AI_ASSISTANT_STATIONARY_ESCAPE_MIN && scoreAdvantage >= AI_ASSISTANT_STATIONARY_ESCAPE_MIN_GAP) {
+      return { code: "MOVE_SOON", reason: "Stationary too long; nearby area is better." };
+    }
     if (cls.busyNow && cls.continuationGood) return { code: "STAY", reason: "Current zone has strong demand and continuation." };
     if (scoreAdvantage >= 10 && overall) return { code: "STAY_BRIEFLY", reason: "Nearby zone has better score; prepare to move." };
     return { code: "MONITOR", reason: "Current zone is acceptable; keep monitoring." };
