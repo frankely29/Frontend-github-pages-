@@ -35,6 +35,19 @@ const PICKUP_ZONE_SAMPLE_LIMIT = 100;
 const PICKUP_REFRESH_DEBOUNCE_MS = 120;
 const PICKUP_FETCH_COOLDOWN_MS = 500;
 const PICKUP_POLL_MS = 12 * 1000;
+// Hard ceiling on a single pickup-overlay fetch. Without this, a hung
+// request leaves `pickupRefreshInFlight=true` forever, `runPickupPollLoop`
+// awaits a promise that never settles, and the whole 12-second poll chain
+// dies until the user manually reloads the browser. 20s is generous enough
+// to tolerate slow mobile networks while still recovering long before a
+// driver notices stale data.
+const PICKUP_FETCH_TIMEOUT_MS = 20 * 1000;
+// Defense-in-depth watchdog above the fetch timeout. Even if some other
+// code path inside refreshPickupOverlay hangs (not the network), the poll
+// loop must keep ticking. If a single refresh takes longer than this, we
+// log and reschedule anyway — the in-flight refresh will eventually no-op
+// itself thanks to the request-serial check at line 1712.
+const PICKUP_POLL_WATCHDOG_MS = 30 * 1000;
 const PICKUP_LAST_GOOD_OVERLAY_GRACE_MS = 15000;
 const PICKUP_MICRO_HOTSPOT_MIN_ZOOM = 10.2;
 const PRESENCE_VIEWPORT_BUFFER_RATIO = 0.18;
@@ -1699,6 +1712,9 @@ async function refreshPickupOverlay({ force = false } = {}) {
 
   pickupOverlayAbortController = new AbortController();
   const requestSerial = ++pickupRequestSerial;
+  const fetchTimeoutHandle = setTimeout(() => {
+    try { pickupOverlayAbortController?.abort(); } catch (_) {}
+  }, PICKUP_FETCH_TIMEOUT_MS);
 
   pickupRefreshInFlight = true;
   lastPickupFetchKey = path;
@@ -1791,6 +1807,7 @@ async function refreshPickupOverlay({ force = false } = {}) {
     };
     console.warn(`/events/pickups/recent failed (${path}):`, e);
   } finally {
+    clearTimeout(fetchTimeoutHandle);
     const endedAt = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
     recordPerfMetric("dbgPickupOverlay", `${Math.max(0, Math.round(endedAt - startedAt))}ms`);
     runtimePerf?.recordDuration?.("pickup_overlay_fetch", endedAt - startedAt);
@@ -1861,7 +1878,28 @@ async function runPickupPollLoop() {
   }
 
   try {
-    await refreshPickupOverlay({ force: true });
+    // Watchdog: if a single refresh somehow takes longer than
+    // PICKUP_POLL_WATCHDOG_MS (network timeout already fires at
+    // PICKUP_FETCH_TIMEOUT_MS, so this only triggers on a non-network
+    // hang), we stop awaiting it and let the next poll tick fire. The
+    // orphaned refresh will no-op on apply via the requestSerial guard.
+    await new Promise((resolve) => {
+      let settled = false;
+      const watchdog = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        console.warn("pickup poll watchdog tripped after", PICKUP_POLL_WATCHDOG_MS, "ms — rescheduling without waiting");
+        resolve();
+      }, PICKUP_POLL_WATCHDOG_MS);
+      refreshPickupOverlay({ force: true })
+        .catch((e) => console.warn("pickup poll refresh failed:", e))
+        .finally(() => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(watchdog);
+          resolve();
+        });
+    });
   } finally {
     if (authHeaderOK() && !document.hidden) schedulePickupPoll();
   }
