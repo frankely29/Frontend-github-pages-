@@ -11,7 +11,9 @@
 // driver can move or remove any flag.
 (function () {
   const STORAGE_KEY = "tlcLongTripBlockFlags";
-  const HOLD_MS = 3000;
+  const HOLD_MS = 3000;                // long-press on existing flag -> Edit dialog
+  const MAP_HOLD_DIM_MS = 3000;        // long-press on map -> zones dim
+  const MAP_HOLD_PICK_MS = 5000;       // keep holding past this -> color picker / place flag
   const MOVE_TOLERANCE_PX = 18;
   const MAX_LOCAL_CACHE = 500;
   const SUPPRESS_NEXT_CLICK_MS = 600;
@@ -251,12 +253,13 @@
         transform: translate(-50%, -50%);
         background: rgba(15,23,42,0.10);
         border: 2px solid rgba(15,23,42,0.6);
-        animation: ltb-hold-fill 3s linear forwards;
+        animation: ltb-hold-fill 5s linear forwards;
       }
       @keyframes ltb-hold-fill {
         0%   { transform: translate(-50%, -50%) scale(0.4); opacity: 0.0; }
-        25%  { transform: translate(-50%, -50%) scale(0.7); opacity: 0.6; }
-        100% { transform: translate(-50%, -50%) scale(1.1); opacity: 0.95; }
+        20%  { transform: translate(-50%, -50%) scale(0.6); opacity: 0.5; }
+        60%  { transform: translate(-50%, -50%) scale(0.9); opacity: 0.85; }
+        100% { transform: translate(-50%, -50%) scale(1.15); opacity: 0.95; }
       }
 
       .ltb-picker-backdrop {
@@ -393,7 +396,15 @@
   // ----- Map long-press --------------------------------------------------
 
   function attachMapLongPress(map) {
-    let timer = null;
+    // Two-stage hold:
+    //   t=0           finger down, hold indicator starts filling
+    //   t=3s          zones dim   (driver can browse the streets under)
+    //   t=5s          color picker opens / placement starts
+    // Lifting before 3s -> nothing happens. Lifting between 3s and 5s ->
+    // dim restores. The split lets drivers eyeball a candidate spot
+    // without committing to placing a flag.
+    let dimTimer = null;
+    let pickTimer = null;
     let startClientX = 0;
     let startClientY = 0;
     let startLngLat = null;
@@ -402,7 +413,8 @@
     let lastStartAt = 0;
 
     const cancel = () => {
-      if (timer) { clearTimeout(timer); timer = null; }
+      if (dimTimer) { clearTimeout(dimTimer); dimTimer = null; }
+      if (pickTimer) { clearTimeout(pickTimer); pickTimer = null; }
       if (indicatorEl) { indicatorEl.remove(); indicatorEl = null; }
       startLngLat = null;
       activeTouchId = null;
@@ -420,16 +432,28 @@
       indicatorEl.style.left = `${clientX}px`;
       indicatorEl.style.top = `${clientY}px`;
       document.body.appendChild(indicatorEl);
-      dimZoneFills();
-      timer = setTimeout(() => {
+
+      // Stage 1: dim zones at MAP_HOLD_DIM_MS (3s).
+      dimTimer = setTimeout(() => {
+        dimTimer = null;
+        if (!startLngLat) return; // hold already cancelled
+        dimZoneFills();
+      }, MAP_HOLD_DIM_MS);
+
+      // Stage 2: open the color picker at MAP_HOLD_PICK_MS (5s).
+      pickTimer = setTimeout(() => {
         const lngLatCopy = startLngLat;
-        if (timer) { clearTimeout(timer); timer = null; }
+        pickTimer = null;
+        if (dimTimer) { clearTimeout(dimTimer); dimTimer = null; }
         if (indicatorEl) { indicatorEl.remove(); indicatorEl = null; }
         startLngLat = null;
         activeTouchId = null;
         if (!lngLatCopy) { restoreZoneFills(); return; }
         state.suppressClickUntilMs = Date.now() + SUPPRESS_NEXT_CLICK_MS;
         state.pickerOpen = true;
+        // Make sure zones are dim before the picker opens, even if the
+        // user passed through the 3s boundary mid-frame.
+        dimZoneFills();
         showColorPicker(lngLatCopy, (color) => {
           state.pickerOpen = false;
           if (color) {
@@ -442,11 +466,11 @@
             restoreZoneFills();
           }
         });
-      }, HOLD_MS);
+      }, MAP_HOLD_PICK_MS);
     };
 
     const checkMove = (clientX, clientY) => {
-      if (!timer) return;
+      if (!pickTimer && !dimTimer) return;
       if (Math.hypot(clientX - startClientX, clientY - startClientY) > MOVE_TOLERANCE_PX) cancel();
     };
 
