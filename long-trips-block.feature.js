@@ -3,7 +3,7 @@
 // medium, yellow = normal. Long-press the map for 3 seconds to place;
 // long-press an existing flag to Move / Remove / Keep it.
 //
-// Storage: shared across all drivers via the backend's /long_trip_flags
+// Storage: shared across all drivers via the backend's /events/long_trip_flag
 // endpoints. localStorage is kept purely as a last-seen cache so the map
 // can paint instantly on load (while the GET request is in flight) and
 // so the feature degrades gracefully when the backend is unreachable.
@@ -88,7 +88,7 @@
   async function apiList() {
     // Cache-buster: belt-and-braces against any layer that might
     // serve a stale GET response (browser, CDN, Railway edge).
-    const url = `${apiBase()}/long_trip_flags?_=${Date.now()}`;
+    const url = `${apiBase()}/events/long_trip_flag?_=${Date.now()}`;
     const r = await fetch(url, {
       method: "GET",
       headers: authHeaders(),
@@ -106,7 +106,7 @@
   }
 
   async function apiCreate(lngLat, color) {
-    const r = await fetch(`${apiBase()}/long_trip_flags`, {
+    const r = await fetch(`${apiBase()}/events/long_trip_flag`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({ lng: lngLat.lng, lat: lngLat.lat, color }),
@@ -116,7 +116,7 @@
   }
 
   async function apiUpdate(id, partial) {
-    const r = await fetch(`${apiBase()}/long_trip_flags/${encodeURIComponent(id)}`, {
+    const r = await fetch(`${apiBase()}/events/long_trip_flag/${encodeURIComponent(id)}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(partial),
@@ -126,7 +126,7 @@
   }
 
   async function apiDelete(id) {
-    const r = await fetch(`${apiBase()}/long_trip_flags/${encodeURIComponent(id)}`, {
+    const r = await fetch(`${apiBase()}/events/long_trip_flag/${encodeURIComponent(id)}`, {
       method: "DELETE",
       headers: authHeaders(),
     });
@@ -244,38 +244,6 @@
       }
       .ltb-place-bar .ltb-place-confirm:active,
       .ltb-place-bar .ltb-place-cancel:active { transform: translateY(1px); }
-
-      .ltb-status-badge {
-        position: fixed; right: 12px; bottom: 12px;
-        z-index: 9997;
-        display: flex; align-items: center; gap: 6px;
-        padding: 6px 10px;
-        background: rgba(15,23,42,0.85);
-        color: #ffffff;
-        border-radius: 999px;
-        font: 600 11px/1 -apple-system, system-ui, "Segoe UI", sans-serif;
-        cursor: pointer;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-        user-select: none; -webkit-user-select: none;
-      }
-      .ltb-status-badge .ltb-status-dot {
-        width: 8px; height: 8px; border-radius: 50%;
-        background: #94a3b8;
-      }
-      .ltb-status-badge.is-ok .ltb-status-dot { background: #10b981; }
-      .ltb-status-badge.is-error .ltb-status-dot { background: #ef4444; }
-      .ltb-status-badge.is-syncing .ltb-status-dot {
-        background: #facc15;
-        animation: ltb-status-pulse 900ms ease-in-out infinite alternate;
-      }
-      .ltb-status-badge .ltb-status-refresh {
-        font-size: 13px; line-height: 1;
-        opacity: 0.75; margin-left: 2px;
-      }
-      .ltb-status-badge:active { transform: translateY(1px); }
-      @keyframes ltb-status-pulse {
-        from { opacity: 0.5; } to { opacity: 1; }
-      }
 
       .ltb-hold-indicator {
         position: fixed; pointer-events: none; z-index: 9998;
@@ -772,11 +740,9 @@
             saveCache();
           }
           state.backendAvailable = true;
-          setStatus("ok", `Flags: ${state.flags.length} synced`);
           toast.textContent = "Spot moved";
         } catch (e) {
           state.backendAvailable = false;
-          setStatus("error", `Move failed (${e?.status || "net"})`);
           console.warn(
             `[long-trips-block] move failed (${e?.status || "network"} ${e?.url || ""}), kept local:`, e
           );
@@ -812,10 +778,8 @@
     try {
       flag = await apiCreate(lngLat, color);
       state.backendAvailable = true;
-      setStatus("ok", `Flags: ${state.flags.length + 1} synced`);
     } catch (e) {
       state.backendAvailable = false;
-      setStatus("error", `Save failed (${e?.status || "net"})`);
       console.warn(
         `[long-trips-block] create failed (${e?.status || "network"} ${e?.url || ""}), saving locally:`, e
       );
@@ -853,10 +817,8 @@
     try {
       await apiDelete(id);
       state.backendAvailable = true;
-      setStatus("ok", `Flags: ${state.flags.length} synced`);
     } catch (e) {
       state.backendAvailable = false;
-      setStatus("error", `Delete failed (${e?.status || "net"})`);
       console.warn(
         `[long-trips-block] delete failed (${e?.status || "network"} ${e?.url || ""}), kept local removal:`, e
       );
@@ -923,64 +885,19 @@
     applyScaleToAllMarkers();
   }
 
-  // ----- Visible status badge -------------------------------------------
-  // Driver feedback: "still can't see others' flags". With no UI feedback
-  // the driver has no idea whether the backend is reachable, returning
-  // an error, or returning an empty list. The badge surfaces that state
-  // and exposes a tap-to-resync action.
-
-  const statusBadge = {
-    el: null, dot: null, text: null,
-    lastState: null, lastDetail: null,
-  };
-
-  function ensureStatusBadge() {
-    if (statusBadge.el) return statusBadge.el;
-    const el = document.createElement("div");
-    el.className = "ltb-status-badge";
-    el.innerHTML = `
-      <span class="ltb-status-dot"></span>
-      <span class="ltb-status-text">Flags: …</span>
-      <span class="ltb-status-refresh" title="Refresh flags now">⟳</span>
-    `;
-    el.addEventListener("click", () => {
-      setStatus("syncing", "syncing…");
-      pollOnce({ silent: false, force: true });
-    });
-    document.body.appendChild(el);
-    statusBadge.el = el;
-    statusBadge.dot = el.querySelector(".ltb-status-dot");
-    statusBadge.text = el.querySelector(".ltb-status-text");
-    return el;
-  }
-
-  function setStatus(state, detail) {
-    statusBadge.lastState = state;
-    statusBadge.lastDetail = detail;
-    const el = ensureStatusBadge();
-    el.classList.remove("is-ok", "is-error", "is-syncing");
-    if (state === "ok") el.classList.add("is-ok");
-    else if (state === "error") el.classList.add("is-error");
-    else el.classList.add("is-syncing");
-    if (statusBadge.text) statusBadge.text.textContent = detail;
-  }
-
-  async function pollOnce({ silent, force } = {}) {
+  async function pollOnce({ silent } = {}) {
     // Don't poll mid-action — would jitter markers / re-fight UI.
-    if (!force && state.placementActive) return;
-    if (!force && typeof document !== "undefined" && document.hidden) return;
+    if (state.placementActive) return;
+    if (typeof document !== "undefined" && document.hidden) return;
     try {
       const serverFlags = await apiList();
       reconcileFromServer(serverFlags);
       state.backendAvailable = true;
-      setStatus("ok", `Flags: ${serverFlags.length} synced`);
       if (!silent) {
         console.info(`[long-trips-block] poll synced ${serverFlags.length} flag(s)`);
       }
     } catch (e) {
       state.backendAvailable = false;
-      const detail = `Flags offline (${e?.status || "net"})`;
-      setStatus("error", detail);
       console.warn(
         `[long-trips-block] poll failed (${e?.status || "network"} ${e?.url || ""}):`, e
       );
@@ -1006,7 +923,6 @@
     initDone = true;
     mapRef = map;
     injectCss();
-    setStatus("syncing", `Flags: connecting to ${apiBase() || "<no API_BASE>"} …`);
     console.info(`[long-trips-block] init: API base = ${apiBase() || "(empty)"}; auth = ${Object.keys(authHeaders()).length ? "yes" : "NO TOKEN"}`);
 
     // Paint cached flags immediately so the map doesn't look empty while
@@ -1023,11 +939,9 @@
       const serverFlags = await apiList();
       reconcileFromServer(serverFlags);
       state.backendAvailable = true;
-      setStatus("ok", `Flags: ${serverFlags.length} synced`);
       console.info(`[long-trips-block] initial sync: ${serverFlags.length} flag(s) from server`);
     } catch (e) {
       state.backendAvailable = false;
-      setStatus("error", `Flags offline (${e?.status || "net"})`);
       console.warn(
         `[long-trips-block] server unreachable on init (${e?.status || "network"} ${e?.url || ""}); using local cache:`, e
       );
