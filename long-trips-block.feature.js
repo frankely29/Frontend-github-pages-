@@ -3,7 +3,7 @@
 // medium, yellow = normal. Long-press the map for 3 seconds to place;
 // long-press an existing flag to Move / Remove / Keep it.
 //
-// Storage: shared across all drivers via the backend's /long_trip_flags
+// Storage: shared across all drivers via the backend's /events/long_trip_flag
 // endpoints. localStorage is kept purely as a last-seen cache so the map
 // can paint instantly on load (while the GET request is in flight) and
 // so the feature degrades gracefully when the backend is unreachable.
@@ -88,7 +88,7 @@
   async function apiList() {
     // Cache-buster: belt-and-braces against any layer that might
     // serve a stale GET response (browser, CDN, Railway edge).
-    const url = `${apiBase()}/long_trip_flags?_=${Date.now()}`;
+    const url = `${apiBase()}/events/long_trip_flag?_=${Date.now()}`;
     const r = await fetch(url, {
       method: "GET",
       headers: authHeaders(),
@@ -106,7 +106,7 @@
   }
 
   async function apiCreate(lngLat, color) {
-    const r = await fetch(`${apiBase()}/long_trip_flags`, {
+    const r = await fetch(`${apiBase()}/events/long_trip_flag`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({ lng: lngLat.lng, lat: lngLat.lat, color }),
@@ -116,7 +116,7 @@
   }
 
   async function apiUpdate(id, partial) {
-    const r = await fetch(`${apiBase()}/long_trip_flags/${encodeURIComponent(id)}`, {
+    const r = await fetch(`${apiBase()}/events/long_trip_flag/${encodeURIComponent(id)}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(partial),
@@ -126,7 +126,7 @@
   }
 
   async function apiDelete(id) {
-    const r = await fetch(`${apiBase()}/long_trip_flags/${encodeURIComponent(id)}`, {
+    const r = await fetch(`${apiBase()}/events/long_trip_flag/${encodeURIComponent(id)}`, {
       method: "DELETE",
       headers: authHeaders(),
     });
