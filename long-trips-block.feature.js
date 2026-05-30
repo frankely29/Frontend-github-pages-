@@ -445,15 +445,39 @@
     attachMapLongPress(map);
   }
 
+  function resolveMapInstance() {
+    // app.js declares `let map;` at top level (classic script). That
+    // creates a global lexical binding accessible as the bare identifier
+    // `map`, but does NOT mirror onto window.map -- so polling
+    // `window.map` returns undefined forever and our init never runs.
+    // Try the lexical global first, then a couple of fallbacks for
+    // forward-compat with module-script migrations.
+    try {
+      // eslint-disable-next-line no-undef
+      if (typeof map !== "undefined" && map) return map;
+    } catch (_) { /* ReferenceError shouldn't fire from typeof but be safe */ }
+    if (typeof window !== "undefined") {
+      if (window.map) return window.map;
+      if (window.tlcMap) return window.tlcMap;
+      if (window.TlcMapUiInternals?.getMap) {
+        try { return window.TlcMapUiInternals.getMap(); } catch (_) {}
+      }
+    }
+    return null;
+  }
+
   function waitForMap() {
-    const candidate = window.map;
+    const candidate = resolveMapInstance();
     if (candidate
       && typeof candidate.getCanvasContainer === "function"
-      && typeof candidate.unproject === "function") {
-      // Map exists. If style hasn't loaded yet, addTo will still work for
-      // markers (markers don't depend on style). Init now.
-      try { init(candidate); }
-      catch (e) { console.warn("[long-trips-block] init failed:", e); }
+      && typeof candidate.unproject === "function"
+      && typeof candidate.on === "function") {
+      try {
+        init(candidate);
+        console.info("[long-trips-block] initialized");
+      } catch (e) {
+        console.warn("[long-trips-block] init failed:", e);
+      }
       return;
     }
     setTimeout(waitForMap, 200);
