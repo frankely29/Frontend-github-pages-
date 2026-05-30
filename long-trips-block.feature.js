@@ -86,12 +86,20 @@
   }
 
   async function apiList() {
-    const r = await fetch(`${apiBase()}/long_trip_flags`, {
+    // Cache-buster: belt-and-braces against any layer that might
+    // serve a stale GET response (browser, CDN, Railway edge).
+    const url = `${apiBase()}/long_trip_flags?_=${Date.now()}`;
+    const r = await fetch(url, {
       method: "GET",
       headers: authHeaders(),
       cache: "no-store",
     });
-    if (!r.ok) throw new Error(`list ${r.status}`);
+    if (!r.ok) {
+      const err = new Error(`list ${r.status}`);
+      err.status = r.status;
+      err.url = url;
+      throw err;
+    }
     const data = await r.json();
     const raw = Array.isArray(data?.flags) ? data.flags : [];
     return raw.map(sanitizeFlag).filter(Boolean);
@@ -813,6 +821,97 @@
     }
   }
 
+  // ----- Reconcile + poll -----------------------------------------------
+  // Driver feedback after the first cut: other drivers weren't seeing
+  // newly-placed flags until they manually refreshed. So we poll every
+  // POLL_INTERVAL_MS and reconcile incrementally instead of wiping +
+  // re-rendering everything (which would jitter markers and would also
+  // wipe local flags that haven't been POSTed yet).
+
+  const POLL_INTERVAL_MS = 20000;
+  let pollTimer = null;
+
+  function reconcileFromServer(serverFlags) {
+    if (!mapRef) return;
+    const serverById = new Map(serverFlags.map((f) => [f.id, f]));
+    const next = [];
+
+    // 1. Flags the server has: add if new, update if moved/recolored.
+    //    Skip the flag currently being dragged so polling doesn't fight
+    //    the user's in-flight move.
+    for (const sf of serverFlags) {
+      const local = state.flags.find((f) => f.id === sf.id);
+      if (state.activeMoveFlagId === sf.id) {
+        next.push(local || sf);
+        continue;
+      }
+      if (!local) {
+        next.push(sf);
+        renderFlag(sf);
+        continue;
+      }
+      const changed = local.lng !== sf.lng || local.lat !== sf.lat || local.color !== sf.color;
+      if (changed) {
+        const m = state.markers[sf.id];
+        if (m) { try { m.remove(); } catch (_) {} delete state.markers[sf.id]; }
+        next.push(sf);
+        renderFlag(sf);
+      } else {
+        next.push(local);
+      }
+    }
+
+    // 2. Flags the server doesn't have: drop them IF they have a
+    //    server-issued id (ltf-…) — someone else removed them.
+    //    Keep local-only ids (ltb-…) because they're queued local writes
+    //    that never reached the backend (e.g. offline placement).
+    for (const local of state.flags) {
+      if (serverById.has(local.id)) continue;
+      const isServerId = String(local.id || "").startsWith("ltf-");
+      if (isServerId) {
+        const m = state.markers[local.id];
+        if (m) { try { m.remove(); } catch (_) {} delete state.markers[local.id]; }
+      } else {
+        next.push(local);
+      }
+    }
+
+    state.flags = next;
+    saveCache();
+    applyScaleToAllMarkers();
+  }
+
+  async function pollOnce({ silent } = {}) {
+    // Don't poll mid-action — would jitter markers / re-fight UI.
+    if (state.placementActive) return;
+    if (typeof document !== "undefined" && document.hidden) return;
+    try {
+      const serverFlags = await apiList();
+      reconcileFromServer(serverFlags);
+      state.backendAvailable = true;
+      if (!silent) {
+        console.info(`[long-trips-block] poll synced ${serverFlags.length} flag(s)`);
+      }
+    } catch (e) {
+      state.backendAvailable = false;
+      console.warn(
+        `[long-trips-block] poll failed (${e?.status || "network"} ${e?.url || ""}):`, e
+      );
+    }
+  }
+
+  function startPolling() {
+    if (pollTimer) return;
+    pollTimer = setInterval(() => { pollOnce({ silent: true }); }, POLL_INTERVAL_MS);
+    if (typeof document !== "undefined") {
+      // Poll immediately when the tab becomes visible — covers the
+      // "driver Alt-Tab'd back" case without waiting up to 20s.
+      document.addEventListener("visibilitychange", () => {
+        if (!document.hidden) pollOnce({ silent: true });
+      });
+    }
+  }
+
   // ----- Init -----------------------------------------------------------
 
   async function init(map) {
@@ -829,20 +928,22 @@
     map.on("zoom", applyScaleToAllMarkers);
     attachMapLongPress(map);
 
-    // Then try to refresh from the shared backend.
+    // First sync: same reconciliation path the poller uses, so the
+    // initial render and steady-state stay consistent.
     try {
       const serverFlags = await apiList();
-      removeAllRenderedFlags();
-      state.flags = serverFlags;
-      saveCache();
-      state.flags.forEach(renderFlag);
-      applyScaleToAllMarkers();
+      reconcileFromServer(serverFlags);
       state.backendAvailable = true;
-      console.info(`[long-trips-block] synced ${serverFlags.length} flag(s) from server`);
+      console.info(`[long-trips-block] initial sync: ${serverFlags.length} flag(s) from server`);
     } catch (e) {
       state.backendAvailable = false;
-      console.warn("[long-trips-block] server unreachable; using local cache only:", e);
+      console.warn(
+        `[long-trips-block] server unreachable on init (${e?.status || "network"} ${e?.url || ""}); using local cache:`, e
+      );
     }
+
+    // Start polling so other drivers' flags appear within POLL_INTERVAL_MS.
+    startPolling();
   }
 
   function resolveMapInstance() {
@@ -891,11 +992,7 @@
     refresh: async () => {
       try {
         const serverFlags = await apiList();
-        removeAllRenderedFlags();
-        state.flags = serverFlags;
-        saveCache();
-        state.flags.forEach(renderFlag);
-        applyScaleToAllMarkers();
+        reconcileFromServer(serverFlags);
         state.backendAvailable = true;
         return serverFlags.length;
       } catch (e) {
