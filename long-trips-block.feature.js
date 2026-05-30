@@ -245,6 +245,38 @@
       .ltb-place-bar .ltb-place-confirm:active,
       .ltb-place-bar .ltb-place-cancel:active { transform: translateY(1px); }
 
+      .ltb-status-badge {
+        position: fixed; right: 12px; bottom: 12px;
+        z-index: 9997;
+        display: flex; align-items: center; gap: 6px;
+        padding: 6px 10px;
+        background: rgba(15,23,42,0.85);
+        color: #ffffff;
+        border-radius: 999px;
+        font: 600 11px/1 -apple-system, system-ui, "Segoe UI", sans-serif;
+        cursor: pointer;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        user-select: none; -webkit-user-select: none;
+      }
+      .ltb-status-badge .ltb-status-dot {
+        width: 8px; height: 8px; border-radius: 50%;
+        background: #94a3b8;
+      }
+      .ltb-status-badge.is-ok .ltb-status-dot { background: #10b981; }
+      .ltb-status-badge.is-error .ltb-status-dot { background: #ef4444; }
+      .ltb-status-badge.is-syncing .ltb-status-dot {
+        background: #facc15;
+        animation: ltb-status-pulse 900ms ease-in-out infinite alternate;
+      }
+      .ltb-status-badge .ltb-status-refresh {
+        font-size: 13px; line-height: 1;
+        opacity: 0.75; margin-left: 2px;
+      }
+      .ltb-status-badge:active { transform: translateY(1px); }
+      @keyframes ltb-status-pulse {
+        from { opacity: 0.5; } to { opacity: 1; }
+      }
+
       .ltb-hold-indicator {
         position: fixed; pointer-events: none; z-index: 9998;
         width: 56px; height: 56px; border-radius: 50%;
@@ -730,22 +762,24 @@
         flag.lat = lngLat.lat;
         saveCache();
         toast.textContent = "Saving…";
-        if (state.backendAvailable !== false) {
-          try {
-            const updated = await apiUpdate(flag.id, { lng: lngLat.lng, lat: lngLat.lat });
-            if (updated) {
-              flag.lng = updated.lng; flag.lat = updated.lat;
-              marker.setLngLat?.([flag.lng, flag.lat]);
-              saveCache();
-            }
-            state.backendAvailable = true;
-            toast.textContent = "Spot moved";
-          } catch (e) {
-            state.backendAvailable = false;
-            console.warn("[long-trips-block] server move failed, kept local:", e);
-            toast.textContent = "Saved locally";
+        // Always try the API; previous gate ("skip if backendAvailable
+        // === false") silently broke sharing after one transient failure.
+        try {
+          const updated = await apiUpdate(flag.id, { lng: lngLat.lng, lat: lngLat.lat });
+          if (updated) {
+            flag.lng = updated.lng; flag.lat = updated.lat;
+            marker.setLngLat?.([flag.lng, flag.lat]);
+            saveCache();
           }
-        } else {
+          state.backendAvailable = true;
+          setStatus("ok", `Flags: ${state.flags.length} synced`);
+          toast.textContent = "Spot moved";
+        } catch (e) {
+          state.backendAvailable = false;
+          setStatus("error", `Move failed (${e?.status || "net"})`);
+          console.warn(
+            `[long-trips-block] move failed (${e?.status || "network"} ${e?.url || ""}), kept local:`, e
+          );
           toast.textContent = "Saved locally";
         }
         setTimeout(cleanup, 900);
@@ -771,15 +805,20 @@
   async function addFlag(lngLat, color) {
     if (!Object.prototype.hasOwnProperty.call(COLORS, color)) return;
     if (!lngLat || !Number.isFinite(lngLat.lng) || !Number.isFinite(lngLat.lat)) return;
+    // Always try the API. The previous gate ("skip if backendAvailable
+    // === false") meant that one transient poll failure left every
+    // subsequent placement local-only, which silently broke sharing.
     let flag = null;
-    if (state.backendAvailable !== false) {
-      try {
-        flag = await apiCreate(lngLat, color);
-        state.backendAvailable = true;
-      } catch (e) {
-        state.backendAvailable = false;
-        console.warn("[long-trips-block] server create failed, saving locally:", e);
-      }
+    try {
+      flag = await apiCreate(lngLat, color);
+      state.backendAvailable = true;
+      setStatus("ok", `Flags: ${state.flags.length + 1} synced`);
+    } catch (e) {
+      state.backendAvailable = false;
+      setStatus("error", `Save failed (${e?.status || "net"})`);
+      console.warn(
+        `[long-trips-block] create failed (${e?.status || "network"} ${e?.url || ""}), saving locally:`, e
+      );
     }
     if (!flag) {
       flag = {
@@ -810,14 +849,17 @@
     const marker = state.markers[id];
     if (marker) { try { marker.remove(); } catch (_) {} delete state.markers[id]; }
     saveCache();
-    if (state.backendAvailable !== false) {
-      try {
-        await apiDelete(id);
-        state.backendAvailable = true;
-      } catch (e) {
-        state.backendAvailable = false;
-        console.warn("[long-trips-block] server delete failed, kept local removal:", e);
-      }
+    // Always try; same reasoning as addFlag.
+    try {
+      await apiDelete(id);
+      state.backendAvailable = true;
+      setStatus("ok", `Flags: ${state.flags.length} synced`);
+    } catch (e) {
+      state.backendAvailable = false;
+      setStatus("error", `Delete failed (${e?.status || "net"})`);
+      console.warn(
+        `[long-trips-block] delete failed (${e?.status || "network"} ${e?.url || ""}), kept local removal:`, e
+      );
     }
   }
 
@@ -881,19 +923,64 @@
     applyScaleToAllMarkers();
   }
 
-  async function pollOnce({ silent } = {}) {
+  // ----- Visible status badge -------------------------------------------
+  // Driver feedback: "still can't see others' flags". With no UI feedback
+  // the driver has no idea whether the backend is reachable, returning
+  // an error, or returning an empty list. The badge surfaces that state
+  // and exposes a tap-to-resync action.
+
+  const statusBadge = {
+    el: null, dot: null, text: null,
+    lastState: null, lastDetail: null,
+  };
+
+  function ensureStatusBadge() {
+    if (statusBadge.el) return statusBadge.el;
+    const el = document.createElement("div");
+    el.className = "ltb-status-badge";
+    el.innerHTML = `
+      <span class="ltb-status-dot"></span>
+      <span class="ltb-status-text">Flags: …</span>
+      <span class="ltb-status-refresh" title="Refresh flags now">⟳</span>
+    `;
+    el.addEventListener("click", () => {
+      setStatus("syncing", "syncing…");
+      pollOnce({ silent: false, force: true });
+    });
+    document.body.appendChild(el);
+    statusBadge.el = el;
+    statusBadge.dot = el.querySelector(".ltb-status-dot");
+    statusBadge.text = el.querySelector(".ltb-status-text");
+    return el;
+  }
+
+  function setStatus(state, detail) {
+    statusBadge.lastState = state;
+    statusBadge.lastDetail = detail;
+    const el = ensureStatusBadge();
+    el.classList.remove("is-ok", "is-error", "is-syncing");
+    if (state === "ok") el.classList.add("is-ok");
+    else if (state === "error") el.classList.add("is-error");
+    else el.classList.add("is-syncing");
+    if (statusBadge.text) statusBadge.text.textContent = detail;
+  }
+
+  async function pollOnce({ silent, force } = {}) {
     // Don't poll mid-action — would jitter markers / re-fight UI.
-    if (state.placementActive) return;
-    if (typeof document !== "undefined" && document.hidden) return;
+    if (!force && state.placementActive) return;
+    if (!force && typeof document !== "undefined" && document.hidden) return;
     try {
       const serverFlags = await apiList();
       reconcileFromServer(serverFlags);
       state.backendAvailable = true;
+      setStatus("ok", `Flags: ${serverFlags.length} synced`);
       if (!silent) {
         console.info(`[long-trips-block] poll synced ${serverFlags.length} flag(s)`);
       }
     } catch (e) {
       state.backendAvailable = false;
+      const detail = `Flags offline (${e?.status || "net"})`;
+      setStatus("error", detail);
       console.warn(
         `[long-trips-block] poll failed (${e?.status || "network"} ${e?.url || ""}):`, e
       );
@@ -919,6 +1006,8 @@
     initDone = true;
     mapRef = map;
     injectCss();
+    setStatus("syncing", `Flags: connecting to ${apiBase() || "<no API_BASE>"} …`);
+    console.info(`[long-trips-block] init: API base = ${apiBase() || "(empty)"}; auth = ${Object.keys(authHeaders()).length ? "yes" : "NO TOKEN"}`);
 
     // Paint cached flags immediately so the map doesn't look empty while
     // the GET request is in flight.
@@ -934,9 +1023,11 @@
       const serverFlags = await apiList();
       reconcileFromServer(serverFlags);
       state.backendAvailable = true;
+      setStatus("ok", `Flags: ${serverFlags.length} synced`);
       console.info(`[long-trips-block] initial sync: ${serverFlags.length} flag(s) from server`);
     } catch (e) {
       state.backendAvailable = false;
+      setStatus("error", `Flags offline (${e?.status || "net"})`);
       console.warn(
         `[long-trips-block] server unreachable on init (${e?.status || "network"} ${e?.url || ""}); using local cache:`, e
       );
