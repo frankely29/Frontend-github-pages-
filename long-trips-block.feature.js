@@ -326,56 +326,6 @@
     document.head.appendChild(style);
   }
 
-  // Build the bitmap that the MapLibre symbol layer uses as the icon
-  // image. One per color, registered once at init via map.addImage(...).
-  // Visual matches the previous DOM flag (pole + colored pennant +
-  // "45+" text) so drivers don't see a style change when this lands.
-  function buildFlagImageData(color) {
-    const palette = COLORS[color] || COLORS.yellow;
-    const W = 68;  // 34px @ 2x for retina
-    const H = 84;  // 42px @ 2x
-    const canvas = document.createElement("canvas");
-    canvas.width = W; canvas.height = H;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return null;
-
-    // Pole: 4px wide, full height, centered, dark
-    ctx.fillStyle = "#1f2937";
-    ctx.fillRect(W / 2 - 2, 0, 4, H);
-
-    // Pennant: starts at pole, extends right. Notched right edge mirrors
-    // the CSS clip-path: polygon(0 0, 100% 0, 100% 65%, 60% 100%, 0 100%)
-    const pX = W / 2;
-    const pY = 0;
-    const pW = 56;
-    const pH = 44;
-    ctx.fillStyle = palette.hex;
-    ctx.strokeStyle = palette.border;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(pX, pY);
-    ctx.lineTo(pX + pW, pY);
-    ctx.lineTo(pX + pW, pY + pH * 0.65);
-    ctx.lineTo(pX + pW * 0.6, pY + pH);
-    ctx.lineTo(pX, pY + pH);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-
-    // "45+" text
-    ctx.fillStyle = "#1f2937";
-    ctx.font = "bold 22px -apple-system, system-ui, sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(FLAG_TEXT, pX + pW * 0.4, pY + pH * 0.45);
-
-    return ctx.getImageData(0, 0, W, H);
-  }
-
-  // DOM flag element. Only used now for the placement-preview marker and
-  // the move-mode draggable marker -- both of which are interactive and
-  // benefit from regular Marker drag behavior. The viewing layer for
-  // every other flag is the GeoJSON symbol layer below.
   function buildFlagElement(flag) {
     const palette = COLORS[flag.color] || COLORS.yellow;
     const root = document.createElement("div");
@@ -392,132 +342,62 @@
     return root;
   }
 
-  // ----- GeoJSON layer rendering ----------------------------------------
-  // Driver feedback: "we should have a system like the hotspot -- they're
-  // perfect; users presence and flags should copy how we did hotspots".
-  //
-  // DOM markers (MapLibre's Marker class) reposition themselves in
-  // JavaScript every frame. Even with setSubpixelPositioning(true) there
-  // is a tiny rounding error vs the GPU's projection of the basemap and
-  // of any GeoJSON layer. At fractional zooms this reads as visible
-  // drift relative to the underlying map.
-  //
-  // Hotspots don't have this problem because they're rendered as GeoJSON
-  // sources + layers: MapLibre projects them on the GPU using the same
-  // matrix as the basemap, every frame, with sub-pixel precision. Flags
-  // now ride on the same pipeline.
-
-  const LTF_SOURCE_ID = "long-trip-flags";
-  const LTF_LAYER_ID = "long-trip-flags-icons";
-  let flagLayerReady = false;
-
-  function ensureFlagLayer() {
-    if (flagLayerReady || !mapRef) return;
-    // Wait for the map style to be ready before adding source/layer.
-    if (!mapRef.isStyleLoaded?.()) {
-      mapRef.once?.("load", () => ensureFlagLayer());
-      mapRef.once?.("styledata", () => ensureFlagLayer());
-      return;
+  function renderFlag(flag) {
+    if (!mapRef || !window.maplibregl?.Marker) return;
+    const el = buildFlagElement(flag);
+    el.style.setProperty("--ltb-zoom-scale", scaleForZoom(mapRef.getZoom?.()).toFixed(3));
+    const marker = new window.maplibregl.Marker({ element: el, anchor: "bottom" })
+      .setLngLat([flag.lng, flag.lat])
+      .addTo(mapRef);
+    // Subpixel positioning so the flag pin doesn't snap to integer pixel
+    // boundaries at fractional zooms -- without this the marker visibly
+    // drifts (jumps a pixel) as you zoom. Presence markers already use
+    // this; flags need it for the same reason.
+    if (typeof marker.setSubpixelPositioning === "function") {
+      marker.setSubpixelPositioning(true);
     }
-
-    // Register one icon image per color. addImage with pixelRatio=2 keeps
-    // it crisp on retina without doubling the on-screen size.
-    for (const color of Object.keys(COLORS)) {
-      const imgId = `ltf-flag-${color}`;
-      try {
-        if (!mapRef.hasImage?.(imgId)) {
-          const data = buildFlagImageData(color);
-          if (data) mapRef.addImage(imgId, data, { pixelRatio: 2 });
-        }
-      } catch (e) {
-        console.warn("[long-trips-block] addImage failed", color, e);
-      }
-    }
-
-    if (!mapRef.getSource?.(LTF_SOURCE_ID)) {
-      mapRef.addSource(LTF_SOURCE_ID, {
-        type: "geojson",
-        data: { type: "FeatureCollection", features: [] },
-      });
-    }
-
-    if (!mapRef.getLayer?.(LTF_LAYER_ID)) {
-      mapRef.addLayer({
-        id: LTF_LAYER_ID,
-        type: "symbol",
-        source: LTF_SOURCE_ID,
-        layout: {
-          "icon-image": [
-            "match", ["get", "color"],
-            "green", "ltf-flag-green",
-            "sky", "ltf-flag-sky",
-            "yellow", "ltf-flag-yellow",
-            "ltf-flag-yellow",
-          ],
-          "icon-anchor": "bottom",
-          // Zoom-driven scale matches the old DOM scaleForZoom curve:
-          // 0.30 at zoom 9, 1.00 at zoom 15. MapLibre interpolates this
-          // on the GPU at fractional zoom levels with zero drift.
-          "icon-size": [
-            "interpolate", ["linear"], ["zoom"],
-            9, 0.3,
-            15, 1.0,
-          ],
-          "icon-allow-overlap": true,
-          "icon-ignore-placement": true,
-        },
-      });
-    }
-    flagLayerReady = true;
-    syncFlagLayer();
+    state.markers[flag.id] = marker;
+    attachFlagLongPress(el, flag);
   }
 
-  function syncFlagLayer() {
-    const src = mapRef?.getSource?.(LTF_SOURCE_ID);
-    if (!src?.setData) return;
-    // Exclude the flag currently in move mode -- it's swapped out for an
-    // interactive DOM marker for the duration of the drag. The layer
-    // feature reappears when move-mode ends.
-    const hidden = state.activeMoveFlagId;
-    const features = state.flags
-      .filter((f) => f.id !== hidden)
-      .map((f) => ({
-        type: "Feature",
-        id: f.id,
-        properties: { id: f.id, color: f.color },
-        geometry: { type: "Point", coordinates: [f.lng, f.lat] },
-      }));
-    src.setData({ type: "FeatureCollection", features });
+  function attachFlagLongPress(el, flag) {
+    let timer = null;
+    let pressStart = null;
+    let startX = 0;
+    let startY = 0;
+    const cancel = () => {
+      if (timer) { clearTimeout(timer); timer = null; }
+      pressStart = null;
+      el.classList.remove("is-holding");
+    };
+    el.addEventListener("pointerdown", (e) => {
+      e.stopPropagation();
+      if (state.placementActive || state.pickerOpen) return;
+      pressStart = Date.now();
+      startX = e.clientX; startY = e.clientY;
+      el.classList.add("is-holding");
+      try { el.setPointerCapture?.(e.pointerId); } catch (_) {}
+      timer = setTimeout(() => {
+        showRemovePicker(flag, () => {
+          state.suppressClickUntilMs = Date.now() + SUPPRESS_NEXT_CLICK_MS;
+        });
+        cancel();
+      }, HOLD_MS);
+    });
+    el.addEventListener("pointermove", (e) => {
+      if (!pressStart) return;
+      if (Math.hypot(e.clientX - startX, e.clientY - startY) > MOVE_TOLERANCE_PX) cancel();
+    });
+    el.addEventListener("pointerup", cancel);
+    el.addEventListener("pointercancel", cancel);
+    el.addEventListener("pointerleave", cancel);
   }
-
-  // Hit-test for long-press on a flag. The map long-press handler calls
-  // this at touch start; if it returns a flag, the press is routed to
-  // the Edit dialog flow instead of new-flag placement.
-  function flagAtScreenPoint(point) {
-    if (!mapRef || !flagLayerReady) return null;
-    if (!mapRef.getLayer?.(LTF_LAYER_ID)) return null;
-    let features;
-    try {
-      features = mapRef.queryRenderedFeatures(point, { layers: [LTF_LAYER_ID] });
-    } catch (_) { return null; }
-    if (!features || !features.length) return null;
-    const id = features[0]?.properties?.id;
-    if (!id) return null;
-    return state.flags.find((f) => f.id === id) || null;
-  }
-
-  // No-op kept so existing call sites compile. The old DOM-marker
-  // renderFlag is gone; everything routes through syncFlagLayer now.
-  function renderFlag(_flag) { syncFlagLayer(); }
 
   function removeAllRenderedFlags() {
-    // DOM markers still live in state.markers for the brief move/preview
-    // windows; clear those too.
     Object.keys(state.markers).forEach((id) => {
       try { state.markers[id].remove(); } catch (_) {}
       delete state.markers[id];
     });
-    syncFlagLayer();
   }
 
   // ----- Map long-press --------------------------------------------------
@@ -601,91 +481,47 @@
       if (Math.hypot(clientX - startClientX, clientY - startClientY) > MOVE_TOLERANCE_PX) cancel();
     };
 
-    // Long-press on an existing flag (now rendered as a layer feature,
-    // no DOM element to attach a handler to) opens the Edit dialog after
-    // HOLD_MS = 3s. Hit-test via map.queryRenderedFeatures at the press
-    // start point. If a flag is under the press, take the flag-edit path;
-    // otherwise take the map-placement path (3s dim, 5s picker).
-    let flagHoldTimer = null;
-    let flagHoldFlag = null;
-    const cancelFlagHold = () => {
-      if (flagHoldTimer) { clearTimeout(flagHoldTimer); flagHoldTimer = null; }
-      flagHoldFlag = null;
-    };
-    const startFlagHold = (flag, clientX, clientY) => {
-      if (state.placementActive || state.pickerOpen) return;
-      cancelFlagHold();
-      flagHoldFlag = flag;
-      startClientX = clientX; startClientY = clientY;
-      flagHoldTimer = setTimeout(() => {
-        const f = flagHoldFlag;
-        cancelFlagHold();
-        if (f) {
-          showRemovePicker(f, () => {
-            state.suppressClickUntilMs = Date.now() + SUPPRESS_NEXT_CLICK_MS;
-          });
-        }
-      }, HOLD_MS);
-    };
-    // Original `cancel` only knows about the map-placement timers; wire
-    // the flag-hold cancellation into the same lifecycle hooks below by
-    // wrapping cancel.
-    const cancelMap = cancel;
-    // eslint-disable-next-line no-func-assign
-    const cancelAll = () => { cancelMap(); cancelFlagHold(); };
-
     map.on("mousedown", (e) => {
       const orig = e.originalEvent;
       if (orig?.button !== 0) return;
       const target = orig?.target;
       if (target instanceof Element && target.closest?.(".ltb-flag")) return;
-      const hit = flagAtScreenPoint(e.point);
-      if (hit) { startFlagHold(hit, orig.clientX, orig.clientY); return; }
       startHold(orig.clientX, orig.clientY, e.lngLat);
     });
 
     map.on("touchstart", (e) => {
       const orig = e.originalEvent;
-      if (!orig?.touches || orig.touches.length !== 1) { cancelAll(); return; }
+      if (!orig?.touches || orig.touches.length !== 1) { cancel(); return; }
       const touch = orig.touches[0];
       const target = touch.target;
       if (target instanceof Element && target.closest?.(".ltb-flag")) return;
       activeTouchId = touch.identifier;
-      const hit = flagAtScreenPoint(e.point);
-      if (hit) { startFlagHold(hit, touch.clientX, touch.clientY); return; }
       startHold(touch.clientX, touch.clientY, e.lngLat);
     });
 
-    const checkMoveAny = (cx, cy) => {
-      if (flagHoldTimer) {
-        if (Math.hypot(cx - startClientX, cy - startClientY) > MOVE_TOLERANCE_PX) cancelFlagHold();
-      }
-      checkMove(cx, cy);
-    };
-
     map.on("mousemove", (e) => {
       const orig = e.originalEvent;
-      checkMoveAny(orig.clientX, orig.clientY);
+      checkMove(orig.clientX, orig.clientY);
     });
 
     map.on("touchmove", (e) => {
       const orig = e.originalEvent;
-      if (!orig?.touches) return cancelAll();
+      if (!orig?.touches) return cancel();
       let touch = null;
       for (const t of orig.touches) {
         if (t.identifier === activeTouchId) { touch = t; break; }
       }
-      if (!touch) return cancelAll();
-      checkMoveAny(touch.clientX, touch.clientY);
+      if (!touch) return cancel();
+      checkMove(touch.clientX, touch.clientY);
     });
 
-    map.on("mouseup", cancelAll);
-    map.on("touchend", cancelAll);
-    map.on("touchcancel", cancelAll);
-    map.on("dragstart", cancelAll);
-    map.on("zoomstart", cancelAll);
-    map.on("pitchstart", cancelAll);
-    map.on("rotatestart", cancelAll);
+    map.on("mouseup", cancel);
+    map.on("touchend", cancel);
+    map.on("touchcancel", cancel);
+    map.on("dragstart", cancel);
+    map.on("zoomstart", cancel);
+    map.on("pitchstart", cancel);
+    map.on("rotatestart", cancel);
 
     document.addEventListener("click", (e) => {
       if (state.suppressClickUntilMs && Date.now() < state.suppressClickUntilMs) {
@@ -891,29 +727,16 @@
 
   function enterMoveMode(flag) {
     if (state.placementActive || state.pickerOpen) return;
-    if (!mapRef || !window.maplibregl?.Marker) return;
+    const marker = state.markers[flag.id];
+    if (!marker) return;
     if (state.activeMoveFlagId && state.activeMoveFlagId !== flag.id) {
       exitMoveMode(state.activeMoveFlagId);
     }
     state.activeMoveFlagId = flag.id;
 
-    // Hide the layer-rendered flag for the duration of the drag; we
-    // render an interactive DOM marker on top so MapLibre's existing
-    // marker drag behavior just works.
-    syncFlagLayer();
-
-    const el = buildFlagElement(flag);
-    el.classList.add("is-moving");
-    el.style.setProperty("--ltb-zoom-scale", scaleForZoom(mapRef.getZoom?.()).toFixed(3));
-    const marker = new window.maplibregl.Marker({
-      element: el, anchor: "bottom", draggable: true,
-    })
-      .setLngLat([flag.lng, flag.lat])
-      .addTo(mapRef);
-    if (typeof marker.setSubpixelPositioning === "function") {
-      marker.setSubpixelPositioning(true);
-    }
-    state.markers[flag.id] = marker;
+    try { marker.setDraggable?.(true); } catch (_) {}
+    const el = marker.getElement?.();
+    if (el) el.classList.add("is-moving");
 
     // Dim zones while moving so the streets underneath read clearly.
     dimZoneFills();
@@ -928,14 +751,11 @@
       if (cleanedUp) return;
       cleanedUp = true;
       try { marker.setDraggable?.(false); } catch (_) {}
+      if (el) el.classList.remove("is-moving");
       marker.off?.("dragend", onDragEnd);
-      try { marker.remove(); } catch (_) {}
-      delete state.markers[flag.id];
       try { toast.remove(); } catch (_) {}
       restoreZoneFills();
       if (state.activeMoveFlagId === flag.id) state.activeMoveFlagId = null;
-      // Bring the flag back into the layer (now at its updated lng/lat).
-      syncFlagLayer();
     };
     const onDragEnd = async () => {
       const lngLat = marker.getLngLat?.();
@@ -944,6 +764,8 @@
         flag.lat = lngLat.lat;
         saveCache();
         toast.textContent = "Saving…";
+        // Always try the API; previous gate ("skip if backendAvailable
+        // === false") silently broke sharing after one transient failure.
         try {
           const updated = await apiUpdate(flag.id, { lng: lngLat.lng, lat: lngLat.lat });
           if (updated) {
@@ -971,13 +793,11 @@
 
   function exitMoveMode(flagId) {
     const marker = state.markers[flagId];
-    if (marker) {
-      try { marker.setDraggable?.(false); } catch (_) {}
-      try { marker.remove(); } catch (_) {}
-      delete state.markers[flagId];
-    }
+    if (!marker) return;
+    try { marker.setDraggable?.(false); } catch (_) {}
+    const el = marker.getElement?.();
+    if (el) el.classList.remove("is-moving");
     if (state.activeMoveFlagId === flagId) state.activeMoveFlagId = null;
-    syncFlagLayer();
   }
 
   // ----- Mutations (API + local fallback) -------------------------------
@@ -1010,22 +830,23 @@
     }
     state.flags.push(flag);
     if (state.flags.length > MAX_LOCAL_CACHE) {
-      state.flags.shift();
+      const dropped = state.flags.shift();
+      if (dropped) {
+        const m = state.markers[dropped.id];
+        if (m) { try { m.remove(); } catch (_) {} delete state.markers[dropped.id]; }
+      }
     }
     saveCache();
-    syncFlagLayer();
+    renderFlag(flag);
   }
 
   async function removeFlag(id) {
     const idx = state.flags.findIndex((f) => f.id === id);
     if (idx === -1) return;
     state.flags.splice(idx, 1);
-    // If a temp interaction marker exists for this id (move mode mid-flight),
-    // clean it up too.
     const marker = state.markers[id];
     if (marker) { try { marker.remove(); } catch (_) {} delete state.markers[id]; }
     saveCache();
-    syncFlagLayer();
     // Always try; same reasoning as addFlag.
     try {
       await apiDelete(id);
@@ -1054,33 +875,48 @@
     const next = [];
 
     // 1. Flags the server has: add if new, update if moved/recolored.
-    //    For the flag currently being dragged in move mode, keep the
-    //    local copy so polling doesn't fight the user's in-flight move.
+    //    Skip the flag currently being dragged so polling doesn't fight
+    //    the user's in-flight move.
     for (const sf of serverFlags) {
       const local = state.flags.find((f) => f.id === sf.id);
       if (state.activeMoveFlagId === sf.id) {
         next.push(local || sf);
         continue;
       }
-      if (!local) { next.push(sf); continue; }
+      if (!local) {
+        next.push(sf);
+        renderFlag(sf);
+        continue;
+      }
       const changed = local.lng !== sf.lng || local.lat !== sf.lat || local.color !== sf.color;
-      next.push(changed ? sf : local);
+      if (changed) {
+        const m = state.markers[sf.id];
+        if (m) { try { m.remove(); } catch (_) {} delete state.markers[sf.id]; }
+        next.push(sf);
+        renderFlag(sf);
+      } else {
+        next.push(local);
+      }
     }
 
-    // 2. Flags the server doesn't have: drop server-id (ltf-…) entries
-    //    -- someone else removed them. Keep local-id (ltb-…) entries
-    //    since they're queued offline writes.
+    // 2. Flags the server doesn't have: drop them IF they have a
+    //    server-issued id (ltf-…) — someone else removed them.
+    //    Keep local-only ids (ltb-…) because they're queued local writes
+    //    that never reached the backend (e.g. offline placement).
     for (const local of state.flags) {
       if (serverById.has(local.id)) continue;
-      if (!String(local.id || "").startsWith("ltf-")) next.push(local);
+      const isServerId = String(local.id || "").startsWith("ltf-");
+      if (isServerId) {
+        const m = state.markers[local.id];
+        if (m) { try { m.remove(); } catch (_) {} delete state.markers[local.id]; }
+      } else {
+        next.push(local);
+      }
     }
 
     state.flags = next;
     saveCache();
-    // One layer update covers add / update / delete -- much faster than
-    // per-marker remove + recreate, and stays in sync with the data in
-    // a single call.
-    syncFlagLayer();
+    applyScaleToAllMarkers();
   }
 
   async function pollOnce({ silent } = {}) {
@@ -1124,12 +960,11 @@
     console.info(`[long-trips-block] init: API base = ${apiBase() || "(empty)"}; auth = ${Object.keys(authHeaders()).length ? "yes" : "NO TOKEN"}`);
 
     // Paint cached flags immediately so the map doesn't look empty while
-    // the GET request is in flight. Flags now render through a GeoJSON
-    // symbol layer (same pattern as hotspots) so there's no per-marker
-    // drift at fractional zooms.
+    // the GET request is in flight.
     loadCache();
-    ensureFlagLayer();
-    syncFlagLayer();
+    state.flags.forEach(renderFlag);
+    applyScaleToAllMarkers();
+    map.on("zoom", applyScaleToAllMarkers);
     attachMapLongPress(map);
 
     // First sync: same reconciliation path the poller uses, so the
