@@ -62,6 +62,8 @@
   const RATING_TIER_GOOD_NOW             = 68;  // "good_zone_now" gate — indigo/High map tier
   const RATING_TIER_DECENT_FLOOR         = 60;  // "decent_rating_zone" gate — blue/Medium map tier
   const RATING_TIER_BELOW_AVERAGE_FLOOR  = 50;  // "below_average_now" floor — sky/Normal map tier
+  const RATING_TIER_ORANGE_CEILING       = 40;  // ratings < 40 are yellow→orange→red bucket-side; "Move soon/now" wording
+  const RATING_TIER_RED_CEILING          = 30;  // ratings < 30 are red/Avoid bucket; strongest "Move now" wording
   const RATING_TIER_DEGRADED_GOOD        = 65;  // degraded-data fallback "good" floor (slightly relaxed from full-mode 68)
   const RATING_TIER_DEGRADED_DECENT      = 50;  // degraded-data fallback "decent" floor
   const RATING_TIER_TARGET_SATURATION    = 56;  // arrival-projected gate for saturation_at_arrival
@@ -2618,17 +2620,51 @@
   //   visibleRating >= 50 (Sky / Medium / ...) : leave as-is
   function honestlyMatchPrimaryDecisionToRating(primary) {
     if (!primary || typeof primary.line !== "string") return primary;
-    const rating = safeNum(state.visibleRating, null);
-    if (!Number.isFinite(rating)) return primary; // no current rating; trust pipeline
+    // Direct Number.isFinite check on state.visibleRating. Do NOT route
+    // through `safeNum(state.visibleRating, null)` -- safeNum coerces via
+    // Number() and Number(null) === 0 is finite, so safeNum returns 0
+    // (NOT the supplied null fallback). That would let the downgrade path
+    // fire with rating=0 whenever there's no active stable zone, falsely
+    // rewriting every "Stay • Good zone right now" into a strong move
+    // recommendation. typeof first sidesteps the coercion entirely.
+    const rating = state.visibleRating;
+    if (typeof rating !== "number" || !Number.isFinite(rating)) return primary;
     if (primary.kind !== "stay") return primary;
-    if (rating >= 50) return primary;
-    if (rating < 30) {
+    if (rating >= RATING_TIER_BELOW_AVERAGE_FLOOR) return primary; // sky-or-better: trust the upstream pipeline
+    // Respect active STAY/STAY_BRIEFLY countdown commitments. If the driver
+    // is mid-countdown with a committed stay, flipping the chip to "Move
+    // now" mid-flight produces a UI contradiction (countdown ring still
+    // ticking "stay 5 min" while the chip shouts "Move"). The countdown
+    // path at derivePrimaryDriverDecision line 2705 explicitly emits "Stay
+    // • Good zone right now" to keep the commitment visible -- honor it.
+    if (state.countdownActive
+      && (state.committedActionCode === "STAY" || state.committedActionCode === "STAY_BRIEFLY")) {
+      return primary;
+    }
+    // Driver feedback: orange (Low) zones must not be labeled "Stay" or
+    // "Stay briefly". Goal is maximizing earnings -- dwelling in a Low or
+    // worse zone wastes earning time. Emit a clear move cue and let the
+    // chip render the right move chevron + caution.
+    if (rating < RATING_TIER_RED_CEILING) {
       return {
-        line: "Monitor • This area is weak — watch for trip or move when possible",
-        kind: "monitor",
+        ...primary,
+        line: "Move now • Weak area — head to a better nearby zone",
+        kind: "move",
       };
     }
+    if (rating < RATING_TIER_ORANGE_CEILING) {
+      return {
+        ...primary,
+        line: "Move soon • Weak area — find a better nearby zone",
+        kind: "move",
+      };
+    }
+    // 40-49 (yellow / below average): borderline. Keep stay-kind so the
+    // assistant doesn't oscillate into Move on every transient yellow tick;
+    // the wording is honest ("below average") and the chip will render
+    // caution via decisionSeverity.
     return {
+      ...primary,
       line: "Stay briefly • Area is below average right now",
       kind: "stay",
     };
@@ -2821,6 +2857,24 @@
       state.lastGuidanceSecondaryLine = line;
       return line;
     }
+    // Coherence shield: by this point the trap, countdown, and committed
+    // move-target paths have already returned their actionable wording.
+    // What's left are stayHereLine / stayBrieflyLine paths which describe
+    // the current zone as "X is good/decent/below average right now". For
+    // sub-sky ratings, the matcher has already downgraded the primary to
+    // "Move soon/now • Weak area" -- so emitting "X is excellent right
+    // now" in the secondary would directly contradict the chip. Substitute
+    // a coherent supporting message instead. Active commitments (countdown,
+    // committed STAY) above this line are honored.
+    if (typeof state.visibleRating === "number"
+      && Number.isFinite(state.visibleRating)
+      && state.visibleRating < RATING_TIER_BELOW_AVERAGE_FLOOR) {
+      const line = state.visibleRating < RATING_TIER_ORANGE_CEILING
+        ? "Find a better nearby zone — current area is weak"
+        : "Watch for nearby options — current area is below average";
+      state.lastGuidanceSecondaryLine = line;
+      return line;
+    }
     if (committedAction === "STAY") {
       state.lastGuidanceSecondaryLine = stayHereLine;
       return stayHereLine;
@@ -3000,7 +3054,13 @@
   function buildMessages() {
     const compactLane = isCompactLaneMode();
     const list = [];
-    const primaryDecision = derivePrimaryDriverDecision();
+    // Pipe through honestlyMatchPrimaryDecisionToRating so the message-list
+    // chip text/severity matches the dock primary line. Without this,
+    // buildMessages emitted the raw upstream label (e.g. "Stay • Good zone
+    // right now") with a green-positive chip even when the dock was already
+    // showing the downgraded "Move soon • Weak area" line for the same
+    // frame -- the chip and the dock contradicted each other.
+    const primaryDecision = honestlyMatchPrimaryDecisionToRating(derivePrimaryDriverDecision());
     const primary = primaryDecision?.line || buildAssistantPrimaryLine();
     const primarySeverity = decisionSeverity(primaryDecision)
       || severityForAction(state.finalActionCode);
