@@ -7,7 +7,7 @@
 (function () {
   const STORAGE_KEY = "tlcLongTripBlockFlags";
   const HOLD_MS = 3000;
-  const MOVE_TOLERANCE_PX = 10;
+  const MOVE_TOLERANCE_PX = 18;
   const MAX_FLAGS = 200;
   const SUPPRESS_NEXT_CLICK_MS = 600;
   const FLAG_TEXT = "45+";
@@ -221,66 +221,115 @@
   }
 
   function attachMapLongPress(map) {
-    const canvas = map.getCanvasContainer();
+    // Route via MapLibre's own event system instead of raw DOM
+    // pointerdown/pointermove on the canvas-container. MapLibre normalises
+    // mouse and touch into 'mousedown' / 'touchstart' events with
+    // pre-computed e.lngLat, sidestepping two bugs the previous DOM-event
+    // path was hitting on mobile:
+    //   1. e.offsetX/offsetY on the canvas-container was inconsistent on
+    //      iOS Safari, so map.unproject() got the wrong screen point and
+    //      the picker dropped the flag in the wrong spot (or threw).
+    //   2. MapLibre's gesture handlers attach to the canvas itself with
+    //      capture, so pointer events on the container were sometimes
+    //      delivered AFTER MapLibre had already started consuming them --
+    //      the hold timer never had a chance to fire.
+    // Cancel on dragstart/zoomstart as a belt-and-suspenders guard so the
+    // hold dies the moment MapLibre decides the gesture is a pan/zoom.
+
     let timer = null;
-    let startX = 0;
-    let startY = 0;
+    let startClientX = 0;
+    let startClientY = 0;
     let startLngLat = null;
     let indicatorEl = null;
-    let activePointerId = null;
+    let activeTouchId = null;
+    let lastStartAt = 0;
 
     const cancel = () => {
       if (timer) { clearTimeout(timer); timer = null; }
       if (indicatorEl) { indicatorEl.remove(); indicatorEl = null; }
       startLngLat = null;
-      activePointerId = null;
+      activeTouchId = null;
     };
 
-    canvas.addEventListener("pointerdown", (e) => {
-      // Only primary button on mouse; ignore secondary clicks.
-      if (e.pointerType === "mouse" && e.button !== 0) return;
-      // If the event originated on a flag marker (the marker is a child of
-      // the canvas container), the flag's own handler already stopped
-      // propagation. This is a defense-in-depth check.
-      if (e.target instanceof Element && e.target.closest?.(".ltb-flag")) return;
-
+    const startHold = (clientX, clientY, lngLat) => {
+      // Mouse + touch may both fire on hybrid devices; ignore the second
+      // event when they land within 120ms of each other.
+      if (Date.now() - lastStartAt < 120) return;
+      lastStartAt = Date.now();
       cancel();
-      activePointerId = e.pointerId;
-      startX = e.clientX; startY = e.clientY;
-      try {
-        startLngLat = map.unproject([e.offsetX, e.offsetY]);
-      } catch (_) { startLngLat = null; }
-      if (!startLngLat) return;
-
+      startClientX = clientX; startClientY = clientY; startLngLat = lngLat;
       indicatorEl = document.createElement("div");
       indicatorEl.className = "ltb-hold-indicator";
-      indicatorEl.style.left = `${e.clientX}px`;
-      indicatorEl.style.top = `${e.clientY}px`;
+      indicatorEl.style.left = `${clientX}px`;
+      indicatorEl.style.top = `${clientY}px`;
       document.body.appendChild(indicatorEl);
-
       timer = setTimeout(() => {
-        const lngLat = startLngLat;
+        const lngLatCopy = startLngLat;
         cancel();
-        if (!lngLat) return;
+        if (!lngLatCopy) return;
         state.suppressClickUntilMs = Date.now() + SUPPRESS_NEXT_CLICK_MS;
-        showColorPicker(lngLat, (color) => {
-          if (color) addFlag(lngLat, color);
+        showColorPicker(lngLatCopy, (color) => {
+          if (color) addFlag(lngLatCopy, color);
         });
       }, HOLD_MS);
+    };
+
+    const checkMove = (clientX, clientY) => {
+      if (!timer) return;
+      if (Math.hypot(clientX - startClientX, clientY - startClientY) > MOVE_TOLERANCE_PX) cancel();
+    };
+
+    map.on("mousedown", (e) => {
+      const orig = e.originalEvent;
+      if (orig?.button !== 0) return;
+      const target = orig?.target;
+      if (target instanceof Element && target.closest?.(".ltb-flag")) return;
+      startHold(orig.clientX, orig.clientY, e.lngLat);
     });
 
-    canvas.addEventListener("pointermove", (e) => {
-      if (!timer || (activePointerId !== null && e.pointerId !== activePointerId)) return;
-      if (Math.hypot(e.clientX - startX, e.clientY - startY) > MOVE_TOLERANCE_PX) cancel();
+    map.on("touchstart", (e) => {
+      const orig = e.originalEvent;
+      if (!orig?.touches || orig.touches.length !== 1) {
+        // Multi-finger -- almost certainly a pinch-zoom; stand down.
+        cancel();
+        return;
+      }
+      const touch = orig.touches[0];
+      const target = touch.target;
+      if (target instanceof Element && target.closest?.(".ltb-flag")) return;
+      activeTouchId = touch.identifier;
+      startHold(touch.clientX, touch.clientY, e.lngLat);
     });
-    canvas.addEventListener("pointerup", cancel);
-    canvas.addEventListener("pointercancel", cancel);
-    canvas.addEventListener("pointerleave", cancel);
 
-    // Suppress the trailing click that MapLibre would synthesize after a
-    // long-press fire — otherwise the existing zone-click popup pops up on
-    // top of our picker.
-    canvas.addEventListener("click", (e) => {
+    map.on("mousemove", (e) => {
+      const orig = e.originalEvent;
+      checkMove(orig.clientX, orig.clientY);
+    });
+
+    map.on("touchmove", (e) => {
+      const orig = e.originalEvent;
+      if (!orig?.touches) return cancel();
+      let touch = null;
+      for (const t of orig.touches) {
+        if (t.identifier === activeTouchId) { touch = t; break; }
+      }
+      if (!touch) return cancel();
+      checkMove(touch.clientX, touch.clientY);
+    });
+
+    map.on("mouseup", cancel);
+    map.on("touchend", cancel);
+    map.on("touchcancel", cancel);
+    map.on("dragstart", cancel);
+    map.on("zoomstart", cancel);
+    map.on("pitchstart", cancel);
+    map.on("rotatestart", cancel);
+
+    // Suppress the trailing click MapLibre synthesizes after a long-press
+    // fires, so the existing zone-click popup doesn't pop on top of our
+    // color picker. Capture-phase on document covers both MapLibre's
+    // own click events and any DOM-level zone-click handler.
+    document.addEventListener("click", (e) => {
       if (state.suppressClickUntilMs && Date.now() < state.suppressClickUntilMs) {
         e.stopPropagation();
         e.preventDefault();
