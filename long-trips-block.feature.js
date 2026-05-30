@@ -349,13 +349,6 @@
     const marker = new window.maplibregl.Marker({ element: el, anchor: "bottom" })
       .setLngLat([flag.lng, flag.lat])
       .addTo(mapRef);
-    // Subpixel positioning so the flag pin doesn't snap to integer pixel
-    // boundaries at fractional zooms -- without this the marker visibly
-    // drifts (jumps a pixel) as you zoom. Presence markers already use
-    // this; flags need it for the same reason.
-    if (typeof marker.setSubpixelPositioning === "function") {
-      marker.setSubpixelPositioning(true);
-    }
     state.markers[flag.id] = marker;
     attachFlagLongPress(el, flag);
   }
@@ -679,9 +672,6 @@
     })
       .setLngLat([lngLat.lng, lngLat.lat])
       .addTo(mapRef);
-    if (typeof marker.setSubpixelPositioning === "function") {
-      marker.setSubpixelPositioning(true);
-    }
 
     const bar = document.createElement("div");
     bar.className = "ltb-place-bar";

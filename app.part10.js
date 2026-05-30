@@ -3176,26 +3176,7 @@ function chooseRichPresenceUserIds(rows, mode) {
   return richUserIds;
 }
 function clusterPresenceByScreenPosition(rows, selfPos) {
-  // Driver feedback: "users and flags should always stay in the correct
-  // position no matter the zoom." This function previously assigned an
-  // orbitMeta to each driver in a screen-pixel cluster, which made the
-  // driver marker render with a CSS offset of ~16-25px radially. That
-  // offset is in *screen pixels*; at lower zooms the same offset covers
-  // more ground, so drivers visibly drift relative to the underlying
-  // map (and relative to long-trip flags, which don't have any such
-  // offset) as you zoom in and out.
-  //
-  // Honest fix: don't push markers off their true position. Two drivers
-  // at the exact same spot will overlap visually; that's a smaller UX
-  // problem than the constant drift complaint. If we ever need to
-  // de-overlap, do it via a different mechanism (e.g. badge offset,
-  // stacked z-index counter) that doesn't move the icon's anchor.
   const richRows = Array.isArray(rows) ? rows : [];
-  for (const row of richRows) row.orbitMeta = null;
-  core.setLastSelfOrbitMeta?.(null);
-  return;
-
-  // eslint-disable-next-line no-unreachable
   const nodes = [];
   const map = core.getMap?.();
   const meState = core.getMeState?.();
