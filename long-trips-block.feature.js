@@ -59,7 +59,15 @@
         position: relative; width: 34px; height: 42px;
         cursor: pointer; user-select: none; -webkit-user-select: none;
         -webkit-touch-callout: none; touch-action: none;
-        transform: translate(-50%, -100%);
+        /* No transform here -- MapLibre Marker drives this element's
+           translate3d every frame; any class transform would be clobbered. */
+      }
+      .ltb-flag-scale {
+        position: absolute; left: 0; top: 0; width: 100%; height: 100%;
+        transform-origin: 50% 100%;  /* scale toward the pin tip (bottom-center) */
+        transform: scale(var(--ltb-zoom-scale, 1));
+        transition: transform 120ms ease-out;
+        will-change: transform;
       }
       .ltb-flag-pole {
         position: absolute; left: 50%; bottom: 0; width: 2px; height: 100%;
@@ -159,10 +167,17 @@
     root.className = "ltb-flag";
     root.dataset.flagId = flag.id;
     root.style.color = palette.hex;
+    // Inner .ltb-flag-scale element carries the zoom-driven scale transform.
+    // The outer .ltb-flag is positioned by MapLibre Marker (it sets its own
+    // translate3d each frame); putting a scale on the outer element would
+    // be clobbered. The inner element scales toward bottom-center so the
+    // pin tip stays anchored at the lat/lng as it shrinks.
     root.innerHTML = `
-      <div class="ltb-flag-pulse"></div>
-      <div class="ltb-flag-pole"></div>
-      <div class="ltb-flag-pennant" style="background:${palette.hex};border:1px solid ${palette.border};">${FLAG_TEXT}</div>
+      <div class="ltb-flag-scale">
+        <div class="ltb-flag-pulse"></div>
+        <div class="ltb-flag-pole"></div>
+        <div class="ltb-flag-pennant" style="background:${palette.hex};border:1px solid ${palette.border};">${FLAG_TEXT}</div>
+      </div>
     `;
     return root;
   }
@@ -170,6 +185,9 @@
   function renderFlag(flag) {
     if (!mapRef || !window.maplibregl?.Marker) return;
     const el = buildFlagElement(flag);
+    // Initialise scale so newly-dropped flags appear at the right size
+    // immediately, before the first zoom event would otherwise update it.
+    el.style.setProperty("--ltb-zoom-scale", scaleForZoom(mapRef.getZoom?.()).toFixed(3));
     const marker = new window.maplibregl.Marker({ element: el, anchor: "bottom" })
       .setLngLat([flag.lng, flag.lat])
       .addTo(mapRef);
@@ -249,6 +267,10 @@
       if (indicatorEl) { indicatorEl.remove(); indicatorEl = null; }
       startLngLat = null;
       activeTouchId = null;
+      // Restore zone fills if we dimmed them and the picker isn't open
+      // (the picker has its own backdrop and will call restore on its own
+      // dismissal). Safe to call when nothing was dimmed -- it's a no-op.
+      restoreZoneFills();
     };
 
     const startHold = (clientX, clientY, lngLat) => {
@@ -263,13 +285,25 @@
       indicatorEl.style.left = `${clientX}px`;
       indicatorEl.style.top = `${clientY}px`;
       document.body.appendChild(indicatorEl);
+      // Dim the zone fills so the street grid underneath becomes visible
+      // -- otherwise the colored zones cover the streets and it's hard to
+      // pick the right block. Restored by cancel() above or by the
+      // picker's resolve callback below.
+      dimZoneFills();
       timer = setTimeout(() => {
         const lngLatCopy = startLngLat;
-        cancel();
-        if (!lngLatCopy) return;
+        // Don't restore fills yet -- the picker is about to open. Strip
+        // the indicator + timer state but keep the fills dimmed so the
+        // street context is still visible during the picker.
+        if (timer) { clearTimeout(timer); timer = null; }
+        if (indicatorEl) { indicatorEl.remove(); indicatorEl = null; }
+        startLngLat = null;
+        activeTouchId = null;
+        if (!lngLatCopy) { restoreZoneFills(); return; }
         state.suppressClickUntilMs = Date.now() + SUPPRESS_NEXT_CLICK_MS;
         showColorPicker(lngLatCopy, (color) => {
           if (color) addFlag(lngLatCopy, color);
+          restoreZoneFills();
         });
       }, HOLD_MS);
     };
@@ -435,6 +469,67 @@
     save();
   }
 
+  // Compute a marker scale that mimics how MapLibre symbol layers
+  // (hotspot dots, zone labels) shrink with the zoom-out. Full size at
+  // z>=15 (close-in detail view), 30% at z<=9 (citywide overview),
+  // linear between. Markers stay anchored at their lat/lng -- only the
+  // visual scales.
+  const SCALE_ZOOM_MAX = 15;
+  const SCALE_ZOOM_MIN = 9;
+  const SCALE_FLOOR = 0.3;
+  function scaleForZoom(zoom) {
+    if (!Number.isFinite(zoom)) return 1;
+    if (zoom >= SCALE_ZOOM_MAX) return 1;
+    if (zoom <= SCALE_ZOOM_MIN) return SCALE_FLOOR;
+    const t = (zoom - SCALE_ZOOM_MIN) / (SCALE_ZOOM_MAX - SCALE_ZOOM_MIN);
+    return SCALE_FLOOR + (1 - SCALE_FLOOR) * t;
+  }
+  function applyScaleToAllMarkers() {
+    if (!mapRef) return;
+    const scale = scaleForZoom(mapRef.getZoom?.());
+    const value = scale.toFixed(3);
+    Object.values(state.markers).forEach((marker) => {
+      const el = marker?.getElement?.();
+      if (el) el.style.setProperty("--ltb-zoom-scale", value);
+    });
+  }
+
+  // Dim the zone fill layers while the driver is mid-hold so the
+  // street grid underneath becomes visible -- otherwise the colored
+  // zones cover the streets and it's hard to pick a precise spot. Save
+  // the original paint expression (which may be an interpolate-by-zoom
+  // expression) and restore it on every exit path.
+  const DIMMABLE_LAYER_IDS = [
+    "zones-fill",
+    "pickup-zone-hotspots-fill",
+    "pickup-zone-hotspots-underpaint",
+  ];
+  const DIMMED_OPACITY = 0.12;
+  let savedFillOpacities = null;
+  function dimZoneFills() {
+    if (!mapRef || savedFillOpacities) return;
+    savedFillOpacities = {};
+    for (const id of DIMMABLE_LAYER_IDS) {
+      try {
+        if (mapRef.getLayer?.(id)) {
+          savedFillOpacities[id] = mapRef.getPaintProperty(id, "fill-opacity");
+          mapRef.setPaintProperty(id, "fill-opacity", DIMMED_OPACITY);
+        }
+      } catch (_) { /* layer not present yet -- skip */ }
+    }
+  }
+  function restoreZoneFills() {
+    if (!mapRef || !savedFillOpacities) return;
+    for (const id of Object.keys(savedFillOpacities)) {
+      try {
+        if (mapRef.getLayer?.(id)) {
+          mapRef.setPaintProperty(id, "fill-opacity", savedFillOpacities[id]);
+        }
+      } catch (_) {}
+    }
+    savedFillOpacities = null;
+  }
+
   function init(map) {
     if (initDone) return;
     initDone = true;
@@ -442,6 +537,8 @@
     injectCss();
     load();
     state.flags.forEach(renderFlag);
+    applyScaleToAllMarkers();
+    map.on("zoom", applyScaleToAllMarkers);
     attachMapLongPress(map);
   }
 
