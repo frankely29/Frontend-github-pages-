@@ -4704,8 +4704,17 @@ function startLocationWatch() {
 async function refreshCurrentFrame() {
   try {
     if (document.hidden) return;
+    // Refresh the timeline first so any newly-appended bins (a fresh 20-min
+    // slot rolled over on the server) are reachable, and so any month-key
+    // change propagates into buildFramePathWithMonthKey before we fetch.
+    await loadTimeline({ force: true }).catch(() => {});
     const idx = Number(slider.value || "0");
-    await loadFrame(idx);
+    // force: true bypasses the in-memory frameCache short-circuit at
+    // loadFrame()'s lastRendered check. Without it the 5-minute interval
+    // fires but returns the cached payload, so backend changes (new
+    // tuning weights, recomputed ratings, new pickup data) never reach
+    // the user's screen while the tab stays open.
+    await loadFrame(idx, { force: true });
   } catch (e) {
     console.warn("Auto-refresh failed:", e);
   }
