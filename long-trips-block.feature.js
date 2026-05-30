@@ -28,6 +28,7 @@
     markers: Object.create(null),
     suppressClickUntilMs: 0,
     pickerOpen: false,
+    placementActive: false,
     activeMoveFlagId: null,
     backendAvailable: null, // null = unknown, true/false = decided
   };
@@ -191,10 +192,50 @@
         filter: drop-shadow(0 0 6px rgba(59,130,246,0.95));
         animation: ltb-move-bob 800ms ease-in-out infinite alternate;
       }
+      .ltb-flag.is-preview .ltb-flag-scale {
+        filter: drop-shadow(0 0 6px rgba(16,185,129,0.95));
+        animation: ltb-move-bob 800ms ease-in-out infinite alternate;
+      }
       @keyframes ltb-move-bob {
         from { transform: scale(var(--ltb-zoom-scale, 1)) translateY(0); }
         to   { transform: scale(var(--ltb-zoom-scale, 1)) translateY(-4px); }
       }
+
+      .ltb-place-bar {
+        position: fixed; left: 50%; bottom: 28px;
+        transform: translateX(-50%);
+        z-index: 9999;
+        display: flex; flex-direction: column; gap: 8px;
+        padding: 12px 16px;
+        background: rgba(15,23,42,0.94);
+        color: #ffffff;
+        border-radius: 14px;
+        box-shadow: 0 10px 28px rgba(0,0,0,0.45);
+        font: 600 13px/1.2 -apple-system, system-ui, "Segoe UI", sans-serif;
+        align-items: center;
+        min-width: 240px; max-width: calc(100vw - 32px);
+        animation: ltb-toast-in 200ms ease-out;
+      }
+      .ltb-place-bar .ltb-place-hint {
+        font-size: 12px; color: rgba(255,255,255,0.85);
+        text-align: center;
+      }
+      .ltb-place-bar .ltb-place-actions {
+        display: flex; gap: 8px;
+      }
+      .ltb-place-bar .ltb-place-actions button {
+        padding: 9px 16px; border-radius: 8px; border: 0;
+        cursor: pointer;
+        font: 700 13px/1 -apple-system, system-ui, sans-serif;
+      }
+      .ltb-place-bar .ltb-place-cancel {
+        background: rgba(255,255,255,0.14); color: #ffffff;
+      }
+      .ltb-place-bar .ltb-place-confirm {
+        background: #10b981; color: #ffffff;
+      }
+      .ltb-place-bar .ltb-place-confirm:active,
+      .ltb-place-bar .ltb-place-cancel:active { transform: translateY(1px); }
 
       .ltb-hold-indicator {
         position: fixed; pointer-events: none; z-index: 9998;
@@ -313,6 +354,7 @@
     };
     el.addEventListener("pointerdown", (e) => {
       e.stopPropagation();
+      if (state.placementActive || state.pickerOpen) return;
       pressStart = Date.now();
       startX = e.clientX; startY = e.clientY;
       el.classList.add("is-holding");
@@ -356,10 +398,11 @@
       if (indicatorEl) { indicatorEl.remove(); indicatorEl = null; }
       startLngLat = null;
       activeTouchId = null;
-      if (!state.pickerOpen) restoreZoneFills();
+      if (!state.pickerOpen && !state.placementActive) restoreZoneFills();
     };
 
     const startHold = (clientX, clientY, lngLat) => {
+      if (state.placementActive || state.activeMoveFlagId) return;
       if (Date.now() - lastStartAt < 120) return;
       lastStartAt = Date.now();
       cancel();
@@ -381,8 +424,15 @@
         state.pickerOpen = true;
         showColorPicker(lngLatCopy, (color) => {
           state.pickerOpen = false;
-          if (color) addFlag(lngLatCopy, color);
-          restoreZoneFills();
+          if (color) {
+            // Hand off dim to the positioning phase so the driver can
+            // drag the preview flag to the exact spot before committing.
+            enterPlacementPositioning(lngLatCopy, color, () => {
+              restoreZoneFills();
+            });
+          } else {
+            restoreZoneFills();
+          }
         });
       }, HOLD_MS);
     };
@@ -564,9 +614,77 @@
     savedFillOpacities = null;
   }
 
+  // ----- Placement positioning ------------------------------------------
+  // After the color picker resolves we don't commit the flag straight
+  // away. Driver feedback: long-press lands on a finger-blob area, the
+  // exact lng/lat is usually off by a block. So we drop a draggable
+  // preview marker at the long-press spot, keep zones dimmed so the
+  // underlying streets are easy to read, and offer Place / Cancel.
+
+  function enterPlacementPositioning(lngLat, color, onDone) {
+    if (!mapRef || !window.maplibregl?.Marker) { onDone(); return; }
+    state.placementActive = true;
+
+    const previewFlag = {
+      id: "__ltb_preview__",
+      lng: lngLat.lng,
+      lat: lngLat.lat,
+      color,
+      createdAt: Date.now(),
+    };
+    const el = buildFlagElement(previewFlag);
+    el.classList.add("is-preview");
+    el.style.setProperty("--ltb-zoom-scale", scaleForZoom(mapRef.getZoom?.()).toFixed(3));
+    const marker = new window.maplibregl.Marker({
+      element: el, anchor: "bottom", draggable: true,
+    })
+      .setLngLat([lngLat.lng, lngLat.lat])
+      .addTo(mapRef);
+
+    const bar = document.createElement("div");
+    bar.className = "ltb-place-bar";
+    bar.innerHTML = `
+      <span class="ltb-place-hint">Drag the flag to the exact spot</span>
+      <div class="ltb-place-actions">
+        <button type="button" class="ltb-place-cancel">Cancel</button>
+        <button type="button" class="ltb-place-confirm">Place here</button>
+      </div>
+    `;
+    document.body.appendChild(bar);
+
+    let cleanedUp = false;
+    const cleanup = (shouldPlace) => {
+      if (cleanedUp) return;
+      cleanedUp = true;
+      const finalLngLat = marker.getLngLat?.();
+      try { marker.remove(); } catch (_) {}
+      try { bar.remove(); } catch (_) {}
+      state.placementActive = false;
+      if (shouldPlace && finalLngLat
+        && Number.isFinite(finalLngLat.lng)
+        && Number.isFinite(finalLngLat.lat)) {
+        addFlag({ lng: finalLngLat.lng, lat: finalLngLat.lat }, color);
+      }
+      onDone();
+    };
+
+    bar.querySelector(".ltb-place-confirm").addEventListener("click", () => {
+      state.suppressClickUntilMs = Date.now() + SUPPRESS_NEXT_CLICK_MS;
+      cleanup(true);
+    });
+    bar.querySelector(".ltb-place-cancel").addEventListener("click", () => {
+      state.suppressClickUntilMs = Date.now() + SUPPRESS_NEXT_CLICK_MS;
+      cleanup(false);
+    });
+    // Walk-away safety net: don't leave the map locked in placement mode
+    // forever if the driver gets distracted.
+    setTimeout(() => cleanup(false), 60000);
+  }
+
   // ----- Move mode ------------------------------------------------------
 
   function enterMoveMode(flag) {
+    if (state.placementActive || state.pickerOpen) return;
     const marker = state.markers[flag.id];
     if (!marker) return;
     if (state.activeMoveFlagId && state.activeMoveFlagId !== flag.id) {
@@ -577,6 +695,9 @@
     try { marker.setDraggable?.(true); } catch (_) {}
     const el = marker.getElement?.();
     if (el) el.classList.add("is-moving");
+
+    // Dim zones while moving so the streets underneath read clearly.
+    dimZoneFills();
 
     const toast = document.createElement("div");
     toast.className = "ltb-move-toast";
@@ -591,6 +712,7 @@
       if (el) el.classList.remove("is-moving");
       marker.off?.("dragend", onDragEnd);
       try { toast.remove(); } catch (_) {}
+      restoreZoneFills();
       if (state.activeMoveFlagId === flag.id) state.activeMoveFlagId = null;
     };
     const onDragEnd = async () => {
