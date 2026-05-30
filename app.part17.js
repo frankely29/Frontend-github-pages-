@@ -261,6 +261,7 @@
     lastSuccessfulGuidanceAt: 0,
     guidanceEnrichRefreshKey: "",
     lastGuidancePrimaryLine: "",
+    lastGuidancePrimarySeverity: "",
     lastGuidanceSecondaryLine: "",
     lastSuccessfulOutlookKey: "",
     lastSuccessfulOutlookAt: 0,
@@ -2471,6 +2472,7 @@
   function buildAssistantPrimaryLine() {
     const primary = derivePrimaryDriverDecision();
     state.lastGuidancePrimaryLine = primary?.line || "";
+    state.lastGuidancePrimarySeverity = decisionSeverity(primary);
     if (primary?.kind === "trap") state.lastTrapMessageAtTs = Date.now();
     if (primary?.kind === "stay") state.lastStayMessageAtTs = Date.now();
     if (primary?.kind === "move") state.lastMoveMessageAtTs = Date.now();
@@ -2759,16 +2761,33 @@
     return "info";
   }
 
+  // Maps a derivePrimaryDriverDecision() result to the icon severity that
+  // reflects the *sentiment* of the message, not just the raw action code.
+  // The old behavior used severityForAction(state.finalActionCode), which
+  // meant every STAY decision rendered the green checkmark even when the
+  // line was "Stay • Below average right now" or "Stay briefly • Nearby
+  // options not strong enough yet". Drivers reported that as misleading.
+  // Keyword groups are derived from the literal strings produced by
+  // derivePrimaryDriverDecision() and safeDegradedStayPrimaryLine().
+  function decisionSeverity(decision) {
+    const kind = String(decision?.kind || "").trim();
+    const line = String(decision?.line || "");
+    if (kind === "move") return "move";
+    if (/^move\b/i.test(line)) return "move";
+    if (/excellent zone right now|good zone right now/i.test(line)) return "positive";
+    if (/below average|\bweak\b|not strong|cool off|stay briefly|not worth|too far|trap risk/i.test(line)) return "caution";
+    if (/decent area/i.test(line)) return "info";
+    if (kind === "stay") return "info";
+    return "info";
+  }
+
   function buildMessages() {
     const compactLane = isCompactLaneMode();
     const list = [];
     const primaryDecision = derivePrimaryDriverDecision();
     const primary = primaryDecision?.line || buildAssistantPrimaryLine();
-    const primarySeverity = primaryDecision?.kind === "move"
-      ? "move"
-      : (primaryDecision?.kind === "stay" || primaryDecision?.kind === "trap")
-        ? "caution"
-        : severityForAction(state.finalActionCode);
+    const primarySeverity = decisionSeverity(primaryDecision)
+      || severityForAction(state.finalActionCode);
     list.push({ key: "action", text: primary, severity: primarySeverity });
 
     const allowTargetInCompact = state.dataQualityMode === "full"
@@ -2860,7 +2879,12 @@
     buildMessages();
     const primaryLine = buildAssistantPrimaryLine();
     const secondaryLine = buildAssistantSecondaryLine();
-    const iconType = leadingIconKindFromAction(state.finalActionCode);
+    // buildAssistantPrimaryLine() just stashed the severity that matches the
+    // text we're about to render. Prefer it so a "Stay • Below average right
+    // now" line gets a caution chip instead of a green check, and so a "Stay •
+    // Excellent zone right now" line still gets the green check.
+    const iconType = state.lastGuidancePrimarySeverity
+      || leadingIconKindFromAction(state.finalActionCode);
     const renderKey = [
       compactLane ? 1 : 0,
       state.expanded ? 1 : 0,
@@ -3975,6 +3999,7 @@
     state.lastSuccessfulGuidanceAt = 0;
     state.guidanceEnrichRefreshKey = "";
     state.lastGuidancePrimaryLine = "";
+    state.lastGuidancePrimarySeverity = "";
     state.lastGuidanceSecondaryLine = "";
     resetCountdownCoachState();
     state.lastPickupRecordedAtMs = null;
