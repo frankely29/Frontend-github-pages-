@@ -792,6 +792,21 @@
 
   // ----- Mutations (API + local fallback) -------------------------------
 
+  // Brief auto-dismiss toast for placement / delete / move feedback.
+  // Reuses the .ltb-move-toast styling (centered pill at bottom).
+  // Driver doesn't want a permanent status widget; this only appears for
+  // ~2-3 seconds right after an action and confirms whether it actually
+  // reached the backend so cross-driver sync is observable.
+  function showPlacementToast(message, kind = "ok") {
+    if (typeof document === "undefined") return;
+    const toast = document.createElement("div");
+    toast.className = "ltb-move-toast";
+    toast.textContent = message;
+    if (kind === "error") toast.style.background = "rgba(153,27,27,0.95)";
+    document.body.appendChild(toast);
+    setTimeout(() => { try { toast.remove(); } catch (_) {} }, kind === "error" ? 3500 : 1600);
+  }
+
   async function addFlag(lngLat, color) {
     if (!Object.prototype.hasOwnProperty.call(COLORS, color)) return;
     if (!lngLat || !Number.isFinite(lngLat.lng) || !Number.isFinite(lngLat.lat)) return;
@@ -799,10 +814,12 @@
     // === false") meant that one transient poll failure left every
     // subsequent placement local-only, which silently broke sharing.
     let flag = null;
+    let createErr = null;
     try {
       flag = await apiCreate(lngLat, color);
       state.backendAvailable = true;
     } catch (e) {
+      createErr = e;
       state.backendAvailable = false;
       console.warn(
         `[long-trips-block] create failed (${e?.status || "network"} ${e?.url || ""}), saving locally:`, e
@@ -828,6 +845,12 @@
     }
     saveCache();
     renderFlag(flag);
+    if (createErr) {
+      const code = createErr?.status || "net";
+      showPlacementToast(`Not shared: ${code} (only on your device)`, "error");
+    } else {
+      showPlacementToast("Saved — others will see it within 20s", "ok");
+    }
   }
 
   async function removeFlag(id) {
