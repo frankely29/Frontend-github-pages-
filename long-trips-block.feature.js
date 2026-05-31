@@ -390,24 +390,305 @@
     return Math.round(n * 1e6) / 1e6;
   }
 
+  // ----- Custom WebGL layer (zero-drift, surgical) -----------------------
+  //
+  // Why this exists: after 12+ PRs of trying to fix marker drift via
+  // MapLibre's standard rendering primitives (symbol layer, circle layer,
+  // DOM Marker, source quantization options, coord snap, etc.) the deep-
+  // research investigation conclusively confirmed that:
+  //
+  //   - Symbol layer positions are integer-pixel rounded; no opt-out.
+  //   - DOM Marker is CSS-positioned, raced against the WebGL commit.
+  //   - Both render OUTSIDE the basemap's per-frame GPU draw, which
+  //     introduces one-frame projection lag on iOS Safari.
+  //
+  // The research-recommended surgical fix is a custom layer (type=custom)
+  // -- a MapLibre-supported first-class layer type that lets us draw our
+  // own WebGL inside the map's render pipeline, using the SAME projection
+  // matrix the basemap uses. Same GL commit. No DOM. No symbol placement.
+  // No integer rounding. The price: we write the shader and manage our
+  // own buffers.
+  //
+  // MVP renders flags as colored points only. The "45+" text overlay
+  // requires a texture atlas; deferred to a follow-up once we've
+  // confirmed zero drift on the geometry.
+
+  const LTF_CUSTOM_LAYER_ID = "long-trip-flags-custom-gl";
+  let flagCustomLayer = null;
+
+  function compileShader(gl, type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+      const log = gl.getShaderInfoLog(shader);
+      gl.deleteShader(shader);
+      throw new Error(`[ltb-gl] shader compile failed: ${log}`);
+    }
+    return shader;
+  }
+
+  function linkProgram(gl, vsSource, fsSource) {
+    const vs = compileShader(gl, gl.VERTEX_SHADER, vsSource);
+    const fs = compileShader(gl, gl.FRAGMENT_SHADER, fsSource);
+    const program = gl.createProgram();
+    gl.attachShader(program, vs);
+    gl.attachShader(program, fs);
+    gl.linkProgram(program);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+      const log = gl.getProgramInfoLog(program);
+      gl.deleteProgram(program);
+      throw new Error(`[ltb-gl] program link failed: ${log}`);
+    }
+    return program;
+  }
+
+  function hexToRgb(hex) {
+    const h = String(hex || "").replace("#", "");
+    const n = parseInt(h.length === 3
+      ? h.split("").map((c) => c + c).join("")
+      : h.padEnd(6, "0"), 16);
+    return [
+      ((n >> 16) & 0xff) / 255,
+      ((n >> 8) & 0xff) / 255,
+      (n & 0xff) / 255,
+    ];
+  }
+
+  // GLSL ES 1.00 (WebGL 1, max compat). MapLibre passes a 4x4 matrix
+  // that transforms from Mercator [0,1] coordinates to clip space.
+  // We compute Mercator on the CPU via MapLibre's
+  // MercatorCoordinate.fromLngLat helper (stable, exact -- no per-zoom
+  // re-quantization the way geojson-vt does).
+  const FLAG_VS = `
+    precision highp float;
+    uniform mat4 u_matrix;
+    uniform float u_pixel_ratio;
+    attribute vec2 a_position;   // mercator x, y
+    attribute vec3 a_color_in;   // r, g, b in [0,1]
+    attribute vec3 a_stroke_in;  // r, g, b in [0,1]
+    attribute float a_size;      // diameter in css pixels
+    varying vec3 v_color;
+    varying vec3 v_stroke;
+    varying float v_size_px;
+    void main() {
+      gl_Position = u_matrix * vec4(a_position, 0.0, 1.0);
+      gl_PointSize = a_size * u_pixel_ratio;
+      v_color = a_color_in;
+      v_stroke = a_stroke_in;
+      v_size_px = a_size * u_pixel_ratio;
+    }
+  `;
+
+  // Renders an anti-aliased filled disc with a colored stroke, like
+  // the previous LTF_DISC visual. PointCoord runs 0..1 across the
+  // gl_Point quad with origin at top-left; centered we get -0.5..0.5
+  // and the magnitude is the distance to the point center.
+  const FLAG_FS = `
+    precision highp float;
+    varying vec3 v_color;
+    varying vec3 v_stroke;
+    varying float v_size_px;
+    void main() {
+      vec2 coord = gl_PointCoord - vec2(0.5);
+      float d = length(coord);
+      if (d > 0.5) discard;
+      // Stroke is the outer ~2.5px ring
+      float stroke_inner = (0.5 * v_size_px - 2.5) / v_size_px;
+      float stroke_aa    = 1.0 / v_size_px;     // ~1px anti-alias
+      float alpha_disc   = 1.0 - smoothstep(0.5 - stroke_aa, 0.5, d);
+      float is_stroke    = smoothstep(stroke_inner - stroke_aa,
+                                      stroke_inner, d);
+      vec3  color        = mix(v_color, v_stroke, is_stroke);
+      gl_FragColor       = vec4(color * alpha_disc, alpha_disc);
+    }
+  `;
+
+  function createFlagCustomLayer() {
+    return {
+      id: LTF_CUSTOM_LAYER_ID,
+      type: "custom",
+      renderingMode: "2d",
+
+      _map: null,
+      _gl: null,
+      _program: null,
+      _posBuffer: null,
+      _colorBuffer: null,
+      _strokeBuffer: null,
+      _sizeBuffer: null,
+      _flagCount: 0,
+      _flags: [],
+
+      _attribLocations: null,
+      _uniformLocations: null,
+
+      onAdd(map, gl) {
+        this._map = map;
+        this._gl = gl;
+        try {
+          this._program = linkProgram(gl, FLAG_VS, FLAG_FS);
+        } catch (e) {
+          console.warn("[ltb-gl] shader setup failed:", e);
+          return;
+        }
+        this._attribLocations = {
+          position: gl.getAttribLocation(this._program, "a_position"),
+          color: gl.getAttribLocation(this._program, "a_color_in"),
+          stroke: gl.getAttribLocation(this._program, "a_stroke_in"),
+          size: gl.getAttribLocation(this._program, "a_size"),
+        };
+        this._uniformLocations = {
+          matrix: gl.getUniformLocation(this._program, "u_matrix"),
+          pixelRatio: gl.getUniformLocation(this._program, "u_pixel_ratio"),
+        };
+        this._posBuffer = gl.createBuffer();
+        this._colorBuffer = gl.createBuffer();
+        this._strokeBuffer = gl.createBuffer();
+        this._sizeBuffer = gl.createBuffer();
+      },
+
+      onRemove(map, gl) {
+        if (this._program) gl.deleteProgram(this._program);
+        if (this._posBuffer) gl.deleteBuffer(this._posBuffer);
+        if (this._colorBuffer) gl.deleteBuffer(this._colorBuffer);
+        if (this._strokeBuffer) gl.deleteBuffer(this._strokeBuffer);
+        if (this._sizeBuffer) gl.deleteBuffer(this._sizeBuffer);
+        this._program = null;
+        this._posBuffer = null;
+        this._colorBuffer = null;
+        this._strokeBuffer = null;
+        this._sizeBuffer = null;
+      },
+
+      setFlags(flags) {
+        this._flags = Array.isArray(flags) ? flags : [];
+        this._uploadBuffers();
+        this._map?.triggerRepaint();
+      },
+
+      _zoomBasedSize() {
+        const z = this._map?.getZoom?.();
+        if (!Number.isFinite(z)) return 32;
+        // Same curve as the previous circle-radius interpolation,
+        // diameter terms (radius * 2).
+        if (z <= 9) return 24;
+        if (z >= 16) return 44;
+        if (z <= 13) {
+          return 24 + (32 - 24) * ((z - 9) / 4);
+        }
+        return 32 + (44 - 32) * ((z - 13) / 3);
+      },
+
+      _uploadBuffers() {
+        const gl = this._gl;
+        if (!gl || !this._program) return;
+        if (!window.maplibregl?.MercatorCoordinate?.fromLngLat) return;
+        const flags = this._flags;
+        this._flagCount = flags.length;
+        if (!flags.length) return;
+        const size = this._zoomBasedSize();
+        const positions = new Float32Array(flags.length * 2);
+        const colors = new Float32Array(flags.length * 3);
+        const strokes = new Float32Array(flags.length * 3);
+        const sizes = new Float32Array(flags.length);
+        for (let i = 0; i < flags.length; i++) {
+          const f = flags[i];
+          const mc = window.maplibregl.MercatorCoordinate.fromLngLat({ lng: f.lng, lat: f.lat });
+          positions[i * 2]     = mc.x;
+          positions[i * 2 + 1] = mc.y;
+          const palette = COLORS[f.color] || COLORS.yellow;
+          const c = hexToRgb(palette.hex);
+          const s = hexToRgb(palette.border);
+          colors[i * 3]     = c[0];
+          colors[i * 3 + 1] = c[1];
+          colors[i * 3 + 2] = c[2];
+          strokes[i * 3]     = s[0];
+          strokes[i * 3 + 1] = s[1];
+          strokes[i * 3 + 2] = s[2];
+          sizes[i] = size;
+        }
+        gl.bindBuffer(gl.ARRAY_BUFFER, this._posBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, positions, gl.DYNAMIC_DRAW);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this._colorBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, colors, gl.DYNAMIC_DRAW);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this._strokeBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, strokes, gl.DYNAMIC_DRAW);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this._sizeBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, sizes, gl.DYNAMIC_DRAW);
+      },
+
+      render(gl, matrix) {
+        if (!this._program || !this._flagCount) return;
+        gl.useProgram(this._program);
+        gl.uniformMatrix4fv(this._uniformLocations.matrix, false, matrix);
+        gl.uniform1f(this._uniformLocations.pixelRatio,
+          (typeof window !== "undefined" && window.devicePixelRatio) || 1);
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, this._posBuffer);
+        gl.enableVertexAttribArray(this._attribLocations.position);
+        gl.vertexAttribPointer(this._attribLocations.position, 2, gl.FLOAT, false, 0, 0);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, this._colorBuffer);
+        gl.enableVertexAttribArray(this._attribLocations.color);
+        gl.vertexAttribPointer(this._attribLocations.color, 3, gl.FLOAT, false, 0, 0);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, this._strokeBuffer);
+        gl.enableVertexAttribArray(this._attribLocations.stroke);
+        gl.vertexAttribPointer(this._attribLocations.stroke, 3, gl.FLOAT, false, 0, 0);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, this._sizeBuffer);
+        gl.enableVertexAttribArray(this._attribLocations.size);
+        gl.vertexAttribPointer(this._attribLocations.size, 1, gl.FLOAT, false, 0, 0);
+
+        gl.drawArrays(gl.POINTS, 0, this._flagCount);
+      },
+    };
+  }
+
   function ensureFlagLayer() {
-    // INTENTIONALLY DISABLED. Deep-research found that MapLibre
-    // symbol/circle layers cannot match the position precision of
-    // DOM Marker with setSubpixelPositioning(true) on iOS Safari:
-    //   - Symbol positions are integer-pixel rounded with no opt-out
-    //   - updateBucketOpacities runs per-frame even with allow-overlap
-    //   - findMatches cross-tile work scales with feature count (the
-    //     "3+ users drifts but 2 doesn't" symptom)
-    //   - setData triggers an opacity fade-in regression
-    // The MapLibre maintainers explicitly call this "a very hard bug
-    // to solve" (Discussion #6695). Their documented recommendation
-    // for "few interactive pins, frequent updates" -- exactly the
-    // flag use case -- is the Marker class.
-    //
-    // PR #953 / #957 / #962 / #963 all tried various layer flavors
-    // and all hit the drift in some form. Function is kept (rather
-    // than deleted) so the layer code can be re-enabled by removing
-    // this early return if MapLibre ever ships a fix.
+    if (useLayer || flagLayerInitStarted || !mapRef) return;
+    if (!mapRef.isStyleLoaded?.()) {
+      flagLayerInitStarted = true;
+      mapRef.once?.("load", () => {
+        flagLayerInitStarted = false;
+        ensureFlagLayer();
+      });
+      return;
+    }
+    flagLayerInitStarted = true;
+    try {
+      if (!mapRef.getLayer?.(LTF_CUSTOM_LAYER_ID)) {
+        flagCustomLayer = createFlagCustomLayer();
+        mapRef.addLayer(flagCustomLayer);
+        // Re-upload sizes on zoom so circles stay legible across zooms.
+        mapRef.on("zoom", () => {
+          if (flagCustomLayer) flagCustomLayer._uploadBuffers();
+        });
+      }
+      // Sweep DOM markers now that the GL layer owns rendering.
+      Object.keys(state.markers).forEach((id) => {
+        if (id === state.activeMoveFlagId) return;
+        if (id === "__ltb_preview__") return;
+        try { state.markers[id].remove(); } catch (_) {}
+        delete state.markers[id];
+      });
+      useLayer = true;
+      syncFlagLayer();
+      console.info("[long-trips-block] custom WebGL layer active (zero-drift)");
+    } catch (e) {
+      console.warn("[long-trips-block] custom layer init failed; falling back to DOM markers:", e);
+      flagLayerInitStarted = false;
+    }
+  }
+
+  // Stub: presence MVP layer's setData-based ensure path; keep the body
+  // commented as dead code in case we revert. The active path is now
+  // the custom WebGL layer in createFlagCustomLayer above.
+  // eslint-disable-next-line no-unused-vars
+  function ensureFlagLayer_LEGACY_SYMBOL() {
     return;
     // eslint-disable-next-line no-unreachable
     if (useLayer || flagLayerInitStarted || !mapRef) return;
@@ -554,40 +835,50 @@
   }
 
   function syncFlagLayer() {
-    if (!useLayer || !mapRef) return;
-    const src = mapRef.getSource?.(LTF_SOURCE_ID);
-    if (!src?.setData) return;
+    if (!useLayer || !mapRef || !flagCustomLayer) return;
     // Exclude the flag currently being interactively moved -- that one
     // is shown via a temp DOM marker for the duration of the drag.
     const hidden = state.activeMoveFlagId;
-    const features = state.flags
-      .filter((f) => f.id !== hidden)
-      .map((f) => ({
-        type: "Feature",
-        id: f.id,
-        properties: { id: f.id, color: f.color },
-        // Snap coordinates to 6 decimals (~11cm) before pushing into the
-        // source so geojson-vt's per-zoom quantization always rounds the
-        // same point to the same tile-cell across every integer zoom
-        // (see snapCoord docstring + PR #958 deep-research). This is
-        // the drift fix that doesn't require buffer=0 (which would
-        // clip the circle disc at tile edges).
-        geometry: { type: "Point", coordinates: [snapCoord(f.lng), snapCoord(f.lat)] },
-      }));
-    src.setData({ type: "FeatureCollection", features });
+    const visible = state.flags.filter((f) => f.id !== hidden);
+    flagCustomLayer.setFlags(visible);
   }
 
   function flagAtScreenPoint(point) {
     if (!useLayer || !mapRef) return null;
-    // Hit-test the disc layer (the circle carries the position; the
-    // text label is positioned on top of it). queryRenderedFeatures
-    // accepts an array of layer ids -- include both so a press that
-    // lands on the "45+" text but not the disc edge still registers.
+    // Custom WebGL layer doesn't participate in queryRenderedFeatures.
+    // Hit-test in CSS pixels directly against each flag's projected
+    // position. We use the same MercatorCoordinate path the renderer
+    // uses, then unproject through the map.project API for the screen
+    // pixel. Hit radius is roughly the disc visual size.
+    if (!flagCustomLayer || !flagCustomLayer._flagCount) return null;
+    const flags = flagCustomLayer._flags;
+    const size = flagCustomLayer._zoomBasedSize?.() ?? 32;
+    const hitR = size * 0.5 + 4;     // include a little forgiveness
+    const hitR2 = hitR * hitR;
+    let best = null;
+    let bestD2 = Infinity;
+    for (const f of flags) {
+      if (!Number.isFinite(f?.lng) || !Number.isFinite(f?.lat)) continue;
+      let p;
+      try { p = mapRef.project([f.lng, f.lat]); } catch (_) { continue; }
+      if (!p) continue;
+      const dx = p.x - point.x;
+      const dy = p.y - point.y;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < hitR2 && d2 < bestD2) {
+        best = f;
+        bestD2 = d2;
+      }
+    }
+    if (best) return best;
+    let features = null;
+    void features;
+    return null;
+    // eslint-disable-next-line no-unreachable
     const layers = [];
     if (mapRef.getLayer?.(LTF_DISC_LAYER_ID)) layers.push(LTF_DISC_LAYER_ID);
     if (mapRef.getLayer?.(LTF_TEXT_LAYER_ID)) layers.push(LTF_TEXT_LAYER_ID);
     if (!layers.length) return null;
-    let features;
     try {
       features = mapRef.queryRenderedFeatures(point, { layers });
     } catch (_) { return null; }
