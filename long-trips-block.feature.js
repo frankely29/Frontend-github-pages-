@@ -414,11 +414,20 @@
           // rebuilds tiles per integer zoom (default maxzoom=18). The
           // grid is finer at higher zooms, so each level rounds the
           // same point to a slightly different position. Pinning
-          // maxzoom=22 + tolerance=0 + buffer=0 keeps the quantization
-          // grid stable across zoom animations.
+          // maxzoom=22 + tolerance=0 keeps the quantization grid
+          // stable across zoom animations.
           maxzoom: 22,
           tolerance: 0,
-          buffer: 0,
+          // NOTE: do NOT set buffer to 0 here even though it'd be
+          // nice for completeness. The disc layer is type=circle, and
+          // circle-radius renders in screen pixels around the point
+          // center. With buffer=0 the rendering gets clipped to the
+          // exact tile geometry -- when a flag is near a tile edge,
+          // part (or all) of the disc disappears. Presence works fine
+          // with buffer=0 because its layer is type=symbol, and symbol
+          // icons don't clip to source tile bounds the same way. So
+          // we use the default buffer (128 px) on this source. See
+          // PR #958 which set buffer=0 and made flags vanish.
         });
       }
       if (!mapRef.getLayer?.(LTF_DISC_LAYER_ID)) {
