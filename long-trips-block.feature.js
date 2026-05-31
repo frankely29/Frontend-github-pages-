@@ -364,10 +364,31 @@
 
   const LTF_SOURCE_ID = "long-trip-flags";
   const LTF_LAYER_ID = "long-trip-flags-icons";              // legacy id (replaced)
-  const LTF_DISC_LAYER_ID = "long-trip-flags-disc";          // circle layer (zero-drift)
+  const LTF_DISC_LAYER_ID = "long-trip-flags-disc";          // symbol icon (zero-drift via same path as presence)
   const LTF_TEXT_LAYER_ID = "long-trip-flags-text";          // "45+" label
   let useLayer = false;
   let flagLayerInitStarted = false;
+
+  // Build a colored circle PNG, one per flag color. Registered via
+  // map.addImage at init time, then used as the icon-image for the disc
+  // symbol layer. The visual is a filled circle with a darker outline
+  // (same color palette the old DOM pennant used).
+  function buildDiscImageData(color) {
+    const palette = COLORS[color] || COLORS.yellow;
+    const D = 60;  // 30px @ 2x retina
+    const r = D / 2;
+    const canvas = document.createElement("canvas");
+    canvas.width = D; canvas.height = D;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    // Outer stroke ring (darker shade of the color)
+    ctx.fillStyle = palette.border;
+    ctx.beginPath(); ctx.arc(r, r, r, 0, Math.PI * 2); ctx.fill();
+    // Inner fill (main color)
+    ctx.fillStyle = palette.hex;
+    ctx.beginPath(); ctx.arc(r, r, r - 3, 0, Math.PI * 2); ctx.fill();
+    return ctx.getImageData(0, 0, D, D);
+  }
 
   function ensureFlagLayer() {
     if (useLayer || flagLayerInitStarted || !mapRef) return;
@@ -382,82 +403,87 @@
     }
     flagLayerInitStarted = true;
     try {
-      // Driver: "use the hotspot system" -- the hotspot's micro_hotspots
-      // layer uses type=circle for point geometry, which renders purely
-      // on the GPU shader at the projected pixel position. No symbol
-      // placement worker, no per-frame collision/sort pass, no chance
-      // of lagging the basemap by a frame during rapid zoom. That's
-      // why hotspots have true zero drift.
+      // Driver feedback iteration:
+      //   PR #953  type=symbol icon (full flag PNG)         -> some drift
+      //   PR #957  type=circle disc + type=symbol text      -> better, but
+      //                                                       still drift
+      //   PR #958  + maxzoom=22 + tolerance=0 + buffer=0    -> drift fixed,
+      //                                                       but circle
+      //                                                       layer clipped
+      //                                                       at tile edges
+      //                                                       w/ buffer=0
+      //                                                       -> flags invisible
+      //   PR #961  drop buffer=0 only                       -> flags back
+      //                                                       but drift back
       //
-      // Previous flag layer used type=symbol with an addImage icon. That
-      // path goes through MapLibre's symbol placement pipeline and the
-      // driver was seeing residual drift on it. Replacing with two
-      // hotspot-style layers, both backed by the same point geojson:
+      // Conclusion: circle layer + buffer=0 is the broken combination.
+      // Presence (PR #956) is a SYMBOL layer and works fine with buffer=0.
+      // Switching the disc from type=circle to type=symbol with a
+      // colored-circle icon-image lets us keep buffer=0 AND have the
+      // disc visible at tile edges. Visual is identical (colored disc).
       //
-      //   long-trip-flags-disc  type=circle  -- the colored disc, zero-
-      //                                        drift position anchor
-      //   long-trip-flags-text  type=symbol  -- the "45+" label text
-      //                                        on top of the disc
-      //
-      // The disc is what carries the position. The text is overlaid;
-      // even if the symbol placement pipeline introduces sub-pixel jitter
-      // on the label, it's rendered ON TOP of the rock-solid disc so it
-      // never appears to "slide off" the geographic point. The marker
-      // looks like a flag-sized colored badge with "45+" on it,
-      // preserving the visual identity of the feature.
+      // Two layers on the same source:
+      //   LTF_DISC_LAYER_ID    type=symbol with icon-image -> colored disc
+      //   LTF_TEXT_LAYER_ID    type=symbol with text-field -> "45+" label
+
+      // Register the three colored-circle PNGs once.
+      for (const color of Object.keys(COLORS)) {
+        const imgId = `ltf-disc-${color}`;
+        try {
+          if (!mapRef.hasImage?.(imgId)) {
+            const data = buildDiscImageData(color);
+            if (data) mapRef.addImage(imgId, data, { pixelRatio: 2 });
+          }
+        } catch (e) {
+          console.warn("[long-trips-block] disc addImage failed", color, e);
+        }
+      }
+
       if (!mapRef.getSource?.(LTF_SOURCE_ID)) {
         mapRef.addSource(LTF_SOURCE_ID, {
           type: "geojson",
           data: { type: "FeatureCollection", features: [] },
-          // Drift root cause from deep-research: geojson-vt quantizes
-          // points to integer tile-grid coordinates via Math.round and
-          // rebuilds tiles per integer zoom (default maxzoom=18). The
-          // grid is finer at higher zooms, so each level rounds the
-          // same point to a slightly different position. Pinning
-          // maxzoom=22 + tolerance=0 keeps the quantization grid
-          // stable across zoom animations.
+          // Drift fix from PR #958's deep-research. geojson-vt quantizes
+          // points to integer tile-grid coordinates and rebuilds tiles
+          // per integer zoom (default maxzoom=18). The grid is finer
+          // at higher zooms, so each level rounds the same point to a
+          // slightly different position. All three options together
+          // pin the quantization grid:
+          //   maxzoom=22   stable single grid up to highest zoom
+          //   tolerance=0  no Douglas-Peucker (no-op on points but
+          //                explicit)
+          //   buffer=0     features only in their owning tile (NOTE:
+          //                this only works because the disc layer is
+          //                now type=symbol; with type=circle, buffer=0
+          //                clipped circle-radius at tile edges -> see
+          //                PR #958 vs #961).
           maxzoom: 22,
           tolerance: 0,
-          // NOTE: do NOT set buffer to 0 here even though it'd be
-          // nice for completeness. The disc layer is type=circle, and
-          // circle-radius renders in screen pixels around the point
-          // center. With buffer=0 the rendering gets clipped to the
-          // exact tile geometry -- when a flag is near a tile edge,
-          // part (or all) of the disc disappears. Presence works fine
-          // with buffer=0 because its layer is type=symbol, and symbol
-          // icons don't clip to source tile bounds the same way. So
-          // we use the default buffer (128 px) on this source. See
-          // PR #958 which set buffer=0 and made flags vanish.
+          buffer: 0,
         });
       }
       if (!mapRef.getLayer?.(LTF_DISC_LAYER_ID)) {
         mapRef.addLayer({
           id: LTF_DISC_LAYER_ID,
-          type: "circle",
+          type: "symbol",
           source: LTF_SOURCE_ID,
-          paint: {
-            "circle-radius": [
+          layout: {
+            "icon-image": [
+              "match", ["get", "color"],
+              "green", "ltf-disc-green",
+              "sky", "ltf-disc-sky",
+              "yellow", "ltf-disc-yellow",
+              "ltf-disc-yellow",
+            ],
+            "icon-anchor": "center",
+            "icon-size": [
               "interpolate", ["linear"], ["zoom"],
-              9, 12,
-              13, 16,
-              16, 22,
+              9, 0.5,
+              13, 0.75,
+              16, 1.0,
             ],
-            "circle-color": [
-              "match", ["get", "color"],
-              "green", "#10b981",
-              "sky", "#38bdf8",
-              "yellow", "#facc15",
-              "#94a3b8",
-            ],
-            "circle-stroke-color": [
-              "match", ["get", "color"],
-              "green", "#047857",
-              "sky", "#0369a1",
-              "yellow", "#a16207",
-              "#1f2937",
-            ],
-            "circle-stroke-width": 2.5,
-            "circle-opacity": 0.96,
+            "icon-allow-overlap": true,
+            "icon-ignore-placement": true,
           },
         });
       }
