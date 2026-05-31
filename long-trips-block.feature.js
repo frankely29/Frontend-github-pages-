@@ -409,26 +409,6 @@
         mapRef.addSource(LTF_SOURCE_ID, {
           type: "geojson",
           data: { type: "FeatureCollection", features: [] },
-          // Drift root cause: geojson-vt quantizes points to integer
-          // tile-grid coordinates (`Math.round(extent * (x * z2 - tx))`)
-          // and rebuilds tiles at every integer zoom up to source maxzoom
-          // (default 18). The quantization grid is finer at higher
-          // zooms, so a point's rounded position differs between
-          // adjacent zoom levels -- visible as drift during zoom
-          // animation. Set maxzoom = 22 so tiles are only quantized at
-          // one fixed-grid level and re-used for all zooms below.
-          // (https://github.com/maplibre/maplibre-gl-js/issues/2507)
-          maxzoom: 22,
-          // tolerance is Douglas-Peucker simplification. It's a no-op
-          // on Point features (geojson-vt doesn't simplify points), but
-          // set explicitly to 0 to document the intent and guarantee no
-          // simplification gets added by future MapLibre changes.
-          tolerance: 0,
-          // buffer is in tile-pixels; default 128. Lower buffer means
-          // a point near a tile boundary may not be replicated into
-          // neighboring tiles -- harmless for our use case where there
-          // is one global GeoJSON source rather than user-tilted views.
-          buffer: 0,
         });
       }
       if (!mapRef.getLayer?.(LTF_DISC_LAYER_ID)) {
