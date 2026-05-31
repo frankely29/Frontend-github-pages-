@@ -391,6 +391,25 @@
   }
 
   function ensureFlagLayer() {
+    // INTENTIONALLY DISABLED. Deep-research found that MapLibre
+    // symbol/circle layers cannot match the position precision of
+    // DOM Marker with setSubpixelPositioning(true) on iOS Safari:
+    //   - Symbol positions are integer-pixel rounded with no opt-out
+    //   - updateBucketOpacities runs per-frame even with allow-overlap
+    //   - findMatches cross-tile work scales with feature count (the
+    //     "3+ users drifts but 2 doesn't" symptom)
+    //   - setData triggers an opacity fade-in regression
+    // The MapLibre maintainers explicitly call this "a very hard bug
+    // to solve" (Discussion #6695). Their documented recommendation
+    // for "few interactive pins, frequent updates" -- exactly the
+    // flag use case -- is the Marker class.
+    //
+    // PR #953 / #957 / #962 / #963 all tried various layer flavors
+    // and all hit the drift in some form. Function is kept (rather
+    // than deleted) so the layer code can be re-enabled by removing
+    // this early return if MapLibre ever ships a fix.
+    return;
+    // eslint-disable-next-line no-unreachable
     if (useLayer || flagLayerInitStarted || !mapRef) return;
     if (!mapRef.isStyleLoaded?.()) {
       // Wait for style ready, then try once.
@@ -586,6 +605,15 @@
     const marker = new window.maplibregl.Marker({ element: el, anchor: "bottom" })
       .setLngLat([flag.lng, flag.lat])
       .addTo(mapRef);
+    // Subpixel positioning is the MapLibre-documented way to avoid
+    // integer-pixel rounding on Marker rendering. Symbol layers have
+    // no equivalent option and round to integer pixels every frame,
+    // which is exactly the drift the driver was reporting (see deep-
+    // research from PR #964 follow-up). Marker class is the right
+    // primitive for a small number of frequently-updating pins.
+    if (typeof marker.setSubpixelPositioning === "function") {
+      marker.setSubpixelPositioning(true);
+    }
     state.markers[flag.id] = marker;
     attachFlagLongPress(el, flag);
   }
