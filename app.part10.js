@@ -2280,6 +2280,19 @@ function syncPresenceLayer() {
   const mapRef = core.getMap?.();
   const src = mapRef?.getSource?.(PRESENCE_SOURCE_ID);
   if (!src?.setData) return;
+  // Round lng/lat to 6 decimals (~11cm) before pushing to the source.
+  // Reason: driver reported PR #963's flag client-side snap (in
+  // long-trips-block.feature.js) fixed flag drift, AND fixed presence
+  // drift with up to 2 drivers, but presence drift returned with 3+
+  // drivers in the same area. Per the deep-research (PR #958),
+  // geojson-vt re-quantizes points per integer zoom and the rounding
+  // error differs across zooms. With many close-together features the
+  // perception of that error compounds. Pre-snapping the source data
+  // makes the same lng/lat hash to the same tile-cell at every zoom,
+  // independent of feature count.
+  function snapCoord(n) {
+    return Math.round(n * 1e6) / 1e6;
+  }
   const features = [];
   for (const row of cachedPresenceRows) {
     const uid = String(row?.uid || "");
@@ -2300,7 +2313,7 @@ function syncPresenceLayer() {
       type: "Feature",
       id: uid,
       properties: { userId: uid, imageId: entry.imageId },
-      geometry: { type: "Point", coordinates: [row.lng, row.lat] },
+      geometry: { type: "Point", coordinates: [snapCoord(row.lng), snapCoord(row.lat)] },
     });
   }
   // Drivers no longer in cachedPresenceRows: clear from active set

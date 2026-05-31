@@ -473,15 +473,12 @@
             ],
             "circle-stroke-width": 2.5,
             "circle-opacity": 0.96,
-            // pitch-alignment / pitch-scale viewport bypasses the
-            // matrix-precision-sensitive branch of circle.vertex.glsl
-            // (the deep-research Angle 3 root cause on iOS Safari
-            // where mediump FP16 in the `a_pos + 32768.0` step loses
-            // low-order bits). For a flat 2D map view this has no
-            // visible effect EXCEPT it sidesteps the iOS shader
-            // precision issue. Cheap extra safety belt.
-            "circle-pitch-alignment": "viewport",
-            "circle-pitch-scale": "viewport",
+            // PR #963 also set circle-pitch-alignment and
+            // circle-pitch-scale to "viewport" as belt-and-braces for
+            // iOS Safari precision. Removed: those options had no
+            // visible benefit on this flat 2D view and we can't rule
+            // out that they were the reason the disc didn't render
+            // after #963 deployed.
           },
         });
       }
