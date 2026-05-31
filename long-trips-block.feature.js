@@ -342,7 +342,170 @@
     return root;
   }
 
+  // ----- GeoJSON layer rendering (zero-drift, hotspot-style) -------------
+  //
+  // Driver: "the hotspot have a perfect system we can copy."
+  //
+  // Hotspots render via map.addSource + map.addLayer -- the GPU projects
+  // them using the same matrix as the basemap. Zero drift at fractional
+  // zoom. DOM markers (MapLibre's Marker class) can't match that because
+  // they're positioned in JavaScript every frame, always a sub-pixel
+  // behind the GPU.
+  //
+  // This module historically rendered flags as DOM markers (kept below
+  // as buildFlagElement + the per-flag renderFlag DOM path). Now we
+  // ALSO try to register a symbol layer. If init succeeds, we sweep
+  // every existing DOM marker and let the layer render flags going
+  // forward -- zero drift, matches hotspots exactly. If init fails for
+  // any reason (style not loaded, hasImage missing, browser quirk),
+  // useLayer stays false and the DOM-marker path keeps working as it
+  // does today. Worst case: drivers see flags with the existing drift.
+  // Best case: zero drift.
+
+  const LTF_SOURCE_ID = "long-trip-flags";
+  const LTF_LAYER_ID = "long-trip-flags-icons";
+  let useLayer = false;
+  let flagLayerInitStarted = false;
+
+  function buildFlagImageData(color) {
+    const palette = COLORS[color] || COLORS.yellow;
+    const W = 68, H = 84;  // 34x42 @ 2x for retina
+    const canvas = document.createElement("canvas");
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    // Pole
+    ctx.fillStyle = "#1f2937";
+    ctx.fillRect(W / 2 - 2, 0, 4, H);
+    // Pennant (notched right edge mirrors the CSS clip-path)
+    const pX = W / 2, pY = 0, pW = 56, pH = 44;
+    ctx.fillStyle = palette.hex;
+    ctx.strokeStyle = palette.border;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(pX, pY);
+    ctx.lineTo(pX + pW, pY);
+    ctx.lineTo(pX + pW, pY + pH * 0.65);
+    ctx.lineTo(pX + pW * 0.6, pY + pH);
+    ctx.lineTo(pX, pY + pH);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    // "45+" text
+    ctx.fillStyle = "#1f2937";
+    ctx.font = "bold 22px -apple-system, system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(FLAG_TEXT, pX + pW * 0.4, pY + pH * 0.45);
+    return ctx.getImageData(0, 0, W, H);
+  }
+
+  function ensureFlagLayer() {
+    if (useLayer || flagLayerInitStarted || !mapRef) return;
+    if (!mapRef.isStyleLoaded?.()) {
+      // Wait for style ready, then try once.
+      flagLayerInitStarted = true;
+      mapRef.once?.("load", () => {
+        flagLayerInitStarted = false;
+        ensureFlagLayer();
+      });
+      return;
+    }
+    flagLayerInitStarted = true;
+    try {
+      for (const color of Object.keys(COLORS)) {
+        const imgId = `ltf-flag-${color}`;
+        if (mapRef.hasImage?.(imgId)) continue;
+        const data = buildFlagImageData(color);
+        if (!data) throw new Error(`buildFlagImageData(${color}) returned null`);
+        mapRef.addImage(imgId, data, { pixelRatio: 2 });
+      }
+      if (!mapRef.getSource?.(LTF_SOURCE_ID)) {
+        mapRef.addSource(LTF_SOURCE_ID, {
+          type: "geojson",
+          data: { type: "FeatureCollection", features: [] },
+        });
+      }
+      if (!mapRef.getLayer?.(LTF_LAYER_ID)) {
+        mapRef.addLayer({
+          id: LTF_LAYER_ID,
+          type: "symbol",
+          source: LTF_SOURCE_ID,
+          layout: {
+            "icon-image": [
+              "match", ["get", "color"],
+              "green", "ltf-flag-green",
+              "sky", "ltf-flag-sky",
+              "yellow", "ltf-flag-yellow",
+              "ltf-flag-yellow",
+            ],
+            "icon-anchor": "bottom",
+            // Same curve as the old DOM scaleForZoom (0.3 at z9, 1.0 at z15)
+            // but interpolated by the GPU on every frame -- this is the
+            // bit that eliminates drift.
+            "icon-size": [
+              "interpolate", ["linear"], ["zoom"],
+              9, 0.3,
+              15, 1.0,
+            ],
+            "icon-allow-overlap": true,
+            "icon-ignore-placement": true,
+          },
+        });
+      }
+      // Layer is live. Sweep the existing DOM markers so we don't
+      // double-render, then push current state into the layer.
+      Object.keys(state.markers).forEach((id) => {
+        // Don't sweep markers for flags currently in interactive states
+        // (move, placement preview). Those still need their DOM marker.
+        if (id === state.activeMoveFlagId) return;
+        if (id === "__ltb_preview__") return;
+        try { state.markers[id].remove(); } catch (_) {}
+        delete state.markers[id];
+      });
+      useLayer = true;
+      syncFlagLayer();
+      console.info("[long-trips-block] layer rendering active (zero-drift)");
+    } catch (e) {
+      console.warn("[long-trips-block] layer init failed; falling back to DOM markers:", e);
+      // Leave useLayer = false. Existing DOM marker path keeps working.
+      flagLayerInitStarted = false;
+    }
+  }
+
+  function syncFlagLayer() {
+    if (!useLayer || !mapRef) return;
+    const src = mapRef.getSource?.(LTF_SOURCE_ID);
+    if (!src?.setData) return;
+    // Exclude the flag currently being interactively moved -- that one
+    // is shown via a temp DOM marker for the duration of the drag.
+    const hidden = state.activeMoveFlagId;
+    const features = state.flags
+      .filter((f) => f.id !== hidden)
+      .map((f) => ({
+        type: "Feature",
+        id: f.id,
+        properties: { id: f.id, color: f.color },
+        geometry: { type: "Point", coordinates: [f.lng, f.lat] },
+      }));
+    src.setData({ type: "FeatureCollection", features });
+  }
+
+  function flagAtScreenPoint(point) {
+    if (!useLayer || !mapRef) return null;
+    if (!mapRef.getLayer?.(LTF_LAYER_ID)) return null;
+    let features;
+    try {
+      features = mapRef.queryRenderedFeatures(point, { layers: [LTF_LAYER_ID] });
+    } catch (_) { return null; }
+    if (!features || !features.length) return null;
+    const id = features[0]?.properties?.id;
+    if (!id) return null;
+    return state.flags.find((f) => f.id === id) || null;
+  }
+
   function renderFlag(flag) {
+    if (useLayer) { syncFlagLayer(); return; }
     if (!mapRef || !window.maplibregl?.Marker) return;
     const el = buildFlagElement(flag);
     el.style.setProperty("--ltb-zoom-scale", scaleForZoom(mapRef.getZoom?.()).toFixed(3));
@@ -391,6 +554,7 @@
       try { state.markers[id].remove(); } catch (_) {}
       delete state.markers[id];
     });
+    if (useLayer) syncFlagLayer();
   }
 
   // ----- Map long-press --------------------------------------------------
@@ -470,8 +634,38 @@
     };
 
     const checkMove = (clientX, clientY) => {
-      if (!pickTimer && !dimTimer) return;
-      if (Math.hypot(clientX - startClientX, clientY - startClientY) > MOVE_TOLERANCE_PX) cancel();
+      if (!pickTimer && !dimTimer && !flagHoldTimer) return;
+      if (Math.hypot(clientX - startClientX, clientY - startClientY) > MOVE_TOLERANCE_PX) {
+        cancel();
+        cancelFlagHold();
+      }
+    };
+
+    // When the layer is active there's no DOM .ltb-flag to attach a
+    // pointerdown to, so the existing flag long-press path doesn't
+    // fire. Hit-test the layer at touch start; if a flag is under the
+    // press, start a 3s timer for the Edit dialog instead of the
+    // map-placement timers.
+    let flagHoldTimer = null;
+    let flagHoldFlag = null;
+    const cancelFlagHold = () => {
+      if (flagHoldTimer) { clearTimeout(flagHoldTimer); flagHoldTimer = null; }
+      flagHoldFlag = null;
+    };
+    const startFlagHold = (flag, cx, cy) => {
+      if (state.placementActive || state.pickerOpen) return;
+      cancelFlagHold();
+      flagHoldFlag = flag;
+      startClientX = cx; startClientY = cy;
+      flagHoldTimer = setTimeout(() => {
+        const f = flagHoldFlag;
+        cancelFlagHold();
+        if (f) {
+          showRemovePicker(f, () => {
+            state.suppressClickUntilMs = Date.now() + SUPPRESS_NEXT_CLICK_MS;
+          });
+        }
+      }, HOLD_MS);
     };
 
     map.on("mousedown", (e) => {
@@ -479,16 +673,21 @@
       if (orig?.button !== 0) return;
       const target = orig?.target;
       if (target instanceof Element && target.closest?.(".ltb-flag")) return;
+      // Layer hit-test for the no-DOM case.
+      const hit = flagAtScreenPoint(e.point);
+      if (hit) { startFlagHold(hit, orig.clientX, orig.clientY); return; }
       startHold(orig.clientX, orig.clientY, e.lngLat);
     });
 
     map.on("touchstart", (e) => {
       const orig = e.originalEvent;
-      if (!orig?.touches || orig.touches.length !== 1) { cancel(); return; }
+      if (!orig?.touches || orig.touches.length !== 1) { cancel(); cancelFlagHold(); return; }
       const touch = orig.touches[0];
       const target = touch.target;
       if (target instanceof Element && target.closest?.(".ltb-flag")) return;
       activeTouchId = touch.identifier;
+      const hit = flagAtScreenPoint(e.point);
+      if (hit) { startFlagHold(hit, touch.clientX, touch.clientY); return; }
       startHold(touch.clientX, touch.clientY, e.lngLat);
     });
 
@@ -499,22 +698,23 @@
 
     map.on("touchmove", (e) => {
       const orig = e.originalEvent;
-      if (!orig?.touches) return cancel();
+      if (!orig?.touches) { cancel(); cancelFlagHold(); return; }
       let touch = null;
       for (const t of orig.touches) {
         if (t.identifier === activeTouchId) { touch = t; break; }
       }
-      if (!touch) return cancel();
+      if (!touch) { cancel(); cancelFlagHold(); return; }
       checkMove(touch.clientX, touch.clientY);
     });
 
-    map.on("mouseup", cancel);
-    map.on("touchend", cancel);
-    map.on("touchcancel", cancel);
-    map.on("dragstart", cancel);
-    map.on("zoomstart", cancel);
-    map.on("pitchstart", cancel);
-    map.on("rotatestart", cancel);
+    const cancelAll = () => { cancel(); cancelFlagHold(); };
+    map.on("mouseup", cancelAll);
+    map.on("touchend", cancelAll);
+    map.on("touchcancel", cancelAll);
+    map.on("dragstart", cancelAll);
+    map.on("zoomstart", cancelAll);
+    map.on("pitchstart", cancelAll);
+    map.on("rotatestart", cancelAll);
 
     document.addEventListener("click", (e) => {
       if (state.suppressClickUntilMs && Date.now() < state.suppressClickUntilMs) {
@@ -717,14 +917,37 @@
 
   function enterMoveMode(flag) {
     if (state.placementActive || state.pickerOpen) return;
-    const marker = state.markers[flag.id];
-    if (!marker) return;
     if (state.activeMoveFlagId && state.activeMoveFlagId !== flag.id) {
       exitMoveMode(state.activeMoveFlagId);
     }
     state.activeMoveFlagId = flag.id;
 
-    try { marker.setDraggable?.(true); } catch (_) {}
+    // Layer-rendered flags don't have a DOM marker. Create a temp one
+    // for the drag, then exclude the flag from the layer so we don't
+    // see both. The temp marker is destroyed on cleanup() and the layer
+    // re-renders at the new lng/lat. DOM-rendered flags (fallback path)
+    // already have state.markers[flag.id]; reuse it.
+    let marker = state.markers[flag.id];
+    let createdTempMarker = false;
+    if (!marker) {
+      if (!mapRef || !window.maplibregl?.Marker) {
+        state.activeMoveFlagId = null;
+        return;
+      }
+      const tempEl = buildFlagElement(flag);
+      tempEl.style.setProperty("--ltb-zoom-scale", scaleForZoom(mapRef.getZoom?.()).toFixed(3));
+      marker = new window.maplibregl.Marker({
+        element: tempEl, anchor: "bottom", draggable: true,
+      })
+        .setLngLat([flag.lng, flag.lat])
+        .addTo(mapRef);
+      state.markers[flag.id] = marker;
+      createdTempMarker = true;
+      // Hide the layer feature for this flag while the temp marker shows.
+      syncFlagLayer();
+    } else {
+      try { marker.setDraggable?.(true); } catch (_) {}
+    }
     const el = marker.getElement?.();
     if (el) el.classList.add("is-moving");
 
@@ -746,6 +969,11 @@
       try { toast.remove(); } catch (_) {}
       restoreZoneFills();
       if (state.activeMoveFlagId === flag.id) state.activeMoveFlagId = null;
+      if (createdTempMarker) {
+        try { marker.remove(); } catch (_) {}
+        delete state.markers[flag.id];
+        syncFlagLayer();  // re-include in the layer at the new lng/lat
+      }
     };
     const onDragEnd = async () => {
       const lngLat = marker.getLngLat?.();
@@ -859,6 +1087,7 @@
     state.flags.splice(idx, 1);
     const marker = state.markers[id];
     if (marker) { try { marker.remove(); } catch (_) {} delete state.markers[id]; }
+    if (useLayer) syncFlagLayer();
     saveCache();
     // Always try; same reasoning as addFlag.
     try {
@@ -930,6 +1159,10 @@
     state.flags = next;
     saveCache();
     applyScaleToAllMarkers();
+    // One layer update covers all add/update/delete from the reconcile
+    // (the per-renderFlag calls above are no-ops on the layer path; this
+    // commits the final state in one src.setData).
+    if (useLayer) syncFlagLayer();
   }
 
   async function pollOnce({ silent } = {}) {
@@ -973,12 +1206,19 @@
     console.info(`[long-trips-block] init: API base = ${apiBase() || "(empty)"}; auth = ${Object.keys(authHeaders()).length ? "yes" : "NO TOKEN"}`);
 
     // Paint cached flags immediately so the map doesn't look empty while
-    // the GET request is in flight.
+    // the GET request is in flight. renderFlag routes to DOM markers
+    // initially; ensureFlagLayer() below promotes us to the zero-drift
+    // GeoJSON layer if it initializes successfully.
     loadCache();
     state.flags.forEach(renderFlag);
     applyScaleToAllMarkers();
     map.on("zoom", applyScaleToAllMarkers);
     attachMapLongPress(map);
+    // Try to upgrade to layer rendering. ensureFlagLayer waits for the
+    // map style to be loaded if it isn't yet. On success, sweeps the
+    // DOM markers and switches to the layer. On failure, useLayer
+    // stays false and the DOM marker path continues unchanged.
+    ensureFlagLayer();
 
     // First sync: same reconciliation path the poller uses, so the
     // initial render and steady-state stay consistent.
