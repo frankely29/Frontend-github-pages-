@@ -2203,6 +2203,27 @@ async function ensurePresenceImage(avatarUrl) {
 }
 
 function ensurePresenceLayer() {
+  // INTENTIONALLY DISABLED. Same reason as the flag layer in
+  // long-trips-block.feature.js -- MapLibre symbol layers cannot
+  // match Marker+subpixelPositioning(true) precision on iOS Safari
+  // for small N + frequent setData. The driver reported drift only
+  // returns with 3+ overlapping presence avatars, which is the
+  // classic findMatches/cross-tile-symbol perf cliff
+  // (maplibre-gl-js issue #6192) compounded by the per-frame
+  // updateBucketOpacities work (placement.ts) and the setData fade
+  // regression (issue #6531). All three are unfixable on a symbol
+  // layer; MapLibre's documented answer for our N is Marker.
+  //
+  // PR #956 added this layer as an additive enhancement to the DOM
+  // marker path. The DOM marker path is intact (upsertDriverMarker
+  // + otherMarkers Map) and already uses setSubpixelPositioning at
+  // app.part10.js:3350. Disabling this layer init means every driver
+  // renders via the precise Marker path.
+  //
+  // Function is kept (rather than deleted) so re-enabling is a one-
+  // line revert if MapLibre ever ships a fix.
+  return;
+  // eslint-disable-next-line no-unreachable
   if (usePresenceLayer || presenceLayerInitStarted) return;
   const mapRef = core.getMap?.();
   if (!mapRef) return;
