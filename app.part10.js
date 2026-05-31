@@ -2220,18 +2220,6 @@ function ensurePresenceLayer() {
       mapRef.addSource(PRESENCE_SOURCE_ID, {
         type: "geojson",
         data: { type: "FeatureCollection", features: [] },
-        // Same drift fix as the long_trip_flags source (see
-        // long-trips-block.feature.js). geojson-vt quantizes points to
-        // integer tile-grid coordinates and rebuilds tiles per integer
-        // zoom up to source maxzoom (default 18). The grid is finer at
-        // higher zooms, so points snap to slightly different positions
-        // across zoom levels -- visible as drift during zoom animation.
-        // Pinning maxzoom=22 forces a single quantization grid across
-        // the camera's actual zoom range, eliminating the per-zoom
-        // re-snap.
-        maxzoom: 22,
-        tolerance: 0,
-        buffer: 0,
       });
     }
     if (!mapRef.getLayer?.(PRESENCE_LAYER_ID)) {
