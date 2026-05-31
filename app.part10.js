@@ -3176,40 +3176,7 @@ function chooseRichPresenceUserIds(rows, mode) {
   return richUserIds;
 }
 function clusterPresenceByScreenPosition(rows, selfPos) {
-  // Driver: "presence still drift -- add the same system as flags."
-  //
-  // The big visible drift on presence isn't sub-pixel rounding; it's
-  // the orbital offset this function used to assign. When two drivers
-  // fell within PRESENCE_LABEL_COLLISION_PX = 28 of each other in
-  // screen space, each got an orbitMeta that mapIdentityOrbitStyleText
-  // turned into a CSS transform of ~16-25 SCREEN-pixels radially. At
-  // zoom 14 that's half a city block; at zoom 11 it's a couple of
-  // blocks. The same lng/lat ended up rendered in a different visual
-  // spot every time zoom changed -- exactly the "drift" complaint.
-  //
-  // Disabling the cluster means drivers render at their true lng/lat
-  // at every zoom. Two drivers literally on top of each other will
-  // visually overlap, which is a smaller UX problem than the constant
-  // drift. The flag-layer fix from PR #953 means a long-trip flag
-  // sitting next to drivers no longer drifts either, so the overall
-  // visual mismatch the driver was reporting is gone.
-  //
-  // Note on the earlier revert: PR #948 also disabled this function
-  // and was reverted. The presence breakage at the time came from
-  // PR #949 (flag layer rewrite, also reverted). This change is
-  // identical in shape to #948's clusterPresenceByScreenPosition
-  // diff; the supporting changes that made #948 risky are no longer
-  // in the picture. The flag layer that #948 paired with shipped
-  // separately in PR #953 and is working.
-  //
-  // Keeping the algorithm body below as unreachable code so a future
-  // revert is a one-line `return` removal.
   const richRows = Array.isArray(rows) ? rows : [];
-  for (const row of richRows) row.orbitMeta = null;
-  core.setLastSelfOrbitMeta?.(null);
-  return;
-
-  // eslint-disable-next-line no-unreachable
   const nodes = [];
   const map = core.getMap?.();
   const meState = core.getMeState?.();
