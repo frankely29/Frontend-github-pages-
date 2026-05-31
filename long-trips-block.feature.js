@@ -363,42 +363,11 @@
   // Best case: zero drift.
 
   const LTF_SOURCE_ID = "long-trip-flags";
-  const LTF_LAYER_ID = "long-trip-flags-icons";
+  const LTF_LAYER_ID = "long-trip-flags-icons";              // legacy id (replaced)
+  const LTF_DISC_LAYER_ID = "long-trip-flags-disc";          // circle layer (zero-drift)
+  const LTF_TEXT_LAYER_ID = "long-trip-flags-text";          // "45+" label
   let useLayer = false;
   let flagLayerInitStarted = false;
-
-  function buildFlagImageData(color) {
-    const palette = COLORS[color] || COLORS.yellow;
-    const W = 68, H = 84;  // 34x42 @ 2x for retina
-    const canvas = document.createElement("canvas");
-    canvas.width = W; canvas.height = H;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return null;
-    // Pole
-    ctx.fillStyle = "#1f2937";
-    ctx.fillRect(W / 2 - 2, 0, 4, H);
-    // Pennant (notched right edge mirrors the CSS clip-path)
-    const pX = W / 2, pY = 0, pW = 56, pH = 44;
-    ctx.fillStyle = palette.hex;
-    ctx.strokeStyle = palette.border;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(pX, pY);
-    ctx.lineTo(pX + pW, pY);
-    ctx.lineTo(pX + pW, pY + pH * 0.65);
-    ctx.lineTo(pX + pW * 0.6, pY + pH);
-    ctx.lineTo(pX, pY + pH);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-    // "45+" text
-    ctx.fillStyle = "#1f2937";
-    ctx.font = "bold 22px -apple-system, system-ui, sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(FLAG_TEXT, pX + pW * 0.4, pY + pH * 0.45);
-    return ctx.getImageData(0, 0, W, H);
-  }
 
   function ensureFlagLayer() {
     if (useLayer || flagLayerInitStarted || !mapRef) return;
@@ -413,45 +382,97 @@
     }
     flagLayerInitStarted = true;
     try {
-      for (const color of Object.keys(COLORS)) {
-        const imgId = `ltf-flag-${color}`;
-        if (mapRef.hasImage?.(imgId)) continue;
-        const data = buildFlagImageData(color);
-        if (!data) throw new Error(`buildFlagImageData(${color}) returned null`);
-        mapRef.addImage(imgId, data, { pixelRatio: 2 });
-      }
+      // Driver: "use the hotspot system" -- the hotspot's micro_hotspots
+      // layer uses type=circle for point geometry, which renders purely
+      // on the GPU shader at the projected pixel position. No symbol
+      // placement worker, no per-frame collision/sort pass, no chance
+      // of lagging the basemap by a frame during rapid zoom. That's
+      // why hotspots have true zero drift.
+      //
+      // Previous flag layer used type=symbol with an addImage icon. That
+      // path goes through MapLibre's symbol placement pipeline and the
+      // driver was seeing residual drift on it. Replacing with two
+      // hotspot-style layers, both backed by the same point geojson:
+      //
+      //   long-trip-flags-disc  type=circle  -- the colored disc, zero-
+      //                                        drift position anchor
+      //   long-trip-flags-text  type=symbol  -- the "45+" label text
+      //                                        on top of the disc
+      //
+      // The disc is what carries the position. The text is overlaid;
+      // even if the symbol placement pipeline introduces sub-pixel jitter
+      // on the label, it's rendered ON TOP of the rock-solid disc so it
+      // never appears to "slide off" the geographic point. The marker
+      // looks like a flag-sized colored badge with "45+" on it,
+      // preserving the visual identity of the feature.
       if (!mapRef.getSource?.(LTF_SOURCE_ID)) {
         mapRef.addSource(LTF_SOURCE_ID, {
           type: "geojson",
           data: { type: "FeatureCollection", features: [] },
         });
       }
-      if (!mapRef.getLayer?.(LTF_LAYER_ID)) {
+      if (!mapRef.getLayer?.(LTF_DISC_LAYER_ID)) {
         mapRef.addLayer({
-          id: LTF_LAYER_ID,
+          id: LTF_DISC_LAYER_ID,
+          type: "circle",
+          source: LTF_SOURCE_ID,
+          paint: {
+            "circle-radius": [
+              "interpolate", ["linear"], ["zoom"],
+              9, 12,
+              13, 16,
+              16, 22,
+            ],
+            "circle-color": [
+              "match", ["get", "color"],
+              "green", "#10b981",
+              "sky", "#38bdf8",
+              "yellow", "#facc15",
+              "#94a3b8",
+            ],
+            "circle-stroke-color": [
+              "match", ["get", "color"],
+              "green", "#047857",
+              "sky", "#0369a1",
+              "yellow", "#a16207",
+              "#1f2937",
+            ],
+            "circle-stroke-width": 2.5,
+            "circle-opacity": 0.96,
+          },
+        });
+      }
+      if (!mapRef.getLayer?.(LTF_TEXT_LAYER_ID)) {
+        mapRef.addLayer({
+          id: LTF_TEXT_LAYER_ID,
           type: "symbol",
           source: LTF_SOURCE_ID,
           layout: {
-            "icon-image": [
-              "match", ["get", "color"],
-              "green", "ltf-flag-green",
-              "sky", "ltf-flag-sky",
-              "yellow", "ltf-flag-yellow",
-              "ltf-flag-yellow",
-            ],
-            "icon-anchor": "bottom",
-            // Same curve as the old DOM scaleForZoom (0.3 at z9, 1.0 at z15)
-            // but interpolated by the GPU on every frame -- this is the
-            // bit that eliminates drift.
-            "icon-size": [
+            "text-field": FLAG_TEXT,
+            "text-font": ["Open Sans Regular"],
+            "text-size": [
               "interpolate", ["linear"], ["zoom"],
-              9, 0.3,
-              15, 1.0,
+              9, 9,
+              13, 11,
+              16, 13,
             ],
-            "icon-allow-overlap": true,
-            "icon-ignore-placement": true,
+            "text-anchor": "center",
+            "text-allow-overlap": true,
+            "text-ignore-placement": true,
+          },
+          paint: {
+            "text-color": "#1f2937",
+            // Slight halo so the label reads against any disc color.
+            "text-halo-color": "rgba(255,255,255,0.85)",
+            "text-halo-width": 1,
           },
         });
+      }
+      // If the legacy symbol-icon layer from PR #953 is still on the
+      // style (e.g. from an earlier session), remove it -- we don't
+      // want to render twice.
+      if (mapRef.getLayer?.(LTF_LAYER_ID)) {
+        try { mapRef.removeLayer(LTF_LAYER_ID); } catch (_) {}
       }
       // Layer is live. Sweep the existing DOM markers so we don't
       // double-render, then push current state into the layer.
@@ -465,7 +486,7 @@
       });
       useLayer = true;
       syncFlagLayer();
-      console.info("[long-trips-block] layer rendering active (zero-drift)");
+      console.info("[long-trips-block] circle+text layer rendering active (zero-drift)");
     } catch (e) {
       console.warn("[long-trips-block] layer init failed; falling back to DOM markers:", e);
       // Leave useLayer = false. Existing DOM marker path keeps working.
@@ -493,10 +514,17 @@
 
   function flagAtScreenPoint(point) {
     if (!useLayer || !mapRef) return null;
-    if (!mapRef.getLayer?.(LTF_LAYER_ID)) return null;
+    // Hit-test the disc layer (the circle carries the position; the
+    // text label is positioned on top of it). queryRenderedFeatures
+    // accepts an array of layer ids -- include both so a press that
+    // lands on the "45+" text but not the disc edge still registers.
+    const layers = [];
+    if (mapRef.getLayer?.(LTF_DISC_LAYER_ID)) layers.push(LTF_DISC_LAYER_ID);
+    if (mapRef.getLayer?.(LTF_TEXT_LAYER_ID)) layers.push(LTF_TEXT_LAYER_ID);
+    if (!layers.length) return null;
     let features;
     try {
-      features = mapRef.queryRenderedFeatures(point, { layers: [LTF_LAYER_ID] });
+      features = mapRef.queryRenderedFeatures(point, { layers });
     } catch (_) { return null; }
     if (!features || !features.length) return null;
     const id = features[0]?.properties?.id;
