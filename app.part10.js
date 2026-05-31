@@ -2069,6 +2069,259 @@ const presenceStore = new Map();
 let cachedPresenceRows = [];
 let presenceRenderMode = 'full';
 let presenceFocusedUserId = null;
+
+// ----- Presence rendered as a GeoJSON symbol layer (zero-drift) ---------
+// Same approach the flag feature uses (see long-trips-block.feature.js
+// PR #953): position-anchor each driver via map.addSource + addLayer so
+// the GPU projects them on every frame with sub-pixel precision, same
+// pipeline as the basemap and hotspots. DOM markers via maplibregl.Marker
+// always lag the GPU by a sub-pixel at fractional zooms; that's the
+// drift the driver is reporting on presence avatars and on flags that
+// happen to be next to them.
+//
+// Additive: the DOM marker path (upsertDriverMarker / otherMarkers) keeps
+// running. For each driver, we async-fetch + canvas-compose their avatar
+// and register it via map.addImage. Once registered, the layer renders
+// that driver as a feature and the existing DOM marker is hidden. If the
+// avatar fetch fails (CORS / network / no avatarUrl), the DOM marker
+// stays visible -- so the worst case is "today's drift on that one
+// driver", not "no avatar at all".
+
+const PRESENCE_SOURCE_ID = "tlc-presence-drivers";
+const PRESENCE_LAYER_ID = "tlc-presence-driver-icons";
+const PRESENCE_ICON_SIZE_PX = 60;             // composed icon edge length @ 1x
+const PRESENCE_AVATAR_PADDING_PX = 4;          // white ring inset
+const presenceImageBySignature = new Map();   // signature -> { imageId, loaded }
+const driverLayerActive = new Set();           // user_id strings whose feature is live
+const driverIconSignature = new Map();         // user_id -> last image signature
+let usePresenceLayer = false;
+let presenceLayerInitStarted = false;
+
+function presenceImageSignature(avatarUrl) {
+  // For now the icon only depends on the avatar URL. When we add badge /
+  // crown overlays later, fold them into this signature too so the cache
+  // invalidates correctly.
+  const a = String(avatarUrl || "").trim();
+  return a ? `av:${a}` : "av:__none__";
+}
+
+function presenceDefaultAvatarCanvas() {
+  // Generic placeholder for drivers without an avatar URL. White ring +
+  // slate fill + a stylized "person" shape so they render as something.
+  const D = PRESENCE_ICON_SIZE_PX * 2;
+  const r = D / 2;
+  const canvas = document.createElement("canvas");
+  canvas.width = D; canvas.height = D;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  // Outer white ring
+  ctx.fillStyle = "#ffffff";
+  ctx.beginPath(); ctx.arc(r, r, r, 0, Math.PI * 2); ctx.fill();
+  // Inner slate disc
+  ctx.fillStyle = "#94a3b8";
+  ctx.beginPath(); ctx.arc(r, r, r - PRESENCE_AVATAR_PADDING_PX * 2, 0, Math.PI * 2); ctx.fill();
+  // Person glyph
+  ctx.fillStyle = "#f8fafc";
+  ctx.beginPath(); ctx.arc(r, r * 0.85, r * 0.25, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(r, r * 1.35, r * 0.5, r * 0.35, 0, 0, Math.PI * 2);
+  ctx.fill();
+  return canvas;
+}
+
+function presenceComposeAvatarCanvas(img) {
+  const D = PRESENCE_ICON_SIZE_PX * 2;  // 2x for retina
+  const r = D / 2;
+  const canvas = document.createElement("canvas");
+  canvas.width = D; canvas.height = D;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  // White ring fill (the part that shows around the avatar)
+  ctx.fillStyle = "#ffffff";
+  ctx.beginPath(); ctx.arc(r, r, r, 0, Math.PI * 2); ctx.fill();
+  // Avatar clipped to a circle
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(r, r, r - PRESENCE_AVATAR_PADDING_PX * 2, 0, Math.PI * 2);
+  ctx.clip();
+  try {
+    ctx.drawImage(
+      img,
+      PRESENCE_AVATAR_PADDING_PX * 2,
+      PRESENCE_AVATAR_PADDING_PX * 2,
+      D - PRESENCE_AVATAR_PADDING_PX * 4,
+      D - PRESENCE_AVATAR_PADDING_PX * 4,
+    );
+  } catch (_) { /* tainted canvas -> fall through to ring + transparent center */ }
+  ctx.restore();
+  return canvas;
+}
+
+function presenceLoadImage(url) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => resolve(img);
+    img.onerror = (e) => reject(e || new Error("image load failed"));
+    img.src = url;
+  });
+}
+
+async function ensurePresenceImage(avatarUrl) {
+  const sig = presenceImageSignature(avatarUrl);
+  const existing = presenceImageBySignature.get(sig);
+  if (existing && existing.loaded) return existing.imageId;
+  if (existing) return null; // in-flight; caller will retry next render
+  const imageId = `tlcp-${sig.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 100)}-${presenceImageBySignature.size}`;
+  presenceImageBySignature.set(sig, { imageId, loaded: false });
+  try {
+    let canvas;
+    if (avatarUrl) {
+      const img = await presenceLoadImage(avatarUrl);
+      canvas = presenceComposeAvatarCanvas(img);
+    } else {
+      canvas = presenceDefaultAvatarCanvas();
+    }
+    if (!canvas) throw new Error("compose returned null");
+    const mapRef = core.getMap?.();
+    if (!mapRef?.addImage) throw new Error("map.addImage unavailable");
+    if (!mapRef.hasImage?.(imageId)) {
+      mapRef.addImage(imageId, await createImageBitmap(canvas), { pixelRatio: 2 });
+    }
+    presenceImageBySignature.set(sig, { imageId, loaded: true });
+    // Nudge the layer to use the now-loaded image.
+    syncPresenceLayer();
+    return imageId;
+  } catch (e) {
+    // Avatar fetch / canvas / addImage failed. Remove the in-flight
+    // entry so a later poll can retry; the DOM marker for this driver
+    // stays as the fallback in the meantime.
+    presenceImageBySignature.delete(sig);
+    console.warn("[presence-layer] image load failed for", sig, ":", e?.message || e);
+    return null;
+  }
+}
+
+function ensurePresenceLayer() {
+  if (usePresenceLayer || presenceLayerInitStarted) return;
+  const mapRef = core.getMap?.();
+  if (!mapRef) return;
+  if (!mapRef.isStyleLoaded?.()) {
+    presenceLayerInitStarted = true;
+    mapRef.once?.("load", () => {
+      presenceLayerInitStarted = false;
+      ensurePresenceLayer();
+    });
+    return;
+  }
+  presenceLayerInitStarted = true;
+  try {
+    if (!mapRef.getSource?.(PRESENCE_SOURCE_ID)) {
+      mapRef.addSource(PRESENCE_SOURCE_ID, {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+    }
+    if (!mapRef.getLayer?.(PRESENCE_LAYER_ID)) {
+      mapRef.addLayer({
+        id: PRESENCE_LAYER_ID,
+        type: "symbol",
+        source: PRESENCE_SOURCE_ID,
+        layout: {
+          "icon-image": ["get", "imageId"],
+          "icon-anchor": "center",
+          "icon-size": [
+            "interpolate", ["linear"], ["zoom"],
+            10, 0.5,
+            14, 0.75,
+            16, 1.0,
+          ],
+          "icon-allow-overlap": true,
+          "icon-ignore-placement": true,
+        },
+      });
+      // Click on a layer-rendered driver opens their profile (matches
+      // the per-DOM-element click handler the DOM marker would have).
+      mapRef.on("click", PRESENCE_LAYER_ID, (e) => {
+        const f = e.features?.[0];
+        const uid = f?.properties?.userId;
+        if (!uid) return;
+        try {
+          window.openDriverProfileModal?.({
+            userId: String(uid),
+            isSelf: false,
+            source: "driver-marker-layer",
+          });
+        } catch (_) {}
+      });
+      mapRef.on("mouseenter", PRESENCE_LAYER_ID, () => {
+        const c = mapRef.getCanvas?.(); if (c) c.style.cursor = "pointer";
+      });
+      mapRef.on("mouseleave", PRESENCE_LAYER_ID, () => {
+        const c = mapRef.getCanvas?.(); if (c) c.style.cursor = "";
+      });
+    }
+    usePresenceLayer = true;
+    console.info("[presence-layer] active (zero-drift)");
+  } catch (e) {
+    console.warn("[presence-layer] init failed; staying on DOM markers:", e);
+    presenceLayerInitStarted = false;
+  }
+}
+
+function syncPresenceLayer() {
+  if (!usePresenceLayer) return;
+  const mapRef = core.getMap?.();
+  const src = mapRef?.getSource?.(PRESENCE_SOURCE_ID);
+  if (!src?.setData) return;
+  const features = [];
+  for (const row of cachedPresenceRows) {
+    const uid = String(row?.uid || "");
+    if (!uid) continue;
+    if (!Number.isFinite(row?.lat) || !Number.isFinite(row?.lng)) continue;
+    const sig = presenceImageSignature(row.avatarUrl);
+    const entry = presenceImageBySignature.get(sig);
+    if (!entry?.loaded) {
+      // Image not ready yet -> kick off load; DOM marker covers visually
+      // until the image is ready. Skip this driver in the layer for now.
+      ensurePresenceImage(row.avatarUrl);
+      driverLayerActive.delete(uid);
+      continue;
+    }
+    driverLayerActive.add(uid);
+    driverIconSignature.set(uid, sig);
+    features.push({
+      type: "Feature",
+      id: uid,
+      properties: { userId: uid, imageId: entry.imageId },
+      geometry: { type: "Point", coordinates: [row.lng, row.lat] },
+    });
+  }
+  // Drivers no longer in cachedPresenceRows: clear from active set
+  const presentUids = new Set(features.map((f) => f.properties.userId));
+  for (const uid of Array.from(driverLayerActive)) {
+    if (!presentUids.has(uid)) driverLayerActive.delete(uid);
+  }
+  src.setData({ type: "FeatureCollection", features });
+}
+
+function hideDomMarkerIfLayerActive(userId) {
+  const uid = String(userId);
+  if (!usePresenceLayer) return false;
+  if (!driverLayerActive.has(uid)) return false;
+  const mk = otherMarkers.get(uid);
+  const el = mk?.getElement?.();
+  if (el && el.style.display !== "none") el.style.display = "none";
+  return true;
+}
+
+function showDomMarkerIfLayerInactive(userId) {
+  const uid = String(userId);
+  if (usePresenceLayer && driverLayerActive.has(uid)) return;
+  const mk = otherMarkers.get(uid);
+  const el = mk?.getElement?.();
+  if (el && el.style.display === "none") el.style.display = "";
+}
 let presenceLiteSourceFingerprint = '';
 let presenceAdaptiveRenderRaf = 0;
 let presenceLastSyncTimestamp = 0;
@@ -3576,6 +3829,8 @@ function renderAdaptivePresenceFromCache() {
       try { mk.remove(); } catch (_) {}
       otherMarkers.delete(uid);
       driverMarkerVisualSignature.delete(uid);
+      driverLayerActive.delete(String(uid));
+      driverIconSignature.delete(String(uid));
     }
   }
 
@@ -3611,6 +3866,20 @@ function renderAdaptivePresenceFromCache() {
   }
 
   core.applyDriverLabelZoomStyles?.();
+
+  // Layer-rendered presence (zero-drift). Init lazily; if/when ready,
+  // sync the feature collection and hide the DOM marker for any driver
+  // whose icon has been loaded into the style. Drivers without a loaded
+  // icon keep their DOM marker visible until ensurePresenceImage
+  // resolves on a later poll.
+  ensurePresenceLayer();
+  syncPresenceLayer();
+  for (const row of richRows) {
+    if (!hideDomMarkerIfLayerActive(row.uid)) {
+      showDomMarkerIfLayerInactive(row.uid);
+    }
+  }
+
   renderedPresenceFingerprint = nextRenderFingerprint;
 }
 
