@@ -2220,6 +2220,12 @@ function ensurePresenceLayer() {
       mapRef.addSource(PRESENCE_SOURCE_ID, {
         type: "geojson",
         data: { type: "FeatureCollection", features: [] },
+        // Same drift fix as long_trip_flags. See research notes in
+        // long-trips-block.feature.js. Pin geojson-vt's tile pyramid
+        // so the quantization grid is stable across zooms.
+        maxzoom: 22,
+        tolerance: 0,
+        buffer: 0,
       });
     }
     if (!mapRef.getLayer?.(PRESENCE_LAYER_ID)) {

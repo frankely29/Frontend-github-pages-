@@ -409,6 +409,16 @@
         mapRef.addSource(LTF_SOURCE_ID, {
           type: "geojson",
           data: { type: "FeatureCollection", features: [] },
+          // Drift root cause from deep-research: geojson-vt quantizes
+          // points to integer tile-grid coordinates via Math.round and
+          // rebuilds tiles per integer zoom (default maxzoom=18). The
+          // grid is finer at higher zooms, so each level rounds the
+          // same point to a slightly different position. Pinning
+          // maxzoom=22 + tolerance=0 + buffer=0 keeps the quantization
+          // grid stable across zoom animations.
+          maxzoom: 22,
+          tolerance: 0,
+          buffer: 0,
         });
       }
       if (!mapRef.getLayer?.(LTF_DISC_LAYER_ID)) {
