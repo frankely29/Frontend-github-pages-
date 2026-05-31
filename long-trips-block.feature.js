@@ -364,30 +364,30 @@
 
   const LTF_SOURCE_ID = "long-trip-flags";
   const LTF_LAYER_ID = "long-trip-flags-icons";              // legacy id (replaced)
-  const LTF_DISC_LAYER_ID = "long-trip-flags-disc";          // symbol icon (zero-drift via same path as presence)
+  const LTF_DISC_LAYER_ID = "long-trip-flags-disc";          // circle layer (the working renderer)
   const LTF_TEXT_LAYER_ID = "long-trip-flags-text";          // "45+" label
   let useLayer = false;
   let flagLayerInitStarted = false;
 
-  // Build a colored circle PNG, one per flag color. Registered via
-  // map.addImage at init time, then used as the icon-image for the disc
-  // symbol layer. The visual is a filled circle with a darker outline
-  // (same color palette the old DOM pennant used).
-  function buildDiscImageData(color) {
-    const palette = COLORS[color] || COLORS.yellow;
-    const D = 60;  // 30px @ 2x retina
-    const r = D / 2;
-    const canvas = document.createElement("canvas");
-    canvas.width = D; canvas.height = D;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return null;
-    // Outer stroke ring (darker shade of the color)
-    ctx.fillStyle = palette.border;
-    ctx.beginPath(); ctx.arc(r, r, r, 0, Math.PI * 2); ctx.fill();
-    // Inner fill (main color)
-    ctx.fillStyle = palette.hex;
-    ctx.beginPath(); ctx.arc(r, r, r - 3, 0, Math.PI * 2); ctx.fill();
-    return ctx.getImageData(0, 0, D, D);
+  // Round lng/lat to 6 decimal places (~11cm precision) before pushing
+  // into the GeoJSON source. Why: float64 lon/lat values from MapLibre's
+  // map.unproject() carry 15-16 significant digits, but the deep-
+  // research investigation behind PR #958 confirmed that geojson-vt's
+  // worker-side projection + `Math.round` quantization re-evaluates
+  // at every integer zoom level. The rounding error differs per zoom,
+  // visible as drift. Pre-snapping client-side to a coarser grid means
+  // the same lng/lat hash to the same tile-cell at every zoom level,
+  // eliminating the per-zoom re-quantization without needing to play
+  // with source `buffer` or `maxzoom` (which break the circle layer).
+  //
+  // 6 decimals = ~11cm at any latitude. At zoom 22 (the highest a
+  // taxi-driver app realistically goes) one pixel ≈ 10cm at the
+  // equator, so 11cm rounding is sub-pixel at every zoom we care
+  // about. This is the workaround documented in the MapLibre large-
+  // data guide ("you can reduce the coordinate precision to around 6
+  // decimals").
+  function snapCoord(n) {
+    return Math.round(n * 1e6) / 1e6;
   }
 
   function ensureFlagLayer() {
@@ -403,87 +403,85 @@
     }
     flagLayerInitStarted = true;
     try {
-      // Driver feedback iteration:
+      // Driver feedback iteration history:
       //   PR #953  type=symbol icon (full flag PNG)         -> some drift
-      //   PR #957  type=circle disc + type=symbol text      -> better, but
-      //                                                       still drift
-      //   PR #958  + maxzoom=22 + tolerance=0 + buffer=0    -> drift fixed,
-      //                                                       but circle
-      //                                                       layer clipped
-      //                                                       at tile edges
-      //                                                       w/ buffer=0
+      //   PR #957  type=circle disc + type=symbol text      -> better, still drift
+      //   PR #958  + maxzoom=22 + tolerance=0 + buffer=0    -> drift fixed
+      //                                                       but circle + buffer=0
+      //                                                       clipped tile edges
       //                                                       -> flags invisible
-      //   PR #961  drop buffer=0 only                       -> flags back
-      //                                                       but drift back
+      //   PR #961  drop buffer=0 only                       -> flags back, drift back
+      //   PR #962  switch disc from circle -> symbol+icon-image -> drift fixed,
+      //                                                       but addImage path
+      //                                                       was flaky and flags
+      //                                                       still invisible
       //
-      // Conclusion: circle layer + buffer=0 is the broken combination.
-      // Presence (PR #956) is a SYMBOL layer and works fine with buffer=0.
-      // Switching the disc from type=circle to type=symbol with a
-      // colored-circle icon-image lets us keep buffer=0 AND have the
-      // disc visible at tile edges. Visual is identical (colored disc).
+      // This PR: stop fighting the source quantization with buffer=0.
+      // Instead, drop the lng/lat precision client-side BEFORE pushing
+      // into the source (see snapCoord above). With both coords pinned
+      // to 6 decimals (~11cm), geojson-vt's per-zoom Math.round always
+      // rounds to the same tile-cell at every zoom -- no drift, no
+      // change to source `buffer` (default 128, so circle renders), no
+      // dependence on addImage. Driver-confirmed presence path is
+      // untouched.
       //
       // Two layers on the same source:
-      //   LTF_DISC_LAYER_ID    type=symbol with icon-image -> colored disc
-      //   LTF_TEXT_LAYER_ID    type=symbol with text-field -> "45+" label
-
-      // Register the three colored-circle PNGs once.
-      for (const color of Object.keys(COLORS)) {
-        const imgId = `ltf-disc-${color}`;
-        try {
-          if (!mapRef.hasImage?.(imgId)) {
-            const data = buildDiscImageData(color);
-            if (data) mapRef.addImage(imgId, data, { pixelRatio: 2 });
-          }
-        } catch (e) {
-          console.warn("[long-trips-block] disc addImage failed", color, e);
-        }
-      }
-
+      //   LTF_DISC_LAYER_ID    type=circle  -> colored disc (zero-drift
+      //                                       once coords are pre-snapped)
+      //   LTF_TEXT_LAYER_ID    type=symbol  -> "45+" label
       if (!mapRef.getSource?.(LTF_SOURCE_ID)) {
         mapRef.addSource(LTF_SOURCE_ID, {
           type: "geojson",
           data: { type: "FeatureCollection", features: [] },
-          // Drift fix from PR #958's deep-research. geojson-vt quantizes
-          // points to integer tile-grid coordinates and rebuilds tiles
-          // per integer zoom (default maxzoom=18). The grid is finer
-          // at higher zooms, so each level rounds the same point to a
-          // slightly different position. All three options together
-          // pin the quantization grid:
-          //   maxzoom=22   stable single grid up to highest zoom
-          //   tolerance=0  no Douglas-Peucker (no-op on points but
-          //                explicit)
-          //   buffer=0     features only in their owning tile (NOTE:
-          //                this only works because the disc layer is
-          //                now type=symbol; with type=circle, buffer=0
-          //                clipped circle-radius at tile edges -> see
-          //                PR #958 vs #961).
+          // Drift fix from deep-research: pin tile pyramid to one
+          // quantization grid.
           maxzoom: 22,
+          // No-op on points but explicit so a future MapLibre default
+          // can't reintroduce simplification drift.
           tolerance: 0,
-          buffer: 0,
+          // NOTE: NO `buffer: 0` here. With type=circle, buffer=0
+          // clips circle-radius at tile edges -> flags vanish.
+          // Default buffer (128 px) is what makes the disc visible.
+          // Drift mitigation comes from snapCoord() instead.
         });
       }
       if (!mapRef.getLayer?.(LTF_DISC_LAYER_ID)) {
         mapRef.addLayer({
           id: LTF_DISC_LAYER_ID,
-          type: "symbol",
+          type: "circle",
           source: LTF_SOURCE_ID,
-          layout: {
-            "icon-image": [
-              "match", ["get", "color"],
-              "green", "ltf-disc-green",
-              "sky", "ltf-disc-sky",
-              "yellow", "ltf-disc-yellow",
-              "ltf-disc-yellow",
-            ],
-            "icon-anchor": "center",
-            "icon-size": [
+          paint: {
+            "circle-radius": [
               "interpolate", ["linear"], ["zoom"],
-              9, 0.5,
-              13, 0.75,
-              16, 1.0,
+              9, 12,
+              13, 16,
+              16, 22,
             ],
-            "icon-allow-overlap": true,
-            "icon-ignore-placement": true,
+            "circle-color": [
+              "match", ["get", "color"],
+              "green", "#10b981",
+              "sky", "#38bdf8",
+              "yellow", "#facc15",
+              "#94a3b8",
+            ],
+            "circle-stroke-color": [
+              "match", ["get", "color"],
+              "green", "#047857",
+              "sky", "#0369a1",
+              "yellow", "#a16207",
+              "#1f2937",
+            ],
+            "circle-stroke-width": 2.5,
+            "circle-opacity": 0.96,
+            // pitch-alignment / pitch-scale viewport bypasses the
+            // matrix-precision-sensitive branch of circle.vertex.glsl
+            // (the deep-research Angle 3 root cause on iOS Safari
+            // where mediump FP16 in the `a_pos + 32768.0` step loses
+            // low-order bits). For a flat 2D map view this has no
+            // visible effect EXCEPT it sidesteps the iOS shader
+            // precision issue. Cheap extra safety belt.
+            "circle-pitch-alignment": "viewport",
+            "circle-pitch-scale": "viewport",
           },
         });
       }
@@ -552,7 +550,13 @@
         type: "Feature",
         id: f.id,
         properties: { id: f.id, color: f.color },
-        geometry: { type: "Point", coordinates: [f.lng, f.lat] },
+        // Snap coordinates to 6 decimals (~11cm) before pushing into the
+        // source so geojson-vt's per-zoom quantization always rounds the
+        // same point to the same tile-cell across every integer zoom
+        // (see snapCoord docstring + PR #958 deep-research). This is
+        // the drift fix that doesn't require buffer=0 (which would
+        // clip the circle disc at tile edges).
+        geometry: { type: "Point", coordinates: [snapCoord(f.lng), snapCoord(f.lat)] },
       }));
     src.setData({ type: "FeatureCollection", features });
   }
