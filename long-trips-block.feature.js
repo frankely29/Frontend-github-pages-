@@ -171,17 +171,13 @@
         transition: transform 120ms ease-out;
         will-change: transform;
       }
-      .ltb-flag-stroke {
-        position: absolute; inset: 0;
-        clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
-        display: flex; align-items: center; justify-content: center;
-      }
       .ltb-flag-fill {
-        width: calc(100% - 6px); height: calc(100% - 6px);
-        clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+        position: absolute; inset: 0;
+        border-radius: 50%;
         display: flex; align-items: center; justify-content: center;
         font: 700 11px/1 -apple-system, system-ui, "Segoe UI", sans-serif;
         color: #1f2937; letter-spacing: 0.5px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.35);
       }
       .ltb-flag-pulse {
         position: absolute; left: 50%; top: 50%;
@@ -331,15 +327,13 @@
     root.className = "ltb-flag";
     root.dataset.flagId = flag.id;
     root.style.color = palette.hex;
-    // Diamond shape matching the LTF_DISC_LAYER_ID symbol marker.
+    // Circle shape matching the LTF_DISC_LAYER_ID circle marker.
     // Used only for interactive move/preview states; static flags
-    // render via the diamond symbol layer (no DOM fallback).
+    // render via the circle layer (no DOM fallback).
     root.innerHTML = `
       <div class="ltb-flag-scale">
         <div class="ltb-flag-pulse"></div>
-        <div class="ltb-flag-stroke" style="background:${palette.border};">
-          <div class="ltb-flag-fill" style="background:${palette.hex};">${FLAG_TEXT}</div>
-        </div>
+        <div class="ltb-flag-fill" style="background:${palette.hex};border:2px solid ${palette.border};">${FLAG_TEXT}</div>
       </div>
     `;
     return root;
@@ -852,60 +846,58 @@
         });
       }
 
-      // LTF_DISC_LAYER_ID was a `type: "circle"` colored disc. We're
-      // keeping the constant name for continuity but changing the
-      // implementation to a `type: "symbol"` with `text-field: "◆"`
-      // (BLACK DIAMOND, U+25C6). The text symbol layer with
-      // text-allow-overlap + text-ignore-placement was confirmed
-      // zero-drift in PR #970 (the "45+" label used the same settings),
-      // so this gives drivers a non-circle marker shape with the same
-      // zero-drift guarantee.
+      // Disc circle layer (zero-drift, proven).
+      //
+      // PR #975 tried switching this layer to a symbol with
+      // `text-field: "◆"` to get a diamond shape. That depends on the
+      // basemap's glyph atlas containing U+25C6 BLACK DIAMOND, which
+      // the current style doesn't reliably ship. The layer was added
+      // but the glyph didn't render, so drivers saw the DOM-marker
+      // fallback (old flag shape) instead. PR #976 removed the
+      // fallback, which then left nothing visible.
+      //
+      // Reverting to `type: "circle"` — guaranteed to render, no font
+      // glyph dependency, zero drift. Drivers can still get a
+      // non-circle shape if we ship icons or extend the glyph atlas
+      // separately.
       let discAdded = false;
       let textAdded = false;
       try {
         if (!mapRef.getLayer?.(LTF_DISC_LAYER_ID)) {
           mapRef.addLayer({
             id: LTF_DISC_LAYER_ID,
-            type: "symbol",
+            type: "circle",
             source: LTF_SOURCE_ID,
-            layout: {
-              "text-field": "◆",
-              "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
-              "text-size": [
-                "interpolate", ["linear"], ["zoom"],
-                9, 26,
-                13, 34,
-                16, 44,
-              ],
-              "text-anchor": "center",
-              "text-allow-overlap": true,
-              "text-ignore-placement": true,
-            },
             paint: {
-              "text-color": [
+              "circle-radius": [
+                "interpolate", ["linear"], ["zoom"],
+                9, 12,
+                13, 16,
+                16, 22,
+              ],
+              "circle-color": [
                 "match", ["get", "color"],
                 "green", "#10b981",
                 "sky", "#38bdf8",
                 "yellow", "#facc15",
                 "#94a3b8",
               ],
-              // Darker per-color halo gives the diamond a stroke-like
-              // outline so it reads against any basemap color.
-              "text-halo-color": [
+              "circle-stroke-color": [
                 "match", ["get", "color"],
                 "green", "#047857",
                 "sky", "#0369a1",
                 "yellow", "#a16207",
                 "#1f2937",
               ],
-              "text-halo-width": 2,
+              "circle-stroke-width": 2.5,
+              "circle-opacity": 0.96,
             },
           });
         }
         discAdded = true;
-        console.info("[long-trips-block] diamond layer added");
+        console.info("[long-trips-block] disc layer added");
       } catch (e) {
-        console.warn("[long-trips-block] diamond layer add failed:", e);
+        console.warn("[long-trips-block] disc layer add failed:", e);
       }
       try {
         if (!mapRef.getLayer?.(LTF_TEXT_LAYER_ID)) {
