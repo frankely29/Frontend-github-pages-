@@ -660,13 +660,107 @@
     }
     flagLayerInitStarted = true;
     try {
-      if (!mapRef.getLayer?.(LTF_CUSTOM_LAYER_ID)) {
-        flagCustomLayer = createFlagCustomLayer();
-        mapRef.addLayer(flagCustomLayer);
-        // Re-upload sizes on zoom so circles stay legible across zooms.
-        mapRef.on("zoom", () => {
-          if (flagCustomLayer) flagCustomLayer._uploadBuffers();
+      // ===== Literal hotspot clone =====
+      //
+      // Driver: "the hotspot dont have that issue we need to use the
+      // same system we have for hotspots replicate it but important
+      // do not change anything about hotspots dont touch hotspots."
+      //
+      // After 12+ PRs of trying source-quantization hacks, addImage
+      // sprites, custom WebGL layers etc., the cleanest answer is to
+      // copy hotspot's config exactly. From app.part10.js the
+      // pickup-micro-hotspots-core layer is:
+      //
+      //   map.addSource("pickup-micro-hotspots", {
+      //     type: "geojson", data: emptyGeojson()
+      //   });
+      //   map.addLayer({
+      //     id: "pickup-micro-hotspots-core",
+      //     type: "circle",
+      //     source: "pickup-micro-hotspots",
+      //     paint: {...}
+      //   }, "zone-labels");
+      //
+      // ZERO source options (no maxzoom, no tolerance, no buffer
+      // overrides). One `type: "circle"` layer. The second argument
+      // to addLayer ("zone-labels") places it BELOW the basemap zone
+      // labels, which is the correct z-order so it renders on the
+      // basemap fill but under the road labels.
+      //
+      // We replicate that exactly. The "45+" text rides on a separate
+      // type=symbol layer with `text-field` -- the same primitive
+      // the basemap uses for place names, which also doesn't drift.
+      //
+      // Hotspot code in app.part10.js is NOT modified.
+      const hotspotBeforeLayer = mapRef.getLayer?.("zones-line")
+        ? "zones-line"
+        : (mapRef.getLayer?.("zone-labels") ? "zone-labels" : undefined);
+
+      if (!mapRef.getSource?.(LTF_SOURCE_ID)) {
+        mapRef.addSource(LTF_SOURCE_ID, {
+          type: "geojson",
+          data: { type: "FeatureCollection", features: [] },
         });
+      }
+      if (!mapRef.getLayer?.(LTF_DISC_LAYER_ID)) {
+        mapRef.addLayer({
+          id: LTF_DISC_LAYER_ID,
+          type: "circle",
+          source: LTF_SOURCE_ID,
+          paint: {
+            "circle-radius": [
+              "interpolate", ["linear"], ["zoom"],
+              9, 12,
+              13, 16,
+              16, 22,
+            ],
+            "circle-color": [
+              "match", ["get", "color"],
+              "green", "#10b981",
+              "sky", "#38bdf8",
+              "yellow", "#facc15",
+              "#94a3b8",
+            ],
+            "circle-stroke-color": [
+              "match", ["get", "color"],
+              "green", "#047857",
+              "sky", "#0369a1",
+              "yellow", "#a16207",
+              "#1f2937",
+            ],
+            "circle-stroke-width": 2.5,
+            "circle-opacity": 0.96,
+          },
+        }, hotspotBeforeLayer);
+      }
+      if (!mapRef.getLayer?.(LTF_TEXT_LAYER_ID)) {
+        mapRef.addLayer({
+          id: LTF_TEXT_LAYER_ID,
+          type: "symbol",
+          source: LTF_SOURCE_ID,
+          layout: {
+            "text-field": FLAG_TEXT,
+            "text-font": ["Open Sans Regular"],
+            "text-size": [
+              "interpolate", ["linear"], ["zoom"],
+              9, 9,
+              13, 11,
+              16, 13,
+            ],
+            "text-anchor": "center",
+            "text-allow-overlap": true,
+            "text-ignore-placement": true,
+          },
+          paint: {
+            "text-color": "#1f2937",
+            "text-halo-color": "rgba(255,255,255,0.85)",
+            "text-halo-width": 1,
+          },
+        }, hotspotBeforeLayer);
+      }
+      // Remove any custom WebGL layer from a previous session.
+      if (mapRef.getLayer?.(LTF_CUSTOM_LAYER_ID)) {
+        try { mapRef.removeLayer(LTF_CUSTOM_LAYER_ID); } catch (_) {}
       }
       // Sweep DOM markers now that the GL layer owns rendering.
       Object.keys(state.markers).forEach((id) => {
@@ -677,7 +771,7 @@
       });
       useLayer = true;
       syncFlagLayer();
-      console.info("[long-trips-block] custom WebGL layer active (zero-drift)");
+      console.info("[long-trips-block] hotspot-clone layer active (zero-drift)");
     } catch (e) {
       console.warn("[long-trips-block] custom layer init failed; falling back to DOM markers:", e);
       flagLayerInitStarted = false;
@@ -835,50 +929,33 @@
   }
 
   function syncFlagLayer() {
-    if (!useLayer || !mapRef || !flagCustomLayer) return;
+    if (!useLayer || !mapRef) return;
+    const src = mapRef.getSource?.(LTF_SOURCE_ID);
+    if (!src?.setData) return;
     // Exclude the flag currently being interactively moved -- that one
     // is shown via a temp DOM marker for the duration of the drag.
     const hidden = state.activeMoveFlagId;
-    const visible = state.flags.filter((f) => f.id !== hidden);
-    flagCustomLayer.setFlags(visible);
+    const features = state.flags
+      .filter((f) => f.id !== hidden)
+      .map((f) => ({
+        type: "Feature",
+        id: f.id,
+        properties: { id: f.id, color: f.color },
+        geometry: { type: "Point", coordinates: [f.lng, f.lat] },
+      }));
+    src.setData({ type: "FeatureCollection", features });
   }
 
   function flagAtScreenPoint(point) {
     if (!useLayer || !mapRef) return null;
-    // Custom WebGL layer doesn't participate in queryRenderedFeatures.
-    // Hit-test in CSS pixels directly against each flag's projected
-    // position. We use the same MercatorCoordinate path the renderer
-    // uses, then unproject through the map.project API for the screen
-    // pixel. Hit radius is roughly the disc visual size.
-    if (!flagCustomLayer || !flagCustomLayer._flagCount) return null;
-    const flags = flagCustomLayer._flags;
-    const size = flagCustomLayer._zoomBasedSize?.() ?? 32;
-    const hitR = size * 0.5 + 4;     // include a little forgiveness
-    const hitR2 = hitR * hitR;
-    let best = null;
-    let bestD2 = Infinity;
-    for (const f of flags) {
-      if (!Number.isFinite(f?.lng) || !Number.isFinite(f?.lat)) continue;
-      let p;
-      try { p = mapRef.project([f.lng, f.lat]); } catch (_) { continue; }
-      if (!p) continue;
-      const dx = p.x - point.x;
-      const dy = p.y - point.y;
-      const d2 = dx * dx + dy * dy;
-      if (d2 < hitR2 && d2 < bestD2) {
-        best = f;
-        bestD2 = d2;
-      }
-    }
-    if (best) return best;
-    let features = null;
-    void features;
-    return null;
-    // eslint-disable-next-line no-unreachable
+    // Hit-test both circle and text layers via queryRenderedFeatures
+    // (the same API hotspots use). Tap on either the disc or the "45+"
+    // label counts as a flag press.
     const layers = [];
     if (mapRef.getLayer?.(LTF_DISC_LAYER_ID)) layers.push(LTF_DISC_LAYER_ID);
     if (mapRef.getLayer?.(LTF_TEXT_LAYER_ID)) layers.push(LTF_TEXT_LAYER_ID);
     if (!layers.length) return null;
+    let features;
     try {
       features = mapRef.queryRenderedFeatures(point, { layers });
     } catch (_) { return null; }
