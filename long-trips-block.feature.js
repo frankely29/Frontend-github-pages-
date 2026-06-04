@@ -696,73 +696,105 @@
         ? "zones-line"
         : (mapRef.getLayer?.("zone-labels") ? "zone-labels" : undefined);
 
+      // Source -- if this fails the whole flow is broken
       if (!mapRef.getSource?.(LTF_SOURCE_ID)) {
         mapRef.addSource(LTF_SOURCE_ID, {
           type: "geojson",
           data: { type: "FeatureCollection", features: [] },
         });
       }
-      if (!mapRef.getLayer?.(LTF_DISC_LAYER_ID)) {
-        mapRef.addLayer({
-          id: LTF_DISC_LAYER_ID,
-          type: "circle",
-          source: LTF_SOURCE_ID,
-          paint: {
-            "circle-radius": [
-              "interpolate", ["linear"], ["zoom"],
-              9, 12,
-              13, 16,
-              16, 22,
-            ],
-            "circle-color": [
-              "match", ["get", "color"],
-              "green", "#10b981",
-              "sky", "#38bdf8",
-              "yellow", "#facc15",
-              "#94a3b8",
-            ],
-            "circle-stroke-color": [
-              "match", ["get", "color"],
-              "green", "#047857",
-              "sky", "#0369a1",
-              "yellow", "#a16207",
-              "#1f2937",
-            ],
-            "circle-stroke-width": 2.5,
-            "circle-opacity": 0.96,
-          },
-        }, hotspotBeforeLayer);
+
+      // Disc layer -- the most important one. Wrap in its own try so
+      // a font lookup failure on the text layer below can't kill it.
+      let discAdded = false;
+      try {
+        if (!mapRef.getLayer?.(LTF_DISC_LAYER_ID)) {
+          mapRef.addLayer({
+            id: LTF_DISC_LAYER_ID,
+            type: "circle",
+            source: LTF_SOURCE_ID,
+            paint: {
+              "circle-radius": [
+                "interpolate", ["linear"], ["zoom"],
+                9, 12,
+                13, 16,
+                16, 22,
+              ],
+              "circle-color": [
+                "match", ["get", "color"],
+                "green", "#10b981",
+                "sky", "#38bdf8",
+                "yellow", "#facc15",
+                "#94a3b8",
+              ],
+              "circle-stroke-color": [
+                "match", ["get", "color"],
+                "green", "#047857",
+                "sky", "#0369a1",
+                "yellow", "#a16207",
+                "#1f2937",
+              ],
+              "circle-stroke-width": 2.5,
+              "circle-opacity": 0.96,
+            },
+          }, hotspotBeforeLayer);
+        }
+        discAdded = true;
+        console.info("[long-trips-block] disc layer added");
+      } catch (e) {
+        console.warn("[long-trips-block] disc layer add failed:", e);
       }
-      if (!mapRef.getLayer?.(LTF_TEXT_LAYER_ID)) {
-        mapRef.addLayer({
-          id: LTF_TEXT_LAYER_ID,
-          type: "symbol",
-          source: LTF_SOURCE_ID,
-          layout: {
-            "text-field": FLAG_TEXT,
-            "text-font": ["Open Sans Regular"],
-            "text-size": [
-              "interpolate", ["linear"], ["zoom"],
-              9, 9,
-              13, 11,
-              16, 13,
-            ],
-            "text-anchor": "center",
-            "text-allow-overlap": true,
-            "text-ignore-placement": true,
-          },
-          paint: {
-            "text-color": "#1f2937",
-            "text-halo-color": "rgba(255,255,255,0.85)",
-            "text-halo-width": 1,
-          },
-        }, hotspotBeforeLayer);
+
+      // Text layer -- nice-to-have. If the font isn't in the basemap
+      // style this throws; in that case skip the text but keep the
+      // disc. The font expression includes the same fallback list
+      // that app.part12.js (which works on this basemap) uses, so
+      // this should match a font that exists.
+      try {
+        if (!mapRef.getLayer?.(LTF_TEXT_LAYER_ID)) {
+          mapRef.addLayer({
+            id: LTF_TEXT_LAYER_ID,
+            type: "symbol",
+            source: LTF_SOURCE_ID,
+            layout: {
+              "text-field": FLAG_TEXT,
+              "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
+              "text-size": [
+                "interpolate", ["linear"], ["zoom"],
+                9, 9,
+                13, 11,
+                16, 13,
+              ],
+              "text-anchor": "center",
+              "text-allow-overlap": true,
+              "text-ignore-placement": true,
+            },
+            paint: {
+              "text-color": "#1f2937",
+              "text-halo-color": "rgba(255,255,255,0.85)",
+              "text-halo-width": 1,
+            },
+          }, hotspotBeforeLayer);
+          console.info("[long-trips-block] text layer added");
+        }
+      } catch (e) {
+        // Symbol layer failed (likely a missing font glyph in the
+        // basemap style). Drivers will see the disc without the
+        // "45+" overlay -- still better than DOM-marker drift.
+        console.warn("[long-trips-block] text layer add failed (disc still renders):", e);
       }
       // Remove any custom WebGL layer from a previous session.
       if (mapRef.getLayer?.(LTF_CUSTOM_LAYER_ID)) {
         try { mapRef.removeLayer(LTF_CUSTOM_LAYER_ID); } catch (_) {}
       }
-      // Sweep DOM markers now that the GL layer owns rendering.
+      if (!discAdded) {
+        // If the disc didn't add we have no anchor for flags.
+        // Bail; DOM marker fallback stays active for visibility.
+        console.warn("[long-trips-block] disc layer never added; staying on DOM markers");
+        flagLayerInitStarted = false;
+        return;
+      }
+      // Sweep DOM markers now that the layer owns rendering.
       Object.keys(state.markers).forEach((id) => {
         if (id === state.activeMoveFlagId) return;
         if (id === "__ltb_preview__") return;
@@ -771,7 +803,11 @@
       });
       useLayer = true;
       syncFlagLayer();
-      console.info("[long-trips-block] hotspot-clone layer active (zero-drift)");
+      const hasText = !!mapRef.getLayer?.(LTF_TEXT_LAYER_ID);
+      console.info(
+        `[long-trips-block] hotspot-clone layer active (zero-drift)` +
+        ` disc=yes text=${hasText ? "yes" : "no"} beforeLayer=${hotspotBeforeLayer || "(top)"}`
+      );
     } catch (e) {
       console.warn("[long-trips-block] custom layer init failed; falling back to DOM markers:", e);
       flagLayerInitStarted = false;
