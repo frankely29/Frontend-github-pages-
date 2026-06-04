@@ -648,48 +648,6 @@
     };
   }
 
-  // Canvas-render a flag image (pole + colored pennant with "45+" text
-  // baked in). Returned as ImageData so map.addImage can register it as
-  // a sprite for the symbol layer's icon-image. One image per color.
-  function buildFlagImageData(color) {
-    const palette = COLORS[color] || COLORS.yellow;
-    const W = 68;  // 34px @ 2x retina
-    const H = 84;  // 42px @ 2x retina
-    const canvas = document.createElement("canvas");
-    canvas.width = W; canvas.height = H;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return null;
-    // Pole: 4px wide (2px @ 1x), full height, dark
-    ctx.fillStyle = "#1f2937";
-    ctx.fillRect(W / 2 - 2, 0, 4, H);
-    // Pennant: starts at pole, extends right with a notched right edge
-    // matching the original CSS clip-path:
-    //   polygon(0 0, 100% 0, 100% 65%, 60% 100%, 0 100%)
-    const pX = W / 2;
-    const pY = 0;
-    const pW = 56;
-    const pH = 44;
-    ctx.fillStyle = palette.hex;
-    ctx.strokeStyle = palette.border;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(pX, pY);
-    ctx.lineTo(pX + pW, pY);
-    ctx.lineTo(pX + pW, pY + pH * 0.65);
-    ctx.lineTo(pX + pW * 0.6, pY + pH);
-    ctx.lineTo(pX, pY + pH);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-    // "45+" text on the pennant
-    ctx.fillStyle = "#1f2937";
-    ctx.font = "bold 22px -apple-system, system-ui, sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(FLAG_TEXT, pX + pW * 0.4, pY + pH * 0.45);
-    return ctx.getImageData(0, 0, W, H);
-  }
-
   function ensureFlagLayer() {
     if (useLayer || flagLayerInitStarted || !mapRef) return;
     if (!mapRef.isStyleLoaded?.()) {
@@ -702,39 +660,28 @@
     }
     flagLayerInitStarted = true;
     try {
-      // Two fixes vs PR #968:
+      // PR #968 (zero-drift) restored after PR #969 reintroduced drift.
       //
-      // 1. VISUAL: drivers want a flag shape, not a colored disc. We
-      //    canvas-render a pole + colored pennant + "45+" PNG per color
-      //    and add it via map.addImage(). A symbol icon layer renders
-      //    that on top of the circle. The circle stays as a position-
-      //    truth anchor in case the icon image fails to load or the
-      //    symbol layer drifts; with the icon present the circle is
-      //    visually covered.
+      // PR #969 added an `icon-image` symbol layer to give the marker a
+      // flag-shape PNG. The icon-image symbol layer participates in
+      // MapLibre's symbol placement pipeline, which integer-pixel rounds
+      // positions on iOS Safari. That's exactly the drift the driver
+      // re-reported. Removing the icon-image layer.
       //
-      // 2. Z-ORDER: drivers reported flags hidden under zone fills.
-      //    Previous PRs used `addLayer(..., "zone-labels")` to place
-      //    the layer BEFORE zone-labels in the layer list, which is
-      //    BELOW it in render order. That works for hotspots because
-      //    of their specific layer ordering; for our flag layers we
-      //    want them ABOVE everything. Drop the beforeLayer argument
-      //    so each layer is appended to the END of the layer list ->
-      //    rendered LAST -> on top of zone fills and labels.
+      // PR #969's z-order fix is KEPT: no `beforeLayer` argument on
+      // addLayer, so each layer is appended to the END of the layer
+      // list -> rendered LAST -> on top of zone fills and labels.
+      //
+      // Renderer:
+      //   LTF_DISC_LAYER_ID   type=circle  -> colored disc (zero-drift)
+      //   LTF_TEXT_LAYER_ID   type=symbol  -> "45+" label
+      //
+      // text symbol does technically drift on iOS, but the label is
+      // small and centered on the disc — the disc is the position-truth
+      // anchor. With the icon-image layer gone, the visible pin position
+      // is the disc, which does not drift.
       //
       // Hotspot code in app.part10.js is NOT touched.
-
-      // Register one flag-shaped icon image per color.
-      for (const color of Object.keys(COLORS)) {
-        const imgId = `ltf-flag-${color}`;
-        try {
-          if (!mapRef.hasImage?.(imgId)) {
-            const data = buildFlagImageData(color);
-            if (data) mapRef.addImage(imgId, data, { pixelRatio: 2 });
-          }
-        } catch (e) {
-          console.warn("[long-trips-block] flag-image addImage failed", color, e);
-        }
-      }
 
       // Source -- default GeoJSON options, no quantization overrides.
       if (!mapRef.getSource?.(LTF_SOURCE_ID)) {
@@ -744,8 +691,7 @@
         });
       }
 
-      // Disc circle layer (anchor + fallback if the icon image
-      // can't be added). Rendered at top of layer list.
+      // Disc circle layer (the position-truth anchor, zero-drift).
       let discAdded = false;
       try {
         if (!mapRef.getLayer?.(LTF_DISC_LAYER_ID)) {
@@ -756,9 +702,9 @@
             paint: {
               "circle-radius": [
                 "interpolate", ["linear"], ["zoom"],
-                9, 8,
-                13, 10,
-                16, 12,
+                9, 12,
+                13, 16,
+                16, 22,
               ],
               "circle-color": [
                 "match", ["get", "color"],
@@ -774,8 +720,8 @@
                 "yellow", "#a16207",
                 "#1f2937",
               ],
-              "circle-stroke-width": 1.5,
-              "circle-opacity": 0.85,
+              "circle-stroke-width": 2.5,
+              "circle-opacity": 0.96,
             },
           });
         }
@@ -785,52 +731,51 @@
         console.warn("[long-trips-block] disc layer add failed:", e);
       }
 
-      // Flag icon symbol layer (the visual the driver wants).
-      // Sits on top of the disc; if the icon-image fails to resolve
-      // (addImage failed earlier) the disc stays visible underneath.
-      let iconAdded = false;
+      // "45+" text label. Font fallback list so the layer survives styles
+      // that ship only one of the two glyph stacks.
+      let textAdded = false;
       try {
-        if (!mapRef.getLayer?.(LTF_LAYER_ID)) {
+        if (!mapRef.getLayer?.(LTF_TEXT_LAYER_ID)) {
           mapRef.addLayer({
-            id: LTF_LAYER_ID,
+            id: LTF_TEXT_LAYER_ID,
             type: "symbol",
             source: LTF_SOURCE_ID,
             layout: {
-              "icon-image": [
-                "match", ["get", "color"],
-                "green", "ltf-flag-green",
-                "sky", "ltf-flag-sky",
-                "yellow", "ltf-flag-yellow",
-                "ltf-flag-yellow",
-              ],
-              "icon-anchor": "bottom",
-              "icon-size": [
+              "text-field": FLAG_TEXT,
+              "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
+              "text-size": [
                 "interpolate", ["linear"], ["zoom"],
-                9, 0.5,
-                13, 0.75,
-                16, 1.0,
+                9, 9,
+                13, 11,
+                16, 13,
               ],
-              "icon-allow-overlap": true,
-              "icon-ignore-placement": true,
+              "text-anchor": "center",
+              "text-allow-overlap": true,
+              "text-ignore-placement": true,
+            },
+            paint: {
+              "text-color": "#1f2937",
+              "text-halo-color": "rgba(255,255,255,0.85)",
+              "text-halo-width": 1,
             },
           });
         }
-        iconAdded = true;
-        console.info("[long-trips-block] flag-icon symbol layer added");
+        textAdded = true;
+        console.info("[long-trips-block] text layer added");
       } catch (e) {
-        console.warn("[long-trips-block] flag-icon layer add failed (disc remains visible):", e);
+        console.warn("[long-trips-block] text layer add failed (disc remains visible):", e);
       }
 
       // Remove any custom WebGL layer from a previous session.
       if (mapRef.getLayer?.(LTF_CUSTOM_LAYER_ID)) {
         try { mapRef.removeLayer(LTF_CUSTOM_LAYER_ID); } catch (_) {}
       }
-      // Remove the legacy separate text layer if it's still around
-      // (the "45+" text is baked into the icon image now).
-      if (mapRef.getLayer?.(LTF_TEXT_LAYER_ID)) {
-        try { mapRef.removeLayer(LTF_TEXT_LAYER_ID); } catch (_) {}
+      // Remove the PR #969 icon-image layer if it's still on the style
+      // from a stale session — it's the drift source.
+      if (mapRef.getLayer?.(LTF_LAYER_ID)) {
+        try { mapRef.removeLayer(LTF_LAYER_ID); } catch (_) {}
       }
-      if (!discAdded && !iconAdded) {
+      if (!discAdded && !textAdded) {
         console.warn("[long-trips-block] no flag layer landed; staying on DOM markers");
         flagLayerInitStarted = false;
         return;
@@ -846,7 +791,7 @@
       syncFlagLayer();
       console.info(
         `[long-trips-block] flag layer active (zero-drift)` +
-        ` disc=${discAdded ? "yes" : "no"} icon=${iconAdded ? "yes" : "no"} (on top)`
+        ` disc=${discAdded ? "yes" : "no"} text=${textAdded ? "yes" : "no"} (on top)`
       );
     } catch (e) {
       console.warn("[long-trips-block] custom layer init failed; falling back to DOM markers:", e);
@@ -1029,7 +974,6 @@
     // label counts as a flag press.
     const layers = [];
     if (mapRef.getLayer?.(LTF_DISC_LAYER_ID)) layers.push(LTF_DISC_LAYER_ID);
-    if (mapRef.getLayer?.(LTF_LAYER_ID)) layers.push(LTF_LAYER_ID);
     if (mapRef.getLayer?.(LTF_TEXT_LAYER_ID)) layers.push(LTF_TEXT_LAYER_ID);
     if (!layers.length) return null;
     let features;
