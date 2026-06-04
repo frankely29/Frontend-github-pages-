@@ -443,66 +443,132 @@
     return program;
   }
 
-  function hexToRgb(hex) {
-    const h = String(hex || "").replace("#", "");
-    const n = parseInt(h.length === 3
-      ? h.split("").map((c) => c + c).join("")
-      : h.padEnd(6, "0"), 16);
-    return [
-      ((n >> 16) & 0xff) / 255,
-      ((n >> 8) & 0xff) / 255,
-      (n & 0xff) / 255,
-    ];
-  }
+  // Textured-quad pipeline (zero drift + flag SHAPE).
+  //
+  // Why: every other MapLibre primitive forces a trade-off:
+  //   - type=circle: zero drift, circles only.
+  //   - type=symbol + icon-image: any shape, but symbol placement
+  //     integer-pixel rounds every frame on iOS Safari (the drift).
+  //   - DOM Marker: any shape, but CSS positioning races the WebGL
+  //     commit on iOS → drift during inertial zoom.
+  //
+  // A custom layer draws a textured quad inside MapLibre's own render
+  // pipeline, using the same projection matrix the basemap uses, in
+  // the same GL commit. No symbol placement step. No DOM. No integer
+  // rounding. The texture can be any shape — we render the
+  // pole+pennant+"45+" flag PNG on a canvas, upload as a texture
+  // atlas with one slice per color, sample from the atlas per flag.
+  //
+  // Quad layout (per flag, 4 vertices, 6 indices):
+  //   Anchor (a_anchor_merc) = bottom of pole, in Mercator [0,1].
+  //   Corner offsets (a_corner_px) = CSS pixels relative to anchor.
+  //     Top of flag is `-h` (above anchor in screen-px convention).
+  //     Bottom of flag is at anchor (cy_px=0).
+  //   UV (a_uv) picks the right horizontal slice in the atlas.
+  //
+  // Shader projects anchor through u_matrix → clip space, then adds
+  // pixel offset converted to clip-space units (post pos.w). This
+  // billboard trick keeps the flag the same screen size regardless
+  // of zoom or pitch, and the pin position is exact (no rounding).
 
-  // GLSL ES 1.00 (WebGL 1, max compat). MapLibre passes a 4x4 matrix
-  // that transforms from Mercator [0,1] coordinates to clip space.
-  // We compute Mercator on the CPU via MapLibre's
-  // MercatorCoordinate.fromLngLat helper (stable, exact -- no per-zoom
-  // re-quantization the way geojson-vt does).
   const FLAG_VS = `
     precision highp float;
+    attribute vec2 a_anchor_merc;
+    attribute vec2 a_corner_px;
+    attribute vec2 a_uv;
     uniform mat4 u_matrix;
-    uniform float u_pixel_ratio;
-    attribute vec2 a_position;   // mercator x, y
-    attribute vec3 a_color_in;   // r, g, b in [0,1]
-    attribute vec3 a_stroke_in;  // r, g, b in [0,1]
-    attribute float a_size;      // diameter in css pixels
-    varying vec3 v_color;
-    varying vec3 v_stroke;
-    varying float v_size_px;
+    uniform vec2 u_viewport_px;
+    uniform float u_size_scale;
+    varying vec2 v_uv;
     void main() {
-      gl_Position = u_matrix * vec4(a_position, 0.0, 1.0);
-      gl_PointSize = a_size * u_pixel_ratio;
-      v_color = a_color_in;
-      v_stroke = a_stroke_in;
-      v_size_px = a_size * u_pixel_ratio;
+      vec4 pos = u_matrix * vec4(a_anchor_merc, 0.0, 1.0);
+      vec2 cornerPx = a_corner_px * u_size_scale;
+      // Screen px: +y is down. Clip space: +y is up. Flip y.
+      // Multiply by pos.w so the offset survives perspective divide.
+      vec2 offsetClip = vec2(
+        ( cornerPx.x / u_viewport_px.x) * 2.0,
+        (-cornerPx.y / u_viewport_px.y) * 2.0
+      ) * pos.w;
+      pos.xy += offsetClip;
+      gl_Position = pos;
+      v_uv = a_uv;
     }
   `;
 
-  // Renders an anti-aliased filled disc with a colored stroke, like
-  // the previous LTF_DISC visual. PointCoord runs 0..1 across the
-  // gl_Point quad with origin at top-left; centered we get -0.5..0.5
-  // and the magnitude is the distance to the point center.
   const FLAG_FS = `
-    precision highp float;
-    varying vec3 v_color;
-    varying vec3 v_stroke;
-    varying float v_size_px;
+    precision mediump float;
+    uniform sampler2D u_texture;
+    varying vec2 v_uv;
     void main() {
-      vec2 coord = gl_PointCoord - vec2(0.5);
-      float d = length(coord);
-      if (d > 0.5) discard;
-      // Stroke is the outer ~2.5px ring
-      float stroke_inner = (0.5 * v_size_px - 2.5) / v_size_px;
-      float stroke_aa    = 1.0 / v_size_px;     // ~1px anti-alias
-      float alpha_disc   = 1.0 - smoothstep(0.5 - stroke_aa, 0.5, d);
-      float is_stroke    = smoothstep(stroke_inner - stroke_aa,
-                                      stroke_inner, d);
-      vec3  color        = mix(v_color, v_stroke, is_stroke);
-      gl_FragColor       = vec4(color * alpha_disc, alpha_disc);
+      vec4 c = texture2D(u_texture, v_uv);
+      if (c.a < 0.02) discard;
+      gl_FragColor = c;
     }
   `;
+
+  // Flag atlas: three flag images side-by-side on one canvas.
+  // CSS pixels per flag = (FLAG_W_CSS x FLAG_H_CSS); the canvas is
+  // drawn at 2x for retina sharpness.
+  const FLAG_W_CSS = 34;
+  const FLAG_H_CSS = 42;
+  const FLAG_ATLAS_SLICES = ["green", "sky", "yellow"];
+
+  function drawFlagInto(ctx, color, xOff, yOff, W, H) {
+    const palette = COLORS[color] || COLORS.yellow;
+    // Pole: vertical bar near image-center, full height.
+    ctx.fillStyle = "#1f2937";
+    ctx.fillRect(xOff + W / 2 - 2, yOff, 4, H);
+    // Pennant attached at the top of the pole.
+    const pX = xOff + W / 2;
+    const pY = yOff;
+    const pW = Math.round(W * 0.82);
+    const pH = Math.round(H * 0.52);
+    ctx.fillStyle = palette.hex;
+    ctx.strokeStyle = palette.border;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(pX, pY);
+    ctx.lineTo(pX + pW, pY);
+    ctx.lineTo(pX + pW, pY + pH * 0.65);
+    ctx.lineTo(pX + pW * 0.6, pY + pH);
+    ctx.lineTo(pX, pY + pH);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    // "45+" label on the pennant.
+    ctx.fillStyle = "#1f2937";
+    ctx.font = `bold ${Math.round(pH * 0.5)}px -apple-system, system-ui, sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(FLAG_TEXT, pX + pW * 0.4, pY + pH * 0.45);
+  }
+
+  function buildFlagAtlas() {
+    const scale = 2; // 2x for retina
+    const flagW = FLAG_W_CSS * scale;
+    const flagH = FLAG_H_CSS * scale;
+    const W = flagW * FLAG_ATLAS_SLICES.length;
+    const H = flagH;
+    const canvas = document.createElement("canvas");
+    canvas.width = W;
+    canvas.height = H;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    for (let i = 0; i < FLAG_ATLAS_SLICES.length; i++) {
+      drawFlagInto(ctx, FLAG_ATLAS_SLICES[i], i * flagW, 0, flagW, flagH);
+    }
+    return { canvas, flagW, flagH, W, H, slices: FLAG_ATLAS_SLICES };
+  }
+
+  // Same curve as the disc layer's circle-radius interpolation:
+  // smaller at low zoom, bigger zoomed in.
+  function flagZoomScale(z) {
+    if (!Number.isFinite(z)) return 0.85;
+    if (z <= 9) return 0.60;
+    if (z >= 16) return 1.10;
+    if (z <= 13) return 0.60 + (0.85 - 0.60) * ((z - 9) / 4);
+    return 0.85 + (1.10 - 0.85) * ((z - 13) / 3);
+  }
 
   function createFlagCustomLayer() {
     return {
@@ -513,52 +579,76 @@
       _map: null,
       _gl: null,
       _program: null,
-      _posBuffer: null,
-      _colorBuffer: null,
-      _strokeBuffer: null,
-      _sizeBuffer: null,
-      _flagCount: 0,
+      _vbo: null,
+      _ibo: null,
+      _texture: null,
+      _atlas: null,
+      _quadCount: 0,
       _flags: [],
-
-      _attribLocations: null,
-      _uniformLocations: null,
+      _attrib: null,
+      _uni: null,
 
       onAdd(map, gl) {
         this._map = map;
         this._gl = gl;
+
+        this._atlas = buildFlagAtlas();
+        if (!this._atlas) {
+          console.warn("[ltb-gl] atlas build failed");
+          return;
+        }
+
         try {
           this._program = linkProgram(gl, FLAG_VS, FLAG_FS);
         } catch (e) {
           console.warn("[ltb-gl] shader setup failed:", e);
+          this._program = null;
           return;
         }
-        this._attribLocations = {
-          position: gl.getAttribLocation(this._program, "a_position"),
-          color: gl.getAttribLocation(this._program, "a_color_in"),
-          stroke: gl.getAttribLocation(this._program, "a_stroke_in"),
-          size: gl.getAttribLocation(this._program, "a_size"),
+
+        this._attrib = {
+          anchor: gl.getAttribLocation(this._program, "a_anchor_merc"),
+          corner: gl.getAttribLocation(this._program, "a_corner_px"),
+          uv: gl.getAttribLocation(this._program, "a_uv"),
         };
-        this._uniformLocations = {
+        this._uni = {
           matrix: gl.getUniformLocation(this._program, "u_matrix"),
-          pixelRatio: gl.getUniformLocation(this._program, "u_pixel_ratio"),
+          viewport: gl.getUniformLocation(this._program, "u_viewport_px"),
+          sizeScale: gl.getUniformLocation(this._program, "u_size_scale"),
+          texture: gl.getUniformLocation(this._program, "u_texture"),
         };
-        this._posBuffer = gl.createBuffer();
-        this._colorBuffer = gl.createBuffer();
-        this._strokeBuffer = gl.createBuffer();
-        this._sizeBuffer = gl.createBuffer();
+
+        this._vbo = gl.createBuffer();
+        this._ibo = gl.createBuffer();
+        this._texture = gl.createTexture();
+
+        // Upload the atlas as a premultiplied texture so MapLibre's
+        // (one, one_minus_src_alpha) blend renders it correctly.
+        gl.bindTexture(gl.TEXTURE_2D, this._texture);
+        gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+        gl.texImage2D(
+          gl.TEXTURE_2D, 0,
+          gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE,
+          this._atlas.canvas
+        );
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.bindTexture(gl.TEXTURE_2D, null);
       },
 
-      onRemove(map, gl) {
+      onRemove(_map, gl) {
         if (this._program) gl.deleteProgram(this._program);
-        if (this._posBuffer) gl.deleteBuffer(this._posBuffer);
-        if (this._colorBuffer) gl.deleteBuffer(this._colorBuffer);
-        if (this._strokeBuffer) gl.deleteBuffer(this._strokeBuffer);
-        if (this._sizeBuffer) gl.deleteBuffer(this._sizeBuffer);
+        if (this._vbo) gl.deleteBuffer(this._vbo);
+        if (this._ibo) gl.deleteBuffer(this._ibo);
+        if (this._texture) gl.deleteTexture(this._texture);
         this._program = null;
-        this._posBuffer = null;
-        this._colorBuffer = null;
-        this._strokeBuffer = null;
-        this._sizeBuffer = null;
+        this._vbo = null;
+        this._ibo = null;
+        this._texture = null;
+        this._atlas = null;
       },
 
       setFlags(flags) {
@@ -567,83 +657,112 @@
         this._map?.triggerRepaint();
       },
 
-      _zoomBasedSize() {
-        const z = this._map?.getZoom?.();
-        if (!Number.isFinite(z)) return 32;
-        // Same curve as the previous circle-radius interpolation,
-        // diameter terms (radius * 2).
-        if (z <= 9) return 24;
-        if (z >= 16) return 44;
-        if (z <= 13) {
-          return 24 + (32 - 24) * ((z - 9) / 4);
-        }
-        return 32 + (44 - 32) * ((z - 13) / 3);
-      },
-
       _uploadBuffers() {
         const gl = this._gl;
-        if (!gl || !this._program) return;
-        if (!window.maplibregl?.MercatorCoordinate?.fromLngLat) return;
+        if (!gl || !this._program || !this._atlas) return;
+        const fromLngLat = window.maplibregl?.MercatorCoordinate?.fromLngLat;
+        if (!fromLngLat) return;
+
         const flags = this._flags;
-        this._flagCount = flags.length;
+        this._quadCount = flags.length;
         if (!flags.length) return;
-        const size = this._zoomBasedSize();
-        const positions = new Float32Array(flags.length * 2);
-        const colors = new Float32Array(flags.length * 3);
-        const strokes = new Float32Array(flags.length * 3);
-        const sizes = new Float32Array(flags.length);
+
+        const halfW = FLAG_W_CSS / 2;
+        const fullH = FLAG_H_CSS;
+        const atlasW = this._atlas.W;
+        const flagW = this._atlas.flagW;
+        const slices = this._atlas.slices;
+
+        const FLOATS_PER_VERTEX = 6;
+        const vertices = new Float32Array(flags.length * 4 * FLOATS_PER_VERTEX);
+        const indices = new Uint16Array(flags.length * 6);
+
         for (let i = 0; i < flags.length; i++) {
           const f = flags[i];
-          const mc = window.maplibregl.MercatorCoordinate.fromLngLat({ lng: f.lng, lat: f.lat });
-          positions[i * 2]     = mc.x;
-          positions[i * 2 + 1] = mc.y;
-          const palette = COLORS[f.color] || COLORS.yellow;
-          const c = hexToRgb(palette.hex);
-          const s = hexToRgb(palette.border);
-          colors[i * 3]     = c[0];
-          colors[i * 3 + 1] = c[1];
-          colors[i * 3 + 2] = c[2];
-          strokes[i * 3]     = s[0];
-          strokes[i * 3 + 1] = s[1];
-          strokes[i * 3 + 2] = s[2];
-          sizes[i] = size;
+          const mc = fromLngLat({ lng: f.lng, lat: f.lat });
+          let sliceIdx = slices.indexOf(f.color);
+          if (sliceIdx < 0) sliceIdx = slices.indexOf("yellow");
+          const uLeft = (sliceIdx * flagW) / atlasW;
+          const uRight = ((sliceIdx + 1) * flagW) / atlasW;
+          // Atlas y=0 is image-top (the pennant). Anchor (lng/lat) is
+          // the pole tip, which is the BOTTOM of the image → v=1 for
+          // bottom vertices.
+          const v0 = i * 4 * FLOATS_PER_VERTEX;
+          // Bottom-left:   anchor screen-y, image bottom-left
+          vertices[v0 +  0] = mc.x; vertices[v0 +  1] = mc.y;
+          vertices[v0 +  2] = -halfW; vertices[v0 +  3] = 0;
+          vertices[v0 +  4] = uLeft;  vertices[v0 +  5] = 1;
+          // Bottom-right
+          vertices[v0 +  6] = mc.x; vertices[v0 +  7] = mc.y;
+          vertices[v0 +  8] =  halfW; vertices[v0 +  9] = 0;
+          vertices[v0 + 10] = uRight; vertices[v0 + 11] = 1;
+          // Top-left:      `fullH` px ABOVE anchor (-y in screen px),
+          //                image top-left.
+          vertices[v0 + 12] = mc.x; vertices[v0 + 13] = mc.y;
+          vertices[v0 + 14] = -halfW; vertices[v0 + 15] = -fullH;
+          vertices[v0 + 16] = uLeft;  vertices[v0 + 17] = 0;
+          // Top-right
+          vertices[v0 + 18] = mc.x; vertices[v0 + 19] = mc.y;
+          vertices[v0 + 20] =  halfW; vertices[v0 + 21] = -fullH;
+          vertices[v0 + 22] = uRight; vertices[v0 + 23] = 0;
+
+          const base = i * 4;
+          // Two triangles: (BL, BR, TL), (TL, BR, TR)
+          indices[i * 6 + 0] = base + 0;
+          indices[i * 6 + 1] = base + 1;
+          indices[i * 6 + 2] = base + 2;
+          indices[i * 6 + 3] = base + 2;
+          indices[i * 6 + 4] = base + 1;
+          indices[i * 6 + 5] = base + 3;
         }
-        gl.bindBuffer(gl.ARRAY_BUFFER, this._posBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER, positions, gl.DYNAMIC_DRAW);
-        gl.bindBuffer(gl.ARRAY_BUFFER, this._colorBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER, colors, gl.DYNAMIC_DRAW);
-        gl.bindBuffer(gl.ARRAY_BUFFER, this._strokeBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER, strokes, gl.DYNAMIC_DRAW);
-        gl.bindBuffer(gl.ARRAY_BUFFER, this._sizeBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER, sizes, gl.DYNAMIC_DRAW);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, this._vbo);
+        gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.DYNAMIC_DRAW);
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this._ibo);
+        gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.DYNAMIC_DRAW);
       },
 
       render(gl, matrix) {
-        if (!this._program || !this._flagCount) return;
+        if (!this._program || !this._quadCount || !this._texture) return;
+
+        const dpr = (typeof window !== "undefined" && window.devicePixelRatio) || 1;
+        const zoom = this._map?.getZoom?.();
+        // u_corner_px is in CSS pixels; convert by multiplying scale by
+        // dpr so it lands in drawing-buffer pixels (which matches the
+        // u_viewport_px values from gl.drawingBuffer{Width,Height}).
+        const scale = flagZoomScale(zoom) * dpr;
+
         gl.useProgram(this._program);
-        gl.uniformMatrix4fv(this._uniformLocations.matrix, false, matrix);
-        gl.uniform1f(this._uniformLocations.pixelRatio,
-          (typeof window !== "undefined" && window.devicePixelRatio) || 1);
+        gl.uniformMatrix4fv(this._uni.matrix, false, matrix);
+        gl.uniform2f(this._uni.viewport, gl.drawingBufferWidth, gl.drawingBufferHeight);
+        gl.uniform1f(this._uni.sizeScale, scale);
+
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, this._texture);
+        gl.uniform1i(this._uni.texture, 0);
+
+        const blendWasEnabled = gl.getParameter(gl.BLEND);
         gl.enable(gl.BLEND);
         gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+        // Pins are screen-anchored UI; don't depth-test against tiles.
+        gl.disable(gl.DEPTH_TEST);
 
-        gl.bindBuffer(gl.ARRAY_BUFFER, this._posBuffer);
-        gl.enableVertexAttribArray(this._attribLocations.position);
-        gl.vertexAttribPointer(this._attribLocations.position, 2, gl.FLOAT, false, 0, 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this._vbo);
+        const stride = 6 * 4; // 6 floats × 4 bytes
+        gl.enableVertexAttribArray(this._attrib.anchor);
+        gl.vertexAttribPointer(this._attrib.anchor, 2, gl.FLOAT, false, stride, 0);
+        gl.enableVertexAttribArray(this._attrib.corner);
+        gl.vertexAttribPointer(this._attrib.corner, 2, gl.FLOAT, false, stride, 2 * 4);
+        gl.enableVertexAttribArray(this._attrib.uv);
+        gl.vertexAttribPointer(this._attrib.uv, 2, gl.FLOAT, false, stride, 4 * 4);
 
-        gl.bindBuffer(gl.ARRAY_BUFFER, this._colorBuffer);
-        gl.enableVertexAttribArray(this._attribLocations.color);
-        gl.vertexAttribPointer(this._attribLocations.color, 3, gl.FLOAT, false, 0, 0);
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this._ibo);
+        gl.drawElements(gl.TRIANGLES, this._quadCount * 6, gl.UNSIGNED_SHORT, 0);
 
-        gl.bindBuffer(gl.ARRAY_BUFFER, this._strokeBuffer);
-        gl.enableVertexAttribArray(this._attribLocations.stroke);
-        gl.vertexAttribPointer(this._attribLocations.stroke, 3, gl.FLOAT, false, 0, 0);
-
-        gl.bindBuffer(gl.ARRAY_BUFFER, this._sizeBuffer);
-        gl.enableVertexAttribArray(this._attribLocations.size);
-        gl.vertexAttribPointer(this._attribLocations.size, 1, gl.FLOAT, false, 0, 0);
-
-        gl.drawArrays(gl.POINTS, 0, this._flagCount);
+        gl.disableVertexAttribArray(this._attrib.anchor);
+        gl.disableVertexAttribArray(this._attrib.corner);
+        gl.disableVertexAttribArray(this._attrib.uv);
+        if (!blendWasEnabled) gl.disable(gl.BLEND);
       },
     };
   }
@@ -660,30 +779,25 @@
     }
     flagLayerInitStarted = true;
     try {
-      // PR #968 (zero-drift) restored after PR #969 reintroduced drift.
+      // Three renderers, in order of preference:
       //
-      // PR #969 added an `icon-image` symbol layer to give the marker a
-      // flag-shape PNG. The icon-image symbol layer participates in
-      // MapLibre's symbol placement pipeline, which integer-pixel rounds
-      // positions on iOS Safari. That's exactly the drift the driver
-      // re-reported. Removing the icon-image layer.
+      //   1. Custom WebGL textured-quad layer  → flag SHAPE + zero drift
+      //   2. Disc circle layer + "45+" text    → zero drift but no shape
+      //      (PR #968 fallback if custom fails)
+      //   3. DOM Markers                       → drifts on iOS but always
+      //      works (handled outside this fn)
       //
-      // PR #969's z-order fix is KEPT: no `beforeLayer` argument on
-      // addLayer, so each layer is appended to the END of the layer
-      // list -> rendered LAST -> on top of zone fills and labels.
+      // The custom layer is the target. The disc fallback exists for
+      // browsers where WebGL custom-layer setup fails (no WebGL, shader
+      // compile error, addLayer rejected, etc.).
       //
-      // Renderer:
-      //   LTF_DISC_LAYER_ID   type=circle  -> colored disc (zero-drift)
-      //   LTF_TEXT_LAYER_ID   type=symbol  -> "45+" label
-      //
-      // text symbol does technically drift on iOS, but the label is
-      // small and centered on the disc — the disc is the position-truth
-      // anchor. With the icon-image layer gone, the visible pin position
-      // is the disc, which does not drift.
+      // No `beforeLayer` argument on addLayer, so layers append to the
+      // END of the layer list and render on top of zone fills/labels.
       //
       // Hotspot code in app.part10.js is NOT touched.
 
-      // Source -- default GeoJSON options, no quantization overrides.
+      // Source -- used by the disc/text fallback path. Custom layer
+      // ignores it and reads from setFlags() instead.
       if (!mapRef.getSource?.(LTF_SOURCE_ID)) {
         mapRef.addSource(LTF_SOURCE_ID, {
           type: "geojson",
@@ -691,96 +805,125 @@
         });
       }
 
-      // Disc circle layer (the position-truth anchor, zero-drift).
+      // 1. Try the custom WebGL flag layer first.
+      let customAdded = false;
+      try {
+        if (mapRef.getLayer?.(LTF_CUSTOM_LAYER_ID)) {
+          try { mapRef.removeLayer(LTF_CUSTOM_LAYER_ID); } catch (_) {}
+        }
+        flagCustomLayer = createFlagCustomLayer();
+        mapRef.addLayer(flagCustomLayer);
+        // Confirm shaders compiled and program linked. If addLayer
+        // succeeded but onAdd's shader/texture setup failed, _program
+        // stays null and we fall back below.
+        if (flagCustomLayer._program) {
+          customAdded = true;
+          console.info("[long-trips-block] custom WebGL flag layer added (shape + zero-drift)");
+        } else {
+          try { mapRef.removeLayer(LTF_CUSTOM_LAYER_ID); } catch (_) {}
+          flagCustomLayer = null;
+          console.warn("[long-trips-block] custom layer added but program=null; falling back");
+        }
+      } catch (e) {
+        console.warn("[long-trips-block] custom layer init failed; falling back:", e);
+        flagCustomLayer = null;
+      }
+
+      // 2. Disc + text fallback (only when custom failed).
       let discAdded = false;
-      try {
-        if (!mapRef.getLayer?.(LTF_DISC_LAYER_ID)) {
-          mapRef.addLayer({
-            id: LTF_DISC_LAYER_ID,
-            type: "circle",
-            source: LTF_SOURCE_ID,
-            paint: {
-              "circle-radius": [
-                "interpolate", ["linear"], ["zoom"],
-                9, 12,
-                13, 16,
-                16, 22,
-              ],
-              "circle-color": [
-                "match", ["get", "color"],
-                "green", "#10b981",
-                "sky", "#38bdf8",
-                "yellow", "#facc15",
-                "#94a3b8",
-              ],
-              "circle-stroke-color": [
-                "match", ["get", "color"],
-                "green", "#047857",
-                "sky", "#0369a1",
-                "yellow", "#a16207",
-                "#1f2937",
-              ],
-              "circle-stroke-width": 2.5,
-              "circle-opacity": 0.96,
-            },
-          });
-        }
-        discAdded = true;
-        console.info("[long-trips-block] disc layer added");
-      } catch (e) {
-        console.warn("[long-trips-block] disc layer add failed:", e);
-      }
-
-      // "45+" text label. Font fallback list so the layer survives styles
-      // that ship only one of the two glyph stacks.
       let textAdded = false;
-      try {
-        if (!mapRef.getLayer?.(LTF_TEXT_LAYER_ID)) {
-          mapRef.addLayer({
-            id: LTF_TEXT_LAYER_ID,
-            type: "symbol",
-            source: LTF_SOURCE_ID,
-            layout: {
-              "text-field": FLAG_TEXT,
-              "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
-              "text-size": [
-                "interpolate", ["linear"], ["zoom"],
-                9, 9,
-                13, 11,
-                16, 13,
-              ],
-              "text-anchor": "center",
-              "text-allow-overlap": true,
-              "text-ignore-placement": true,
-            },
-            paint: {
-              "text-color": "#1f2937",
-              "text-halo-color": "rgba(255,255,255,0.85)",
-              "text-halo-width": 1,
-            },
-          });
+      if (!customAdded) {
+        try {
+          if (!mapRef.getLayer?.(LTF_DISC_LAYER_ID)) {
+            mapRef.addLayer({
+              id: LTF_DISC_LAYER_ID,
+              type: "circle",
+              source: LTF_SOURCE_ID,
+              paint: {
+                "circle-radius": [
+                  "interpolate", ["linear"], ["zoom"],
+                  9, 12,
+                  13, 16,
+                  16, 22,
+                ],
+                "circle-color": [
+                  "match", ["get", "color"],
+                  "green", "#10b981",
+                  "sky", "#38bdf8",
+                  "yellow", "#facc15",
+                  "#94a3b8",
+                ],
+                "circle-stroke-color": [
+                  "match", ["get", "color"],
+                  "green", "#047857",
+                  "sky", "#0369a1",
+                  "yellow", "#a16207",
+                  "#1f2937",
+                ],
+                "circle-stroke-width": 2.5,
+                "circle-opacity": 0.96,
+              },
+            });
+          }
+          discAdded = true;
+          console.info("[long-trips-block] disc fallback layer added");
+        } catch (e) {
+          console.warn("[long-trips-block] disc layer add failed:", e);
         }
-        textAdded = true;
-        console.info("[long-trips-block] text layer added");
-      } catch (e) {
-        console.warn("[long-trips-block] text layer add failed (disc remains visible):", e);
+        try {
+          if (!mapRef.getLayer?.(LTF_TEXT_LAYER_ID)) {
+            mapRef.addLayer({
+              id: LTF_TEXT_LAYER_ID,
+              type: "symbol",
+              source: LTF_SOURCE_ID,
+              layout: {
+                "text-field": FLAG_TEXT,
+                "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
+                "text-size": [
+                  "interpolate", ["linear"], ["zoom"],
+                  9, 9,
+                  13, 11,
+                  16, 13,
+                ],
+                "text-anchor": "center",
+                "text-allow-overlap": true,
+                "text-ignore-placement": true,
+              },
+              paint: {
+                "text-color": "#1f2937",
+                "text-halo-color": "rgba(255,255,255,0.85)",
+                "text-halo-width": 1,
+              },
+            });
+          }
+          textAdded = true;
+          console.info("[long-trips-block] text fallback layer added");
+        } catch (e) {
+          console.warn("[long-trips-block] text layer add failed:", e);
+        }
+      } else {
+        // Custom succeeded — sweep any stale fallback layers from prior
+        // sessions so we don't render flags twice.
+        if (mapRef.getLayer?.(LTF_DISC_LAYER_ID)) {
+          try { mapRef.removeLayer(LTF_DISC_LAYER_ID); } catch (_) {}
+        }
+        if (mapRef.getLayer?.(LTF_TEXT_LAYER_ID)) {
+          try { mapRef.removeLayer(LTF_TEXT_LAYER_ID); } catch (_) {}
+        }
       }
 
-      // Remove any custom WebGL layer from a previous session.
-      if (mapRef.getLayer?.(LTF_CUSTOM_LAYER_ID)) {
-        try { mapRef.removeLayer(LTF_CUSTOM_LAYER_ID); } catch (_) {}
-      }
-      // Remove the PR #969 icon-image layer if it's still on the style
-      // from a stale session — it's the drift source.
+      // Remove the PR #969 icon-image symbol layer if it's still on the
+      // style from a prior session — it's the drift source.
       if (mapRef.getLayer?.(LTF_LAYER_ID)) {
         try { mapRef.removeLayer(LTF_LAYER_ID); } catch (_) {}
       }
-      if (!discAdded && !textAdded) {
+
+      if (!customAdded && !discAdded && !textAdded) {
         console.warn("[long-trips-block] no flag layer landed; staying on DOM markers");
         flagLayerInitStarted = false;
         return;
       }
-      // Sweep DOM markers now that the layer owns rendering.
+      // Sweep DOM markers now that a layer owns rendering.
       Object.keys(state.markers).forEach((id) => {
         if (id === state.activeMoveFlagId) return;
         if (id === "__ltb_preview__") return;
@@ -790,11 +933,13 @@
       useLayer = true;
       syncFlagLayer();
       console.info(
-        `[long-trips-block] flag layer active (zero-drift)` +
-        ` disc=${discAdded ? "yes" : "no"} text=${textAdded ? "yes" : "no"} (on top)`
+        `[long-trips-block] flag layer active.` +
+        ` custom=${customAdded ? "yes" : "no"}` +
+        ` disc=${discAdded ? "yes" : "no"}` +
+        ` text=${textAdded ? "yes" : "no"}`
       );
     } catch (e) {
-      console.warn("[long-trips-block] custom layer init failed; falling back to DOM markers:", e);
+      console.warn("[long-trips-block] flag layer init failed; falling back to DOM markers:", e);
       flagLayerInitStarted = false;
     }
   }
@@ -951,27 +1096,66 @@
 
   function syncFlagLayer() {
     if (!useLayer || !mapRef) return;
-    const src = mapRef.getSource?.(LTF_SOURCE_ID);
-    if (!src?.setData) return;
     // Exclude the flag currently being interactively moved -- that one
     // is shown via a temp DOM marker for the duration of the drag.
     const hidden = state.activeMoveFlagId;
-    const features = state.flags
-      .filter((f) => f.id !== hidden)
-      .map((f) => ({
+    const visible = state.flags.filter((f) => f.id !== hidden);
+
+    // Push to the custom WebGL layer (active renderer when it's up).
+    if (flagCustomLayer?.setFlags) {
+      flagCustomLayer.setFlags(visible);
+    }
+
+    // Also keep the GeoJSON source in sync — the disc/text fallback
+    // layers read from it. This is a no-op when only the custom layer
+    // is active (the source has no layer consuming it), but it costs
+    // nothing and means a hot-swap between renderers Just Works.
+    const src = mapRef.getSource?.(LTF_SOURCE_ID);
+    if (src?.setData) {
+      const features = visible.map((f) => ({
         type: "Feature",
         id: f.id,
         properties: { id: f.id, color: f.color },
         geometry: { type: "Point", coordinates: [f.lng, f.lat] },
       }));
-    src.setData({ type: "FeatureCollection", features });
+      src.setData({ type: "FeatureCollection", features });
+    }
   }
 
   function flagAtScreenPoint(point) {
     if (!useLayer || !mapRef) return null;
-    // Hit-test both circle and text layers via queryRenderedFeatures
-    // (the same API hotspots use). Tap on either the disc or the "45+"
-    // label counts as a flag press.
+
+    // When the custom WebGL layer is the renderer there is no MapLibre
+    // feature to query — custom layers are opaque to queryRenderedFeatures.
+    // CPU hit-test: project each flag's lng/lat to screen px (the same
+    // math the basemap uses), then test the tap point against the flag's
+    // screen-space bounding box (matched to the rendered quad).
+    if (flagCustomLayer?._program && typeof mapRef.project === "function") {
+      const hidden = state.activeMoveFlagId;
+      const flags = state.flags.filter((f) => f.id !== hidden);
+      if (!flags.length) return null;
+      const scale = flagZoomScale(mapRef.getZoom?.());
+      const halfW = (FLAG_W_CSS / 2) * scale;
+      const fullH = FLAG_H_CSS * scale;
+      // Anchor is at pole tip (bottom of flag). Flag extends UP from
+      // anchor by fullH px and ±halfW px sideways.
+      let best = null;
+      let bestDist = Infinity;
+      for (const f of flags) {
+        let screen;
+        try { screen = mapRef.project([f.lng, f.lat]); } catch (_) { continue; }
+        const dx = point.x - screen.x;
+        const dy = point.y - screen.y;
+        if (Math.abs(dx) <= halfW && dy <= 0 && dy >= -fullH) {
+          const d = Math.hypot(dx, dy);
+          if (d < bestDist) { bestDist = d; best = f; }
+        }
+      }
+      return best;
+    }
+
+    // Fallback path: hit-test the disc/text layers via queryRenderedFeatures
+    // (the same API hotspots use).
     const layers = [];
     if (mapRef.getLayer?.(LTF_DISC_LAYER_ID)) layers.push(LTF_DISC_LAYER_ID);
     if (mapRef.getLayer?.(LTF_TEXT_LAYER_ID)) layers.push(LTF_TEXT_LAYER_ID);
