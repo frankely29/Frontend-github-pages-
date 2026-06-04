@@ -826,19 +826,27 @@
       //
       // Hotspot code in app.part10.js is NOT touched.
 
-      // Disc + text renderer — the proven zero-drift path that drivers
-      // confirmed works (PR #968 / PR #970). The custom WebGL approach
-      // attempted in #971/#972/#973 reintroduced drift on iOS Safari
-      // every time, despite multiple attempts (mercator-matrix shader,
-      // CPU projection, etc.). Reverting to this known-good renderer
-      // until we have a different strategy for the flag shape.
+      // Re-enabling the custom WebGL flag-shape layer (the CPU-projection
+      // version from PR #973). Driver's hypothesis: the "drift" reports
+      // after #971/#972/#973 may have actually been the DOM-marker
+      // fallback flickering during init — the WebGL layer itself was
+      // rendering zero-drift, but the DOM fallback was showing the old
+      // flag visual on top for a brief moment, which read as drift.
       //
-      // No `beforeLayer` argument on addLayer, so layers append to the
-      // END of the layer list and render on top of zone fills/labels.
+      // PR #976 removed the DOM fallback entirely. If the hypothesis is
+      // correct, re-adding the WebGL layer should give the flag shape
+      // with zero drift.
+      //
+      // Strategy:
+      //   1. Try the custom WebGL layer first. If addLayer throws (no
+      //      WebGL support, etc.), fall back to disc+text.
+      //   2. The custom layer bakes "45+" into the flag canvas atlas,
+      //      so the separate text layer is only added in the fallback.
+      //   3. No DOM-marker fallback (#976/#977 stays).
       //
       // Hotspot code in app.part10.js is NOT touched.
 
-      // Source for the disc + text layers.
+      // Source for the disc + text fallback layers.
       if (!mapRef.getSource?.(LTF_SOURCE_ID)) {
         mapRef.addSource(LTF_SOURCE_ID, {
           type: "geojson",
@@ -846,109 +854,119 @@
         });
       }
 
-      // Disc circle layer (zero-drift, proven).
-      //
-      // PR #975 tried switching this layer to a symbol with
-      // `text-field: "◆"` to get a diamond shape. That depends on the
-      // basemap's glyph atlas containing U+25C6 BLACK DIAMOND, which
-      // the current style doesn't reliably ship. The layer was added
-      // but the glyph didn't render, so drivers saw the DOM-marker
-      // fallback (old flag shape) instead. PR #976 removed the
-      // fallback, which then left nothing visible.
-      //
-      // Reverting to `type: "circle"` — guaranteed to render, no font
-      // glyph dependency, zero drift. Drivers can still get a
-      // non-circle shape if we ship icons or extend the glyph atlas
-      // separately.
-      let discAdded = false;
-      let textAdded = false;
+      // 1. Try the custom WebGL flag-shape layer.
+      let customAdded = false;
       try {
-        if (!mapRef.getLayer?.(LTF_DISC_LAYER_ID)) {
-          mapRef.addLayer({
-            id: LTF_DISC_LAYER_ID,
-            type: "circle",
-            source: LTF_SOURCE_ID,
-            paint: {
-              "circle-radius": [
-                "interpolate", ["linear"], ["zoom"],
-                9, 12,
-                13, 16,
-                16, 22,
-              ],
-              "circle-color": [
-                "match", ["get", "color"],
-                "green", "#10b981",
-                "sky", "#38bdf8",
-                "yellow", "#facc15",
-                "#94a3b8",
-              ],
-              "circle-stroke-color": [
-                "match", ["get", "color"],
-                "green", "#047857",
-                "sky", "#0369a1",
-                "yellow", "#a16207",
-                "#1f2937",
-              ],
-              "circle-stroke-width": 2.5,
-              "circle-opacity": 0.96,
-            },
-          });
+        if (mapRef.getLayer?.(LTF_CUSTOM_LAYER_ID)) {
+          try { mapRef.removeLayer(LTF_CUSTOM_LAYER_ID); } catch (_) {}
         }
-        discAdded = true;
-        console.info("[long-trips-block] disc layer added");
-      } catch (e) {
-        console.warn("[long-trips-block] disc layer add failed:", e);
-      }
-      try {
-        if (!mapRef.getLayer?.(LTF_TEXT_LAYER_ID)) {
-          mapRef.addLayer({
-            id: LTF_TEXT_LAYER_ID,
-            type: "symbol",
-            source: LTF_SOURCE_ID,
-            layout: {
-              "text-field": FLAG_TEXT,
-              "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
-              "text-size": [
-                "interpolate", ["linear"], ["zoom"],
-                9, 9,
-                13, 11,
-                16, 13,
-              ],
-              "text-anchor": "center",
-              "text-allow-overlap": true,
-              "text-ignore-placement": true,
-            },
-            paint: {
-              "text-color": "#1f2937",
-              "text-halo-color": "rgba(255,255,255,0.85)",
-              "text-halo-width": 1,
-            },
-          });
+        flagCustomLayer = createFlagCustomLayer();
+        mapRef.addLayer(flagCustomLayer);
+        if (mapRef.getLayer?.(LTF_CUSTOM_LAYER_ID)) {
+          customAdded = true;
+          console.info("[long-trips-block] custom WebGL flag layer added (shape, CPU projection)");
         }
-        textAdded = true;
-        console.info("[long-trips-block] text layer added");
       } catch (e) {
-        console.warn("[long-trips-block] text layer add failed:", e);
+        console.warn("[long-trips-block] custom WebGL layer init failed; falling back to disc:", e);
+        flagCustomLayer = null;
       }
 
-      // Remove the custom WebGL layer from any prior session — it
-      // reintroduced drift and is no longer the active renderer.
-      if (mapRef.getLayer?.(LTF_CUSTOM_LAYER_ID)) {
-        try { mapRef.removeLayer(LTF_CUSTOM_LAYER_ID); } catch (_) {}
+      // 2. Disc + text fallback (only when custom didn't land).
+      let discAdded = false;
+      let textAdded = false;
+      if (!customAdded) {
+        try {
+          if (!mapRef.getLayer?.(LTF_DISC_LAYER_ID)) {
+            mapRef.addLayer({
+              id: LTF_DISC_LAYER_ID,
+              type: "circle",
+              source: LTF_SOURCE_ID,
+              paint: {
+                "circle-radius": [
+                  "interpolate", ["linear"], ["zoom"],
+                  9, 12,
+                  13, 16,
+                  16, 22,
+                ],
+                "circle-color": [
+                  "match", ["get", "color"],
+                  "green", "#10b981",
+                  "sky", "#38bdf8",
+                  "yellow", "#facc15",
+                  "#94a3b8",
+                ],
+                "circle-stroke-color": [
+                  "match", ["get", "color"],
+                  "green", "#047857",
+                  "sky", "#0369a1",
+                  "yellow", "#a16207",
+                  "#1f2937",
+                ],
+                "circle-stroke-width": 2.5,
+                "circle-opacity": 0.96,
+              },
+            });
+          }
+          discAdded = true;
+          console.info("[long-trips-block] disc fallback layer added");
+        } catch (e) {
+          console.warn("[long-trips-block] disc layer add failed:", e);
+        }
+        try {
+          if (!mapRef.getLayer?.(LTF_TEXT_LAYER_ID)) {
+            mapRef.addLayer({
+              id: LTF_TEXT_LAYER_ID,
+              type: "symbol",
+              source: LTF_SOURCE_ID,
+              layout: {
+                "text-field": FLAG_TEXT,
+                "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
+                "text-size": [
+                  "interpolate", ["linear"], ["zoom"],
+                  9, 9,
+                  13, 11,
+                  16, 13,
+                ],
+                "text-anchor": "center",
+                "text-allow-overlap": true,
+                "text-ignore-placement": true,
+              },
+              paint: {
+                "text-color": "#1f2937",
+                "text-halo-color": "rgba(255,255,255,0.85)",
+                "text-halo-width": 1,
+              },
+            });
+          }
+          textAdded = true;
+          console.info("[long-trips-block] text fallback layer added");
+        } catch (e) {
+          console.warn("[long-trips-block] text layer add failed:", e);
+        }
+      } else {
+        // Custom WebGL succeeded — the flag PNG already bakes in "45+",
+        // so the separate disc/text layers from a prior session would
+        // render on top and look wrong. Sweep them.
+        if (mapRef.getLayer?.(LTF_DISC_LAYER_ID)) {
+          try { mapRef.removeLayer(LTF_DISC_LAYER_ID); } catch (_) {}
+        }
+        if (mapRef.getLayer?.(LTF_TEXT_LAYER_ID)) {
+          try { mapRef.removeLayer(LTF_TEXT_LAYER_ID); } catch (_) {}
+        }
       }
-      flagCustomLayer = null;
+
       // Remove the PR #969 icon-image symbol layer if it's still on
       // the style from a prior session.
       if (mapRef.getLayer?.(LTF_LAYER_ID)) {
         try { mapRef.removeLayer(LTF_LAYER_ID); } catch (_) {}
       }
 
-      if (!discAdded && !textAdded) {
-        console.warn("[long-trips-block] no flag layer landed; staying on DOM markers");
+      if (!customAdded && !discAdded && !textAdded) {
+        console.warn("[long-trips-block] no flag layer landed; nothing will render");
         flagLayerInitStarted = false;
         return;
       }
-      // Sweep DOM markers now that a layer owns rendering.
+      // Sweep DOM markers (defensive — there shouldn't be any after #976).
       Object.keys(state.markers).forEach((id) => {
         if (id === state.activeMoveFlagId) return;
         if (id === "__ltb_preview__") return;
@@ -958,8 +976,10 @@
       useLayer = true;
       syncFlagLayer();
       console.info(
-        `[long-trips-block] flag layer active (zero-drift)` +
-        ` disc=${discAdded ? "yes" : "no"} text=${textAdded ? "yes" : "no"}`
+        `[long-trips-block] flag layer active.` +
+        ` custom=${customAdded ? "yes" : "no"}` +
+        ` disc=${discAdded ? "yes" : "no"}` +
+        ` text=${textAdded ? "yes" : "no"}`
       );
     } catch (e) {
       console.warn("[long-trips-block] flag layer init failed; falling back to DOM markers:", e);
@@ -1119,27 +1139,63 @@
 
   function syncFlagLayer() {
     if (!useLayer || !mapRef) return;
-    const src = mapRef.getSource?.(LTF_SOURCE_ID);
-    if (!src?.setData) return;
     // Exclude the flag currently being interactively moved -- that one
     // is shown via a temp DOM marker for the duration of the drag.
     const hidden = state.activeMoveFlagId;
-    const features = state.flags
-      .filter((f) => f.id !== hidden)
-      .map((f) => ({
+    const visible = state.flags.filter((f) => f.id !== hidden);
+
+    // Push to the custom WebGL layer when it's the active renderer.
+    if (flagCustomLayer?.setFlags) {
+      flagCustomLayer.setFlags(visible);
+    }
+
+    // Also keep the GeoJSON source in sync for the disc/text fallback
+    // path. No-op when only the custom layer is active.
+    const src = mapRef.getSource?.(LTF_SOURCE_ID);
+    if (src?.setData) {
+      const features = visible.map((f) => ({
         type: "Feature",
         id: f.id,
         properties: { id: f.id, color: f.color },
         geometry: { type: "Point", coordinates: [f.lng, f.lat] },
       }));
-    src.setData({ type: "FeatureCollection", features });
+      src.setData({ type: "FeatureCollection", features });
+    }
   }
 
   function flagAtScreenPoint(point) {
     if (!useLayer || !mapRef) return null;
-    // Hit-test the disc/text layers via queryRenderedFeatures (the
-    // same API hotspots use). Tap on either the disc or the "45+"
-    // label counts as a flag press.
+
+    // When the custom WebGL layer is the renderer, queryRenderedFeatures
+    // cannot see its quads (custom layers are opaque to it). CPU hit-test:
+    // project each flag's lng/lat to screen px (float64 via map.project()),
+    // then test the tap against the flag's bounding box, matched to the
+    // rendered quad sizing.
+    if (flagCustomLayer?._program && typeof mapRef.project === "function") {
+      const hidden = state.activeMoveFlagId;
+      const flags = state.flags.filter((f) => f.id !== hidden);
+      if (!flags.length) return null;
+      const scale = flagZoomScale(mapRef.getZoom?.());
+      const halfW = (FLAG_W_CSS / 2) * scale;
+      const fullH = FLAG_H_CSS * scale;
+      // Anchor is at pole tip (bottom of flag). Flag extends UP from
+      // anchor by fullH px and ±halfW px sideways.
+      let best = null;
+      let bestDist = Infinity;
+      for (const f of flags) {
+        let screen;
+        try { screen = mapRef.project([f.lng, f.lat]); } catch (_) { continue; }
+        const dx = point.x - screen.x;
+        const dy = point.y - screen.y;
+        if (Math.abs(dx) <= halfW && dy <= 0 && dy >= -fullH) {
+          const d = Math.hypot(dx, dy);
+          if (d < bestDist) { bestDist = d; best = f; }
+        }
+      }
+      return best;
+    }
+
+    // Fallback: queryRenderedFeatures against disc/text layers.
     const layers = [];
     if (mapRef.getLayer?.(LTF_DISC_LAYER_ID)) layers.push(LTF_DISC_LAYER_ID);
     if (mapRef.getLayer?.(LTF_TEXT_LAYER_ID)) layers.push(LTF_TEXT_LAYER_ID);
