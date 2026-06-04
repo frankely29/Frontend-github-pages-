@@ -160,32 +160,31 @@
     if (document.getElementById("long-trips-block-css")) return;
     const css = `
       .ltb-flag {
-        position: relative; width: 34px; height: 42px;
+        position: relative; width: 44px; height: 44px;
         cursor: pointer; user-select: none; -webkit-user-select: none;
         -webkit-touch-callout: none; touch-action: none;
       }
       .ltb-flag-scale {
         position: absolute; left: 0; top: 0; width: 100%; height: 100%;
-        transform-origin: 50% 100%;
+        transform-origin: 50% 50%;
         transform: scale(var(--ltb-zoom-scale, 1));
         transition: transform 120ms ease-out;
         will-change: transform;
       }
-      .ltb-flag-pole {
-        position: absolute; left: 50%; bottom: 0; width: 2px; height: 100%;
-        background: #1f2937; transform: translateX(-50%);
-        box-shadow: 0 1px 2px rgba(0,0,0,0.4);
+      .ltb-flag-stroke {
+        position: absolute; inset: 0;
+        clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+        display: flex; align-items: center; justify-content: center;
       }
-      .ltb-flag-pennant {
-        position: absolute; left: 50%; top: 0; width: 28px; height: 22px;
+      .ltb-flag-fill {
+        width: calc(100% - 6px); height: calc(100% - 6px);
+        clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
         display: flex; align-items: center; justify-content: center;
         font: 700 11px/1 -apple-system, system-ui, "Segoe UI", sans-serif;
         color: #1f2937; letter-spacing: 0.5px;
-        clip-path: polygon(0 0, 100% 0, 100% 65%, 60% 100%, 0 100%);
-        box-shadow: 0 2px 4px rgba(0,0,0,0.35);
       }
       .ltb-flag-pulse {
-        position: absolute; left: 50%; top: 11px;
+        position: absolute; left: 50%; top: 50%;
         width: 4px; height: 4px; border-radius: 50%;
         transform: translate(-50%, -50%);
         background: currentColor; opacity: 0;
@@ -332,11 +331,15 @@
     root.className = "ltb-flag";
     root.dataset.flagId = flag.id;
     root.style.color = palette.hex;
+    // Diamond shape matching the LTF_DISC_LAYER_ID symbol marker.
+    // Used only for interactive move/preview states; static flags
+    // render via the diamond symbol layer (no DOM fallback).
     root.innerHTML = `
       <div class="ltb-flag-scale">
         <div class="ltb-flag-pulse"></div>
-        <div class="ltb-flag-pole"></div>
-        <div class="ltb-flag-pennant" style="background:${palette.hex};border:1px solid ${palette.border};">${FLAG_TEXT}</div>
+        <div class="ltb-flag-stroke" style="background:${palette.border};">
+          <div class="ltb-flag-fill" style="background:${palette.hex};">${FLAG_TEXT}</div>
+        </div>
       </div>
     `;
     return root;
@@ -1159,25 +1162,12 @@
     return state.flags.find((f) => f.id === id) || null;
   }
 
-  function renderFlag(flag) {
-    if (useLayer) { syncFlagLayer(); return; }
-    if (!mapRef || !window.maplibregl?.Marker) return;
-    const el = buildFlagElement(flag);
-    el.style.setProperty("--ltb-zoom-scale", scaleForZoom(mapRef.getZoom?.()).toFixed(3));
-    const marker = new window.maplibregl.Marker({ element: el, anchor: "bottom" })
-      .setLngLat([flag.lng, flag.lat])
-      .addTo(mapRef);
-    // Subpixel positioning is the MapLibre-documented way to avoid
-    // integer-pixel rounding on Marker rendering. Symbol layers have
-    // no equivalent option and round to integer pixels every frame,
-    // which is exactly the drift the driver was reporting (see deep-
-    // research from PR #964 follow-up). Marker class is the right
-    // primitive for a small number of frequently-updating pins.
-    if (typeof marker.setSubpixelPositioning === "function") {
-      marker.setSubpixelPositioning(true);
-    }
-    state.markers[flag.id] = marker;
-    attachFlagLongPress(el, flag);
+  function renderFlag(_flag) {
+    // Static flags render exclusively via the diamond symbol layer
+    // (LTF_DISC_LAYER_ID + LTF_TEXT_LAYER_ID). No DOM-marker fallback —
+    // if the layer isn't ready yet, the flag stays in state.flags and
+    // appears once ensureFlagLayer's syncFlagLayer call fires.
+    if (useLayer) syncFlagLayer();
   }
 
   function attachFlagLongPress(el, flag) {
@@ -1532,7 +1522,7 @@
     el.classList.add("is-preview");
     el.style.setProperty("--ltb-zoom-scale", scaleForZoom(mapRef.getZoom?.()).toFixed(3));
     const marker = new window.maplibregl.Marker({
-      element: el, anchor: "bottom", draggable: true,
+      element: el, anchor: "center", draggable: true,
     })
       .setLngLat([lngLat.lng, lngLat.lat])
       .addTo(mapRef);
@@ -1601,7 +1591,7 @@
       const tempEl = buildFlagElement(flag);
       tempEl.style.setProperty("--ltb-zoom-scale", scaleForZoom(mapRef.getZoom?.()).toFixed(3));
       marker = new window.maplibregl.Marker({
-        element: tempEl, anchor: "bottom", draggable: true,
+        element: tempEl, anchor: "center", draggable: true,
       })
         .setLngLat([flag.lng, flag.lat])
         .addTo(mapRef);
