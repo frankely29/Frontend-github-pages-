@@ -114,7 +114,8 @@ let startupViewportFrameRendered = false;
 let startupFullFrameBackfillStarted = false;
 let startupFullFrameBackfillCompleted = false;
 let startupFullFrameRetryCount = 0;
-let startupFullFrameRetryTimer = null;
+const MAX_STARTUP_FULL_FRAME_RETRIES = 5;
+const startupFullFrameRetryTimers = new Set();
 let startupCameraLockEventSent = false;
 let startupInitialCameraLocked = false;
 let startupCameraLockReason = "";
@@ -2545,16 +2546,20 @@ function getCurrentStartupFrameIndex() {
 }
 
 function clearStartupFullFrameRetryTimer() {
-  if (startupFullFrameRetryTimer) clearTimeout(startupFullFrameRetryTimer);
-  startupFullFrameRetryTimer = null;
+  for (const handle of startupFullFrameRetryTimers) clearTimeout(handle);
+  startupFullFrameRetryTimers.clear();
 }
 
 function scheduleStartupFullFrameRetry(idx, delayMs, reason = "") {
-  clearStartupFullFrameRetryTimer();
+  // Previously cleared any existing timer at the top, which meant two
+  // consecutive calls (e.g. 1200ms + 3200ms from kickBackfillOnce) would
+  // collide — the second scheduling wiped the first, so only one retry
+  // actually fired. Now each call adds its own timer; clear() runs them
+  // all out on completion.
   const normalizedIdx = Math.max(0, Number(idx) || 0);
   const timeoutMs = Math.max(0, Number(delayMs) || 0);
-  startupFullFrameRetryTimer = setTimeout(() => {
-    startupFullFrameRetryTimer = null;
+  const handle = setTimeout(() => {
+    startupFullFrameRetryTimers.delete(handle);
     if (startupFullFrameBackfillCompleted) return;
     if (!currentFrameIsViewportSubset()) return;
     if (pendingFrameLoad?.idx === normalizedIdx) return;
@@ -2562,6 +2567,7 @@ function scheduleStartupFullFrameRetry(idx, delayMs, reason = "") {
     startupFullFrameRetryCount += 1;
     void ensureStartupFullFrameBackfill(normalizedIdx, reason || "retry");
   }, timeoutMs);
+  startupFullFrameRetryTimers.add(handle);
 }
 
 async function ensureStartupFullFrameBackfill(idx, reason = "") {
@@ -2577,9 +2583,26 @@ async function ensureStartupFullFrameBackfill(idx, reason = "") {
     if (frame && frame._viewport_subset !== true && currentFrame?._viewport_subset !== true) {
       startupFullFrameBackfillCompleted = true;
       clearStartupFullFrameRetryTimer();
+    } else if (
+      !startupFullFrameBackfillCompleted
+      && startupFullFrameRetryCount < MAX_STARTUP_FULL_FRAME_RETRIES
+    ) {
+      // loadFrame returned but the map is still in viewport-subset mode.
+      // Previously we relied on user pan/zoom to trigger another attempt,
+      // which is what caused the "needs multiple refreshes" symptom.
+      scheduleStartupFullFrameRetry(normalizedIdx, 4500, "backfill-incomplete-retry");
     }
     return frame;
   } catch (_) {
+    // Network error / abort. Previously this was silently swallowed and
+    // the only recovery was the user moving or zooming the map. Schedule
+    // a retry so the map fully loads on its own.
+    if (
+      !startupFullFrameBackfillCompleted
+      && startupFullFrameRetryCount < MAX_STARTUP_FULL_FRAME_RETRIES
+    ) {
+      scheduleStartupFullFrameRetry(normalizedIdx, 4500, "backfill-error-retry");
+    }
     return null;
   }
 }
