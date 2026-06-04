@@ -460,37 +460,48 @@
   // atlas with one slice per color, sample from the atlas per flag.
   //
   // Quad layout (per flag, 4 vertices, 6 indices):
-  //   Anchor (a_anchor_merc) = bottom of pole, in Mercator [0,1].
+  //   Anchor (a_anchor_px)  = bottom of pole, in CSS pixels.
+  //                           Computed each frame on the CPU via
+  //                           map.project([lng, lat]) — see the
+  //                           shader comment below for the why.
   //   Corner offsets (a_corner_px) = CSS pixels relative to anchor.
   //     Top of flag is `-h` (above anchor in screen-px convention).
   //     Bottom of flag is at anchor (cy_px=0).
   //   UV (a_uv) picks the right horizontal slice in the atlas.
+
+  // The shader was originally projecting Mercator [0,1] coords through
+  // MapLibre's customLayerMatrix (which incorporates a worldSize scale,
+  // ~4M at zoom 13). Multiplying small Mercator values by huge worldSize
+  // in float32 loses sub-pixel precision — that's what drove the drift
+  // back in PR #971/#972. Built-in MapLibre layers avoid it by using
+  // per-tile coordinates (small numbers, per-tile matrix incorporates
+  // the offset).
   //
-  // Shader projects anchor through u_matrix → clip space, then adds
-  // pixel offset converted to clip-space units (post pos.w). This
-  // billboard trick keeps the flag the same screen size regardless
-  // of zoom or pitch, and the pin position is exact (no rounding).
+  // The fix: project on the CPU via `map.project()` (which is the same
+  // function MapLibre uses internally for hit-testing, in float64), and
+  // upload the resulting CSS-pixel anchor to the vertex buffer. The
+  // shader then just does CSS-px → clip-space — no big numbers, no
+  // float32 precision loss.
+  //
+  // Per-frame rebuild cost is trivial (a few hundred floats), and
+  // MapLibre only calls render() on active frames anyway.
 
   const FLAG_VS = `
     precision highp float;
-    attribute vec2 a_anchor_merc;
+    attribute vec2 a_anchor_px;
     attribute vec2 a_corner_px;
     attribute vec2 a_uv;
-    uniform mat4 u_matrix;
-    uniform vec2 u_viewport_px;
+    uniform vec2 u_viewport_css_px;
     uniform float u_size_scale;
     varying vec2 v_uv;
     void main() {
-      vec4 pos = u_matrix * vec4(a_anchor_merc, 0.0, 1.0);
-      vec2 cornerPx = a_corner_px * u_size_scale;
-      // Screen px: +y is down. Clip space: +y is up. Flip y.
-      // Multiply by pos.w so the offset survives perspective divide.
-      vec2 offsetClip = vec2(
-        ( cornerPx.x / u_viewport_px.x) * 2.0,
-        (-cornerPx.y / u_viewport_px.y) * 2.0
-      ) * pos.w;
-      pos.xy += offsetClip;
-      gl_Position = pos;
+      vec2 px = a_anchor_px + a_corner_px * u_size_scale;
+      // CSS px → clip. CSS y is down, clip y is up — flip y.
+      vec2 clip = vec2(
+            (px.x / u_viewport_css_px.x) * 2.0 - 1.0,
+        1.0 - (px.y / u_viewport_css_px.y) * 2.0
+      );
+      gl_Position = vec4(clip, 0.0, 1.0);
       v_uv = a_uv;
     }
   `;
@@ -607,13 +618,12 @@
         }
 
         this._attrib = {
-          anchor: gl.getAttribLocation(this._program, "a_anchor_merc"),
+          anchor: gl.getAttribLocation(this._program, "a_anchor_px"),
           corner: gl.getAttribLocation(this._program, "a_corner_px"),
           uv: gl.getAttribLocation(this._program, "a_uv"),
         };
         this._uni = {
-          matrix: gl.getUniformLocation(this._program, "u_matrix"),
-          viewport: gl.getUniformLocation(this._program, "u_viewport_px"),
+          viewport: gl.getUniformLocation(this._program, "u_viewport_css_px"),
           sizeScale: gl.getUniformLocation(this._program, "u_size_scale"),
           texture: gl.getUniformLocation(this._program, "u_texture"),
         };
@@ -638,12 +648,10 @@
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
         gl.bindTexture(gl.TEXTURE_2D, null);
 
-        // setFlags() runs from syncFlagLayer() before this onAdd does
-        // (MapLibre defers onAdd to the next render frame). At that
-        // moment GL resources didn't exist yet, so _uploadBuffers
-        // bailed and _flags was stashed. Flush it now so the first
-        // render() actually has a non-empty vertex buffer to draw.
-        if (this._flags.length) this._uploadBuffers();
+        // _quadCount tracks the number of flags ready to draw. It is
+        // updated by setFlags(); the buffer itself is built fresh in
+        // render() each frame from the latest map projection.
+        this._quadCount = this._flags.length;
       },
 
       onRemove(_map, gl) {
@@ -660,19 +668,24 @@
 
       setFlags(flags) {
         this._flags = Array.isArray(flags) ? flags : [];
-        this._uploadBuffers();
+        this._quadCount = this._flags.length;
+        // No buffer upload here — render() rebuilds the buffer from the
+        // current map projection each frame. We just need a repaint so
+        // that next frame's render() picks up the new flag list.
         this._map?.triggerRepaint();
       },
 
-      _uploadBuffers() {
+      // Rebuild the vertex buffer for the current camera state. Called
+      // from render() every frame (cheap: ~24 floats per flag, well
+      // under 500 flags in practice). Uses map.project() — the same
+      // function MapLibre uses for hit-testing internally, in float64
+      // precision. This is the path that avoids float32 drift.
+      _rebuildProjectedBuffer() {
         const gl = this._gl;
-        if (!gl || !this._program || !this._atlas) return;
-        const fromLngLat = window.maplibregl?.MercatorCoordinate?.fromLngLat;
-        if (!fromLngLat) return;
-
+        if (!gl || !this._program || !this._atlas || !this._map) return false;
+        if (typeof this._map.project !== "function") return false;
         const flags = this._flags;
-        this._quadCount = flags.length;
-        if (!flags.length) return;
+        if (!flags.length) return false;
 
         const halfW = FLAG_W_CSS / 2;
         const fullH = FLAG_H_CSS;
@@ -686,7 +699,12 @@
 
         for (let i = 0; i < flags.length; i++) {
           const f = flags[i];
-          const mc = fromLngLat({ lng: f.lng, lat: f.lat });
+          let pt;
+          try {
+            pt = this._map.project([f.lng, f.lat]);
+          } catch (_) {
+            pt = { x: -10000, y: -10000 }; // off-screen if projection fails
+          }
           let sliceIdx = slices.indexOf(f.color);
           if (sliceIdx < 0) sliceIdx = slices.indexOf("yellow");
           const uLeft = (sliceIdx * flagW) / atlasW;
@@ -695,21 +713,20 @@
           // the pole tip, which is the BOTTOM of the image → v=1 for
           // bottom vertices.
           const v0 = i * 4 * FLOATS_PER_VERTEX;
-          // Bottom-left:   anchor screen-y, image bottom-left
-          vertices[v0 +  0] = mc.x; vertices[v0 +  1] = mc.y;
+          // Bottom-left
+          vertices[v0 +  0] = pt.x; vertices[v0 +  1] = pt.y;
           vertices[v0 +  2] = -halfW; vertices[v0 +  3] = 0;
           vertices[v0 +  4] = uLeft;  vertices[v0 +  5] = 1;
           // Bottom-right
-          vertices[v0 +  6] = mc.x; vertices[v0 +  7] = mc.y;
+          vertices[v0 +  6] = pt.x; vertices[v0 +  7] = pt.y;
           vertices[v0 +  8] =  halfW; vertices[v0 +  9] = 0;
           vertices[v0 + 10] = uRight; vertices[v0 + 11] = 1;
-          // Top-left:      `fullH` px ABOVE anchor (-y in screen px),
-          //                image top-left.
-          vertices[v0 + 12] = mc.x; vertices[v0 + 13] = mc.y;
+          // Top-left (fullH px ABOVE anchor in screen px)
+          vertices[v0 + 12] = pt.x; vertices[v0 + 13] = pt.y;
           vertices[v0 + 14] = -halfW; vertices[v0 + 15] = -fullH;
           vertices[v0 + 16] = uLeft;  vertices[v0 + 17] = 0;
           // Top-right
-          vertices[v0 + 18] = mc.x; vertices[v0 + 19] = mc.y;
+          vertices[v0 + 18] = pt.x; vertices[v0 + 19] = pt.y;
           vertices[v0 + 20] =  halfW; vertices[v0 + 21] = -fullH;
           vertices[v0 + 22] = uRight; vertices[v0 + 23] = 0;
 
@@ -727,21 +744,30 @@
         gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.DYNAMIC_DRAW);
         gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this._ibo);
         gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.DYNAMIC_DRAW);
+        return true;
       },
 
-      render(gl, matrix) {
-        if (!this._program || !this._quadCount || !this._texture) return;
+      render(gl, _matrix) {
+        if (!this._program || !this._flags.length || !this._texture) return;
+
+        // Re-project for THIS frame's camera before we draw. The
+        // `_matrix` MapLibre hands us is unused — we don't want to feed
+        // small Mercator coords through worldSize-scaled matrices in
+        // float32 (that's what produced the drift).
+        if (!this._rebuildProjectedBuffer()) return;
 
         const dpr = (typeof window !== "undefined" && window.devicePixelRatio) || 1;
         const zoom = this._map?.getZoom?.();
-        // u_corner_px is in CSS pixels; convert by multiplying scale by
-        // dpr so it lands in drawing-buffer pixels (which matches the
-        // u_viewport_px values from gl.drawingBuffer{Width,Height}).
-        const scale = flagZoomScale(zoom) * dpr;
+        // corner_px is in CSS pixels and viewport uniform is in CSS
+        // pixels too, so no dpr multiplication needed.
+        const scale = flagZoomScale(zoom);
 
         gl.useProgram(this._program);
-        gl.uniformMatrix4fv(this._uni.matrix, false, matrix);
-        gl.uniform2f(this._uni.viewport, gl.drawingBufferWidth, gl.drawingBufferHeight);
+        gl.uniform2f(
+          this._uni.viewport,
+          gl.drawingBufferWidth / dpr,
+          gl.drawingBufferHeight / dpr
+        );
         gl.uniform1f(this._uni.sizeScale, scale);
 
         gl.activeTexture(gl.TEXTURE0);
@@ -829,8 +855,8 @@
         // setFlags() may be called between now and onAdd (in fact the
         // syncFlagLayer() below does exactly that — it pushes the
         // current flags into the layer). The layer stores them in
-        // `_flags`; onAdd flushes them via `_uploadBuffers()` at the
-        // end of init so they're ready for the first render().
+        // `_flags`; render() rebuilds the GPU buffer from `_flags`
+        // each frame using the current map projection.
         if (mapRef.getLayer?.(LTF_CUSTOM_LAYER_ID)) {
           customAdded = true;
           console.info("[long-trips-block] custom WebGL flag layer added (shape + zero-drift)");
