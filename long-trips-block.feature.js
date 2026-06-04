@@ -364,7 +364,7 @@
 
   const LTF_SOURCE_ID = "long-trip-flags";
   const LTF_LAYER_ID = "long-trip-flags-icons";              // legacy id (replaced)
-  const LTF_DISC_LAYER_ID = "long-trip-flags-disc";          // circle layer (the working renderer)
+  const LTF_DISC_LAYER_ID = "long-trip-flags-disc";          // diamond ◆ symbol layer (was a circle before)
   const LTF_TEXT_LAYER_ID = "long-trip-flags-text";          // "45+" label
   let useLayer = false;
   let flagLayerInitStarted = false;
@@ -849,44 +849,60 @@
         });
       }
 
+      // LTF_DISC_LAYER_ID was a `type: "circle"` colored disc. We're
+      // keeping the constant name for continuity but changing the
+      // implementation to a `type: "symbol"` with `text-field: "◆"`
+      // (BLACK DIAMOND, U+25C6). The text symbol layer with
+      // text-allow-overlap + text-ignore-placement was confirmed
+      // zero-drift in PR #970 (the "45+" label used the same settings),
+      // so this gives drivers a non-circle marker shape with the same
+      // zero-drift guarantee.
       let discAdded = false;
       let textAdded = false;
       try {
         if (!mapRef.getLayer?.(LTF_DISC_LAYER_ID)) {
           mapRef.addLayer({
             id: LTF_DISC_LAYER_ID,
-            type: "circle",
+            type: "symbol",
             source: LTF_SOURCE_ID,
-            paint: {
-              "circle-radius": [
+            layout: {
+              "text-field": "◆",
+              "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
+              "text-size": [
                 "interpolate", ["linear"], ["zoom"],
-                9, 12,
-                13, 16,
-                16, 22,
+                9, 26,
+                13, 34,
+                16, 44,
               ],
-              "circle-color": [
+              "text-anchor": "center",
+              "text-allow-overlap": true,
+              "text-ignore-placement": true,
+            },
+            paint: {
+              "text-color": [
                 "match", ["get", "color"],
                 "green", "#10b981",
                 "sky", "#38bdf8",
                 "yellow", "#facc15",
                 "#94a3b8",
               ],
-              "circle-stroke-color": [
+              // Darker per-color halo gives the diamond a stroke-like
+              // outline so it reads against any basemap color.
+              "text-halo-color": [
                 "match", ["get", "color"],
                 "green", "#047857",
                 "sky", "#0369a1",
                 "yellow", "#a16207",
                 "#1f2937",
               ],
-              "circle-stroke-width": 2.5,
-              "circle-opacity": 0.96,
+              "text-halo-width": 2,
             },
           });
         }
         discAdded = true;
-        console.info("[long-trips-block] disc layer added");
+        console.info("[long-trips-block] diamond layer added");
       } catch (e) {
-        console.warn("[long-trips-block] disc layer add failed:", e);
+        console.warn("[long-trips-block] diamond layer add failed:", e);
       }
       try {
         if (!mapRef.getLayer?.(LTF_TEXT_LAYER_ID)) {
