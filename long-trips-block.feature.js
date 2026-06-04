@@ -648,6 +648,48 @@
     };
   }
 
+  // Canvas-render a flag image (pole + colored pennant with "45+" text
+  // baked in). Returned as ImageData so map.addImage can register it as
+  // a sprite for the symbol layer's icon-image. One image per color.
+  function buildFlagImageData(color) {
+    const palette = COLORS[color] || COLORS.yellow;
+    const W = 68;  // 34px @ 2x retina
+    const H = 84;  // 42px @ 2x retina
+    const canvas = document.createElement("canvas");
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    // Pole: 4px wide (2px @ 1x), full height, dark
+    ctx.fillStyle = "#1f2937";
+    ctx.fillRect(W / 2 - 2, 0, 4, H);
+    // Pennant: starts at pole, extends right with a notched right edge
+    // matching the original CSS clip-path:
+    //   polygon(0 0, 100% 0, 100% 65%, 60% 100%, 0 100%)
+    const pX = W / 2;
+    const pY = 0;
+    const pW = 56;
+    const pH = 44;
+    ctx.fillStyle = palette.hex;
+    ctx.strokeStyle = palette.border;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(pX, pY);
+    ctx.lineTo(pX + pW, pY);
+    ctx.lineTo(pX + pW, pY + pH * 0.65);
+    ctx.lineTo(pX + pW * 0.6, pY + pH);
+    ctx.lineTo(pX, pY + pH);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    // "45+" text on the pennant
+    ctx.fillStyle = "#1f2937";
+    ctx.font = "bold 22px -apple-system, system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(FLAG_TEXT, pX + pW * 0.4, pY + pH * 0.45);
+    return ctx.getImageData(0, 0, W, H);
+  }
+
   function ensureFlagLayer() {
     if (useLayer || flagLayerInitStarted || !mapRef) return;
     if (!mapRef.isStyleLoaded?.()) {
@@ -660,43 +702,41 @@
     }
     flagLayerInitStarted = true;
     try {
-      // ===== Literal hotspot clone =====
+      // Two fixes vs PR #968:
       //
-      // Driver: "the hotspot dont have that issue we need to use the
-      // same system we have for hotspots replicate it but important
-      // do not change anything about hotspots dont touch hotspots."
+      // 1. VISUAL: drivers want a flag shape, not a colored disc. We
+      //    canvas-render a pole + colored pennant + "45+" PNG per color
+      //    and add it via map.addImage(). A symbol icon layer renders
+      //    that on top of the circle. The circle stays as a position-
+      //    truth anchor in case the icon image fails to load or the
+      //    symbol layer drifts; with the icon present the circle is
+      //    visually covered.
       //
-      // After 12+ PRs of trying source-quantization hacks, addImage
-      // sprites, custom WebGL layers etc., the cleanest answer is to
-      // copy hotspot's config exactly. From app.part10.js the
-      // pickup-micro-hotspots-core layer is:
+      // 2. Z-ORDER: drivers reported flags hidden under zone fills.
+      //    Previous PRs used `addLayer(..., "zone-labels")` to place
+      //    the layer BEFORE zone-labels in the layer list, which is
+      //    BELOW it in render order. That works for hotspots because
+      //    of their specific layer ordering; for our flag layers we
+      //    want them ABOVE everything. Drop the beforeLayer argument
+      //    so each layer is appended to the END of the layer list ->
+      //    rendered LAST -> on top of zone fills and labels.
       //
-      //   map.addSource("pickup-micro-hotspots", {
-      //     type: "geojson", data: emptyGeojson()
-      //   });
-      //   map.addLayer({
-      //     id: "pickup-micro-hotspots-core",
-      //     type: "circle",
-      //     source: "pickup-micro-hotspots",
-      //     paint: {...}
-      //   }, "zone-labels");
-      //
-      // ZERO source options (no maxzoom, no tolerance, no buffer
-      // overrides). One `type: "circle"` layer. The second argument
-      // to addLayer ("zone-labels") places it BELOW the basemap zone
-      // labels, which is the correct z-order so it renders on the
-      // basemap fill but under the road labels.
-      //
-      // We replicate that exactly. The "45+" text rides on a separate
-      // type=symbol layer with `text-field` -- the same primitive
-      // the basemap uses for place names, which also doesn't drift.
-      //
-      // Hotspot code in app.part10.js is NOT modified.
-      const hotspotBeforeLayer = mapRef.getLayer?.("zones-line")
-        ? "zones-line"
-        : (mapRef.getLayer?.("zone-labels") ? "zone-labels" : undefined);
+      // Hotspot code in app.part10.js is NOT touched.
 
-      // Source -- if this fails the whole flow is broken
+      // Register one flag-shaped icon image per color.
+      for (const color of Object.keys(COLORS)) {
+        const imgId = `ltf-flag-${color}`;
+        try {
+          if (!mapRef.hasImage?.(imgId)) {
+            const data = buildFlagImageData(color);
+            if (data) mapRef.addImage(imgId, data, { pixelRatio: 2 });
+          }
+        } catch (e) {
+          console.warn("[long-trips-block] flag-image addImage failed", color, e);
+        }
+      }
+
+      // Source -- default GeoJSON options, no quantization overrides.
       if (!mapRef.getSource?.(LTF_SOURCE_ID)) {
         mapRef.addSource(LTF_SOURCE_ID, {
           type: "geojson",
@@ -704,8 +744,8 @@
         });
       }
 
-      // Disc layer -- the most important one. Wrap in its own try so
-      // a font lookup failure on the text layer below can't kill it.
+      // Disc circle layer (anchor + fallback if the icon image
+      // can't be added). Rendered at top of layer list.
       let discAdded = false;
       try {
         if (!mapRef.getLayer?.(LTF_DISC_LAYER_ID)) {
@@ -716,9 +756,9 @@
             paint: {
               "circle-radius": [
                 "interpolate", ["linear"], ["zoom"],
-                9, 12,
-                13, 16,
-                16, 22,
+                9, 8,
+                13, 10,
+                16, 12,
               ],
               "circle-color": [
                 "match", ["get", "color"],
@@ -734,10 +774,10 @@
                 "yellow", "#a16207",
                 "#1f2937",
               ],
-              "circle-stroke-width": 2.5,
-              "circle-opacity": 0.96,
+              "circle-stroke-width": 1.5,
+              "circle-opacity": 0.85,
             },
-          }, hotspotBeforeLayer);
+          });
         }
         discAdded = true;
         console.info("[long-trips-block] disc layer added");
@@ -745,52 +785,53 @@
         console.warn("[long-trips-block] disc layer add failed:", e);
       }
 
-      // Text layer -- nice-to-have. If the font isn't in the basemap
-      // style this throws; in that case skip the text but keep the
-      // disc. The font expression includes the same fallback list
-      // that app.part12.js (which works on this basemap) uses, so
-      // this should match a font that exists.
+      // Flag icon symbol layer (the visual the driver wants).
+      // Sits on top of the disc; if the icon-image fails to resolve
+      // (addImage failed earlier) the disc stays visible underneath.
+      let iconAdded = false;
       try {
-        if (!mapRef.getLayer?.(LTF_TEXT_LAYER_ID)) {
+        if (!mapRef.getLayer?.(LTF_LAYER_ID)) {
           mapRef.addLayer({
-            id: LTF_TEXT_LAYER_ID,
+            id: LTF_LAYER_ID,
             type: "symbol",
             source: LTF_SOURCE_ID,
             layout: {
-              "text-field": FLAG_TEXT,
-              "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
-              "text-size": [
-                "interpolate", ["linear"], ["zoom"],
-                9, 9,
-                13, 11,
-                16, 13,
+              "icon-image": [
+                "match", ["get", "color"],
+                "green", "ltf-flag-green",
+                "sky", "ltf-flag-sky",
+                "yellow", "ltf-flag-yellow",
+                "ltf-flag-yellow",
               ],
-              "text-anchor": "center",
-              "text-allow-overlap": true,
-              "text-ignore-placement": true,
+              "icon-anchor": "bottom",
+              "icon-size": [
+                "interpolate", ["linear"], ["zoom"],
+                9, 0.5,
+                13, 0.75,
+                16, 1.0,
+              ],
+              "icon-allow-overlap": true,
+              "icon-ignore-placement": true,
             },
-            paint: {
-              "text-color": "#1f2937",
-              "text-halo-color": "rgba(255,255,255,0.85)",
-              "text-halo-width": 1,
-            },
-          }, hotspotBeforeLayer);
-          console.info("[long-trips-block] text layer added");
+          });
         }
+        iconAdded = true;
+        console.info("[long-trips-block] flag-icon symbol layer added");
       } catch (e) {
-        // Symbol layer failed (likely a missing font glyph in the
-        // basemap style). Drivers will see the disc without the
-        // "45+" overlay -- still better than DOM-marker drift.
-        console.warn("[long-trips-block] text layer add failed (disc still renders):", e);
+        console.warn("[long-trips-block] flag-icon layer add failed (disc remains visible):", e);
       }
+
       // Remove any custom WebGL layer from a previous session.
       if (mapRef.getLayer?.(LTF_CUSTOM_LAYER_ID)) {
         try { mapRef.removeLayer(LTF_CUSTOM_LAYER_ID); } catch (_) {}
       }
-      if (!discAdded) {
-        // If the disc didn't add we have no anchor for flags.
-        // Bail; DOM marker fallback stays active for visibility.
-        console.warn("[long-trips-block] disc layer never added; staying on DOM markers");
+      // Remove the legacy separate text layer if it's still around
+      // (the "45+" text is baked into the icon image now).
+      if (mapRef.getLayer?.(LTF_TEXT_LAYER_ID)) {
+        try { mapRef.removeLayer(LTF_TEXT_LAYER_ID); } catch (_) {}
+      }
+      if (!discAdded && !iconAdded) {
+        console.warn("[long-trips-block] no flag layer landed; staying on DOM markers");
         flagLayerInitStarted = false;
         return;
       }
@@ -803,10 +844,9 @@
       });
       useLayer = true;
       syncFlagLayer();
-      const hasText = !!mapRef.getLayer?.(LTF_TEXT_LAYER_ID);
       console.info(
-        `[long-trips-block] hotspot-clone layer active (zero-drift)` +
-        ` disc=yes text=${hasText ? "yes" : "no"} beforeLayer=${hotspotBeforeLayer || "(top)"}`
+        `[long-trips-block] flag layer active (zero-drift)` +
+        ` disc=${discAdded ? "yes" : "no"} icon=${iconAdded ? "yes" : "no"} (on top)`
       );
     } catch (e) {
       console.warn("[long-trips-block] custom layer init failed; falling back to DOM markers:", e);
@@ -989,6 +1029,7 @@
     // label counts as a flag press.
     const layers = [];
     if (mapRef.getLayer?.(LTF_DISC_LAYER_ID)) layers.push(LTF_DISC_LAYER_ID);
+    if (mapRef.getLayer?.(LTF_LAYER_ID)) layers.push(LTF_LAYER_ID);
     if (mapRef.getLayer?.(LTF_TEXT_LAYER_ID)) layers.push(LTF_TEXT_LAYER_ID);
     if (!layers.length) return null;
     let features;
