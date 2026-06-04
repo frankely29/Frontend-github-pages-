@@ -829,8 +829,19 @@
       //
       // Hotspot code in app.part10.js is NOT touched.
 
-      // Source -- used by the disc/text fallback path. Custom layer
-      // ignores it and reads from setFlags() instead.
+      // Disc + text renderer — the proven zero-drift path that drivers
+      // confirmed works (PR #968 / PR #970). The custom WebGL approach
+      // attempted in #971/#972/#973 reintroduced drift on iOS Safari
+      // every time, despite multiple attempts (mercator-matrix shader,
+      // CPU projection, etc.). Reverting to this known-good renderer
+      // until we have a different strategy for the flag shape.
+      //
+      // No `beforeLayer` argument on addLayer, so layers append to the
+      // END of the layer list and render on top of zone fills/labels.
+      //
+      // Hotspot code in app.part10.js is NOT touched.
+
+      // Source for the disc + text layers.
       if (!mapRef.getSource?.(LTF_SOURCE_ID)) {
         mapRef.addSource(LTF_SOURCE_ID, {
           type: "geojson",
@@ -838,124 +849,90 @@
         });
       }
 
-      // 1. Try the custom WebGL flag layer first.
-      let customAdded = false;
-      try {
-        if (mapRef.getLayer?.(LTF_CUSTOM_LAYER_ID)) {
-          try { mapRef.removeLayer(LTF_CUSTOM_LAYER_ID); } catch (_) {}
-        }
-        flagCustomLayer = createFlagCustomLayer();
-        mapRef.addLayer(flagCustomLayer);
-        // IMPORTANT: MapLibre calls our `onAdd` on the NEXT render frame,
-        // not synchronously inside `addLayer`. So we cannot inspect
-        // `_program` here — it will always be null. Trust addLayer's
-        // success: once the layer is registered, render() will fire
-        // once onAdd has wired up the shaders/buffers/texture.
-        //
-        // setFlags() may be called between now and onAdd (in fact the
-        // syncFlagLayer() below does exactly that — it pushes the
-        // current flags into the layer). The layer stores them in
-        // `_flags`; render() rebuilds the GPU buffer from `_flags`
-        // each frame using the current map projection.
-        if (mapRef.getLayer?.(LTF_CUSTOM_LAYER_ID)) {
-          customAdded = true;
-          console.info("[long-trips-block] custom WebGL flag layer added (shape + zero-drift)");
-        }
-      } catch (e) {
-        console.warn("[long-trips-block] custom layer init failed; falling back:", e);
-        flagCustomLayer = null;
-      }
-
-      // 2. Disc + text fallback (only when custom failed).
       let discAdded = false;
       let textAdded = false;
-      if (!customAdded) {
-        try {
-          if (!mapRef.getLayer?.(LTF_DISC_LAYER_ID)) {
-            mapRef.addLayer({
-              id: LTF_DISC_LAYER_ID,
-              type: "circle",
-              source: LTF_SOURCE_ID,
-              paint: {
-                "circle-radius": [
-                  "interpolate", ["linear"], ["zoom"],
-                  9, 12,
-                  13, 16,
-                  16, 22,
-                ],
-                "circle-color": [
-                  "match", ["get", "color"],
-                  "green", "#10b981",
-                  "sky", "#38bdf8",
-                  "yellow", "#facc15",
-                  "#94a3b8",
-                ],
-                "circle-stroke-color": [
-                  "match", ["get", "color"],
-                  "green", "#047857",
-                  "sky", "#0369a1",
-                  "yellow", "#a16207",
-                  "#1f2937",
-                ],
-                "circle-stroke-width": 2.5,
-                "circle-opacity": 0.96,
-              },
-            });
-          }
-          discAdded = true;
-          console.info("[long-trips-block] disc fallback layer added");
-        } catch (e) {
-          console.warn("[long-trips-block] disc layer add failed:", e);
+      try {
+        if (!mapRef.getLayer?.(LTF_DISC_LAYER_ID)) {
+          mapRef.addLayer({
+            id: LTF_DISC_LAYER_ID,
+            type: "circle",
+            source: LTF_SOURCE_ID,
+            paint: {
+              "circle-radius": [
+                "interpolate", ["linear"], ["zoom"],
+                9, 12,
+                13, 16,
+                16, 22,
+              ],
+              "circle-color": [
+                "match", ["get", "color"],
+                "green", "#10b981",
+                "sky", "#38bdf8",
+                "yellow", "#facc15",
+                "#94a3b8",
+              ],
+              "circle-stroke-color": [
+                "match", ["get", "color"],
+                "green", "#047857",
+                "sky", "#0369a1",
+                "yellow", "#a16207",
+                "#1f2937",
+              ],
+              "circle-stroke-width": 2.5,
+              "circle-opacity": 0.96,
+            },
+          });
         }
-        try {
-          if (!mapRef.getLayer?.(LTF_TEXT_LAYER_ID)) {
-            mapRef.addLayer({
-              id: LTF_TEXT_LAYER_ID,
-              type: "symbol",
-              source: LTF_SOURCE_ID,
-              layout: {
-                "text-field": FLAG_TEXT,
-                "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
-                "text-size": [
-                  "interpolate", ["linear"], ["zoom"],
-                  9, 9,
-                  13, 11,
-                  16, 13,
-                ],
-                "text-anchor": "center",
-                "text-allow-overlap": true,
-                "text-ignore-placement": true,
-              },
-              paint: {
-                "text-color": "#1f2937",
-                "text-halo-color": "rgba(255,255,255,0.85)",
-                "text-halo-width": 1,
-              },
-            });
-          }
-          textAdded = true;
-          console.info("[long-trips-block] text fallback layer added");
-        } catch (e) {
-          console.warn("[long-trips-block] text layer add failed:", e);
+        discAdded = true;
+        console.info("[long-trips-block] disc layer added");
+      } catch (e) {
+        console.warn("[long-trips-block] disc layer add failed:", e);
+      }
+      try {
+        if (!mapRef.getLayer?.(LTF_TEXT_LAYER_ID)) {
+          mapRef.addLayer({
+            id: LTF_TEXT_LAYER_ID,
+            type: "symbol",
+            source: LTF_SOURCE_ID,
+            layout: {
+              "text-field": FLAG_TEXT,
+              "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
+              "text-size": [
+                "interpolate", ["linear"], ["zoom"],
+                9, 9,
+                13, 11,
+                16, 13,
+              ],
+              "text-anchor": "center",
+              "text-allow-overlap": true,
+              "text-ignore-placement": true,
+            },
+            paint: {
+              "text-color": "#1f2937",
+              "text-halo-color": "rgba(255,255,255,0.85)",
+              "text-halo-width": 1,
+            },
+          });
         }
-      } else {
-        // Custom succeeded — sweep any stale fallback layers from prior
-        // sessions so we don't render flags twice.
-        if (mapRef.getLayer?.(LTF_DISC_LAYER_ID)) {
-          try { mapRef.removeLayer(LTF_DISC_LAYER_ID); } catch (_) {}
-        }
-        if (mapRef.getLayer?.(LTF_TEXT_LAYER_ID)) {
-          try { mapRef.removeLayer(LTF_TEXT_LAYER_ID); } catch (_) {}
-        }
+        textAdded = true;
+        console.info("[long-trips-block] text layer added");
+      } catch (e) {
+        console.warn("[long-trips-block] text layer add failed:", e);
       }
 
-      // Remove the PR #969 icon-image symbol layer if it's still on the
-      // style from a prior session — it's the drift source.
+      // Remove the custom WebGL layer from any prior session — it
+      // reintroduced drift and is no longer the active renderer.
+      if (mapRef.getLayer?.(LTF_CUSTOM_LAYER_ID)) {
+        try { mapRef.removeLayer(LTF_CUSTOM_LAYER_ID); } catch (_) {}
+      }
+      flagCustomLayer = null;
+      // Remove the PR #969 icon-image symbol layer if it's still on
+      // the style from a prior session.
       if (mapRef.getLayer?.(LTF_LAYER_ID)) {
         try { mapRef.removeLayer(LTF_LAYER_ID); } catch (_) {}
       }
 
-      if (!customAdded && !discAdded && !textAdded) {
+      if (!discAdded && !textAdded) {
         console.warn("[long-trips-block] no flag layer landed; staying on DOM markers");
         flagLayerInitStarted = false;
         return;
@@ -970,10 +947,8 @@
       useLayer = true;
       syncFlagLayer();
       console.info(
-        `[long-trips-block] flag layer active.` +
-        ` custom=${customAdded ? "yes" : "no"}` +
-        ` disc=${discAdded ? "yes" : "no"}` +
-        ` text=${textAdded ? "yes" : "no"}`
+        `[long-trips-block] flag layer active (zero-drift)` +
+        ` disc=${discAdded ? "yes" : "no"} text=${textAdded ? "yes" : "no"}`
       );
     } catch (e) {
       console.warn("[long-trips-block] flag layer init failed; falling back to DOM markers:", e);
@@ -1133,66 +1108,27 @@
 
   function syncFlagLayer() {
     if (!useLayer || !mapRef) return;
+    const src = mapRef.getSource?.(LTF_SOURCE_ID);
+    if (!src?.setData) return;
     // Exclude the flag currently being interactively moved -- that one
     // is shown via a temp DOM marker for the duration of the drag.
     const hidden = state.activeMoveFlagId;
-    const visible = state.flags.filter((f) => f.id !== hidden);
-
-    // Push to the custom WebGL layer (active renderer when it's up).
-    if (flagCustomLayer?.setFlags) {
-      flagCustomLayer.setFlags(visible);
-    }
-
-    // Also keep the GeoJSON source in sync — the disc/text fallback
-    // layers read from it. This is a no-op when only the custom layer
-    // is active (the source has no layer consuming it), but it costs
-    // nothing and means a hot-swap between renderers Just Works.
-    const src = mapRef.getSource?.(LTF_SOURCE_ID);
-    if (src?.setData) {
-      const features = visible.map((f) => ({
+    const features = state.flags
+      .filter((f) => f.id !== hidden)
+      .map((f) => ({
         type: "Feature",
         id: f.id,
         properties: { id: f.id, color: f.color },
         geometry: { type: "Point", coordinates: [f.lng, f.lat] },
       }));
-      src.setData({ type: "FeatureCollection", features });
-    }
+    src.setData({ type: "FeatureCollection", features });
   }
 
   function flagAtScreenPoint(point) {
     if (!useLayer || !mapRef) return null;
-
-    // When the custom WebGL layer is the renderer there is no MapLibre
-    // feature to query — custom layers are opaque to queryRenderedFeatures.
-    // CPU hit-test: project each flag's lng/lat to screen px (the same
-    // math the basemap uses), then test the tap point against the flag's
-    // screen-space bounding box (matched to the rendered quad).
-    if (flagCustomLayer?._program && typeof mapRef.project === "function") {
-      const hidden = state.activeMoveFlagId;
-      const flags = state.flags.filter((f) => f.id !== hidden);
-      if (!flags.length) return null;
-      const scale = flagZoomScale(mapRef.getZoom?.());
-      const halfW = (FLAG_W_CSS / 2) * scale;
-      const fullH = FLAG_H_CSS * scale;
-      // Anchor is at pole tip (bottom of flag). Flag extends UP from
-      // anchor by fullH px and ±halfW px sideways.
-      let best = null;
-      let bestDist = Infinity;
-      for (const f of flags) {
-        let screen;
-        try { screen = mapRef.project([f.lng, f.lat]); } catch (_) { continue; }
-        const dx = point.x - screen.x;
-        const dy = point.y - screen.y;
-        if (Math.abs(dx) <= halfW && dy <= 0 && dy >= -fullH) {
-          const d = Math.hypot(dx, dy);
-          if (d < bestDist) { bestDist = d; best = f; }
-        }
-      }
-      return best;
-    }
-
-    // Fallback path: hit-test the disc/text layers via queryRenderedFeatures
-    // (the same API hotspots use).
+    // Hit-test the disc/text layers via queryRenderedFeatures (the
+    // same API hotspots use). Tap on either the disc or the "45+"
+    // label counts as a flag press.
     const layers = [];
     if (mapRef.getLayer?.(LTF_DISC_LAYER_ID)) layers.push(LTF_DISC_LAYER_ID);
     if (mapRef.getLayer?.(LTF_TEXT_LAYER_ID)) layers.push(LTF_TEXT_LAYER_ID);
