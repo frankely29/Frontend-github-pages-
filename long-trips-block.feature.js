@@ -637,6 +637,13 @@
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
         gl.bindTexture(gl.TEXTURE_2D, null);
+
+        // setFlags() runs from syncFlagLayer() before this onAdd does
+        // (MapLibre defers onAdd to the next render frame). At that
+        // moment GL resources didn't exist yet, so _uploadBuffers
+        // bailed and _flags was stashed. Flush it now so the first
+        // render() actually has a non-empty vertex buffer to draw.
+        if (this._flags.length) this._uploadBuffers();
       },
 
       onRemove(_map, gl) {
@@ -813,16 +820,20 @@
         }
         flagCustomLayer = createFlagCustomLayer();
         mapRef.addLayer(flagCustomLayer);
-        // Confirm shaders compiled and program linked. If addLayer
-        // succeeded but onAdd's shader/texture setup failed, _program
-        // stays null and we fall back below.
-        if (flagCustomLayer._program) {
+        // IMPORTANT: MapLibre calls our `onAdd` on the NEXT render frame,
+        // not synchronously inside `addLayer`. So we cannot inspect
+        // `_program` here — it will always be null. Trust addLayer's
+        // success: once the layer is registered, render() will fire
+        // once onAdd has wired up the shaders/buffers/texture.
+        //
+        // setFlags() may be called between now and onAdd (in fact the
+        // syncFlagLayer() below does exactly that — it pushes the
+        // current flags into the layer). The layer stores them in
+        // `_flags`; onAdd flushes them via `_uploadBuffers()` at the
+        // end of init so they're ready for the first render().
+        if (mapRef.getLayer?.(LTF_CUSTOM_LAYER_ID)) {
           customAdded = true;
           console.info("[long-trips-block] custom WebGL flag layer added (shape + zero-drift)");
-        } else {
-          try { mapRef.removeLayer(LTF_CUSTOM_LAYER_ID); } catch (_) {}
-          flagCustomLayer = null;
-          console.warn("[long-trips-block] custom layer added but program=null; falling back");
         }
       } catch (e) {
         console.warn("[long-trips-block] custom layer init failed; falling back:", e);
