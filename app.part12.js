@@ -411,17 +411,6 @@
 
     await core.ensurePickupSourceAndLayers?.();
 
-    await window.TlcZoneEdgeCueModule?.ensureZoneEdgeCueSourceAndLayers?.();
-
-    const frame =
-      window.TlcCommunityInternals?.getCurrentFrame?.() ||
-      window.TlcModeInternals?.getCurrentFrame?.() ||
-      null;
-
-    if (frame) {
-      window.TlcZoneEdgeCueModule?.scheduleZoneEdgeCueRefresh?.(frame);
-    }
-
     return true;
   }
 
@@ -459,7 +448,6 @@
 
     const fc = buildZoneLabelsFeatureCollection(frame);
     src.setData(fc);
-    window.TlcZoneEdgeCueModule?.scheduleZoneEdgeCueRefresh?.(frame);
   }
 
   function getFeatureCollectionBounds(fc) {
