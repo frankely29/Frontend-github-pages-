@@ -613,10 +613,13 @@
   // hit-testing the same way it did for the previous circle layer.
   // ---------------------------------------------------------------
   function buildBuildingSprite() {
-    // 32×32 canvas at 2× DPR. Simple landmark building silhouette:
-    // a tall rectangle with a triangular roof and a 3×4 window grid.
-    // Gold accents tie it back to the dollar flag visually.
-    const SIZE = 64;        // 32 CSS px × 2 DPR
+    // 80×80 canvas at 2× DPR. A 3-building skyline silhouette —
+    // universal "downtown" iconography that reads as "buildings" at
+    // small sizes far better than a single rectangle. Center building
+    // is the tallest with a slim spire (Empire-State-style); flanking
+    // buildings are stepped down on either side. Gold accents tie
+    // back to the dollar flag.
+    const SIZE = 80;
     const canvas = document.createElement("canvas");
     canvas.width = SIZE;
     canvas.height = SIZE;
@@ -624,36 +627,88 @@
     if (!ctx) return null;
     ctx.clearRect(0, 0, SIZE, SIZE);
 
-    // Building body — dark slate fill, gold border (matches flag).
-    const bodyX = 14, bodyY = 18, bodyW = 36, bodyH = 40;
-    ctx.fillStyle = "#1f2937";        // slate-900 body
-    ctx.strokeStyle = "#a16207";      // dark amber border (flag border)
-    ctx.lineWidth = 2.5;
-    ctx.fillRect(bodyX, bodyY, bodyW, bodyH);
-    ctx.strokeRect(bodyX, bodyY, bodyW, bodyH);
+    const BODY = "#1f2937";       // slate body
+    const BORDER = "#a16207";     // dark amber border (flag border)
+    const ROOF = "#fbbf24";       // gold cap (flag fill)
+    const WINDOW_ON = "#fde68a";  // pale gold "lit window"
 
-    // Flat roof cap — slim gold band on top.
-    ctx.fillStyle = "#fbbf24";        // gold (matches flag fill)
-    ctx.fillRect(bodyX - 2, bodyY - 4, bodyW + 4, 4);
-    ctx.strokeRect(bodyX - 2, bodyY - 4, bodyW + 4, 4);
+    const groundY = 70;
 
-    // Window grid — 3 columns × 4 rows of small light squares to
-    // unmistakably read as "building" at small sizes.
-    ctx.fillStyle = "#fde68a";        // pale gold windows
-    const winW = 6, winH = 5;
-    const padX = 4, padY = 3;
-    const cols = 3, rows = 4;
-    const innerX = bodyX + padX;
-    const innerY = bodyY + padY;
-    const stepX = (bodyW - 2 * padX - winW) / (cols - 1);
-    const stepY = (bodyH - 2 * padY - winH) / (rows - 1);
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        ctx.fillRect(innerX + c * stepX, innerY + r * stepY, winW, winH);
+    ctx.lineWidth = 1.8;
+    ctx.strokeStyle = BORDER;
+
+    // ----- Left building (shortest)
+    const aX = 8, aW = 18, aY = 40, aH = groundY - aY;
+    ctx.fillStyle = BODY;
+    ctx.fillRect(aX, aY, aW, aH);
+    ctx.strokeRect(aX, aY, aW, aH);
+    ctx.fillStyle = ROOF;
+    ctx.fillRect(aX - 1, aY - 3, aW + 2, 3);
+    ctx.strokeRect(aX - 1, aY - 3, aW + 2, 3);
+    ctx.fillStyle = WINDOW_ON;
+    for (let c = 0; c < 2; c++) {
+      for (let r = 0; r < 3; r++) {
+        ctx.fillRect(aX + 3 + c * 7, aY + 4 + r * 8, 4, 5);
       }
     }
-    // Return as an ImageData-compatible object MapLibre accepts. The
-    // ImageBitmap-style {width, height, data} works for all versions.
+
+    // ----- Right building (medium with notched top)
+    const cX = 54, cW = 18, cY = 32, cH = groundY - cY;
+    ctx.fillStyle = BODY;
+    ctx.fillRect(cX, cY, cW, cH);
+    ctx.strokeRect(cX, cY, cW, cH);
+    ctx.fillRect(cX + 3, cY - 4, cW - 6, 4);
+    ctx.strokeRect(cX + 3, cY - 4, cW - 6, 4);
+    ctx.fillStyle = ROOF;
+    ctx.fillRect(cX + 5, cY - 7, cW - 10, 3);
+    ctx.strokeRect(cX + 5, cY - 7, cW - 10, 3);
+    ctx.fillStyle = WINDOW_ON;
+    for (let c = 0; c < 2; c++) {
+      for (let r = 0; r < 4; r++) {
+        ctx.fillRect(cX + 3 + c * 7, cY + 4 + r * 8, 4, 5);
+      }
+    }
+
+    // ----- Center building (tallest, Empire-State-style stepped top
+    // with a slim gold spire). Drawn last so it visually sits on top
+    // of overlapping flank buildings.
+    const bX = 26, bW = 24, bY = 18, bH = groundY - bY;
+    // Wider base tier
+    ctx.fillStyle = BODY;
+    ctx.fillRect(bX - 3, groundY - 14, bW + 6, 14);
+    ctx.strokeRect(bX - 3, groundY - 14, bW + 6, 14);
+    // Main tower
+    ctx.fillRect(bX, bY, bW, bH - 14);
+    ctx.strokeRect(bX, bY, bW, bH - 14);
+    // Stepped top cap
+    ctx.fillRect(bX + 4, bY - 6, bW - 8, 6);
+    ctx.strokeRect(bX + 4, bY - 6, bW - 8, 6);
+    // Gold spire pedestal
+    ctx.fillStyle = ROOF;
+    ctx.fillRect(bX + bW / 2 - 3, bY - 9, 6, 3);
+    ctx.strokeRect(bX + bW / 2 - 3, bY - 9, 6, 3);
+    // Thin spire pole + finial ball
+    ctx.fillRect(bX + bW / 2 - 1, bY - 16, 2, 7);
+    ctx.beginPath();
+    ctx.arc(bX + bW / 2, bY - 18, 2.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    // Tower windows — 3 cols × 5 rows
+    ctx.fillStyle = WINDOW_ON;
+    for (let c = 0; c < 3; c++) {
+      for (let r = 0; r < 5; r++) {
+        ctx.fillRect(bX + 3 + c * 6, bY + 4 + r * 8, 4, 5);
+      }
+    }
+    // Base-tier windows — 5 cols × 1 row (taller storefronts)
+    for (let c = 0; c < 5; c++) {
+      ctx.fillRect(bX - 1 + c * 6, groundY - 11, 4, 7);
+    }
+
+    // ----- Ground line tying the three buildings together
+    ctx.fillStyle = BORDER;
+    ctx.fillRect(4, groundY, SIZE - 8, 2);
+
     const img = ctx.getImageData(0, 0, SIZE, SIZE);
     return { width: SIZE, height: SIZE, data: img.data };
   }
@@ -718,12 +773,14 @@
           minzoom: BLDG_MIN_ZOOM, // hidden at city-overview zooms
           layout: {
             "icon-image": BLDG_IMAGE_ID,
+            // Larger size curve than before so the 3-building skyline
+            // detail (windows, spire) is readable at normal zoom.
             "icon-size": [
               "interpolate", ["linear"], ["zoom"],
-              BLDG_MIN_ZOOM, 0.5,
-              14, 0.7,
-              16, 1.0,
-              18, 1.3,
+              BLDG_MIN_ZOOM, 0.65,
+              14, 0.90,
+              16, 1.20,
+              18, 1.55,
             ],
             "icon-allow-overlap": true,
             "icon-ignore-placement": true,
