@@ -15,6 +15,7 @@
   const LS_KEY_BRONX_WASH_HEIGHTS = "bronx_wash_heights_mode";
   const LS_KEY_QUEENS = "queens_mode_enabled";
   const LS_KEY_BROOKLYN = "brooklyn_mode_enabled";
+  const LS_KEY_TRIPS_45PLUS = "trips_45plus_mode_enabled";
 
   const MANHATTAN_PICKUP_WEIGHT = 0.40;
   const MANHATTAN_NEXT_BIN_WEIGHT = 0.35;
@@ -58,6 +59,11 @@
   let manhattanMode = (localStorage.getItem(LS_KEY_MANHATTAN) || "0") === "1";
   let queensMode = (localStorage.getItem(LS_KEY_QUEENS) || "0") === "1";
   let brooklynMode = (localStorage.getItem(LS_KEY_BROOKLYN) || "0") === "1";
+  // "45+ trips mode" — citywide scope: when on, every zone gets the
+  // trips_45plus_v3 score regardless of borough. Takes precedence over
+  // the borough-scoped modes (see getVisibleScoreSourceForFeature and
+  // getModeAwareBaseRating).
+  let trips45plusV3Mode = (localStorage.getItem(LS_KEY_TRIPS_45PLUS) || "0") === "1";
 
   function isStatenIslandFeature(props) {
     const b = (props?.borough || "").toString().toLowerCase();
@@ -127,6 +133,7 @@
     manhattanMode = !!manhattanMode;
     queensMode = !!queensMode;
     brooklynMode = !!brooklynMode;
+    trips45plusV3Mode = !!trips45plusV3Mode;
   }
 
   function persistSpecialModeState() {
@@ -135,6 +142,7 @@
     localStorage.setItem(LS_KEY_STATEN, statenIslandMode ? "1" : "0");
     localStorage.setItem(LS_KEY_QUEENS, queensMode ? "1" : "0");
     localStorage.setItem(LS_KEY_BROOKLYN, brooklynMode ? "1" : "0");
+    localStorage.setItem(LS_KEY_TRIPS_45PLUS, trips45plusV3Mode ? "1" : "0");
   }
 
   function ensureManhattanButton() {
@@ -173,10 +181,48 @@
 
   const btnManhattan = ensureManhattanButton();
 
+  function ensureTrips45plusButton() {
+    let btn = document.getElementById("btnTrips45plus");
+    if (btn) return btn;
+    btn = document.createElement("button");
+    btn.id = "btnTrips45plus";
+    btn.type = "button";
+    btn.className = "navBtn";
+    btn.style.marginLeft = "6px";
+    btn.style.padding = "6px 10px";
+    btn.style.borderRadius = "10px";
+    btn.style.border = "1px solid rgba(0,0,0,0.2)";
+    btn.style.background = "rgba(255,255,255,0.95)";
+    btn.style.fontWeight = "700";
+    btn.style.fontSize = "12px";
+    const navRow =
+      document.getElementById("navRow") ||
+      (legendEl ? legendEl.querySelector(".navRow") : null) ||
+      legendEl;
+    if (navRow) {
+      if (btnManhattan && btnManhattan.parentElement === navRow) {
+        btnManhattan.insertAdjacentElement("afterend", btn);
+      } else {
+        navRow.appendChild(btn);
+      }
+    } else {
+      document.body.appendChild(btn);
+    }
+    return btn;
+  }
+
+  const btnTrips45plus = ensureTrips45plusButton();
+
   function syncManhattanUI() {
     if (!btnManhattan) return;
     btnManhattan.textContent = manhattanMode ? "Manhattan Mode: ON" : "Manhattan Mode: OFF";
     btnManhattan.classList.toggle("on", !!manhattanMode);
+  }
+
+  function syncTrips45plusV3UI() {
+    if (!btnTrips45plus) return;
+    btnTrips45plus.textContent = trips45plusV3Mode ? "45+ Trips Mode: ON" : "45+ Trips Mode: OFF";
+    btnTrips45plus.classList.toggle("on", !!trips45plusV3Mode);
   }
 
   function syncQueensUI() {
@@ -370,6 +416,16 @@
     return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : NaN;
   }
 
+  function readTrips45plusV3ShadowRating(props) {
+    const n = Number(props?.earnings_shadow_rating_trips_45plus_v3 ?? NaN);
+    return Number.isFinite(n) ? Math.max(1, Math.min(100, Math.round(n))) : NaN;
+  }
+
+  function readTrips45plusV3ShadowConfidence(props) {
+    const n = Number(props?.earnings_shadow_confidence_trips_45plus_v3 ?? NaN);
+    return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : NaN;
+  }
+
   function readQueensShadowRating(props) {
     const n = Number(props?.earnings_shadow_rating_queens_v2 ?? NaN);
     return Number.isFinite(n) ? Math.max(1, Math.min(100, Math.round(n))) : NaN;
@@ -542,6 +598,11 @@
   }
 
   function getVisibleScoreSourceForFeature(props, geom) {
+    // 45+ Trips Mode is citywide; takes precedence over borough modes.
+    if (trips45plusV3Mode) {
+      if (Number.isFinite(readTrips45plusV3ShadowRating(props))) return "trips_45plus_v3_shadow";
+    }
+
     if (queensMode && isQueensModeZone(props)) {
       if (Number.isFinite(readQueensV3ShadowRating(props))) return "queens_v3_shadow";
       if (Number.isFinite(readQueensShadowRating(props))) return "queens_shadow";
@@ -611,6 +672,8 @@
       case "staten_island_shadow":
       case "staten_island_mode_legacy":
         return "Staten Island Team Joseo score";
+      case "trips_45plus_v3_shadow":
+        return "45+ Trips Team Joseo score";
       default:
         return "Team Joseo score";
     }
@@ -654,6 +717,8 @@
         return "staten_island_v2 fallback shadow";
       case "staten_island_mode_legacy":
         return "staten_island legacy fallback";
+      case "trips_45plus_v3_shadow":
+        return "trips_45plus_v3 live shadow";
       case "legacy_citywide":
         return "legacy citywide fallback";
       default:
@@ -680,6 +745,12 @@
   }
 
   function getModeAwareBaseRating(props, geom) {
+    // 45+ Trips Mode is citywide; takes precedence over borough modes.
+    if (trips45plusV3Mode) {
+      const shadowRating = readTrips45plusV3ShadowRating(props);
+      if (Number.isFinite(shadowRating)) return shadowRating;
+    }
+
     if (queensMode && isQueensModeZone(props)) {
       const shadowRatingV3 = readQueensV3ShadowRating(props);
       if (Number.isFinite(shadowRatingV3)) return shadowRatingV3;
@@ -1462,7 +1533,14 @@
   }
 
   function getModeFlags() {
-    return { statenIslandMode, bronxWashHeightsMode, manhattanMode, queensMode, brooklynMode };
+    return {
+      statenIslandMode,
+      bronxWashHeightsMode,
+      manhattanMode,
+      queensMode,
+      brooklynMode,
+      trips45plusV3Mode,
+    };
   }
 
   function normalizeModeKey(key) {
@@ -1482,6 +1560,11 @@
       case "brooklyn":
       case "brooklynMode":
         return "brooklyn";
+      case "trips45plus":
+      case "trips45plusV3":
+      case "trips45plusV3Mode":
+      case "trips_45plus_v3":
+        return "trips45plus";
       default:
         return "";
     }
@@ -1507,6 +1590,9 @@
       case "brooklyn":
         brooklynMode = useDesiredState ? desiredState : !brooklynMode;
         break;
+      case "trips45plus":
+        trips45plusV3Mode = useDesiredState ? desiredState : !trips45plusV3Mode;
+        break;
       default:
         return getModeFlags();
     }
@@ -1518,6 +1604,7 @@
     syncManhattanUI();
     syncQueensUI();
     syncBrooklynUI();
+    syncTrips45plusV3UI();
     const flags = getModeFlags();
     window.dispatchEvent(new CustomEvent('tlc-mode-changed', { detail: flags }));
     return flags;
@@ -1674,6 +1761,17 @@
       e.preventDefault();
       e.stopPropagation();
       toggleModeByKey("bronxWashHeights");
+      core.renderCurrentFrame?.();
+    });
+  }
+
+  if (btnTrips45plus) {
+    btnTrips45plus.addEventListener("pointerdown", (e) => e.stopPropagation());
+    btnTrips45plus.addEventListener("touchstart", (e) => e.stopPropagation(), { passive: true });
+    btnTrips45plus.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleModeByKey("trips45plus");
       core.renderCurrentFrame?.();
     });
   }
@@ -1838,4 +1936,5 @@
   syncManhattanUI();
   syncQueensUI();
   syncBrooklynUI();
+  syncTrips45plusV3UI();
 })();
