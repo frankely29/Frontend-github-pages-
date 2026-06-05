@@ -196,10 +196,19 @@
       .ltb-flag.is-moving .ltb-flag-scale {
         filter: drop-shadow(0 0 6px rgba(59,130,246,0.95));
         animation: ltb-move-bob 800ms ease-in-out infinite alternate;
+        /* Hold transparency while adjusting position so drivers can
+           still see the street/zone underneath the marker. Returns to
+           full opacity once cleanup() removes the is-moving class
+           (placement confirmed or cancelled). */
+        opacity: 0.55;
       }
       .ltb-flag.is-preview .ltb-flag-scale {
         filter: drop-shadow(0 0 6px rgba(16,185,129,0.95));
         animation: ltb-move-bob 800ms ease-in-out infinite alternate;
+        /* Same transparency rule for the new-flag placement preview —
+           drivers are picking the spot; let them see what they're
+           pointing at. */
+        opacity: 0.55;
       }
       @keyframes ltb-move-bob {
         from { transform: scale(var(--ltb-zoom-scale, 1)) translateY(0); }
