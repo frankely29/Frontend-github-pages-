@@ -2003,6 +2003,19 @@ function initMap() {
     },
     center: [-73.98, 40.73],
     zoom: STARTUP_INITIAL_USER_ZOOM,
+    // Constrain the camera to NY + NJ + PA so the basemap never fetches
+    // tiles for the rest of the US. All actual data (zones, hotspots,
+    // flags, presence) is already NYC-scoped; this bounds the visual
+    // basemap too. Coordinates are [west, south] → [east, north] with a
+    // small margin for inertial pan/zoom past the strict state edges.
+    //   NY:   -79.8 → -71.85, 40.5 → 45.0
+    //   NJ:   -75.6 → -73.9,  38.93 → 41.36
+    //   PA:   -80.5 → -74.7,  39.72 → 42.27
+    maxBounds: [[-80.7, 38.7], [-71.7, 45.2]],
+    // Don't let the user zoom out far enough to see neighboring states
+    // outside the tri-state area. Below ~zoom 6 you start seeing the
+    // full east coast.
+    minZoom: 6,
     attributionControl: { position: "bottom-right" },
     localIdeographFontFamily: "sans-serif",
   });
