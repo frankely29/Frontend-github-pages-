@@ -38,15 +38,23 @@
   const DIM_TICK_INTERVAL_MS = 60 * 1000;    // re-evaluate time-of-day dim every minute
 
   // Dim multipliers applied to the flag (premultiplied alpha in shader)
-  // and the building dots (data-driven circle-opacity).
+  // and the building dots (data-driven circle-opacity). Medium is set
+  // high (0.95) so flags stay clearly visible during normal hours;
+  // only off-hours produce a noticeable fade.
   const DIM_PEAK = 1.0;    // peak: full brightness
-  const DIM_MEDIUM = 0.6;  // neither peak nor off
-  const DIM_OFF = 0.22;    // off: very faded, still visible enough to register
+  const DIM_MEDIUM = 0.95; // normal hours: very nearly full
+  const DIM_OFF = 0.25;    // off hours: visibly faded but still readable
 
   // Source/layer IDs
   const BLDG_SOURCE_ID = "lth-buildings";
-  const BLDG_LAYER_ID = "lth-buildings-circle";
+  const BLDG_LAYER_ID = "lth-buildings-icon";  // symbol layer (🏢 emoji)
   const FLAG_CUSTOM_LAYER_ID = "lth-flags-custom-gl";
+
+  // Hide the building icons below this zoom so they don't crowd the
+  // map at city-overview scales. Drivers see flags only at low zoom;
+  // when they zoom in to inspect a cluster, the individual buildings
+  // appear.
+  const BLDG_MIN_ZOOM = 14;
 
   // ---------------------------------------------------------------
   // Module state
@@ -330,12 +338,21 @@
     return { canvas, flagW, flagH, padW, W, H, slices: FLAG_ATLAS_SLICES };
   }
 
+  // Wider zoom-size curve so flags shrink at city-overview zooms (avoid
+  // crowding) and grow at street-level zooms (clearly visible target).
+  // Linear piecewise interpolation:
+  //   z ≤ 10   → 0.35  (city overview — tiny)
+  //   z 10–13  → 0.35 → 0.80
+  //   z 13–15  → 0.80 → 1.20
+  //   z 15–17  → 1.20 → 1.65
+  //   z ≥ 17   → 1.65  (street level — bold)
   function flagZoomScale(z) {
-    if (!Number.isFinite(z)) return 0.85;
-    if (z <= 9) return 0.60;
-    if (z >= 16) return 1.10;
-    if (z <= 13) return 0.60 + (0.85 - 0.60) * ((z - 9) / 4);
-    return 0.85 + (1.10 - 0.85) * ((z - 13) / 3);
+    if (!Number.isFinite(z)) return 0.80;
+    if (z <= 10) return 0.35;
+    if (z >= 17) return 1.65;
+    if (z <= 13) return 0.35 + (0.80 - 0.35) * ((z - 10) / 3);
+    if (z <= 15) return 0.80 + (1.20 - 0.80) * ((z - 13) / 2);
+    return 1.20 + (1.65 - 1.20) * ((z - 15) / 2);
   }
 
   function createFlagCustomLayer() {
@@ -621,23 +638,30 @@
       try {
         mapRef.addLayer({
           id: BLDG_LAYER_ID,
-          type: "circle",
+          type: "symbol",
           source: BLDG_SOURCE_ID,
-          paint: {
-            "circle-radius": [
+          minzoom: BLDG_MIN_ZOOM, // hidden at city-overview zooms
+          layout: {
+            // Emoji renders cross-platform without needing a sprite.
+            "text-field": "🏢",
+            "text-size": [
               "interpolate", ["linear"], ["zoom"],
-              10, 2.5,
-              13, 4,
-              16, 6.5,
+              BLDG_MIN_ZOOM, 14,
+              16, 20,
+              18, 28,
             ],
-            "circle-color": "#0f9d58",
-            "circle-stroke-color": "#ffffff",
-            "circle-stroke-width": 1.4,
+            "text-allow-overlap": true,
+            "text-ignore-placement": true,
+            "text-anchor": "center",
+          },
+          paint: {
             // Data-driven dim — each feature carries its parent
             // hotspot's current dim value (recomputed every minute
-            // by the dim tick).
-            "circle-opacity": ["coalesce", ["get", "dim"], 0.95],
-            "circle-stroke-opacity": ["coalesce", ["get", "dim"], 0.95],
+            // by the dim tick). Emoji is fully colored; we fade it
+            // via text-opacity.
+            "text-opacity": ["coalesce", ["get", "dim"], 0.95],
+            "text-halo-color": "#ffffff",
+            "text-halo-width": 1.2,
           },
         });
       } catch (e) {
@@ -880,27 +904,37 @@
     `;
   }
 
+  // The zone-popup click handler in app.js is registered before ours
+  // and there's no way to stop its propagation in MapLibre. So when
+  // our handler detects a flag/building hit, we close the zone popup
+  // that the earlier handler just opened.
+  function closeAnyZonePopup() {
+    try {
+      document.querySelectorAll(".maplibregl-popup").forEach((node) => {
+        try { node.remove(); } catch (_) {}
+      });
+    } catch (_) {}
+  }
+
   function attachClickHandler(map) {
-    // Match the long-trips-block convention: handle clicks/taps on the
-    // map canvas. Long-press on the map is reserved for the 45+ flag
-    // feature; we only react to short taps. e.preventDefault here would
-    // break pan, so we rely on the long-press handler in the other
-    // file having already absorbed the click if it consumed it.
     map.on("click", (e) => {
       const pt = e.point;
-      // 1. Building dot has priority — it's smaller and more specific.
+      // 1. Building icon has priority — it's smaller and more specific.
       const feat = buildingAtScreenPoint(pt);
       if (feat) {
+        closeAnyZonePopup();
         showPopup(buildingPopupHtml(feat.properties || {}), pt);
         return;
       }
       // 2. Hotspot flag (CPU hit-test against the WebGL quads).
       const h = hotspotAtScreenPoint(pt);
       if (h) {
+        closeAnyZonePopup();
         showPopup(flagPopupHtml(h), pt);
         return;
       }
-      // 3. Tap on empty map closes any open popup.
+      // 3. Tap on empty map (or a bare zone) closes our popup; the
+      // zone popup handler will decide whether to open the zone one.
       closePopup();
     });
     map.on("movestart", closePopup);
