@@ -426,6 +426,22 @@
     return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : NaN;
   }
 
+  // Raw premium-long-trip aggregates exposed by backend PR #466 as
+  // *_shadow output fields. Used by the popup to show drivers WHY a
+  // zone scored highly in 45+ Trips mode (count + avg length + share).
+  function readPremiumLongTripShareShadow(props) {
+    const n = Number(props?.premium_long_trip_share_shadow ?? NaN);
+    return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : NaN;
+  }
+  function readPremiumLongTripAvgMinutesShadow(props) {
+    const n = Number(props?.premium_long_trip_avg_minutes_shadow ?? NaN);
+    return Number.isFinite(n) ? n : NaN;
+  }
+  function readPremiumLongTripAvgMilesShadow(props) {
+    const n = Number(props?.premium_long_trip_avg_miles_shadow ?? NaN);
+    return Number.isFinite(n) ? n : NaN;
+  }
+
   function readQueensShadowRating(props) {
     const n = Number(props?.earnings_shadow_rating_queens_v2 ?? NaN);
     return Number.isFinite(n) ? Math.max(1, Math.min(100, Math.round(n))) : NaN;
@@ -1926,7 +1942,12 @@
     readStatenIslandV3ShadowRating,
     readStatenIslandV3ShadowBucket,
     readStatenIslandV3ShadowColor,
-    readStatenIslandV3ShadowConfidence
+    readStatenIslandV3ShadowConfidence,
+    readTrips45plusV3ShadowRating,
+    readTrips45plusV3ShadowConfidence,
+    readPremiumLongTripShareShadow,
+    readPremiumLongTripAvgMinutesShadow,
+    readPremiumLongTripAvgMilesShadow
   };
 
   enforceSpecialModeExclusivity();
