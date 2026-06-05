@@ -629,7 +629,24 @@
     const ctx = canvas.getContext("2d");
     if (!ctx) return null;
     for (let i = 0; i < FLAG_ATLAS_SLICES.length; i++) {
-      drawFlagInto(ctx, FLAG_ATLAS_SLICES[i], i * padW, 0, flagW, flagH);
+      const xOff = i * padW;
+      // The pennant in drawFlagInto extends ~32% past the slice's right
+      // edge (pW = round(W * 0.82) starting at W/2). Without a clip,
+      // the previous slice's pennant paints into the NEXT slice's
+      // area, and the next slice's own draw doesn't fully cover it —
+      // the overflowed pennant pixels persist on the LEFT of the next
+      // slice's sample area, which is the green-ghost-left-of-sky bug.
+      // PR #986's 2-pixel gutter wasn't enough because the overflow is
+      // ~22 device pixels.
+      //
+      // Clip the canvas to the slice's bounding rect so the overflow
+      // is discarded instead of bleeding into the neighbor.
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(xOff, 0, flagW, flagH);
+      ctx.clip();
+      drawFlagInto(ctx, FLAG_ATLAS_SLICES[i], xOff, 0, flagW, flagH);
+      ctx.restore();
     }
     return { canvas, flagW, flagH, padW, W, H, slices: FLAG_ATLAS_SLICES };
   }
