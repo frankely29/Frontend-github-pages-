@@ -2661,6 +2661,11 @@ function getRenderVisualSignature(modeFlags) {
     flags.manhattanMode ? 1 : 0,
     flags.queensMode ? 1 : 0,
     flags.brooklynMode ? 1 : 0,
+    // Must include trips45plusV3Mode so toggling it produces a new
+    // cache key. Without this, renderFrame hits the previous-mode
+    // cache and reuses the prior colored features — driver's
+    // "nothing happens when I toggle" symptom.
+    flags.trips45plusV3Mode ? 1 : 0,
     tendencySig,
   ].join("|");
 }
