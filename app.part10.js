@@ -3274,6 +3274,22 @@ function makeDriverIcon(name, headingDeg, avatarUrl = "", mode = "name", orbitMe
   return el;
 }
 
+// Hide the DOM marker's avatar <img> for drivers whose WebGL texture
+// is loaded. The rest of the marker (name label, badge, click area)
+// stays visible — only the visible avatar is swapped to the zero-drift
+// WebGL render.
+if (typeof window !== "undefined" && !window.onPresenceAvatarLayerReady) {
+  window.onPresenceAvatarLayerReady = function (userId) {
+    const mk = otherMarkers.get(String(userId)) || otherMarkers.get(userId);
+    const el = mk?.getElement?.();
+    if (!el) return;
+    const img = el.querySelector?.(".mapPresenceAvatar");
+    if (img && img.style.visibility !== "hidden") {
+      img.style.visibility = "hidden";
+    }
+  };
+}
+
 function clearOtherDrivers() {
   resetPresenceSnapshotOverflowState();
   for (const m of otherMarkers.values()) {
@@ -3286,6 +3302,7 @@ function clearOtherDrivers() {
   cachedPresenceFingerprint = '';
   renderedPresenceFingerprint = '';
   presenceFocusedUserId = null;
+  try { window.TlcPresenceAvatarLayerModule?.reset?.(); } catch (_) {}
   presenceLastSyncTimestamp = 0;
   presenceLastSyncCursor = 0;
   presenceDeltaMode = 'probe';
@@ -3861,6 +3878,31 @@ function renderAdaptivePresenceFromCache() {
   }
 
   clusterPresenceByScreenPosition(richRows, selfPos);
+
+  // Zero-drift avatar pass. The custom WebGL layer (PR for presence
+  // drift) renders each driver's avatar at exactly the screen pixel
+  // map.project() resolves to, in the same GL commit as the basemap.
+  // DOM markers still create the avatar element below as a fallback
+  // (and as the carrier for name label + click handler), but the
+  // visible avatar <img> is hidden once the WebGL texture is loaded
+  // (see installPresenceAvatarReadyCallback at module-init below).
+  try {
+    if (map && window.TlcPresenceAvatarLayerModule) {
+      window.TlcPresenceAvatarLayerModule.ensureInstalled?.(map);
+      window.TlcPresenceAvatarLayerModule.setDrivers?.(
+        richRows
+          .filter((r) => r.avatarUrl)
+          .map((r) => ({
+            userId: r.uid,
+            lng: r.lng,
+            lat: r.lat,
+            avatarUrl: r.avatarUrl,
+          }))
+      );
+    }
+  } catch (e) {
+    console.warn("[presence-avatars] update failed:", e);
+  }
 
   for (const row of richRows) {
     upsertDriverMarker(
