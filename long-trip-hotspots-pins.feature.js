@@ -53,14 +53,15 @@
 
   // Source/layer IDs
   const BLDG_SOURCE_ID = "lth-buildings";
-  const BLDG_LAYER_ID = "lth-buildings-icon";  // symbol layer (🏢 emoji)
+  const BLDG_LAYER_ID = "lth-buildings-icon";  // symbol layer (building sprite)
+  const BLDG_IMAGE_ID = "lth-building-sprite"; // sprite registered via map.addImage
   const FLAG_CUSTOM_LAYER_ID = "lth-flags-custom-gl";
 
-  // Hide the building icons below this zoom so they don't crowd the
-  // map at city-overview scales. Drivers see flags only at low zoom;
-  // when they zoom in to inspect a cluster, the individual buildings
-  // appear.
-  const BLDG_MIN_ZOOM = 14;
+  // Show building icons at zoom ≥ 12 (mid-borough scale). Previously
+  // 14 was too tight — drivers couldn't see them at most working
+  // zooms. 12 keeps them visible at normal driving zooms while
+  // hiding them when looking at the whole city.
+  const BLDG_MIN_ZOOM = 12;
 
   // ---------------------------------------------------------------
   // Module state
@@ -602,10 +603,72 @@
   }
 
   // ---------------------------------------------------------------
-  // Building circle layer — MapLibre's built-in circle type. Tiny
-  // dots, so any sub-pixel drift would be invisible anyway, and
-  // queryRenderedFeatures works out of the box for click handling.
+  // Building marker layer — a small "building" sprite (simple gold
+  // tower silhouette with windows) rendered via MapLibre's symbol
+  // layer. We generate the sprite on a canvas and register it via
+  // map.addImage() — that's reliable across every browser/device,
+  // unlike Unicode emoji which depend on the device font.
+  //
+  // queryRenderedFeatures works against the symbol layer for click
+  // hit-testing the same way it did for the previous circle layer.
   // ---------------------------------------------------------------
+  function buildBuildingSprite() {
+    // 32×32 canvas at 2× DPR. Simple landmark building silhouette:
+    // a tall rectangle with a triangular roof and a 3×4 window grid.
+    // Gold accents tie it back to the dollar flag visually.
+    const SIZE = 64;        // 32 CSS px × 2 DPR
+    const canvas = document.createElement("canvas");
+    canvas.width = SIZE;
+    canvas.height = SIZE;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    ctx.clearRect(0, 0, SIZE, SIZE);
+
+    // Building body — dark slate fill, gold border (matches flag).
+    const bodyX = 14, bodyY = 18, bodyW = 36, bodyH = 40;
+    ctx.fillStyle = "#1f2937";        // slate-900 body
+    ctx.strokeStyle = "#a16207";      // dark amber border (flag border)
+    ctx.lineWidth = 2.5;
+    ctx.fillRect(bodyX, bodyY, bodyW, bodyH);
+    ctx.strokeRect(bodyX, bodyY, bodyW, bodyH);
+
+    // Flat roof cap — slim gold band on top.
+    ctx.fillStyle = "#fbbf24";        // gold (matches flag fill)
+    ctx.fillRect(bodyX - 2, bodyY - 4, bodyW + 4, 4);
+    ctx.strokeRect(bodyX - 2, bodyY - 4, bodyW + 4, 4);
+
+    // Window grid — 3 columns × 4 rows of small light squares to
+    // unmistakably read as "building" at small sizes.
+    ctx.fillStyle = "#fde68a";        // pale gold windows
+    const winW = 6, winH = 5;
+    const padX = 4, padY = 3;
+    const cols = 3, rows = 4;
+    const innerX = bodyX + padX;
+    const innerY = bodyY + padY;
+    const stepX = (bodyW - 2 * padX - winW) / (cols - 1);
+    const stepY = (bodyH - 2 * padY - winH) / (rows - 1);
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        ctx.fillRect(innerX + c * stepX, innerY + r * stepY, winW, winH);
+      }
+    }
+    // Return as an ImageData-compatible object MapLibre accepts. The
+    // ImageBitmap-style {width, height, data} works for all versions.
+    const img = ctx.getImageData(0, 0, SIZE, SIZE);
+    return { width: SIZE, height: SIZE, data: img.data };
+  }
+
+  function ensureBuildingSpriteRegistered() {
+    if (!mapRef || mapRef.hasImage?.(BLDG_IMAGE_ID)) return;
+    const sprite = buildBuildingSprite();
+    if (!sprite) return;
+    try {
+      mapRef.addImage(BLDG_IMAGE_ID, sprite, { pixelRatio: 2 });
+    } catch (e) {
+      console.warn("[lth] building sprite registration failed:", e);
+    }
+  }
+
   function buildingsGeoJSON() {
     const now = nycHourAndDay();
     const features = [];
@@ -642,6 +705,10 @@
         return;
       }
     }
+    // Register the building sprite (idempotent) before adding the
+    // symbol layer that references it.
+    ensureBuildingSpriteRegistered();
+
     if (!mapRef.getLayer?.(BLDG_LAYER_ID)) {
       try {
         mapRef.addLayer({
@@ -650,26 +717,23 @@
           source: BLDG_SOURCE_ID,
           minzoom: BLDG_MIN_ZOOM, // hidden at city-overview zooms
           layout: {
-            // Emoji renders cross-platform without needing a sprite.
-            "text-field": "🏢",
-            "text-size": [
+            "icon-image": BLDG_IMAGE_ID,
+            "icon-size": [
               "interpolate", ["linear"], ["zoom"],
-              BLDG_MIN_ZOOM, 14,
-              16, 20,
-              18, 28,
+              BLDG_MIN_ZOOM, 0.5,
+              14, 0.7,
+              16, 1.0,
+              18, 1.3,
             ],
-            "text-allow-overlap": true,
-            "text-ignore-placement": true,
-            "text-anchor": "center",
+            "icon-allow-overlap": true,
+            "icon-ignore-placement": true,
+            "icon-anchor": "bottom", // anchor the building base at the lat/lng
           },
           paint: {
             // Data-driven dim — each feature carries its parent
             // hotspot's current dim value (recomputed every minute
-            // by the dim tick). Emoji is fully colored; we fade it
-            // via text-opacity.
-            "text-opacity": ["coalesce", ["get", "dim"], 0.95],
-            "text-halo-color": "#ffffff",
-            "text-halo-width": 1.2,
+            // by the dim tick).
+            "icon-opacity": ["coalesce", ["get", "dim"], 0.95],
           },
         });
       } catch (e) {
