@@ -1237,7 +1237,15 @@ function wireModesPanel() {
   document.getElementById("dockTrips45plusBtn")?.addEventListener("click", (e) => {
     e.preventDefault();
     toggleModeByKey('trips45plus');
+    // Re-render the cached frame for immediate feedback.
     if (currentFrame) renderFrame(currentFrame);
+    // 45+ trips mode reads earnings_shadow_rating_trips_45plus_v3, a
+    // field added by backend PR #464. If the cached currentFrame was
+    // fetched BEFORE Railway deployed that PR, the field isn't there
+    // and the re-render above falls back to citywide colors — looks
+    // like "nothing happens when I toggle." Force-fetch fresh frame
+    // data so the new field is guaranteed present.
+    refreshCurrentFrame().catch(() => {});
     openDrawer("modes", "Modes", modesPanelHTML());
     wireModesPanel();
   });
