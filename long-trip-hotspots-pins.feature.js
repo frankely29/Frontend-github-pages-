@@ -35,6 +35,13 @@
 
   const HOTSPOT_ENDPOINT = "/long_trip_hotspots";
   const REFRESH_INTERVAL_MS = 5 * 60 * 1000; // re-poll every 5 min in case admin rebuilt
+  const DIM_TICK_INTERVAL_MS = 60 * 1000;    // re-evaluate time-of-day dim every minute
+
+  // Dim multipliers applied to the flag (premultiplied alpha in shader)
+  // and the building dots (data-driven circle-opacity).
+  const DIM_PEAK = 1.0;    // peak: full brightness
+  const DIM_MEDIUM = 0.6;  // neither peak nor off
+  const DIM_OFF = 0.22;    // off: very faded, still visible enough to register
 
   // Source/layer IDs
   const BLDG_SOURCE_ID = "lth-buildings";
@@ -53,6 +60,60 @@
   let zOrderListenerInstalled = false;
   let zOrderMovePending = false;
   let zOrderInMove = false;
+
+  // ---------------------------------------------------------------
+  // NYC-local time + dim evaluation
+  // ---------------------------------------------------------------
+  // NYC's offset shifts ±1h between EST and EDT. Using the browser's
+  // Intl machinery is the cleanest way to get a DST-correct local
+  // hour without hard-coding any offset.
+  function nycHourAndDay() {
+    try {
+      const parts = new Intl.DateTimeFormat("en-US", {
+        timeZone: "America/New_York",
+        hourCycle: "h23",
+        hour: "2-digit",
+        weekday: "short",
+      }).formatToParts(new Date());
+      let hour = 0;
+      let weekday = "Mon";
+      for (const p of parts) {
+        if (p.type === "hour") hour = Number(p.value) || 0;
+        else if (p.type === "weekday") weekday = p.value;
+      }
+      const isWeekend = (weekday === "Sat" || weekday === "Sun");
+      return { hour, isWeekend };
+    } catch (_) {
+      // Worst case: fall back to UTC. Off-by-a-few-hours is better
+      // than crashing.
+      const d = new Date();
+      return { hour: d.getUTCHours(), isWeekend: (d.getUTCDay() === 0 || d.getUTCDay() === 6) };
+    }
+  }
+
+  function hourInRanges(hour, ranges) {
+    if (!Array.isArray(ranges) || !ranges.length) return false;
+    for (const r of ranges) {
+      if (!Array.isArray(r) || r.length < 2) continue;
+      const a = r[0], b = r[1];
+      // Wrapping ranges (e.g. [23, 5] = 11pm–5am) cross midnight.
+      if (a <= b) {
+        if (hour >= a && hour < b) return true;
+      } else {
+        if (hour >= a || hour < b) return true;
+      }
+    }
+    return false;
+  }
+
+  function dimForHotspot(h, now) {
+    const sched = h.dim_schedule;
+    if (!sched) return DIM_PEAK;
+    if (sched.weekday_only && now.isWeekend) return DIM_OFF;
+    if (hourInRanges(now.hour, sched.peak)) return DIM_PEAK;
+    if (hourInRanges(now.hour, sched.off)) return DIM_OFF;
+    return DIM_MEDIUM;
+  }
 
   // ---------------------------------------------------------------
   // API helpers — match long-trips-block.feature.js
@@ -111,6 +172,7 @@
       address: String(m?.address || "Address not listed"),
       best_hours: String(m?.best_hours || "Varies"),
     })).filter((m) => Number.isFinite(m.lat) && Number.isFinite(m.lng) && m.name) : [];
+    const dim_schedule = sanitizeDimSchedule(h?.dim_schedule);
     return {
       id,
       lat, lng,
@@ -120,7 +182,26 @@
       total_weight: Number(h?.total_weight) || 0,
       rationale: String(h?.rationale || ""),
       best_hours: String(h?.best_hours || ""),
+      dim_schedule,
       members,
+    };
+  }
+
+  function sanitizeDimSchedule(s) {
+    if (!s || typeof s !== "object") {
+      return { peak: [], off: [], weekday_only: false };
+    }
+    const cleanRanges = (arr) => Array.isArray(arr) ? arr.map((r) => {
+      if (!Array.isArray(r) || r.length < 2) return null;
+      const a = Math.max(0, Math.min(24, Number(r[0])));
+      const b = Math.max(0, Math.min(24, Number(r[1])));
+      if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+      return [a, b];
+    }).filter(Boolean) : [];
+    return {
+      peak: cleanRanges(s.peak),
+      off: cleanRanges(s.off),
+      weekday_only: Boolean(s.weekday_only),
     };
   }
 
@@ -163,9 +244,11 @@
     attribute vec2 a_anchor_px;
     attribute vec2 a_corner_px;
     attribute vec2 a_uv;
+    attribute float a_dim;
     uniform vec2 u_viewport_css_px;
     uniform float u_size_scale;
     varying vec2 v_uv;
+    varying float v_dim;
     void main() {
       vec2 px = a_anchor_px + a_corner_px * u_size_scale;
       vec2 clip = vec2(
@@ -174,6 +257,7 @@
       );
       gl_Position = vec4(clip, 0.0, 1.0);
       v_uv = a_uv;
+      v_dim = a_dim;
     }
   `;
 
@@ -181,10 +265,14 @@
     precision mediump float;
     uniform sampler2D u_texture;
     varying vec2 v_uv;
+    varying float v_dim;
     void main() {
       vec4 c = texture2D(u_texture, v_uv);
       if (c.a < 0.02) discard;
-      gl_FragColor = c;
+      // Texture is premultiplied — scaling all 4 channels by v_dim
+      // gives the same visual effect as multiplying alpha against
+      // unpremultiplied. v_dim is in [0,1].
+      gl_FragColor = c * v_dim;
     }
   `;
 
@@ -290,6 +378,7 @@
           anchor: gl.getAttribLocation(this._program, "a_anchor_px"),
           corner: gl.getAttribLocation(this._program, "a_corner_px"),
           uv: gl.getAttribLocation(this._program, "a_uv"),
+          dim: gl.getAttribLocation(this._program, "a_dim"),
         };
         this._uni = {
           viewport: gl.getUniformLocation(this._program, "u_viewport_css_px"),
@@ -349,7 +438,8 @@
         const flagW = this._atlas.flagW;
         const padW = this._atlas.padW || flagW;
 
-        const FLOATS_PER_VERTEX = 6;
+        // 7 floats per vertex: 2 anchor_px + 2 corner_px + 2 uv + 1 dim
+        const FLOATS_PER_VERTEX = 7;
         const vertices = new Float32Array(flags.length * 4 * FLOATS_PER_VERTEX);
         const indices = new Uint16Array(flags.length * 6);
 
@@ -364,23 +454,28 @@
           // Single-slice atlas: always sample slot 0.
           const uLeft = 0;
           const uRight = flagW / atlasW;
+          const dim = Number.isFinite(f.dim) ? f.dim : 1.0;
           const v0 = i * 4 * FLOATS_PER_VERTEX;
           // Bottom-left
           vertices[v0 +  0] = pt.x; vertices[v0 +  1] = pt.y;
           vertices[v0 +  2] = -halfW; vertices[v0 +  3] = 0;
           vertices[v0 +  4] = uLeft;  vertices[v0 +  5] = 1;
+          vertices[v0 +  6] = dim;
           // Bottom-right
-          vertices[v0 +  6] = pt.x; vertices[v0 +  7] = pt.y;
-          vertices[v0 +  8] =  halfW; vertices[v0 +  9] = 0;
-          vertices[v0 + 10] = uRight; vertices[v0 + 11] = 1;
+          vertices[v0 +  7] = pt.x; vertices[v0 +  8] = pt.y;
+          vertices[v0 +  9] =  halfW; vertices[v0 + 10] = 0;
+          vertices[v0 + 11] = uRight; vertices[v0 + 12] = 1;
+          vertices[v0 + 13] = dim;
           // Top-left
-          vertices[v0 + 12] = pt.x; vertices[v0 + 13] = pt.y;
-          vertices[v0 + 14] = -halfW; vertices[v0 + 15] = -fullH;
-          vertices[v0 + 16] = uLeft;  vertices[v0 + 17] = 0;
+          vertices[v0 + 14] = pt.x; vertices[v0 + 15] = pt.y;
+          vertices[v0 + 16] = -halfW; vertices[v0 + 17] = -fullH;
+          vertices[v0 + 18] = uLeft;  vertices[v0 + 19] = 0;
+          vertices[v0 + 20] = dim;
           // Top-right
-          vertices[v0 + 18] = pt.x; vertices[v0 + 19] = pt.y;
-          vertices[v0 + 20] =  halfW; vertices[v0 + 21] = -fullH;
-          vertices[v0 + 22] = uRight; vertices[v0 + 23] = 0;
+          vertices[v0 + 21] = pt.x; vertices[v0 + 22] = pt.y;
+          vertices[v0 + 23] =  halfW; vertices[v0 + 24] = -fullH;
+          vertices[v0 + 25] = uRight; vertices[v0 + 26] = 0;
+          vertices[v0 + 27] = dim;
 
           const base = i * 4;
           indices[i * 6 + 0] = base + 0;
@@ -425,13 +520,17 @@
         gl.disable(gl.DEPTH_TEST);
 
         gl.bindBuffer(gl.ARRAY_BUFFER, this._vbo);
-        const stride = 6 * 4;
+        const stride = 7 * 4; // 7 floats × 4 bytes (anchor.xy + corner.xy + uv.xy + dim)
         gl.enableVertexAttribArray(this._attrib.anchor);
         gl.vertexAttribPointer(this._attrib.anchor, 2, gl.FLOAT, false, stride, 0);
         gl.enableVertexAttribArray(this._attrib.corner);
         gl.vertexAttribPointer(this._attrib.corner, 2, gl.FLOAT, false, stride, 2 * 4);
         gl.enableVertexAttribArray(this._attrib.uv);
         gl.vertexAttribPointer(this._attrib.uv, 2, gl.FLOAT, false, stride, 4 * 4);
+        if (this._attrib.dim >= 0) {
+          gl.enableVertexAttribArray(this._attrib.dim);
+          gl.vertexAttribPointer(this._attrib.dim, 1, gl.FLOAT, false, stride, 6 * 4);
+        }
 
         gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this._ibo);
         gl.drawElements(gl.TRIANGLES, this._quadCount * 6, gl.UNSIGNED_SHORT, 0);
@@ -439,6 +538,7 @@
         gl.disableVertexAttribArray(this._attrib.anchor);
         gl.disableVertexAttribArray(this._attrib.corner);
         gl.disableVertexAttribArray(this._attrib.uv);
+        if (this._attrib.dim >= 0) gl.disableVertexAttribArray(this._attrib.dim);
         if (!blendWasEnabled) gl.disable(gl.BLEND);
       },
     };
@@ -482,8 +582,10 @@
   // queryRenderedFeatures works out of the box for click handling.
   // ---------------------------------------------------------------
   function buildingsGeoJSON() {
+    const now = nycHourAndDay();
     const features = [];
     for (const h of hotspots) {
+      const dim = dimForHotspot(h, now);
       for (const m of h.members) {
         features.push({
           type: "Feature",
@@ -493,6 +595,7 @@
             category: m.category,
             address: m.address,
             best_hours: m.best_hours,
+            dim,
           },
           geometry: { type: "Point", coordinates: [m.lng, m.lat] },
         });
@@ -530,7 +633,11 @@
             "circle-color": "#0f9d58",
             "circle-stroke-color": "#ffffff",
             "circle-stroke-width": 1.4,
-            "circle-opacity": 0.95,
+            // Data-driven dim — each feature carries its parent
+            // hotspot's current dim value (recomputed every minute
+            // by the dim tick).
+            "circle-opacity": ["coalesce", ["get", "dim"], 0.95],
+            "circle-stroke-opacity": ["coalesce", ["get", "dim"], 0.95],
           },
         });
       } catch (e) {
@@ -595,10 +702,21 @@
 
   function syncFlagLayer() {
     if (!flagCustomLayer) return;
+    const now = nycHourAndDay();
     const flagList = hotspots.map((h) => ({
       id: h.id, lat: h.lat, lng: h.lng,
+      dim: dimForHotspot(h, now),
     }));
     flagCustomLayer.setFlags(flagList);
+  }
+
+  // Re-evaluate dim every minute. Cheap (rebuilds 17 vertex slots in
+  // the flag VBO and reshuffles the buildings GeoJSON), idempotent
+  // when the hour hasn't changed.
+  function tickDim() {
+    if (!useLayer) return;
+    syncFlagLayer();
+    syncBuildingsLayer();
   }
 
   // ---------------------------------------------------------------
@@ -718,6 +836,14 @@
     const intensity = Number.isFinite(h.total_weight) && h.total_weight > 0
       ? `<span class="lth-popup-intensity">Intensity ${h.total_weight.toFixed(1)}</span>`
       : "";
+    // Live dim state — gives the driver a verbal echo of the visual.
+    const dimNow = dimForHotspot(h, nycHourAndDay());
+    let dimLabel = "";
+    let dimClass = "";
+    if (dimNow >= DIM_PEAK - 0.01) { dimLabel = "Peak hours"; dimClass = "lth-popup-state-peak"; }
+    else if (dimNow <= DIM_OFF + 0.01) { dimLabel = "Off hours"; dimClass = "lth-popup-state-off"; }
+    else { dimLabel = "Steady"; dimClass = "lth-popup-state-medium"; }
+    const stateChip = `<span class="lth-popup-state ${dimClass}">${dimLabel} now</span>`;
     return `
       <div class="lth-popup-header">
         <span class="lth-popup-dollar">$</span>
@@ -726,6 +852,7 @@
           <div class="lth-popup-sub">
             ${escapeHtml(h.member_count)} buildings nearby
             ${intensity}
+            ${stateChip}
           </div>
         </div>
       </div>
@@ -842,6 +969,16 @@
         font-size: 10.5px; font-weight: 700;
         text-transform: none; letter-spacing: 0;
       }
+      .lth-popup-state {
+        display: inline-block; margin-left: 6px;
+        padding: 1px 6px;
+        border-radius: 8px;
+        font-size: 10.5px; font-weight: 700;
+        text-transform: none; letter-spacing: 0;
+      }
+      .lth-popup-state-peak    { background: #ecfdf5; color: #047857; }
+      .lth-popup-state-medium  { background: #fef3c7; color: #92400e; }
+      .lth-popup-state-off     { background: #f1f5f9; color: #475569; }
       .lth-popup-list {
         list-style: none; padding: 0; margin: 4px 0 0;
       }
@@ -893,6 +1030,11 @@
     // Re-poll periodically so admin rebuilds appear without a full
     // page reload.
     setInterval(refresh, REFRESH_INTERVAL_MS);
+    // Re-evaluate the time-of-day dim every minute so a flag visibly
+    // dims/brightens when its category crosses a peak/off boundary
+    // (e.g. a hotel cluster crossing midnight, or a corporate
+    // cluster crossing 8am).
+    setInterval(tickDim, DIM_TICK_INTERVAL_MS);
   }
 
   function resolveMapInstance() {
