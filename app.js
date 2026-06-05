@@ -703,7 +703,7 @@ function setNavDisabled(disabled) { return window.TlcMapUiModule?.setNavDisabled
 function setNavDestination(dest) { return window.TlcMapUiModule?.setNavDestination?.(dest); }
 function hasRecommendedDestination() { return !!window.TlcMapUiModule?.hasRecommendedDestination?.(); }
 function updateRecommendation(frame) { return window.TlcMapUiModule?.updateRecommendation?.(frame); }
-function getModeFlags() { return window.TlcModeModule?.getModeFlags?.() || { statenIslandMode:false, bronxWashHeightsMode:false, manhattanMode:false, queensMode:false, brooklynMode:false }; }
+function getModeFlags() { return window.TlcModeModule?.getModeFlags?.() || { statenIslandMode:false, bronxWashHeightsMode:false, manhattanMode:false, queensMode:false, brooklynMode:false, trips45plusV3Mode:false }; }
 function toggleModeByKey(key) { return window.TlcModeModule?.toggleModeByKey?.(key); }
 function syncStatenIslandUI(...args) { return window.TlcModeModule?.syncStatenIslandUI?.(...args); }
 function syncBronxWashHeightsUI(...args) { return window.TlcModeModule?.syncBronxWashHeightsUI?.(...args); }
@@ -1166,6 +1166,7 @@ function modesPanelHTML() {
         <button id="dockBrooklynBtn" class="chipBtn">${modeFlags.brooklynMode ? "Brooklyn: ON" : "Brooklyn: OFF"}</button>
         <button id="dockManhattanBtn" class="chipBtn">${modeFlags.manhattanMode ? "Manhattan: ON" : "Manhattan: OFF"}</button>
         <button id="dockBronxWashHeightsBtn" class="chipBtn">${modeFlags.bronxWashHeightsMode ? "Bronx/Wash Heights: ON" : "Bronx/Wash Heights: OFF"}</button>
+        <button id="dockTrips45plusBtn" class="chipBtn">${modeFlags.trips45plusV3Mode ? "45+ Trips: ON" : "45+ Trips: OFF"}</button>
         <button id="dockGhostBtn" class="chipBtn">${me?.ghost_mode ? "Ghost: ON" : "Ghost: OFF"}</button>
       </div>
 
@@ -1228,6 +1229,14 @@ function wireModesPanel() {
   document.getElementById("dockBronxWashHeightsBtn")?.addEventListener("click", (e) => {
     e.preventDefault();
     toggleModeByKey('bronxWashHeights');
+    if (currentFrame) renderFrame(currentFrame);
+    openDrawer("modes", "Modes", modesPanelHTML());
+    wireModesPanel();
+  });
+
+  document.getElementById("dockTrips45plusBtn")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    toggleModeByKey('trips45plus');
     if (currentFrame) renderFrame(currentFrame);
     openDrawer("modes", "Modes", modesPanelHTML());
     wireModesPanel();
