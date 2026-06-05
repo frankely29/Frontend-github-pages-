@@ -311,12 +311,14 @@
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
-    // "$" label on the pennant — large and white for legibility at any zoom.
+    // "$" label on the pennant — large and dark for legibility at any zoom.
+    // Font sized to nearly the pennant height so the symbol dominates
+    // the flag; vertical center via textBaseline=middle.
     ctx.fillStyle = FLAG_PALETTE.text;
-    ctx.font = `bold ${Math.round(pH * 0.7)}px -apple-system, system-ui, sans-serif`;
+    ctx.font = `900 ${Math.round(pH * 0.95)}px -apple-system, system-ui, sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(FLAG_TEXT, pX + pW * 0.4, pY + pH * 0.5);
+    ctx.fillText(FLAG_TEXT, pX + pW * 0.45, pY + pH * 0.5);
   }
 
   function buildFlagAtlas() {
