@@ -717,7 +717,21 @@ function buildPickupFeatureCollection(items) {
 
 async function ensurePickupSourceAndLayers() {
   if (!map) return false;
-  const styleReady = await waitForStyleReady();
+  let styleReady = await waitForStyleReady();
+  if (!styleReady) {
+    // waitForStyleReady relies on map.isStyleLoaded(), which returns
+    // false whenever ANY source has pending tile loads. After PR #980
+    // made the startup zone backfill retry aggressively, that flag can
+    // stay false long past waitForStyleReady's 5s timeout — and then
+    // ensurePickupSourceAndLayers bails, refreshPickupOverlay bails,
+    // hotspots never load until the next 12s poll cycle (which can
+    // hit the same race). Symptom: hotspots intermittently never load.
+    //
+    // We don't actually need ALL sources loaded to call addSource /
+    // addLayer — we only need the style spec parsed. Fall back to
+    // checking for that directly.
+    styleReady = !!(map.getStyle?.()?.layers?.length);
+  }
   if (!styleReady) return false;
 
   if (!map.getSource("pickup-points")) {
