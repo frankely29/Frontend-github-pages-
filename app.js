@@ -3395,6 +3395,36 @@ function buildPopupHTML(props, geom, metrics = getZonePopupMetrics(map?.getZoom?
       </div>
     `
     : "";
+  // 45+ Trips Mode evidence block: when the visible source is the
+  // trips_45plus_v3 score, drivers want to see the mode-specific
+  // signals (premium long-trip count, share, avg miles, avg minutes)
+  // — not just the generic score numbers. premium_long_trip_share is
+  // a fraction in [0,1]; multiplying by pickups_now gives the
+  // ABSOLUTE COUNT of premium-long trips in this zone this bin,
+  // which is the "amount" signal the driver asked for.
+  const trips45plusEvidenceHtml = visibleScoreSource === "trips_45plus_v3_shadow"
+    ? (() => {
+        const mm = window.TlcModeModule || {};
+        const share = mm.readPremiumLongTripShareShadow?.(props);
+        const avgMin = mm.readPremiumLongTripAvgMinutesShadow?.(props);
+        const avgMi = mm.readPremiumLongTripAvgMilesShadow?.(props);
+        const longTripCount = (Number.isFinite(pickupsNowShadow) && Number.isFinite(share))
+          ? Math.round(pickupsNowShadow * share)
+          : null;
+        const longTripCountNext = (Number.isFinite(nextPickupsShadow) && Number.isFinite(share))
+          ? Math.round(nextPickupsShadow * share)
+          : null;
+        return `
+          <div style="margin-top:${metrics.lineGapPx + 1}px;padding:6px 8px;border-radius:6px;background:rgba(20,147,255,0.10);border:1px solid rgba(20,147,255,0.25);">
+            <div style="font-weight:700;margin-bottom:2px;">45+ Trips evidence (long = 45+ min OR 10+ mi):</div>
+            <div><b>Long trips here (last 20 min):</b> ${longTripCount == null ? "n/a" : `~${longTripCount}`}</div>
+            <div><b>Projected long trips (next 20 min):</b> ${longTripCountNext == null ? "n/a" : `~${longTripCountNext}`}</div>
+            <div><b>Share of trips that qualify:</b> ${Number.isFinite(share) ? `${Math.round(share * 100)}%` : "n/a"}</div>
+            <div><b>When one happens, avg length:</b> ${Number.isFinite(avgMi) ? `${avgMi.toFixed(1)} mi` : "n/a"} / ${Number.isFinite(avgMin) ? `${Math.round(avgMin)} min` : "n/a"}</div>
+          </div>
+        `;
+      })()
+    : "";
   const popupMetricEvidenceHtml = isVisibleV3Source
     ? `
       <div style="margin-top:${metrics.lineGapPx + 1}px;"><b>Trips counted for score (last 20 min):</b> ${scoreTripsNowDisplay}</div>
@@ -3403,6 +3433,7 @@ function buildPopupHTML(props, geom, metrics = getZonePopupMetrics(map?.getZoom?
       <div><b>Median pay / min:</b> ${Number.isFinite(medianPayPerMinShadow) ? `$${medianPayPerMinShadow.toFixed(2)}` : "n/a"}</div>
       <div><b>Median pay / mile:</b> ${Number.isFinite(medianPayPerMileShadow) ? `$${medianPayPerMileShadow.toFixed(2)}` : "n/a"}</div>
       ${popupMetricWarningLines.join("")}
+      ${trips45plusEvidenceHtml}
       ${legacyPreviewHtml}
     `
     : `
