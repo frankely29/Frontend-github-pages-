@@ -1168,6 +1168,7 @@ function modesPanelHTML() {
         <button id="dockBronxWashHeightsBtn" class="chipBtn">${modeFlags.bronxWashHeightsMode ? "Bronx/Wash Heights: ON" : "Bronx/Wash Heights: OFF"}</button>
         <button id="dockTrips45plusBtn" class="chipBtn">${modeFlags.trips45plusV3Mode ? "45+ Trips: ON" : "45+ Trips: OFF"}</button>
         <button id="dockGhostBtn" class="chipBtn">${me?.ghost_mode ? "Ghost: ON" : "Ghost: OFF"}</button>
+        ${me?.is_admin ? `<button id="dockRebuildBtn" class="chipBtn">Rebuild scoring data</button>` : ""}
       </div>
 
       <div style="display:flex;gap:10px;flex-wrap:wrap;">
@@ -1232,6 +1233,41 @@ function wireModesPanel() {
     if (currentFrame) renderFrame(currentFrame);
     openDrawer("modes", "Modes", modesPanelHTML());
     wireModesPanel();
+  });
+
+  document.getElementById("dockRebuildBtn")?.addEventListener("click", async (e) => {
+    e.preventDefault();
+    const btn = e.currentTarget;
+    if (!btn) return;
+    const original = btn.textContent;
+    btn.textContent = "Triggering rebuild…";
+    btn.disabled = true;
+    try {
+      const r = await fetch(`${RAILWAY_BASE}/generate?force_clear_lock=1`, {
+        method: "GET",
+        headers: getCommunityAuthHeaders(),
+      });
+      let detail = "";
+      try {
+        const data = await r.json();
+        detail = data?.result?.reason || data?.detail || JSON.stringify(data).slice(0, 80);
+      } catch (_) {}
+      if (r.ok) {
+        btn.textContent = "Rebuild started • wait ~5 min, then reload";
+      } else {
+        btn.textContent = `Failed ${r.status}: ${detail || "see network tab"}`;
+        btn.disabled = false;
+      }
+    } catch (err) {
+      btn.textContent = `Error: ${err?.message || err}`;
+      btn.disabled = false;
+    }
+    setTimeout(() => {
+      if (btn.isConnected) {
+        btn.textContent = original;
+        btn.disabled = false;
+      }
+    }, 12000);
   });
 
   document.getElementById("dockTrips45plusBtn")?.addEventListener("click", (e) => {
