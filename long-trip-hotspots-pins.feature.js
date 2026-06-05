@@ -20,17 +20,23 @@
   // Constants
   // ---------------------------------------------------------------
   const FLAG_TEXT = "$";
-  const FLAG_W_CSS = 32;
+  // Doubled width per driver request — wider banner reads from further
+  // away. Height held at the previous value so the pole still feels
+  // like a flagpole, not a billboard.
+  const FLAG_W_CSS = 64;
   const FLAG_H_CSS = 40;
   // Single-slice atlas (one color; no per-flag color choice like the
   // 45+ system). Atlas stays the same shape as the 45+ system so the
   // UV math + buffer layout can mirror it 1:1.
   const FLAG_ATLAS_SLICES = ["dollar"];
+  // Gold flag with a dark "$" — high contrast, unambiguous "money"
+  // signal, and stands out against both the cool zone colors (sky,
+  // blue) and warm ones (red, orange).
   const FLAG_PALETTE = {
-    fill: "#0f9d58",       // green flag body
-    border: "#0b7a44",
+    fill: "#fbbf24",       // gold flag body (amber-400)
+    border: "#a16207",     // dark amber border
     pole: "#1f2937",
-    text: "#ffffff",
+    text: "#1f2937",       // near-black "$" reads cleanly on gold
   };
 
   const HOTSPOT_ENDPOINT = "/long_trip_hotspots";
@@ -980,15 +986,17 @@
       .lth-popup-dollar {
         display: inline-flex; align-items: center; justify-content: center;
         width: 28px; height: 28px;
-        background: #0f9d58; color: #fff;
+        background: #fbbf24; color: #1f2937;
+        border: 1.5px solid #a16207;
         border-radius: 50%;
-        font: 700 16px -apple-system, system-ui, sans-serif;
+        font: 800 16px -apple-system, system-ui, sans-serif;
         flex-shrink: 0;
       }
       .lth-popup-bldg-icon {
         display: inline-flex; align-items: center; justify-content: center;
         width: 22px; height: 22px;
-        background: #0f9d58; color: #fff;
+        background: #fbbf24; color: #1f2937;
+        border: 1.5px solid #a16207;
         border-radius: 50%;
         font: 700 14px -apple-system, system-ui, sans-serif;
         flex-shrink: 0;
