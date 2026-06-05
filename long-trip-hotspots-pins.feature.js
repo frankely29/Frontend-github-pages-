@@ -118,6 +118,8 @@
       dominant_category: String(h?.dominant_category || ""),
       member_count: Number(h?.member_count) || members.length,
       total_weight: Number(h?.total_weight) || 0,
+      rationale: String(h?.rationale || ""),
+      best_hours: String(h?.best_hours || ""),
       members,
     };
   }
@@ -696,16 +698,44 @@
         <div class="lth-popup-addr">${escapeHtml(m.address)}</div>
       </li>
     `).join("");
+    // Rationale + best-hours + intensity together explain WHY this is
+    // a hotspot, not just WHICH buildings are in it. The intensity
+    // (total_weight) is shown rounded — it's an internal score
+    // (~5 → minimum cluster, ~17+ → strongest in the city) so we just
+    // round it instead of pretending it's a meaningful unit.
+    const rationale = h.rationale ? `
+      <div class="lth-popup-row">
+        <b>Why this is a hotspot</b>
+        <div>${escapeHtml(h.rationale)}</div>
+      </div>
+    ` : "";
+    const bestHours = h.best_hours ? `
+      <div class="lth-popup-row">
+        <b>Best hours</b>
+        <div>${escapeHtml(h.best_hours)}</div>
+      </div>
+    ` : "";
+    const intensity = Number.isFinite(h.total_weight) && h.total_weight > 0
+      ? `<span class="lth-popup-intensity">Intensity ${h.total_weight.toFixed(1)}</span>`
+      : "";
     return `
       <div class="lth-popup-header">
         <span class="lth-popup-dollar">$</span>
         <div>
           <div class="lth-popup-title">Long-trip hotspot</div>
-          <div class="lth-popup-sub">${escapeHtml(h.member_count)} buildings nearby</div>
+          <div class="lth-popup-sub">
+            ${escapeHtml(h.member_count)} buildings nearby
+            ${intensity}
+          </div>
         </div>
       </div>
-      <ul class="lth-popup-list">${items}</ul>
-      <div class="lth-popup-hint">Tap a building dot for hours.</div>
+      ${rationale}
+      ${bestHours}
+      <div class="lth-popup-row">
+        <b>Buildings represented</b>
+        <ul class="lth-popup-list">${items}</ul>
+      </div>
+      <div class="lth-popup-hint">Tap a building dot for its hours.</div>
     `;
   }
 
@@ -804,9 +834,16 @@
       }
       .lth-popup-title { font-weight: 700; font-size: 14px; }
       .lth-popup-sub  { color: #6b7280; font-size: 11px; text-transform: capitalize; }
+      .lth-popup-intensity {
+        display: inline-block; margin-left: 6px;
+        padding: 1px 6px;
+        background: #ecfdf5; color: #047857;
+        border-radius: 8px;
+        font-size: 10.5px; font-weight: 700;
+        text-transform: none; letter-spacing: 0;
+      }
       .lth-popup-list {
-        list-style: none; padding: 0; margin: 0 0 6px;
-        border-top: 1px solid #f3f4f6;
+        list-style: none; padding: 0; margin: 4px 0 0;
       }
       .lth-popup-item {
         padding: 6px 0;
