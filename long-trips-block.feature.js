@@ -413,6 +413,54 @@
   const LTF_CUSTOM_LAYER_ID = "long-trip-flags-custom-gl";
   let flagCustomLayer = null;
 
+  // Z-order keeper. Each addLayer() call without a beforeId puts the
+  // layer at the END of the layer list (= rendered last = on top). That's
+  // correct at the moment of addition. But MapLibre re-renders the layer
+  // list whenever the style changes — zones reload, mode switches, source
+  // data updates can all insert new layers, and any layer added AFTER the
+  // flag layer would render on top, hiding the flag under zone fills.
+  //
+  // Symptom (intermittent, per-user): flags appear underneath the zone
+  // colors. Fix: listen for `styledata` events and re-move the flag
+  // layers to the top whenever the style changes. rAF batches multiple
+  // events in one frame into a single move pass; an `inMove` flag
+  // prevents the recursion that would otherwise happen because
+  // moveLayer itself triggers styledata.
+
+  let flagZOrderListenerInstalled = false;
+  let flagZOrderMovePending = false;
+  let flagZOrderInMove = false;
+
+  function installFlagZOrderKeeper() {
+    if (flagZOrderListenerInstalled || !mapRef) return;
+    flagZOrderListenerInstalled = true;
+    const ids = [LTF_CUSTOM_LAYER_ID, LTF_DISC_LAYER_ID, LTF_TEXT_LAYER_ID];
+    const scheduleMove = () => {
+      if (flagZOrderInMove || flagZOrderMovePending) return;
+      flagZOrderMovePending = true;
+      const raf = (typeof window !== "undefined" && window.requestAnimationFrame)
+        || ((fn) => setTimeout(fn, 16));
+      raf(() => {
+        flagZOrderMovePending = false;
+        if (!mapRef) return;
+        const presentIds = ids.filter((id) => mapRef.getLayer?.(id));
+        if (!presentIds.length) return;
+        flagZOrderInMove = true;
+        try {
+          // moveLayer with no second arg moves to the end of the layer
+          // list. Doing them in order custom → disc → text leaves them
+          // at the very top, with disc above custom and text above disc.
+          for (const id of presentIds) {
+            try { mapRef.moveLayer(id); } catch (_) {}
+          }
+        } finally {
+          flagZOrderInMove = false;
+        }
+      });
+    };
+    try { mapRef.on?.("styledata", scheduleMove); } catch (_) {}
+  }
+
   function compileShader(gl, type, source) {
     const shader = gl.createShader(type);
     gl.shaderSource(shader, source);
@@ -1001,6 +1049,7 @@
       });
       useLayer = true;
       syncFlagLayer();
+      installFlagZOrderKeeper();
       console.info(
         `[long-trips-block] flag layer active.` +
         ` custom=${customAdded ? "yes" : "no"}` +
