@@ -1242,6 +1242,26 @@ function wireModesPanel() {
     const original = btn.textContent;
     btn.textContent = "Triggering rebuild…";
     btn.disabled = true;
+
+    // Fire the long-trip-hotspots rebuild in parallel. It's a separate
+    // endpoint (re-runs the POI clustering, writes 17 rows) that's
+    // independent of the monthly engine rebuild and finishes in
+    // seconds. Fire-and-forget so a hotspot failure can't block the
+    // engine rebuild; log failures to console for debugging.
+    fetch(`${RAILWAY_BASE}/admin/long_trip_hotspots/rebuild`, {
+      method: "POST",
+      headers: getCommunityAuthHeaders(),
+    }).then(async (r) => {
+      if (r.ok) {
+        const data = await r.json().catch(() => ({}));
+        console.info("[admin] hotspots rebuilt:", data);
+      } else {
+        console.warn(`[admin] hotspots rebuild failed: ${r.status}`);
+      }
+    }).catch((err) => {
+      console.warn("[admin] hotspots rebuild error:", err);
+    });
+
     try {
       const r = await fetch(`${RAILWAY_BASE}/generate?force_clear_lock=1`, {
         method: "GET",
