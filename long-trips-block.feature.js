@@ -612,7 +612,16 @@
     const scale = 2; // 2x for retina
     const flagW = FLAG_W_CSS * scale;
     const flagH = FLAG_H_CSS * scale;
-    const W = flagW * FLAG_ATLAS_SLICES.length;
+    // Padding between slices in the atlas. WebGL's LINEAR filter samples
+    // ~half a texel on each side of the requested UV; without a gap
+    // between slices, the left edge of sky/yellow sampled into the
+    // (green/sky) slice to its left, painting a faint ghost block — the
+    // "leftover flag on the left side" driver bug. A 2-device-pixel
+    // transparent gutter is enough for LINEAR + CLAMP_TO_EDGE inside
+    // each cell to read empty pixels at the edge instead.
+    const PAD = 2;
+    const padW = flagW + PAD;
+    const W = padW * FLAG_ATLAS_SLICES.length;
     const H = flagH;
     const canvas = document.createElement("canvas");
     canvas.width = W;
@@ -620,9 +629,9 @@
     const ctx = canvas.getContext("2d");
     if (!ctx) return null;
     for (let i = 0; i < FLAG_ATLAS_SLICES.length; i++) {
-      drawFlagInto(ctx, FLAG_ATLAS_SLICES[i], i * flagW, 0, flagW, flagH);
+      drawFlagInto(ctx, FLAG_ATLAS_SLICES[i], i * padW, 0, flagW, flagH);
     }
-    return { canvas, flagW, flagH, W, H, slices: FLAG_ATLAS_SLICES };
+    return { canvas, flagW, flagH, padW, W, H, slices: FLAG_ATLAS_SLICES };
   }
 
   // Same curve as the disc layer's circle-radius interpolation:
@@ -745,6 +754,11 @@
         const fullH = FLAG_H_CSS;
         const atlasW = this._atlas.W;
         const flagW = this._atlas.flagW;
+        // padW = flagW + 2px atlas gutter. UV math packs each flag at
+        // sliceIdx*padW (left edge of the slice) and samples a flagW
+        // width; the 2-pixel padding after each slice is what stops
+        // LINEAR-filter bleed from the neighboring slice.
+        const padW = this._atlas.padW || flagW;
         const slices = this._atlas.slices;
 
         const FLOATS_PER_VERTEX = 6;
@@ -761,8 +775,8 @@
           }
           let sliceIdx = slices.indexOf(f.color);
           if (sliceIdx < 0) sliceIdx = slices.indexOf("yellow");
-          const uLeft = (sliceIdx * flagW) / atlasW;
-          const uRight = ((sliceIdx + 1) * flagW) / atlasW;
+          const uLeft = (sliceIdx * padW) / atlasW;
+          const uRight = (sliceIdx * padW + flagW) / atlasW;
           // Atlas y=0 is image-top (the pennant). Anchor (lng/lat) is
           // the pole tip, which is the BOTTOM of the image → v=1 for
           // bottom vertices.
