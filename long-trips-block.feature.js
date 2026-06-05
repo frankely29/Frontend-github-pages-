@@ -800,11 +800,37 @@
   function ensureFlagLayer() {
     if (useLayer || flagLayerInitStarted || !mapRef) return;
     if (!mapRef.isStyleLoaded?.()) {
+      // Don't rely on map.once("load", ...) here. If the map already
+      // fired "load" before this code runs, the once-listener never
+      // fires. And after PR #980's aggressive zone backfill retries,
+      // tile sources can briefly flip isStyleLoaded() back to false
+      // when they reload — hitting that window would silently strand
+      // the flag layer in `flagLayerInitStarted=true` forever, with
+      // useLayer never flipping true, which is exactly the
+      // "existing flags don't load" symptom.
+      //
+      // Use a polling loop instead. Idempotent — once useLayer flips
+      // true, the poll exits. Capped at 30s so a truly stuck map
+      // doesn't poll forever.
       flagLayerInitStarted = true;
-      mapRef.once?.("load", () => {
+      let attempts = 0;
+      const pollHandle = setInterval(() => {
+        attempts += 1;
+        if (useLayer) {
+          clearInterval(pollHandle);
+          return;
+        }
+        if (attempts >= 100) {
+          clearInterval(pollHandle);
+          flagLayerInitStarted = false;
+          console.warn("[long-trips-block] ensureFlagLayer poll timed out after 30s");
+          return;
+        }
+        if (!mapRef?.isStyleLoaded?.()) return;
+        clearInterval(pollHandle);
         flagLayerInitStarted = false;
         ensureFlagLayer();
-      });
+      }, 300);
       return;
     }
     flagLayerInitStarted = true;
