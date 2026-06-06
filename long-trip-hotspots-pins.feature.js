@@ -613,12 +613,13 @@
   // hit-testing the same way it did for the previous circle layer.
   // ---------------------------------------------------------------
   function buildBuildingSprite() {
-    // 80×80 canvas at 2× DPR. A 3-building skyline silhouette —
-    // universal "downtown" iconography that reads as "buildings" at
-    // small sizes far better than a single rectangle. Center building
-    // is the tallest with a slim spire (Empire-State-style); flanking
-    // buildings are stepped down on either side. Gold accents tie
-    // back to the dollar flag.
+    // 80×80 canvas at 2× DPR. A single slim SKYSCRAPER — one tall
+    // glass tower with a stepped setback, a gold crown and a roof
+    // antenna. One clean focal tower per building (instead of a
+    // 3-tower cluster) keeps the map uncluttered while still reading
+    // as a downtown high-rise. Vertical window mullions survive
+    // downscaling so it stays glassy at the small on-map icon sizes,
+    // and the gold crown/antenna tie back to the dollar flag.
     const SIZE = 80;
     const canvas = document.createElement("canvas");
     canvas.width = SIZE;
@@ -627,87 +628,54 @@
     if (!ctx) return null;
     ctx.clearRect(0, 0, SIZE, SIZE);
 
-    const BODY = "#1f2937";       // slate body
+    const BODY = "#1f2937";       // slate tower body
     const BORDER = "#a16207";     // dark amber border (flag border)
-    const ROOF = "#fbbf24";       // gold cap (flag fill)
-    const WINDOW_ON = "#fde68a";  // pale gold "lit window"
+    const ROOF = "#fbbf24";       // gold crown / antenna (flag fill)
+    const WINDOW_ON = "#fde68a";  // pale gold lit-window mullions
 
-    const groundY = 70;
-
-    ctx.lineWidth = 1.8;
+    const groundY = 76;
+    ctx.lineWidth = 1.5;
     ctx.strokeStyle = BORDER;
 
-    // ----- Left building (shortest)
-    const aX = 8, aW = 18, aY = 40, aH = groundY - aY;
-    ctx.fillStyle = BODY;
-    ctx.fillRect(aX, aY, aW, aH);
-    ctx.strokeRect(aX, aY, aW, aH);
-    ctx.fillStyle = ROOF;
-    ctx.fillRect(aX - 1, aY - 3, aW + 2, 3);
-    ctx.strokeRect(aX - 1, aY - 3, aW + 2, 3);
-    ctx.fillStyle = WINDOW_ON;
-    for (let c = 0; c < 2; c++) {
-      for (let r = 0; r < 3; r++) {
-        ctx.fillRect(aX + 3 + c * 7, aY + 4 + r * 8, 4, 5);
+    // Fill a tier with vertical glass mullions, then break them into
+    // lit windows with thin horizontal floor bands.
+    function glass(x, w, top, bottom, cols) {
+      ctx.fillStyle = WINDOW_ON;
+      const inset = 2.5, stripeW = 1.6;
+      const gap = (w - inset * 2 - cols * stripeW) / (cols - 1);
+      for (let c = 0; c < cols; c++) {
+        ctx.fillRect(x + inset + c * (stripeW + gap), top, stripeW, bottom - top);
+      }
+      ctx.fillStyle = BODY;
+      for (let fy = top + 5; fy < bottom - 2; fy += 7) {
+        ctx.fillRect(x + 1.5, fy, w - 3, 1.3);
       }
     }
 
-    // ----- Right building (medium with notched top)
-    const cX = 54, cW = 18, cY = 32, cH = groundY - cY;
+    // Main shaft (slim + tall = skyscraper proportions).
     ctx.fillStyle = BODY;
-    ctx.fillRect(cX, cY, cW, cH);
-    ctx.strokeRect(cX, cY, cW, cH);
-    ctx.fillRect(cX + 3, cY - 4, cW - 6, 4);
-    ctx.strokeRect(cX + 3, cY - 4, cW - 6, 4);
+    ctx.fillRect(29, 26, 22, 50);
+    ctx.strokeRect(29, 26, 22, 50);
+    // Stepped setback tier sitting on the shaft.
+    ctx.fillRect(34, 12, 12, 14);
+    ctx.strokeRect(34, 12, 12, 14);
+    // Gold crown cap.
     ctx.fillStyle = ROOF;
-    ctx.fillRect(cX + 5, cY - 7, cW - 10, 3);
-    ctx.strokeRect(cX + 5, cY - 7, cW - 10, 3);
-    ctx.fillStyle = WINDOW_ON;
-    for (let c = 0; c < 2; c++) {
-      for (let r = 0; r < 4; r++) {
-        ctx.fillRect(cX + 3 + c * 7, cY + 4 + r * 8, 4, 5);
-      }
-    }
-
-    // ----- Center building (tallest, Empire-State-style stepped top
-    // with a slim gold spire). Drawn last so it visually sits on top
-    // of overlapping flank buildings.
-    const bX = 26, bW = 24, bY = 18, bH = groundY - bY;
-    // Wider base tier
-    ctx.fillStyle = BODY;
-    ctx.fillRect(bX - 3, groundY - 14, bW + 6, 14);
-    ctx.strokeRect(bX - 3, groundY - 14, bW + 6, 14);
-    // Main tower
-    ctx.fillRect(bX, bY, bW, bH - 14);
-    ctx.strokeRect(bX, bY, bW, bH - 14);
-    // Stepped top cap
-    ctx.fillRect(bX + 4, bY - 6, bW - 8, 6);
-    ctx.strokeRect(bX + 4, bY - 6, bW - 8, 6);
-    // Gold spire pedestal
-    ctx.fillStyle = ROOF;
-    ctx.fillRect(bX + bW / 2 - 3, bY - 9, 6, 3);
-    ctx.strokeRect(bX + bW / 2 - 3, bY - 9, 6, 3);
-    // Thin spire pole + finial ball
-    ctx.fillRect(bX + bW / 2 - 1, bY - 16, 2, 7);
+    ctx.fillRect(34, 9, 12, 3);
+    ctx.strokeRect(34, 9, 12, 3);
+    // Roof antenna — slim mast + finial ball.
+    ctx.fillRect(39, 2, 2, 7);
     ctx.beginPath();
-    ctx.arc(bX + bW / 2, bY - 18, 2.2, 0, Math.PI * 2);
+    ctx.arc(40, 2, 2, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
-    // Tower windows — 3 cols × 5 rows
-    ctx.fillStyle = WINDOW_ON;
-    for (let c = 0; c < 3; c++) {
-      for (let r = 0; r < 5; r++) {
-        ctx.fillRect(bX + 3 + c * 6, bY + 4 + r * 8, 4, 5);
-      }
-    }
-    // Base-tier windows — 5 cols × 1 row (taller storefronts)
-    for (let c = 0; c < 5; c++) {
-      ctx.fillRect(bX - 1 + c * 6, groundY - 11, 4, 7);
-    }
+    // Glass curtain wall on both tiers.
+    glass(29, 22, 29, 73, 4);
+    glass(34, 12, 15, 24, 2);
 
-    // ----- Ground line tying the three buildings together
+    // Short street baseline grounding the tower.
     ctx.fillStyle = BORDER;
-    ctx.fillRect(4, groundY, SIZE - 8, 2);
+    ctx.fillRect(26, groundY, 28, 2);
 
     const img = ctx.getImageData(0, 0, SIZE, SIZE);
     return { width: SIZE, height: SIZE, data: img.data };
