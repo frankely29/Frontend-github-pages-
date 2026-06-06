@@ -773,14 +773,16 @@
           minzoom: BLDG_MIN_ZOOM, // hidden at city-overview zooms
           layout: {
             "icon-image": BLDG_IMAGE_ID,
-            // Larger size curve than before so the 3-building skyline
-            // detail (windows, spire) is readable at normal zoom.
+            // Slimmer size curve. Each hotspot renders 3+ building
+            // sprites, so the previous 0.65–1.55 curve made clusters
+            // look bulky and crowded the map. Scaled down ~40% — the
+            // skyline still reads, but markers no longer dominate.
             "icon-size": [
               "interpolate", ["linear"], ["zoom"],
-              BLDG_MIN_ZOOM, 0.65,
-              14, 0.90,
-              16, 1.20,
-              18, 1.55,
+              BLDG_MIN_ZOOM, 0.38,
+              14, 0.52,
+              16, 0.70,
+              18, 0.92,
             ],
             "icon-allow-overlap": true,
             "icon-ignore-placement": true,
