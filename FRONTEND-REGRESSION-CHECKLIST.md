@@ -37,6 +37,14 @@
 - [ ] Games still work.
 - [ ] Radio still works.
 
+## Dollar-flag prime-time pulse
+- [x] `node --check long-trip-hotspots-pins.feature.js` passes
+- [x] mock-DOM smoke test: only prime flags enter the pulse source; glow + 2 rings are created below the buildings/flag layers; rings animate out of phase; no `[lth]` errors
+- [x] frontend prime predicate matches the backend (Sun 19:00 → 8 transit flags pulse; weekend drops weekday-only corporate/school)
+- [ ] live map: gold ring visibly pulses at a flag's pole base during its prime window, and is absent outside it
+- [ ] live map: popup shows the "Prime time now" chip plus the Best hours / Why rows during prime
+- [ ] live map: no pan/zoom performance regression while a pulse is active
+
 ## Checks completed in this environment
 - [x] `node --check app.js`
 - [x] `node --check app.part2.js`

@@ -57,6 +57,24 @@
   const BLDG_IMAGE_ID = "lth-building-sprite"; // sprite registered via map.addImage
   const FLAG_CUSTOM_LAYER_ID = "lth-flags-custom-gl";
 
+  // Prime-time pulse — a gold "best time to be near it" beacon at each
+  // flag's pole base. Rendered as map-anchored circle layers (no iOS
+  // drift, the same reason the flags use CPU projection) and animated
+  // only while ≥1 flag is in its prime window. The flag + building
+  // layers stay on top, so the pulse reads as a halo on the ground
+  // beneath the pole. The "prime" window comes from the backend
+  // dim_schedule and is always a subset of "peak", so a pulsing flag is
+  // also at full brightness.
+  const PULSE_SOURCE_ID = "lth-pulse";
+  const PULSE_GLOW_LAYER_ID = "lth-pulse-glow";
+  const PULSE_RING1_LAYER_ID = "lth-pulse-ring1";
+  const PULSE_RING2_LAYER_ID = "lth-pulse-ring2";
+  const PULSE_PERIOD_MS = 1600;    // one ring-expansion cycle
+  const PULSE_R_MIN = 6;           // ring radius (px) at cycle start
+  const PULSE_R_MAX = 26;          // ring radius (px) at cycle end (fades out)
+  const PULSE_FPS_MS = 33;         // throttle paint updates to ~30fps
+  const PULSE_COLOR = "#fbbf24";   // gold — matches the dollar flag
+
   // Show building icons at zoom ≥ 12 (mid-borough scale). Previously
   // 14 was too tight — drivers couldn't see them at most working
   // zooms. 12 keeps them visible at normal driving zooms while
@@ -75,6 +93,9 @@
   let zOrderListenerInstalled = false;
   let zOrderMovePending = false;
   let zOrderInMove = false;
+  let pulseActive = false;          // is the pulse animation loop running
+  let pulseRAF = null;              // requestAnimationFrame handle
+  let pulseLastPaint = 0;           // last frame ts we pushed paint updates
 
   // ---------------------------------------------------------------
   // NYC-local time + dim evaluation
@@ -128,6 +149,17 @@
     if (hourInRanges(now.hour, sched.peak)) return DIM_PEAK;
     if (hourInRanges(now.hour, sched.off)) return DIM_OFF;
     return DIM_MEDIUM;
+  }
+
+  // True when "now" is inside this hotspot's prime window — the tightest
+  // "best time to be near it" window (a subset of peak). Drives the
+  // pulsing ring at the flag's pole base and the popup's "Prime time"
+  // chip. weekday_only flags never pulse on weekends.
+  function primeForHotspot(h, now) {
+    const sched = h.dim_schedule;
+    if (!sched) return false;
+    if (sched.weekday_only && now.isWeekend) return false;
+    return hourInRanges(now.hour, sched.prime);
   }
 
   // ---------------------------------------------------------------
@@ -204,7 +236,7 @@
 
   function sanitizeDimSchedule(s) {
     if (!s || typeof s !== "object") {
-      return { peak: [], off: [], weekday_only: false };
+      return { peak: [], off: [], prime: [], weekday_only: false };
     }
     const cleanRanges = (arr) => Array.isArray(arr) ? arr.map((r) => {
       if (!Array.isArray(r) || r.length < 2) return null;
@@ -216,6 +248,7 @@
     return {
       peak: cleanRanges(s.peak),
       off: cleanRanges(s.off),
+      prime: cleanRanges(s.prime),
       weekday_only: Boolean(s.weekday_only),
     };
   }
@@ -577,7 +610,13 @@
   function installZOrderKeeper() {
     if (zOrderListenerInstalled || !mapRef) return;
     zOrderListenerInstalled = true;
-    const ids = [BLDG_LAYER_ID, FLAG_CUSTOM_LAYER_ID];
+    // Pulse rings first so that, after each moveLayer-to-top sweep, they
+    // end up below the buildings + flag (moved last) — a ground halo
+    // under the pole rather than over the flag.
+    const ids = [
+      PULSE_GLOW_LAYER_ID, PULSE_RING1_LAYER_ID, PULSE_RING2_LAYER_ID,
+      BLDG_LAYER_ID, FLAG_CUSTOM_LAYER_ID,
+    ];
     const scheduleMove = () => {
       if (zOrderInMove || zOrderMovePending) return;
       zOrderMovePending = true;
@@ -778,6 +817,146 @@
   }
 
   // ---------------------------------------------------------------
+  // Prime-time pulse — gold beacon at the flag's pole base
+  // ---------------------------------------------------------------
+  // The source holds one point per flag currently in its prime window.
+  // Two stroke-only "radar" rings expand + fade out of phase, over a
+  // steady soft glow. Animated only while ≥1 flag is prime, throttled to
+  // ~30fps, and paused while the tab is hidden.
+  function ensurePulseLayers() {
+    if (!mapRef) return;
+    if (!mapRef.getSource?.(PULSE_SOURCE_ID)) {
+      try {
+        mapRef.addSource(PULSE_SOURCE_ID, {
+          type: "geojson",
+          data: { type: "FeatureCollection", features: [] },
+        });
+      } catch (e) {
+        console.warn("[lth] pulse source add failed:", e);
+        return;
+      }
+    }
+    // Steady soft glow sitting at the pole base.
+    if (!mapRef.getLayer?.(PULSE_GLOW_LAYER_ID)) {
+      try {
+        mapRef.addLayer({
+          id: PULSE_GLOW_LAYER_ID,
+          type: "circle",
+          source: PULSE_SOURCE_ID,
+          paint: {
+            "circle-radius": 9,
+            "circle-color": PULSE_COLOR,
+            "circle-opacity": 0.2,
+            "circle-blur": 0.6,
+            "circle-stroke-width": 0,
+          },
+        });
+      } catch (e) { console.warn("[lth] pulse glow add failed:", e); }
+    }
+    // Two stroke-only rings; radius + stroke-opacity driven by the loop.
+    for (const id of [PULSE_RING1_LAYER_ID, PULSE_RING2_LAYER_ID]) {
+      if (mapRef.getLayer?.(id)) continue;
+      try {
+        mapRef.addLayer({
+          id,
+          type: "circle",
+          source: PULSE_SOURCE_ID,
+          paint: {
+            "circle-radius": PULSE_R_MIN,
+            "circle-color": "rgba(0,0,0,0)",   // ring only — no fill
+            "circle-opacity": 0,
+            "circle-stroke-color": PULSE_COLOR,
+            "circle-stroke-width": 2.5,
+            "circle-stroke-opacity": 0,
+          },
+        });
+      } catch (e) { console.warn("[lth] pulse ring add failed:", e); }
+    }
+  }
+
+  function pulseGeoJSON(now) {
+    const features = [];
+    for (const h of hotspots) {
+      if (!primeForHotspot(h, now)) continue;
+      features.push({
+        type: "Feature",
+        properties: { hotspot_id: h.id },
+        geometry: { type: "Point", coordinates: [h.lng, h.lat] },
+      });
+    }
+    return { type: "FeatureCollection", features };
+  }
+
+  // Recompute which flags are in prime time; (re)start or stop the loop.
+  function syncPulseLayer() {
+    if (!mapRef) return;
+    const src = mapRef.getSource?.(PULSE_SOURCE_ID);
+    if (!src?.setData) return;
+    const fc = pulseGeoJSON(nycHourAndDay());
+    try { src.setData(fc); } catch (_) {}
+    if (fc.features.length > 0) startPulse();
+    else stopPulse();
+  }
+
+  function _now() {
+    return (typeof performance !== "undefined" && performance.now)
+      ? performance.now() : Date.now();
+  }
+  function _raf(fn) {
+    if (typeof window !== "undefined" && window.requestAnimationFrame) {
+      return window.requestAnimationFrame(fn);
+    }
+    return setTimeout(() => fn(_now()), PULSE_FPS_MS);
+  }
+
+  function setRing(layerId, t, zScale) {
+    if (!mapRef?.getLayer?.(layerId)) return;
+    const r = (PULSE_R_MIN + t * (PULSE_R_MAX - PULSE_R_MIN)) * zScale;
+    const op = 0.55 * (1 - t); // fade as the ring grows
+    try {
+      mapRef.setPaintProperty(layerId, "circle-radius", r);
+      mapRef.setPaintProperty(layerId, "circle-stroke-opacity", op);
+    } catch (_) {}
+  }
+
+  function pulseFrame(ts) {
+    if (!pulseActive) { pulseRAF = null; return; }
+    // Throttle the paint pushes to ~30fps; the rAF itself is cheap.
+    if (ts - pulseLastPaint >= PULSE_FPS_MS) {
+      pulseLastPaint = ts;
+      const zScale = flagZoomScale(mapRef?.getZoom?.());
+      const t = (ts % PULSE_PERIOD_MS) / PULSE_PERIOD_MS; // 0..1
+      setRing(PULSE_RING1_LAYER_ID, t, zScale);
+      setRing(PULSE_RING2_LAYER_ID, (t + 0.5) % 1, zScale);
+      if (mapRef?.getLayer?.(PULSE_GLOW_LAYER_ID)) {
+        // Gentle breathing on the steady glow.
+        const glow = 0.16 + 0.12 * (0.5 + 0.5 * Math.sin(ts / 600));
+        try {
+          mapRef.setPaintProperty(PULSE_GLOW_LAYER_ID, "circle-radius", 9 * zScale);
+          mapRef.setPaintProperty(PULSE_GLOW_LAYER_ID, "circle-opacity", glow);
+        } catch (_) {}
+      }
+    }
+    pulseRAF = _raf(pulseFrame);
+  }
+
+  function startPulse() {
+    if (pulseActive) return;
+    if (typeof document !== "undefined" && document.hidden) return;
+    pulseActive = true;
+    pulseLastPaint = 0;
+    pulseRAF = _raf(pulseFrame);
+  }
+
+  function stopPulse() {
+    pulseActive = false;
+    if (pulseRAF != null && typeof window !== "undefined" && window.cancelAnimationFrame) {
+      try { window.cancelAnimationFrame(pulseRAF); } catch (_) {}
+    }
+    pulseRAF = null;
+  }
+
+  // ---------------------------------------------------------------
   // Layer setup
   // ---------------------------------------------------------------
   function ensureFlagLayer() {
@@ -803,6 +982,7 @@
     }
     layerInitStarted = true;
     try {
+      ensurePulseLayers();
       ensureBuildingsLayer();
 
       if (mapRef.getLayer?.(FLAG_CUSTOM_LAYER_ID)) {
@@ -815,6 +995,7 @@
         installZOrderKeeper();
         syncBuildingsLayer();
         syncFlagLayer();
+        syncPulseLayer();
         console.info(`[lth] WebGL dollar-flag layer ready; ${hotspots.length} hotspot(s)`);
       }
     } catch (e) {
@@ -840,6 +1021,7 @@
     if (!useLayer) return;
     syncFlagLayer();
     syncBuildingsLayer();
+    syncPulseLayer();
   }
 
   // ---------------------------------------------------------------
@@ -959,14 +1141,20 @@
     const intensity = Number.isFinite(h.total_weight) && h.total_weight > 0
       ? `<span class="lth-popup-intensity">Intensity ${h.total_weight.toFixed(1)}</span>`
       : "";
-    // Live dim state — gives the driver a verbal echo of the visual.
-    const dimNow = dimForHotspot(h, nycHourAndDay());
+    // Live time-of-day state — a verbal echo of the visual. "Prime time"
+    // (the pulsing window) outranks the peak/steady/off dim state, and
+    // carries the same little pulsing dot the map shows.
+    const nowTod = nycHourAndDay();
+    const isPrime = primeForHotspot(h, nowTod);
+    const dimNow = dimForHotspot(h, nowTod);
     let dimLabel = "";
     let dimClass = "";
-    if (dimNow >= DIM_PEAK - 0.01) { dimLabel = "Peak hours"; dimClass = "lth-popup-state-peak"; }
+    if (isPrime) { dimLabel = "Prime time"; dimClass = "lth-popup-state-prime"; }
+    else if (dimNow >= DIM_PEAK - 0.01) { dimLabel = "Peak hours"; dimClass = "lth-popup-state-peak"; }
     else if (dimNow <= DIM_OFF + 0.01) { dimLabel = "Off hours"; dimClass = "lth-popup-state-off"; }
     else { dimLabel = "Steady"; dimClass = "lth-popup-state-medium"; }
-    const stateChip = `<span class="lth-popup-state ${dimClass}">${dimLabel} now</span>`;
+    const stateDot = isPrime ? `<span class="lth-pulse-dot"></span>` : "";
+    const stateChip = `<span class="lth-popup-state ${dimClass}">${stateDot}${dimLabel} now</span>`;
     return `
       <div class="lth-popup-header">
         <span class="lth-popup-dollar">$</span>
@@ -1114,6 +1302,21 @@
       .lth-popup-state-peak    { background: #ecfdf5; color: #047857; }
       .lth-popup-state-medium  { background: #fef3c7; color: #92400e; }
       .lth-popup-state-off     { background: #f1f5f9; color: #475569; }
+      .lth-popup-state-prime   { background: #fff7ed; color: #b45309; }
+      .lth-pulse-dot {
+        display: inline-block;
+        width: 7px; height: 7px;
+        margin-right: 4px;
+        border-radius: 50%;
+        background: #f59e0b;
+        vertical-align: middle;
+        animation: lth-pulse-dot 1.4s ease-out infinite;
+      }
+      @keyframes lth-pulse-dot {
+        0%   { box-shadow: 0 0 0 0 rgba(245,158,11,0.55); }
+        70%  { box-shadow: 0 0 0 6px rgba(245,158,11,0); }
+        100% { box-shadow: 0 0 0 0 rgba(245,158,11,0); }
+      }
       .lth-popup-list {
         list-style: none; padding: 0; margin: 4px 0 0;
       }
@@ -1148,6 +1351,7 @@
       ensureFlagLayer();
       syncFlagLayer();
       syncBuildingsLayer();
+      syncPulseLayer();
     } catch (e) {
       console.warn("[lth] fetch failed:", e?.message || e);
     }
@@ -1170,6 +1374,14 @@
     // (e.g. a hotel cluster crossing midnight, or a corporate
     // cluster crossing 8am).
     setInterval(tickDim, DIM_TICK_INTERVAL_MS);
+    // Pause the pulse animation while the tab is hidden (battery); on
+    // return, re-sync so it resumes only if a flag is still in prime.
+    if (typeof document !== "undefined" && document.addEventListener) {
+      document.addEventListener("visibilitychange", () => {
+        if (document.hidden) stopPulse();
+        else syncPulseLayer();
+      });
+    }
   }
 
   function resolveMapInstance() {
