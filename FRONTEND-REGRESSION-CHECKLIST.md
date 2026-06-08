@@ -80,6 +80,8 @@
 - [x] hospital/hotel sprites redrawn as wide building blocks with a big emblem; icon-size bumped; "HOSPITAL"/"HOTEL" type tag added above each icon from z13
 - [ ] live map: dollar-flag buildings no longer flash/blink
 - [ ] live map: hospital/hotel icons are clearly bigger/wider and each shows "HOSPITAL"/"HOTEL" on top; type is obvious at a glance
+- [x] declutter: smaller icon-size curve (z12→0.3), landmarks hidden below z12, type tags from z15 with `text-allow-overlap:false` + padding; `node --check` + smoke pass
+- [ ] live map: zoomed out is clean (small markers, no label pile-up); icons grow and "HOSPITAL"/"HOTEL" tags appear (decluttered) as you zoom in
 
 ## Checks completed in this environment
 - [x] `node --check app.js`
