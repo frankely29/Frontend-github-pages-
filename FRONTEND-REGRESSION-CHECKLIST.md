@@ -70,6 +70,10 @@
 - [ ] live map: hospital (red cross) and hotel (gold star) icons render distinctly from z11; names from z14
 - [ ] live map: hospitals pulse afternoon (noon–5pm), hotels pulse morning (7am–noon)
 - [ ] live map: tapping a building opens the popup (type, address, best hours, prime/off chip); no clash with zone/flag popups
+- [x] icons redrawn as the approved skyscraper silhouette (hospital = white-blue + red-cross badge; hotel = amber-gold + crown star + awning); smoke test still passes
+- [x] pulse rings thinned in screen space + kept clear of dollar-flag pulses; smoke test shows 19 prime hospitals → 16 after thinning at the test scale, re-thinned on `moveend`
+- [ ] live map: clustered landmark pulses no longer pile up; thin out when zoomed out, separate when zoomed in; no overlap with flag pulses
+- [ ] live map: hospital/hotel icons look like proper buildings (skyscraper style) and are still distinguishable at a glance
 
 ## Checks completed in this environment
 - [x] `node --check app.js`
