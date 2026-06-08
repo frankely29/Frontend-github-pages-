@@ -757,6 +757,33 @@ async function ensurePickupSourceAndLayers() {
     map.removeLayer("pickup-zone-hotspots-line-halo");
   }
 
+  // Zoom-aware transparency for the pickup-zone hotspots, mirroring the
+  // zones-fill treatment: keep the intensity-based opacity when zoomed out,
+  // then fade to 40% of it as you zoom in close, so the street layout
+  // underneath shows through. Built as a top-level zoom interpolate whose
+  // stop outputs are the intensity ramp (normal at z14) and that ramp x0.4
+  // (at z16) — "zoom" must stay at the top level of a paint expression, so
+  // it can't simply be multiplied over the whole intensity ramp.
+  const HOTSPOT_ZOOMED_IN_FADE = 0.4;
+  const underpaintOpacityBase = [
+    "interpolate", ["linear"], ["coalesce", ["get", "intensity"], 0.35],
+    0.00, 0.52, 0.45, 0.64, 0.75, 0.74, 1.00, 0.84,
+  ];
+  const fillOpacityBase = [
+    "interpolate", ["linear"], ["coalesce", ["get", "intensity"], 0.35],
+    0.00, 0.46, 0.45, 0.58, 0.75, 0.70, 1.00, 0.80,
+  ];
+  const underpaintOpacityExpr = [
+    "interpolate", ["linear"], ["zoom"],
+    14, underpaintOpacityBase,
+    16, ["*", underpaintOpacityBase, HOTSPOT_ZOOMED_IN_FADE],
+  ];
+  const fillOpacityExpr = [
+    "interpolate", ["linear"], ["zoom"],
+    14, fillOpacityBase,
+    16, ["*", fillOpacityBase, HOTSPOT_ZOOMED_IN_FADE],
+  ];
+
   if (!map.getLayer("pickup-zone-hotspots-underpaint")) {
     map.addLayer(
       {
@@ -777,19 +804,7 @@ async function ensurePickupSourceAndLayers() {
             1.00,
             "#ffeeb6",
           ],
-          "fill-opacity": [
-            "interpolate",
-            ["linear"],
-            ["coalesce", ["get", "intensity"], 0.35],
-            0.00,
-            0.52,
-            0.45,
-            0.64,
-            0.75,
-            0.74,
-            1.00,
-            0.84,
-          ],
+          "fill-opacity": underpaintOpacityExpr,
         },
       },
       hotspotBeforeLayer
@@ -808,19 +823,7 @@ async function ensurePickupSourceAndLayers() {
       1.00,
       "#ffeeb6",
     ]);
-    map.setPaintProperty("pickup-zone-hotspots-underpaint", "fill-opacity", [
-      "interpolate",
-      ["linear"],
-      ["coalesce", ["get", "intensity"], 0.35],
-      0.00,
-      0.52,
-      0.45,
-      0.64,
-      0.75,
-      0.74,
-      1.00,
-      0.84,
-    ]);
+    map.setPaintProperty("pickup-zone-hotspots-underpaint", "fill-opacity", underpaintOpacityExpr);
   }
 
   if (!map.getLayer("pickup-zone-hotspots-fill")) {
@@ -843,19 +846,7 @@ async function ensurePickupSourceAndLayers() {
             1.00,
             "#ffc92b",
           ],
-          "fill-opacity": [
-            "interpolate",
-            ["linear"],
-            ["coalesce", ["get", "intensity"], 0.35],
-            0.00,
-            0.46,
-            0.45,
-            0.58,
-            0.75,
-            0.70,
-            1.00,
-            0.80,
-          ],
+          "fill-opacity": fillOpacityExpr,
         },
       },
       hotspotBeforeLayer
@@ -874,19 +865,7 @@ async function ensurePickupSourceAndLayers() {
       1.00,
       "#ffc92b",
     ]);
-    map.setPaintProperty("pickup-zone-hotspots-fill", "fill-opacity", [
-      "interpolate",
-      ["linear"],
-      ["coalesce", ["get", "intensity"], 0.35],
-      0.00,
-      0.46,
-      0.45,
-      0.58,
-      0.75,
-      0.70,
-      1.00,
-      0.80,
-    ]);
+    map.setPaintProperty("pickup-zone-hotspots-fill", "fill-opacity", fillOpacityExpr);
   }
 
   if (!map.getLayer("pickup-zone-hotspots-line")) {
