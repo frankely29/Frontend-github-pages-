@@ -2,6 +2,11 @@
 
 ## 2026-06-08
 
+### Zoom-aware hotspot transparency
+- Applied the same zoom-fade to the pickup-zone hotspot fills (`pickup-zone-hotspots-underpaint` + `-fill` in `app.part10.js`): their intensity-based opacity is preserved when zoomed out, then faded to **40% of it** as you zoom in close, so the **street layout underneath shows through** — matching the `zones-fill` behavior.
+- Because these layers already drive `fill-opacity` off `intensity` (and `zoom` must stay at the top level of a paint expression), it's structured as a top-level zoom `interpolate` whose stop outputs are the intensity ramp (normal at z14) and that ramp × 0.4 (at z16). Applied on both the create and per-update repaint paths for `underpaint` and `fill`.
+- The hotspot outline (`pickup-zone-hotspots-line`) stays as-is, so hotspot edges remain visible. Same z14/z16 breakpoints and 0.4 factor as the zones change (one-line tunables).
+
 ### Zoom-aware zone transparency
 - The borough/score `zones-fill` layer now fades with zoom: solid color when zoomed out (so zones read clearly at borough/overview scale), ramping to **40% opacity (60% transparent)** as you zoom in close, so the **street layout underneath shows through** for navigation. Implemented as a `fill-opacity` zoom `interpolate` in `app.part12.js` (linear z14 → z16, held at 0.4 beyond), applied on both the layer create and the per-update repaint paths.
 - The white zone outlines (`zones-line`) stay opaque, so zone boundaries remain crisp while the fill goes see-through.

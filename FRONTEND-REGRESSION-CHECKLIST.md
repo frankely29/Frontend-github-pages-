@@ -58,6 +58,12 @@
 - [ ] live map: zooming in close (≥ z16) makes zones ~60% transparent and the street layout shows through
 - [ ] live map: zone outlines stay crisp; long-trips-block dim and navigation street mode still restore opacity correctly afterward
 
+## Hotspot zoom transparency
+- [x] `node --check app.part10.js` passes; `pickup-zone-hotspots-underpaint`/`-fill` opacity is a top-level zoom `interpolate` over the intensity ramp, on both create and update paths
+- [ ] live map: hotspots keep their intensity-based opacity when zoomed out (≤ z14)
+- [ ] live map: zooming in close (≥ z16) fades hotspots ~60% and the street layout shows through; relative intensity differences still read
+- [ ] live map: hotspot outlines remain visible; long-trips-block dim still restores hotspot opacity afterward
+
 ## Checks completed in this environment
 - [x] `node --check app.js`
 - [x] `node --check app.part2.js`
