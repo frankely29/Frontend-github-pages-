@@ -2,6 +2,12 @@
 
 ## 2026-06-07
 
+### Dollar-flag pickup-time correction + holiday/weekend calendar
+- The map now consumes a backend **closure calendar** (federal holidays + NYC school recesses, served in the `/long_trip_hotspots` response) and matches its NYC date against it: weekday-only flags (offices, schools) go **dark and stop pulsing on weekends + holidays**, and the elite-school flag is dark all summer and over recesses. Hotels, transit, and hospitals keep running. Falls back to weekend-only behavior if the backend sends no calendar.
+- Popup shows a **"Closed today (holiday)" / "Closed (school break)" / "Closed weekends"** chip when a flag is shut, taking precedence over the prime/peak/steady state.
+- Picks up the backend's corrected pickup windows automatically (hotels = morning **checkout** only, not check-in; corporate = **end-of-day** only, not the morning arrival), since the schedule is server-driven.
+- `nycHourAndDay()` now also returns the NYC `ymd`; new `closureReason()` gates `dimForHotspot`/`primeForHotspot` — weekend/holiday for weekday-only flags, plus explicit `[start,end]` ISO seasonal ranges (the backend's per-year school recesses) for the school flag; `sanitizeCalendar()` defensively parses the new field and degrades to weekend-only.
+
 ### Dollar-flag prime-time pulse
 - Added a pulsing gold beacon at each dollar flag's pole base in `long-trip-hotspots-pins.feature.js`, shown only while that flag is in its **prime window** — the tightest "best time to be near it" hours for its building type (served by the backend in `dim_schedule.prime`, always a subset of `peak`). Prime windows in play: luxury hotels 7–11am (morning airport runs), transit hubs 7–9am & 5–8pm (rush + arrivals), hospitals 1–5pm (discharge peak), corporate 4–7pm and elite schools 2–4pm (weekdays only).
 - Rendered as three map-anchored MapLibre circle layers — a steady soft glow plus two stroke-only "radar" rings that expand and fade out of phase. Map-anchored like the flags, so zero iOS-Safari drift; the rings scale with the flag's zoom curve and sit below the building/flag layers (a halo on the ground under the pole).

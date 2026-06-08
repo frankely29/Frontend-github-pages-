@@ -45,6 +45,13 @@
 - [ ] live map: popup shows the "Prime time now" chip plus the Best hours / Why rows during prime
 - [ ] live map: no pan/zoom performance regression while a pulse is active
 
+## Dollar-flag holiday/weekend calendar
+- [x] `node --check long-trip-hotspots-pins.feature.js` passes
+- [x] mock-DOM smoke test: with today marked a holiday + school in summer, only the open hotel flag pulses; corporate (holiday) and school (seasonal) are excluded; no `[lth]` errors
+- [x] empty/absent calendar degrades to weekend-only behavior (`sanitizeCalendar` drops malformed input)
+- [ ] live map: an office/school flag is dark with a "Closed (holiday)" chip on a federal holiday; the school flag is dark over summer
+- [ ] live map: hotels/transit/hospitals still behave normally on holidays/weekends
+
 ## Checks completed in this environment
 - [x] `node --check app.js`
 - [x] `node --check app.part2.js`
