@@ -2,6 +2,9 @@
 
 ## 2026-06-08
 
+### Major landmarks — non-Midtown icons 20% smaller
+- Scaled the non-Midtown landmark `icon-size` to **80% (a uniform 20% smaller)** at every zoom, per request. Midtown sizing is unchanged. Non-Midtown stops are now `z11 0.40 / z14 0.59 / z16 0.74 / z18 0.90` (were `0.5 / 0.74 / 0.92 / 1.12`).
+
 ### Major landmarks — shrink ONLY Midtown at zoom-out (restore the rest)
 - The previous declutter shrank every landmark, but only Midtown was actually crowded. Made the zoom-out size **data-driven**: only landmarks inside a Midtown box (Times Sq / 5th Ave / Central Park South — 14 of them, the dense hotel cluster + Mt Sinai West) are shrunk at zoom-out (`icon-size` z11→0.24), converging back to normal size by z18. The other **24** (UES medical row, downtown, outer boroughs) are **back to the original, larger size**. Also reverted `MIN_ZOOM` 12→11 so the non-Midtown ones show from the same zoom as before.
 
