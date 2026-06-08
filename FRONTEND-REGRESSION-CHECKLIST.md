@@ -74,6 +74,12 @@
 - [x] pulse rings thinned in screen space + kept clear of dollar-flag pulses; smoke test shows 19 prime hospitals → 16 after thinning at the test scale, re-thinned on `moveend`
 - [ ] live map: clustered landmark pulses no longer pile up; thin out when zoomed out, separate when zoomed in; no overlap with flag pulses
 - [ ] live map: hospital/hotel icons look like proper buildings (skyscraper style) and are still distinguishable at a glance
+- [x] z-order keeper made passive (re-add on reload only, no per-`styledata` `moveLayer`) so it can't ping-pong with the flag keeper; no near-duplicate coords (closest pair 87m); `node --check` + smoke pass
+- [ ] live map: building icons no longer flash; The Peninsula and St. Regis no longer overlap
+- [x] flag z-order keeper guarded with an "already on top" check (skips no-op `moveLayer`s that re-fire `styledata`); both features `node --check` + smoke pass
+- [x] hospital/hotel sprites redrawn as wide building blocks with a big emblem; icon-size bumped; "HOSPITAL"/"HOTEL" type tag added above each icon from z13
+- [ ] live map: dollar-flag buildings no longer flash/blink
+- [ ] live map: hospital/hotel icons are clearly bigger/wider and each shows "HOSPITAL"/"HOTEL" on top; type is obvious at a glance
 
 ## Checks completed in this environment
 - [x] `node --check app.js`

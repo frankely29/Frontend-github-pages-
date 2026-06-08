@@ -44,7 +44,7 @@
     ["hotel", "Mandarin Oriental New York", 40.7686, -73.9819, "80 Columbus Cir, Manhattan"],
     ["hotel", "Lotte New York Palace", 40.7585, -73.9742, "455 Madison Ave, Manhattan"],
     ["hotel", "The Ritz-Carlton Central Park", 40.7659, -73.9776, "50 Central Park S, Manhattan"],
-    ["hotel", "The Peninsula New York", 40.7616, -73.9744, "700 5th Ave, Manhattan"],
+    ["hotel", "The Peninsula New York", 40.7617, -73.9754, "700 5th Ave, Manhattan"],
     ["hotel", "Four Seasons Downtown", 40.7137, -74.0083, "27 Barclay St, Manhattan"],
     ["hotel", "New York Marriott Marquis", 40.7589, -73.9854, "1535 Broadway, Manhattan"],
     ["hotel", "New York Hilton Midtown", 40.7621, -73.9789, "1335 6th Ave, Manhattan"],
@@ -92,7 +92,7 @@
   const SPRITE_HOSPITAL = "mbf-sprite-hospital";
   const SPRITE_HOTEL = "mbf-sprite-hotel";
   const MIN_ZOOM = 11;        // show landmarks from mid-borough scale up
-  const LABEL_MIN_ZOOM = 14;  // show name labels only when zoomed in
+  const LABEL_MIN_ZOOM = 13;  // show the HOSPITAL/HOTEL type tag from here
   const REFRESH_MS = 60 * 1000;
   const PULSE_PERIOD_MS = 1600;
   const PULSE_R_MIN = 7;
@@ -158,35 +158,39 @@
     return { width: SIZE, height: SIZE, data: ctx.getImageData(0, 0, SIZE, SIZE).data };
   }
 
-  // Shared skyscraper silhouette — the same slim glass-tower design used
-  // (and approved) for the flag-system building sprite, so these landmarks
-  // read as real buildings. `P` = { body, border, roof, window } palette.
-  function drawSkyscraper(ctx, P) {
-    ctx.lineWidth = 1.5;
-    ctx.strokeStyle = P.border;
-    function glass(x, w, top, bottom, cols) {
-      ctx.fillStyle = P.window;
-      const inset = 2.5, stripeW = 1.6;
-      const gap = (w - inset * 2 - cols * stripeW) / (cols - 1);
-      for (let c = 0; c < cols; c++) ctx.fillRect(x + inset + c * (stripeW + gap), top, stripeW, bottom - top);
-      ctx.fillStyle = P.body;
-      for (let fy = top + 5; fy < bottom - 2; fy += 7) ctx.fillRect(x + 1.5, fy, w - 3, 1.3);
-    }
-    // Main shaft + stepped setback tier.
+  function roundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  // A bold, WIDE building block — far easier to read on the map than a slim
+  // tower — with a flat roof cap, a window grid, and a ground bar. The big
+  // type emblem (cross / star) is drawn on top by the per-type functions.
+  // `P` = { body, border, window, cap } palette.
+  function drawWideBuilding(ctx, P) {
+    ctx.lineJoin = "round";
+    // Flat roof cap.
+    ctx.fillStyle = P.cap;
+    roundRect(ctx, 19, 12, 42, 8, 3); ctx.fill();
+    // Main body (wide block).
     ctx.fillStyle = P.body;
-    ctx.fillRect(29, 26, 22, 50); ctx.strokeRect(29, 26, 22, 50);
-    ctx.fillRect(34, 12, 12, 14); ctx.strokeRect(34, 12, 12, 14);
-    // Crown cap + roof antenna with finial.
-    ctx.fillStyle = P.roof;
-    ctx.fillRect(34, 9, 12, 3); ctx.strokeRect(34, 9, 12, 3);
-    ctx.fillRect(39, 2, 2, 7);
-    ctx.beginPath(); ctx.arc(40, 2, 2, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-    // Glass curtain wall on both tiers.
-    glass(29, 22, 29, 73, 4);
-    glass(34, 12, 15, 24, 2);
-    // Street baseline.
+    ctx.strokeStyle = P.border;
+    ctx.lineWidth = 3;
+    roundRect(ctx, 16, 18, 48, 56, 4);
+    ctx.fill(); ctx.stroke();
+    // Window grid.
+    ctx.fillStyle = P.window;
+    for (let ry = 25; ry <= 64; ry += 9) {
+      for (let cx = 23; cx <= 53; cx += 9) ctx.fillRect(cx, ry, 5, 5);
+    }
+    // Ground bar.
     ctx.fillStyle = P.border;
-    ctx.fillRect(26, 76, 28, 2);
+    ctx.fillRect(13, 74, 54, 4);
   }
 
   function starPath(ctx, cx, cy, spikes, outer, inner) {
@@ -204,33 +208,30 @@
   }
 
   function drawHospital(ctx) {
-    // Cool white-blue glass tower (medical palette) with a red-cross badge
-    // on the facade so it reads unmistakably as a hospital.
-    drawSkyscraper(ctx, { body: "#e9f1fc", border: "#1d4ed8", roof: "#dc2626", window: "#bfdbfe" });
-    const bx = 32, by = 42, bs = 16;
+    // Bold white-and-blue hospital block with a BIG red medical cross.
+    drawWideBuilding(ctx, { body: "#eaf2fd", border: "#1d4ed8", window: "#9cc0f5", cap: "#1d4ed8" });
+    const cx = 40, cy = 46, R = 14;
     ctx.fillStyle = "#ffffff";
-    ctx.strokeStyle = "#dc2626";
-    ctx.lineWidth = 1.5;
-    ctx.fillRect(bx, by, bs, bs);
-    ctx.strokeRect(bx, by, bs, bs);
+    ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = "#dc2626"; ctx.stroke();
     ctx.fillStyle = "#dc2626";
-    const cx = bx + bs / 2, cy = by + bs / 2, a = 2.4, l = 11;
+    const a = 3.6, l = 18;
     ctx.fillRect(cx - a, cy - l / 2, a * 2, l);
     ctx.fillRect(cx - l / 2, cy - a, l, a * 2);
   }
 
   function drawHotel(ctx) {
-    // Warm amber-gold glass tower (luxury palette) with a gold star at the
-    // crown and a dark entrance awning so it reads as a grand hotel.
-    drawSkyscraper(ctx, { body: "#a16207", border: "#78350f", roof: "#fde68a", window: "#fef3c7" });
-    ctx.fillStyle = "#fde68a";
-    ctx.strokeStyle = "#78350f";
-    ctx.lineWidth = 1;
-    starPath(ctx, 40, 18, 5, 6.2, 2.7);
+    // Bold amber-gold hotel block with a BIG star + entrance awning.
+    drawWideBuilding(ctx, { body: "#f7c64f", border: "#92400e", window: "#cf962f", cap: "#92400e" });
+    ctx.fillStyle = "#ffffff";
+    ctx.strokeStyle = "#92400e";
+    ctx.lineWidth = 1.6;
+    starPath(ctx, 40, 45, 5, 14, 6);
     ctx.fill(); ctx.stroke();
-    ctx.fillStyle = "#78350f";
+    // Entrance awning at the base.
+    ctx.fillStyle = "#92400e";
     ctx.beginPath();
-    ctx.moveTo(31, 70); ctx.lineTo(49, 70); ctx.lineTo(46, 76); ctx.lineTo(34, 76);
+    ctx.moveTo(28, 70); ctx.lineTo(52, 70); ctx.lineTo(48, 78); ctx.lineTo(32, 78);
     ctx.closePath(); ctx.fill();
   }
 
@@ -364,7 +365,7 @@
           id: ICON_LAYER_ID, type: "symbol", source: SRC_ID, minzoom: MIN_ZOOM,
           layout: {
             "icon-image": ["match", ["get", "type"], "hospital", SPRITE_HOSPITAL, SPRITE_HOTEL],
-            "icon-size": ["interpolate", ["linear"], ["zoom"], 11, 0.34, 14, 0.5, 16, 0.66, 18, 0.82],
+            "icon-size": ["interpolate", ["linear"], ["zoom"], 11, 0.5, 14, 0.74, 16, 0.92, 18, 1.12],
             "icon-allow-overlap": true,
             "icon-ignore-placement": true,
             "icon-anchor": "bottom",
@@ -372,19 +373,24 @@
         });
       }
 
-      // Name labels — only when zoomed in, so the map stays uncluttered.
+      // Type tag ABOVE each building — "HOSPITAL" / "HOTEL" — so it's
+      // instantly clear what the building is. Colored by type, sits just
+      // above the icon, shown from a neighborhood zoom up. (The full name
+      // is in the tap popup.)
       if (!mapRef.getLayer(LABEL_LAYER_ID)) {
         mapRef.addLayer({
           id: LABEL_LAYER_ID, type: "symbol", source: SRC_ID, minzoom: LABEL_MIN_ZOOM,
           layout: {
-            "text-field": ["get", "name"],
+            "text-field": ["upcase", ["get", "type"]],
             "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
-            "text-size": 11, "text-anchor": "top", "text-offset": [0, 0.5],
-            "text-allow-overlap": false, "text-optional": true,
-            "text-max-width": 9,
+            "text-size": ["interpolate", ["linear"], ["zoom"], 13, 10, 16, 12.5, 18, 14],
+            "text-anchor": "bottom", "text-offset": [0, -3.0],
+            "text-letter-spacing": 0.08,
+            "text-allow-overlap": true, "text-ignore-placement": true,
           },
           paint: {
-            "text-color": "#1f2937", "text-halo-color": "#ffffff", "text-halo-width": 1.4,
+            "text-color": ["match", ["get", "type"], "hospital", "#dc2626", "#b45309"],
+            "text-halo-color": "#ffffff", "text-halo-width": 2.2,
           },
         });
       }
@@ -412,10 +418,15 @@
       raf(() => {
         pending = false;
         if (!mapRef) return;
-        if (!mapRef.getSource?.(SRC_ID) || !mapRef.getLayer?.(ICON_LAYER_ID)) {
-          layersReady = false;
-          ensureLayers();
-        }
+        // Only act when a full style reload has actually dropped our layers:
+        // re-add them and lift them once. We deliberately do NOT moveLayer on
+        // every styledata — the flag system runs its own z-order keeper, and
+        // two keepers each lifting to the top re-trigger each other's
+        // styledata every frame (moveLayer fires styledata), which makes the
+        // icons flash. Adding once + recovering on reload is enough.
+        if (mapRef.getSource?.(SRC_ID) && mapRef.getLayer?.(ICON_LAYER_ID)) return;
+        layersReady = false;
+        ensureLayers();
         for (const id of ids) {
           if (mapRef.getLayer?.(id)) { try { mapRef.moveLayer(id); } catch (_) {} }
         }
