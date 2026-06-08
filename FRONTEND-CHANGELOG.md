@@ -1,5 +1,12 @@
 # Frontend Changelog
 
+## 2026-06-08
+
+### Zoom-aware zone transparency
+- The borough/score `zones-fill` layer now fades with zoom: solid color when zoomed out (so zones read clearly at borough/overview scale), ramping to **40% opacity (60% transparent)** as you zoom in close, so the **street layout underneath shows through** for navigation. Implemented as a `fill-opacity` zoom `interpolate` in `app.part12.js` (linear z14 → z16, held at 0.4 beyond), applied on both the layer create and the per-update repaint paths.
+- The white zone outlines (`zones-line`) stay opaque, so zone boundaries remain crisp while the fill goes see-through.
+- Compatible with the temporary paint overrides in `long-trips-block` (dim) and `navigation.streetmode` (route view): both cache/restore `fill-opacity` via get/setPaintProperty, so they preserve and restore the zoom expression. Breakpoints (14/16) and the 0.4 floor are one-line tunables.
+
 ## 2026-06-07
 
 ### Dollar-flag pickup-time correction + holiday/weekend calendar

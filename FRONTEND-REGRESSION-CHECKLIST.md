@@ -52,6 +52,12 @@
 - [ ] live map: an office/school flag is dark with a "Closed (holiday)" chip on a federal holiday; the school flag is dark over summer
 - [ ] live map: hotels/transit/hospitals still behave normally on holidays/weekends
 
+## Zone zoom transparency
+- [x] `node --check app.part12.js` passes; `zones-fill` opacity is a zoom `interpolate` on both the create and update paths
+- [ ] live map: zones show normal solid color when zoomed out (≤ z14)
+- [ ] live map: zooming in close (≥ z16) makes zones ~60% transparent and the street layout shows through
+- [ ] live map: zone outlines stay crisp; long-trips-block dim and navigation street mode still restore opacity correctly afterward
+
 ## Checks completed in this environment
 - [x] `node --check app.js`
 - [x] `node --check app.part2.js`
