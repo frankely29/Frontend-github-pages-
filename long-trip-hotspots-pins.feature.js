@@ -96,6 +96,9 @@
   let pulseActive = false;          // is the pulse animation loop running
   let pulseRAF = null;              // requestAnimationFrame handle
   let pulseLastPaint = 0;           // last frame ts we pushed paint updates
+  // Closure calendar served by the backend (federal holidays + school
+  // recesses). Used to dark/de-pulse weekday-only + seasonal flags by date.
+  let calendar = { holidays: [], seasonal_closures: {} };
 
   // ---------------------------------------------------------------
   // NYC-local time + dim evaluation
@@ -110,20 +113,35 @@
         hourCycle: "h23",
         hour: "2-digit",
         weekday: "short",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
       }).formatToParts(new Date());
       let hour = 0;
       let weekday = "Mon";
+      let y = "", mo = "", da = "";
       for (const p of parts) {
         if (p.type === "hour") hour = Number(p.value) || 0;
         else if (p.type === "weekday") weekday = p.value;
+        else if (p.type === "year") y = p.value;
+        else if (p.type === "month") mo = p.value;
+        else if (p.type === "day") da = p.value;
       }
       const isWeekend = (weekday === "Sat" || weekday === "Sun");
-      return { hour, isWeekend };
+      // ymd "YYYY-MM-DD" matches the backend holiday list; md "MM-DD"
+      // matches the recurring seasonal-closure ranges.
+      return { hour, isWeekend, ymd: `${y}-${mo}-${da}`, md: `${mo}-${da}` };
     } catch (_) {
       // Worst case: fall back to UTC. Off-by-a-few-hours is better
       // than crashing.
       const d = new Date();
-      return { hour: d.getUTCHours(), isWeekend: (d.getUTCDay() === 0 || d.getUTCDay() === 6) };
+      const mo = String(d.getUTCMonth() + 1).padStart(2, "0");
+      const da = String(d.getUTCDate()).padStart(2, "0");
+      return {
+        hour: d.getUTCHours(),
+        isWeekend: (d.getUTCDay() === 0 || d.getUTCDay() === 6),
+        ymd: `${d.getUTCFullYear()}-${mo}-${da}`, md: `${mo}-${da}`,
+      };
     }
   }
 
@@ -142,10 +160,38 @@
     return false;
   }
 
+  // "MM-DD" range membership, inclusive; wraps the year boundary when
+  // start > end (e.g. winter break "12-24".."01-02").
+  function mdInRange(md, start, end) {
+    return (start <= end) ? (md >= start && md <= end) : (md >= start || md <= end);
+  }
+
+  // Why this hotspot is closed right now, or null if open. A closed flag
+  // is dimmed off and never pulses. Two sources, both from the backend
+  // calendar:
+  //   - weekday_only types (offices, schools) close on weekends and on
+  //     federal holidays (calendar.holidays);
+  //   - per-category seasonal closures — the school flag all summer and
+  //     over recesses (calendar.seasonal_closures).
+  function closureReason(h, now) {
+    const sched = h.dim_schedule;
+    if (sched && sched.weekday_only) {
+      if (now.isWeekend) return "weekend";
+      if (Array.isArray(calendar.holidays) && calendar.holidays.includes(now.ymd)) return "holiday";
+    }
+    const ranges = calendar.seasonal_closures && calendar.seasonal_closures[h.dominant_category];
+    if (Array.isArray(ranges)) {
+      for (const r of ranges) {
+        if (Array.isArray(r) && r.length === 2 && mdInRange(now.md, r[0], r[1])) return "break";
+      }
+    }
+    return null;
+  }
+
   function dimForHotspot(h, now) {
     const sched = h.dim_schedule;
     if (!sched) return DIM_PEAK;
-    if (sched.weekday_only && now.isWeekend) return DIM_OFF;
+    if (closureReason(h, now)) return DIM_OFF;        // closed: weekend / holiday / school break
     if (hourInRanges(now.hour, sched.peak)) return DIM_PEAK;
     if (hourInRanges(now.hour, sched.off)) return DIM_OFF;
     return DIM_MEDIUM;
@@ -154,11 +200,11 @@
   // True when "now" is inside this hotspot's prime window — the tightest
   // "best time to be near it" window (a subset of peak). Drives the
   // pulsing ring at the flag's pole base and the popup's "Prime time"
-  // chip. weekday_only flags never pulse on weekends.
+  // chip. A closed flag (weekend / holiday / school break) never pulses.
   function primeForHotspot(h, now) {
     const sched = h.dim_schedule;
     if (!sched) return false;
-    if (sched.weekday_only && now.isWeekend) return false;
+    if (closureReason(h, now)) return false;
     return hourInRanges(now.hour, sched.prime);
   }
 
@@ -202,7 +248,35 @@
     }
     const data = await r.json();
     const list = Array.isArray(data?.hotspots) ? data.hotspots : [];
-    return list.map(sanitize).filter(Boolean);
+    return {
+      hotspots: list.map(sanitize).filter(Boolean),
+      calendar: sanitizeCalendar(data?.calendar),
+    };
+  }
+
+  // Defensive parse of the backend closure calendar. Holidays must be
+  // "YYYY-MM-DD"; seasonal ranges must be ["MM-DD","MM-DD"]. Anything
+  // malformed is dropped, leaving an empty calendar (→ weekend-only
+  // behavior), so an old/partial backend response degrades gracefully.
+  function sanitizeCalendar(c) {
+    const empty = { holidays: [], seasonal_closures: {} };
+    if (!c || typeof c !== "object") return empty;
+    const ymd = /^\d{4}-\d{2}-\d{2}$/;
+    const md = /^\d{2}-\d{2}$/;
+    const holidays = Array.isArray(c.holidays)
+      ? c.holidays.filter((s) => typeof s === "string" && ymd.test(s))
+      : [];
+    const seasonal = {};
+    if (c.seasonal_closures && typeof c.seasonal_closures === "object") {
+      for (const cat of Object.keys(c.seasonal_closures)) {
+        const raw = c.seasonal_closures[cat];
+        const ranges = Array.isArray(raw) ? raw.filter(
+          (r) => Array.isArray(r) && r.length === 2 && md.test(r[0]) && md.test(r[1])
+        ) : [];
+        if (ranges.length) seasonal[cat] = ranges;
+      }
+    }
+    return { holidays, seasonal_closures: seasonal };
   }
 
   function sanitize(h) {
@@ -1141,20 +1215,29 @@
     const intensity = Number.isFinite(h.total_weight) && h.total_weight > 0
       ? `<span class="lth-popup-intensity">Intensity ${h.total_weight.toFixed(1)}</span>`
       : "";
-    // Live time-of-day state — a verbal echo of the visual. "Prime time"
-    // (the pulsing window) outranks the peak/steady/off dim state, and
-    // carries the same little pulsing dot the map shows.
+    // Live time-of-day state — a verbal echo of the visual. A closure
+    // (weekend / holiday / school break) outranks everything; otherwise
+    // "Prime time" (the pulsing window) outranks the peak/steady/off dim.
     const nowTod = nycHourAndDay();
-    const isPrime = primeForHotspot(h, nowTod);
+    const closed = closureReason(h, nowTod);
+    const isPrime = !closed && primeForHotspot(h, nowTod);
     const dimNow = dimForHotspot(h, nowTod);
     let dimLabel = "";
     let dimClass = "";
-    if (isPrime) { dimLabel = "Prime time"; dimClass = "lth-popup-state-prime"; }
+    let stateSuffix = " now";
+    if (closed) {
+      dimClass = "lth-popup-state-off";
+      stateSuffix = "";
+      dimLabel = closed === "holiday" ? "Closed today (holiday)"
+               : closed === "break" ? "Closed (school break)"
+               : "Closed weekends";
+    }
+    else if (isPrime) { dimLabel = "Prime time"; dimClass = "lth-popup-state-prime"; }
     else if (dimNow >= DIM_PEAK - 0.01) { dimLabel = "Peak hours"; dimClass = "lth-popup-state-peak"; }
     else if (dimNow <= DIM_OFF + 0.01) { dimLabel = "Off hours"; dimClass = "lth-popup-state-off"; }
     else { dimLabel = "Steady"; dimClass = "lth-popup-state-medium"; }
     const stateDot = isPrime ? `<span class="lth-pulse-dot"></span>` : "";
-    const stateChip = `<span class="lth-popup-state ${dimClass}">${stateDot}${dimLabel} now</span>`;
+    const stateChip = `<span class="lth-popup-state ${dimClass}">${stateDot}${dimLabel}${stateSuffix}</span>`;
     return `
       <div class="lth-popup-header">
         <span class="lth-popup-dollar">$</span>
@@ -1346,7 +1429,9 @@
   // ---------------------------------------------------------------
   async function refresh() {
     try {
-      hotspots = await fetchHotspots();
+      const res = await fetchHotspots();
+      hotspots = res.hotspots;
+      calendar = res.calendar;
       console.info(`[lth] loaded ${hotspots.length} hotspot(s) from /long_trip_hotspots`);
       ensureFlagLayer();
       syncFlagLayer();
