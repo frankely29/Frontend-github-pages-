@@ -160,19 +160,14 @@
     return false;
   }
 
-  // "MM-DD" range membership, inclusive; wraps the year boundary when
-  // start > end (e.g. winter break "12-24".."01-02").
-  function mdInRange(md, start, end) {
-    return (start <= end) ? (md >= start && md <= end) : (md >= start || md <= end);
-  }
-
   // Why this hotspot is closed right now, or null if open. A closed flag
   // is dimmed off and never pulses. Two sources, both from the backend
   // calendar:
   //   - weekday_only types (offices, schools) close on weekends and on
   //     federal holidays (calendar.holidays);
   //   - per-category seasonal closures — the school flag all summer and
-  //     over recesses (calendar.seasonal_closures).
+  //     over recesses, as explicit [start, end] ISO date ranges
+  //     (calendar.seasonal_closures).
   function closureReason(h, now) {
     const sched = h.dim_schedule;
     if (sched && sched.weekday_only) {
@@ -182,7 +177,9 @@
     const ranges = calendar.seasonal_closures && calendar.seasonal_closures[h.dominant_category];
     if (Array.isArray(ranges)) {
       for (const r of ranges) {
-        if (Array.isArray(r) && r.length === 2 && mdInRange(now.md, r[0], r[1])) return "break";
+        // r = ["YYYY-MM-DD","YYYY-MM-DD"]; fixed-width ISO strings compare
+        // chronologically, so a plain string range check is correct.
+        if (Array.isArray(r) && r.length === 2 && now.ymd >= r[0] && now.ymd <= r[1]) return "break";
       }
     }
     return null;
@@ -262,7 +259,6 @@
     const empty = { holidays: [], seasonal_closures: {} };
     if (!c || typeof c !== "object") return empty;
     const ymd = /^\d{4}-\d{2}-\d{2}$/;
-    const md = /^\d{2}-\d{2}$/;
     const holidays = Array.isArray(c.holidays)
       ? c.holidays.filter((s) => typeof s === "string" && ymd.test(s))
       : [];
@@ -271,7 +267,7 @@
       for (const cat of Object.keys(c.seasonal_closures)) {
         const raw = c.seasonal_closures[cat];
         const ranges = Array.isArray(raw) ? raw.filter(
-          (r) => Array.isArray(r) && r.length === 2 && md.test(r[0]) && md.test(r[1])
+          (r) => Array.isArray(r) && r.length === 2 && ymd.test(r[0]) && ymd.test(r[1])
         ) : [];
         if (ranges.length) seasonal[cat] = ranges;
       }
