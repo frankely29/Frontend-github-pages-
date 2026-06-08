@@ -82,6 +82,8 @@
 - [ ] live map: hospital/hotel icons are clearly bigger/wider and each shows "HOSPITAL"/"HOTEL" on top; type is obvious at a glance
 - [x] declutter: smaller icon-size curve (z12→0.3), landmarks hidden below z12, type tags from z15 with `text-allow-overlap:false` + padding; `node --check` + smoke pass
 - [ ] live map: zoomed out is clean (small markers, no label pile-up); icons grow and "HOSPITAL"/"HOTEL" tags appear (decluttered) as you zoom in
+- [x] zoom-out size is now Midtown-only (data-driven `midtown` flag): box catches the 14 Midtown landmarks; UES medical/downtown/boroughs (24) keep original size; `MIN_ZOOM` back to 11; `node --check` + smoke pass
+- [ ] live map: Midtown no longer blobs at a distance; non-Midtown buildings are back to their pre-#1015 size
 
 ## Checks completed in this environment
 - [x] `node --check app.js`

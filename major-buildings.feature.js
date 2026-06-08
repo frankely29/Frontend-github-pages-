@@ -91,7 +91,7 @@
   const PULSE_RING2_ID = "mbf-pulse-ring2";
   const SPRITE_HOSPITAL = "mbf-sprite-hospital";
   const SPRITE_HOTEL = "mbf-sprite-hotel";
-  const MIN_ZOOM = 12;        // show landmarks from mid-borough scale (not city overview)
+  const MIN_ZOOM = 11;        // show landmarks from mid-borough scale up
   const LABEL_MIN_ZOOM = 15;  // show the HOSPITAL/HOTEL type tag only when zoomed in
   const REFRESH_MS = 60 * 1000;
   const PULSE_PERIOD_MS = 1600;
@@ -250,12 +250,24 @@
   // ---------------------------------------------------------------
   // GeoJSON
   // ---------------------------------------------------------------
+  // The dense Midtown cluster (Times Sq / 5th Ave / Central Park South) is
+  // the only crowded area, so ONLY its landmarks are shrunk at zoom-out (via
+  // a data-driven icon-size keyed to this `midtown` flag). Everywhere else
+  // keeps the normal size. The box captures the Midtown hotels but excludes
+  // the UES medical row and the downtown / outer-borough landmarks.
+  function isMidtown(lat, lng) {
+    return lat >= 40.748 && lat <= 40.771 && lng >= -73.993 && lng <= -73.969;
+  }
+
   function landmarksGeoJSON() {
     return {
       type: "FeatureCollection",
       features: LANDMARKS.map((L, i) => ({
         type: "Feature",
-        properties: { idx: i, type: L.type, name: L.name, address: L.address },
+        properties: {
+          idx: i, type: L.type, name: L.name, address: L.address,
+          midtown: isMidtown(L.lat, L.lng),
+        },
         geometry: { type: "Point", coordinates: [L.lng, L.lat] },
       })),
     };
@@ -365,7 +377,16 @@
           id: ICON_LAYER_ID, type: "symbol", source: SRC_ID, minzoom: MIN_ZOOM,
           layout: {
             "icon-image": ["match", ["get", "type"], "hospital", SPRITE_HOSPITAL, SPRITE_HOTEL],
-            "icon-size": ["interpolate", ["linear"], ["zoom"], 12, 0.3, 14, 0.45, 16, 0.75, 18, 1.05],
+            // Normal size everywhere (restored to the pre-declutter values);
+            // only the dense Midtown cluster is shrunk at zoom-out so it
+            // doesn't blob together at a distance, converging back to normal
+            // size by z18 once you've zoomed into it.
+            "icon-size": ["interpolate", ["linear"], ["zoom"],
+              11, ["case", ["get", "midtown"], 0.24, 0.5],
+              14, ["case", ["get", "midtown"], 0.42, 0.74],
+              16, ["case", ["get", "midtown"], 0.72, 0.92],
+              18, 1.12,
+            ],
             "icon-allow-overlap": true,
             "icon-ignore-placement": true,
             "icon-anchor": "bottom",
