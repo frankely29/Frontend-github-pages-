@@ -2,6 +2,9 @@
 
 ## 2026-06-08
 
+### Major landmarks — declutter at zoom-out
+- The landmark icons + "HOSPITAL"/"HOTEL" tags crowded together at zoom-out (esp. Midtown). Cleaned it up: icons are **much smaller when zoomed out** (size curve z12→0.3 ramping to z18→1.05, vs the old flat-ish 0.5–1.12), they no longer show at the **city-overview** zoom (min zoom 11→12), and the **type tags only appear from z15 and are now collision-managed** (`text-allow-overlap: false` + padding) so they show only where there's room instead of stacking. Result: clean small markers when zoomed out, growing with the type label appearing as you zoom in.
+
 ### Flag buildings flashing fix + bigger/labeled landmark icons
 - **Dollar-flag buildings flashing**: the flag system's *own* z-order keeper (`long-trip-hotspots-pins.feature.js`) also called `moveLayer` on every `styledata`. Even a no-op move-to-top fires another `styledata`, so it re-triggered itself every frame and continuously re-placed the symbol building layer — which reads as flashing. Added an **"already on top" guard**: it now skips the move when its layers are already the topmost in order, so it only acts after a real reload. Falls back to the old always-move behavior if the layer order can't be read (no regression).
 - **Hospital/hotel icons were too skinny / hard to read**: redrew them as **bold, WIDE building blocks** (window grid + roof cap) with a **big central emblem** — red medical cross for hospitals, gold star for hotels — and bumped the icon size up ~45%. Added a **"HOSPITAL" / "HOTEL" type tag above each building** (colored by type, white halo) from z13, so it's instantly clear what each one is. The full name stays in the tap popup.

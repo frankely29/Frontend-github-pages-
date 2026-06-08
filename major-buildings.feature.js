@@ -91,8 +91,8 @@
   const PULSE_RING2_ID = "mbf-pulse-ring2";
   const SPRITE_HOSPITAL = "mbf-sprite-hospital";
   const SPRITE_HOTEL = "mbf-sprite-hotel";
-  const MIN_ZOOM = 11;        // show landmarks from mid-borough scale up
-  const LABEL_MIN_ZOOM = 13;  // show the HOSPITAL/HOTEL type tag from here
+  const MIN_ZOOM = 12;        // show landmarks from mid-borough scale (not city overview)
+  const LABEL_MIN_ZOOM = 15;  // show the HOSPITAL/HOTEL type tag only when zoomed in
   const REFRESH_MS = 60 * 1000;
   const PULSE_PERIOD_MS = 1600;
   const PULSE_R_MIN = 7;
@@ -365,7 +365,7 @@
           id: ICON_LAYER_ID, type: "symbol", source: SRC_ID, minzoom: MIN_ZOOM,
           layout: {
             "icon-image": ["match", ["get", "type"], "hospital", SPRITE_HOSPITAL, SPRITE_HOTEL],
-            "icon-size": ["interpolate", ["linear"], ["zoom"], 11, 0.5, 14, 0.74, 16, 0.92, 18, 1.12],
+            "icon-size": ["interpolate", ["linear"], ["zoom"], 12, 0.3, 14, 0.45, 16, 0.75, 18, 1.05],
             "icon-allow-overlap": true,
             "icon-ignore-placement": true,
             "icon-anchor": "bottom",
@@ -383,10 +383,10 @@
           layout: {
             "text-field": ["upcase", ["get", "type"]],
             "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
-            "text-size": ["interpolate", ["linear"], ["zoom"], 13, 10, 16, 12.5, 18, 14],
-            "text-anchor": "bottom", "text-offset": [0, -3.0],
-            "text-letter-spacing": 0.08,
-            "text-allow-overlap": true, "text-ignore-placement": true,
+            "text-size": ["interpolate", ["linear"], ["zoom"], 15, 11, 17, 13, 18, 14],
+            "text-anchor": "bottom", "text-offset": [0, -2.4],
+            "text-letter-spacing": 0.08, "text-padding": 6,
+            "text-allow-overlap": false,
           },
           paint: {
             "text-color": ["match", ["get", "type"], "hospital", "#dc2626", "#b45309"],
