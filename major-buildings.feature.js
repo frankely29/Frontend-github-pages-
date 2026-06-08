@@ -98,6 +98,10 @@
   const PULSE_R_MIN = 7;
   const PULSE_R_MAX = 30;
   const PULSE_FPS_MS = 33;
+  // Pulse de-clutter: collapse overlapping pulse rings by SCREEN distance
+  // so clustered landmarks and nearby dollar-flag pulses don't pile up.
+  const MIN_PULSE_GAP_PX = 58;   // min screen gap between two landmark pulses
+  const FLAG_PULSE_GAP_PX = 44;  // keep landmark pulses clear of flag pulses
 
   let mapRef = null;
   let initDone = false;
@@ -144,7 +148,7 @@
   // every device, unlike emoji which depend on the system font.
   // ---------------------------------------------------------------
   function spriteData(draw) {
-    const SIZE = 84;
+    const SIZE = 80;
     const canvas = document.createElement("canvas");
     canvas.width = SIZE; canvas.height = SIZE;
     const ctx = canvas.getContext("2d");
@@ -154,14 +158,35 @@
     return { width: SIZE, height: SIZE, data: ctx.getImageData(0, 0, SIZE, SIZE).data };
   }
 
-  function roundRect(ctx, x, y, w, h, r) {
-    ctx.beginPath();
-    ctx.moveTo(x + r, y);
-    ctx.arcTo(x + w, y, x + w, y + h, r);
-    ctx.arcTo(x + w, y + h, x, y + h, r);
-    ctx.arcTo(x, y + h, x, y, r);
-    ctx.arcTo(x, y, x + w, y, r);
-    ctx.closePath();
+  // Shared skyscraper silhouette — the same slim glass-tower design used
+  // (and approved) for the flag-system building sprite, so these landmarks
+  // read as real buildings. `P` = { body, border, roof, window } palette.
+  function drawSkyscraper(ctx, P) {
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = P.border;
+    function glass(x, w, top, bottom, cols) {
+      ctx.fillStyle = P.window;
+      const inset = 2.5, stripeW = 1.6;
+      const gap = (w - inset * 2 - cols * stripeW) / (cols - 1);
+      for (let c = 0; c < cols; c++) ctx.fillRect(x + inset + c * (stripeW + gap), top, stripeW, bottom - top);
+      ctx.fillStyle = P.body;
+      for (let fy = top + 5; fy < bottom - 2; fy += 7) ctx.fillRect(x + 1.5, fy, w - 3, 1.3);
+    }
+    // Main shaft + stepped setback tier.
+    ctx.fillStyle = P.body;
+    ctx.fillRect(29, 26, 22, 50); ctx.strokeRect(29, 26, 22, 50);
+    ctx.fillRect(34, 12, 12, 14); ctx.strokeRect(34, 12, 12, 14);
+    // Crown cap + roof antenna with finial.
+    ctx.fillStyle = P.roof;
+    ctx.fillRect(34, 9, 12, 3); ctx.strokeRect(34, 9, 12, 3);
+    ctx.fillRect(39, 2, 2, 7);
+    ctx.beginPath(); ctx.arc(40, 2, 2, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    // Glass curtain wall on both tiers.
+    glass(29, 22, 29, 73, 4);
+    glass(34, 12, 15, 24, 2);
+    // Street baseline.
+    ctx.fillStyle = P.border;
+    ctx.fillRect(26, 76, 28, 2);
   }
 
   function starPath(ctx, cx, cy, spikes, outer, inner) {
@@ -179,44 +204,33 @@
   }
 
   function drawHospital(ctx) {
-    ctx.lineJoin = "round";
-    // White tower body with a blue outline, bottom-anchored.
+    // Cool white-blue glass tower (medical palette) with a red-cross badge
+    // on the facade so it reads unmistakably as a hospital.
+    drawSkyscraper(ctx, { body: "#e9f1fc", border: "#1d4ed8", roof: "#dc2626", window: "#bfdbfe" });
+    const bx = 32, by = 42, bs = 16;
     ctx.fillStyle = "#ffffff";
-    ctx.strokeStyle = "#2563eb";
-    ctx.lineWidth = 4;
-    roundRect(ctx, 22, 15, 40, 61, 5);
-    ctx.fill(); ctx.stroke();
-    // Blue ground bar.
-    ctx.fillStyle = "#2563eb";
-    ctx.fillRect(15, 74, 54, 5);
-    // Bold red medical cross on the facade.
+    ctx.strokeStyle = "#dc2626";
+    ctx.lineWidth = 1.5;
+    ctx.fillRect(bx, by, bs, bs);
+    ctx.strokeRect(bx, by, bs, bs);
     ctx.fillStyle = "#dc2626";
-    const cx = 42, cy = 41, arm = 6, len = 20;
-    ctx.fillRect(cx - arm, cy - len / 2, arm * 2, len);
-    ctx.fillRect(cx - len / 2, cy - arm, len, arm * 2);
+    const cx = bx + bs / 2, cy = by + bs / 2, a = 2.4, l = 11;
+    ctx.fillRect(cx - a, cy - l / 2, a * 2, l);
+    ctx.fillRect(cx - l / 2, cy - a, l, a * 2);
   }
 
   function drawHotel(ctx) {
-    ctx.lineJoin = "round";
-    // Gold tower body with a dark-amber outline.
-    ctx.fillStyle = "#fbbf24";
-    ctx.strokeStyle = "#b45309";
-    ctx.lineWidth = 4;
-    roundRect(ctx, 22, 13, 40, 63, 5);
+    // Warm amber-gold glass tower (luxury palette) with a gold star at the
+    // crown and a dark entrance awning so it reads as a grand hotel.
+    drawSkyscraper(ctx, { body: "#a16207", border: "#78350f", roof: "#fde68a", window: "#fef3c7" });
+    ctx.fillStyle = "#fde68a";
+    ctx.strokeStyle = "#78350f";
+    ctx.lineWidth = 1;
+    starPath(ctx, 40, 18, 5, 6.2, 2.7);
     ctx.fill(); ctx.stroke();
-    // Window bands so it reads as a building.
-    ctx.fillStyle = "rgba(124,45,18,0.32)";
-    for (let wy = 22; wy <= 52; wy += 9) ctx.fillRect(27, wy, 30, 3);
-    // White luxury star on the facade.
-    ctx.fillStyle = "#ffffff";
-    ctx.strokeStyle = "#b45309";
-    ctx.lineWidth = 1.5;
-    starPath(ctx, 42, 39, 5, 11, 4.6);
-    ctx.fill(); ctx.stroke();
-    // Dark entrance awning at the base.
-    ctx.fillStyle = "#7c2d12";
+    ctx.fillStyle = "#78350f";
     ctx.beginPath();
-    ctx.moveTo(28, 70); ctx.lineTo(56, 70); ctx.lineTo(52, 78); ctx.lineTo(32, 78);
+    ctx.moveTo(31, 70); ctx.lineTo(49, 70); ctx.lineTo(46, 76); ctx.lineTo(34, 76);
     ctx.closePath(); ctx.fill();
   }
 
@@ -246,17 +260,57 @@
     };
   }
 
-  function pulseGeoJSON(hour) {
-    const features = [];
-    for (const L of LANDMARKS) {
-      if (!isPrimeNow(L.type, hour)) continue;
-      features.push({
-        type: "Feature",
-        properties: { type: L.type },
-        geometry: { type: "Point", coordinates: [L.lng, L.lat] },
-      });
+  // Screen positions of the dollar-flag hotspots (if that feature is
+  // loaded), so landmark pulses can stay clear of the flag pulses.
+  function flagScreenPoints() {
+    try {
+      const hs = window.LongTripHotspotsFeature?.getHotspots?.();
+      if (!Array.isArray(hs) || typeof mapRef?.project !== "function") return [];
+      const pts = [];
+      for (const h of hs) {
+        if (!Number.isFinite(h?.lat) || !Number.isFinite(h?.lng)) continue;
+        try { pts.push(mapRef.project([h.lng, h.lat])); } catch (_) {}
+      }
+      return pts;
+    } catch (_) { return []; }
+  }
+
+  // The set of prime-time landmarks to actually PULSE, thinned in SCREEN
+  // space so overlapping rings don't pile up: drop any that sit too close
+  // to an already-kept pulse or to a dollar-flag pulse. Recomputed on
+  // move/zoom, so the set adapts to scale — denser at street level, sparse
+  // when zoomed out. (Icons are never thinned; only the rings.)
+  function thinnedPulseGeoJSON() {
+    const hour = nycHour();
+    const prime = LANDMARKS.filter((L) => isPrimeNow(L.type, hour));
+    const toFeature = (L) => ({
+      type: "Feature",
+      properties: { type: L.type },
+      geometry: { type: "Point", coordinates: [L.lng, L.lat] },
+    });
+    if (!prime.length || typeof mapRef?.project !== "function") {
+      return { type: "FeatureCollection", features: prime.map(toFeature) };
     }
-    return { type: "FeatureCollection", features };
+    const flagPts = flagScreenPoints();
+    const keptPx = [];
+    const kept = [];
+    for (const L of prime) {
+      let px;
+      try { px = mapRef.project([L.lng, L.lat]); } catch (_) { continue; }
+      let blocked = false;
+      for (const f of flagPts) {
+        if (Math.hypot(px.x - f.x, px.y - f.y) < FLAG_PULSE_GAP_PX) { blocked = true; break; }
+      }
+      if (!blocked) {
+        for (const k of keptPx) {
+          if (Math.hypot(px.x - k.x, px.y - k.y) < MIN_PULSE_GAP_PX) { blocked = true; break; }
+        }
+      }
+      if (blocked) continue;
+      kept.push(L);
+      keptPx.push(px);
+    }
+    return { type: "FeatureCollection", features: kept.map(toFeature) };
   }
 
   // ---------------------------------------------------------------
@@ -435,7 +489,7 @@
     if (!mapRef || !layersReady) return;
     const src = mapRef.getSource?.(PULSE_SRC_ID);
     if (!src?.setData) return;
-    const fc = pulseGeoJSON(nycHour());
+    const fc = thinnedPulseGeoJSON();
     try { src.setData(fc); } catch (_) {}
     if (fc.features.length > 0) startPulse();
     else stopPulse();
@@ -530,6 +584,9 @@
       }
     });
     map.on("movestart", closePopup);
+    // Re-thin the pulse set when the view settles, so overlapping rings
+    // collapse/expand with zoom.
+    map.on("moveend", syncPulse);
   }
 
   // ---------------------------------------------------------------

@@ -2,6 +2,10 @@
 
 ## 2026-06-08
 
+### Major landmarks — building icons redesigned + pulse de-cluttered
+- Redrew the hospital & hotel sprites in `major-buildings.feature.js` to use the **approved skyscraper silhouette** (the same slim glass-tower design as the flag-system building sprite) so they read as real buildings, recolored + emblemed per type: **hospital** = cool white-blue glass tower with a red-cross badge; **hotel** = warm amber-gold glass tower with a crown star + entrance awning.
+- **De-cluttered the pulses**: landmark pulse rings are now thinned in **screen space** (recomputed on move/zoom) so clustered buildings collapse to a few well-spaced rings, and they stay clear of the dollar-flag pulses (reads the flag positions via `window.LongTripHotspotsFeature.getHotspots()`). Icons are never thinned — only the rings — so every building still shows; the pulse set is dense at street level and sparse when zoomed out, fixing the "many pulses stacked on top of each other" look.
+
 ### Major hospital & hotel landmarks (new feature)
 - Added `major-buildings.feature.js`: a standalone, read-only map layer showing **38 major NYC hospitals & hotels** as individual buildings with **distinct, identifiable icons** — hospitals as a white tower with a red medical cross, hotels as a gold tower with a star + entrance awning (canvas sprites via `map.addImage`). Separate from the dollar-flag system: no flags, no clustering, no backend.
 - Each landmark **pulses** (a colored ring at its base) during its best-pickup window, researched from data: **hotels 7am–noon** (standard checkout 11am–noon → morning airport departures) and **hospitals noon–5pm** (≈55% of discharges are afternoon). Ring color is type-coded (hospital red, hotel gold); the loop runs only while ≥1 landmark is prime, ~30fps, paused when the tab is hidden.
