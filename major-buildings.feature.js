@@ -92,7 +92,7 @@
   const SPRITE_HOSPITAL = "mbf-sprite-hospital";
   const SPRITE_HOTEL = "mbf-sprite-hotel";
   const MIN_ZOOM = 11;        // show landmarks from mid-borough scale up
-  const LABEL_MIN_ZOOM = 15;  // show the HOSPITAL/HOTEL type tag only when zoomed in
+  const LABEL_MIN_ZOOM = 13;  // show the HOSPITAL/HOTEL type tag from a neighborhood zoom
   const REFRESH_MS = 60 * 1000;
   const PULSE_PERIOD_MS = 1600;
   const PULSE_R_MIN = 7;
@@ -405,7 +405,7 @@
           layout: {
             "text-field": ["upcase", ["get", "type"]],
             "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
-            "text-size": ["interpolate", ["linear"], ["zoom"], 15, 11, 17, 13, 18, 14],
+            "text-size": ["interpolate", ["linear"], ["zoom"], 13, 9.5, 16, 12, 18, 14],
             "text-anchor": "bottom", "text-offset": [0, -2.4],
             "text-letter-spacing": 0.08, "text-padding": 6,
             "text-allow-overlap": false,

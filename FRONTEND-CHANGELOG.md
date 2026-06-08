@@ -2,6 +2,9 @@
 
 ## 2026-06-08
 
+### Major landmarks — type labels appear sooner
+- The "HOSPITAL"/"HOTEL" tags now show from **z13** (was z15), so you see what a building is without zooming in as far. Still collision-managed (`text-allow-overlap: false`), so dense Midtown stays decluttered — they just start appearing earlier and where there's room. Text-size curve extended down to z13 (9.5px) so they're legible at the lower zoom.
+
 ### Major landmarks — non-Midtown icons 20% smaller
 - Scaled the non-Midtown landmark `icon-size` to **80% (a uniform 20% smaller)** at every zoom, per request. Midtown sizing is unchanged. Non-Midtown stops are now `z11 0.40 / z14 0.59 / z16 0.74 / z18 0.90` (were `0.5 / 0.74 / 0.92 / 1.12`).
 
