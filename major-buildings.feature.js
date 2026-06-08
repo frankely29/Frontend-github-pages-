@@ -44,7 +44,7 @@
     ["hotel", "Mandarin Oriental New York", 40.7686, -73.9819, "80 Columbus Cir, Manhattan"],
     ["hotel", "Lotte New York Palace", 40.7585, -73.9742, "455 Madison Ave, Manhattan"],
     ["hotel", "The Ritz-Carlton Central Park", 40.7659, -73.9776, "50 Central Park S, Manhattan"],
-    ["hotel", "The Peninsula New York", 40.7616, -73.9744, "700 5th Ave, Manhattan"],
+    ["hotel", "The Peninsula New York", 40.7617, -73.9754, "700 5th Ave, Manhattan"],
     ["hotel", "Four Seasons Downtown", 40.7137, -74.0083, "27 Barclay St, Manhattan"],
     ["hotel", "New York Marriott Marquis", 40.7589, -73.9854, "1535 Broadway, Manhattan"],
     ["hotel", "New York Hilton Midtown", 40.7621, -73.9789, "1335 6th Ave, Manhattan"],
@@ -412,10 +412,15 @@
       raf(() => {
         pending = false;
         if (!mapRef) return;
-        if (!mapRef.getSource?.(SRC_ID) || !mapRef.getLayer?.(ICON_LAYER_ID)) {
-          layersReady = false;
-          ensureLayers();
-        }
+        // Only act when a full style reload has actually dropped our layers:
+        // re-add them and lift them once. We deliberately do NOT moveLayer on
+        // every styledata — the flag system runs its own z-order keeper, and
+        // two keepers each lifting to the top re-trigger each other's
+        // styledata every frame (moveLayer fires styledata), which makes the
+        // icons flash. Adding once + recovering on reload is enough.
+        if (mapRef.getSource?.(SRC_ID) && mapRef.getLayer?.(ICON_LAYER_ID)) return;
+        layersReady = false;
+        ensureLayers();
         for (const id of ids) {
           if (mapRef.getLayer?.(id)) { try { mapRef.moveLayer(id); } catch (_) {} }
         }

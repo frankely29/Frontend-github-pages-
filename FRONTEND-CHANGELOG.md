@@ -2,6 +2,10 @@
 
 ## 2026-06-08
 
+### Major landmarks — fix flashing icons + overlapping pin
+- **Flashing fix**: the major-buildings z-order keeper called `moveLayer` on every `styledata` event. The flag system runs its own `styledata` keeper doing the same, and because `moveLayer` itself fires `styledata`, the two keepers re-triggered each other every frame and ping-ponged the layer order — making overlapping building icons flash. The keeper is now **passive**: it only re-adds + lifts its layers when a real style reload has dropped them, and never continuously lifts, so there's nothing to fight.
+- **Overlap fix**: The Peninsula and The St. Regis sat ~20m apart (imprecise Peninsula coordinate), stacking their icons. Moved The Peninsula to its actual 700 5th Ave location (~110m away); the closest landmark pair is now 87m, so no icons overlap.
+
 ### Major landmarks — building icons redesigned + pulse de-cluttered
 - Redrew the hospital & hotel sprites in `major-buildings.feature.js` to use the **approved skyscraper silhouette** (the same slim glass-tower design as the flag-system building sprite) so they read as real buildings, recolored + emblemed per type: **hospital** = cool white-blue glass tower with a red-cross badge; **hotel** = warm amber-gold glass tower with a crown star + entrance awning.
 - **De-cluttered the pulses**: landmark pulse rings are now thinned in **screen space** (recomputed on move/zoom) so clustered buildings collapse to a few well-spaced rings, and they stay clear of the dollar-flag pulses (reads the flag positions via `window.LongTripHotspotsFeature.getHotspots()`). Icons are never thinned — only the rings — so every building still shows; the pulse set is dense at street level and sparse when zoomed out, fixing the "many pulses stacked on top of each other" look.
