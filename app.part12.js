@@ -336,11 +336,12 @@
     // zoomed out (borough/overview — easy to compare zones at a glance),
     // then ramp to 40% opacity (60% transparent) as the driver zooms in
     // close, so the street layout underneath shows through for navigation.
-    // Linear between z14 (opaque) and z16 (60% transparent); held at 0.4
-    // beyond z16. Tune the 14/16 breakpoints or the 0.4 floor to taste.
+    // Linear between z12 (opaque) and z16 (60% transparent); held at 0.4
+    // beyond z16. Fade begins at z12 so the transparency comes in earlier
+    // (less zooming). Tune the 12/16 breakpoints or the 0.4 floor to taste.
     const zonesFillOpacityExpr = [
       "interpolate", ["linear"], ["zoom"],
-      14, 1,
+      12, 1,
       16, 0.4
     ];
 

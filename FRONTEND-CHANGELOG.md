@@ -2,6 +2,9 @@
 
 ## 2026-06-08
 
+### Zone/hotspot transparency begins earlier
+- Moved the start of the zoom-fade from **z14 to z12** for both the zones (`app.part12.js`) and the pickup-zone hotspots (`app.part10.js`), so the see-through transparency comes in earlier and users don't have to zoom in as far. Full transparency still lands at z16 (unchanged); only the begin breakpoint moved.
+
 ### Zoom-aware hotspot transparency
 - Applied the same zoom-fade to the pickup-zone hotspot fills (`pickup-zone-hotspots-underpaint` + `-fill` in `app.part10.js`): their intensity-based opacity is preserved when zoomed out, then faded to **40% of it** as you zoom in close, so the **street layout underneath shows through** — matching the `zones-fill` behavior.
 - Because these layers already drive `fill-opacity` off `intensity` (and `zoom` must stay at the top level of a paint expression), it's structured as a top-level zoom `interpolate` whose stop outputs are the intensity ramp (normal at z14) and that ramp × 0.4 (at z16). Applied on both the create and per-update repaint paths for `underpaint` and `fill`.
