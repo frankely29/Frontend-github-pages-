@@ -2,6 +2,11 @@
 
 ## 2026-06-08
 
+### Major hospital & hotel landmarks (new feature)
+- Added `major-buildings.feature.js`: a standalone, read-only map layer showing **38 major NYC hospitals & hotels** as individual buildings with **distinct, identifiable icons** — hospitals as a white tower with a red medical cross, hotels as a gold tower with a star + entrance awning (canvas sprites via `map.addImage`). Separate from the dollar-flag system: no flags, no clustering, no backend.
+- Each landmark **pulses** (a colored ring at its base) during its best-pickup window, researched from data: **hotels 7am–noon** (standard checkout 11am–noon → morning airport departures) and **hospitals noon–5pm** (≈55% of discharges are afternoon). Ring color is type-coded (hospital red, hotel gold); the loop runs only while ≥1 landmark is prime, ~30fps, paused when the tab is hidden.
+- Icons appear from z11; **name labels** from z14; tap a building for a popup with its type, address, best pickup hours, and a live "Prime pickup now / Off-peak" chip. Coordinates reused from the hand-curated backend POI list. Registered in `index.html`'s feature-script list.
+
 ### Zone/hotspot transparency begins earlier
 - Moved the start of the zoom-fade from **z14 to z12** for both the zones (`app.part12.js`) and the pickup-zone hotspots (`app.part10.js`), so the see-through transparency comes in earlier and users don't have to zoom in as far. Full transparency still lands at z16 (unchanged); only the begin breakpoint moved.
 - Follow-up: nudged the begin one more level earlier, **z12 → z11**, for both layers (end still z16).
