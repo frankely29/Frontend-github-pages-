@@ -761,9 +761,10 @@ async function ensurePickupSourceAndLayers() {
   // zones-fill treatment: keep the intensity-based opacity when zoomed out,
   // then fade to 40% of it as you zoom in close, so the street layout
   // underneath shows through. Built as a top-level zoom interpolate whose
-  // stop outputs are the intensity ramp (normal at z14) and that ramp x0.4
+  // stop outputs are the intensity ramp (normal at z12) and that ramp x0.4
   // (at z16) — "zoom" must stay at the top level of a paint expression, so
-  // it can't simply be multiplied over the whole intensity ramp.
+  // it can't simply be multiplied over the whole intensity ramp. Fade
+  // begins at z12 so the transparency comes in earlier (less zooming).
   const HOTSPOT_ZOOMED_IN_FADE = 0.4;
   const underpaintOpacityBase = [
     "interpolate", ["linear"], ["coalesce", ["get", "intensity"], 0.35],
@@ -775,12 +776,12 @@ async function ensurePickupSourceAndLayers() {
   ];
   const underpaintOpacityExpr = [
     "interpolate", ["linear"], ["zoom"],
-    14, underpaintOpacityBase,
+    12, underpaintOpacityBase,
     16, ["*", underpaintOpacityBase, HOTSPOT_ZOOMED_IN_FADE],
   ];
   const fillOpacityExpr = [
     "interpolate", ["linear"], ["zoom"],
-    14, fillOpacityBase,
+    12, fillOpacityBase,
     16, ["*", fillOpacityBase, HOTSPOT_ZOOMED_IN_FADE],
   ];
 
