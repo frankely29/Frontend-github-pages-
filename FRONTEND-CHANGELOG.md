@@ -1,5 +1,14 @@
 # Frontend Changelog
 
+## 2026-06-07
+
+### Dollar-flag prime-time pulse
+- Added a pulsing gold beacon at each dollar flag's pole base in `long-trip-hotspots-pins.feature.js`, shown only while that flag is in its **prime window** — the tightest "best time to be near it" hours for its building type (served by the backend in `dim_schedule.prime`, always a subset of `peak`). Prime windows in play: luxury hotels 7–11am (morning airport runs), transit hubs 7–9am & 5–8pm (rush + arrivals), hospitals 1–5pm (discharge peak), corporate 4–7pm and elite schools 2–4pm (weekdays only).
+- Rendered as three map-anchored MapLibre circle layers — a steady soft glow plus two stroke-only "radar" rings that expand and fade out of phase. Map-anchored like the flags, so zero iOS-Safari drift; the rings scale with the flag's zoom curve and sit below the building/flag layers (a halo on the ground under the pole).
+- The animation runs only while ≥1 flag is in prime (re-evaluated on the existing per-minute dim tick and 5-min refresh), is throttled to ~30fps, and pauses entirely while the tab is hidden.
+- Popup now shows a **"Prime time now"** chip (with the same pulsing dot) that outranks the existing peak/steady/off state — plus the "Best hours" and "Why this is a hotspot" rows and the live time-of-day dim, all of which were previously blank/dormant because the backend never sent `dim_schedule`/`best_hours`/`rationale` (now fixed in the paired backend change).
+- Degrades gracefully: if the backend doesn't send `dim_schedule.prime` (older deploy), no flag pulses and nothing else changes.
+
 ## 2026-03-19
 
 ### Phase 1 cleanup
