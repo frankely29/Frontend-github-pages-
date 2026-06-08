@@ -377,15 +377,16 @@
           id: ICON_LAYER_ID, type: "symbol", source: SRC_ID, minzoom: MIN_ZOOM,
           layout: {
             "icon-image": ["match", ["get", "type"], "hospital", SPRITE_HOSPITAL, SPRITE_HOTEL],
-            // Normal size everywhere (restored to the pre-declutter values);
-            // only the dense Midtown cluster is shrunk at zoom-out so it
-            // doesn't blob together at a distance, converging back to normal
-            // size by z18 once you've zoomed into it.
+            // Per-feature size. The dense Midtown cluster is shrunk hard at
+            // zoom-out so it doesn't blob together at a distance (converging
+            // to full size by z18). Everything else is the original size
+            // scaled to 80% (a uniform 20% smaller, per request). First
+            // value in each case = Midtown, second = elsewhere.
             "icon-size": ["interpolate", ["linear"], ["zoom"],
-              11, ["case", ["get", "midtown"], 0.24, 0.5],
-              14, ["case", ["get", "midtown"], 0.42, 0.74],
-              16, ["case", ["get", "midtown"], 0.72, 0.92],
-              18, 1.12,
+              11, ["case", ["get", "midtown"], 0.24, 0.40],
+              14, ["case", ["get", "midtown"], 0.42, 0.59],
+              16, ["case", ["get", "midtown"], 0.72, 0.74],
+              18, ["case", ["get", "midtown"], 1.12, 0.90],
             ],
             "icon-allow-overlap": true,
             "icon-ignore-placement": true,
