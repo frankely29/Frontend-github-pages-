@@ -64,6 +64,13 @@
 - [ ] live map: zooming in close (≥ z16) fades hotspots ~60% and the street layout shows through; relative intensity differences still read
 - [ ] live map: hotspot outlines remain visible; long-trips-block dim still restores hotspot opacity afterward
 
+## Major hospital & hotel landmarks
+- [x] `node --check major-buildings.feature.js` passes; registered in `index.html` feature list
+- [x] mock-DOM smoke test: 2 sprites registered, 5 layers created, 38 landmark features; at 1pm NYC exactly the 19 hospitals enter the pulse source (afternoon discharge), hotels don't; rings animate; no `[mbf]` errors
+- [ ] live map: hospital (red cross) and hotel (gold star) icons render distinctly from z11; names from z14
+- [ ] live map: hospitals pulse afternoon (noon–5pm), hotels pulse morning (7am–noon)
+- [ ] live map: tapping a building opens the popup (type, address, best hours, prime/off chip); no clash with zone/flag popups
+
 ## Checks completed in this environment
 - [x] `node --check app.js`
 - [x] `node --check app.part2.js`
