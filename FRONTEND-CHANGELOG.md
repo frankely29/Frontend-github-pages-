@@ -2,6 +2,9 @@
 
 ## 2026-06-08
 
+### Major landmarks — shrink ONLY Midtown at zoom-out (restore the rest)
+- The previous declutter shrank every landmark, but only Midtown was actually crowded. Made the zoom-out size **data-driven**: only landmarks inside a Midtown box (Times Sq / 5th Ave / Central Park South — 14 of them, the dense hotel cluster + Mt Sinai West) are shrunk at zoom-out (`icon-size` z11→0.24), converging back to normal size by z18. The other **24** (UES medical row, downtown, outer boroughs) are **back to the original, larger size**. Also reverted `MIN_ZOOM` 12→11 so the non-Midtown ones show from the same zoom as before.
+
 ### Major landmarks — declutter at zoom-out
 - The landmark icons + "HOSPITAL"/"HOTEL" tags crowded together at zoom-out (esp. Midtown). Cleaned it up: icons are **much smaller when zoomed out** (size curve z12→0.3 ramping to z18→1.05, vs the old flat-ish 0.5–1.12), they no longer show at the **city-overview** zoom (min zoom 11→12), and the **type tags only appear from z15 and are now collision-managed** (`text-allow-overlap: false` + padding) so they show only where there's room instead of stacking. Result: clean small markers when zoomed out, growing with the type label appearing as you zoom in.
 
