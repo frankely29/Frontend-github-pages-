@@ -697,6 +697,23 @@
         if (!mapRef) return;
         const presentIds = ids.filter((id) => mapRef.getLayer?.(id));
         if (!presentIds.length) return;
+        // Skip when our layers are already the topmost, in order. moveLayer
+        // always fires another "styledata" (even for a no-op move to the
+        // top), which re-triggers this handler every frame and continuously
+        // re-places the symbol building layer — that re-placement reads as
+        // flashing. Only actually move when a style reload has knocked us
+        // out of place. Defaults to moving if the order can't be read, so
+        // there's no regression vs. the old always-move behavior.
+        let order = null;
+        try {
+          order = (typeof mapRef.getLayersOrder === "function")
+            ? mapRef.getLayersOrder()
+            : (mapRef.getStyle?.()?.layers || []).map((l) => l.id);
+        } catch (_) { order = null; }
+        if (Array.isArray(order) && order.length >= presentIds.length) {
+          const tail = order.slice(-presentIds.length);
+          if (tail.every((id, i) => id === presentIds[i])) return;
+        }
         zOrderInMove = true;
         try {
           // buildings → flag last so the flag sits on top of the dots.
