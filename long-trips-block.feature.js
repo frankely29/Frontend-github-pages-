@@ -17,7 +17,8 @@
   const MOVE_TOLERANCE_PX = 18;
   const MAX_LOCAL_CACHE = 500;
   const SUPPRESS_NEXT_CLICK_MS = 600;
-  const FLAG_TEXT = "45+";
+  const FLAG_LINES = ["45+", "Trips"];     // stacked on the flag (narrow)
+  const FLAG_TEXT = FLAG_LINES.join("");   // "45+Trips" for prose / dialogs
 
   const COLORS = {
     green:  { hex: "#10b981", border: "#047857", label: "Best (Green)" },
@@ -160,7 +161,7 @@
     if (document.getElementById("long-trips-block-css")) return;
     const css = `
       .ltb-flag {
-        position: relative; width: 44px; height: 44px;
+        position: relative; width: 44px; height: 40px;
         cursor: pointer; user-select: none; -webkit-user-select: none;
         -webkit-touch-callout: none; touch-action: none;
       }
@@ -173,10 +174,10 @@
       }
       .ltb-flag-fill {
         position: absolute; inset: 0;
-        border-radius: 50%;
-        display: flex; align-items: center; justify-content: center;
-        font: 700 11px/1 -apple-system, system-ui, "Segoe UI", sans-serif;
-        color: #1f2937; letter-spacing: 0.5px;
+        border-radius: 8px;
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        font: 700 13px/1.05 -apple-system, system-ui, "Segoe UI", sans-serif;
+        color: #1f2937; letter-spacing: 0.3px;
         box-shadow: 0 2px 4px rgba(0,0,0,0.35);
       }
       .ltb-flag-pulse {
@@ -342,7 +343,7 @@
     root.innerHTML = `
       <div class="ltb-flag-scale">
         <div class="ltb-flag-pulse"></div>
-        <div class="ltb-flag-fill" style="background:${palette.hex};border:2px solid ${palette.border};">${FLAG_TEXT}</div>
+        <div class="ltb-flag-fill" style="background:${palette.hex};border:2px solid ${palette.border};">${FLAG_LINES.map((l) => `<span>${l}</span>`).join("")}</div>
       </div>
     `;
     return root;
@@ -574,38 +575,64 @@
   // Flag atlas: three flag images side-by-side on one canvas.
   // CSS pixels per flag = (FLAG_W_CSS x FLAG_H_CSS); the canvas is
   // drawn at 2x for retina sharpness.
+  // Compact pennant holding the label on TWO lines ("45+" over "Trips").
+  // Size is the ORIGINAL flag footprint (34 x 42) so it scales down the same
+  // as before when zooming out — the rename must not change the on-map size.
+  // The pole sits POLE_FRAC of the way across (near the left) so the narrow
+  // pennant has room for the two lines without widening the flag. The lng/lat
+  // anchor is the pole base, so the quad's horizontal extent is measured from
+  // that pole: FLAG_LEFT_CSS px to its left, FLAG_RIGHT_CSS px to its right.
   const FLAG_W_CSS = 34;
   const FLAG_H_CSS = 42;
+  const POLE_FRAC = 0.18;
+  const FLAG_LEFT_CSS = -POLE_FRAC * FLAG_W_CSS;          // ≈ -6.1
+  const FLAG_RIGHT_CSS = (1 - POLE_FRAC) * FLAG_W_CSS;    // ≈ +27.9
   const FLAG_ATLAS_SLICES = ["green", "sky", "yellow"];
 
   function drawFlagInto(ctx, color, xOff, yOff, W, H) {
     const palette = COLORS[color] || COLORS.yellow;
-    // Pole: vertical bar near image-center, full height.
+    const poleX = Math.round(W * POLE_FRAC);
+    // Pole: vertical bar near the left, full height.
     ctx.fillStyle = "#1f2937";
-    ctx.fillRect(xOff + W / 2 - 2, yOff, 4, H);
-    // Pennant attached at the top of the pole.
-    const pX = xOff + W / 2;
+    ctx.fillRect(xOff + poleX - 2, yOff, 4, H);
+    // Compact two-line pennant ("45+" over "Trips") at the top of the pole,
+    // with a small swallowtail notch in its right edge. Stays inside the
+    // slice (right edge ≈ 0.94*W) so it can't bleed into the neighbour.
+    const pX = xOff + poleX;
     const pY = yOff;
-    const pW = Math.round(W * 0.82);
-    const pH = Math.round(H * 0.52);
+    const pW = Math.round(W * 0.76);
+    const pH = Math.round(H * 0.64);
+    const notch = Math.round(pW * 0.12);
     ctx.fillStyle = palette.hex;
     ctx.strokeStyle = palette.border;
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(pX, pY);
     ctx.lineTo(pX + pW, pY);
-    ctx.lineTo(pX + pW, pY + pH * 0.65);
-    ctx.lineTo(pX + pW * 0.6, pY + pH);
+    ctx.lineTo(pX + pW - notch, pY + pH * 0.5);
+    ctx.lineTo(pX + pW, pY + pH);
     ctx.lineTo(pX, pY + pH);
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
-    // "45+" label on the pennant.
+    // Two stacked lines, auto-sized down to the widest one ("Trips").
+    const usable = pW - notch - 6;
     ctx.fillStyle = "#1f2937";
-    ctx.font = `bold ${Math.round(pH * 0.5)}px -apple-system, system-ui, sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(FLAG_TEXT, pX + pW * 0.4, pY + pH * 0.45);
+    let fontPx = Math.round(pH * 0.34);
+    ctx.font = `bold ${fontPx}px -apple-system, system-ui, sans-serif`;
+    const widest = Math.max(
+      ctx.measureText(FLAG_LINES[0]).width,
+      ctx.measureText(FLAG_LINES[1]).width
+    );
+    if (widest > usable) {
+      fontPx = Math.max(7, Math.floor(fontPx * usable / widest));
+      ctx.font = `bold ${fontPx}px -apple-system, system-ui, sans-serif`;
+    }
+    const cx = pX + (pW - notch) * 0.5;
+    ctx.fillText(FLAG_LINES[0], cx, pY + pH * 0.30);
+    ctx.fillText(FLAG_LINES[1], cx, pY + pH * 0.70);
   }
 
   function buildFlagAtlas() {
@@ -654,11 +681,14 @@
   // Same curve as the disc layer's circle-radius interpolation:
   // smaller at low zoom, bigger zoomed in.
   function flagZoomScale(z) {
-    if (!Number.isFinite(z)) return 0.85;
-    if (z <= 9) return 0.60;
-    if (z >= 16) return 1.10;
-    if (z <= 13) return 0.60 + (0.85 - 0.60) * ((z - 9) / 4);
-    return 0.85 + (1.10 - 0.85) * ((z - 13) / 3);
+    // Shrinks hard when zoomed out so flags stay small/uncluttered at the
+    // city-overview zooms, then grows to full size as you zoom in to street
+    // level. (Zoom-out floor was 0.60 — too big when far out — now 0.30.)
+    if (!Number.isFinite(z)) return 0.65;
+    if (z <= 9) return 0.30;
+    if (z >= 16) return 1.05;
+    if (z <= 13) return 0.30 + (0.65 - 0.30) * ((z - 9) / 4);   // z9..z13: 0.30 -> 0.65
+    return 0.65 + (1.05 - 0.65) * ((z - 13) / 3);                // z13..z16: 0.65 -> 1.05
   }
 
   function createFlagCustomLayer() {
@@ -767,7 +797,11 @@
         const flags = this._flags;
         if (!flags.length) return false;
 
-        const halfW = FLAG_W_CSS / 2;
+        // Quad spans from the pole (anchor, dx=0) outward: FLAG_LEFT_CSS to
+        // its left, FLAG_RIGHT_CSS to its right — the pole baked into the
+        // atlas at POLE_FRAC lands exactly on the lng/lat anchor.
+        const leftX = FLAG_LEFT_CSS;
+        const rightX = FLAG_RIGHT_CSS;
         const fullH = FLAG_H_CSS;
         const atlasW = this._atlas.W;
         const flagW = this._atlas.flagW;
@@ -800,19 +834,19 @@
           const v0 = i * 4 * FLOATS_PER_VERTEX;
           // Bottom-left
           vertices[v0 +  0] = pt.x; vertices[v0 +  1] = pt.y;
-          vertices[v0 +  2] = -halfW; vertices[v0 +  3] = 0;
+          vertices[v0 +  2] = leftX; vertices[v0 +  3] = 0;
           vertices[v0 +  4] = uLeft;  vertices[v0 +  5] = 1;
           // Bottom-right
           vertices[v0 +  6] = pt.x; vertices[v0 +  7] = pt.y;
-          vertices[v0 +  8] =  halfW; vertices[v0 +  9] = 0;
+          vertices[v0 +  8] = rightX; vertices[v0 +  9] = 0;
           vertices[v0 + 10] = uRight; vertices[v0 + 11] = 1;
           // Top-left (fullH px ABOVE anchor in screen px)
           vertices[v0 + 12] = pt.x; vertices[v0 + 13] = pt.y;
-          vertices[v0 + 14] = -halfW; vertices[v0 + 15] = -fullH;
+          vertices[v0 + 14] = leftX; vertices[v0 + 15] = -fullH;
           vertices[v0 + 16] = uLeft;  vertices[v0 + 17] = 0;
           // Top-right
           vertices[v0 + 18] = pt.x; vertices[v0 + 19] = pt.y;
-          vertices[v0 + 20] =  halfW; vertices[v0 + 21] = -fullH;
+          vertices[v0 + 20] = rightX; vertices[v0 + 21] = -fullH;
           vertices[v0 + 22] = uRight; vertices[v0 + 23] = 0;
 
           const base = i * 4;
@@ -1033,7 +1067,7 @@
               type: "symbol",
               source: LTF_SOURCE_ID,
               layout: {
-                "text-field": FLAG_TEXT,
+                "text-field": FLAG_LINES.join("\n"),
                 "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
                 "text-size": [
                   "interpolate", ["linear"], ["zoom"],
@@ -1206,7 +1240,7 @@
           type: "symbol",
           source: LTF_SOURCE_ID,
           layout: {
-            "text-field": FLAG_TEXT,
+            "text-field": FLAG_LINES.join("\n"),
             "text-font": ["Open Sans Regular"],
             "text-size": [
               "interpolate", ["linear"], ["zoom"],
@@ -1291,10 +1325,12 @@
       const flags = state.flags.filter((f) => f.id !== hidden);
       if (!flags.length) return null;
       const scale = flagZoomScale(mapRef.getZoom?.());
-      const halfW = (FLAG_W_CSS / 2) * scale;
+      const leftX = FLAG_LEFT_CSS * scale;
+      const rightX = FLAG_RIGHT_CSS * scale;
       const fullH = FLAG_H_CSS * scale;
-      // Anchor is at pole tip (bottom of flag). Flag extends UP from
-      // anchor by fullH px and ±halfW px sideways.
+      // Anchor is at the pole base (bottom of flag). Flag extends UP from
+      // anchor by fullH px, and sideways from FLAG_LEFT_CSS to FLAG_RIGHT_CSS
+      // (mostly to the right, since the pole sits near the left).
       let best = null;
       let bestDist = Infinity;
       for (const f of flags) {
@@ -1302,7 +1338,7 @@
         try { screen = mapRef.project([f.lng, f.lat]); } catch (_) { continue; }
         const dx = point.x - screen.x;
         const dy = point.y - screen.y;
-        if (Math.abs(dx) <= halfW && dy <= 0 && dy >= -fullH) {
+        if (dx >= leftX && dx <= rightX && dy <= 0 && dy >= -fullH) {
           const d = Math.hypot(dx, dy);
           if (d < bestDist) { bestDist = d; best = f; }
         }

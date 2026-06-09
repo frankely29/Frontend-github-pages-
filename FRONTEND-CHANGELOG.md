@@ -7,6 +7,84 @@
 - Pulses a magenta glow + two expanding rings during each district's **let-out window** — dinner let-out through last call, later on Fri/Sat — computed client-side from the backend `dim_schedule` (`prime` weeknight / `prime_weekend`; hour ranges wrap past midnight). Pins dim by time-of-day and brighten/pulse at let-out; a tap shows the district's venues, a "best pickup" state chip, and best-hours.
 - Self-contained IIFE mirroring the long-trip-hotspots feature's wiring (apiBase / authHeaders / waitForMap, 5-min refresh, 1-min dim tick, GL circle pulse). No backend calendar needed — nightlife never closes.
 
+### Dollar-flag shrinks more when zoomed out
+- Flags still felt too big at the city-overview zooms. Lowered the `flagZoomScale` zoom-out end so they shrink harder when you zoom out: **z≤9 `0.60 → 0.30`**, z13 `0.85 → 0.65`, and the zoomed-in cap `1.10 → 1.05` (so close-up size is basically unchanged). Net: far-out flags are about **half** their previous size and stay small/uncluttered across the overview zooms, then grow to full size as you zoom in to street level.
+
+### Dollar-flag size restored to the original (the rename must not resize it)
+- The "45+" → two-line rename had unintentionally grown the flag (`FLAG_W_CSS` 34 → 44, `FLAG_H_CSS` 42 → 48), so it looked too big / cluttered when zoomed out. **Restored the original 34 × 42 footprint** so the flag scales down exactly as before when you zoom out — the `flagZoomScale` curve (0.60× far out → 1.10× zoomed in) was never the problem and is unchanged. The two-line "45+"/"Trips" label is kept and auto-sizes to the smaller pennant; the drag-marker badge went back to ~44×40.
+
+### Dollar-flag relabeled "45+" → "45+ / Trips" (two lines, narrow)
+- The driver-placed long-trip flag now shows the label on **two stacked lines — "45+" over "Trips"** — so the flag stays **narrow** instead of stretching into one wide banner. The pole sits near the left (`POLE_FRAC`) with a compact pennant to its right; the lng/lat anchor stays the **pole base**, so flags pin to exactly the same map point as before.
+- WebGL atlas path (`drawFlagInto`): `FLAG_W_CSS` 34 → 44 and `FLAG_H_CSS` 42 → 48 (a touch taller for the 2nd line); the two lines **auto-size down** (via `measureText` on the wider line, "Trips") so they can never overflow the pennant. The quad corner offsets and the CPU hit-test use `FLAG_LEFT_CSS`/`FLAG_RIGHT_CSS` so the pole-left shape stays tap-accurate.
+- Label is defined once as `FLAG_LINES = ["45+","Trips"]`: the WebGL pennant draws the two lines, the disc+text fallback uses a two-line `text-field` (`"45+\nTrips"`), the DOM drag/preview marker is a compact two-line badge, and the color-picker dialog uses the joined `FLAG_TEXT` ("45+Trips").
+
+### City Events on the map — concerts, sports, conventions (new feature)
+- Added `city-events.feature.js`: a standalone, read-only map layer that reads `GET /city_events` (today's big NYC events, fetched from Ticketmaster by the backend) and drops a **category pin per event** — concert (♪, purple), sports (ball, orange), convention (badge, teal) — as canvas sprites via `map.addImage`. Self-contained, no clustering, registered in `index.html` after `major-buildings.feature.js`.
+- **Let-out pulse = the best-pickup signal.** Each event runs `upcoming → in_progress → letting_out → ended`, derived on the client from `startAt` + a per-category duration estimate (concert/sports ~3h, convention ~5h; let-out window = end −15m to end +45m). **Only the events letting out right now pulse** — a gold ring at the venue (the same "best time, now" language as the dollar-flag prime pulse) — so a driver instantly sees which venue is about to release a surge of riders. Upcoming and mid-event venues are static icons. The pulse loop runs only while ≥1 event is letting out, ~30fps, paused when the tab is hidden.
+- **Name labels** from z13, collision-managed (`text-allow-overlap: false` + padding) and category-colored with a white halo, so dense areas don't stack. Pins from z11.
+- **Tap a pin** for a popup: category tag, event name, venue, a live status chip (**"Letting out — best pickup"** / "In progress · lets out ~10:30 PM" / "Starts in 45m"), the start–estimated-end time (NYC), and a **Tickets / info** link (`target=_blank rel=noopener`). A 1-minute tick re-evaluates every event's state so pins advance through the states and the pulse set updates live.
+- Passive z-order keeper (only re-adds after a real style reload) so it never fights other layers — avoids the flashing class of bug fixed earlier. Dormant + harmless when the backend has no `TICKETMASTER_API_KEY` (empty list → no pins).
+
+## 2026-06-08
+
+### Major landmarks — type labels appear sooner
+- The "HOSPITAL"/"HOTEL" tags now show from **z13** (was z15), so you see what a building is without zooming in as far. Still collision-managed (`text-allow-overlap: false`), so dense Midtown stays decluttered — they just start appearing earlier and where there's room. Text-size curve extended down to z13 (9.5px) so they're legible at the lower zoom.
+
+### Major landmarks — non-Midtown icons 20% smaller
+- Scaled the non-Midtown landmark `icon-size` to **80% (a uniform 20% smaller)** at every zoom, per request. Midtown sizing is unchanged. Non-Midtown stops are now `z11 0.40 / z14 0.59 / z16 0.74 / z18 0.90` (were `0.5 / 0.74 / 0.92 / 1.12`).
+
+### Major landmarks — shrink ONLY Midtown at zoom-out (restore the rest)
+- The previous declutter shrank every landmark, but only Midtown was actually crowded. Made the zoom-out size **data-driven**: only landmarks inside a Midtown box (Times Sq / 5th Ave / Central Park South — 14 of them, the dense hotel cluster + Mt Sinai West) are shrunk at zoom-out (`icon-size` z11→0.24), converging back to normal size by z18. The other **24** (UES medical row, downtown, outer boroughs) are **back to the original, larger size**. Also reverted `MIN_ZOOM` 12→11 so the non-Midtown ones show from the same zoom as before.
+
+### Major landmarks — declutter at zoom-out
+- The landmark icons + "HOSPITAL"/"HOTEL" tags crowded together at zoom-out (esp. Midtown). Cleaned it up: icons are **much smaller when zoomed out** (size curve z12→0.3 ramping to z18→1.05, vs the old flat-ish 0.5–1.12), they no longer show at the **city-overview** zoom (min zoom 11→12), and the **type tags only appear from z15 and are now collision-managed** (`text-allow-overlap: false` + padding) so they show only where there's room instead of stacking. Result: clean small markers when zoomed out, growing with the type label appearing as you zoom in.
+
+### Flag buildings flashing fix + bigger/labeled landmark icons
+- **Dollar-flag buildings flashing**: the flag system's *own* z-order keeper (`long-trip-hotspots-pins.feature.js`) also called `moveLayer` on every `styledata`. Even a no-op move-to-top fires another `styledata`, so it re-triggered itself every frame and continuously re-placed the symbol building layer — which reads as flashing. Added an **"already on top" guard**: it now skips the move when its layers are already the topmost in order, so it only acts after a real reload. Falls back to the old always-move behavior if the layer order can't be read (no regression).
+- **Hospital/hotel icons were too skinny / hard to read**: redrew them as **bold, WIDE building blocks** (window grid + roof cap) with a **big central emblem** — red medical cross for hospitals, gold star for hotels — and bumped the icon size up ~45%. Added a **"HOSPITAL" / "HOTEL" type tag above each building** (colored by type, white halo) from z13, so it's instantly clear what each one is. The full name stays in the tap popup.
+
+### Major landmarks — fix flashing icons + overlapping pin
+- **Flashing fix**: the major-buildings z-order keeper called `moveLayer` on every `styledata` event. The flag system runs its own `styledata` keeper doing the same, and because `moveLayer` itself fires `styledata`, the two keepers re-triggered each other every frame and ping-ponged the layer order — making overlapping building icons flash. The keeper is now **passive**: it only re-adds + lifts its layers when a real style reload has dropped them, and never continuously lifts, so there's nothing to fight.
+- **Overlap fix**: The Peninsula and The St. Regis sat ~20m apart (imprecise Peninsula coordinate), stacking their icons. Moved The Peninsula to its actual 700 5th Ave location (~110m away); the closest landmark pair is now 87m, so no icons overlap.
+
+### Major landmarks — building icons redesigned + pulse de-cluttered
+- Redrew the hospital & hotel sprites in `major-buildings.feature.js` to use the **approved skyscraper silhouette** (the same slim glass-tower design as the flag-system building sprite) so they read as real buildings, recolored + emblemed per type: **hospital** = cool white-blue glass tower with a red-cross badge; **hotel** = warm amber-gold glass tower with a crown star + entrance awning.
+- **De-cluttered the pulses**: landmark pulse rings are now thinned in **screen space** (recomputed on move/zoom) so clustered buildings collapse to a few well-spaced rings, and they stay clear of the dollar-flag pulses (reads the flag positions via `window.LongTripHotspotsFeature.getHotspots()`). Icons are never thinned — only the rings — so every building still shows; the pulse set is dense at street level and sparse when zoomed out, fixing the "many pulses stacked on top of each other" look.
+
+### Major hospital & hotel landmarks (new feature)
+- Added `major-buildings.feature.js`: a standalone, read-only map layer showing **38 major NYC hospitals & hotels** as individual buildings with **distinct, identifiable icons** — hospitals as a white tower with a red medical cross, hotels as a gold tower with a star + entrance awning (canvas sprites via `map.addImage`). Separate from the dollar-flag system: no flags, no clustering, no backend.
+- Each landmark **pulses** (a colored ring at its base) during its best-pickup window, researched from data: **hotels 7am–noon** (standard checkout 11am–noon → morning airport departures) and **hospitals noon–5pm** (≈55% of discharges are afternoon). Ring color is type-coded (hospital red, hotel gold); the loop runs only while ≥1 landmark is prime, ~30fps, paused when the tab is hidden.
+- Icons appear from z11; **name labels** from z14; tap a building for a popup with its type, address, best pickup hours, and a live "Prime pickup now / Off-peak" chip. Coordinates reused from the hand-curated backend POI list. Registered in `index.html`'s feature-script list.
+
+### Zone/hotspot transparency begins earlier
+- Moved the start of the zoom-fade from **z14 to z12** for both the zones (`app.part12.js`) and the pickup-zone hotspots (`app.part10.js`), so the see-through transparency comes in earlier and users don't have to zoom in as far. Full transparency still lands at z16 (unchanged); only the begin breakpoint moved.
+- Follow-up: nudged the begin one more level earlier, **z12 → z11**, for both layers (end still z16).
+
+### Zoom-aware hotspot transparency
+- Applied the same zoom-fade to the pickup-zone hotspot fills (`pickup-zone-hotspots-underpaint` + `-fill` in `app.part10.js`): their intensity-based opacity is preserved when zoomed out, then faded to **40% of it** as you zoom in close, so the **street layout underneath shows through** — matching the `zones-fill` behavior.
+- Because these layers already drive `fill-opacity` off `intensity` (and `zoom` must stay at the top level of a paint expression), it's structured as a top-level zoom `interpolate` whose stop outputs are the intensity ramp (normal at z14) and that ramp × 0.4 (at z16). Applied on both the create and per-update repaint paths for `underpaint` and `fill`.
+- The hotspot outline (`pickup-zone-hotspots-line`) stays as-is, so hotspot edges remain visible. Same z14/z16 breakpoints and 0.4 factor as the zones change (one-line tunables).
+
+### Zoom-aware zone transparency
+- The borough/score `zones-fill` layer now fades with zoom: solid color when zoomed out (so zones read clearly at borough/overview scale), ramping to **40% opacity (60% transparent)** as you zoom in close, so the **street layout underneath shows through** for navigation. Implemented as a `fill-opacity` zoom `interpolate` in `app.part12.js` (linear z14 → z16, held at 0.4 beyond), applied on both the layer create and the per-update repaint paths.
+- The white zone outlines (`zones-line`) stay opaque, so zone boundaries remain crisp while the fill goes see-through.
+- Compatible with the temporary paint overrides in `long-trips-block` (dim) and `navigation.streetmode` (route view): both cache/restore `fill-opacity` via get/setPaintProperty, so they preserve and restore the zoom expression. Breakpoints (14/16) and the 0.4 floor are one-line tunables.
+
+## 2026-06-07
+
+### Dollar-flag pickup-time correction + holiday/weekend calendar
+- The map now consumes a backend **closure calendar** (federal holidays + NYC school recesses, served in the `/long_trip_hotspots` response) and matches its NYC date against it: weekday-only flags (offices, schools) go **dark and stop pulsing on weekends + holidays**, and the elite-school flag is dark all summer and over recesses. Hotels, transit, and hospitals keep running. Falls back to weekend-only behavior if the backend sends no calendar.
+- Popup shows a **"Closed today (holiday)" / "Closed (school break)" / "Closed weekends"** chip when a flag is shut, taking precedence over the prime/peak/steady state.
+- Picks up the backend's corrected pickup windows automatically (hotels = morning **checkout** only, not check-in; corporate = **end-of-day** only, not the morning arrival), since the schedule is server-driven.
+- `nycHourAndDay()` now also returns the NYC `ymd`; new `closureReason()` gates `dimForHotspot`/`primeForHotspot` — weekend/holiday for weekday-only flags, plus explicit `[start,end]` ISO seasonal ranges (the backend's per-year school recesses) for the school flag; `sanitizeCalendar()` defensively parses the new field and degrades to weekend-only.
+
+### Dollar-flag prime-time pulse
+- Added a pulsing gold beacon at each dollar flag's pole base in `long-trip-hotspots-pins.feature.js`, shown only while that flag is in its **prime window** — the tightest "best time to be near it" hours for its building type (served by the backend in `dim_schedule.prime`, always a subset of `peak`). Prime windows in play: luxury hotels 7–11am (morning airport runs), transit hubs 7–9am & 5–8pm (rush + arrivals), hospitals 1–5pm (discharge peak), corporate 4–7pm and elite schools 2–4pm (weekdays only).
+- Rendered as three map-anchored MapLibre circle layers — a steady soft glow plus two stroke-only "radar" rings that expand and fade out of phase. Map-anchored like the flags, so zero iOS-Safari drift; the rings scale with the flag's zoom curve and sit below the building/flag layers (a halo on the ground under the pole).
+- The animation runs only while ≥1 flag is in prime (re-evaluated on the existing per-minute dim tick and 5-min refresh), is throttled to ~30fps, and pauses entirely while the tab is hidden.
+- Popup now shows a **"Prime time now"** chip (with the same pulsing dot) that outranks the existing peak/steady/off state — plus the "Best hours" and "Why this is a hotspot" rows and the live time-of-day dim, all of which were previously blank/dormant because the backend never sent `dim_schedule`/`best_hours`/`rationale` (now fixed in the paired backend change).
+- Degrades gracefully: if the backend doesn't send `dim_schedule.prime` (older deploy), no flag pulses and nothing else changes.
+
 ## 2026-03-19
 
 ### Phase 1 cleanup

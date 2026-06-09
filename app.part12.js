@@ -332,6 +332,19 @@
       "#66aaff"
     ];
 
+    // Zoom-aware zone transparency. Zones stay at full, solid color when
+    // zoomed out (borough/overview — easy to compare zones at a glance),
+    // then ramp to 40% opacity (60% transparent) as the driver zooms in
+    // close, so the street layout underneath shows through for navigation.
+    // Linear between z11 (opaque) and z16 (60% transparent); held at 0.4
+    // beyond z16. Fade begins at z11 so the transparency comes in earlier
+    // (less zooming). Tune the 11/16 breakpoints or the 0.4 floor to taste.
+    const zonesFillOpacityExpr = [
+      "interpolate", ["linear"], ["zoom"],
+      11, 1,
+      16, 0.4
+    ];
+
     if (!map.getLayer("zones-fill")) {
       map.addLayer({
         id: "zones-fill",
@@ -339,12 +352,12 @@
         source: "zones",
         paint: {
           "fill-color": zonesFillColorExpr,
-          "fill-opacity": 1,
+          "fill-opacity": zonesFillOpacityExpr,
         },
       });
     } else {
       map.setPaintProperty("zones-fill", "fill-color", zonesFillColorExpr);
-      map.setPaintProperty("zones-fill", "fill-opacity", 1);
+      map.setPaintProperty("zones-fill", "fill-opacity", zonesFillOpacityExpr);
     }
 
     if (!map.getLayer("zones-line")) {
