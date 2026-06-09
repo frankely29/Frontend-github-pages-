@@ -2,6 +2,9 @@
 
 ## 2026-06-09
 
+### Dollar-flag size restored to the original (the rename must not resize it)
+- The "45+" → two-line rename had unintentionally grown the flag (`FLAG_W_CSS` 34 → 44, `FLAG_H_CSS` 42 → 48), so it looked too big / cluttered when zoomed out. **Restored the original 34 × 42 footprint** so the flag scales down exactly as before when you zoom out — the `flagZoomScale` curve (0.60× far out → 1.10× zoomed in) was never the problem and is unchanged. The two-line "45+"/"Trips" label is kept and auto-sizes to the smaller pennant; the drag-marker badge went back to ~44×40.
+
 ### Dollar-flag relabeled "45+" → "45+ / Trips" (two lines, narrow)
 - The driver-placed long-trip flag now shows the label on **two stacked lines — "45+" over "Trips"** — so the flag stays **narrow** instead of stretching into one wide banner. The pole sits near the left (`POLE_FRAC`) with a compact pennant to its right; the lng/lat anchor stays the **pole base**, so flags pin to exactly the same map point as before.
 - WebGL atlas path (`drawFlagInto`): `FLAG_W_CSS` 34 → 44 and `FLAG_H_CSS` 42 → 48 (a touch taller for the 2nd line); the two lines **auto-size down** (via `measureText` on the wider line, "Trips") so they can never overflow the pennant. The quad corner offsets and the CPU hit-test use `FLAG_LEFT_CSS`/`FLAG_RIGHT_CSS` so the pole-left shape stays tap-accurate.
