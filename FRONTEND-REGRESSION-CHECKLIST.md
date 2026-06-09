@@ -52,6 +52,15 @@
 - [ ] live map: an office/school flag is dark with a "Closed (holiday)" chip on a federal holiday; the school flag is dark over summer
 - [ ] live map: hotels/transit/hospitals still behave normally on holidays/weekends
 
+## Dollar-flag label & banner ("45+" → "45+Trips")
+- [x] `node --check long-trips-block.feature.js` passes; no leftover `halfW` references
+- [x] `FLAG_TEXT` is the single source of the label; updates the WebGL banner, the disc+text fallback, the DOM drag marker, and the picker dialog at once
+- [x] WebGL banner geometry verified by rendered preview: "45+Trips" fits on green/sky/yellow, swallowtail notch intact, pole-base (lng/lat anchor) maps to quad dx=0 (`FLAG_LEFT_CSS + POLE_FRAC*FLAG_W_CSS == 0`)
+- [x] label auto-sizes down via `measureText` so it can't overflow the banner if the text changes
+- [ ] live map: placed flags read "45+Trips" on a wider banner; the pole still pins to the exact tapped point
+- [ ] live map: tapping the banner still selects the flag (hit-test matches the wider, pole-left shape); long-press still opens Edit; drag/preview marker shows the pill
+- [ ] live map: three flags side-by-side don't bleed into each other (banner stays inside its atlas slice)
+
 ## Zone zoom transparency
 - [x] `node --check app.part12.js` passes; `zones-fill` opacity is a zoom `interpolate` on both the create and update paths
 - [ ] live map: zones show normal solid color when zoomed out (≤ z14)
