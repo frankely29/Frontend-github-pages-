@@ -2,6 +2,11 @@
 
 ## 2026-06-09
 
+### Nightlife & dining district pickup pulse
+- New `nightlife-districts.feature.js` map overlay (registered in `index.html`'s `__TLC_LOCAL_JS_ASSETS__`). Reads `GET /nightlife_districts` and drops one **magenta cocktail-glass pin** per district, distinct from the gold dollar-flag pins and orange event pins.
+- Pulses a magenta glow + two expanding rings during each district's **let-out window** — dinner let-out through last call, later on Fri/Sat — computed client-side from the backend `dim_schedule` (`prime` weeknight / `prime_weekend`; hour ranges wrap past midnight). Pins dim by time-of-day and brighten/pulse at let-out; a tap shows the district's venues, a "best pickup" state chip, and best-hours.
+- Self-contained IIFE mirroring the long-trip-hotspots feature's wiring (apiBase / authHeaders / waitForMap, 5-min refresh, 1-min dim tick, GL circle pulse). No backend calendar needed — nightlife never closes.
+
 ### Dollar-flag shrinks more when zoomed out
 - Flags still felt too big at the city-overview zooms. Lowered the `flagZoomScale` zoom-out end so they shrink harder when you zoom out: **z≤9 `0.60 → 0.30`**, z13 `0.85 → 0.65`, and the zoomed-in cap `1.10 → 1.05` (so close-up size is basically unchanged). Net: far-out flags are about **half** their previous size and stay small/uncluttered across the overview zooms, then grow to full size as you zoom in to street level.
 
