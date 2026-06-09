@@ -161,7 +161,7 @@
     if (document.getElementById("long-trips-block-css")) return;
     const css = `
       .ltb-flag {
-        position: relative; width: 54px; height: 44px;
+        position: relative; width: 44px; height: 40px;
         cursor: pointer; user-select: none; -webkit-user-select: none;
         -webkit-touch-callout: none; touch-action: none;
       }
@@ -575,17 +575,18 @@
   // Flag atlas: three flag images side-by-side on one canvas.
   // CSS pixels per flag = (FLAG_W_CSS x FLAG_H_CSS); the canvas is
   // drawn at 2x for retina sharpness.
-  // Compact pennant holding the label on TWO lines ("45+" over "Trips"),
-  // so the flag stays narrow instead of one wide banner. The pole sits
-  // POLE_FRAC of the way across (near the left) and the pennant is to its
-  // right. The lng/lat anchor is the pole base, so the quad's horizontal
-  // extent is measured from that pole: FLAG_LEFT_CSS px to its left,
-  // FLAG_RIGHT_CSS px to its right.
-  const FLAG_W_CSS = 44;
-  const FLAG_H_CSS = 48;
+  // Compact pennant holding the label on TWO lines ("45+" over "Trips").
+  // Size is the ORIGINAL flag footprint (34 x 42) so it scales down the same
+  // as before when zooming out — the rename must not change the on-map size.
+  // The pole sits POLE_FRAC of the way across (near the left) so the narrow
+  // pennant has room for the two lines without widening the flag. The lng/lat
+  // anchor is the pole base, so the quad's horizontal extent is measured from
+  // that pole: FLAG_LEFT_CSS px to its left, FLAG_RIGHT_CSS px to its right.
+  const FLAG_W_CSS = 34;
+  const FLAG_H_CSS = 42;
   const POLE_FRAC = 0.18;
-  const FLAG_LEFT_CSS = -POLE_FRAC * FLAG_W_CSS;          // ≈ -7.9
-  const FLAG_RIGHT_CSS = (1 - POLE_FRAC) * FLAG_W_CSS;    // ≈ +36.1
+  const FLAG_LEFT_CSS = -POLE_FRAC * FLAG_W_CSS;          // ≈ -6.1
+  const FLAG_RIGHT_CSS = (1 - POLE_FRAC) * FLAG_W_CSS;    // ≈ +27.9
   const FLAG_ATLAS_SLICES = ["green", "sky", "yellow"];
 
   function drawFlagInto(ctx, color, xOff, yOff, W, H) {
