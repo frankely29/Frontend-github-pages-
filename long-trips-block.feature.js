@@ -17,7 +17,8 @@
   const MOVE_TOLERANCE_PX = 18;
   const MAX_LOCAL_CACHE = 500;
   const SUPPRESS_NEXT_CLICK_MS = 600;
-  const FLAG_TEXT = "45+Trips";
+  const FLAG_LINES = ["45+", "Trips"];     // stacked on the flag (narrow)
+  const FLAG_TEXT = FLAG_LINES.join("");   // "45+Trips" for prose / dialogs
 
   const COLORS = {
     green:  { hex: "#10b981", border: "#047857", label: "Best (Green)" },
@@ -160,7 +161,7 @@
     if (document.getElementById("long-trips-block-css")) return;
     const css = `
       .ltb-flag {
-        position: relative; width: 92px; height: 30px;
+        position: relative; width: 54px; height: 44px;
         cursor: pointer; user-select: none; -webkit-user-select: none;
         -webkit-touch-callout: none; touch-action: none;
       }
@@ -173,10 +174,9 @@
       }
       .ltb-flag-fill {
         position: absolute; inset: 0;
-        border-radius: 9px;
-        display: flex; align-items: center; justify-content: center;
-        white-space: nowrap;
-        font: 700 12px/1 -apple-system, system-ui, "Segoe UI", sans-serif;
+        border-radius: 8px;
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        font: 700 13px/1.05 -apple-system, system-ui, "Segoe UI", sans-serif;
         color: #1f2937; letter-spacing: 0.3px;
         box-shadow: 0 2px 4px rgba(0,0,0,0.35);
       }
@@ -343,7 +343,7 @@
     root.innerHTML = `
       <div class="ltb-flag-scale">
         <div class="ltb-flag-pulse"></div>
-        <div class="ltb-flag-fill" style="background:${palette.hex};border:2px solid ${palette.border};">${FLAG_TEXT}</div>
+        <div class="ltb-flag-fill" style="background:${palette.hex};border:2px solid ${palette.border};">${FLAG_LINES.map((l) => `<span>${l}</span>`).join("")}</div>
       </div>
     `;
     return root;
@@ -575,16 +575,17 @@
   // Flag atlas: three flag images side-by-side on one canvas.
   // CSS pixels per flag = (FLAG_W_CSS x FLAG_H_CSS); the canvas is
   // drawn at 2x for retina sharpness.
-  // Widened into a banner so the "45+Trips" label fits on the pennant.
-  // The pole sits POLE_FRAC of the way across the flag (near the left) and
-  // the pennant streams to the right. The lng/lat anchor is the pole base,
-  // so the quad's horizontal extent is measured from that pole:
-  // FLAG_LEFT_CSS px to its left, FLAG_RIGHT_CSS px to its right.
-  const FLAG_W_CSS = 72;
-  const FLAG_H_CSS = 42;
-  const POLE_FRAC = 0.16;
-  const FLAG_LEFT_CSS = -POLE_FRAC * FLAG_W_CSS;          // ≈ -11.5
-  const FLAG_RIGHT_CSS = (1 - POLE_FRAC) * FLAG_W_CSS;    // ≈ +60.5
+  // Compact pennant holding the label on TWO lines ("45+" over "Trips"),
+  // so the flag stays narrow instead of one wide banner. The pole sits
+  // POLE_FRAC of the way across (near the left) and the pennant is to its
+  // right. The lng/lat anchor is the pole base, so the quad's horizontal
+  // extent is measured from that pole: FLAG_LEFT_CSS px to its left,
+  // FLAG_RIGHT_CSS px to its right.
+  const FLAG_W_CSS = 44;
+  const FLAG_H_CSS = 48;
+  const POLE_FRAC = 0.18;
+  const FLAG_LEFT_CSS = -POLE_FRAC * FLAG_W_CSS;          // ≈ -7.9
+  const FLAG_RIGHT_CSS = (1 - POLE_FRAC) * FLAG_W_CSS;    // ≈ +36.1
   const FLAG_ATLAS_SLICES = ["green", "sky", "yellow"];
 
   function drawFlagInto(ctx, color, xOff, yOff, W, H) {
@@ -593,14 +594,14 @@
     // Pole: vertical bar near the left, full height.
     ctx.fillStyle = "#1f2937";
     ctx.fillRect(xOff + poleX - 2, yOff, 4, H);
-    // Wide banner pennant streaming right from the top of the pole, with a
-    // small swallowtail notch in its right edge. Stays inside the slice
-    // (right edge ≈ 0.96*W) so it can't bleed into the neighbouring flag.
+    // Compact two-line pennant ("45+" over "Trips") at the top of the pole,
+    // with a small swallowtail notch in its right edge. Stays inside the
+    // slice (right edge ≈ 0.94*W) so it can't bleed into the neighbour.
     const pX = xOff + poleX;
     const pY = yOff;
-    const pW = Math.round(W * 0.80);
-    const pH = Math.round(H * 0.52);
-    const notch = Math.round(pH * 0.3);
+    const pW = Math.round(W * 0.76);
+    const pH = Math.round(H * 0.64);
+    const notch = Math.round(pW * 0.12);
     ctx.fillStyle = palette.hex;
     ctx.strokeStyle = palette.border;
     ctx.lineWidth = 2;
@@ -613,19 +614,24 @@
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
-    // "45+Trips" label, auto-sized down to fit the banner width.
+    // Two stacked lines, auto-sized down to the widest one ("Trips").
     const usable = pW - notch - 6;
     ctx.fillStyle = "#1f2937";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    let fontPx = Math.round(pH * 0.52);
+    let fontPx = Math.round(pH * 0.34);
     ctx.font = `bold ${fontPx}px -apple-system, system-ui, sans-serif`;
-    const tw = ctx.measureText(FLAG_TEXT).width;
-    if (tw > usable) {
-      fontPx = Math.max(7, Math.floor(fontPx * usable / tw));
+    const widest = Math.max(
+      ctx.measureText(FLAG_LINES[0]).width,
+      ctx.measureText(FLAG_LINES[1]).width
+    );
+    if (widest > usable) {
+      fontPx = Math.max(7, Math.floor(fontPx * usable / widest));
       ctx.font = `bold ${fontPx}px -apple-system, system-ui, sans-serif`;
     }
-    ctx.fillText(FLAG_TEXT, pX + (pW - notch) * 0.5, pY + pH * 0.52);
+    const cx = pX + (pW - notch) * 0.5;
+    ctx.fillText(FLAG_LINES[0], cx, pY + pH * 0.30);
+    ctx.fillText(FLAG_LINES[1], cx, pY + pH * 0.70);
   }
 
   function buildFlagAtlas() {
@@ -1057,7 +1063,7 @@
               type: "symbol",
               source: LTF_SOURCE_ID,
               layout: {
-                "text-field": FLAG_TEXT,
+                "text-field": FLAG_LINES.join("\n"),
                 "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
                 "text-size": [
                   "interpolate", ["linear"], ["zoom"],
@@ -1230,7 +1236,7 @@
           type: "symbol",
           source: LTF_SOURCE_ID,
           layout: {
-            "text-field": FLAG_TEXT,
+            "text-field": FLAG_LINES.join("\n"),
             "text-font": ["Open Sans Regular"],
             "text-size": [
               "interpolate", ["linear"], ["zoom"],
