@@ -1,5 +1,14 @@
 # Frontend Changelog
 
+## 2026-06-09
+
+### City Events on the map — concerts, sports, conventions (new feature)
+- Added `city-events.feature.js`: a standalone, read-only map layer that reads `GET /city_events` (today's big NYC events, fetched from Ticketmaster by the backend) and drops a **category pin per event** — concert (♪, purple), sports (ball, orange), convention (badge, teal) — as canvas sprites via `map.addImage`. Self-contained, no clustering, registered in `index.html` after `major-buildings.feature.js`.
+- **Let-out pulse = the best-pickup signal.** Each event runs `upcoming → in_progress → letting_out → ended`, derived on the client from `startAt` + a per-category duration estimate (concert/sports ~3h, convention ~5h; let-out window = end −15m to end +45m). **Only the events letting out right now pulse** — a gold ring at the venue (the same "best time, now" language as the dollar-flag prime pulse) — so a driver instantly sees which venue is about to release a surge of riders. Upcoming and mid-event venues are static icons. The pulse loop runs only while ≥1 event is letting out, ~30fps, paused when the tab is hidden.
+- **Name labels** from z13, collision-managed (`text-allow-overlap: false` + padding) and category-colored with a white halo, so dense areas don't stack. Pins from z11.
+- **Tap a pin** for a popup: category tag, event name, venue, a live status chip (**"Letting out — best pickup"** / "In progress · lets out ~10:30 PM" / "Starts in 45m"), the start–estimated-end time (NYC), and a **Tickets / info** link (`target=_blank rel=noopener`). A 1-minute tick re-evaluates every event's state so pins advance through the states and the pulse set updates live.
+- Passive z-order keeper (only re-adds after a real style reload) so it never fights other layers — avoids the flashing class of bug fixed earlier. Dormant + harmless when the backend has no `TICKETMASTER_API_KEY` (empty list → no pins).
+
 ## 2026-06-08
 
 ### Major landmarks — type labels appear sooner

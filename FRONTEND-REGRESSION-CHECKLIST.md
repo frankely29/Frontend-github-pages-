@@ -85,6 +85,15 @@
 - [x] zoom-out size is now Midtown-only (data-driven `midtown` flag): box catches the 14 Midtown landmarks; UES medical/downtown/boroughs (24) keep original size; `MIN_ZOOM` back to 11; `node --check` + smoke pass
 - [ ] live map: Midtown no longer blobs at a distance; non-Midtown buildings are back to their pre-#1015 size
 
+## City events on the map (Ticketmaster)
+- [x] `node --check city-events.feature.js` passes; registered in `index.html` after `major-buildings.feature.js`
+- [x] mock-DOM smoke test (`/tmp/cbe_smoke.js`): 4 crafted events → states `letting_out` / `in_progress` / `upcoming` / `ended`; 3 category sprites registered, 5 layers created; geojson drops the ended event (3 features) and exactly **1** has `letout=true`; pulse rings animate; tapping the let-out pin shows the "best pickup" chip + a Tickets link; 0 `[cbe]` warnings
+- [x] only `letting_out` events pulse (the let-out surge); upcoming/in-progress venues are static icons — the pulse source is exactly the let-out set
+- [x] dormant when the backend returns `[]` (no `TICKETMASTER_API_KEY`): no pins, no errors
+- [ ] live map: concert/sports/convention pins render distinctly from z11; names from z13 (collision-managed)
+- [ ] live map: a venue letting out **now** pulses gold; the pulse moves to the next venue as events advance (1-min tick); upcoming/mid-event venues don't pulse
+- [ ] live map: tapping a pin opens the popup (category, name, venue, live status chip, start–end NYC time, Tickets link); no clash with zone/flag/landmark popups
+
 ## Checks completed in this environment
 - [x] `node --check app.js`
 - [x] `node --check app.part2.js`
