@@ -57,8 +57,9 @@
 - [x] `FLAG_LINES = ["45+","Trips"]` is the single source: WebGL pennant draws two lines, the disc+text fallback uses `"45+\nTrips"`, the DOM marker is a two-line badge, the picker dialog uses joined `FLAG_TEXT`
 - [x] geometry verified by rendered preview: "45+" over "Trips" fits on green/sky/yellow, swallowtail notch intact, narrower than the one-line banner (`FLAG_W_CSS` 72 → 44); pole-base maps to quad dx=0 (`FLAG_LEFT_CSS + POLE_FRAC*FLAG_W_CSS == 0`)
 - [x] both lines auto-size down via `measureText` on the wider line ("Trips") so they can't overflow the pennant
-- [x] size restored to the ORIGINAL footprint (`FLAG_W_CSS` 44 → 34, `FLAG_H_CSS` 48 → 42) so the rename doesn't change on-map size; `flagZoomScale` unchanged → flags shrink at zoom-out exactly as before (verified by a 3-scale rendered preview: ×0.60 far out → ×1.10 zoomed in)
-- [ ] live map: zoomed out, flags are small/clean (same as before the rename) and scale down with zoom — no oversized/cluttered look
+- [x] size restored to the ORIGINAL footprint (`FLAG_W_CSS` 44 → 34, `FLAG_H_CSS` 48 → 42) so the rename doesn't change on-map size
+- [x] `flagZoomScale` zoom-out end lowered so flags shrink harder when far out: z≤9 `0.60 → 0.30`, z13 `0.85 → 0.65`, cap `1.10 → 1.05`; verified by a before/after rendered preview (far-out ≈ half size, zoomed-in ≈ unchanged)
+- [ ] live map: zoomed out, flags are small/clean and clearly smaller than before; they grow to full size as you zoom in — no oversized/cluttered look at overview zooms
 - [ ] live map: placed flags show "45+" over "Trips" on a narrow flag; the pole still pins to the exact tapped point
 - [ ] live map: tapping the flag still selects it (hit-test matches the pole-left shape); long-press still opens Edit; drag/preview marker shows the two-line badge
 - [ ] live map: three flags side-by-side don't bleed into each other (pennant stays inside its atlas slice)
