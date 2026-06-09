@@ -1,5 +1,12 @@
 # Frontend Changelog
 
+## 2026-06-09
+
+### Nightlife & dining district pickup pulse
+- New `nightlife-districts.feature.js` map overlay (registered in `index.html`'s `__TLC_LOCAL_JS_ASSETS__`). Reads `GET /nightlife_districts` and drops one **magenta cocktail-glass pin** per district, distinct from the gold dollar-flag pins and orange event pins.
+- Pulses a magenta glow + two expanding rings during each district's **let-out window** — dinner let-out through last call, later on Fri/Sat — computed client-side from the backend `dim_schedule` (`prime` weeknight / `prime_weekend`; hour ranges wrap past midnight). Pins dim by time-of-day and brighten/pulse at let-out; a tap shows the district's venues, a "best pickup" state chip, and best-hours.
+- Self-contained IIFE mirroring the long-trip-hotspots feature's wiring (apiBase / authHeaders / waitForMap, 5-min refresh, 1-min dim tick, GL circle pulse). No backend calendar needed — nightlife never closes.
+
 ## 2026-03-19
 
 ### Phase 1 cleanup

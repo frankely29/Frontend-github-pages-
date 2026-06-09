@@ -64,3 +64,9 @@
 - [ ] Billiards battle completes and awards XP.
 - [ ] Public winner banner appears.
 - [ ] Profile shows win/loss stats.
+
+## Nightlife & dining districts
+- [ ] Magenta cocktail-glass pins appear at the districts (from `GET /nightlife_districts`), visually distinct from the gold dollar-flag pins.
+- [ ] During a district's let-out window the pin pulses magenta; outside it the pin dims and does not pulse (verify the weeknight `prime` vs Fri/Sat `prime_weekend` switch).
+- [ ] Tapping a pin shows the venue list, a "best pickup" state chip, and best-hours; tapping empty map closes it.
+- [ ] District labels appear at zoom >= 13 and the layer survives a base-style reload.
