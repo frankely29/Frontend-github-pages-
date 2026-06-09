@@ -2,6 +2,11 @@
 
 ## 2026-06-09
 
+### Dollar-flag renamed "45+" → "45+Trips" (wider banner)
+- The driver-placed long-trip flag now reads **"45+Trips"** instead of just "45+", and the pennant was widened into a **banner** to fit the longer label. The pole now sits near the left of the flag (`POLE_FRAC`) with the banner streaming to the right; the lng/lat anchor stays the **pole base**, so flags pin to exactly the same map point as before.
+- WebGL atlas path (`drawFlagInto`): `FLAG_W_CSS` 34 → 72, banner has a swallowtail notch, and the label **auto-sizes down** (via `measureText`) to fit the banner width — so the text can change again later without overflowing. The quad corner offsets and the CPU hit-test were switched from symmetric `±halfW` to `FLAG_LEFT_CSS`/`FLAG_RIGHT_CSS` so the wider, pole-left shape stays tap-accurate.
+- The DOM marker shown while dragging/placing a flag became a matching **pill** (was a 44px circle) so "45+Trips" fits there too. The disc+text fallback and the color-picker dialog pick up the new text automatically (shared `FLAG_TEXT`).
+
 ### City Events on the map — concerts, sports, conventions (new feature)
 - Added `city-events.feature.js`: a standalone, read-only map layer that reads `GET /city_events` (today's big NYC events, fetched from Ticketmaster by the backend) and drops a **category pin per event** — concert (♪, purple), sports (ball, orange), convention (badge, teal) — as canvas sprites via `map.addImage`. Self-contained, no clustering, registered in `index.html` after `major-buildings.feature.js`.
 - **Let-out pulse = the best-pickup signal.** Each event runs `upcoming → in_progress → letting_out → ended`, derived on the client from `startAt` + a per-category duration estimate (concert/sports ~3h, convention ~5h; let-out window = end −15m to end +45m). **Only the events letting out right now pulse** — a gold ring at the venue (the same "best time, now" language as the dollar-flag prime pulse) — so a driver instantly sees which venue is about to release a surge of riders. Upcoming and mid-event venues are static icons. The pulse loop runs only while ≥1 event is letting out, ~30fps, paused when the tab is hidden.
