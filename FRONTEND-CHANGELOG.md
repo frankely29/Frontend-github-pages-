@@ -2,6 +2,9 @@
 
 ## 2026-06-09
 
+### Dollar-flag shrinks more when zoomed out
+- Flags still felt too big at the city-overview zooms. Lowered the `flagZoomScale` zoom-out end so they shrink harder when you zoom out: **z≤9 `0.60 → 0.30`**, z13 `0.85 → 0.65`, and the zoomed-in cap `1.10 → 1.05` (so close-up size is basically unchanged). Net: far-out flags are about **half** their previous size and stay small/uncluttered across the overview zooms, then grow to full size as you zoom in to street level.
+
 ### Dollar-flag size restored to the original (the rename must not resize it)
 - The "45+" → two-line rename had unintentionally grown the flag (`FLAG_W_CSS` 34 → 44, `FLAG_H_CSS` 42 → 48), so it looked too big / cluttered when zoomed out. **Restored the original 34 × 42 footprint** so the flag scales down exactly as before when you zoom out — the `flagZoomScale` curve (0.60× far out → 1.10× zoomed in) was never the problem and is unchanged. The two-line "45+"/"Trips" label is kept and auto-sizes to the smaller pennant; the drag-marker badge went back to ~44×40.
 

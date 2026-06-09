@@ -681,11 +681,14 @@
   // Same curve as the disc layer's circle-radius interpolation:
   // smaller at low zoom, bigger zoomed in.
   function flagZoomScale(z) {
-    if (!Number.isFinite(z)) return 0.85;
-    if (z <= 9) return 0.60;
-    if (z >= 16) return 1.10;
-    if (z <= 13) return 0.60 + (0.85 - 0.60) * ((z - 9) / 4);
-    return 0.85 + (1.10 - 0.85) * ((z - 13) / 3);
+    // Shrinks hard when zoomed out so flags stay small/uncluttered at the
+    // city-overview zooms, then grows to full size as you zoom in to street
+    // level. (Zoom-out floor was 0.60 — too big when far out — now 0.30.)
+    if (!Number.isFinite(z)) return 0.65;
+    if (z <= 9) return 0.30;
+    if (z >= 16) return 1.05;
+    if (z <= 13) return 0.30 + (0.65 - 0.30) * ((z - 9) / 4);   // z9..z13: 0.30 -> 0.65
+    return 0.65 + (1.05 - 0.65) * ((z - 13) / 3);                // z13..z16: 0.65 -> 1.05
   }
 
   function createFlagCustomLayer() {
