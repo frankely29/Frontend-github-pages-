@@ -2,10 +2,10 @@
 
 ## 2026-06-09
 
-### Dollar-flag renamed "45+" → "45+Trips" (wider banner)
-- The driver-placed long-trip flag now reads **"45+Trips"** instead of just "45+", and the pennant was widened into a **banner** to fit the longer label. The pole now sits near the left of the flag (`POLE_FRAC`) with the banner streaming to the right; the lng/lat anchor stays the **pole base**, so flags pin to exactly the same map point as before.
-- WebGL atlas path (`drawFlagInto`): `FLAG_W_CSS` 34 → 72, banner has a swallowtail notch, and the label **auto-sizes down** (via `measureText`) to fit the banner width — so the text can change again later without overflowing. The quad corner offsets and the CPU hit-test were switched from symmetric `±halfW` to `FLAG_LEFT_CSS`/`FLAG_RIGHT_CSS` so the wider, pole-left shape stays tap-accurate.
-- The DOM marker shown while dragging/placing a flag became a matching **pill** (was a 44px circle) so "45+Trips" fits there too. The disc+text fallback and the color-picker dialog pick up the new text automatically (shared `FLAG_TEXT`).
+### Dollar-flag relabeled "45+" → "45+ / Trips" (two lines, narrow)
+- The driver-placed long-trip flag now shows the label on **two stacked lines — "45+" over "Trips"** — so the flag stays **narrow** instead of stretching into one wide banner. The pole sits near the left (`POLE_FRAC`) with a compact pennant to its right; the lng/lat anchor stays the **pole base**, so flags pin to exactly the same map point as before.
+- WebGL atlas path (`drawFlagInto`): `FLAG_W_CSS` 34 → 44 and `FLAG_H_CSS` 42 → 48 (a touch taller for the 2nd line); the two lines **auto-size down** (via `measureText` on the wider line, "Trips") so they can never overflow the pennant. The quad corner offsets and the CPU hit-test use `FLAG_LEFT_CSS`/`FLAG_RIGHT_CSS` so the pole-left shape stays tap-accurate.
+- Label is defined once as `FLAG_LINES = ["45+","Trips"]`: the WebGL pennant draws the two lines, the disc+text fallback uses a two-line `text-field` (`"45+\nTrips"`), the DOM drag/preview marker is a compact two-line badge, and the color-picker dialog uses the joined `FLAG_TEXT` ("45+Trips").
 
 ### City Events on the map — concerts, sports, conventions (new feature)
 - Added `city-events.feature.js`: a standalone, read-only map layer that reads `GET /city_events` (today's big NYC events, fetched from Ticketmaster by the backend) and drops a **category pin per event** — concert (♪, purple), sports (ball, orange), convention (badge, teal) — as canvas sprites via `map.addImage`. Self-contained, no clustering, registered in `index.html` after `major-buildings.feature.js`.
