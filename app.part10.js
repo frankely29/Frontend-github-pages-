@@ -37,6 +37,19 @@ const PICKUP_ZONE_SAMPLE_LIMIT = 100;
 // heavy — it makes the backend score every zone and times out — so bound the
 // single request to a ~0.05deg (~3.5mi) buffer around the current view.
 const PICKUP_ONESHOT_BUFFER_DEG = 0.05;
+// After the local one-shot load, the rest of the city is filled in once in the
+// background by fetching a grid of bounded tiles over the NYC service area (a
+// single citywide request scores every zone and times out). Each tile is about
+// the size of the fast local fetch, so it stays quick; tile results accumulate
+// and are kept until the next page refresh.
+const PICKUP_CITY_SOUTH = 40.49;
+const PICKUP_CITY_NORTH = 40.92;
+const PICKUP_CITY_WEST = -74.27;
+const PICKUP_CITY_EAST = -73.68;
+const PICKUP_TILE_DEG = 0.12;          // tile size (~ the fast local-fetch span)
+const PICKUP_TILE_STAGGER_MS = 250;    // gap between background tile fetches
+const PICKUP_TILE_TIMEOUT_MS = 15000;  // per-tile abort so one slow tile can't stall the fill
+const PICKUP_CITY_ITEM_CAP = 600;      // cap on accumulated recent-pickup dots
 const PICKUP_REFRESH_DEBOUNCE_MS = 120;
 const PICKUP_FETCH_COOLDOWN_MS = 500;
 const PICKUP_POLL_MS = 12 * 1000;
@@ -81,6 +94,10 @@ let pickupRefreshInFlight = false;
 // Hotspots pull once per refresh; set true after the first successful load
 // so the poll and any move-triggered refresh become no-ops thereafter.
 let pickupOverlayLoadedOnce = false;
+// Background citywide fill: runs once after the first local load, tiling the
+// service area so the whole city is present and kept until a page refresh.
+let pickupCitywideFillStarted = false;
+let pickupCitywideSeed = null;
 let pickupRefreshQueued = false;
 let pickupRefreshQueuedForce = false;
 let pickupOverlayAbortController = null;
@@ -1627,6 +1644,103 @@ async function fetchPresencePayload(params, signal) {
   return { payload: full, mode: 'full' };
 }
 
+// ---- Citywide hotspot fill (progressive, once per refresh) -----------------
+// A single citywide request times out (the backend scores every zone), so after
+// the fast local paint we fetch a grid of bounded tiles over the service area in
+// the background, accumulate (dedup by zone), and keep the result until refresh.
+
+function buildPickupServiceAreaTiles() {
+  const tiles = [];
+  for (let s = PICKUP_CITY_SOUTH; s < PICKUP_CITY_NORTH; s += PICKUP_TILE_DEG) {
+    const n = Math.min(s + PICKUP_TILE_DEG, PICKUP_CITY_NORTH);
+    for (let w = PICKUP_CITY_WEST; w < PICKUP_CITY_EAST; w += PICKUP_TILE_DEG) {
+      const e = Math.min(w + PICKUP_TILE_DEG, PICKUP_CITY_EAST);
+      tiles.push({ south: s, north: n, west: w, east: e, cLat: (s + n) / 2, cLng: (w + e) / 2 });
+    }
+  }
+  // Nearest-first from the current view so the user's area fills in immediately.
+  let center = null;
+  try { const c = map?.getCenter?.(); if (c) center = { lat: c.lat, lng: c.lng }; } catch (_) {}
+  if (center) {
+    tiles.sort((a, b) =>
+      ((a.cLat - center.lat) ** 2 + (a.cLng - center.lng) ** 2) -
+      ((b.cLat - center.lat) ** 2 + (b.cLng - center.lng) ** 2));
+  }
+  return tiles;
+}
+
+// Pull the overlay-relevant collections out of a /events/pickups/recent
+// response, matching how refreshPickupOverlay reads them.
+function parsePickupOverlayPayload(data) {
+  const items = Array.isArray(data) ? data : (data?.items || []);
+  const zoneStats = Array.isArray(data?.zone_stats) ? data.zone_stats : [];
+  const zoneHotspots = (data?.zone_hotspots && data.zone_hotspots.type === "FeatureCollection" && Array.isArray(data.zone_hotspots.features))
+    ? data.zone_hotspots : emptyGeojson();
+  const polygonZoneIds = new Set();
+  for (const f of zoneHotspots.features || []) {
+    const zid = normalizePickupZoneId(f?.properties?.zone_id ?? f?.properties?.zoneId ?? f?.properties?.location_id ?? f?.properties?.LocationID);
+    if (zid != null) polygonZoneIds.add(zid);
+  }
+  const topMicro = normalizePickupMicroHotspots(
+    data?.micro_hotspots ?? data?.micro_hotspot_clusters ?? data?.hotspot_micro_clusters ?? null, polygonZoneIds);
+  const nestedMicro = normalizePickupMicroHotspots(
+    extractNestedPickupMicroHotspots(zoneHotspots, polygonZoneIds), polygonZoneIds);
+  const microHotspots = { type: "FeatureCollection", features: [...(topMicro.features || []), ...(nestedMicro.features || [])] };
+  return { items, zoneStats, zoneHotspots, microHotspots };
+}
+
+async function fillCitywidePickupHotspotsOnce() {
+  if (pickupCitywideFillStarted) return;
+  pickupCitywideFillStarted = true;
+  if (!authHeaderOK() || !map || !mapReady) return;
+
+  // Accumulators deduped by zone / micro key. Seeded with the local load so the
+  // user's area never blinks out while the rest of the city streams in.
+  const zoneStatsById = new Map();
+  const hotspotsByZone = new Map();
+  const microByKey = new Map();
+  let items = [];
+  const zoneKeyOf = (f) => normalizePickupZoneId(f?.properties?.zone_id ?? f?.properties?.zoneId ?? f?.properties?.location_id ?? f?.properties?.LocationID);
+  const microKeyOf = (f) => [String(f?.properties?.zone_id ?? ""), String(f?.properties?.hotspot_id ?? ""), String(f?.properties?.hotspot_index ?? "")].join("|");
+  const merge = (p) => {
+    for (const st of p.zoneStats || []) { if (st?.zone_id != null) zoneStatsById.set(String(st.zone_id), st); }
+    for (const f of p.zoneHotspots?.features || []) { const k = zoneKeyOf(f); if (k != null) hotspotsByZone.set(String(k), f); }
+    for (const f of p.microHotspots?.features || []) microByKey.set(microKeyOf(f), f);
+    if (Array.isArray(p.items) && p.items.length) items = items.concat(p.items).slice(-PICKUP_CITY_ITEM_CAP);
+  };
+  const render = () => setPickupOverlayData(
+    buildPickupFeatureCollection(items), items,
+    Array.from(zoneStatsById.values()),
+    { type: "FeatureCollection", features: Array.from(hotspotsByZone.values()) },
+    { type: "FeatureCollection", features: Array.from(microByKey.values()) });
+
+  if (pickupCitywideSeed) merge(pickupCitywideSeed);
+
+  for (const t of buildPickupServiceAreaTiles()) {
+    if (!mapPageIsVisible || document.hidden || !authHeaderOK()) break;
+    const qs = new URLSearchParams({
+      limit: String(PICKUP_RECENT_LIMIT),
+      zone_sample_limit: String(PICKUP_ZONE_SAMPLE_LIMIT),
+      min_lng: String(t.west), max_lng: String(t.east),
+      min_lat: String(t.south), max_lat: String(t.north),
+    });
+    let timeoutHandle = null;
+    try {
+      const ac = new AbortController();
+      timeoutHandle = setTimeout(() => { try { ac.abort(); } catch (_) {} }, PICKUP_TILE_TIMEOUT_MS);
+      const data = await getJSONAuth(`/events/pickups/recent?${qs.toString()}`, communityToken, { signal: ac.signal });
+      merge(parsePickupOverlayPayload(data));
+      render();
+    } catch (e) {
+      /* skip this tile; keep everything already accumulated */
+    } finally {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+    }
+    await new Promise((r) => setTimeout(r, PICKUP_TILE_STAGGER_MS));
+  }
+  console.log(`[pickup overlay] citywide fill done: ${hotspotsByZone.size} hotspot zones, ${items.length} dots`);
+}
+
 // Build the single bounded request for the once-per-refresh hotspot load. The
 // bbox is a generous buffer around the current view (PICKUP_ONESHOT_BUFFER_DEG)
 // so panning within the loaded area shows hotspots without re-fetching, while
@@ -1786,10 +1900,14 @@ async function refreshPickupOverlay({ force = false } = {}) {
     const fc = buildPickupFeatureCollection(items);
     appliedPickupRequestSerial = requestSerial;
     setPickupOverlayData(fc, items, zoneStats, zoneHotspots, microHotspots);
-    // First successful citywide load done — pin it and stop the poll. The
-    // guards in schedulePickupPoll / schedulePickupOverlayRefresh keep it off.
+    // First successful (local) load done — pin it and stop the poll. The guards
+    // in schedulePickupPoll / schedulePickupOverlayRefresh keep it off.
     pickupOverlayLoadedOnce = true;
     clearPickupPollTimer();
+    // Seed the citywide accumulator with this local result, then fill in the
+    // rest of the city once in the background (bounded tiles -> no timeout).
+    pickupCitywideSeed = { items, zoneStats, zoneHotspots, microHotspots };
+    void fillCitywidePickupHotspotsOnce();
     window.__pickupDebug = {
       ...(window.__pickupDebug || {}),
       usedLastGoodHotspotOverlayFallback,
