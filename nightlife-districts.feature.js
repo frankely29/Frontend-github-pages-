@@ -263,6 +263,8 @@
       if (!mapRef.getLayer(ICON_LAYER_ID)) {
         mapRef.addLayer({
           id: ICON_LAYER_ID, type: "symbol", source: SRC_ID, minzoom: MIN_ZOOM,
+          // Only show a district while it is in its let-out window (pulsing).
+          filter: primeFilter,
           layout: {
             "icon-image": SPRITE_ID,
             "icon-size": ["interpolate", ["linear"], ["zoom"], 11, 0.4, 14, 0.62, 16, 0.8, 18, 0.95],
@@ -275,6 +277,7 @@
       if (!mapRef.getLayer(LABEL_LAYER_ID)) {
         mapRef.addLayer({
           id: LABEL_LAYER_ID, type: "symbol", source: SRC_ID, minzoom: LABEL_MIN_ZOOM,
+          filter: primeFilter,
           layout: {
             "text-field": ["get", "label"],
             "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],

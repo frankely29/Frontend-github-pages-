@@ -1,5 +1,15 @@
 # Frontend Changelog
 
+## 2026-06-10
+
+### Strategic points show only during their prime / let-out window
+- All time-based map overlays now **hide their pins entirely outside their prime pickup window** and appear (pulsing) only during it — so the map shows only where it's worth being *right now*, instead of a full board of always-on markers. The change is a per-layer `filter` keyed to the same boolean that already drives each overlay's pulse, so an icon is visible if and only if it is pulsing. All evaluate on the existing 1-minute tick, so points appear/disappear as the clock crosses into/out of prime.
+  - **Dollar-flag long-trip hotspots** (`long-trip-hotspots-pins.feature.js`): the gold "$" flag and its associated building sprites (hotels / hospitals / offices) now show only while the hotspot is in its `dim_schedule.prime` window. Non-prime flags are dropped from the WebGL layer (`syncFlagLayer` filters on `primeForHotspot`), and the buildings layer gets `filter ["==", ["get","prime"], true]` (each building carries its parent hotspot's `prime`). The pole-base pulse was already prime-only.
+  - **Major hospital & hotel landmarks** (`major-buildings.feature.js`): icons + type labels now carry a `prime` flag (hotels = checkout mornings, hospitals = the discharge window) and are filtered on it; a new `syncIcons()` rebuilds the icon source every minute so they show/hide as time moves. Previously the icons were always on and only the pulse was time-gated.
+  - **Nightlife & dining districts** (`nightlife-districts.feature.js`): the magenta cocktail pin + label are filtered to the district's let-out window (`prime` / `prime_weekend`), matching the pulse.
+  - **City events** (`city-events.feature.js`): concert / sports / convention pins + labels show only while the event is **letting out** (the best-pickup surge), and are hidden while upcoming or in progress.
+- Not affected: driver-placed "45+ Trips" flags (a manual annotation with no prime schedule) stay visible, and non-strategic layers (presence avatars, etc.) are unchanged.
+
 ## 2026-06-09
 
 ### Nightlife & dining district pickup pulse

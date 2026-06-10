@@ -139,3 +139,11 @@
 - [ ] During a district's let-out window the pin pulses magenta; outside it the pin dims and does not pulse (verify the weeknight `prime` vs Fri/Sat `prime_weekend` switch).
 - [ ] Tapping a pin shows the venue list, a "best pickup" state chip, and best-hours; tapping empty map closes it.
 - [ ] District labels appear at zoom >= 13 and the layer survives a base-style reload.
+
+## Strategic points: show only during prime/let-out (hide otherwise)
+- [ ] Dollar-flag hotspots: the gold "$" flag + its building sprites appear only during the hotspot's prime window (and pulse); outside prime the whole cluster (flag, buildings, pulse) is absent from the map.
+- [ ] Major landmarks: a hotel shows only in its checkout-morning prime window and a hospital only in its discharge window; both are hidden at other hours and reappear within ~1 min as the clock crosses into prime.
+- [ ] Nightlife districts: the magenta pin + label show only during the let-out window (weeknight `prime` vs Fri/Sat `prime_weekend`) and are hidden otherwise.
+- [ ] City events: a pin + label appear only while the event is letting out, not while it is upcoming or in progress.
+- [ ] Driver-placed "45+ Trips" flags remain visible at all times (unaffected by this change).
+- [ ] All four overlays survive a base-style reload with prime-only visibility intact; tapping where a hidden point would be does nothing (no stale popups).

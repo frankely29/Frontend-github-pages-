@@ -260,6 +260,7 @@
   }
 
   function landmarksGeoJSON() {
+    const hour = nycHour();
     return {
       type: "FeatureCollection",
       features: LANDMARKS.map((L, i) => ({
@@ -267,6 +268,7 @@
         properties: {
           idx: i, type: L.type, name: L.name, address: L.address,
           midtown: isMidtown(L.lat, L.lng),
+          prime: isPrimeNow(L.type, hour),
         },
         geometry: { type: "Point", coordinates: [L.lng, L.lat] },
       })),
@@ -375,6 +377,9 @@
       if (!mapRef.getLayer(ICON_LAYER_ID)) {
         mapRef.addLayer({
           id: ICON_LAYER_ID, type: "symbol", source: SRC_ID, minzoom: MIN_ZOOM,
+          // Only show a landmark while it is in its prime pickup window
+          // (hotels: checkout mornings; hospitals: the discharge window).
+          filter: ["==", ["get", "prime"], true],
           layout: {
             "icon-image": ["match", ["get", "type"], "hospital", SPRITE_HOSPITAL, SPRITE_HOTEL],
             // Per-feature size. The dense Midtown cluster is shrunk hard at
@@ -402,6 +407,7 @@
       if (!mapRef.getLayer(LABEL_LAYER_ID)) {
         mapRef.addLayer({
           id: LABEL_LAYER_ID, type: "symbol", source: SRC_ID, minzoom: LABEL_MIN_ZOOM,
+          filter: ["==", ["get", "prime"], true],
           layout: {
             "text-field": ["upcase", ["get", "type"]],
             "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
@@ -516,6 +522,15 @@
       try { window.cancelAnimationFrame(pulseRAF); } catch (_) {}
     }
     pulseRAF = null;
+  }
+
+  // Rebuild the icon/label source each minute so each landmark's `prime`
+  // flag tracks the clock — the building only shows during its prime pickup
+  // window and is hidden from the map otherwise.
+  function syncIcons() {
+    if (!mapRef || !layersReady) return;
+    const src = mapRef.getSource?.(SRC_ID);
+    if (src?.setData) { try { src.setData(landmarksGeoJSON()); } catch (_) {} }
   }
 
   function syncPulse() {
@@ -693,13 +708,14 @@
       if (mapRef?.isStyleLoaded?.()) ensureLayers();
     }, 300);
 
-    // Re-evaluate which landmarks are in their prime window every minute.
-    setInterval(syncPulse, REFRESH_MS);
+    // Re-evaluate which landmarks are in their prime window every minute —
+    // refresh both the icons (show/hide) and the pulse set.
+    setInterval(() => { syncIcons(); syncPulse(); }, REFRESH_MS);
 
     if (typeof document !== "undefined" && document.addEventListener) {
       document.addEventListener("visibilitychange", () => {
         if (document.hidden) stopPulse();
-        else syncPulse();
+        else { syncIcons(); syncPulse(); }
       });
     }
     console.info("[mbf] initialized");
