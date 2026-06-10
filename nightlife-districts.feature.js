@@ -270,7 +270,7 @@
           filter: primeFilter,
           layout: {
             "icon-image": SPRITE_ID,
-            "icon-size": ["interpolate", ["linear"], ["zoom"], 9, 0.5, 11, 0.58, 14, 0.72, 16, 0.88, 18, 1.0],
+            "icon-size": ["interpolate", ["linear"], ["zoom"], 9, 0.3, 11, 0.42, 14, 0.62, 16, 0.8, 18, 0.95],
             "icon-allow-overlap": true, "icon-ignore-placement": true, "icon-anchor": "bottom",
           },
           paint: { "icon-opacity": ["coalesce", ["get", "dim"], 0.9] },
@@ -367,9 +367,9 @@
 
   function pulseZoomScale(z) {
     if (typeof z !== "number") return 1;
-    if (z <= 11) return 1.0;   // full-size beacon at the city-overview zoom
-    if (z >= 16) return 1.5;
-    return 1.0 + (z - 11) * (0.5 / 5);
+    if (z <= 9) return 0.5;            // shrink to a compact dot when zoomed out
+    if (z >= 16) return 1.4;
+    return 0.5 + (z - 9) * (0.9 / 7);  // grow smoothly as you zoom in
   }
   function setRing(id, t, zScale) {
     if (!mapRef.getLayer?.(id)) return;
