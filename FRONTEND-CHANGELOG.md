@@ -2,9 +2,10 @@
 
 ## 2026-06-10
 
-### "Backup My Trips" button — download your pickup trips
-- New **💾 Backup My Trips** button in the Modes panel (next to Change Password) downloads **all of your pickup trips** as a `.zip` containing both a CSV and a JSON file, so you can keep an external copy that survives a server/database reset. The button is enabled only while signed in.
-- Calls the new authenticated `GET /me/pickups/export`, streams the response as a Blob, and triggers a browser download named `pickup-trips-YYYY-MM-DD.zip` (prefers the server's `Content-Disposition` filename, falls back to a dated default). Shows "Preparing… → ✅ Saved!" on the button and an alert on failure.
+### "Backup All Trips" — owner-only, moved into the Admin Portal
+- The trip backup is now an **admin-portal** action restricted to the **account owner (main admin)**, and it backs up **every user's** pickup trips (not just your own). The old **💾 Backup My Trips** button in the Modes panel (and its `/me/pickups/export` call) was removed.
+- New **⬇️ Backup All Trips** button in the Admin Portal header (`admin.panel.js`), shown only when `me.is_account_owner` is true. Calls the owner-gated `GET /admin/pickups/export_all`, reads the response as a Blob, and downloads `all-pickup-trips-YYYY-MM-DD.zip` (CSV + JSON, every user's trips with `user_id`/`email`). Shows "Preparing… → ✅ Saved!" and alerts on failure.
+- Relies on `/me` now returning `is_account_owner` for the visibility gate; the backend also enforces owner-only (403), so the button is owner-only on both ends.
 
 ### Pickup/hotspot overlay: fill the whole city once, in the background
 - After the fast local load, the overlay now **progressively loads the rest of the city once** and keeps it until a page refresh — so panning/zooming shows citywide hotspots without the old constant re-pulling. A single citywide request can't be used (the backend scores every zone and times out), so instead `fillCitywidePickupHotspotsOnce()` walks a grid of **20 bounded tiles** over the NYC service area (`PICKUP_TILE_DEG = 0.12°`, each ~the size of the fast local fetch), **nearest-first** from the current view, staggered ~250 ms apart.

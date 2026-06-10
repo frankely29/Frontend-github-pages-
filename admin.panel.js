@@ -44,6 +44,62 @@
     return !!state?.me?.is_admin;
   }
 
+  function isAccountOwner() {
+    return !!state?.me?.is_account_owner;
+  }
+
+  function resolveBackupApiBase() {
+    if (runtime?.resolveApiBase) return runtime.resolveApiBase();
+    if (typeof window !== 'undefined' && window.API_BASE) {
+      const b = String(window.API_BASE).trim();
+      if (b) return b.replace(/\/+$/, '');
+    }
+    const rc = String(window.__TLC_RUNTIME_CONFIG__?.apiBase || '').trim();
+    if (rc) return rc.replace(/\/+$/, '');
+    return DEFAULT_API_BASE;
+  }
+
+  // Owner-only: download every user's pickup trips as a ZIP (CSV + JSON) for an
+  // external backup that survives a database reset.
+  async function downloadAllTrips() {
+    if (!isAccountOwner() || !state.token) return;
+    const btn = root && root.querySelector('#adminPanelBackup');
+    const original = btn ? btn.textContent : '';
+    try {
+      if (btn) { btn.disabled = true; btn.textContent = '⏳ Preparing…'; }
+      const res = await fetch(`${resolveBackupApiBase()}/admin/pickups/export_all`, {
+        headers: { Authorization: `Bearer ${state.token}` },
+      });
+      if (!res.ok) {
+        let detail = `Backup failed (${res.status})`;
+        try { const j = await res.json(); detail = j?.detail || detail; } catch (_) {}
+        throw new Error(detail);
+      }
+      const blob = await res.blob();
+      let filename = `all-pickup-trips-${new Date().toISOString().slice(0, 10)}.zip`;
+      const cd = res.headers.get('Content-Disposition') || '';
+      const m = /filename="?([^"]+)"?/i.exec(cd);
+      if (m && m[1]) filename = m[1];
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+      if (btn) {
+        btn.textContent = '✅ Saved!';
+        setTimeout(() => { btn.textContent = original; }, 2200);
+      }
+    } catch (err) {
+      alert((err && err.message) || 'Could not back up trips. Please try again.');
+      if (btn) btn.textContent = original;
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
   function authRequest(path, options = {}) {
     if (runtime?.requestJSONDetailed) {
       return runtime.requestJSONDetailed(path, {
@@ -107,6 +163,7 @@
         <div class="adminPanelHeader">
           <h2 id="adminPanelTitle">Admin Portal</h2>
           <div class="adminHeaderActions">
+            <button type="button" id="adminPanelBackup" class="adminBtn" hidden>⬇️ Backup All Trips</button>
             <button type="button" id="adminPanelRefresh" class="adminBtn">Refresh</button>
             <button type="button" id="adminPanelClose" class="adminBtn">Close</button>
           </div>
@@ -128,6 +185,7 @@
 
     root.querySelector('#adminPanelClose')?.addEventListener('click', () => close());
     root.querySelector('#adminPanelRefresh')?.addEventListener('click', () => refreshAll());
+    root.querySelector('#adminPanelBackup')?.addEventListener('click', () => downloadAllTrips());
 
     drawTabs();
     refreshVisibility();
@@ -334,6 +392,8 @@
     ensureDom();
     const show = isAdmin();
     launcher.hidden = !show;
+    const backupBtn = root && root.querySelector('#adminPanelBackup');
+    if (backupBtn) backupBtn.hidden = !isAccountOwner();
     if (!show && state.isOpen) close();
   }
 
