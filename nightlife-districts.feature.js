@@ -48,6 +48,9 @@
   let pulseActive = false;
   let pulseRAF = null;
   let pulseLastPaint = 0;
+  let zOrderInstalled = false;
+  let zOrderPending = false;
+  let zOrderInMove = false;
 
   // ---------------------------------------------------------------
   // API helpers — match long-trip-hotspots-pins.feature.js
@@ -292,6 +295,7 @@
         });
       }
       layersReady = true;
+      installZOrderKeeper();
       syncPulse();
       console.info(`[nld] nightlife layer ready; ${districts.length} district(s)`);
     } catch (e) {
@@ -304,6 +308,54 @@
     const src = mapRef.getSource?.(SRC_ID);
     if (src && src.setData) { try { src.setData(districtsGeoJSON()); } catch (_) {} }
     syncPulse();
+  }
+
+  // Z-order keeper. The zone choropleth re-adds its fill layers on top
+  // (aggressive backfill on style reloads / mode switches), which would bury
+  // our pins + pulse under the zone colors — the reported symptom. Re-lift
+  // our layers whenever a style change drops a zone layer above us. It is
+  // zone-aware (only acts when a `*zone*` layer is actually above us) so we
+  // settle just above the zones and never ping-pong with the other point
+  // overlays, which lift themselves to the very top on the same event.
+  function installZOrderKeeper() {
+    if (zOrderInstalled || !mapRef) return;
+    zOrderInstalled = true;
+    // Bottom -> top: glow, rings, pin, label (label ends up topmost).
+    const ids = [PULSE_GLOW_ID, PULSE_RING1_ID, PULSE_RING2_ID, ICON_LAYER_ID, LABEL_LAYER_ID];
+    const scheduleMove = () => {
+      if (zOrderInMove || zOrderPending) return;
+      zOrderPending = true;
+      const raf = (typeof window !== "undefined" && window.requestAnimationFrame)
+        || ((fn) => setTimeout(fn, 16));
+      raf(() => {
+        zOrderPending = false;
+        if (!mapRef) return;
+        const present = ids.filter((id) => mapRef.getLayer?.(id));
+        if (!present.length) return;
+        let order = null;
+        try {
+          order = (typeof mapRef.getLayersOrder === "function")
+            ? mapRef.getLayersOrder()
+            : (mapRef.getStyle?.()?.layers || []).map((l) => l.id);
+        } catch (_) { order = null; }
+        if (Array.isArray(order) && order.length) {
+          let zoneMax = -1;
+          for (let i = 0; i < order.length; i++) {
+            if (/zone/i.test(order[i])) zoneMax = i;
+          }
+          const ourMin = Math.min.apply(null, present.map((id) => order.indexOf(id)));
+          if (zoneMax < 0 || ourMin > zoneMax) return; // already above the zones
+        }
+        zOrderInMove = true;
+        try {
+          for (const id of present) { try { mapRef.moveLayer(id); } catch (_) {} }
+        } finally {
+          zOrderInMove = false;
+        }
+      });
+    };
+    try { mapRef.on?.("styledata", scheduleMove); } catch (_) {}
+    scheduleMove();
   }
 
   // ---------------------------------------------------------------

@@ -16,6 +16,9 @@
   - **Full-size pulse at low zoom**: `pulseZoomScale` floor 0.7 → 1.0 (at zoom ≤11) so the rings/glow are not shrunk at city scale.
   - **Brighter**: glow opacity ~0.12–0.22 → ~0.22–0.36 and radius 12 → 18; ring peak opacity 0.55 → 0.85, stroke-width 2.5 → 3.5; cocktail-pin size curve bumped (low end 0.4 → 0.5).
 
+### Nightlife pins render above the zone colors
+- The zone choropleth re-adds its fill layers on top of the map whenever the style reloads (the aggressive zone backfill), which buried the nightlife pins + pulse **underneath** the zone colors — they were being drawn, then painted over. `nightlife-districts.feature.js` was the only point overlay missing a **z-order keeper**; the dollar-flag, hotspot, major-building, and city-event overlays already re-lift themselves on `styledata`. Added one for nightlife, with a twist: it's **zone-aware** — it only re-lifts when a `*zone*` layer is actually rendered above it, so it settles just above the zones and never ping-pongs with the other overlays' keepers (which lift themselves to the very top on the same event).
+
 ## 2026-06-09
 
 ### Nightlife & dining district pickup pulse
