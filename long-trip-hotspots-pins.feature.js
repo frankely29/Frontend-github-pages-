@@ -68,10 +68,9 @@
   const PULSE_SOURCE_ID = "lth-pulse";
   const PULSE_GLOW_LAYER_ID = "lth-pulse-glow";
   const PULSE_RING1_LAYER_ID = "lth-pulse-ring1";
-  const PULSE_RING2_LAYER_ID = "lth-pulse-ring2";
-  const PULSE_PERIOD_MS = 1600;    // one ring-expansion cycle
+  const PULSE_PERIOD_MS = 2200;    // one ring-expansion cycle
   const PULSE_R_MIN = 6;           // ring radius (px) at cycle start
-  const PULSE_R_MAX = 26;          // ring radius (px) at cycle end (fades out)
+  const PULSE_R_MAX = 20;          // ring radius (px) at cycle end (fades out)
   const PULSE_FPS_MS = 33;         // throttle paint updates to ~30fps
   const PULSE_COLOR = "#fbbf24";   // gold — matches the dollar flag
 
@@ -684,7 +683,7 @@
     // end up below the buildings + flag (moved last) — a ground halo
     // under the pole rather than over the flag.
     const ids = [
-      PULSE_GLOW_LAYER_ID, PULSE_RING1_LAYER_ID, PULSE_RING2_LAYER_ID,
+      PULSE_GLOW_LAYER_ID, PULSE_RING1_LAYER_ID,
       BLDG_LAYER_ID, FLAG_CUSTOM_LAYER_ID,
     ];
     const scheduleMove = () => {
@@ -946,12 +945,11 @@
         });
       } catch (e) { console.warn("[lth] pulse glow add failed:", e); }
     }
-    // Two stroke-only rings; radius + stroke-opacity driven by the loop.
-    for (const id of [PULSE_RING1_LAYER_ID, PULSE_RING2_LAYER_ID]) {
-      if (mapRef.getLayer?.(id)) continue;
+    // Single stroke-only ring; radius + stroke-opacity driven by the loop.
+    if (!mapRef.getLayer?.(PULSE_RING1_LAYER_ID)) {
       try {
         mapRef.addLayer({
-          id,
+          id: PULSE_RING1_LAYER_ID,
           type: "circle",
           source: PULSE_SOURCE_ID,
           paint: {
@@ -959,7 +957,7 @@
             "circle-color": "rgba(0,0,0,0)",   // ring only — no fill
             "circle-opacity": 0,
             "circle-stroke-color": PULSE_COLOR,
-            "circle-stroke-width": 2.5,
+            "circle-stroke-width": 3.5,
             "circle-stroke-opacity": 0,
           },
         });
@@ -1005,7 +1003,7 @@
   function setRing(layerId, t, zScale) {
     if (!mapRef?.getLayer?.(layerId)) return;
     const r = (PULSE_R_MIN + t * (PULSE_R_MAX - PULSE_R_MIN)) * zScale;
-    const op = 0.55 * (1 - t); // fade as the ring grows
+    const op = 0.85 * (1 - t); // fade as the ring grows
     try {
       mapRef.setPaintProperty(layerId, "circle-radius", r);
       mapRef.setPaintProperty(layerId, "circle-stroke-opacity", op);
@@ -1020,7 +1018,6 @@
       const zScale = flagZoomScale(mapRef?.getZoom?.());
       const t = (ts % PULSE_PERIOD_MS) / PULSE_PERIOD_MS; // 0..1
       setRing(PULSE_RING1_LAYER_ID, t, zScale);
-      setRing(PULSE_RING2_LAYER_ID, (t + 0.5) % 1, zScale);
       if (mapRef?.getLayer?.(PULSE_GLOW_LAYER_ID)) {
         // Gentle breathing on the steady glow.
         const glow = 0.16 + 0.12 * (0.5 + 0.5 * Math.sin(ts / 600));

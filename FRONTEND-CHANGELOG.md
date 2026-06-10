@@ -31,6 +31,13 @@
   - **Smaller/tighter**: `PULSE_R_MAX` 30 → 20 so the ring stays a compact inner halo around the pin rather than sweeping wide.
   - The soft glow underneath is unchanged.
 
+### Other point overlays adopt the same single-ring pulse
+- Replicated the nightlife pulse feel across the other ring-pulse overlays so the whole map pulses consistently — **one** slower, smaller, bolder ring instead of two fast ones. Each keeps its own glow color/character; only the ring changed (dropped each overlay's `…-pulse-ring2` layer, animation call, and z-order entry; `PULSE_PERIOD_MS` → 2200, `PULSE_R_MAX` → 20, ring stroke-width 2.5 → 3.5, ring opacity → `0.85·(1−t)`):
+  - **City events** (`city-events.feature.js`) — the letting-out surge pulse.
+  - **Major hospital & hotel landmarks** (`major-buildings.feature.js`) — keeps the per-type stroke color.
+  - **Dollar-flag long-trip hotspots** (`long-trip-hotspots-pins.feature.js`) — the gold pole-base pulse.
+- The driver-placed "45+ Trips" flags have no ring pulse and are untouched.
+
 ## 2026-06-09
 
 ### Nightlife & dining district pickup pulse
