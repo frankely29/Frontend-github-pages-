@@ -24,6 +24,13 @@
   - `pulseZoomScale` floor 1.0 (≤z11) → a smooth ramp **0.5 (z9) → 1.4 (z16)**, so the glow/rings roughly halve at city zoom (glow ~18px → ~9–11px).
   - Pin `icon-size` low end trimmed (`9: 0.5 → 0.3`, `11: 0.58 → 0.42`, …), tapering to a near-identical `18: 1.0 → 0.95` up close.
 
+### Nightlife pulse: one slower ring for a smoother feel
+- The let-out pulse used **two** expanding rings (offset half a cycle) on a fast 1.5s loop, which read as busy. Simplified to a single, calmer ring:
+  - **One ring** instead of two (dropped `nld-pulse-ring2` entirely — layer, animation, and z-order entry).
+  - **Slower**: `PULSE_PERIOD_MS` 1500 → 2800 so it expands and fades gently.
+  - **Smaller/tighter**: `PULSE_R_MAX` 30 → 20 so the ring stays a compact inner halo around the pin rather than sweeping wide.
+  - The soft glow underneath is unchanged.
+
 ## 2026-06-09
 
 ### Nightlife & dining district pickup pulse
