@@ -2120,7 +2120,7 @@ function initMap() {
       if (authHeaderOK()) {
         notePresenceBoost();
         scheduleAdaptivePresenceRender();
-        schedulePickupOverlayRefresh();
+        // Hotspots are loaded once per refresh, not re-pulled on map move.
         schedulePresencePoll({ immediate: true, reason: "viewport-change" });
       }
       applyDriverLabelZoomStyles();
@@ -2136,7 +2136,7 @@ function initMap() {
     map.on("zoomend", () => {
       if (authHeaderOK()) {
         scheduleAdaptivePresenceRender();
-        schedulePickupOverlayRefresh();
+        // Hotspots are loaded once per refresh, not re-pulled on zoom.
         schedulePresencePoll({ immediate: true, reason: "viewport-change" });
       }
       applyDriverLabelZoomStyles();

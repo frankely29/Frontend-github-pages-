@@ -2,6 +2,13 @@
 
 ## 2026-06-10
 
+### Pickup/hotspot overlay loads once per refresh (stop re-pulling on every map move)
+- The pickup **hotspot overlay** (`/events/pickups/recent` in `app.part10.js`) was re-querying the database on **every `moveend` and `zoomend`** (viewport-scoped) and polling every **12s** — constant network + work as you pan, even though the hotspots barely change. It now **loads once per page refresh and stays put**:
+  - **One citywide request:** `pickupOverlayQueryPath()` drops the bbox params and asks for the full service-wide set in a single call (`limit=200`, the backend's max; the endpoint already treats bbox as optional). So panning shows the already-loaded hotspots without re-fetching.
+  - **One-shot guards:** a `pickupOverlayLoadedOnce` flag set after the first successful load makes `refreshPickupOverlay`, `schedulePickupOverlayRefresh`, and `schedulePickupPoll` all no-op thereafter (and stops the 12s poll). Failures before the first success still retry, so the single load is robust.
+  - **`app.js`:** removed the `schedulePickupOverlayRefresh()` calls from the `moveend` / `zoomend` handlers (presence still refreshes on move; hotspots no longer do).
+- Net: the overlay is pulled a single time after a refresh and no longer consumes resources re-pulling/re-rendering as the map moves. A page refresh re-loads it.
+
 ### Strategic points show only during their prime / let-out window
 - All time-based map overlays now **hide their pins entirely outside their prime pickup window** and appear (pulsing) only during it — so the map shows only where it's worth being *right now*, instead of a full board of always-on markers. The change is a per-layer `filter` keyed to the same boolean that already drives each overlay's pulse, so an icon is visible if and only if it is pulsing. All evaluate on the existing 1-minute tick, so points appear/disappear as the clock crosses into/out of prime.
   - **Dollar-flag long-trip hotspots** (`long-trip-hotspots-pins.feature.js`): the gold "$" flag and its associated building sprites (hotels / hospitals / offices) now show only while the hotspot is in its `dim_schedule.prime` window. Non-prime flags are dropped from the WebGL layer (`syncFlagLayer` filters on `primeForHotspot`), and the buildings layer gets `filter ["==", ["get","prime"], true]` (each building carries its parent hotspot's `prime`). The pole-base pulse was already prime-only.
