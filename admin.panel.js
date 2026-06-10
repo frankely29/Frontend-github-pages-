@@ -100,6 +100,47 @@
     }
   }
 
+  // Owner-only: download every driver's stats (miles/hours/pickups/trips)
+  // summed by day/week/month/year as a ZIP.
+  async function downloadAllStats() {
+    if (!isAccountOwner() || !state.token) return;
+    const btn = root && root.querySelector('#adminPanelStats');
+    const original = btn ? btn.textContent : '';
+    try {
+      if (btn) { btn.disabled = true; btn.textContent = '⏳ Preparing…'; }
+      const res = await fetch(`${resolveBackupApiBase()}/admin/stats/export`, {
+        headers: { Authorization: `Bearer ${state.token}` },
+      });
+      if (!res.ok) {
+        let detail = `Export failed (${res.status})`;
+        try { const j = await res.json(); detail = j?.detail || detail; } catch (_) {}
+        throw new Error(detail);
+      }
+      const blob = await res.blob();
+      let filename = `driver-stats-${new Date().toISOString().slice(0, 10)}.zip`;
+      const cd = res.headers.get('Content-Disposition') || '';
+      const m = /filename="?([^"]+)"?/i.exec(cd);
+      if (m && m[1]) filename = m[1];
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+      if (btn) {
+        btn.textContent = '✅ Saved!';
+        setTimeout(() => { btn.textContent = original; }, 2200);
+      }
+    } catch (err) {
+      alert((err && err.message) || 'Could not export stats. Please try again.');
+      if (btn) btn.textContent = original;
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
   // Owner-only: restore trips by uploading a backup .zip/.json to the server,
   // which unzips it and re-adds any missing trips (non-destructive).
   async function restoreAllTrips(fileObj) {
@@ -207,6 +248,7 @@
             <button type="button" id="adminPanelBackup" class="adminBtn" hidden>⬇️ Backup All Trips</button>
             <button type="button" id="adminPanelRestore" class="adminBtn" hidden>♻️ Restore</button>
             <input type="file" id="adminPanelRestoreInput" accept=".zip,.json,application/zip,application/json" hidden>
+            <button type="button" id="adminPanelStats" class="adminBtn" hidden>📊 Export Stats</button>
             <button type="button" id="adminPanelRefresh" class="adminBtn">Refresh</button>
             <button type="button" id="adminPanelClose" class="adminBtn">Close</button>
           </div>
@@ -229,16 +271,21 @@
     root.querySelector('#adminPanelClose')?.addEventListener('click', () => close());
     root.querySelector('#adminPanelRefresh')?.addEventListener('click', () => refreshAll());
     root.querySelector('#adminPanelBackup')?.addEventListener('click', () => downloadAllTrips());
+    root.querySelector('#adminPanelStats')?.addEventListener('click', () => downloadAllStats());
     const restoreInput = root.querySelector('#adminPanelRestoreInput');
     root.querySelector('#adminPanelRestore')?.addEventListener('click', () => {
       if (!isAccountOwner()) return;
-      if (!window.confirm('Restore trips from a backup file?\n\nThis is non-destructive: trips you still have are kept, and only missing ones are re-added.')) return;
+      if (!window.confirm('Restore from a backup file?\n\nThis re-adds any missing trips and leaderboard stats. It is non-destructive — rows that already exist are skipped, so it can never create duplicates.\n\nYou\'ll confirm once more after choosing the file.')) return;
       if (restoreInput) restoreInput.click();
     });
     restoreInput?.addEventListener('change', () => {
       const f = restoreInput.files && restoreInput.files[0];
       restoreInput.value = '';
-      if (f) void restoreAllTrips(f);
+      if (!f) return;
+      // Second, final confirmation naming the exact file before anything uploads.
+      const sizeKb = Math.max(1, Math.round((f.size || 0) / 1024));
+      if (!window.confirm(`Restore from this file?\n\n  ${f.name}  (${sizeKb} KB)\n\nMissing trips and stats will be re-added; anything already in the database is skipped (no duplicates). This is the last step before it runs.`)) return;
+      void restoreAllTrips(f);
     });
 
     drawTabs();
@@ -450,6 +497,8 @@
     if (backupBtn) backupBtn.hidden = !isAccountOwner();
     const restoreBtn = root && root.querySelector('#adminPanelRestore');
     if (restoreBtn) restoreBtn.hidden = !isAccountOwner();
+    const statsBtn = root && root.querySelector('#adminPanelStats');
+    if (statsBtn) statsBtn.hidden = !isAccountOwner();
     if (!show && state.isOpen) close();
   }
 

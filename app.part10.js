@@ -2130,6 +2130,7 @@ const authStatus = document.getElementById("authStatus");
 const btnAuth = document.getElementById("btnAuth");
 const btnGhostMode = document.getElementById("btnGhostMode");
 const btnChangePassword = document.getElementById("btnChangePassword");
+const btnDownloadStats = document.getElementById("btnDownloadStats");
 const btnDeleteAccount = document.getElementById("btnDeleteAccount");
 
 const btnPolice = document.getElementById("btnPolice");
@@ -2939,6 +2940,7 @@ function setAuthUI(signedIn, note) {
   enforceSaveButtonTheme();
   if (btnGhostMode) btnGhostMode.classList.toggle("disabled", !signedIn);
   if (btnChangePassword) btnChangePassword.classList.toggle("disabled", !signedIn);
+  if (btnDownloadStats) btnDownloadStats.classList.toggle("disabled", !signedIn);
   if (btnDeleteAccount) btnDeleteAccount.classList.toggle("disabled", !signedIn);
 
   if (authStatus) authStatus.textContent = note || (signedIn ? "Status: signed in" : "Status: signed out");
@@ -3351,6 +3353,57 @@ if (btnChangePassword) {
     e.preventDefault();
     e.stopPropagation();
     openChangePasswordDialog();
+  });
+}
+
+// Download the signed-in driver's own work stats (miles + hours, summed by
+// day/week/month/year) as a ZIP — e.g. to keep as a record for taxes.
+async function downloadMyStats() {
+  if (!requireCommunityToken("download your stats")) return;
+  const btn = btnDownloadStats;
+  const originalLabel = btn ? btn.textContent : "";
+  try {
+    if (btn) { btn.classList.add("disabled"); btn.textContent = "📊 Preparing…"; }
+    const apiBase = (window.FrontendRuntime?.resolveApiBase?.() || RAILWAY_BASE || "");
+    const res = await fetch(`${apiBase}/me/stats/export`, {
+      headers: { Authorization: `Bearer ${communityToken}` },
+    });
+    if (!res.ok) {
+      let detail = `Download failed (${res.status})`;
+      try { const j = await res.json(); detail = j?.detail || detail; } catch (_) {}
+      throw new Error(detail);
+    }
+    const blob = await res.blob();
+    let filename = `my-driving-stats-${new Date().toISOString().slice(0, 10)}.zip`;
+    const cd = res.headers.get("Content-Disposition") || "";
+    const m = /filename="?([^"]+)"?/i.exec(cd);
+    if (m && m[1]) filename = m[1];
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+    if (btn) {
+      btn.textContent = "✅ Saved!";
+      setTimeout(() => { btn.textContent = originalLabel; }, 2200);
+    }
+  } catch (err) {
+    alert(err?.detail || err?.message || "Could not download your stats. Please try again.");
+    if (btn) btn.textContent = originalLabel;
+  } finally {
+    if (btn) btn.classList.remove("disabled");
+  }
+}
+
+if (btnDownloadStats) {
+  btnDownloadStats.addEventListener("pointerdown", (e) => e.stopPropagation());
+  btnDownloadStats.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    void downloadMyStats();
   });
 }
 

@@ -2,6 +2,10 @@
 
 ## 2026-06-10
 
+### Stats downloads — "Download My Stats" (users) and "Export Stats" (owner)
+- New **📊 Download My Stats** button in the Modes panel (next to Change Password), enabled when signed in. Downloads the driver's **own** miles + hours summed by day/week/month/year as a `.zip` (CSVs + JSON + README) via `GET /me/stats/export` — a handy personal record (e.g. for taxes). Same blob-download UX as the backup ("Preparing… → ✅ Saved!").
+- New **📊 Export Stats** button in the Admin Portal header, shown only to the **account owner**. Downloads **every** driver's stats (miles/hours/pickups/trips/heartbeats) summed by day/week/month/year via the owner-gated `GET /admin/stats/export`.
+
 ### "Restore" — owner-only trip restore from a backup file
 - New **♻️ Restore** button in the Admin Portal header (next to Backup), shown only to the **account owner**. Pick the backup `.zip` (or `.json`) you downloaded and it uploads to the owner-gated `POST /admin/pickups/import`, which re-adds any missing trips. A confirm dialog explains it's **non-destructive** (existing trips are kept; only missing ones are re-added), and the result is summarized in an alert (restored / already-present / skipped-missing-user / ignored).
 - Uses a hidden `<input type="file">` + `FormData` multipart upload with the owner's token; the input is cleared after each pick so the same file can be re-selected. Visibility is gated on `me.is_account_owner` (backend also enforces owner-only).
