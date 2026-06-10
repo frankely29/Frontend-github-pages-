@@ -32,10 +32,11 @@ const PRESENCE_BOOST_WINDOW_MS = 25 * 1000;
 const PRESENCE_ACCURACY_THRESHOLD = 120;
 const PICKUP_RECENT_LIMIT = 30;
 const PICKUP_ZONE_SAMPLE_LIMIT = 100;
-// Hotspots are loaded once per page refresh in a single citywide (no-bbox)
-// request — not re-pulled as the map moves. Use the backend's max recent
-// window so that one pull covers the whole service area.
-const PICKUP_GLOBAL_LIMIT = 200;
+// Hotspots load once per page refresh over a generous bounded area around the
+// view, then stay put as the map moves. A full citywide (no-bbox) pull is too
+// heavy — it makes the backend score every zone and times out — so bound the
+// single request to a ~0.05deg (~3.5mi) buffer around the current view.
+const PICKUP_ONESHOT_BUFFER_DEG = 0.05;
 const PICKUP_REFRESH_DEBOUNCE_MS = 120;
 const PICKUP_FETCH_COOLDOWN_MS = 500;
 const PICKUP_POLL_MS = 12 * 1000;
@@ -1626,14 +1627,25 @@ async function fetchPresencePayload(params, signal) {
   return { payload: full, mode: 'full' };
 }
 
-// One citywide request (no bbox) so the hotspot overlay can be pulled once
-// per refresh and kept as the user pans — instead of re-querying the DB for
-// the current viewport on every move. The backend treats the bbox params as
-// optional and returns the most-recent pickups service-wide when omitted.
-function pickupOverlayQueryPath(limit = PICKUP_GLOBAL_LIMIT) {
+// Build the single bounded request for the once-per-refresh hotspot load. The
+// bbox is a generous buffer around the current view (PICKUP_ONESHOT_BUFFER_DEG)
+// so panning within the loaded area shows hotspots without re-fetching, while
+// staying bounded enough that the backend responds fast (citywide times out).
+function pickupOverlayQueryPath(limit = PICKUP_RECENT_LIMIT) {
+  const bounds = getBufferedMapBounds(PICKUP_VIEWPORT_BUFFER_RATIO, PICKUP_ONESHOT_BUFFER_DEG);
+  if (!bounds) return null;
+  const west = Number(bounds.west);
+  const east = Number(bounds.east);
+  const south = Number(bounds.south);
+  const north = Number(bounds.north);
+  if (![west, east, south, north].every(Number.isFinite)) return null;
   const qs = new URLSearchParams({
     limit: String(limit),
     zone_sample_limit: String(PICKUP_ZONE_SAMPLE_LIMIT),
+    min_lng: String(Math.min(west, east)),
+    max_lng: String(Math.max(west, east)),
+    min_lat: String(Math.min(south, north)),
+    max_lat: String(Math.max(south, north)),
   });
   return `/events/pickups/recent?${qs.toString()}`;
 }
