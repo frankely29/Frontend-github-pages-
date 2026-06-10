@@ -100,6 +100,47 @@
     }
   }
 
+  // Owner-only: download every driver's stats (miles/hours/pickups/trips)
+  // summed by day/week/month/year as a ZIP.
+  async function downloadAllStats() {
+    if (!isAccountOwner() || !state.token) return;
+    const btn = root && root.querySelector('#adminPanelStats');
+    const original = btn ? btn.textContent : '';
+    try {
+      if (btn) { btn.disabled = true; btn.textContent = '⏳ Preparing…'; }
+      const res = await fetch(`${resolveBackupApiBase()}/admin/stats/export`, {
+        headers: { Authorization: `Bearer ${state.token}` },
+      });
+      if (!res.ok) {
+        let detail = `Export failed (${res.status})`;
+        try { const j = await res.json(); detail = j?.detail || detail; } catch (_) {}
+        throw new Error(detail);
+      }
+      const blob = await res.blob();
+      let filename = `driver-stats-${new Date().toISOString().slice(0, 10)}.zip`;
+      const cd = res.headers.get('Content-Disposition') || '';
+      const m = /filename="?([^"]+)"?/i.exec(cd);
+      if (m && m[1]) filename = m[1];
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+      if (btn) {
+        btn.textContent = '✅ Saved!';
+        setTimeout(() => { btn.textContent = original; }, 2200);
+      }
+    } catch (err) {
+      alert((err && err.message) || 'Could not export stats. Please try again.');
+      if (btn) btn.textContent = original;
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
   // Owner-only: restore trips by uploading a backup .zip/.json to the server,
   // which unzips it and re-adds any missing trips (non-destructive).
   async function restoreAllTrips(fileObj) {
@@ -207,6 +248,7 @@
             <button type="button" id="adminPanelBackup" class="adminBtn" hidden>⬇️ Backup All Trips</button>
             <button type="button" id="adminPanelRestore" class="adminBtn" hidden>♻️ Restore</button>
             <input type="file" id="adminPanelRestoreInput" accept=".zip,.json,application/zip,application/json" hidden>
+            <button type="button" id="adminPanelStats" class="adminBtn" hidden>📊 Export Stats</button>
             <button type="button" id="adminPanelRefresh" class="adminBtn">Refresh</button>
             <button type="button" id="adminPanelClose" class="adminBtn">Close</button>
           </div>
@@ -229,6 +271,7 @@
     root.querySelector('#adminPanelClose')?.addEventListener('click', () => close());
     root.querySelector('#adminPanelRefresh')?.addEventListener('click', () => refreshAll());
     root.querySelector('#adminPanelBackup')?.addEventListener('click', () => downloadAllTrips());
+    root.querySelector('#adminPanelStats')?.addEventListener('click', () => downloadAllStats());
     const restoreInput = root.querySelector('#adminPanelRestoreInput');
     root.querySelector('#adminPanelRestore')?.addEventListener('click', () => {
       if (!isAccountOwner()) return;
@@ -454,6 +497,8 @@
     if (backupBtn) backupBtn.hidden = !isAccountOwner();
     const restoreBtn = root && root.querySelector('#adminPanelRestore');
     if (restoreBtn) restoreBtn.hidden = !isAccountOwner();
+    const statsBtn = root && root.querySelector('#adminPanelStats');
+    if (statsBtn) statsBtn.hidden = !isAccountOwner();
     if (!show && state.isOpen) close();
   }
 
