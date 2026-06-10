@@ -2,6 +2,12 @@
 
 ## 2026-06-10
 
+### Pickup/hotspot overlay: fill the whole city once, in the background
+- After the fast local load, the overlay now **progressively loads the rest of the city once** and keeps it until a page refresh — so panning/zooming shows citywide hotspots without the old constant re-pulling. A single citywide request can't be used (the backend scores every zone and times out), so instead `fillCitywidePickupHotspotsOnce()` walks a grid of **20 bounded tiles** over the NYC service area (`PICKUP_TILE_DEG = 0.12°`, each ~the size of the fast local fetch), **nearest-first** from the current view, staggered ~250 ms apart.
+  - Tile results **accumulate** into the overlay (deduped by zone / micro-hotspot key, dots capped at `PICKUP_CITY_ITEM_CAP`) and re-render as each tile lands, so the city fills in around you over a few seconds.
+  - **Additive + defensive:** it's seeded with the local load and triggered only after it succeeds; a slow tile is aborted (`PICKUP_TILE_TIMEOUT_MS`) and a failed tile is skipped — if the background fill ever hiccups, the local hotspots from the one-shot load stay put. It runs **once per refresh** (`pickupCitywideFillStarted`); a page refresh re-runs it with current data.
+- This sits on top of the once-per-refresh behavior below (no per-move re-pull, no 12s poll).
+
 ### Pickup/hotspot overlay loads once per refresh (stop re-pulling on every map move)
 - The pickup **hotspot overlay** (`/events/pickups/recent` in `app.part10.js`) was re-querying the database on **every `moveend` and `zoomend`** (viewport-scoped) and polling every **12s** — constant network + work as you pan, even though the hotspots barely change. It now **loads once per page refresh and stays put**:
   - **One bounded request:** `pickupOverlayQueryPath()` fetches a **generous area around the current view** in a single call — a `~0.05°` (~3.5 mi) buffer (`PICKUP_ONESHOT_BUFFER_DEG`). So panning within the loaded area shows the already-loaded hotspots without re-fetching. (A first attempt used a full citywide no-bbox pull, but that makes the backend score every zone and times out — the hotspots never rendered — so it's bounded to a generous local area instead.)
