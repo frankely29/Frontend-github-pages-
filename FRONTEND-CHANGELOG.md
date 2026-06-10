@@ -2,6 +2,10 @@
 
 ## 2026-06-10
 
+### "Backup My Trips" button — download your pickup trips
+- New **💾 Backup My Trips** button in the Modes panel (next to Change Password) downloads **all of your pickup trips** as a `.zip` containing both a CSV and a JSON file, so you can keep an external copy that survives a server/database reset. The button is enabled only while signed in.
+- Calls the new authenticated `GET /me/pickups/export`, streams the response as a Blob, and triggers a browser download named `pickup-trips-YYYY-MM-DD.zip` (prefers the server's `Content-Disposition` filename, falls back to a dated default). Shows "Preparing… → ✅ Saved!" on the button and an alert on failure.
+
 ### Pickup/hotspot overlay: fill the whole city once, in the background
 - After the fast local load, the overlay now **progressively loads the rest of the city once** and keeps it until a page refresh — so panning/zooming shows citywide hotspots without the old constant re-pulling. A single citywide request can't be used (the backend scores every zone and times out), so instead `fillCitywidePickupHotspotsOnce()` walks a grid of **20 bounded tiles** over the NYC service area (`PICKUP_TILE_DEG = 0.12°`, each ~the size of the fast local fetch), **nearest-first** from the current view, staggered ~250 ms apart.
   - Tile results **accumulate** into the overlay (deduped by zone / micro-hotspot key, dots capped at `PICKUP_CITY_ITEM_CAP`) and re-render as each tile lands, so the city fills in around you over a few seconds.
