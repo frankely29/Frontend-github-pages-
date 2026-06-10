@@ -27,7 +27,7 @@
 ### Nightlife pulse: one slower ring for a smoother feel
 - The let-out pulse used **two** expanding rings (offset half a cycle) on a fast 1.5s loop, which read as busy. Simplified to a single, calmer ring:
   - **One ring** instead of two (dropped `nld-pulse-ring2` entirely — layer, animation, and z-order entry).
-  - **Slower**: `PULSE_PERIOD_MS` 1500 → 2800 so it expands and fades gently.
+  - **Slower**: `PULSE_PERIOD_MS` 1500 → 2200 so it expands and fades gently.
   - **Smaller/tighter**: `PULSE_R_MAX` 30 → 20 so the ring stays a compact inner halo around the pin rather than sweeping wide.
   - The soft glow underneath is unchanged.
 
