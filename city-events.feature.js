@@ -21,7 +21,6 @@
   const LABEL_LAYER_ID = "cbe-labels";
   const PULSE_GLOW_ID = "cbe-pulse-glow";
   const PULSE_RING1_ID = "cbe-pulse-ring1";
-  const PULSE_RING2_ID = "cbe-pulse-ring2";
   const SPRITES = { concert: "cbe-sprite-concert", sports: "cbe-sprite-sports", convention: "cbe-sprite-convention" };
 
   const MIN_ZOOM = 11;
@@ -35,9 +34,9 @@
   const LETOUT_TAIL = 45 * 60;   // the surge runs ~45m past the end
 
   const PULSE_COLOR = "#fbbf24";       // gold = "best time, now" (matches the flag prime pulse)
-  const PULSE_PERIOD_MS = 1500;
+  const PULSE_PERIOD_MS = 2200;
   const PULSE_R_MIN = 8;
-  const PULSE_R_MAX = 30;
+  const PULSE_R_MAX = 20;
   const PULSE_FPS_MS = 33;
 
   const CAT = {
@@ -249,16 +248,14 @@
           paint: { "circle-radius": 12, "circle-color": PULSE_COLOR, "circle-opacity": 0.18, "circle-blur": 0.6 },
         });
       }
-      for (const id of [PULSE_RING1_ID, PULSE_RING2_ID]) {
-        if (!mapRef.getLayer(id)) {
-          mapRef.addLayer({
-            id, type: "circle", source: SRC_ID, minzoom: MIN_ZOOM, filter: letoutFilter,
-            paint: {
-              "circle-radius": PULSE_R_MIN, "circle-color": "rgba(0,0,0,0)",
-              "circle-stroke-color": PULSE_COLOR, "circle-stroke-width": 2.5, "circle-stroke-opacity": 0,
-            },
-          });
-        }
+      if (!mapRef.getLayer(PULSE_RING1_ID)) {
+        mapRef.addLayer({
+          id: PULSE_RING1_ID, type: "circle", source: SRC_ID, minzoom: MIN_ZOOM, filter: letoutFilter,
+          paint: {
+            "circle-radius": PULSE_R_MIN, "circle-color": "rgba(0,0,0,0)",
+            "circle-stroke-color": PULSE_COLOR, "circle-stroke-width": 3.5, "circle-stroke-opacity": 0,
+          },
+        });
       }
 
       // Event pins (sprite by category).
@@ -309,7 +306,7 @@
   function installZOrderKeeper() {
     if (zOrderInstalled || !mapRef) return;
     zOrderInstalled = true;
-    const ids = [PULSE_GLOW_ID, PULSE_RING1_ID, PULSE_RING2_ID, ICON_LAYER_ID, LABEL_LAYER_ID];
+    const ids = [PULSE_GLOW_ID, PULSE_RING1_ID, ICON_LAYER_ID, LABEL_LAYER_ID];
     let pending = false;
     const onStyle = () => {
       if (pending) return;
@@ -344,7 +341,7 @@
   function setRing(id, t, zScale) {
     if (!mapRef?.getLayer?.(id)) return;
     const r = (PULSE_R_MIN + t * (PULSE_R_MAX - PULSE_R_MIN)) * zScale;
-    const op = 0.55 * (1 - t);
+    const op = 0.85 * (1 - t);
     try {
       mapRef.setPaintProperty(id, "circle-radius", r);
       mapRef.setPaintProperty(id, "circle-stroke-opacity", op);
@@ -357,7 +354,6 @@
       const z = pulseZoomScale(mapRef?.getZoom?.());
       const t = (ts % PULSE_PERIOD_MS) / PULSE_PERIOD_MS;
       setRing(PULSE_RING1_ID, t, z);
-      setRing(PULSE_RING2_ID, (t + 0.5) % 1, z);
       if (mapRef?.getLayer?.(PULSE_GLOW_ID)) {
         const glow = 0.16 + 0.12 * (0.5 + 0.5 * Math.sin(ts / 500));
         try {

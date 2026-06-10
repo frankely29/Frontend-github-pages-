@@ -88,15 +88,14 @@
   const PULSE_SRC_ID = "mbf-pulse";
   const PULSE_GLOW_ID = "mbf-pulse-glow";
   const PULSE_RING1_ID = "mbf-pulse-ring1";
-  const PULSE_RING2_ID = "mbf-pulse-ring2";
   const SPRITE_HOSPITAL = "mbf-sprite-hospital";
   const SPRITE_HOTEL = "mbf-sprite-hotel";
   const MIN_ZOOM = 11;        // show landmarks from mid-borough scale up
   const LABEL_MIN_ZOOM = 13;  // show the HOSPITAL/HOTEL type tag from a neighborhood zoom
   const REFRESH_MS = 60 * 1000;
-  const PULSE_PERIOD_MS = 1600;
+  const PULSE_PERIOD_MS = 2200;
   const PULSE_R_MIN = 7;
-  const PULSE_R_MAX = 30;
+  const PULSE_R_MAX = 20;
   const PULSE_FPS_MS = 33;
   // Pulse de-clutter: collapse overlapping pulse rings by SCREEN distance
   // so clustered landmarks and nearby dollar-flag pulses don't pile up.
@@ -360,17 +359,15 @@
           },
         });
       }
-      for (const id of [PULSE_RING1_ID, PULSE_RING2_ID]) {
-        if (!mapRef.getLayer(id)) {
-          mapRef.addLayer({
-            id, type: "circle", source: PULSE_SRC_ID, minzoom: MIN_ZOOM,
-            paint: {
-              "circle-radius": PULSE_R_MIN, "circle-color": "rgba(0,0,0,0)",
-              "circle-opacity": 0, "circle-stroke-color": colorByType,
-              "circle-stroke-width": 2.5, "circle-stroke-opacity": 0,
-            },
-          });
-        }
+      if (!mapRef.getLayer(PULSE_RING1_ID)) {
+        mapRef.addLayer({
+          id: PULSE_RING1_ID, type: "circle", source: PULSE_SRC_ID, minzoom: MIN_ZOOM,
+          paint: {
+            "circle-radius": PULSE_R_MIN, "circle-color": "rgba(0,0,0,0)",
+            "circle-opacity": 0, "circle-stroke-color": colorByType,
+            "circle-stroke-width": 3.5, "circle-stroke-opacity": 0,
+          },
+        });
       }
 
       // Building icons (distinct sprite per type).
@@ -437,7 +434,7 @@
   function installZOrderKeeper() {
     if (zOrderInstalled || !mapRef) return;
     zOrderInstalled = true;
-    const ids = [PULSE_GLOW_ID, PULSE_RING1_ID, PULSE_RING2_ID, ICON_LAYER_ID, LABEL_LAYER_ID];
+    const ids = [PULSE_GLOW_ID, PULSE_RING1_ID, ICON_LAYER_ID, LABEL_LAYER_ID];
     let pending = false;
     const onStyle = () => {
       if (pending) return;
@@ -482,7 +479,7 @@
   function setRing(id, t, zScale) {
     if (!mapRef?.getLayer?.(id)) return;
     const r = (PULSE_R_MIN + t * (PULSE_R_MAX - PULSE_R_MIN)) * zScale;
-    const op = 0.5 * (1 - t);
+    const op = 0.85 * (1 - t);
     try {
       mapRef.setPaintProperty(id, "circle-radius", r);
       mapRef.setPaintProperty(id, "circle-stroke-opacity", op);
@@ -496,7 +493,6 @@
       const z = pulseZoomScale(mapRef?.getZoom?.());
       const t = (ts % PULSE_PERIOD_MS) / PULSE_PERIOD_MS;
       setRing(PULSE_RING1_ID, t, z);
-      setRing(PULSE_RING2_ID, (t + 0.5) % 1, z);
       if (mapRef?.getLayer?.(PULSE_GLOW_ID)) {
         const glow = 0.14 + 0.10 * (0.5 + 0.5 * Math.sin(ts / 600));
         try {
