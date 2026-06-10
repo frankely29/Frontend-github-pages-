@@ -32,7 +32,7 @@
   const PIN_COLOR = "#ec4899";
   const PIN_DARK = "#9d174d";
   const PULSE_COLOR = "#ec4899";
-  const PULSE_PERIOD_MS = 2800;  // slower cycle -> smoother single pulse
+  const PULSE_PERIOD_MS = 2200;  // calm single-pulse cycle
   const PULSE_R_MIN = 8;
   const PULSE_R_MAX = 20;        // one compact inner ring
   const PULSE_FPS_MS = 33;
