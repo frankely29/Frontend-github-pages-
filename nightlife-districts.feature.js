@@ -23,7 +23,6 @@
   const LABEL_LAYER_ID = "nld-labels";
   const PULSE_GLOW_ID = "nld-pulse-glow";
   const PULSE_RING1_ID = "nld-pulse-ring1";
-  const PULSE_RING2_ID = "nld-pulse-ring2";
   const SPRITE_ID = "nld-sprite-cocktail";
 
   const MIN_ZOOM = 9;   // pulse + pins visible from the city-overview zoom
@@ -33,9 +32,9 @@
   const PIN_COLOR = "#ec4899";
   const PIN_DARK = "#9d174d";
   const PULSE_COLOR = "#ec4899";
-  const PULSE_PERIOD_MS = 1500;
+  const PULSE_PERIOD_MS = 2800;  // slower cycle -> smoother single pulse
   const PULSE_R_MIN = 8;
-  const PULSE_R_MAX = 30;
+  const PULSE_R_MAX = 20;        // one compact inner ring
   const PULSE_FPS_MS = 33;
 
   const DIM_PEAK = 1.0;     // open + busy hours
@@ -251,16 +250,14 @@
           paint: { "circle-radius": 18, "circle-color": PULSE_COLOR, "circle-opacity": 0.32, "circle-blur": 0.6 },
         });
       }
-      for (const id of [PULSE_RING1_ID, PULSE_RING2_ID]) {
-        if (!mapRef.getLayer(id)) {
-          mapRef.addLayer({
-            id, type: "circle", source: SRC_ID, minzoom: MIN_ZOOM, filter: primeFilter,
-            paint: {
-              "circle-radius": PULSE_R_MIN, "circle-color": "rgba(0,0,0,0)",
-              "circle-stroke-color": PULSE_COLOR, "circle-stroke-width": 3.5, "circle-stroke-opacity": 0,
-            },
-          });
-        }
+      if (!mapRef.getLayer(PULSE_RING1_ID)) {
+        mapRef.addLayer({
+          id: PULSE_RING1_ID, type: "circle", source: SRC_ID, minzoom: MIN_ZOOM, filter: primeFilter,
+          paint: {
+            "circle-radius": PULSE_R_MIN, "circle-color": "rgba(0,0,0,0)",
+            "circle-stroke-color": PULSE_COLOR, "circle-stroke-width": 3.5, "circle-stroke-opacity": 0,
+          },
+        });
       }
       // District pins (magenta cocktail sprite), dimmed by time-of-day.
       if (!mapRef.getLayer(ICON_LAYER_ID)) {
@@ -321,7 +318,7 @@
     if (zOrderInstalled || !mapRef) return;
     zOrderInstalled = true;
     // Bottom -> top: glow, rings, pin, label (label ends up topmost).
-    const ids = [PULSE_GLOW_ID, PULSE_RING1_ID, PULSE_RING2_ID, ICON_LAYER_ID, LABEL_LAYER_ID];
+    const ids = [PULSE_GLOW_ID, PULSE_RING1_ID, ICON_LAYER_ID, LABEL_LAYER_ID];
     const scheduleMove = () => {
       if (zOrderInMove || zOrderPending) return;
       zOrderPending = true;
@@ -387,7 +384,6 @@
       const z = pulseZoomScale(mapRef?.getZoom?.());
       const t = (ts % PULSE_PERIOD_MS) / PULSE_PERIOD_MS;
       setRing(PULSE_RING1_ID, t, z);
-      setRing(PULSE_RING2_ID, (t + 0.5) % 1, z);
       if (mapRef.getLayer?.(PULSE_GLOW_ID)) {
         const glow = 0.22 + 0.14 * (0.5 + 0.5 * Math.sin(ts / 500));
         try {
