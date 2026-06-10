@@ -32,6 +32,10 @@ const PRESENCE_BOOST_WINDOW_MS = 25 * 1000;
 const PRESENCE_ACCURACY_THRESHOLD = 120;
 const PICKUP_RECENT_LIMIT = 30;
 const PICKUP_ZONE_SAMPLE_LIMIT = 100;
+// Hotspots are loaded once per page refresh in a single citywide (no-bbox)
+// request — not re-pulled as the map moves. Use the backend's max recent
+// window so that one pull covers the whole service area.
+const PICKUP_GLOBAL_LIMIT = 200;
 const PICKUP_REFRESH_DEBOUNCE_MS = 120;
 const PICKUP_FETCH_COOLDOWN_MS = 500;
 const PICKUP_POLL_MS = 12 * 1000;
@@ -73,6 +77,9 @@ const PICKUP_VIEWPORT_MIN_BUFFER_DEG = 0.01;
 let pickupRefreshTimer = null;
 let pickupPollTimer = null;
 let pickupRefreshInFlight = false;
+// Hotspots pull once per refresh; set true after the first successful load
+// so the poll and any move-triggered refresh become no-ops thereafter.
+let pickupOverlayLoadedOnce = false;
 let pickupRefreshQueued = false;
 let pickupRefreshQueuedForce = false;
 let pickupOverlayAbortController = null;
@@ -1619,22 +1626,14 @@ async function fetchPresencePayload(params, signal) {
   return { payload: full, mode: 'full' };
 }
 
-function pickupOverlayQueryPath(limit = PICKUP_RECENT_LIMIT) {
-  const bounds = getBufferedMapBounds(PICKUP_VIEWPORT_BUFFER_RATIO, PICKUP_VIEWPORT_MIN_BUFFER_DEG);
-  if (!bounds) return null;
-  const west = Number(bounds.west);
-  const east = Number(bounds.east);
-  const south = Number(bounds.south);
-  const north = Number(bounds.north);
-  if (![west, east, south, north].every(Number.isFinite)) return null;
-
+// One citywide request (no bbox) so the hotspot overlay can be pulled once
+// per refresh and kept as the user pans — instead of re-querying the DB for
+// the current viewport on every move. The backend treats the bbox params as
+// optional and returns the most-recent pickups service-wide when omitted.
+function pickupOverlayQueryPath(limit = PICKUP_GLOBAL_LIMIT) {
   const qs = new URLSearchParams({
     limit: String(limit),
     zone_sample_limit: String(PICKUP_ZONE_SAMPLE_LIMIT),
-    min_lng: String(Math.min(west, east)),
-    max_lng: String(Math.max(west, east)),
-    min_lat: String(Math.min(south, north)),
-    max_lat: String(Math.max(south, north)),
   });
   return `/events/pickups/recent?${qs.toString()}`;
 }
@@ -1680,6 +1679,9 @@ function getPrecisePickupViewportGateKey() {
 }
 
 async function refreshPickupOverlay({ force = false } = {}) {
+  // Hotspots are pulled once per refresh; after the first successful load we
+  // never re-fetch (no per-move pull, no poll). A page refresh resets this.
+  if (pickupOverlayLoadedOnce) return;
   frontendPerfStats.pickupFetchesAttempted += 1;
   const startedAt = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
   if (pickupRefreshInFlight) {
@@ -1772,6 +1774,10 @@ async function refreshPickupOverlay({ force = false } = {}) {
     const fc = buildPickupFeatureCollection(items);
     appliedPickupRequestSerial = requestSerial;
     setPickupOverlayData(fc, items, zoneStats, zoneHotspots, microHotspots);
+    // First successful citywide load done — pin it and stop the poll. The
+    // guards in schedulePickupPoll / schedulePickupOverlayRefresh keep it off.
+    pickupOverlayLoadedOnce = true;
+    clearPickupPollTimer();
     window.__pickupDebug = {
       ...(window.__pickupDebug || {}),
       usedLastGoodHotspotOverlayFallback,
@@ -1818,6 +1824,7 @@ async function refreshPickupOverlay({ force = false } = {}) {
 }
 
 function schedulePickupOverlayRefresh({ force = false } = {}) {
+  if (pickupOverlayLoadedOnce) return;
   let viewportGateChanged = false;
   if (!force) {
     const nextViewportGateKey = getPrecisePickupViewportGateKey();
@@ -1851,6 +1858,7 @@ function clearPickupPollTimer() {
 }
 
 function schedulePickupPoll({ immediate = false } = {}) {
+  if (pickupOverlayLoadedOnce) return;
   clearPickupPollTimer();
   if (!authHeaderOK() || document.hidden) return;
   const delay = immediate ? 0 : PICKUP_POLL_MS;
@@ -1953,7 +1961,7 @@ window.runCommunityVisibilitySmokeTest = async function () {
   }
 
   try {
-    const path = pickupOverlayQueryPath(PICKUP_RECENT_LIMIT);
+    const path = pickupOverlayQueryPath();
     if (!path) {
       throw new Error("Pickup overlay query path unavailable.");
     }
