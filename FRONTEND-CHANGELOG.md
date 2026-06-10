@@ -2,6 +2,9 @@
 
 ## 2026-06-10
 
+### Admin "Export Stats" → pick a specific driver and/or date range
+- The owner's **📊 Export Stats** button now opens a small dialog instead of downloading everything immediately: a **Driver** dropdown (populated from `/admin/users`, defaults to "All drivers") plus **From / To date** fields. Same day in both = a single specific date; leave blank for all time. It passes `user_id` / `start` / `end` to `GET /admin/stats/export`. Dropdown population is best-effort — if `/admin/users` fails it still works for "All drivers".
+
 ### Stats downloads — "Download My Stats" (users) and "Export Stats" (owner)
 - New **📊 Download My Stats** button in the Modes panel (next to Change Password), enabled when signed in. Downloads the driver's **own** miles + hours summed by day/week/month/year as a `.zip` (CSVs + JSON + README) via `GET /me/stats/export` — a handy personal record (e.g. for taxes). Same blob-download UX as the backup ("Preparing… → ✅ Saved!").
 - New **📊 Export Stats** button in the Admin Portal header, shown only to the **account owner**. Downloads **every** driver's stats (miles/hours/pickups/trips/heartbeats) summed by day/week/month/year via the owner-gated `GET /admin/stats/export`.

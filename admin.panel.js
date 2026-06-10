@@ -100,15 +100,21 @@
     }
   }
 
-  // Owner-only: download every driver's stats (miles/hours/pickups/trips)
-  // summed by day/week/month/year as a ZIP.
-  async function downloadAllStats() {
-    if (!isAccountOwner() || !state.token) return;
+  // Owner-only: download driver stats (miles/hours/pickups/trips) summed by
+  // day/week/month/year as a ZIP. Optional { userId, start, end } narrow to a
+  // specific driver and/or an inclusive YYYY-MM-DD date range.
+  async function downloadAllStats(opts = {}) {
+    if (!isAccountOwner() || !state.token) return false;
+    const params = new URLSearchParams();
+    if (opts.userId) params.set('user_id', String(opts.userId));
+    if (opts.start) params.set('start', opts.start);
+    if (opts.end) params.set('end', opts.end);
+    const qs = params.toString();
     const btn = root && root.querySelector('#adminPanelStats');
     const original = btn ? btn.textContent : '';
     try {
       if (btn) { btn.disabled = true; btn.textContent = '⏳ Preparing…'; }
-      const res = await fetch(`${resolveBackupApiBase()}/admin/stats/export`, {
+      const res = await fetch(`${resolveBackupApiBase()}/admin/stats/export${qs ? `?${qs}` : ''}`, {
         headers: { Authorization: `Bearer ${state.token}` },
       });
       if (!res.ok) {
@@ -133,12 +139,82 @@
         btn.textContent = '✅ Saved!';
         setTimeout(() => { btn.textContent = original; }, 2200);
       }
+      return true;
     } catch (err) {
       alert((err && err.message) || 'Could not export stats. Please try again.');
       if (btn) btn.textContent = original;
+      return false;
     } finally {
       if (btn) btn.disabled = false;
     }
+  }
+
+  // Owner-only: open a small dialog to pick a specific driver and/or a date
+  // range before exporting. Blank driver = all; blank dates = all time; the
+  // same day in both date fields = a single specific date.
+  async function openStatsExportModal() {
+    if (!isAccountOwner() || !state.token) return;
+    document.getElementById('statsExportOverlay')?.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'statsExportOverlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:100000;display:flex;align-items:center;justify-content:center;padding:16px;';
+    const card = document.createElement('div');
+    card.style.cssText = 'background:#13161c;color:#e8eaed;border:1px solid #2a2f3a;border-radius:12px;max-width:420px;width:100%;padding:20px;box-shadow:0 12px 40px rgba(0,0,0,0.5);font:14px system-ui,sans-serif;';
+    const inputStyle = 'width:100%;padding:8px;border-radius:8px;border:1px solid #2a2f3a;background:#0d0f14;color:#e8eaed;box-sizing:border-box;';
+    card.innerHTML = `
+      <div style="font-size:16px;font-weight:600;margin-bottom:4px;">📊 Export driver stats</div>
+      <div style="opacity:.7;font-size:12px;margin-bottom:14px;">Miles, hours, pickups &amp; trips summed by day / week / month / year.</div>
+      <label style="display:block;margin-bottom:12px;">
+        <span style="display:block;margin-bottom:4px;opacity:.85;">Driver</span>
+        <select id="statsExportUser" style="${inputStyle}"><option value="">All drivers</option></select>
+      </label>
+      <div style="display:flex;gap:10px;margin-bottom:6px;">
+        <label style="flex:1;"><span style="display:block;margin-bottom:4px;opacity:.85;">From date</span>
+          <input id="statsExportStart" type="date" style="${inputStyle}"></label>
+        <label style="flex:1;"><span style="display:block;margin-bottom:4px;opacity:.85;">To date</span>
+          <input id="statsExportEnd" type="date" style="${inputStyle}"></label>
+      </div>
+      <div style="opacity:.6;font-size:11px;margin-bottom:16px;">Leave dates blank for all time. Pick the same day in both for one specific date.</div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;">
+        <button id="statsExportCancel" type="button" class="adminBtn" style="background:transparent;">Cancel</button>
+        <button id="statsExportGo" type="button" class="adminBtn">⬇️ Download</button>
+      </div>`;
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+
+    const close = () => overlay.remove();
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    card.querySelector('#statsExportCancel').addEventListener('click', close);
+
+    // Populate the driver dropdown from /admin/users (best-effort).
+    try {
+      const data = await authRequest('/admin/users');
+      const list = Array.isArray(data) ? data : (data?.items || data?.users || data?.data || data?.rows || []);
+      const sel = card.querySelector('#statsExportUser');
+      list.slice()
+        .sort((a, b) => String(a?.display_name || a?.email || '').localeCompare(String(b?.display_name || b?.email || '')))
+        .forEach((u) => {
+          if (!u || u.id == null) return;
+          const opt = document.createElement('option');
+          opt.value = String(u.id);
+          const label = u.display_name || u.email || `User ${u.id}`;
+          opt.textContent = (u.email && u.email !== label) ? `${label} (${u.email})` : label;
+          sel.appendChild(opt);
+        });
+    } catch (_) { /* dropdown keeps just "All drivers" */ }
+
+    card.querySelector('#statsExportGo').addEventListener('click', async () => {
+      const userId = card.querySelector('#statsExportUser').value || '';
+      const start = card.querySelector('#statsExportStart').value || '';
+      const end = card.querySelector('#statsExportEnd').value || '';
+      if (start && end && start > end) { alert('"From date" must be on or before "To date".'); return; }
+      const goBtn = card.querySelector('#statsExportGo');
+      goBtn.disabled = true; goBtn.textContent = '⏳ Preparing…';
+      const ok = await downloadAllStats({ userId, start, end });
+      if (ok) close();
+      else { goBtn.disabled = false; goBtn.textContent = '⬇️ Download'; }
+    });
   }
 
   // Owner-only: restore trips by uploading a backup .zip/.json to the server,
@@ -271,7 +347,7 @@
     root.querySelector('#adminPanelClose')?.addEventListener('click', () => close());
     root.querySelector('#adminPanelRefresh')?.addEventListener('click', () => refreshAll());
     root.querySelector('#adminPanelBackup')?.addEventListener('click', () => downloadAllTrips());
-    root.querySelector('#adminPanelStats')?.addEventListener('click', () => downloadAllStats());
+    root.querySelector('#adminPanelStats')?.addEventListener('click', () => openStatsExportModal());
     const restoreInput = root.querySelector('#adminPanelRestoreInput');
     root.querySelector('#adminPanelRestore')?.addEventListener('click', () => {
       if (!isAccountOwner()) return;
