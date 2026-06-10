@@ -232,13 +232,17 @@
     const restoreInput = root.querySelector('#adminPanelRestoreInput');
     root.querySelector('#adminPanelRestore')?.addEventListener('click', () => {
       if (!isAccountOwner()) return;
-      if (!window.confirm('Restore trips from a backup file?\n\nThis is non-destructive: trips you still have are kept, and only missing ones are re-added.')) return;
+      if (!window.confirm('Restore from a backup file?\n\nThis re-adds any missing trips and leaderboard stats. It is non-destructive — rows that already exist are skipped, so it can never create duplicates.\n\nYou\'ll confirm once more after choosing the file.')) return;
       if (restoreInput) restoreInput.click();
     });
     restoreInput?.addEventListener('change', () => {
       const f = restoreInput.files && restoreInput.files[0];
       restoreInput.value = '';
-      if (f) void restoreAllTrips(f);
+      if (!f) return;
+      // Second, final confirmation naming the exact file before anything uploads.
+      const sizeKb = Math.max(1, Math.round((f.size || 0) / 1024));
+      if (!window.confirm(`Restore from this file?\n\n  ${f.name}  (${sizeKb} KB)\n\nMissing trips and stats will be re-added; anything already in the database is skipped (no duplicates). This is the last step before it runs.`)) return;
+      void restoreAllTrips(f);
     });
 
     drawTabs();
