@@ -100,6 +100,45 @@
     }
   }
 
+  // Owner-only: restore trips by uploading a backup .zip/.json to the server,
+  // which unzips it and re-adds any missing trips (non-destructive).
+  async function restoreAllTrips(fileObj) {
+    if (!isAccountOwner() || !state.token || !fileObj) return;
+    const btn = root && root.querySelector('#adminPanelRestore');
+    const original = btn ? btn.textContent : '';
+    try {
+      if (btn) { btn.disabled = true; btn.textContent = '⏳ Restoring…'; }
+      const fd = new FormData();
+      fd.append('file', fileObj, fileObj.name || 'backup.zip');
+      const res = await fetch(`${resolveBackupApiBase()}/admin/pickups/import`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${state.token}` },
+        body: fd,
+      });
+      const out = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error((out && out.detail) || `Restore failed (${res.status})`);
+      }
+      const lines = [
+        `Restored ${out.inserted} trip(s).`,
+        out.skipped_existing ? `${out.skipped_existing} already present — kept as-is.` : '',
+        out.skipped_missing_user ? `${out.skipped_missing_user} skipped — their user no longer exists (id ${(out.missing_user_ids || []).join(', ')}).` : '',
+        out.invalid ? `${out.invalid} unreadable row(s) ignored.` : '',
+      ].filter(Boolean);
+      alert(lines.join('\n'));
+      if (btn) {
+        btn.textContent = '✅ Restored!';
+        setTimeout(() => { btn.textContent = original; }, 2200);
+      }
+      try { refreshAll(); } catch (_) {}
+    } catch (err) {
+      alert((err && err.message) || 'Could not restore trips. Please try again.');
+      if (btn) btn.textContent = original;
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
   function authRequest(path, options = {}) {
     if (runtime?.requestJSONDetailed) {
       return runtime.requestJSONDetailed(path, {
@@ -164,6 +203,8 @@
           <h2 id="adminPanelTitle">Admin Portal</h2>
           <div class="adminHeaderActions">
             <button type="button" id="adminPanelBackup" class="adminBtn" hidden>⬇️ Backup All Trips</button>
+            <button type="button" id="adminPanelRestore" class="adminBtn" hidden>♻️ Restore</button>
+            <input type="file" id="adminPanelRestoreInput" accept=".zip,.json,application/zip,application/json" hidden>
             <button type="button" id="adminPanelRefresh" class="adminBtn">Refresh</button>
             <button type="button" id="adminPanelClose" class="adminBtn">Close</button>
           </div>
@@ -186,6 +227,17 @@
     root.querySelector('#adminPanelClose')?.addEventListener('click', () => close());
     root.querySelector('#adminPanelRefresh')?.addEventListener('click', () => refreshAll());
     root.querySelector('#adminPanelBackup')?.addEventListener('click', () => downloadAllTrips());
+    const restoreInput = root.querySelector('#adminPanelRestoreInput');
+    root.querySelector('#adminPanelRestore')?.addEventListener('click', () => {
+      if (!isAccountOwner()) return;
+      if (!window.confirm('Restore trips from a backup file?\n\nThis is non-destructive: trips you still have are kept, and only missing ones are re-added.')) return;
+      if (restoreInput) restoreInput.click();
+    });
+    restoreInput?.addEventListener('change', () => {
+      const f = restoreInput.files && restoreInput.files[0];
+      restoreInput.value = '';
+      if (f) void restoreAllTrips(f);
+    });
 
     drawTabs();
     refreshVisibility();
@@ -394,6 +446,8 @@
     launcher.hidden = !show;
     const backupBtn = root && root.querySelector('#adminPanelBackup');
     if (backupBtn) backupBtn.hidden = !isAccountOwner();
+    const restoreBtn = root && root.querySelector('#adminPanelRestore');
+    if (restoreBtn) restoreBtn.hidden = !isAccountOwner();
     if (!show && state.isOpen) close();
   }
 
