@@ -124,6 +124,8 @@
         out.skipped_existing ? `${out.skipped_existing} already present — kept as-is.` : '',
         out.skipped_missing_user ? `${out.skipped_missing_user} skipped — their user no longer exists (id ${(out.missing_user_ids || []).join(', ')}).` : '',
         out.invalid ? `${out.invalid} unreadable row(s) ignored.` : '',
+        out.daily_stats_inserted ? `Restored ${out.daily_stats_inserted} leaderboard daily-stat row(s).` : '',
+        out.daily_stats_skipped_existing ? `${out.daily_stats_skipped_existing} daily-stat row(s) already present.` : '',
       ].filter(Boolean);
       alert(lines.join('\n'));
       if (btn) {
