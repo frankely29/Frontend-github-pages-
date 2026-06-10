@@ -26,7 +26,7 @@
   const PULSE_RING2_ID = "nld-pulse-ring2";
   const SPRITE_ID = "nld-sprite-cocktail";
 
-  const MIN_ZOOM = 11;
+  const MIN_ZOOM = 9;   // pulse + pins visible from the city-overview zoom
   const LABEL_MIN_ZOOM = 13;
 
   // Distinct magenta identity (gold #fbbf24 is the dollar-flag pulse).
@@ -245,7 +245,7 @@
       if (!mapRef.getLayer(PULSE_GLOW_ID)) {
         mapRef.addLayer({
           id: PULSE_GLOW_ID, type: "circle", source: SRC_ID, minzoom: MIN_ZOOM, filter: primeFilter,
-          paint: { "circle-radius": 12, "circle-color": PULSE_COLOR, "circle-opacity": 0.18, "circle-blur": 0.6 },
+          paint: { "circle-radius": 18, "circle-color": PULSE_COLOR, "circle-opacity": 0.32, "circle-blur": 0.6 },
         });
       }
       for (const id of [PULSE_RING1_ID, PULSE_RING2_ID]) {
@@ -254,7 +254,7 @@
             id, type: "circle", source: SRC_ID, minzoom: MIN_ZOOM, filter: primeFilter,
             paint: {
               "circle-radius": PULSE_R_MIN, "circle-color": "rgba(0,0,0,0)",
-              "circle-stroke-color": PULSE_COLOR, "circle-stroke-width": 2.5, "circle-stroke-opacity": 0,
+              "circle-stroke-color": PULSE_COLOR, "circle-stroke-width": 3.5, "circle-stroke-opacity": 0,
             },
           });
         }
@@ -267,7 +267,7 @@
           filter: primeFilter,
           layout: {
             "icon-image": SPRITE_ID,
-            "icon-size": ["interpolate", ["linear"], ["zoom"], 11, 0.4, 14, 0.62, 16, 0.8, 18, 0.95],
+            "icon-size": ["interpolate", ["linear"], ["zoom"], 9, 0.5, 11, 0.58, 14, 0.72, 16, 0.88, 18, 1.0],
             "icon-allow-overlap": true, "icon-ignore-placement": true, "icon-anchor": "bottom",
           },
           paint: { "icon-opacity": ["coalesce", ["get", "dim"], 0.9] },
@@ -315,14 +315,14 @@
 
   function pulseZoomScale(z) {
     if (typeof z !== "number") return 1;
-    if (z <= 11) return 0.7;
-    if (z >= 16) return 1.4;
-    return 0.7 + (z - 11) * (0.7 / 5);
+    if (z <= 11) return 1.0;   // full-size beacon at the city-overview zoom
+    if (z >= 16) return 1.5;
+    return 1.0 + (z - 11) * (0.5 / 5);
   }
   function setRing(id, t, zScale) {
     if (!mapRef.getLayer?.(id)) return;
     const radius = (PULSE_R_MIN + (PULSE_R_MAX - PULSE_R_MIN) * t) * zScale;
-    const opacity = 0.55 * (1 - t);
+    const opacity = 0.85 * (1 - t);
     try {
       mapRef.setPaintProperty(id, "circle-radius", radius);
       mapRef.setPaintProperty(id, "circle-stroke-opacity", opacity);
@@ -337,9 +337,9 @@
       setRing(PULSE_RING1_ID, t, z);
       setRing(PULSE_RING2_ID, (t + 0.5) % 1, z);
       if (mapRef.getLayer?.(PULSE_GLOW_ID)) {
-        const glow = 0.12 + 0.10 * (0.5 + 0.5 * Math.sin(ts / 500));
+        const glow = 0.22 + 0.14 * (0.5 + 0.5 * Math.sin(ts / 500));
         try {
-          mapRef.setPaintProperty(PULSE_GLOW_ID, "circle-radius", 12 * z);
+          mapRef.setPaintProperty(PULSE_GLOW_ID, "circle-radius", 18 * z);
           mapRef.setPaintProperty(PULSE_GLOW_ID, "circle-opacity", glow);
         } catch (_) {}
       }

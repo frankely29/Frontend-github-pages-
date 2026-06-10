@@ -10,6 +10,12 @@
   - **City events** (`city-events.feature.js`): concert / sports / convention pins + labels show only while the event is **letting out** (the best-pickup surge), and are hidden while upcoming or in progress.
 - Not affected: driver-placed "45+ Trips" flags (a manual annotation with no prime schedule) stay visible, and non-strategic layers (presence avatars, etc.) are unchanged.
 
+### Nightlife pulse: visible at the city-overview zoom, and bolder
+- The nightlife / dining district let-out pulse was gated to zoom ≥11 and rendered faintly (glow at ~0.12–0.22 opacity, shrunk to 0.7× at low zoom), so it was invisible at a city-wide view and read as very dim even zoomed in. Now it's a clear magenta beacon from the overview scale:
+  - **Zoom gate** `MIN_ZOOM` 11 → 9 — pins + pulse appear at the city-overview zoom (the type label still holds at 13 to avoid clutter).
+  - **Full-size pulse at low zoom**: `pulseZoomScale` floor 0.7 → 1.0 (at zoom ≤11) so the rings/glow are not shrunk at city scale.
+  - **Brighter**: glow opacity ~0.12–0.22 → ~0.22–0.36 and radius 12 → 18; ring peak opacity 0.55 → 0.85, stroke-width 2.5 → 3.5; cocktail-pin size curve bumped (low end 0.4 → 0.5).
+
 ## 2026-06-09
 
 ### Nightlife & dining district pickup pulse
