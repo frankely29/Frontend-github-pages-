@@ -2,6 +2,10 @@
 
 ## 2026-06-10
 
+### "Restore" — owner-only trip restore from a backup file
+- New **♻️ Restore** button in the Admin Portal header (next to Backup), shown only to the **account owner**. Pick the backup `.zip` (or `.json`) you downloaded and it uploads to the owner-gated `POST /admin/pickups/import`, which re-adds any missing trips. A confirm dialog explains it's **non-destructive** (existing trips are kept; only missing ones are re-added), and the result is summarized in an alert (restored / already-present / skipped-missing-user / ignored).
+- Uses a hidden `<input type="file">` + `FormData` multipart upload with the owner's token; the input is cleared after each pick so the same file can be re-selected. Visibility is gated on `me.is_account_owner` (backend also enforces owner-only).
+
 ### "Backup All Trips" — owner-only, moved into the Admin Portal
 - The trip backup is now an **admin-portal** action restricted to the **account owner (main admin)**, and it backs up **every user's** pickup trips (not just your own). The old **💾 Backup My Trips** button in the Modes panel (and its `/me/pickups/export` call) was removed.
 - New **⬇️ Backup All Trips** button in the Admin Portal header (`admin.panel.js`), shown only when `me.is_account_owner` is true. Calls the owner-gated `GET /admin/pickups/export_all`, reads the response as a Blob, and downloads `all-pickup-trips-YYYY-MM-DD.zip` (CSV + JSON, every user's trips with `user_id`/`email`). Shows "Preparing… → ✅ Saved!" and alerts on failure.
