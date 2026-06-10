@@ -823,6 +823,7 @@
     const features = [];
     for (const h of hotspots) {
       const dim = dimForHotspot(h, now);
+      const prime = primeForHotspot(h, now);
       for (const m of h.members) {
         features.push({
           type: "Feature",
@@ -833,6 +834,7 @@
             address: m.address,
             best_hours: m.best_hours,
             dim,
+            prime,
           },
           geometry: { type: "Point", coordinates: [m.lng, m.lat] },
         });
@@ -865,6 +867,10 @@
           type: "symbol",
           source: BLDG_SOURCE_ID,
           minzoom: BLDG_MIN_ZOOM, // hidden at city-overview zooms
+          // Hide a hotspot's buildings unless it is in its prime window — the
+          // cluster only appears (with its flag + pulse) at the best pickup
+          // hours, and is absent from the map otherwise.
+          filter: ["==", ["get", "prime"], true],
           layout: {
             "icon-image": BLDG_IMAGE_ID,
             // Slimmer size curve. Each hotspot renders 3+ building
@@ -1094,10 +1100,15 @@
   function syncFlagLayer() {
     if (!flagCustomLayer) return;
     const now = nycHourAndDay();
-    const flagList = hotspots.map((h) => ({
-      id: h.id, lat: h.lat, lng: h.lng,
-      dim: dimForHotspot(h, now),
-    }));
+    // Only flags whose hotspot is in its prime window are drawn — the gold
+    // dollar-flag appears (pulsing) at the best pickup hours and is hidden
+    // from the map at all other times.
+    const flagList = hotspots
+      .filter((h) => primeForHotspot(h, now))
+      .map((h) => ({
+        id: h.id, lat: h.lat, lng: h.lng,
+        dim: dimForHotspot(h, now),
+      }));
     flagCustomLayer.setFlags(flagList);
   }
 

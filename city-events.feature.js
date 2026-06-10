@@ -265,6 +265,9 @@
       if (!mapRef.getLayer(ICON_LAYER_ID)) {
         mapRef.addLayer({
           id: ICON_LAYER_ID, type: "symbol", source: SRC_ID, minzoom: MIN_ZOOM,
+          // Only show an event while it is letting out (pulsing) — the
+          // best-pickup surge window — and hide it from the map otherwise.
+          filter: letoutFilter,
           layout: {
             "icon-image": ["match", ["get", "spriteCategory"],
               "sports", SPRITES.sports, "convention", SPRITES.convention, SPRITES.concert],
@@ -278,6 +281,7 @@
       if (!mapRef.getLayer(LABEL_LAYER_ID)) {
         mapRef.addLayer({
           id: LABEL_LAYER_ID, type: "symbol", source: SRC_ID, minzoom: LABEL_MIN_ZOOM,
+          filter: letoutFilter,
           layout: {
             "text-field": ["get", "name"],
             "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
