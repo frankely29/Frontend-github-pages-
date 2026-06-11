@@ -811,7 +811,7 @@
           layout: {
             "text-field": ["get", "name"],
             "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
-            "text-size": ["interpolate", ["linear"], ["zoom"], 10, 9, 13, 10.5, 17, 13],
+            "text-size": ["interpolate", ["linear"], ["zoom"], 10, 6.5, 13, 9, 17, 12],
             "text-anchor": "top",
             "text-offset": [0, 0.5],
             "text-max-width": 7,
@@ -1854,7 +1854,7 @@
             // from a mid-borough zoom; collision keeps it legible.
             "text-field": ["get", "name"],
             "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
-            "text-size": ["interpolate", ["linear"], ["zoom"], 11, 9.5, 16, 12, 18, 14],
+            "text-size": ["interpolate", ["linear"], ["zoom"], 11, 7, 16, 11, 18, 13],
             "text-anchor": "bottom", "text-offset": [0, -2.4],
             "text-letter-spacing": 0.02, "text-padding": 6,
             "text-max-width": 8, "text-optional": true,
