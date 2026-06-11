@@ -2,6 +2,9 @@
 
 ## 2026-06-11
 
+### Strategic Points (3c): delete the dead dollar-flag code — unification complete
+- Removed the now-unused dollar-flag WebGL code from `strategic-points.feature.js` (the flag stopped rendering back in 2/3): the `FLAG_*` constants, the `flagCustomLayer` var, the WebGL helpers (`compileShader`/`linkProgram`), the `FLAG_VS`/`FLAG_FS` shaders, `drawDollarFlagInto`, `buildFlagAtlas`, `createFlagCustomLayer`, `syncFlagLayer` + its two callers, and the flag id in the z-order keeper — **371 lines**. `flagZoomScale` is kept (the unified gold pulse uses it). Verified: `node --check` passes, no dangling references remain, and the live pulse/buildings/popup code is intact. This completes the **Strategic Points** unification (per-category buildings → flag retired → one gold pulse → one file → dead code gone).
+
 ### Strategic Points (3b): single-file merge — four overlays become one system
 - The four overlay files (`long-trip-hotspots-pins`, `major-buildings`, `nightlife-districts`, `city-events`) are now combined into one **`strategic-points.feature.js`** and removed individually; `index.html` loads just that one file. Each overlay is preserved **verbatim as its own IIFE** (distinct `lth-`/`mbf-`/`nld-`/`cbe-` layer/source/CSS id prefixes and separate globals → no collisions), so behavior is **identical** — a structural unification, not a rewrite. Together with the unified gold pulse (3a) and the retired "$" flag (2/3), the four overlays are now one "Strategic Points" system. The driver-placed 45+ flags (`long-trips-block`) and the demand heatmap / recorded pickups stay separate, as intended.
 - The now-dead dollar-flag WebGL code is carried over **unchanged** in this step and stripped in a small isolated follow-up, so the structural merge itself can't break the parse.
