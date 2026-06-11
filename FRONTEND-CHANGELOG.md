@@ -1,5 +1,14 @@
 # Frontend Changelog
 
+## 2026-06-11
+
+### Strategic Points (1/3): a unique building per category for the long-trip hotspots
+- The long-trip hotspot ("dollar-flag") layer drew **one identical tower for every building**. Now each member **category** gets its own recognizable building (`long-trip-hotspots-pins.feature.js`):
+  - `hotel_luxury` & `hospital` reuse the **Major-Buildings** art (gold tower + star + awning / white-blue block + red cross), so the hotel/hospital look is shared across systems.
+  - `corporate` (financial) = a new **sleek blue-glass tower**.
+  - `airport, transit_hub, private_school, private_club, luxury_condo, luxury_shopping, performance, stadium, convention, tourist` each get a **bespoke sprite**; any unmapped category falls back to the original generic tower.
+- Implemented as 13 canvas sprites + a data-driven `icon-image` `match` on `["get","category"]`. **No data, flag, or pulse changes** here — flag removal and the deep-merge/rename into one "Strategic Points" system follow in 2/3 and 3/3.
+
 ## 2026-06-10
 
 ### Admin "Export Stats" → pick a specific driver and/or date range

@@ -54,7 +54,27 @@
   // Source/layer IDs
   const BLDG_SOURCE_ID = "lth-buildings";
   const BLDG_LAYER_ID = "lth-buildings-icon";  // symbol layer (building sprite)
-  const BLDG_IMAGE_ID = "lth-building-sprite"; // sprite registered via map.addImage
+  const BLDG_IMAGE_ID = "lth-building-sprite"; // generic fallback sprite (map.addImage)
+  // Per-category building sprites — every hotspot member category gets its own
+  // recognizable building so a cluster reads as a real, varied skyline instead
+  // of identical towers. hotel_luxury & hospital reuse the Major-Buildings art;
+  // corporate is a sleek blue-glass financial tower; the rest are bespoke. Any
+  // category not listed here falls back to BLDG_IMAGE_ID (the generic tower).
+  const BLDG_SPRITE_BY_CATEGORY = {
+    hotel_luxury:    "lth-bldg-hotel",
+    hospital:        "lth-bldg-hospital",
+    corporate:       "lth-bldg-corporate",
+    airport:         "lth-bldg-airport",
+    transit_hub:     "lth-bldg-transit",
+    private_school:  "lth-bldg-school",
+    private_club:    "lth-bldg-club",
+    luxury_condo:    "lth-bldg-condo",
+    luxury_shopping: "lth-bldg-shopping",
+    performance:     "lth-bldg-performance",
+    stadium:         "lth-bldg-stadium",
+    convention:      "lth-bldg-convention",
+    tourist:         "lth-bldg-tourist",
+  };
   const FLAG_CUSTOM_LAYER_ID = "lth-flags-custom-gl";
 
   // Prime-time pulse — a gold "best time to be near it" beacon at each
@@ -806,15 +826,228 @@
     return { width: SIZE, height: SIZE, data: img.data };
   }
 
-  function ensureBuildingSpriteRegistered() {
-    if (!mapRef || mapRef.hasImage?.(BLDG_IMAGE_ID)) return;
-    const sprite = buildBuildingSprite();
-    if (!sprite) return;
-    try {
-      mapRef.addImage(BLDG_IMAGE_ID, sprite, { pixelRatio: 2 });
-    } catch (e) {
-      console.warn("[lth] building sprite registration failed:", e);
+  // ---------------------------------------------------------------
+  // Per-category building sprites (80×80 @ 2× DPR, base near the bottom edge
+  // so "icon-anchor":"bottom" plants them at the lat/lng). The generic tower
+  // above (buildBuildingSprite) is the fallback; these add a distinct, bolder
+  // building per category. Reuses the Major-Buildings drawing vocabulary.
+  // ---------------------------------------------------------------
+  const BLDG_SIZE = 80;
+  function spriteFromDraw(drawFn) {
+    const canvas = document.createElement("canvas");
+    canvas.width = BLDG_SIZE;
+    canvas.height = BLDG_SIZE;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    ctx.clearRect(0, 0, BLDG_SIZE, BLDG_SIZE);
+    ctx.lineJoin = "round";
+    try { drawFn(ctx); } catch (_) { return null; }
+    const img = ctx.getImageData(0, 0, BLDG_SIZE, BLDG_SIZE);
+    return { width: BLDG_SIZE, height: BLDG_SIZE, data: img.data };
+  }
+  function bldgRoundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+  // Shared wide block: cap + body + window grid + ground bar. The big emblem
+  // is drawn on top by each caller. `P` = { body, border, window, cap }.
+  function bldgWideBlock(ctx, P) {
+    ctx.fillStyle = P.cap;
+    bldgRoundRect(ctx, 19, 12, 42, 8, 3); ctx.fill();
+    ctx.fillStyle = P.body; ctx.strokeStyle = P.border; ctx.lineWidth = 3;
+    bldgRoundRect(ctx, 16, 18, 48, 56, 4); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = P.window;
+    for (let ry = 25; ry <= 64; ry += 9) {
+      for (let cx = 23; cx <= 53; cx += 9) ctx.fillRect(cx, ry, 5, 5);
     }
+    ctx.fillStyle = P.border; ctx.fillRect(13, 74, 54, 4);
+  }
+  function bldgStar(ctx, cx, cy, spikes, outer, inner) {
+    let rot = -Math.PI / 2;
+    const step = Math.PI / spikes;
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(rot) * outer, cy + Math.sin(rot) * outer);
+    for (let i = 0; i < spikes; i++) {
+      rot += step; ctx.lineTo(cx + Math.cos(rot) * inner, cy + Math.sin(rot) * inner);
+      rot += step; ctx.lineTo(cx + Math.cos(rot) * outer, cy + Math.sin(rot) * outer);
+    }
+    ctx.closePath();
+  }
+
+  // hotel_luxury — gold block + white star + awning (matches Major Buildings).
+  function drawHotelBldg(ctx) {
+    bldgWideBlock(ctx, { body: "#f7c64f", border: "#92400e", window: "#cf962f", cap: "#92400e" });
+    ctx.fillStyle = "#ffffff"; ctx.strokeStyle = "#92400e"; ctx.lineWidth = 1.6;
+    bldgStar(ctx, 40, 45, 5, 14, 6); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "#92400e";
+    ctx.beginPath(); ctx.moveTo(28, 70); ctx.lineTo(52, 70); ctx.lineTo(48, 78); ctx.lineTo(32, 78); ctx.closePath(); ctx.fill();
+  }
+  // hospital — white/blue block + red cross (matches Major Buildings).
+  function drawHospitalBldg(ctx) {
+    bldgWideBlock(ctx, { body: "#eaf2fd", border: "#1d4ed8", window: "#9cc0f5", cap: "#1d4ed8" });
+    const cx = 40, cy = 46, R = 14;
+    ctx.fillStyle = "#ffffff"; ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = "#dc2626"; ctx.stroke();
+    ctx.fillStyle = "#dc2626"; const a = 3.6, l = 18;
+    ctx.fillRect(cx - a, cy - l / 2, a * 2, l); ctx.fillRect(cx - l / 2, cy - a, l, a * 2);
+  }
+  // corporate — sleek blue-glass financial tower.
+  function drawCorporateBldg(ctx) {
+    const body = "#1e3a8a", border = "#1e40af", win = "#93c5fd";
+    ctx.fillStyle = border; ctx.fillRect(25, 10, 30, 4);
+    ctx.fillStyle = "#cbd5e1"; ctx.fillRect(39, 3, 2, 8);
+    ctx.fillStyle = body; ctx.strokeStyle = border; ctx.lineWidth = 3;
+    bldgRoundRect(ctx, 26, 14, 28, 60, 2); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = win;
+    for (let ry = 19; ry <= 66; ry += 7) for (let cx = 30; cx <= 47; cx += 7) ctx.fillRect(cx, ry, 5, 4.5);
+    ctx.save(); ctx.globalAlpha = 0.5; ctx.fillStyle = "#bfdbfe"; ctx.fillRect(30, 16, 4, 56); ctx.restore();
+    ctx.fillStyle = border; ctx.fillRect(22, 74, 36, 4);
+  }
+  // airport — terminal + control tower + gliding plane.
+  function drawAirportBldg(ctx) {
+    const body = "#e5edf6", border = "#0369a1", win = "#7dd3fc";
+    ctx.fillStyle = body; ctx.strokeStyle = border; ctx.lineWidth = 3;
+    bldgRoundRect(ctx, 12, 46, 56, 28, 4); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = win; for (let cx = 18; cx <= 58; cx += 8) ctx.fillRect(cx, 53, 5, 14);
+    ctx.fillStyle = body; ctx.strokeStyle = border;
+    bldgRoundRect(ctx, 49, 22, 12, 26, 2); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = border; ctx.fillRect(48, 19, 14, 5);
+    ctx.fillStyle = "#0369a1";
+    ctx.save(); ctx.translate(28, 30); ctx.rotate(-0.5);
+    ctx.fillRect(-1.6, -11, 3.2, 22); ctx.fillRect(-10, -2, 20, 3.2); ctx.fillRect(-4.5, 8, 9, 2.6);
+    ctx.restore();
+    ctx.fillStyle = border; ctx.fillRect(10, 74, 60, 4);
+  }
+  // transit_hub — station block + white subway roundel.
+  function drawTransitBldg(ctx) {
+    bldgWideBlock(ctx, { body: "#334155", border: "#0f766e", window: "#5eead4", cap: "#0f766e" });
+    const cx = 40, cy = 46, R = 13;
+    ctx.fillStyle = "#ffffff"; ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#0f766e"; ctx.fillRect(cx - R, cy - 3, R * 2, 6);
+    ctx.fillStyle = "#ffffff"; ctx.font = "900 13px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText("M", cx, cy + 0.5);
+  }
+  // private_school — brick block + pennant + white mortarboard.
+  function drawSchoolBldg(ctx) {
+    bldgWideBlock(ctx, { body: "#b45309", border: "#7c2d12", window: "#fde68a", cap: "#7c2d12" });
+    ctx.strokeStyle = "#7c2d12"; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.moveTo(40, 6); ctx.lineTo(40, 18); ctx.stroke();
+    ctx.fillStyle = "#dc2626"; ctx.beginPath(); ctx.moveTo(40, 6); ctx.lineTo(52, 9); ctx.lineTo(40, 12); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath(); ctx.moveTo(40, 38); ctx.lineTo(54, 44); ctx.lineTo(40, 50); ctx.lineTo(26, 44); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#1f2937"; ctx.fillRect(34, 46, 12, 6);
+    ctx.strokeStyle = "#fde68a"; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.moveTo(50, 45); ctx.lineTo(50, 54); ctx.stroke();
+    ctx.fillStyle = "#fde68a"; ctx.beginPath(); ctx.arc(50, 55, 1.8, 0, Math.PI * 2); ctx.fill();
+  }
+  // private_club — deep-green block + gold crest + awning.
+  function drawClubBldg(ctx) {
+    bldgWideBlock(ctx, { body: "#166534", border: "#052e16", window: "#86efac", cap: "#052e16" });
+    ctx.fillStyle = "#fbbf24"; ctx.strokeStyle = "#052e16"; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(40, 36); ctx.lineTo(50, 40); ctx.lineTo(50, 48);
+    ctx.quadraticCurveTo(50, 54, 40, 58); ctx.quadraticCurveTo(30, 54, 30, 48); ctx.lineTo(30, 40); ctx.closePath(); ctx.fill(); ctx.stroke();
+    bldgStar(ctx, 40, 46, 5, 5.5, 2.4); ctx.fillStyle = "#052e16"; ctx.fill();
+    ctx.fillStyle = "#052e16"; ctx.beginPath(); ctx.moveTo(28, 70); ctx.lineTo(52, 70); ctx.lineTo(48, 78); ctx.lineTo(32, 78); ctx.closePath(); ctx.fill();
+  }
+  // luxury_condo — residential tower with balcony bands.
+  function drawCondoBldg(ctx) {
+    const body = "#d6d3d1", border = "#57534e", rail = "#0891b2";
+    ctx.fillStyle = border; ctx.fillRect(27, 12, 26, 4);
+    ctx.fillStyle = body; ctx.strokeStyle = border; ctx.lineWidth = 3;
+    bldgRoundRect(ctx, 26, 16, 28, 58, 3); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = rail; for (let y = 22; y <= 66; y += 8) ctx.fillRect(28, y, 24, 3);
+    ctx.fillStyle = "#a8a29e"; for (let y = 26; y <= 66; y += 8) for (let cx = 31; cx <= 47; cx += 8) ctx.fillRect(cx, y, 5, 3);
+    ctx.fillStyle = border; ctx.fillRect(23, 74, 34, 4);
+  }
+  // luxury_shopping — storefront + striped awning + shopping bag.
+  function drawShoppingBldg(ctx) {
+    bldgWideBlock(ctx, { body: "#fbcfe8", border: "#9d174d", window: "#fce7f3", cap: "#9d174d" });
+    const ax = 16, aw = 48, ay = 40;
+    for (let i = 0; i < 6; i++) { ctx.fillStyle = i % 2 ? "#ffffff" : "#db2777"; ctx.fillRect(ax + i * (aw / 6), ay, aw / 6, 7); }
+    ctx.fillStyle = "#9d174d"; ctx.fillRect(ax, ay + 7, aw, 2);
+    ctx.fillStyle = "#ffffff"; ctx.strokeStyle = "#9d174d"; ctx.lineWidth = 1.6;
+    bldgRoundRect(ctx, 34, 52, 14, 16, 2); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.arc(41, 53, 4, Math.PI, 0); ctx.stroke();
+  }
+  // performance — theater facade + gold marquee.
+  function drawPerformanceBldg(ctx) {
+    bldgWideBlock(ctx, { body: "#7f1d1d", border: "#450a0a", window: "#fca5a5", cap: "#450a0a" });
+    ctx.fillStyle = "#f59e0b"; ctx.strokeStyle = "#fff7ed"; ctx.lineWidth = 1.4;
+    bldgRoundRect(ctx, 22, 40, 36, 14, 3); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "#fff7ed";
+    for (let cx = 27; cx <= 53; cx += 6) { ctx.beginPath(); ctx.arc(cx, 40, 1.4, 0, Math.PI * 2); ctx.fill(); ctx.beginPath(); ctx.arc(cx, 54, 1.4, 0, Math.PI * 2); ctx.fill(); }
+    bldgStar(ctx, 40, 47, 5, 5, 2.2); ctx.fillStyle = "#7f1d1d"; ctx.fill();
+  }
+  // stadium — arena bowl + floodlights.
+  function drawStadiumBldg(ctx) {
+    ctx.strokeStyle = "#9ca3af"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(20, 30); ctx.lineTo(20, 50); ctx.moveTo(60, 30); ctx.lineTo(60, 50); ctx.stroke();
+    ctx.fillStyle = "#fde68a"; bldgRoundRect(ctx, 14, 24, 12, 8, 2); ctx.fill(); bldgRoundRect(ctx, 54, 24, 12, 8, 2); ctx.fill();
+    ctx.fillStyle = "#e5e7eb"; ctx.strokeStyle = "#1f2937"; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.ellipse(40, 52, 28, 18, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "#15803d"; ctx.beginPath(); ctx.ellipse(40, 52, 16, 9, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(40, 44); ctx.lineTo(40, 60); ctx.stroke();
+  }
+  // convention — wide curved hall + banner.
+  function drawConventionBldg(ctx) {
+    const body = "#0f766e", border = "#134e4a", win = "#5eead4";
+    ctx.fillStyle = border; ctx.beginPath(); ctx.moveTo(12, 34); ctx.quadraticCurveTo(40, 18, 68, 34); ctx.lineTo(68, 40); ctx.lineTo(12, 40); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = body; ctx.strokeStyle = border; ctx.lineWidth = 3;
+    bldgRoundRect(ctx, 14, 40, 52, 34, 3); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = win; for (let cx = 20; cx <= 58; cx += 8) ctx.fillRect(cx, 48, 5, 18);
+    ctx.fillStyle = "#f59e0b"; ctx.fillRect(36, 22, 16, 12); ctx.fillStyle = "#134e4a"; ctx.fillRect(36, 22, 16, 3);
+    ctx.fillStyle = border; ctx.fillRect(11, 74, 58, 4);
+  }
+  // tourist — stone monument / obelisk.
+  function drawTouristBldg(ctx) {
+    const stone = "#e7e5e4", border = "#78716c", cap = "#0ea5e9";
+    ctx.fillStyle = stone; ctx.strokeStyle = border; ctx.lineWidth = 3;
+    bldgRoundRect(ctx, 28, 60, 24, 14, 2); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(40, 8); ctx.lineTo(46, 60); ctx.lineTo(34, 60); ctx.closePath();
+    ctx.fillStyle = stone; ctx.fill(); ctx.stroke();
+    ctx.fillStyle = cap; ctx.beginPath(); ctx.moveTo(40, 8); ctx.lineTo(44, 16); ctx.lineTo(36, 16); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = border; ctx.fillRect(22, 74, 36, 4);
+  }
+
+  const BLDG_CATEGORY_DRAW = {
+    "lth-bldg-hotel": drawHotelBldg,
+    "lth-bldg-hospital": drawHospitalBldg,
+    "lth-bldg-corporate": drawCorporateBldg,
+    "lth-bldg-airport": drawAirportBldg,
+    "lth-bldg-transit": drawTransitBldg,
+    "lth-bldg-school": drawSchoolBldg,
+    "lth-bldg-club": drawClubBldg,
+    "lth-bldg-condo": drawCondoBldg,
+    "lth-bldg-shopping": drawShoppingBldg,
+    "lth-bldg-performance": drawPerformanceBldg,
+    "lth-bldg-stadium": drawStadiumBldg,
+    "lth-bldg-convention": drawConventionBldg,
+    "lth-bldg-tourist": drawTouristBldg,
+  };
+
+  function ensureBuildingSpriteRegistered() {
+    if (!mapRef) return;
+    const add = (id, sprite) => {
+      if (!sprite || mapRef.hasImage?.(id)) return;
+      try { mapRef.addImage(id, sprite, { pixelRatio: 2 }); }
+      catch (e) { console.warn("[lth] sprite registration failed:", id, e); }
+    };
+    // Generic fallback tower (unchanged design).
+    add(BLDG_IMAGE_ID, buildBuildingSprite());
+    // One distinct building per category.
+    for (const id of Object.keys(BLDG_CATEGORY_DRAW)) add(id, spriteFromDraw(BLDG_CATEGORY_DRAW[id]));
+  }
+
+  // Data-driven icon-image: each member's category maps to its own sprite, with
+  // the generic tower as the fallback for any unmapped category.
+  function buildingIconImageExpr() {
+    const expr = ["match", ["get", "category"]];
+    for (const cat of Object.keys(BLDG_SPRITE_BY_CATEGORY)) expr.push(cat, BLDG_SPRITE_BY_CATEGORY[cat]);
+    expr.push(BLDG_IMAGE_ID);
+    return expr;
   }
 
   function buildingsGeoJSON() {
@@ -871,7 +1104,7 @@
           // hours, and is absent from the map otherwise.
           filter: ["==", ["get", "prime"], true],
           layout: {
-            "icon-image": BLDG_IMAGE_ID,
+            "icon-image": buildingIconImageExpr(),
             // Slimmer size curve. Each hotspot renders 3+ building
             // sprites, so the previous 0.65–1.55 curve made clusters
             // look bulky and crowded the map. Scaled down ~40% — the
