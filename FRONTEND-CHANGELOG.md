@@ -2,6 +2,11 @@
 
 ## 2026-06-11
 
+### Strategic Points (2/3): retire the gold "$" dollar flag
+- The long-trip hotspot layer **no longer renders the gold "$" pennant flag** (`long-trip-hotspots-pins.feature.js`). The per-category **buildings** and the **prime-time gold pulse** stay exactly as they were. The flag's WebGL custom layer is simply **no longer added** — its now-dead code (shaders, atlas, draw) is deleted in the 3/3 merge.
+- `useLayer` (the layer's "active" gate, previously tied to the flag layer being present) now keys off the **buildings layer**.
+- The **cluster-summary popup** (the list of a hotspot's buildings) is **preserved**: it now opens by tapping near a **prime hotspot's center** (where the pulse sits) instead of the "$" flag, and its header icon changed from "$" to ★. Individual building popups are unchanged.
+
 ### Strategic Points (1/3): a unique building per category for the long-trip hotspots
 - The long-trip hotspot ("dollar-flag") layer drew **one identical tower for every building**. Now each member **category** gets its own recognizable building (`long-trip-hotspots-pins.feature.js`):
   - `hotel_luxury` & `hospital` reuse the **Major-Buildings** art (gold tower + star + awning / white-blue block + red cross), so the hotel/hospital look is shared across systems.

@@ -9,8 +9,8 @@
 // zero-drift on iOS Safari, the same way the 45+ flags are.
 //
 // Click behavior:
-//   - Tap a $ flag      → popup listing the buildings it represents (address)
-//   - Tap a building dot → popup with that building's name, address, best hours
+//   - Tap a hotspot (its pulse) → popup listing the buildings it represents
+//   - Tap a building             → popup with its name, address, best hours
 //
 // Backend: GET /long_trip_hotspots (built via POST /admin/long_trip_hotspots/rebuild)
 (function () {
@@ -1308,18 +1308,17 @@
       ensurePulseLayers();
       ensureBuildingsLayer();
 
-      if (mapRef.getLayer?.(FLAG_CUSTOM_LAYER_ID)) {
-        try { mapRef.removeLayer(FLAG_CUSTOM_LAYER_ID); } catch (_) {}
-      }
-      flagCustomLayer = createFlagCustomLayer();
-      mapRef.addLayer(flagCustomLayer);
-      if (mapRef.getLayer?.(FLAG_CUSTOM_LAYER_ID)) {
+      // The gold "$" dollar flag has been retired — only the per-category
+      // buildings + the prime-time pulse render now. The old WebGL flag layer
+      // is no longer added (its now-dead code is removed in the Strategic
+      // Points merge). "Ready" is gated on the buildings layer, which used to
+      // ride on the flag layer being present.
+      if (mapRef.getLayer?.(BLDG_LAYER_ID)) {
         useLayer = true;
         installZOrderKeeper();
         syncBuildingsLayer();
-        syncFlagLayer();
         syncPulseLayer();
-        console.info(`[lth] WebGL dollar-flag layer ready; ${hotspots.length} hotspot(s)`);
+        console.info(`[lth] hotspot buildings + pulse ready; ${hotspots.length} hotspot(s)`);
       }
     } catch (e) {
       console.warn("[lth] ensureFlagLayer failed:", e);
@@ -1357,24 +1356,20 @@
   // for the building dots (those are a built-in circle layer).
   // ---------------------------------------------------------------
   function hotspotAtScreenPoint(point) {
-    if (!useLayer || !mapRef || !flagCustomLayer?._program) return null;
-    if (typeof mapRef.project !== "function") return null;
-    const scale = flagZoomScale(mapRef.getZoom?.());
-    const halfW = (FLAG_W_CSS / 2) * scale;
-    const fullH = FLAG_H_CSS * scale;
+    if (!useLayer || !mapRef || typeof mapRef.project !== "function") return null;
+    // The cluster summary now opens by tapping near a prime hotspot's center
+    // (where the pulse sits) — this replaces the old "$" flag tap target. Only
+    // prime hotspots are tappable, matching when the buildings + pulse show.
+    const TAP_R = 22; // px tolerance around the hotspot center
+    const now = nycHourAndDay();
     let best = null;
     let bestDist = Infinity;
     for (const h of hotspots) {
+      if (!primeForHotspot(h, now)) continue;
       let screen;
       try { screen = mapRef.project([h.lng, h.lat]); } catch (_) { continue; }
-      const dx = point.x - screen.x;
-      const dy = point.y - screen.y;
-      // Anchor is at pole tip (bottom of flag). Flag extends UP from
-      // anchor by fullH px and ±halfW px sideways.
-      if (Math.abs(dx) <= halfW && dy <= 0 && dy >= -fullH) {
-        const d = Math.hypot(dx, dy);
-        if (d < bestDist) { bestDist = d; best = h; }
-      }
+      const d = Math.hypot(point.x - screen.x, point.y - screen.y);
+      if (d <= TAP_R && d < bestDist) { bestDist = d; best = h; }
     }
     return best;
   }
@@ -1494,7 +1489,7 @@
     const stateChip = `<span class="lth-popup-state ${dimClass}">${stateDot}${dimLabel}${stateSuffix}</span>`;
     return `
       <div class="lth-popup-header">
-        <span class="lth-popup-dollar">$</span>
+        <span class="lth-popup-dollar">★</span>
         <div>
           <div class="lth-popup-title">Long-trip hotspot</div>
           <div class="lth-popup-sub">
