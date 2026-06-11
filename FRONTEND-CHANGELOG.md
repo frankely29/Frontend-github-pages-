@@ -2,6 +2,11 @@
 
 ## 2026-06-11
 
+### Strategic Points: show building NAMES from a farther-out zoom (labels only)
+- Building **names** are now readable without zooming in much — and the building **icons are unchanged** (their zoom thresholds were left exactly as they were).
+- **Strategic points** (long-trip buildings): added a separate **text-only name-label layer** (`lth-buildings-label`) shown from zoom **10** (city-overview), collision-deconflicted. The building sprite layer is untouched (still from zoom 12), so this only adds names — it doesn't change when the buildings appear.
+- **Hotels/hospitals**: their label now shows the building **NAME** (e.g. "Lenox Hill Hospital") instead of the "HOSPITAL"/"HOTEL" type tag, and from zoom **11** (was 13). The icon still conveys hospital vs hotel; names stay color-coded (red/amber) with a white halo. Icons untouched.
+
 ### Strategic Points (3c): delete the dead dollar-flag code — unification complete
 - Removed the now-unused dollar-flag WebGL code from `strategic-points.feature.js` (the flag stopped rendering back in 2/3): the `FLAG_*` constants, the `flagCustomLayer` var, the WebGL helpers (`compileShader`/`linkProgram`), the `FLAG_VS`/`FLAG_FS` shaders, `drawDollarFlagInto`, `buildFlagAtlas`, `createFlagCustomLayer`, `syncFlagLayer` + its two callers, and the flag id in the z-order keeper — **371 lines**. `flagZoomScale` is kept (the unified gold pulse uses it). Verified: `node --check` passes, no dangling references remain, and the live pulse/buildings/popup code is intact. This completes the **Strategic Points** unification (per-category buildings → flag retired → one gold pulse → one file → dead code gone).
 

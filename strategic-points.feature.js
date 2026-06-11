@@ -51,6 +51,8 @@
   // Source/layer IDs
   const BLDG_SOURCE_ID = "lth-buildings";
   const BLDG_LAYER_ID = "lth-buildings-icon";  // symbol layer (building sprite)
+  const BLDG_LABEL_LAYER_ID = "lth-buildings-label"; // text-only NAME labels (separate from icons so names show farther out)
+  const BLDG_LABEL_MIN_ZOOM = 10;  // building names readable from a city-overview zoom
   const BLDG_IMAGE_ID = "lth-building-sprite"; // generic fallback sprite (map.addImage)
   // Per-category building sprites — every hotspot member category gets its own
   // recognizable building so a cluster reads as a real, varied skyline instead
@@ -366,7 +368,7 @@
     // under the pole rather than over the flag.
     const ids = [
       PULSE_GLOW_LAYER_ID, PULSE_RING1_LAYER_ID,
-      BLDG_LAYER_ID,
+      BLDG_LAYER_ID, BLDG_LABEL_LAYER_ID,
     ];
     const scheduleMove = () => {
       if (zOrderInMove || zOrderMovePending) return;
@@ -791,6 +793,39 @@
         });
       } catch (e) {
         console.warn("[lth] buildings layer add failed:", e);
+      }
+    }
+
+    // Separate text-only NAME label layer. Kept apart from the icon layer so
+    // the names can appear from a much farther-out zoom than the building
+    // sprites — the building icons are unchanged. Collision-deconflicted so it
+    // stays legible even at city scale.
+    if (!mapRef.getLayer?.(BLDG_LABEL_LAYER_ID)) {
+      try {
+        mapRef.addLayer({
+          id: BLDG_LABEL_LAYER_ID,
+          type: "symbol",
+          source: BLDG_SOURCE_ID,
+          minzoom: BLDG_LABEL_MIN_ZOOM,
+          filter: ["==", ["get", "prime"], true],
+          layout: {
+            "text-field": ["get", "name"],
+            "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
+            "text-size": ["interpolate", ["linear"], ["zoom"], 10, 9, 13, 10.5, 17, 13],
+            "text-anchor": "top",
+            "text-offset": [0, 0.5],
+            "text-max-width": 7,
+            "text-allow-overlap": false,
+          },
+          paint: {
+            "text-color": "#111827",
+            "text-halo-color": "#ffffff",
+            "text-halo-width": 1.4,
+            "text-opacity": ["coalesce", ["get", "dim"], 0.95],
+          },
+        });
+      } catch (e) {
+        console.warn("[lth] buildings label layer add failed:", e);
       }
     }
   }
@@ -1502,7 +1537,7 @@
   const SPRITE_HOSPITAL = "mbf-sprite-hospital";
   const SPRITE_HOTEL = "mbf-sprite-hotel";
   const MIN_ZOOM = 11;        // show landmarks from mid-borough scale up
-  const LABEL_MIN_ZOOM = 13;  // show the HOSPITAL/HOTEL type tag from a neighborhood zoom
+  const LABEL_MIN_ZOOM = 11;  // show the building NAME from a mid-borough zoom
   const REFRESH_MS = 60 * 1000;
   const PULSE_PERIOD_MS = 2200;
   const PULSE_R_MIN = 7;
@@ -1815,11 +1850,14 @@
           id: LABEL_LAYER_ID, type: "symbol", source: SRC_ID, minzoom: LABEL_MIN_ZOOM,
           filter: ["==", ["get", "prime"], true],
           layout: {
-            "text-field": ["upcase", ["get", "type"]],
+            // The building NAME (the icon already shows hospital vs hotel),
+            // from a mid-borough zoom; collision keeps it legible.
+            "text-field": ["get", "name"],
             "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
-            "text-size": ["interpolate", ["linear"], ["zoom"], 13, 9.5, 16, 12, 18, 14],
+            "text-size": ["interpolate", ["linear"], ["zoom"], 11, 9.5, 16, 12, 18, 14],
             "text-anchor": "bottom", "text-offset": [0, -2.4],
-            "text-letter-spacing": 0.08, "text-padding": 6,
+            "text-letter-spacing": 0.02, "text-padding": 6,
+            "text-max-width": 8, "text-optional": true,
             "text-allow-overlap": false,
           },
           paint: {
