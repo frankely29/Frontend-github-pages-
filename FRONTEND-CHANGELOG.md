@@ -2,6 +2,10 @@
 
 ## 2026-06-11
 
+### Strategic Points (3b): single-file merge — four overlays become one system
+- The four overlay files (`long-trip-hotspots-pins`, `major-buildings`, `nightlife-districts`, `city-events`) are now combined into one **`strategic-points.feature.js`** and removed individually; `index.html` loads just that one file. Each overlay is preserved **verbatim as its own IIFE** (distinct `lth-`/`mbf-`/`nld-`/`cbe-` layer/source/CSS id prefixes and separate globals → no collisions), so behavior is **identical** — a structural unification, not a rewrite. Together with the unified gold pulse (3a) and the retired "$" flag (2/3), the four overlays are now one "Strategic Points" system. The driver-placed 45+ flags (`long-trips-block`) and the demand heatmap / recorded pickups stay separate, as intended.
+- The now-dead dollar-flag WebGL code is carried over **unchanged** in this step and stripped in a small isolated follow-up, so the structural merge itself can't break the parse.
+
 ### Strategic Points (3a): one unified gold pulse for every point type
 - Every Strategic Point now pulses the **same gold** (`#fbbf24`): the **nightlife** pulse changed from magenta and the **major-buildings** pulse changed from per-type colors to gold (the long-trip hotspots and city events were already gold). **Pins keep their own identity** — the magenta cocktail pin, the blue hospital sprite, etc. are unchanged; only the pulse ring/glow is unified. The structural single-file merge into `strategic-points.feature.js` follows in 3b.
 
