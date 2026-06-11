@@ -2,6 +2,9 @@
 
 ## 2026-06-11
 
+### Strategic Points (3a): one unified gold pulse for every point type
+- Every Strategic Point now pulses the **same gold** (`#fbbf24`): the **nightlife** pulse changed from magenta and the **major-buildings** pulse changed from per-type colors to gold (the long-trip hotspots and city events were already gold). **Pins keep their own identity** — the magenta cocktail pin, the blue hospital sprite, etc. are unchanged; only the pulse ring/glow is unified. The structural single-file merge into `strategic-points.feature.js` follows in 3b.
+
 ### Strategic Points (2/3): retire the gold "$" dollar flag
 - The long-trip hotspot layer **no longer renders the gold "$" pennant flag** (`long-trip-hotspots-pins.feature.js`). The per-category **buildings** and the **prime-time gold pulse** stay exactly as they were. The flag's WebGL custom layer is simply **no longer added** — its now-dead code (shaders, atlas, draw) is deleted in the 3/3 merge.
 - `useLayer` (the layer's "active" gate, previously tied to the flag layer being present) now keys off the **buildings layer**.

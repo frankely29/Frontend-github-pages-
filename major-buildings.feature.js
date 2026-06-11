@@ -343,11 +343,9 @@
         mapRef.addSource(PULSE_SRC_ID, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
       }
 
-      const colorByType = [
-        "match", ["get", "type"],
-        "hospital", TYPE_INFO.hospital.color,
-        TYPE_INFO.hotel.color,
-      ];
+      // Unified gold Strategic Points pulse (was keyed to building type — the
+      // building SPRITES keep their per-type colors; only the pulse is gold).
+      const colorByType = "#fbbf24";
 
       // Pulse: a steady glow + two expanding stroke rings, below the icons.
       if (!mapRef.getLayer(PULSE_GLOW_ID)) {

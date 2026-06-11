@@ -28,10 +28,11 @@
   const MIN_ZOOM = 9;   // pulse + pins visible from the city-overview zoom
   const LABEL_MIN_ZOOM = 13;
 
-  // Distinct magenta identity (gold #fbbf24 is the dollar-flag pulse).
+  // Magenta cocktail-pin identity stays; the PULSE is now the unified gold of
+  // the Strategic Points system (one gold pulse for every point type).
   const PIN_COLOR = "#ec4899";
   const PIN_DARK = "#9d174d";
-  const PULSE_COLOR = "#ec4899";
+  const PULSE_COLOR = "#fbbf24";
   const PULSE_PERIOD_MS = 2200;  // calm single-pulse cycle
   const PULSE_R_MIN = 8;
   const PULSE_R_MAX = 20;        // one compact inner ring
