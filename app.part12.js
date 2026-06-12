@@ -445,7 +445,7 @@
         layout: {
           "symbol-placement": "point",
           "text-field": ["coalesce", ["get", "trendLabel"], ""],
-          "text-font": ["Open Sans Bold", "Arial Unicode MS Regular"],
+          "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
           "text-size": zoneTrendTextSizeExpr,
           "text-anchor": "top",
           "text-offset": [0, 0.9],
