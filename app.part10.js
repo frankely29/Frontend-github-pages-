@@ -415,10 +415,16 @@ function pickupMicroHotspotsFingerprint(fc) {
 
 function setPickupPointLayerVisibility(visible) {
   if (!map) return;
-  const value = visible ? "visible" : "none";
+  // Product decision: the raw "green dot" recorded-trip markers are no longer
+  // shown on the map -- only FORMED hotspots are surfaced. Trips are still
+  // recorded (POST /events/pickup) and still feed hotspot formation on the
+  // backend; we simply never render the raw points. The pickup-points source
+  // and its data flow are left intact (debug + hotspot suppression logic), so
+  // the three render layers are just forced hidden regardless of the request.
+  void visible;
   for (const layerId of ["pickup-heat", "pickup-circles-glow", "pickup-circles"]) {
     if (map.getLayer(layerId)) {
-      try { map.setLayoutProperty(layerId, "visibility", value); } catch {}
+      try { map.setLayoutProperty(layerId, "visibility", "none"); } catch {}
     }
   }
 }
