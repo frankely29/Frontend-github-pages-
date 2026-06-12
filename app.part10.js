@@ -110,6 +110,44 @@ let lastGoodZoneHotspotsFc = emptyGeojson();
 let lastGoodMicroHotspotsFc = emptyGeojson();
 let lastGoodZoneStats = [];
 let lastGoodHotspotOverlaySavedAtMs = 0;
+// Per-feature anti-flicker stickiness. The whole-overlay last-good fallback above
+// only fires when a response has NO hotspots; it can't help when a valid response
+// merely drops one of two hotspots in a zone (a 2nd cluster hovering at the
+// backend qualification threshold, recomputed every 12s poll). This holds an
+// individual zone-hotspot / micro-hotspot for a short grace after it last
+// appeared, keyed by zone|hotspot_id|hotspot_index, so a 2nd hotspot stays put
+// instead of blinking on and off. It drops only after it's been absent the full
+// grace, so genuine removals still clear.
+const PICKUP_HOTSPOT_STICKY_MS = 90 * 1000;
+const pickupZoneHotspotStickyStore = new Map();   // key -> { feature, ts }
+const pickupMicroHotspotStickyStore = new Map();
+function pickupHotspotStickyKey(feat) {
+  const p = feat?.properties || {};
+  const key = [
+    String(p.zone_id ?? p.zoneId ?? p.location_id ?? p.LocationID ?? ""),
+    String(p.hotspot_id ?? p.hotspotId ?? p.pickup_hotspot_id ?? ""),
+    String(p.hotspot_index ?? p.hotspotIndex ?? p.pickup_hotspot_index ?? ""),
+  ].join("|");
+  return key === "||" ? "" : key;
+}
+function applyPickupHotspotStickiness(fc, store) {
+  const now = Date.now();
+  const feats = (fc && Array.isArray(fc.features)) ? fc.features : [];
+  const present = new Set();
+  for (const feat of feats) {
+    const key = pickupHotspotStickyKey(feat);
+    if (!key) continue;
+    present.add(key);
+    store.set(key, { feature: feat, ts: now });
+  }
+  const out = feats.slice();
+  for (const [key, entry] of store) {
+    if (present.has(key)) continue;
+    if (now - entry.ts > PICKUP_HOTSPOT_STICKY_MS) { store.delete(key); continue; }
+    out.push(entry.feature);
+  }
+  return { type: "FeatureCollection", features: out };
+}
 let pickupHotspotZoneIds = new Set();
 let pickupPointsSourceFingerprint = "";
 let pickupHotspotsSourceFingerprint = "";
@@ -1904,6 +1942,10 @@ async function refreshPickupOverlay({ force = false } = {}) {
       }
       usedLastGoodHotspotOverlayFallback = hasVisibleHotspotOverlay(zoneHotspots, microHotspots);
     }
+    // Anti-flicker: retain each hotspot for a short grace after it last appeared,
+    // so an intermittently-emitted 2nd hotspot doesn't blink between 12s polls.
+    zoneHotspots = applyPickupHotspotStickiness(zoneHotspots, pickupZoneHotspotStickyStore);
+    microHotspots = applyPickupHotspotStickiness(microHotspots, pickupMicroHotspotStickyStore);
     const zoneHotspotCount = zoneHotspots?.features?.length ?? 0;
     const normalizedMicroHotspotCount = microHotspots?.features?.length ?? 0;
     const fc = buildPickupFeatureCollection(items);
