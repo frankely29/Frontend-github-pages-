@@ -513,10 +513,8 @@
     const meridiem = hour >= 12 ? "PM" : "AM";
     hour = hour % 12;
     if (hour === 0) hour = 12;
-    // Compact, context-obvious (the current frame's full time is shown in the
-    // scrubber): "7:20" rather than "7:20 AM".
-    void meridiem;
-    return `${hour}:${minute}`;
+    // Include the meridiem so the horizon is unambiguous at a glance: "7:20 PM".
+    return `${hour}:${minute} ${meridiem}`;
   }
 
   // Track the driver's location (from the geolocation watch in app.js, via the
@@ -536,17 +534,18 @@
   // arrow glyphs (they render blank) -- a canvas uses the full system fonts, the
   // codebase's reliable cross-device approach (see strategic-points sprites).
   // Built once per (direction, time) id.
-  function ensureTrendSprite(map, id, text, color, fontPx) {
+  function ensureTrendSprite(map, id, segments, fontPx) {
     try {
       if (typeof map.hasImage === "function" && map.hasImage(id)) return;
       const dpr = 2;
       const size = Math.max(8, Math.round(Number(fontPx) || 14));
       const font = `800 ${size}px -apple-system, system-ui, "Segoe UI", Roboto, Arial, sans-serif`;
+      const fullText = segments.map((s) => s.text).join("");
       const gauge = document.createElement("canvas").getContext("2d");
       gauge.font = font;
       const padX = 5;
       const padY = 3;
-      const w = Math.ceil(gauge.measureText(text).width) + padX * 2;
+      const w = Math.ceil(gauge.measureText(fullText).width) + padX * 2;
       const h = size + padY * 2;
       const canvas = document.createElement("canvas");
       canvas.width = Math.max(1, Math.round(w * dpr));
@@ -556,13 +555,19 @@
       ctx.font = font;
       ctx.textAlign = "left";
       ctx.textBaseline = "middle";
-      // White outline so it reads on any zone color.
+      // White outline so it reads on any zone color. Stroke the whole label once
+      // for a clean halo, then fill each colored segment left-to-right (the time
+      // keeps its good/bad color, the arrow takes the next-bin color).
       ctx.lineJoin = "round";
       ctx.lineWidth = 3.5;
       ctx.strokeStyle = "rgba(255,255,255,0.96)";
-      ctx.strokeText(text, padX, h / 2);
-      ctx.fillStyle = color;
-      ctx.fillText(text, padX, h / 2);
+      ctx.strokeText(fullText, padX, h / 2);
+      let x = padX;
+      for (const seg of segments) {
+        ctx.fillStyle = seg.color;
+        ctx.fillText(seg.text, x, h / 2);
+        x += ctx.measureText(seg.text).width;
+      }
       const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
       map.addImage(id, { width: canvas.width, height: canvas.height, data: data.data }, { pixelRatio: dpr });
     } catch (e) {
@@ -571,24 +576,30 @@
   }
 
   // Build the per-zone demand-trend badges for the selected mode: every rated
-  // zone gets the next-bin time + a direction glyph -- "7:40 ↑" rising /
-  // "7:40 ↓" cooling / "7:40 =" holding -- colored with the bucket color the
-  // zone will be NEXT bin, so the hue previews the upcoming state. The
-  // proximity declutter (symbol-sort-key) thins them where they crowd.
+  // zone gets the next-bin time + a direction glyph -- "7:40 PM ↑" rising /
+  // "7:40 PM ↓" cooling / "7:40 PM =" holding. The TIME is colored green/red/
+  // slate for good/bad/steady; only the ARROW takes the bucket color the zone
+  // will be NEXT bin. Direction comes from the color-bucket change, so an arrow
+  // always means a real color change and "=" is always the zone's own color.
+  // The proximity declutter (symbol-sort-key) thins them where they crowd.
   function buildZoneTrendLabelsFeatureCollection(frame) {
     const modeModule = window.TlcModeModule || {};
     const getBase = modeModule.getModeAwareBaseRating;
     const getNext = modeModule.getModeAwareNextBinRating;
     const getColor = typeof modeModule.getColorForRating === "function" ? modeModule.getColorForRating : null;
+    const getBucketOf = typeof modeModule.getBucketForRating === "function" ? modeModule.getBucketForRating : null;
+    const getEffBucket = typeof modeModule.effectiveBucket === "function" ? modeModule.effectiveBucket : null;
+    const getEffColor = typeof modeModule.effectiveColor === "function" ? modeModule.effectiveColor : null;
     const map = core.getMap?.();
     if (!map || typeof getBase !== "function" || typeof getNext !== "function") {
       return { type: "FeatureCollection", features: [] };
     }
+    // Rating buckets in ascending order (worst red -> best green); used to tell
+    // whether the next bin moves the zone to a better or worse color so the arrow
+    // direction never disagrees with the hue.
+    const BUCKET_RANK = { red: 0, orange: 1, yellow: 2, sky: 3, blue: 4, indigo: 5, purple: 6, green: 7 };
     const timeLabel = formatBinClockLabel(frame?.next_time);
-    const timeKey = String(timeLabel).replace(/[^0-9]/g, "") || "x";
-    const upText = timeLabel ? `${timeLabel} ↑` : "↑";
-    const downText = timeLabel ? `${timeLabel} ↓` : "↓";
-    const sameText = timeLabel ? `${timeLabel} =` : "=";
+    const timeKey = String(timeLabel).replace(/[^0-9apm]/gi, "") || "x";
     // "Near" reference for collision priority: the driver's location, else the
     // current map view center.
     let anchorLng = null;
@@ -611,13 +622,17 @@
       const cur = getBase(props, geom);
       if (!Number.isFinite(cur)) continue;
       const nxt = getNext(props, geom);
-      // Three-way next-bin trend for every rated zone: up if the next bin is
-      // higher, down if lower, = if it holds (or has no forecast). Compare the
-      // rounded 0-100 ratings so sub-point noise reads as "same".
+      // Direction follows the COLOR-bucket change so it can never disagree with
+      // the hue the user sees: the current bucket is the one the zone is painted
+      // with (effective/adjusted), the next bucket is the next-bin rating's. Same
+      // bucket (or no forecast) -> "=", a better bucket -> up, a worse one -> down.
+      const curBucket = getEffBucket ? getEffBucket(props, geom) : "";
+      const nxtBucket = (Number.isFinite(nxt) && getBucketOf) ? getBucketOf(nxt) : curBucket;
+      const curRank = BUCKET_RANK[curBucket];
+      const nxtRank = BUCKET_RANK[nxtBucket];
       let dir = "same";
-      if (Number.isFinite(nxt)) {
-        const delta = Math.round(nxt) - Math.round(cur);
-        dir = delta > 0 ? "up" : (delta < 0 ? "down" : "same");
+      if (Number.isFinite(curRank) && Number.isFinite(nxtRank) && nxtRank !== curRank) {
+        dir = nxtRank > curRank ? "up" : "down";
       }
       // Reuse the cached zone-name position so the trend sits under the name.
       const signature = getZoneLabelSignature(f);
@@ -628,16 +643,21 @@
       // +30%. Keyed so each (size, direction, time) sprite is built once.
       const nameSize = Number(layout.properties && layout.properties.textSize) || 10;
       const badgeFont = Math.max(9, Math.round(nameSize * 1.3));
-      const dirText = dir === "up" ? upText : (dir === "down" ? downText : sameText);
-      // Arrow color = the bucket color the zone will be NEXT bin (the held color
-      // when steady), so the hue previews the upcoming state while the glyph
-      // shows the direction. The white halo keeps it legible over a like-colored
-      // zone. Encode the color into the sprite id so each hue caches separately.
-      const colorRating = Number.isFinite(nxt) ? nxt : cur;
-      const nextColor = getColor ? getColor(colorRating) : (dir === "up" ? "#0a8f2c" : dir === "down" ? "#d12727" : "#5a6573");
-      const colorKey = String(nextColor).replace(/[^0-9a-zA-Z]/g, "");
+      // Two-tone badge: the TIME keeps the good/bad cue (green rising / red
+      // cooling / slate steady), while only the ARROW takes the bucket color the
+      // zone will be next bin -- so "=" is always the zone's own color and any
+      // arrow always marks a real color change. White halo keeps it legible.
+      const glyph = dir === "up" ? "↑" : (dir === "down" ? "↓" : "=");
+      const timeColor = dir === "up" ? "#0a8f2c" : (dir === "down" ? "#d12727" : "#5a6573");
+      const arrowColor = Number.isFinite(nxt)
+        ? (getColor ? getColor(nxt) : timeColor)
+        : (getEffColor ? getEffColor(props, geom) : timeColor);
+      const segments = timeLabel
+        ? [{ text: `${timeLabel} `, color: timeColor }, { text: glyph, color: arrowColor }]
+        : [{ text: glyph, color: arrowColor }];
+      const colorKey = String(arrowColor).replace(/[^0-9a-zA-Z]/g, "");
       const spriteId = `zone-trend-${dir}-${colorKey}-${timeKey}-${badgeFont}`;
-      ensureTrendSprite(map, spriteId, dirText, nextColor, badgeFont);
+      ensureTrendSprite(map, spriteId, segments, badgeFont);
       // Collision priority: nearer zones get a lower sort key, so when badges
       // overlap (dense Manhattan, zoomed out) the ones near the driver survive
       // and far ones drop.
