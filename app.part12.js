@@ -432,10 +432,18 @@
     }
     const zoneTrendIconSizeExpr = [
       "interpolate", ["linear"], ["zoom"],
+      // Mirror the zone-name text-size zoom curve exactly (0 below z11, then the
+      // 0.45 -> 0.75 -> 1.0 factor). The sprite's 14px font is ~1.3x a typical
+      // zone name (~10.8px), so badges scale with zoom identically to names but
+      // ~30% larger -- and shrink/disappear when zoomed out, preventing the
+      // crowded look from afar.
+      7, 0,
+      8, 0,
+      9, 0,
       10, 0,
-      11, 0.5,
-      13, 0.85,
-      15, 1
+      11, 0.45,
+      12, 0.75,
+      15, 1.0
     ];
     if (!map.getLayer("zone-trend-labels")) {
       map.addLayer({
