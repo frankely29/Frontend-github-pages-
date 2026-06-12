@@ -570,23 +570,23 @@
     }
   }
 
-  // Build the per-zone demand-trend badges for the selected mode: flag every
-  // zone that's rising or falling in the next 20-minute bin, showing the next-
-  // bin time + an arrow -- "7:40 ↑" (rising, green) / "7:40 ↓" (cooling, red).
-  // The proximity declutter (symbol-sort-key) thins them where they crowd.
+  // Build the per-zone demand-trend badges for the selected mode: every rated
+  // zone gets the next-bin time + a direction -- "7:40 ↑" (rising, green) /
+  // "7:40 ↓" (cooling, red) / "7:40 =" (holding, slate). The proximity
+  // declutter (symbol-sort-key) thins them where they crowd.
   function buildZoneTrendLabelsFeatureCollection(frame) {
     const modeModule = window.TlcModeModule || {};
     const getBase = modeModule.getModeAwareBaseRating;
     const getNext = modeModule.getModeAwareNextBinRating;
-    const getBucket = modeModule.getBucketForRating;
     const map = core.getMap?.();
-    if (!map || typeof getBase !== "function" || typeof getNext !== "function" || typeof getBucket !== "function") {
+    if (!map || typeof getBase !== "function" || typeof getNext !== "function") {
       return { type: "FeatureCollection", features: [] };
     }
     const timeLabel = formatBinClockLabel(frame?.next_time);
     const timeKey = String(timeLabel).replace(/[^0-9]/g, "") || "x";
     const upText = timeLabel ? `${timeLabel} ↑` : "↑";
     const downText = timeLabel ? `${timeLabel} ↓` : "↓";
+    const sameText = timeLabel ? `${timeLabel} =` : "=";
     // "Near" reference for collision priority: the driver's location, else the
     // current map view center.
     let anchorLng = null;
@@ -607,13 +607,16 @@
       if (!locationId) continue;
       const geom = f?.geometry;
       const cur = getBase(props, geom);
+      if (!Number.isFinite(cur)) continue;
       const nxt = getNext(props, geom);
-      if (!Number.isFinite(cur) || !Number.isFinite(nxt)) continue;
-      // Flag every zone that's moving next bin (rising or falling). The
-      // proximity declutter (symbol-sort-key) keeps the nearest badges where
-      // they crowd; only skip zones with no movement -- no arrow to show.
-      if (nxt === cur) continue;
-      const heating = nxt > cur;
+      // Three-way next-bin trend for every rated zone: up if the next bin is
+      // higher, down if lower, = if it holds (or has no forecast). Compare the
+      // rounded 0-100 ratings so sub-point noise reads as "same".
+      let dir = "same";
+      if (Number.isFinite(nxt)) {
+        const delta = Math.round(nxt) - Math.round(cur);
+        dir = delta > 0 ? "up" : (delta < 0 ? "down" : "same");
+      }
       // Reuse the cached zone-name position so the trend sits under the name.
       const signature = getZoneLabelSignature(f);
       const layout = zoneLabelLayoutCache.get(`${locationId}|${signature}`) || buildZoneLabelLayoutFeature(f);
@@ -623,8 +626,10 @@
       // +30%. Keyed so each (size, direction, time) sprite is built once.
       const nameSize = Number(layout.properties && layout.properties.textSize) || 10;
       const badgeFont = Math.max(9, Math.round(nameSize * 1.3));
-      const spriteId = `zone-trend-${heating ? "up" : "down"}-${timeKey}-${badgeFont}`;
-      ensureTrendSprite(map, spriteId, heating ? upText : downText, heating ? "#0a8f2c" : "#d12727", badgeFont);
+      const dirText = dir === "up" ? upText : (dir === "down" ? downText : sameText);
+      const dirColor = dir === "up" ? "#0a8f2c" : (dir === "down" ? "#d12727" : "#5a6573");
+      const spriteId = `zone-trend-${dir}-${timeKey}-${badgeFont}`;
+      ensureTrendSprite(map, spriteId, dirText, dirColor, badgeFont);
       // Collision priority: nearer zones get a lower sort key, so when badges
       // overlap (dense Manhattan, zoomed out) the ones near the driver survive
       // and far ones drop.
