@@ -1003,6 +1003,9 @@ async function ensurePickupSourceAndLayers() {
     map.moveLayer("pickup-zone-hotspots-line", hotspotBeforeLayer);
   }
 
+  // The "best" (recommended) hotspot in a zone is warm GOLD and larger/brighter;
+  // a secondary hotspot is a cooler SLATE-GREY tone, so when a zone shows two you
+  // can tell which is better by color alone, not just size.
   if (!map.getLayer("pickup-micro-hotspots-glow")) {
     map.addLayer({
       id: "pickup-micro-hotspots-glow",
@@ -1015,7 +1018,7 @@ async function ensurePickupSourceAndLayers() {
           PICKUP_MICRO_HOTSPOT_MIN_ZOOM, ["case", ["coalesce", ["get", "recommended"], false], 5.8, 4.0],
           16, ["case", ["coalesce", ["get", "recommended"], false], 8.0, 5.2]
         ],
-        "circle-color": ["case", ["coalesce", ["get", "recommended"], false], "rgba(255,215,79,0.16)", "rgba(255,215,79,0.06)"],
+        "circle-color": ["case", ["coalesce", ["get", "recommended"], false], "rgba(255,215,79,0.16)", "rgba(124,146,168,0.12)"],
         "circle-opacity": ["case", ["coalesce", ["get", "recommended"], false], 0.56, 0.20],
         "circle-blur": 0.7,
       },
@@ -1034,9 +1037,9 @@ async function ensurePickupSourceAndLayers() {
           PICKUP_MICRO_HOTSPOT_MIN_ZOOM, ["case", ["coalesce", ["get", "recommended"], false], 2.8, 1.7],
           16, ["case", ["coalesce", ["get", "recommended"], false], 4.2, 2.4]
         ],
-        "circle-color": ["case", ["coalesce", ["get", "recommended"], false], "rgba(255,255,255,0.98)", "rgba(255,243,199,0.62)"],
-        "circle-opacity": ["case", ["coalesce", ["get", "recommended"], false], 0.98, 0.36],
-        "circle-stroke-color": ["case", ["coalesce", ["get", "recommended"], false], "rgba(255,190,46,1)", "rgba(255,190,46,0.45)"],
+        "circle-color": ["case", ["coalesce", ["get", "recommended"], false], "rgba(255,255,255,0.98)", "rgba(214,224,234,0.6)"],
+        "circle-opacity": ["case", ["coalesce", ["get", "recommended"], false], 0.98, 0.42],
+        "circle-stroke-color": ["case", ["coalesce", ["get", "recommended"], false], "rgba(255,190,46,1)", "rgba(124,146,168,0.7)"],
         "circle-stroke-width": ["case", ["coalesce", ["get", "recommended"], false], 1.0, 0.6],
       },
     }, "zone-labels");
@@ -1055,7 +1058,7 @@ async function ensurePickupSourceAndLayers() {
           16, ["case", ["coalesce", ["get", "recommended"], false], 9.6, 6.8]
         ],
         "circle-color": "rgba(0,0,0,0)",
-        "circle-stroke-color": ["case", ["coalesce", ["get", "recommended"], false], "rgba(255,201,64,0.72)", "rgba(255,201,64,0.34)"],
+        "circle-stroke-color": ["case", ["coalesce", ["get", "recommended"], false], "rgba(255,201,64,0.72)", "rgba(124,146,168,0.42)"],
         "circle-stroke-width": ["case", ["coalesce", ["get", "recommended"], false], 1.0, 0.6],
         "circle-opacity": ["case", ["coalesce", ["get", "recommended"], false], 0.46, 0.22],
       },
