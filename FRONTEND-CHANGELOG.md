@@ -1,6 +1,13 @@
 # Frontend Changelog
 
-## 2026-06-11
+## 2026-06-12
+
+### On-map demand-trend label: "about to cool / heat up at HH:MM"
+- Added a catchy on-map badge under each zone name that warns when a zone's color **bucket changes in the next 20-minute bin**: **▼ 6:40 PM** (cooling, red) or **▲ 7:00 PM** (heating, green), at the exact clock time. Lets drivers see a hot zone is about to fade — or that another is about to pick up — without opening the popup.
+- New `zone-trend-labels` Mapbox symbol layer (`app.part12.js`), rendered as its own source/layer (the zone-name layer is geometry-cached and stable, but the trend changes every frame and with the selected mode). Bold text, white halo, positioned just below the zone name; only drawn for zones with an actual bucket change (keeps the map uncluttered) and only at the name zoom (≥ `LABEL_ZOOM_MIN`).
+- **Mode-aware:** new `getModeAwareNextBinRating(props, geom)` in `TlcModeModule` mirrors `getModeAwareBaseRating`'s mode cascade but reads the backend's next-bin rating (`earnings_shadow_rating_<mode>_next`), so the trend follows whichever mode (citywide / borough / 45+) the driver has selected.
+- Refreshes automatically on frame change AND mode toggle (both invalidate the existing zone-label refresh guard via `currentFrameSig` / `visualSignature`). The clock time comes from the frame's `next_time`, formatted to NY-local 12-hour with a self-contained parser (no timezone round-trip). `node --check` passes for both files.
+
 
 ### Strategic Points: show building NAMES from a farther-out zoom (labels only)
 - Building **names** are now readable without zooming in much — and the building **icons are unchanged** (their zoom thresholds were left exactly as they were).

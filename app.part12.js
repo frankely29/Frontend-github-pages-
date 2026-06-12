@@ -422,6 +422,49 @@
       map.setLayoutProperty("zone-labels", "symbol-sort-key", ["coalesce", ["get", "sortKey"], 0]);
     }
 
+    // Demand-trend labels: a catchy on-map badge under the zone name that warns
+    // when the NEXT 20-minute bin changes the zone's color bucket (▲ heating /
+    // ▼ cooling) and at what clock time. Rendered as its own symbol layer
+    // because the trend changes every frame & with the selected mode (the zone
+    // name layer is geometry-cached and stable).
+    if (!map.getSource("zone-trend-labels")) {
+      map.addSource("zone-trend-labels", { type: "geojson", data: core.emptyGeojson?.() || { type: "FeatureCollection", features: [] } });
+    }
+    const zoneTrendTextSizeExpr = [
+      "interpolate", ["linear"], ["zoom"],
+      10, 0,
+      11, 10,
+      13, 12,
+      15, 14
+    ];
+    if (!map.getLayer("zone-trend-labels")) {
+      map.addLayer({
+        id: "zone-trend-labels",
+        type: "symbol",
+        source: "zone-trend-labels",
+        layout: {
+          "symbol-placement": "point",
+          "text-field": ["coalesce", ["get", "trendLabel"], ""],
+          "text-font": ["Open Sans Bold", "Arial Unicode MS Regular"],
+          "text-size": zoneTrendTextSizeExpr,
+          "text-anchor": "top",
+          "text-offset": [0, 0.9],
+          "text-allow-overlap": true,
+          "text-ignore-placement": true,
+          "text-padding": 1,
+        },
+        paint: {
+          "text-color": ["coalesce", ["get", "trendColor"], "#d12727"],
+          "text-halo-color": "#ffffff",
+          "text-halo-width": 1.7,
+          "text-halo-blur": 0.3,
+        },
+        minzoom: LABEL_ZOOM_MIN,
+      });
+    } else {
+      map.setLayoutProperty("zone-trend-labels", "text-size", zoneTrendTextSizeExpr);
+    }
+
     await core.ensurePickupSourceAndLayers?.();
 
     return true;
@@ -451,6 +494,60 @@
     return { type: "FeatureCollection", features: out };
   }
 
+  function formatBinClockLabel(iso) {
+    const m = String(iso || "").match(/T(\d{2}):(\d{2})/);
+    if (!m) return "";
+    let hour = parseInt(m[1], 10);
+    const minute = m[2];
+    const meridiem = hour >= 12 ? "PM" : "AM";
+    hour = hour % 12;
+    if (hour === 0) hour = 12;
+    return `${hour}:${minute} ${meridiem}`;
+  }
+
+  // Build the per-zone demand-trend labels for the currently selected mode:
+  // flag only zones whose color bucket CHANGES in the next 20-minute bin, with
+  // an arrow (▲ heating / ▼ cooling) and the exact clock time it changes.
+  function buildZoneTrendLabelsFeatureCollection(frame) {
+    const modeModule = window.TlcModeModule || {};
+    const getBase = modeModule.getModeAwareBaseRating;
+    const getNext = modeModule.getModeAwareNextBinRating;
+    const getBucket = modeModule.getBucketForRating;
+    if (typeof getBase !== "function" || typeof getNext !== "function" || typeof getBucket !== "function") {
+      return { type: "FeatureCollection", features: [] };
+    }
+    const timeLabel = formatBinClockLabel(frame?.next_time);
+    const feats = frame?.polygons?.features || [];
+    const out = [];
+    for (const f of feats) {
+      const props = f?.properties || {};
+      const locationId = String(props.LocationID ?? "");
+      if (!locationId) continue;
+      const geom = f?.geometry;
+      const cur = getBase(props, geom);
+      const nxt = getNext(props, geom);
+      if (!Number.isFinite(cur) || !Number.isFinite(nxt)) continue;
+      const curBucket = getBucket(cur);
+      const nxtBucket = getBucket(nxt);
+      // Only flag a real color-bucket change next bin (keeps the map uncluttered).
+      if (!curBucket || !nxtBucket || curBucket === nxtBucket) continue;
+      const heating = nxt > cur;
+      const arrow = heating ? "▲" : "▼"; // ▲ / ▼
+      const trendLabel = timeLabel ? `${arrow} ${timeLabel}` : arrow;
+      const trendColor = heating ? "#0a8f2c" : "#d12727";
+      // Reuse the cached zone-name position so the trend sits under the name.
+      const signature = getZoneLabelSignature(f);
+      const layout = zoneLabelLayoutCache.get(`${locationId}|${signature}`) || buildZoneLabelLayoutFeature(f);
+      if (!layout || !layout.geometry) continue;
+      out.push({
+        type: "Feature",
+        geometry: layout.geometry,
+        properties: { LocationID: props.LocationID, trendLabel, trendColor },
+      });
+    }
+    return { type: "FeatureCollection", features: out };
+  }
+
   function refreshZoneLabels(frame) {
     const map = core.getMap?.();
     const mapReady = core.isMapReady?.();
@@ -461,6 +558,13 @@
 
     const fc = buildZoneLabelsFeatureCollection(frame);
     src.setData(fc);
+
+    // Demand-trend labels live in their own source so they refresh every frame
+    // and on mode change (the zone-name layer is geometry-cached and stable).
+    const trendSrc = map.getSource("zone-trend-labels");
+    if (trendSrc) {
+      trendSrc.setData(buildZoneTrendLabelsFeatureCollection(frame));
+    }
   }
 
   function getFeatureCollectionBounds(fc) {
