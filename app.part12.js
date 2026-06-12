@@ -452,6 +452,9 @@
         source: "zone-trend-labels",
         layout: {
           "symbol-placement": "point",
+          // Nearer zones (lower sort key) are placed first, so they win
+          // collision over far-away ones.
+          "symbol-sort-key": ["get", "sortKey"],
           // Drawn as a canvas sprite (icon), NOT map text: the basemap font has
           // no arrow glyphs, so "7:40 ↑" is rendered to a canvas and registered
           // via map.addImage() -- the codebase's reliable cross-device approach.
@@ -516,6 +519,18 @@
     return `${hour}:${minute}`;
   }
 
+  // Track the driver's location (from the geolocation watch in app.js, via the
+  // existing 'tlc-user-location-updated' event) so trend badges near the driver
+  // win collision over far-away ones. Falls back to the map view center when no
+  // location is available.
+  let trendDriverLngLat = null;
+  if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+    window.addEventListener("tlc-user-location-updated", (e) => {
+      const d = (e && e.detail) || {};
+      if (Number.isFinite(d.lng) && Number.isFinite(d.lat)) trendDriverLngLat = [Number(d.lng), Number(d.lat)];
+    });
+  }
+
   // Render the trend badge text ("7:40 ↑") to a canvas and register it with the
   // map as an icon. Used instead of map text because the basemap font has no
   // arrow glyphs (they render blank) -- a canvas uses the full system fonts, the
@@ -571,6 +586,18 @@
     const timeKey = String(timeLabel).replace(/[^0-9]/g, "") || "x";
     const upText = timeLabel ? `${timeLabel} ↑` : "↑";
     const downText = timeLabel ? `${timeLabel} ↓` : "↓";
+    // "Near" reference for collision priority: the driver's location, else the
+    // current map view center.
+    let anchorLng = null;
+    let anchorLat = null;
+    if (trendDriverLngLat) {
+      anchorLng = trendDriverLngLat[0];
+      anchorLat = trendDriverLngLat[1];
+    } else if (typeof map.getCenter === "function") {
+      const c = map.getCenter();
+      anchorLng = c && c.lng;
+      anchorLat = c && c.lat;
+    }
     const feats = frame?.polygons?.features || [];
     const out = [];
     for (const f of feats) {
@@ -597,10 +624,20 @@
       const badgeFont = Math.max(9, Math.round(nameSize * 1.3));
       const spriteId = `zone-trend-${heating ? "up" : "down"}-${timeKey}-${badgeFont}`;
       ensureTrendSprite(map, spriteId, heating ? upText : downText, heating ? "#0a8f2c" : "#d12727", badgeFont);
+      // Collision priority: nearer zones get a lower sort key, so when badges
+      // overlap (dense Manhattan, zoomed out) the ones near the driver survive
+      // and far ones drop.
+      const coords = (layout.geometry && layout.geometry.coordinates) || [];
+      let sortKey = 0;
+      if (Number.isFinite(anchorLng) && Number.isFinite(Number(coords[0]))) {
+        const dLng = Number(coords[0]) - anchorLng;
+        const dLat = Number(coords[1]) - anchorLat;
+        sortKey = Math.round((dLng * dLng + dLat * dLat) * 1e7);
+      }
       out.push({
         type: "Feature",
         geometry: layout.geometry,
-        properties: { LocationID: props.LocationID, trendSprite: spriteId },
+        properties: { LocationID: props.LocationID, trendSprite: spriteId, sortKey },
       });
     }
     return { type: "FeatureCollection", features: out };
