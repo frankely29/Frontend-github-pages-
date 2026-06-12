@@ -459,9 +459,13 @@
           "icon-size": zoneTrendIconSizeExpr,
           "icon-anchor": "top",
           "icon-offset": [0, 12],
-          "icon-allow-overlap": true,
-          "icon-ignore-placement": true,
-          "icon-padding": 0,
+          // Collision ON: from afar, crowded badges (dense small Manhattan
+          // zones) drop out for a clean look; zooming in opens space so more
+          // appear. Names stay always-on (they ignore placement), so badges
+          // only ever thin against each other.
+          "icon-allow-overlap": false,
+          "icon-ignore-placement": false,
+          "icon-padding": 2,
         },
         minzoom: LABEL_ZOOM_MIN,
       });
@@ -517,18 +521,18 @@
   // arrow glyphs (they render blank) -- a canvas uses the full system fonts, the
   // codebase's reliable cross-device approach (see strategic-points sprites).
   // Built once per (direction, time) id.
-  function ensureTrendSprite(map, id, text, color) {
+  function ensureTrendSprite(map, id, text, color, fontPx) {
     try {
       if (typeof map.hasImage === "function" && map.hasImage(id)) return;
       const dpr = 2;
-      const fontPx = 14;
-      const font = `800 ${fontPx}px -apple-system, system-ui, "Segoe UI", Roboto, Arial, sans-serif`;
+      const size = Math.max(8, Math.round(Number(fontPx) || 14));
+      const font = `800 ${size}px -apple-system, system-ui, "Segoe UI", Roboto, Arial, sans-serif`;
       const gauge = document.createElement("canvas").getContext("2d");
       gauge.font = font;
       const padX = 5;
       const padY = 3;
       const w = Math.ceil(gauge.measureText(text).width) + padX * 2;
-      const h = fontPx + padY * 2;
+      const h = size + padY * 2;
       const canvas = document.createElement("canvas");
       canvas.width = Math.max(1, Math.round(w * dpr));
       canvas.height = Math.max(1, Math.round(h * dpr));
@@ -565,12 +569,8 @@
     }
     const timeLabel = formatBinClockLabel(frame?.next_time);
     const timeKey = String(timeLabel).replace(/[^0-9]/g, "") || "x";
-    // The next-bin time is the same for every zone in a frame, so just two
-    // sprites are needed: rising (green ↑) and cooling (red ↓).
-    const upSprite = `zone-trend-up-${timeKey}`;
-    const downSprite = `zone-trend-down-${timeKey}`;
-    ensureTrendSprite(map, upSprite, timeLabel ? `${timeLabel} ↑` : "↑", "#0a8f2c");
-    ensureTrendSprite(map, downSprite, timeLabel ? `${timeLabel} ↓` : "↓", "#d12727");
+    const upText = timeLabel ? `${timeLabel} ↑` : "↑";
+    const downText = timeLabel ? `${timeLabel} ↓` : "↓";
     const feats = frame?.polygons?.features || [];
     const out = [];
     for (const f of feats) {
@@ -590,10 +590,17 @@
       const signature = getZoneLabelSignature(f);
       const layout = zoneLabelLayoutCache.get(`${locationId}|${signature}`) || buildZoneLabelLayoutFeature(f);
       if (!layout || !layout.geometry) continue;
+      // Size the badge to the zone exactly like the name does (small Manhattan
+      // zones -> small badges that fit and don't drift out of the zone), then
+      // +30%. Keyed so each (size, direction, time) sprite is built once.
+      const nameSize = Number(layout.properties && layout.properties.textSize) || 10;
+      const badgeFont = Math.max(9, Math.round(nameSize * 1.3));
+      const spriteId = `zone-trend-${heating ? "up" : "down"}-${timeKey}-${badgeFont}`;
+      ensureTrendSprite(map, spriteId, heating ? upText : downText, heating ? "#0a8f2c" : "#d12727", badgeFont);
       out.push({
         type: "Feature",
         geometry: layout.geometry,
-        properties: { LocationID: props.LocationID, trendSprite: heating ? upSprite : downSprite },
+        properties: { LocationID: props.LocationID, trendSprite: spriteId },
       });
     }
     return { type: "FeatureCollection", features: out };
