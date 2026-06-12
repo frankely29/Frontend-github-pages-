@@ -571,13 +571,15 @@
   }
 
   // Build the per-zone demand-trend badges for the selected mode: every rated
-  // zone gets the next-bin time + a direction -- "7:40 ↑" (rising, green) /
-  // "7:40 ↓" (cooling, red) / "7:40 =" (holding, slate). The proximity
-  // declutter (symbol-sort-key) thins them where they crowd.
+  // zone gets the next-bin time + a direction glyph -- "7:40 ↑" rising /
+  // "7:40 ↓" cooling / "7:40 =" holding -- colored with the bucket color the
+  // zone will be NEXT bin, so the hue previews the upcoming state. The
+  // proximity declutter (symbol-sort-key) thins them where they crowd.
   function buildZoneTrendLabelsFeatureCollection(frame) {
     const modeModule = window.TlcModeModule || {};
     const getBase = modeModule.getModeAwareBaseRating;
     const getNext = modeModule.getModeAwareNextBinRating;
+    const getColor = typeof modeModule.getColorForRating === "function" ? modeModule.getColorForRating : null;
     const map = core.getMap?.();
     if (!map || typeof getBase !== "function" || typeof getNext !== "function") {
       return { type: "FeatureCollection", features: [] };
@@ -627,9 +629,15 @@
       const nameSize = Number(layout.properties && layout.properties.textSize) || 10;
       const badgeFont = Math.max(9, Math.round(nameSize * 1.3));
       const dirText = dir === "up" ? upText : (dir === "down" ? downText : sameText);
-      const dirColor = dir === "up" ? "#0a8f2c" : (dir === "down" ? "#d12727" : "#5a6573");
-      const spriteId = `zone-trend-${dir}-${timeKey}-${badgeFont}`;
-      ensureTrendSprite(map, spriteId, dirText, dirColor, badgeFont);
+      // Arrow color = the bucket color the zone will be NEXT bin (the held color
+      // when steady), so the hue previews the upcoming state while the glyph
+      // shows the direction. The white halo keeps it legible over a like-colored
+      // zone. Encode the color into the sprite id so each hue caches separately.
+      const colorRating = Number.isFinite(nxt) ? nxt : cur;
+      const nextColor = getColor ? getColor(colorRating) : (dir === "up" ? "#0a8f2c" : dir === "down" ? "#d12727" : "#5a6573");
+      const colorKey = String(nextColor).replace(/[^0-9a-zA-Z]/g, "");
+      const spriteId = `zone-trend-${dir}-${colorKey}-${timeKey}-${badgeFont}`;
+      ensureTrendSprite(map, spriteId, dirText, nextColor, badgeFont);
       // Collision priority: nearer zones get a lower sort key, so when badges
       // overlap (dense Manhattan, zoomed out) the ones near the driver survive
       // and far ones drop.
