@@ -502,7 +502,10 @@
     const meridiem = hour >= 12 ? "PM" : "AM";
     hour = hour % 12;
     if (hour === 0) hour = 12;
-    return `${hour}:${minute} ${meridiem}`;
+    // Compact, context-obvious (the current frame's full time is shown in the
+    // scrubber): "7:20" rather than "7:20 AM".
+    void meridiem;
+    return `${hour}:${minute}`;
   }
 
   // Build the per-zone demand-trend labels for the currently selected mode:
@@ -532,8 +535,9 @@
       // Only flag a real color-bucket change next bin (keeps the map uncluttered).
       if (!curBucket || !nxtBucket || curBucket === nxtBucket) continue;
       const heating = nxt > cur;
-      const arrow = heating ? "▲" : "▼"; // ▲ / ▼
-      const trendLabel = timeLabel ? `${arrow} ${timeLabel}` : arrow;
+      const arrow = heating ? "▲" : "▼"; // ▲ rising (green) / ▼ cooling (red)
+      // Format: "(7:20 ▲)" -- time first, then direction, in parentheses.
+      const trendLabel = timeLabel ? `(${timeLabel} ${arrow})` : `(${arrow})`;
       const trendColor = heating ? "#0a8f2c" : "#d12727";
       // Reuse the cached zone-name position so the trend sits under the name.
       const signature = getZoneLabelSignature(f);
