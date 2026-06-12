@@ -570,9 +570,10 @@
     }
   }
 
-  // Build the per-zone demand-trend badges for the selected mode: flag only
-  // zones whose color bucket CHANGES in the next 20-minute bin, showing the
-  // change time + an arrow -- "7:40 ↑" (rising, green) / "7:40 ↓" (cooling, red).
+  // Build the per-zone demand-trend badges for the selected mode: flag every
+  // zone that's rising or falling in the next 20-minute bin, showing the next-
+  // bin time + an arrow -- "7:40 ↑" (rising, green) / "7:40 ↓" (cooling, red).
+  // The proximity declutter (symbol-sort-key) thins them where they crowd.
   function buildZoneTrendLabelsFeatureCollection(frame) {
     const modeModule = window.TlcModeModule || {};
     const getBase = modeModule.getModeAwareBaseRating;
@@ -608,10 +609,10 @@
       const cur = getBase(props, geom);
       const nxt = getNext(props, geom);
       if (!Number.isFinite(cur) || !Number.isFinite(nxt)) continue;
-      const curBucket = getBucket(cur);
-      const nxtBucket = getBucket(nxt);
-      // Only flag a real color-bucket change next bin (keeps the map uncluttered).
-      if (!curBucket || !nxtBucket || curBucket === nxtBucket) continue;
+      // Flag every zone that's moving next bin (rising or falling). The
+      // proximity declutter (symbol-sort-key) keeps the nearest badges where
+      // they crowd; only skip zones with no movement -- no arrow to show.
+      if (nxt === cur) continue;
       const heating = nxt > cur;
       // Reuse the cached zone-name position so the trend sits under the name.
       const signature = getZoneLabelSignature(f);
