@@ -430,12 +430,12 @@
     if (!map.getSource("zone-trend-labels")) {
       map.addSource("zone-trend-labels", { type: "geojson", data: core.emptyGeojson?.() || { type: "FeatureCollection", features: [] } });
     }
-    const zoneTrendTextSizeExpr = [
+    const zoneTrendIconSizeExpr = [
       "interpolate", ["linear"], ["zoom"],
       10, 0,
-      11, 10,
-      13, 12,
-      15, 14
+      11, 0.5,
+      13, 0.85,
+      15, 1
     ];
     if (!map.getLayer("zone-trend-labels")) {
       map.addLayer({
@@ -444,25 +444,21 @@
         source: "zone-trend-labels",
         layout: {
           "symbol-placement": "point",
-          "text-field": ["coalesce", ["get", "trendLabel"], ""],
-          "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
-          "text-size": zoneTrendTextSizeExpr,
-          "text-anchor": "top",
-          "text-offset": [0, 0.9],
-          "text-allow-overlap": true,
-          "text-ignore-placement": true,
-          "text-padding": 1,
-        },
-        paint: {
-          "text-color": ["coalesce", ["get", "trendColor"], "#d12727"],
-          "text-halo-color": "#ffffff",
-          "text-halo-width": 1.7,
-          "text-halo-blur": 0.3,
+          // Drawn as a canvas sprite (icon), NOT map text: the basemap font has
+          // no arrow glyphs, so "7:40 ↑" is rendered to a canvas and registered
+          // via map.addImage() -- the codebase's reliable cross-device approach.
+          "icon-image": ["get", "trendSprite"],
+          "icon-size": zoneTrendIconSizeExpr,
+          "icon-anchor": "top",
+          "icon-offset": [0, 12],
+          "icon-allow-overlap": true,
+          "icon-ignore-placement": true,
+          "icon-padding": 0,
         },
         minzoom: LABEL_ZOOM_MIN,
       });
     } else {
-      map.setLayoutProperty("zone-trend-labels", "text-size", zoneTrendTextSizeExpr);
+      map.setLayoutProperty("zone-trend-labels", "icon-size", zoneTrendIconSizeExpr);
     }
 
     await core.ensurePickupSourceAndLayers?.();
@@ -508,18 +504,65 @@
     return `${hour}:${minute}`;
   }
 
-  // Build the per-zone demand-trend labels for the currently selected mode:
-  // flag only zones whose color bucket CHANGES in the next 20-minute bin, with
-  // an arrow (▲ heating / ▼ cooling) and the exact clock time it changes.
+  // Render the trend badge text ("7:40 ↑") to a canvas and register it with the
+  // map as an icon. Used instead of map text because the basemap font has no
+  // arrow glyphs (they render blank) -- a canvas uses the full system fonts, the
+  // codebase's reliable cross-device approach (see strategic-points sprites).
+  // Built once per (direction, time) id.
+  function ensureTrendSprite(map, id, text, color) {
+    try {
+      if (typeof map.hasImage === "function" && map.hasImage(id)) return;
+      const dpr = 2;
+      const fontPx = 14;
+      const font = `800 ${fontPx}px -apple-system, system-ui, "Segoe UI", Roboto, Arial, sans-serif`;
+      const gauge = document.createElement("canvas").getContext("2d");
+      gauge.font = font;
+      const padX = 5;
+      const padY = 3;
+      const w = Math.ceil(gauge.measureText(text).width) + padX * 2;
+      const h = fontPx + padY * 2;
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(w * dpr));
+      canvas.height = Math.max(1, Math.round(h * dpr));
+      const ctx = canvas.getContext("2d");
+      ctx.scale(dpr, dpr);
+      ctx.font = font;
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      // White outline so it reads on any zone color.
+      ctx.lineJoin = "round";
+      ctx.lineWidth = 3.5;
+      ctx.strokeStyle = "rgba(255,255,255,0.96)";
+      ctx.strokeText(text, padX, h / 2);
+      ctx.fillStyle = color;
+      ctx.fillText(text, padX, h / 2);
+      const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      map.addImage(id, { width: canvas.width, height: canvas.height, data: data.data }, { pixelRatio: dpr });
+    } catch (e) {
+      /* non-fatal: skip the badge if sprite creation fails */
+    }
+  }
+
+  // Build the per-zone demand-trend badges for the selected mode: flag only
+  // zones whose color bucket CHANGES in the next 20-minute bin, showing the
+  // change time + an arrow -- "7:40 ↑" (rising, green) / "7:40 ↓" (cooling, red).
   function buildZoneTrendLabelsFeatureCollection(frame) {
     const modeModule = window.TlcModeModule || {};
     const getBase = modeModule.getModeAwareBaseRating;
     const getNext = modeModule.getModeAwareNextBinRating;
     const getBucket = modeModule.getBucketForRating;
-    if (typeof getBase !== "function" || typeof getNext !== "function" || typeof getBucket !== "function") {
+    const map = core.getMap?.();
+    if (!map || typeof getBase !== "function" || typeof getNext !== "function" || typeof getBucket !== "function") {
       return { type: "FeatureCollection", features: [] };
     }
     const timeLabel = formatBinClockLabel(frame?.next_time);
+    const timeKey = String(timeLabel).replace(/[^0-9]/g, "") || "x";
+    // The next-bin time is the same for every zone in a frame, so just two
+    // sprites are needed: rising (green ↑) and cooling (red ↓).
+    const upSprite = `zone-trend-up-${timeKey}`;
+    const downSprite = `zone-trend-down-${timeKey}`;
+    ensureTrendSprite(map, upSprite, timeLabel ? `${timeLabel} ↑` : "↑", "#0a8f2c");
+    ensureTrendSprite(map, downSprite, timeLabel ? `${timeLabel} ↓` : "↓", "#d12727");
     const feats = frame?.polygons?.features || [];
     const out = [];
     for (const f of feats) {
@@ -535,10 +578,6 @@
       // Only flag a real color-bucket change next bin (keeps the map uncluttered).
       if (!curBucket || !nxtBucket || curBucket === nxtBucket) continue;
       const heating = nxt > cur;
-      const arrow = heating ? "▲" : "▼"; // ▲ rising (green) / ▼ cooling (red)
-      // Format: "(7:20 ▲)" -- time first, then direction, in parentheses.
-      const trendLabel = timeLabel ? `(${timeLabel} ${arrow})` : `(${arrow})`;
-      const trendColor = heating ? "#0a8f2c" : "#d12727";
       // Reuse the cached zone-name position so the trend sits under the name.
       const signature = getZoneLabelSignature(f);
       const layout = zoneLabelLayoutCache.get(`${locationId}|${signature}`) || buildZoneLabelLayoutFeature(f);
@@ -546,7 +585,7 @@
       out.push({
         type: "Feature",
         geometry: layout.geometry,
-        properties: { LocationID: props.LocationID, trendLabel, trendColor },
+        properties: { LocationID: props.LocationID, trendSprite: heating ? upSprite : downSprite },
       });
     }
     return { type: "FeatureCollection", features: out };
