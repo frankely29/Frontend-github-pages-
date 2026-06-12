@@ -1744,21 +1744,26 @@ async function fillCitywidePickupHotspotsOnce() {
   // Accumulators deduped by zone / micro key. Seeded with the local load so the
   // user's area never blinks out while the rest of the city streams in.
   const zoneStatsById = new Map();
-  const hotspotsByZone = new Map();
+  // Keyed by the FULL hotspot key (zone|hotspot_id|hotspot_index), not by zone:
+  // a zone can have two hotspots, and keying by zone alone collapsed them to one
+  // (the 2nd overwrote the 1st). That dropped the 2nd hotspot every time the
+  // citywide fill re-rendered over the local load -- the "appears then
+  // disappears" bug. The micro accumulator below already keys this way.
+  const hotspotsByKey = new Map();
   const microByKey = new Map();
   let items = [];
   const zoneKeyOf = (f) => normalizePickupZoneId(f?.properties?.zone_id ?? f?.properties?.zoneId ?? f?.properties?.location_id ?? f?.properties?.LocationID);
   const microKeyOf = (f) => [String(f?.properties?.zone_id ?? ""), String(f?.properties?.hotspot_id ?? ""), String(f?.properties?.hotspot_index ?? "")].join("|");
   const merge = (p) => {
     for (const st of p.zoneStats || []) { if (st?.zone_id != null) zoneStatsById.set(String(st.zone_id), st); }
-    for (const f of p.zoneHotspots?.features || []) { const k = zoneKeyOf(f); if (k != null) hotspotsByZone.set(String(k), f); }
+    for (const f of p.zoneHotspots?.features || []) { if (zoneKeyOf(f) != null) hotspotsByKey.set(microKeyOf(f), f); }
     for (const f of p.microHotspots?.features || []) microByKey.set(microKeyOf(f), f);
     if (Array.isArray(p.items) && p.items.length) items = items.concat(p.items).slice(-PICKUP_CITY_ITEM_CAP);
   };
   const render = () => setPickupOverlayData(
     buildPickupFeatureCollection(items), items,
     Array.from(zoneStatsById.values()),
-    { type: "FeatureCollection", features: Array.from(hotspotsByZone.values()) },
+    { type: "FeatureCollection", features: Array.from(hotspotsByKey.values()) },
     { type: "FeatureCollection", features: Array.from(microByKey.values()) });
 
   if (pickupCitywideSeed) merge(pickupCitywideSeed);
@@ -1785,7 +1790,7 @@ async function fillCitywidePickupHotspotsOnce() {
     }
     await new Promise((r) => setTimeout(r, PICKUP_TILE_STAGGER_MS));
   }
-  console.log(`[pickup overlay] citywide fill done: ${hotspotsByZone.size} hotspot zones, ${items.length} dots`);
+  console.log(`[pickup overlay] citywide fill done: ${hotspotsByKey.size} hotspots, ${items.length} dots`);
 }
 
 // Build the single bounded request for the once-per-refresh hotspot load. The
