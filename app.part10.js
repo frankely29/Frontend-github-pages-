@@ -647,7 +647,7 @@ function setPickupOverlayData(fc, items = [], zoneStats = [], zoneHotspots = emp
       const hotspotId = normalizePickupHotspotId(props.hotspot_id ?? props.hotspotId ?? props.pickup_hotspot_id);
       const hotspotIndex = normalizePickupHotspotIndex(props.hotspot_index ?? props.hotspotIndex ?? props.pickup_hotspot_index);
       const hotspotIdIndexKey = pickupHotspotKeyFromParts("", hotspotId, hotspotIndex);
-      return hotspotIdIndexKeys.has(hotspotIdIndexKey);
+      return visibleHotspotIdIndexKeys.has(hotspotIdIndexKey);
     }),
   };
 
