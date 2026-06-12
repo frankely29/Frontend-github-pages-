@@ -1,5 +1,13 @@
 # Frontend Regression Checklist
 
+## On-map demand-trend label
+- [x] `node --check` passes for `app.part11.js` and `app.part12.js`.
+- [ ] A zone whose color bucket changes next bin shows a ▼ (red, cooling) or ▲ (green, heating) badge under its name with the next bin's clock time (e.g. "▼ 6:40 PM").
+- [ ] Zones with no bucket change show no trend badge (map stays uncluttered).
+- [ ] The trend follows the selected mode: toggling citywide / a borough / 45+ trips re-evaluates each zone's current-vs-next bucket and updates the badges.
+- [ ] Trend badges refresh on frame change and on mode toggle, and hide at low zoom like the zone names.
+- [ ] No badge when the backend omits `next_time` / `_next` (e.g. last bin or missing data) — no console errors.
+
 ## Core auth and shell
 - [ ] Sign in works.
 - [ ] Sign out works.

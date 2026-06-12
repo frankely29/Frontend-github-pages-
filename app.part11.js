@@ -821,6 +821,44 @@
     return NaN;
   }
 
+  function readModeNextRating(props, baseField) {
+    const n = Number(props?.[baseField + "_next"] ?? NaN);
+    return Number.isFinite(n) ? Math.max(1, Math.min(100, Math.round(n))) : NaN;
+  }
+
+  // Mirrors getModeAwareBaseRating's mode cascade, but reads the NEXT 20-minute
+  // bin's visible rating ("<field>_next") the backend attaches to each frame.
+  // Drives the on-map demand-trend label (about to cool / heat up).
+  function getModeAwareNextBinRating(props, geom) {
+    if (trips45plusV3Mode) {
+      const r = readModeNextRating(props, "earnings_shadow_rating_trips_45plus_v3");
+      if (Number.isFinite(r)) return r;
+    }
+    if (queensMode && isQueensModeZone(props)) {
+      const r = readModeNextRating(props, "earnings_shadow_rating_queens_v3");
+      if (Number.isFinite(r)) return r;
+    }
+    if (brooklynMode && isBrooklynModeZone(props)) {
+      const r = readModeNextRating(props, "earnings_shadow_rating_brooklyn_v3");
+      if (Number.isFinite(r)) return r;
+    }
+    if (statenIslandMode && isStatenIslandFeature(props)) {
+      const r = readModeNextRating(props, "earnings_shadow_rating_staten_island_v3");
+      if (Number.isFinite(r)) return r;
+    }
+    if (bronxWashHeightsMode && isBronxWashHeightsModeZone(props)) {
+      const r = readModeNextRating(props, "earnings_shadow_rating_bronx_wash_heights_v3");
+      if (Number.isFinite(r)) return r;
+    }
+    if (manhattanMode && isManhattanModeZone(props, geom)) {
+      const r = readModeNextRating(props, "earnings_shadow_rating_manhattan_v3");
+      if (Number.isFinite(r)) return r;
+    }
+    const citywide = readModeNextRating(props, "earnings_shadow_rating_citywide_v3");
+    if (Number.isFinite(citywide)) return citywide;
+    return NaN;
+  }
+
   function getModeAwareBaseBucket(props, geom) {
     const rating = getModeAwareBaseRating(props, geom);
     if (Number.isFinite(rating)) return getBucketForRating(rating);
@@ -1901,6 +1939,7 @@
     getVisibleScoreTechnicalSourceLabel,
     isVisibleScoreUsingFallback,
     getModeAwareBaseRating,
+    getModeAwareNextBinRating,
     getModeAwareBaseBucket,
     getModeAwareBaseColor,
     getFeatureVisibleScoreDebug,
