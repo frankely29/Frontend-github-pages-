@@ -99,9 +99,40 @@
   const BLDG_MIN_ZOOM = 12;
 
   // ---------------------------------------------------------------
+  // Live earnings-peak gate
+  // ---------------------------------------------------------------
+  // Buildings + pulse reveal only when the building's TLC zone is at a
+  // genuine EARNINGS peak right now — read from the live frame's per-zone
+  // rating (the same 0–100 number that paints the zone color the driver
+  // sees, via the active map mode). This replaces the static clock
+  // schedule as the primary trigger; the schedule is the fallback used
+  // only when no live rating is available (no frame yet, zone off-screen
+  // in a viewport subset, or a low-confidence bin).
+  //
+  // Earnings-gated, not demand-gated, on purpose: a busy-but-cheap hour
+  // (e.g. the 5pm short-hop surge, or a Costco-style grocery run) never
+  // clears the bar, so buildings stay dark exactly when the volume is a
+  // trap. They light up only when long-trip pay is actually present.
+  //
+  // Hysteresis (turn-on threshold above turn-off) stops buildings
+  // flickering when a zone hovers at a bucket boundary — the same
+  // approach as the pickup-hotspot hysteresis. "Real peaks only": turn
+  // ON at indigo (rating ≥ 68); keep them on until the zone falls below
+  // blue (< 60), then turn OFF.
+  const LIVE_GATE_ON_RATING = 68;        // indigo+ — a real peak turns buildings ON
+  const LIVE_GATE_OFF_RATING = 60;       // below blue turns them OFF (hysteresis band)
+  const LIVE_GATE_MIN_CONFIDENCE = 0.35; // ignore sparse/low-confidence bins -> fall back to schedule
+
+  // ---------------------------------------------------------------
   // Module state
   // ---------------------------------------------------------------
   let mapRef = null;
+  // Per-hotspot on/off memory for the live gate's hysteresis.
+  const liveGateState = new Map();       // hotspot_id -> bool
+  // Per-frame cache of the resolved zone rating, so the point-in-polygon
+  // lookup runs once per hotspot per frame even though primeForHotspot /
+  // dimForHotspot are each called several times per render.
+  let liveRatingCache = { frameTime: null, byId: new Map() };
   let initDone = false;
   let hotspots = [];                // array of {id, lat, lng, label, members:[...]}
   let layerInitStarted = false;
@@ -201,23 +232,113 @@
     return null;
   }
 
+  // ---------------------------------------------------------------
+  // Live earnings-gate helpers (see config block near the top)
+  // ---------------------------------------------------------------
+  // Ray-cast test for one linear ring ([[lng,lat], ...]).
+  function pointInRing(lng, lat, ring) {
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const xi = ring[i][0], yi = ring[i][1];
+      const xj = ring[j][0], yj = ring[j][1];
+      const denom = (yj - yi) || 1e-12;
+      if (((yi > lat) !== (yj > lat)) && (lng < ((xj - xi) * (lat - yi)) / denom + xi)) {
+        inside = !inside;
+      }
+    }
+    return inside;
+  }
+
+  // Point-in GeoJSON Polygon / MultiPolygon, honoring holes (even-odd).
+  function geomContains(lng, lat, geom) {
+    if (!geom) return false;
+    const polys = geom.type === "MultiPolygon" ? geom.coordinates
+      : geom.type === "Polygon" ? [geom.coordinates]
+      : [];
+    for (const rings of polys) {
+      if (!rings || !rings.length || !pointInRing(lng, lat, rings[0])) continue;
+      let inHole = false;
+      for (let k = 1; k < rings.length; k++) {
+        if (pointInRing(lng, lat, rings[k])) { inHole = true; break; }
+      }
+      if (!inHole) return true;
+    }
+    return false;
+  }
+
+  // Live per-zone rating (0–100, active map mode) for the zone containing
+  // this hotspot's centroid — or null when there's no current frame, no
+  // containing zone, or the bin is too low-confidence to trust. Cached per
+  // frame so the polygon scan runs once per hotspot per frame.
+  function liveZoneRatingForHotspot(h) {
+    try {
+      const frame = window.TlcModeInternals?.getCurrentFrame?.();
+      const feats = frame?.polygons?.features;
+      if (!Array.isArray(feats) || !feats.length) return null;
+      if (!h || !Number.isFinite(h.lng) || !Number.isFinite(h.lat)) return null;
+
+      // Key the cache on time + feature count so a viewport-subset frame
+      // and the later full frame (same time) don't share a stale entry.
+      const frameTime = String(frame?.time || "") + ":" + feats.length;
+      if (liveRatingCache.frameTime !== frameTime) {
+        liveRatingCache = { frameTime, byId: new Map() };
+      }
+      if (liveRatingCache.byId.has(h.id)) return liveRatingCache.byId.get(h.id);
+
+      let rating = null;
+      for (const f of feats) {
+        if (!geomContains(h.lng, h.lat, f?.geometry)) continue;
+        const props = f.properties || {};
+        const conf = Number(props.earnings_shadow_confidence_citywide_v3);
+        if (Number.isFinite(conf) && conf < LIVE_GATE_MIN_CONFIDENCE) break; // trust the schedule instead
+        const r = window.TlcModeModule?.effectiveRating?.(props, f.geometry || null);
+        if (Number.isFinite(r)) rating = Number(r);
+        break;
+      }
+      liveRatingCache.byId.set(h.id, rating);
+      return rating;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // The live gate with hysteresis. Returns true/false when live data is
+  // available, or null to tell the caller to fall back to the schedule.
+  function liveEarningsGate(h) {
+    const rating = liveZoneRatingForHotspot(h);
+    if (rating === null) return null;
+    const prev = liveGateState.get(h.id) === true;
+    let on = prev;
+    if (!prev && rating >= LIVE_GATE_ON_RATING) on = true;
+    else if (prev && rating < LIVE_GATE_OFF_RATING) on = false;
+    liveGateState.set(h.id, on);
+    return on;
+  }
+
   function dimForHotspot(h, now) {
-    const sched = h.dim_schedule;
+    if (closureReason(h, now)) return DIM_OFF;          // closed: weekend / holiday / school break
+    const live = liveEarningsGate(h);
+    if (live !== null) return live ? DIM_PEAK : DIM_OFF; // live peak: full bright, else dark
+    const sched = h.dim_schedule;                        // fallback: static clock schedule
     if (!sched) return DIM_PEAK;
-    if (closureReason(h, now)) return DIM_OFF;        // closed: weekend / holiday / school break
     if (hourInRanges(now.hour, sched.peak)) return DIM_PEAK;
     if (hourInRanges(now.hour, sched.off)) return DIM_OFF;
     return DIM_MEDIUM;
   }
 
-  // True when "now" is inside this hotspot's prime window — the tightest
-  // "best time to be near it" window (a subset of peak). Drives the
-  // pulsing ring at the flag's pole base and the popup's "Prime time"
-  // chip. A closed flag (weekend / holiday / school break) never pulses.
+  // True when this hotspot should reveal its buildings + pulse right now.
+  // Primary trigger is the live earnings-peak gate (the building's zone at
+  // indigo+, with hysteresis); the static "prime" window is the fallback
+  // used only when no live rating is available. A closed flag (weekend /
+  // holiday / school break) never reveals, regardless of the zone score —
+  // so an unrelated zone peak can't light up a building that isn't
+  // generating trips.
   function primeForHotspot(h, now) {
+    if (closureReason(h, now)) return false;
+    const live = liveEarningsGate(h);
+    if (live !== null) return live;
     const sched = h.dim_schedule;
     if (!sched) return false;
-    if (closureReason(h, now)) return false;
     return hourInRanges(now.hour, sched.prime);
   }
 
