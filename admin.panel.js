@@ -103,6 +103,49 @@
     if (!copied) { try { window.prompt('Copy your access token:', token); } catch (_) {} }
   }
 
+  // Admin-only: rotate (invalidate + replace) this admin's access token in one
+  // click. After sharing a token, this makes the shared copy stop working
+  // immediately; the app keeps running because the fresh token is saved to
+  // localStorage and applied to the live in-memory session in place (no logout).
+  async function rotateAccessToken() {
+    if (!isAdmin()) return;
+    const btn = root && root.querySelector('#adminPanelRotateToken');
+    const original = btn ? btn.textContent : '';
+    const flash = (text) => {
+      if (!btn) return;
+      btn.disabled = false;
+      btn.textContent = text;
+      setTimeout(() => { btn.textContent = original; }, 2200);
+    };
+    if (!state.token) { flash('⚠️ Not signed in'); return; }
+    if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
+      const ok = window.confirm('Rotate your access token?\n\nAny copy you shared will stop working immediately. This device stays signed in.');
+      if (!ok) return;
+    }
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Rotating…'; }
+    try {
+      const res = await fetch(`${resolveBackupApiBase()}/me/rotate_token`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${state.token}` },
+      });
+      if (!res.ok) {
+        let detail = `Rotate failed (${res.status})`;
+        try { const j = await res.json(); detail = j?.detail || detail; } catch (_) {}
+        throw new Error(detail);
+      }
+      const data = await res.json();
+      const next = String(data?.token || '').trim();
+      if (!next) throw new Error('No token returned');
+      // Swap the new token in everywhere so the session continues seamlessly.
+      state.token = next;
+      try { localStorage.setItem('community_token_v1', next); } catch (_) {}
+      try { window.TlcCommunityInternals?.setCommunityTokenState?.(next); } catch (_) {}
+      flash('✅ Token rotated');
+    } catch (e) {
+      flash('⚠️ ' + ((e && e.message) || 'Failed'));
+    }
+  }
+
   // Owner-only: download every user's pickup trips as a ZIP (CSV + JSON) for an
   // external backup that survives a database reset.
   async function downloadAllTrips() {
@@ -370,6 +413,7 @@
             <input type="file" id="adminPanelRestoreInput" accept=".zip,.json,application/zip,application/json" hidden>
             <button type="button" id="adminPanelStats" class="adminBtn" hidden>📊 Export Stats</button>
             <button type="button" id="adminPanelCopyToken" class="adminBtn" hidden>🔑 Copy Access Token</button>
+            <button type="button" id="adminPanelRotateToken" class="adminBtn" hidden>🔄 Rotate Token</button>
             <button type="button" id="adminPanelRefresh" class="adminBtn">Refresh</button>
             <button type="button" id="adminPanelClose" class="adminBtn">Close</button>
           </div>
@@ -394,6 +438,7 @@
     root.querySelector('#adminPanelBackup')?.addEventListener('click', () => downloadAllTrips());
     root.querySelector('#adminPanelStats')?.addEventListener('click', () => openStatsExportModal());
     root.querySelector('#adminPanelCopyToken')?.addEventListener('click', () => copyAccessToken());
+    root.querySelector('#adminPanelRotateToken')?.addEventListener('click', () => rotateAccessToken());
     const restoreInput = root.querySelector('#adminPanelRestoreInput');
     root.querySelector('#adminPanelRestore')?.addEventListener('click', () => {
       if (!isAccountOwner()) return;
@@ -623,6 +668,8 @@
     if (statsBtn) statsBtn.hidden = !isAccountOwner();
     const tokenBtn = root && root.querySelector('#adminPanelCopyToken');
     if (tokenBtn) tokenBtn.hidden = !isAdmin();
+    const rotateBtn = root && root.querySelector('#adminPanelRotateToken');
+    if (rotateBtn) rotateBtn.hidden = !isAdmin();
     if (!show && state.isOpen) close();
   }
 
