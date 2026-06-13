@@ -59,6 +59,50 @@
     return DEFAULT_API_BASE;
   }
 
+  // Admin-only: copy this admin's own Bearer access token to the clipboard so it
+  // can authenticate API calls (e.g. pulling live zone data) from a tool or
+  // another session. It's the same token the app already sends as
+  // `Authorization: Bearer ...` -- the admin's own credential on their own
+  // device. Treat it as a secret; rotate (re-login / change password) after use.
+  async function copyAccessToken() {
+    if (!isAdmin()) return;
+    const btn = root && root.querySelector('#adminPanelCopyToken');
+    const original = btn ? btn.textContent : '';
+    const token = String(state.token || '').trim();
+    const flash = (text) => {
+      if (!btn) return;
+      btn.textContent = text;
+      setTimeout(() => { btn.textContent = original; }, 1800);
+    };
+    if (!token) { flash('⚠️ No token'); return; }
+    let copied = false;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(token);
+        copied = true;
+      }
+    } catch (_) { /* fall through to manual fallback */ }
+    if (!copied) {
+      // Fallback for contexts without the async clipboard API (some iOS Safari):
+      // a hidden textarea + execCommand('copy').
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = token;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.top = '-1000px';
+        document.body.appendChild(ta);
+        ta.select();
+        ta.setSelectionRange(0, token.length);
+        copied = document.execCommand('copy');
+        document.body.removeChild(ta);
+      } catch (_) { copied = false; }
+    }
+    flash(copied ? '✅ Copied' : '⚠️ Copy failed');
+    // Last resort: surface it so the admin can copy it by hand.
+    if (!copied) { try { window.prompt('Copy your access token:', token); } catch (_) {} }
+  }
+
   // Owner-only: download every user's pickup trips as a ZIP (CSV + JSON) for an
   // external backup that survives a database reset.
   async function downloadAllTrips() {
@@ -325,6 +369,7 @@
             <button type="button" id="adminPanelRestore" class="adminBtn" hidden>♻️ Restore</button>
             <input type="file" id="adminPanelRestoreInput" accept=".zip,.json,application/zip,application/json" hidden>
             <button type="button" id="adminPanelStats" class="adminBtn" hidden>📊 Export Stats</button>
+            <button type="button" id="adminPanelCopyToken" class="adminBtn" hidden>🔑 Copy Access Token</button>
             <button type="button" id="adminPanelRefresh" class="adminBtn">Refresh</button>
             <button type="button" id="adminPanelClose" class="adminBtn">Close</button>
           </div>
@@ -348,6 +393,7 @@
     root.querySelector('#adminPanelRefresh')?.addEventListener('click', () => refreshAll());
     root.querySelector('#adminPanelBackup')?.addEventListener('click', () => downloadAllTrips());
     root.querySelector('#adminPanelStats')?.addEventListener('click', () => openStatsExportModal());
+    root.querySelector('#adminPanelCopyToken')?.addEventListener('click', () => copyAccessToken());
     const restoreInput = root.querySelector('#adminPanelRestoreInput');
     root.querySelector('#adminPanelRestore')?.addEventListener('click', () => {
       if (!isAccountOwner()) return;
@@ -575,6 +621,8 @@
     if (restoreBtn) restoreBtn.hidden = !isAccountOwner();
     const statsBtn = root && root.querySelector('#adminPanelStats');
     if (statsBtn) statsBtn.hidden = !isAccountOwner();
+    const tokenBtn = root && root.querySelector('#adminPanelCopyToken');
+    if (tokenBtn) tokenBtn.hidden = !isAdmin();
     if (!show && state.isOpen) close();
   }
 
