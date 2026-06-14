@@ -1350,8 +1350,20 @@
     tourist: "Visitors hopping between sights through the day.",
   };
 
+  // Clean display label per category — the internal keys like "hotel_luxury"
+  // read wrong for the budget/mid hotels that share that category.
+  const CATEGORY_LABEL = {
+    airport: "Airport", hospital: "Hospital", hotel_luxury: "Hotel",
+    transit_hub: "Transit hub", corporate: "Office building",
+    private_school: "School", private_club: "Private club",
+    luxury_condo: "Residential building", luxury_shopping: "Shopping / dining",
+    performance: "Venue", stadium: "Stadium", convention: "Convention center",
+    tourist: "Attraction",
+  };
+
   function buildingPopupHtml(props) {
     const cat = String(props.category || "");
+    const label = CATEGORY_LABEL[cat] || cat.replace(/_/g, " ");
     const why = (props.why && String(props.why)) || WHY_BY_CATEGORY[cat] || "";
     const whyRow = why
       ? `<div class="lth-popup-row"><b>Why it generates rides</b><div>${escapeHtml(why)}</div></div>`
@@ -1361,7 +1373,7 @@
         <span class="lth-popup-bldg-icon">●</span>
         <div>
           <div class="lth-popup-title">${escapeHtml(props.name)}</div>
-          <div class="lth-popup-sub">${escapeHtml(props.category).replace(/_/g, " ")}</div>
+          <div class="lth-popup-sub">${escapeHtml(label)}</div>
         </div>
       </div>
       <div class="lth-popup-row"><b>Address</b><div>${escapeHtml(props.address)}</div></div>
