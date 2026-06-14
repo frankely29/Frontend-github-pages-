@@ -143,6 +143,11 @@
   let pulseActive = false;          // is the pulse animation loop running
   let pulseRAF = null;              // requestAnimationFrame handle
   let pulseLastPaint = 0;           // last frame ts we pushed paint updates
+  // Rotating pulse: instead of one static pulse at each cluster's centroid,
+  // the single pulse hops to the next member building each ring cycle, so
+  // every building in the cluster gets a turn without crowding the map.
+  let pulseRotation = 0;            // advances once per completed ring cycle
+  let pulsePrevPhase = 0;           // last cycle phase (0..1), to detect the wrap
   // Closure calendar served by the backend (federal holidays + school
   // recesses). Used to dark/de-pulse weekday-only + seasonal flags by date.
   let calendar = { holidays: [], seasonal_closures: {} };
@@ -1020,10 +1025,17 @@
     const features = [];
     for (const h of hotspots) {
       if (!primeForHotspot(h, now)) continue;
+      // Rotate the single pulse through the cluster's member buildings so
+      // each one gets a turn (advances every ring cycle), rather than always
+      // sitting on the centroid. Falls back to the centroid if no members.
+      const mems = Array.isArray(h.members) ? h.members : [];
+      const mem = mems.length ? mems[pulseRotation % mems.length] : null;
+      const lng = (mem && Number.isFinite(mem.lng)) ? mem.lng : h.lng;
+      const lat = (mem && Number.isFinite(mem.lat)) ? mem.lat : h.lat;
       features.push({
         type: "Feature",
-        properties: { hotspot_id: h.id },
-        geometry: { type: "Point", coordinates: [h.lng, h.lat] },
+        properties: { hotspot_id: h.id, member_name: mem ? mem.name : "" },
+        geometry: { type: "Point", coordinates: [lng, lat] },
       });
     }
     return { type: "FeatureCollection", features };
@@ -1068,6 +1080,14 @@
       pulseLastPaint = ts;
       const zScale = flagZoomScale(mapRef?.getZoom?.());
       const t = (ts % PULSE_PERIOD_MS) / PULSE_PERIOD_MS; // 0..1
+      // When a ring cycle wraps, hop the pulse to each cluster's next member
+      // building so the beacon rotates through them all.
+      if (t < pulsePrevPhase) {
+        pulseRotation = (pulseRotation + 1) % 100000;
+        const psrc = mapRef?.getSource?.(PULSE_SOURCE_ID);
+        if (psrc?.setData) { try { psrc.setData(pulseGeoJSON(nycHourAndDay())); } catch (_) {} }
+      }
+      pulsePrevPhase = t;
       setRing(PULSE_RING1_LAYER_ID, t, zScale);
       if (mapRef?.getLayer?.(PULSE_GLOW_LAYER_ID)) {
         // Gentle breathing on the steady glow.
@@ -1311,17 +1331,54 @@
     `;
   }
 
+  // Per-category "why it generates rides" — the reasoning shown in a
+  // building's popup alongside its best hours. Used as a fallback when the
+  // backend member doesn't carry its own `why`.
+  const WHY_BY_CATEGORY = {
+    airport: "Arrivals stream out all day needing rides into the city — heaviest at the morning and evening flight banks.",
+    hospital: "Open 24/7: discharges, ER visits and shift changes throw rides around the clock, with discharges clustering midday.",
+    hotel_luxury: "Guests check out toward airports, stations and meetings — the morning checkout window is the big one.",
+    transit_hub: "Travelers finishing the train or bus leg need the last mile, concentrated at rush hour.",
+    corporate: "Office workers leaving for home or meetings — end-of-day is busiest, especially Thursday and Friday.",
+    private_school: "Parents and staff at drop-off and pickup — tight weekday windows, nothing on weekends or over the summer.",
+    private_club: "Members heading out after lunch and dinner.",
+    luxury_condo: "Residents leaving for work in the morning.",
+    luxury_shopping: "Shoppers leaving with bags want a ride home — busiest afternoons, peak weekends.",
+    performance: "The audience empties out all at once when the show lets out.",
+    stadium: "Fans leave en masse when the game or event ends.",
+    convention: "Attendees come and go through the day while an event is running.",
+    tourist: "Visitors hopping between sights through the day.",
+  };
+
+  // Clean display label per category — the internal keys like "hotel_luxury"
+  // read wrong for the budget/mid hotels that share that category.
+  const CATEGORY_LABEL = {
+    airport: "Airport", hospital: "Hospital", hotel_luxury: "Hotel",
+    transit_hub: "Transit hub", corporate: "Office building",
+    private_school: "School", private_club: "Private club",
+    luxury_condo: "Residential building", luxury_shopping: "Shopping / dining",
+    performance: "Venue", stadium: "Stadium", convention: "Convention center",
+    tourist: "Attraction",
+  };
+
   function buildingPopupHtml(props) {
+    const cat = String(props.category || "");
+    const label = CATEGORY_LABEL[cat] || cat.replace(/_/g, " ");
+    const why = (props.why && String(props.why)) || WHY_BY_CATEGORY[cat] || "";
+    const whyRow = why
+      ? `<div class="lth-popup-row"><b>Why it generates rides</b><div>${escapeHtml(why)}</div></div>`
+      : "";
     return `
       <div class="lth-popup-header">
         <span class="lth-popup-bldg-icon">●</span>
         <div>
           <div class="lth-popup-title">${escapeHtml(props.name)}</div>
-          <div class="lth-popup-sub">${escapeHtml(props.category).replace(/_/g, " ")}</div>
+          <div class="lth-popup-sub">${escapeHtml(label)}</div>
         </div>
       </div>
       <div class="lth-popup-row"><b>Address</b><div>${escapeHtml(props.address)}</div></div>
       <div class="lth-popup-row"><b>Best hours</b><div>${escapeHtml(props.best_hours)}</div></div>
+      ${whyRow}
     `;
   }
 
