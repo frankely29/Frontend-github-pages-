@@ -2701,13 +2701,12 @@
   }
 
   function buildServerPrimaryLine(guidance) {
-    const tz = guidance.targetZone;
-    let head = mapServerActionLabel(guidance.actionCode);
-    if (guidance.actionCode === "MOVE_NEARBY" && tz && tz.name) {
-      head = `Move to ${tz.name}` + (tz.etaMinutes ? ` (~${Math.round(tz.etaMinutes)} min)` : "");
-    }
+    // The backend message is already a complete directive ("Go to X (~N min)" /
+    // "Set up at X; busy now" / "Stay in Z — it's working") with the safety and
+    // trap tips folded in. Use it as-is — prepending an action verb just
+    // doubled the language ("Stay here • Stay in Sunnyside").
     const msg = String(guidance.message || "").trim();
-    return msg ? `${head} • ${msg}` : head;
+    return msg || mapServerActionLabel(guidance.actionCode);
   }
 
   function buildAssistantPrimaryLine() {
@@ -2843,6 +2842,14 @@
   }
 
   function buildAssistantSecondaryLine() {
+    // When the server brain drives the primary line, its message is already a
+    // complete directive (with safety/trap folded in) — don't also render a
+    // local tier description, which is what caused the repetition.
+    const _srvSecondary = activeServerGuidance();
+    if (_srvSecondary && _srvSecondary.message && !(state.trapModeActive && state.trapNeedsNearbyEscape)) {
+      state.lastGuidanceSecondaryLine = "";
+      return "";
+    }
     // The PRIMARY line already says "Stay • {tier label}". To avoid double
     // language ("Stay • Decent area for now" + "Stay in Middle Village for
     // now"), the secondary line should DESCRIBE the zone instead of
