@@ -2071,6 +2071,10 @@
         name: String(targetZone.name || targetZone.zone_name || targetZone.zoneName || "").trim(),
         centerLat: safeNum(targetZone.center_lat ?? targetZone.centerLat ?? targetZone.lat),
         centerLng: safeNum(targetZone.center_lng ?? targetZone.centerLng ?? targetZone.lng),
+        etaMinutes: safeNum(targetZone.eta_minutes),
+        rating: safeNum(targetZone.rating),
+        ratingNow: safeNum(targetZone.rating_now),
+        distanceMiles: safeNum(targetZone.distance_miles),
       } : null,
       triplessMinutes: safeNum(payload.tripless_minutes),
       stationaryMinutes: safeNum(payload.stationary_minutes),
@@ -2078,6 +2082,23 @@
       dispatchUncertainty: safeNum(payload.dispatch_uncertainty),
       moveCooldownUntilTs: safeNum(payload.move_cooldown_until_unix),
       holdUntilTs: safeNum(payload.hold_until_unix),
+      // Phase-3 brain fields (the message already folds these in; kept here
+      // so the UI can also surface them structurally).
+      safetyElevatedRisk: !!payload.safety_elevated_risk,
+      safetyAdvice: String(payload.safety_advice || "").trim() || null,
+      safetyMinRiderRating: safeNum(payload.safety_min_rider_rating),
+      trapZone: !!payload.trap_zone,
+      offlineUntilArrival: !!payload.offline_until_arrival,
+      trapAdvice: String(payload.trap_advice || "").trim() || null,
+      hotspotHint: (payload.hotspot_hint && typeof payload.hotspot_hint === "object") ? {
+        label: String(payload.hotspot_hint.label || "").trim() || null,
+        bestHours: String(payload.hotspot_hint.best_hours || "").trim() || null,
+        primeNow: !!payload.hotspot_hint.prime_now,
+        position: Array.isArray(payload.hotspot_hint.position) ? {
+          lat: safeNum(payload.hotspot_hint.position[0]),
+          lng: safeNum(payload.hotspot_hint.position[1]),
+        } : null,
+      } : null,
     };
   }
 
@@ -2670,7 +2691,42 @@
     };
   }
 
+  function mapServerActionLabel(code) {
+    return ({
+      HOLD: "Stay here",
+      MOVE_NEARBY: "Move",
+      MICRO_REPOSITION: "Reposition",
+      WAIT_DISPATCH: "Wait for dispatch",
+    })[code] || "Guidance";
+  }
+
+  function buildServerPrimaryLine(guidance) {
+    const tz = guidance.targetZone;
+    let head = mapServerActionLabel(guidance.actionCode);
+    if (guidance.actionCode === "MOVE_NEARBY" && tz && tz.name) {
+      head = `Move to ${tz.name}` + (tz.etaMinutes ? ` (~${Math.round(tz.etaMinutes)} min)` : "");
+    }
+    const msg = String(guidance.message || "").trim();
+    return msg ? `${head} • ${msg}` : head;
+  }
+
   function buildAssistantPrimaryLine() {
+    // The server brain holds the whole board (arrival-time forecast, travel
+    // cost, safety, trap, best spot+hours) and its message already folds those
+    // in — so prefer it when fresh. Local trap-escape is a time-critical UX
+    // state, so let it win; otherwise fall back to local when no fresh server.
+    const server = activeServerGuidance();
+    const localTrapOverride = state.trapModeActive && state.trapNeedsNearbyEscape;
+    if (server && server.message && !localTrapOverride) {
+      const kind = (server.actionCode === "MOVE_NEARBY" || server.actionCode === "MICRO_REPOSITION")
+        ? "move" : (server.actionCode === "HOLD" ? "stay" : "monitor");
+      const line = buildServerPrimaryLine(server);
+      state.lastGuidancePrimaryLine = line;
+      state.lastGuidancePrimarySeverity = decisionSeverity({ kind, line });
+      if (kind === "stay") state.lastStayMessageAtTs = Date.now();
+      if (kind === "move") state.lastMoveMessageAtTs = Date.now();
+      return line;
+    }
     const primary = honestlyMatchPrimaryDecisionToRating(derivePrimaryDriverDecision());
     state.lastGuidancePrimaryLine = primary?.line || "";
     state.lastGuidancePrimarySeverity = decisionSeverity(primary);
