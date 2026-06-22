@@ -498,11 +498,28 @@
     };
   }
 
+  // Anchor the guidance location against GPS jitter: while the driver stays
+  // within ~140m of the last anchor we keep using it, so a stationary driver
+  // keeps ONE stable recommendation instead of re-fetching (and flip-flopping)
+  // every time the phone's GPS wobbles a few meters or nudges a zone boundary.
+  let _guidanceLocAnchor = null;
+  function stableGuidanceLatLng(lat, lng) {
+    const a = _guidanceLocAnchor;
+    if (a) {
+      const dLat = (lat - a.lat) * 111320;
+      const dLng = (lng - a.lng) * 111320 * Math.cos((lat * Math.PI) / 180);
+      if (Math.sqrt(dLat * dLat + dLng * dLng) < 140) return a;
+    }
+    _guidanceLocAnchor = { lat, lng };
+    return _guidanceLocAnchor;
+  }
+
   function buildGuidanceCacheKey(frameTime, userLocation, modeFlags) {
     if (!frameTime) return "";
-    const lat = safeNum(userLocation?.lat);
-    const lng = safeNum(userLocation?.lng);
-    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return "";
+    const rawLat = safeNum(userLocation?.lat);
+    const rawLng = safeNum(userLocation?.lng);
+    if (!Number.isFinite(rawLat) || !Number.isFinite(rawLng)) return "";
+    const { lat, lng } = stableGuidanceLatLng(rawLat, rawLng);
     const flags = modeFlags || {};
     return [
       frameTime,
