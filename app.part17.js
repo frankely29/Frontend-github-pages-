@@ -495,6 +495,8 @@
       bronxWashHeightsMode: !!flags.bronxWashHeightsMode,
       queensMode: !!flags.queensMode,
       brooklynMode: !!flags.brooklynMode,
+      manhattanMode: !!flags.manhattanMode,
+      trips45plusV3Mode: !!flags.trips45plusV3Mode,
     };
   }
 
@@ -529,6 +531,8 @@
       flags.bronxWashHeightsMode ? 1 : 0,
       flags.queensMode ? 1 : 0,
       flags.brooklynMode ? 1 : 0,
+      flags.manhattanMode ? 1 : 0,
+      flags.trips45plusV3Mode ? 1 : 0,
     ].join("|");
   }
 
@@ -2176,6 +2180,8 @@
       bronx_wash_heights_mode: modeFlags?.bronxWashHeightsMode ? "1" : "0",
       queens_mode: modeFlags?.queensMode ? "1" : "0",
       brooklyn_mode: modeFlags?.brooklynMode ? "1" : "0",
+      manhattan_mode: modeFlags?.manhattanMode ? "1" : "0",
+      trips_45plus_mode: modeFlags?.trips45plusV3Mode ? "1" : "0",
     });
     const token = window.TlcCommunityInternals?.getCommunityTokenState?.() || "";
     const guidancePath = `/assistant/guidance?${params.toString()}`;
