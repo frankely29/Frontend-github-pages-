@@ -2116,7 +2116,35 @@
           lng: safeNum(payload.hotspot_hint.position[1]),
         } : null,
       } : null,
+      pickupAnchor: (payload.pickup_anchor && typeof payload.pickup_anchor === "object") ? {
+        lat: safeNum(payload.pickup_anchor.lat),
+        lng: safeNum(payload.pickup_anchor.lng),
+        label: String(payload.pickup_anchor.label || "").trim() || null,
+      } : null,
+      rideMagnet: (payload.ride_magnet && typeof payload.ride_magnet === "object") ? {
+        lat: safeNum(payload.ride_magnet.lat),
+        lng: safeNum(payload.ride_magnet.lng),
+        label: String(payload.ride_magnet.label || "").trim() || null,
+      } : null,
     };
+  }
+
+  // The precise spot the directive names (curated cluster -> live pickup corner
+  // -> transit magnet -> target-zone center), used to pre-load the nav link.
+  function guidanceNavSpot(g) {
+    if (!g) return null;
+    const cands = [
+      g.hotspotHint && g.hotspotHint.position
+        ? { lat: g.hotspotHint.position.lat, lng: g.hotspotHint.position.lng, label: g.hotspotHint.label }
+        : null,
+      g.pickupAnchor ? { lat: g.pickupAnchor.lat, lng: g.pickupAnchor.lng, label: g.pickupAnchor.label } : null,
+      g.rideMagnet ? { lat: g.rideMagnet.lat, lng: g.rideMagnet.lng, label: g.rideMagnet.label } : null,
+      g.targetZone ? { lat: g.targetZone.centerLat, lng: g.targetZone.centerLng, label: g.targetZone.name } : null,
+    ];
+    for (const c of cands) {
+      if (c && Number.isFinite(c.lat) && Number.isFinite(c.lng)) return c;
+    }
+    return null;
   }
 
   async function fetchGuidance(frame, userLocation, modeFlags) {
@@ -3254,6 +3282,13 @@
     if (state.lastAssistantRenderKey === renderKey) return;
     state.lastAssistantRenderKey = renderKey;
 
+    // Small navigation icon pre-loaded with the recommended spot — tap to get
+    // driving directions there (curated spot / pickup corner / transit hub).
+    const navSpot = guidanceNavSpot(activeServerGuidance());
+    const navBtnHtml = navSpot
+      ? `<a class="aiAssistantNavBtn" href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${navSpot.lat},${navSpot.lng}`)}&travelmode=driving" target="_blank" rel="noopener" title="${escapeHtml("Directions to " + (navSpot.label || "the spot"))}" aria-label="Navigate to the recommended spot" style="display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:9px;background:#1f8b4c;color:#fff;text-decoration:none;flex:0 0 auto;margin-left:6px;"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><path fill="currentColor" d="M2 11.5L21.5 3 13 22.5l-2.2-8.3L2 11.5z"/></svg></a>`
+      : "";
+
     dockMount.innerHTML = `
       <div class="aiAssistantWidget ${compactLane ? "aiAssistantWidget--compactLane" : ""} ${state.expanded ? "is-expanded" : ""}" id="aiAssistantWidget">
         <div class="aiAssistantMainRow">
@@ -3262,6 +3297,7 @@
             <div class="aiAssistantPrimaryText">${String(primaryLine || "").replace(/dwell/gi, "stay")}</div>
             <div class="aiAssistantSecondaryText">${String(secondaryLine || "").replace(/dwell/gi, "stay")}</div>
           </div>
+          ${navBtnHtml}
           <button class="aiAssistantExpandBtn" type="button" data-ai-action="toggle-expanded" aria-expanded="${state.expanded ? "true" : "false"}">${state.expanded ? "−" : "+"}</button>
         </div>
         ${state.expanded ? buildPanelHtml() : ""}
