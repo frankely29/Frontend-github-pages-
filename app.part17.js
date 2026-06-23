@@ -2135,6 +2135,16 @@
 
   // The precise spot the directive names (curated cluster -> live pickup corner
   // -> transit magnet -> target-zone center), used to pre-load the nav link.
+  // Every candidate is bounds-checked to the NYC metro: a single corrupted
+  // coordinate (a mis-geocoded magnet, a swapped lat/lng) must never send a
+  // driver out of the area — we'd rather drop the nav link than route to
+  // Florida. The box spans all five boroughs plus EWR, with margin.
+  function isInNycMetro(lat, lng) {
+    return Number.isFinite(lat) && Number.isFinite(lng)
+      && lat >= 40.35 && lat <= 41.10
+      && lng >= -74.40 && lng <= -73.60;
+  }
+
   function guidanceNavSpot(g) {
     if (!g) return null;
     const cands = [
@@ -2146,7 +2156,7 @@
       g.targetZone ? { lat: g.targetZone.centerLat, lng: g.targetZone.centerLng, label: g.targetZone.name } : null,
     ];
     for (const c of cands) {
-      if (c && Number.isFinite(c.lat) && Number.isFinite(c.lng)) return c;
+      if (c && isInNycMetro(c.lat, c.lng)) return c;
     }
     return null;
   }
@@ -2751,13 +2761,27 @@
     })[code] || "Guidance";
   }
 
+  // Split a complete server directive into a scannable HEADLINE (the action +
+  // its immediate why) and the supporting DETAIL (exact spot, ETA, anticipation,
+  // safety/trap tips). The card then leads with the decision instead of a wall
+  // of text. Splits at the first sentence break; if there's only one sentence
+  // the whole thing is the headline and the detail is empty.
+  function splitGuidanceMessage(msg) {
+    const full = String(msg || "").trim();
+    if (!full) return { headline: "", detail: "" };
+    const m = full.match(/^([\s\S]*?[.!?])\s+([\s\S]+)$/);
+    if (!m) return { headline: full, detail: "" };
+    return { headline: m[1].trim(), detail: m[2].trim() };
+  }
+
   function buildServerPrimaryLine(guidance) {
     // The backend message is already a complete directive ("Go to X (~N min)" /
     // "Set up at X; busy now" / "Stay in Z — it's working") with the safety and
-    // trap tips folded in. Use it as-is — prepending an action verb just
-    // doubled the language ("Stay here • Stay in Sunnyside").
+    // trap tips folded in. Lead with just its headline sentence; the rest of the
+    // directive becomes the secondary detail line (see buildAssistantSecondaryLine).
     const msg = String(guidance.message || "").trim();
-    return msg || mapServerActionLabel(guidance.actionCode);
+    if (!msg) return mapServerActionLabel(guidance.actionCode);
+    return splitGuidanceMessage(msg).headline || msg;
   }
 
   function buildAssistantPrimaryLine() {
@@ -2893,13 +2917,15 @@
   }
 
   function buildAssistantSecondaryLine() {
-    // When the server brain drives the primary line, its message is already a
-    // complete directive (with safety/trap folded in) — don't also render a
-    // local tier description, which is what caused the repetition.
+    // When the server brain drives the primary line, the headline sentence is
+    // the primary; the REST of its directive (exact spot, ETA, the upcoming-
+    // surge heads-up) becomes the secondary so the card reads as a clean
+    // headline + detail instead of one long run-on line.
     const _srvSecondary = activeServerGuidance();
     if (_srvSecondary && _srvSecondary.message && !(state.trapModeActive && state.trapNeedsNearbyEscape)) {
-      state.lastGuidanceSecondaryLine = "";
-      return "";
+      const detail = splitGuidanceMessage(_srvSecondary.message).detail;
+      state.lastGuidanceSecondaryLine = detail;
+      return detail;
     }
     // The PRIMARY line already says "Stay • {tier label}". To avoid double
     // language ("Stay • Decent area for now" + "Stay in Middle Village for
@@ -3295,18 +3321,30 @@
       ? `<a class="aiAssistantNavBtn" href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${navSpot.lat},${navSpot.lng}`)}&travelmode=driving" target="_blank" rel="noopener" title="${escapeHtml("Directions to " + (navSpot.label || "the spot"))}" aria-label="Navigate to the recommended spot" style="display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:9px;background:#1f8b4c;color:#fff;text-decoration:none;flex:0 0 auto;margin-left:6px;"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><path fill="currentColor" d="M2 11.5L21.5 3 13 22.5l-2.2-8.3L2 11.5z"/></svg></a>`
       : "";
 
+    // Lead with the action HEADLINE; show the supporting detail (spot/ETA/
+    // anticipation) only when present so the card never leaves an empty line.
+    // Both run through escapeHtml — the directive text can contain an admin-
+    // uploadable zone name, so it must never render as markup.
+    const primaryHtml = escapeHtml(String(primaryLine || "").replace(/dwell/gi, "stay"));
+    // Show the supporting detail in the full dock; keep the narrow compact lane
+    // to just the headline (the detail is still one tap away via "More info").
+    const secondaryText = String(secondaryLine || "").replace(/dwell/gi, "stay");
+    const secondaryHtml = (secondaryText && !compactLane)
+      ? `<div class="aiAssistantSecondaryText">${escapeHtml(secondaryText)}</div>`
+      : "";
+    const moreInfoLabel = state.expanded ? "Hide details ▲" : "More info ▼";
     dockMount.innerHTML = `
       <div class="aiAssistantWidget ${compactLane ? "aiAssistantWidget--compactLane" : ""} ${state.expanded ? "is-expanded" : ""}" id="aiAssistantWidget">
         <div class="aiAssistantMainRow">
           <div class="aiAssistantIconChip aiAssistantIconChip--${iconType}">${iconMarkup(iconType)}</div>
           <div class="aiAssistantMessageStack">
-            <div class="aiAssistantPrimaryText">${String(primaryLine || "").replace(/dwell/gi, "stay")}</div>
-            <div class="aiAssistantSecondaryText">${String(secondaryLine || "").replace(/dwell/gi, "stay")}</div>
+            <div class="aiAssistantPrimaryText">${primaryHtml}</div>
+            ${secondaryHtml}
           </div>
           ${navBtnHtml}
-          <button class="aiAssistantExpandBtn" type="button" data-ai-action="toggle-expanded" aria-expanded="${state.expanded ? "true" : "false"}">${state.expanded ? "−" : "+"}</button>
         </div>
         ${state.expanded ? buildPanelHtml() : ""}
+        <button class="aiAssistantMoreInfoBtn" type="button" data-ai-action="toggle-expanded" aria-expanded="${state.expanded ? "true" : "false"}">${moreInfoLabel}</button>
       </div>
     `;
     clearMessageRotationTimer();
