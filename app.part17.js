@@ -5,6 +5,10 @@
   const AI_ASSISTANT_HEARTBEAT_MS_VISIBLE = 15000;
   const AI_ASSISTANT_HEARTBEAT_MS_HIDDEN = 60000;
   const AI_ASSISTANT_PRE_STABLE_HEARTBEAT_MS = 2500;
+  // Re-fetch server guidance at least this often even when the driver is sitting
+  // in one zone, so the recommendation keeps refreshing (the brain's next-hour
+  // read shifts as the clock advances). Zone changes refresh immediately on top.
+  const AI_ASSISTANT_GUIDANCE_REFRESH_MS = 180000;
   const AI_ASSISTANT_PROPOSAL_MIN_STABLE_MS = 8000;
   const AI_ASSISTANT_PROPOSAL_MIN_HITS = 2;
   const AI_ASSISTANT_STAY_TO_MOVE_EXTRA_BUFFER = 2.5;
@@ -303,6 +307,7 @@
     guidanceLastErrorMessage: "",
     serverGuidance: null,
     serverGuidanceUpdatedAt: 0,
+    lastGuidanceFetchAt: 0,
     guidanceSource: "local",
     lastGuidanceRequestKey: "",
     lastSuccessfulGuidanceKey: "",
@@ -2161,12 +2166,15 @@
     return null;
   }
 
-  async function fetchGuidance(frame, userLocation, modeFlags) {
+  async function fetchGuidance(frame, userLocation, modeFlags, options = {}) {
+    const forceRefresh = !!options.forceRefresh;
     const frameTime = frameTimeIso(frame);
     const key = buildGuidanceCacheKey(frameTime, userLocation, modeFlags);
     state.lastGuidanceRequestKey = key;
     if (!frameTime || !key) return null;
-    if (state.guidanceCache.has(key)) {
+    // forceRefresh bypasses the cache to pull a fresh read (the periodic in-zone
+    // refresh); a normal call still serves the cached payload when present.
+    if (!forceRefresh && state.guidanceCache.has(key)) {
       state.guidanceStatus = "ready";
       state.guidanceLastErrorCode = "";
       state.guidanceLastErrorMessage = "";
@@ -2207,6 +2215,7 @@
         }
         state.guidanceCache.set(key, payload);
         trimMapCache(state.guidanceCache, 18);
+        state.lastGuidanceFetchAt = Date.now();
         state.lastSuccessfulGuidanceKey = key;
         state.lastSuccessfulGuidanceAt = Date.now();
         state.guidanceStatus = "ready";
@@ -3902,6 +3911,17 @@
         state.guidanceLastErrorMessage = "";
         state.lastSuccessfulGuidanceKey = guidanceKey;
         state.lastSuccessfulGuidanceAt = Date.now();
+        // Keep the recommendation current: pull a fresh read the moment the
+        // driver enters a new zone, and every few minutes otherwise so a
+        // stationary or slow-moving driver isn't left on a frozen line (the
+        // brain's next-hour read shifts as the clock advances). Renders the
+        // cached value now; swaps in the new one when it lands.
+        const guidanceStale = Date.now() - (state.lastGuidanceFetchAt || 0) >= AI_ASSISTANT_GUIDANCE_REFRESH_MS;
+        if ((guidanceStale || zoneChanged) && state.guidanceInFlightKey !== guidanceKey) {
+          fetchGuidance(liveFrame, state.lastUserLocation, modeFlags, { forceRefresh: true })
+            .then((payload) => { if (payload) scheduleAssistantRecompute({ reason: "guidance-refresh", urgent: false }); })
+            .catch(() => {});
+        }
       } else {
         state.guidanceStatus = "error";
         state.guidanceLastErrorCode = "malformed_cached_payload";
