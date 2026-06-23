@@ -2481,6 +2481,17 @@ html, body { height: 100%; margin: 0; padding: 0; background: #e5e5e5; }
   word-break: break-word;
 }
 .aiAssistantExpandBtn{ border:none; border-radius:10px; padding:3px 8px; font-weight:900; background: rgba(15,23,42,0.08); color:#0f172a; cursor:pointer; }
+/* Full-width "More info / Hide details" toggle pinned to the bottom of the card
+   — a clearer, more discoverable affordance than a corner +/- for revealing the
+   evidence panel (live ratings, why-this-advice, timing). */
+.aiAssistantMoreInfoBtn{
+  display:block; width:100%; margin-top:8px; padding:7px 8px;
+  border:none; border-top:1px solid rgba(15,23,42,0.08);
+  background:transparent; color:#1f8b4c; cursor:pointer;
+  font-size:12px; font-weight:800; letter-spacing:0.02em; text-align:center;
+}
+.aiAssistantMoreInfoBtn:hover{ color:#136b39; background:rgba(31,139,76,0.06); }
+.aiAssistantWidget--compactLane .aiAssistantMoreInfoBtn{ font-size:11px; padding:6px 8px; }
 .aiAssistantPanel{ margin-top:8px; width:100%; max-height:min(52vh,420px); overflow:auto; border-top:1px solid rgba(15,23,42,0.08); padding-top:8px; }
 .aiAssistantSection{ padding:6px 2px; font-size:12px; color:#0f172a; }
 .aiAssistantList{ margin:4px 0 0 14px; padding:0; }
