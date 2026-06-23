@@ -3321,17 +3321,12 @@
       ? `<a class="aiAssistantNavBtn" href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${navSpot.lat},${navSpot.lng}`)}&travelmode=driving" target="_blank" rel="noopener" title="${escapeHtml("Directions to " + (navSpot.label || "the spot"))}" aria-label="Navigate to the recommended spot" style="display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:9px;background:#1f8b4c;color:#fff;text-decoration:none;flex:0 0 auto;margin-left:6px;"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false"><path fill="currentColor" d="M2 11.5L21.5 3 13 22.5l-2.2-8.3L2 11.5z"/></svg></a>`
       : "";
 
-    // Lead with the action HEADLINE; show the supporting detail (spot/ETA/
-    // anticipation) only when present so the card never leaves an empty line.
-    // Both run through escapeHtml — the directive text can contain an admin-
-    // uploadable zone name, so it must never render as markup.
+    // Keep ONLY the most important thing on the face of the card — the action
+    // headline ("Go to DUMBO/Vinegar Hill — much busier than here"). The
+    // supporting detail (exact spot, ETA, anticipation) lives one tap away under
+    // "More info", so the card stays glanceable while driving. escapeHtml because
+    // the directive text can contain an admin-uploadable zone name.
     const primaryHtml = escapeHtml(String(primaryLine || "").replace(/dwell/gi, "stay"));
-    // Show the supporting detail in the full dock; keep the narrow compact lane
-    // to just the headline (the detail is still one tap away via "More info").
-    const secondaryText = String(secondaryLine || "").replace(/dwell/gi, "stay");
-    const secondaryHtml = (secondaryText && !compactLane)
-      ? `<div class="aiAssistantSecondaryText">${escapeHtml(secondaryText)}</div>`
-      : "";
     const moreInfoLabel = state.expanded ? "Hide details ▲" : "More info ▼";
     dockMount.innerHTML = `
       <div class="aiAssistantWidget ${compactLane ? "aiAssistantWidget--compactLane" : ""} ${state.expanded ? "is-expanded" : ""}" id="aiAssistantWidget">
@@ -3339,7 +3334,6 @@
           <div class="aiAssistantIconChip aiAssistantIconChip--${iconType}">${iconMarkup(iconType)}</div>
           <div class="aiAssistantMessageStack">
             <div class="aiAssistantPrimaryText">${primaryHtml}</div>
-            ${secondaryHtml}
           </div>
           ${navBtnHtml}
         </div>
@@ -3438,7 +3432,15 @@
     return `
       <div class="aiAssistantPanel">
         <section class="aiAssistantSection"><strong>Current area</strong><div>${escapeHtml(state.activeStableZoneName || "—")} • ${escapeHtml(state.activeStableBorough || "—")} • ${Math.round(state.visibleRating || 0)} ${escapeHtml(prettyBucket(state.visibleBucket) || "")} • ${escapeHtml(state.visibleScoreSourceLabel || "")}</div></section>
-        <section class="aiAssistantSection"><strong>Advice</strong><div>${escapeHtml(buildAssistantPrimaryLine() || "")}</div><div>${escapeHtml(buildAssistantSecondaryLine() || "")}</div></section>
+        ${(() => {
+          // The headline already sits on the card face; lead More info with the
+          // REST of the recommendation (exact spot, ETA, anticipation). Fall back
+          // to the headline only when there's no separate detail to show.
+          const detail = escapeHtml(buildAssistantSecondaryLine() || "");
+          return detail
+            ? `<section class="aiAssistantSection"><strong>Full recommendation</strong><div>${detail}</div></section>`
+            : `<section class="aiAssistantSection"><strong>Advice</strong><div>${escapeHtml(buildAssistantPrimaryLine() || "")}</div></section>`;
+        })()}
         ${evidenceSection}
         ${serverSupplementLine}
         <section class="aiAssistantSection"><strong>Countdown</strong><div>${state.countdownActive ? `Countdown active • ${Math.max(1, Math.round(state.countdownMinutesRemaining || 0))} min left` : "Countdown inactive"}</div><div>${escapeHtml(state.countdownReasonText || state.countdownHoldWindowReason || "No countdown needed.")}</div>${state.countdownActive && state.countdownTarget?.zoneName ? `<div>Target: ${escapeHtml(state.countdownTarget.zoneName)} • ${Math.round(state.countdownTarget.etaMinutes || 0)} min</div>` : ""}</section>
