@@ -3289,9 +3289,20 @@
   }
 
   function mirrorRecommendLine() {
-    if (!recommendLine) return;
     const primary = buildAssistantPrimaryLine();
     const secondary = buildAssistantSecondaryLine();
+    // Single source of truth for the recommendation. Any other UI surface that
+    // shows a recommendation (the top banner in app.part13) must read from here
+    // so they can't contradict each other — a driver was seeing two different
+    // recommendations on screen at the same time. Always published, even when
+    // recommendLine isn't mounted, so consumers stay in sync.
+    window.TlcAssistantRecommendation = {
+      primary: primary || "",
+      secondary: secondary || "",
+      source: state.guidanceSource || "local",
+      ts: Date.now(),
+    };
+    if (!recommendLine) return;
     const key = `${primary}|${secondary}`;
     if (state.lastRecommendLineKey === key) return;
     state.lastRecommendLineKey = key;

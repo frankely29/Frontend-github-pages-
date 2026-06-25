@@ -1015,6 +1015,13 @@
   }
 
   function buildHeadline() {
+    // Single source of truth: the assistant dock publishes the recommendation
+    // (server-aware, hour-aware) on window.TlcAssistantRecommendation. Mirror it
+    // here so the top banner and the dock card NEVER show different
+    // recommendations on screen at the same time. Fall back to the local action-
+    // code shape only when the assistant hasn't published a line yet.
+    const shared = (window.TlcAssistantRecommendation || null);
+    if (shared && shared.primary) return shared.primary;
     const zone = state.activeStableZoneName || "—";
     const target = state.assistantMoveTarget?.zoneName || "—";
     const actionCode = state.finalActionCode || state.actionCode;
