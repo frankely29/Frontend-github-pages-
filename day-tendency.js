@@ -227,11 +227,16 @@
     root.style.left = `${Math.round(left)}px`;
   }
 
+  // This meter is RELATIVE — how busy the zone is vs its OWN monthly usual, not
+  // an absolute busy-ness. Word the band that way ("Above usual" / "Typical" /
+  // "Below usual") so a glancing driver doesn't read "High" as "this is a busy
+  // zone, stay" when the zone is actually weak in absolute terms (IMG_4170: Bay
+  // Ridge showed "67 High" while the engine rated it ~46 and said to leave).
   function bandText(band) {
     const b = String(band || '').toLowerCase();
-    if (b === 'high') return 'High';
-    if (b === 'low') return 'Low';
-    return 'Normal';
+    if (b === 'high') return 'Above usual';
+    if (b === 'low') return 'Below usual';
+    return 'Typical';
   }
 
   function scoreToPct(score) {
@@ -528,15 +533,29 @@
     const saturationDeduction = Number.isFinite(saturationPenalty)
       ? Math.max(0, Math.min(1, saturationPenalty)) * SATURATION_TENDENCY_POINTS
       : 0;
-    const tendencyScore = clampScore100(50 + (rawVisibleScore - monthlyBenchmarkScore) - saturationDeduction);
+    let tendencyScore = clampScore100(50 + (rawVisibleScore - monthlyBenchmarkScore) - saturationDeduction);
     if (!Number.isFinite(tendencyScore)) return null;
+    // Cap when the absolute zone is weak: a below-blue zone (absolute rating < 60,
+    // the same blue floor the engine uses) must never present in the top "Above
+    // usual" region — number, bar, AND word. Otherwise a normally-dead zone that's
+    // merely busier-than-its-own-usual reads as a hot zone and contradicts both
+    // the map color and the recommendation card. Clamp just under the high band so
+    // the whole meter reads "Typical" at most; the surge is still shown (mid-bar),
+    // it just can't masquerade as an absolute hotspot.
+    const HIGH_BAND_FLOOR = 60;
+    const BLUE_FLOOR_ABSOLUTE = 60;
+    const cappedForWeakZone = Number.isFinite(rawVisibleScore) && rawVisibleScore < BLUE_FLOOR_ABSOLUTE;
+    if (cappedForWeakZone) {
+      tendencyScore = Math.min(tendencyScore, HIGH_BAND_FLOOR - 1);
+    }
     const band = tendencyScore < 40 ? 'low' : (tendencyScore >= 60 ? 'high' : 'normal');
-    const label = band === 'low' ? 'Low' : (band === 'high' ? 'High' : 'Normal');
+    const label = bandText(band);
     const benchmarkMonthLabel = getMonthLabelFromKey(benchmark?.monthKey);
     const explainBase = `Current ${Math.round(rawVisibleScore)} vs ${benchmarkMonthLabel} benchmark ${Math.round(monthlyBenchmarkScore)}`;
-    const explain = saturationDeduction >= 3
+    let explain = saturationDeduction >= 3
       ? `${explainBase} • saturation -${Math.round(saturationDeduction)}`
       : explainBase;
+    if (cappedForWeakZone) explain += ' • capped (below blue floor)';
     const sourceMode = 'frontend_visible_zone_vs_month_benchmark';
     const payload = {
       status: 'ok',
