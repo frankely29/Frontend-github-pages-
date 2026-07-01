@@ -856,16 +856,103 @@
     startFirstFixWatcher();
   }
 
-  async function refreshDayTendencyMeter({ force = false } = {}) {
-    const latLng = await getCurrentTendencyLatLng();
+  // Citywide "good night / bad night" read: this frame's citywide demand vs the
+  // typical for the SAME weekday+time this month. Served on the month_benchmark
+  // response as `day_quality`, so the meter is now a whole-city day verdict and
+  // no longer depends on GPS or the zone under the driver.
+  async function fetchCitywideDayQuality(frameTimeIso, signal) {
+    const endpoint = getMonthBenchmarkEndpoint(frameTimeIso);
+    const res = await fetch(endpoint, { method: 'GET', cache: 'no-store', headers: getDayTendencyAuthHeaders(), signal });
+    if (!res.ok) {
+      if (res.status === 402 && typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+        try { window.dispatchEvent(new CustomEvent('tlc:payment-required', { detail: { status: 402, url: endpoint } })); } catch (_) {}
+      }
+      throw new Error(`Day quality request failed (${res.status})`);
+    }
+    const payload = await res.json();
+    const dq = payload && typeof payload === 'object' ? payload.day_quality : null;
+    if (!dq || dq.status !== 'ok' || !Number.isFinite(Number(dq.score))) return null;
+    return dq;
+  }
 
-    if (!latLng) {
-      handleGpsLossState();
+  // Sum the citywide demand of the CURRENTLY RENDERED frame (the exact data the
+  // map is painted from), so the meter can never disagree with the map. Airports
+  // excluded to match the benchmark. Returns null if the frame isn't summable yet.
+  function sumCurrentFrameCitywidePickups() {
+    try {
+      const frame = window.TlcModeInternals?.getCurrentFrame?.();
+      const feats = frame?.polygons?.features;
+      if (!Array.isArray(feats) || !feats.length) return null;
+      let sum = 0;
+      let n = 0;
+      for (const f of feats) {
+        const p = (f && f.properties) || {};
+        if (p.airport_excluded) continue;
+        const pk = Number(p.pickups_now_shadow);
+        if (Number.isFinite(pk)) { sum += Math.max(0, pk); n += 1; }
+      }
+      return n > 0 ? sum : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function nightBandLabel(score) {
+    if (score < 40) return { band: 'low', label: 'Slow night' };
+    if (score >= 60) return { band: 'high', label: 'Busy night' };
+    return { band: 'normal', label: 'Normal night' };
+  }
+
+  // Recompute the read from the map's own citywide level vs the typical for this
+  // weekday+time (from the backend), so meter and map always agree. Falls back to
+  // the backend's own read only when the frame can't be summed.
+  function buildDayQualityMeterPayload(dq, mapCurrent, frameTimeLabel) {
+    const typical = Number(dq?.typical_citywide_pickups);
+    const swing = Number(dq?.full_swing_fraction) > 0 ? Number(dq.full_swing_fraction) : 0.6;
+    let score;
+    let band;
+    let label;
+    let explain;
+    if (Number.isFinite(mapCurrent) && Number.isFinite(typical) && typical > 0) {
+      const rel = (mapCurrent - typical) / typical;
+      score = Math.max(0, Math.min(100, 50 + 50 * (rel / swing)));
+      const nb = nightBandLabel(score);
+      band = nb.band;
+      label = nb.label;
+      const pct = Math.round(rel * 100);
+      const sign = pct >= 0 ? '+' : '';
+      const when = [dq?.weekday_name, dq?.time_label].filter(Boolean).join(' ') || 'a normal night like this';
+      explain = `${sign}${pct}% vs a typical ${when}`.trim();
+    } else {
+      score = clampScore100(dq?.score);
+      if (!Number.isFinite(score)) return null;
+      band = dq?.band;
+      label = String(dq?.label || '').trim() || bandText(dq?.band);
+      explain = String(dq?.explain || '').trim();
+    }
+    return {
+      status: 'ok',
+      score: Math.round(score),
+      meter_pct: Math.max(0, Math.min(1, score / 100)),
+      band,
+      label,
+      confidence: 1,
+      scope: 'citywide',
+      scope_label: 'Citywide',
+      source_mode: 'citywide_day_quality',
+      explain,
+      local_time_label: String(frameTimeLabel || '').trim(),
+    };
+  }
+
+  async function refreshDayTendencyMeter({ force = false } = {}) {
+    const frameTimeIso = getCurrentFrameTimeIso();
+    if (!frameTimeIso) {
+      // No frame selected yet; keep the meter in a light waiting state.
+      if (!STATE.hasRenderedRealPayload) applyBenchmarkWaitingState();
       return;
     }
-
-    STATE.hasInitialGpsFix = true;
-    if (!force && !movedMateriallyFromLastQuery(latLng) && STATE.lastQueryAt > 0) return;
+    if (!force && STATE.lastRequestedFrameTime === frameTimeIso && STATE.hasRenderedRealPayload) return;
 
     const requestSeq = ++STATE.requestSeq;
     STATE.activeRequestSeq = requestSeq;
@@ -877,48 +964,32 @@
     STATE.isRefreshing = true;
 
     let payload = null;
-    let localDerived = null;
-    let frameContext = null;
-    let advancedContext = null;
     let hadError = false;
 
     try {
-      STATE.lastRequestedFrameTime = getCurrentFrameTimeIso();
-      localDerived = resolveVisibleZoneScorePayload(latLng);
-      if (localDerived?.benchmarkFamily) {
-        const benchmark = await fetchMonthBenchmark({
-          familyKey: localDerived.benchmarkFamily,
-          frameTimeIso: localDerived.frameTime || STATE.lastRequestedFrameTime || null,
-          force,
-        });
-        const compared = buildBenchmarkComparedPayload(localDerived, benchmark);
-        if (compared) {
-          STATE.benchmarkFailureCount = 0;
-          STATE.lastBenchmarkFailureAt = 0;
-          payload = normalizeDayTendencyPayload(compared.payload);
-          frameContext = compared.frameContext;
-          advancedContext = compared.advancedContext;
-        }
+      STATE.lastRequestedFrameTime = frameTimeIso;
+      const dq = await fetchCitywideDayQuality(frameTimeIso, abortController.signal);
+      if (dq) {
+        STATE.benchmarkFailureCount = 0;
+        STATE.lastBenchmarkFailureAt = 0;
+        const mapCurrent = sumCurrentFrameCitywidePickups();
+        payload = normalizeDayTendencyPayload(buildDayQualityMeterPayload(dq, mapCurrent, getCurrentFrameTimeLabel()));
       }
-      STATE.lastFetchRoute = 'month_benchmark_compare';
+      STATE.lastFetchRoute = 'citywide_day_quality';
 
       if (requestSeq !== STATE.requestSeq) return;
-      STATE.lastQueryLat = latLng.lat;
-      STATE.lastQueryLng = latLng.lng;
       STATE.lastQueryAt = Date.now();
       if (payload) applyDayTendencyPayload(payload);
-      else if (localDerived) applyBenchmarkWaitingState();
-      else applyNoZoneResolvedState();
-      publishDayTendencyState({ payload, frameContext, advancedContext, route: STATE.lastFetchRoute });
+      else applyBenchmarkWaitingState();
+      publishDayTendencyState({ payload, frameContext: null, advancedContext: null, route: STATE.lastFetchRoute });
     } catch (error) {
       if (abortController.signal.aborted || requestSeq !== STATE.requestSeq) return;
       hadError = true;
       STATE.benchmarkFailureCount = Number(STATE.benchmarkFailureCount || 0) + 1;
       STATE.lastBenchmarkFailureAt = Date.now();
       publishDayTendencyState({ payload: null, frameContext: null, advancedContext: null, route: null });
-      if (STATE.benchmarkFailureCount >= 2) applyBenchmarkUnavailableState(localDerived);
-      else if (localDerived) applyBenchmarkWaitingState();
-      else applyNoZoneResolvedState();
+      if (STATE.benchmarkFailureCount >= 2) applyBenchmarkUnavailableState(null);
+      else applyBenchmarkWaitingState();
     } finally {
       if (requestSeq === STATE.activeRequestSeq) {
         STATE.isRefreshing = false;
