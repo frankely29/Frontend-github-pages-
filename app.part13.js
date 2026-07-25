@@ -16,7 +16,12 @@
   const AI_ASSISTANT_BUSY_NOW_MIN = 0.68;
   const AI_ASSISTANT_SLOW_NOW_MAX = 0.35;
   const AI_ASSISTANT_SLOW_NEXT_MAX = 0.40;
-  const AI_ASSISTANT_SHORT_TRIP_TRAP_MIN = 0.62;
+  // Short-trip pressure is a PERCENTILE RANK within the frame (median ~0.50), so
+  // a threshold near the middle labels roughly half the city a trap. Kept in step
+  // with the server's TRAP_SHORT_TRIP_PENALTY_MIN so the local fallback and the
+  // server engine agree on what "short-trip trap" means -- otherwise the wording
+  // changes depending on which engine happened to answer.
+  const AI_ASSISTANT_SHORT_TRIP_TRAP_MIN = 0.75;
   const AI_ASSISTANT_RETENTION_TRAP_MIN = 0.55;
   const AI_ASSISTANT_CONTINUATION_TRAP_MAX = 0.45;
   const AI_ASSISTANT_LONG_TRIP_FRIENDLY_MIN = 0.62;
@@ -1014,14 +1019,25 @@
     state.actionSubline = buildSubline();
   }
 
+  // The recommendation published by the assistant dock, or null when it hasn't
+  // produced one yet. EVERY recommendation-bearing part of the banner must go
+  // through this one accessor: mirroring only the headline still let the banner
+  // pair a server "Stay in X" with a locally-derived "Target: Y" row and a local
+  // subline, which is two different recommendations on screen at once. Headline,
+  // subline and target row now stand or fall together.
+  function sharedRecommendation() {
+    const shared = (window.TlcAssistantRecommendation || null);
+    return (shared && shared.primary) ? shared : null;
+  }
+
   function buildHeadline() {
     // Single source of truth: the assistant dock publishes the recommendation
     // (server-aware, hour-aware) on window.TlcAssistantRecommendation. Mirror it
     // here so the top banner and the dock card NEVER show different
     // recommendations on screen at the same time. Fall back to the local action-
     // code shape only when the assistant hasn't published a line yet.
-    const shared = (window.TlcAssistantRecommendation || null);
-    if (shared && shared.primary) return shared.primary;
+    const shared = sharedRecommendation();
+    if (shared) return shared.primary;
     const zone = state.activeStableZoneName || "—";
     const target = state.assistantMoveTarget?.zoneName || "—";
     const actionCode = state.finalActionCode || state.actionCode;
@@ -1033,6 +1049,14 @@
   }
 
   function buildSubline() {
+    // Take the detail from the SAME source as the headline. Reading local state
+    // here while the headline came from the dock is what produced contradictory
+    // pairs like "Stay in Bushwick South — red-hot and steady" above "Trap risk
+    // here. Better nearby escape in 0.8 mi." An empty shared detail is returned
+    // as empty on purpose: the dock deciding there is no detail must not be a
+    // licence to substitute a local line that disagrees with it.
+    const shared = sharedRecommendation();
+    if (shared) return shared.secondary || "";
     if (state.assistantMoveTarget && state.actionReason === "trap_escape") {
       return `Trap risk here. Better nearby escape in ${formatMiles(state.assistantMoveTarget.distanceMiles)}.`;
     }
@@ -1129,6 +1153,7 @@
     const bestSummaryTxt = buildBestNowSummary(snapshot);
     const tagsHtml = (state.assistantTags || []).slice(0, 3).map((tag) => `<span class="aiAssistTag">${tag}</span>`).join("");
     const target = state.assistantMoveTarget;
+    const sublineTxt = buildSubline();
     const canShowBorough = !!(snapshot.currentBoroughName && snapshot.currentZoneBoroughTotal);
     const boroughFallback = `<div class="aiAssistMeta">Borough rankings available after stable zone entry</div>`;
     const rankingsPanel = state.rankingsExpanded ? `
@@ -1220,8 +1245,8 @@
           <button type="button" class="aiAssistRankToggle" data-assistant-rankings-toggle="1">${state.rankingsExpanded ? "Hide rankings" : "Rankings"}</button>
         </div>
         ${tagsHtml ? `<div class="aiAssistTags">${tagsHtml}</div>` : ""}
-        ${target ? `<div class="aiAssistMeta">Target: ${target.zoneName} (${target.borough || "—"}) • ${formatMiles(target.distanceMiles)} • rating ${Math.round(target.visibleRating || 0)} • ${state.actionReason.replaceAll("_", " ")}</div>` : ""}
-        <div class="aiAssistMeta">${buildSubline()}</div>
+        ${target && !sharedRecommendation() ? `<div class="aiAssistMeta">Target: ${target.zoneName} (${target.borough || "—"}) • ${formatMiles(target.distanceMiles)} • rating ${Math.round(target.visibleRating || 0)} • ${state.actionReason.replaceAll("_", " ")}</div>` : ""}
+        ${sublineTxt ? `<div class="aiAssistMeta">${sublineTxt}</div>` : ""}
         <div class="aiAssistMeta">${bestSummaryTxt}</div>
         ${rankingsPanel}
       </div>
@@ -1263,6 +1288,19 @@
   }
 
   function applyNavDestination(actionCode, moveTarget) {
+    // Nav has to follow the SAME recommendation the driver is reading. When the
+    // dock owns the sentence, it owns the pin too: routing to a locally-chosen
+    // zone while the card says "stay" is the same contradiction as the old
+    // duplicate headline, except this one actually drives.
+    const shared = sharedRecommendation();
+    if (shared) {
+      if (shared.isMove && shared.target) {
+        window.TlcMapUiModule?.setNavDestination?.({ lat: shared.target.lat, lng: shared.target.lng });
+        return true;
+      }
+      window.TlcMapUiModule?.setNavDestination?.(null);
+      return false;
+    }
     const shouldSet = !!moveTarget && ["LEAVE_NOW", "MOVE_SOON", "STAY_BRIEFLY"].includes(actionCode);
     if (shouldSet) {
       window.TlcMapUiModule?.setNavDestination?.({ lat: moveTarget.lat, lng: moveTarget.lng });
