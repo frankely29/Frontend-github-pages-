@@ -3303,10 +3303,26 @@
     // so they can't contradict each other — a driver was seeing two different
     // recommendations on screen at the same time. Always published, even when
     // recommendLine isn't mounted, so consumers stay in sync.
+    // Publish the DESTINATION alongside the words. The banner drives the map's
+    // nav destination, and it was picking that from its own local move target —
+    // so the card could read "Stay in Bushwick South" while the map routed the
+    // driver to Williamsburg. Whoever owns the sentence has to own the pin.
+    // isMove=false on a stay/hold means "no destination", which is a real
+    // instruction to clear nav, not an absence of information.
+    const _srv = activeServerGuidance();
+    const _navSpot = _srv ? guidanceNavSpot(_srv) : null;
+    // normalizeServerGuidance maps the wire's lowercase action onto actionCode
+    // ("move_nearby" -> "MOVE_NEARBY"); there is no `action` field on the
+    // normalized object, so match on actionCode or nav silently never engages.
+    const _isMove = !!(_srv && ["MOVE_NEARBY", "MICRO_REPOSITION"].includes(String(_srv.actionCode || "").trim()));
     window.TlcAssistantRecommendation = {
       primary: primary || "",
       secondary: secondary || "",
       source: state.guidanceSource || "local",
+      isMove: _isMove,
+      target: (_isMove && _navSpot && Number.isFinite(_navSpot.lat) && Number.isFinite(_navSpot.lng))
+        ? { lat: _navSpot.lat, lng: _navSpot.lng, label: _navSpot.label || "" }
+        : null,
       ts: Date.now(),
     };
     if (!recommendLine) return;
