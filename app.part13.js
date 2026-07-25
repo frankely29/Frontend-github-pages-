@@ -16,7 +16,12 @@
   const AI_ASSISTANT_BUSY_NOW_MIN = 0.68;
   const AI_ASSISTANT_SLOW_NOW_MAX = 0.35;
   const AI_ASSISTANT_SLOW_NEXT_MAX = 0.40;
-  const AI_ASSISTANT_SHORT_TRIP_TRAP_MIN = 0.62;
+  // Short-trip pressure is a PERCENTILE RANK within the frame (median ~0.50), so
+  // a threshold near the middle labels roughly half the city a trap. Kept in step
+  // with the server's TRAP_SHORT_TRIP_PENALTY_MIN so the local fallback and the
+  // server engine agree on what "short-trip trap" means -- otherwise the wording
+  // changes depending on which engine happened to answer.
+  const AI_ASSISTANT_SHORT_TRIP_TRAP_MIN = 0.75;
   const AI_ASSISTANT_RETENTION_TRAP_MIN = 0.55;
   const AI_ASSISTANT_CONTINUATION_TRAP_MAX = 0.45;
   const AI_ASSISTANT_LONG_TRIP_FRIENDLY_MIN = 0.62;

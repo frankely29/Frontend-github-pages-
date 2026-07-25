@@ -63,6 +63,7 @@
   // glance and any future tuning has one source of truth. Each constant
   // documents which decision branch consumes it.
   const RATING_TIER_EXCELLENT            = 83;  // "excellent_zone_now" gate — green/Highest map tier
+  const RATING_TIER_VERY_GOOD            = 75;  // "very_good_zone_now" gate — purple map tier
   const RATING_TIER_GOOD_NOW             = 68;  // "good_zone_now" gate — indigo/High map tier
   const RATING_TIER_DECENT_FLOOR         = 60;  // "decent_rating_zone" gate — blue/Medium map tier
   const RATING_TIER_BELOW_AVERAGE_FLOOR  = 50;  // "below_average_now" floor — sky/Normal map tier
@@ -1492,11 +1493,13 @@
     // recommends STAY elsewhere, but it must NOT promote the LABEL — a
     // sky-tier zone that happens to be stable is still sky, not decent.
     //   Excellent  → green tier  (rating >= 83)
+    //   Very good  → purple tier (rating >= 75)
     //   Good       → indigo tier (rating >= 68)
     //   Decent     → blue tier   (rating >= 60)
     //   Below avg  → sky tier    (rating >= 50)
     //   else       → yellow / orange / red — fall through to context copy
     if (currentRating >= RATING_TIER_EXCELLENT) return { reasonCode: "excellent_zone_now", reasonText: "Excellent zone right now" };
+    if (currentRating >= RATING_TIER_VERY_GOOD) return { reasonCode: "very_good_zone_now", reasonText: "Very good zone right now" };
     if (currentRating >= RATING_TIER_GOOD_NOW) return { reasonCode: "good_zone_now", reasonText: "Good zone right now" };
     if (currentRating >= RATING_TIER_DECENT_FLOOR) return { reasonCode: "decent_rating_zone", reasonText: "Decent area for now" };
     if (currentRating >= RATING_TIER_BELOW_AVERAGE_FLOOR) return { reasonCode: "below_average_now", reasonText: "Below average right now" };
@@ -1659,6 +1662,9 @@
       if (currentRating >= RATING_TIER_EXCELLENT) {
         return { actionCode: "STAY", reasonCode: "excellent_zone_now", reasonText: "Excellent zone right now", worthMoving: false };
       }
+      if (currentRating >= RATING_TIER_VERY_GOOD) {
+        return { actionCode: "STAY", reasonCode: "very_good_zone_now", reasonText: "Very good zone right now", worthMoving: false };
+      }
       if (currentRating >= RATING_TIER_DEGRADED_GOOD) {
         return { actionCode: "STAY", reasonCode: "good_zone_now", reasonText: "Good zone right now", worthMoving: false };
       }
@@ -1792,7 +1798,7 @@
     if (state.committedActionCode !== "MONITOR") return false;
     if (!proposal || proposal.actionCode !== "STAY") return false;
     if (proposal.moveTarget) return false;
-    return ["excellent_zone_now", "good_zone_now", "decent_rating_zone", "below_average_now", "moving_not_worth_it"].includes(String(proposal.reasonCode || "").trim());
+    return ["excellent_zone_now", "very_good_zone_now", "good_zone_now", "decent_rating_zone", "below_average_now", "moving_not_worth_it"].includes(String(proposal.reasonCode || "").trim());
   }
 
   function isImmediateCountdownPromotion(proposal, nowTs) {
@@ -2301,6 +2307,7 @@
   function friendlyReasonFromCode(reasonCode, fallbackText = "") {
     const map = {
       excellent_zone_now: "Excellent zone right now",
+      very_good_zone_now: "Very good zone right now",
       good_zone_now: "Good zone right now",
       decent_rating_zone: "Decent area for now",
       below_average_now: "Below average right now",
@@ -2364,7 +2371,7 @@
     if (state.dataQualityMode !== "degraded") return false;
     if (state.finalActionCode !== "STAY") return false;
     if (state.assistantMoveTarget) return false;
-    return ["excellent_zone_now", "good_zone_now", "decent_rating_zone", "below_average_now", "moving_not_worth_it"].includes(String(state.recommendationReasonCode || "").trim());
+    return ["excellent_zone_now", "very_good_zone_now", "good_zone_now", "decent_rating_zone", "below_average_now", "moving_not_worth_it"].includes(String(state.recommendationReasonCode || "").trim());
   }
 
   function safeDegradedStayPrimaryLine() {
