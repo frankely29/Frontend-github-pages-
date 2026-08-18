@@ -232,12 +232,31 @@
 
   function handleAuthStateChanged() {
     renderTrialCountdown();
+    const meObj = (typeof window !== 'undefined') ? window.me : null;
+    const hasAnyAccess = !!(meObj?.is_admin) || hasAccess();
+
     if (visible) {
-      const meObj = (typeof window !== 'undefined') ? window.me : null;
-      const hasAnyAccess = !!(meObj?.is_admin) || hasAccess();
-      if (hasAnyAccess) {
-        hide();
-      }
+      if (hasAnyAccess) hide();
+      return;
+    }
+
+    // Show it proactively when the server has already said this account has no
+    // access, instead of waiting to catch a 402.
+    //
+    // The overlay was purely reactive: it appeared only if a gated request
+    // failed while the 'tlc:payment-required' listener happened to be
+    // registered. This module loads part-way through a sequential script chain,
+    // so a gated request that fires earlier -- or one whose failure is swallowed
+    // by a caller that doesn't re-dispatch -- leaves the driver looking at an app
+    // where nothing loads and nothing explains why.
+    //
+    // Deliberately requires an explicit has_access === false from the server, so
+    // a not-yet-loaded /me (subscription absent) can never flash a paywall at
+    // someone who is signed in and paid up.
+    const sub = getSubscriptionFromMe();
+    const serverSaysNoAccess = !!sub && sub.has_access === false;
+    if (serverSaysNoAccess && !meObj?.is_admin) {
+      show({ reason: '' });
     }
   }
 
