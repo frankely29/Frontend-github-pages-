@@ -190,6 +190,84 @@
     }
   }
 
+  let pendingRedeem = false;
+
+  function setRedeemStatus(text, kind) {
+    const el = document.querySelector('[data-paywall-redeem-status]');
+    if (!el) return;
+    if (!text) {
+      el.hidden = true;
+      el.textContent = '';
+      return;
+    }
+    el.hidden = false;
+    el.textContent = text;
+    el.classList.toggle('isError', kind === 'error');
+    el.classList.toggle('isOk', kind === 'ok');
+  }
+
+  async function redeemCode() {
+    if (pendingRedeem) return;
+    const input = document.querySelector('[data-paywall-redeem-input]');
+    const code = (input?.value || '').trim();
+    if (!code) {
+      setRedeemStatus('Enter your code first.', 'error');
+      return;
+    }
+
+    pendingRedeem = true;
+    const btn = document.querySelector('[data-paywall-redeem-btn]');
+    const originalLabel = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
+    setRedeemStatus('Checking your code…', '');
+
+    try {
+      const token = runtime?.getToken?.() || '';
+      if (!token) throw new Error('Sign in first, then redeem your code.');
+
+      await runtime.postJSON('/subscription/redeem', { code }, token);
+
+      // Re-read /me so the whole app (not just this overlay) sees the new
+      // access, then let the normal auth-state path decide to hide.
+      if (typeof window.loadMe === 'function') {
+        try { await window.loadMe(); } catch (_) {}
+      }
+      setRedeemStatus('Code accepted — you\u2019re all set.', 'ok');
+      if (input) input.value = '';
+      renderTrialCountdown();
+      if (hasAccess()) {
+        hide();
+      } else {
+        // The code was accepted but /me still reports no access. Say so rather
+        // than silently leaving the overlay up with a success message on it.
+        setRedeemStatus('Code accepted, but access has not refreshed yet. Reload the page.', 'error');
+      }
+    } catch (err) {
+      // The server's message is the useful one here -- revoked, expired,
+      // already used, not a real code -- so prefer it over a generic string.
+      const detail = err?.payload?.detail || err?.detail || err?.message;
+      setRedeemStatus(String(detail || 'That code could not be redeemed.'), 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = originalLabel || 'Redeem'; }
+      pendingRedeem = false;
+    }
+  }
+
+  function wireRedeem() {
+    const btn = document.querySelector('[data-paywall-redeem-btn]');
+    if (btn && !btn.__tlcWired) {
+      btn.addEventListener('click', (ev) => { ev.preventDefault(); redeemCode(); });
+      btn.__tlcWired = true;
+    }
+    const input = document.querySelector('[data-paywall-redeem-input]');
+    if (input && !input.__tlcWired) {
+      input.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter') { ev.preventDefault(); redeemCode(); }
+      });
+      input.__tlcWired = true;
+    }
+  }
+
   function renderTrialCountdown() {
     const el = ensureTrialCountdownEl();
     if (!el) return;
@@ -381,6 +459,7 @@
       wireCheckoutButton();
       wirePortalButton();
       wireDismissButton();
+      wireRedeem();
       renderTrialCountdown();
     };
     if (document.readyState === 'loading') {
@@ -407,6 +486,7 @@
     renderTrialCountdown,
     hasActiveSubscription,
     hasAccess,
+    redeemCode,
     getTrialInfo,
   };
 
