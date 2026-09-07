@@ -18,9 +18,28 @@
     return meObj.subscription || null;
   }
 
+  // The server is the authority on access and publishes its verdict as
+  // subscription.has_access. Re-deriving it here from a hand-written status list
+  // is what made the paywall disagree with the API: 'past_due' (still inside a
+  // paid window) and 'trialing' (a Paddle plan that opens with a trial) both
+  // grant access server-side, but neither appeared in the list -- so a driver
+  // with a working account sat behind a paywall, and post-checkout polling for
+  // one of those statuses never finished.
+  //
+  // Fall back to the status list only when has_access is absent (older payload).
+  function hasAccess() {
+    const sub = getSubscriptionFromMe();
+    if (!sub) return false;
+    if (typeof sub.has_access === 'boolean') return sub.has_access;
+    return sub.status === 'active' || sub.status === 'comp';
+  }
+
+  // Kept for the countdown pill, which asks a narrower question: is this driver
+  // on a PAID plan (so no trial pill), as opposed to having access by any means.
   function hasActiveSubscription() {
     const sub = getSubscriptionFromMe();
-    return !!(sub && (sub.status === 'active' || sub.status === 'comp'));
+    if (!sub) return false;
+    return ['active', 'comp', 'past_due', 'trialing'].indexOf(sub.status) !== -1;
   }
 
   function getTrialInfo() {
@@ -31,7 +50,11 @@
     const subDays = sub && typeof sub.days_remaining === 'number' ? sub.days_remaining : null;
 
     if (subDays !== null) {
-      const onTrial = sub.status === 'trial' || sub.status === null || sub.status === 'none';
+      // The pill is for the free signup trial, which the server reports with no
+      // subscription status at all ('none'/null). It compared against 'trial',
+      // a value the server never emits -- harmless only because every other
+      // branch happened to hide the pill anyway.
+      const onTrial = sub.status === null || sub.status === 'none';
       return { onTrial, daysRemaining: Math.max(0, subDays) };
     }
 
@@ -201,7 +224,7 @@
   function handlePaymentRequired(event) {
     const detail = event?.detail || {};
     const reason = detail?.reason || detail?.detail?.reason || '';
-    if (hasActiveSubscription()) return;
+    if (hasAccess()) return;
     const meObj = (typeof window !== 'undefined') ? window.me : null;
     if (meObj?.is_admin) return;
     show({ reason });
@@ -209,13 +232,31 @@
 
   function handleAuthStateChanged() {
     renderTrialCountdown();
+    const meObj = (typeof window !== 'undefined') ? window.me : null;
+    const hasAnyAccess = !!(meObj?.is_admin) || hasAccess();
+
     if (visible) {
-      const meObj = (typeof window !== 'undefined') ? window.me : null;
-      const sub = getSubscriptionFromMe();
-      const hasAnyAccess = !!(meObj?.is_admin) || hasActiveSubscription() || !!(sub && sub.has_access === true);
-      if (hasAnyAccess) {
-        hide();
-      }
+      if (hasAnyAccess) hide();
+      return;
+    }
+
+    // Show it proactively when the server has already said this account has no
+    // access, instead of waiting to catch a 402.
+    //
+    // The overlay was purely reactive: it appeared only if a gated request
+    // failed while the 'tlc:payment-required' listener happened to be
+    // registered. This module loads part-way through a sequential script chain,
+    // so a gated request that fires earlier -- or one whose failure is swallowed
+    // by a caller that doesn't re-dispatch -- leaves the driver looking at an app
+    // where nothing loads and nothing explains why.
+    //
+    // Deliberately requires an explicit has_access === false from the server, so
+    // a not-yet-loaded /me (subscription absent) can never flash a paywall at
+    // someone who is signed in and paid up.
+    const sub = getSubscriptionFromMe();
+    const serverSaysNoAccess = !!sub && sub.has_access === false;
+    if (serverSaysNoAccess && !meObj?.is_admin) {
+      show({ reason: '' });
     }
   }
 
@@ -252,9 +293,13 @@
         }
       };
 
+      // Poll the server's own has_access verdict. Waiting on a status
+      // allow-list meant a checkout that landed on 'trialing' or 'past_due'
+      // never cleared the overlay even though the API had already let the
+      // driver in.
       for (let i = 0; i < 5; i++) {
         await refreshMe();
-        if (hasActiveSubscription()) {
+        if (hasAccess()) {
           hide();
           return;
         }
@@ -293,8 +338,7 @@
       btn.addEventListener('click', (ev) => {
         ev.preventDefault();
         const meObj = (typeof window !== 'undefined') ? window.me : null;
-        const sub = getSubscriptionFromMe();
-        const hasAnyAccess = !!(meObj?.is_admin) || hasActiveSubscription() || !!(sub && sub.has_access === true);
+        const hasAnyAccess = !!(meObj?.is_admin) || hasAccess();
         if (hasAnyAccess) {
           hide();
         }
@@ -362,6 +406,7 @@
     openPortal,
     renderTrialCountdown,
     hasActiveSubscription,
+    hasAccess,
     getTrialInfo,
   };
 
