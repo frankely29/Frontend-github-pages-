@@ -228,6 +228,21 @@
             Manage subscription
           </button>
         </div>
+        <!-- Free-access code. Lives inside the paywall because the people who
+             have one are exactly the people looking at this overlay. -->
+        <div class="paywallRedeem">
+          <label class="paywallRedeemLabel" for="paywallRedeemInput">Have a free access code?</label>
+          <div class="paywallRedeemRow">
+            <input id="paywallRedeemInput" class="paywallRedeemInput" type="text"
+                   placeholder="JOSEO-XXXX-XXXX" autocomplete="off"
+                   autocapitalize="characters" spellcheck="false"
+                   data-paywall-redeem-input>
+            <button type="button" class="paywallBtn paywallBtnSecondary"
+                    data-paywall-redeem-btn>Redeem</button>
+          </div>
+          <div class="paywallRedeemStatus" role="status" aria-live="polite"
+               data-paywall-redeem-status hidden></div>
+        </div>
         <div class="paywallFooter">
           <span>Secure checkout by Paddle • Cancel anytime</span>
           <button type="button" class="paywallBtnDismiss" data-paywall-dismiss-btn aria-label="Close">

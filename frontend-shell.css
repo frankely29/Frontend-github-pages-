@@ -2831,3 +2831,46 @@ body.night .subscriptionStatusLabel {
 body.night .subscriptionStatusValue {
   color: #f8fafc;
 }
+
+/* Free-access code entry inside the paywall. Visually subordinate to the
+   Subscribe action: most people are here to pay, a few have a code. */
+.paywallRedeem {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(0, 0, 0, 0.12);
+}
+.paywallRedeemLabel {
+  display: block;
+  font-size: 12px;
+  opacity: 0.75;
+  margin-bottom: 6px;
+}
+.paywallRedeemRow {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+.paywallRedeemInput {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 9px 10px;
+  font-size: 14px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+  border-radius: 8px;
+  background: #fff;
+  color: #111;
+}
+.paywallRedeemInput:focus {
+  outline: 2px solid #0066ff;
+  outline-offset: 1px;
+}
+.paywallRedeemStatus {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.35;
+}
+.paywallRedeemStatus.isError { color: #c0392b; }
+.paywallRedeemStatus.isOk { color: #1e7e34; }
