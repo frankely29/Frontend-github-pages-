@@ -78,10 +78,36 @@
         params.set('include_inactive', includeInactive ? 'true' : 'false');
         return request(`/admin/access_tokens?${params.toString()}`);
       },
-      revokeAccessToken(code) {
+      revokeAccessToken(code, { withdrawAccess = false } = {}) {
+        // withdrawAccess is the destructive half: it also takes back the access
+        // everyone who redeemed this code is holding. Default false so a plain
+        // "stop this code working" never quietly cuts people off.
         return request(`/admin/access_tokens/${encodeURIComponent(code)}/revoke`, {
           method: 'POST',
+          body: { withdraw_access: !!withdrawAccess },
+        });
+      },
+      restoreAccessToken(code) {
+        return request(`/admin/access_tokens/${encodeURIComponent(code)}/restore`, {
+          method: 'POST',
           body: {},
+        });
+      },
+      listAccessTokenRedemptions(code) {
+        return request(`/admin/access_tokens/${encodeURIComponent(code)}/redemptions`);
+      },
+      revokeAccessTokenRedemption(code, userId) {
+        return request(
+          `/admin/access_tokens/${encodeURIComponent(code)}/redemptions/${encodeURIComponent(userId)}/revoke`,
+          { method: 'POST', body: {} }
+        );
+      },
+      revokeAllAccessTokens({ withdrawAccess = false } = {}) {
+        // The server requires this exact confirmation string, so a stray call
+        // cannot empty out every code that was ever issued.
+        return request('/admin/access_tokens/revoke_all', {
+          method: 'POST',
+          body: { confirm: 'REVOKE ALL', withdraw_access: !!withdrawAccess },
         });
       },
       listComps({ limit = 100, offset = 0, search = '' } = {}) {

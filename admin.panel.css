@@ -157,3 +157,29 @@
   letter-spacing: 0.05em;
   user-select: all;
 }
+
+/* Redeemer rows inside a code's "Who used it" drawer. Each row has to make one
+   thing obvious at a glance: whether "Remove access" would actually do
+   anything, which is why the no-op case shows text instead of a dead button. */
+.adminRedeemer {
+  display: grid;
+  gap: 4px;
+  padding: 8px 0;
+  border-bottom: 1px dashed rgba(15, 23, 42, 0.15);
+  font-size: 12px;
+}
+.adminRedeemer:last-child { border-bottom: 0; }
+.adminRedeemerWho { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+.adminRedeemerMeta { display: flex; flex-wrap: wrap; gap: 10px; font-size: 11px; opacity: 0.75; font-weight: 700; }
+.adminRedeemerNote { font-style: italic; }
+.adminRedeemer .adminBtn { justify-self: start; }
+
+/* The bulk revoke lives behind its own visual boundary — it is the one control
+   here that cannot be aimed at a single code. */
+.adminDangerZone {
+  border: 1px solid rgba(185, 28, 28, 0.35);
+  border-radius: 12px;
+  background: rgba(254, 226, 226, 0.35);
+  padding: 10px;
+}
+.adminDangerZone h3 { color: #991b1b; }
