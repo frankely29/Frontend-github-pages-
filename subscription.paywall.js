@@ -190,6 +190,37 @@
     }
   }
 
+  // Going from locked-out to allowed mid-session needs a reload.
+  //
+  // The app loads its map data once at startup. When that happens while the
+  // account has no access those requests fail, nothing retries them, and the map
+  // stays blank -- so granting access afterwards (redeeming a code, or paying)
+  // fixes the account but not the page the driver is looking at. They had to
+  // know to reload by hand.
+  //
+  // Guarded so it can fire at most once in a short window: if access were
+  // somehow granted and the page still failed, an ungated reload would loop and
+  // the driver could not even read the error.
+  const RELOAD_GUARD_KEY = 'tlc_access_reload_at';
+  const RELOAD_GUARD_MS = 30000;
+
+  function reloadIntoAccess() {
+    try {
+      const prev = Number(sessionStorage.getItem(RELOAD_GUARD_KEY) || 0);
+      if (prev && (Date.now() - prev) < RELOAD_GUARD_MS) return false;
+      sessionStorage.setItem(RELOAD_GUARD_KEY, String(Date.now()));
+    } catch (_) {
+      // sessionStorage can throw (private mode, blocked storage). Reloading once
+      // is still right; we just lose the loop guard.
+    }
+    try {
+      window.location.reload();
+    } catch (_) {
+      return false;
+    }
+    return true;
+  }
+
   let pendingRedeem = false;
 
   function setRedeemStatus(text, kind) {
@@ -232,11 +263,17 @@
       if (typeof window.loadMe === 'function') {
         try { await window.loadMe(); } catch (_) {}
       }
-      setRedeemStatus('Code accepted — you\u2019re all set.', 'ok');
       if (input) input.value = '';
       renderTrialCountdown();
       if (hasAccess()) {
         hide();
+        // The map failed to load while this account was locked out and will not
+        // retry on its own, so reload straight into the working app rather than
+        // leaving a blank map behind the dismissed overlay.
+        setRedeemStatus('Code accepted — loading your map…', 'ok');
+        if (!reloadIntoAccess()) {
+          setRedeemStatus('Code accepted. Reload the page to load your map.', 'ok');
+        }
       } else {
         // The code was accepted but /me still reports no access. Say so rather
         // than silently leaving the overlay up with a success message on it.
@@ -379,6 +416,10 @@
         await refreshMe();
         if (hasAccess()) {
           hide();
+          // Same reason as redeeming: the driver came back from Paddle into a
+          // page whose map requests already failed while they had no access.
+          // Hiding the overlay would reveal a blank map they paid for.
+          reloadIntoAccess();
           return;
         }
         await new Promise((resolve) => setTimeout(resolve, 1500));
