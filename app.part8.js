@@ -1045,13 +1045,29 @@ function shouldReuseVoiceRow(oldMsg, newMsg) {
       && String(oldMsg?.text || '') === String(newMsg?.text || '');
   }
 
+/**
+ * The URL an inline image should actually load.
+ *
+ * Both display sites — a 110px grid tile and a chat bubble capped at 220px —
+ * are far smaller than an 8MB original, so they load the thumbnail and leave
+ * full resolution to the full-screen viewer. A server without thumbnails sends
+ * no such URL and everything falls back to the original, unchanged.
+ *
+ * Shared so the renderers and shouldReuseImageRow cannot disagree: if a row is
+ * rendered with one URL and compared against the other, no row is ever reused
+ * and every refresh rebuilds the whole list.
+ */
+function displayImageUrlFor(message) {
+    return String(message?.imageThumbUrl || '').trim() || String(message?.imageUrl || '').trim();
+  }
+
 function shouldReuseImageRow(row, message, scope = 'public') {
     if (!row || !message) return false;
     if (!messageHasImage(message)) return false;
     return String(row.dataset.messageKey || '') === String(getVoiceMessageDomKey(message) || '')
       && String(row.dataset.messageId || '') === String(message?.id ?? '')
       && String(row.dataset.messageScope || '') === String(scope || '')
-      && String(row.dataset.imageUrl || '').trim() === String(message?.imageUrl || '').trim();
+      && String(row.dataset.imageUrl || '').trim() === displayImageUrlFor(message);
   }
 
 function escapeCssValue(value) {
@@ -3216,6 +3232,13 @@ function stopActiveVoiceRecording(scope) {
     return resolveChatAssetUrl(url);
   }
 
+  function normalizeImageThumbUrl(raw) {
+    // Servers that predate thumbnails send no such field; callers fall back to
+    // the full image, which is what happened before this existed.
+    const url = raw?.image_thumb_url || raw?.imageThumbUrl || '';
+    return resolveChatAssetUrl(url);
+  }
+
   function normalizeAudioDurationMs(raw) {
     const candidates = [raw?.audio_duration_ms, raw?.voice_duration_ms, raw?.duration_ms, raw?.audioDurationMs, raw?.voiceDurationMs, raw?.durationMs];
     for (const value of candidates) {
@@ -3270,6 +3293,7 @@ function stopActiveVoiceRecording(scope) {
       displayName,
       audioUrl,
       imageUrl,
+      imageThumbUrl: normalizeImageThumbUrl(raw),
       audioDurationMs: normalizeAudioDurationMs(raw),
       audioMimeType: normalizeAudioMimeType(raw),
       imageMimeType: normalizeImageMimeType(raw),
@@ -4308,7 +4332,11 @@ function stopActiveVoiceRecording(scope) {
       .filter((msg) => messageHasImage(msg) && String(msg?.imageUrl || '').trim())
       .map((msg) => ({
         id: msg?.id == null ? '' : String(msg.id),
+        // The viewer always shows full resolution. The thumbnail URL comes along
+        // only so a tile can still be matched to its item by URL when the
+        // message carries no id.
         imageUrl: String(msg?.imageUrl || '').trim(),
+        imageThumbUrl: String(msg?.imageThumbUrl || '').trim(),
         imageMimeType: String(msg?.imageMimeType || '').trim(),
         displayName: String(msg?.displayName || 'Driver').trim() || 'Driver',
         createdAt: msg?.createdAt || '',
@@ -4736,7 +4764,12 @@ function stopActiveVoiceRecording(scope) {
     const imageUrlText = String(imageUrl || '').trim();
     let index = -1;
     if (messageIdText) index = items.findIndex((item) => String(item.id || '') === messageIdText);
-    if (index < 0 && imageUrlText) index = items.findIndex((item) => String(item.imageUrl || '') === imageUrlText);
+    if (index < 0 && imageUrlText) {
+      // The clicked element carries whichever URL it displayed, which is the
+      // thumbnail. Match on either so an id-less message still opens.
+      index = items.findIndex((item) => String(item.imageUrl || '') === imageUrlText
+        || String(item.imageThumbUrl || '') === imageUrlText);
+    }
     if (index < 0) return;
     const wasChatOpen = typeof window.getOpenPanelKey === 'function' && window.getOpenPanelKey() === 'chat';
     chatPhotoViewerState.restoreChatDrawer = wasChatOpen;
@@ -4760,8 +4793,10 @@ function stopActiveVoiceRecording(scope) {
   }
 
   function renderChatImageCard(message, bubbleClass = 'chatBubbleOther') {
-    const rawImageUrl = String(message?.imageUrl || '').trim();
-    const cacheEntry = imageAssetCache.get(getImageAssetCacheKey(message));
+    // The bubble is capped at 220px CSS, so it loads the thumbnail. Tapping it
+    // opens the viewer, which resolves the full image by message id.
+    const rawImageUrl = displayImageUrlFor(message);
+    const cacheEntry = imageAssetCache.get(getImageAssetCacheKey({ ...message, imageUrl: rawImageUrl }));
     const initialSrc = cacheEntry?.status === 'ready' && cacheEntry?.blobUrl ? String(cacheEntry.blobUrl) : '';
     const caption = String(message?.text || '').trim();
     const scope = String(message?.scope || '').toLowerCase() === 'private' ? 'private' : 'public';
@@ -5874,11 +5909,16 @@ function stopActiveVoiceRecording(scope) {
     if (!Array.isArray(items) || !items.length) return `<div class="chatEmpty">${escapeHtml(emptyText)}</div>`;
     return `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px;">${items.map((msg) => {
       const rawImageUrl = String(msg?.imageUrl || '').trim();
-      const cacheEntry = imageAssetCache.get(getImageAssetCacheKey(msg));
+      // A 110px tile only ever needed the small version. The tile loads the
+      // thumbnail; the viewer this button opens still loads the full image.
+      // Servers without thumbnails send no such URL and fall back to the full
+      // one, which is exactly the old behaviour.
+      const tileImageUrl = String(msg?.imageThumbUrl || '').trim() || rawImageUrl;
+      const cacheEntry = imageAssetCache.get(getImageAssetCacheKey({ ...msg, imageUrl: tileImageUrl }));
       const initialSrc = cacheEntry?.status === 'ready' && cacheEntry?.blobUrl ? String(cacheEntry.blobUrl) : '';
       const label = escapeHtml(formatChatTime(msg?.createdAt) || '');
       const sender = escapeHtml(String(msg?.displayName || 'Driver').trim() || 'Driver');
-      return `<button type="button" class="chatPhotoTile" data-chat-image-viewer="1" data-message-id="${escapeHtml(String(msg?.id ?? ''))}" data-image-url="${escapeHtml(rawImageUrl)}" data-photo-scope="${escapeHtml(String(scope || 'public'))}" data-photo-source="${escapeHtml(String(source || 'photos'))}" data-photo-user-id="${escapeHtml(String(userId || ''))}" style="padding:0;border:0;background:none;cursor:pointer;"><img src="${escapeHtml(initialSrc)}" alt="Chat photo" loading="lazy" data-chat-image="1" data-message-id="${escapeHtml(String(msg?.id ?? ''))}" data-image-url="${escapeHtml(rawImageUrl)}" data-image-mime-type="${escapeHtml(String(msg?.imageMimeType || ''))}" data-created-at="${escapeHtml(String(msg?.createdAt || ''))}" style="width:100%;height:110px;object-fit:cover;border-radius:10px;display:block;" /><span style="display:block;font-size:11px;font-weight:800;opacity:.85;margin-top:3px;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${sender}</span><span style="display:block;font-size:11px;opacity:.75;margin-top:1px;text-align:left;">${label}</span></button>`;
+      return `<button type="button" class="chatPhotoTile" data-chat-image-viewer="1" data-message-id="${escapeHtml(String(msg?.id ?? ''))}" data-image-url="${escapeHtml(rawImageUrl)}" data-photo-scope="${escapeHtml(String(scope || 'public'))}" data-photo-source="${escapeHtml(String(source || 'photos'))}" data-photo-user-id="${escapeHtml(String(userId || ''))}" style="padding:0;border:0;background:none;cursor:pointer;"><img src="${escapeHtml(initialSrc)}" alt="Chat photo" loading="lazy" data-chat-image="1" data-message-id="${escapeHtml(String(msg?.id ?? ''))}" data-image-url="${escapeHtml(tileImageUrl)}" data-image-mime-type="${escapeHtml(String(msg?.imageMimeType || ''))}" data-created-at="${escapeHtml(String(msg?.createdAt || ''))}" style="width:100%;height:110px;object-fit:cover;border-radius:10px;display:block;" /><span style="display:block;font-size:11px;font-weight:800;opacity:.85;margin-top:3px;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${sender}</span><span style="display:block;font-size:11px;opacity:.75;margin-top:1px;text-align:left;">${label}</span></button>`;
     }).join('')}</div>`;
   }
 
