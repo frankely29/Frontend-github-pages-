@@ -166,6 +166,59 @@ console.log('\n-- admin.actions.js request shapes --');
   check('the phrase the UI prints is the phrase it checks',
     D.bulkConfirmAccepted(win.AdminAccessCodes.BULK_CONFIRM_PHRASE) === true);
 
+  /* -------------------------------------------------- listener lifecycle */
+
+  console.log('\n-- listener lifecycle --');
+  // The admin panel hands every tab the SAME body element, so container-level
+  // delegation that is never removed stacks another listener per visit — and a
+  // single Revoke click would raise one confirm dialog per visit.
+  {
+    const listeners = [];
+    const stubContainer = {
+      set innerHTML(_v) { /* no DOM parser here; the wiring is what's under test */ },
+      get innerHTML() { return ''; },
+      querySelector: () => null,
+      querySelectorAll: () => [],
+      contains: () => true,
+      addEventListener: (type, fn, capture) => listeners.push({ type, fn, capture, live: true }),
+      removeEventListener: (type, fn, capture) => {
+        const hit = listeners.find((l) => l.type === type && l.fn === fn && !!l.capture === !!capture && l.live);
+        if (hit) hit.live = false;
+      },
+    };
+    let cleanup = null;
+    const helpers = {
+      components: win.AdminComponents,
+      actions: {},
+      registerCleanup: (fn) => { cleanup = fn; },
+    };
+
+    win.AdminAccessCodes.renderAdminAccessCodes(stubContainer, null, helpers);
+    const delegated = listeners.filter((l) => l.type === 'click' || l.type === 'toggle');
+    eq('render attaches one delegated click and one toggle',
+      delegated.map((l) => l.type).sort(), ['click', 'toggle']);
+    check('render registers a cleanup', typeof cleanup === 'function');
+
+    cleanup();
+    check('cleanup detaches every delegated listener',
+      delegated.every((l) => !l.live),
+      JSON.stringify(delegated.map((l) => [l.type, l.live])));
+
+    // Reopening the tab after cleanup must leave exactly one of each again,
+    // not two.
+    win.AdminAccessCodes.renderAdminAccessCodes(stubContainer, null, helpers);
+    const stillLive = listeners.filter((l) => l.live && (l.type === 'click' || l.type === 'toggle'));
+    eq('a second visit leaves one of each, not two',
+      stillLive.map((l) => l.type).sort(), ['click', 'toggle']);
+
+    // And a host that offers no cleanup hook must not throw.
+    let threw = null;
+    try {
+      win.AdminAccessCodes.renderAdminAccessCodes(stubContainer, null, { components: win.AdminComponents, actions: {} });
+    } catch (e) { threw = e; }
+    check('a helpers object without registerCleanup does not throw', !threw, threw?.message);
+  }
+
   console.log(failures ? `\n${failures} check(s) FAILED` : '\nall checks passed');
   process.exit(failures ? 1 : 0);
 })();

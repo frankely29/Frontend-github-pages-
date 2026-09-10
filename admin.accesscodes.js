@@ -577,16 +577,16 @@
       restore: (btn) => doRestore(container, helpers, btn),
       'revoke-one': (btn) => doRevokeOne(container, helpers, btn),
     };
-    container.addEventListener('click', (ev) => {
+    const onClick = (ev) => {
       const btn = ev.target?.closest?.('button[data-codes-action]');
       if (!btn || !container.contains(btn)) return;
       const handler = HANDLERS[btn.dataset.codesAction];
       if (handler) handler(btn);
-    });
+    };
 
     // Redeemers are fetched when the row is opened, not for every code up
     // front: one request per code would make the list unusable at 200 codes.
-    container.addEventListener('toggle', (ev) => {
+    const onToggle = (ev) => {
       const details = ev.target;
       if (!details?.classList?.contains?.('adminRedeemers') || !details.open) return;
       const code = details.dataset.code || '';
@@ -595,7 +595,17 @@
         bodyEl.dataset.loaded = '1';
         loadRedemptions(container, helpers, code, bodyEl);
       }
-    }, true);
+    };
+
+    container.addEventListener('click', onClick);
+    container.addEventListener('toggle', onToggle, true);
+    // The panel reuses one body element for every tab, so leaving these
+    // attached would stack another pair each time the tab is reopened — and a
+    // single Revoke click would then raise one confirm per visit.
+    helpers?.registerCleanup?.(() => {
+      container.removeEventListener('click', onClick);
+      container.removeEventListener('toggle', onToggle, true);
+    });
 
     loadAndRender(container, helpers);
   }
