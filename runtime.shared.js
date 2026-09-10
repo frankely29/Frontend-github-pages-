@@ -77,6 +77,23 @@
     }
   }
 
+  // A 401 on these means "wrong credentials", not "your session died" — the
+  // caller is deliberately testing a password. Signing the user out because
+  // they fat-fingered their current password would be its own bug.
+  const CREDENTIAL_CHECK_PATHS = /\/(auth\/login|auth\/signup|me\/change_password)(\?|$)/i;
+
+  function isCredentialCheckUrl(url) {
+    return CREDENTIAL_CHECK_PATHS.test(String(url || ''));
+  }
+
+  function sentAuthHeader(headers) {
+    if (!headers) return false;
+    if (typeof headers.get === 'function') return !!headers.get('Authorization');
+    return Object.keys(headers).some(
+      (k) => k.toLowerCase() === 'authorization' && String(headers[k] || '').trim()
+    );
+  }
+
   async function fetchText(urlOrPath, opts = {}) {
     const controller = opts.signal ? null : new AbortController();
     const timeoutMs = Number(opts.timeoutMs || 0);
@@ -120,6 +137,29 @@
             }
           } catch (_) {
             // Never let event dispatch break the original error flow.
+          }
+        }
+
+        // A 401 on a call that DID carry a token means the token is no longer
+        // good (30-day expiry, rotated, or the account is gone). Without this
+        // signal the map just renders empty behind an honest-looking "data
+        // temporarily unavailable" message and there is no way back in short
+        // of clearing site data — the paywall's 402 path has always had this,
+        // the auth path never did.
+        if (res.status === 401 && sentAuthHeader(fetchOptions.headers) && !isCredentialCheckUrl(absoluteUrl)) {
+          try {
+            if (typeof window !== 'undefined' && window.dispatchEvent) {
+              window.dispatchEvent(new CustomEvent('tlc:auth-expired', {
+                detail: {
+                  status: 401,
+                  url: absoluteUrl,
+                  payload,
+                  detail: payload?.detail || null,
+                },
+              }));
+            }
+          } catch (_) {
+            // Same rule as above: the original error must still propagate.
           }
         }
 

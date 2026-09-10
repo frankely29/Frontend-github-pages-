@@ -3081,6 +3081,20 @@ function clearAuth() {
   syncAdminPortalSession();
 }
 
+// Any authenticated request coming back 401 means the stored token is dead.
+// Every feed hits this at once when it happens, so lean on authHeaderOK() as
+// the guard: the first event clears the token and the rest become no-ops.
+if (typeof window !== "undefined") {
+  window.addEventListener("tlc:auth-expired", (ev) => {
+    try {
+      if (!authHeaderOK()) return;
+      console.warn("[auth] token rejected, signing out:", ev?.detail?.url || "(unknown url)");
+      clearAuth();
+      setAuthUI(false, "Session expired — sign in again.");
+    } catch (_) {}
+  });
+}
+
 function requireCommunityToken(actionLabel = "perform this action") {
   if (authHeaderOK()) return true;
   setAuthUI(false, `Sign in to ${actionLabel}.`);
