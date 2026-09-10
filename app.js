@@ -523,6 +523,19 @@ async function fetchJSON(url, opts = {}) {
         window.dispatchEvent(new CustomEvent("tlc:payment-required", { detail: { status: 402, url, payload: parsed } }));
       } catch (_) {}
     }
+    // Mirror of the runtime.shared.js signal, for the fallback path where
+    // FrontendRuntime isn't loaded. Same carve-out: a 401 while checking a
+    // password is a wrong password, not a dead session.
+    if (
+      res.status === 401
+      && !/\/(auth\/login|auth\/signup|me\/change_password)(\?|$)/i.test(String(url || ""))
+      && Object.keys(fetchOpts.headers || {}).some((k) => k.toLowerCase() === "authorization")
+      && typeof window !== "undefined" && typeof window.dispatchEvent === "function"
+    ) {
+      try {
+        window.dispatchEvent(new CustomEvent("tlc:auth-expired", { detail: { status: 401, url, payload: parsed } }));
+      } catch (_) {}
+    }
     const err = new Error(`${res.status} ${res.statusText} @ ${url} :: ${text.slice(0, 120)}`);
     err.status = res.status;
     err.url = url;

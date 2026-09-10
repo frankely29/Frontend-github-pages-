@@ -32,3 +32,6 @@ jobs:
           done
           echo "Checked $count JS file(s)."
           exit $fail
+
+      - name: Behaviour tests
+        run: node tests/run.js
