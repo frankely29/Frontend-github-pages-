@@ -109,3 +109,51 @@
   .adminLoadToggleRow{ align-items:flex-start; }
   .adminLoadCheckboxGrid{ grid-template-columns:repeat(1,minmax(0,1fr)); }
 }
+
+/* --- Access codes ------------------------------------------------------- */
+.adminCodesForm {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px 12px;
+  align-items: end;
+  margin-bottom: 10px;
+}
+.adminField {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+.adminField > span { opacity: 0.75; }
+.adminFieldWide { grid-column: 1 / -1; }
+.adminCheckRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  opacity: 0.85;
+}
+.adminInput:disabled { opacity: 0.45; }
+
+/* The freshly minted code is the whole point of the screen — it should be the
+   one thing that is unmistakable, and selectable when clipboard access fails. */
+.adminCodeResult {
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid rgba(0, 176, 80, 0.45);
+  border-radius: 10px;
+  background: rgba(0, 176, 80, 0.08);
+}
+.adminCodeBig {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 22px;
+  letter-spacing: 0.08em;
+  margin: 6px 0 8px;
+  user-select: all;
+  word-break: break-all;
+}
+.adminCodeValue {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.05em;
+  user-select: all;
+}

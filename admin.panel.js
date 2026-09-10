@@ -22,6 +22,7 @@
     { key: 'system', label: 'System' },
     { key: 'trips', label: 'Trips' },
     { key: 'comps', label: 'Comps' },
+    { key: 'codes', label: 'Access codes' },
     { key: 'tests', label: 'Tests' },
   ];
 
@@ -569,6 +570,7 @@
       }
       if (key === 'tests') payload = {};
       if (key === 'comps') payload = {};
+      if (key === 'codes') payload = {};
 
       state.tabCache[key] = payload;
       paintTab(key, payload);
@@ -603,6 +605,7 @@
     if (key === 'system') return window.AdminSystem?.renderAdminSystem ? window.AdminSystem.renderAdminSystem(bodyEl, payload, h) : setBodyError('Admin system module failed to load.');
     if (key === 'trips') return window.AdminTrips?.renderAdminTrips ? window.AdminTrips.renderAdminTrips(bodyEl, payload, h) : setBodyError('Admin trips module failed to load.');
     if (key === 'comps') return window.AdminComps?.renderAdminComps ? window.AdminComps.renderAdminComps(bodyEl, payload, h) : setBodyError('Admin comps module failed to load.');
+    if (key === 'codes') return window.AdminAccessCodes?.renderAdminAccessCodes ? window.AdminAccessCodes.renderAdminAccessCodes(bodyEl, payload, h) : setBodyError('Admin access-codes module failed to load.');
     if (key === 'tests') {
       console.info('Admin tests tab rendered');
       return window.AdminTests?.renderAdminTests ? window.AdminTests.renderAdminTests(bodyEl, payload, { ...h, session: { me: state.me } }) : setBodyError('Admin tests module failed to load.');
