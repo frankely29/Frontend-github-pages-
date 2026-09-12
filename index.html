@@ -111,7 +111,8 @@
       "./navigation.vectorbasemap.css",
       "./navigation.turnbyturn.css",
       "./app-shell.css",
-      "./landing.css"
+      "./landing.css",
+      "./map-action.css"
     ];
 
     window.__TLC_LOCAL_JS_ASSETS__ = [
@@ -148,7 +149,8 @@
       "./day-tendency.js",
       "./app.lazy.js",
       "./app-shell.js",
-      "./landing.js"
+      "./landing.js",
+      "./map-action.js"
     ];
 
     window.__tlcWithBuildId = function __tlcWithBuildId(path) {
@@ -540,6 +542,66 @@
           <path d="M12 3.2 18.8 10 14 11.1 12.9 16 12 20.8 11.1 16 10 11.1 5.2 10 12 3.2Z" fill="currentColor"/>
           <circle cx="12" cy="12" r="4.35" fill="rgba(255,255,255,0.96)"/>
           <circle cx="12" cy="12" r="2.1" fill="currentColor"/>
+        </svg>
+      </span>
+    </button>
+  </div>
+
+  <!--
+    Segmented map control (top right). Recentre and report, joined, mirroring
+    the menu button opposite it.
+
+    Neither half reimplements anything: recentre clicks #btnCenter above and
+    mirrors its pressed state, report clicks #btnPolice in the modes panel.
+    map-action.js hides .mapControlStack only once it has wired this up, so if
+    that script fails to load the original control is still on screen.
+  -->
+  <div class="mapSegmented" id="mapSegmented" role="group" aria-label="Map controls" hidden>
+    <button id="mapSegCenter" class="mapSegBtn" type="button" aria-label="Recentre on me" aria-pressed="true">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
+        <circle cx="12" cy="12" r="4" fill="currentColor"/>
+        <circle cx="12" cy="12" r="7.4" stroke="currentColor" stroke-width="1.7"/>
+        <path d="M12 1.6v3.2M12 19.2v3.2M22.4 12h-3.2M4.8 12H1.6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+      </svg>
+    </button>
+    <button id="mapSegReport" class="mapSegBtn mapSegDanger" type="button" aria-label="Report police">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
+        <path d="M12 2.6 20 5.6v6.1c0 4.7-3.3 8.2-8 9.7-4.7-1.5-8-5-8-9.7V5.6l8-3Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+        <path d="M12 8.4v4.2M12 16.1h.01" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
+      </svg>
+    </button>
+  </div>
+
+  <!--
+    The action pill. One word, a direction, a distance and a score — the whole
+    output of the scoring engine, on the map, without a tap.
+
+    It renders what app.part17.js publishes on window.TlcAssistantRecommendation
+    and computes nothing of its own, so it cannot contradict the assistant card
+    or the banner. Hidden until the first recommendation arrives.
+  -->
+  <div id="mapAction" hidden>
+    <div class="mapActionDetail" id="mapActionDetail" hidden>
+      <div class="mapActionWhy" id="mapActionWhy"></div>
+      <div class="mapActionMeta" id="mapActionMeta"></div>
+    </div>
+    <button class="mapActionPill" id="mapActionPill" type="button" data-tone="idle"
+            aria-expanded="false" aria-controls="mapActionDetail">
+      <span class="mapActionVerb" id="mapActionVerb">MONITOR</span>
+      <span class="mapActionArrow" id="mapActionArrow" aria-hidden="true" hidden>
+        <svg viewBox="0 0 24 24" fill="none" focusable="false">
+          <path d="M12 3.4v17.2M12 3.4l6 6M12 3.4l-6 6" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </span>
+      <span class="mapActionFacts">
+        <span class="mapActionDist" id="mapActionDist" hidden></span>
+        <span class="mapActionDot" id="mapActionDot" aria-hidden="true" hidden>•</span>
+        <span class="mapActionZone" id="mapActionZone"></span>
+      </span>
+      <span class="mapActionScore" id="mapActionScore" hidden></span>
+      <span class="mapActionChevron" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" focusable="false">
+          <path d="M6 9.5 12 15.5 18 9.5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
       </span>
     </button>

@@ -752,6 +752,7 @@ window.TlcMapUiInternals = {
   getZoneLocationId,
   geometryCenter,
   haversineMiles,
+  computeBearingDeg,
   fetchJSON,
   formatNYCTimeOnlyLabel,
   setBodyTheme,

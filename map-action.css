@@ -1,0 +1,254 @@
+/* ==========================================================================
+   map-action.css — the action pill, and the segmented control it shares the
+   map with.
+
+   The single most valuable thing this app computes is one word: stay, or go,
+   and if go, where. Until now that word lived inside a side panel the driver
+   had to open. A driver at a light has about two seconds; a panel is four taps
+   too many. So the word lives on the map, always, at the bottom, where a thumb
+   already is.
+
+   Everything here is fixed-position chrome over the map. Nothing in this file
+   reflows the map or the dock.
+   ========================================================================== */
+
+/* ------------------------------------------------------------- action pill */
+
+#mapAction {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 104px);
+  width: min(100vw - 24px, 430px);
+  z-index: 3100; /* over the map and the slider, under the dock and the menu */
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+}
+
+/* Attribute, not class: the pill is absent before the first recommendation
+   arrives, and an empty pill that says nothing is worse than no pill. */
+#mapAction[hidden] { display: none !important; }
+
+.mapActionPill {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 11px 12px 11px 18px;
+  border: 0;
+  border-radius: 999px;
+  color: #fff;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: 0 10px 30px rgba(16, 22, 34, 0.28), 0 2px 6px rgba(16, 22, 34, 0.18);
+  /* The colour is the loudest thing on the screen, so it changes slowly enough
+     to notice rather than flickering between ticks. */
+  transition: background-color 0.35s ease, box-shadow 0.2s ease;
+  background: #2b3648;
+}
+.mapActionPill:active { transform: scale(0.985); }
+
+/* Tone drives colour, and only LEAVE gets red. A pill that is red for every
+   suggestion is a pill drivers stop reading. */
+.mapActionPill[data-tone="hold"]   { background: linear-gradient(180deg, #14b85f, #0e9a4e); }
+.mapActionPill[data-tone="soft"]   { background: linear-gradient(180deg, #f0a828, #d98c10); }
+.mapActionPill[data-tone="move"]   { background: linear-gradient(180deg, #f0781e, #d55f0c); }
+.mapActionPill[data-tone="urgent"] { background: linear-gradient(180deg, #ef2f3c, #cf1622); }
+.mapActionPill[data-tone="idle"]   { background: linear-gradient(180deg, #46536a, #333e51); }
+
+.mapActionVerb {
+  font-weight: 900;
+  font-size: 17px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+/* The arrow points at the target's real bearing. It is rotated by an inline
+   custom property rather than an inline transform so that a stale bearing can
+   be cleared by removing one attribute. */
+.mapActionArrow {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.22);
+  display: grid;
+  place-items: center;
+}
+.mapActionArrow svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+  transform: rotate(var(--bearing, 0deg));
+  transition: transform 0.4s ease;
+}
+.mapActionArrow[hidden] { display: none !important; }
+
+.mapActionFacts {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 700;
+}
+/* The zone name is the part worth truncating: a driver who can read "LEAVE",
+   the distance and the score has the decision even if the name is clipped. But
+   it takes what space there is FIRST — left to the default flex sizing, the
+   distance held its full width and "Sunnyside / Woodside / Maspeth North" was
+   allotted 35px, which is an ellipsis and nothing else. */
+.mapActionZone {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mapActionDist { flex: 0 0 auto; opacity: 0.9; white-space: nowrap; font-weight: 600; }
+.mapActionDot { opacity: 0.55; }
+.mapActionDist[hidden], .mapActionDot[hidden], .mapActionScore[hidden] { display: none !important; }
+
+.mapActionScore {
+  flex: 0 0 auto;
+  min-width: 30px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.24);
+  font-size: 13px;
+  font-weight: 900;
+  text-align: center;
+}
+
+.mapActionChevron {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.2);
+  display: grid;
+  place-items: center;
+}
+.mapActionChevron svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+  transition: transform 0.2s ease;
+}
+.mapActionPill[aria-expanded="true"] .mapActionChevron svg { transform: rotate(180deg); }
+
+/* ----------------------------------------------------------- detail sheet */
+
+.mapActionDetail {
+  pointer-events: auto;
+  order: -1; /* opens upward, so the pill never moves out from under the thumb */
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.97);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(16, 22, 34, 0.06);
+  box-shadow: 0 12px 32px rgba(16, 22, 34, 0.18);
+  color: #101622;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.mapActionDetail[hidden] { display: none !important; }
+.mapActionWhy { font-weight: 600; }
+.mapActionMeta {
+  margin-top: 6px;
+  font-size: 12px;
+  opacity: 0.62;
+}
+
+body.night .mapActionDetail {
+  background: rgba(18, 24, 36, 0.95);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: #eef2f8;
+}
+
+/* ------------------------------------------------- segmented map controls */
+
+.mapSegmented {
+  position: fixed;
+  right: 14px;
+  top: calc(env(safe-area-inset-top, 0px) + 14px);
+  z-index: 3200; /* same layer as the menu button it mirrors */
+  display: flex;
+  align-items: stretch;
+  /* 48px total, border included — the menu button opposite is 48px, and two
+     controls on the same line at different heights read as a mistake. */
+  box-sizing: border-box;
+  height: 48px;
+  border-radius: 15px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.97);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(16, 22, 34, 0.06);
+  box-shadow: 0 2px 6px rgba(16, 22, 34, 0.08), 0 12px 32px rgba(16, 22, 34, 0.16);
+}
+.mapSegmented[hidden] { display: none !important; }
+
+.mapSegBtn {
+  width: 48px;
+  height: 100%;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: #101622;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+.mapSegBtn + .mapSegBtn { border-left: 1px solid rgba(16, 22, 34, 0.08); }
+.mapSegBtn svg { width: 21px; height: 21px; display: block; }
+.mapSegBtn:active { background: rgba(16, 22, 34, 0.06); }
+/* Off means auto-centre is not following; the glyph dims rather than vanishing,
+   so the control never changes width. */
+.mapSegBtn[aria-pressed="false"] { opacity: 0.4; }
+.mapSegBtn.mapSegDanger { color: #d21e2b; }
+
+/* Set by map-action.js only after the segmented control is wired. The old
+   bottom-left stack holds the same #btnCenter, so hiding it before then would
+   leave a driver with no way to recentre. */
+body.map-segmented-on .mapControlStack { display: none !important; }
+
+/* The top strip already held three things at +10px: the online badge left, the
+   weather badge right, the assistant card between them. A control in the
+   top-right corner lands on the weather badge (and the menu button was already
+   landing on the online badge). So the badge strip moves below the control row
+   rather than under it.
+
+   The assistant card follows without a rule here: updateAssistantDockLayout in
+   app.part17.js positions it from the badges' live rects, and now reads their
+   top instead of assuming +10px. Scoped to the class map-action.js sets, so
+   the whole shift exists exactly as long as the control causing it does. */
+body.map-segmented-on #onlineBadge,
+body.map-segmented-on #weatherBadge {
+  top: calc(env(safe-area-inset-top, 0px) + 72px);
+}
+
+body.night .mapSegmented {
+  background: rgba(18, 24, 36, 0.94);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+body.night .mapSegBtn { color: #eef2f8; }
+body.night .mapSegBtn + .mapSegBtn { border-left-color: rgba(255, 255, 255, 0.12); }
+body.night .mapSegBtn.mapSegDanger { color: #ff6b73; }
+
+/* Signed out, there is no recommendation and nothing to recentre on. The
+   landing page hides the rest of the map chrome the same way. */
+#lockedOverlay.show ~ #mapAction,
+#lockedOverlay.show ~ .mapSegmented { display: none !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  .mapActionPill,
+  .mapActionArrow svg,
+  .mapActionChevron svg { transition: none; }
+}
