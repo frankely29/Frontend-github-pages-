@@ -1,0 +1,273 @@
+/* ==========================================================================
+   compose.css — the Post destination.
+
+   Two modes, a caption, the zone you are in, and one button. The approved
+   design puts the Post button at the bottom under a thumb, and that is where
+   it stays at every width.
+   ========================================================================== */
+
+.composeScreen {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-block: 4px;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  color: #101622;
+}
+
+/* ------------------------------------------------------------------ modes */
+
+.composeModes {
+  display: flex;
+  gap: 6px;
+  padding: 5px;
+  border-radius: 999px;
+  background: rgba(16, 22, 34, 0.06);
+}
+.composeMode {
+  flex: 1 1 0;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #3a465c;
+  font-family: inherit; font-weight: 700; font-size: 14px; line-height: 1;
+  cursor: pointer;
+}
+.composeMode.on {
+  background: #fff;
+  color: #101622;
+  box-shadow: 0 1px 3px rgba(16, 22, 34, 0.12);
+}
+
+/* ------------------------------------------------------------------ photo */
+
+.composePhoto {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.composePhoto[hidden] { display: none !important; }
+
+/* A label wrapping a hidden input, so the whole area is the file picker
+   without any script wiring a click through to it. */
+.composePick {
+  display: grid;
+  place-items: center;
+  padding: 13px;
+  border-radius: 14px;
+  border: 1px dashed rgba(16, 22, 34, 0.22);
+  background: rgba(16, 22, 34, 0.03);
+  cursor: pointer;
+}
+.composeFileInput {
+  /* Not display:none — a hidden input is skipped by some browsers' file
+     pickers and by keyboard focus. Clipped instead. */
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+}
+.composePickLabel { font-family: inherit; font-weight: 700; font-size: 14px; line-height: 1; color: #101622; }
+
+.composeDrop {
+  font-size: 13px;
+  color: #6b7789;
+  text-align: center;
+}
+.composeDrop[hidden] { display: none !important; }
+
+.composePreview {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  max-height: 44vh;
+  object-fit: cover;
+  border-radius: 14px;
+  background: rgba(16, 22, 34, 0.06);
+}
+.composePreview[hidden] { display: none !important; }
+
+.composeClear {
+  align-self: flex-start;
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 14px;
+  background: rgba(16, 22, 34, 0.06);
+  color: #b3202c;
+  font-family: inherit; font-weight: 700; font-size: 13px; line-height: 1;
+  cursor: pointer;
+}
+.composeClear[hidden] { display: none !important; }
+
+/* ------------------------------------------------------------------- body */
+
+.composeBody {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 118px;
+  padding: 13px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(16, 22, 34, 0.14);
+  background: #fff;
+  color: #101622;
+  font-family: inherit; font-weight: 400; font-size: 15px; line-height: 1.45;
+  resize: vertical;
+}
+.composeBody::placeholder { color: #94a0b2; }
+.composeBody:focus {
+  outline: none;
+  border-color: #101622;
+  box-shadow: 0 0 0 3px rgba(16, 22, 34, 0.08);
+}
+
+/* ------------------------------------------------------------------- zone */
+
+.composeLabel {
+  font-family: inherit; font-weight: 800; font-size: 11px; line-height: 1;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: #6b7789;
+}
+
+.composeZone {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.composeZonePill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 9px 9px 9px 14px;
+  border: 1px solid rgba(16, 22, 34, 0.14);
+  border-radius: 999px;
+  background: #fff;
+  color: #101622;
+  font-family: inherit; font-weight: 700; font-size: 14px; line-height: 1;
+  cursor: pointer;
+}
+/* Tagged reads as committed; untagged as an offer. Same pill, so tapping it
+   does not move anything underneath. */
+.composeZonePill.on {
+  background: #101622;
+  border-color: #101622;
+  color: #fff;
+}
+.composeZonePin { opacity: 0.5; font-size: 11px; }
+.composeZoneName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Score colours come from the map legend, set inline by compose.js so the tag
+   shows the same number in the same colour the driver is looking at. */
+.composeZoneScore {
+  flex: 0 0 auto;
+  min-width: 26px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(16, 22, 34, 0.08);
+  font-family: inherit; font-weight: 800; font-size: 12px; line-height: 1;
+  text-align: center;
+}
+.composeZonePill.on .composeZoneScore { background: rgba(255, 255, 255, 0.2); }
+
+.composeZoneHint, .composeZoneNone {
+  font-size: 13px;
+  line-height: 1.4;
+  color: #6b7789;
+}
+
+/* ----------------------------------------------------------------- footer */
+
+.composeFooter {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.composeCount {
+  flex: 0 0 auto;
+  min-width: 30px;
+  font-family: inherit; font-weight: 700; font-size: 13px; line-height: 1;
+  color: #6b7789;
+}
+/* The counter only appears near the limit, so most of the time it was
+   reserving 30px plus a gap for nothing and the Post button stopped short of
+   full width. */
+.composeCount:empty { display: none; }
+.composeCount.over { color: #b3202c; }
+
+.composeSubmit {
+  flex: 1 1 auto;
+  padding: 15px 18px;
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #14b85f, #0e9a4e);
+  color: #fff;
+  font-family: inherit; font-weight: 800; font-size: 16px; line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 8px 22px rgba(14, 154, 78, 0.28);
+}
+.composeSubmit:active { transform: scale(0.99); }
+/* Disabled has to look disabled: a green button that does nothing when tapped
+   reads as a broken app rather than an empty form. */
+.composeSubmit:disabled {
+  background: rgba(16, 22, 34, 0.1);
+  color: #8d99ab;
+  box-shadow: none;
+  cursor: default;
+}
+
+.composeStatus {
+  padding: 11px 14px;
+  border-radius: 12px;
+  background: rgba(20, 184, 95, 0.1);
+  color: #0b7a3e;
+  font-family: inherit; font-weight: 600; font-size: 14px; line-height: 1.4;
+}
+.composeStatus[hidden] { display: none !important; }
+.composeStatusError { background: rgba(226, 30, 44, 0.08); color: #b3202c; }
+
+/* ------------------------------------------------------------------ night */
+
+body.night .composeScreen { color: #eef2f8; }
+body.night .composeModes { background: rgba(255, 255, 255, 0.08); }
+body.night .composeMode { color: #b8c3d4; }
+body.night .composeMode.on { background: rgba(255, 255, 255, 0.16); color: #fff; }
+body.night .composePick {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+body.night .composePickLabel { color: #eef2f8; }
+body.night .composeDrop,
+body.night .composeLabel,
+body.night .composeZoneHint,
+body.night .composeZoneNone,
+body.night .composeCount { color: #8d99ab; }
+body.night .composeBody {
+  background: rgba(22, 28, 42, 0.96);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: #eef2f8;
+}
+body.night .composeBody:focus {
+  border-color: #eef2f8;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.1);
+}
+body.night .composeZonePill {
+  background: rgba(22, 28, 42, 0.96);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: #eef2f8;
+}
+body.night .composeZonePill.on { background: #eef2f8; border-color: #eef2f8; color: #101622; }
+body.night .composeZonePill.on .composeZoneScore { background: rgba(16, 22, 34, 0.12); }
+body.night .composeClear { background: rgba(255, 255, 255, 0.08); color: #ff8fa6; }
+body.night .composeSubmit:disabled { background: rgba(255, 255, 255, 0.1); color: #6b7789; }
+
+@media (prefers-reduced-motion: reduce) {
+  .composeSubmit:active { transform: none; }
+}
