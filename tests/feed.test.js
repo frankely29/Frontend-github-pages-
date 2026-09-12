@@ -102,6 +102,18 @@ function post(overrides = {}) {
   }, overrides);
 }
 
+function comment(id, over = {}) {
+  return Object.assign({
+    id,
+    post_id: 1,
+    author: { user_id: 9, display_name: 'Aisha D.', handle: 'aisha',
+      city: 'New York', avatar_url: null, level: 41, platforms: ['lyft'] },
+    body: 'Confirmed, moving here too.',
+    mine: false, can_delete: false,
+    created_at: Math.floor(Date.now() / 1000) - 300,
+  }, over);
+}
+
 function build(options = {}) {
   const registered = [];
   const calls = [];
@@ -501,6 +513,234 @@ test('two loads at once do not both paint', async () => {
   await Promise.all([a, b]);
   await tick();
   assert.strictEqual(dom.calls.length, 1, 'a second load was fired while one was in flight');
+});
+
+
+// --------------------------------------------------------------------------
+// threads
+// --------------------------------------------------------------------------
+
+const T = (items, next = null, count = null) => ({ body: { ok: true, post_id: 1,
+  items, next_after_id: next, comment_count: count === null ? items.length : count } });
+
+async function withFeed(posts, extra = []) {
+  const dom = build({ responses: [feedBody(posts)].concat(extra) });
+  await dom.entry.onEnter();
+  await tick();
+  return dom;
+}
+
+test('a post with no replies invites one rather than showing a zero', async () => {
+  const dom = await withFeed([post({ id: 1, comment_count: 0 })]);
+  assert.strictEqual(dom.body.querySelector('[data-role="replies"]').textContent, 'Reply');
+});
+
+test('a post with replies shows how many', async () => {
+  const dom = await withFeed([post({ id: 1, comment_count: 47 })]);
+  assert.strictEqual(dom.body.querySelector('[data-role="replies"]').textContent, 'Replies 47');
+});
+
+test('opening a thread fetches it, closing does not refetch', async () => {
+  // Re-fetching every time someone collapses and expands to re-read is a
+  // request per glance.
+  const dom = await withFeed([post({ id: 1, comment_count: 1 })], [T([comment(5)])]);
+  dom.body.querySelector('[data-role="replies"]').click();
+  await tick(); await tick();
+  const after = dom.calls.length;
+  assert.ok(dom.calls[after - 1].url.includes('/social/posts/1/comments'),
+    dom.calls[after - 1].url);
+  assert.ok(dom.body.textContent.includes('Confirmed, moving here too.'), dom.body.textContent);
+
+  dom.body.querySelector('[data-role="replies"]').click();
+  await tick();
+  dom.body.querySelector('[data-role="replies"]').click();
+  await tick();
+  assert.strictEqual(dom.calls.length, after, 'it refetched on reopen');
+});
+
+test('a closed thread is hidden, not removed', async () => {
+  const dom = await withFeed([post({ id: 1 })], [T([comment(5)])]);
+  const host = dom.body.querySelector('[data-role="thread"]');
+  assert.strictEqual(host.hidden, true);
+  dom.body.querySelector('[data-role="replies"]').click();
+  await tick(); await tick();
+  assert.strictEqual(host.hidden, false);
+});
+
+test('an empty thread says so', async () => {
+  const dom = await withFeed([post({ id: 1 })], [T([])]);
+  dom.body.querySelector('[data-role="replies"]').click();
+  await tick(); await tick();
+  assert.ok(/no replies yet/i.test(dom.body.textContent), dom.body.textContent);
+});
+
+test('sending a reply appends it and updates the count from the server', async () => {
+  const dom = await withFeed([post({ id: 1, comment_count: 0 })], [
+    T([]),
+    { body: { ok: true, comment: comment(7, { body: 'Mine.', mine: true, can_delete: true }),
+      comment_count: 12 } },
+  ]);
+  dom.body.querySelector('[data-role="replies"]').click();
+  await tick(); await tick();
+  const input = dom.body.querySelector('[data-role="reply-input"]');
+  input.value = 'Mine.';
+  input.dispatch('input');
+  dom.body.querySelector('[data-role="send-reply"]').click();
+  await tick(); await tick();
+
+  assert.ok(dom.body.textContent.includes('Mine.'), dom.body.textContent);
+  // 12, not 1: a page is 20 and a thread can be longer, so the server's count
+  // is the only one worth trusting.
+  assert.strictEqual(dom.api._state.items[0].comment_count, 12);
+  assert.strictEqual(dom.body.querySelector('[data-role="replies"]').textContent, 'Replies 12');
+});
+
+test('an empty reply is not sent', async () => {
+  const dom = await withFeed([post({ id: 1 })], [T([])]);
+  dom.body.querySelector('[data-role="replies"]').click();
+  await tick(); await tick();
+  const before = dom.calls.length;
+  const input = dom.body.querySelector('[data-role="reply-input"]');
+  input.value = '   ';
+  input.dispatch('input');
+  dom.body.querySelector('[data-role="send-reply"]').click();
+  await tick();
+  assert.strictEqual(dom.calls.length, before);
+});
+
+test('a failed reply keeps what was typed', async () => {
+  // Making someone retype a reply because the network dropped is unforgivable.
+  const dom = await withFeed([post({ id: 1 })], [T([]), { throws: true }]);
+  dom.body.querySelector('[data-role="replies"]').click();
+  await tick(); await tick();
+  const input = dom.body.querySelector('[data-role="reply-input"]');
+  input.value = 'Worth keeping.';
+  input.dispatch('input');
+  dom.body.querySelector('[data-role="send-reply"]').click();
+  await tick(); await tick();
+  assert.strictEqual(dom.api.threadState(1).draft, 'Worth keeping.');
+  assert.strictEqual(dom.body.querySelector('[data-role="reply-input"]').value, 'Worth keeping.');
+  assert.ok(dom.api.threadState(1).error, 'no reason shown');
+});
+
+test('two taps on send post one reply', async () => {
+  const dom = await withFeed([post({ id: 1 })], [T([]),
+    { body: { ok: true, comment: comment(7), comment_count: 1 } }]);
+  dom.body.querySelector('[data-role="replies"]').click();
+  await tick(); await tick();
+  const input = dom.body.querySelector('[data-role="reply-input"]');
+  input.value = 'Once.';
+  input.dispatch('input');
+  const before = dom.calls.length;
+  const card = dom.body.querySelector('[data-post-id]');
+  const a = dom.api.sendReply(1, card);
+  const b = dom.api.sendReply(1, card);
+  await Promise.all([a, b]);
+  assert.strictEqual(dom.calls.length, before + 1, 'double-posted');
+});
+
+test('delete is offered only where the server said it can be', async () => {
+  // can_delete is sent rather than derived, so the client cannot offer a
+  // delete that 403s.
+  const dom = await withFeed([post({ id: 1 })], [
+    T([comment(5, { can_delete: false }), comment(6, { can_delete: true })])]);
+  dom.body.querySelector('[data-role="replies"]').click();
+  await tick(); await tick();
+  assert.strictEqual(dom.body.querySelectorAll('[data-role="delete-comment"]').length, 1);
+});
+
+test('deleting a reply removes it and takes the server count', async () => {
+  const dom = await withFeed([post({ id: 1, comment_count: 2 })], [
+    T([comment(5, { can_delete: true }), comment(6)]),
+    { body: { ok: true, post_id: 1, comment_count: 1 } },
+  ]);
+  dom.body.querySelector('[data-role="replies"]').click();
+  await tick(); await tick();
+  dom.body.querySelector('[data-role="delete-comment"]').click();
+  await tick(); await tick();
+  assert.strictEqual(dom.calls[dom.calls.length - 1].opts.method, 'DELETE');
+  assert.strictEqual(dom.api.threadState(1).items.length, 1);
+  assert.strictEqual(dom.api._state.items[0].comment_count, 1);
+});
+
+test('earlier replies page forwards from the cursor', async () => {
+  const dom = await withFeed([post({ id: 1 })], [
+    T([comment(5)], 5), T([comment(6)], null)]);
+  dom.body.querySelector('[data-role="replies"]').click();
+  await tick(); await tick();
+  dom.body.querySelector('[data-role="more-replies"]').click();
+  await tick(); await tick();
+  assert.ok(dom.calls[dom.calls.length - 1].url.includes('after_id=5'),
+    dom.calls[dom.calls.length - 1].url);
+  assert.strictEqual(dom.api.threadState(1).items.length, 2);
+});
+
+test('a reply author is a profile target too', async () => {
+  const dom = await withFeed([post({ id: 1 })], [T([comment(5)])]);
+  dom.body.querySelector('[data-role="replies"]').click();
+  await tick(); await tick();
+  const name = dom.body.querySelector('.feedCommentName');
+  assert.strictEqual(name.getAttribute('data-role'), 'author');
+  assert.strictEqual(name.getAttribute('data-user-id'), '9');
+});
+
+test('an open thread survives the list being rebuilt', async () => {
+  // A refetch replaces every card. Without re-painting open threads, a driver
+  // reading replies has them vanish under them when the feed refreshes.
+  const dom = await withFeed([post({ id: 1, comment_count: 1 })],
+    [T([comment(5)]), feedBody([post({ id: 1, comment_count: 1 })])]);
+  dom.body.querySelector('[data-role="replies"]').click();
+  await tick(); await tick();
+  assert.ok(dom.body.textContent.includes('Confirmed, moving here too.'));
+
+  await dom.api.load();
+  await tick();
+  assert.strictEqual(dom.api.threadState(1).open, true);
+  const host = dom.body.querySelector('[data-role="thread"]');
+  assert.strictEqual(host.hidden, false, 'the rebuilt card closed the open thread');
+  assert.ok(dom.body.textContent.includes('Confirmed, moving here too.'),
+    'the replies vanished when the list refreshed');
+});
+
+test('threads for posts no longer on screen are dropped', async () => {
+  // Otherwise the map grows for the life of the session.
+  const dom = await withFeed([post({ id: 1 })], [T([comment(5)]), feedBody([post({ id: 2 })])]);
+  dom.body.querySelector('[data-role="replies"]').click();
+  await tick(); await tick();
+  assert.ok(dom.api._threads['1'], 'no thread to prune');
+  await dom.api.load();
+  await tick();
+  assert.ok(!dom.api._threads['1'], 'a thread for a post that scrolled away was kept');
+});
+
+test('a 402 on a reply says the trial ended rather than "could not post"', async () => {
+  const dom = await withFeed([post({ id: 1 })], [T([]), { status: 402, body: {} }]);
+  dom.body.querySelector('[data-role="replies"]').click();
+  await tick(); await tick();
+  const input = dom.body.querySelector('[data-role="reply-input"]');
+  input.value = 'x';
+  input.dispatch('input');
+  dom.body.querySelector('[data-role="send-reply"]').click();
+  await tick(); await tick();
+  assert.ok(/trial|plan/i.test(dom.api.threadState(1).error), dom.api.threadState(1).error);
+});
+
+test('the reply field stops at the server ceiling', async () => {
+  const dom = await withFeed([post({ id: 1 })], [T([])]);
+  dom.body.querySelector('[data-role="replies"]').click();
+  await tick(); await tick();
+  assert.strictEqual(
+    dom.body.querySelector('[data-role="reply-input"]').getAttribute('maxlength'), '600');
+});
+
+test('a thread hides properly despite the flex display', () => {
+  assert.ok(CSS.includes('.feedThread[hidden]'),
+    'display:flex on a container beats the hidden attribute');
+});
+
+test('delete sits away from the name a thumb is aiming for', () => {
+  // Deleting a reply by mistake is not undoable.
+  assert.ok(/\.feedCommentDelete\s*\{[^}]*margin-left:\s*auto/.test(CSS));
 });
 
 // --------------------------------------------------------------------------
