@@ -1,0 +1,242 @@
+/* ==========================================================================
+   feed.css — the Feed destination.
+
+   Cards on a tinted ground, the way the approved design draws them. Scoped
+   under the feed's own class names so nothing here can reach the map.
+   ========================================================================== */
+
+.feedScreen {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-block: 4px;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  color: #101622;
+}
+
+/* ------------------------------------------------------------------ scopes */
+
+.feedScopes {
+  display: flex;
+  gap: 8px;
+  /* Three tabs fit at 390px, but a longer city name should scroll rather than
+     wrap the row into two lines. */
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding-bottom: 2px;
+}
+.feedScopes::-webkit-scrollbar { display: none; }
+
+.feedScope {
+  flex: 0 0 auto;
+  padding: 8px 16px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(16, 22, 34, 0.06);
+  color: #3a465c;
+  font: 700 14px/1 inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.feedScope.on {
+  background: #101622;
+  color: #fff;
+}
+
+/* ------------------------------------------------------------------- list */
+
+.feedList {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.feedCard {
+  padding: 14px;
+  border-radius: 18px;
+  background: #fff;
+  border: 1px solid rgba(16, 22, 34, 0.06);
+  box-shadow: 0 1px 2px rgba(16, 22, 34, 0.04), 0 8px 24px rgba(16, 22, 34, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* --------------------------------------------------------------- the head */
+
+.feedHead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.feedAvatar {
+  position: relative;
+  flex: 0 0 auto;
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font: 800 15px/1 inherit;
+  overflow: hidden;
+}
+/* The photo sits ON the initials rather than replacing them, so a failed load
+   falls back to something readable instead of a broken-image glyph. */
+.feedAvatarImg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.feedWho { min-width: 0; flex: 1 1 auto; }
+
+.feedNameRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.feedName {
+  font: 800 15px/1.2 inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.feedLevel {
+  flex: 0 0 auto;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: rgba(16, 22, 34, 0.07);
+  color: #3a465c;
+  font: 800 10px/1.4 inherit;
+  letter-spacing: 0.04em;
+}
+.feedMeta {
+  margin-top: 2px;
+  font-size: 13px;
+  color: #6b7789;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --------------------------------------------------------------- the zone */
+
+.feedZone {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 100%;
+  padding: 6px 8px 6px 11px;
+  border-radius: 999px;
+  background: rgba(16, 22, 34, 0.05);
+  font: 700 13px/1 inherit;
+}
+.feedZonePin { opacity: 0.45; font-size: 11px; }
+.feedZoneName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The score uses the map legend's own bands, set inline by feed.js. Colouring
+   a 44 green here would teach drivers the wrong thing about the map. */
+.feedZoneScore {
+  flex: 0 0 auto;
+  min-width: 26px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  font: 800 12px/1 inherit;
+  text-align: center;
+}
+
+/* -------------------------------------------------------------- the media */
+
+.feedImage {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  border-radius: 12px;
+  background: rgba(16, 22, 34, 0.05);
+}
+
+.feedBody {
+  font-size: 15px;
+  line-height: 1.45;
+  /* Drivers type line breaks and they mean them. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ------------------------------------------------------------- the actions */
+
+.feedActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 2px;
+}
+.feedLike {
+  border: 0;
+  border-radius: 999px;
+  padding: 7px 14px;
+  background: rgba(16, 22, 34, 0.05);
+  color: #3a465c;
+  font: 700 14px/1 inherit;
+  cursor: pointer;
+}
+.feedLike.on { background: rgba(226, 30, 74, 0.1); color: #c81e5a; }
+.feedLike:disabled { opacity: 0.6; }
+
+/* ------------------------------------------------------ notices and paging */
+
+.feedNotice {
+  padding: 28px 18px;
+  border-radius: 16px;
+  background: rgba(16, 22, 34, 0.04);
+  color: #6b7789;
+  font-size: 14px;
+  line-height: 1.5;
+  text-align: center;
+}
+.feedNoticeError { color: #b3202c; background: rgba(226, 30, 44, 0.07); }
+
+.feedMore {
+  align-self: center;
+  margin: 4px 0 8px;
+  padding: 11px 22px;
+  border: 1px solid rgba(16, 22, 34, 0.12);
+  border-radius: 999px;
+  background: #fff;
+  color: #101622;
+  font: 700 14px/1 inherit;
+  cursor: pointer;
+}
+.feedMore:disabled { opacity: 0.55; }
+
+/* ------------------------------------------------------------------ night */
+
+body.night .feedScreen { color: #eef2f8; }
+body.night .feedScope { background: rgba(255, 255, 255, 0.08); color: #b8c3d4; }
+body.night .feedScope.on { background: #eef2f8; color: #101622; }
+body.night .feedCard {
+  background: rgba(22, 28, 42, 0.96);
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+body.night .feedLevel { background: rgba(255, 255, 255, 0.1); color: #b8c3d4; }
+body.night .feedMeta { color: #8d99ab; }
+body.night .feedZone { background: rgba(255, 255, 255, 0.08); }
+body.night .feedLike { background: rgba(255, 255, 255, 0.08); color: #b8c3d4; }
+body.night .feedLike.on { background: rgba(255, 107, 138, 0.16); color: #ff8fa6; }
+body.night .feedNotice { background: rgba(255, 255, 255, 0.05); color: #8d99ab; }
+body.night .feedMore {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: #eef2f8;
+}
