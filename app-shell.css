@@ -1,0 +1,294 @@
+/*
+ * app-shell.css — the navigation layout.
+ *
+ * Scoped entirely to .shell* class names and two body classes, so nothing here
+ * can reach into the map's stylesheet. The one exception is deliberate and
+ * documented: .shell-no-scrubber hides #sliderWrap and lowers #dock, which is
+ * the whole point of making the time machine admin-only.
+ */
+
+/* ------------------------------------------------------------------ hidden
+   `display:flex` on these beats the `hidden` attribute's UA `display:none`, so
+   without this a closed menu and a closed screen stay in the layout as
+   invisible full-size sheets that swallow every tap on the app underneath.
+   Caught by loading the real page in a browser; no unit test would see it. */
+.shellScreen[hidden],
+.shellMenu[hidden],
+.shellScrim[hidden] {
+  display: none !important;
+}
+
+/* ---------------------------------------------------------------- menu button
+   Top-left, mirroring the recentre control top-right. 48px because this is
+   tapped one-handed, often by someone parked and impatient. */
+.shellMenuBtn {
+  position: fixed;
+  left: 14px;
+  top: calc(env(safe-area-inset-top, 0px) + 14px);
+  width: 48px;
+  height: 48px;
+  border-radius: 15px;
+  border: 1px solid rgba(16, 22, 34, 0.06);
+  background: rgba(255, 255, 255, 0.97);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 2px 6px rgba(16, 22, 34, 0.08), 0 12px 32px rgba(16, 22, 34, 0.16);
+  color: #101622;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  padding: 0;
+  z-index: 3200;
+}
+.shellMenuBtn svg { width: 22px; height: 22px; display: block; }
+.shellMenuBtn:active { transform: scale(0.96); }
+
+body.night .shellMenuBtn {
+  background: rgba(18, 24, 36, 0.94);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: #eef2f8;
+}
+
+/* ---------------------------------------------------------------------- scrim */
+.shellScrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 14, 22, 0.42);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  z-index: 9400;
+}
+.shellScrim.open { opacity: 1; }
+
+/* ----------------------------------------------------------------------- menu
+   A left drawer rather than a bottom sheet: the dock already owns the bottom
+   edge, and two things sliding up from the same edge read as one broken thing. */
+.shellMenu {
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: min(306px, 86vw);
+  background: #fff;
+  box-shadow: 20px 0 56px rgba(10, 14, 22, 0.28);
+  display: flex;
+  flex-direction: column;
+  transform: translateX(-100%);
+  transition: transform 0.22s cubic-bezier(0.32, 0.72, 0, 1);
+  z-index: 9500;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.shellMenu.open { transform: translateX(0); }
+
+.shellMenuHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 12px 14px 16px;
+  border-bottom: 1px solid rgba(16, 22, 34, 0.055);
+  flex: none;
+}
+.shellMenuTitle {
+  font: 700 17px/1 system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  letter-spacing: -0.03em;
+  color: #101622;
+}
+.shellMenuClose {
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  border: 0;
+  background: transparent;
+  color: #59616e;
+  font-size: 17px;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  flex: none;
+}
+
+.shellMenuBody { flex: 1; overflow-y: auto; padding: 6px 10px 14px; }
+
+.shellGroup {
+  font: 700 10.5px/1 system-ui, -apple-system, sans-serif;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: #8a919d;
+  padding: 16px 10px 8px;
+}
+
+.shellItem {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  min-height: 52px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  background: none;
+  border-radius: 12px;
+  cursor: pointer;
+  text-align: left;
+  color: #101622;
+  font: inherit;
+}
+.shellItem:hover { background: rgba(16, 22, 34, 0.035); }
+.shellItem.on { background: rgba(16, 22, 34, 0.05); }
+
+.shellItemIcon {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: #59616e;
+  font-size: 17px;
+  line-height: 1;
+}
+.shellItem.on .shellItemIcon { color: #101622; }
+
+.shellItemText { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.shellItemTitle {
+  font: 600 14px/1.15 system-ui, -apple-system, sans-serif;
+  letter-spacing: -0.012em;
+}
+.shellItemSub {
+  font: 500 11.5px/1.3 system-ui, -apple-system, sans-serif;
+  color: #8a919d;
+}
+.shellItemHere {
+  font: 600 10px/1 system-ui, -apple-system, sans-serif;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: #8a919d;
+  border: 1px solid rgba(16, 22, 34, 0.1);
+  border-radius: 999px;
+  padding: 4px 7px;
+  flex: none;
+}
+
+body.night .shellMenu { background: #121826; }
+body.night .shellMenuTitle,
+body.night .shellItem,
+body.night .shellItem.on .shellItemIcon { color: #eef2f8; }
+body.night .shellMenuHeader { border-bottom-color: rgba(255, 255, 255, 0.08); }
+body.night .shellItem:hover,
+body.night .shellItem.on { background: rgba(255, 255, 255, 0.06); }
+
+/* --------------------------------------------------------------- destinations
+   Full screen, opaque, above the dock. A destination that lets the map show
+   through is a panel, and the point of this layout is that these are not
+   panels. */
+.shellScreen {
+  position: fixed;
+  inset: 0;
+  background: #eef0f4;
+  display: flex;
+  flex-direction: column;
+  z-index: 9200;
+  opacity: 0;
+  transform: translateY(10px);
+  transition: opacity 0.18s ease, transform 0.22s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.shellScreen.open { opacity: 1; transform: none; }
+
+.shellScreenBar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  min-height: 64px;
+  flex: none;
+  background: #fff;
+  border-bottom: 1px solid rgba(16, 22, 34, 0.1);
+  padding-top: calc(10px + env(safe-area-inset-top, 0px));
+}
+
+/* One way back, in the same place on every screen, big enough to hit. */
+.shellBack {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 44px;
+  padding: 0 15px 0 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(16, 22, 34, 0.1);
+  background: #fff;
+  color: #101622;
+  cursor: pointer;
+  font: 600 13px/1 system-ui, -apple-system, sans-serif;
+  flex: none;
+}
+.shellBack svg { width: 17px; height: 17px; display: block; }
+
+.shellScreenTitle {
+  font: 700 18px/1 system-ui, -apple-system, sans-serif;
+  letter-spacing: -0.022em;
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  color: #101622;
+}
+
+.shellScreenBody {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 16px;
+  padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+}
+
+.shellEmpty {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 64px 20px;
+  color: #59616e;
+}
+.shellEmptyTitle {
+  font: 700 16px/1.2 system-ui, -apple-system, sans-serif;
+  letter-spacing: -0.02em;
+  color: #101622;
+}
+.shellEmptyLine { font: 500 13px/1.5 system-ui, -apple-system, sans-serif; }
+
+body.night .shellScreen { background: #0d1420; }
+body.night .shellScreenBar { background: #121826; border-bottom-color: rgba(255, 255, 255, 0.08); }
+body.night .shellScreenTitle,
+body.night .shellEmptyTitle { color: #eef2f8; }
+body.night .shellBack {
+  background: #121826;
+  border-color: rgba(255, 255, 255, 0.12);
+  color: #eef2f8;
+}
+
+/* While a destination is open the map's own chrome must not float over it. */
+body.shell-screen-open #dock,
+body.shell-screen-open .mapControlStack,
+body.shell-screen-open .sliderWrap,
+body.shell-screen-open #sliderWrap,
+body.shell-screen-open .shellMenuBtn {
+  display: none !important;
+}
+
+/* ------------------------------------------------------- the driver's dock
+   The time machine is an operator tool. Hiding it from drivers is what earns
+   the dock the space it leaves -- so the two builds differ by one class, not by
+   two layouts. */
+body.shell-no-scrubber .sliderWrap,
+body.shell-no-scrubber #sliderWrap {
+  display: none !important;
+}
+body.shell-no-scrubber #dock {
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 14px) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shellMenu, .shellScrim, .shellScreen { transition: none; }
+}
