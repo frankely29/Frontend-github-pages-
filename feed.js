@@ -123,6 +123,18 @@
     return Math.floor(delta / 604800) + "w";
   }
 
+  // Acronyms the server stores lowercase. Without these, VEHICLE_CHOICES
+  // "suv" and "ev" render as "Suv" and "Ev", which reads as a typo.
+  var UPPER_CHOICES = { suv: "SUV", ev: "EV", tlc: "TLC", fhv: "FHV" };
+
+  /** "black_car" -> "Black car". The server stores keys; a driver reads words. */
+  function prettyChoice(value) {
+    var key = String(value || "").trim().toLowerCase();
+    if (UPPER_CHOICES[key]) return UPPER_CHOICES[key];
+    var text = String(value || "").replace(/_/g, " ").trim();
+    return text ? text.charAt(0).toUpperCase() + text.slice(1) : "";
+  }
+
   function initials(name) {
     var parts = String(name || "").trim().split(/\s+/).filter(Boolean);
     if (!parts.length) return "?";
@@ -202,7 +214,7 @@
     var meta = [];
     if (author.handle) meta.push("@" + author.handle);
     if (Array.isArray(author.platforms) && author.platforms.length) {
-      meta.push(author.platforms.join(" "));
+      meta.push(author.platforms.map(prettyChoice).join(" "));
     }
     var age = ago(post.created_at);
     if (age) meta.push(age);
@@ -494,6 +506,7 @@
     buildCard: buildCard,
     ago: ago,
     initials: initials,
+    prettyChoice: prettyChoice,
     scoreColor: scoreColor,
     install: install,
   };

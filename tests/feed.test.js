@@ -250,9 +250,25 @@ test('a card shows the name, level, handle, platform, age and city', () => {
   const dom = build();
   const card = dom.api.buildCard(post());
   const text = card.textContent;
-  ['Marcus R.', 'LVL 24', '@marcus', 'fhv', '18m', 'Queens'].forEach((bit) => {
+  ['Marcus R.', 'LVL 24', '@marcus', 'FHV', '18m', 'Queens'].forEach((bit) => {
     assert.ok(text.includes(bit), `card is missing ${bit} — got: ${text}`);
   });
+});
+
+test('the card shows platform keys as words', () => {
+  const dom = build();
+  const card = dom.api.buildCard(post({
+    author: { user_id: 7, display_name: 'A', handle: 'a', level: 1,
+      platforms: ['uber', 'black_car'] } }));
+  assert.ok(card.textContent.includes('Uber Black car'), card.textContent);
+});
+
+test('acronyms the server stores lowercase are not title-cased into typos', () => {
+  // VEHICLE_CHOICES has "suv" and "ev". "Suv" and "Ev" read as mistakes.
+  const dom = build();
+  assert.strictEqual(dom.api.prettyChoice('suv'), 'SUV');
+  assert.strictEqual(dom.api.prettyChoice('ev'), 'EV');
+  assert.strictEqual(dom.api.prettyChoice('minivan'), 'Minivan');
 });
 
 test('a driver with no level and no platform still gets a clean card', () => {
