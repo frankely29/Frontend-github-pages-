@@ -69,9 +69,47 @@
 .landingArt .n5 { left: 58%; top: 62px;  width: 26px; height: 26px; background: #8000ff; }
 .landingArt .n6 { left: 60%; top: 152px; width: 28px; height: 28px; background: #ff8c00; }
 .landingArt .n7 { left: 78%; top: 90px;  width: 42px; height: 42px; background: #00b050; }
-.landingArt .n8 { left: 73%; top: 44px;  width: 22px; height: 22px; background: #31db7d; }
+/* n8 sits left of where the Sign in pill floats — at 73% it was half-eaten by
+   the button, which read as a rendering bug rather than a node. */
+.landingArt .n8 { left: 65%; top: 30px;  width: 22px; height: 22px; background: #31db7d; }
 .landingArt .n9 { left: 91%; top: 140px; width: 24px; height: 24px; background: #31db7d; }
 .landingArt .n10{ left: 84%; top: 190px; width: 20px; height: 20px; background: #00b050; }
+
+/* The links. Without them the hero is a scatter of dots; with them it is a
+   network, which is the entire claim the page is making. Thin rotated bars
+   rather than an SVG, so it stays one stylesheet and no extra request. */
+.landingArt::before,
+.landingArt::after {
+  content: "";
+  position: absolute;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.16);
+  transform-origin: 0 50%;
+}
+.landingArt::before { left: 12%; top: 103px; width: 52%; transform: rotate(-9deg); }
+.landingArt::after  { left: 24%; top: 148px; width: 58%; transform: rotate(-16deg); }
+.landingNode::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 84px;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.14);
+  transform-origin: 0 50%;
+  transform: rotate(var(--link, 24deg));
+  z-index: -1;
+}
+.landingArt .n1::before { --link: -34deg; width: 76px; }
+.landingArt .n2::before { --link: 46deg; width: 70px; }
+.landingArt .n3::before { --link: -46deg; width: 66px; }
+.landingArt .n4::before { --link: -22deg; width: 92px; }
+.landingArt .n5::before { --link: 58deg; width: 62px; }
+.landingArt .n6::before { --link: -38deg; width: 78px; }
+.landingArt .n7::before { display: none; }
+.landingArt .n8::before { --link: 57deg; width: 86px; }
+.landingArt .n9::before { --link: -142deg; width: 62px; }
+.landingArt .n10::before { --link: -118deg; width: 70px; }
 
 /* The night fades in so the headline sits on solid ink, not on a dot. */
 .landingFade {
@@ -353,6 +391,47 @@
   box-shadow: 0 0 0 3px rgba(16, 22, 34, 0.07);
 }
 .landingHint { font: 500 11.5px/1.4 system-ui, sans-serif; color: #8a919d; }
+
+.landingOptional {
+  font: 600 9.5px/1 system-ui, sans-serif;
+  letter-spacing: 0.06em;
+  color: #8a919d;
+  border: 1px solid rgba(16, 22, 34, 0.1);
+  border-radius: 999px;
+  padding: 3px 6px;
+  margin-left: 7px;
+}
+
+/* An icon inside the field rather than beside it, so the two tinted fields read
+   as one thing each instead of a label, a picture and a box. */
+.landingInputWrap { position: relative; display: flex; align-items: center; }
+.landingInputIcon {
+  position: absolute;
+  left: 13px;
+  width: 18px;
+  height: 18px;
+  pointer-events: none;
+  color: #8a919d;
+}
+.landingInputWrap .landingInput { padding-left: 41px; }
+.landingInputMono {
+  font: 700 15px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+/* Tinted so the two fields that are not email-and-password look different from
+   the two that are. */
+.landingInputCity .landingInput {
+  background: rgba(255, 212, 0, 0.07);
+  border-color: rgba(190, 150, 0, 0.34);
+}
+.landingInputCity .landingInputIcon { color: #a8860a; }
+.landingInputCode .landingInput {
+  background: rgba(0, 102, 255, 0.045);
+  border-color: rgba(0, 102, 255, 0.24);
+}
+.landingInputCode .landingInputIcon { color: #0066ff; }
 
 .landingCheck {
   display: flex;

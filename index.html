@@ -285,7 +285,7 @@
         </div>
 
         <div class="landingFormBody">
-          <p class="landingFormLede" data-landing-lede>Your name is what other drivers see in the feed and in chat.</p>
+          <p class="landingFormLede" data-landing-lede>Your name and city are what other drivers see.</p>
 
           <div class="landingField" data-landing-field="name">
             <label class="landingLabel" for="authName">Display name</label>
@@ -303,6 +303,29 @@
             <span class="landingHint" data-landing-hint>At least 6 characters.</span>
           </div>
 
+          <!--
+            City and access code. Both are real: the city is sent with the
+            signup payload (/auth/signup takes it) and the code is redeemed
+            against /subscription/redeem with the token signup returns, because
+            a code unlocks an account and so the account has to exist first.
+          -->
+          <div class="landingField" data-landing-field="city">
+            <label class="landingLabel" for="authCity">Where you drive</label>
+            <div class="landingInputWrap landingInputCity">
+              <svg class="landingInputIcon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 21.4s6.8-5.8 6.8-11a6.8 6.8 0 1 0-13.6 0c0 5.2 6.8 11 6.8 11z" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linejoin="round"/><circle cx="12" cy="10.2" r="2.4" fill="none" stroke="currentColor" stroke-width="1.85"/></svg>
+              <input id="authCity" type="text" class="landingInput" placeholder="Houston, TX" autocomplete="address-level2" maxlength="80" />
+            </div>
+            <span class="landingHint">Puts you in your city&rsquo;s room. Change it any time.</span>
+          </div>
+
+          <div class="landingField" data-landing-field="code">
+            <label class="landingLabel" for="authCode">Access code <span class="landingOptional">Optional</span></label>
+            <div class="landingInputWrap landingInputCode">
+              <svg class="landingInputIcon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="8.2" cy="15.8" r="3.6" fill="none" stroke="currentColor" stroke-width="1.85"/><path d="m10.8 13.2 8-8M16.4 7.6l2.2 2.2M14.2 9.8l2.2 2.2" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round"/></svg>
+              <input id="authCode" type="text" class="landingInput landingInputMono" placeholder="JOSEO-3KQ9-7WTM" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="64" />
+            </div>
+          </div>
+
           <label class="landingCheck">
             <input id="authGhost" type="checkbox" />
             <span>Ghost mode &mdash; hide me on the map, still counted online</span>
@@ -312,7 +335,7 @@
             <span class="landingPromiseIcon" aria-hidden="true">
               <svg viewBox="0 0 24 24"><path d="M5 12.6 9.8 17.4 19 7.2" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </span>
-            <span><b>Your 7 days start the moment you tap.</b> No card, nothing else to choose.</span>
+            <span><b>Your 7 days start the moment you tap</b> &mdash; or your code applies instead. No card either way, nothing else to choose.</span>
           </div>
 
           <div id="authStatus" class="landingStatus">Status: signed out</div>

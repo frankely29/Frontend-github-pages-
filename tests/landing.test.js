@@ -24,7 +24,7 @@ const CSS = fs.readFileSync(path.join(ROOT, 'landing.css'), 'utf8');
 const JS_SOURCE = path.join(ROOT, 'landing.js');
 
 const AUTH_IDS = ['authEmail', 'authPass', 'authName', 'authGhost',
-  'btnLogin', 'btnSignup', 'authStatus'];
+  'authCity', 'authCode', 'btnLogin', 'btnSignup', 'authStatus'];
 
 // --------------------------------------------------------------------------
 // a DOM just large enough for landing.js
@@ -110,10 +110,14 @@ function buildDom() {
   form.appendChild(make('h2', null, { 'data-landing-title': '' }));
   form.appendChild(make('p', null, { 'data-landing-lede': '' }));
   form.appendChild(make('div', null, { 'data-landing-field': 'name' }));
+  form.appendChild(make('div', null, { 'data-landing-field': 'city' }));
+  form.appendChild(make('div', null, { 'data-landing-field': 'code' }));
   form.appendChild(make('span', null, { 'data-landing-hint': '' }));
   form.appendChild(make('div', null, { 'data-landing-promise': '' }));
   form.appendChild(make('p', null, { 'data-landing-swap': '' }));
   form.appendChild(make('input', 'authName'));
+  form.appendChild(make('input', 'authCity'));
+  form.appendChild(make('input', 'authCode'));
   form.appendChild(make('input', 'authEmail'));
   form.appendChild(make('input', 'authPass'));
   form.appendChild(make('input', 'authGhost'));
@@ -354,6 +358,84 @@ test('the overlay still uses the class setAuthUI toggles', () => {
   const app = fs.readFileSync(path.join(ROOT, 'app.part10.js'), 'utf8');
   assert.ok(app.includes('lockedOverlay.classList.toggle("show"'),
     'setAuthUI no longer toggles .show — this page would never appear');
+});
+
+// --------------------------------------------------------------------------
+// city and access code
+// --------------------------------------------------------------------------
+
+test('signup asks for city and an optional access code', () => {
+  const env = buildDom();
+  env.api.goTo('signup');
+  assert.strictEqual(env.form.querySelector('[data-landing-field=city]').hidden, false);
+  assert.strictEqual(env.form.querySelector('[data-landing-field=code]').hidden, false);
+});
+
+test('sign in asks for neither', () => {
+  // The account already knows its city, and a code is redeemed from the menu.
+  const env = buildDom();
+  env.api.goTo('signin');
+  assert.strictEqual(env.form.querySelector('[data-landing-field=city]').hidden, true);
+  assert.strictEqual(env.form.querySelector('[data-landing-field=code]').hidden, true);
+});
+
+test('the access code field is marked optional in the markup', () => {
+  // Otherwise it reads as required and stops people who do not have one.
+  const block = INDEX.slice(INDEX.indexOf('data-landing-field="code"'),
+    INDEX.indexOf('landingCheck'));
+  assert.ok(/Optional/i.test(INDEX.slice(INDEX.indexOf('for="authCode"') - 200,
+    INDEX.indexOf('id="authCode"'))), 'the label should say Optional');
+  assert.ok(block.includes('autocapitalize="characters"'), 'codes are upper case');
+});
+
+test('signup sends the city to the server', () => {
+  const app = fs.readFileSync(path.join(ROOT, 'app.part10.js'), 'utf8');
+  const fn = app.slice(app.indexOf('async function doSignup'),
+    app.indexOf('async function changePassword'));
+  assert.ok(/body\.city\s*=\s*city/.test(fn), 'city is never sent');
+  assert.ok(/if \(city\)/.test(fn), 'an empty city must not be sent as ""');
+});
+
+test('the access code is redeemed with the token signup just returned', () => {
+  // It cannot be redeemed anonymously — /subscription/redeem is authenticated.
+  const app = fs.readFileSync(path.join(ROOT, 'app.part10.js'), 'utf8');
+  const fn = app.slice(app.indexOf('async function doSignup'),
+    app.indexOf('async function changePassword'));
+  assert.ok(fn.includes('/subscription/redeem'), 'the code is never redeemed');
+  assert.ok(/postJSON\("\/subscription\/redeem",\s*\{ code: accessCode \},\s*token\)/.test(fn),
+    'redeem must be called with the signup token');
+});
+
+test('a bad access code does not cost someone their new account', () => {
+  const app = fs.readFileSync(path.join(ROOT, 'app.part10.js'), 'utf8');
+  const fn = app.slice(app.indexOf('async function doSignup'),
+    app.indexOf('async function changePassword'));
+  const redeem = fn.slice(fn.indexOf('/subscription/redeem'));
+  // Comments stripped first: this is an assertion about code, and the prose
+  // above the block says the word "throwing" while doing the opposite.
+  const code = redeem.slice(0, redeem.indexOf('await loadMe'))
+    .split('\n').filter((line) => !line.trim().startsWith('//')).join('\n');
+  assert.ok(redeem.includes('catch'), 'a failed redemption must be caught');
+  assert.ok(!/\bthrow\b/.test(code),
+    'a failed redemption must not throw — the account already exists');
+  assert.ok(fn.includes('codeNotice'), 'the driver should be told the code did not apply');
+});
+
+test('the code is redeemed before the profile is loaded', () => {
+  // Otherwise loadMe() caches a trial and the access the code granted only
+  // appears after a refresh.
+  const app = fs.readFileSync(path.join(ROOT, 'app.part10.js'), 'utf8');
+  const fn = app.slice(app.indexOf('async function doSignup'),
+    app.indexOf('async function changePassword'));
+  assert.ok(fn.indexOf('/subscription/redeem') < fn.indexOf('await loadMe()'),
+    'redeem must run before loadMe()');
+});
+
+test('the hero draws links, not just dots', () => {
+  // Without them it is a scatter of circles; with them it is a network, which
+  // is the entire claim the page makes.
+  assert.ok(CSS.includes('.landingNode::before'), 'no node links');
+  assert.ok(/\.landingArt::(before|after)/.test(CSS), 'no long links');
 });
 
 // --------------------------------------------------------------------------

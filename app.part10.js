@@ -2180,6 +2180,8 @@ const authEmail = document.getElementById("authEmail");
 const authPass = document.getElementById("authPass");
 const authName = document.getElementById("authName");
 const authGhost = document.getElementById("authGhost");
+const authCity = document.getElementById("authCity");
+const authCode = document.getElementById("authCode");
 const btnLogin = document.getElementById("btnLogin");
 const btnSignup = document.getElementById("btnSignup");
 const authStatus = document.getElementById("authStatus");
@@ -3251,7 +3253,9 @@ async function doLogin(email, password, desiredGhostMode) {
 
 async function doSignup(email, password, desiredGhostMode) {
   const display_name = safeName() || (email || "").split("@")[0] || "Driver";
+  const city = safeCity();
   const body = { email, password, display_name };
+  if (city) body.city = city;
   const data = await postJSON("/auth/signup", body, null);
   const token = data?.token || data?.access_token || "";
   if (!token) throw new Error("Signup success but token missing.");
@@ -3259,9 +3263,34 @@ async function doSignup(email, password, desiredGhostMode) {
   localStorage.setItem(LS_TOKEN, token);
   localStorage.setItem(LS_EMAIL, email);
   seedSelfStateFromAuthResponse(data, email);
+
+  // The code is redeemed here rather than on a screen of its own. It cannot be
+  // redeemed anonymously -- /subscription/redeem is authenticated -- but that is
+  // a rule about the order of two REQUESTS, not about the number of screens, and
+  // the token from the line above satisfies it.
+  //
+  // Before loadMe(), so the profile that loads already carries the access the
+  // code granted rather than a trial that a refresh would silently replace.
+  //
+  // A bad code must never cost someone the account they just created, so this
+  // reports and carries on rather than throwing.
+  let codeNotice = "";
+  const accessCode = safeAccessCode();
+  if (accessCode) {
+    try {
+      await postJSON("/subscription/redeem", { code: accessCode }, token);
+      if (authCode) authCode.value = "";
+    } catch (e) {
+      codeNotice = String((e && (e.detail || e.message)) || "that code could not be redeemed");
+      console.warn("Access code was not redeemed:", codeNotice);
+    }
+  }
+
   await loadMe();
   syncCommunityIdentityGlobals();
-  setAuthUI(true, `Status: account created • signed in as ${me?.display_name || me?.email || email}`);
+  setAuthUI(true, codeNotice
+    ? `Account created — but ${codeNotice} Your free week started instead.`
+    : `Status: account created • signed in as ${me?.display_name || me?.email || email}`);
   if (authPass) authPass.value = "";
   try {
     await applyPostAuthPreferences({ email, forceGhostSync: true, desiredGhostMode });
@@ -3330,6 +3359,12 @@ function safeEmail() {
 }
 function safePass() {
   return authPass && authPass.value ? authPass.value : "";
+}
+function safeCity() {
+  return authCity && authCity.value ? authCity.value.trim() : "";
+}
+function safeAccessCode() {
+  return authCode && authCode.value ? authCode.value.trim().toUpperCase() : "";
 }
 
 window.getAuthUiDebugState = function getAuthUiDebugState() {

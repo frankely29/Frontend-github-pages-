@@ -18,9 +18,10 @@
   var DOORS = {
     signup: {
       title: "Create account",
-      lede: "Your name is what other drivers see in the feed and in chat.",
+      lede: "Your name and city are what other drivers see.",
       submit: "signup",
       showName: true,
+      showExtras: true,
       showPromise: true,
       hint: "At least 6 characters.",
       swap: "Already have one? <b data-landing-go=\"signin\">Sign in</b>",
@@ -28,9 +29,10 @@
     },
     signin: {
       title: "Sign in",
-      lede: "Same account on every device — your trips and chats come with you.",
+      lede: "Same account on every device — your posts, trips and chats come with you.",
       submit: "signin",
       showName: false,
+      showExtras: false,
       showPromise: false,
       hint: "",
       swap: "No account yet? <b data-landing-go=\"signup\">Create one</b>",
@@ -64,6 +66,8 @@
     var title = q("[data-landing-title]");
     var lede = q("[data-landing-lede]");
     var nameField = q('[data-landing-field="name"]');
+    var cityField = q('[data-landing-field="city"]');
+    var codeField = q('[data-landing-field="code"]');
     var promise = q("[data-landing-promise]");
     var hint = q("[data-landing-hint]");
     var swap = q("[data-landing-swap]");
@@ -74,6 +78,10 @@
     if (title) title.textContent = door.title;
     if (lede) lede.textContent = door.lede;
     if (nameField) nameField.hidden = !door.showName;
+    // Signing in needs neither: the account already knows its city, and a code
+    // is redeemed from the menu once you are in.
+    if (cityField) cityField.hidden = !door.showExtras;
+    if (codeField) codeField.hidden = !door.showExtras;
     if (promise) promise.hidden = !door.showPromise;
     if (hint) {
       hint.textContent = door.hint;
