@@ -326,3 +326,155 @@ body.night .profileMore {
   border-color: rgba(255, 255, 255, 0.14);
   color: #eef2f8;
 }
+
+/* ==========================================================================
+   Editing your own profile.
+   ========================================================================== */
+
+.profileEdit {
+  margin-top: 4px;
+  padding: 13px 18px;
+  border: 1px solid rgba(16, 22, 34, 0.14);
+  border-radius: 999px;
+  background: #fff;
+  color: #101622;
+  font-family: inherit;
+  font-weight: 700;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.profileForm {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 6px;
+}
+
+.profileField {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.profileFieldLabel {
+  font-family: inherit;
+  font-weight: 800;
+  font-size: 11px;
+  line-height: 1;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: #6b7789;
+}
+
+.profileInput {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px 13px;
+  border-radius: 12px;
+  border: 1px solid rgba(16, 22, 34, 0.14);
+  background: #fff;
+  color: #101622;
+  font-family: inherit;
+  font-weight: 400;
+  font-size: 15px;
+  line-height: 1.4;
+}
+.profileInput:focus {
+  outline: none;
+  border-color: #101622;
+  box-shadow: 0 0 0 3px rgba(16, 22, 34, 0.08);
+}
+.profileTextarea { resize: vertical; min-height: 78px; }
+
+.profileFieldNote {
+  min-height: 15px;
+  font-size: 12px;
+  line-height: 1.3;
+  color: #6b7789;
+}
+.profileFieldNote.ok { color: #0b7a3e; }
+.profileFieldNote.bad { color: #b3202c; }
+
+.profileChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.profileChip {
+  padding: 9px 13px;
+  border: 1px solid rgba(16, 22, 34, 0.14);
+  border-radius: 999px;
+  background: #fff;
+  color: #3a465c;
+  font-family: inherit;
+  font-weight: 700;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+.profileChip.on { background: #101622; border-color: #101622; color: #fff; }
+
+.profileFormError {
+  padding: 11px 13px;
+  border-radius: 12px;
+  background: rgba(226, 30, 44, 0.08);
+  color: #b3202c;
+  font-size: 14px;
+  line-height: 1.4;
+}
+.profileFormError[hidden] { display: none !important; }
+
+.profileFormRow {
+  display: flex;
+  gap: 10px;
+}
+.profileCancel {
+  flex: 0 0 auto;
+  padding: 14px 20px;
+  border: 1px solid rgba(16, 22, 34, 0.14);
+  border-radius: 999px;
+  background: #fff;
+  color: #3a465c;
+  font-family: inherit;
+  font-weight: 700;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+.profileSave {
+  flex: 1 1 auto;
+  padding: 14px 20px;
+  border: 0;
+  border-radius: 999px;
+  background: #101622;
+  color: #fff;
+  font-family: inherit;
+  font-weight: 800;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+/* Disabled has to look disabled, or a button that does nothing when tapped
+   reads as a broken app rather than a blocked field. */
+.profileSave:disabled {
+  background: rgba(16, 22, 34, 0.1);
+  color: #8d99ab;
+  cursor: default;
+}
+
+body.night .profileEdit,
+body.night .profileCancel,
+body.night .profileChip,
+body.night .profileInput {
+  background: rgba(22, 28, 42, 0.96);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: #eef2f8;
+}
+body.night .profileChip { color: #b8c3d4; }
+body.night .profileChip.on { background: #eef2f8; border-color: #eef2f8; color: #101622; }
+body.night .profileFieldLabel, body.night .profileFieldNote { color: #8d99ab; }
+body.night .profileFieldNote.ok { color: #5fd694; }
+body.night .profileFieldNote.bad { color: #ff8fa6; }
+body.night .profileSave { background: #eef2f8; color: #101622; }
+body.night .profileSave:disabled { background: rgba(255, 255, 255, 0.1); color: #6b7789; }

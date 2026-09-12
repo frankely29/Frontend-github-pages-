@@ -23,6 +23,15 @@ const RULES = CSS.replace(/\/\*[\s\S]*?\*\//g, '');
 const FEED_JS = fs.readFileSync(path.join(ROOT, 'feed.js'), 'utf8');
 const JS_SOURCE = path.join(ROOT, 'profile.js');
 
+// Comments here explain what the code deliberately does NOT do, and name the
+// very tokens some of these tests assert are absent. Checks for an absent
+// identifier have to read the code alone or they match the prose about it.
+function codeOf(file) {
+  return fs.readFileSync(file, 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+}
+
 function makeNode(tag) {
   const node = {
     tagName: String(tag || 'div').toUpperCase(),
@@ -137,9 +146,13 @@ function build(options = {}) {
   };
   window.window = window;
 
+  const timers = [];
   const ctx = vm.createContext({
     window, document, console,
     localStorage: { getItem: () => 'a-token' },
+    // Fired by hand, so a test states exactly when the debounce elapses.
+    setTimeout: (fn) => { timers.push(fn); return timers.length; },
+    clearTimeout: (id) => { if (id) timers[id - 1] = null; },
     CustomEvent: function (type, init) {
       this.type = type; this.detail = init && init.detail;
       window._fired.push({ type, detail: init && init.detail });
@@ -163,8 +176,9 @@ function build(options = {}) {
   const entry = registered[registered.length - 1] || null;
   const body = makeNode('div');
   if (entry && entry.render) entry.render(body);
+  const flush = () => { const pending = timers.splice(0); pending.forEach((fn) => fn && fn()); };
   return { window, document, api: window.TeamJoseoProfile, entry, body, calls,
-    replaced, titleNode, registered };
+    replaced, titleNode, registered, timers, flush };
 }
 
 const P = (p) => ({ body: { ok: true, profile: p } });
@@ -226,9 +240,8 @@ test('the hash is replaced, not pushed', () => {
   dom.api._state.target = 9;
   dom.entry.onEnter();
   assert.ok(dom.replaced.some((u) => u === '#/profile?u=9'), dom.replaced.join(','));
-  const src = fs.readFileSync(JS_SOURCE, 'utf8')
-    .split('\n').filter((l) => !l.trim().startsWith('*') && !l.trim().startsWith('//')).join('\n');
-  assert.ok(!/location\.hash\s*=/.test(src), 'it assigns location.hash somewhere');
+  assert.ok(!/location\.hash\s*=/.test(codeOf(JS_SOURCE)),
+    'it assigns location.hash somewhere');
 });
 
 test('open() sets the target and asks the shell to show the screen', () => {
@@ -282,6 +295,19 @@ test('the head shows counts, name, bio and driver tags', async () => {
     'Uber · Lyft', 'Toyota Sienna', 'TLC since 2019'].forEach((bit) => {
     assert.ok(text.includes(bit), `missing ${bit} in: ${text}`);
   });
+});
+
+test('the read view shows the same words the form does', async () => {
+  // The server stores keys. A profile reading "uber · lyft" above a form
+  // reading "Uber" looks like two different apps.
+  const dom = build({ responses: [
+    P(profile({ platforms: ['uber', 'black_car'], vehicle_type: 'minivan' })), G([])] });
+  dom.api._state.target = 7;
+  await dom.entry.onEnter();
+  await tick(); await tick();
+  const tags = [...dom.body.querySelectorAll('.profileTag')].map((t) => t.textContent);
+  assert.ok(tags.includes('Uber · Black car'), tags.join(' | '));
+  assert.ok(tags.includes('Minivan'), tags.join(' | '));
 });
 
 test('the shell title becomes the handle', async () => {
@@ -543,6 +569,282 @@ test('the feed survives profile.js being absent', () => {
 test('a tappable author is reachable by keyboard', () => {
   assert.ok(FEED_JS.includes('"tabindex", "0"'), 'the author block is mouse-only');
   assert.ok(RULES.includes('[data-role="author"]:focus-visible'), 'no focus ring');
+});
+
+
+// --------------------------------------------------------------------------
+// editing your own profile
+// --------------------------------------------------------------------------
+
+const OPTIONS = { body: { ok: true, platforms: ['uber', 'lyft', 'via'],
+  vehicle_types: ['sedan', 'minivan', 'ev'] } };
+
+async function opened(over = {}, extra = []) {
+  const dom = build({ responses: [P(profile(Object.assign({ is_me: true }, over))),
+    G([]), OPTIONS].concat(extra) });
+  await dom.entry.onEnter();
+  await tick(); await tick();
+  dom.body.querySelector('[data-role="edit"]').click();
+  await tick(); await tick();
+  return dom;
+}
+
+test('only your own profile offers an edit button', async () => {
+  const mine = build({ responses: [P(profile({ is_me: true })), G([])] });
+  await mine.entry.onEnter();
+  await tick(); await tick();
+  assert.ok(mine.body.querySelector('[data-role="edit"]'), 'no edit button on your own profile');
+
+  const theirs = build({ responses: [P(profile({ is_me: false })), G([])] });
+  theirs.api._state.target = 7;
+  await theirs.entry.onEnter();
+  await tick(); await tick();
+  assert.strictEqual(theirs.body.querySelector('[data-role="edit"]'), null,
+    'an edit button appeared on someone else\'s profile');
+});
+
+test('the form opens with what the profile already says', async () => {
+  const dom = await opened();
+  const d = dom.api._state.draft;
+  assert.strictEqual(d.handle, 'marcus_fhv');
+  assert.strictEqual(d.bio, 'Nights out of Queens since 2019.');
+  assert.strictEqual(d.platforms.join(','), 'Uber,Lyft');
+  assert.strictEqual(d.vehicle_type, 'Toyota Sienna');
+  assert.strictEqual(d.driving_since_year, '2019');
+});
+
+test('the draft is a copy, so cancel really cancels', async () => {
+  // Editing the live profile object would leave Cancel with nothing to restore.
+  const dom = await opened();
+  dom.api._state.draft.bio = 'Something else entirely';
+  dom.api._state.draft.platforms.push('via');
+  dom.api.cancelEdit();
+  assert.strictEqual(dom.api._state.profile.bio, 'Nights out of Queens since 2019.');
+  assert.strictEqual(dom.api._state.profile.platforms.join(','), 'Uber,Lyft');
+  assert.strictEqual(dom.api._state.draft, null);
+});
+
+test('the closed sets come from the server, not from this file', async () => {
+  const dom = await opened();
+  const src = codeOf(JS_SOURCE);
+  assert.ok(src.includes('/social/identity/options'), 'the options endpoint is not called');
+  assert.ok(!src.includes('black_car'), 'the platform list is hard-coded here');
+  assert.ok(dom.calls.some((c) => c.url.includes('/social/identity/options')));
+});
+
+test('a platform the driver already has is still offered when the list shrinks', async () => {
+  // Otherwise a list that lost an entry silently drops their answer on the
+  // next save.
+  const dom = await opened({ platforms: ['gone_from_list'] });
+  const names = [...dom.body.querySelectorAll('[data-platform]')]
+    .map((c) => c.getAttribute('data-platform'));
+  assert.ok(names.includes('gone_from_list'), names.join(','));
+});
+
+test('only changed fields are sent, because the route is a patch', async () => {
+  // An omitted field is left alone; an explicit null CLEARS it. Sending the
+  // whole draft would let a bio edit wipe a vehicle.
+  const dom = await opened();
+  dom.api._state.draft.bio = 'New bio.';
+  const diff = dom.api.identityDiff();
+  assert.deepStrictEqual(Object.keys(diff), ['bio']);
+  assert.strictEqual(diff.bio, 'New bio.');
+});
+
+test('nothing changed means nothing is sent at all', async () => {
+  const dom = await opened();
+  assert.strictEqual(Object.keys(dom.api.identityDiff()).length, 0);
+  const before = dom.calls.length;
+  await dom.api.save();
+  assert.strictEqual(dom.calls.length, before, 'an empty save still hit the server');
+  assert.strictEqual(dom.api._state.editing, false);
+});
+
+test('clearing a field sends null rather than an empty string', async () => {
+  // null is how the server is told to clear; "" would be stored as a bio of
+  // nothing rather than no bio.
+  const dom = await opened();
+  dom.api._state.draft.bio = '   ';
+  dom.api._state.draft.vehicle_type = '';
+  const diff = dom.api.identityDiff();
+  assert.strictEqual(diff.bio, null);
+  assert.strictEqual(diff.vehicle_type, null);
+});
+
+test('the handle goes to its own endpoint, and only when it changed', async () => {
+  const dom = await opened({}, [P(profile({ is_me: true, handle: 'newname' }))]);
+  dom.api._state.draft.handle = 'newname';
+  await dom.api.save();
+  await tick();
+  const handleCall = dom.calls.filter((c) => c.url.endsWith('/social/me/handle'))[0];
+  assert.ok(handleCall, 'the handle was never saved');
+  assert.strictEqual(JSON.parse(handleCall.opts.body).handle, 'newname');
+});
+
+test('re-typing your own handle in a different case is not a change', async () => {
+  const dom = await opened();
+  dom.api._state.draft.handle = 'MARCUS_FHV';
+  await dom.api.save();
+  await tick();
+  assert.ok(!dom.calls.some((c) => c.url.endsWith('/social/me/handle')),
+    'it tried to claim the handle the driver already owns');
+});
+
+test('a taken handle names itself rather than saying "could not save"', async () => {
+  const dom = await opened({}, [{ status: 409, body: {} }]);
+  dom.api._state.draft.handle = 'taken';
+  await dom.api.save();
+  await tick();
+  assert.ok(/taken/i.test(dom.api._state.saveError), dom.api._state.saveError);
+});
+
+test('a failed save keeps the form open with the draft intact', async () => {
+  // Closing it would throw away what someone typed and leave them guessing
+  // which part landed.
+  const dom = await opened({}, [{ throws: true }]);
+  dom.api._state.draft.bio = 'Worth keeping.';
+  await dom.api.save();
+  await tick();
+  assert.strictEqual(dom.api._state.editing, true);
+  assert.strictEqual(dom.api._state.draft.bio, 'Worth keeping.');
+  assert.ok(dom.api._state.saveError, 'no reason shown');
+});
+
+test('a partial failure says which part failed', async () => {
+  const dom = await opened({}, [
+    P(profile({ is_me: true, handle: 'newname' })),  // handle ok
+    { throws: true },                                 // identity failed
+  ]);
+  dom.api._state.draft.handle = 'newname';
+  dom.api._state.draft.bio = 'Changed too.';
+  await dom.api.save();
+  await tick();
+  assert.ok(/details/i.test(dom.api._state.saveError), dom.api._state.saveError);
+  assert.ok(!/handle/i.test(dom.api._state.saveError),
+    'it blamed the handle, which saved fine');
+});
+
+test('two taps on save send one round of requests', async () => {
+  const dom = await opened({}, [P(profile({ is_me: true }))]);
+  dom.api._state.draft.bio = 'Once.';
+  const before = dom.calls.length;
+  const a = dom.api.save();
+  const b = dom.api.save();
+  await Promise.all([a, b]);
+  assert.strictEqual(dom.calls.length, before + 1, 'double-saved');
+});
+
+// --------------------------------------------------------------------------
+// the live handle check
+// --------------------------------------------------------------------------
+
+test('typing a new handle checks it, once, after a pause', async () => {
+  const dom = await opened({}, [{ body: { ok: true, handle: 'newname', available: true } }]);
+  dom.api._state.draft.handle = 'n';
+  dom.api.checkHandle();
+  dom.api._state.draft.handle = 'ne';
+  dom.api.checkHandle();
+  dom.api._state.draft.handle = 'newname';
+  dom.api.checkHandle();
+  const before = dom.calls.length;
+  dom.flush();
+  await tick(); await tick();
+  assert.strictEqual(dom.calls.length, before + 1, 'every keystroke hit the server');
+  assert.strictEqual(dom.api._state.handleState.available, true);
+});
+
+test('your own handle is never reported as taken', async () => {
+  const dom = await opened();
+  dom.api._state.draft.handle = 'marcus_fhv';
+  dom.api.checkHandle();
+  assert.strictEqual(dom.api._state.handleState, null);
+  assert.strictEqual(dom.timers.filter(Boolean).length, 0, 'it asked anyway');
+});
+
+test('a stale check does not overwrite the handle being typed now', async () => {
+  const dom = await opened({}, [{ body: { ok: true, handle: 'aaa', available: false,
+    reason: 'That handle is taken' } }]);
+  dom.api._state.draft.handle = 'aaa';
+  dom.api.checkHandle();
+  dom.api._state.draft.handle = 'bbb';   // moved on while in flight
+  dom.flush();
+  await tick(); await tick();
+  assert.notStrictEqual(dom.api._state.handleState && dom.api._state.handleState.reason,
+    'That handle is taken');
+});
+
+test('a handle known to be taken blocks save', async () => {
+  const dom = await opened({}, [{ body: { ok: true, handle: 'taken', available: false,
+    reason: 'That handle is taken' } }]);
+  dom.api._state.draft.handle = 'taken';
+  dom.api.checkHandle();
+  dom.flush();
+  await tick(); await tick();
+  assert.strictEqual(dom.api._nodes.saveBtn.disabled, true);
+});
+
+test('a check that could not run does not block save', async () => {
+  // The server is the real authority. A failed availability check must not
+  // lock someone out of saving their bio.
+  const dom = await opened({}, [{ throws: true }]);
+  dom.api._state.draft.handle = 'unknown';
+  dom.api.checkHandle();
+  dom.flush();
+  await tick(); await tick();
+  assert.strictEqual(dom.api._nodes.saveBtn.disabled, false);
+});
+
+test('leaving the screen closes the form and cancels a pending check', async () => {
+  const dom = await opened();
+  dom.api._state.draft.handle = 'halfway';
+  dom.api.checkHandle();
+  dom.entry.onLeave();
+  assert.strictEqual(dom.api._state.editing, false);
+  assert.strictEqual(dom.api._state.draft, null);
+  assert.strictEqual(dom.timers.filter(Boolean).length, 0, 'a check was left pending');
+});
+
+test('the grid is out of the way while the form is open', async () => {
+  const dom = build({ responses: [P(profile({ is_me: true })),
+    G([gridPost(1)]), OPTIONS] });
+  await dom.entry.onEnter();
+  await tick(); await tick();
+  assert.ok(dom.body.querySelector('.profileTile'), 'no tiles to begin with');
+  dom.body.querySelector('[data-role="edit"]').click();
+  await tick(); await tick();
+  assert.strictEqual(dom.body.querySelector('.profileTile'), null,
+    'a photo grid under an open form is something to scroll past to reach Save');
+});
+
+test('stored keys are shown as words', async () => {
+  const dom = build();
+  assert.strictEqual(dom.api.prettyChoice('black_car'), 'Black car');
+  assert.strictEqual(dom.api.prettyChoice('uber'), 'Uber');
+  // "suv" and "ev" are real VEHICLE_CHOICES; "Suv" and "Ev" read as typos.
+  assert.strictEqual(dom.api.prettyChoice('suv'), 'SUV');
+  assert.strictEqual(dom.api.prettyChoice('ev'), 'EV');
+  assert.strictEqual(dom.api.prettyChoice(''), '');
+});
+
+test('toggling a platform does not rebuild the inputs', async () => {
+  // A full repaint would throw away the caret, and half of what someone was
+  // typing with it.
+  const dom = await opened();
+  const bioBefore = dom.body.querySelector('.profileTextarea');
+  dom.body.querySelector('[data-platform="via"]').click();
+  assert.strictEqual(dom.api._state.draft.platforms.indexOf('via') >= 0, true);
+  assert.strictEqual(dom.body.querySelector('.profileTextarea'), bioBefore,
+    'the form was rebuilt on a chip tap');
+});
+
+test('the bio field stops at the server ceiling', async () => {
+  const dom = await opened();
+  const bio = dom.body.querySelector('.profileTextarea');
+  assert.strictEqual(bio.getAttribute('maxlength'), '200');
+});
+
+test('a disabled save button looks disabled', () => {
+  assert.ok(/\.profileSave:disabled\s*\{/.test(RULES), 'no disabled style');
 });
 
 // --------------------------------------------------------------------------
