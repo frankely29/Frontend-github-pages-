@@ -110,7 +110,8 @@
       "./navigation.vectoroverlay.css",
       "./navigation.vectorbasemap.css",
       "./navigation.turnbyturn.css",
-      "./app-shell.css"
+      "./app-shell.css",
+      "./landing.css"
     ];
 
     window.__TLC_LOCAL_JS_ASSETS__ = [
@@ -146,7 +147,8 @@
       "./presence-avatars-layer.feature.js",
       "./day-tendency.js",
       "./app.lazy.js",
-      "./app-shell.js"
+      "./app-shell.js",
+      "./landing.js"
     ];
 
     window.__tlcWithBuildId = function __tlcWithBuildId(path) {
@@ -175,34 +177,156 @@
   <div id="map"></div>
   <canvas id="wxCanvas"></canvas>
 
+  <!--
+    The signed-out page. Every id the auth code binds to (authEmail, authPass,
+    authName, authGhost, btnLogin, btnSignup, authStatus) is still here and
+    still does the same job -- app.part10.js:2179-2185 looks them up by id, so
+    they had to survive this rewrite intact. What changed is everything around
+    them: a page that says what this is before asking anyone to join it.
+  -->
   <div id="lockedOverlay" class="lockedOverlay" aria-hidden="true">
-    <div class="lockedCard">
-      <div class="lockedHead">Sign in to use community features</div>
-      <div class="lockedBody">
-        <div class="row">
-          <label for="authEmail">Email</label>
-          <input id="authEmail" type="email" inputmode="email" placeholder="you@email.com" autocomplete="email" />
-        </div>
-        <div class="row">
-          <label for="authPass">Password</label>
-          <input id="authPass" type="password" placeholder="password" autocomplete="current-password" />
-        </div>
-        <div class="row">
-          <label for="authName">Driver name (shown in profile and chat)</label>
-          <input id="authName" type="text" placeholder="Driver name" autocomplete="nickname" />
-        </div>
-        <div class="row rowCheck">
-          <input id="authGhost" type="checkbox" />
-          <label for="authGhost">Ghost mode (hide me on the map only; still counted online)</label>
+    <div class="landing" id="landing">
+
+      <!-- pane 1: the pitch -->
+      <div class="landingPane landingPitch" data-landing-pane="pitch">
+        <div class="landingArt" aria-hidden="true">
+          <span class="landingNode n1">MJ</span><span class="landingNode n2">RT</span>
+          <span class="landingNode n3">DV</span><span class="landingNode n4">KP</span>
+          <span class="landingNode n5">LM</span><span class="landingNode n6">CB</span>
+          <span class="landingNode n7 ny">NY</span>
+          <span class="landingNode n8 sm"></span><span class="landingNode n9 sm"></span>
+          <span class="landingNode n10 sm"></span>
+          <span class="landingFade"></span>
         </div>
 
-        <div class="lockedActions">
-          <button id="btnLogin" class="primaryBtn" type="button">Sign in</button>
-          <button id="btnSignup" class="secondaryBtn" type="button">Create account</button>
+        <div class="landingTop">
+          <span class="landingMark">Joseo</span>
+          <button type="button" class="landingGhostBtn" data-landing-go="signin">Sign in</button>
         </div>
 
-        <div id="authStatus" class="authStatus">Status: signed out</div>
+        <div class="landingBody">
+          <span class="landingKicker">Rideshare &amp; taxi drivers</span>
+          <h1 class="landingH1">The first place that is <em>only</em> drivers.</h1>
+          <p class="landingLede">Not a Facebook group. Not a subreddit full of
+            passengers. A network built for the people actually out there.</p>
+
+          <div class="landingCta">
+            <button type="button" class="landingBtn landingBtnGo" data-landing-go="signup">
+              Create account &mdash; free for 7 days
+            </button>
+            <button type="button" class="landingBtn landingBtnGhost" data-landing-go="signin">
+              I already have an account
+            </button>
+          </div>
+          <p class="landingFine">No card to start. <b>$8/week</b> after the trial, cancel anytime.<br>
+            Got an access code? Use it when you sign up.</p>
+
+          <!--
+            Five real screens. The track carries a sixth frame that repeats the
+            first, so when the loop restarts there is nothing to rewind past -- a
+            five-frame loop has to race backwards to the start, and that snap is
+            what makes a carousel look broken.
+          -->
+          <div class="landingCar">
+            <div class="landingCarView">
+              <div class="landingTrack">
+                <div class="landingSlide">
+                  <div class="landingPhone"><img src="./landing/slide-Feed.jpg" alt="The feed" loading="lazy" decoding="async" width="560" height="1212"></div>
+                  <div class="landingCap"><span class="landingCapT">A feed that is only drivers</span>
+                    <span class="landingCapD">No civilians, no dealerships, no rage-bait.</span></div>
+                </div>
+                <div class="landingSlide">
+                  <div class="landingPhone"><img src="./landing/slide-Compose.jpg" alt="Posting" loading="lazy" decoding="async" width="560" height="1212"></div>
+                  <div class="landingCap"><span class="landingCapT">Post what you see</span>
+                    <span class="landingCapD">A queue, a pay screen, a spot that is working.</span></div>
+                </div>
+                <div class="landingSlide">
+                  <div class="landingPhone"><img src="./landing/slide-Menu.jpg" alt="Rooms and messages" loading="lazy" decoding="async" width="560" height="1212"></div>
+                  <div class="landingCap"><span class="landingCapT">Rooms, messages, voice notes</span>
+                    <span class="landingCapD">Your city gets its own room. Nobody types at a red light.</span></div>
+                </div>
+                <div class="landingSlide">
+                  <div class="landingPhone"><img src="./landing/slide-Profile.jpg" alt="Your profile" loading="lazy" decoding="async" width="560" height="1212"></div>
+                  <div class="landingCap"><span class="landingCapT">Your trips, your people</span>
+                    <span class="landingCapD">Follow the drivers worth following.</span></div>
+                </div>
+                <div class="landingSlide">
+                  <div class="landingPhone"><img src="./landing/slide-LeaveRoute.jpg" alt="The map" loading="lazy" decoding="async" width="560" height="1212"></div>
+                  <div class="landingCap"><span class="landingCapT">And in New York, the map</span>
+                    <span class="landingCapD">Every zone scored. One word tells you what to do.</span></div>
+                </div>
+                <div class="landingSlide" aria-hidden="true">
+                  <div class="landingPhone"><img src="./landing/slide-Feed.jpg" alt="" loading="lazy" decoding="async" width="560" height="1212"></div>
+                  <div class="landingCap"><span class="landingCapT">A feed that is only drivers</span>
+                    <span class="landingCapD">No civilians, no dealerships, no rage-bait.</span></div>
+                </div>
+              </div>
+            </div>
+            <div class="landingDots" aria-hidden="true">
+              <span class="landingDot"></span><span class="landingDot"></span><span class="landingDot"></span>
+              <span class="landingDot"></span><span class="landingDot"></span>
+            </div>
+          </div>
+
+          <div class="landingFoot">
+            <span>Team Joseo &middot; built by drivers, for drivers</span>
+          </div>
+        </div>
       </div>
+
+      <!-- pane 2: the form. One form for both doors; the copy and the button change. -->
+      <div class="landingPane landingForm" data-landing-pane="form" hidden>
+        <div class="landingFormBar">
+          <button type="button" class="landingBack" data-landing-go="pitch">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M14.5 5.5 8 12l6.5 6.5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span>Back</span>
+          </button>
+          <h2 class="landingFormTitle" data-landing-title>Create account</h2>
+        </div>
+
+        <div class="landingFormBody">
+          <p class="landingFormLede" data-landing-lede>Your name is what other drivers see in the feed and in chat.</p>
+
+          <div class="landingField" data-landing-field="name">
+            <label class="landingLabel" for="authName">Display name</label>
+            <input id="authName" type="text" class="landingInput" placeholder="NightHawk" autocomplete="nickname" />
+          </div>
+
+          <div class="landingField">
+            <label class="landingLabel" for="authEmail">Email</label>
+            <input id="authEmail" type="email" class="landingInput" inputmode="email" placeholder="you@example.com" autocomplete="email" />
+          </div>
+
+          <div class="landingField">
+            <label class="landingLabel" for="authPass">Password</label>
+            <input id="authPass" type="password" class="landingInput" placeholder="At least 6 characters" autocomplete="current-password" />
+            <span class="landingHint" data-landing-hint>At least 6 characters.</span>
+          </div>
+
+          <label class="landingCheck">
+            <input id="authGhost" type="checkbox" />
+            <span>Ghost mode &mdash; hide me on the map, still counted online</span>
+          </label>
+
+          <div class="landingPromise" data-landing-promise>
+            <span class="landingPromiseIcon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M5 12.6 9.8 17.4 19 7.2" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </span>
+            <span><b>Your 7 days start the moment you tap.</b> No card, nothing else to choose.</span>
+          </div>
+
+          <div id="authStatus" class="landingStatus">Status: signed out</div>
+        </div>
+
+        <div class="landingFormFoot">
+          <!-- Both buttons stay in the DOM: app.part10.js binds each once, by id.
+               The pane shows whichever one this door is for. -->
+          <button id="btnSignup" class="landingBtn landingBtnGo" type="button" data-landing-submit="signup">Create account</button>
+          <button id="btnLogin" class="landingBtn landingBtnGo" type="button" data-landing-submit="signin" hidden>Sign in</button>
+          <p class="landingSwap" data-landing-swap></p>
+        </div>
+      </div>
+
     </div>
   </div>
 

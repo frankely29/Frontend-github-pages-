@@ -1,0 +1,417 @@
+/*
+ * landing.css — the signed-out page.
+ *
+ * Lives inside #lockedOverlay, which app.part10.js already shows and hides via
+ * setAuthUI(). This file only restyles what is inside it and overrides the two
+ * properties on the overlay itself that would otherwise centre a small card:
+ * the dim backdrop and the padding. Everything else is scoped to .landing*.
+ */
+
+/* The overlay was a scrim around a modal. It is now the page.
+ *
+ * The z-index matters and was found the hard way: at its original 2000 the
+ * shell's menu button (3200) and the dock (3000) floated on top of the
+ * signed-out page and swallowed taps meant for it. For a logged-out visitor
+ * this IS the app, so it goes above the app's chrome — and that chrome is
+ * hidden too, because a menu button that does nothing is worse than no button.
+ */
+#lockedOverlay.lockedOverlay {
+  background: #0a0f1c;
+  padding: 0;
+  align-items: stretch;
+  justify-content: stretch;
+  z-index: 9600;
+}
+
+#lockedOverlay.show ~ .shellMenuBtn,
+#lockedOverlay.show ~ #dock,
+#lockedOverlay.show ~ .mapControlStack,
+#lockedOverlay.show ~ .sliderWrap {
+  display: none !important;
+}
+
+.landing {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #0a0f1c;
+  color: #fff;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.landingPane { position: absolute; inset: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.landingPane[hidden] { display: none !important; }
+
+/* ------------------------------------------------------------------- hero art
+   A network with New York as the bright knot in it. Absolutely positioned dots
+   rather than an image, so it costs nothing to download and scales anywhere. */
+.landingArt { position: absolute; left: 0; right: 0; top: 0; height: 300px; overflow: hidden; }
+.landingNode {
+  position: absolute;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  font: 700 13px/1 system-ui, sans-serif;
+  color: #fff;
+  box-shadow: 0 0 0 2px rgba(10, 15, 28, 0.55);
+}
+.landingNode.sm { font-size: 0; }
+.landingNode.ny {
+  font-size: 17px;
+  box-shadow: 0 0 0 2px rgba(10, 15, 28, 0.55), 0 0 60px 30px rgba(49, 219, 125, 0.22);
+}
+.landingArt .n1 { left: 7%;  top: 86px;  width: 34px; height: 34px; background: #ff8c00; }
+.landingArt .n2 { left: 26%; top: 44px;  width: 28px; height: 28px; background: #66ccff; }
+.landingArt .n3 { left: 19%; top: 146px; width: 30px; height: 30px; background: #4b3cff; }
+.landingArt .n4 { left: 37%; top: 108px; width: 26px; height: 26px; background: #ffd400; color: #3d2e00; }
+.landingArt .n5 { left: 58%; top: 62px;  width: 26px; height: 26px; background: #8000ff; }
+.landingArt .n6 { left: 60%; top: 152px; width: 28px; height: 28px; background: #ff8c00; }
+.landingArt .n7 { left: 78%; top: 90px;  width: 42px; height: 42px; background: #00b050; }
+.landingArt .n8 { left: 73%; top: 44px;  width: 22px; height: 22px; background: #31db7d; }
+.landingArt .n9 { left: 91%; top: 140px; width: 24px; height: 24px; background: #31db7d; }
+.landingArt .n10{ left: 84%; top: 190px; width: 20px; height: 20px; background: #00b050; }
+
+/* The night fades in so the headline sits on solid ink, not on a dot. */
+.landingFade {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg,
+    rgba(10, 15, 28, 0) 0%,
+    rgba(10, 15, 28, 0.22) 38%,
+    rgba(10, 15, 28, 0.9) 74%,
+    #0a0f1c 100%);
+}
+
+/* ------------------------------------------------------------------ top bar */
+.landingTop {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  height: 60px;
+}
+.landingTop::before {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; top: 0;
+  height: 104px;
+  background: linear-gradient(180deg, rgba(10, 15, 28, 0.74), rgba(10, 15, 28, 0));
+  pointer-events: none;
+  z-index: -1;
+}
+.landingMark { font: 700 17px/1 system-ui, sans-serif; letter-spacing: -0.03em; }
+.landingGhostBtn {
+  min-height: 40px;
+  padding: 0 14px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #fff;
+  font: 600 13px/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+
+/* --------------------------------------------------------------------- pitch */
+.landingBody { position: relative; z-index: 2; padding: 186px 20px 0; }
+
+.landingKicker {
+  display: inline-flex;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  padding: 7px 11px;
+  font: 600 11px/1 system-ui, sans-serif;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.86);
+}
+.landingH1 {
+  font: 800 31px/1.1 system-ui, sans-serif;
+  letter-spacing: -0.037em;
+  margin: 13px 0 0;
+  color: #fff;
+}
+.landingH1 em { font-style: normal; color: #31db7d; }
+.landingLede {
+  font: 500 14.5px/1.5 system-ui, sans-serif;
+  color: rgba(255, 255, 255, 0.66);
+  margin: 10px 0 0;
+  max-width: 32ch;
+}
+
+.landingCta { display: flex; flex-direction: column; gap: 9px; margin-top: 18px; }
+
+/* 54px because this is the one thing on the page anyone has to hit. */
+.landingBtn {
+  min-height: 54px;
+  border-radius: 14px;
+  border: 0;
+  cursor: pointer;
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  font: 700 15.5px/1 system-ui, sans-serif;
+  letter-spacing: -0.012em;
+  padding: 0 14px;
+}
+.landingBtn[hidden] { display: none !important; }
+.landingBtnGo {
+  background: linear-gradient(180deg, #31db7d 0%, #10a74f 100%);
+  color: #fff;
+  box-shadow: 0 3px 8px rgba(16, 167, 79, 0.26), 0 14px 30px rgba(16, 167, 79, 0.3);
+}
+.landingBtnGhost {
+  background: rgba(255, 255, 255, 0.09);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+}
+.landingBtn:disabled { opacity: 0.55; cursor: default; }
+
+.landingFine {
+  font: 500 12px/1.5 system-ui, sans-serif;
+  color: rgba(255, 255, 255, 0.44);
+  text-align: center;
+  margin: 11px 0 0;
+}
+.landingFine b { color: rgba(255, 255, 255, 0.74); font-weight: 600; }
+
+/* ------------------------------------------------------------------ carousel */
+.landingCar { margin-top: 20px; }
+.landingCarView { position: relative; overflow: hidden; border-radius: 20px; }
+
+/* The track is the width of the viewport and its slides overflow it, so one
+   slide is exactly 100% and one step is exactly translateX(-100%). Sizing the
+   track at 600% and the slides at 16.6% looks equivalent and is not: the
+   percentage resolves against the wrong box and every step lands off by the
+   difference. */
+.landingTrack {
+  display: flex;
+  animation: landingSlide 24s cubic-bezier(0.65, 0.02, 0.28, 1) infinite;
+}
+.landingSlide {
+  flex: 0 0 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 11px;
+  padding-top: 2px;
+}
+.landingPhone {
+  width: 232px;
+  border-radius: 19px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.4), 0 22px 50px rgba(0, 0, 0, 0.5);
+  background: #0a0f1c;
+}
+.landingPhone img { display: block; width: 100%; height: auto; }
+.landingCap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  text-align: center;
+  padding: 0 14px;
+}
+.landingCapT { font: 700 15px/1.2 system-ui, sans-serif; letter-spacing: -0.02em; }
+.landingCapD {
+  font: 500 12.5px/1.4 system-ui, sans-serif;
+  color: rgba(255, 255, 255, 0.56);
+  min-height: 35px;
+}
+
+.landingDots { display: flex; justify-content: center; gap: 6px; margin-top: 13px; }
+.landingDot { height: 6px; width: 6px; border-radius: 999px; background: rgba(255, 255, 255, 0.24); }
+.landingDot:nth-child(1) { animation: landingDot1 24s infinite; }
+.landingDot:nth-child(2) { animation: landingDot2 24s infinite; }
+.landingDot:nth-child(3) { animation: landingDot3 24s infinite; }
+.landingDot:nth-child(4) { animation: landingDot4 24s infinite; }
+.landingDot:nth-child(5) { animation: landingDot5 24s infinite; }
+
+@keyframes landingSlide {
+  0%, 13%   { transform: translateX(0); }
+  17%, 30%  { transform: translateX(-100%); }
+  34%, 47%  { transform: translateX(-200%); }
+  50%, 63%  { transform: translateX(-300%); }
+  67%, 80%  { transform: translateX(-400%); }
+  84%, 100% { transform: translateX(-500%); }
+}
+/* Dot 1 lights twice, because the last frame IS the first. */
+@keyframes landingDot1 {
+  0%, 15%   { background: #31db7d; width: 17px; }
+  18%, 82%  { background: rgba(255, 255, 255, 0.24); width: 6px; }
+  85%, 100% { background: #31db7d; width: 17px; }
+}
+@keyframes landingDot2 {
+  0%, 15%   { background: rgba(255, 255, 255, 0.24); width: 6px; }
+  18%, 32%  { background: #31db7d; width: 17px; }
+  35%, 100% { background: rgba(255, 255, 255, 0.24); width: 6px; }
+}
+@keyframes landingDot3 {
+  0%, 32%   { background: rgba(255, 255, 255, 0.24); width: 6px; }
+  35%, 49%  { background: #31db7d; width: 17px; }
+  52%, 100% { background: rgba(255, 255, 255, 0.24); width: 6px; }
+}
+@keyframes landingDot4 {
+  0%, 49%   { background: rgba(255, 255, 255, 0.24); width: 6px; }
+  52%, 65%  { background: #31db7d; width: 17px; }
+  68%, 100% { background: rgba(255, 255, 255, 0.24); width: 6px; }
+}
+@keyframes landingDot5 {
+  0%, 65%   { background: rgba(255, 255, 255, 0.24); width: 6px; }
+  68%, 82%  { background: #31db7d; width: 17px; }
+  85%, 100% { background: rgba(255, 255, 255, 0.24); width: 6px; }
+}
+
+.landingFoot {
+  margin-top: 26px;
+  padding: 15px 0 24px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  font: 500 11.5px/1.4 system-ui, sans-serif;
+  color: rgba(255, 255, 255, 0.34);
+}
+
+/* ---------------------------------------------------------------------- form */
+.landingForm { display: flex; flex-direction: column; background: #fff; color: #101622; }
+
+.landingFormBar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  padding-top: calc(10px + env(safe-area-inset-top, 0px));
+  min-height: 64px;
+  flex: none;
+  border-bottom: 1px solid rgba(16, 22, 34, 0.1);
+}
+.landingBack {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 44px;
+  padding: 0 15px 0 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(16, 22, 34, 0.1);
+  background: #fff;
+  color: #101622;
+  cursor: pointer;
+  font: 600 13px/1 system-ui, sans-serif;
+  flex: none;
+}
+.landingBack svg { width: 17px; height: 17px; display: block; }
+.landingFormTitle {
+  font: 700 18px/1 system-ui, sans-serif;
+  letter-spacing: -0.022em;
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+}
+
+.landingFormBody {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.landingFormLede {
+  font: 500 13.5px/1.5 system-ui, sans-serif;
+  color: #59616e;
+  margin: 0 0 2px;
+  max-width: 33ch;
+}
+
+.landingField { display: flex; flex-direction: column; gap: 5px; }
+.landingField[hidden] { display: none !important; }
+.landingLabel {
+  font: 700 10.5px/1 system-ui, sans-serif;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #8a919d;
+}
+.landingInput {
+  min-height: 50px;
+  padding: 0 13px;
+  border: 1px solid rgba(16, 22, 34, 0.1);
+  border-radius: 13px;
+  background: #fff;
+  color: #101622;
+  font: 500 15px/1 system-ui, sans-serif;
+  width: 100%;
+}
+.landingInput:focus {
+  outline: none;
+  border-color: #101622;
+  box-shadow: 0 0 0 3px rgba(16, 22, 34, 0.07);
+}
+.landingHint { font: 500 11.5px/1.4 system-ui, sans-serif; color: #8a919d; }
+
+.landingCheck {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font: 500 12.5px/1.45 system-ui, sans-serif;
+  color: #59616e;
+  cursor: pointer;
+  padding: 4px 0;
+}
+.landingCheck input { width: 20px; height: 20px; flex: none; margin: 0; }
+
+.landingPromise {
+  display: flex;
+  gap: 10px;
+  padding: 11px 13px;
+  border-radius: 13px;
+  background: rgba(16, 167, 79, 0.07);
+  border: 1px solid rgba(16, 167, 79, 0.2);
+  font: 500 12.5px/1.45 system-ui, sans-serif;
+  color: #59616e;
+}
+.landingPromise[hidden] { display: none !important; }
+.landingPromise b { color: #101622; font-weight: 650; }
+.landingPromiseIcon { flex: none; color: #10a74f; }
+.landingPromiseIcon svg { width: 18px; height: 18px; display: block; }
+
+.landingStatus {
+  font: 500 12.5px/1.45 system-ui, sans-serif;
+  color: #59616e;
+  padding: 2px 0 8px;
+  min-height: 20px;
+}
+
+.landingFormFoot {
+  flex: none;
+  padding: 12px 20px calc(16px + env(safe-area-inset-bottom, 0px));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.landingSwap {
+  font: 500 13px/1.4 system-ui, sans-serif;
+  color: #59616e;
+  text-align: center;
+  margin: 0;
+}
+.landingSwap b { color: #0066ff; font-weight: 650; cursor: pointer; }
+
+/* Motion that cannot be stopped is a problem for some people, and a carousel is
+   exactly the kind that triggers it. */
+@media (prefers-reduced-motion: reduce) {
+  .landingTrack, .landingDot { animation: none; }
+  .landingDot:nth-child(1) { background: #31db7d; width: 17px; }
+}
+
+/* Wide screens: the pitch is a phone-shaped column, not a stretched banner. */
+@media (min-width: 620px) {
+  .landingBody, .landingTop { max-width: 520px; margin-inline: auto; }
+  .landingArt { max-width: 520px; left: 50%; transform: translateX(-50%); }
+  .landingFormBar, .landingFormBody, .landingFormFoot { max-width: 520px; margin-inline: auto; width: 100%; }
+}
