@@ -254,9 +254,30 @@
     like.setAttribute("data-role", "like");
     paintLike(like, post);
     actions.appendChild(like);
+
+    var replies = el("button", "feedReplies");
+    replies.type = "button";
+    replies.setAttribute("data-role", "replies");
+    replies.setAttribute("aria-expanded", "false");
+    paintReplies(replies, post);
+    actions.appendChild(replies);
     card.appendChild(actions);
 
+    // Threads open in place. A separate screen per post would mean losing your
+    // place in the feed to read two lines, and coming back to a refetched one.
+    var thread = el("div", "feedThread");
+    thread.hidden = true;
+    thread.setAttribute("data-role", "thread");
+    card.appendChild(thread);
+
     return card;
+  }
+
+  function paintReplies(button, post) {
+    var n = num(post.comment_count) || 0;
+    // No count until there is one: "0 replies" invites nothing, an unadorned
+    // "Reply" does.
+    button.textContent = n ? "Replies " + n : "Reply";
   }
 
   function paintLike(button, post) {
@@ -299,6 +320,210 @@
     }
   }
 
+
+  /* --------------------------------------------------------------- threads */
+
+  // Keyed by post id: { open, loading, items, nextAfterId, error, sending }.
+  // Kept out of the post objects so a feed refetch does not blow away an open
+  // thread someone is reading.
+  var threads = {};
+
+  function threadState(postId) {
+    var key = String(postId);
+    if (!threads[key]) {
+      threads[key] = { open: false, loading: false, items: [], nextAfterId: null,
+        error: "", sending: false, loaded: false };
+    }
+    return threads[key];
+  }
+
+  function findPost(postId) {
+    return state.items.filter(function (p) { return String(p.id) === String(postId); })[0] || null;
+  }
+
+  async function toggleThread(postId, card) {
+    var t = threadState(postId);
+    t.open = !t.open;
+    paintThread(postId, card);
+    // Fetched on first open only. Re-fetching every time someone collapses and
+    // expands a thread to re-read it is a request per glance.
+    if (t.open && !t.loaded && !t.loading) loadThread(postId, card);
+  }
+
+  async function loadThread(postId, card, options) {
+    var t = threadState(postId);
+    var append = !!(options && options.append);
+    if (t.loading) return;
+    t.loading = true;
+    t.error = "";
+    paintThread(postId, card);
+
+    var query = "?limit=20";
+    if (append && t.nextAfterId) query += "&after_id=" + encodeURIComponent(t.nextAfterId);
+    try {
+      var data = await getAuth("/social/posts/" + encodeURIComponent(postId) + "/comments" + query);
+      var items = (data && data.items) || [];
+      t.items = append ? t.items.concat(items) : items;
+      t.nextAfterId = (data && data.next_after_id) || null;
+      t.loaded = true;
+      // The server's count, not the length of what was fetched: a page is 20
+      // and a thread can be longer.
+      var post = findPost(postId);
+      if (post && num(data && data.comment_count) !== null) {
+        post.comment_count = num(data.comment_count);
+      }
+    } catch (err) {
+      t.error = err && err.status === 404
+        ? "This post is gone."
+        : "Could not load replies.";
+    } finally {
+      t.loading = false;
+      paintThread(postId, card);
+    }
+  }
+
+  async function sendReply(postId, card) {
+    var t = threadState(postId);
+    if (t.sending) return;
+    var input = card.querySelector('[data-role="reply-input"]');
+    var text = String((input && input.value) || "").trim();
+    if (!text) return;
+
+    t.sending = true;
+    t.error = "";
+    paintThread(postId, card);
+    try {
+      var data = await request("/social/posts/" + encodeURIComponent(postId) + "/comments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body: text }),
+      });
+      if (data && data.comment) t.items = t.items.concat([data.comment]);
+      var post = findPost(postId);
+      if (post && num(data && data.comment_count) !== null) {
+        post.comment_count = num(data.comment_count);
+      }
+      t.draft = "";
+    } catch (err) {
+      // The draft is kept and put back into the field below. Making someone
+      // retype a reply because the network dropped is unforgivable.
+      t.draft = text;
+      t.error = err && err.status === 402
+        ? "Your trial has ended — start a plan to reply."
+        : "Could not post that reply.";
+    } finally {
+      t.sending = false;
+      paintThread(postId, card);
+      var button = card.querySelector('[data-role="replies"]');
+      var post2 = findPost(postId);
+      if (button && post2) paintReplies(button, post2);
+    }
+  }
+
+  async function deleteComment(postId, commentId, card) {
+    var t = threadState(postId);
+    try {
+      var data = await request("/social/comments/" + encodeURIComponent(commentId), {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+      });
+      t.items = t.items.filter(function (c) { return String(c.id) !== String(commentId); });
+      var post = findPost(postId);
+      if (post && num(data && data.comment_count) !== null) {
+        post.comment_count = num(data.comment_count);
+      }
+    } catch (_) {
+      t.error = "Could not delete that reply.";
+    }
+    paintThread(postId, card);
+    var button = card.querySelector('[data-role="replies"]');
+    var post2 = findPost(postId);
+    if (button && post2) paintReplies(button, post2);
+  }
+
+  function buildComment(comment) {
+    var author = comment.author || {};
+    var row = el("div", "feedComment");
+    row.setAttribute("data-comment-id", String(comment.id));
+
+    var avatar = el("div", "feedCommentAvatar", initials(author.display_name));
+    avatar.style.background = avatarColor(author.user_id);
+    avatar.setAttribute("data-role", "author");
+    if (num(author.user_id) !== null) avatar.setAttribute("data-user-id", String(author.user_id));
+    row.appendChild(avatar);
+
+    var main = el("div", "feedCommentMain");
+    var head = el("div", "feedCommentHead");
+    var who = el("span", "feedCommentName", author.display_name || "Driver");
+    who.setAttribute("data-role", "author");
+    if (num(author.user_id) !== null) who.setAttribute("data-user-id", String(author.user_id));
+    head.appendChild(who);
+    var age = ago(comment.created_at);
+    if (age) head.appendChild(el("span", "feedCommentAge", age));
+    if (comment.can_delete) {
+      var del = el("button", "feedCommentDelete", "Delete");
+      del.type = "button";
+      del.setAttribute("data-role", "delete-comment");
+      del.setAttribute("aria-label", "Delete this reply");
+      head.appendChild(del);
+    }
+    main.appendChild(head);
+    main.appendChild(el("div", "feedCommentBody", comment.body || ""));
+    row.appendChild(main);
+    return row;
+  }
+
+  function paintThread(postId, card) {
+    var host = card.querySelector('[data-role="thread"]');
+    if (!host) return;
+    var t = threadState(postId);
+    var button = card.querySelector('[data-role="replies"]');
+    if (button) button.setAttribute("aria-expanded", t.open ? "true" : "false");
+
+    host.hidden = !t.open;
+    if (!t.open) return;
+    host.textContent = "";
+
+    if (t.loading && !t.items.length) {
+      host.appendChild(el("div", "feedThreadNote", "Loading…"));
+    }
+    t.items.forEach(function (comment) { host.appendChild(buildComment(comment)); });
+
+    if (t.nextAfterId) {
+      var more = el("button", "feedThreadMore", t.loading ? "Loading…" : "Earlier replies");
+      more.type = "button";
+      more.disabled = t.loading;
+      more.setAttribute("data-role", "more-replies");
+      host.appendChild(more);
+    }
+    if (!t.loading && !t.items.length && !t.error) {
+      host.appendChild(el("div", "feedThreadNote", "No replies yet."));
+    }
+    if (t.error) host.appendChild(el("div", "feedThreadNote feedThreadError", t.error));
+
+    var composer = el("div", "feedReplyRow");
+    var input = el("input", "feedReplyInput");
+    input.type = "text";
+    input.setAttribute("data-role", "reply-input");
+    input.setAttribute("placeholder", "Reply…");
+    input.setAttribute("maxlength", "600");
+    input.value = t.draft || "";
+    input.disabled = t.sending;
+    composer.appendChild(input);
+    var send = el("button", "feedReplySend", t.sending ? "…" : "Send");
+    send.type = "button";
+    send.disabled = t.sending;
+    send.setAttribute("data-role", "send-reply");
+    composer.appendChild(send);
+    host.appendChild(composer);
+    // Keystrokes are held on the thread so a repaint mid-typing -- a reply
+    // landing, a delete -- does not swallow what is half written.
+    input.addEventListener("input", function () { t.draft = input.value || ""; });
+    input.addEventListener("keydown", function (e) {
+      if (e && e.key === "Enter") { e.preventDefault(); sendReply(postId, card); }
+    });
+  }
+
   /* --------------------------------------------------------------- render */
 
   function paintScopes() {
@@ -328,7 +553,14 @@
       return;
     }
 
-    state.items.forEach(function (post) { nodes.list.appendChild(buildCard(post)); });
+    state.items.forEach(function (post) {
+      var card = buildCard(post);
+      nodes.list.appendChild(card);
+      // A thread already open stays open across a repaint of the list.
+      if (threads[String(post.id)] && threads[String(post.id)].open) {
+        paintThread(post.id, card);
+      }
+    });
 
     if (state.nextBeforeId) {
       var more = el("button", "feedMore", state.loading ? "Loading…" : "Load more");
@@ -381,6 +613,7 @@
       var items = (data && data.items) || [];
       state.items = append ? state.items.concat(items) : items;
       state.nextBeforeId = (data && data.next_before_id) || null;
+      pruneThreads();
     } catch (err) {
       if (scopeAtRequest !== state.scope) return;
       state.error = err && err.status === 401
@@ -392,6 +625,15 @@
         paintList();
       }
     }
+  }
+
+  /** Threads for posts that are no longer on screen are not worth keeping. */
+  function pruneThreads() {
+    var live = {};
+    state.items.forEach(function (p) { live[String(p.id)] = true; });
+    Object.keys(threads).forEach(function (key) {
+      if (!live[key]) delete threads[key];
+    });
   }
 
   function setScope(next) {
@@ -430,7 +672,23 @@
     }
 
     var moreBtn = target.closest('[data-role="more"]');
-    if (moreBtn) { load({ append: true }); }
+    if (moreBtn) { load({ append: true }); return; }
+
+    var card = target.closest("[data-post-id]");
+    if (!card) return;
+    var postId = card.getAttribute("data-post-id");
+
+    if (target.closest('[data-role="replies"]')) { toggleThread(postId, card); return; }
+    if (target.closest('[data-role="send-reply"]')) { sendReply(postId, card); return; }
+    if (target.closest('[data-role="more-replies"]')) {
+      loadThread(postId, card, { append: true });
+      return;
+    }
+    var del = target.closest('[data-role="delete-comment"]');
+    if (del) {
+      var row = del.closest("[data-comment-id]");
+      if (row) deleteComment(postId, row.getAttribute("data-comment-id"), card);
+    }
   }
 
   function render(body) {
@@ -504,6 +762,12 @@
     setScope: setScope,
     load: load,
     buildCard: buildCard,
+    _threads: threads,
+    threadState: threadState,
+    toggleThread: toggleThread,
+    loadThread: loadThread,
+    sendReply: sendReply,
+    deleteComment: deleteComment,
     ago: ago,
     initials: initials,
     prettyChoice: prettyChoice,
