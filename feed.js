@@ -177,9 +177,19 @@
       img.addEventListener("error", function () { img.remove(); });
       avatar.appendChild(img);
     }
+    avatar.setAttribute("data-role", "author");
+    if (num(author.user_id) !== null) avatar.setAttribute("data-user-id", String(author.user_id));
     head.appendChild(avatar);
 
     var who = el("div", "feedWho");
+    // The author block opens their profile. A network whose people are not
+    // reachable from their words is a list of announcements.
+    who.setAttribute("data-role", "author");
+    if (num(author.user_id) !== null) {
+      who.setAttribute("data-user-id", String(author.user_id));
+      who.setAttribute("role", "button");
+      who.setAttribute("tabindex", "0");
+    }
     var line1 = el("div", "feedNameRow");
     line1.appendChild(el("span", "feedName", author.display_name || "Driver"));
     var level = num(author.level);
@@ -388,6 +398,17 @@
 
     var scopeBtn = target.closest("[data-scope]");
     if (scopeBtn) { setScope(scopeBtn.getAttribute("data-scope")); return; }
+
+    var authorEl = target.closest('[data-role="author"]');
+    if (authorEl) {
+      var userId = authorEl.getAttribute("data-user-id");
+      // profile.js registers itself; if it is not loaded, a tap does nothing
+      // rather than throwing. Better a dead tap than a dead feed.
+      if (userId && window.TeamJoseoProfile && typeof window.TeamJoseoProfile.open === "function") {
+        window.TeamJoseoProfile.open(userId);
+      }
+      return;
+    }
 
     var likeBtn = target.closest('[data-role="like"]');
     if (likeBtn) {
