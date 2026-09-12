@@ -1,0 +1,328 @@
+/* ==========================================================================
+   profile.css — the Profile destination.
+
+   A driver's credentials, then their posts. The reputation card is the part
+   that makes this different from a photo app, so it gets the strongest frame
+   on the screen.
+   ========================================================================== */
+
+.profileScreen {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-block: 4px;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  color: #101622;
+}
+
+.profileHead {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ------------------------------------------------------- avatar and counts */
+
+.profileTop {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.profileAvatar {
+  position: relative;
+  flex: 0 0 auto;
+  width: 82px;
+  height: 82px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-family: inherit;
+  font-weight: 800;
+  font-size: 28px;
+  line-height: 1;
+  overflow: hidden;
+}
+/* On top of the initials, not instead of them, so a failed load falls back to
+   something readable rather than a broken-image glyph. */
+.profileAvatarImg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.profileCounts {
+  display: flex;
+  gap: 22px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.profileStat { min-width: 0; }
+.profileStatValue {
+  font-family: inherit;
+  font-weight: 800;
+  font-size: 21px;
+  line-height: 1.1;
+}
+.profileStatLabel {
+  margin-top: 1px;
+  font-size: 13px;
+  color: #6b7789;
+}
+
+/* --------------------------------------------------------- name, bio, tags */
+
+.profileName {
+  font-family: inherit;
+  font-weight: 800;
+  font-size: 17px;
+  line-height: 1.3;
+}
+.profileBio {
+  font-size: 15px;
+  line-height: 1.45;
+  /* Drivers type line breaks in a bio and they mean them. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.profileTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.profileTag {
+  padding: 7px 12px;
+  border: 1px solid rgba(16, 22, 34, 0.14);
+  border-radius: 999px;
+  font-size: 13px;
+  color: #3a465c;
+  /* A vehicle or platform list can be long; it wraps to another chip row
+     rather than widening the screen. */
+  overflow-wrap: anywhere;
+}
+
+/* The one line that says a number is private. Quiet, but present: a driver
+   should know which of these figures other people can see. */
+.profilePrivate {
+  font-size: 13px;
+  color: #8d99ab;
+}
+.profilePrivate::before { content: "🔒 "; }
+
+/* -------------------------------------------------------- reputation card */
+
+.profileRep {
+  margin-top: 2px;
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(16, 22, 34, 0.1);
+  background: rgba(16, 22, 34, 0.03);
+}
+.profileRepHead {
+  font-family: inherit;
+  font-weight: 800;
+  font-size: 11px;
+  line-height: 1;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: #3a465c;
+}
+.profileRepGrid {
+  margin-top: 12px;
+  display: flex;
+  /* Three cells fit at 390px; a long rank name wraps them rather than
+     squeezing the numbers into nothing. */
+  flex-wrap: wrap;
+  gap: 14px;
+}
+.profileRepCell {
+  flex: 1 1 88px;
+  min-width: 88px;
+}
+.profileRepValue {
+  font-family: inherit;
+  font-weight: 800;
+  font-size: 20px;
+  line-height: 1.1;
+}
+.profileRepLabel {
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: #6b7789;
+}
+.profileRepTitle {
+  margin-top: 12px;
+  display: inline-block;
+  padding: 6px 11px;
+  border-radius: 999px;
+  background: #101622;
+  color: #fff;
+  font-family: inherit;
+  font-weight: 700;
+  font-size: 12px;
+  line-height: 1;
+}
+
+/* ----------------------------------------------------------------- follow */
+
+.profileFollow {
+  margin-top: 4px;
+  padding: 14px 18px;
+  border: 0;
+  border-radius: 999px;
+  background: #101622;
+  color: #fff;
+  font-family: inherit;
+  font-weight: 800;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+/* Following is a state, not an action, so it stops shouting. */
+.profileFollow.on {
+  background: rgba(16, 22, 34, 0.07);
+  color: #3a465c;
+}
+.profileFollow:disabled { opacity: 0.6; }
+
+/* ------------------------------------------------------------------- grid */
+
+.profileGrid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.profileGridTiles {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 3px;
+}
+
+.profileTile {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  /* Paired with aspect-ratio so a square tile can never push the grid wider
+     than the screen. */
+  max-width: 100%;
+  overflow: hidden;
+  border-radius: 4px;
+  background: rgba(16, 22, 34, 0.06);
+}
+.profileTileImg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+/* A text post still gets a tile: its words beat an empty square, and a grid of
+   empty squares reads as broken images. */
+.profileTileText {
+  position: absolute;
+  inset: 0;
+  padding: 8px;
+  font-size: 11px;
+  line-height: 1.3;
+  color: #3a465c;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.profileTileChip {
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  right: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 4px 3px 6px;
+  border-radius: 999px;
+  background: rgba(10, 14, 22, 0.66);
+  color: #fff;
+  font-family: inherit;
+  font-weight: 700;
+  font-size: 10px;
+  line-height: 1;
+}
+.profileTileZone {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.profileTileScore {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 2px 5px;
+  border-radius: 999px;
+  font-family: inherit;
+  font-weight: 800;
+  font-size: 10px;
+  line-height: 1;
+}
+
+/* -------------------------------------------------- notices and paging */
+
+.profileNotice {
+  padding: 26px 18px;
+  border-radius: 16px;
+  background: rgba(16, 22, 34, 0.04);
+  color: #6b7789;
+  font-size: 14px;
+  line-height: 1.5;
+  text-align: center;
+}
+.profileNoticeError { color: #b3202c; background: rgba(226, 30, 44, 0.07); }
+
+.profileMore {
+  align-self: center;
+  padding: 11px 22px;
+  border: 1px solid rgba(16, 22, 34, 0.12);
+  border-radius: 999px;
+  background: #fff;
+  color: #101622;
+  font-family: inherit;
+  font-weight: 700;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+.profileMore:disabled { opacity: 0.55; }
+
+/* --------------------------------------------------- a tappable feed author */
+
+[data-role="author"] { cursor: pointer; }
+[data-role="author"]:focus-visible {
+  outline: 2px solid #0066ff;
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+/* ------------------------------------------------------------------ night */
+
+body.night .profileScreen { color: #eef2f8; }
+body.night .profileStatLabel,
+body.night .profileRepLabel,
+body.night .profileNotice { color: #8d99ab; }
+body.night .profileTag { border-color: rgba(255, 255, 255, 0.16); color: #b8c3d4; }
+body.night .profileRep {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+body.night .profileRepHead { color: #b8c3d4; }
+body.night .profileRepTitle { background: #eef2f8; color: #101622; }
+body.night .profileFollow { background: #eef2f8; color: #101622; }
+body.night .profileFollow.on { background: rgba(255, 255, 255, 0.1); color: #b8c3d4; }
+body.night .profileTile { background: rgba(255, 255, 255, 0.06); }
+body.night .profileTileText { color: #b8c3d4; }
+body.night .profileNotice { background: rgba(255, 255, 255, 0.05); }
+body.night .profileMore {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: #eef2f8;
+}
