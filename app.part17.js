@@ -3295,6 +3295,80 @@
     state.activeMessageIcon = active.severity;
   }
 
+  // How each action code reads on the pill, and how loud it is allowed to be.
+  // LEAVE_NOW is the only red: if everything shouts, nothing does.
+  const ACTION_PILL = {
+    STAY:         { verb: "STAY",      tone: "hold" },
+    STAY_BRIEFLY: { verb: "WAIT",      tone: "soft" },
+    // "MOVE SOON" is 108px of a 366px pill and it starved the zone name down to
+    // an ellipsis. "MOVE" plus the amber tone carries the same urgency, and the
+    // "soon" is in the sheet.
+    MOVE_SOON:    { verb: "MOVE",      tone: "move" },
+    LEAVE_NOW:    { verb: "LEAVE",     tone: "urgent" },
+    MONITOR:      { verb: "MONITOR",   tone: "idle" },
+  };
+
+  function isMoveActionCode(code) {
+    return code === "MOVE_SOON" || code === "LEAVE_NOW";
+  }
+
+  // The recommendation as fields. Whatever the words say, this says the same:
+  // both are derived from state.finalActionCode in the same tick, and a move
+  // describes the TARGET zone while a hold describes the zone underfoot —
+  // naming the wrong one is how a pill ends up reading "LEAVE · Astoria" while
+  // the driver is parked in Astoria.
+  function buildActionDetail() {
+    const actionCode = String(state.finalActionCode || state.actionCode || "MONITOR").trim().toUpperCase();
+    const shape = ACTION_PILL[actionCode] || ACTION_PILL.MONITOR;
+    const moving = isMoveActionCode(actionCode);
+    const target = moving ? (state.assistantMoveTarget || null) : null;
+
+    // A move with no target is not a move anyone can follow. Say MONITOR rather
+    // than point at nothing.
+    if (moving && !target) {
+      return {
+        actionCode: "MONITOR",
+        verb: ACTION_PILL.MONITOR.verb,
+        tone: ACTION_PILL.MONITOR.tone,
+        isMove: false,
+        zoneName: String(state.activeStableZoneName || "").trim(),
+        score: Number.isFinite(state.visibleRating) ? Math.round(state.visibleRating) : null,
+        distanceMiles: null,
+        etaMinutes: null,
+        bearingDeg: null,
+      };
+    }
+
+    const zoneName = moving
+      ? String(target.zoneName || "").trim()
+      : String(state.activeStableZoneName || "").trim();
+    const rawScore = moving ? target.visibleRating : state.visibleRating;
+
+    let bearingDeg = null;
+    const from = state.lastUserLocation;
+    if (moving
+      && from && Number.isFinite(from.lat) && Number.isFinite(from.lng)
+      && Number.isFinite(target.centerLat) && Number.isFinite(target.centerLng)) {
+      const brng = internals.computeBearingDeg?.(
+        { lat: from.lat, lng: from.lng },
+        { lat: target.centerLat, lng: target.centerLng }
+      );
+      if (Number.isFinite(brng)) bearingDeg = brng;
+    }
+
+    return {
+      actionCode,
+      verb: shape.verb,
+      tone: shape.tone,
+      isMove: moving,
+      zoneName,
+      score: Number.isFinite(rawScore) ? Math.round(rawScore) : null,
+      distanceMiles: (moving && Number.isFinite(target.distanceMiles)) ? target.distanceMiles : null,
+      etaMinutes: (moving && Number.isFinite(target.etaMinutes)) ? Math.round(target.etaMinutes) : null,
+      bearingDeg,
+    };
+  }
+
   function mirrorRecommendLine() {
     const primary = buildAssistantPrimaryLine();
     const secondary = buildAssistantSecondaryLine();
@@ -3323,8 +3397,21 @@
       target: (_isMove && _navSpot && Number.isFinite(_navSpot.lat) && Number.isFinite(_navSpot.lng))
         ? { lat: _navSpot.lat, lng: _navSpot.lng, label: _navSpot.label || "" }
         : null,
+      // The same recommendation, in parts rather than in a sentence, for the
+      // on-map action pill. It is published HERE, by the one function that owns
+      // the sentence, precisely so the pill cannot drift from the words: a pill
+      // that re-derived "leave" from state while this line said "stay" is the
+      // exact failure the comment above is about. Consumers read, never compute.
+      detail: buildActionDetail(),
       ts: Date.now(),
     };
+    // Cheap wake-up for the pill. Without it the pill has to poll, and polling
+    // is either laggy or wasteful; there is no third option.
+    try {
+      window.dispatchEvent(new CustomEvent("tlc:recommendation", {
+        detail: window.TlcAssistantRecommendation,
+      }));
+    } catch (_) {}
     if (!recommendLine) return;
     const key = `${primary}|${secondary}`;
     if (state.lastRecommendLineKey === key) return;
@@ -3514,6 +3601,12 @@
     const laneRight = Math.floor(weatherRect.left - 10);
     const laneWidth = Math.floor(laneRight - laneLeft);
     const laneCenter = Math.floor((laneLeft + laneRight) / 2);
+    // Sit on the same line as the badges, wherever that line is. This used to
+    // be hardcoded to +10px, so when the badge strip moved down to clear the
+    // top-right map control the card stayed behind and ran under it.
+    const laneTop = Number.isFinite(onlineRect.top)
+      ? `${Math.round(onlineRect.top)}px`
+      : "calc(env(safe-area-inset-top) + 10px)";
 
     if (laneWidth >= 140) {
       const dockWidth = Math.min(220, laneWidth);
@@ -3522,7 +3615,7 @@
       dock.style.width = `${dockWidth}px`;
       dock.style.maxWidth = `${dockWidth}px`;
       dock.style.transform = "translateX(-50%)";
-      dock.style.top = "calc(env(safe-area-inset-top) + 10px)";
+      dock.style.top = laneTop;
       dock.dataset.aiCompactLane = laneWidth < 210 ? "1" : "0";
       return;
     }
@@ -3532,7 +3625,7 @@
     dock.style.width = "min(220px, calc(100vw - 32px))";
     dock.style.maxWidth = "calc(100vw - 32px)";
     dock.style.transform = "translateX(-50%)";
-    dock.style.top = "calc(env(safe-area-inset-top) + 10px)";
+    dock.style.top = laneTop;
     dock.dataset.aiCompactLane = "1";
   }
 
