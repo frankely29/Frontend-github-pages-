@@ -292,3 +292,51 @@ body.shell-no-scrubber #dock {
 @media (prefers-reduced-motion: reduce) {
   .shellMenu, .shellScrim, .shellScreen { transition: none; }
 }
+
+/* ------------------------------------------------- conditions, in the menu
+
+   The online count, the weather chip, the day-tendency rail and the assistant
+   card used to sit on the map. The approved Main artboard's map top is the
+   menu button and the locate/shield control and nothing else, so they moved
+   in here (app-shell.js relocateStatus). These are the *same* nodes, so each
+   arrives carrying the fixed-position, map-anchored CSS it was written with.
+   This section undoes the anchoring and nothing else: each widget keeps its
+   own internal layout, including the tendency rail's vertical bar, which is
+   deliberate and whose marker is positioned against that vertical track. */
+.shellStatus {
+  padding: 12px 12px 16px;
+  border-top: 1px solid rgba(16, 22, 34, 0.08);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.shellStatus > #onlineBadge,
+.shellStatus > #weatherBadge,
+.shellStatus > #dayTendencyMeter,
+.shellStatus > #aiAssistantDock {
+  position: static !important;
+  inset: auto !important;
+  transform: none !important;
+  margin: 0 !important;
+  z-index: auto !important;
+  /* Their map styling sizes against the viewport. In a 300px drawer that
+     overflows the panel edge, so cap them and count padding in the width. */
+  box-sizing: border-box !important;
+  max-width: 100% !important;
+}
+
+/* The chips are pills sized by their text on the map; in a list they read
+   better as full-width rows. */
+.shellStatus > #onlineBadge,
+.shellStatus > #weatherBadge {
+  width: 100% !important;
+}
+
+/* The rail is pointer-events:none on the map because it is a passive readout
+   floating over pannable zones. Inside the drawer nothing is behind it, and
+   leaving it inert would swallow taps meant for the panel. */
+.shellStatus > #dayTendencyMeter { pointer-events: auto !important; }
+
+body.night .shellStatus { border-top-color: rgba(255, 255, 255, 0.1); }

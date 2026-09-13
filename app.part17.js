@@ -3600,6 +3600,19 @@
     const weatherBadge = document.getElementById("weatherBadge");
     if (!dock || !onlineBadge || !weatherBadge) return;
 
+    // The card and the badges now live in the menu's Conditions section, not
+    // on the map. This function's whole job was to thread the card through the
+    // lane between the two badges -- inside the drawer there is no lane, and
+    // the inline left/top it writes would drag the card out of the list. It
+    // also has to clear what it wrote before the move, or those offsets stay.
+    if (dock.closest && dock.closest("#shellStatus")) {
+      ["left", "right", "top", "width", "maxWidth", "transform"].forEach((prop) => {
+        dock.style[prop] = "";
+      });
+      delete dock.dataset.aiCompactLane;
+      return;
+    }
+
     const onlineRect = onlineBadge.getBoundingClientRect?.();
     const weatherRect = weatherBadge.getBoundingClientRect?.();
     if (!onlineRect || !weatherRect) return;

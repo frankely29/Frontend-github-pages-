@@ -30,6 +30,38 @@
 
   var SCREEN_HOST_ID = "shellScreens";
   var MENU_ID = "shellMenu";
+  var STATUS_ID = "shellStatus";
+
+  /* The map chrome that moves into the menu's Conditions section. Order is the
+   * order they appear there. #dayTendencyMeter is built lazily by
+   * day-tendency.js the first time it has a reading, so this runs again on
+   * every open rather than once at mount. */
+  var STATUS_NODE_IDS = [
+    "aiAssistantDock",
+    "dayTendencyMeter",
+    "onlineBadge",
+    "weatherBadge",
+  ];
+
+  function relocateStatus() {
+    var host = byId(STATUS_ID);
+    if (!host) return;
+    STATUS_NODE_IDS.forEach(function (id) {
+      var node = byId(id);
+      if (!node || node.parentNode === host) return;
+      // The map versions are fixed-position and carry inline offsets written
+      // by their own layout code. Clearing them here means the CSS below is
+      // not fighting a style attribute for the rest of the session.
+      node.style.left = "";
+      node.style.right = "";
+      node.style.top = "";
+      node.style.bottom = "";
+      node.style.width = "";
+      node.style.maxWidth = "";
+      node.style.transform = "";
+      host.appendChild(node);
+    });
+  }
   var SCRIM_ID = "shellScrim";
   var BUTTON_ID = "shellMenuBtn";
 
@@ -97,6 +129,7 @@
     if (!menu || !scrim) return;
     lastFocus = document.activeElement;
     paintMenu();
+    relocateStatus();
     menu.hidden = false;
     scrim.hidden = false;
     // Two frames: the element has to be laid out before the transform can
@@ -333,6 +366,19 @@
     header.appendChild(close);
     menu.appendChild(header);
     menu.appendChild(el("div", "shellMenuBody"));
+
+    // Conditions live here now, not on the map. The approved Main artboard's
+    // map top is the menu button and the locate/shield control and nothing
+    // else; the build had grown an online count, a weather chip, the day
+    // tendency rail and the assistant card up there, all competing with the
+    // zones underneath. Nothing is rebuilt or duplicated -- relocateStatus()
+    // moves the live nodes, so every updater that already holds a reference
+    // to them keeps working untouched.
+    var status = el("div", "shellStatus");
+    status.id = STATUS_ID;
+    status.appendChild(el("div", "shellGroup", "Conditions"));
+    menu.appendChild(status);
+
     document.body.appendChild(menu);
 
     // One delegated listener rather than one per item, because the list is
@@ -420,6 +466,14 @@
     applyAdminChrome();
     paintMenu();
     syncFromHash();
+    // Clear the map top now, not on the first menu open -- otherwise the
+    // chips a driver is meant to stop seeing are exactly what they see until
+    // they happen to open the menu. The retries catch #dayTendencyMeter and
+    // the assistant dock, which their own scripts build a beat later.
+    relocateStatus();
+    [400, 1500, 4000].forEach(function (ms) {
+      window.setTimeout(relocateStatus, ms);
+    });
   }
 
   if (document.readyState === "loading") {
