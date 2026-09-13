@@ -381,35 +381,30 @@ body.shell-no-scrubber #dock {
 
 /* The track: a 6px lane instead of a 118px column, and the gradient runs left
    to right, so red is at the left where a horizontal scale expects its floor. */
-/* A dot, not a track. The drawer is 306px wide and a 46px track plus "49
-   Normal night" plus both chips does not fit on one line -- measured, the band
-   truncated to "Normal n...". The track's length was never the information:
-   the marker's position was, and the number already states it. So the same
-   element becomes a 14px dot showing the one thing the track contributed that
-   the number does not -- the colour at that point on the scale.
+/* A meter, laid on its side: the full worst-to-best range with the score
+   marked on it, which is what the vertical rail showed and what a single
+   number cannot. Red at the left, green at the right, so the scale runs the
+   same direction as the number beside it.
 
-   The colour is sampled, not hardcoded: the gradient is laid out seven times
-   wider than the dot and shifted to --tendency-pct, which puts the stop for
-   this score under the dot. One value, set once by day-tendency.js, drives
-   both the marker on the vertical rail and the colour here. */
+   It fits at this width only because the redundant "online" word is dropped
+   below -- with the word in place there was no room for both the meter and
+   the tendency label, and the label truncated. */
 #shellConditions .dayTendencyScale {
-  flex: 0 0 14px;
-  width: 14px !important;
-  height: 14px !important;
-  border-radius: 999px !important;
+  flex: 0 0 54px;
+  width: 54px !important;
+  height: 6px !important;
+  border-radius: 999px;
   border: 0 !important;
-  background-image: linear-gradient(to right, #e60000 0%, #ffd400 50%, #00b050 100%) !important;
-  background-size: 700% 100% !important;
-  background-position: var(--tendency-pct, 50%) 0 !important;
   box-shadow: inset 0 0 0 1px rgba(16, 22, 34, 0.12);
+  background: linear-gradient(to right, #e60000 0%, #ffd400 50%, #00b050 100%) !important;
 }
-/* The marker measures a track that is no longer there. */
-#shellConditions .dayTendencyMarker { display: none !important; }
 
-/* The marker rides --tendency-pct, which day-tendency.js sets without knowing
-   the orientation. Vertical uses it as `bottom`; here it is `left`, and the
-   rule becomes a 2px upright instead of a 2px crossbar. */
+/* The marker is the reading. It rides --tendency-pct, which day-tendency.js
+   sets without knowing the orientation: on the vertical rail that value is
+   `bottom`, here it is `left`, and the rule turns from a crossbar into an
+   upright. */
 #shellConditions .dayTendencyMarker {
+  display: block !important;
   left: var(--tendency-pct, 50%) !important;
   bottom: auto !important;
   top: -2px;
@@ -417,6 +412,7 @@ body.shell-no-scrubber #dock {
   height: calc(100% + 4px);
   border-top: 0 !important;
   border-left: 2px solid #fff;
+  box-shadow: 0 0 2px rgba(0, 0, 0, 0.55);
   transform: translateX(-1px);
 }
 
