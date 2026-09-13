@@ -506,6 +506,60 @@ test('motion is honoured as a preference', () => {
     'the colour and arrow transitions ignore reduced motion');
 });
 
+
+// ------------------------------------------------ the approved pill geometry
+
+test('the collapsed pill hugs its words instead of spanning the map', () => {
+  // The approved artboard's pill is 200px wide on a 390px screen -- "STAY ·
+  // Astoria 86" and no more. It shipped full-bleed, and full-bleed is what a
+  // toolbar looks like, not a badge. Three things together produce the hug,
+  // and any one of them reverting puts it back to 366px.
+  assert.ok(/#mapAction\s*\{[^}]*align-items:\s*center/s.test(CSS),
+    'the column stretches its children, so the pill cannot size to content');
+  assert.ok(/\.mapActionPill\s*\{[^}]*width:\s*auto/s.test(CSS),
+    'the pill is back to a fixed width');
+  assert.ok(/\.mapActionFacts\s*\{[^}]*flex:\s*0 1 auto/s.test(CSS),
+    'facts claiming the leftover width stretches the pill back to full-bleed');
+});
+
+test('the pill is the height the artboard draws', () => {
+  assert.ok(/\.mapActionPill\s*\{[^}]*height:\s*42px/s.test(CSS), 'not 42px tall');
+});
+
+test('expanded, the pill becomes the header of its sheet', () => {
+  assert.ok(/\.mapActionPill\[aria-expanded="true"\]\s*\{[^}]*width:\s*100%/s.test(CSS),
+    'the expanded pill must span the sheet it opened');
+  assert.ok(/\.mapActionDetail\s*\{[^}]*align-self:\s*stretch/s.test(CSS),
+    'the sheet would be centred to its own content width like the pill');
+});
+
+test('the verb and the zone are separated the way the artboard separates them', () => {
+  assert.ok(INDEX.includes('mapActionSep'), 'no separator between the verb and the zone');
+  assert.ok(/\.mapActionSep\s*\{[^}]*border-radius:\s*999px/s.test(CSS),
+    'the separator is not a dot');
+});
+
+test('the dock icons are single-stroke line art, not illustrations', () => {
+  // The old set were multi-colour: a blue gear, a red-and-yellow gamepad, a
+  // drum-kit emoji. Next to the approved map they read as stickers.
+  const APP = APPJS;
+  const block = APP.slice(APP.indexOf('function applyDockIconModel'),
+                          APP.indexOf('const pickupIconEl'));
+  assert.ok(!/fill="#(?!fff|ffffff)[0-9a-f]{3,6}"/i.test(block),
+    'a dock icon still carries a hardcoded colour fill');
+  assert.ok(!/🥁|🎨|⚙️/.test(block), 'a dock icon is still an emoji');
+  const strokes = block.split('stroke="currentColor"').length - 1;
+  assert.ok(strokes >= 8, `expected every dock icon to stroke with currentColor (found ${strokes})`);
+});
+
+test('the dock ink follows the theme', () => {
+  // currentColor is only correct if something sets the colour, and night mode
+  // needs the opposite ink or the icons vanish into the dark dock.
+  const SHELL = fs.readFileSync(path.join(ROOT, 'frontend-shell.css'), 'utf8');
+  assert.ok(/\.dockIcon\s*\{[^}]*color:/s.test(SHELL), 'day ink unset');
+  assert.ok(/body\.night \.dockIcon\s*\{[^}]*color:/s.test(SHELL), 'night ink unset');
+});
+
 // --------------------------------------------------------------------------
 
 let failed = 0;

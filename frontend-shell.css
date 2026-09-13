@@ -2874,3 +2874,11 @@ body.night .subscriptionStatusValue {
 }
 .paywallRedeemStatus.isError { color: #c0392b; }
 .paywallRedeemStatus.isOk { color: #1e7e34; }
+
+/* ---------------------------------------------------------------- dock ink
+   The dock icons are single-stroke line art (see applyDockIconModel), drawn
+   with currentColor so one rule themes the whole row. The artboard hardcodes
+   #101622; night mode needs the opposite, and a hardcoded ink would have gone
+   invisible on the dark dock. */
+.dockIcon { color: #101622; }
+body.night .dockIcon { color: #eef2f8; }
