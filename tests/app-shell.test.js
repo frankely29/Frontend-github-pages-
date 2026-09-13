@@ -425,16 +425,27 @@ test('the tendency rail lies down without losing its marker', () => {
     'the info column keeps min-height:118px and holds the bar open');
 });
 
-test('the tendency dot is coloured by the score, not hardcoded', () => {
-  // The drawer has no room for the 46px track, so the same element becomes a
-  // dot that samples the gradient at --tendency-pct. That only works if the
-  // percentage reaches an ancestor of the dot, which is why day-tendency.js
-  // sets it on the root as well as on the marker.
+test('the meter shows the whole range, with the score marked on it', () => {
+  // A single number cannot say how good 49 is. The rail did, and the drawer
+  // version has to as well: the full worst-to-best gradient, red at the left
+  // so the scale runs the same direction as the number beside it, and a
+  // marker that moves. A dot coloured by the score was tried here and is not
+  // the same thing -- it loses the range.
+  assert.ok(/#shellConditions \.dayTendencyScale[\s\S]{0,600}linear-gradient\(to right, #e60000/.test(SHELL_CSS),
+    'the meter is not a worst-to-best gradient running left to right');
+  assert.ok(/#shellConditions \.dayTendencyMarker[\s\S]{0,400}left:\s*var\(--tendency-pct/.test(SHELL_CSS),
+    'the marker does not track the score');
+  assert.ok(!/#shellConditions \.dayTendencyMarker\s*\{[^}]*display:\s*none/s.test(SHELL_CSS),
+    'the marker is hidden, so the meter shows a range with nothing marked on it');
+});
+
+test('the marker reads a percentage rather than one fixed edge', () => {
+  // day-tendency.js states the position and the CSS decides which edge it
+  // drives: `bottom` on the vertical rail, `left` here. Writing to bottom
+  // directly is what made the rail impossible to lay flat.
   const DT = fs.readFileSync(path.join(__dirname, '..', 'day-tendency.js'), 'utf8');
-  assert.ok(/STATE\.root\.style\.setProperty\('--tendency-pct'/.test(DT),
-    'the dot cannot read the position, so its colour would never change');
-  assert.ok(/#shellConditions \.dayTendencyScale[\s\S]{0,600}background-position:\s*var\(--tendency-pct/.test(SHELL_CSS),
-    'the dot does not sample the gradient at the score');
+  assert.ok(/--tendency-pct/.test(DT), 'the marker position is hardcoded to one axis again');
+  assert.ok(!/marker\.style\.bottom/.test(DT), 'the marker writes bottom directly again');
 });
 
 test('the online count keeps its number when the word is dropped', () => {
