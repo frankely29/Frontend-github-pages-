@@ -24,7 +24,11 @@
   pointer-events: none;
   display: flex;
   flex-direction: column;
-  align-items: stretch;
+  /* The approved design's collapsed pill hugs its own words and sits centred
+     over the map -- "STAY · Astoria 86" is about 200px wide, not the full
+     430px the column allows. Centring here rather than stretching is what
+     lets the pill size to its content; the detail sheet opts back out below. */
+  align-items: center;
   gap: 8px;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
 }
@@ -35,11 +39,17 @@
 
 .mapActionPill {
   pointer-events: auto;
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 10px;
-  width: 100%;
-  padding: 11px 12px 11px 18px;
+  gap: 8px;
+  /* Content-width, capped by the column. The approved artboard's pill is
+     42px tall with 14px of lead-in and 5px after the chevron, which is what
+     makes it read as a badge on the map rather than a toolbar across it. */
+  width: auto;
+  max-width: 100%;
+  height: 42px;
+  padding: 0 5px 0 14px;
+  white-space: nowrap;
   border: 0;
   border-radius: 999px;
   color: #fff;
@@ -53,6 +63,22 @@
 }
 .mapActionPill:active { transform: scale(0.985); }
 
+/* Expanded, the pill stops being a badge and becomes the header of the sheet
+   it opened -- the approved Expanded artboard shows it running the full width
+   of the card, with the reasoning underneath. */
+.mapActionPill[aria-expanded="true"] { width: 100%; }
+
+/* The separator between the verb and the zone. Small enough to read as
+   punctuation rather than a bullet in a list. */
+.mapActionSep {
+  flex: 0 0 auto;
+  width: 3.5px;
+  height: 3.5px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.45;
+}
+
 /* Tone drives colour, and only LEAVE gets red. A pill that is red for every
    suggestion is a pill drivers stop reading. */
 .mapActionPill[data-tone="hold"]   { background: linear-gradient(180deg, #14b85f, #0e9a4e); }
@@ -62,9 +88,11 @@
 .mapActionPill[data-tone="idle"]   { background: linear-gradient(180deg, #46536a, #333e51); }
 
 .mapActionVerb {
-  font-weight: 900;
-  font-size: 17px;
-  letter-spacing: 0.02em;
+  flex: 0 0 auto;
+  font-weight: 800;
+  font-size: 15px;
+  line-height: 1;
+  letter-spacing: 0.03em;
   white-space: nowrap;
 }
 
@@ -90,13 +118,18 @@
 .mapActionArrow[hidden] { display: none !important; }
 
 .mapActionFacts {
-  flex: 1 1 auto;
+  /* 0 1 auto, not 1 1 auto: a hugging pill must not have a child that claims
+     the leftover width, or the pill stretches back to full-bleed and the
+     change above does nothing. It still shrinks, which is what keeps a long
+     zone name from pushing the score off the end. */
+  flex: 0 1 auto;
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 14px;
-  font-weight: 700;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 /* The zone name is the part worth truncating: a driver who can read "LEAVE",
    the distance and the score has the decision even if the name is clipped. But
@@ -116,19 +149,20 @@
 
 .mapActionScore {
   flex: 0 0 auto;
-  min-width: 30px;
-  padding: 3px 8px;
+  min-width: 22px;
+  padding: 3px 5px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.24);
-  font-size: 13px;
-  font-weight: 900;
+  background: rgba(255, 255, 255, 0.22);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  font-weight: 700;
   text-align: center;
 }
 
 .mapActionChevron {
   flex: 0 0 auto;
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.2);
   display: grid;
@@ -147,6 +181,10 @@
 .mapActionDetail {
   pointer-events: auto;
   order: -1; /* opens upward, so the pill never moves out from under the thumb */
+  /* The column centres its children so the collapsed pill can hug; the sheet
+     is the one child that still wants the full width. */
+  align-self: stretch;
+  width: 100%;
   padding: 12px 14px;
   border-radius: 16px;
   background: rgba(255, 255, 255, 0.97);

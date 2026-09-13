@@ -1682,77 +1682,41 @@ function applyDockIconModel() {
     iconEl.style.lineHeight = "1";
   };
 
+  // The dock icons are the approved artboard's, path for path: one weight,
+  // one stroke, no fills. The previous set were multi-colour illustrations --
+  // a blue gear, a red-and-yellow gamepad, a drum kit emoji -- which is what
+  // made the dock read as a row of stickers next to a designed map. Stroke is
+  // currentColor rather than the artboard's hardcoded ink so night mode works.
   setIcon(dockColors, `
-    <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" focusable="false" style="display:block">
-      <circle cx="12" cy="12" r="10" fill="#f2f8ff"/>
-      <path d="M12 2a10 10 0 0 1 8.7 5l-5.7 1.1-1.9-4.6Z" fill="#9b5cff"/>
-      <path d="M20.7 7a10 10 0 0 1 1.2 6.6l-5.8.8-1.1-6.3Z" fill="#2f7cff"/>
-      <path d="M21.9 13.6A10 10 0 0 1 17 20.7l-4.3-3.9 3.2-2.7Z" fill="#ff5d6f"/>
-      <path d="M17 20.7A10 10 0 0 1 7 20.5l1.5-5.7 4.2 1.9Z" fill="#ffc928"/>
-      <path d="M7 20.5A10 10 0 0 1 2 12.1l5.8-.9 1 3.7Z" fill="#2ecf73"/>
-      <circle cx="12" cy="12" r="10" fill="none" stroke="#2c4972" stroke-width="1.1"/>
-    </svg>
+    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" style="display:block" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.4a8.6 8.6 0 1 0 0 17.2c1.3 0 2-.8 2-1.8 0-1.4-1.4-1.6-1.4-2.8 0-.9.8-1.6 1.8-1.6h1.5a4.7 4.7 0 0 0 4.7-4.7c0-3.5-3.8-6.3-8.6-6.3z"></path><circle cx="8.2" cy="10.4" r="1.1" fill="currentColor" stroke="none"></circle><circle cx="12" cy="7.8" r="1.1" fill="currentColor" stroke="none"></circle><circle cx="15.8" cy="10.2" r="1.1" fill="currentColor" stroke="none"></circle></svg>
   `);
 
   setIcon(dockModes, `
-    <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" focusable="false" style="display:block">
-      <path d="M10.3 2h3.4l.5 2.2a8 8 0 0 1 1.8.8l1.9-1.2 2.4 2.4-1.2 1.9c.3.6.6 1.2.8 1.8L22 10.3v3.4l-2.2.5a8 8 0 0 1-.8 1.8l1.2 1.9-2.4 2.4-1.9-1.2a8 8 0 0 1-1.8.8l-.5 2.2h-3.4l-.5-2.2a8 8 0 0 1-1.8-.8l-1.9 1.2-2.4-2.4 1.2-1.9a8 8 0 0 1-.8-1.8L2 13.7v-3.4l2.2-.5c.2-.6.5-1.2.8-1.8L3.8 6.1l2.4-2.4 1.9 1.2a8 8 0 0 1 1.8-.8L10.3 2Z" fill="#4e78ff"/>
-      <circle cx="12" cy="12" r="4.4" fill="#73d2ff"/>
-      <circle cx="12" cy="12" r="2.45" fill="#ffffff"/>
-      <circle cx="12" cy="12" r="8.25" fill="none" stroke="#2d4f9e" stroke-width="1.1" opacity="0.35"/>
-    </svg>
+    <svg viewBox="0 0 24 24" width="23" height="23" aria-hidden="true" focusable="false" style="display:block" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 4v8M6.5 17.5V20M12 4v2.5M12 12v8M17.5 4v8M17.5 17.5V20"></path><circle cx="6.5" cy="14.8" r="2.4"></circle><circle cx="12" cy="9.2" r="2.4"></circle><circle cx="17.5" cy="14.8" r="2.4"></circle></svg>
   `);
 
   setIcon(dockChat, `
-    <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" focusable="false" style="display:block">
-      <path d="M4.8 5.5h14.4a2.8 2.8 0 0 1 2.8 2.8v7.1a2.8 2.8 0 0 1-2.8 2.8H11l-4.2 3.3c-.9.7-2.2 0-2.1-1.2l.3-2.1A2.8 2.8 0 0 1 2 15.4V8.3a2.8 2.8 0 0 1 2.8-2.8Z" fill="#5865f2" stroke="#22337f" stroke-width="1.3" stroke-linejoin="round"/>
-      <circle cx="8.3" cy="11.8" r="1.2" fill="#fff"/>
-      <circle cx="12" cy="11.8" r="1.2" fill="#fff"/>
-      <circle cx="15.7" cy="11.8" r="1.2" fill="#fff"/>
-    </svg>
+    <svg viewBox="0 0 24 24" width="23" height="23" aria-hidden="true" focusable="false" style="display:block" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 11.7a8.2 8.2 0 0 1-8.8 8.2 8.8 8.8 0 0 1-3.2-.6L4.2 20.6l1.3-4.1a8 8 0 0 1-1.3-4.8A8.2 8.2 0 0 1 12.3 3.5a8.2 8.2 0 0 1 8.2 8.2z"></path></svg>
   `);
 
   setIcon(dockGames, `
-    <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" focusable="false" style="display:block">
-      <path d="M8.2 8.4h7.6c2.1 0 3.9 1.3 4.7 3.2l1 2.4c.9 2.2-.8 4.7-3.2 4.7-1 0-1.9-.4-2.5-1.1l-1.4-1.6h-4.8l-1.4 1.6c-.6.7-1.6 1.1-2.5 1.1-2.4 0-4.1-2.5-3.2-4.7l1-2.4c.8-1.9 2.6-3.2 4.7-3.2Z" fill="#334155" stroke="#0f172a" stroke-width="1.2"/>
-      <path d="M8 12.1h3.5M9.75 10.35v3.5" stroke="#e2e8f0" stroke-width="1.4" stroke-linecap="round"/>
-      <circle cx="15.7" cy="11.2" r="1" fill="#60a5fa"/>
-      <circle cx="17.7" cy="12.8" r="1" fill="#facc15"/>
-      <circle cx="15.3" cy="14.4" r="1" fill="#34d399"/>
-      <circle cx="13.6" cy="12.8" r="1" fill="#f87171"/>
-    </svg>
+    <svg viewBox="0 0 24 24" width="23" height="23" aria-hidden="true" focusable="false" style="display:block" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="2.6" y="7.4" width="18.8" height="9.2" rx="4.4"></rect><path d="M7.2 10.6v2.8M5.8 12h2.8"></path><circle cx="15.8" cy="11.4" r=".95" fill="currentColor" stroke="none"></circle><circle cx="18" cy="13.6" r=".95" fill="currentColor" stroke="none"></circle></svg>
   `);
 
   setIcon(dockMusic, `
-    <span style="font-size:22px; line-height:1;">🥁</span>
+    <svg viewBox="0 0 24 24" width="23" height="23" aria-hidden="true" focusable="false" style="display:block" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9.4 17.6V5.4l9.2-1.8v12"></path><circle cx="6.6" cy="17.8" r="2.8"></circle><circle cx="15.8" cy="15.6" r="2.8"></circle></svg>
   `);
 
   setIcon(dockProfile, `
-    <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" focusable="false" style="display:block">
-      <circle cx="12" cy="12" r="10" fill="#eef3ff"/>
-      <circle cx="12" cy="8" r="4" fill="#f4c7a1"/>
-      <path d="M4 20a8 8 0 0 1 16 0v.2H4Z" fill="#5c6cf0"/>
-      <path d="M4 20a8 8 0 0 1 16 0" fill="none" stroke="#3c47b8" stroke-width="1.6" stroke-linecap="round"/>
-      <path d="M8.2 7.8c.4-2 2-3.4 3.8-3.4s3.4 1.5 3.8 3.4c-.8-.6-1.6-.9-2.7-.9h-2.2c-1 0-1.9.3-2.7.9Z" fill="#5d4037"/>
-    </svg>
+    <svg viewBox="0 0 24 24" width="23" height="23" aria-hidden="true" focusable="false" style="display:block" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8.4" r="3.6"></circle><path d="M5 19.6a7 7 0 0 1 14 0"></path></svg>
   `);
 
   setIcon(dockLeaderboard, `
-    <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" focusable="false" style="display:block">
-      <path d="M4.2 20h15.6" stroke="#7a5313" stroke-width="1.4" stroke-linecap="round"/>
-      <rect x="5.2" y="11.2" width="3.3" height="6" rx="1" fill="#3f8cff"/>
-      <rect x="10.35" y="8.4" width="3.3" height="8.8" rx="1" fill="#2ecf73"/>
-      <rect x="15.5" y="5.5" width="3.3" height="11.7" rx="1" fill="#ffb300"/>
-      <path d="M12 2.5 13.2 5h2.7l-2.2 1.8.8 2.8L12 8.1 9.5 9.6l.8-2.8L8 5h2.7L12 2.5Z" fill="#ffcc2f" stroke="#b57f00" stroke-width="0.8"/>
-    </svg>
+    <svg viewBox="0 0 24 24" width="23" height="23" aria-hidden="true" focusable="false" style="display:block" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M7.8 3.8h8.4v5.4a4.2 4.2 0 0 1-8.4 0z"></path><path d="M7.8 5.2H5v1.4a2.8 2.8 0 0 0 2.8 2.8"></path><path d="M16.2 5.2H19v1.4a2.8 2.8 0 0 1-2.8 2.8"></path><path d="M10.2 13.4h3.6l.6 3.4h-4.8z"></path><path d="M7.4 19.8h9.2"></path></svg>
   `);
 
   setIcon(dockAdmin, `
-    <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" focusable="false" style="display:block">
-      <path d="M12 2.4 19.3 5v5.5c0 4.9-2.7 8.5-7.3 11.1-4.6-2.6-7.3-6.2-7.3-11.1V5L12 2.4Z" fill="#eaf1ff" stroke="#1e3a8a" stroke-width="1.35" stroke-linejoin="round"/>
-      <path d="M8 9h8M8 12h8M8 15h5.2" stroke="#1f2937" stroke-width="1.45" stroke-linecap="round"/>
-      <circle cx="16.8" cy="15" r="1.4" fill="#4f46e5" stroke="#312e81" stroke-width="0.7"/>
-    </svg>
+    <svg viewBox="0 0 24 24" width="23" height="23" aria-hidden="true" focusable="false" style="display:block" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.6 4.8 7v5.4c0 4.2 3.1 6.8 7.2 7.8 4.1-1 7.2-3.6 7.2-7.8V7z"></path><path d="M12 9v4.2"></path><circle cx="12" cy="16.2" r=".95" fill="currentColor" stroke="none"></circle></svg>
   `);
 
   const pickupIconEl = document.querySelector("#pickupFab .pickupFabIcon");
