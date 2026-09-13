@@ -293,45 +293,34 @@ body.shell-no-scrubber #dock {
   .shellMenu, .shellScrim, .shellScreen { transition: none; }
 }
 
-/* ------------------------------------------ conditions, on the map top
+/* ------------------------------------ conditions, under the menu header
 
-   One horizontal strip under the top controls: tendency, drivers online,
-   weather. These are the same live nodes, moved by app-shell.js
-   relocateStatus, so each arrives carrying the fixed-position CSS it was
-   written with and this undoes the anchoring.
+   One horizontal bar -- tendency, drivers online, weather -- sitting directly
+   under "Joseo" and above the destination list. Being inside the drawer is
+   what makes it appear only while the drawer is open: no show/hide logic of
+   its own, nothing to leave stuck on screen.
 
-   They spent one revision inside the menu, which was wrong twice over: they
-   ate a third of the drawer, and a condition you have to open a drawer to
-   read is not a condition, it is a lookup. The map top is where a glance
-   goes. */
-#mapConditions {
-  position: fixed;
-  /* Clear of the 48px menu button and the locate/shield control that sit on
-     the line above, both of which start at the same inset. */
-  top: calc(env(safe-area-inset-top, 0px) + 14px + 48px + 10px);
-  left: 14px;
-  right: 14px;
-  z-index: 1100;
+   These are the same live nodes, moved by app-shell.js relocateStatus, so
+   each arrives carrying the fixed-position CSS it was written with, and the
+   block below undoes that anchoring. */
+#shellConditions {
+  flex: none;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 7px 10px;
-  border-radius: 13px;
-  background: rgba(255, 255, 255, 0.94);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(16, 22, 34, 0.06);
-  box-shadow: 0 2px 6px rgba(16, 22, 34, 0.08), 0 10px 26px rgba(16, 22, 34, 0.12);
+  gap: 6px;
+  margin: 0;
+  padding: 9px 12px 10px;
+  border-bottom: 1px solid rgba(16, 22, 34, 0.055);
   font: 600 12px/1 system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
   color: #101622;
-  pointer-events: none; /* a readout, not a control: taps belong to the map */
 }
-/* Empty until the first reading lands; an empty bar is a smudge on the map. */
-#mapConditions:empty { display: none; }
+/* Empty until the first reading lands, and an empty bar under the header is
+   just a stray rule across the drawer. */
+#shellConditions:empty { display: none; }
 
-#mapConditions > #dayTendencyMeter,
-#mapConditions > #onlineBadge,
-#mapConditions > #weatherBadge {
+#shellConditions > #dayTendencyMeter,
+#shellConditions > #onlineBadge,
+#shellConditions > #weatherBadge {
   position: static !important;
   inset: auto !important;
   transform: none !important;
@@ -350,28 +339,33 @@ body.shell-no-scrubber #dock {
 
 /* The tendency takes the width that is going spare; the two chips are as wide
    as their text and no wider. */
-#mapConditions > #dayTendencyMeter { flex: 1 1 auto; min-width: 0; }
-#mapConditions > #onlineBadge,
-#mapConditions > #weatherBadge { flex: 0 0 auto; white-space: nowrap; opacity: 0.75; }
+#shellConditions > #dayTendencyMeter { flex: 1 1 auto; min-width: 0; }
+#shellConditions > #onlineBadge,
+#shellConditions > #weatherBadge { flex: 0 0 auto; white-space: nowrap; opacity: 0.75; }
+
+/* Next to the two-person icon the word is saying it twice, and the space it
+   frees is what lets the tendency label read in full. app.part9.js keeps it in
+   the DOM, so textContent and the badge's title still say "N online". */
+#shellConditions .onlineWord { display: none; }
 
 /* Hairline separators instead of more chip borders -- three bordered pills
    inside a bordered bar is four rectangles saying the same thing. */
-#mapConditions > #onlineBadge::before,
-#mapConditions > #weatherBadge::before {
+#shellConditions > #onlineBadge::before,
+#shellConditions > #weatherBadge::before {
   content: "";
   display: inline-block;
   width: 1px;
   height: 12px;
-  margin-right: 7px;
+  margin-right: 6px;
   vertical-align: -2px;
   background: rgba(16, 22, 34, 0.14);
 }
 
 /* --- the tendency rail, on its side ------------------------------------ */
-#mapConditions .dayTendencyInner,
-#mapConditions .dayTendencyBarWrap,
-#mapConditions .dayTendencyInfoCol,
-#mapConditions .dayTendencyValueStack {
+#shellConditions .dayTendencyInner,
+#shellConditions .dayTendencyBarWrap,
+#shellConditions .dayTendencyInfoCol,
+#shellConditions .dayTendencyValueStack {
   display: flex;
   flex-direction: row;
   align-items: center;
@@ -383,25 +377,39 @@ body.shell-no-scrubber #dock {
   min-height: 0 !important;
   height: auto !important;
 }
-#mapConditions .dayTendencyBarWrap { flex: 1 1 auto; }
+#shellConditions .dayTendencyBarWrap { flex: 1 1 auto; }
 
 /* The track: a 6px lane instead of a 118px column, and the gradient runs left
    to right, so red is at the left where a horizontal scale expects its floor. */
-#mapConditions .dayTendencyScale {
-  /* Fixed, not flexible. Flexible, the track absorbed the spare width and the
-     band next to it truncated to "Normal n..." -- the track is a shape whose
-     length carries no information, the words are the reading. */
-  flex: 0 0 46px;
-  width: 46px !important;
-  height: 6px !important;
-  border-radius: 999px;
-  background: linear-gradient(to right, #e60000 0%, #ffd400 50%, #00b050 100%) !important;
+/* A dot, not a track. The drawer is 306px wide and a 46px track plus "49
+   Normal night" plus both chips does not fit on one line -- measured, the band
+   truncated to "Normal n...". The track's length was never the information:
+   the marker's position was, and the number already states it. So the same
+   element becomes a 14px dot showing the one thing the track contributed that
+   the number does not -- the colour at that point on the scale.
+
+   The colour is sampled, not hardcoded: the gradient is laid out seven times
+   wider than the dot and shifted to --tendency-pct, which puts the stop for
+   this score under the dot. One value, set once by day-tendency.js, drives
+   both the marker on the vertical rail and the colour here. */
+#shellConditions .dayTendencyScale {
+  flex: 0 0 14px;
+  width: 14px !important;
+  height: 14px !important;
+  border-radius: 999px !important;
+  border: 0 !important;
+  background-image: linear-gradient(to right, #e60000 0%, #ffd400 50%, #00b050 100%) !important;
+  background-size: 700% 100% !important;
+  background-position: var(--tendency-pct, 50%) 0 !important;
+  box-shadow: inset 0 0 0 1px rgba(16, 22, 34, 0.12);
 }
+/* The marker measures a track that is no longer there. */
+#shellConditions .dayTendencyMarker { display: none !important; }
 
 /* The marker rides --tendency-pct, which day-tendency.js sets without knowing
    the orientation. Vertical uses it as `bottom`; here it is `left`, and the
    rule becomes a 2px upright instead of a 2px crossbar. */
-#mapConditions .dayTendencyMarker {
+#shellConditions .dayTendencyMarker {
   left: var(--tendency-pct, 50%) !important;
   bottom: auto !important;
   top: -2px;
@@ -413,19 +421,22 @@ body.shell-no-scrubber #dock {
 }
 
 /* Vertical set type has no business in a 6px-tall row. */
-#mapConditions .dayTendencyLabelVertical { display: none; }
+#shellConditions .dayTendencyLabelVertical { display: none; }
 
 /* The readout was drawn to sit directly on the map: 22px, near-black, with a
    white halo behind it so it survived a dark zone. On the strip's own surface
    the halo is a smudge and 22px is a headline in a 29px bar. */
-#mapConditions .dayTendencyScore {
+#shellConditions .dayTendencyScore {
   font-size: 13px !important;
   font-weight: 800 !important;
   color: inherit !important;
   text-shadow: none !important;
 }
-#mapConditions .dayTendencyBand {
-  font-size: 12px !important;
+#shellConditions .dayTendencyBand {
+  /* 11px, and it still ellipsizes. The default labels ("Above usual",
+     "Typical") fit; the server may send any label it likes, and a long one
+     truncating is the right outcome -- the number beside it is the reading. */
+  font-size: 11px !important;
   font-weight: 600 !important;
   color: inherit !important;
   text-shadow: none !important;
@@ -434,17 +445,16 @@ body.shell-no-scrubber #dock {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-#mapConditions .dayTendencyBorough { display: none; }
+#shellConditions .dayTendencyBorough { display: none; }
 
-body.night #mapConditions {
-  background: rgba(18, 24, 36, 0.92);
-  border-color: rgba(255, 255, 255, 0.1);
+body.night #shellConditions {
+  border-bottom-color: rgba(255, 255, 255, 0.08);
   color: #eef2f8;
 }
-body.night #mapConditions > #onlineBadge::before,
-body.night #mapConditions > #weatherBadge::before { background: rgba(255, 255, 255, 0.18); }
+body.night #shellConditions > #onlineBadge::before,
+body.night #shellConditions > #weatherBadge::before { background: rgba(255, 255, 255, 0.18); }
 
 /* Narrow phones: the band name is the first thing worth losing. */
 @media (max-width: 380px) {
-  #mapConditions .dayTendencyBand { display: none; }
+  #shellConditions .dayTendencyBand { display: none; }
 }

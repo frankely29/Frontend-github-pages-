@@ -30,12 +30,15 @@
 
   var SCREEN_HOST_ID = "shellScreens";
   var MENU_ID = "shellMenu";
-  var STATUS_ID = "mapConditions";
+  var STATUS_ID = "shellConditions";
 
-  /* The readings that belong on the map, in one horizontal strip under the top
-   * controls. They lived in the menu's Conditions section for exactly one
-   * revision: buried there they cost a third of the drawer and still had to be
-   * opened to be read, which is the opposite of a glanceable condition.
+  /* The readings, gathered into one horizontal bar directly under the menu's
+   * "Joseo" header, so they appear only while the drawer is open.
+   *
+   * This bar has moved three times: a stack at the bottom of the drawer, then
+   * a strip pinned over the map, now here. The bar itself is the thing that
+   * was right -- one line, tendency then online then weather -- so what
+   * changes here is only where it hangs, not how it is built.
    *
    * #dayTendencyMeter is built lazily by day-tendency.js the first time it has
    * a reading, so relocateStatus runs again after mount rather than once.
@@ -384,13 +387,14 @@
 
     document.body.appendChild(menu);
 
-    // One horizontal strip under the top controls, holding the readings a
-    // driver glances at without opening anything. Nothing here is rebuilt or
+    // The conditions bar, directly under the header and above the destination
+    // list. Inside the drawer, so it is on screen exactly when the drawer is
+    // and needs no show/hide logic of its own. Nothing here is rebuilt or
     // duplicated -- relocateStatus() moves the live nodes, so every updater
     // that already holds a reference to them keeps working untouched.
-    var status = el("div", "mapConditions");
+    var status = el("div", "shellConditions");
     status.id = STATUS_ID;
-    document.body.appendChild(status);
+    menu.insertBefore(status, menu.querySelector(".shellMenuBody"));
 
     // One delegated listener rather than one per item, because the list is
     // repainted whenever a destination registers.

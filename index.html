@@ -689,7 +689,10 @@
   <div id="onlineBadge" class="onlineBadge" title="Drivers online">
     <span class="onlineIcon">👥</span>
     <span class="onlineTextWrap">
-      <span class="onlineTxt">0 Online</span>
+      <!-- Count and word split the same way updateOnlineBadge writes them,
+           so the first paint matches every later one and a narrow host can
+           drop the redundant word before any presence data arrives. -->
+      <span class="onlineTxt"><span class="onlineNum">0</span><span class="onlineWord"> online</span></span>
       <span class="onlineGhostTxt" hidden>0 Ghosted</span>
     </span>
   </div>

@@ -70,7 +70,21 @@
     const mainLine = `${display} online`;
     const txtEl = onlineBadge.querySelector(".onlineTxt") || onlineBadge.querySelector("#onlineTxt");
     if (txtEl) {
-      txtEl.textContent = mainLine;
+      // The count and the word are separate spans so a narrow host can drop
+      // the word and keep the number: next to a two-person icon "online" is
+      // saying it twice, and in the menu bar those ~45px are the difference
+      // between the tendency label reading "Normal night" and "Normal ni...".
+      // textContent still reads "N online" for anything that inspects it, and
+      // the badge's title carries the full phrase for assistive tech.
+      txtEl.textContent = "";
+      const countEl = document.createElement("span");
+      countEl.className = "onlineNum";
+      countEl.textContent = String(display);
+      const wordEl = document.createElement("span");
+      wordEl.className = "onlineWord";
+      wordEl.textContent = " online";
+      txtEl.appendChild(countEl);
+      txtEl.appendChild(wordEl);
     } else {
       const textWrapEl = onlineBadge.querySelector(".onlineTextWrap");
       if (textWrapEl) {
