@@ -66,6 +66,16 @@ function makeNode(tag) {
     },
   });
   node.appendChild = (child) => { child.parentNode = node; node.children.push(child); return child; };
+  // The shell inserts the conditions bar between the header and the list, so
+  // this double needs the real insertBefore contract: place before the
+  // reference, or append when the reference is null/absent.
+  node.insertBefore = (child, ref) => {
+    child.parentNode = node;
+    const at = ref ? node.children.indexOf(ref) : -1;
+    if (at < 0) node.children.push(child);
+    else node.children.splice(at, 0, child);
+    return child;
+  };
   node.setAttribute = (k, v) => { node._attrs[k] = String(v); };
   node.getAttribute = (k) => (k in node._attrs ? node._attrs[k] : null);
   node.addEventListener = (type, fn) => {
@@ -387,10 +397,20 @@ test('relocation moves the live node rather than rebuilding it', () => {
 });
 
 test('the gathered widgets stop being anchored to the viewport', () => {
-  assert.ok(/#mapConditions > #dayTendencyMeter[\s\S]{0,500}position:\s*static/.test(SHELL_CSS),
+  assert.ok(/#shellConditions > #dayTendencyMeter[\s\S]{0,500}position:\s*static/.test(SHELL_CSS),
     'the widgets keep the fixed positioning that had them floating separately');
-  assert.ok(/box-sizing:\s*border-box/.test(SHELL_CSS.slice(SHELL_CSS.indexOf('#mapConditions'))),
-    'without border-box their padding pushes them past the strip edge');
+  assert.ok(/box-sizing:\s*border-box/.test(SHELL_CSS.slice(SHELL_CSS.indexOf('#shellConditions'))),
+    'without border-box their padding pushes them past the bar edge');
+});
+
+test('the bar hangs under the header, inside the drawer', () => {
+  // Inside the drawer is what makes it appear only while the drawer is open --
+  // no show/hide logic of its own, nothing to leave stuck on screen. Appending
+  // it to the menu would put it under the destination list instead.
+  assert.ok(/insertBefore\(status, menu\.querySelector\(["']\.shellMenuBody["']\)\)/.test(SHELL_SRC),
+    'the bar is not placed between the header and the list');
+  assert.ok(!/#shellConditions\s*\{[^}]*position:\s*fixed/s.test(SHELL_CSS),
+    'a fixed bar would float over the map instead of sitting in the drawer');
 });
 
 test('the tendency rail lies down without losing its marker', () => {
@@ -401,10 +421,34 @@ test('the tendency rail lies down without losing its marker', () => {
   const DT = fs.readFileSync(path.join(__dirname, '..', 'day-tendency.js'), 'utf8');
   assert.ok(/--tendency-pct/.test(DT), 'the marker position is still hardcoded to one axis');
   assert.ok(!/marker\.style\.bottom/.test(DT), 'the marker still writes bottom directly');
-  assert.ok(/#mapConditions \.dayTendencyMarker[\s\S]{0,300}left:\s*var\(--tendency-pct/.test(SHELL_CSS),
-    'the horizontal marker does not read the percentage');
-  assert.ok(/#mapConditions[\s\S]{0,4000}min-height:\s*0\s*!important/.test(SHELL_CSS),
-    'the info column keeps min-height:118px and holds the strip open');
+  assert.ok(/#shellConditions[\s\S]{0,4000}min-height:\s*0\s*!important/.test(SHELL_CSS),
+    'the info column keeps min-height:118px and holds the bar open');
+});
+
+test('the tendency dot is coloured by the score, not hardcoded', () => {
+  // The drawer has no room for the 46px track, so the same element becomes a
+  // dot that samples the gradient at --tendency-pct. That only works if the
+  // percentage reaches an ancestor of the dot, which is why day-tendency.js
+  // sets it on the root as well as on the marker.
+  const DT = fs.readFileSync(path.join(__dirname, '..', 'day-tendency.js'), 'utf8');
+  assert.ok(/STATE\.root\.style\.setProperty\('--tendency-pct'/.test(DT),
+    'the dot cannot read the position, so its colour would never change');
+  assert.ok(/#shellConditions \.dayTendencyScale[\s\S]{0,600}background-position:\s*var\(--tendency-pct/.test(SHELL_CSS),
+    'the dot does not sample the gradient at the score');
+});
+
+test('the online count keeps its number when the word is dropped', () => {
+  // "online" next to a two-person icon says it twice, and those ~45px are what
+  // let the tendency label read in full. The word stays in the DOM so
+  // textContent still reads "N online" for anything that inspects it.
+  const P9 = fs.readFileSync(path.join(__dirname, '..', 'app.part9.js'), 'utf8');
+  assert.ok(/onlineNum/.test(P9) && /onlineWord/.test(P9),
+    'the count and the word are still one string, so the word cannot be dropped');
+  const INDEX = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  assert.ok(/onlineNum/.test(INDEX),
+    'the first paint still ships the unsplit string, so it differs from every later one');
+  assert.ok(/#shellConditions \.onlineWord\s*\{[^}]*display:\s*none/s.test(SHELL_CSS),
+    'the redundant word is not dropped in the bar');
 });
 
 test('the assistant card stops threading itself between the badges', () => {

@@ -738,6 +738,10 @@
     if (STATE.score) STATE.score.textContent = roundedScore;
     if (STATE.band) STATE.band.textContent = label;
     if (STATE.marker) STATE.marker.style.setProperty('--tendency-pct', `${pct}%`);
+    // Also on the root, so any descendant can read the position -- the menu
+    // bar has no room for the full track and samples the same gradient at
+    // this percentage to colour a dot instead.
+    if (STATE.root) STATE.root.style.setProperty('--tendency-pct', `${pct}%`);
 
     const borough = String(payload?.borough || '').trim();
     const scope = String(payload?.scope || '').trim();

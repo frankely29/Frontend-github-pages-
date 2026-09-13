@@ -3604,11 +3604,11 @@
     // lane between the online and weather badges at the top of the map. The
     // card is retired -- it said the same thing as the map pill, whose own
     // "why" is the same rec.secondary || rec.primary it rendered -- and the
-    // two badges now sit inside the #mapConditions strip. There is no lane to
+    // two badges now sit inside the #shellConditions bar. There is no lane to
     // thread and nothing to thread through it. Bail, and clear whatever this
     // wrote beforehand, or those offsets outlive the change.
     if (dock.dataset.shellRetired === "1" ||
-        (dock.closest && dock.closest("#mapConditions"))) {
+        (dock.closest && dock.closest("#shellConditions"))) {
       ["left", "right", "top", "width", "maxWidth", "transform"].forEach((prop) => {
         dock.style[prop] = "";
       });
