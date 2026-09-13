@@ -563,12 +563,16 @@ test('the dock icons are single-stroke line art, not illustrations', () => {
   assert.ok(strokes >= 8, `expected every dock icon to stroke with currentColor (found ${strokes})`);
 });
 
-test('the dock ink follows the theme', () => {
-  // currentColor is only correct if something sets the colour, and night mode
-  // needs the opposite ink or the icons vanish into the dark dock.
-  const SHELL = fs.readFileSync(path.join(ROOT, 'frontend-shell.css'), 'utf8');
-  assert.ok(/\.dockIcon\s*\{[^}]*color:/s.test(SHELL), 'day ink unset');
-  assert.ok(/body\.night \.dockIcon\s*\{[^}]*color:/s.test(SHELL), 'night ink unset');
+test('the dock ink stays legible on the dock that actually exists', () => {
+  // currentColor is only correct if something sets the colour. It must be a
+  // DARK ink and stay dark: the night dock button measures
+  // rgba(255,255,255,.82), lighter than the day one, so the light-ink night
+  // override this test used to demand made the icons invisible (~1.05:1).
+  const SHELL = fs.readFileSync(path.join(ROOT, 'frontend-shell.css'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.ok(/\.dockIcon\s*\{[^}]*color:\s*#101622/s.test(SHELL), 'dock ink unset or not the dark ink');
+  assert.ok(!/body\.night\s+\.dockIcon\s*\{[^}]*color:/s.test(SHELL),
+    'a night ink override puts light icons back on a light dock');
 });
 
 // -------------------------------------------------- the expanded card
