@@ -173,7 +173,10 @@
           source: SRC_END,
           layout: {
             "icon-image": ARROW_IMAGE,
-            "icon-size": ["interpolate", ["linear"], ["zoom"], 9, 0.45, 14, 0.7],
+            // Sized against the approved mockup, where the triangle reads at a
+            // glance from a phone cradle. 0.45 rendered it at about half that
+            // -- measured in a real MapLibre, not guessed from the number.
+            "icon-size": ["interpolate", ["linear"], ["zoom"], 9, 0.85, 14, 1.2],
             "icon-rotate": ["coalesce", ["get", "bearing"], 0],
             "icon-rotation-alignment": "map",
             "icon-allow-overlap": true,
