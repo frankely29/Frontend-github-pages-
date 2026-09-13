@@ -3600,12 +3600,15 @@
     const weatherBadge = document.getElementById("weatherBadge");
     if (!dock || !onlineBadge || !weatherBadge) return;
 
-    // The card and the badges now live in the menu's Conditions section, not
-    // on the map. This function's whole job was to thread the card through the
-    // lane between the two badges -- inside the drawer there is no lane, and
-    // the inline left/top it writes would drag the card out of the list. It
-    // also has to clear what it wrote before the move, or those offsets stay.
-    if (dock.closest && dock.closest("#shellStatus")) {
+    // This function's whole job was to thread the assistant card through the
+    // lane between the online and weather badges at the top of the map. The
+    // card is retired -- it said the same thing as the map pill, whose own
+    // "why" is the same rec.secondary || rec.primary it rendered -- and the
+    // two badges now sit inside the #mapConditions strip. There is no lane to
+    // thread and nothing to thread through it. Bail, and clear whatever this
+    // wrote beforehand, or those offsets outlive the change.
+    if (dock.dataset.shellRetired === "1" ||
+        (dock.closest && dock.closest("#mapConditions"))) {
       ["left", "right", "top", "width", "maxWidth", "transform"].forEach((prop) => {
         dock.style[prop] = "";
       });

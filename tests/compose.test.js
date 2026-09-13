@@ -543,7 +543,11 @@ test('no stylesheet uses the invalid font shorthand', () => {
         .replace(/\/\*[\s\S]*?\*\//g, '');
       const bad = text.match(/font:[^;}]*\binherit\b[^;}]*;/g) || [];
       // A bare `font: inherit` is fine; anything else ending in inherit is not.
-      const broken = bad.filter((decl) => !/^font:\s*inherit\s*;$/.test(decl.trim()));
+      // `font: inherit` is legal -- inherit is a CSS-wide keyword, valid as
+      // the WHOLE value, with or without !important. Only the compound form
+      // (`font: 700 14px/1 inherit`) is the bug this guards.
+      const broken = bad.filter(
+        (decl) => !/^font:\s*inherit\s*(!important\s*)?;$/.test(decl.trim()));
       assert.strictEqual(broken.length, 0,
         `${name} has an invalid font shorthand: ${broken.join(' ')}`);
     });
