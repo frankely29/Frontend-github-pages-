@@ -43,6 +43,8 @@
   var root = null;
   var currentDoor = "signup";
   var lapsed = false;
+  var openPane = "";
+  var resolving = false;
 
   function q(selector) {
     return root ? root.querySelector(selector) : null;
@@ -50,12 +52,18 @@
 
   function show(pane) {
     if (!root) return;
+    var already = openPane === pane;
     var panes = root.querySelectorAll("[data-landing-pane]");
     for (var i = 0; i < panes.length; i += 1) {
       var node = panes[i];
       node.hidden = node.getAttribute("data-landing-pane") !== pane;
     }
-    // A pane that scrolled to the bottom last time should not open there.
+    openPane = pane;
+    // A pane that scrolled to the bottom last time should not OPEN there --
+    // but only on the way in. This used to run on every call, and the paywall
+    // re-announces a locked account more than once, so each re-announcement
+    // threw a driver who was reading the page back to the top mid-scroll.
+    if (already) return;
     var open = q('[data-landing-pane="' + pane + '"]');
     if (open) open.scrollTop = 0;
   }
@@ -112,6 +120,11 @@
   function setLapsed(on) {
     if (!root) return;
     var locked = !!on;
+    // Re-entrant by design: the paywall announces a locked account on more
+    // than one event. Doing the work again is harmless, but show() below is
+    // not free -- it used to reset the scroll position every time.
+    if (locked === lapsed && !resolving) return;
+    resolving = false;
     var blocks = root.querySelectorAll("[data-landing-cta]");
     for (var i = 0; i < blocks.length; i += 1) {
       var wants = blocks[i].getAttribute("data-landing-cta") === "lapsed";
@@ -182,6 +195,7 @@
     root.addEventListener("click", onClick);
     applyDoor("signup");
     show("pitch");
+    if (hasStoredToken()) setResolving();
   }
 
   if (document.readyState === "loading") {
@@ -196,9 +210,40 @@
     if (root) show("pitch");
   });
 
+  /* Boot shows this page before anything knows which version of it to show.
+   *
+   * With a token in hand, setAuthUI(false) can still run while /me is in
+   * flight -- and that reveals the signed-out page, so a lapsed driver saw
+   * "Create account / I already have an account" flash up before it was
+   * replaced by Subscribe. Both are wrong for them; one of them is wrong and
+   * looks like the old design coming back.
+   *
+   * So while the answer is unknown the page keeps its hero, its pitch and its
+   * carousel, and simply shows no call to action yet. A signed-out visitor
+   * never enters this state -- no token, nothing to resolve -- and gets their
+   * buttons on the first paint as before. */
+  function setResolving() {
+    if (!root) return;
+    resolving = true;
+    var blocks = root.querySelectorAll("[data-landing-cta], [data-landing-fine]");
+    for (var i = 0; i < blocks.length; i += 1) blocks[i].hidden = true;
+    var top = q("[data-landing-go='signin'].landingGhostBtn");
+    if (top) top.hidden = true;
+  }
+
+  function hasStoredToken() {
+    try {
+      return !!(window.localStorage && window.localStorage.getItem("community_token_v1"));
+    } catch (_) {
+      return false;
+    }
+  }
+
   window.TeamJoseoLanding = {
     goTo: goTo,
     setLapsed: setLapsed,
+    setResolving: setResolving,
+    isResolving: function () { return resolving; },
     isLapsed: function () { return lapsed; },
     door: function () { return currentDoor; },
     _doors: DOORS,

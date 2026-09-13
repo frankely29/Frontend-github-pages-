@@ -67,6 +67,13 @@ function makeNode(tag) {
   node.focus = () => { node.focused += 1; };
   const walk = (n, out) => { n.children.forEach((c) => { out.push(c); walk(c, out); }); return out; };
   const matches = (n, sel) => {
+    // A selector list is one selector to the browser, and the source uses one
+    // to gather both call-to-action blocks and both fine-print lines in a
+    // single pass. Without this the double silently matched nothing and the
+    // test failed where the browser is fine.
+    if (sel.indexOf(',') >= 0) {
+      return sel.split(',').some((part) => matches(n, part.trim()));
+    }
     if (sel.startsWith('.')) return n.classList.contains(sel.slice(1));
     if (sel.startsWith('[') && sel.endsWith(']')) {
       const inner = sel.slice(1, -1);
@@ -105,6 +112,10 @@ function buildDom() {
 
   pitch.appendChild(make('button', null, { 'data-landing-go': 'signup' }));
   pitch.appendChild(make('button', null, { 'data-landing-go': 'signin' }));
+  pitch.appendChild(make('div', null, { 'data-landing-cta': 'new' }));
+  pitch.appendChild(make('div', null, { 'data-landing-cta': 'lapsed' }));
+  pitch.appendChild(make('p', null, { 'data-landing-fine': 'new' }));
+  pitch.appendChild(make('p', null, { 'data-landing-fine': 'lapsed' }));
 
   form.appendChild(make('button', null, { 'data-landing-go': 'pitch' }));
   form.appendChild(make('h2', null, { 'data-landing-title': '' }));
@@ -143,6 +154,11 @@ function buildDom() {
     dispatch: (t, e) => (window._l[t] || []).forEach((fn) => fn(e)),
   };
   window.window = window;
+  window.localStorage = {
+    _v: {},
+    getItem(k) { return Object.prototype.hasOwnProperty.call(this._v, k) ? this._v[k] : null; },
+    setItem(k, v) { this._v[k] = String(v); },
+  };
   const ctx = vm.createContext({ window, document, console });
   vm.runInContext(fs.readFileSync(JS_SOURCE, 'utf8'), ctx, { filename: 'landing.js' });
   return { window, document, byId, landing, pitch, form, api: window.TeamJoseoLanding };
@@ -499,6 +515,72 @@ test('the lapsed buttons reuse the paywall module rather than reimplement it', (
   assert.ok(/triggerCheckout\(\)/.test(LANDING_JS), 'subscribe does not start the real checkout');
   assert.ok(!/\/subscription\/checkout/.test(LANDING_JS),
     'the landing calls the checkout endpoint itself');
+});
+
+// --------------------------------------------------- the two boot glitches
+
+test('re-announcing a locked account does not throw the reader back to the top', () => {
+  // The paywall says "locked" on more than one event. show() reset scrollTop
+  // on every call, so each repeat yanked a driver mid-scroll back to the top
+  // of the pitch. Reproduced at 420 -> 0 in a browser before the fix.
+  const dom = buildDom();
+  dom.api.setLapsed(true);
+  dom.pitch.scrollTop = 420;
+  dom.api.setLapsed(true);
+  dom.api.setLapsed(true);
+  assert.strictEqual(dom.pitch.scrollTop, 420,
+    'the pitch scrolled back to the top when the lock was re-announced');
+});
+
+test('actually opening a pane still starts it at the top', () => {
+  // The guard above must not cost the original behaviour: a pane that was
+  // scrolled to the bottom last time should not open there.
+  const dom = buildDom();
+  dom.pitch.scrollTop = 300;
+  dom.api.goTo('signup');   // leaves the pitch
+  dom.api.goTo('pitch');    // and comes back to it
+  assert.strictEqual(dom.pitch.scrollTop, 0, 'a reopened pane kept its old scroll');
+});
+
+test('a page that does not know yet shows no call to action', () => {
+  // With a token in hand, setAuthUI(false) can run while /me is still in
+  // flight, and that used to reveal the signed-out buttons -- the flash of
+  // "the old sign in page" before Subscribe replaced it.
+  const dom = buildDom();
+  dom.api.setResolving();
+  const cta = (which) => dom.landing.querySelectorAll('[data-landing-cta]')
+    .filter((n) => n.getAttribute('data-landing-cta') === which)[0];
+  assert.strictEqual(cta('new').hidden, true, 'signed-out buttons still shown while resolving');
+  assert.strictEqual(cta('lapsed').hidden, true, 'subscribe buttons shown before the answer');
+  assert.strictEqual(dom.api.isResolving(), true);
+});
+
+test('resolving gives way to whichever answer arrives', () => {
+  const dom = buildDom();
+  const cta = (dm, which) => dm.landing.querySelectorAll('[data-landing-cta]')
+    .filter((n) => n.getAttribute('data-landing-cta') === which)[0];
+
+  dom.api.setResolving();
+  dom.api.setLapsed(true);
+  assert.strictEqual(cta(dom, 'lapsed').hidden, false, 'subscribe never appeared');
+  assert.strictEqual(dom.api.isResolving(), false);
+
+  const out = buildDom();
+  out.api.setResolving();
+  out.api.setLapsed(false);
+  assert.strictEqual(cta(out, 'new').hidden, false,
+    'a real sign-out left the page with no way to make an account');
+});
+
+test('setAuthUI picks the version of the page by whether a token is left', () => {
+  // No token means signed out for real. A token still present means the
+  // answer is unknown, not that they should be asked to create an account.
+  const app = fs.readFileSync(path.join(ROOT, 'app.part10.js'), 'utf8');
+  const fn = app.slice(app.indexOf('function setAuthUI'), app.indexOf('function setAuthUI') + 1800);
+  assert.ok(/authHeaderOK\(\)/.test(fn), 'setAuthUI does not check for a token before revealing');
+  assert.ok(/setResolving/.test(fn), 'a token-present lock still shows the signed-out buttons');
+  assert.ok(fn.indexOf('setResolving') < fn.indexOf('classList.toggle("show"'),
+    'the mode must be chosen before the overlay is revealed, or it flashes');
 });
 
 let failed = 0;

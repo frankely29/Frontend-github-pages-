@@ -2988,6 +2988,20 @@ function setAuthUI(signedIn, note) {
 
   const showLock = !signedIn;
   if (lockedOverlay) {
+    // Which version of the signed-out page this is. No token means signed
+    // out for real, so it gets the Create-account buttons; with a token still
+    // present the answer is not known yet -- /me may be in flight -- and
+    // showing those buttons to a lapsed driver is the flash of "the old sign
+    // in page" they reported. The landing keeps its hero and says nothing
+    // about what to do until the paywall or a real sign-out decides.
+    const landing = (typeof window !== "undefined") ? window.TeamJoseoLanding : null;
+    if (showLock && landing) {
+      if (authHeaderOK()) {
+        if (typeof landing.setResolving === "function") landing.setResolving();
+      } else if (typeof landing.setLapsed === "function") {
+        landing.setLapsed(false);
+      }
+    }
     lockedOverlay.classList.toggle("show", showLock);
     lockedOverlay.setAttribute("aria-hidden", showLock ? "false" : "true");
   }
