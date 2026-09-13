@@ -113,6 +113,10 @@
     expanded = !!next;
     setHidden(el.detail, !expanded);
     if (el.pill) el.pill.setAttribute("aria-expanded", expanded ? "true" : "false");
+    // The card only paints while it has something to hold. Collapsed it has to
+    // be fully transparent, or the pill stops being a badge on the map and
+    // becomes a badge on an empty white slab.
+    if (el.card) el.card.classList.toggle("open", expanded);
   }
 
   function onPillClick() {
@@ -191,6 +195,7 @@
     el.zone = byId("mapActionZone");
     el.score = byId("mapActionScore");
     el.detail = byId("mapActionDetail");
+    el.card = byId("mapActionCard");
     el.why = byId("mapActionWhy");
     el.meta = byId("mapActionMeta");
     el.segmented = byId("mapSegmented");

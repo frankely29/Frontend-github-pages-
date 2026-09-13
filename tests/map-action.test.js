@@ -453,9 +453,18 @@ test('the pill sits under the dock in the stacking order', () => {
   assert.ok(Number(z[1]) > 1200, 'the pill sits above the slider');
 });
 
-test('the sheet opens upward so the pill stays under the thumb', () => {
-  assert.ok(/\.mapActionDetail\s*\{[^}]*order:\s*-1/.test(CSS),
-    'the detail sheet would push the pill down when it opens');
+test('the whole card grows upward, so nothing lands where the dock is', () => {
+  // This test used to require order:-1 on the sheet, which floated it above a
+  // pill that never moved. The approved Expanded artboard makes the pill the
+  // card's header instead, so the pill does rise by the drawer's height when
+  // it opens -- a deliberate trade for the answer keeping one shape and one
+  // colour whether open or shut. What must still hold is the direction: the
+  // container is anchored by its bottom, so the card can only grow up, never
+  // down into the dock.
+  assert.ok(/#mapAction\s*\{[^}]*bottom:/s.test(CSS),
+    'the pill container is not bottom-anchored, so opening it grows downward');
+  assert.ok(!/#mapAction\s*\{[^}]*[^-]top:/s.test(CSS),
+    'a top anchor would pin the card and push the drawer over the dock');
 });
 
 test('the hidden attribute actually hides, despite the flex display', () => {
@@ -529,8 +538,10 @@ test('the pill is the height the artboard draws', () => {
 test('expanded, the pill becomes the header of its sheet', () => {
   assert.ok(/\.mapActionPill\[aria-expanded="true"\]\s*\{[^}]*width:\s*100%/s.test(CSS),
     'the expanded pill must span the sheet it opened');
-  assert.ok(/\.mapActionDetail\s*\{[^}]*align-self:\s*stretch/s.test(CSS),
-    'the sheet would be centred to its own content width like the pill');
+  // The sheet no longer sets its own width: it is a child of .mapActionCard,
+  // a flex column that stretches it. The card is what goes full-width.
+  assert.ok(/\.mapActionCard\.open\s*\{[^}]*width:\s*100%/s.test(CSS),
+    'the open card must span the column, or the drawer hugs the pill width');
 });
 
 test('the verb and the zone are separated the way the artboard separates them', () => {
@@ -558,6 +569,60 @@ test('the dock ink follows the theme', () => {
   const SHELL = fs.readFileSync(path.join(ROOT, 'frontend-shell.css'), 'utf8');
   assert.ok(/\.dockIcon\s*\{[^}]*color:/s.test(SHELL), 'day ink unset');
   assert.ok(/body\.night \.dockIcon\s*\{[^}]*color:/s.test(SHELL), 'night ink unset');
+});
+
+// -------------------------------------------------- the expanded card
+
+test('the pill and the reasoning are one card, pill first', () => {
+  // The approved Expanded artboard unrolls the pill into a card whose header
+  // IS the pill. It used to be two floating pieces with the sheet ordered
+  // above the pill.
+  assert.ok(INDEX.includes('mapActionCard'), 'no card wrapper');
+  const card = INDEX.indexOf('mapActionCard');
+  const pill = INDEX.indexOf('mapActionPill', card);
+  const detail = INDEX.indexOf('mapActionDetail', card);
+  assert.ok(pill > -1 && detail > pill, 'the reasoning must follow the pill inside the card');
+  assert.ok(!/\.mapActionDetail\s*\{[^}]*order:\s*-1/s.test(CSS),
+    'the sheet still floats above the pill instead of hanging under it');
+});
+
+test('the card is invisible until it has something to hold', () => {
+  // A collapsed card that paints its surface turns the badge into a badge
+  // sitting on an empty white slab.
+  const base = CSS.match(/\.mapActionCard\s*\{[^}]*\}/s)[0];
+  assert.ok(!/background/.test(base), 'the collapsed card paints a background');
+  assert.ok(!/border:/.test(base), 'the collapsed card paints a border');
+  assert.ok(/\.mapActionCard\.open\s*\{[^}]*background/s.test(CSS),
+    'the open card has no surface');
+});
+
+test('the pill squares off where it meets the drawer', () => {
+  assert.ok(/\.mapActionPill\[aria-expanded="true"\]\s*\{[^}]*border-radius:\s*18px 18px 0 0/s.test(CSS),
+    'the expanded pill keeps round bottom corners against a square drawer');
+});
+
+test('opening the sheet is what opens the card', () => {
+  const JS = fs.readFileSync(path.join(ROOT, 'map-action.js'), 'utf8');
+  assert.ok(/classList\.toggle\("open", expanded\)/.test(JS),
+    'the card never opens, so the reasoning renders on no surface');
+});
+
+test('the reasoning is not clipped by the card that clips', () => {
+  // The card sets overflow:hidden so it can square the pill's corners. A
+  // width:100% child PLUS padding then overflowed by exactly the padding and
+  // got cut -- the reasoning lost its last two words on every line.
+  // Strip comments first: the block explains the bug in prose, and a bare
+  // search would match the explanation instead of a declaration.
+  const bare = CSS.replace(/\/\*[\s\S]*?\*\//g, '');
+  const detail = bare.match(/\.mapActionDetail\s*\{[^}]*\}/s)[0];
+  assert.ok(!/width:\s*100%/.test(detail),
+    'width:100% plus padding overflows the card, which now clips');
+  assert.ok(/box-sizing:\s*border-box/.test(detail), 'padding is not counted in the width');
+});
+
+test('an empty line in the drawer does not pad the card', () => {
+  assert.ok(/:empty\s*(,[^{]*)?\{[^}]*display:\s*none/s.test(CSS),
+    'an empty meta line still costs a gap inside the card');
 });
 
 // --------------------------------------------------------------------------
