@@ -37,6 +37,33 @@
    arrives, and an empty pill that says nothing is worse than no pill. */
 #mapAction[hidden] { display: none !important; }
 
+/* The card that holds the pill and, once opened, the reasoning under it.
+   Collapsed it paints nothing at all -- no background, no border, no radius --
+   so the pill is still a badge floating on the map. Expanded it becomes the
+   surface the approved artboard draws, with the pill as its coloured header;
+   overflow:hidden is what lets the pill's own 999px corners be clipped square
+   where they meet the drawer. */
+.mapActionCard {
+  display: flex;
+  flex-direction: column;
+  width: auto;
+  max-width: 100%;
+  border-radius: 18px;
+}
+.mapActionCard.open {
+  width: 100%;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.97);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(16, 22, 34, 0.06);
+  box-shadow: 0 2px 6px rgba(16, 22, 34, 0.08), 0 12px 32px rgba(16, 22, 34, 0.16);
+}
+body.night .mapActionCard.open {
+  background: rgba(18, 24, 36, 0.95);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
 .mapActionPill {
   pointer-events: auto;
   display: inline-flex;
@@ -66,7 +93,13 @@
 /* Expanded, the pill stops being a badge and becomes the header of the sheet
    it opened -- the approved Expanded artboard shows it running the full width
    of the card, with the reasoning underneath. */
-.mapActionPill[aria-expanded="true"] { width: 100%; }
+.mapActionPill[aria-expanded="true"] {
+  width: 100%;
+  /* Square where it meets the drawer, still round at the top: the header of a
+     card, not a pill sitting on one. */
+  border-radius: 18px 18px 0 0;
+  box-shadow: none;
+}
 
 /* The separator between the verb and the zone. Small enough to read as
    punctuation rather than a bullet in a list. */
@@ -178,37 +211,36 @@
 
 /* ----------------------------------------------------------- detail sheet */
 
+/* Inside the card now, under the pill -- the artboard's drawer. The surface,
+   border, radius and shadow all belong to .mapActionCard; this only owns its
+   padding and type, or the two would paint two nested cards. The card is
+   bottom-anchored, so opening this grows the whole thing upward. */
 .mapActionDetail {
   pointer-events: auto;
-  order: -1; /* opens upward, so the pill never moves out from under the thumb */
-  /* The column centres its children so the collapsed pill can hug; the sheet
-     is the one child that still wants the full width. */
-  align-self: stretch;
-  width: 100%;
-  padding: 12px 14px;
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.97);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(16, 22, 34, 0.06);
-  box-shadow: 0 12px 32px rgba(16, 22, 34, 0.18);
+  /* No width:100% here. The card is a flex column, so this stretches to it
+     already -- and width:100% PLUS the padding overflowed the card by exactly
+     the padding, which the card's overflow:hidden then clipped. The reasoning
+     lost its last two words per line. box-sizing is the belt to that braces. */
+  box-sizing: border-box;
+  padding: 13px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
   color: #101622;
-  font-size: 13px;
-  line-height: 1.4;
+  font: 500 13px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
 }
 .mapActionDetail[hidden] { display: none !important; }
-.mapActionWhy { font-weight: 600; }
+.mapActionWhy { color: #59616e; }
+body.night .mapActionWhy { color: #aeb6c2; }
 .mapActionMeta {
-  margin-top: 6px;
   font-size: 12px;
   opacity: 0.62;
 }
+/* The drawer is a 12px-gap flex column: an empty meta line is an invisible
+   child that still pushes the card 12px taller. */
+.mapActionMeta:empty, .mapActionWhy:empty { display: none; }
 
-body.night .mapActionDetail {
-  background: rgba(18, 24, 36, 0.95);
-  border-color: rgba(255, 255, 255, 0.1);
-  color: #eef2f8;
-}
+body.night .mapActionDetail { color: #eef2f8; }
 
 /* ------------------------------------------------- segmented map controls */
 

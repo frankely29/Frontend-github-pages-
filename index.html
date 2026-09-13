@@ -588,10 +588,11 @@
     or the banner. Hidden until the first recommendation arrives.
   -->
   <div id="mapAction" hidden>
-    <div class="mapActionDetail" id="mapActionDetail" hidden>
-      <div class="mapActionWhy" id="mapActionWhy"></div>
-      <div class="mapActionMeta" id="mapActionMeta"></div>
-    </div>
+    <!-- One card, not two floating pieces. The approved Expanded artboard
+         unrolls the pill into a card whose header IS the pill, so the answer
+         never changes shape or colour when the reasoning opens. The card
+         paints nothing while collapsed -- see .mapActionCard in the css. -->
+    <div class="mapActionCard" id="mapActionCard">
     <button class="mapActionPill" id="mapActionPill" type="button" data-tone="idle"
             aria-expanded="false" aria-controls="mapActionDetail">
       <span class="mapActionVerb" id="mapActionVerb">MONITOR</span>
@@ -613,6 +614,11 @@
         </svg>
       </span>
     </button>
+      <div class="mapActionDetail" id="mapActionDetail" hidden>
+        <div class="mapActionWhy" id="mapActionWhy"></div>
+        <div class="mapActionMeta" id="mapActionMeta"></div>
+      </div>
+    </div>
   </div>
 
   <div class="sliderWrap" id="sliderWrap">

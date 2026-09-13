@@ -2877,8 +2877,12 @@ body.night .subscriptionStatusValue {
 
 /* ---------------------------------------------------------------- dock ink
    The dock icons are single-stroke line art (see applyDockIconModel), drawn
-   with currentColor so one rule themes the whole row. The artboard hardcodes
-   #101622; night mode needs the opposite, and a hardcoded ink would have gone
-   invisible on the dark dock. */
+   with currentColor so one rule inks the whole row.
+
+   One ink, both themes, on purpose. I first paired this with a
+   `body.night .dockIcon { color: #eef2f8 }`, assuming night darkened the dock
+   the way it darkens the map. It does not: measured, the night dock button is
+   rgba(255,255,255,.82) against a day rgba(240,240,240,.95) -- lighter, if
+   anything. Light ink on that is about 1.05:1, which is an invisible dock.
+   If the dock surface is ever darkened, this is the rule to pair. */
 .dockIcon { color: #101622; }
-body.night .dockIcon { color: #eef2f8; }
