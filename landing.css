@@ -494,3 +494,64 @@
   .landingArt { max-width: 520px; left: 50%; transform: translateX(-50%); }
   .landingFormBar, .landingFormBody, .landingFormFoot { max-width: 520px; margin-inline: auto; width: 100%; }
 }
+
+/* ------------------------------------------------- the lapsed-account row
+   The access-code row moved here from the paywall overlay, so it has to speak
+   this page's language rather than that one's: dark surface, the same 14px
+   radius as the buttons above it, and the mono placeholder the code itself is
+   written in. */
+.landingRedeem {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.landingRedeemLabel {
+  font: 600 12px/1 system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  color: rgba(255, 255, 255, 0.56);
+}
+.landingRedeemRow {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+.landingRedeemInput {
+  flex: 1 1 auto;
+  min-width: 0;
+  box-sizing: border-box;
+  min-height: 48px;
+  padding: 0 13px;
+  border-radius: 13px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+  font: 700 14px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.08em;
+}
+.landingRedeemInput::placeholder { color: rgba(255, 255, 255, 0.32); }
+.landingRedeemInput:focus {
+  outline: none;
+  border-color: rgba(255, 255, 255, 0.4);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.08);
+}
+/* Sized to the input beside it, not to the full-width buttons above. */
+.landingBtn.landingRedeemBtn {
+  flex: 0 0 auto;
+  width: auto;
+  min-height: 48px;
+  padding: 0 16px;
+}
+.landingRedeemStatus {
+  font: 500 12px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  color: rgba(255, 255, 255, 0.66);
+}
+.landingRedeemStatus.error { color: #ff8f9a; }
+.landingRedeemStatus.ok { color: #31db7d; }
+
+/* display:flex on a container beats the hidden attribute's UA display:none,
+   so both call-to-action blocks painted at once -- the lapsed page showed
+   "Create account" and "Subscribe" stacked. The attribute is the state these
+   blocks are switched with, so it has to win. */
+.landingCta[hidden],
+.landingRedeem[hidden],
+.landingFine[hidden] { display: none !important; }

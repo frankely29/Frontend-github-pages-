@@ -77,7 +77,31 @@
     return trialCountdownEl;
   }
 
+  // The approved entry flow has no subscribe screen in it: land, one form, the
+  // map. So a locked account is sent to the landing page it already read --
+  // same hero, same pitch, same "$8/week after the trial" -- with Subscribe as
+  // its button, instead of a dark modal in a visual language nothing else in
+  // the app speaks. The overlay below is kept only as the fallback for a
+  // document that somehow has no landing page in it.
+  function landingLock() {
+    if (typeof window === 'undefined') return null;
+    const landing = window.TeamJoseoLanding;
+    const overlay = document.getElementById('lockedOverlay');
+    if (!landing || typeof landing.setLapsed !== 'function' || !overlay) return null;
+    return { landing, overlay };
+  }
+
   function show(options = {}) {
+    const lock = landingLock();
+    if (lock) {
+      lock.landing.setLapsed(true);
+      lock.overlay.classList.add('show');
+      lock.overlay.setAttribute('aria-hidden', 'false');
+      visible = true;
+      if (typeof window !== 'undefined') window.__paywallVisible = true;
+      return;
+    }
+
     const el = ensureOverlayEl();
     if (!el) {
       console.warn('Paywall overlay element not found in DOM');
@@ -101,6 +125,18 @@
   }
 
   function hide() {
+    const lock = landingLock();
+    if (lock) {
+      // Leave the landing in its signed-out shape, or the next signed-out
+      // visitor gets a Subscribe button and no way to make an account.
+      lock.landing.setLapsed(false);
+      lock.overlay.classList.remove('show');
+      lock.overlay.setAttribute('aria-hidden', 'true');
+      visible = false;
+      if (typeof window !== 'undefined') window.__paywallVisible = false;
+      return;
+    }
+
     const el = ensureOverlayEl();
     if (!el) return;
     el.classList.remove('show');

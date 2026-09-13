@@ -219,7 +219,7 @@
           <p class="landingLede">Not a Facebook group. Not a subreddit full of
             passengers. A network built for the people actually out there.</p>
 
-          <div class="landingCta">
+          <div class="landingCta" data-landing-cta="new">
             <button type="button" class="landingBtn landingBtnGo" data-landing-go="signup">
               Create account &mdash; free for 7 days
             </button>
@@ -227,8 +227,42 @@
               I already have an account
             </button>
           </div>
-          <p class="landingFine">No card to start. <b>$8/week</b> after the trial, cancel anytime.<br>
+          <p class="landingFine" data-landing-fine="new">No card to start. <b>$8/week</b> after the trial, cancel anytime.<br>
             Got an access code? Use it when you sign up.</p>
+
+          <!--
+            The same page, for a driver whose trial has run out. They get the
+            pitch they already know and one button, rather than a separate dark
+            modal nobody designed: the approved entry flow is land, one form,
+            the map, and this is the only screen in it that a lapsed account
+            can be shown. The redeem row lives here rather than in the paywall
+            overlay because this is the screen that is actually on display --
+            and because two elements carrying data-paywall-redeem-input would
+            leave redeemCode() reading whichever came first in the document.
+          -->
+          <div class="landingCta" data-landing-cta="lapsed" hidden>
+            <button type="button" class="landingBtn landingBtnGo" data-landing-subscribe>
+              Subscribe &mdash; $8/week
+            </button>
+            <button type="button" class="landingBtn landingBtnGhost" data-landing-portal>
+              Manage subscription
+            </button>
+          </div>
+          <div class="landingRedeem" data-landing-cta="lapsed" hidden>
+            <label class="landingRedeemLabel" for="paywallRedeemInput">Have a free access code?</label>
+            <div class="landingRedeemRow">
+              <input id="paywallRedeemInput" class="landingRedeemInput" type="text"
+                     placeholder="JOSEO-XXXX-XXXX" autocomplete="off"
+                     autocapitalize="characters" spellcheck="false"
+                     data-paywall-redeem-input>
+              <button type="button" class="landingBtn landingBtnGhost landingRedeemBtn"
+                      data-paywall-redeem-btn>Redeem</button>
+            </div>
+            <div class="landingRedeemStatus" role="status" aria-live="polite"
+                 data-paywall-redeem-status hidden></div>
+          </div>
+          <p class="landingFine" data-landing-fine="lapsed" hidden>Your free week is over.
+            <b>$8/week</b>, cancel anytime.<br>Secure checkout by Paddle.</p>
 
           <!--
             Five real screens. The track carries a sixth frame that repeats the
@@ -386,21 +420,10 @@
             Manage subscription
           </button>
         </div>
-        <!-- Free-access code. Lives inside the paywall because the people who
-             have one are exactly the people looking at this overlay. -->
-        <div class="paywallRedeem">
-          <label class="paywallRedeemLabel" for="paywallRedeemInput">Have a free access code?</label>
-          <div class="paywallRedeemRow">
-            <input id="paywallRedeemInput" class="paywallRedeemInput" type="text"
-                   placeholder="JOSEO-XXXX-XXXX" autocomplete="off"
-                   autocapitalize="characters" spellcheck="false"
-                   data-paywall-redeem-input>
-            <button type="button" class="paywallBtn paywallBtnSecondary"
-                    data-paywall-redeem-btn>Redeem</button>
-          </div>
-          <div class="paywallRedeemStatus" role="status" aria-live="polite"
-               data-paywall-redeem-status hidden></div>
-        </div>
+        <!-- The redeem row moved onto the landing page, which is the screen a
+             locked account is actually shown now. It is not duplicated here:
+             redeemCode() finds its input with a document-wide querySelector,
+             so a second copy would silently win or lose on DOM order. -->
         <div class="paywallFooter">
           <span>Secure checkout by Paddle • Cancel anytime</span>
           <button type="button" class="paywallBtnDismiss" data-paywall-dismiss-btn aria-label="Close">
