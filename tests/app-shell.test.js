@@ -338,6 +338,70 @@ test('exposes a stable public surface', () => {
 });
 
 // --------------------------------------------------------------------------
+// ---------------------------------------------- conditions moved off the map
+
+const SHELL_SRC = fs.readFileSync(SOURCE, 'utf8');
+const SHELL_CSS = fs.readFileSync(path.join(__dirname, '..', 'app-shell.css'), 'utf8');
+const PART17_SRC = fs.readFileSync(path.join(__dirname, '..', 'app.part17.js'), 'utf8');
+
+test('every widget that cluttered the map top is relocated, not deleted', () => {
+  // The approved Main artboard's map top is the menu button and the
+  // locate/shield control and nothing else. These four moved into the menu's
+  // Conditions section; if one is dropped from the list it silently reappears
+  // over the zones.
+  ['onlineBadge', 'weatherBadge', 'dayTendencyMeter', 'aiAssistantDock'].forEach((id) => {
+    assert.ok(SHELL_SRC.includes(`"${id}"`), `${id} is not relocated into the menu`);
+  });
+});
+
+test('the map is cleared at mount, not on the first menu open', () => {
+  // Relocating only on open means the chips a driver is meant to stop seeing
+  // are exactly what they see until they happen to open the drawer.
+  const mount = SHELL_SRC.slice(SHELL_SRC.indexOf('function mount'));
+  assert.ok(/relocateStatus\(\)/.test(mount), 'mount never relocates');
+});
+
+test('relocation runs again after mount, for the lazily-built widgets', () => {
+  // day-tendency.js builds its meter the first time it has a reading, and the
+  // assistant dock mounts a beat later. A single pass at mount misses both.
+  assert.ok(/setTimeout\(relocateStatus/.test(SHELL_SRC),
+    'nothing re-runs relocation, so late-built widgets stay on the map');
+});
+
+test('relocation moves the live node rather than rebuilding it', () => {
+  // Every updater in the app holds a reference to these elements by id.
+  // Cloning or re-creating them would leave the updaters writing to orphans:
+  // the widgets would appear in the menu and never change again.
+  assert.ok(/host\.appendChild\(node\)/.test(SHELL_SRC), 'node is not moved');
+  assert.ok(!/cloneNode/.test(SHELL_SRC), 'a clone would strip the live wiring');
+});
+
+test('the moved widgets stop being anchored to the viewport', () => {
+  assert.ok(/\.shellStatus > #onlineBadge[\s\S]{0,400}position:\s*static/.test(SHELL_CSS),
+    'the widgets keep the fixed positioning they used on the map');
+  assert.ok(/box-sizing:\s*border-box/.test(SHELL_CSS.slice(SHELL_CSS.indexOf('.shellStatus'))),
+    'without border-box their padding pushes them past the drawer edge');
+});
+
+test('the assistant card stops threading itself between the badges', () => {
+  // updateAssistantDockLayout positions the card in the lane between the
+  // online and weather badges. In the drawer there is no lane, and the inline
+  // left/top it writes would drag the card out of the list.
+  const fn = PART17_SRC.slice(PART17_SRC.indexOf('function updateAssistantDockLayout'));
+  const guard = fn.indexOf('shellStatus');
+  const laneMath = fn.indexOf('laneLeft');
+  assert.ok(guard > -1, 'no guard for the relocated card');
+  assert.ok(guard < laneMath, 'the guard must come before the lane maths runs');
+});
+
+test('the menu list still scrolls once Conditions takes the bottom', () => {
+  // Conditions is a fixed block at the end of a fixed-height drawer. If the
+  // item list above it cannot scroll, the entries it pushes off the bottom --
+  // Music, Colours, Modes, Profile -- become unreachable.
+  assert.ok(/\.shellMenuBody\s*\{[^}]*overflow-y:\s*auto/s.test(SHELL_CSS),
+    'the destination list cannot scroll, so the lower entries are lost');
+});
+
 let failed = 0;
 tests.forEach(([name, fn]) => {
   try {
