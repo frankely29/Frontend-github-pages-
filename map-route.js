@@ -33,8 +33,10 @@
 
   var SRC_LINE = "tlc-action-route";
   var SRC_END = "tlc-action-route-end";
+  var SRC_ZONE = "tlc-action-route-zone";
   var LAYER_LINE = "tlc-action-route-line";
   var LAYER_END = "tlc-action-route-arrow";
+  var LAYER_ZONE = "tlc-action-route-zone-outline";
   var ARROW_IMAGE = "tlc-action-route-arrow-img";
 
   // Below this the line is redrawn for GPS jitter rather than for movement.
@@ -51,6 +53,7 @@
     origin: null,     // { lat, lng } last drawn
     pending: null,    // { lat, lng } waiting for a frame
     frame: 0,
+    outlined: false,  // whether the destination zone polygon was resolved
     drawn: 0,         // how many times the source was actually written
     skipped: 0,       // how many updates were dropped as noise
   };
@@ -129,6 +132,7 @@
     try {
       if (!map.getSource(SRC_LINE)) map.addSource(SRC_LINE, { type: "geojson", data: EMPTY });
       if (!map.getSource(SRC_END)) map.addSource(SRC_END, { type: "geojson", data: EMPTY });
+      if (!map.getSource(SRC_ZONE)) map.addSource(SRC_ZONE, { type: "geojson", data: EMPTY });
       addArrowImage(map);
 
       if (!map.getLayer(LAYER_LINE)) {
@@ -145,6 +149,20 @@
             "line-opacity": 0.85,
             // Dots, as drawn. The gap grows with the width or it closes up.
             "line-dasharray": [0.1, 1.9],
+          },
+        });
+      }
+      // Under the line and the arrow, so neither is cut by the border.
+      if (!map.getLayer(LAYER_ZONE)) {
+        map.addLayer({
+          id: LAYER_ZONE,
+          type: "line",
+          source: SRC_ZONE,
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: {
+            "line-color": "#0b1220",
+            "line-width": ["interpolate", ["linear"], ["zoom"], 9, 2.2, 14, 4.0],
+            "line-opacity": 0.95,
           },
         });
       }
@@ -182,6 +200,7 @@
     try {
       state.map.getSource(SRC_LINE).setData(EMPTY);
       state.map.getSource(SRC_END).setData(EMPTY);
+      state.map.getSource(SRC_ZONE).setData(EMPTY);
     } catch (_) {}
   }
 
@@ -213,6 +232,39 @@
       });
       state.origin = { lat: from.lat, lng: from.lng };
       state.drawn += 1;
+    } catch (_) {}
+  }
+
+  /**
+   * Outline the zone the driver is being sent to.
+   *
+   * Resolved through the map's own lookup, from the target coordinates the
+   * assistant published -- so the outlined polygon is by construction the zone
+   * the pill names, not a second guess at it.
+   *
+   * Done once per target, never per frame: the polygon only changes when the
+   * recommendation does, and it is the one piece of geometry here big enough
+   * that redrawing it on movement would cost something.
+   */
+  function outlineTarget(target) {
+    if (!state.ready || !state.map) return;
+    var internals = window.TlcMapUiInternals;
+    var feature = null;
+    if (internals && typeof internals.resolveZoneFeatureAtLngLat === "function") {
+      try {
+        feature = internals.resolveZoneFeatureAtLngLat({ lat: target.lat, lng: target.lng });
+      } catch (_) {}
+    }
+    try {
+      // No polygon is not a failure: the line and arrow still say where to go.
+      // An outline drawn around a guess would be worse than none.
+      state.map.getSource(SRC_ZONE).setData(
+        feature && feature.geometry
+          ? { type: "FeatureCollection",
+              features: [{ type: "Feature", properties: {}, geometry: feature.geometry }] }
+          : EMPTY
+      );
+      state.outlined = !!(feature && feature.geometry);
     } catch (_) {}
   }
 
@@ -266,7 +318,9 @@
       return;
     }
 
+    var changed = !state.target || state.target.lat !== lat || state.target.lng !== lng;
     state.target = { lat: lat, lng: lng };
+    if (changed) outlineTarget(state.target);
     var at = driverAt();
     if (at) {
       // A new target redraws immediately rather than waiting for the driver to
@@ -297,6 +351,7 @@
       map.on("styledata", function () {
         state.ready = false;
         if (install(map) && state.target) {
+          outlineTarget(state.target);
           var at = driverAt();
           if (at) write(at, state.target);
         }
@@ -338,6 +393,7 @@
     movedEnough: movedEnough,
     bearing: bearing,
     clear: clear,
+    outlineTarget: outlineTarget,
     MIN_MOVE_DEG: MIN_MOVE_DEG,
   };
 })();

@@ -62,6 +62,7 @@ function fakeMap(options = {}) {
 function build(options = {}) {
   const map = options.map === null ? null : (options.map || fakeMap());
   const frames = [];
+  const zoneLookups = [];
 
   const document = {
     readyState: 'complete',
@@ -86,6 +87,14 @@ function build(options = {}) {
     TlcMapUiInternals: {
       getMap: () => map,
       getUserLatLng: () => (options.at === undefined ? { lat: 40.60, lng: -73.92 } : options.at),
+      resolveZoneFeatureAtLngLat: () => {
+        zoneLookups.push(1);
+        if (options.zone === null) return null;
+        return options.zone || {
+          properties: { zone_name: 'Astoria' },
+          geometry: { type: 'Polygon', coordinates: [[[0, 0], [0, 1], [1, 1], [0, 0]]] },
+        };
+      },
     },
     TlcAssistantRecommendation: options.initial || null,
   };
@@ -99,7 +108,7 @@ function build(options = {}) {
   vm.runInContext(fs.readFileSync(JS_SOURCE, 'utf8'), ctx, { filename: 'map-route.js' });
 
   const flush = () => { const pending = frames.splice(0); pending.forEach((fn) => fn()); };
-  return { window, document, map, api: window.TeamJoseoMapRoute, frames, flush };
+  return { window, document, map, api: window.TeamJoseoMapRoute, frames, flush, zoneLookups };
 }
 
 const MOVE = {
@@ -119,6 +128,7 @@ const moveTo = (dom, lat, lng) => dom.window.dispatch('tlc-user-location-updated
   { detail: { lat, lng, ts: Date.now() } });
 
 const line = (dom) => dom.map._sources['tlc-action-route'].data;
+const zone = (dom) => dom.map._sources['tlc-action-route-zone'].data;
 const endPoint = (dom) => dom.map._sources['tlc-action-route-end'].data;
 // Arrays built inside the vm have that realm's prototype, so deepStrictEqual
 // reports "same structure but not reference-equal". Compare the values.
@@ -272,6 +282,80 @@ test('the arrow image is built once', () => {
   publish(dom, MOVE);
   dom.api.install();
   assert.strictEqual(dom.map.calls.addImage, 1);
+});
+
+
+// --------------------------------------------------------------------------
+// the destination zone outline
+// --------------------------------------------------------------------------
+
+test('the destination zone is outlined', () => {
+  const dom = build();
+  publish(dom, MOVE);
+  assert.strictEqual(zone(dom).features.length, 1, 'no outline drawn');
+  assert.strictEqual(zone(dom).features[0].geometry.type, 'Polygon');
+});
+
+test('the outline comes from the target coordinates the pill published', () => {
+  // Resolved through the map's own lookup from those coordinates, so the
+  // outlined polygon is by construction the zone the pill names.
+  const src = codeOf(JS_SOURCE);
+  assert.ok(src.includes('resolveZoneFeatureAtLngLat'), 'it does not use the map lookup');
+  assert.ok(/resolveZoneFeatureAtLngLat\(\{ lat: target\.lat, lng: target\.lng \}\)/.test(src),
+    'it resolves from something other than the published target');
+});
+
+test('the zone is resolved once per target, never per frame', () => {
+  // The polygon only changes when the recommendation does, and it is the one
+  // piece of geometry here big enough that redrawing it on movement would cost.
+  const dom = build();
+  publish(dom, MOVE);
+  const after = dom.zoneLookups.length;
+  for (let i = 1; i <= 5; i += 1) moveTo(dom, 40.60 + i * 0.01, -73.92);
+  dom.flush();
+  assert.strictEqual(dom.zoneLookups.length, after, 'the zone was re-resolved while moving');
+});
+
+test('the same target published again does not re-resolve', () => {
+  const dom = build();
+  publish(dom, MOVE);
+  const after = dom.zoneLookups.length;
+  publish(dom, MOVE);
+  assert.strictEqual(dom.zoneLookups.length, after);
+});
+
+test('a new target does re-resolve', () => {
+  const dom = build();
+  publish(dom, MOVE);
+  const after = dom.zoneLookups.length;
+  publish(dom, Object.assign({}, MOVE, { targetLat: 40.80, targetLng: -73.88 }));
+  assert.ok(dom.zoneLookups.length > after, 'a new target kept the old outline');
+});
+
+test('a stay clears the outline with everything else', () => {
+  const dom = build();
+  publish(dom, MOVE);
+  publish(dom, STAY);
+  assert.strictEqual(zone(dom).features.length, 0);
+});
+
+test('a zone that cannot be resolved leaves no outline, and the line still shows', () => {
+  // An outline drawn around a guess is worse than none; the line and arrow
+  // already say where to go.
+  const dom = build({ zone: null });
+  publish(dom, MOVE);
+  assert.strictEqual(zone(dom).features.length, 0);
+  assert.strictEqual(line(dom).features.length, 1, 'the line went with it');
+  assert.strictEqual(dom.api._state.outlined, false);
+});
+
+test('the outline sits under the line and the arrow', () => {
+  // Added before them, so neither is cut by the border.
+  const dom = build();
+  dom.api.install();
+  const order = Object.keys(dom.map._layers);
+  assert.ok(order.indexOf('tlc-action-route-zone-outline') < order.indexOf('tlc-action-route-arrow'),
+    order.join(' < '));
 });
 
 // --------------------------------------------------------------------------
