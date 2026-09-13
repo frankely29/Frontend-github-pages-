@@ -344,14 +344,24 @@ const SHELL_SRC = fs.readFileSync(SOURCE, 'utf8');
 const SHELL_CSS = fs.readFileSync(path.join(__dirname, '..', 'app-shell.css'), 'utf8');
 const PART17_SRC = fs.readFileSync(path.join(__dirname, '..', 'app.part17.js'), 'utf8');
 
-test('every widget that cluttered the map top is relocated, not deleted', () => {
-  // The approved Main artboard's map top is the menu button and the
-  // locate/shield control and nothing else. These four moved into the menu's
-  // Conditions section; if one is dropped from the list it silently reappears
-  // over the zones.
-  ['onlineBadge', 'weatherBadge', 'dayTendencyMeter', 'aiAssistantDock'].forEach((id) => {
-    assert.ok(SHELL_SRC.includes(`"${id}"`), `${id} is not relocated into the menu`);
+test('the three readings are gathered into the map strip', () => {
+  // Tendency, drivers online and weather each used to float separately over
+  // the zones. They belong together in one bar; if one is dropped from the
+  // list it silently goes back to floating on its own.
+  ['dayTendencyMeter', 'onlineBadge', 'weatherBadge'].forEach((id) => {
+    assert.ok(SHELL_SRC.includes(`"${id}"`), `${id} is not gathered into the strip`);
   });
+});
+
+test('the assistant card is retired rather than gathered', () => {
+  // It rendered the same recommendation as the map pill -- the pill's own
+  // "why" is the same rec.secondary || rec.primary the card showed -- so the
+  // app was giving one answer twice and inviting a driver to wonder which to
+  // believe. Putting it in the strip would just move the duplicate.
+  const list = SHELL_SRC.slice(SHELL_SRC.indexOf('STATUS_NODE_IDS'),
+                               SHELL_SRC.indexOf('function hideDuplicateAssistant'));
+  assert.ok(!/"aiAssistantDock"/.test(list), 'the duplicate card is back in the strip');
+  assert.ok(/hideDuplicateAssistant/.test(SHELL_SRC), 'nothing retires the duplicate card');
 });
 
 test('the map is cleared at mount, not on the first menu open', () => {
@@ -362,10 +372,10 @@ test('the map is cleared at mount, not on the first menu open', () => {
 });
 
 test('relocation runs again after mount, for the lazily-built widgets', () => {
-  // day-tendency.js builds its meter the first time it has a reading, and the
-  // assistant dock mounts a beat later. A single pass at mount misses both.
-  assert.ok(/setTimeout\(relocateStatus/.test(SHELL_SRC),
-    'nothing re-runs relocation, so late-built widgets stay on the map');
+  // day-tendency.js builds its meter the first time it has a reading, so a
+  // single pass at mount misses it and the rail floats loose over the zones.
+  assert.ok(/setTimeout\(function \(\) \{\s*relocateStatus\(\);/.test(SHELL_SRC),
+    'nothing re-runs relocation, so late-built widgets stay loose');
 });
 
 test('relocation moves the live node rather than rebuilding it', () => {
@@ -376,30 +386,46 @@ test('relocation moves the live node rather than rebuilding it', () => {
   assert.ok(!/cloneNode/.test(SHELL_SRC), 'a clone would strip the live wiring');
 });
 
-test('the moved widgets stop being anchored to the viewport', () => {
-  assert.ok(/\.shellStatus > #onlineBadge[\s\S]{0,400}position:\s*static/.test(SHELL_CSS),
-    'the widgets keep the fixed positioning they used on the map');
-  assert.ok(/box-sizing:\s*border-box/.test(SHELL_CSS.slice(SHELL_CSS.indexOf('.shellStatus'))),
-    'without border-box their padding pushes them past the drawer edge');
+test('the gathered widgets stop being anchored to the viewport', () => {
+  assert.ok(/#mapConditions > #dayTendencyMeter[\s\S]{0,500}position:\s*static/.test(SHELL_CSS),
+    'the widgets keep the fixed positioning that had them floating separately');
+  assert.ok(/box-sizing:\s*border-box/.test(SHELL_CSS.slice(SHELL_CSS.indexOf('#mapConditions'))),
+    'without border-box their padding pushes them past the strip edge');
+});
+
+test('the tendency rail lies down without losing its marker', () => {
+  // The rail is drawn as a 13x118 vertical column whose marker is placed by
+  // `bottom`. Laying it flat means the marker has to move along the other
+  // axis, which is why day-tendency.js now states a percentage
+  // (--tendency-pct) and lets the CSS decide which edge it drives.
+  const DT = fs.readFileSync(path.join(__dirname, '..', 'day-tendency.js'), 'utf8');
+  assert.ok(/--tendency-pct/.test(DT), 'the marker position is still hardcoded to one axis');
+  assert.ok(!/marker\.style\.bottom/.test(DT), 'the marker still writes bottom directly');
+  assert.ok(/#mapConditions \.dayTendencyMarker[\s\S]{0,300}left:\s*var\(--tendency-pct/.test(SHELL_CSS),
+    'the horizontal marker does not read the percentage');
+  assert.ok(/#mapConditions[\s\S]{0,4000}min-height:\s*0\s*!important/.test(SHELL_CSS),
+    'the info column keeps min-height:118px and holds the strip open');
 });
 
 test('the assistant card stops threading itself between the badges', () => {
-  // updateAssistantDockLayout positions the card in the lane between the
-  // online and weather badges. In the drawer there is no lane, and the inline
-  // left/top it writes would drag the card out of the list.
+  // updateAssistantDockLayout positioned the card in the lane between the
+  // online and weather badges. The card is retired and the badges are inside
+  // the strip, so there is no lane -- and the inline left/top it writes would
+  // outlive the change.
   const fn = PART17_SRC.slice(PART17_SRC.indexOf('function updateAssistantDockLayout'));
-  const guard = fn.indexOf('shellStatus');
+  const guard = fn.indexOf('shellRetired');
   const laneMath = fn.indexOf('laneLeft');
-  assert.ok(guard > -1, 'no guard for the relocated card');
+  assert.ok(guard > -1, 'no guard for the retired card');
   assert.ok(guard < laneMath, 'the guard must come before the lane maths runs');
 });
 
-test('the menu list still scrolls once Conditions takes the bottom', () => {
-  // Conditions is a fixed block at the end of a fixed-height drawer. If the
-  // item list above it cannot scroll, the entries it pushes off the bottom --
-  // Music, Colours, Modes, Profile -- become unreachable.
+test('the menu is destinations again, with no readings in it', () => {
+  // The readings spent one revision at the bottom of the drawer, where they
+  // ate a third of it and still had to be opened to be read.
+  assert.ok(!/shellStatus/.test(SHELL_CSS), 'the menu still styles a Conditions block');
+  assert.ok(!/shellStatus/.test(SHELL_SRC), 'the menu still builds a Conditions block');
   assert.ok(/\.shellMenuBody\s*\{[^}]*overflow-y:\s*auto/s.test(SHELL_CSS),
-    'the destination list cannot scroll, so the lower entries are lost');
+    'the destination list cannot scroll');
 });
 
 let failed = 0;

@@ -30,18 +30,34 @@
 
   var SCREEN_HOST_ID = "shellScreens";
   var MENU_ID = "shellMenu";
-  var STATUS_ID = "shellStatus";
+  var STATUS_ID = "mapConditions";
 
-  /* The map chrome that moves into the menu's Conditions section. Order is the
-   * order they appear there. #dayTendencyMeter is built lazily by
-   * day-tendency.js the first time it has a reading, so this runs again on
-   * every open rather than once at mount. */
+  /* The readings that belong on the map, in one horizontal strip under the top
+   * controls. They lived in the menu's Conditions section for exactly one
+   * revision: buried there they cost a third of the drawer and still had to be
+   * opened to be read, which is the opposite of a glanceable condition.
+   *
+   * #dayTendencyMeter is built lazily by day-tendency.js the first time it has
+   * a reading, so relocateStatus runs again after mount rather than once.
+   *
+   * #aiAssistantDock is deliberately NOT here. It rendered the same
+   * recommendation as the map pill -- same primary and secondary line, the
+   * pill's own "why" is rec.secondary || rec.primary -- so the app was showing
+   * one answer twice and inviting the driver to wonder which one to believe.
+   * The pill is the one that stays; hideDuplicateAssistant() retires the card. */
   var STATUS_NODE_IDS = [
-    "aiAssistantDock",
     "dayTendencyMeter",
     "onlineBadge",
     "weatherBadge",
   ];
+
+  function hideDuplicateAssistant() {
+    var dock = byId("aiAssistantDock");
+    if (!dock || dock.dataset.shellRetired === "1") return;
+    dock.dataset.shellRetired = "1";
+    dock.hidden = true;
+    dock.style.display = "none";
+  }
 
   function relocateStatus() {
     var host = byId(STATUS_ID);
@@ -129,7 +145,6 @@
     if (!menu || !scrim) return;
     lastFocus = document.activeElement;
     paintMenu();
-    relocateStatus();
     menu.hidden = false;
     scrim.hidden = false;
     // Two frames: the element has to be laid out before the transform can
@@ -367,19 +382,15 @@
     menu.appendChild(header);
     menu.appendChild(el("div", "shellMenuBody"));
 
-    // Conditions live here now, not on the map. The approved Main artboard's
-    // map top is the menu button and the locate/shield control and nothing
-    // else; the build had grown an online count, a weather chip, the day
-    // tendency rail and the assistant card up there, all competing with the
-    // zones underneath. Nothing is rebuilt or duplicated -- relocateStatus()
-    // moves the live nodes, so every updater that already holds a reference
-    // to them keeps working untouched.
-    var status = el("div", "shellStatus");
-    status.id = STATUS_ID;
-    status.appendChild(el("div", "shellGroup", "Conditions"));
-    menu.appendChild(status);
-
     document.body.appendChild(menu);
+
+    // One horizontal strip under the top controls, holding the readings a
+    // driver glances at without opening anything. Nothing here is rebuilt or
+    // duplicated -- relocateStatus() moves the live nodes, so every updater
+    // that already holds a reference to them keeps working untouched.
+    var status = el("div", "mapConditions");
+    status.id = STATUS_ID;
+    document.body.appendChild(status);
 
     // One delegated listener rather than one per item, because the list is
     // repainted whenever a destination registers.
@@ -471,8 +482,12 @@
     // they happen to open the menu. The retries catch #dayTendencyMeter and
     // the assistant dock, which their own scripts build a beat later.
     relocateStatus();
+    hideDuplicateAssistant();
     [400, 1500, 4000].forEach(function (ms) {
-      window.setTimeout(relocateStatus, ms);
+      window.setTimeout(function () {
+        relocateStatus();
+        hideDuplicateAssistant();
+      }, ms);
     });
   }
 

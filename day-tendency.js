@@ -100,9 +100,13 @@
         background: linear-gradient(to top, #e60000 0%, #ffd400 50%, #00b050 100%);
         overflow: hidden;
       }
+      /* The percentage arrives as --tendency-pct rather than a hardcoded
+         bottom, so the same marker works on a vertical track (this rule) and
+         on the horizontal one the map strip uses. */
       .dayTendencyMarker {
         position: absolute;
         left: -1px;
+        bottom: var(--tendency-pct, 50%);
         width: calc(100% + 2px);
         border-top: 2px solid #fff;
         box-shadow: 0 0 2px rgba(0, 0, 0, 0.55);
@@ -733,7 +737,7 @@
 
     if (STATE.score) STATE.score.textContent = roundedScore;
     if (STATE.band) STATE.band.textContent = label;
-    if (STATE.marker) STATE.marker.style.bottom = `${pct}%`;
+    if (STATE.marker) STATE.marker.style.setProperty('--tendency-pct', `${pct}%`);
 
     const borough = String(payload?.borough || '').trim();
     const scope = String(payload?.scope || '').trim();
@@ -770,7 +774,7 @@
     if (!root) return;
     if (STATE.score) STATE.score.textContent = '--';
     if (STATE.band) STATE.band.textContent = 'Locating...';
-    if (STATE.marker) STATE.marker.style.bottom = '50%';
+    if (STATE.marker) STATE.marker.style.setProperty('--tendency-pct', '50%');
     if (STATE.borough) {
       STATE.borough.textContent = '';
       STATE.borough.hidden = true;
@@ -786,7 +790,7 @@
     if (!root) return;
     if (STATE.score) STATE.score.textContent = '--';
     if (STATE.band) STATE.band.textContent = 'Waiting...';
-    if (STATE.marker) STATE.marker.style.bottom = '50%';
+    if (STATE.marker) STATE.marker.style.setProperty('--tendency-pct', '50%');
     if (STATE.borough) {
       STATE.borough.textContent = '';
       STATE.borough.hidden = true;
@@ -802,7 +806,7 @@
     if (!root) return;
     if (STATE.score) STATE.score.textContent = '--';
     if (STATE.band) STATE.band.textContent = 'Waiting...';
-    if (STATE.marker) STATE.marker.style.bottom = '50%';
+    if (STATE.marker) STATE.marker.style.setProperty('--tendency-pct', '50%');
     root.title = 'Waiting for active month benchmark comparison data.';
     root.setAttribute('aria-label', 'Waiting for active month benchmark comparison data.');
     root.hidden = false;
@@ -814,7 +818,7 @@
     if (!root) return;
     if (STATE.score) STATE.score.textContent = '--';
     if (STATE.band) STATE.band.textContent = 'Unavailable';
-    if (STATE.marker) STATE.marker.style.bottom = '50%';
+    if (STATE.marker) STATE.marker.style.setProperty('--tendency-pct', '50%');
     const borough = String(localDerived?.borough || '').trim();
     if (STATE.borough) {
       if (borough) {
