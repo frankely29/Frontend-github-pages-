@@ -3336,6 +3336,9 @@
         distanceMiles: null,
         etaMinutes: null,
         bearingDeg: null,
+        targetLat: null,
+        targetLng: null,
+        targetZoneId: null,
       };
     }
 
@@ -3366,6 +3369,11 @@
       distanceMiles: (moving && Number.isFinite(target.distanceMiles)) ? target.distanceMiles : null,
       etaMinutes: (moving && Number.isFinite(target.etaMinutes)) ? Math.round(target.etaMinutes) : null,
       bearingDeg,
+      // Where the line on the map has to end. Published from the same tick as
+      // the words, so the line cannot point at a zone the pill is not naming.
+      targetLat: (moving && Number.isFinite(target.centerLat)) ? target.centerLat : null,
+      targetLng: (moving && Number.isFinite(target.centerLng)) ? target.centerLng : null,
+      targetZoneId: moving ? (target.locationId || null) : null,
     };
   }
 
