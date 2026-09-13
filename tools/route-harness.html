@@ -1,0 +1,105 @@
+<!doctype html>
+<!--
+  route-harness.html — look at the map-route layers in a real MapLibre.
+
+  WHY THIS EXISTS
+
+  The app's own map cannot be rendered in a sandbox: it needs the scoring API
+  to initialise, and MapLibre itself is loaded from a CDN that a locked-down
+  environment usually blocks. So the layers in map-route.js -- the dotted line,
+  the destination outline, the arrow -- shipped once on unit tests and a style
+  validator alone, with nobody having seen them.
+
+  This page answers the narrower question those cannot: do the three layers
+  actually install and draw in a real MapLibre? It needs no API and no network.
+  It found one thing immediately -- the arrow rendered at about half the size
+  the approved design shows -- which no unit test would ever have reported.
+
+  RUNNING IT
+
+      npm install maplibre-gl@5.10.0
+      cp node_modules/maplibre-gl/dist/maplibre-gl.{js,css} tools/
+      cp map-route.js tools/
+      python3 -m http.server 8000
+      open http://127.0.0.1:8000/tools/route-harness.html
+
+  The zones are stand-ins with the app's real colour bands, not live data. What
+  is real is MapLibre, the layer specs, and the module driving them.
+-->
+<html>
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="./maplibre-gl.css" />
+  <script src="./maplibre-gl.js"></script>
+  <style>
+    html, body { margin: 0; height: 100%; background: #eef1f5; }
+    #map { position: absolute; inset: 0; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <script>
+    // A real MapLibre instance with no network at all: one geojson source of
+    // stand-in NYC zones, styled the way the app styles them. The app's own
+    // map needs the API to initialise, which is unreachable here -- but the
+    // question this harness answers is narrower and does not need it: do
+    // map-route.js's three layers actually install and draw in real MapLibre?
+    var ZONES = {
+      type: "FeatureCollection",
+      features: [
+        ["ASTORIA", 91, "#00b050", -73.945, 40.762, -73.905, 40.784],
+        ["L.I.C.", 57, "#66ccff", -73.985, 40.740, -73.945, 40.762],
+        ["JACKSON HTS", 73, "#4b3cff", -73.905, 40.740, -73.865, 40.762],
+        ["WILLIAMSBG", 78, "#8000ff", -73.965, 40.706, -73.925, 40.728],
+        ["BUSHWICK", 64, "#0066ff", -73.925, 40.684, -73.885, 40.706],
+        ["RIDGEWOOD", 69, "#4b3cff", -73.905, 40.706, -73.865, 40.728],
+        ["BED-STUY", 54, "#66ccff", -73.945, 40.662, -73.905, 40.684],
+        ["CROWN HTS", 47, "#ffd400", -73.945, 40.640, -73.905, 40.662],
+        ["FLATBUSH", 44, "#ffd400", -73.945, 40.618, -73.905, 40.640],
+        ["MARINE PK", 22, "#e60000", -73.945, 40.596, -73.905, 40.618],
+        ["CANARSIE", 33, "#ff8c00", -73.905, 40.596, -73.865, 40.618],
+      ].map(function (z) {
+        var name = z[0], score = z[1], color = z[2];
+        var w = z[3], s = z[4], e = z[5], n = z[6];
+        return {
+          type: "Feature",
+          properties: { zone_name: name, score: score, color: color,
+                        label: name + "\n" + score },
+          geometry: { type: "Polygon",
+                      coordinates: [[[w, s], [e, s], [e, n], [w, n], [w, s]]] },
+        };
+      }),
+    };
+
+    var map = new maplibregl.Map({
+      container: "map",
+      style: {
+        version: 8,
+        sources: { zones: { type: "geojson", data: ZONES } },
+        layers: [
+          { id: "bg", type: "background", paint: { "background-color": "#eef1f5" } },
+          { id: "zones-fill", type: "fill", source: "zones",
+            paint: { "fill-color": ["get", "color"], "fill-opacity": 0.92 } },
+          { id: "zones-line", type: "line", source: "zones",
+            paint: { "line-color": "#ffffff", "line-width": 1.5 } },
+        ],
+      },
+      center: [-73.925, 40.690],
+      zoom: 10.4,
+      attributionControl: false,
+    });
+    window.map = map;
+
+    // The two seams map-route.js reads. The driver is in Marine Pk, sent to
+    // Astoria -- the same pair the approved mockup draws.
+    window.TlcMapUiInternals = {
+      getMap: function () { return map; },
+      getUserLatLng: function () { return { lat: 40.607, lng: -73.925 }; },
+      resolveZoneFeatureAtLngLat: function () { return ZONES.features[0]; },
+    };
+    window.__harnessReady = false;
+    map.on("load", function () { window.__harnessReady = true; });
+  </script>
+  <script src="./map-route.js"></script>
+</body>
+</html>
