@@ -439,6 +439,68 @@ test('the hero draws links, not just dots', () => {
 });
 
 // --------------------------------------------------------------------------
+// ------------------------------------- the page a lapsed account is sent to
+
+const LANDING_JS = fs.readFileSync(JS_SOURCE, 'utf8');
+const PAYWALL_JS = fs.readFileSync(path.join(ROOT, 'subscription.paywall.js'), 'utf8');
+
+test('a locked account is sent to the landing page, not a separate modal', () => {
+  // The approved entry flow is land, one form, the map -- there is no
+  // subscribe screen in it. show() is the one choke point every locked path
+  // goes through, so the redirect belongs there rather than at each caller.
+  const show = PAYWALL_JS.slice(PAYWALL_JS.indexOf('function show(options'),
+                                PAYWALL_JS.indexOf('function hide('));
+  assert.ok(/landingLock\(\)/.test(show), 'show() still opens its own overlay first');
+  assert.ok(/setLapsed\(true\)/.test(show), 'the landing is not put into its lapsed shape');
+  assert.ok(/lockedOverlay/.test(PAYWALL_JS), 'the landing is never actually revealed');
+});
+
+test('hiding puts the landing back the way a signed-out visitor needs it', () => {
+  // Otherwise the next person to reach the signed-out page gets a Subscribe
+  // button and no way to make an account.
+  const hide = PAYWALL_JS.slice(PAYWALL_JS.indexOf('function hide('));
+  assert.ok(/setLapsed\(false\)/.test(hide), 'the lapsed shape is left behind');
+});
+
+test('the lapsed page keeps the pitch and swaps only the call to action', () => {
+  assert.ok(INDEX.includes('data-landing-cta="new"'), 'no signed-out block');
+  assert.ok(INDEX.includes('data-landing-cta="lapsed"'), 'no lapsed block');
+  assert.ok(INDEX.includes('data-landing-subscribe'), 'no subscribe button');
+  assert.ok(INDEX.includes('data-landing-portal'), 'no manage-subscription button');
+  // Re-labelling the existing buttons would have been fewer nodes, but they
+  // carry data-landing-go and clicking one navigates to a form.
+  assert.ok(/data-landing-go="signup"[\s\S]{0,120}Create account/.test(INDEX),
+    'the signed-out buttons were repurposed instead of hidden');
+});
+
+test('the attribute that switches the blocks actually hides them', () => {
+  // .landingCta is display:flex, which beats the hidden attribute's UA
+  // display:none -- both blocks painted at once and the lapsed page showed
+  // "Create account" stacked above "Subscribe".
+  assert.ok(/\.landingCta\[hidden\][^{]*\{[^}]*display:\s*none/s.test(CSS),
+    'a flex container ignores [hidden], so both call-to-action blocks paint');
+});
+
+test('there is exactly one access-code input in the document', () => {
+  // redeemCode() finds its input with a document-wide querySelector, so a
+  // second copy left in the paywall overlay would silently win or lose on DOM
+  // order. The row moved to the landing rather than being duplicated.
+  // Strip HTML comments first: the markup explains this rule in prose right
+  // next to the element, and a bare count matches the explanation too.
+  const bare = INDEX.replace(/<!--[\s\S]*?-->/g, '');
+  const inputs = bare.split('data-paywall-redeem-input').length - 1;
+  assert.strictEqual(inputs, 1, `expected one redeem input, found ${inputs}`);
+});
+
+test('the lapsed buttons reuse the paywall module rather than reimplement it', () => {
+  // A second implementation of "take their money" is the last thing this file
+  // should grow.
+  assert.ok(/TlcPaywallModule/.test(LANDING_JS), 'the landing does not defer to the paywall module');
+  assert.ok(/triggerCheckout\(\)/.test(LANDING_JS), 'subscribe does not start the real checkout');
+  assert.ok(!/\/subscription\/checkout/.test(LANDING_JS),
+    'the landing calls the checkout endpoint itself');
+});
+
 let failed = 0;
 tests.forEach(([name, fn]) => {
   try { fn(); console.log(`  ok   ${name}`); }

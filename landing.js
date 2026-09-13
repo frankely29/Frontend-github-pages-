@@ -42,6 +42,7 @@
 
   var root = null;
   var currentDoor = "signup";
+  var lapsed = false;
 
   function q(selector) {
     return root ? root.querySelector(selector) : null;
@@ -95,6 +96,43 @@
     if (pass) pass.setAttribute("autocomplete", door.autocomplete);
   }
 
+  /* The same page, shown to a driver whose free week has run out.
+   *
+   * The approved entry flow is land, one form, the map -- there is no
+   * subscribe screen in it, deliberately, because the trial starts inside
+   * /auth/signup and there was nothing to choose. A lapsed account still has
+   * to be told something, and this is the only approved surface that can tell
+   * them: same hero, same pitch, same "$8/week after the trial" they already
+   * read, with the button that was going to be their second visit anyway.
+   *
+   * Only the call to action changes. Swapping the copy on the existing
+   * buttons would have been fewer nodes, but those two carry data-landing-go
+   * and clicking them navigates; a button labelled "Subscribe" that opens the
+   * sign-up form is worse than a second block. */
+  function setLapsed(on) {
+    if (!root) return;
+    var locked = !!on;
+    var blocks = root.querySelectorAll("[data-landing-cta]");
+    for (var i = 0; i < blocks.length; i += 1) {
+      var wants = blocks[i].getAttribute("data-landing-cta") === "lapsed";
+      blocks[i].hidden = wants !== locked;
+    }
+    var fine = root.querySelectorAll("[data-landing-fine]");
+    for (var j = 0; j < fine.length; j += 1) {
+      var f = fine[j].getAttribute("data-landing-fine") === "lapsed";
+      fine[j].hidden = f !== locked;
+    }
+    // "Sign in" makes no sense to someone already signed in.
+    var top = q("[data-landing-go='signin'].landingGhostBtn");
+    if (top) top.hidden = locked;
+    lapsed = locked;
+    if (locked) show("pitch");
+  }
+
+  function paywall() {
+    return (typeof window !== "undefined" && window.TlcPaywallModule) || null;
+  }
+
   function goTo(target) {
     if (target === "pitch") {
       show("pitch");
@@ -114,7 +152,25 @@
     var trigger = event.target && event.target.closest
       ? event.target.closest("[data-landing-go]")
       : null;
-    if (!trigger) return;
+    if (!trigger) {
+      // The lapsed buttons drive the paywall module directly: it already owns
+      // the Paddle checkout and portal calls, and a second implementation of
+      // "take their money" is the last thing this file should grow.
+      var sub = event.target && event.target.closest
+        ? event.target.closest("[data-landing-subscribe]") : null;
+      if (sub) {
+        event.preventDefault();
+        if (paywall()) paywall().triggerCheckout();
+        return;
+      }
+      var portal = event.target && event.target.closest
+        ? event.target.closest("[data-landing-portal]") : null;
+      if (portal) {
+        event.preventDefault();
+        if (paywall()) paywall().openPortal();
+      }
+      return;
+    }
     // Never preventDefault on the submit buttons: their real listener lives in
     // app.part10.js and this handler must not get in front of it.
     goTo(trigger.getAttribute("data-landing-go"));
@@ -142,6 +198,8 @@
 
   window.TeamJoseoLanding = {
     goTo: goTo,
+    setLapsed: setLapsed,
+    isLapsed: function () { return lapsed; },
     door: function () { return currentDoor; },
     _doors: DOORS,
   };
