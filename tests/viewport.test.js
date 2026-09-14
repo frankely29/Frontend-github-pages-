@@ -15,6 +15,12 @@
  * bar short: 894px of map on a 956px screen, with a flat 62px strip of page
  * background under it, edge to edge.
  *
+ * That was written here long before the strip was reported as a bug, and it is
+ * the whole answer. The over-constrained height was fixed and the meta tag that
+ * causes the short window was kept -- so the strip came back as soon as
+ * anything else was anchored to the bottom. black-translucent is gone now; see
+ * the test below.
+ *
  * These are text assertions about shipped CSS, deliberately, and this file does
  * not pretend otherwise: the wrong percentage base is an iOS behaviour and no
  * test runner here can produce it. What CAN be pinned is that nothing depends
@@ -98,12 +104,23 @@ test('the page box has a real-viewport height where one exists', () => {
     'the 100% fallback for browsers without dvh is gone');
 });
 
-test('viewport-fit=cover and the translucent status bar still ship', () => {
-  // These two are why the page paints over the whole screen in the first place.
-  // Without them the gap cannot happen -- but nor can the full-bleed map.
+test('the translucent status bar is gone, and cover stays', () => {
+  /* The docstring at the top of this file described the mechanism correctly
+   * and then the wrong half was kept.
+   *
+   * WebKit bug 301108, an iOS 26 regression: black-translucent AND
+   * viewport-fit=cover together make iOS draw from the true top of the screen
+   * while computing the window height as if it had been inset below the status
+   * bar. The window comes out one status bar short and the strip below it is
+   * outside the paintable surface. Measured on the reporter's phone from two
+   * screenshots a minute apart -- 956 in one, 894 in the other, with the answer
+   * pill at 81pt down in BOTH, so the top inset never moved.
+   *
+   * cover is not the broken half and it is what puts the map under the status
+   * bar, so it stays. black-translucent is the half that has to go. */
   assert.ok(/viewport-fit=cover/.test(INDEX), 'viewport-fit=cover is gone');
-  assert.ok(/apple-mobile-web-app-status-bar-style"\s+content="black-translucent/
-    .test(INDEX), 'the translucent status bar is gone');
+  assert.ok(!/apple-mobile-web-app-status-bar-style"\s+content="black-translucent/
+    .test(INDEX), 'black-translucent is back, and the bottom strip with it');
 });
 
 test('the map is re-measured when the viewport moves under it', () => {
