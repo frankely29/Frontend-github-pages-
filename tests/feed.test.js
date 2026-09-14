@@ -739,6 +739,26 @@ test('a post with replies shows how many', async () => {
   assert.strictEqual(dom.body.querySelector('[data-role="replies"]').textContent, 'Replies 47');
 });
 
+test('opening a thread says so, closing one does not', async () => {
+  /* Opening a thread grows the card by a divider, the replies and a composer,
+   * onto the bottom of a card that was already the last thing above the dock,
+   * so the field lands under the icons. This file does not own the sheet; it
+   * announces, and feed-first.js raises the sheet and scrolls the composer up.
+   * Closing announces nothing -- yanking the sheet back down under someone who
+   * just collapsed a thread is a worse bug than the one being fixed. */
+  const dom = await withFeed([post({ id: 1, comment_count: 1 })], [T([comment(5)])]);
+  dom.body.querySelector('[data-role="replies"]').click();
+  await tick(); await tick();
+  assert.ok(dom.window._fired.includes('tlc:feed-thread-opened'),
+    'nothing told the sheet a composer had just opened');
+
+  dom.window._fired.length = 0;
+  dom.body.querySelector('[data-role="replies"]').click();
+  await tick();
+  assert.ok(!dom.window._fired.includes('tlc:feed-thread-opened'),
+    'closing a thread pulled the sheet up');
+});
+
 test('opening a thread fetches it, closing does not refetch', async () => {
   // Re-fetching every time someone collapses and expands to re-read is a
   // request per glance.

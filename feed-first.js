@@ -354,6 +354,38 @@
     // expanded, so a stored split would only ever fight one of them.
   }
 
+  /* Scroll the open thread's last row up past the dock.
+   *
+   * The dock floats over the sheet rather than sitting under it, so the feed's
+   * own bottom edge is not the line that matters -- the dock's top edge is.
+   * Measure it rather than guessing: the dock's offset and height have both
+   * moved twice this week.
+   */
+  function revealComposer(postId) {
+    var body = document.querySelector("#shellScreens .shellScreenBody");
+    // The card that was opened, not the first open thread on the screen.
+    var card = postId === undefined || postId === null
+      ? null
+      : document.querySelector('#shellScreens [data-post-id="' + String(postId) + '"]');
+    var scope = card || document.getElementById("shellScreens");
+    var rows = scope && scope.querySelectorAll
+      ? scope.querySelectorAll(".feedReplyRow, .feedThreadNote")
+      : null;
+    var row = rows && rows.length ? rows[rows.length - 1] : null;
+    if (!body || !row || !row.getBoundingClientRect || !body.getBoundingClientRect) return;
+    var dock = document.getElementById("dock");
+    var box = row.getBoundingClientRect();
+    var floor = body.getBoundingClientRect().bottom;
+    if (dock && dock.getBoundingClientRect) {
+      var dockBox = dock.getBoundingClientRect();
+      // Only when it is actually over the sheet -- it is hidden under the
+      // keyboard, and a hidden dock has a zero box.
+      if (dockBox.height > 0 && dockBox.top < floor) floor = dockBox.top;
+    }
+    var over = box.bottom - (floor - 12);
+    if (over > 0) body.scrollTop = (body.scrollTop || 0) + over;
+  }
+
   function snap(options) {
     var mid = (EXPANDED + MINIMIZED) / 2;
     setSplit(split > mid ? MINIMIZED : EXPANDED);
@@ -594,6 +626,28 @@
       enforceSingleOccupant();
       apply();
     });
+    /* Replying needs the sheet up.
+     *
+     * Opening a thread grows the card by a divider, the replies and a
+     * composer, onto the bottom of a card that was already the last thing
+     * above the dock -- so the field a driver just asked for opened
+     * underneath the icons. Reported as "it expands down behind the icons".
+     *
+     * Moving the minimised detent up far enough to fit a composer would take
+     * half the map for a case that lasts as long as one reply, and would fail
+     * again the moment a thread has three of them in it. The sheet already has
+     * an expanded detent; this is what it is for. */
+    window.addEventListener("tlc:feed-thread-opened", function (event) {
+      var postId = event && event.detail ? event.detail.postId : null;
+      setSplit(EXPANDED);
+      noteUse();
+      // The thread is fetched after it opens, so the composer moves once more
+      // when the replies land. Three passes: after the layout, after the
+      // sheet's 260ms transition, and after a slow round trip.
+      [80, 320, 1100].forEach(function (ms) {
+        window.setTimeout(function () { revealComposer(postId); }, ms);
+      });
+    });
     // The dock is built by index.html but the shell registers over it at
     // DOMContentLoaded, and /me arrives later still; re-running is free.
     window.addEventListener("tlc:auth-state-changed", function () {
@@ -624,6 +678,7 @@
     setSplit: setSplit,
     toggle: toggle,
     snap: snap,
+    revealComposer: revealComposer,
     split: function () { return split; },
     detents: { expanded: EXPANDED, minimized: MINIMIZED },
     isHome: function () {
