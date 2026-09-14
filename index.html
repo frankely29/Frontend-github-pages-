@@ -402,6 +402,27 @@
             and because two elements carrying data-paywall-redeem-input would
             leave redeemCode() reading whichever came first in the document.
           -->
+          <!--
+            Why you are looking at this page.
+
+            Without it a driver types their email and password, lands here, and
+            reads the same pitch a stranger gets. Nothing says the sign-in
+            worked, so it looks like it failed and threw them back. It did not
+            fail; their free week ended. Reported as "it takes me back to
+            welcome page", and the recording showed exactly that: sign-in
+            succeeded, status line read "signed in as Ipad", and this screen
+            gave no hint of either.
+
+            Carries data-landing-cta="lapsed" so the existing machinery shows
+            and hides it -- both the CSS rule that works before any script, and
+            setLapsed() afterwards. The name is filled in by landing.js when it
+            knows it; the sentence stands on its own until then.
+          -->
+          <div class="landingLocked" data-landing-cta="lapsed" hidden>
+            <p class="landingLockedTitle" data-landing-locked-title>You're signed in.</p>
+            <p class="landingLockedWhy">Your free week is over, so the map is paused.
+              Subscribe below, or enter an access code, to pick up where you left off.</p>
+          </div>
           <div class="landingCta" data-landing-cta="lapsed" hidden>
             <button type="button" class="landingBtn landingBtnGo" data-landing-subscribe>
               Subscribe &mdash; $8/week

@@ -127,6 +127,11 @@ function buildDom(opts = {}) {
   // setLapsed does to the first.
   pitch.appendChild(make('button', null, { 'data-landing-go': 'signin' }, 'landingGhostBtn'));
   pitch.appendChild(make('div', null, { 'data-landing-cta': 'new' }));
+  // The locked notice. It rides data-landing-cta="lapsed" like the buttons do,
+  // so setLapsed shows and hides it without knowing it exists.
+  const locked = make('div', null, { 'data-landing-cta': 'lapsed' }, 'landingLocked');
+  locked.appendChild(make('p', null, { 'data-landing-locked-title': '' }, 'landingLockedTitle'));
+  pitch.appendChild(locked);
   pitch.appendChild(make('div', null, { 'data-landing-cta': 'lapsed' }));
   pitch.appendChild(make('p', null, { 'data-landing-fine': 'new' }));
   pitch.appendChild(make('p', null, { 'data-landing-fine': 'lapsed' }));
@@ -629,6 +634,69 @@ test('an expiry still resets the pane when the page is not on screen', () => {
   dom.window.dispatch('tlc:auth-expired', { detail: { status: 401 } });
   assert.strictEqual(dom.form.hidden, true,
     'a stale form is still waiting behind the overlay next time it opens');
+});
+
+// -------------------------- the locked page has to say why it is showing
+
+test('the locked page says the sign-in worked, and why the map is paused', () => {
+  // Without this a driver types their email and password, lands here, and reads
+  // the same pitch a stranger gets. Nothing says the sign-in succeeded, so it
+  // looks like it failed and threw them back -- which is how it was reported,
+  // four times. The fine print under the buttons already said "Your free week
+  // is over" and was read straight past: grey, small, below the call to action.
+  assert.ok(INDEX.includes('data-landing-locked-title'),
+    'the locked page has no notice element');
+  const block = INDEX.slice(INDEX.indexOf('class="landingLocked"'),
+                            INDEX.indexOf('class="landingCta" data-landing-cta="lapsed"'));
+  assert.ok(/signed in/i.test(block), 'the notice never says the sign-in worked');
+  assert.ok(/free week is over/i.test(block), 'the notice never says why');
+  assert.ok(/access code/i.test(block) && /[Ss]ubscribe/.test(block),
+    'the notice does not point at the two ways out');
+  // It must ride the same switch as the rest of the lapsed block, so it appears
+  // with no script involved and disappears when access comes back.
+  assert.ok(/class="landingLocked"[^>]*data-landing-cta="lapsed"/.test(INDEX),
+    'the notice is not tied to the lapsed state');
+  assert.ok(/class="landingLocked"[^>]*\shidden/.test(INDEX),
+    'the notice would show to a signed-out visitor');
+});
+
+test('the notice is placed above the buttons, not below them', () => {
+  const notice = INDEX.indexOf('class="landingLocked"');
+  const cta = INDEX.indexOf('data-landing-subscribe');
+  assert.ok(notice > 0 && cta > 0);
+  assert.ok(notice < cta, 'the explanation comes after the buttons it explains');
+});
+
+test('the locked notice names the account when it can, and never says undefined', () => {
+  const dom = buildDom({ overlayRaisedBy: 'locked' });
+  const title = () => dom.landing.querySelectorAll('[data-landing-locked-title]')[0];
+
+  // no /me yet: the sentence still has to stand up
+  dom.api.setLapsed(true);
+  assert.strictEqual(title()._text, "You're signed in.");
+
+  // with a profile, it names them
+  dom.window.me = { display_name: 'Ipad', email: 'someone@example.com' };
+  dom.api.setLapsed(false);
+  dom.api.setLapsed(true);
+  assert.strictEqual(title()._text, "You're signed in as Ipad.");
+
+  // display_name missing falls back to the email, not to "undefined"
+  dom.window.me = { email: 'someone@example.com' };
+  dom.api.setLapsed(false);
+  dom.api.setLapsed(true);
+  assert.strictEqual(title()._text, "You're signed in as someone@example.com.");
+  assert.ok(!/undefined|null/.test(title()._text));
+});
+
+test('the locked notice is styled to be read, not skimmed past', () => {
+  // The fine print it replaces was grey-on-dark at 12px below the buttons.
+  assert.ok(/\.landingLockedTitle\s*\{[^}]*color:\s*#fff/.test(CSS),
+    'the headline of the notice is not full-contrast');
+  assert.ok(/\.landingLocked\s*\{[^}]*border/.test(CSS),
+    'the notice does not read as its own block');
+  assert.ok(/\.landingLocked\[hidden\]\s*\{[^}]*display:\s*none/.test(CSS),
+    'display:flex would beat the hidden attribute, as it did for .landingCta');
 });
 
 test('the locked page still offers a way to sign in', () => {
