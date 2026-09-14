@@ -409,6 +409,57 @@ test('unliking sends DELETE, not POST', async () => {
   assert.strictEqual(dom.api._state.items[0].like_count, 3);
 });
 
+test('every write carries the token, not just the reads', async () => {
+  /* The bug this pins: request() merged the caller's options over its own with
+   * Object.assign, and Object.assign copies whole values -- so a caller that
+   * passed { headers: { "Content-Type": ... } } REPLACED the object holding
+   * Authorization. Every write went out anonymous, came back 401, and the 401
+   * handler signed the driver out and showed the welcome page. Reads pass no
+   * headers of their own, so the feed loaded perfectly and only doing
+   * something was broken. Admins too -- an anonymous request has no admin. */
+  const dom = build({ responses: [
+    feedBody([post({ id: 5, like_count: 1 })]),
+    { body: { ok: true, post_id: 5, like_count: 2 } },
+    { body: { ok: true, items: [], next_after_id: null } },
+    { body: { ok: true, comment: { id: 9, body: 'hi', created_at: 1 }, comment_count: 1 } },
+  ] });
+  await dom.entry.onEnter();
+  await tick();
+
+  dom.body.querySelector('[data-role="like"]').click();
+  await tick(); await tick();
+
+  const write = dom.calls[dom.calls.length - 1];
+  assert.ok(/\/like$/.test(write.url), `expected the like call, got ${write.url}`);
+  assert.strictEqual(write.opts.headers.Authorization, 'Bearer a-token',
+    'the like went out with no token');
+  // and the header it set for itself is still there
+  assert.strictEqual(write.opts.headers['Content-Type'], 'application/json');
+
+  // Reads were never broken; prove they still are not.
+  assert.strictEqual(dom.calls[0].opts.headers.Authorization, 'Bearer a-token');
+});
+
+test('a 401 on a request that went out anonymous does not sign anyone out', async () => {
+  /* Defence in depth for the above. Only a request that actually carried the
+   * token can prove the token is dead; a 401 on one that did not is a bug in
+   * this file. Believing it is what turned one dropped header into every
+   * driver being thrown back to the welcome page. */
+  const dom = build({ token: '', responses: [{ status: 401 }] });
+  await dom.entry.onEnter();
+  await tick();
+  assert.ok(!dom.window._fired.includes('tlc:auth-expired'),
+    'a tokenless 401 still tore the session down');
+});
+
+test('a 401 on a request that did carry the token still signs out', async () => {
+  const dom = build({ responses: [{ status: 401 }] });
+  await dom.entry.onEnter();
+  await tick();
+  assert.ok(dom.window._fired.includes('tlc:auth-expired'),
+    'a real expiry was swallowed');
+});
+
 test('a like count never goes negative', async () => {
   const dom = build({ responses: [feedBody([post({ id: 5, liked_by_me: true, like_count: 0 })]),
     { body: { ok: true, post_id: 5, like_count: 0 } }] });

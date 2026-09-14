@@ -431,6 +431,28 @@ test('following updates the button and the count together', async () => {
   assert.ok(dom.body.textContent.includes('Following'), dom.body.textContent);
 });
 
+test('a follow carries the token', async () => {
+  /* Same bug feed.js had, same shape: request() merged the caller's options
+   * over its own with Object.assign, which copies whole values -- so passing
+   * { headers: { "Content-Type": ... } } REPLACED the object holding
+   * Authorization. Follow, handle, identity and city all went out anonymous,
+   * came back 401, and the 401 handler signed the driver out to the welcome
+   * page. Reads pass no headers, so viewing a profile worked and every action
+   * on it did not. */
+  const dom = build({ responses: [P(profile()), G([]),
+    { body: { ok: true, follower_count: 1850 } }] });
+  dom.api._state.target = 7;
+  await dom.entry.onEnter();
+  await tick(); await tick();
+  dom.body.querySelector('[data-role="follow"]').click();
+  await tick(); await tick();
+  const write = dom.calls[dom.calls.length - 1];
+  assert.ok(/\/follow$/.test(write.url), `expected the follow call, got ${write.url}`);
+  assert.strictEqual(write.opts.headers.Authorization, 'Bearer a-token',
+    'the follow went out with no token');
+  assert.strictEqual(write.opts.headers['Content-Type'], 'application/json');
+});
+
 test('a failed follow rolls back both', async () => {
   const dom = build({ responses: [P(profile()), G([]), { throws: true }] });
   dom.api._state.target = 7;
