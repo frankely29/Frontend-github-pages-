@@ -57,6 +57,27 @@
     return s.current();
   }
 
+  /* The other thing that can be the sheet.
+   *
+   * Chat, the leaderboard, games, music, colours, modes and profile all share
+   * one container -- #dockDrawer -- with their content swapped into it. Under
+   * Feed First it wears the same geometry as the feed's screen, so "is the
+   * sheet up" is a question about either of them. */
+  function drawerOpen() {
+    var drawer = byId("dockDrawer");
+    return !!(drawer && drawer.classList && drawer.classList.contains("open"));
+  }
+
+  function closeDrawer() {
+    if (!drawerOpen()) return false;
+    // Through its own close button rather than a private function: closeDrawer
+    // in app.js is not exported, and the button does the whole teardown --
+    // chat polling, the auto-minimise timer, the keyboard mode.
+    var close = byId("dockDrawerClose");
+    if (close && typeof close.click === "function") { close.click(); return true; }
+    return false;
+  }
+
   /* ------------------------------------------------------------ the dock */
 
   function makeDockButton(id, label) {
@@ -100,10 +121,12 @@
     }
 
     feed.addEventListener("click", function () {
+      closeDrawer();
       var s = shell();
       if (s && typeof s.open === "function") s.open(HOME);
     });
     map.addEventListener("click", function () {
+      closeDrawer();
       var s = shell();
       if (s && typeof s.close === "function") s.close();
     });
@@ -285,15 +308,22 @@
 
   function apply() {
     if (!document.body) return;
-    var home = openKey() === HOME;
+    /* The sheet is up for any destination, not just the feed.
+     *
+     * It used to be feed-only, which meant tapping Chat left the sheet layout
+     * behind and put a floating card back on the screen -- the two-widget look
+     * this whole design exists to get rid of. */
+    var home = !!openKey() || drawerOpen();
     var was = document.body.classList.contains("feed-first");
     document.body.classList.toggle("feed-first", home);
 
     var feed = byId("dockFeed");
     var map = byId("dockMap");
-    if (feed) feed.classList.toggle("on", home);
-    // Map is "where you are" only when nothing is covering it.
-    if (map) map.classList.toggle("on", !openKey());
+    // Feed is "where you are" only when the feed is what is in the sheet --
+    // not whenever the sheet happens to be up.
+    if (feed) feed.classList.toggle("on", openKey() === HOME && !drawerOpen());
+    // And the map only when nothing is covering it at all.
+    if (map) map.classList.toggle("on", !openKey() && !drawerOpen());
 
     if (home === was) return;
     paintSplit();
@@ -331,6 +361,23 @@
     openHomeOnce();
 
     window.addEventListener("tlc:shell-screen-changed", apply);
+
+    /* One sheet, one occupant.
+     *
+     * The feed screen and the drawer are different elements at the same layer,
+     * so with both open the feed sat on top of the panel a driver had just
+     * asked for. Opening a panel leaves the feed; closing one goes back to it.
+     * That is what "the feed changes to the chat box" has to mean. */
+    window.addEventListener("tlc:drawer-changed", function (event) {
+      var key = event && event.detail ? event.detail.key : null;
+      var s = shell();
+      if (key) {
+        if (openKey() && s && typeof s.close === "function") s.close();
+      } else if (!openKey() && s && typeof s.open === "function") {
+        s.open(HOME);
+      }
+      apply();
+    });
     // The dock is built by index.html but the shell registers over it at
     // DOMContentLoaded, and /me arrives later still; re-running is free.
     window.addEventListener("tlc:auth-state-changed", function () {

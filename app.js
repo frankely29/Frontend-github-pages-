@@ -990,6 +990,19 @@ function syncDockActiveButton() {
   if (openPanelKey === "admin") dockAdmin?.classList.add("dockBtnActive");
 }
 
+/* Which panel is in the drawer, said out loud.
+ *
+ * openPanelKey is a module variable nobody outside this file can read, and the
+ * drawer is now one of two things that can be the sheet on the Feed First
+ * screen -- so something outside has to know when it opens. Same shape as
+ * tlc:shell-screen-changed, which does the job for the other one. */
+function announceDrawer() {
+  try {
+    window.dispatchEvent(new CustomEvent("tlc:drawer-changed",
+      { detail: { key: openPanelKey } }));
+  } catch (_) {}
+}
+
 function openDrawer(key, title, html) {
   openPanelKey = key;
   if (dockDrawerTitle) dockDrawerTitle.textContent = title;
@@ -1006,6 +1019,7 @@ function openDrawer(key, title, html) {
   }
   touchDrawerAutoMinimizeTimer();
   scheduleChatKeyboardModeSync();
+  announceDrawer();
 }
 
 function closeDrawer() {
@@ -1023,6 +1037,7 @@ function closeDrawer() {
   if (typeof window !== "undefined" && typeof window.syncChatPollingState === "function") {
     window.syncChatPollingState();
   }
+  announceDrawer();
 }
 
 function toggleDrawer(key, title, html) {

@@ -105,6 +105,13 @@ function build(options = {}) {
 
   body.appendChild(track);
 
+  // The seven panels that share one container. Under Feed First it wears the
+  // same geometry as the feed's screen, so the double needs it to test that.
+  const drawer = makeNode('div'); drawer.id = 'dockDrawer';
+  const drawerClose = makeNode('button'); drawerClose.id = 'dockDrawerClose';
+  drawer.appendChild(drawerClose);
+  body.appendChild(drawer);
+
   // A real getElementById walks the tree. The first cut of this double looked
   // only in a map of nodes built up front, so it could not find the two
   // buttons the file under test creates -- and every assertion about their
@@ -132,6 +139,11 @@ function build(options = {}) {
   let currentKey = options.open === undefined ? null : options.open;
   const opened = [];
   const closed = [];
+
+  drawerClose.addEventListener('click', () => {
+    drawer.classList.remove('open');
+    window.dispatch('tlc:drawer-changed', { detail: { key: null } });
+  });
 
   const window = {
     document, console,
@@ -166,6 +178,11 @@ function build(options = {}) {
 
   return {
     window, document, body, byId, track, timers, resizes, opened, closed, store,
+    drawer,
+    openDrawer: (key) => {
+      drawer.classList.add('open');
+      window.dispatch('tlc:drawer-changed', { detail: { key } });
+    },
     el: (id) => document.getElementById(id),
     split: () => Number(String(body.style['--tj-split'] || '').replace('%', '')),
     handle: () => document.getElementById('tjSheetHandle'),
@@ -220,14 +237,56 @@ test('the dock keeps its own behaviour', () => {
     'the dock viewport overflow is being overridden');
 });
 
-test('the feed is home, and only the feed', () => {
+test('the sheet is up for any destination, down for none', () => {
+  // It used to be feed-only, so tapping Chat left the sheet layout behind and
+  // put a floating card back on the screen -- the two-widget look the whole
+  // design exists to remove.
   const dom = build({ open: 'feed' });
   assert.ok(dom.body.classList.contains('feed-first'));
-  dom.setOpen('chat');
-  assert.ok(!dom.body.classList.contains('feed-first'),
-    'chat got the map card too');
+  dom.setOpen('post');
+  assert.ok(dom.body.classList.contains('feed-first'), 'posting fell out of the sheet');
   dom.setOpen(null);
-  assert.ok(!dom.body.classList.contains('feed-first'), 'the full map kept the card layout');
+  assert.ok(!dom.body.classList.contains('feed-first'), 'the full map kept the sheet layout');
+});
+
+test('a dock panel is the sheet too', () => {
+  // Chat, board, games, music, colours, modes and profile share one container,
+  // so this is one rule rather than seven rewrites.
+  const dom = build({ open: null });
+  dom.openDrawer('chat');
+  assert.ok(dom.body.classList.contains('feed-first'),
+    'chat opened as a floating card again');
+});
+
+test('opening a panel leaves the feed, closing one goes back to it', () => {
+  // The feed screen and the drawer are different elements at the same layer,
+  // so with both open the feed sat on top of the panel the driver just asked
+  // for. "The feed changes to the chat box" has to mean one occupant.
+  const dom = build({ open: 'feed' });
+  dom.openDrawer('chat');
+  assert.strictEqual(dom.closed.length, 1, 'the feed stayed open under the panel');
+  dom.el('dockDrawerClose').click();
+  assert.deepStrictEqual(dom.opened.slice(-1), ['feed'], 'closing chat left a blank map');
+});
+
+test('the dock says which panel you are in, not just that the sheet is up', () => {
+  const dom = build({ open: 'feed' });
+  assert.ok(dom.el('dockFeed').classList.contains('on'));
+  dom.openDrawer('chat');
+  assert.ok(!dom.el('dockFeed').classList.contains('on'),
+    'Feed reads as current while chat is in the sheet');
+  assert.ok(!dom.el('dockMap').classList.contains('on'),
+    'the map reads as current while a panel covers it');
+});
+
+test('Feed and Map dismiss whatever panel is in the sheet', () => {
+  const dom = build({ open: null });
+  dom.openDrawer('chat');
+  dom.el('dockFeed').click();
+  assert.ok(!dom.drawer.classList.contains('open'), 'chat stayed open behind the feed');
+  dom.openDrawer('games');
+  dom.el('dockMap').click();
+  assert.ok(!dom.drawer.classList.contains('open'), 'games stayed open over the map');
 });
 
 test('the dock says which of the two you are on', () => {
@@ -480,6 +539,43 @@ test('the dock sits at the bottom of the screen', () => {
 test('nothing transitions while a finger is on it', () => {
   assert.ok(/body\.feed-first\.tj-dragging[^{]*\{[^}]*transition:\s*none/s.test(CSS),
     'the sheet lags behind the drag on a rubber band');
+});
+
+test('every panel wears the sheet, by one rule', () => {
+  // #dockDrawer is one container with seven panels' content swapped into it,
+  // so re-homing them is a rule on an element rather than seven rewrites. The
+  // ID is what beats .dockDrawer.panelChat's own geometry on specificity.
+  const m = CSS.match(/body\.feed-first #dockDrawer\s*\{([^}]*)\}/s);
+  assert.ok(m, 'the drawer is still a floating card under Feed First');
+  assert.ok(/top:\s*var\(--tj-split\)/.test(m[1]), 'it does not sit on the split');
+  assert.ok(/backdrop-filter:\s*blur/.test(m[1]), 'it is not frosted like the feed');
+  // top + height + bottom is over-constrained and the spec throws bottom away.
+  assert.ok(/height:\s*auto/.test(m[1]), 'a fixed height would ignore bottom: 0');
+  assert.ok(/max-height:\s*none/.test(m[1]), 'panelChat\'s 82dvh cap survives');
+  const z = Number((m[1].match(/z-index:\s*(\d+)/) || [])[1]);
+  assert.ok(z < 9250, `z-index ${z} puts the panel over the handle that drags it`);
+});
+
+test('the sheet looks the same whatever is in it', () => {
+  // app-shell.css hides the menu button on body.shell-screen-open, which is
+  // true for the feed and false for a dock panel -- so it reappeared the moment
+  // you opened Chat and vanished again on the way back.
+  assert.ok(/body\.feed-first \.shellMenuBtn\s*\{[^}]*display:\s*none/s.test(CSS),
+    'the menu button comes and goes with the occupant');
+});
+
+test('the sheet is not modal', () => {
+  // The map behind stays visible and usable, which is the point of the layout,
+  // so the scrim that used to dim it has no job.
+  assert.ok(/body\.feed-first #dockBackdrop\s*\{[^}]*display:\s*none/s.test(CSS),
+    'a panel still dims the map behind it');
+});
+
+test('the app says which panel is in the drawer', () => {
+  // openPanelKey is a module variable nobody outside app.js can read.
+  const APP = fs.readFileSync(path.join(ROOT, 'app.js'), 'utf8');
+  assert.ok(/tlc:drawer-changed/.test(APP), 'nothing announces the drawer');
+  assert.ok(/tlc:drawer-changed/.test(SRC), 'feed-first.js is guessing instead');
 });
 
 test('the full lock card never lands on the feed', () => {
