@@ -518,7 +518,7 @@ test('a locked account is sent to the landing page, and there is no modal left',
 });
 
 test('locking does not wait for landing.js', () => {
-  // This is the whole bug. landing.js is 35th in the script manifest and does
+  // This is the whole bug. landing.js was 35th in the script manifest and did
   // not exist for the first second or more; show() used to require it and
   // fall back to the dark card without it. Reproduced with landing.js delayed
   // 3s: the card was up from 948ms and never left. Now the class does it, and
@@ -553,8 +553,8 @@ test('hiding puts the landing back the way a signed-out visitor needs it', () =>
 // ------------------------------------------- signing in has to be possible
 
 test('a page whose answer already arrived does not hide its own buttons', () => {
-  // landing.js is 35th in the script manifest; setAuthUI runs around 580ms
-  // against a mount nearer 700ms, so the answer often beats this script. When
+  // landing.js is a separate request; setAuthUI can run before it, so the
+  // answer often beats this script. When
   // it did, mount() entered the resolving state anyway and hid every button
   // with nothing left to unhide them: a driver with an expired token got a
   // welcome page with no Sign in and no Create account. Caught in a browser by

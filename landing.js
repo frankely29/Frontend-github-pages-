@@ -205,8 +205,8 @@
     /* Resolve only if nothing has answered yet.
      *
      * index.html clears tj-auth-pending the moment setAuthUI decides, and that
-     * can happen before this script exists -- it is 35th in the manifest, and
-     * setAuthUI runs around 580ms against a mount nearer 700ms. Whether the
+     * can happen before this script exists -- it is a separate request either
+     * way, and setAuthUI can win. Whether the
      * answer beats the mount is a race, and on the losing side this hid every
      * button on the page with nothing left to come along and unhide them: a
      * driver with an expired token got a welcome page with no way in at all,

@@ -83,7 +83,7 @@
    *
    * Locking is a class on <html>, and that is the point. This used to ask for
    * window.TeamJoseoLanding and fall back to a dark modal when it was missing.
-   * landing.js is 35th in the script manifest and does not exist for the first
+   * landing.js was 35th in the script manifest and did not exist for the first
    * second or more, so a 402 arriving in that window got the modal -- a race
    * dressed up as a fallback. The landing markup is in index.html from the
    * first byte, so the class raises it with no script involved at all.
