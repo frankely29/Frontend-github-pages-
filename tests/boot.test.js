@@ -211,6 +211,49 @@ test('the pending stage ends where auth is actually decided', () => {
     'a boot path through bootstrapCommunityModule no longer calls setAuthUI');
 });
 
+// ------------------------------- signed in is not the same as allowed in
+
+test('the overlay decision consults access, not just the token', () => {
+  // Before this, setAuthUI(true) opened the map for anyone holding a valid
+  // token. A driver whose week had run out got the map for ~4.9 seconds
+  // (1137ms to 6044ms, measured) before a 402 finally raised the subscribe
+  // page -- so the map still came before the welcome page, for exactly the
+  // people most likely to notice.
+  const i = PART10_RULES.indexOf('function setAuthUI');
+  const fn = PART10_RULES.slice(i, i + 2600);
+  assert.ok(/const showLock\s*=\s*!signedIn\s*\|\|\s*lapsed/.test(fn),
+    'the lock is still decided by the token alone');
+  assert.ok(/subscriptionKnownLapsed\(\)/.test(fn),
+    'setAuthUI does not ask whether access has lapsed');
+});
+
+test('a lapsed driver is shown the subscribe page, not the resolving one', () => {
+  const i = PART10_RULES.indexOf('function setAuthUI');
+  const fn = PART10_RULES.slice(i, i + 2600);
+  const lapsedBranch = fn.indexOf('if (lapsed)');
+  const resolvingBranch = fn.indexOf('setResolving');
+  assert.ok(lapsedBranch >= 0, 'no branch handles a lapsed driver');
+  assert.ok(lapsedBranch < resolvingBranch,
+    'the resolving branch runs first, so a lapsed driver never gets Subscribe');
+  assert.ok(/setLapsed\(true\)/.test(fn.slice(lapsedBranch, resolvingBranch)),
+    'the lapsed branch does not put the landing into its subscribe state');
+});
+
+test('only an explicit no from the server counts as lapsed', () => {
+  // Getting this wrong the other way puts a subscribe page in front of a
+  // paying driver, so absent data must never mean lapsed: /me can be in
+  // flight, can fail transiently leaving `me` untouched, or can predate the
+  // field entirely.
+  const i = PART10_RULES.indexOf('function subscriptionKnownLapsed');
+  assert.ok(i >= 0, 'subscriptionKnownLapsed is gone');
+  const fn = PART10_RULES.slice(i, PART10_RULES.indexOf('\n}', i));
+  assert.ok(/has_access === false/.test(fn),
+    'lapsed is inferred rather than read from an explicit has_access === false');
+  assert.ok(/is_admin/.test(fn), 'an admin can be walled out of their own app');
+  assert.ok(!/!sub\?\.has_access\b/.test(fn) && !/!hasAccess\b/.test(fn),
+    'a missing subscription would be treated as lapsed');
+});
+
 // --------------------------------------------------- the old card is gone
 
 test('the old white sign-in card is gone for good', () => {
