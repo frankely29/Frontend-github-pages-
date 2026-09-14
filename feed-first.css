@@ -14,11 +14,11 @@
  */
 
 body.feed-first {
-  /* Both written by feed-first.js, both zero unless it measured something.
-     --tj-kb is the keyboard; --tj-vgap is how far the layout viewport falls
-     short of the screen it is painted on. */
+  /* Both written by feed-first.js, both zero unless the keyboard is up.
+     --tj-kb is how tall the keyboard is; --tj-vtop is how far iOS has slid the
+     window down inside the layout viewport to reveal the field under it. */
   --tj-kb: 0px;
-  --tj-vgap: 0px;
+  --tj-vtop: 0px;
   /* Where the sheet's top edge is. feed-first.js writes it during a drag and
      snaps it to one of the two detents on release. Everything that has to sit
      on the seam -- the handle, the answer pill, the lock label -- reads it. */
@@ -37,7 +37,7 @@ body.feed-first {
   --tj-dock-lift: max(10px, calc(env(safe-area-inset-bottom, 0px) - 14px));
   /* The dock box is ~72px tall (70px Save, 2px track padding), so its top edge
      is at lift + 72. 82 leaves 10px of air above it. */
-  --tj-dock-clear: calc(var(--tj-dock-lift) + 82px + var(--tj-vgap));
+  --tj-dock-clear: calc(var(--tj-dock-lift) + 82px);
 }
 
 /* ------------------------------------------------------------ the map */
@@ -47,10 +47,26 @@ body.feed-first {
 
 body.feed-first #wxCanvas { display: none !important; }
 
+/* ------------------------------------------------------- the canvas
+ *
+ * After the keyboard closes, iOS leaves a standalone web view about 62pt
+ * shorter than the window it is painted in. Measured off the photo: the sheet,
+ * the Save button and the round buttons are all cut off at the same line 62pt
+ * up, with #e5e5e5 below. That strip is OUTSIDE the viewport -- a fixed
+ * element given a negative offset to reach it is clipped, not painted, which
+ * is what sawed the dock in half.
+ *
+ * The one thing that does paint there is the root background. html carries no
+ * background of its own now, so body's propagates to the canvas and fills the
+ * window, and the strip is the same colour as the sheet that ends on it. It
+ * costs nothing where there is no strip: #map covers the viewport. */
+html { background: transparent; }
+body.feed-first { background: var(--tj-sheet-solid); }
+
 /* ---------------------------------------------------------- the sheet */
 body.feed-first #shellScreens {
   top: var(--tj-split);
-  bottom: calc(0px - var(--tj-vgap));
+  bottom: 0;
   border-radius: 22px 22px 0 0;
   overflow: hidden;
   /* Frosted, so the zone you are standing in tints the feed and there is no
@@ -100,7 +116,7 @@ body.feed-first #dockDrawer {
   top: var(--tj-split);
   left: 0;
   right: 0;
-  bottom: calc(0px - var(--tj-vgap));
+  bottom: 0;
   width: auto;
   height: auto;
   max-height: none;
@@ -172,20 +188,45 @@ body.feed-first .leaderboardPanelWrap { min-height: 0; }
  * So while the keyboard is up the sheet is anchored to the KEYBOARD instead,
  * and feed-first.js puts the document scroll back to zero. The dock goes down
  * with it -- it has nowhere to be -- and its clearance goes with it, or the
- * composer would be held 92px above a dock that is not there. */
+ * composer would be held 92px above a dock that is not there.
+ *
+ * And iOS has a second move. When the field is near the bottom it does not
+ * scroll the document at all -- it slides the whole window down inside the
+ * layout viewport. Nothing in the page moves, but the top of the page is now
+ * above the top of the screen, which is the photo where the scope chips are
+ * cut in half by the status bar. --tj-vtop is how far it slid, so while the
+ * keyboard is up the sheet is pinned to the window rather than to the layout
+ * viewport: its top edge comes DOWN by that much and its bottom edge comes UP
+ * by the same, which leaves it exactly filling what is on screen. */
 body.feed-first.tj-kb-up #dockDrawer,
 body.feed-first.tj-kb-up #shellScreens {
-  bottom: var(--tj-kb) !important;
+  top: calc(var(--tj-vtop) + 10px) !important;
+  bottom: calc(var(--tj-kb) - var(--tj-vtop)) !important;
   padding-bottom: 8px !important;
 }
 body.feed-first.tj-kb-up .driverProfileSheet,
 body.feed-first.tj-kb-up .adminPanel {
-  bottom: var(--tj-kb) !important;
+  top: calc(var(--tj-vtop) + 10px) !important;
+  bottom: calc(var(--tj-kb) - var(--tj-vtop)) !important;
   padding-bottom: 8px !important;
 }
+/* Nothing to drag while you are typing, and at the top of the window it would
+   be sitting under the status bar. */
+body.feed-first.tj-kb-up #tjSheetHandle { display: none !important; }
+/* The second selector is not redundant. Further down this file,
+   `body.feed-first.shell-screen-open #dock { display: block !important }`
+   un-hides the dock over the feed, and it has exactly the same specificity as
+   the first selector here -- so with both !important the later rule won and
+   the dock stayed on screen over the keyboard. That is the photo with the
+   icons floating above the keys. One more class settles it. */
 body.feed-first.tj-kb-up #dock,
+body.feed-first.tj-kb-up.shell-screen-open #dock,
 body.chatKeyboardMode.feed-first #dock { display: none !important; }
-body.feed-first.tj-kb-up .shellScreenBody { padding-bottom: 8px; }
+body.feed-first.tj-kb-up .shellScreenBody {
+  padding-bottom: 8px;
+  /* The 42px above clear the handle, which is not there while typing. */
+  padding-top: 12px;
+}
 
 /* The map's own chrome has nothing to do while someone is typing, and the
    answer pill would sit on the sheet's new top edge. */
@@ -221,7 +262,7 @@ body.feed-first .adminPanel {
   top: var(--tj-split) !important;
   left: 0 !important;
   right: 0 !important;
-  bottom: calc(0px - var(--tj-vgap)) !important;
+  bottom: 0 !important;
   width: auto !important;
   height: auto !important;
   max-height: none !important;
@@ -378,7 +419,7 @@ body.feed-first #dock { z-index: 9300 !important; }
  * is no inset, and the same token drives every clearance above so the two can
  * no longer drift apart. */
 body.feed-first #dock {
-  bottom: calc(var(--tj-dock-lift) - var(--tj-vgap)) !important;
+  bottom: var(--tj-dock-lift) !important;
 }
 
 /* Solid over text, over a fade. rgba(240,240,240,0.95) is invisible as

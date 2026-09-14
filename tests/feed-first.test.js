@@ -53,11 +53,10 @@ function dockLift() {
   return { raw, floor, onIndicator: Math.max(floor, INDICATOR - sub) };
 }
 
-// calc(var(--tj-dock-lift) + Npx + var(--tj-vgap)) -> px on a home-indicator phone
+// calc(var(--tj-dock-lift) + Npx) -> px on a home-indicator phone
 function dockClear() {
   const raw = rootToken('tj-dock-clear');
   assert.ok(/var\(--tj-dock-lift\)/.test(raw), 'the clearance does not follow the dock');
-  assert.ok(/var\(--tj-vgap\)/.test(raw), 'the clearance forgets the viewport gap');
   const air = Number((raw.match(/\+\s*(\d+)px/) || [])[1]);
   assert.ok(Number.isFinite(air), `--tj-dock-clear is not the shape these tests read: ${raw}`);
   return { raw, air, onIndicator: dockLift().onIndicator + air };
@@ -279,6 +278,16 @@ function build(options = {}) {
     },
     resizeMapToViewport: () => { resizes.push(1); },
     innerHeight: 956,
+    innerWidth: 440,
+    scrollY: 0,
+    scrollTo: (x, y) => { window.scrollY = y; },
+    /* The keyboard, as the browser reports it. height is what is left on
+     * screen; offsetTop is how far iOS has slid the window down inside the
+     * layout viewport to reveal a field near the bottom. Both are needed --
+     * the bug was reading them as one number. */
+    visualViewport: Object.assign(
+      { height: 956, offsetTop: 0, addEventListener: () => {} },
+      options.vv || {}),
     setTimeout: (fn, ms) => { timers.push({ fn, ms }); return timers.length; },
     addEventListener: (t, fn) => { (window._l[t] = window._l[t] || []).push(fn); },
     _l: {},
@@ -810,7 +819,6 @@ test('the dock sits at the bottom of the screen', () => {
   assert.ok(m, 'the dock keeps the scrubber offset under Feed First');
   assert.ok(/var\(--tj-dock-lift\)/.test(m[1]),
     'the dock is not on the token every clearance reads');
-  assert.ok(/var\(--tj-vgap\)/.test(m[1]), 'the dock forgets the viewport gap');
   const lift = dockLift();
   assert.ok(lift.onIndicator <= 24,
     `dock sits ${lift.onIndicator}px up on a home-indicator phone`);
@@ -883,33 +891,93 @@ test('the sheet follows the keyboard instead of being covered by it', () => {
    * chatKeyboardMode only covers text entry inside the chat drawer; the
    * visualViewport measurement covers the feed's reply box too, so the class
    * that drives this is the measured one. */
-  assert.ok(/body\.feed-first\.tj-kb-up[^{]*#dockDrawer[^{]*\{[^}]*bottom:\s*var\(--tj-kb\)/s.test(CSS),
+  assert.ok(/body\.feed-first\.tj-kb-up[^{]*#dockDrawer[^{]*\{[^}]*bottom:\s*calc\(var\(--tj-kb\)/s.test(CSS),
     'the sheet does not follow the keyboard');
   assert.ok(/body\.feed-first\.tj-kb-up[^{]*\{[^}]*padding-bottom:\s*8px/s.test(CSS),
     'the composer is still held above a dock that is not there');
   assert.ok(/tj-kb-up #dock[^{]*\{[^}]*display:\s*none/s.test(CSS),
     'the dock sits over the keyboard');
+  /* And that rule has to WIN. body.feed-first.shell-screen-open #dock carries
+   * display: block !important further down this file and has exactly the same
+   * specificity, so the later rule took it and the dock stayed on screen over
+   * the keys. One more class settles it, and nothing but a test will notice if
+   * it is dropped. */
+  assert.ok(/body\.feed-first\.tj-kb-up\.shell-screen-open #dock/.test(CSS),
+    'the hide loses to shell-screen-open on source order');
   assert.ok(/visualViewport/.test(SRC), 'nothing measures the keyboard');
   assert.ok(/window\.scrollTo\(0,\s*0\)/.test(SRC),
     "iOS's own scroll is left in place, which is what broke the layout");
 });
 
-test('the layout viewport being short is measured, not assumed', () => {
-  /* On the reporter's phone every bottom-anchored thing sat ~62pt above the
-   * physical bottom of the screen: in a standalone web app the layout viewport
-   * comes out one status bar shorter than the screen it is painted on. No CSS
-   * can see that; window.innerHeight against screen.height can.
+test('a keyboard at the bottom of the sheet is still a keyboard', () => {
+  /* The case from the photo. The reply field is at the bottom of the sheet, so
+   * iOS slides the whole window down instead of scrolling the document: the
+   * visual viewport is 536 tall and offset 420 inside a 956 layout viewport.
    *
-   * Guarded hard, because getting this wrong moves the whole UI: standalone
-   * only, portrait only, and only a band in a plausible range. Everywhere else
-   * it measures zero and changes nothing. */
-  assert.ok(/function viewportGap/.test(SRC), 'nothing measures the gap');
-  const fn = SRC.slice(SRC.indexOf('function viewportGap'));
+   * The first cut read the keyboard as innerHeight - (height + offsetTop),
+   * which is 956 - 956 = 0. Under the 60px floor, so tj-kb-up never turned on,
+   * the dock stayed on screen over the keyboard and the sheet's header was
+   * left above the top of the window. */
+  const dom = build({ open: 'feed', vv: { height: 536, offsetTop: 420 } });
+  assert.strictEqual(dom.api.keyboardInset(), 420, 'the slide cancelled the keyboard out');
+  assert.strictEqual(dom.api.viewportShift(), 420, 'the slide is not measured');
+  dom.api.paintViewport();
+  assert.ok(dom.body.classList.contains('tj-kb-up'), 'the keyboard went unnoticed');
+  assert.strictEqual(dom.body.style['--tj-kb'], '420px');
+  assert.strictEqual(dom.body.style['--tj-vtop'], '420px');
+  // top = 420 + 10, bottom = 420 - 420 = 0: the sheet fills what is on screen.
+});
+
+test('no keyboard, no slide written', () => {
+  const dom = build({ open: 'feed' });
+  dom.api.paintViewport();
+  assert.ok(!dom.body.classList.contains('tj-kb-up'));
+  assert.strictEqual(dom.body.style['--tj-kb'], '0px');
+  assert.strictEqual(dom.body.style['--tj-vtop'], '0px');
+});
+
+test('nothing tries to paint outside the viewport', () => {
+  /* After the keyboard closes, iOS leaves a standalone web view about 62pt
+   * shorter than the window. The first answer gave every bottom-anchored
+   * surface a negative offset to reach past the viewport edge. A fixed element
+   * cannot be painted outside the viewport -- it is clipped there. Measured off
+   * the photo: the Save button is 68pt tall and 28 survived, the round buttons
+   * are 53 and 21 survived, both cut at the same line. It did not fill the
+   * strip, it sawed the dock in half.
+   *
+   * The strip is the canvas behind the viewport, and only the root background
+   * paints there. */
+  assert.ok(!/--tj-vgap/.test(CSS), 'something still reaches past the viewport edge');
+  assert.ok(!/viewportGap/.test(SRC), 'the gap is still being measured for nothing');
+  assert.ok(/html\s*\{[^}]*background:\s*transparent/s.test(CSS),
+    'html keeps a background, so body\'s never reaches the canvas');
+  assert.ok(/body\.feed-first\s*\{[^}]*background:\s*var\(--tj-sheet-solid\)/s.test(CSS),
+    'the strip is not painted the sheet\'s colour');
+});
+
+test('the keyboard is measured without the slide cancelling it out', () => {
+  /* iOS has two moves. It scrolls the document, or -- when the field is near
+   * the bottom -- it slides the whole window down inside the layout viewport
+   * and scrolls nothing. visualViewport.offsetTop is the slide.
+   *
+   * Subtracting the slide from the keyboard, as the first cut did, cancels the
+   * keyboard out exactly when the slide is biggest: the field at the bottom of
+   * a sheet read a keyboard of about zero, tj-kb-up never turned on, the dock
+   * stayed on screen over the keyboard and the sheet's header was left above
+   * the top of the window. That is the photo. */
+  const fn = SRC.slice(SRC.indexOf('function keyboardInset'));
   const body = fn.slice(0, fn.indexOf('\n  }'));
-  assert.ok(/standalone/.test(body), 'it would fire in a browser with toolbars');
-  assert.ok(/innerWidth/.test(body), 'screen.height does not rotate; landscape would read a bogus gap');
-  assert.ok(/140/.test(body) && /> 8/.test(body), 'no sanity band on the measurement');
-  assert.ok(/--tj-vgap/.test(CSS), 'nothing uses it');
+  assert.ok(!/offsetTop/.test(body), 'the slide is still being subtracted from the keyboard');
+  assert.ok(/innerHeight/.test(body) && /vv\.height/.test(body), 'not measured against the visual viewport');
+  assert.ok(/function viewportShift/.test(SRC), 'nothing measures the slide');
+  assert.ok(/--tj-vtop/.test(SRC) && /--tj-vtop/.test(CSS), 'the slide is measured and then ignored');
+  // The sheet has to move both edges: down by the slide, and up by the rest of
+  // the keyboard. Only moving the bottom leaves its header off the top.
+  const kb = CSS.match(/body\.feed-first\.tj-kb-up #dockDrawer,\s*\n?body\.feed-first\.tj-kb-up #shellScreens\s*\{([^}]*)\}/s);
+  assert.ok(kb, 'no keyboard geometry for the sheet');
+  assert.ok(/top:\s*calc\(var\(--tj-vtop\)/.test(kb[1]), 'the top edge ignores the slide');
+  assert.ok(/bottom:\s*calc\(var\(--tj-kb\)\s*-\s*var\(--tj-vtop\)\)/.test(kb[1]),
+    'the bottom edge double-counts the slide');
 });
 
 test('Profile and Admin are in the sheet too', () => {

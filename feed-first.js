@@ -277,43 +277,61 @@
    * plausible range -- so anywhere it does not apply it measures zero and
    * changes nothing.
    */
+  /* How tall the keyboard is, and how far iOS has slid the window down to
+   * reveal the field under it. They are two different numbers and the first
+   * cut of this conflated them.
+   *
+   * The layout viewport keeps its height when the keyboard opens; the VISUAL
+   * viewport is the part of it still on screen. When the focused field is near
+   * the bottom, iOS does not scroll the document -- it slides the visual
+   * viewport down inside the layout one, which is visualViewport.offsetTop.
+   *
+   * Subtracting offsetTop as well, as this did, cancels the keyboard out
+   * exactly when the slide is largest: a field at the bottom of the sheet read
+   * a keyboard height of about zero, tj-kb-up never turned on, the dock stayed
+   * on screen over the keyboard and the sheet's own header was left above the
+   * top of the window. That is the photo.
+   */
   function keyboardInset() {
     var vv = window.visualViewport;
     if (!vv) return 0;
-    var inset = Math.round((window.innerHeight || 0) - (vv.height + vv.offsetTop));
+    var inset = Math.round((window.innerHeight || 0) - (Number(vv.height) || 0));
     // Under about 60px it is a toolbar or a rounding artefact, not a keyboard.
     return inset > 60 ? inset : 0;
   }
 
-  function viewportGap() {
-    var standalone = false;
-    try {
-      standalone = window.navigator.standalone === true
-        || !!(window.matchMedia && window.matchMedia("(display-mode: standalone)").matches);
-    } catch (_) {}
-    if (!standalone) return 0;
-    var screenH = Math.round(Number(window.screen && window.screen.height) || 0);
-    var innerH = Math.round(Number(window.innerHeight) || 0);
-    if (!screenH || !innerH) return 0;
-    // screen.height does not rotate on iOS, so landscape would read a huge
-    // bogus gap.
-    if (innerH > (Number(window.innerWidth) || 0)) {
-      var gap = screenH - innerH;
-      if (gap > 8 && gap < 140) return gap;
-    }
-    return 0;
+  /** How far the window has been slid down inside the layout viewport. */
+  function viewportShift() {
+    var vv = window.visualViewport;
+    if (!vv) return 0;
+    var top = Math.round(Number(vv.offsetTop) || 0);
+    return top > 0 ? top : 0;
   }
 
+  /* --tj-vgap is gone, and this is why.
+   *
+   * After the keyboard closes, iOS leaves a standalone web view about 62pt
+   * shorter than the screen it is painted in. That was measured correctly.
+   * What was wrong was the conclusion: everything anchored to the bottom was
+   * given a NEGATIVE offset to reach past the viewport edge, and a fixed
+   * element cannot be painted outside the viewport -- it is clipped there.
+   *
+   * The photo shows exactly that. The Save button is 68pt tall and 28pt of it
+   * survives; the round buttons are 53 and 21 survives. Both cut at the same
+   * line, 62pt up. The compensation did not fill the strip, it sawed the dock
+   * in half.
+   *
+   * The strip is the canvas behind the viewport, and the only thing that
+   * paints there is the root background. So feed-first.css gives the canvas
+   * the sheet's own colour and the strip stops existing to look at. */
   function paintViewport() {
     if (!document.body) return;
     var kb = keyboardInset();
-    var gap = kb > 0 ? 0 : viewportGap();
     document.body.style.setProperty("--tj-kb", kb + "px");
-    document.body.style.setProperty("--tj-vgap", gap + "px");
+    document.body.style.setProperty("--tj-vtop", (kb > 0 ? viewportShift() : 0) + "px");
     document.body.classList.toggle("tj-kb-up", kb > 0);
-    // iOS scrolls the document to bring the focused field into view. With the
-    // sheet now following the keyboard there is nothing to reveal, and that
-    // scroll is what pushed the header off the top of the screen.
+    // iOS also scrolls the document itself when it can. With the sheet
+    // following the keyboard there is nothing down there to reveal.
     if (kb > 0 && (window.scrollY || window.pageYOffset)) {
       try { window.scrollTo(0, 0); } catch (_) {}
     }
@@ -672,7 +690,7 @@
     apply: apply,
     paintViewport: paintViewport,
     keyboardInset: keyboardInset,
-    viewportGap: viewportGap,
+    viewportShift: viewportShift,
     installDockButtons: installDockButtons,
     installHandle: installHandle,
     setSplit: setSplit,
