@@ -1,0 +1,216 @@
+/* feed-first.css — the feed is the screen, the map is a card on it.
+ *
+ * There is no second map. The card IS #map, repositioned: a MapLibre instance
+ * is expensive and two of them would disagree about the camera, the night
+ * palette and the zone layer within a second of each other. So this file moves
+ * the one that exists into a rounded box at the top and hands the rest of the
+ * screen to the Feed.
+ *
+ * The dock is untouched on purpose. Same floating circles, same 70px Save,
+ * same sideways slide and the same auto-recentre on Save that app.part6.js
+ * already does -- the only change here is that it no longer disappears when a
+ * destination opens, because under Feed First the destination IS the home
+ * screen and the dock is how you leave it.
+ */
+
+body.feed-first {
+  /* One number, defined once. The card height, the screen below it and the
+     recommendation pill inside it are all measured from this. */
+  --tj-card-top: calc(env(safe-area-inset-top, 0px) + 10px);
+  --tj-card-h: 30vh;
+  --tj-card-gap: 10px;
+}
+@supports (height: 30dvh) {
+  body.feed-first { --tj-card-h: 30dvh; }
+}
+
+/* ------------------------------------------------------------- the card */
+body.feed-first #map {
+  top: var(--tj-card-top);
+  left: 10px;
+  right: 10px;
+  bottom: auto;
+  height: var(--tj-card-h);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 6px 20px rgba(11, 16, 24, 0.22);
+  /* The card is a window, not a map you pan. #mapCardOpen sits over it and
+     takes the tap -- fighting MapLibre's own gesture handling for a single
+     tap target is a losing game. */
+  pointer-events: none;
+}
+
+/* The weather canvas is sized in pixels from window.innerHeight by its own
+   script, so it cannot follow the card. It is atmosphere over a full-screen
+   map and has no job on a 30% one. */
+body.feed-first #wxCanvas { display: none !important; }
+
+/* The tap target over the card. Built by feed-first.js so the page has no
+   dead element when the script is absent. */
+#mapCardOpen { display: none; }
+body.feed-first #mapCardOpen {
+  display: block;
+  position: fixed;
+  top: var(--tj-card-top);
+  left: 10px;
+  right: 10px;
+  height: var(--tj-card-h);
+  z-index: 2500;
+  border: 0;
+  border-radius: 16px;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+body.feed-first #mapCardOpen:active { transform: scale(0.995); }
+body.feed-first #mapCardOpen:focus-visible {
+  outline: 3px solid #0066ff;
+  outline-offset: 2px;
+}
+
+/* The answer, docked inside the card. It is the single most valuable line the
+   app produces and it should not be a screen away. */
+body.feed-first #mapAction {
+  bottom: auto !important;
+  top: calc(var(--tj-card-top) + var(--tj-card-h) - 52px) !important;
+  width: min(100vw - 44px, 400px) !important;
+  z-index: 2600 !important;
+}
+
+/* ------------------------------------------------------ the feed below it */
+body.feed-first #shellScreens {
+  top: calc(var(--tj-card-top) + var(--tj-card-h) + var(--tj-card-gap));
+  border-radius: 18px 18px 0 0;
+  overflow: hidden;
+  background: #f3f5f9;
+}
+
+/* No back bar on the home screen. "< Map" above a map card that is already on
+   screen, with the dock saying where you are underneath, is three answers to
+   one question. */
+body.feed-first .shellScreenBar { display: none !important; }
+
+/* Content clears the floating dock rather than ending underneath it. */
+body.feed-first .shellScreenBody {
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 104px);
+}
+
+/* --------------------------------------------------------------- the dock
+   app-shell.css hides the dock whenever a destination is open, which is right
+   when the destination is a page you visit and wrong when it is home. Higher
+   specificity rather than a change over there, so the rule that governs every
+   other screen keeps governing them. */
+body.feed-first.shell-screen-open #dock { display: block !important; }
+
+/* ...and above it, not merely displayed.
+ *
+ * The dock sits at z-index 3000 and .shellScreen at 9200, so un-hiding it was
+ * not enough: it rendered underneath the feed, present in the layout and
+ * invisible on screen. Caught in a screenshot -- a probe that asks for display
+ * and height says "shown" for an element buried under an opaque panel. */
+body.feed-first #dock { z-index: 9300 !important; }
+
+/* Opaque, and over a fade.
+ *
+ * The dock's faces are rgba(240,240,240,0.95), which is invisible as
+ * translucency over a map and reads as a smear over a feed -- someone's post
+ * shows through the circle sitting on it. Over text the buttons have to be
+ * solid, and the text has to stop before it reaches them, so the dock also
+ * carries a scrim that fades the last card out rather than letting it collide.
+ * Save keeps its gradient: :not() rather than re-declaring it, because this
+ * file loads last and a bare .dockBtn rule would win against it. */
+body.feed-first .dockBtn:not(.dockBtnSave) { background: #ffffff; }
+body.night.feed-first .dockBtn:not(.dockBtnSave) { background: #1b2333; }
+body.night.feed-first .dockBtn:not(.dockBtnSave) .dockIcon { color: #eef2f8; }
+
+body.feed-first #dock::before {
+  content: "";
+  position: absolute;
+  left: -12px;
+  right: -12px;
+  top: -22px;
+  bottom: -60px;
+  z-index: -1;
+  pointer-events: none;
+  background: linear-gradient(to bottom,
+    rgba(243, 245, 249, 0) 0%,
+    rgba(243, 245, 249, 0.86) 38%,
+    rgba(243, 245, 249, 1) 68%);
+}
+body.night.feed-first #dock::before {
+  background: linear-gradient(to bottom,
+    rgba(13, 20, 32, 0) 0%,
+    rgba(13, 20, 32, 0.86) 38%,
+    rgba(13, 20, 32, 1) 68%);
+}
+
+/* The recentre and report pair belong to a map you can aim at. On a 30% card
+   they float over someone's post and point at nothing. They come back with the
+   full map. */
+body.feed-first #mapSegmented,
+body.feed-first .mapSegmented { display: none !important; }
+
+/* The menu button stays hidden. Under Feed First the dock is the navigation,
+   and the button would land on the map card anyway. */
+
+/* Feed and Map are the two the dock never had, because the dock never carried
+   navigation. Filled dark when you are on them -- the same ink as the answer
+   bar above, rather than a new colour. */
+#dockFeed.on, #dockMap.on { background: #101622; }
+#dockFeed.on .dockIcon, #dockMap.on .dockIcon { color: #ffffff; }
+
+body.night.feed-first #shellScreens { background: #0d1420; }
+body.night #dockFeed.on, body.night #dockMap.on { background: #eef2f8; }
+body.night #dockFeed.on .dockIcon, body.night #dockMap.on .dockIcon { color: #101622; }
+
+/* The map is a card, so the map's own full-screen furniture has nothing to sit
+   on. The slider, the control stack and the nav banner all belong to the map
+   screen and come back with it. */
+body.feed-first .sliderWrap,
+body.feed-first #sliderWrap,
+body.feed-first .mapControlStack,
+body.feed-first #navQuickStack,
+body.feed-first #navActiveBanner,
+body.feed-first #mapFeedPeek { display: none !important; }
+
+/* ------------------------------------------------------------- the lock
+ *
+ * The blur follows the card for free -- html.tj-map-locked already targets
+ * #map, wherever #map happens to be. The explanation does not: #mapLockCard is
+ * fixed at 50%/50% with a Subscribe button, a redeem row and a Manage button,
+ * which under Feed First lands in the middle of somebody's post and is taller
+ * than the card it is explaining.
+ *
+ * So on this screen the card gets a one-line label instead, and the full lock
+ * card stays where there is room for it -- the map screen, one tap away. */
+html.tj-map-locked body.feed-first #mapLockCard { display: none !important; }
+
+#mapCardLocked { display: none; }
+html.tj-map-locked body.feed-first #mapCardLocked {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  position: fixed;
+  left: 22px;
+  right: 22px;
+  top: calc(var(--tj-card-top) + var(--tj-card-h) - 54px);
+  z-index: 2600;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgba(10, 15, 28, 0.94);
+  color: #fff;
+  border: 0;
+  font: 600 12.5px/1.2 system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+html.tj-map-locked body.feed-first #mapCardLocked:focus-visible {
+  outline: 3px solid #0066ff;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #mapCardOpen:active { transform: none; }
+}

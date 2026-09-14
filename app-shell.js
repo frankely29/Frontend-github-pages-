@@ -330,6 +330,7 @@
       body.appendChild(lockPanel(entry));
     }
     current = key;
+    announceScreen();
     host.hidden = false;
     document.body.classList.add("shell-screen-open");
     requestAnimationFrame(function () { host.classList.add("open"); });
@@ -340,6 +341,21 @@
       try { window.location.hash = "#/" + key; } catch (_) {}
     }
     return true;
+  }
+
+  /* Which destination is open, said out loud.
+   *
+   * `current` was a module variable nobody outside could read, so anything that
+   * needed to lay out differently per destination had to guess from the hash --
+   * which the lock screen deliberately does not set, and which a
+   * pushHash:false open does not either. One event, fired wherever `current`
+   * changes, and the answer is never stale.
+   */
+  function announceScreen() {
+    try {
+      window.dispatchEvent(new CustomEvent("tlc:shell-screen-changed",
+        { detail: { key: current } }));
+    } catch (_) {}
   }
 
   function openScreen(key, options) {
@@ -383,6 +399,7 @@
     }
 
     current = key;
+    announceScreen();
     host.hidden = false;
     document.body.classList.add("shell-screen-open");
     requestAnimationFrame(function () { host.classList.add("open"); });
@@ -407,6 +424,7 @@
       try { entry.onLeave(); } catch (_) {}
     }
     current = null;
+    announceScreen();
     if (host) {
       host.classList.remove("open");
       window.setTimeout(function () {
@@ -684,6 +702,7 @@
     closeMenu: closeMenu,
     refreshChrome: applyAdminChrome,
     emptyState: emptyState,
+    current: function () { return current; },
     isLocked: function (key) { return entryIsLocked(find(key)); },
     lockedKeys: function () { return PAID_KEYS.slice(); },
     _registry: registry,
