@@ -247,8 +247,8 @@ test('an unpaid driver is let into the app, and loses the map', () => {
   const fn = PART10_RULES.slice(i, i + 3000);
   assert.ok(/const showLock = !signedIn;/.test(fn),
     'a lapsed driver is still shown the signed-out page instead of the app');
-  assert.ok(/applyMapLockState\(lapsed\)/.test(fn),
-    'nothing locks the map, so an unpaid driver keeps it');
+  assert.ok(/applyMapAccessState\(lapsed\)/.test(fn),
+    'nothing takes the map away, so an unpaid driver keeps it outright');
   assert.ok(/subscriptionKnownLapsed\(\)/.test(fn),
     'setAuthUI no longer asks whether access has lapsed');
 });
@@ -440,9 +440,12 @@ test('the feature lock is its own class, not the map lock wearing a hat', () => 
 test('setAuthUI drives both locks from the same verdict', () => {
   const i = PART10_RULES.indexOf('function setAuthUI');
   const fn = PART10_RULES.slice(i, i + 3200);
-  assert.ok(/applyMapLockState\(lapsed\)/.test(fn), 'the map lock is not driven by lapsed');
+  assert.ok(/applyMapAccessState\(lapsed\)/.test(fn),
+    'the map is not driven by lapsed');
   assert.ok(/applyFeatureLockState\(lapsed\)/.test(fn),
     'the feature lock is not driven by lapsed');
+  assert.ok(!/applyMapLockState\(lapsed\)/.test(fn),
+    'setAuthUI locks the map directly, which skips the preview entirely');
 });
 
 test('the feature lock is readable by the files that need it', () => {
