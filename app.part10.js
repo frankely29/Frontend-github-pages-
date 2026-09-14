@@ -3006,6 +3006,15 @@ function setAuthUI(signedIn, note) {
     lockedOverlay.setAttribute("aria-hidden", showLock ? "false" : "true");
   }
 
+  // The boot's second stage ends here, and only here: this is the first moment
+  // the app knows whether anyone is signed in. Until now index.html has held
+  // the welcome page on screen and kept the map off it, so a driver never sees
+  // the map before the page that explains what this is. From here the classes
+  // above decide, as they always have.
+  if (typeof document !== "undefined" && document.documentElement) {
+    document.documentElement.classList.remove("tj-auth-pending");
+  }
+
   if (btnPolice) btnPolice.classList.toggle("disabled", !signedIn);
   if (btnPickup) btnPickup.classList.toggle("disabled", !signedIn);
   if (pickupFab) pickupFab.classList.toggle("disabled", !signedIn);
