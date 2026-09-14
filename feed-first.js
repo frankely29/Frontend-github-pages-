@@ -231,7 +231,17 @@
    * starts at 39%.
    */
   var EXPANDED = 0.39;
-  var MINIMIZED = 0.66;
+  /* MINIMIZED was 66%, which put the sheet's top edge at 631pt on a 956pt
+   * screen. The dock's top edge is at 862, so the feed had 231pt to work in:
+   * 42 for the handle, ~44 for the scope chips, and a post card is ~180. The
+   * card's own bottom row -- the like and Reply buttons -- landed at 875, 13pt
+   * under the dock. Measured off a screenshot, reported as "some of the feed
+   * box is covered by the icons".
+   *
+   * 60% puts the top edge at 574 and the first card's last row at ~834, 28pt
+   * clear of the dock -- and those 28pt show the top sliver of the next card,
+   * which is the affordance that says the list keeps going. */
+  var MINIMIZED = 0.6;
   var LS_HINTS = "tj_sheet_hints_v1";
   var HINTS_UNTIL = 3;
 

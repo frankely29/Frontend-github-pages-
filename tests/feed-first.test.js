@@ -261,6 +261,18 @@ function build(options = {}) {
 const tests = [];
 const test = (n, f) => tests.push([n, f]);
 
+// The two detents come from the module, so moving one is a one-line change in
+// feed-first.js rather than a search-and-replace through forty assertions.
+// Their actual values are pinned once each, against the geometry they exist to
+// satisfy -- see 'the minimised feed clears the dock'.
+let _detents = null;
+function detents() {
+  if (!_detents) _detents = build({ open: 'feed' }).api.detents;
+  return _detents;
+}
+const MIN = () => Math.round(detents().minimized * 100);
+const EXP = () => Math.round(detents().expanded * 100);
+
 // --------------------------------------------------------------------------
 
 test('Feed and Map join the dock without displacing anything', () => {
@@ -412,8 +424,33 @@ test('it opens minimised', () => {
   // while they wait. Starting expanded put two thirds of the first behind two
   // thirds of the second.
   const dom = build({ open: 'feed' });
-  assert.strictEqual(dom.split(), 66, 'the sheet does not open minimised');
+  assert.strictEqual(dom.split(), MIN(), 'the sheet does not open minimised');
   assert.ok(dom.body.classList.contains('tj-min'));
+});
+
+test('the minimised feed clears the dock', () => {
+  /* This is the only assertion that pins the number rather than following it,
+   * and it pins it against what it exists for.
+   *
+   * At 66% the sheet's top edge was 631pt down a 956pt screen and the dock's
+   * top edge is at 862, leaving 231pt: 42 for the handle, ~44 for the scope
+   * chips, and a post card is ~180. So the card's own last row -- like and
+   * Reply -- landed at 875, 13pt under the icons. Measured off a screenshot.
+   *
+   * Whatever the detent is, the first card has to finish above the dock. */
+  const SCREEN = 956;
+  const dockTop = SCREEN - dockLift().onIndicator - 74;   // the dock box is 74 tall
+  const handle = 42;                                      // .shellScreenBody padding-top
+  const chips = 44;                                       // the scope row
+  const card = 180;                                       // one post, avatar row to actions
+  const top = (MIN() / 100) * SCREEN;
+  const lastRow = top + handle + chips + card;
+  assert.ok(lastRow <= dockTop - 8,
+    `the first card's last row lands at ${Math.round(lastRow)}pt, ` +
+    `under a dock whose top edge is at ${dockTop}pt`);
+  // And not so high that minimised stops being minimised -- the map is what
+  // they opened the app for.
+  assert.ok(MIN() >= 55, `minimised leaves only ${MIN()}% of the map`);
 });
 
 test('expanded is 15% shorter than what was drawn', () => {
@@ -430,9 +467,9 @@ test('expanded is 15% shorter than what was drawn', () => {
 test('dragging it down snaps it to minimised', () => {
   const dom = build({ open: 'feed' });
   dom.tap();
-  assert.strictEqual(dom.split(), 39, 'precondition: expanded');
+  assert.strictEqual(dom.split(), EXP(), 'precondition: expanded');
   dom.drag(260);
-  assert.strictEqual(dom.split(), 66, 'it did not snap to the minimised detent');
+  assert.strictEqual(dom.split(), MIN(), 'it did not snap to the minimised detent');
   assert.ok(dom.body.classList.contains('tj-min'), 'nothing marks the minimised state');
 });
 
@@ -440,14 +477,14 @@ test('a short drag falls back to where it started', () => {
   // Snapping to the nearest detent, not to wherever the finger stopped.
   const dom = build({ open: 'feed' });
   dom.drag(-40);
-  assert.strictEqual(dom.split(), 66, 'a nudge moved it to the wrong detent');
+  assert.strictEqual(dom.split(), MIN(), 'a nudge moved it to the wrong detent');
 });
 
 test('dragging it back up expands it again', () => {
   const dom = build({ open: 'feed' });
   dom.drag(260);
   dom.drag(-260);
-  assert.strictEqual(dom.split(), 39);
+  assert.strictEqual(dom.split(), EXP());
   assert.ok(!dom.body.classList.contains('tj-min'));
 });
 
@@ -455,9 +492,9 @@ test('a tap toggles, a drag does not', () => {
   // Four pixels of slop, so a tap that wobbles is still a tap.
   const dom = build({ open: 'feed' });
   dom.tap();
-  assert.strictEqual(dom.split(), 39, 'tapping the handle did nothing');
+  assert.strictEqual(dom.split(), EXP(), 'tapping the handle did nothing');
   dom.tap();
-  assert.strictEqual(dom.split(), 66);
+  assert.strictEqual(dom.split(), MIN());
 });
 
 test('the arrow points where the sheet will go', () => {
@@ -491,33 +528,33 @@ test('the feed always opens minimised, whatever happened last time', () => {
   // up once got a two-thirds-covered map every time they came back. Entering
   // the map is the moment you want the map.
   const dom = build({ open: 'feed', storage: { tj_sheet_split_v1: '0.39' } });
-  assert.strictEqual(dom.split(), 66, 'a stale stored split still moves the feed');
+  assert.strictEqual(dom.split(), MIN(), 'a stale stored split still moves the feed');
 });
 
 test('dragging the feed holds while you are on it', () => {
   const dom = build({ open: 'feed' });
   dom.tap();
-  assert.strictEqual(dom.split(), 39, 'the feed cannot be pulled up');
+  assert.strictEqual(dom.split(), EXP(), 'the feed cannot be pulled up');
   dom.window.dispatch('tlc:auth-state-changed', {});
-  assert.strictEqual(dom.split(), 39, 'a refresh collapsed it again');
+  assert.strictEqual(dom.split(), EXP(), 'a refresh collapsed it again');
 });
 
 test('a panel opens expanded, the feed opens minimised', () => {
   // Nobody taps Chat wanting a third of Chat, and nobody enters the map
   // wanting two thirds of it covered.
   const dom = build({ open: 'feed' });
-  assert.strictEqual(dom.split(), 66, 'the feed did not open minimised');
+  assert.strictEqual(dom.split(), MIN(), 'the feed did not open minimised');
   dom.openDrawer('chat');
-  assert.strictEqual(dom.split(), 39, 'chat opened minimised');
+  assert.strictEqual(dom.split(), EXP(), 'chat opened minimised');
   dom.el('dockDrawerClose').click();
-  assert.strictEqual(dom.split(), 66, 'the feed did not come back minimised');
+  assert.strictEqual(dom.split(), MIN(), 'the feed did not come back minimised');
 });
 
 test('every panel gets the same treatment', () => {
   ['leaderboard', 'games', 'music', 'colors', 'modes', 'profile'].forEach((key) => {
     const dom = build({ open: 'feed' });
     dom.openDrawer(key);
-    assert.strictEqual(dom.split(), 39, `${key} opened minimised`);
+    assert.strictEqual(dom.split(), EXP(), `${key} opened minimised`);
   });
 });
 
@@ -526,7 +563,7 @@ test('a shell destination that is not the feed opens expanded too', () => {
   // taps Post is going there to write.
   const dom = build({ open: 'feed' });
   dom.setOpen('post');
-  assert.strictEqual(dom.split(), 39, 'posting opened minimised');
+  assert.strictEqual(dom.split(), EXP(), 'posting opened minimised');
 });
 
 test('a repaint does not yank a dragged sheet back', () => {
@@ -535,9 +572,9 @@ test('a repaint does not yank a dragged sheet back', () => {
   const dom = build({ open: 'feed' });
   dom.openDrawer('chat');
   dom.drag(260);
-  assert.strictEqual(dom.split(), 66);
+  assert.strictEqual(dom.split(), MIN());
   dom.window.dispatch('tlc:auth-state-changed', {});
-  assert.strictEqual(dom.split(), 66, 'a refresh snapped the sheet back');
+  assert.strictEqual(dom.split(), MIN(), 'a refresh snapped the sheet back');
 });
 
 test('the sheet cannot be dragged off either end', () => {
@@ -565,9 +602,9 @@ test('the map is never resized', () => {
 test('the keyboard does what the drag does', () => {
   const dom = build({ open: 'feed' });
   dom.handle().dispatch('keydown', { key: 'ArrowDown', preventDefault() {} });
-  assert.strictEqual(dom.split(), 66);
+  assert.strictEqual(dom.split(), MIN());
   dom.handle().dispatch('keydown', { key: 'ArrowUp', preventDefault() {} });
-  assert.strictEqual(dom.split(), 39);
+  assert.strictEqual(dom.split(), EXP());
 });
 
 // --------------------------------------------------------------------------
