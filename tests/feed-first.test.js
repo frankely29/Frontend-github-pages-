@@ -422,16 +422,24 @@ test('the dock keeps its own behaviour', () => {
     'the dock viewport overflow is being overridden');
 });
 
-test('the sheet is up for any destination, down for none', () => {
-  // It used to be feed-only, so tapping Chat left the sheet layout behind and
-  // put a floating card back on the screen -- the two-widget look the whole
-  // design exists to remove.
+test('there is one interface and it never comes off', () => {
+  /* This used to come off whenever no destination was open, and the OLD
+   * map-first app is still underneath: the hamburger, the locate and report
+   * pair, the FROM DRIVERS card, the answer pill at the bottom and the
+   * time-machine scrubber. Every one of those is hidden by a body.feed-first
+   * rule, so the class coming off put the whole other interface back. Caught
+   * on video: tapping Map switched apps.
+   *
+   * The map with nothing over it is the sheet minimised, not a second app. */
   const dom = build({ open: 'feed' });
   assert.ok(dom.body.classList.contains('feed-first'));
   dom.setOpen('post');
   assert.ok(dom.body.classList.contains('feed-first'), 'posting fell out of the sheet');
   dom.setOpen(null);
-  assert.ok(!dom.body.classList.contains('feed-first'), 'the full map kept the sheet layout');
+  assert.ok(dom.body.classList.contains('feed-first'),
+    'the old map-first interface came back');
+  dom.openDrawer('chat');
+  assert.ok(dom.body.classList.contains('feed-first'), 'chat fell out of the sheet');
 });
 
 test('a dock panel is the sheet too', () => {
@@ -456,6 +464,7 @@ test('opening a panel leaves the feed, closing one goes back to it', () => {
 
 test('the dock says which panel you are in, not just that the sheet is up', () => {
   const dom = build({ open: 'feed' });
+  dom.tap();   // up off the minimised detent, which is where the feed opens
   assert.ok(dom.el('dockFeed').classList.contains('on'));
   dom.openDrawer('chat');
   assert.ok(!dom.el('dockFeed').classList.contains('on'),
@@ -474,26 +483,38 @@ test('Feed and Map dismiss whatever panel is in the sheet', () => {
   assert.ok(!dom.drawer.classList.contains('open'), 'games stayed open over the map');
 });
 
-test('the dock says which of the two you are on', () => {
+test('the dock says which of the two you are looking at', () => {
+  /* Both used to be destinations, and one of them was "the shell is closed".
+   * Now the sheet is always up and the only question is how far: pulled up is
+   * the feed, pushed down is the map. */
   const dom = build({ open: 'feed' });
-  assert.ok(dom.el('dockFeed').classList.contains('on'));
-  assert.ok(!dom.el('dockMap').classList.contains('on'));
-  dom.setOpen(null);
-  assert.ok(dom.el('dockMap').classList.contains('on'), 'nothing marks the map');
+  assert.ok(dom.el('dockMap').classList.contains('on'),
+    'the feed opens minimised, so the map is what is on screen');
   assert.ok(!dom.el('dockFeed').classList.contains('on'));
+  dom.tap();
+  assert.ok(dom.el('dockFeed').classList.contains('on'), 'nothing marks the feed');
+  assert.ok(!dom.el('dockMap').classList.contains('on'));
 });
 
 test('neither is marked while you are somewhere else entirely', () => {
-  const dom = build({ open: 'chat' });
+  const dom = build({ open: 'feed' });
+  dom.openDrawer('chat');
   assert.ok(!dom.el('dockFeed').classList.contains('on'));
   assert.ok(!dom.el('dockMap').classList.contains('on'),
     'the map reads as current while chat is covering it');
 });
 
-test('the two buttons go where they say', () => {
+test('Map moves the sheet, it does not leave', () => {
+  /* Map called shell.close(), and closing the shell is exactly what brought
+   * the old interface back. It pushes the sheet down to the map instead. */
   const dom = build({ open: 'feed' });
+  dom.tap();
+  assert.strictEqual(dom.split(), EXP(), 'precondition: pulled up');
+  const closedBefore = dom.closed.length;
   dom.el('dockMap').click();
-  assert.strictEqual(dom.closed.length, 1, 'Map did not open the map');
+  assert.strictEqual(dom.closed.length, closedBefore, 'Map closed the shell');
+  assert.strictEqual(dom.split(), MIN(), 'Map did not push the sheet down');
+  assert.deepStrictEqual(dom.opened.slice(-1), ['feed'], 'Map left the feed behind');
   dom.el('dockFeed').click();
   assert.deepStrictEqual(dom.opened.slice(-1), ['feed']);
 });

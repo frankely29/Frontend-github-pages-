@@ -233,11 +233,19 @@
       // Asking for the map means the sheet stays down. Without this flag,
       // closing the panel on the way out would be read as "nothing is in the
       // sheet" and put the feed straight back up.
-      goingToMap = true;
+      /* Map used to close the shell, and closing the shell is what brought
+       * the OLD map-first interface back: the hamburger, the locate and
+       * report pair, the FROM DRIVERS card, the answer pill at the bottom and
+       * the time-machine scrubber, all of which body.feed-first hides and none
+       * of which is hidden once that class comes off.
+       *
+       * There is one interface now. Map means "get the sheet out of the way",
+       * not "leave". */
       closeOtherHosts(null);
       var s = shell();
-      if (s && typeof s.close === "function") s.close();
-      window.setTimeout(function () { goingToMap = false; }, 400);
+      if (s && typeof s.open === "function") s.open(HOME);
+      setSplit(MINIMIZED);
+      noteUse();
     });
   }
 
@@ -257,8 +265,15 @@
     button.textContent = "\uD83D\uDD12 Map locked \u2014 tap to see plans";
     button.setAttribute("aria-label", "The map is locked. Tap to see plans.");
     button.addEventListener("click", function () {
-      var s = shell();
-      if (s && typeof s.close === "function") s.close();
+      /* This used to close the shell to reveal #mapLockCard, which lives on
+       * the old map screen. That screen is gone, so it goes straight to the
+       * thing the card was there to offer. */
+      try {
+        var paywall = window.TlcPaywallModule;
+        if (paywall && typeof paywall.triggerCheckout === "function") {
+          paywall.triggerCheckout();
+        }
+      } catch (_) {}
     });
     document.body.appendChild(button);
   }
@@ -500,6 +515,22 @@
       handle.setAttribute("aria-expanded", min ? "false" : "true");
       handle.setAttribute("aria-label", min ? "Show more posts" : "Show more map");
     }
+    paintDockState(min);
+  }
+
+  /* Which of Feed and Map is lit.
+   *
+   * Here rather than only in apply(), because the answer depends on how far up
+   * the sheet is and apply() does not run on a drag -- so the highlight sat on
+   * whichever one it was when the sheet last changed occupant, and pulling the
+   * feed up over the map left Map lit. */
+  function paintDockState(min) {
+    var feed = byId("dockFeed");
+    var map = byId("dockMap");
+    var panel = drawerOpen();
+    if (min === undefined) min = split > (EXPANDED + MINIMIZED) / 2;
+    if (feed) feed.classList.toggle("on", !panel && !min);
+    if (map) map.classList.toggle("on", !panel && min);
   }
 
   function setSplit(next, options) {
@@ -652,22 +683,25 @@
 
   function apply() {
     if (!document.body) return;
-    /* The sheet is up for any destination, not just the feed.
+    /* There is ONE interface, and it is always this one.
      *
-     * It used to be feed-only, which meant tapping Chat left the sheet layout
-     * behind and put a floating card back on the screen -- the two-widget look
-     * this whole design exists to get rid of. */
-    var home = !!openKey() || drawerOpen();
+     * This used to come off whenever no destination was open -- and the old
+     * map-first app is still underneath, so taking it off put all of it back:
+     * the hamburger, the locate and report pair, the FROM DRIVERS card, the
+     * answer pill at the bottom of the screen and the time-machine scrubber.
+     * Tapping Map closed the shell, so tapping Map switched interfaces. Caught
+     * on video.
+     *
+     * Every one of those is hidden by a body.feed-first rule, so the class
+     * staying on is the whole fix. The map with nothing over it is the sheet
+     * minimised, not a different screen. */
     var was = document.body.classList.contains("feed-first");
-    document.body.classList.toggle("feed-first", home);
+    document.body.classList.add("feed-first");
+    var home = true;
 
-    var feed = byId("dockFeed");
-    var map = byId("dockMap");
-    // Feed is "where you are" only when the feed is what is in the sheet --
-    // not whenever the sheet happens to be up.
-    if (feed) feed.classList.toggle("on", openKey() === HOME && !drawerOpen());
-    // And the map only when nothing is covering it at all.
-    if (map) map.classList.toggle("on", !openKey() && !drawerOpen());
+    // Which of the two the driver is actually looking at. The sheet is always
+    // up now, so it is about how far up it is, not whether it is there.
+    paintDockState();
 
     splitForOccupant();
     if (home === was) return;
