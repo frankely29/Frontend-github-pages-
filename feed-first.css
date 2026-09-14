@@ -153,6 +153,23 @@ body.feed-first #mapAction {
 body.feed-first.shell-screen-open #dock { display: block !important; }
 body.feed-first #dock { z-index: 9300 !important; }
 
+/* Down where the screen ends.
+ *
+ * #dock sits at safe-area + 38px, and those 38 exist for exactly one reason:
+ * to clear the time-machine slider. app-shell.css takes them back with
+ * body.shell-no-scrubber -- which is only ever set for NON-admins, because
+ * admins keep the slider.
+ *
+ * Under Feed First nobody has the slider: this file hides it for everyone. So
+ * an admin was left with 38px of clearance for something that is not on
+ * screen, and on a phone with a 34pt home indicator that is the dock floating
+ * 72pt off the bottom with an empty band under it. Reported as "the bottom
+ * part has an empty section", and invisible in any browser without a home
+ * indicator inset -- which is every browser I can run here. */
+body.feed-first #dock {
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 10px) !important;
+}
+
 /* Solid over text, over a fade. rgba(240,240,240,0.95) is invisible as
    translucency over a map and a smear over somebody's post. */
 body.feed-first .dockBtn:not(.dockBtnSave) { background: #ffffff; }

@@ -146,7 +146,13 @@
   var LS_HINTS = "tj_sheet_hints_v1";
   var HINTS_UNTIL = 3;
 
-  var split = EXPANDED;
+  /* Minimised is where it opens.
+   *
+   * The map is what a driver opens this app for; the feed is what they look at
+   * while they wait. Starting expanded put two thirds of the reason they came
+   * behind two thirds of the reason they stayed. The arrow points up from
+   * here, so the first thing the hint teaches is "pull this up for more". */
+  var split = MINIMIZED;
   var dragging = null;
 
   function vh() {
@@ -205,7 +211,7 @@
     var saved = null;
     try { saved = localStorage.getItem("tj_sheet_split_v1"); } catch (_) {}
     var n = Number(saved);
-    setSplit(Number.isFinite(n) && n > 0 ? n : EXPANDED);
+    setSplit(Number.isFinite(n) && n > 0 ? n : MINIMIZED);
   }
 
   function onDown(event) {

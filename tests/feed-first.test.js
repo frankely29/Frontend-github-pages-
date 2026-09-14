@@ -287,23 +287,30 @@ test('it survives the shell not being there', () => {
 // the sheet
 // --------------------------------------------------------------------------
 
-test('it opens at the expanded detent', () => {
+test('it opens minimised', () => {
+  // The map is what a driver opens the app for; the feed is what they look at
+  // while they wait. Starting expanded put two thirds of the first behind two
+  // thirds of the second.
   const dom = build({ open: 'feed' });
-  assert.strictEqual(dom.split(), 39,
-    'the sheet does not open where it was approved');
+  assert.strictEqual(dom.split(), 66, 'the sheet does not open minimised');
+  assert.ok(dom.body.classList.contains('tj-min'));
 });
 
 test('expanded is 15% shorter than what was drawn', () => {
   // The approved drawing had the sheet starting at 28%, so 72% of the screen.
   // 15% less than that is 61.2%, which starts at 38.8% -- 39.
-  const drawn = 100 - 28;
-  const asked = drawn * 0.85;
-  assert.ok(Math.abs((100 - build({ open: 'feed' }).split()) - asked) < 1.5,
-    `the sheet is ${100 - build({ open: 'feed' }).split()}% tall, not ${asked.toFixed(1)}%`);
+  const dom = build({ open: 'feed' });
+  dom.tap();
+  const tall = 100 - dom.split();
+  const asked = (100 - 28) * 0.85;
+  assert.ok(Math.abs(tall - asked) < 1.5,
+    `expanded is ${tall}% tall, not ${asked.toFixed(1)}%`);
 });
 
 test('dragging it down snaps it to minimised', () => {
   const dom = build({ open: 'feed' });
+  dom.tap();
+  assert.strictEqual(dom.split(), 39, 'precondition: expanded');
   dom.drag(260);
   assert.strictEqual(dom.split(), 66, 'it did not snap to the minimised detent');
   assert.ok(dom.body.classList.contains('tj-min'), 'nothing marks the minimised state');
@@ -312,8 +319,8 @@ test('dragging it down snaps it to minimised', () => {
 test('a short drag falls back to where it started', () => {
   // Snapping to the nearest detent, not to wherever the finger stopped.
   const dom = build({ open: 'feed' });
-  dom.drag(40);
-  assert.strictEqual(dom.split(), 39, 'a nudge moved it to the wrong detent');
+  dom.drag(-40);
+  assert.strictEqual(dom.split(), 66, 'a nudge moved it to the wrong detent');
 });
 
 test('dragging it back up expands it again', () => {
@@ -328,18 +335,18 @@ test('a tap toggles, a drag does not', () => {
   // Four pixels of slop, so a tap that wobbles is still a tap.
   const dom = build({ open: 'feed' });
   dom.tap();
-  assert.strictEqual(dom.split(), 66, 'tapping the handle did nothing');
+  assert.strictEqual(dom.split(), 39, 'tapping the handle did nothing');
   dom.tap();
-  assert.strictEqual(dom.split(), 39);
+  assert.strictEqual(dom.split(), 66);
 });
 
 test('the arrow points where the sheet will go', () => {
   // Down while the feed is up, up while it is down. The CSS rotates it off
   // body.tj-min, so the class is the whole contract.
   const dom = build({ open: 'feed' });
-  assert.ok(!dom.body.classList.contains('tj-min'), 'arrow would point up with the feed up');
-  dom.tap();
   assert.ok(dom.body.classList.contains('tj-min'), 'arrow would point down with the feed down');
+  dom.tap();
+  assert.ok(!dom.body.classList.contains('tj-min'), 'arrow would point up with the feed up');
   assert.ok(/body\.feed-first\.tj-min #tjSheetHandle \.tjArrow[^}]*rotate\(180deg\)/s.test(CSS),
     'nothing flips the arrow');
 });
@@ -360,8 +367,8 @@ test('a driver who has used it before is not nudged again', () => {
 });
 
 test('where they left it is where it opens', () => {
-  const dom = build({ open: 'feed', storage: { tj_sheet_split_v1: '0.66' } });
-  assert.strictEqual(dom.split(), 66, 'it forgot the sheet was minimised');
+  const dom = build({ open: 'feed', storage: { tj_sheet_split_v1: '0.39' } });
+  assert.strictEqual(dom.split(), 39, 'it forgot the sheet was expanded');
 });
 
 test('the sheet cannot be dragged off either end', () => {
@@ -455,6 +462,19 @@ test('the sheet content clears the handle', () => {
   assert.ok(m, 'no padding rule for the sheet body');
   const top = Number((m[1].match(/padding-top:\s*(\d+)px/) || [])[1]);
   assert.ok(top >= 38, `padding-top ${top}px puts content under the handle`);
+});
+
+test('the dock sits at the bottom of the screen', () => {
+  // #dock carries 38px of clearance for the time-machine slider, and
+  // app-shell.css only takes it back for non-admins. Feed First hides the
+  // slider for everyone, so an admin was left holding clearance for something
+  // that is not there -- 72pt off the bottom on a phone with a home indicator,
+  // with an empty band underneath.
+  const m = CSS.match(/body\.feed-first #dock\s*\{([^}]*bottom[^}]*)\}/s);
+  assert.ok(m, 'the dock keeps the scrubber offset under Feed First');
+  const px = Number((m[1].match(/\+\s*(\d+)px/) || [])[1]);
+  assert.ok(Number.isFinite(px) && px <= 14, `dock sits ${px}px above the safe area`);
+  assert.ok(/safe-area-inset-bottom/.test(m[1]), 'the dock ignores the home indicator');
 });
 
 test('nothing transitions while a finger is on it', () => {
