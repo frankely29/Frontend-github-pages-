@@ -517,52 +517,8 @@ test('the hero draws links, not just dots', () => {
 const LANDING_JS = fs.readFileSync(JS_SOURCE, 'utf8');
 const PAYWALL_JS = fs.readFileSync(path.join(ROOT, 'subscription.paywall.js'), 'utf8');
 
-test('a locked account is sent to the landing page, and there is no modal left', () => {
-  // The approved entry flow is land, one form, the map -- there is no
-  // subscribe screen in it. show() is the one choke point every locked path
-  // goes through, so the redirect belongs there rather than at each caller.
-  const show = PAYWALL_JS.slice(PAYWALL_JS.indexOf('function show(options'),
-                                PAYWALL_JS.indexOf('function isVisible('));
-  assert.ok(/lockDocument\(true\)/.test(show), 'show() no longer locks the document');
-  assert.ok(/lockedOverlay/.test(PAYWALL_JS), 'the landing is never actually revealed');
-  // The dark card is gone from the document and from the styles, so there is
-  // nothing left for a race to fall back to.
-  assert.ok(!INDEX.includes('id="paywallOverlay"'), 'the dark card is back in the markup');
-  assert.ok(!/\.paywallOverlay\s*\{/.test(SHELL_CSS), 'the dark card is back in the styles');
-});
 
-test('locking does not wait for landing.js', () => {
-  // This is the whole bug. landing.js was 35th in the script manifest and did
-  // not exist for the first second or more; show() used to require it and
-  // fall back to the dark card without it. Reproduced with landing.js delayed
-  // 3s: the card was up from 948ms and never left. Now the class does it, and
-  // Subscribe appears at 986ms with landing.js still absent.
-  const lock = PAYWALL_JS.slice(PAYWALL_JS.indexOf('function lockDocument'),
-                                PAYWALL_JS.indexOf('function show(options'));
-  assert.ok(/classList\.toggle\('tj-locked'/.test(lock),
-    'locking is not expressed as a class, so it needs a script to work');
-  // setLapsed may be called, but only as an extra -- never as the gate.
-  const gate = lock.slice(0, lock.indexOf('setLapsed'));
-  assert.ok(/tj-locked/.test(gate) && /lockedOverlay/.test(gate),
-    'the overlay is only raised after landing.js is consulted');
-  // And the CSS has to be the inline kind, or it is not there in time either.
-  const critical = (INDEX.match(/<style id="tjBootCritical">([\s\S]*?)<\/style>/) || [])[1] || '';
-  assert.ok(/html\.tj-locked\s+#lockedOverlay/.test(critical),
-    'the locked rule is not in the inline boot CSS, so it can arrive too late');
-  assert.ok(/html\.tj-locked\s+\[data-landing-cta="lapsed"\]/.test(critical),
-    'nothing reveals Subscribe without landing.js');
-});
 
-test('hiding puts the landing back the way a signed-out visitor needs it', () => {
-  // Otherwise the next person to reach the signed-out page gets a Subscribe
-  // button and no way to make an account.
-  const lock = PAYWALL_JS.slice(PAYWALL_JS.indexOf('function lockDocument'),
-                                PAYWALL_JS.indexOf('function show(options'));
-  assert.ok(/setLapsed\(locked\)/.test(lock),
-    'unlocking leaves the landing in its lapsed shape');
-  const hide = PAYWALL_JS.slice(PAYWALL_JS.indexOf('function hide('));
-  assert.ok(/lockDocument\(false\)/.test(hide), 'hide() no longer unlocks');
-});
 
 // ------------------------------------------- signing in has to be possible
 
@@ -608,22 +564,6 @@ test('an expiry does not close the form someone is typing into', () => {
   assert.strictEqual(dom.form.hidden, false, 'a second poll finished the job');
 });
 
-test('an expiry leaves the form alone however the page got on screen', () => {
-  // #lockedOverlay is raised three ways -- the `show` class, tj-auth-pending
-  // while the app works out who this is, and tj-locked when access has lapsed.
-  // Only the first sets the class. The guard asked about the class, so during
-  // boot and while locked -- exactly the states a driver with a dead or expired
-  // token is in -- a 401 still threw them off the form. Confirmed in a browser
-  // on all three: .show kept the form, the other two went to pitch.
-  ['show', 'boot', 'locked'].forEach((raisedBy) => {
-    const dom = buildDom({ overlayRaisedBy: raisedBy });
-    dom.api.goTo('signin');
-    assert.strictEqual(dom.form.hidden, false, `${raisedBy}: the form never opened`);
-    dom.window.dispatch('tlc:auth-expired', { detail: { status: 401 } });
-    assert.strictEqual(dom.form.hidden, false,
-      `${raisedBy}: an expiry threw the driver off the form they were typing into`);
-  });
-});
 
 test('an expiry still resets the pane when the page is not on screen', () => {
   // The original point of the listener, which must survive the guard: coming
@@ -638,105 +578,12 @@ test('an expiry still resets the pane when the page is not on screen', () => {
 
 // -------------------------- the locked page has to say why it is showing
 
-test('the locked page says the sign-in worked, and why the map is paused', () => {
-  // Without this a driver types their email and password, lands here, and reads
-  // the same pitch a stranger gets. Nothing says the sign-in succeeded, so it
-  // looks like it failed and threw them back -- which is how it was reported,
-  // four times. The fine print under the buttons already said "Your free week
-  // is over" and was read straight past: grey, small, below the call to action.
-  assert.ok(INDEX.includes('data-landing-locked-title'),
-    'the locked page has no notice element');
-  const block = INDEX.slice(INDEX.indexOf('class="landingLocked"'),
-                            INDEX.indexOf('class="landingCta" data-landing-cta="lapsed"'));
-  assert.ok(/signed in/i.test(block), 'the notice never says the sign-in worked');
-  assert.ok(/free week is over/i.test(block), 'the notice never says why');
-  assert.ok(/access code/i.test(block) && /[Ss]ubscribe/.test(block),
-    'the notice does not point at the two ways out');
-  // It must ride the same switch as the rest of the lapsed block, so it appears
-  // with no script involved and disappears when access comes back.
-  assert.ok(/class="landingLocked"[^>]*data-landing-cta="lapsed"/.test(INDEX),
-    'the notice is not tied to the lapsed state');
-  assert.ok(/class="landingLocked"[^>]*\shidden/.test(INDEX),
-    'the notice would show to a signed-out visitor');
-});
 
-test('the notice is placed above the buttons, not below them', () => {
-  const notice = INDEX.indexOf('class="landingLocked"');
-  const cta = INDEX.indexOf('data-landing-subscribe');
-  assert.ok(notice > 0 && cta > 0);
-  assert.ok(notice < cta, 'the explanation comes after the buttons it explains');
-});
 
-test('the locked notice names the account when it can, and never says undefined', () => {
-  const dom = buildDom({ overlayRaisedBy: 'locked' });
-  const title = () => dom.landing.querySelectorAll('[data-landing-locked-title]')[0];
 
-  // no /me yet: the sentence still has to stand up
-  dom.api.setLapsed(true);
-  assert.strictEqual(title()._text, "You're signed in.");
 
-  // with a profile, it names them
-  dom.window.me = { display_name: 'Ipad', email: 'someone@example.com' };
-  dom.api.setLapsed(false);
-  dom.api.setLapsed(true);
-  assert.strictEqual(title()._text, "You're signed in as Ipad.");
 
-  // display_name missing falls back to the email, not to "undefined"
-  dom.window.me = { email: 'someone@example.com' };
-  dom.api.setLapsed(false);
-  dom.api.setLapsed(true);
-  assert.strictEqual(title()._text, "You're signed in as someone@example.com.");
-  assert.ok(!/undefined|null/.test(title()._text));
-});
 
-test('the locked notice is styled to be read, not skimmed past', () => {
-  // The fine print it replaces was grey-on-dark at 12px below the buttons.
-  assert.ok(/\.landingLockedTitle\s*\{[^}]*color:\s*#fff/.test(CSS),
-    'the headline of the notice is not full-contrast');
-  assert.ok(/\.landingLocked\s*\{[^}]*border/.test(CSS),
-    'the notice does not read as its own block');
-  assert.ok(/\.landingLocked\[hidden\]\s*\{[^}]*display:\s*none/.test(CSS),
-    'display:flex would beat the hidden attribute, as it did for .landingCta');
-});
-
-test('the locked page still offers a way to sign in', () => {
-  // The locked screen is the one with no other way off it: Subscribe, Manage
-  // subscription and the redeem box all assume this is the right account.
-  // setLapsed(true) used to hide the only sign-in button on the page, so a
-  // driver on the wrong account -- or with a second one that is paid up -- had
-  // to pay to get out. Measured before: visible NEVER on the locked page.
-  const dom = buildDom();
-  const ghost = dom.landing.querySelectorAll('[data-landing-go="signin"]')
-    .filter((n) => n.classList.contains('landingGhostBtn'))[0];
-  assert.ok(ghost, 'the top-right sign-in button is gone from the fixture');
-
-  dom.api.setLapsed(true);
-  assert.strictEqual(ghost.hidden, false, 'the locked page hides its only sign-in button');
-  dom.api.setLapsed(false);
-  assert.strictEqual(ghost.hidden, false, 'sign in did not come back for a signed-out visitor');
-});
-
-test('the locked page reveals sign in without waiting for landing.js', () => {
-  // Same reason the rest of the locked state is CSS: landing.js sets
-  // hidden=true on this button while a session is being checked, and on a
-  // locked page nothing was coming along to unset it.
-  const critical = (INDEX.match(/<style id="tjBootCritical">([\s\S]*?)<\/style>/) || [])[1] || '';
-  const rules = critical.replace(/\/\*[\s\S]*?\*\//g, '');
-  assert.ok(/html\.tj-locked\s+\.landingTop\s+\.landingGhostBtn\s*\{[^}]*display:\s*(?!none)/
-    .test(rules),
-    'nothing forces the sign-in button back on the locked page');
-});
-
-test('the lapsed page keeps the pitch and swaps only the call to action', () => {
-  assert.ok(INDEX.includes('data-landing-cta="new"'), 'no signed-out block');
-  assert.ok(INDEX.includes('data-landing-cta="lapsed"'), 'no lapsed block');
-  assert.ok(INDEX.includes('data-landing-subscribe'), 'no subscribe button');
-  assert.ok(INDEX.includes('data-landing-portal'), 'no manage-subscription button');
-  // Re-labelling the existing buttons would have been fewer nodes, but they
-  // carry data-landing-go and clicking one navigates to a form.
-  assert.ok(/data-landing-go="signup"[\s\S]{0,120}Create account/.test(INDEX),
-    'the signed-out buttons were repurposed instead of hidden');
-});
 
 test('the attribute that switches the blocks actually hides them', () => {
   // .landingCta is display:flex, which beats the hidden attribute's UA

@@ -69,34 +69,63 @@
        (It used to be 35th, and did not exist until long after this window had
        closed -- see the script manifest below.) !important because .landingCta
        is display:flex, which beats the hidden attribute. */
-    html.tj-auth-pending.tj-has-token:not(.tj-locked) [data-landing-cta],
-    html.tj-auth-pending.tj-has-token:not(.tj-locked) [data-landing-fine],
-    html.tj-auth-pending.tj-has-token:not(.tj-locked) .landingTop .landingGhostBtn { display: none !important; }
+    html.tj-auth-pending.tj-has-token [data-landing-cta],
+    html.tj-auth-pending.tj-has-token [data-landing-fine],
+    html.tj-auth-pending.tj-has-token .landingTop .landingGhostBtn { display: none !important; }
 
-    /* Locked out. Raised by a class, so it works before any script does.
-       subscription.paywall.js used to fall back to a dark "Subscribe to
-       continue" card whenever window.TeamJoseoLanding was missing -- and
-       landing.js, then 35th in the script manifest, was missing for the first
-       second or more on a slow connection. A 402 inside that window put a modal on
-       screen in a visual language nothing else in the app speaks. The landing
-       markup is in this document from the first byte, so nothing needs to wait
-       for a script; the class alone raises it and swaps it to its subscribe
-       form. The :not(.tj-locked) above is what lets it win while the session
-       is still being checked. */
-    html.tj-locked #lockedOverlay { display: flex !important; }
-    html.tj-locked [data-landing-cta="new"],
-    html.tj-locked [data-landing-fine="new"] { display: none !important; }
-    html.tj-locked [data-landing-cta="lapsed"] { display: flex !important; }
-    html.tj-locked [data-landing-fine="lapsed"] { display: block !important; }
+    /* ------------------------------------------------------- the map lock
+     *
+     * An unpaid driver keeps the app. What they lose is the map and everything
+     * derived from it: the score colours, the recommendation, the tendency, the
+     * time machine.
+     *
+     * The blur is the point -- a dimmed map is still readable, and the zone
+     * colours ARE the product. But blur alone leaks it, because the pill says
+     * "Much busier, go to Red Hook, 91" in words and the tendency meter says the
+     * same as a number. Those are hidden outright, and app.part10.js stops the
+     * polling that fills them so the answer is not sitting in the DOM behind a
+     * blur for anyone who opens an inspector.
+     *
+     * The dock and the menu button are deliberately NOT hidden here: staying in
+     * the app is the whole idea.
+     */
+    html.tj-map-locked #map,
+    html.tj-map-locked #wxCanvas {
+      filter: blur(18px) saturate(0.6) !important;
+      pointer-events: none !important;
+    }
+    html.tj-map-locked #mapAction,
+    html.tj-map-locked .mapSegmented,
+    html.tj-map-locked .mapControlStack,
+    html.tj-map-locked .sliderWrap,
+    html.tj-map-locked #sliderWrap,
+    html.tj-map-locked #navQuickStack,
+    html.tj-map-locked #navActiveBanner,
+    html.tj-map-locked #mapLoading,
+    html.tj-map-locked #dayTendencyMeter { display: none !important; }
 
-    /* The one sign-in button on this page, and it stays on the locked screen.
-       Everything else there -- Subscribe, Manage subscription, the redeem box
-       -- assumes this is the right account. Without this a driver on the wrong
-       account, or with a second one that is paid up, had to pay to get out.
-       Forced from here rather than left to landing.js because that script sets
-       hidden=true on this button while a session is being checked, and on a
-       locked page nothing was ever coming along to unset it. */
-    html.tj-locked .landingTop .landingGhostBtn { display: block !important; }
+    /* The card that explains it. In the markup so it needs no script. */
+    #mapLockCard { display: none; }
+    html.tj-map-locked #mapLockCard {
+      display: flex;
+      position: fixed;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      z-index: 2600;            /* over the map, under the dock (3000) */
+      width: min(340px, calc(100vw - 32px));
+      box-sizing: border-box;
+      flex-direction: column;
+      gap: 10px;
+      padding: 18px 16px;
+      border-radius: 18px;
+      background: rgba(10, 15, 28, 0.94);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      box-shadow: 0 18px 60px rgba(2, 6, 23, 0.55);
+      color: #fff;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+      text-align: center;
+    }
   </style>
 
   <script>
@@ -349,6 +378,45 @@
   <canvas id="wxCanvas"></canvas>
 
   <!--
+    What an unpaid driver sees over the blurred map. In the markup, hidden by
+    default, shown by html.tj-map-locked -- so it needs no script and cannot
+    race one, the same reason the boot stages work.
+
+    Subscribe and Manage carry the same data attributes the paywall module has
+    always looked for, so triggerCheckout() and openPortal() find them with no
+    change. The redeem row moved here from the landing page: redeemCode() finds
+    its input with a document-wide querySelector, so there must be exactly one
+    in the document, and this is now the screen it belongs on.
+  -->
+  <div id="mapLockCard" role="dialog" aria-labelledby="mapLockTitle">
+    <div id="mapLockTitle" class="mapLockTitle">Map locked</div>
+    <p class="mapLockWhy" data-map-lock-why>
+      Your free look has ended. Subscribe to see zone scores, the day's tendency
+      and where to go next.
+    </p>
+    <button type="button" class="mapLockBtn mapLockBtnGo" data-landing-subscribe>
+      Subscribe &mdash; $8/week
+    </button>
+    <div class="mapLockRedeem">
+      <label class="mapLockRedeemLabel" for="paywallRedeemInput">Have a free access code?</label>
+      <div class="mapLockRedeemRow">
+        <input id="paywallRedeemInput" class="mapLockRedeemInput" type="text"
+               placeholder="JOSEO-XXXX-XXXX" autocomplete="off"
+               autocapitalize="characters" spellcheck="false" maxlength="64"
+               data-paywall-redeem-input />
+        <button type="button" class="mapLockBtn mapLockBtnGhost" data-paywall-redeem-btn>
+          Redeem
+        </button>
+      </div>
+      <div class="mapLockRedeemStatus" role="status" aria-live="polite"
+           data-paywall-redeem-status></div>
+    </div>
+    <button type="button" class="mapLockBtn mapLockBtnGhost" data-landing-portal>
+      Manage subscription
+    </button>
+  </div>
+
+  <!--
     The signed-out page. Every id the auth code binds to (authEmail, authPass,
     authName, authGhost, btnLogin, btnSignup, authStatus) is still here and
     still does the same job -- app.part10.js:2179-2185 looks them up by id, so
@@ -392,60 +460,13 @@
           <p class="landingFine" data-landing-fine="new">No card to start. <b>$8/week</b> after the trial, cancel anytime.<br>
             Got an access code? Use it when you sign up.</p>
 
-          <!--
-            The same page, for a driver whose trial has run out. They get the
-            pitch they already know and one button, rather than a separate dark
-            modal nobody designed: the approved entry flow is land, one form,
-            the map, and this is the only screen in it that a lapsed account
-            can be shown. The redeem row lives here rather than in the paywall
-            overlay because this is the screen that is actually on display --
-            and because two elements carrying data-paywall-redeem-input would
-            leave redeemCode() reading whichever came first in the document.
-          -->
-          <!--
-            Why you are looking at this page.
-
-            Without it a driver types their email and password, lands here, and
-            reads the same pitch a stranger gets. Nothing says the sign-in
-            worked, so it looks like it failed and threw them back. It did not
-            fail; their free week ended. Reported as "it takes me back to
-            welcome page", and the recording showed exactly that: sign-in
-            succeeded, status line read "signed in as Ipad", and this screen
-            gave no hint of either.
-
-            Carries data-landing-cta="lapsed" so the existing machinery shows
-            and hides it -- both the CSS rule that works before any script, and
-            setLapsed() afterwards. The name is filled in by landing.js when it
-            knows it; the sentence stands on its own until then.
-          -->
-          <div class="landingLocked" data-landing-cta="lapsed" hidden>
-            <p class="landingLockedTitle" data-landing-locked-title>You're signed in.</p>
-            <p class="landingLockedWhy">Your free week is over, so the map is paused.
-              Subscribe below, or enter an access code, to pick up where you left off.</p>
-          </div>
-          <div class="landingCta" data-landing-cta="lapsed" hidden>
-            <button type="button" class="landingBtn landingBtnGo" data-landing-subscribe>
-              Subscribe &mdash; $8/week
-            </button>
-            <button type="button" class="landingBtn landingBtnGhost" data-landing-portal>
-              Manage subscription
-            </button>
-          </div>
-          <div class="landingRedeem" data-landing-cta="lapsed" hidden>
-            <label class="landingRedeemLabel" for="paywallRedeemInput">Have a free access code?</label>
-            <div class="landingRedeemRow">
-              <input id="paywallRedeemInput" class="landingRedeemInput" type="text"
-                     placeholder="JOSEO-XXXX-XXXX" autocomplete="off"
-                     autocapitalize="characters" spellcheck="false"
-                     data-paywall-redeem-input>
-              <button type="button" class="landingBtn landingBtnGhost landingRedeemBtn"
-                      data-paywall-redeem-btn>Redeem</button>
-            </div>
-            <div class="landingRedeemStatus" role="status" aria-live="polite"
-                 data-paywall-redeem-status hidden></div>
-          </div>
-          <p class="landingFine" data-landing-fine="lapsed" hidden>Your free week is over.
-            <b>$8/week</b>, cancel anytime.<br>Secure checkout by Paddle.</p>
+          <!-- The lapsed call to action used to live here: this page was what a
+               driver whose trial ended was shown instead of the app. It has
+               moved onto the map, which is the only thing they actually lose.
+               See #mapLockCard. The redeem row went with it -- redeemCode()
+               finds its input with a document-wide querySelector, so there is
+               exactly one in the document and it belongs on the screen that is
+               actually on display. -->
 
           <!--
             Five real screens. The track carries a sixth frame that repeats the

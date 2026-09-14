@@ -2046,7 +2046,9 @@ function clearPickupPollTimer() {
 function schedulePickupPoll({ immediate = false } = {}) {
   if (pickupOverlayLoadedOnce) return;
   clearPickupPollTimer();
-  if (!authHeaderOK() || document.hidden) return;
+  // Locked means the map is not this driver's to poll for. The server would
+  // refuse anyway, and a 402 every few seconds is just noise.
+  if (!authHeaderOK() || document.hidden || window.isMapLocked?.()) return;
   const delay = immediate ? 0 : PICKUP_POLL_MS;
   const runner = () => {
     pickupPollTimer = null;
@@ -2060,7 +2062,7 @@ function schedulePickupPoll({ immediate = false } = {}) {
 }
 
 async function runPickupPollLoop() {
-  if (!authHeaderOK() || document.hidden) {
+  if (!authHeaderOK() || document.hidden || window.isMapLocked?.()) {
     clearPickupPollTimer();
     return;
   }
@@ -2995,6 +2997,53 @@ function subscriptionKnownLapsed() {
   return !!sub && sub.has_access === false;
 }
 
+/* Lock the map, not the app.
+ *
+ * An unpaid driver keeps the dock, the menu and the feed; what they lose is the
+ * map and everything derived from it. Expressed as one class on <html> so the
+ * rules live in the inline boot CSS and apply before any script has loaded --
+ * the same reason the boot stages work.
+ *
+ * Blurring is not enough on its own and the CSS cannot do this part: the
+ * recommendation pill says "Much busier, go to Red Hook, 91" in words, and the
+ * day-tendency meter carries the same answer as a number. Those are hidden, not
+ * blurred, and the polling that fills them is stopped, so the answer is not
+ * sitting in the DOM behind a blur for anyone who opens an inspector.
+ */
+function applyMapLockState(locked) {
+  if (typeof document === "undefined" || !document.documentElement) return;
+  const on = !!locked;
+  const was = document.documentElement.classList.contains("tj-map-locked");
+  document.documentElement.classList.toggle("tj-map-locked", on);
+  if (on === was) return;
+
+  // Clear the answer, do not just cover it. The CSS hides the pill and the
+  // tendency meter, but whatever the preview last put in them would still be
+  // sitting in the DOM. The server refuses fresh data once the preview is spent,
+  // so this only drops what is already stale.
+  if (on) {
+    try {
+      window.TlcAssistantRecommendation = null;
+      window.dispatchEvent(new CustomEvent("tlc:assistant-recommendation", { detail: null }));
+    } catch (_) {}
+    try {
+      if (window.TlcDayTendencyState) window.TlcDayTendencyState.payload = null;
+    } catch (_) {}
+  }
+
+  try {
+    window.dispatchEvent(new CustomEvent("tlc:map-lock-changed", { detail: { locked: on } }));
+  } catch (_) {}
+}
+
+if (typeof window !== "undefined") {
+  window.applyMapLockState = applyMapLockState;
+  window.isMapLocked = function isMapLocked() {
+    return !!(document.documentElement
+      && document.documentElement.classList.contains("tj-map-locked"));
+  };
+}
+
 function setAuthUI(signedIn, note) {
   if (btnAuth) btnAuth.textContent = signedIn ? "Sign out" : "Sign in";
   if (communityNote) {
@@ -3003,25 +3052,25 @@ function setAuthUI(signedIn, note) {
       : "Community: sign in to see other drivers, report police, and record trips.";
   }
 
-  // Being signed in is not the same as being allowed in, and this used to
-  // treat them as the same thing: setAuthUI(true) opened the map for anyone
-  // holding a valid token, and a driver whose week had run out only got the
-  // subscribe page afterwards, when some request came back 402. So the map
-  // appeared first, every launch. /me has already answered this by the time
-  // this runs, so ask it here, where the overlay is decided.
+  /* An unpaid driver is not a signed-out one.
+   *
+   * This used to treat them as the same: a lapsed account got the landing page
+   * with a Subscribe button and nothing else, which reads as "your sign-in
+   * failed" no matter how carefully it is worded. They are in the app now. The
+   * map is what they cannot have -- see tj-map-locked below -- and the feed,
+   * which they can read, is the reason to pay for the rest.
+   *
+   * #lockedOverlay means signed out, and only that.
+   */
   const lapsed = signedIn && subscriptionKnownLapsed();
-  const showLock = !signedIn || lapsed;
+  const showLock = !signedIn;
   if (lockedOverlay) {
-    // Which version of the signed-out page this is. No token means signed
-    // out for real, so it gets the Create-account buttons; with a token still
-    // present and no verdict yet, the landing keeps its hero and says nothing
-    // about what to do -- the answer is not known, and guessing is what put
-    // "Create account" in front of a driver who already had one.
+    // With a token present and no verdict yet, the landing keeps its hero and
+    // says nothing about what to do -- the answer is not known, and guessing is
+    // what put "Create account" in front of a driver who already had one.
     const landing = (typeof window !== "undefined") ? window.TeamJoseoLanding : null;
     if (showLock && landing) {
-      if (lapsed) {
-        if (typeof landing.setLapsed === "function") landing.setLapsed(true);
-      } else if (authHeaderOK()) {
+      if (authHeaderOK()) {
         if (typeof landing.setResolving === "function") landing.setResolving();
       } else if (typeof landing.setLapsed === "function") {
         landing.setLapsed(false);
@@ -3030,6 +3079,10 @@ function setAuthUI(signedIn, note) {
     lockedOverlay.classList.toggle("show", showLock);
     lockedOverlay.setAttribute("aria-hidden", showLock ? "false" : "true");
   }
+
+  // What an unpaid driver actually loses. One class, read by the inline boot
+  // CSS in index.html, so it holds before any of this file has loaded.
+  applyMapLockState(lapsed);
 
   // The boot's second stage ends here, and only here: this is the first moment
   // the app knows whether anyone is signed in. Until now index.html has held
