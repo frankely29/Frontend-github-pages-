@@ -47,6 +47,16 @@ const CRITICAL_RULES = stripComments(CRITICAL);
 const INDEX_NO_HTML_COMMENTS = INDEX.replace(/<!--[\s\S]*?-->/g, '');
 const PART10_RULES = stripComments(PART10);
 
+// The script loader, sliced out by an anchor that actually occurs in the file.
+// The first cut of these tests mixed indices from two different strings and
+// looked for a substring that was never there, so the slice came back empty and
+// the assertions passed or failed on nothing.
+function loaderSource() {
+  const at = INDEX.indexOf('const jsAssets =');
+  assert.ok(at > 0, 'the script loader is gone from index.html');
+  return INDEX.slice(at, INDEX.indexOf('</script>', at));
+}
+
 const tests = [];
 const test = (name, fn) => tests.push([name, fn]);
 
@@ -267,6 +277,56 @@ test('only an explicit no from the server counts as lapsed', () => {
   assert.ok(/is_admin/.test(fn), 'an admin can be walled out of their own app');
   assert.ok(!/!sub\?\.has_access\b/.test(fn) && !/!hasAccess\b/.test(fn),
     'a missing subscription would be treated as lapsed');
+});
+
+// ------------------------------- the page has to work, not just look ready
+
+test('the scripts are all requested together, not one after another', () => {
+  // This is the bug behind most of the others. The loader waited for each
+  // script's onload before the NEXT one was even requested, so 39 files cost 39
+  // round trips. The welcome page paints in ~300ms from the inline CSS above,
+  // so on a phone a driver saw Sign in and Create account, tapped them, and
+  // nothing happened. Measured on a throttled connection: 26 of 39 scripts in,
+  // window.TeamJoseoLanding undefined, the email field 0x0.
+  const loader = loaderSource();
+  const code = stripComments(loader).replace(/\/\/[^\n]*/g, '');
+  assert.ok(!/onload\s*=\s*function[^}]*loadScript/i.test(code),
+    'a script still waits for the previous one to load before being requested');
+  assert.ok(!/loadScriptSequentially/.test(code),
+    'the sequential loader is back');
+  assert.ok(/jsAssets\.forEach/.test(code),
+    'the scripts are not appended in one pass');
+});
+
+test('execution order is still pinned, because these files depend on it', () => {
+  // Parallel DOWNLOAD is the win; parallel EXECUTION would break app.part* which
+  // read globals app.js defines. async=false is the one line keeping insertion
+  // order, so losing it would trade one bug for a worse one.
+  const loader = stripComments(loaderSource());
+  assert.ok(/script\.async\s*=\s*false/.test(loader),
+    'scripts would execute in arrival order, which their dependencies forbid');
+});
+
+test('a missing critical script still stops the app honestly', () => {
+  const loader = loaderSource();
+  assert.ok(/CRITICAL_JS_ASSETS\.has\(rawAsset\)/.test(loader),
+    'nothing checks whether the failed script was a critical one');
+  assert.ok(/showBootFatalOverlay/.test(loader),
+    'a missing critical script no longer says so');
+});
+
+test('the welcome page\'s own script is loaded early, not last', () => {
+  // Even with parallel downloads it still EXECUTES in list order, and this is
+  // the only script the first screen needs. It used to sit 35th of 39.
+  const list = (INDEX.match(/__TLC_LOCAL_JS_ASSETS__ = \[([\s\S]*?)\];/) || [])[1] || '';
+  const items = [...list.matchAll(/"(\.\/[^"]+)"/g)].map((m) => m[1]);
+  assert.ok(items.length > 10, 'could not read the script manifest');
+  const at = items.indexOf('./landing.js');
+  assert.ok(at >= 0, 'landing.js is not in the manifest at all');
+  assert.ok(at <= 2,
+    `landing.js is ${at + 1}th of ${items.length}; the first screen waits on it`);
+  assert.strictEqual(items.filter((x) => x === './landing.js').length, 1,
+    'landing.js is listed twice, so it would run twice');
 });
 
 // --------------------------------------------------- the old card is gone

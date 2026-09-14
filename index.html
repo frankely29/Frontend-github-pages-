@@ -64,10 +64,11 @@
        page goes back to deciding this for itself.
 
        This lives here, in CSS available at the first paint, because it has to.
-       landing.js -- which owns the same idea at runtime -- is 35th in the
-       script manifest and does not exist until ~700ms, about 300ms after this
-       window has already closed. !important because .landingCta is display:flex,
-       which beats the hidden attribute. */
+       landing.js owns the same idea at runtime but is still a separate request;
+       even loaded first it cannot beat a rule that is already in the document.
+       (It used to be 35th, and did not exist until long after this window had
+       closed -- see the script manifest below.) !important because .landingCta
+       is display:flex, which beats the hidden attribute. */
     html.tj-auth-pending.tj-has-token:not(.tj-locked) [data-landing-cta],
     html.tj-auth-pending.tj-has-token:not(.tj-locked) [data-landing-fine],
     html.tj-auth-pending.tj-has-token:not(.tj-locked) .landingTop .landingGhostBtn { display: none !important; }
@@ -75,8 +76,8 @@
     /* Locked out. Raised by a class, so it works before any script does.
        subscription.paywall.js used to fall back to a dark "Subscribe to
        continue" card whenever window.TeamJoseoLanding was missing -- and
-       landing.js is 35th in the script manifest, missing for the first second
-       or more on a slow connection. A 402 inside that window put a modal on
+       landing.js, then 35th in the script manifest, was missing for the first
+       second or more on a slow connection. A 402 inside that window put a modal on
        screen in a visual language nothing else in the app speaks. The landing
        markup is in this document from the first byte, so nothing needs to wait
        for a script; the class alone raises it and swaps it to its subscribe
@@ -225,6 +226,14 @@
     ];
 
     window.__TLC_LOCAL_JS_ASSETS__ = [
+      // First, deliberately. This is the only script the welcome page needs to
+      // work, and the welcome page is the first thing anyone sees -- painted in
+      // ~300ms by the inline CSS above. It used to sit 35th, so on a phone the
+      // Sign in and Create account buttons were on screen and inert for as long
+      // as the other 34 took to arrive. It has no load-time dependency on any
+      // of them: it reads the DOM, and reaches for TlcPaywallModule only from
+      // inside a click handler.
+      "./landing.js",
       "./runtime.shared.js",
       "./app.js",
       "./navigation.preview.js",
@@ -258,7 +267,6 @@
       "./day-tendency.js",
       "./app.lazy.js",
       "./app-shell.js",
-      "./landing.js",
       "./map-action.js",
       "./feed.js",
       "./compose.js",
@@ -973,33 +981,44 @@
       const failedAssets = [];
       const CRITICAL_JS_ASSETS = new Set(['./runtime.shared.js', './app.js', './app.part4.js']);
 
-      function loadScriptSequentially(index) {
-        if (index >= jsAssets.length) return;
-        const rawAsset = jsAssets[index];
+      /* Requested together, executed in order.
+       *
+       * This used to wait for each script's onload before the NEXT one was even
+       * requested, so 39 files cost 39 round trips. On a phone that is tens of
+       * seconds -- and the welcome page paints in the first 300ms, so a driver
+       * saw Sign in and Create account, tapped them, and nothing happened:
+       * landing.js was 35th in this list and had not arrived. Measured on a
+       * throttled connection: 26 of 39 scripts in, window.TeamJoseoLanding
+       * still undefined, the button visible and inert.
+       *
+       * script.async = false is what keeps execution in insertion order, which
+       * these files do depend on. It was already set; appending them together
+       * changes only when they are FETCHED. Same order, same result, one round
+       * trip instead of thirty-nine.
+       *
+       * One deliberate difference: a critical script failing no longer stops
+       * the rest, because they are already queued. The fatal overlay still goes
+       * up and covers the screen, which is what that case is for.
+       */
+      let bootFatalShown = false;
+      jsAssets.forEach(function loadLocalScript(rawAsset) {
         const src = window.__tlcWithBuildId(rawAsset);
         const script = document.createElement("script");
         script.src = src;
         script.async = false;
-        script.onload = function () {
-          loadScriptSequentially(index + 1);
-        };
         script.onerror = function () {
           console.error("Failed to load local script:", src);
           failedAssets.push(src);
-          const isCritical = CRITICAL_JS_ASSETS.has(rawAsset);
-          if (isCritical) {
+          if (!bootFatalShown && CRITICAL_JS_ASSETS.has(rawAsset)) {
+            bootFatalShown = true;
             showBootFatalOverlay(
               'Frontend failed to boot',
               `Missing required script:\n${src}\n\nFailed assets:\n${failedAssets.join('\n')}`
             );
-            return;
           }
-          loadScriptSequentially(index + 1);
         };
         document.body.appendChild(script);
-      }
-
-      loadScriptSequentially(0);
+      });
     })();
   </script>
 
