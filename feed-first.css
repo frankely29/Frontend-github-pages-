@@ -14,6 +14,11 @@
  */
 
 body.feed-first {
+  /* Both written by feed-first.js, both zero unless it measured something.
+     --tj-kb is the keyboard; --tj-vgap is how far the layout viewport falls
+     short of the screen it is painted on. */
+  --tj-kb: 0px;
+  --tj-vgap: 0px;
   /* Where the sheet's top edge is. feed-first.js writes it during a drag and
      snaps it to one of the two detents on release. Everything that has to sit
      on the seam -- the handle, the answer pill, the lock label -- reads it. */
@@ -32,6 +37,7 @@ body.feed-first #wxCanvas { display: none !important; }
 /* ---------------------------------------------------------- the sheet */
 body.feed-first #shellScreens {
   top: var(--tj-split);
+  bottom: calc(0px - var(--tj-vgap));
   border-radius: 22px 22px 0 0;
   overflow: hidden;
   /* Frosted, so the zone you are standing in tints the feed and there is no
@@ -81,7 +87,7 @@ body.feed-first #dockDrawer {
   top: var(--tj-split);
   left: 0;
   right: 0;
-  bottom: 0;
+  bottom: calc(0px - var(--tj-vgap));
   width: auto;
   height: auto;
   max-height: none;
@@ -114,7 +120,7 @@ body.feed-first #dockDrawer {
    *
    * The dock is 74px tall at safe-area + 10px, so its top edge is at
    * safe-area + 84px. */
-  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 92px);
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 92px + var(--tj-vgap));
   transform: translateY(100%);
   transition: top 0.26s cubic-bezier(0.32, 0.72, 0, 1),
               transform 0.26s cubic-bezier(0.32, 0.72, 0, 1);
@@ -143,13 +149,35 @@ body.feed-first .chatPanelWrap,
 body.feed-first .gamesPanelWrap,
 body.feed-first .leaderboardPanelWrap { min-height: 0; }
 
-/* Typing is the exception: the keyboard takes the bottom of the screen, the
-   dock goes with it, and holding 92px for a dock nobody can see would put the
-   composer behind the keyboard instead. */
-body.chatKeyboardMode.feed-first #dockDrawer {
-  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
+/* Typing.
+ *
+ * A position: fixed sheet is anchored to the LAYOUT viewport, which the
+ * keyboard does not change -- so the composer stayed where it was, the
+ * keyboard covered it, and iOS scrolled the whole document to reveal the
+ * focused field. That scroll is what tore the layout apart: the header went
+ * off the top and a band of nothing opened above the keyboard.
+ *
+ * So while the keyboard is up the sheet is anchored to the KEYBOARD instead,
+ * and feed-first.js puts the document scroll back to zero. The dock goes down
+ * with it -- it has nowhere to be -- and its clearance goes with it, or the
+ * composer would be held 92px above a dock that is not there. */
+body.feed-first.tj-kb-up #dockDrawer,
+body.feed-first.tj-kb-up #shellScreens {
+  bottom: var(--tj-kb) !important;
+  padding-bottom: 8px !important;
 }
+body.feed-first.tj-kb-up .driverProfileSheet,
+body.feed-first.tj-kb-up .adminPanel {
+  bottom: var(--tj-kb) !important;
+  padding-bottom: 8px !important;
+}
+body.feed-first.tj-kb-up #dock,
 body.chatKeyboardMode.feed-first #dock { display: none !important; }
+body.feed-first.tj-kb-up .shellScreenBody { padding-bottom: 8px; }
+
+/* The map's own chrome has nothing to do while someone is typing, and the
+   answer pill would sit on the sheet's new top edge. */
+body.feed-first.tj-kb-up #mapAction { display: none !important; }
 
 /* The sheet is not modal. The map behind it stays visible and usable, which is
    the whole point of the layout, so the scrim that used to dim it has no job. */
@@ -181,7 +209,7 @@ body.feed-first .adminPanel {
   top: var(--tj-split) !important;
   left: 0 !important;
   right: 0 !important;
-  bottom: 0 !important;
+  bottom: calc(0px - var(--tj-vgap)) !important;
   width: auto !important;
   height: auto !important;
   max-height: none !important;
@@ -199,7 +227,7 @@ body.feed-first .adminPanel {
   /* The dock's clearance, on the container -- the same reason as the drawer:
      a height: 100% body resolves against this box and never sees padding on
      itself. */
-  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 92px) !important;
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 92px + var(--tj-vgap)) !important;
   /* Their own open animations translate on X as well as Y and would fight the
      top the split is driving. */
   transform: translateY(100%) !important;
@@ -225,7 +253,7 @@ body.feed-first .adminPanelBody { min-height: 0; }
  * in it, and under Feed First the dock is the navigation. */
 body.feed-first .shellMenuBtn { display: none !important; }
 body.feed-first .shellScreenBody {
-  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 104px);
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 104px + var(--tj-vgap));
   /* Clears the handle. It is 34px tall and fixed to the sheet's top edge, so
      16px of padding put the scope chips under the arrow -- caught in a
      screenshot, where the chevron was sitting on top of "My city". */
@@ -331,7 +359,7 @@ body.feed-first #dock { z-index: 9300 !important; }
  * part has an empty section", and invisible in any browser without a home
  * indicator inset -- which is every browser I can run here. */
 body.feed-first #dock {
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 10px) !important;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 10px - var(--tj-vgap)) !important;
 }
 
 /* Solid over text, over a fade. rgba(240,240,240,0.95) is invisible as

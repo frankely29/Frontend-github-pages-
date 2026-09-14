@@ -248,6 +248,67 @@
     return Math.max(1, window.innerHeight || 800);
   }
 
+  /* ------------------------------------------------- the keyboard, and the gap
+   *
+   * Two separate measurements, both of which move the bottom of the sheet.
+   *
+   * THE KEYBOARD. A position: fixed sheet is anchored to the LAYOUT viewport,
+   * which the keyboard does not change -- so the composer stays where it was
+   * and the keyboard covers it. iOS then scrolls the whole document to reveal
+   * the focused input, which is what tore the layout apart: the header went off
+   * the top and a band of nothing appeared above the keyboard. Anchoring the
+   * sheet to the keyboard instead, and undoing that scroll, keeps it whole.
+   *
+   * THE GAP. On this phone every bottom-anchored thing sits ~62pt above the
+   * physical bottom of the screen, because in a standalone web app the layout
+   * viewport comes out one status bar shorter than the screen it is painted
+   * on. Nothing in CSS can see that; window.innerHeight against screen.height
+   * can. Guarded hard -- standalone only, portrait only, and only a band in a
+   * plausible range -- so anywhere it does not apply it measures zero and
+   * changes nothing.
+   */
+  function keyboardInset() {
+    var vv = window.visualViewport;
+    if (!vv) return 0;
+    var inset = Math.round((window.innerHeight || 0) - (vv.height + vv.offsetTop));
+    // Under about 60px it is a toolbar or a rounding artefact, not a keyboard.
+    return inset > 60 ? inset : 0;
+  }
+
+  function viewportGap() {
+    var standalone = false;
+    try {
+      standalone = window.navigator.standalone === true
+        || !!(window.matchMedia && window.matchMedia("(display-mode: standalone)").matches);
+    } catch (_) {}
+    if (!standalone) return 0;
+    var screenH = Math.round(Number(window.screen && window.screen.height) || 0);
+    var innerH = Math.round(Number(window.innerHeight) || 0);
+    if (!screenH || !innerH) return 0;
+    // screen.height does not rotate on iOS, so landscape would read a huge
+    // bogus gap.
+    if (innerH > (Number(window.innerWidth) || 0)) {
+      var gap = screenH - innerH;
+      if (gap > 8 && gap < 140) return gap;
+    }
+    return 0;
+  }
+
+  function paintViewport() {
+    if (!document.body) return;
+    var kb = keyboardInset();
+    var gap = kb > 0 ? 0 : viewportGap();
+    document.body.style.setProperty("--tj-kb", kb + "px");
+    document.body.style.setProperty("--tj-vgap", gap + "px");
+    document.body.classList.toggle("tj-kb-up", kb > 0);
+    // iOS scrolls the document to bring the focused field into view. With the
+    // sheet now following the keyboard there is nothing to reveal, and that
+    // scroll is what pushed the header off the top of the screen.
+    if (kb > 0 && (window.scrollY || window.pageYOffset)) {
+      try { window.scrollTo(0, 0); } catch (_) {}
+    }
+  }
+
   function hintsUsed() {
     try { return Number(localStorage.getItem(LS_HINTS) || 0) || 0; } catch (_) { return 0; }
   }
@@ -486,6 +547,15 @@
     openHomeOnce();
 
     linkHosts();
+    paintViewport();
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener("resize", paintViewport);
+      window.visualViewport.addEventListener("scroll", paintViewport);
+    }
+    window.addEventListener("resize", paintViewport);
+    window.addEventListener("orientationchange", function () {
+      window.setTimeout(paintViewport, 250);
+    });
     window.addEventListener("tlc:shell-screen-changed", apply);
 
     /* The drawer announces itself; the other two do not.
@@ -536,6 +606,9 @@
 
   window.TeamJoseoFeedFirst = {
     apply: apply,
+    paintViewport: paintViewport,
+    keyboardInset: keyboardInset,
+    viewportGap: viewportGap,
     installDockButtons: installDockButtons,
     installHandle: installHandle,
     setSplit: setSplit,
