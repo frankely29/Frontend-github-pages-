@@ -516,3 +516,32 @@ html.tj-map-locked body.feed-first #mapCardLocked:focus-visible {
   body.feed-first #tjSheetHandle.tj-hint .tjArrow,
   body.feed-first.tj-min #tjSheetHandle.tj-hint .tjArrow { animation: none; }
 }
+
+/* ------------------------------------------------------- the readout
+ *
+ * Admin only, and only while the window is actually short of the screen it is
+ * painted in -- which is the state that has now survived three fixes and which
+ * no browser here can reproduce. It puts the numbers that tell the remaining
+ * explanations apart somewhere they can be photographed. Tap to dismiss.
+ */
+#tjWindowReadout {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  top: calc(env(safe-area-inset-top, 0px) + 6px);
+  z-index: 9400;
+  max-width: calc(100vw - 24px);
+  border: 0;
+  border-radius: 999px;
+  padding: 5px 12px;
+  background: rgba(11, 16, 24, 0.86);
+  color: #eef2f8;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
