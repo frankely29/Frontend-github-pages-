@@ -105,8 +105,21 @@ function makeNode(tag) {
     get() { return node._html; },
     set(v) { node._html = String(v); },
   });
-  node.appendChild = (c) => { c.parentNode = node; node.children.push(c); return c; };
+  /* appendChild MOVES a node that already has a parent -- it does not copy it.
+   *
+   * This double pushed without unlinking, so re-appending the dock's own
+   * buttons to put them in order duplicated every one of them instead of
+   * moving it. The order code is right and the double was lying about the one
+   * piece of DOM behaviour it depends on. */
+  const unlink = (c) => {
+    if (!c || !c.parentNode) return;
+    const at = c.parentNode.children.indexOf(c);
+    if (at >= 0) c.parentNode.children.splice(at, 1);
+    c.parentNode = null;
+  };
+  node.appendChild = (c) => { unlink(c); c.parentNode = node; node.children.push(c); return c; };
   node.insertBefore = (c, ref) => {
+    unlink(c);
     c.parentNode = node;
     const at = ref ? node.children.indexOf(ref) : -1;
     if (at < 0) node.children.push(c); else node.children.splice(at, 0, c);
@@ -379,13 +392,18 @@ test('Feed and Map join the dock without displacing anything', () => {
   assert.ok(ids.includes('dockFeed') && ids.includes('dockMap'), 'no navigation in the dock');
 });
 
-test('they sit next to Save, because the dock re-centres on Save', () => {
-  // app.part6.js scrolls the dock back to Save after ten seconds of no
-  // interaction. Navigation put anywhere else drifts off the edge on its own.
+test('Feed sits next to Save, because the dock re-centres on Save', () => {
+  /* app.part6.js scrolls the dock back to Save after ten seconds of no
+   * interaction, so whatever is beside Save is what a driver always finds
+   * without scrolling.
+   *
+   * This used to require Map beside Save too. It no longer does: the order was
+   * specified as Games left of Feed, which puts Map one further out. Feed is
+   * the one that has to stay adjacent -- it is home. */
   const ids = build().ids();
   const save = ids.indexOf('pickupFab');
-  assert.strictEqual(ids[save - 2], 'dockFeed', ids.join(','));
-  assert.strictEqual(ids[save - 1], 'dockMap', ids.join(','));
+  assert.strictEqual(ids[save - 1], 'dockFeed', ids.join(','));
+  assert.ok(ids.indexOf('dockMap') >= 0, 'Map fell out of the dock: ' + ids.join(','));
 });
 
 test('the dock keeps its own behaviour', () => {
@@ -1083,6 +1101,48 @@ test('only one host is open at a time', () => {
   // They are all at the same layer now, so two open at once is one sitting on
   // top of the other.
   assert.ok(/closeOtherHosts/.test(SRC), 'nothing closes the host you just left');
+});
+
+test('the dock is in the order it was asked for', () => {
+  /* Save in the middle, Feed on its left, Chat on its right, Music right of
+   * Chat, Games left of Feed. Written as the relationships rather than as one
+   * expected array, so the five that were NOT specified can be moved around
+   * without this test having an opinion about them. */
+  const ids = build({ open: 'feed' }).ids();
+  const at = (id) => {
+    const i = ids.indexOf(id);
+    assert.ok(i >= 0, `${id} is not in the dock: ${ids.join(', ')}`);
+    return i;
+  };
+  assert.ok(at('dockFeed') < at('pickupFab'), 'Feed is not left of Save');
+  assert.ok(at('dockChat') > at('pickupFab'), 'Chat is not right of Save');
+  assert.ok(at('dockMusic') > at('dockChat'), 'Music is not right of Chat');
+  assert.ok(at('dockGames') < at('dockFeed'), 'Games is not left of Feed');
+  // Save centred is the dock's own job -- app.part6.js re-centres on it -- but
+  // it cannot centre something that is not in the middle of the row.
+  const left = at('pickupFab');
+  const right = ids.length - 1 - left;
+  assert.ok(Math.abs(left - right) <= 1,
+    `Save has ${left} buttons left of it and ${right} right: ${ids.join(', ')}`);
+});
+
+test('reordering the dock leaves anything it has not heard of alone', () => {
+  // A button added later should move, not disappear.
+  const dom = build({ open: 'feed' });
+  const stray = dom.document.createElement('button');
+  stray.id = 'dockSomethingNew';
+  dom.track.appendChild(stray);
+  dom.api.orderDock();
+  assert.ok(dom.ids().includes('dockSomethingNew'), 'it was dropped from the track');
+});
+
+test('reordering a dock already in order touches nothing', () => {
+  /* It runs on every settle pass, and moving nodes resets the dock's sideways
+   * scroll -- which app.part6.js only puts back after ten idle seconds. */
+  const dom = build({ open: 'feed' });
+  const before = dom.track.children.slice();
+  dom.api.orderDock();
+  assert.deepStrictEqual(dom.track.children, before, 'it reshuffled an ordered dock');
 });
 
 test('the answer sits at the top, and nothing sits on it', () => {
