@@ -123,13 +123,21 @@
   }
 
   async function request(path, opts) {
-    var headers = {};
     var t = token();
-    if (t) headers.Authorization = "Bearer " + t;
-    var res = await fetch(apiBase() + path, Object.assign({ mode: "cors", headers: headers }, opts || {}));
+    /* The same header-clobbering bug feed.js had: Object.assign REPLACES
+     * headers, so follow, handle, identity and city -- every write on this
+     * screen -- went out anonymous and 401'd the driver straight out of the
+     * app. Merge, do not replace, and only believe a 401 that came back from a
+     * request which actually carried the token. */
+    var init = Object.assign({ mode: "cors" }, opts || {});
+    init.headers = Object.assign({}, (opts && opts.headers) || {});
+    if (t) init.headers.Authorization = "Bearer " + t;
+    var res = await fetch(apiBase() + path, init);
     var text = await res.text();
     if (!res.ok) {
-      if (res.status === 401) fire("tlc:auth-expired", { status: 401, url: path, token: t });
+      if (res.status === 401 && init.headers.Authorization) {
+        fire("tlc:auth-expired", { status: 401, url: path, token: t });
+      }
       if (res.status === 402) fire("tlc:payment-required", { status: 402, url: path });
       var err = new Error(text || (res.status + " " + res.statusText));
       err.status = res.status;

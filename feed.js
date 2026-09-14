@@ -116,16 +116,30 @@
   }
 
   async function request(path, opts) {
-    var headers = {};
     var t = token();
-    if (t) headers.Authorization = "Bearer " + t;
-    var res = await fetch(apiBase() + path, Object.assign({ mode: "cors", headers: headers }, opts || {}));
+    /* Object.assign copies whole values, so a caller passing its own headers
+     * REPLACED this object rather than adding to it -- and every write here
+     * passes { "Content-Type": "application/json" }. Liking a post, replying,
+     * and deleting a comment all went out with no Authorization at all, got
+     * 401, and signed the driver out. Reads pass no headers, which is why the
+     * feed loaded fine and only doing something broke. Merge, do not replace. */
+    var init = Object.assign({ mode: "cors" }, opts || {});
+    init.headers = Object.assign({}, (opts && opts.headers) || {});
+    if (t) init.headers.Authorization = "Bearer " + t;
+    var res = await fetch(apiBase() + path, init);
     var text = await res.text();
     if (!res.ok) {
-      // Same signals the rest of the app raises, so an expired session takes
-      // the whole app back to the landing page rather than leaving this one
-      // screen stuck on an error nobody can act on.
-      if (res.status === 401) fire("tlc:auth-expired", { status: 401, url: path, token: t });
+      /* Same signals the rest of the app raises, so an expired session takes
+       * the whole app back to the landing page rather than leaving this one
+       * screen stuck on an error nobody can act on.
+       *
+       * Only a request that actually carried the token can prove the token is
+       * dead. A 401 on one that went out anonymous is a bug in this file, and
+       * tearing the session down for it is how a single dropped header became
+       * "liking a post signs you out". */
+      if (res.status === 401 && init.headers.Authorization) {
+        fire("tlc:auth-expired", { status: 401, url: path, token: t });
+      }
       if (res.status === 402) fire("tlc:payment-required", { status: 402, url: path });
       var err = new Error(text || (res.status + " " + res.statusText));
       err.status = res.status;
