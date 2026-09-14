@@ -248,7 +248,13 @@ test('they sit next to Save, because the dock re-centres on Save', () => {
 test('the dock keeps its own behaviour', () => {
   // The sideways slide, the scroll hints and the auto-recentre live in
   // app.part6.js. This file appends two buttons and touches none of it.
-  assert.ok(!/scrollLeft|scrollTo|scrollBy|centerDock|ScrollHint/.test(SRC),
+  // Named precisely. A bare /scrollTo/ also matched window.scrollTo(0, 0),
+  // which undoes iOS's own scroll when the keyboard opens and has nothing to
+  // do with the dock -- so the test failed on a change it was not about.
+  // #dockViewport is the scroller; #dockTrack is only where the two buttons
+  // are appended, which is the documented job and is asserted above. Naming
+  // the track here made the test fail on the feature it exists to protect.
+  assert.ok(!/dockViewport|scrollLeft|scrollBy|centerDock|ScrollHint/.test(SRC),
     'feed-first.js reaches into the dock scroller');
   assert.ok(!/display\s*:\s*none[^}]*#dock\b/.test(CSS), 'the dock gets hidden somewhere');
   assert.ok(!/overflow-x\s*:\s*(hidden|visible)/.test(CSS),
@@ -658,14 +664,42 @@ test('the dock clearance is where a height:100% panel can see it', () => {
     'the clearance is back on the body, where a height:100% child cannot see it');
 });
 
-test('typing gives the composer the dock\'s room', () => {
-  // The keyboard takes the bottom of the screen and the dock goes with it.
-  // Holding 92px for a dock nobody can see puts the composer behind the
-  // keyboard instead.
-  assert.ok(/body\.chatKeyboardMode\.feed-first #dockDrawer\s*\{[^}]*padding-bottom/s.test(CSS),
-    'the composer keeps the dock clearance while the keyboard is up');
-  assert.ok(/body\.chatKeyboardMode\.feed-first #dock\s*\{[^}]*display:\s*none/s.test(CSS),
+test('the sheet follows the keyboard instead of being covered by it', () => {
+  /* A position: fixed sheet is anchored to the LAYOUT viewport, which the
+   * keyboard does not change -- so the composer stayed put, the keyboard
+   * covered it, and iOS scrolled the whole document to reveal the focused
+   * field. That scroll is what tore the layout apart.
+   *
+   * chatKeyboardMode only covers text entry inside the chat drawer; the
+   * visualViewport measurement covers the feed's reply box too, so the class
+   * that drives this is the measured one. */
+  assert.ok(/body\.feed-first\.tj-kb-up[^{]*#dockDrawer[^{]*\{[^}]*bottom:\s*var\(--tj-kb\)/s.test(CSS),
+    'the sheet does not follow the keyboard');
+  assert.ok(/body\.feed-first\.tj-kb-up[^{]*\{[^}]*padding-bottom:\s*8px/s.test(CSS),
+    'the composer is still held above a dock that is not there');
+  assert.ok(/tj-kb-up #dock[^{]*\{[^}]*display:\s*none/s.test(CSS),
     'the dock sits over the keyboard');
+  assert.ok(/visualViewport/.test(SRC), 'nothing measures the keyboard');
+  assert.ok(/window\.scrollTo\(0,\s*0\)/.test(SRC),
+    "iOS's own scroll is left in place, which is what broke the layout");
+});
+
+test('the layout viewport being short is measured, not assumed', () => {
+  /* On the reporter's phone every bottom-anchored thing sat ~62pt above the
+   * physical bottom of the screen: in a standalone web app the layout viewport
+   * comes out one status bar shorter than the screen it is painted on. No CSS
+   * can see that; window.innerHeight against screen.height can.
+   *
+   * Guarded hard, because getting this wrong moves the whole UI: standalone
+   * only, portrait only, and only a band in a plausible range. Everywhere else
+   * it measures zero and changes nothing. */
+  assert.ok(/function viewportGap/.test(SRC), 'nothing measures the gap');
+  const fn = SRC.slice(SRC.indexOf('function viewportGap'));
+  const body = fn.slice(0, fn.indexOf('\n  }'));
+  assert.ok(/standalone/.test(body), 'it would fire in a browser with toolbars');
+  assert.ok(/innerWidth/.test(body), 'screen.height does not rotate; landscape would read a bogus gap');
+  assert.ok(/140/.test(body) && /> 8/.test(body), 'no sanity band on the measurement');
+  assert.ok(/--tj-vgap/.test(CSS), 'nothing uses it');
 });
 
 test('Profile and Admin are in the sheet too', () => {
