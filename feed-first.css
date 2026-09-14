@@ -25,6 +25,19 @@ body.feed-first {
   --tj-split: 39%;
   --tj-sheet: rgba(243, 245, 249, 0.82);
   --tj-sheet-solid: #f3f5f9;
+  /* How far the dock floats off the bottom, and how much room everything in
+     the sheet has to leave for it. One number, two places -- they were drifting
+     apart every time either moved.
+     env(safe-area-inset-bottom) is 34pt on a home-indicator phone, and the
+     dock used to sit at that plus 10. That was right while the map showed
+     through underneath; now the sheet runs to the bottom edge it left a 55pt
+     band of blank frosting under the icons. Reported as "the icons were not
+     lowered so it doesn't match". max() keeps it at 10px where there is no
+     inset, so a desktop browser does not push the dock off the bottom. */
+  --tj-dock-lift: max(10px, calc(env(safe-area-inset-bottom, 0px) - 14px));
+  /* The dock box is ~72px tall (70px Save, 2px track padding), so its top edge
+     is at lift + 72. 82 leaves 10px of air above it. */
+  --tj-dock-clear: calc(var(--tj-dock-lift) + 82px + var(--tj-vgap));
 }
 
 /* ------------------------------------------------------------ the map */
@@ -118,9 +131,8 @@ body.feed-first #dockDrawer {
    * it. The frosting still runs to the bottom, so the dock sits on the sheet
    * rather than on a cut edge.
    *
-   * The dock is 74px tall at safe-area + 10px, so its top edge is at
-   * safe-area + 84px. */
-  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 92px + var(--tj-vgap));
+   * --tj-dock-clear is the dock's height plus wherever it is floating. */
+  padding-bottom: var(--tj-dock-clear);
   transform: translateY(100%);
   transition: top 0.26s cubic-bezier(0.32, 0.72, 0, 1),
               transform 0.26s cubic-bezier(0.32, 0.72, 0, 1);
@@ -227,7 +239,7 @@ body.feed-first .adminPanel {
   /* The dock's clearance, on the container -- the same reason as the drawer:
      a height: 100% body resolves against this box and never sees padding on
      itself. */
-  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 92px + var(--tj-vgap)) !important;
+  padding-bottom: var(--tj-dock-clear) !important;
   /* Their own open animations translate on X as well as Y and would fight the
      top the split is driving. */
   transform: translateY(100%) !important;
@@ -253,7 +265,7 @@ body.feed-first .adminPanelBody { min-height: 0; }
  * in it, and under Feed First the dock is the navigation. */
 body.feed-first .shellMenuBtn { display: none !important; }
 body.feed-first .shellScreenBody {
-  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 104px + var(--tj-vgap));
+  padding-bottom: calc(var(--tj-dock-clear) + 12px);
   /* Clears the handle. It is 34px tall and fixed to the sheet's top edge, so
      16px of padding put the scope chips under the arrow -- caught in a
      screenshot, where the chevron was sitting on top of "My city". */
@@ -357,9 +369,16 @@ body.feed-first #dock { z-index: 9300 !important; }
  * screen, and on a phone with a 34pt home indicator that is the dock floating
  * 72pt off the bottom with an empty band under it. Reported as "the bottom
  * part has an empty section", and invisible in any browser without a home
- * indicator inset -- which is every browser I can run here. */
+ * indicator inset -- which is every browser I can run here.
+ *
+ * safe-area + 10 was still 44pt up, which was fine while the map showed
+ * through under the icons and wrong once the sheet ran to the bottom edge:
+ * measured off the phone, the small buttons ended 55pt above the screen with
+ * blank frosting under them. --tj-dock-lift is 20pt there and 10pt where there
+ * is no inset, and the same token drives every clearance above so the two can
+ * no longer drift apart. */
 body.feed-first #dock {
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 10px - var(--tj-vgap)) !important;
+  bottom: calc(var(--tj-dock-lift) - var(--tj-vgap)) !important;
 }
 
 /* Solid over text, over a fade. rgba(240,240,240,0.95) is invisible as

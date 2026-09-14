@@ -27,6 +27,43 @@ const SHELL_JS = fs.readFileSync(path.join(ROOT, 'app-shell.js'), 'utf8');
 const INDEX = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
 
 // --------------------------------------------------------------------------
+// The dock's offset and every clearance that has to match it come from two
+// custom properties now, so reading a literal px out of the rule finds nothing.
+// Resolve them here instead of loosening the assertions: INDICATOR is the
+// safe-area inset on a home-indicator phone, which is the case these numbers
+// exist for and the one no browser here can reproduce.
+const INDICATOR = 34;
+
+function rootToken(name) {
+  const block = CSS.match(/body\.feed-first\s*\{([\s\S]*?)\n\}/);
+  assert.ok(block, 'no body.feed-first token block');
+  const m = block[1].match(new RegExp('--' + name + ':\\s*([^;]+);'));
+  assert.ok(m, `--${name} is not declared`);
+  return m[1].trim();
+}
+
+// max(Npx, calc(env(safe-area-inset-bottom, 0px) - Mpx)) -> { floor, onIndicator }
+function dockLift() {
+  const raw = rootToken('tj-dock-lift');
+  assert.ok(/safe-area-inset-bottom/.test(raw), 'the dock ignores the home indicator');
+  const floor = Number((raw.match(/max\(\s*(\d+)px/) || [])[1]);
+  const sub = Number((raw.match(/-\s*(\d+)px/) || [])[1]);
+  assert.ok(Number.isFinite(floor) && Number.isFinite(sub),
+    `--tj-dock-lift is not the shape these tests read: ${raw}`);
+  return { raw, floor, onIndicator: Math.max(floor, INDICATOR - sub) };
+}
+
+// calc(var(--tj-dock-lift) + Npx + var(--tj-vgap)) -> px on a home-indicator phone
+function dockClear() {
+  const raw = rootToken('tj-dock-clear');
+  assert.ok(/var\(--tj-dock-lift\)/.test(raw), 'the clearance does not follow the dock');
+  assert.ok(/var\(--tj-vgap\)/.test(raw), 'the clearance forgets the viewport gap');
+  const air = Number((raw.match(/\+\s*(\d+)px/) || [])[1]);
+  assert.ok(Number.isFinite(air), `--tj-dock-clear is not the shape these tests read: ${raw}`);
+  return { raw, air, onIndicator: dockLift().onIndicator + air };
+}
+
+// --------------------------------------------------------------------------
 
 function makeNode(tag) {
   const node = {
@@ -602,11 +639,20 @@ test('the dock sits at the bottom of the screen', () => {
   // slider for everyone, so an admin was left holding clearance for something
   // that is not there -- 72pt off the bottom on a phone with a home indicator,
   // with an empty band underneath.
+  //
+  // safe-area + 10 was still 44pt up, which read as a band of blank frosting
+  // under the icons once the sheet ran to the bottom edge -- measured off a
+  // screenshot at 55pt under the small buttons.
   const m = CSS.match(/body\.feed-first #dock\s*\{([^}]*bottom[^}]*)\}/s);
   assert.ok(m, 'the dock keeps the scrubber offset under Feed First');
-  const px = Number((m[1].match(/\+\s*(\d+)px/) || [])[1]);
-  assert.ok(Number.isFinite(px) && px <= 14, `dock sits ${px}px above the safe area`);
-  assert.ok(/safe-area-inset-bottom/.test(m[1]), 'the dock ignores the home indicator');
+  assert.ok(/var\(--tj-dock-lift\)/.test(m[1]),
+    'the dock is not on the token every clearance reads');
+  assert.ok(/var\(--tj-vgap\)/.test(m[1]), 'the dock forgets the viewport gap');
+  const lift = dockLift();
+  assert.ok(lift.onIndicator <= 24,
+    `dock sits ${lift.onIndicator}px up on a home-indicator phone`);
+  // Never so low that a browser without an inset pushes it off the bottom.
+  assert.ok(lift.floor >= 8, `dock floor is ${lift.floor}px where there is no inset`);
 });
 
 test('nothing transitions while a finger is on it', () => {
@@ -648,14 +694,15 @@ test('the dock clearance is where a height:100% panel can see it', () => {
    * Padding the flex CONTAINER shortens the box those wraps measure against. */
   const drawer = CSS.match(/body\.feed-first #dockDrawer\s*\{([^}]*)\}/s);
   assert.ok(drawer, 'no drawer rule');
-  // [^)]* would stop at env()'s own closing paren and match nothing -- the
-  // first cut of this read NaN and failed against CSS the browser had already
-  // been watched getting right.
-  const pad = Number((drawer[1].match(/padding-bottom:\s*calc\([\s\S]*?\+\s*(\d+)px/) || [])[1]);
-  // The dock is 74px tall sitting at safe-area + 10px, so its top edge is at
-  // safe-area + 84px.
-  assert.ok(Number.isFinite(pad) && pad >= 84,
-    `the container reserves ${pad}px for a dock whose top edge is at 84px`);
+  assert.ok(/padding-bottom:\s*var\(--tj-dock-clear\)/.test(drawer[1]),
+    'the container does not reserve the dock clearance');
+  // The dock box is ~72px tall, so whatever air the token adds on top of the
+  // lift has to cover it -- otherwise the last row of a panel lands under the
+  // icons, which is how chat lost its composer.
+  const clear = dockClear();
+  assert.ok(clear.air >= 78, `the clearance reserves ${clear.air}px for a 72px dock`);
+  assert.ok(clear.onIndicator >= dockLift().onIndicator + 78,
+    `the container reserves ${clear.onIndicator}px on a home-indicator phone`);
 
   const body = CSS.match(/body\.feed-first \.dockDrawerBody\s*\{([^}]*)\}/s);
   assert.ok(body, 'no drawer body rule');
@@ -713,8 +760,8 @@ test('Profile and Admin are in the sheet too', () => {
   assert.ok(sheet, 'neither gets the sheet geometry');
   assert.ok(/top:\s*var\(--tj-split\)/.test(sheet[1]), 'they do not sit on the split');
   assert.ok(/backdrop-filter:\s*blur/.test(sheet[1]), 'they are not frosted');
-  assert.ok(/padding-bottom:\s*calc\([\s\S]*?\+\s*9\d px?|padding-bottom:\s*calc\([\s\S]*?\+\s*9\d+px/
-    .test(sheet[1]), 'no dock clearance on the container');
+  assert.ok(/padding-bottom:\s*var\(--tj-dock-clear\)/.test(sheet[1]),
+    'no dock clearance on the container');
   assert.ok(/\.driverProfileBackdrop\s*\{[^}]*display:\s*none/s.test(CSS),
     'profile still dims the map behind it');
 });
