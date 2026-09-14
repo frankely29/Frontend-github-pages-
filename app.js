@@ -2085,6 +2085,13 @@ function initMap() {
     enforceSaveButtonTheme();
     mapReady = true;
     map.resize();
+    // The launch settle, for iOS. The window goes full-bleed after the first
+    // frames and does not always say so; these three catch it without waiting
+    // for a gesture. Idempotent, so on every other platform they do nothing.
+    [120, 600, 1800].forEach((ms) => window.setTimeout(() => {
+      if (typeof resizeMapToViewport === "function") resizeMapToViewport();
+      else if (map && typeof map.resize === "function") { try { map.resize(); } catch (_) {} }
+    }, ms));
     applyNightBasemap(!!window.TlcMapUiModule?.getWeatherState?.()?.isNight);
     // Explicit navigation init order:
     // 1) preview service, 2) manual widget owner, 3) turn-by-turn engine.
@@ -4042,6 +4049,42 @@ window.addEventListener("resize", () => {
   if (timeline.length) setSliderBubbleTextAndPos();
   enforceSaveButtonTheme();
 });
+
+/* Re-measure the map whenever the viewport moves under it.
+ *
+ * MapLibre watches its own container and normally needs none of this. iOS is
+ * the exception: a standalone web app launches inset below the status bar and
+ * then goes full-bleed a moment later, and the visual viewport changes again
+ * every time the browser chrome collapses or expands. Those transitions do not
+ * reliably reach a ResizeObserver there, and a canvas that measured the short
+ * viewport keeps drawing at that size -- the gap along the bottom that the CSS
+ * above is the other half of the fix for.
+ *
+ * resize() is cheap and idempotent: it returns immediately when nothing has
+ * changed, so calling it on every one of these is fine and calling it on a few
+ * timers after load is what catches the launch settle, which fires no event at
+ * all on some iOS versions.
+ */
+function resizeMapToViewport() {
+  if (!mapReady || !map || typeof map.resize !== "function") return;
+  try { map.resize(); } catch (_) {}
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("resize", resizeMapToViewport, { passive: true });
+  window.addEventListener("orientationchange", resizeMapToViewport, { passive: true });
+  // Coming back from another app, or out of the bfcache, can restore the page
+  // at a different size than it left at.
+  window.addEventListener("pageshow", resizeMapToViewport);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) resizeMapToViewport();
+  });
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener("resize", resizeMapToViewport, { passive: true });
+    window.visualViewport.addEventListener("scroll", resizeMapToViewport, { passive: true });
+  }
+  window.resizeMapToViewport = resizeMapToViewport;
+}
 window.addEventListener("team-joseo-startup-camera-locked", () => {
   if (startupInitialFrameIndex === null || startupViewportFrameStarted) return;
   void runStartupViewportFrameSequence(startupInitialFrameIndex);

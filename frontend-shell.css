@@ -1,10 +1,35 @@
 html, body { height: 100%; margin: 0; padding: 0; background: #e5e5e5; }
+/* Everything on the map screen is position: fixed, so the page box only has to
+   be at least as tall as the viewport -- but on iOS `height: 100%` here is the
+   same short measurement that put a strip of this background under the map.
+   100dvh is the real viewport on every browser that has it, and the 100% above
+   stays as the fallback for those that do not. */
+@supports (height: 100dvh) {
+  html, body { height: 100dvh; }
+}
 .hidden { display: none !important; }
+    /* Anchored to all four edges, never sized by a percentage.
+     *
+     * `height: 100%` is what left a band of page background along the bottom on
+     * iOS. The element is position: fixed, so top, height and bottom were all
+     * set at once -- over-constrained, and the spec throws `bottom` away. That
+     * left the percentage deciding, and on iOS a standalone web app with
+     * apple-mobile-web-app-status-bar-style: black-translucent resolves 100%
+     * against the screen MINUS the status bar, while viewport-fit=cover paints
+     * the page over the whole screen. The map came out exactly one status bar
+     * short: measured 894px of map on a 956px screen, a flat 62px strip of
+     * body background underneath it, edge to edge.
+     *
+     * With no height and no width, top/right/bottom/left do the sizing and the
+     * element fills whatever the viewport actually is -- no percentage, nothing
+     * to resolve against the wrong box. Written out longhand rather than as
+     * `inset` so it is obvious that all four are doing the work. */
     #map {
       position: fixed;
-      inset: 0;
-      height: 100%;
-      width: 100%;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      left: 0;
     }
 
     /* =========================================================
@@ -52,9 +77,17 @@ html, body { height: 100%; margin: 0; padding: 0; background: #e5e5e5; }
     /* =========================================================
        WEATHER FX OVERLAY
        ========================================================= */
+    /* Fixed, for the same reason as #map: this was absolute, so it sized
+     * against <body>, whose height: 100% has the same iOS problem. Its own
+     * script also writes an explicit pixel height from window.innerHeight, so
+     * the CSS is the floor rather than the whole answer -- but a floor that
+     * agrees with the map is the point. */
     #wxCanvas{
-      position: absolute;
-      inset: 0;
+      position: fixed;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      left: 0;
       z-index: 700;
       pointer-events: none;
     }
