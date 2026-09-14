@@ -155,6 +155,68 @@ body.chatKeyboardMode.feed-first #dock { display: none !important; }
    the whole point of the layout, so the scrim that used to dim it has no job. */
 body.feed-first #dockBackdrop { display: none !important; }
 
+/* ------------------------------- the two that were never in the drawer
+ *
+ * Profile opens .driverProfileSheet inside #driverProfileModalRoot, and Admin
+ * opens .adminPanel inside .adminPortal. Neither ever used #dockDrawer, which
+ * is why they still looked like the old app after everything else moved into
+ * the sheet: their own container, their own z-index, their own backdrop.
+ *
+ * Both are the same shape as the drawer -- a flex column with a header and a
+ * scrolling body -- so they take the same geometry. The roots drop to the
+ * sheet's layer so the handle (9250) and the dock (9300) stay on top of them,
+ * and their backdrops go: nothing here is modal any more. */
+body.feed-first #driverProfileModalRoot,
+body.feed-first .adminPortal {
+  z-index: 9200 !important;
+  background: transparent !important;
+  padding: 0 !important;
+  pointer-events: none;
+}
+body.feed-first .driverProfileBackdrop { display: none !important; }
+
+body.feed-first .driverProfileSheet,
+body.feed-first .adminPanel {
+  position: fixed !important;
+  top: var(--tj-split) !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: auto !important;
+  height: auto !important;
+  max-height: none !important;
+  margin: 0 !important;
+  border: 0 !important;
+  border-radius: 22px 22px 0 0 !important;
+  background: var(--tj-sheet) !important;
+  backdrop-filter: blur(16px) saturate(1.15);
+  -webkit-backdrop-filter: blur(16px) saturate(1.15);
+  box-shadow: 0 -10px 30px rgba(11, 16, 24, 0.18) !important;
+  z-index: 9200 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  pointer-events: auto;
+  /* The dock's clearance, on the container -- the same reason as the drawer:
+     a height: 100% body resolves against this box and never sees padding on
+     itself. */
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 92px) !important;
+  /* Their own open animations translate on X as well as Y and would fight the
+     top the split is driving. */
+  transform: translateY(100%) !important;
+  transition: top 0.26s cubic-bezier(0.32, 0.72, 0, 1),
+              transform 0.26s cubic-bezier(0.32, 0.72, 0, 1) !important;
+}
+body.feed-first #driverProfileModalRoot.open .driverProfileSheet,
+body.feed-first .adminPortal.open .adminPanel { transform: translateY(0) !important; }
+body.feed-first.tj-dragging .driverProfileSheet,
+body.feed-first.tj-dragging .adminPanel { transition: none !important; }
+
+/* Clear of the handle, like every other occupant. */
+body.feed-first .driverProfileHeader,
+body.feed-first .adminPanelHeader { padding-top: 40px !important; }
+body.feed-first .driverProfileBody,
+body.feed-first .adminPanelBody { min-height: 0; }
+
 /* The menu button stays down for every occupant of the sheet.
  *
  * app-shell.css hides it on body.shell-screen-open, which is true for the feed
