@@ -323,7 +323,78 @@
    *
    * The strip is the canvas behind the viewport, and the only thing that
    * paints there is the root background. So feed-first.css gives the canvas
-   * the sheet's own colour and the strip stops existing to look at. */
+   * the sheet's own colour and the strip stops existing to look at.
+   *
+   * That fixed the colour and not the cause, and the next photo says so: the
+   * sheet's top edge is 536pt down, it sits at 60%, and 536 / 0.6 is 894 on a
+   * 956pt screen. Nothing is mispositioned -- the window is 62pt short and
+   * everything in it is exactly where it should be. The strip is no longer a
+   * grey band, it is the sheet's own colour, but the dock is still 62pt higher
+   * off the bottom of the screen than it is off the bottom of the window.
+   *
+   * So the only fix left is to get the window back, which is below.
+   */
+  var lastKeyboard = 0;
+
+  /* Is the window short of the screen it is painted in?
+   *
+   * Guarded three ways because being wrong about this moves the whole UI:
+   * standalone only (a browser tab is SUPPOSED to be shorter than the screen,
+   * by the height of its own chrome), portrait only (screen.height does not
+   * rotate on iOS, so landscape reads a huge bogus difference), and only
+   * inside a band that a status bar could plausibly account for.
+   */
+  function windowIsShort() {
+    var standalone = false;
+    try {
+      standalone = window.navigator.standalone === true
+        || !!(window.matchMedia && window.matchMedia("(display-mode: standalone)").matches);
+    } catch (_) {}
+    if (!standalone) return 0;
+    var screenH = Math.round(Number(window.screen && window.screen.height) || 0);
+    var innerH = Math.round(Number(window.innerHeight) || 0);
+    if (!screenH || !innerH) return 0;
+    if (innerH <= (Number(window.innerWidth) || 0)) return 0;
+    var short = screenH - innerH;
+    return short > 8 && short < 140 ? short : 0;
+  }
+
+  /* Ask iOS to measure the window again.
+   *
+   * A standalone web app that has had the keyboard up sometimes keeps the
+   * shrunken window after the keyboard goes. Two things are known to be
+   * involved and both are cheap to undo: a field that still holds focus after
+   * the keyboard is dismissed, which iOS reads as still editing, and a
+   * document left scrolled. Neither is wanted once the keyboard is gone.
+   *
+   * The height poke at the end forces a reflow of the root. Whether that is
+   * enough to make iOS re-measure its own web view is the part I cannot test:
+   * no browser here reproduces the short window, so this is reasoned from the
+   * measurements rather than watched working. It is one frame, once per
+   * keyboard, and only when the window is actually short -- so where it does
+   * not help it also does nothing.
+   */
+  function askForTheWindowBack() {
+    if (!windowIsShort()) return;
+    try {
+      var focused = document.activeElement;
+      if (focused && typeof focused.blur === "function"
+        && /^(INPUT|TEXTAREA|SELECT)$/.test(String(focused.tagName || ""))) {
+        focused.blur();
+      }
+    } catch (_) {}
+    try { window.scrollTo(0, 0); } catch (_) {}
+    try {
+      var root = document.documentElement;
+      if (!root || !root.style) return;
+      var had = root.style.height;
+      root.style.height = (Number(window.innerHeight) || 0) + 1 + "px";
+      // Read something layout-dependent so the write cannot be coalesced away.
+      void root.offsetHeight;
+      root.style.height = had;
+    } catch (_) {}
+  }
+
   function paintViewport() {
     if (!document.body) return;
     var kb = keyboardInset();
@@ -335,6 +406,13 @@
     if (kb > 0 && (window.scrollY || window.pageYOffset)) {
       try { window.scrollTo(0, 0); } catch (_) {}
     }
+    // The keyboard has just gone. Give iOS a moment to put the window back on
+    // its own, and only then ask.
+    if (lastKeyboard > 0 && kb === 0) {
+      window.setTimeout(askForTheWindowBack, 260);
+      window.setTimeout(askForTheWindowBack, 900);
+    }
+    lastKeyboard = kb;
   }
 
   function hintsUsed() {
@@ -616,6 +694,13 @@
     window.addEventListener("orientationchange", function () {
       window.setTimeout(paintViewport, 250);
     });
+    /* Coming back to the app is the other moment the window can be found
+     * short: it was left that way, the app was backgrounded, and nothing since
+     * has fired a resize. Asking on return costs one measurement. */
+    window.addEventListener("pageshow", askForTheWindowBack);
+    document.addEventListener("visibilitychange", function () {
+      if (!document.hidden) window.setTimeout(askForTheWindowBack, 120);
+    });
     window.addEventListener("tlc:shell-screen-changed", apply);
 
     /* The drawer announces itself; the other two do not.
@@ -689,6 +774,8 @@
   window.TeamJoseoFeedFirst = {
     apply: apply,
     paintViewport: paintViewport,
+    windowIsShort: windowIsShort,
+    askForTheWindowBack: askForTheWindowBack,
     keyboardInset: keyboardInset,
     viewportShift: viewportShift,
     installDockButtons: installDockButtons,
