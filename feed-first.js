@@ -68,6 +68,19 @@
     return !!(drawer && drawer.classList && drawer.classList.contains("open"));
   }
 
+  /* Who is in the sheet: the feed, something else, or nobody.
+   *
+   * The feed is the one a driver lives on, so it opens where they left it --
+   * minimised by default, because the map is what they came for. Everything
+   * else is something they went looking for, so it opens expanded: nobody taps
+   * Chat wanting a third of Chat. */
+  function occupant() {
+    if (drawerOpen()) return "panel";
+    var key = openKey();
+    if (!key) return null;
+    return key === HOME ? "feed" : "panel";
+  }
+
   function closeDrawer() {
     if (!drawerOpen()) return false;
     // Through its own close button rather than a private function: closeDrawer
@@ -213,7 +226,10 @@
   function setSplit(next, options) {
     split = Math.min(0.92, Math.max(0.16, next));
     paintSplit();
-    if (options && options.remember) {
+    // Only the feed's position is worth keeping. A panel always opens expanded,
+    // so remembering where a driver left Chat would be remembering something
+    // that is never read back.
+    if (options && options.remember && occupant() === "feed") {
       try { localStorage.setItem("tj_sheet_split_v1", String(split)); } catch (_) {}
     }
   }
@@ -230,11 +246,29 @@
     noteUse();
   }
 
-  function restoreSplit() {
+  function feedSplit() {
     var saved = null;
     try { saved = localStorage.getItem("tj_sheet_split_v1"); } catch (_) {}
     var n = Number(saved);
-    setSplit(Number.isFinite(n) && n > 0 ? n : MINIMIZED);
+    return Number.isFinite(n) && n > 0 ? n : MINIMIZED;
+  }
+
+  function restoreSplit() {
+    setSplit(feedSplit());
+  }
+
+  /* Open where this occupant belongs.
+   *
+   * Only on a change of occupant, never on every repaint -- otherwise a driver
+   * who has just dragged the sheet somewhere would be snapped back by the next
+   * /me refresh. */
+  var lastOccupant = null;
+  function splitForOccupant() {
+    var who = occupant();
+    if (who === lastOccupant) return;
+    lastOccupant = who;
+    if (who === "panel") setSplit(EXPANDED);
+    else if (who === "feed") setSplit(feedSplit());
   }
 
   function onDown(event) {
@@ -325,6 +359,7 @@
     // And the map only when nothing is covering it at all.
     if (map) map.classList.toggle("on", !openKey() && !drawerOpen());
 
+    splitForOccupant();
     if (home === was) return;
     paintSplit();
     paintHint();
