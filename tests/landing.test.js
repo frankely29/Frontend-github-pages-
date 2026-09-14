@@ -75,6 +75,14 @@ function makeNode(tag) {
     if (sel.indexOf(',') >= 0) {
       return sel.split(',').some((part) => matches(n, part.trim()));
     }
+    // A compound selector -- an attribute and a class on the same element,
+    // like [data-landing-go='signin'].landingGhostBtn, which is how landing.js
+    // singles out the header sign-in button. This fell through to the tag-name
+    // compare at the bottom and matched nothing, silently: the test that was
+    // meant to catch that button being hidden passed against the broken code
+    // because q() handed it null and the source's `if (top)` never ran.
+    const parts = sel.match(/\[[^\]]*\]|\.[\w-]+|[\w-]+/g) || [];
+    if (parts.length > 1) return parts.every((part) => matches(n, part));
     if (sel.startsWith('.')) return n.classList.contains(sel.slice(1));
     if (sel.startsWith('[') && sel.endsWith(']')) {
       const inner = sel.slice(1, -1);
@@ -113,6 +121,11 @@ function buildDom() {
 
   pitch.appendChild(make('button', null, { 'data-landing-go': 'signup' }));
   pitch.appendChild(make('button', null, { 'data-landing-go': 'signin' }));
+  // The real page carries two sign-in affordances: this ghost button in the
+  // header, which landing.js singles out by class, and the one above inside
+  // the call-to-action block. A fixture with only the second cannot see what
+  // setLapsed does to the first.
+  pitch.appendChild(make('button', null, { 'data-landing-go': 'signin' }, 'landingGhostBtn'));
   pitch.appendChild(make('div', null, { 'data-landing-cta': 'new' }));
   pitch.appendChild(make('div', null, { 'data-landing-cta': 'lapsed' }));
   pitch.appendChild(make('p', null, { 'data-landing-fine': 'new' }));
@@ -518,6 +531,34 @@ test('hiding puts the landing back the way a signed-out visitor needs it', () =>
     'unlocking leaves the landing in its lapsed shape');
   const hide = PAYWALL_JS.slice(PAYWALL_JS.indexOf('function hide('));
   assert.ok(/lockDocument\(false\)/.test(hide), 'hide() no longer unlocks');
+});
+
+test('the locked page still offers a way to sign in', () => {
+  // The locked screen is the one with no other way off it: Subscribe, Manage
+  // subscription and the redeem box all assume this is the right account.
+  // setLapsed(true) used to hide the only sign-in button on the page, so a
+  // driver on the wrong account -- or with a second one that is paid up -- had
+  // to pay to get out. Measured before: visible NEVER on the locked page.
+  const dom = buildDom();
+  const ghost = dom.landing.querySelectorAll('[data-landing-go="signin"]')
+    .filter((n) => n.classList.contains('landingGhostBtn'))[0];
+  assert.ok(ghost, 'the top-right sign-in button is gone from the fixture');
+
+  dom.api.setLapsed(true);
+  assert.strictEqual(ghost.hidden, false, 'the locked page hides its only sign-in button');
+  dom.api.setLapsed(false);
+  assert.strictEqual(ghost.hidden, false, 'sign in did not come back for a signed-out visitor');
+});
+
+test('the locked page reveals sign in without waiting for landing.js', () => {
+  // Same reason the rest of the locked state is CSS: landing.js sets
+  // hidden=true on this button while a session is being checked, and on a
+  // locked page nothing was coming along to unset it.
+  const critical = (INDEX.match(/<style id="tjBootCritical">([\s\S]*?)<\/style>/) || [])[1] || '';
+  const rules = critical.replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.ok(/html\.tj-locked\s+\.landingTop\s+\.landingGhostBtn\s*\{[^}]*display:\s*(?!none)/
+    .test(rules),
+    'nothing forces the sign-in button back on the locked page');
 });
 
 test('the lapsed page keeps the pitch and swaps only the call to action', () => {
