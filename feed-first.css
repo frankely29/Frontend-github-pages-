@@ -60,6 +60,74 @@ body.feed-first .feedNote { background-color: #ffffff; }
 body.feed-first .feedScope.on { background-color: #101622; }
 
 body.feed-first .shellScreenBar { display: none !important; }
+
+/* --------------------------------------------- the same sheet, everything
+ *
+ * Chat, the leaderboard, games, music, colours, modes and profile are not
+ * shell screens -- they are panels that share one container, #dockDrawer, with
+ * their content swapped into it. That is lucky: re-homing seven panels is one
+ * set of rules on one element rather than seven rewrites.
+ *
+ * So the drawer stops being a floating card top-left (or, for chat, a
+ * bottom-anchored 82dvh box with a red gradient) and becomes the sheet. Same
+ * top, same frosting, same corners, same handle, same drag. Tapping Chat
+ * changes what is in the sheet and nothing else about the screen.
+ *
+ * The ID beats .dockDrawer.panelChat's own geometry on specificity, which is
+ * what makes this a rule rather than a fight. Height is set to auto on
+ * purpose: top, height and bottom together is over-constrained and the spec
+ * throws bottom away. */
+body.feed-first #dockDrawer {
+  top: var(--tj-split);
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: auto;
+  height: auto;
+  max-height: none;
+  margin: 0;
+  border: 0;
+  border-radius: 22px 22px 0 0;
+  background: var(--tj-sheet);
+  backdrop-filter: blur(16px) saturate(1.15);
+  -webkit-backdrop-filter: blur(16px) saturate(1.15);
+  box-shadow: 0 -10px 30px rgba(11, 16, 24, 0.18);
+  /* Same layer as the shell screen, under the handle (9250) and dock (9300).
+     panelChat sets 10500 for a card that floated over everything; a sheet does
+     not need to outrank the app's own chrome. */
+  z-index: 9200;
+  display: flex;
+  flex-direction: column;
+  transform: translateY(100%);
+  transition: top 0.26s cubic-bezier(0.32, 0.72, 0, 1),
+              transform 0.26s cubic-bezier(0.32, 0.72, 0, 1);
+}
+body.feed-first #dockDrawer.open { transform: translateY(0); }
+body.feed-first.tj-dragging #dockDrawer { transition: none !important; }
+
+/* Clear of the handle, same as the feed's own body. */
+body.feed-first .dockDrawerHeader { padding: 40px 14px 6px 16px; }
+body.feed-first .dockDrawerTitle { font-size: 17px; letter-spacing: -0.02em; }
+body.feed-first .dockDrawerBody {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 104px);
+}
+
+/* The sheet is not modal. The map behind it stays visible and usable, which is
+   the whole point of the layout, so the scrim that used to dim it has no job. */
+body.feed-first #dockBackdrop { display: none !important; }
+
+/* The menu button stays down for every occupant of the sheet.
+ *
+ * app-shell.css hides it on body.shell-screen-open, which is true for the feed
+ * and false for a dock panel -- so it reappeared the moment you opened Chat and
+ * vanished again when you went back. The sheet should look the same whatever is
+ * in it, and under Feed First the dock is the navigation. */
+body.feed-first .shellMenuBtn { display: none !important; }
 body.feed-first .shellScreenBody {
   padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 104px);
   /* Clears the handle. It is 34px tall and fixed to the sheet's top edge, so
