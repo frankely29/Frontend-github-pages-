@@ -3044,6 +3044,132 @@ if (typeof window !== "undefined") {
   };
 }
 
+/* The preview clock, counted from the server's number and nobody else's.
+ *
+ * The map opens for a few minutes and then locks. Where "a few minutes" is
+ * measured matters: a timer the browser starts for itself resets on reinstall,
+ * on clearing site data and in a private window, so the preview becomes
+ * unlimited for anyone who notices. The clock lives in the access gate, and
+ * /me reports what is left of it -- this counts down from that, and re-arms
+ * from the server's number on every /me, so the moment the map blurs and the
+ * moment the server starts refusing cannot drift apart.
+ *
+ * A deadline and a tick rather than one long setTimeout: a background tab has
+ * its timers throttled and a sleeping phone does not run them at all, so a
+ * single timeout fires late -- sometimes minutes late, always in the driver's
+ * favour. Comparing the wall clock on each tick survives both, and the 402 the
+ * server returns is still the backstop underneath.
+ */
+let mapPreviewDeadline = 0;
+let mapPreviewTicker = null;
+const MAP_PREVIEW_TICK_MS = 1000;
+
+function mapPreviewGranted() {
+  const sub = me?.subscription;
+  if (!sub) return 0;
+  const left = Number(sub.map_preview_remaining_seconds);
+  return Number.isFinite(left) && left > 0 ? Math.floor(left) : 0;
+}
+
+function mapPreviewRemaining() {
+  if (!mapPreviewDeadline) return 0;
+  return Math.max(0, Math.ceil((mapPreviewDeadline - Date.now()) / 1000));
+}
+
+function stopMapPreview() {
+  if (mapPreviewTicker !== null) {
+    try { window.clearInterval(mapPreviewTicker); } catch (_) {}
+    mapPreviewTicker = null;
+  }
+  mapPreviewDeadline = 0;
+  if (typeof document !== "undefined" && document.documentElement) {
+    document.documentElement.classList.remove("tj-map-preview");
+  }
+  paintMapPreviewNote();
+}
+
+function paintMapPreviewNote() {
+  if (typeof document === "undefined") return;
+  const note = document.getElementById("mapPreviewNote");
+  if (!note) return;
+  const left = mapPreviewRemaining();
+  const mins = Math.floor(left / 60);
+  const secs = left % 60;
+  note.textContent = "Free look \u00b7 " + mins + ":" + (secs < 10 ? "0" : "") + secs
+    + " left \u00b7 Subscribe";
+}
+
+function endMapPreview() {
+  stopMapPreview();
+  applyMapLockState(true);
+}
+
+/* What an unpaid driver's map does, start to finish.
+ *
+ * Called with the same verdict that drives everything else, so there is one
+ * answer to "has this account got access" and three things reading it rather
+ * than three things deciding it.
+ */
+function applyMapAccessState(lapsed) {
+  if (!lapsed) {
+    stopMapPreview();
+    applyMapLockState(false);
+    return;
+  }
+  const granted = mapPreviewGranted();
+  if (granted <= 0) {
+    stopMapPreview();
+    applyMapLockState(true);
+    return;
+  }
+  // Re-armed from the server's number every time, which is what keeps this
+  // honest across a /me refresh: the clock is the gate's, not this file's.
+  mapPreviewDeadline = Date.now() + granted * 1000;
+  applyMapLockState(false);
+  if (typeof document !== "undefined" && document.documentElement) {
+    document.documentElement.classList.add("tj-map-preview");
+  }
+  paintMapPreviewNote();
+  if (mapPreviewTicker === null && typeof window !== "undefined") {
+    mapPreviewTicker = window.setInterval(function () {
+      if (mapPreviewRemaining() > 0) { paintMapPreviewNote(); return; }
+      endMapPreview();
+    }, MAP_PREVIEW_TICK_MS);
+  }
+}
+
+if (typeof window !== "undefined") {
+  window.applyMapAccessState = applyMapAccessState;
+  window.mapPreviewRemaining = mapPreviewRemaining;
+  window.endMapPreview = endMapPreview;
+
+  // A 402 on a map route means the gate has already stopped serving it, so the
+  // preview is over whatever this clock thinks. Ending it here rather than
+  // leaving the ticker running keeps it from unblurring a map the server will
+  // not fill.
+  window.addEventListener("tlc:payment-required", function () {
+    if (!subscriptionKnownLapsed()) return;
+    endMapPreview();
+  });
+
+  /* The countdown is its own way to pay.
+   *
+   * Bound by id rather than by the attribute the lock card's Subscribe button
+   * carries: the paywall module finds that one with document.querySelector, so
+   * a second element wearing it would take the wiring and leave the lock card's
+   * button dead. Delegated from the document, because this element exists
+   * before this file runs and outlives every repaint.
+   */
+  document.addEventListener("click", function (ev) {
+    const target = ev && ev.target;
+    const hit = target && target.closest ? target.closest("#mapPreviewNote") : null;
+    if (!hit) return;
+    ev.preventDefault();
+    const paywall = window.TlcPaywallModule;
+    if (paywall && typeof paywall.triggerCheckout === "function") paywall.triggerCheckout();
+  });
+}
+
 /* Everything that is not the map and not the feed.
  *
  * Kept as a second class rather than folded into tj-map-locked, because the two
@@ -3112,7 +3238,7 @@ function setAuthUI(signedIn, note) {
 
   // What an unpaid driver actually loses. One class, read by the inline boot
   // CSS in index.html, so it holds before any of this file has loaded.
-  applyMapLockState(lapsed);
+  applyMapAccessState(lapsed);
   applyFeatureLockState(lapsed);
 
   // The boot's second stage ends here, and only here: this is the first moment

@@ -94,6 +94,9 @@
     visible = locked;
     if (typeof window === 'undefined') return;
     window.__paywallVisible = locked;
+    // Locking explicitly ends the preview as well, or its ticker would keep a
+    // countdown running over a map that is already covered.
+    if (locked && typeof window.endMapPreview === 'function') { window.endMapPreview(); return; }
     if (typeof window.applyMapLockState === 'function') window.applyMapLockState(locked);
   }
 
@@ -345,6 +348,12 @@
     if (hasAccess()) return;
     const meObj = (typeof window !== 'undefined') ? window.me : null;
     if (meObj?.is_admin) return;
+    // A 402 means the gate has stopped serving this route, so the preview is
+    // over whatever the client's clock still says.
+    if (typeof window !== 'undefined' && typeof window.endMapPreview === 'function') {
+      window.endMapPreview();
+      return;
+    }
     if (typeof window !== 'undefined' && typeof window.applyMapLockState === 'function') {
       window.applyMapLockState(true);
       return;
@@ -372,7 +381,23 @@
     const sub = getSubscriptionFromMe();
     const serverSaysNoAccess = !!sub && sub.has_access === false;
 
-    if (typeof window === 'undefined' || typeof window.applyMapLockState !== 'function') return;
+    if (typeof window === 'undefined') return;
+    /* Through applyMapAccessState, not straight to the lock.
+     *
+     * "No access" is not the same as "no map": the gate gives an unpaid driver
+     * a few minutes of it, and /me says how many are left. Locking here on
+     * has_access === false alone -- which is what this used to do -- took the
+     * preview away before it started, so the feature existed on the server and
+     * was invisible in the app. applyMapAccessState re-arms from the server's
+     * number, so this listener firing again on a /me refresh keeps the two
+     * clocks together instead of restarting the preview.
+     */
+    if (typeof window.applyMapAccessState === 'function') {
+      if (hasAnyAccess) window.applyMapAccessState(false);
+      else if (serverSaysNoAccess && !meObj?.is_admin) window.applyMapAccessState(true);
+      return;
+    }
+    if (typeof window.applyMapLockState !== 'function') return;
     if (hasAnyAccess) {
       window.applyMapLockState(false);
     } else if (serverSaysNoAccess && !meObj?.is_admin) {

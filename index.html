@@ -104,6 +104,36 @@
     html.tj-map-locked #mapLoading,
     html.tj-map-locked #dayTendencyMeter { display: none !important; }
 
+    /* The few minutes before the lock, said out loud.
+     *
+     * A map that simply blurs one second is a bug as far as the driver is
+     * concerned. This says how long is left and what to do about it, and it is
+     * the same element whether there are four minutes on it or four seconds --
+     * app.part10.js only rewrites the number. Hidden by default and by the lock
+     * itself, so the note and the card are never both on screen. */
+    #mapPreviewNote { display: none; }
+    html.tj-map-preview:not(.tj-map-locked) #mapPreviewNote {
+      display: block;
+      position: fixed;
+      left: 50%;
+      transform: translateX(-50%);
+      top: calc(env(safe-area-inset-top, 0px) + 10px);
+      z-index: 2500;            /* under the lock card (2600) and the dock */
+      max-width: calc(100vw - 32px);
+      box-sizing: border-box;
+      padding: 7px 14px;
+      border: 0;
+      border-radius: 999px;
+      background: rgba(10, 15, 28, 0.9);
+      color: #fff;
+      font: 600 12.5px/1 system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+      letter-spacing: -0.01em;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      cursor: pointer;
+    }
+
     /* The card that explains it. In the markup so it needs no script. */
     #mapLockCard { display: none; }
     html.tj-map-locked #mapLockCard {
@@ -388,6 +418,19 @@
     its input with a document-wide querySelector, so there must be exactly one
     in the document, and this is now the screen it belongs on.
   -->
+  <!--
+    The preview countdown.
+
+    Deliberately NOT carrying data-landing-subscribe, tempting as it was. The
+    paywall module finds its checkout button with document.querySelector on
+    '[data-paywall-checkout-btn], [data-landing-subscribe]' -- one element, the
+    first in document order -- and this sits above the lock card. Reusing the
+    attribute would have quietly moved the wiring onto the countdown and left
+    the lock card's Subscribe button dead, which is the one screen where there
+    is nothing else to press. app.part10.js binds this one by id instead.
+  -->
+  <button type="button" id="mapPreviewNote" aria-live="polite">Free look</button>
+
   <div id="mapLockCard" role="dialog" aria-labelledby="mapLockTitle">
     <div id="mapLockTitle" class="mapLockTitle">Map locked</div>
     <p class="mapLockWhy" data-map-lock-why>
