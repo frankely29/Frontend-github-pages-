@@ -68,9 +68,25 @@
        script manifest and does not exist until ~700ms, about 300ms after this
        window has already closed. !important because .landingCta is display:flex,
        which beats the hidden attribute. */
-    html.tj-auth-pending.tj-has-token [data-landing-cta],
-    html.tj-auth-pending.tj-has-token [data-landing-fine],
-    html.tj-auth-pending.tj-has-token .landingTop .landingGhostBtn { display: none !important; }
+    html.tj-auth-pending.tj-has-token:not(.tj-locked) [data-landing-cta],
+    html.tj-auth-pending.tj-has-token:not(.tj-locked) [data-landing-fine],
+    html.tj-auth-pending.tj-has-token:not(.tj-locked) .landingTop .landingGhostBtn { display: none !important; }
+
+    /* Locked out. Raised by a class, so it works before any script does.
+       subscription.paywall.js used to fall back to a dark "Subscribe to
+       continue" card whenever window.TeamJoseoLanding was missing -- and
+       landing.js is 35th in the script manifest, missing for the first second
+       or more on a slow connection. A 402 inside that window put a modal on
+       screen in a visual language nothing else in the app speaks. The landing
+       markup is in this document from the first byte, so nothing needs to wait
+       for a script; the class alone raises it and swaps it to its subscribe
+       form. The :not(.tj-locked) above is what lets it win while the session
+       is still being checked. */
+    html.tj-locked #lockedOverlay { display: flex !important; }
+    html.tj-locked [data-landing-cta="new"],
+    html.tj-locked [data-landing-fine="new"] { display: none !important; }
+    html.tj-locked [data-landing-cta="lapsed"] { display: flex !important; }
+    html.tj-locked [data-landing-fine="lapsed"] { display: block !important; }
   </style>
 
   <script>
@@ -510,43 +526,11 @@
     </div>
   </div>
 
-  <!-- STAGE 3: Paywall overlay. Hidden by default. Shown when HTTP 402 is received
-       from any authenticated backend call. DORMANT until Stage 4B flips ENFORCE_TRIAL=true. -->
-  <div id="paywallOverlay" class="paywallOverlay" aria-hidden="true" role="dialog" aria-labelledby="paywallTitle">
-    <div class="paywallCard">
-      <div class="paywallHead" id="paywallTitle">Team Joseo Map — Subscribe to continue</div>
-      <div class="paywallBody">
-        <p class="paywallMessage" data-paywall-message>
-          Your Team Joseo Map access requires an active subscription.
-        </p>
-        <ul class="paywallBenefits">
-          <li>Live hotspot map with real-time demand signals</li>
-          <li>Day-tendency scoring for every neighborhood</li>
-          <li>Driver community + chat + leaderboard</li>
-          <li>NYC-verified TLC data pipeline</li>
-        </ul>
-        <div class="paywallPrice">$8 / week</div>
-        <div class="paywallActions">
-          <button type="button" class="paywallBtn paywallBtnPrimary" data-paywall-checkout-btn>
-            Subscribe ($8/week)
-          </button>
-          <button type="button" class="paywallBtn paywallBtnSecondary" data-paywall-portal-btn>
-            Manage subscription
-          </button>
-        </div>
-        <!-- The redeem row moved onto the landing page, which is the screen a
-             locked account is actually shown now. It is not duplicated here:
-             redeemCode() finds its input with a document-wide querySelector,
-             so a second copy would silently win or lose on DOM order. -->
-        <div class="paywallFooter">
-          <span>Secure checkout by Paddle • Cancel anytime</span>
-          <button type="button" class="paywallBtnDismiss" data-paywall-dismiss-btn aria-label="Close">
-            &times;
-          </button>
-        </div>
-      </div>
-    </div>
-  </div>
+  <!-- The dark "Subscribe to continue" card that used to live here is gone.
+       A locked account is shown the landing page in its subscribe form, which
+       is the screen the approved flow has and the one every other locked path
+       already used. The card only ever appeared when landing.js had not loaded
+       yet, which made it a race rather than a design. -->
 
   <!-- STAGE 3: Trial countdown pill. Shown when user is signed-in on an active trial.
        Hidden for paid users, comped users, admins, signed-out users, expired users. -->
