@@ -4,9 +4,14 @@
 (function () {
   'use strict';
 
+  // Subscribe and Manage moved onto the landing page. Both spellings are
+  // matched so the busy label ("Connecting to Paddle…") still finds its button
+  // whichever markup a document carries.
+  const CHECKOUT_BTN = '[data-paywall-checkout-btn], [data-landing-subscribe]';
+  const PORTAL_BTN = '[data-paywall-portal-btn], [data-landing-portal]';
+
   const runtime = (typeof window !== 'undefined') ? window.FrontendRuntime : null;
 
-  let overlayEl = null;
   let trialCountdownEl = null;
   let visible = false;
   let pendingCheckout = false;
@@ -65,86 +70,56 @@
     return { onTrial: true, daysRemaining: remaining };
   }
 
-  function ensureOverlayEl() {
-    if (overlayEl) return overlayEl;
-    overlayEl = document.getElementById('paywallOverlay');
-    return overlayEl;
-  }
-
   function ensureTrialCountdownEl() {
     if (trialCountdownEl) return trialCountdownEl;
     trialCountdownEl = document.getElementById('trialCountdownPill');
     return trialCountdownEl;
   }
 
-  // The approved entry flow has no subscribe screen in it: land, one form, the
-  // map. So a locked account is sent to the landing page it already read --
-  // same hero, same pitch, same "$8/week after the trial" -- with Subscribe as
-  // its button, instead of a dark modal in a visual language nothing else in
-  // the app speaks. The overlay below is kept only as the fallback for a
-  // document that somehow has no landing page in it.
-  function landingLock() {
-    if (typeof window === 'undefined') return null;
-    const landing = window.TeamJoseoLanding;
+  /* The approved entry flow has no subscribe screen in it: land, one form, the
+   * map. So a locked account is shown the landing page it already read -- same
+   * hero, same pitch, same "$8/week after the trial" -- with Subscribe as its
+   * button.
+   *
+   * Locking is a class on <html>, and that is the point. This used to ask for
+   * window.TeamJoseoLanding and fall back to a dark modal when it was missing.
+   * landing.js is 35th in the script manifest and does not exist for the first
+   * second or more, so a 402 arriving in that window got the modal -- a race
+   * dressed up as a fallback. The landing markup is in index.html from the
+   * first byte, so the class raises it with no script involved at all.
+   *
+   * setLapsed() is still called when landing.js is up, so the module's own
+   * state stays in step; it is now an extra, not a requirement.
+   */
+  function lockDocument(on) {
+    const locked = !!on;
+    const html = (typeof document !== 'undefined') ? document.documentElement : null;
+    if (html) html.classList.toggle('tj-locked', locked);
+
     const overlay = document.getElementById('lockedOverlay');
-    if (!landing || typeof landing.setLapsed !== 'function' || !overlay) return null;
-    return { landing, overlay };
+    if (overlay) {
+      overlay.classList.toggle('show', locked);
+      overlay.setAttribute('aria-hidden', locked ? 'false' : 'true');
+    }
+
+    // Unlocking must leave the landing in its signed-out shape, or the next
+    // signed-out visitor finds a Subscribe button and no way to make an account.
+    const landing = (typeof window !== 'undefined') ? window.TeamJoseoLanding : null;
+    if (landing && typeof landing.setLapsed === 'function') landing.setLapsed(locked);
+
+    visible = locked;
+    if (typeof window !== 'undefined') window.__paywallVisible = locked;
   }
 
-  function show(options = {}) {
-    const lock = landingLock();
-    if (lock) {
-      lock.landing.setLapsed(true);
-      lock.overlay.classList.add('show');
-      lock.overlay.setAttribute('aria-hidden', 'false');
-      visible = true;
-      if (typeof window !== 'undefined') window.__paywallVisible = true;
-      return;
-    }
-
-    const el = ensureOverlayEl();
-    if (!el) {
-      console.warn('Paywall overlay element not found in DOM');
-      return;
-    }
-
-    const reason = String(options.reason || '');
-    const messageEl = el.querySelector('[data-paywall-message]');
-    if (messageEl) {
-      messageEl.textContent = reason
-        ? reason
-        : 'Your Team Joseo Map access requires an active subscription.';
-    }
-
-    el.classList.add('show');
-    el.setAttribute('aria-hidden', 'false');
-    visible = true;
-    if (typeof window !== 'undefined') {
-      window.__paywallVisible = true;
-    }
+  // `options.reason` is accepted and ignored: it used to write into the modal's
+  // message line, and the landing states the reason in its own words instead.
+  // Kept in the signature because callers still pass it.
+  function show(options = {}) {   // eslint-disable-line no-unused-vars
+    lockDocument(true);
   }
 
   function hide() {
-    const lock = landingLock();
-    if (lock) {
-      // Leave the landing in its signed-out shape, or the next signed-out
-      // visitor gets a Subscribe button and no way to make an account.
-      lock.landing.setLapsed(false);
-      lock.overlay.classList.remove('show');
-      lock.overlay.setAttribute('aria-hidden', 'true');
-      visible = false;
-      if (typeof window !== 'undefined') window.__paywallVisible = false;
-      return;
-    }
-
-    const el = ensureOverlayEl();
-    if (!el) return;
-    el.classList.remove('show');
-    el.setAttribute('aria-hidden', 'true');
-    visible = false;
-    if (typeof window !== 'undefined') {
-      window.__paywallVisible = false;
-    }
+    lockDocument(false);
   }
 
   function isVisible() {
@@ -155,7 +130,7 @@
     if (pendingCheckout) return;
     pendingCheckout = true;
 
-    const btn = document.querySelector('[data-paywall-checkout-btn]');
+    const btn = document.querySelector(CHECKOUT_BTN);
     const originalLabel = btn ? btn.textContent : '';
     if (btn) {
       btn.disabled = true;
@@ -194,7 +169,7 @@
     if (pendingPortal) return;
     pendingPortal = true;
 
-    const btn = document.querySelector('[data-paywall-portal-btn]');
+    const btn = document.querySelector(PORTAL_BTN);
     const originalLabel = btn ? btn.textContent : '';
     if (btn) {
       btn.disabled = true;
@@ -466,7 +441,7 @@
   }
 
   function wireCheckoutButton() {
-    const btn = document.querySelector('[data-paywall-checkout-btn]');
+    const btn = document.querySelector(CHECKOUT_BTN);
     if (btn && !btn.__tlcWired) {
       btn.addEventListener('click', (ev) => {
         ev.preventDefault();
@@ -477,26 +452,11 @@
   }
 
   function wirePortalButton() {
-    const btn = document.querySelector('[data-paywall-portal-btn]');
+    const btn = document.querySelector(PORTAL_BTN);
     if (btn && !btn.__tlcWired) {
       btn.addEventListener('click', (ev) => {
         ev.preventDefault();
         openPortal();
-      });
-      btn.__tlcWired = true;
-    }
-  }
-
-  function wireDismissButton() {
-    const btn = document.querySelector('[data-paywall-dismiss-btn]');
-    if (btn && !btn.__tlcWired) {
-      btn.addEventListener('click', (ev) => {
-        ev.preventDefault();
-        const meObj = (typeof window !== 'undefined') ? window.me : null;
-        const hasAnyAccess = !!(meObj?.is_admin) || hasAccess();
-        if (hasAnyAccess) {
-          hide();
-        }
       });
       btn.__tlcWired = true;
     }
@@ -516,14 +476,14 @@
       if (!event.persisted) return;
       pendingCheckout = false;
       pendingPortal = false;
-      const checkoutBtn = document.querySelector('[data-paywall-checkout-btn]');
+      const checkoutBtn = document.querySelector(CHECKOUT_BTN);
       if (checkoutBtn) {
         checkoutBtn.disabled = false;
         if (/connecting to paddle/i.test(checkoutBtn.textContent || '')) {
           checkoutBtn.textContent = 'Subscribe ($8/week)';
         }
       }
-      const portalBtn = document.querySelector('[data-paywall-portal-btn]');
+      const portalBtn = document.querySelector(PORTAL_BTN);
       if (portalBtn) {
         portalBtn.disabled = false;
         if (/opening portal/i.test(portalBtn.textContent || '')) {
@@ -535,7 +495,6 @@
     const tryWire = () => {
       wireCheckoutButton();
       wirePortalButton();
-      wireDismissButton();
       wireRedeem();
       renderTrialCountdown();
     };

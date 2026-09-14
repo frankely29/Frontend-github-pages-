@@ -21,6 +21,7 @@ const vm = require('vm');
 const ROOT = path.join(__dirname, '..');
 const INDEX = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
 const CSS = fs.readFileSync(path.join(ROOT, 'landing.css'), 'utf8');
+const SHELL_CSS = fs.readFileSync(path.join(ROOT, 'frontend-shell.css'), 'utf8');
 const JS_SOURCE = path.join(ROOT, 'landing.js');
 
 const AUTH_IDS = ['authEmail', 'authPass', 'authName', 'authGhost',
@@ -179,9 +180,21 @@ test('every id app.part10.js binds to is still in index.html, exactly once', () 
 });
 
 test('the auth ids are inside the overlay setAuthUI shows and hides', () => {
+  // This used to bound the overlay by where #paywallOverlay started. That
+  // element is gone, so the bound is now the overlay's own closing tag, found
+  // by walking the divs from it.
   const start = INDEX.indexOf('id="lockedOverlay"');
-  const end = INDEX.indexOf('id="paywallOverlay"');
-  assert.ok(start > -1 && end > start, 'lockedOverlay still precedes paywallOverlay');
+  assert.ok(start > -1, '#lockedOverlay is gone');
+  let depth = 0;
+  let end = -1;
+  const tagRe = /<(\/?)div\b[^>]*>/g;
+  tagRe.lastIndex = INDEX.lastIndexOf('<div', start);
+  let m;
+  while ((m = tagRe.exec(INDEX))) {
+    depth += m[1] ? -1 : 1;
+    if (depth === 0) { end = m.index; break; }
+  }
+  assert.ok(end > start, 'could not find where #lockedOverlay closes');
   const block = INDEX.slice(start, end);
   AUTH_IDS.forEach((id) => {
     assert.ok(block.includes(`id="${id}"`), `${id} escaped the signed-out overlay`);
@@ -460,22 +473,51 @@ test('the hero draws links, not just dots', () => {
 const LANDING_JS = fs.readFileSync(JS_SOURCE, 'utf8');
 const PAYWALL_JS = fs.readFileSync(path.join(ROOT, 'subscription.paywall.js'), 'utf8');
 
-test('a locked account is sent to the landing page, not a separate modal', () => {
+test('a locked account is sent to the landing page, and there is no modal left', () => {
   // The approved entry flow is land, one form, the map -- there is no
   // subscribe screen in it. show() is the one choke point every locked path
   // goes through, so the redirect belongs there rather than at each caller.
   const show = PAYWALL_JS.slice(PAYWALL_JS.indexOf('function show(options'),
-                                PAYWALL_JS.indexOf('function hide('));
-  assert.ok(/landingLock\(\)/.test(show), 'show() still opens its own overlay first');
-  assert.ok(/setLapsed\(true\)/.test(show), 'the landing is not put into its lapsed shape');
+                                PAYWALL_JS.indexOf('function isVisible('));
+  assert.ok(/lockDocument\(true\)/.test(show), 'show() no longer locks the document');
   assert.ok(/lockedOverlay/.test(PAYWALL_JS), 'the landing is never actually revealed');
+  // The dark card is gone from the document and from the styles, so there is
+  // nothing left for a race to fall back to.
+  assert.ok(!INDEX.includes('id="paywallOverlay"'), 'the dark card is back in the markup');
+  assert.ok(!/\.paywallOverlay\s*\{/.test(SHELL_CSS), 'the dark card is back in the styles');
+});
+
+test('locking does not wait for landing.js', () => {
+  // This is the whole bug. landing.js is 35th in the script manifest and does
+  // not exist for the first second or more; show() used to require it and
+  // fall back to the dark card without it. Reproduced with landing.js delayed
+  // 3s: the card was up from 948ms and never left. Now the class does it, and
+  // Subscribe appears at 986ms with landing.js still absent.
+  const lock = PAYWALL_JS.slice(PAYWALL_JS.indexOf('function lockDocument'),
+                                PAYWALL_JS.indexOf('function show(options'));
+  assert.ok(/classList\.toggle\('tj-locked'/.test(lock),
+    'locking is not expressed as a class, so it needs a script to work');
+  // setLapsed may be called, but only as an extra -- never as the gate.
+  const gate = lock.slice(0, lock.indexOf('setLapsed'));
+  assert.ok(/tj-locked/.test(gate) && /lockedOverlay/.test(gate),
+    'the overlay is only raised after landing.js is consulted');
+  // And the CSS has to be the inline kind, or it is not there in time either.
+  const critical = (INDEX.match(/<style id="tjBootCritical">([\s\S]*?)<\/style>/) || [])[1] || '';
+  assert.ok(/html\.tj-locked\s+#lockedOverlay/.test(critical),
+    'the locked rule is not in the inline boot CSS, so it can arrive too late');
+  assert.ok(/html\.tj-locked\s+\[data-landing-cta="lapsed"\]/.test(critical),
+    'nothing reveals Subscribe without landing.js');
 });
 
 test('hiding puts the landing back the way a signed-out visitor needs it', () => {
   // Otherwise the next person to reach the signed-out page gets a Subscribe
   // button and no way to make an account.
+  const lock = PAYWALL_JS.slice(PAYWALL_JS.indexOf('function lockDocument'),
+                                PAYWALL_JS.indexOf('function show(options'));
+  assert.ok(/setLapsed\(locked\)/.test(lock),
+    'unlocking leaves the landing in its lapsed shape');
   const hide = PAYWALL_JS.slice(PAYWALL_JS.indexOf('function hide('));
-  assert.ok(/setLapsed\(false\)/.test(hide), 'the lapsed shape is left behind');
+  assert.ok(/lockDocument\(false\)/.test(hide), 'hide() no longer unlocks');
 });
 
 test('the lapsed page keeps the pitch and swaps only the call to action', () => {
