@@ -98,6 +98,23 @@ body.feed-first #dockDrawer {
   z-index: 9200;
   display: flex;
   flex-direction: column;
+  /* The dock's clearance belongs HERE, not on the body.
+   *
+   * .chatPanelWrap, .gamesPanelWrap and .leaderboardPanelWrap are all
+   * height: 100%, so they fill the body's CONTENT box and padding on the body
+   * does nothing but push a scrollbar down -- the panel still ran to the
+   * bottom of the sheet and the dock sat on top of it. For chat that meant the
+   * composer, which is the last row of the wrap, was behind the dock: the
+   * panel was open, looked fine, and could not be typed in.
+   *
+   * Padding the flex CONTAINER shortens the box those wraps resolve their 100%
+   * against, so the last row of a panel lands above the dock instead of under
+   * it. The frosting still runs to the bottom, so the dock sits on the sheet
+   * rather than on a cut edge.
+   *
+   * The dock is 74px tall at safe-area + 10px, so its top edge is at
+   * safe-area + 84px. */
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 92px);
   transform: translateY(100%);
   transition: top 0.26s cubic-bezier(0.32, 0.72, 0, 1),
               transform 0.26s cubic-bezier(0.32, 0.72, 0, 1);
@@ -114,8 +131,25 @@ body.feed-first .dockDrawerBody {
   max-height: none;
   overflow: auto;
   -webkit-overflow-scrolling: touch;
-  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 104px);
+  /* Not the dock clearance -- that is on the container above, where a
+     height: 100% child can actually see it. */
+  padding-bottom: 8px;
 }
+
+/* The three panels that fill their container rather than flowing. With the
+   clearance on the container these now end where the dock begins, which is
+   what makes chat's composer reachable. */
+body.feed-first .chatPanelWrap,
+body.feed-first .gamesPanelWrap,
+body.feed-first .leaderboardPanelWrap { min-height: 0; }
+
+/* Typing is the exception: the keyboard takes the bottom of the screen, the
+   dock goes with it, and holding 92px for a dock nobody can see would put the
+   composer behind the keyboard instead. */
+body.chatKeyboardMode.feed-first #dockDrawer {
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
+}
+body.chatKeyboardMode.feed-first #dock { display: none !important; }
 
 /* The sheet is not modal. The map behind it stays visible and usable, which is
    the whole point of the layout, so the scrim that used to dim it has no job. */

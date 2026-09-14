@@ -622,6 +622,43 @@ test('the sheet looks the same whatever is in it', () => {
     'the menu button comes and goes with the occupant');
 });
 
+test('the dock clearance is where a height:100% panel can see it', () => {
+  /* .chatPanelWrap, .gamesPanelWrap and .leaderboardPanelWrap are all
+   * height: 100%, so they resolve against the drawer BODY's content box.
+   * Padding on the body therefore bought nothing: the panel still ran to the
+   * bottom of the sheet with the dock on top of it, and for chat that meant
+   * the composer -- the last row of the wrap -- was unreachable. The panel was
+   * open, looked right, and could not be typed in.
+   *
+   * Padding the flex CONTAINER shortens the box those wraps measure against. */
+  const drawer = CSS.match(/body\.feed-first #dockDrawer\s*\{([^}]*)\}/s);
+  assert.ok(drawer, 'no drawer rule');
+  // [^)]* would stop at env()'s own closing paren and match nothing -- the
+  // first cut of this read NaN and failed against CSS the browser had already
+  // been watched getting right.
+  const pad = Number((drawer[1].match(/padding-bottom:\s*calc\([\s\S]*?\+\s*(\d+)px/) || [])[1]);
+  // The dock is 74px tall sitting at safe-area + 10px, so its top edge is at
+  // safe-area + 84px.
+  assert.ok(Number.isFinite(pad) && pad >= 84,
+    `the container reserves ${pad}px for a dock whose top edge is at 84px`);
+
+  const body = CSS.match(/body\.feed-first \.dockDrawerBody\s*\{([^}]*)\}/s);
+  assert.ok(body, 'no drawer body rule');
+  const bodyPad = Number((body[1].match(/padding-bottom:\s*(\d+)px/) || [])[1]);
+  assert.ok(Number.isFinite(bodyPad) && bodyPad < 40,
+    'the clearance is back on the body, where a height:100% child cannot see it');
+});
+
+test('typing gives the composer the dock\'s room', () => {
+  // The keyboard takes the bottom of the screen and the dock goes with it.
+  // Holding 92px for a dock nobody can see puts the composer behind the
+  // keyboard instead.
+  assert.ok(/body\.chatKeyboardMode\.feed-first #dockDrawer\s*\{[^}]*padding-bottom/s.test(CSS),
+    'the composer keeps the dock clearance while the keyboard is up');
+  assert.ok(/body\.chatKeyboardMode\.feed-first #dock\s*\{[^}]*display:\s*none/s.test(CSS),
+    'the dock sits over the keyboard');
+});
+
 test('the sheet is not modal', () => {
   // The map behind stays visible and usable, which is the point of the layout,
   // so the scrim that used to dim it has no job.
