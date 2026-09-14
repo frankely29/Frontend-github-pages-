@@ -430,6 +430,64 @@ test('where they left it is where it opens', () => {
   assert.strictEqual(dom.split(), 39, 'it forgot the sheet was expanded');
 });
 
+test('a panel opens expanded, the feed opens where it was left', () => {
+  // Nobody taps Chat wanting a third of Chat. The feed is the one a driver
+  // lives on, so it keeps its own position.
+  const dom = build({ open: 'feed' });
+  assert.strictEqual(dom.split(), 66, 'the feed did not open minimised');
+  dom.openDrawer('chat');
+  assert.strictEqual(dom.split(), 39, 'chat opened minimised');
+  dom.el('dockDrawerClose').click();
+  assert.strictEqual(dom.split(), 66, 'the feed did not come back where it was left');
+});
+
+test('every panel gets the same treatment', () => {
+  ['leaderboard', 'games', 'music', 'colors', 'modes', 'profile'].forEach((key) => {
+    const dom = build({ open: 'feed' });
+    dom.openDrawer(key);
+    assert.strictEqual(dom.split(), 39, `${key} opened minimised`);
+  });
+});
+
+test('a shell destination that is not the feed opens expanded too', () => {
+  // Post is a render-based screen rather than a drawer panel, and a driver who
+  // taps Post is going there to write.
+  const dom = build({ open: 'feed' });
+  dom.setOpen('post');
+  assert.strictEqual(dom.split(), 39, 'posting opened minimised');
+});
+
+test('dragging a panel is not remembered as the feed position', () => {
+  // A panel always opens expanded, so storing where Chat was left would be
+  // storing something never read back -- and it would move the feed.
+  const dom = build({ open: 'feed' });
+  dom.openDrawer('chat');
+  dom.drag(260);
+  assert.strictEqual(dom.split(), 66, 'precondition: the panel was dragged down');
+  dom.el('dockDrawerClose').click();
+  assert.strictEqual(dom.store.tj_sheet_split_v1, undefined,
+    'dragging a panel wrote the feed position');
+});
+
+test('where the driver leaves the FEED is still remembered', () => {
+  const dom = build({ open: 'feed' });
+  dom.tap();
+  assert.strictEqual(dom.split(), 39);
+  assert.strictEqual(dom.store.tj_sheet_split_v1, '0.39',
+    'the feed position was not kept');
+});
+
+test('a repaint does not yank a dragged sheet back', () => {
+  // apply() runs on every /me refresh. Re-seating the split on each of those
+  // would undo a drag a driver made a second earlier.
+  const dom = build({ open: 'feed' });
+  dom.openDrawer('chat');
+  dom.drag(260);
+  assert.strictEqual(dom.split(), 66);
+  dom.window.dispatch('tlc:auth-state-changed', {});
+  assert.strictEqual(dom.split(), 66, 'a refresh snapped the sheet back');
+});
+
 test('the sheet cannot be dragged off either end', () => {
   const dom = build({ open: 'feed' });
   dom.handle().dispatch('pointerdown', { button: 0, clientY: 400 });
