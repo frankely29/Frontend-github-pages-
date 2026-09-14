@@ -1018,43 +1018,6 @@ test('asking drops the focus iOS is still holding the window for', () => {
   assert.strictEqual(dom.window.scrollY, 0, 'the document was left scrolled');
 });
 
-test('the readout appears only for an admin on a short window', () => {
-  /* Three goes at this bar have each cost a round trip, because the one thing
-   * that settles it -- what the phone reports -- is the one thing no browser
-   * here can produce. So the numbers go on the screen where they can be
-   * photographed, and nowhere else. */
-  const healthy = build({ open: 'feed', screenHeight: 956 });
-  healthy.window.me = { is_admin: true };
-  healthy.api.paintDiagnostic();
-  assert.ok(!healthy.el('tjWindowReadout'), 'it shows on a window that is fine');
-
-  const notAdmin = build({ open: 'feed', screenHeight: 956 + 62 });
-  notAdmin.window.me = { is_admin: false };
-  notAdmin.api.paintDiagnostic();
-  assert.ok(!notAdmin.el('tjWindowReadout'), 'a driver was shown the diagnostics');
-
-  const dom = build({ open: 'feed', screenHeight: 956 + 62 });
-  dom.window.me = { is_admin: true };
-  dom.api.paintDiagnostic();
-  const node = dom.el('tjWindowReadout');
-  assert.ok(node, 'nothing to photograph');
-  // The five numbers that tell the remaining explanations apart.
-  ['w 956/1018', 'vv ', 'sy ', 'de ', 'dk '].forEach((bit) => {
-    assert.ok(node.textContent.includes(bit),
-      `${bit} missing from "${node.textContent}"`);
-  });
-});
-
-test('the readout can be dismissed and stays dismissed', () => {
-  const dom = build({ open: 'feed', screenHeight: 956 + 62 });
-  dom.window.me = { is_admin: true };
-  dom.api.paintDiagnostic();
-  dom.el('tjWindowReadout').click();
-  assert.ok(!dom.el('tjWindowReadout'), 'a tap did not put it away');
-  dom.api.paintDiagnostic();
-  assert.ok(!dom.el('tjWindowReadout'), 'it came back on the next measurement');
-});
-
 test('nothing tries to paint outside the viewport', () => {
   /* After the keyboard closes, iOS leaves a standalone web view about 62pt
    * shorter than the window. The first answer gave every bottom-anchored
