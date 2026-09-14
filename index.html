@@ -87,6 +87,15 @@
     html.tj-locked [data-landing-fine="new"] { display: none !important; }
     html.tj-locked [data-landing-cta="lapsed"] { display: flex !important; }
     html.tj-locked [data-landing-fine="lapsed"] { display: block !important; }
+
+    /* The one sign-in button on this page, and it stays on the locked screen.
+       Everything else there -- Subscribe, Manage subscription, the redeem box
+       -- assumes this is the right account. Without this a driver on the wrong
+       account, or with a second one that is paid up, had to pay to get out.
+       Forced from here rather than left to landing.js because that script sets
+       hidden=true on this button while a session is being checked, and on a
+       locked page nothing was ever coming along to unset it. */
+    html.tj-locked .landingTop .landingGhostBtn { display: block !important; }
   </style>
 
   <script>

@@ -135,9 +135,15 @@
       var f = fine[j].getAttribute("data-landing-fine") === "lapsed";
       fine[j].hidden = f !== locked;
     }
-    // "Sign in" makes no sense to someone already signed in.
+    // Sign in stays, locked or not. It used to be hidden here on the reasoning
+    // that it "makes no sense to someone already signed in" -- but the locked
+    // page is the one screen with no other way off it. Subscribe, Manage
+    // subscription and a redeem box all assume this is the right account; a
+    // driver on the wrong one, or one who has a second account that is paid up,
+    // had to pay to get out. It is also the only sign-in button on this page,
+    // so hiding it hid the whole affordance.
     var top = q("[data-landing-go='signin'].landingGhostBtn");
-    if (top) top.hidden = locked;
+    if (top) top.hidden = false;
     lapsed = locked;
     if (locked) show("pitch");
   }
