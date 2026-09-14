@@ -454,3 +454,71 @@ body.night #shellConditions > #weatherBadge::before { background: rgba(255, 255,
 @media (max-width: 380px) {
   #shellConditions .dayTendencyBand { display: none; }
 }
+
+/* ------------------------------------------------------------------- locks
+ *
+ * A locked destination stays in the menu, dimmed, with a padlock where "Here"
+ * would go. Dimmed rather than removed: a driver who cannot see chat in the
+ * list has no way to learn that chat exists, and nothing to tap to find out
+ * what a plan buys. Tapping one opens the panel below rather than the panel
+ * they wanted.
+ */
+.shellItem.locked .shellItemTitle,
+.shellItem.locked .shellItemSub,
+.shellItem.locked .shellItemIcon { opacity: 0.55; }
+.shellItemLock {
+  font: 500 13px/1 system-ui, -apple-system, sans-serif;
+  flex: none;
+  opacity: 0.75;
+}
+
+.shellLock {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 10px;
+  padding: 56px 22px 40px;
+  color: #59616e;
+}
+.shellLockMark { font-size: 30px; line-height: 1; }
+.shellLockTitle {
+  font: 700 18px/1.2 system-ui, -apple-system, sans-serif;
+  letter-spacing: -0.02em;
+  color: #101622;
+}
+.shellLockLine {
+  font: 500 13.5px/1.55 system-ui, -apple-system, sans-serif;
+  max-width: 30ch;
+}
+.shellLockBtn {
+  margin-top: 8px;
+  border: 0;
+  border-radius: 999px;
+  padding: 13px 26px;
+  background: #101622;
+  color: #fff;
+  font: 700 14px/1 system-ui, -apple-system, sans-serif;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  min-height: 44px;
+}
+.shellLockGhost {
+  border: 1px solid rgba(16, 22, 34, 0.16);
+  border-radius: 999px;
+  padding: 11px 20px;
+  background: transparent;
+  color: #101622;
+  font: 600 13px/1 system-ui, -apple-system, sans-serif;
+  cursor: pointer;
+  min-height: 40px;
+}
+.shellLockFine {
+  font: 500 11.5px/1.45 system-ui, -apple-system, sans-serif;
+  color: #8a919d;
+  max-width: 32ch;
+}
+
+body.night .shellLockTitle { color: #eef2f8; }
+body.night .shellLockBtn { background: #eef2f8; color: #101622; }
+body.night .shellLockGhost { border-color: rgba(255, 255, 255, 0.16); color: #eef2f8; }

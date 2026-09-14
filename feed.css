@@ -406,3 +406,59 @@ body.night .feedReplyInput {
 }
 body.night .feedReplySend { background: #eef2f8; color: #101622; }
 body.night .feedCommentDelete { color: #ff8fa6; }
+
+/* --------------------------------------------------------- read-only feed
+ *
+ * What an unpaid driver sees. The feed itself is untouched -- same cards, same
+ * threads, same scores -- and only the controls that write change. The bar at
+ * the top says so once, rather than every disabled button explaining itself.
+ */
+.feedJoin {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 11px 13px;
+  margin: 0 0 10px;
+  border: 1px solid rgba(16, 22, 34, 0.1);
+  border-radius: 14px;
+  background: rgba(16, 22, 34, 0.03);
+}
+.feedJoinLine {
+  flex: 1 1 14ch;
+  min-width: 0;
+  font: 500 12.5px/1.4 system-ui, -apple-system, sans-serif;
+  color: #59616e;
+}
+.feedJoinBtn {
+  flex: none;
+  border: 0;
+  border-radius: 999px;
+  padding: 9px 16px;
+  background: #101622;
+  color: #fff;
+  font: 700 12.5px/1 system-ui, -apple-system, sans-serif;
+  cursor: pointer;
+  min-height: 36px;
+}
+.feedReplyLocked {
+  align-items: center;
+  gap: 10px;
+}
+.feedReplyLockedLine {
+  flex: 1 1 auto;
+  min-width: 0;
+  font: 500 12.5px/1.4 system-ui, -apple-system, sans-serif;
+  color: #8a919d;
+}
+.feedLike.disabled,
+.feedScope.disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+body.night .feedJoin {
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+}
+body.night .feedJoinBtn { background: #eef2f8; color: #101622; }

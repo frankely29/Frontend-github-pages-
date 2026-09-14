@@ -58,6 +58,8 @@ function makeNode(tag) {
   };
   node.setAttribute = (k, v) => { node._attrs[k] = String(v); };
   node.getAttribute = (k) => (k in node._attrs ? node._attrs[k] : null);
+  node.removeAttribute = (k) => { delete node._attrs[k]; };
+  node.hasAttribute = (k) => k in node._attrs;
   node.addEventListener = (t, fn) => { (node._listeners[t] = node._listeners[t] || []).push(fn); };
   node.dispatch = (t, e) => (node._listeners[t] || []).forEach((fn) => fn(e || { type: t }));
   node.click = () => {
@@ -133,6 +135,11 @@ function build(options = {}) {
     TeamJoseoShell: options.noShell ? undefined : {
       register: (entry) => registered.push(entry),
     },
+    // An unpaid, signed-in driver. Set before render(), because that is when
+    // the browser would know it too -- setAuthUI runs long before the feed is
+    // opened.
+    isFeatureLocked: () => !!options.locked,
+    TlcPaywallModule: { triggerCheckout: () => calls.push({ url: 'checkout' }) },
   };
   window.window = window;
 
@@ -529,6 +536,147 @@ async function withFeed(posts, extra = []) {
   await tick();
   return dom;
 }
+
+async function withLockedFeed(posts, extra = []) {
+  const dom = build({ locked: true, responses: [feedBody(posts)].concat(extra) });
+  await dom.entry.onEnter();
+  await tick();
+  return dom;
+}
+
+// --------------------------------------------------------------------------
+// read-only — the feed is the shop window, not the product
+// --------------------------------------------------------------------------
+
+test('an unpaid driver still gets the posts', async () => {
+  // The whole point. Nothing about the cards changes; only the buttons that
+  // write do.
+  const dom = await withLockedFeed([post({ id: 1, body: 'Red Hook is moving.' })]);
+  assert.ok(dom.body.textContent.includes('Red Hook is moving.')
+    || dom.body.querySelectorAll('.feedBody').length > 0,
+    'the feed was emptied rather than made read-only');
+  assert.ok(dom.body.querySelector('[data-post-id]'), 'no post card rendered');
+});
+
+test('liking is offered to nobody who would be refused it', async () => {
+  const dom = await withLockedFeed([post({ id: 1, like_count: 4 })]);
+  const like = dom.body.querySelector('[data-role="like"]');
+  assert.strictEqual(like.disabled, true, 'the like button still invites a 402');
+  assert.ok(like.classList.contains('disabled'), 'it does not look disabled');
+  assert.ok(/4/.test(like.textContent), 'the count went with it: ' + like.textContent);
+});
+
+test('a paid driver keeps their like button', async () => {
+  const dom = await withFeed([post({ id: 1, like_count: 4 })]);
+  const like = dom.body.querySelector('[data-role="like"]');
+  assert.ok(!like.disabled, 'a paying driver cannot like');
+  assert.ok(!like.classList.contains('disabled'));
+});
+
+test('a tap on a locked like sends nothing', async () => {
+  const dom = await withLockedFeed([post({ id: 1, like_count: 4, liked_by_me: false })]);
+  const before = dom.calls.length;
+  dom.body.querySelector('[data-role="like"]').click();
+  await tick();
+  assert.strictEqual(dom.calls.length, before, 'it POSTed a like it knew would fail');
+  assert.strictEqual(dom.api._state.items[0].like_count, 4,
+    'the count moved optimistically and will snap back');
+});
+
+test('replies are readable and unwritable', async () => {
+  // GET /social/posts/{id}/comments is open, so the conversation is served in
+  // full. The stop is at the point of adding to it, and it says what it costs
+  // rather than showing a dead text field.
+  const dom = await withLockedFeed([post({ id: 1, comment_count: 1 })], [T([comment(5)])]);
+  dom.body.querySelector('[data-role="replies"]').click();
+  await tick(); await tick();
+  assert.ok(dom.body.textContent.includes('Confirmed, moving here too.')
+    || dom.body.querySelectorAll('.feedCommentBody').length > 0,
+    'the thread itself was withheld');
+  assert.ok(!dom.body.querySelector('[data-role="reply-input"]'),
+    'a text field that cannot send is still offered');
+  assert.ok(dom.body.querySelector('.feedReplyLocked'), 'nothing says why');
+  assert.ok(dom.body.querySelector('.feedReplyLocked').querySelector('[data-role="subscribe"]'),
+    'no way to pay from the place they were stopped');
+});
+
+test('a paid driver keeps the reply box', async () => {
+  const dom = await withFeed([post({ id: 1, comment_count: 1 })], [T([comment(5)])]);
+  dom.body.querySelector('[data-role="replies"]').click();
+  await tick(); await tick();
+  assert.ok(dom.body.querySelector('[data-role="reply-input"]'), 'the composer went missing');
+  assert.ok(!dom.body.querySelector('.feedReplyLocked'));
+});
+
+test('sendReply refuses to fire while locked', async () => {
+  const dom = await withLockedFeed([post({ id: 1, comment_count: 1 })], [T([comment(5)])]);
+  dom.body.querySelector('[data-role="replies"]').click();
+  await tick(); await tick();
+  const before = dom.calls.length;
+  const card = dom.body.querySelector('[data-post-id]');
+  await dom.api.sendReply(1, card);
+  await tick();
+  assert.strictEqual(dom.calls.length, before, 'it posted a comment it knew would be refused');
+});
+
+test('Following is not the first thing an unpaid driver sees', async () => {
+  // They cannot follow anyone, so the default tab is an empty list under a
+  // heading they have no way to fill.
+  const dom = build({ locked: true, responses: [feedBody([])] });
+  assert.strictEqual(dom.api._state.scope, 'everyone',
+    'a locked driver landed on Following');
+  const following = dom.body.querySelectorAll('[data-scope]')
+    .filter((b) => b.getAttribute('data-scope') === 'following')[0];
+  assert.strictEqual(following.disabled, true, 'Following is still tappable');
+});
+
+test('Following is still the default for anyone who can follow', () => {
+  const dom = build({ responses: [feedBody([])] });
+  assert.strictEqual(dom.api._state.scope, 'following');
+  const following = dom.body.querySelectorAll('[data-scope]')
+    .filter((b) => b.getAttribute('data-scope') === 'following')[0];
+  assert.ok(!following.disabled);
+});
+
+test('a locked scope tab sends no request', async () => {
+  const dom = build({ locked: true, responses: [feedBody([])] });
+  await tick();
+  const before = dom.calls.length;
+  const following = dom.body.querySelectorAll('[data-scope]')
+    .filter((b) => b.getAttribute('data-scope') === 'following')[0];
+  following.click();
+  await tick();
+  assert.strictEqual(dom.calls.length, before, 'a disabled tab still refetched');
+  assert.strictEqual(dom.api._state.scope, 'everyone');
+});
+
+test('the feed says once what a plan buys, not on every button', async () => {
+  const dom = await withLockedFeed([post({ id: 1 }), post({ id: 2 })]);
+  assert.strictEqual(dom.body.querySelectorAll('.feedJoin').length, 1,
+    'the explanation is repeated');
+  const bar = dom.body.querySelector('.feedJoin');
+  assert.ok(/read/i.test(bar.textContent) || /free/i.test(bar.textContent),
+    'it does not say that reading is free: ' + bar.textContent);
+  assert.ok(bar.querySelector('[data-role="subscribe"]'), 'no way to act on it');
+});
+
+test('a paid driver is never told to subscribe', async () => {
+  const dom = await withFeed([post({ id: 1 })]);
+  assert.strictEqual(dom.body.querySelectorAll('.feedJoin').length, 0);
+});
+
+test('subscribing goes through the paywall module, not a third checkout', async () => {
+  const dom = await withLockedFeed([post({ id: 1 })]);
+  const before = dom.calls.length;
+  dom.body.querySelector('.feedJoin').querySelector('[data-role="subscribe"]').click();
+  assert.strictEqual(dom.calls.length, before + 1);
+  assert.strictEqual(dom.calls[before].url, 'checkout');
+});
+
+test('the read-only styles ship', () => {
+  ['.feedJoin', '.feedJoinBtn', '.feedReplyLocked', '.feedLike.disabled']
+    .forEach((sel) => assert.ok(CSS.includes(sel), 'no style for ' + sel));
+});
 
 test('a post with no replies invites one rather than showing a zero', async () => {
   const dom = await withFeed([post({ id: 1, comment_count: 0 })]);

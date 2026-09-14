@@ -143,6 +143,7 @@ function build(options = {}) {
       register: (entry) => registered.push(entry),
       open: (key) => window._opened.push(key),
     },
+    isFeatureLocked: () => !!options.locked,
   };
   window.window = window;
 
@@ -439,6 +440,31 @@ test('a failed follow rolls back both', async () => {
   await tick(); await tick();
   assert.strictEqual(dom.api._state.profile.followed_by_me, false);
   assert.strictEqual(dom.api._state.profile.follower_count, 1847);
+});
+
+test('an unpaid driver is not offered a follow that would be refused', async () => {
+  // Following is a write, and every write is behind the plan. A button whose
+  // only outcome is a 402 is a worse "no" than a disabled one.
+  const dom = build({ locked: true, responses: [P(profile()), G([])] });
+  dom.api._state.target = 7;
+  await dom.entry.onEnter();
+  await tick(); await tick();
+  const follow = dom.body.querySelector('[data-role="follow"]');
+  assert.strictEqual(follow.disabled, true, 'the follow button still invites a 402');
+  const before = dom.calls.length;
+  follow.click();
+  await tick(); await tick();
+  assert.strictEqual(dom.calls.length, before, 'it sent the follow anyway');
+  assert.strictEqual(dom.api._state.profile.followed_by_me, false,
+    'the count moved optimistically and will snap back');
+});
+
+test('a paying driver still gets their follow button', async () => {
+  const dom = build({ responses: [P(profile()), G([])] });
+  dom.api._state.target = 7;
+  await dom.entry.onEnter();
+  await tick(); await tick();
+  assert.ok(!dom.body.querySelector('[data-role="follow"]').disabled);
 });
 
 test('unfollowing sends DELETE', async () => {

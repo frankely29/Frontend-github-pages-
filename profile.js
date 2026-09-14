@@ -231,7 +231,18 @@
     }
   }
 
+  /* Following is a write, and writes are behind the plan. Same reasoning as
+   * feed.js: do not offer a button whose only outcome is a 402. */
+  function locked() {
+    try {
+      return !!(window.isFeatureLocked && window.isFeatureLocked());
+    } catch (_) {
+      return false;
+    }
+  }
+
   async function toggleFollow() {
+    if (locked()) return;
     var profile = state.profile;
     if (!profile || profile.is_me || state.following) return;
     var wasFollowing = !!profile.followed_by_me;
@@ -381,7 +392,11 @@
       var follow = el("button", "profileFollow" + (p.followed_by_me ? " on" : ""));
       follow.type = "button";
       follow.setAttribute("data-role", "follow");
-      follow.disabled = state.following;
+      follow.disabled = state.following || locked();
+      if (locked()) {
+        follow.classList.add("disabled");
+        follow.title = "Subscribe to follow drivers";
+      }
       follow.textContent = state.following
         ? "…"
         : (p.followed_by_me ? "Following" : "Follow");

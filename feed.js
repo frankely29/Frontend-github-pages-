@@ -50,6 +50,33 @@
     try { return localStorage.getItem(LS_TOKEN) || ""; } catch (_) { return ""; }
   }
 
+  /* Reading is free; joining in is not.
+   *
+   * The server decides this -- the feed reads are open and every write still
+   * returns 402 -- and this only stops the app from offering a button that is
+   * going to fail. A driver who taps Like and watches the heart come back a
+   * second later has been told "no" in the worst possible way.
+   */
+  function locked() {
+    try {
+      return !!(window.isFeatureLocked && window.isFeatureLocked());
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function subscribe() {
+    var paywall = window.TlcPaywallModule;
+    if (paywall && typeof paywall.triggerCheckout === "function") paywall.triggerCheckout();
+  }
+
+  function subscribeButton(label) {
+    var button = el("button", "feedJoinBtn", label || "Subscribe");
+    button.type = "button";
+    button.setAttribute("data-role", "subscribe");
+    return button;
+  }
+
   function apiBase() {
     var runtime = window.FrontendRuntime;
     if (runtime && typeof runtime.resolveApiBase === "function") return runtime.resolveApiBase();
@@ -285,11 +312,19 @@
     button.textContent = (liked ? "♥ " : "♡ ") + (num(post.like_count) || 0);
     button.setAttribute("aria-pressed", liked ? "true" : "false");
     button.classList.toggle("on", liked);
+    // The count still shows. What a post is worth is part of reading it; only
+    // adding to it is behind the plan.
+    var off = locked();
+    button.disabled = off;
+    button.classList.toggle("disabled", off);
+    if (off) button.title = "Subscribe to like posts";
+    else button.removeAttribute("title");
   }
 
   /* --------------------------------------------------------------- liking */
 
   async function toggleLike(postId, button) {
+    if (locked()) return;
     var post = state.items.filter(function (p) { return String(p.id) === String(postId); })[0];
     if (!post || button.disabled) return;
 
@@ -383,6 +418,7 @@
   }
 
   async function sendReply(postId, card) {
+    if (locked()) return;
     var t = threadState(postId);
     if (t.sending) return;
     var input = card.querySelector('[data-role="reply-input"]');
@@ -500,6 +536,21 @@
       host.appendChild(el("div", "feedThreadNote", "No replies yet."));
     }
     if (t.error) host.appendChild(el("div", "feedThreadNote feedThreadError", t.error));
+
+    /* Replies are readable and unwritable.
+     *
+     * The thread above is all served -- GET /social/posts/{id}/comments is open
+     * -- so an unpaid driver reads the whole conversation and is stopped only at
+     * the point of adding to it. A disabled text field would be crueller and
+     * less clear than saying what it costs.
+     */
+    if (locked()) {
+      var wall = el("div", "feedReplyRow feedReplyLocked");
+      wall.appendChild(el("span", "feedReplyLockedLine", "Subscribe to reply."));
+      wall.appendChild(subscribeButton("Subscribe"));
+      host.appendChild(wall);
+      return;
+    }
 
     var composer = el("div", "feedReplyRow");
     var input = el("input", "feedReplyInput");
@@ -650,8 +701,14 @@
     var target = event.target;
     if (!target || !target.closest) return;
 
+    if (target.closest('[data-role="subscribe"]')) { subscribe(); return; }
+
     var scopeBtn = target.closest("[data-scope]");
-    if (scopeBtn) { setScope(scopeBtn.getAttribute("data-scope")); return; }
+    if (scopeBtn) {
+      if (scopeBtn.disabled) return;
+      setScope(scopeBtn.getAttribute("data-scope"));
+      return;
+    }
 
     var authorEl = target.closest('[data-role="author"]');
     if (authorEl) {
@@ -691,8 +748,28 @@
     }
   }
 
+  /* Following is empty for anyone who cannot follow.
+   *
+   * It is the default tab, and it is the worst possible first screen for a
+   * driver who has just been locked out: an empty list under a heading they
+   * have no way to fill. Everyone is the shop window -- other drivers talking
+   * about what the map told them -- so that is where they land.
+   */
+  function normaliseScope() {
+    if (locked() && state.scope === "following") state.scope = "everyone";
+  }
+
   function render(body) {
     var wrap = el("div", "feedScreen");
+    normaliseScope();
+
+    if (locked()) {
+      var join = el("div", "feedJoin");
+      join.appendChild(el("span", "feedJoinLine",
+        "Reading is free. Replying, liking and posting come with a plan."));
+      join.appendChild(subscribeButton("Subscribe — $8/week"));
+      wrap.appendChild(join);
+    }
 
     var scopes = el("div", "feedScopes");
     scopes.setAttribute("role", "group");
@@ -701,6 +778,11 @@
       var button = el("button", "feedScope", scope.label);
       button.type = "button";
       button.setAttribute("data-scope", scope.key);
+      if (scope.key === "following" && locked()) {
+        button.disabled = true;
+        button.classList.add("disabled");
+        button.title = "Subscribe to follow drivers";
+      }
       scopes.appendChild(button);
     });
     wrap.appendChild(scopes);
@@ -721,6 +803,7 @@
   function onEnter() {
     // Always refetch on open. A timeline is the one screen where showing what
     // was true ten minutes ago is a bug, and posts are small.
+    normaliseScope();
     load();
   }
 
