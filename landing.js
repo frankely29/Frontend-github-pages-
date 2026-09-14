@@ -148,6 +148,27 @@
     if (locked) show("pitch");
   }
 
+  /* Is this page actually in front of someone right now?
+   *
+   * Asked of the rendering, not of one class. #lockedOverlay is raised three
+   * different ways -- the `show` class, html.tj-auth-pending while the app is
+   * still working out who this is, and html.tj-locked when access has lapsed --
+   * and only the first of those sets `show`. Checking that class alone meant the
+   * page counted as "not on screen" during boot and while locked, which are
+   * precisely the states a driver with a dead or expired token is in when they
+   * go to sign in again. A 401 landing then threw them off the form they were
+   * typing into and back to the pitch: "after I type email and password it takes
+   * me back to welcome page".
+   */
+  function onScreen() {
+    var overlay = document.getElementById("lockedOverlay");
+    if (!overlay) return false;
+    if (typeof window.getComputedStyle !== "function") {
+      return overlay.classList.contains("show");
+    }
+    return window.getComputedStyle(overlay).display !== "none";
+  }
+
   function paywall() {
     return (typeof window !== "undefined" && window.TlcPaywallModule) || null;
   }
@@ -245,9 +266,7 @@
    */
   window.addEventListener("tlc:auth-expired", function () {
     if (!root) return;
-    var overlay = document.getElementById("lockedOverlay");
-    var onScreen = !!(overlay && overlay.classList.contains("show"));
-    if (onScreen && openPane === "form") return;
+    if (onScreen() && openPane === "form") return;
     show("pitch");
   });
 
