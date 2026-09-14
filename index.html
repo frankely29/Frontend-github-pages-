@@ -287,7 +287,11 @@
       "./feed.css",
       "./compose.css",
       "./profile.css",
-      "./map-feed-peek.css"
+      "./map-feed-peek.css",
+      // Last, so its map-card layout wins over the full-screen rules in
+      // frontend-shell.css and app-shell.css by source order rather than by a
+      // pile of !important.
+      "./feed-first.css"
     ];
 
     window.__TLC_LOCAL_JS_ASSETS__ = [
@@ -340,7 +344,10 @@
       // After feed.js, which it borrows "3 minutes ago" from, and after
       // app-shell.js, whose open('feed') it calls. It falls back rather than
       // throwing if either is missing, but there is no reason to make it.
-      "./map-feed-peek.js"
+      "./map-feed-peek.js",
+      // After app-shell.js, whose open/close/current it drives, and after
+      // app.part6.js, which owns the dock's sideways scrolling.
+      "./feed-first.js"
     ];
 
     window.__tlcWithBuildId = function __tlcWithBuildId(path) {
