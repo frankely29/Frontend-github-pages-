@@ -3131,13 +3131,35 @@ function clearAuth() {
   syncAdminPortalSession();
 }
 
-// Any authenticated request coming back 401 means the stored token is dead.
-// Every feed hits this at once when it happens, so lean on authHeaderOK() as
-// the guard: the first event clears the token and the rest become no-ops.
+/* Any authenticated request coming back 401 means the token it carried is dead.
+ *
+ * "The token it carried" is the part this used to get wrong. The only guard was
+ * authHeaderOK() -- is there a token now -- which holds the moment someone signs
+ * in, because now there is one: the new one. So a request made with the OLD
+ * token, still in flight while the driver typed their password, came back 401
+ * after the sign-in had already succeeded and cleared the session it knew
+ * nothing about. Signed in, on the map, then thrown back to the welcome page
+ * with "Session expired -- sign in again."
+ *
+ * Reproduced by holding the polls' 401s until after the sign-in landed: map at
+ * first, overlay back up 15s later. On a phone the network opens that window
+ * without any help.
+ *
+ * So a 401 signs the driver out only if it is THIS session that was rejected.
+ * Events from before predate the answer and are none of its business.
+ *
+ * Several feeds still hit this at once for a genuinely dead token; authHeaderOK()
+ * is what makes the first event clear it and the rest no-ops.
+ */
 if (typeof window !== "undefined") {
   window.addEventListener("tlc:auth-expired", (ev) => {
     try {
       if (!authHeaderOK()) return;
+      // No token on the event means an older dispatcher that cannot say which
+      // session it was: fall back to the previous behaviour rather than ignore
+      // a real expiry.
+      const rejected = ev?.detail?.token;
+      if (rejected && rejected !== communityToken) return;
       console.warn("[auth] token rejected, signing out:", ev?.detail?.url || "(unknown url)");
       clearAuth();
       setAuthUI(false, "Session expired — sign in again.");

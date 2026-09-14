@@ -313,6 +313,21 @@
     setTimeout(function releaseAuthPendingStage() {
       const html = document.documentElement;
       if (html) html.classList.remove("tj-auth-pending");
+      // Dropping the class is not enough on its own. landing.js also sets the
+      // hidden attribute on these while it waits, and an attribute no CSS rule
+      // is fighting stays put -- so a driver on a slow connection was left
+      // looking at a welcome page with nothing to tap, permanently. Hand the
+      // page back to landing.js if it is up; otherwise unhide the signed-out
+      // shape directly, which is the right answer when nothing ever replied.
+      const landing = window.TeamJoseoLanding;
+      if (landing && typeof landing.setLapsed === "function") {
+        landing.setLapsed(false);
+        return;
+      }
+      document.querySelectorAll('[data-landing-cta="new"], [data-landing-fine="new"]')
+        .forEach(function (el) { el.hidden = false; });
+      const signIn = document.querySelector("[data-landing-go='signin'].landingGhostBtn");
+      if (signIn) signIn.hidden = false;
     }, 8000);
   </script>
 </head>

@@ -189,7 +189,7 @@
       var res = await fetch(apiBase() + path, Object.assign({ mode: "cors" }, init));
       var text = await res.text();
       if (!res.ok) {
-        if (res.status === 401) fire("tlc:auth-expired", { status: 401, url: path });
+        if (res.status === 401) fire("tlc:auth-expired", { status: 401, url: path, token: t });
         if (res.status === 402) fire("tlc:payment-required", { status: 402, url: path });
         var err = new Error(text || (res.status + " " + res.statusText));
         err.status = res.status;

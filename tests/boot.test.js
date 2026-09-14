@@ -197,6 +197,21 @@ test('both stages have a way out if the app never gets there', () => {
     'the escape hatches are longer than any driver would wait');
 });
 
+test('the escape hatch gives the buttons back, not just the class', () => {
+  // Dropping tj-auth-pending is not enough on its own: landing.js also sets the
+  // hidden attribute on those blocks while it waits, and an attribute no CSS
+  // rule is fighting stays put. A driver on a slow connection was left on a
+  // welcome page with nothing to tap at all, permanently.
+  const head = INDEX_NO_HTML_COMMENTS.slice(0, INDEX_NO_HTML_COMMENTS.indexOf('</head>'));
+  const fn = head.slice(head.indexOf('releaseAuthPendingStage'));
+  assert.ok(/classList\.remove\("tj-auth-pending"\)/.test(fn), 'the class is no longer cleared');
+  assert.ok(/setLapsed\(false\)|hidden = false/.test(fn),
+    'nothing unhides the buttons, so the page stays dead after the timeout');
+  assert.ok(/data-landing-cta="new"/.test(fn),
+    'the signed-out call to action is not restored');
+  assert.ok(/landingGhostBtn/.test(fn), 'the sign-in button is not restored');
+});
+
 test('the pending stage ends where auth is actually decided', () => {
   // setAuthUI is the first point the app knows the answer, and every boot path
   // in bootstrapCommunityModule() calls it.
