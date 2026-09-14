@@ -1,9 +1,90 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="tj-boot tj-auth-pending">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
   <title>Team Joseo Map</title>
+
+  <!--
+    BOOT PAINT. Inline on purpose, and first on purpose.
+
+    Every other stylesheet in this app is injected by the script further down
+    this head, and an injected stylesheet does not block the first paint. So
+    the browser used to paint the raw document before any of them arrived:
+    the landing markup as bare HTML -- wordmark, a "Sign in" link, then the
+    email and password fields straight down the page. Measured at 341ms with
+    1 of 13 stylesheets loaded. That unstyled page is the "old sign in page"
+    drivers saw flash up before the real one; it was never old code.
+
+    These rules are the first paint, so there is nothing to flash. They cover
+    two stages, and the classes on <html> are cleared as each finishes:
+
+      tj-boot          nothing but the splash, until the stylesheets land.
+      tj-auth-pending  the welcome page, until the app knows who this is.
+
+    visibility rather than display throughout: MapLibre measures #map when it
+    initialises, and a display:none container measures zero.
+  -->
+  <style id="tjBootCritical">
+    html.tj-boot, html.tj-boot body { background: #0a0f1c; overflow: hidden; }
+    html.tj-boot body > * { visibility: hidden !important; }
+    html.tj-boot #bootSplash { visibility: visible !important; }
+
+    #bootSplash {
+      position: fixed;
+      inset: 0;
+      z-index: 10000;
+      display: grid;
+      place-items: center;
+      background: #0a0f1c;
+      color: #fff;
+      font: 700 17px/1 system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+      letter-spacing: -0.03em;
+    }
+    html:not(.tj-boot) #bootSplash { display: none !important; }
+
+    /* The map is not the first thing a driver sees. Until the welcome page has
+       had its turn -- and until the app knows whether this is a signed-in
+       driver at all -- the map and the app's chrome stay off screen. */
+    html.tj-auth-pending #map,
+    html.tj-auth-pending #wxCanvas { visibility: hidden !important; }
+    html.tj-auth-pending #lockedOverlay { display: flex !important; }
+    html.tj-auth-pending .shellMenuBtn,
+    html.tj-auth-pending #dock,
+    html.tj-auth-pending .mapControlStack,
+    html.tj-auth-pending .sliderWrap,
+    html.tj-auth-pending #mapAction,
+    html.tj-auth-pending .mapSegmented,
+    html.tj-auth-pending #mapLoading { display: none !important; }
+
+    /* A driver who is already signed in must never be asked to sign in.
+       While their session is being checked the welcome page keeps its hero
+       and its pitch, and offers nothing to tap -- there is nothing for them
+       to decide. Whichever answer comes back removes tj-auth-pending and the
+       page goes back to deciding this for itself.
+
+       This lives here, in CSS available at the first paint, because it has to.
+       landing.js -- which owns the same idea at runtime -- is 35th in the
+       script manifest and does not exist until ~700ms, about 300ms after this
+       window has already closed. !important because .landingCta is display:flex,
+       which beats the hidden attribute. */
+    html.tj-auth-pending.tj-has-token [data-landing-cta],
+    html.tj-auth-pending.tj-has-token [data-landing-fine],
+    html.tj-auth-pending.tj-has-token .landingTop .landingGhostBtn { display: none !important; }
+  </style>
+
+  <script>
+    /* Read once, before anything paints: is there a session to check at all?
+       localStorage is synchronous, so this is known on the first frame, which
+       is the only reason the rule above can work. */
+    (function markStoredSession() {
+      try {
+        if (window.localStorage && window.localStorage.getItem("community_token_v1")) {
+          document.documentElement.classList.add("tj-has-token");
+        }
+      } catch (e) { /* private mode, blocked storage: treat as signed out */ }
+    })();
+  </script>
 
   <!-- PWA / iOS standalone support -->
   <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -169,20 +250,53 @@
       return `${raw}${sep}v=${encodeURIComponent(build)}`;
     };
 
+    /* Leaving the boot splash is the moment the stylesheets are actually in
+       effect -- not a guess at how long that takes. Each link reports back,
+       and the splash lifts once the last one has settled.
+       A stylesheet that 404s still settles (onerror), so one missing file
+       cannot strand anyone on the splash; the timeout below covers the rest,
+       because a driver stuck on a wordmark has no app at all. */
+    window.__tlcEndBootStage = function __tlcEndBootStage() {
+      const html = document.documentElement;
+      if (html) html.classList.remove("tj-boot");
+    };
+
     (function loadLocalCssNow() {
       const head = document.head || document.getElementsByTagName("head")[0];
       const cssAssets = Array.isArray(window.__TLC_LOCAL_CSS_ASSETS__) ? window.__TLC_LOCAL_CSS_ASSETS__ : [];
+      let pending = cssAssets.length;
+      if (!pending) window.__tlcEndBootStage();
+      const settled = () => {
+        pending -= 1;
+        if (pending <= 0) window.__tlcEndBootStage();
+      };
       cssAssets.forEach((href) => {
         const link = document.createElement("link");
         link.rel = "stylesheet";
+        link.addEventListener("load", settled);
+        link.addEventListener("error", settled);
         link.href = window.__tlcWithBuildId(href);
         head.appendChild(link);
       });
+      setTimeout(window.__tlcEndBootStage, 4000);
     })();
+
+    /* Last resort for the second stage. setAuthUI() clears tj-auth-pending as
+       soon as the app knows whether anyone is signed in; if the scripts never
+       get that far, the welcome page is still a dead end, so let the app
+       through rather than hold a driver on a screen with no way out. */
+    setTimeout(function releaseAuthPendingStage() {
+      const html = document.documentElement;
+      if (html) html.classList.remove("tj-auth-pending");
+    }, 8000);
   </script>
 </head>
 
 <body>
+  <!-- The first frame. Same ground and same wordmark as the welcome page it
+       hands over to, so the handover is not a change of screen. -->
+  <div id="bootSplash" aria-hidden="true">Joseo</div>
+
   <div id="map"></div>
   <canvas id="wxCanvas"></canvas>
 
