@@ -57,6 +57,55 @@
     return s.current();
   }
 
+  /* Everything that can BE the sheet.
+   *
+   * #dockDrawer holds the seven swap-in panels, but two dock buttons never
+   * used it: Profile opens .driverProfileSheet inside #driverProfileModalRoot,
+   * and Admin opens .adminPanel inside .adminPortal. Both are their own
+   * fixed-position containers with their own z-index and their own backdrop,
+   * which is why they still looked like the old app while everything else had
+   * moved into the sheet.
+   *
+   * They are the same shape -- a flex column with a header and a scrolling
+   * body -- so they get the same geometry, and this list is what the rest of
+   * the file asks "is the sheet up, and who is in it".
+   */
+  var HOSTS = [
+    { sel: "#dockDrawer" },
+    { sel: "#driverProfileModalRoot",
+      close: function () {
+        try { if (typeof window.closeDriverProfileModal === "function") window.closeDriverProfileModal(); } catch (_) {}
+      } },
+    { sel: ".adminPortal",
+      close: function () {
+        try { if (window.AdminPortal && typeof window.AdminPortal.close === "function") window.AdminPortal.close(); } catch (_) {}
+      } },
+  ];
+
+  function hostNode(host) {
+    try { return document.querySelector(host.sel); } catch (_) { return null; }
+  }
+
+  function openHost() {
+    for (var i = 0; i < HOSTS.length; i += 1) {
+      var node = hostNode(HOSTS[i]);
+      if (node && node.classList && node.classList.contains("open")) return HOSTS[i];
+    }
+    return null;
+  }
+
+  /* One occupant. Opening any host closes the others -- they are all at the
+   * same layer now, so two open at once is one sitting on top of the other. */
+  function closeOtherHosts(keep) {
+    HOSTS.forEach(function (host) {
+      if (host === keep) return;
+      var node = hostNode(host);
+      if (!node || !node.classList || !node.classList.contains("open")) return;
+      if (typeof host.close === "function") host.close();
+      else closeDrawer();
+    });
+  }
+
   /* The other thing that can be the sheet.
    *
    * Chat, the leaderboard, games, music, colours, modes and profile all share
@@ -64,8 +113,7 @@
    * Feed First it wears the same geometry as the feed's screen, so "is the
    * sheet up" is a question about either of them. */
   function drawerOpen() {
-    var drawer = byId("dockDrawer");
-    return !!(drawer && drawer.classList && drawer.classList.contains("open"));
+    return !!openHost();
   }
 
   /* Who is in the sheet: the feed, something else, or nobody.
@@ -134,14 +182,19 @@
     }
 
     feed.addEventListener("click", function () {
-      closeDrawer();
+      closeOtherHosts(null);
       var s = shell();
       if (s && typeof s.open === "function") s.open(HOME);
     });
     map.addEventListener("click", function () {
-      closeDrawer();
+      // Asking for the map means the sheet stays down. Without this flag,
+      // closing the panel on the way out would be read as "nothing is in the
+      // sheet" and put the feed straight back up.
+      goingToMap = true;
+      closeOtherHosts(null);
       var s = shell();
       if (s && typeof s.close === "function") s.close();
+      window.setTimeout(function () { goingToMap = false; }, 400);
     });
   }
 
@@ -226,31 +279,30 @@
   function setSplit(next, options) {
     split = Math.min(0.92, Math.max(0.16, next));
     paintSplit();
-    // Only the feed's position is worth keeping. A panel always opens expanded,
-    // so remembering where a driver left Chat would be remembering something
-    // that is never read back.
-    if (options && options.remember && occupant() === "feed") {
-      try { localStorage.setItem("tj_sheet_split_v1", String(split)); } catch (_) {}
-    }
+    // Nothing is persisted. The feed opens minimised and a panel opens
+    // expanded, so a stored split would only ever fight one of them.
   }
 
   function snap(options) {
     var mid = (EXPANDED + MINIMIZED) / 2;
-    setSplit(split > mid ? MINIMIZED : EXPANDED, { remember: true });
+    setSplit(split > mid ? MINIMIZED : EXPANDED);
     if (options && options.used) noteUse();
   }
 
   function toggle() {
     var mid = (EXPANDED + MINIMIZED) / 2;
-    setSplit(split > mid ? EXPANDED : MINIMIZED, { remember: true });
+    setSplit(split > mid ? EXPANDED : MINIMIZED);
     noteUse();
   }
 
+  /* The feed always opens minimised.
+   *
+   * It used to reopen wherever it was last left, which meant a driver who had
+   * pulled it up once got a two-thirds-covered map every time they came back
+   * to it. Entering the map is the moment you want the map. Dragging still
+   * works and still holds while you are there -- it just does not persist. */
   function feedSplit() {
-    var saved = null;
-    try { saved = localStorage.getItem("tj_sheet_split_v1"); } catch (_) {}
-    var n = Number(saved);
-    return Number.isFinite(n) && n > 0 ? n : MINIMIZED;
+    return MINIMIZED;
   }
 
   function restoreSplit() {
@@ -327,8 +379,8 @@
     // Keyboard: the arrows do what the drag does.
     handle.addEventListener("keydown", function (event) {
       if (!event) return;
-      if (event.key === "ArrowUp") { setSplit(EXPANDED, { remember: true }); noteUse(); }
-      else if (event.key === "ArrowDown") { setSplit(MINIMIZED, { remember: true }); noteUse(); }
+      if (event.key === "ArrowUp") { setSplit(EXPANDED); noteUse(); }
+      else if (event.key === "ArrowDown") { setSplit(MINIMIZED); noteUse(); }
       else return;
       event.preventDefault();
     });
@@ -387,6 +439,44 @@
     s.open(HOME);
   }
 
+  /* One occupant, enforced from wherever the change came from.
+   *
+   * This used to live inside the tlc:drawer-changed listener, so it only ran
+   * for the seven swap-in panels. Profile fires nothing -- it is opened
+   * straight from app.part5.js -- so it appeared with the feed still open, and
+   * since both sit at z-index 9200 the feed, appended later, painted on top.
+   * Profile was open, correctly positioned and completely invisible.
+   */
+  var goingToMap = false;
+  function enforceSingleOccupant() {
+    var host = openHost();
+    var s = shell();
+    if (host) {
+      closeOtherHosts(host);
+      if (openKey() && s && typeof s.close === "function") s.close();
+      return;
+    }
+    // Nothing is in the sheet: back to the feed, unless the driver asked for
+    // the bare map.
+    if (goingToMap) return;
+    if (!openKey() && s && typeof s.open === "function") s.open(HOME);
+  }
+
+  var linked = [];
+  function linkHosts() {
+    if (typeof window.MutationObserver !== "function") return;
+    HOSTS.forEach(function (host) {
+      var node = hostNode(host);
+      if (!node || linked.indexOf(node) >= 0) return;
+      linked.push(node);
+      var observer = new window.MutationObserver(function () {
+        enforceSingleOccupant();
+        apply();
+      });
+      observer.observe(node, { attributes: true, attributeFilter: ["class"] });
+    });
+  }
+
   function mount() {
     if (!document.body) return;
     installDockButtons();
@@ -395,7 +485,24 @@
     apply();
     openHomeOnce();
 
+    linkHosts();
     window.addEventListener("tlc:shell-screen-changed", apply);
+
+    /* The drawer announces itself; the other two do not.
+     *
+     * Profile and Admin are opened by code in app.part5.js and a lazily loaded
+     * admin module, and neither fires anything. Watching the one attribute
+     * that changes -- `open` on their root -- is cheaper than reaching into
+     * either of them, and it cannot miss a path that opens them some other
+     * way. The roots are built lazily, so linking is retried rather than done
+     * once. */
+    document.addEventListener("click", function (event) {
+      var hit = event && event.target && event.target.closest
+        ? event.target.closest("#dockProfile, #dockAdmin") : null;
+      if (!hit) return;
+      window.setTimeout(function () { linkHosts(); apply(); }, 60);
+      window.setTimeout(function () { linkHosts(); apply(); }, 400);
+    }, true);
 
     /* One sheet, one occupant.
      *
@@ -403,14 +510,8 @@
      * so with both open the feed sat on top of the panel a driver had just
      * asked for. Opening a panel leaves the feed; closing one goes back to it.
      * That is what "the feed changes to the chat box" has to mean. */
-    window.addEventListener("tlc:drawer-changed", function (event) {
-      var key = event && event.detail ? event.detail.key : null;
-      var s = shell();
-      if (key) {
-        if (openKey() && s && typeof s.close === "function") s.close();
-      } else if (!openKey() && s && typeof s.open === "function") {
-        s.open(HOME);
-      }
+    window.addEventListener("tlc:drawer-changed", function () {
+      enforceSingleOccupant();
       apply();
     });
     // The dock is built by index.html but the shell registers over it at
@@ -421,7 +522,9 @@
       apply();
     });
     [300, 1200, 3000].forEach(function (ms) {
-      window.setTimeout(function () { installDockButtons(); openHomeOnce(); apply(); }, ms);
+      window.setTimeout(function () {
+        installDockButtons(); linkHosts(); openHomeOnce(); apply();
+      }, ms);
     });
   }
 

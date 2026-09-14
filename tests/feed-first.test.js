@@ -132,6 +132,24 @@ function build(options = {}) {
     body,
     createElement: (t) => makeNode(t),
     getElementById: (id) => findById(body, id) || byId.get(id) || null,
+    // The sheet hosts are addressed by selector now (#dockDrawer,
+    // #driverProfileModalRoot, .adminPortal), so the double needs the one
+    // lookup it never had. Without it every host reads as absent and the
+    // assertions fail against code the browser runs correctly.
+    querySelector: (sel) => {
+      const want = String(sel).trim();
+      if (want.startsWith('#')) return findById(body, want.slice(1));
+      const cls = want.replace(/^\./, '');
+      const walk = (node) => {
+        if (node.classList && node.classList.contains(cls)) return node;
+        for (const child of node.children) {
+          const hit = walk(child);
+          if (hit) return hit;
+        }
+        return null;
+      };
+      return walk(body);
+    },
     addEventListener: (t, fn) => { (document._l[t] = document._l[t] || []).push(fn); },
     _l: {},
   };
@@ -425,20 +443,31 @@ test('a driver who has used it before is not nudged again', () => {
   assert.ok(!dom.handle().classList.contains('tj-hint'));
 });
 
-test('where they left it is where it opens', () => {
+test('the feed always opens minimised, whatever happened last time', () => {
+  // It used to reopen wherever it was last left, so a driver who had pulled it
+  // up once got a two-thirds-covered map every time they came back. Entering
+  // the map is the moment you want the map.
   const dom = build({ open: 'feed', storage: { tj_sheet_split_v1: '0.39' } });
-  assert.strictEqual(dom.split(), 39, 'it forgot the sheet was expanded');
+  assert.strictEqual(dom.split(), 66, 'a stale stored split still moves the feed');
 });
 
-test('a panel opens expanded, the feed opens where it was left', () => {
-  // Nobody taps Chat wanting a third of Chat. The feed is the one a driver
-  // lives on, so it keeps its own position.
+test('dragging the feed holds while you are on it', () => {
+  const dom = build({ open: 'feed' });
+  dom.tap();
+  assert.strictEqual(dom.split(), 39, 'the feed cannot be pulled up');
+  dom.window.dispatch('tlc:auth-state-changed', {});
+  assert.strictEqual(dom.split(), 39, 'a refresh collapsed it again');
+});
+
+test('a panel opens expanded, the feed opens minimised', () => {
+  // Nobody taps Chat wanting a third of Chat, and nobody enters the map
+  // wanting two thirds of it covered.
   const dom = build({ open: 'feed' });
   assert.strictEqual(dom.split(), 66, 'the feed did not open minimised');
   dom.openDrawer('chat');
   assert.strictEqual(dom.split(), 39, 'chat opened minimised');
   dom.el('dockDrawerClose').click();
-  assert.strictEqual(dom.split(), 66, 'the feed did not come back where it was left');
+  assert.strictEqual(dom.split(), 66, 'the feed did not come back minimised');
 });
 
 test('every panel gets the same treatment', () => {
@@ -455,26 +484,6 @@ test('a shell destination that is not the feed opens expanded too', () => {
   const dom = build({ open: 'feed' });
   dom.setOpen('post');
   assert.strictEqual(dom.split(), 39, 'posting opened minimised');
-});
-
-test('dragging a panel is not remembered as the feed position', () => {
-  // A panel always opens expanded, so storing where Chat was left would be
-  // storing something never read back -- and it would move the feed.
-  const dom = build({ open: 'feed' });
-  dom.openDrawer('chat');
-  dom.drag(260);
-  assert.strictEqual(dom.split(), 66, 'precondition: the panel was dragged down');
-  dom.el('dockDrawerClose').click();
-  assert.strictEqual(dom.store.tj_sheet_split_v1, undefined,
-    'dragging a panel wrote the feed position');
-});
-
-test('where the driver leaves the FEED is still remembered', () => {
-  const dom = build({ open: 'feed' });
-  dom.tap();
-  assert.strictEqual(dom.split(), 39);
-  assert.strictEqual(dom.store.tj_sheet_split_v1, '0.39',
-    'the feed position was not kept');
 });
 
 test('a repaint does not yank a dragged sheet back', () => {
@@ -657,6 +666,29 @@ test('typing gives the composer the dock\'s room', () => {
     'the composer keeps the dock clearance while the keyboard is up');
   assert.ok(/body\.chatKeyboardMode\.feed-first #dock\s*\{[^}]*display:\s*none/s.test(CSS),
     'the dock sits over the keyboard');
+});
+
+test('Profile and Admin are in the sheet too', () => {
+  // These two never used #dockDrawer -- their own container, their own
+  // z-index, their own backdrop -- which is why they still looked like the old
+  // app after everything else moved.
+  assert.ok(/driverProfileModalRoot/.test(SRC) && /adminPortal/.test(SRC),
+    'feed-first.js does not know about the two loose hosts');
+  const sheet = CSS.match(
+    /body\.feed-first \.driverProfileSheet,\s*\n?body\.feed-first \.adminPanel\s*\{([^}]*)\}/s);
+  assert.ok(sheet, 'neither gets the sheet geometry');
+  assert.ok(/top:\s*var\(--tj-split\)/.test(sheet[1]), 'they do not sit on the split');
+  assert.ok(/backdrop-filter:\s*blur/.test(sheet[1]), 'they are not frosted');
+  assert.ok(/padding-bottom:\s*calc\([\s\S]*?\+\s*9\d px?|padding-bottom:\s*calc\([\s\S]*?\+\s*9\d+px/
+    .test(sheet[1]), 'no dock clearance on the container');
+  assert.ok(/\.driverProfileBackdrop\s*\{[^}]*display:\s*none/s.test(CSS),
+    'profile still dims the map behind it');
+});
+
+test('only one host is open at a time', () => {
+  // They are all at the same layer now, so two open at once is one sitting on
+  // top of the other.
+  assert.ok(/closeOtherHosts/.test(SRC), 'nothing closes the host you just left');
 });
 
 test('the sheet is not modal', () => {
