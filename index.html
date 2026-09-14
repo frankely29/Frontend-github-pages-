@@ -178,9 +178,31 @@
 
   <!-- PWA / iOS standalone support -->
   <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <!-- apple-mobile-web-app-status-bar-style="black-translucent" USED to be here,
+       and it is what produced the bar at the bottom of the screen.
+
+       WebKit bug 301108, an iOS 26 regression: with black-translucent AND
+       viewport-fit=cover, iOS draws the page from the true top of the screen
+       but computes the window height as if it had been inset below the status
+       bar. The window comes out exactly one status bar short and the strip
+       below it is outside the paintable surface -- no CSS reaches it.
+
+       Measured on the reporter's phone, from two screenshots a minute apart:
+
+         good   window 956 of a 956pt screen, dock 23.7pt off the bottom
+         bad    window 894 of a 956pt screen, dock 85.7pt off the bottom
+         both   the answer pill at 81pt down, so the top inset never changed
+
+       62pt short, and 62pt is that phone's status bar. Someone else hit this
+       independently on an 844pt screen and lost exactly 47 -- their status bar.
+
+       viewport-fit=cover stays, because it is what puts the map under the
+       status bar and it is not the half that is broken. -->
   <meta name="apple-mobile-web-app-title" content="Joseo Map" />
-  <meta name="theme-color" content="#0f172a" />
+  <!-- Only paints anything if iOS decides to give the status bar a background
+       of its own now. Light, because that is what the app is behind it: the
+       map's water and the feed's own surface. -->
+  <meta name="theme-color" content="#eef2f6" />
   <meta name="mobile-web-app-capable" content="yes" />
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180" />
