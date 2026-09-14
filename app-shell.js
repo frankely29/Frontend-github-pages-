@@ -313,7 +313,7 @@
     wrap.appendChild(manage);
 
     wrap.appendChild(el("div", "shellLockFine",
-      "Already paid on another account? Sign in as that one from the menu."));
+      "Already paid on another account? Sign out and back in as that one."));
     return wrap;
   }
 

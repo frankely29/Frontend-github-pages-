@@ -765,8 +765,10 @@
 
     if (locked()) {
       var join = el("div", "feedJoin");
+      // Short on purpose: at 390px the longer version wrapped to four lines and
+      // pushed the posts -- the thing they came for -- most of a thumb down.
       join.appendChild(el("span", "feedJoinLine",
-        "Reading is free. Replying, liking and posting come with a plan."));
+        "Reading is free. Subscribe to reply, like and post."));
       join.appendChild(subscribeButton("Subscribe — $8/week"));
       wrap.appendChild(join);
     }

@@ -117,7 +117,12 @@
       position: fixed;
       left: 50%;
       transform: translateX(-50%);
-      top: calc(env(safe-area-inset-top, 0px) + 10px);
+      /* Below the top row, not in it. The menu button occupies 14-62px down the
+         left and the locate/police pair the same band on the right, so a
+         centred pill up there lands on top of them and gets its own text
+         clipped -- caught in the browser at 390px, invisible to every DOM
+         test. */
+      top: calc(env(safe-area-inset-top, 0px) + 70px);
       z-index: 2500;            /* under the lock card (2600) and the dock */
       max-width: calc(100vw - 32px);
       box-sizing: border-box;
