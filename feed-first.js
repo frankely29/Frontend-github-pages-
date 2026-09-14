@@ -111,12 +111,12 @@
 
   /* ------------------------------------------------------------ the card */
 
-  /* One line over a blurred card.
+  /* One line over a blurred map.
    *
    * #mapLockCard explains the lock properly -- Subscribe, a redeem box, Manage
-   * subscription -- and is taller than the 30% card it would be explaining, so
-   * feed-first.css hides it here and this takes its place. Tapping opens the
-   * full map, which is where that card lives and where there is room for it. */
+   * subscription -- and is fixed at 50%/50%, which with the sheet up is behind
+   * it. feed-first.css hides it here and this rides the seam instead. Tapping
+   * opens the map screen, where that card lives and has room. */
   function installCardLock() {
     if (byId("mapCardLocked")) return;
     var button = document.createElement("button");
@@ -131,17 +131,148 @@
     document.body.appendChild(button);
   }
 
-  function installCardTap() {
-    if (byId("mapCardOpen")) return;
-    var button = document.createElement("button");
-    button.type = "button";
-    button.id = "mapCardOpen";
-    button.setAttribute("aria-label", "Open the full map");
-    button.addEventListener("click", function () {
-      var s = shell();
-      if (s && typeof s.close === "function") s.close();
+  /* ------------------------------------------------------------ the sheet
+   *
+   * Two detents and free dragging between them. The map behind never changes
+   * size -- the sheet slides over it -- so there is no resize on any frame of
+   * a drag, which is what makes this cheap enough to follow a finger exactly.
+   *
+   * EXPANDED is 39% rather than the 28% that was drawn: the approved sheet was
+   * 72% of the screen and is 15% shorter than that here, which is 61%, which
+   * starts at 39%.
+   */
+  var EXPANDED = 0.39;
+  var MINIMIZED = 0.66;
+  var LS_HINTS = "tj_sheet_hints_v1";
+  var HINTS_UNTIL = 3;
+
+  var split = EXPANDED;
+  var dragging = null;
+
+  function vh() {
+    return Math.max(1, window.innerHeight || 800);
+  }
+
+  function hintsUsed() {
+    try { return Number(localStorage.getItem(LS_HINTS) || 0) || 0; } catch (_) { return 0; }
+  }
+
+  function noteUse() {
+    try { localStorage.setItem(LS_HINTS, String(hintsUsed() + 1)); } catch (_) {}
+    paintHint();
+  }
+
+  /* A hint that never goes away has stopped being a hint. */
+  function paintHint() {
+    var handle = byId("tjSheetHandle");
+    if (!handle) return;
+    handle.classList.toggle("tj-hint", hintsUsed() < HINTS_UNTIL);
+  }
+
+  function paintSplit() {
+    if (!document.body) return;
+    document.body.style.setProperty("--tj-split", (split * 100).toFixed(2) + "%");
+    var min = split > (EXPANDED + MINIMIZED) / 2;
+    document.body.classList.toggle("tj-min", min);
+    var handle = byId("tjSheetHandle");
+    if (handle) {
+      handle.setAttribute("aria-expanded", min ? "false" : "true");
+      handle.setAttribute("aria-label", min ? "Show more posts" : "Show more map");
+    }
+  }
+
+  function setSplit(next, options) {
+    split = Math.min(0.92, Math.max(0.16, next));
+    paintSplit();
+    if (options && options.remember) {
+      try { localStorage.setItem("tj_sheet_split_v1", String(split)); } catch (_) {}
+    }
+  }
+
+  function snap(options) {
+    var mid = (EXPANDED + MINIMIZED) / 2;
+    setSplit(split > mid ? MINIMIZED : EXPANDED, { remember: true });
+    if (options && options.used) noteUse();
+  }
+
+  function toggle() {
+    var mid = (EXPANDED + MINIMIZED) / 2;
+    setSplit(split > mid ? EXPANDED : MINIMIZED, { remember: true });
+    noteUse();
+  }
+
+  function restoreSplit() {
+    var saved = null;
+    try { saved = localStorage.getItem("tj_sheet_split_v1"); } catch (_) {}
+    var n = Number(saved);
+    setSplit(Number.isFinite(n) && n > 0 ? n : EXPANDED);
+  }
+
+  function onDown(event) {
+    if (!event || (event.button !== undefined && event.button !== 0)) return;
+    dragging = { y: event.clientY, from: split, moved: false };
+    document.body.classList.add("tj-dragging");
+    var handle = byId("tjSheetHandle");
+    if (handle && typeof handle.setPointerCapture === "function" && event.pointerId !== undefined) {
+      try { handle.setPointerCapture(event.pointerId); } catch (_) {}
+    }
+  }
+
+  function onMove(event) {
+    if (!dragging) return;
+    var dy = event.clientY - dragging.y;
+    // Four pixels of slop, so a tap that wobbles is still a tap.
+    if (Math.abs(dy) > 4) dragging.moved = true;
+    setSplit(dragging.from + dy / vh());
+    if (event.preventDefault) event.preventDefault();
+  }
+
+  function onUp() {
+    if (!dragging) return;
+    var moved = dragging.moved;
+    dragging = null;
+    document.body.classList.remove("tj-dragging");
+    if (moved) snap({ used: true });
+    else toggle();
+  }
+
+  function installHandle() {
+    if (byId("tjSheetHandle")) return;
+    var handle = document.createElement("button");
+    handle.type = "button";
+    handle.id = "tjSheetHandle";
+    handle.setAttribute("aria-controls", "shellScreens");
+
+    var grab = document.createElement("span");
+    grab.className = "tjGrab";
+    grab.setAttribute("aria-hidden", "true");
+    handle.appendChild(grab);
+
+    var arrow = document.createElement("span");
+    arrow.className = "tjArrow";
+    arrow.setAttribute("aria-hidden", "true");
+    arrow.innerHTML = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none"'
+      + ' stroke="currentColor" stroke-width="2.6" stroke-linecap="round"'
+      + ' stroke-linejoin="round" style="display:block">'
+      + '<path d="m6 9.5 6 6 6-6"></path></svg>';
+    handle.appendChild(arrow);
+
+    handle.addEventListener("pointerdown", onDown);
+    handle.addEventListener("pointermove", onMove);
+    handle.addEventListener("pointerup", onUp);
+    handle.addEventListener("pointercancel", onUp);
+    // Keyboard: the arrows do what the drag does.
+    handle.addEventListener("keydown", function (event) {
+      if (!event) return;
+      if (event.key === "ArrowUp") { setSplit(EXPANDED, { remember: true }); noteUse(); }
+      else if (event.key === "ArrowDown") { setSplit(MINIMIZED, { remember: true }); noteUse(); }
+      else return;
+      event.preventDefault();
     });
-    document.body.appendChild(button);
+
+    document.body.appendChild(handle);
+    restoreSplit();
+    paintHint();
   }
 
   /* ----------------------------------------------------------- the state */
@@ -159,16 +290,15 @@
     if (map) map.classList.toggle("on", !openKey());
 
     if (home === was) return;
-    // The card and the full screen are different sizes and MapLibre measures
-    // its container, not the window. Without this the map keeps drawing at
-    // whichever size it was when the switch happened.
-    if (typeof window.resizeMapToViewport === "function") {
-      window.resizeMapToViewport();
-      // Once after the layout has actually settled, because the class change
-      // and the reflow are not the same frame.
-      window.setTimeout(window.resizeMapToViewport, 80);
-      window.setTimeout(window.resizeMapToViewport, 400);
-    }
+    paintSplit();
+    paintHint();
+    /* Deliberately no map resize.
+     *
+     * The map is full bleed in both states -- the sheet slides over it rather
+     * than shrinking it -- so its container never changes and MapLibre has
+     * nothing to re-measure. That is what makes dragging cheap enough to
+     * follow a finger: the alternative, a card that grows and shrinks, re-lays
+     * out and re-renders the whole map on every frame of the gesture. */
   }
 
   /* Land on the feed, once.
@@ -189,7 +319,7 @@
   function mount() {
     if (!document.body) return;
     installDockButtons();
-    installCardTap();
+    installHandle();
     installCardLock();
     apply();
     openHomeOnce();
@@ -216,6 +346,12 @@
   window.TeamJoseoFeedFirst = {
     apply: apply,
     installDockButtons: installDockButtons,
+    installHandle: installHandle,
+    setSplit: setSplit,
+    toggle: toggle,
+    snap: snap,
+    split: function () { return split; },
+    detents: { expanded: EXPANDED, minimized: MINIMIZED },
     isHome: function () {
       return !!(document.body && document.body.classList.contains("feed-first"));
     },
