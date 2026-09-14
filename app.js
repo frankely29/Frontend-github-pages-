@@ -533,7 +533,18 @@ async function fetchJSON(url, opts = {}) {
       && typeof window !== "undefined" && typeof window.dispatchEvent === "function"
     ) {
       try {
-        window.dispatchEvent(new CustomEvent("tlc:auth-expired", { detail: { status: 401, url, payload: parsed } }));
+        window.dispatchEvent(new CustomEvent("tlc:auth-expired", {
+          detail: {
+            status: 401,
+            url,
+            payload: parsed,
+            // Which token was rejected — see the listener in app.part10.js.
+            token: String(
+              (Object.entries(fetchOpts.headers || {})
+                .find(([k]) => k.toLowerCase() === "authorization") || [])[1] || ""
+            ).replace(/^Bearer\s+/i, "").trim(),
+          },
+        }));
       } catch (_) {}
     }
     const err = new Error(`${res.status} ${res.statusText} @ ${url} :: ${text.slice(0, 120)}`);

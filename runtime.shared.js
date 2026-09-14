@@ -94,6 +94,22 @@
     );
   }
 
+  // Which token a request actually carried. A 401 only means "sign out" if the
+  // token it was sent with is still the one in use: a request made before a new
+  // sign-in can land after it, and its 401 says nothing about the new session.
+  function sentBearer(headers) {
+    if (!headers) return '';
+    var raw = '';
+    if (typeof headers.get === 'function') {
+      raw = headers.get('Authorization') || '';
+    } else {
+      var key = Object.keys(headers).filter(
+        function (k) { return k.toLowerCase() === 'authorization'; })[0];
+      raw = key ? String(headers[key] || '') : '';
+    }
+    return raw.replace(/^Bearer\s+/i, '').trim();
+  }
+
   async function fetchText(urlOrPath, opts = {}) {
     const controller = opts.signal ? null : new AbortController();
     const timeoutMs = Number(opts.timeoutMs || 0);
@@ -155,6 +171,9 @@
                   url: absoluteUrl,
                   payload,
                   detail: payload?.detail || null,
+                  // Which token was rejected. The listener signs the driver out
+                  // only if this is still the token in use. Never logged.
+                  token: sentBearer(fetchOptions.headers),
                 },
               }));
             }

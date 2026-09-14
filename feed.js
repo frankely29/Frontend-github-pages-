@@ -98,7 +98,7 @@
       // Same signals the rest of the app raises, so an expired session takes
       // the whole app back to the landing page rather than leaving this one
       // screen stuck on an error nobody can act on.
-      if (res.status === 401) fire("tlc:auth-expired", { status: 401, url: path });
+      if (res.status === 401) fire("tlc:auth-expired", { status: 401, url: path, token: t });
       if (res.status === 402) fire("tlc:payment-required", { status: 402, url: path });
       var err = new Error(text || (res.status + " " + res.statusText));
       err.status = res.status;
