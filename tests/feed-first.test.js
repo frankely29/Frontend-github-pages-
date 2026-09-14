@@ -633,7 +633,10 @@ test('the dock clearance is where a height:100% panel can see it', () => {
    * Padding the flex CONTAINER shortens the box those wraps measure against. */
   const drawer = CSS.match(/body\.feed-first #dockDrawer\s*\{([^}]*)\}/s);
   assert.ok(drawer, 'no drawer rule');
-  const pad = Number((drawer[1].match(/padding-bottom:\s*calc\([^)]*\+\s*(\d+)px/) || [])[1]);
+  // [^)]* would stop at env()'s own closing paren and match nothing -- the
+  // first cut of this read NaN and failed against CSS the browser had already
+  // been watched getting right.
+  const pad = Number((drawer[1].match(/padding-bottom:\s*calc\([\s\S]*?\+\s*(\d+)px/) || [])[1]);
   // The dock is 74px tall sitting at safe-area + 10px, so its top edge is at
   // safe-area + 84px.
   assert.ok(Number.isFinite(pad) && pad >= 84,
