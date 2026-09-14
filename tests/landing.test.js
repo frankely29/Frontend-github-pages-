@@ -159,7 +159,13 @@ function buildDom(opts = {}) {
   // without it here that branch could not be exercised at all.
   const overlay = makeNode('div');
   overlay.id = 'lockedOverlay';
-  if (opts.overlayShown) overlay.classList.add('show');
+  // Three different things raise this overlay and only one of them is the
+  // `show` class, so the double has to model what it RENDERS as, not just what
+  // classes it carries. opts.overlayRaisedBy: 'show' | 'boot' | 'locked' | null.
+  const raisedBy = opts.overlayRaisedBy
+    || (opts.overlayShown ? 'show' : null);
+  if (raisedBy === 'show') overlay.classList.add('show');
+  overlay.__display = raisedBy ? 'flex' : 'none';
   byId.set('lockedOverlay', overlay);
 
   // <html> carries the boot stage. tj-auth-pending means the app has not yet
@@ -177,6 +183,9 @@ function buildDom(opts = {}) {
   };
   const window = {
     document, console,
+    // landing.js asks the rendering whether the page is on screen. The double
+    // answers from __display, which buildDom sets per boot state above.
+    getComputedStyle: (el) => ({ display: (el && el.__display) || 'none' }),
     addEventListener: (t, fn) => { (window._l[t] = window._l[t] || []).push(fn); },
     _l: {},
     dispatch: (t, e) => (window._l[t] || []).forEach((fn) => fn(e)),
@@ -592,6 +601,23 @@ test('an expiry does not close the form someone is typing into', () => {
     'an expiry threw the driver off the form they were using');
   dom.window.dispatch('tlc:auth-expired', { detail: { status: 401 } });
   assert.strictEqual(dom.form.hidden, false, 'a second poll finished the job');
+});
+
+test('an expiry leaves the form alone however the page got on screen', () => {
+  // #lockedOverlay is raised three ways -- the `show` class, tj-auth-pending
+  // while the app works out who this is, and tj-locked when access has lapsed.
+  // Only the first sets the class. The guard asked about the class, so during
+  // boot and while locked -- exactly the states a driver with a dead or expired
+  // token is in -- a 401 still threw them off the form. Confirmed in a browser
+  // on all three: .show kept the form, the other two went to pitch.
+  ['show', 'boot', 'locked'].forEach((raisedBy) => {
+    const dom = buildDom({ overlayRaisedBy: raisedBy });
+    dom.api.goTo('signin');
+    assert.strictEqual(dom.form.hidden, false, `${raisedBy}: the form never opened`);
+    dom.window.dispatch('tlc:auth-expired', { detail: { status: 401 } });
+    assert.strictEqual(dom.form.hidden, false,
+      `${raisedBy}: an expiry threw the driver off the form they were typing into`);
+  });
 });
 
 test('an expiry still resets the pane when the page is not on screen', () => {
