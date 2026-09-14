@@ -453,6 +453,25 @@ test('the feature lock is readable by the files that need it', () => {
     'feed.js and app-shell.js have no way to ask');
 });
 
+test('night does not unlock the map', () => {
+  /* The blur and the night theme both claim `filter` on #map with !important,
+   * and `body.night #map` is (1,1,1) on specificity -- exactly the same as
+   * `html.tj-map-locked #map` in the inline boot CSS. A tie goes to source
+   * order, and the boot CSS is in <head> while frontend-shell.css is injected
+   * after it, so the night rule won and the blur lost: an unpaid driver at
+   * night got the lock card over a perfectly readable map. Half of every day,
+   * and invisible to any test run in daylight.
+   *
+   * Caught in a browser, not here -- computed style is the only place the two
+   * rules meet -- so what this pins is the fix: the night rule excludes the
+   * locked state rather than outranking it. */
+  const night = SHELL_CSS.match(/([^\n{]*body\.night\s+#map\s*)\{([^}]*)\}/);
+  assert.ok(night, 'the night rule for #map is gone');
+  assert.ok(/:not\(\.tj-map-locked\)/.test(night[1]),
+    `night clears the map's filter unconditionally again: "${night[1].trim()}"`);
+  assert.ok(/html\.tj-map-locked #map/.test(CRITICAL_RULES), 'the blur itself is gone');
+});
+
 let failed = 0;
 tests.forEach(([name, fn]) => {
   try { fn(); console.log(`  ok   ${name}`); }

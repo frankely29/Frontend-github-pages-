@@ -286,7 +286,8 @@
       "./map-action.css",
       "./feed.css",
       "./compose.css",
-      "./profile.css"
+      "./profile.css",
+      "./map-feed-peek.css"
     ];
 
     window.__TLC_LOCAL_JS_ASSETS__ = [
@@ -335,7 +336,11 @@
       "./feed.js",
       "./compose.js",
       "./profile.js",
-      "./map-route.js"
+      "./map-route.js",
+      // After feed.js, which it borrows "3 minutes ago" from, and after
+      // app-shell.js, whose open('feed') it calls. It falls back rather than
+      // throwing if either is missing, but there is no reason to make it.
+      "./map-feed-peek.js"
     ];
 
     window.__tlcWithBuildId = function __tlcWithBuildId(path) {
@@ -423,6 +428,27 @@
     its input with a document-wide querySelector, so there must be exactly one
     in the document, and this is now the screen it belongs on.
   -->
+  <!--
+    The feed, on the map.
+
+    The top quarter of the screen shows the latest posts; tapping anywhere in it
+    opens the full Feed. One tap target and one destination on purpose -- rows
+    that each went somewhere different would make the big obvious gesture
+    ambiguous, and a list that scrolled would fight it.
+
+    In the markup rather than built by script, like the lock card above it, so
+    it cannot race the scripts around it. map-feed-peek.js fills .peekList and
+    binds the tap.
+  -->
+  <div id="mapFeedPeek" role="button" tabindex="0"
+       aria-label="Latest posts from drivers — open the feed" hidden>
+    <div class="peekHead">
+      <span class="peekTitle">From drivers</span>
+      <span class="peekAll">See all &rsaquo;</span>
+    </div>
+    <div class="peekList"></div>
+  </div>
+
   <!--
     The preview countdown.
 
