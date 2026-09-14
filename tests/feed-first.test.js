@@ -1085,6 +1085,31 @@ test('only one host is open at a time', () => {
   assert.ok(/closeOtherHosts/.test(SRC), 'nothing closes the host you just left');
 });
 
+test('the answer sits at the top, and nothing sits on it', () => {
+  /* It used to ride the sheet's top edge, which moved every time the sheet did
+   * and put it in the busiest part of the map -- the zone the driver is
+   * standing in, with their own marker in it. Top centre is where a glance
+   * lands and it does not move.
+   *
+   * The two buttons that were up there are gone, so the band is the pill's
+   * own. map-action.js un-hides the segmented control once it has wired it up,
+   * and it does that by removing the hidden ATTRIBUTE -- so the rule that
+   * takes it away has to be a style, and has to be !important. */
+  const pill = CSS.match(/body\.feed-first #mapAction\s*\{([^}]*)\}/s);
+  assert.ok(pill, 'no rule places the answer pill');
+  assert.ok(/top:\s*calc\(env\(safe-area-inset-top/.test(pill[1]),
+    'the pill is not anchored to the top of the screen');
+  assert.ok(/bottom:\s*auto/.test(pill[1]), 'it is still anchored to the bottom too');
+  assert.ok(!/--tj-split/.test(pill[1]), 'it still rides the sheet');
+
+  assert.ok(/body\.feed-first[^{]*mapSegmented[^{]*\{[^}]*display:\s*none\s*!important/s.test(CSS),
+    'the pair at the top right is still there, under the pill');
+  // And nothing left behind: the original stack map-action.js replaced is
+  // hidden too, or removing the segmented control brings it back.
+  assert.ok(/body\.feed-first[^{]*\.mapControlStack[^{]*\{[^}]*display:\s*none/s.test(CSS),
+    'hiding the segmented control lets the old centre button reappear');
+});
+
 test('the sheet is not modal', () => {
   // The map behind stays visible and usable, which is the point of the layout,
   // so the scrim that used to dim it has no job.

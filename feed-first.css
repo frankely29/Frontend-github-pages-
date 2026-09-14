@@ -82,7 +82,6 @@ body.feed-first #shellScreens {
    here would make the drag feel like it is on a rubber band. */
 body.feed-first.tj-dragging #shellScreens,
 body.feed-first.tj-dragging #tjSheetHandle,
-body.feed-first.tj-dragging #mapAction,
 body.feed-first.tj-dragging #mapCardLocked { transition: none !important; }
 
 /* Anything carrying words gets an opaque ground. This is the whole contrast
@@ -381,14 +380,35 @@ body.feed-first.tj-dragging #tjSheetHandle .tjArrow { animation: none; }
 
 #tjSheetHandle:focus-visible { outline: 3px solid #0066ff; outline-offset: 2px; }
 
-/* ------------------------------------------- things that ride the seam */
+/* ------------------------------------------------------ the answer, on top
+ *
+ * The recommendation used to ride the sheet's top edge, so it moved every time
+ * the sheet did and sat in the busiest part of the map -- the zone the driver
+ * is standing in, with their own marker in it.
+ *
+ * Top centre instead: it is the one thing on this screen the app exists to
+ * say, it is the first place a glance lands, and it no longer moves at all.
+ * The two buttons that were up there are gone (below), so the band is its own.
+ * safe-area-inset-top is 62pt on a Dynamic Island phone, which clears it. */
 body.feed-first #mapAction {
   bottom: auto !important;
-  top: calc(var(--tj-split) - 54px) !important;
+  top: calc(env(safe-area-inset-top, 0px) + 10px) !important;
   width: min(100vw - 28px, 420px) !important;
-  z-index: 2600 !important;
-  transition: top 0.26s cubic-bezier(0.32, 0.72, 0, 1);
+  z-index: 3200 !important;
 }
+
+/* The pair at the top right: recentre, and report police.
+ *
+ * Asked for, and worth saying what goes with them. Reporting police is still
+ * in the dock, under Modes -- the right half only ever clicked #btnPolice in
+ * there. Recentring leaves the map surface entirely: auto-centre is on by
+ * default and stays on, so the map keeps following the driver, but there is
+ * now no way back to themselves after panning away by hand.
+ *
+ * !important because map-action.js un-hides this once it has wired it up, and
+ * it is the attribute it removes, not a style. */
+body.feed-first #mapSegmented,
+body.feed-first .mapSegmented { display: none !important; }
 
 /* --------------------------------------------------------------- dock
    app-shell.css hides the dock whenever a destination is open, which is right
@@ -511,7 +531,6 @@ html.tj-map-locked body.feed-first #mapCardLocked:focus-visible {
 @media (prefers-reduced-motion: reduce) {
   body.feed-first #shellScreens,
   body.feed-first #tjSheetHandle,
-  body.feed-first #mapAction,
   html.tj-map-locked body.feed-first #mapCardLocked { transition: none; }
   body.feed-first #tjSheetHandle.tj-hint .tjArrow,
   body.feed-first.tj-min #tjSheetHandle.tj-hint .tjArrow { animation: none; }
