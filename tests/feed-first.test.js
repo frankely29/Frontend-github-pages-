@@ -255,6 +255,9 @@ function build(options = {}) {
     // assertions fail against code the browser runs correctly.
     querySelector: (sel) => selectAll(body, sel)[0] || null,
     querySelectorAll: (sel) => selectAll(body, sel),
+    hidden: false,
+    documentElement: makeNode('html'),
+    activeElement: null,
     addEventListener: (t, fn) => { (document._l[t] = document._l[t] || []).push(fn); },
     _l: {},
   };
@@ -288,6 +291,11 @@ function build(options = {}) {
     visualViewport: Object.assign(
       { height: 956, offsetTop: 0, addEventListener: () => {} },
       options.vv || {}),
+    /* The window against the screen it is painted in. Equal here: a short
+     * window is the bug, so a test that wants one says so. */
+    screen: { height: options.screenHeight === undefined ? 956 : options.screenHeight },
+    navigator: { standalone: options.standalone !== false },
+    matchMedia: () => ({ matches: options.standalone !== false }),
     setTimeout: (fn, ms) => { timers.push({ fn, ms }); return timers.length; },
     addEventListener: (t, fn) => { (window._l[t] = window._l[t] || []).push(fn); },
     _l: {},
@@ -934,6 +942,75 @@ test('no keyboard, no slide written', () => {
   assert.ok(!dom.body.classList.contains('tj-kb-up'));
   assert.strictEqual(dom.body.style['--tj-kb'], '0px');
   assert.strictEqual(dom.body.style['--tj-vtop'], '0px');
+});
+
+test('a window short of its screen is noticed, and only where it can be', () => {
+  /* The photo that started this: the sheet's top edge is 536pt down a 956pt
+   * screen and it sits at 60%. 536 / 0.6 is 894. Nothing is mispositioned --
+   * the window is 62pt short of the screen it is painted in, and everything in
+   * it is exactly where it should be.
+   *
+   * Guarded three ways, because being wrong about this would move the whole
+   * UI: a browser tab is SUPPOSED to be shorter than the screen by the height
+   * of its own chrome, screen.height does not rotate on iOS so landscape reads
+   * a huge bogus difference, and a number outside a status bar's worth of
+   * pixels is a measurement gone wrong rather than this bug. */
+  assert.strictEqual(build({ screenHeight: 956 }).api.windowIsShort(), 0,
+    'a window the size of its screen reported a gap');
+  assert.strictEqual(build({ screenHeight: 956 + 62 }).api.windowIsShort(), 62,
+    'the short window went unnoticed');
+  assert.strictEqual(build({ screenHeight: 956 + 62, standalone: false }).api.windowIsShort(), 0,
+    'it fires in a browser tab, where the chrome accounts for the difference');
+  assert.strictEqual(build({ screenHeight: 956 + 400 }).api.windowIsShort(), 0,
+    'no sanity band: 400px is not a status bar');
+  assert.strictEqual(build({ screenHeight: 956 + 4 }).api.windowIsShort(), 0,
+    'a rounding artefact was treated as the bug');
+});
+
+test('the keyboard leaving asks for the window back', () => {
+  // Only then: asking while somebody is typing would blur the field they are
+  // typing in, which is a far worse bug than the one being fixed.
+  const up = build({ open: 'feed', vv: { height: 536, offsetTop: 0 } });
+  // mount() schedules its own; only the ones this call adds are interesting.
+  const before = up.timers.length;
+  up.api.paintViewport();
+  assert.strictEqual(up.timers.length, before,
+    'it asked while the keyboard was still up');
+
+  up.window.visualViewport.height = 956;
+  up.api.paintViewport();
+  assert.ok(up.timers.length > before, 'the keyboard left and nothing asked');
+});
+
+test('asking does nothing where the window is not short', () => {
+  /* Which is every browser I can run, so this is the case that has to be
+   * harmless -- it must not blur a field or scroll the page on a device that
+   * never had the bug. */
+  const dom = build({ open: 'feed', screenHeight: 956 });
+  const field = dom.document.createElement('input');
+  let blurred = false;
+  field.blur = () => { blurred = true; };
+  dom.document.activeElement = field;
+  dom.window.scrollY = 40;
+
+  dom.api.askForTheWindowBack();
+  assert.strictEqual(blurred, false, 'it blurred a field on a healthy window');
+  assert.strictEqual(dom.window.scrollY, 40, 'it scrolled a page that was fine');
+});
+
+test('asking drops the focus iOS is still holding the window for', () => {
+  // A field that still has focus after the keyboard is dismissed is what iOS
+  // reads as "still editing", and it is why the window stays shrunk.
+  const dom = build({ open: 'feed', screenHeight: 956 + 62 });
+  const field = dom.document.createElement('input');
+  let blurred = false;
+  field.blur = () => { blurred = true; };
+  dom.document.activeElement = field;
+  dom.window.scrollY = 40;
+
+  dom.api.askForTheWindowBack();
+  assert.ok(blurred, 'the field kept focus, and iOS keeps the window short for it');
+  assert.strictEqual(dom.window.scrollY, 0, 'the document was left scrolled');
 });
 
 test('nothing tries to paint outside the viewport', () => {
