@@ -3044,6 +3044,36 @@ if (typeof window !== "undefined") {
   };
 }
 
+/* Everything that is not the map and not the feed.
+ *
+ * Kept as a second class rather than folded into tj-map-locked, because the two
+ * are about to stop agreeing: the map opens for a timed preview and then locks,
+ * while chat, the leaderboard, games and posting are never open to an unpaid
+ * driver at all. One class for "the map is covered right now" and one for "this
+ * account has no access" keeps the preview from accidentally unlocking chat.
+ *
+ * Reading is deliberately not in here. The feed stays legible -- it is the
+ * reason to pay for the rest -- and only the parts that write are taken away.
+ */
+function applyFeatureLockState(locked) {
+  if (typeof document === "undefined" || !document.documentElement) return;
+  const on = !!locked;
+  const was = document.documentElement.classList.contains("tj-feature-locked");
+  document.documentElement.classList.toggle("tj-feature-locked", on);
+  if (on === was) return;
+  try {
+    window.dispatchEvent(new CustomEvent("tlc:feature-lock-changed", { detail: { locked: on } }));
+  } catch (_) {}
+}
+
+if (typeof window !== "undefined") {
+  window.applyFeatureLockState = applyFeatureLockState;
+  window.isFeatureLocked = function isFeatureLocked() {
+    return !!(document.documentElement
+      && document.documentElement.classList.contains("tj-feature-locked"));
+  };
+}
+
 function setAuthUI(signedIn, note) {
   if (btnAuth) btnAuth.textContent = signedIn ? "Sign out" : "Sign in";
   if (communityNote) {
@@ -3083,6 +3113,7 @@ function setAuthUI(signedIn, note) {
   // What an unpaid driver actually loses. One class, read by the inline boot
   // CSS in index.html, so it holds before any of this file has loaded.
   applyMapLockState(lapsed);
+  applyFeatureLockState(lapsed);
 
   // The boot's second stage ends here, and only here: this is the first moment
   // the app knows whether anyone is signed in. Until now index.html has held

@@ -483,6 +483,213 @@ test('the menu is destinations again, with no readings in it', () => {
     'the destination list cannot scroll');
 });
 
+// --------------------------------------------------------------------------
+// locked destinations — free to read the feed, paid for everything else
+// --------------------------------------------------------------------------
+
+/** Put the shell into the state an unpaid, signed-in driver is in. */
+function lock(env, on) {
+  env.window.isFeatureLocked = () => !!on;
+  env.window.dispatch('tlc:feature-lock-changed', { detail: { locked: !!on } });
+}
+
+function menuItem(env, key) {
+  return env.byId.get('shellMenu').querySelectorAll('.shellItem')
+    .filter((i) => i.getAttribute('data-shell-key') === key)[0] || null;
+}
+
+function screenBody(env) {
+  return env.byId.get('shellScreens').querySelector('.shellScreenBody');
+}
+
+test('a paid-up driver has nothing locked', () => {
+  const env = makeEnv();
+  ['chat', 'games', 'post', 'leaderboard', 'feed', 'map'].forEach((k) => {
+    assert.ok(!env.shell.isLocked(k), `"${k}" is locked with no lock in force`);
+  });
+});
+
+test('an unpaid driver loses chat, games, the leaderboard and posting', () => {
+  const env = makeEnv();
+  lock(env, true);
+  ['chat', 'games', 'leaderboard', 'post'].forEach((k) => {
+    assert.ok(env.shell.isLocked(k), `"${k}" must be locked without a plan`);
+  });
+});
+
+test('the feed and the map are never locked by this', () => {
+  // Reading the feed is the whole reason an unpaid driver stays, and the map
+  // has its own timed preview and its own class. If either turned up in the
+  // paid list, this model would be the wall it was meant to replace.
+  const env = makeEnv();
+  lock(env, true);
+  assert.ok(!env.shell.isLocked('feed'), 'the feed must stay readable');
+  assert.ok(!env.shell.isLocked('map'), 'the map is governed by the preview, not this');
+  assert.ok(!env.shell.lockedKeys().includes('feed'));
+  assert.ok(!env.shell.lockedKeys().includes('map'));
+});
+
+test('an admin is never walled', () => {
+  const env = makeEnv({ admin: true });
+  lock(env, true);
+  assert.ok(!env.shell.isLocked('chat'), 'admins keep everything');
+});
+
+test('locked destinations stay in the menu, with a padlock', () => {
+  // Hiding them would leave a driver with a smaller app rather than a locked
+  // one, and nothing to tap to find out what a plan buys.
+  const env = makeEnv();
+  lock(env, true);
+  const keys = menuKeys(env);
+  ['chat', 'games', 'leaderboard', 'post'].forEach((k) => {
+    assert.ok(keys.includes(k), `"${k}" was removed from the menu instead of locked`);
+    const item = menuItem(env, k);
+    assert.ok(item.classList.contains('locked'), `"${k}" carries no locked class`);
+    assert.ok(item.querySelector('.shellItemLock'), `"${k}" shows no padlock`);
+  });
+  assert.ok(!menuItem(env, 'feed').classList.contains('locked'),
+    'the feed must not be marked locked');
+});
+
+test('opening a locked destination shows the wall, not the panel', () => {
+  const env = makeEnv({ dockButtons: ['dockChat', 'dockGames'] });
+  lock(env, true);
+  const chat = env.byId.get('dockChat');
+  const before = chat.clicks;
+  clickMenuItem(env, 'chat');
+  assert.strictEqual(chat.clicks, before,
+    'the dock panel was opened behind the lock');
+  assert.ok(screenBody(env).querySelector('.shellLock'), 'no lock panel rendered');
+  assert.strictEqual(env.byId.get('shellScreens').hidden, false, 'screen host stayed closed');
+});
+
+test('the wall names the destination it is standing in front of', () => {
+  const env = makeEnv();
+  lock(env, true);
+  clickMenuItem(env, 'leaderboard');
+  const title = env.byId.get('shellScreens').querySelector('.shellScreenTitle');
+  assert.strictEqual(title.textContent, 'Leaderboard');
+  const line = screenBody(env).querySelector('.shellLockTitle').textContent;
+  assert.ok(/Leaderboard/.test(line), `the wall does not say which screen: "${line}"`);
+});
+
+test('the wall offers a way to pay and a way to manage an existing plan', () => {
+  const env = makeEnv();
+  const calls = [];
+  env.window.TlcPaywallModule = {
+    triggerCheckout: () => calls.push('checkout'),
+    openPortal: () => calls.push('portal'),
+  };
+  lock(env, true);
+  clickMenuItem(env, 'chat');
+  const body = screenBody(env);
+  const go = body.querySelector('.shellLockBtn');
+  const manage = body.querySelector('.shellLockGhost');
+  assert.ok(go, 'no subscribe button');
+  assert.ok(manage, 'no way to manage an existing subscription');
+  go.click();
+  manage.click();
+  assert.deepStrictEqual(calls, ['checkout', 'portal'],
+    'the wall reimplements checkout instead of using the paywall module');
+});
+
+test('the wall is never bookmarked', () => {
+  // A reload should land a driver where the app works, not back on the wall.
+  const env = makeEnv();
+  lock(env, true);
+  clickMenuItem(env, 'games');
+  assert.strictEqual(env.window.location.hash, '',
+    `a lock screen wrote a hash: "${env.window.location.hash}"`);
+});
+
+test('the dock is the other way in, and it is guarded too', () => {
+  // #dockChat is a button a driver taps directly; its own handler lives in
+  // app.part*.js and would open the panel regardless of what the menu says.
+  const env = makeEnv({ dockButtons: ['dockChat', 'dockGames'] });
+  lock(env, true);
+  const chat = env.byId.get('dockChat');
+  let defaultPrevented = false;
+  env.document.dispatch('click', {
+    type: 'click',
+    target: chat,
+    preventDefault: () => { defaultPrevented = true; },
+    stopPropagation: () => {},
+  });
+  assert.ok(defaultPrevented, 'the dock click was left to open the panel');
+  assert.ok(screenBody(env).querySelector('.shellLock'), 'no lock panel from the dock');
+});
+
+test('a tap on an icon inside a dock button still counts', () => {
+  // The tap usually lands on the svg, not the button.
+  const env = makeEnv({ dockButtons: ['dockChat'] });
+  lock(env, true);
+  const chat = env.byId.get('dockChat');
+  const icon = makeNode('svg');
+  chat.appendChild(icon);
+  let prevented = false;
+  env.document.dispatch('click', {
+    type: 'click',
+    target: icon,
+    preventDefault: () => { prevented = true; },
+    stopPropagation: () => {},
+  });
+  assert.ok(prevented, 'a tap on the icon walked past the guard');
+});
+
+test('the dock is untouched for anyone who has paid', () => {
+  const env = makeEnv({ dockButtons: ['dockChat'] });
+  let prevented = false;
+  env.document.dispatch('click', {
+    type: 'click',
+    target: env.byId.get('dockChat'),
+    preventDefault: () => { prevented = true; },
+    stopPropagation: () => {},
+  });
+  assert.ok(!prevented, 'a paid driver had their dock tap swallowed');
+});
+
+test('paying while standing on the wall opens what they paid for', () => {
+  const env = makeEnv({ dockButtons: ['dockChat'] });
+  lock(env, true);
+  clickMenuItem(env, 'chat');
+  assert.ok(screenBody(env).querySelector('.shellLock'), 'precondition: on the wall');
+  const chat = env.byId.get('dockChat');
+  const before = chat.clicks;
+  lock(env, false);
+  assert.strictEqual(chat.clicks, before + 1,
+    'the wall stayed up after the subscription started');
+  assert.strictEqual(env.byId.get('shellScreens').hidden, true,
+    'the lock panel is still sitting on top of the panel it was hiding');
+});
+
+test('the paid list survives a destination registering over the placeholder', () => {
+  // chat.js, compose.js and friends register over app-shell.js's placeholder.
+  // A flag that lives only on the placeholder entry is silently thrown away by
+  // that second registration, and the destination quietly unlocks.
+  const env = makeEnv();
+  lock(env, true);
+  env.shell.register({
+    key: 'chat', title: 'Chat', icon: '✉', group: 'Network', dock: 'dockChat',
+  });
+  assert.ok(env.shell.isLocked('chat'),
+    're-registering chat without paid:true unlocked it');
+});
+
+test('a destination can still declare itself paid', () => {
+  const env = makeEnv();
+  lock(env, true);
+  env.shell.register({ key: 'battles', title: 'Battles', icon: '⚔', paid: true,
+    render: (body) => body.appendChild(makeNode('div')) });
+  assert.ok(env.shell.isLocked('battles'));
+});
+
+test('the lock styles ship', () => {
+  ['.shellLock', '.shellLockBtn', '.shellItemLock', '.shellItem.locked']
+    .forEach((sel) => {
+      assert.ok(SHELL_CSS.includes(sel), `no style for ${sel}`);
+    });
+});
+
 let failed = 0;
 tests.forEach(([name, fn]) => {
   try {

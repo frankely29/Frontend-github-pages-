@@ -422,6 +422,34 @@ test('the old white sign-in card is gone for good', () => {
   });
 });
 
+test('the feature lock is its own class, not the map lock wearing a hat', () => {
+  // The two are about to stop agreeing: the map opens for a timed preview and
+  // closes again, while chat, games, the leaderboard and posting are never open
+  // to an unpaid driver at all. Folding them into one class means the preview
+  // would unlock chat for five minutes.
+  assert.ok(/function applyFeatureLockState/.test(PART10_RULES),
+    'no feature lock state at all');
+  const i = PART10_RULES.indexOf('function applyFeatureLockState');
+  const fn = PART10_RULES.slice(i, PART10_RULES.indexOf('\n}', i));
+  assert.ok(fn.includes('tj-feature-locked'), 'it does not set its own class');
+  assert.ok(!fn.includes('tj-map-locked'), 'the two locks are the same class');
+  assert.ok(fn.includes('tlc:feature-lock-changed'),
+    'nothing is told when access changes, so the menu never repaints');
+});
+
+test('setAuthUI drives both locks from the same verdict', () => {
+  const i = PART10_RULES.indexOf('function setAuthUI');
+  const fn = PART10_RULES.slice(i, i + 3200);
+  assert.ok(/applyMapLockState\(lapsed\)/.test(fn), 'the map lock is not driven by lapsed');
+  assert.ok(/applyFeatureLockState\(lapsed\)/.test(fn),
+    'the feature lock is not driven by lapsed');
+});
+
+test('the feature lock is readable by the files that need it', () => {
+  assert.ok(/window\.isFeatureLocked\s*=/.test(PART10_RULES),
+    'feed.js and app-shell.js have no way to ask');
+});
+
 let failed = 0;
 tests.forEach(([name, fn]) => {
   try { fn(); console.log(`  ok   ${name}`); }

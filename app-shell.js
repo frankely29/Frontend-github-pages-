@@ -112,6 +112,46 @@
     }
   }
 
+  /* Destinations an unpaid driver does not get.
+   *
+   * Held here as a list of keys rather than only as a flag on each entry,
+   * because every one of these is registered twice -- app-shell.js puts up a
+   * placeholder and the real file (chat.js, compose.js, ...) registers over it.
+   * A flag set on the placeholder is thrown away by the second registration,
+   * silently, and the destination quietly unlocks. The list cannot be dropped
+   * that way. `paid: true` on an entry still works, for anything registered
+   * later that wants to opt in.
+   *
+   * The map is not in here: it has its own timed preview and its own class.
+   * The feed is not in here either -- reading is free, and feed.js takes away
+   * the buttons that write.
+   */
+  var PAID_KEYS = ["post", "chat", "leaderboard", "games"];
+
+  function featuresLocked() {
+    try {
+      return !!(window.isFeatureLocked && window.isFeatureLocked());
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function entryIsPaid(entry) {
+    if (!entry) return false;
+    if (entry.paid === true) return true;
+    return PAID_KEYS.indexOf(entry.key) >= 0;
+  }
+
+  function entryIsLocked(entry) {
+    if (!entryIsPaid(entry)) return false;
+    if (isAdmin()) return false;
+    return featuresLocked();
+  }
+
+  function paywall() {
+    return (typeof window !== "undefined" && window.TlcPaywallModule) || null;
+  }
+
   // ------------------------------------------------------------------ registry
 
   /**
@@ -223,6 +263,13 @@
 
         if (entry.key === current) {
           item.appendChild(el("span", "shellItemHere", "Here"));
+        } else if (entryIsLocked(entry)) {
+          // Still listed, still tappable. Hiding these would leave an unpaid
+          // driver with a menu that looks like a smaller app rather than a
+          // locked one, and nothing to tap to find out what they are missing.
+          item.classList.add("locked");
+          item.appendChild(el("span", "shellItemLock", "🔒"));
+          item.setAttribute("aria-label", (entry.title || entry.key) + " — locked, subscribe to open");
         }
         body.appendChild(item);
       });
@@ -231,9 +278,78 @@
 
   // ------------------------------------------------------------- destinations
 
+  /* What a locked destination shows instead of itself.
+   *
+   * One panel for all of them, with the destination's own name in it, rather
+   * than four bespoke screens: the message is the same every time, and a screen
+   * that has to be written per destination is a screen that gets forgotten the
+   * next time one is added.
+   *
+   * Subscribe goes through the paywall module, which already owns the Paddle
+   * checkout. There is no second implementation of taking money here.
+   */
+  function lockPanel(entry) {
+    var wrap = el("div", "shellLock");
+    wrap.appendChild(el("div", "shellLockMark", "🔒"));
+    wrap.appendChild(el("div", "shellLockTitle", (entry.title || entry.key) + " is part of the plan"));
+    wrap.appendChild(el("div", "shellLockLine",
+      "Your subscription has ended. The feed stays open to read — "
+      + "chat, the leaderboard, games and posting come back when you start a plan."));
+
+    var go = el("button", "shellLockBtn", "Subscribe — $8/week");
+    go.type = "button";
+    go.addEventListener("click", function () {
+      if (paywall() && typeof paywall().triggerCheckout === "function") {
+        paywall().triggerCheckout();
+      }
+    });
+    wrap.appendChild(go);
+
+    var manage = el("button", "shellLockGhost", "Manage subscription");
+    manage.type = "button";
+    manage.addEventListener("click", function () {
+      if (paywall() && typeof paywall().openPortal === "function") paywall().openPortal();
+    });
+    wrap.appendChild(manage);
+
+    wrap.appendChild(el("div", "shellLockFine",
+      "Already paid on another account? Sign in as that one from the menu."));
+    return wrap;
+  }
+
+  function showLockScreen(key, entry, options) {
+    var host = byId(SCREEN_HOST_ID);
+    if (!host) return false;
+    if (current && current !== key) leaveScreen({ silent: true });
+    var title = host.querySelector(".shellScreenTitle");
+    var body = host.querySelector(".shellScreenBody");
+    if (title) title.textContent = entry.title || key;
+    if (body) {
+      body.textContent = "";
+      body.scrollTop = 0;
+      body.appendChild(lockPanel(entry));
+    }
+    current = key;
+    host.hidden = false;
+    document.body.classList.add("shell-screen-open");
+    requestAnimationFrame(function () { host.classList.add("open"); });
+    closeMenu();
+    // No hash for a lock screen. A bookmark or a reload should not land a
+    // driver back on the wall; it should land them where the app works.
+    if (options && options.pushHash === true) {
+      try { window.location.hash = "#/" + key; } catch (_) {}
+    }
+    return true;
+  }
+
   function openScreen(key, options) {
     var entry = find(key);
     if (!entry) return false;
+
+    // Before the dock branch, deliberately: chat, the leaderboard and games are
+    // dock panels, and clicking their button is what opens them. Checking after
+    // would open the panel and then paint over it.
+    if (entryIsLocked(entry)) return showLockScreen(key, entry, options);
 
     if (entry.dock) {
       // An existing panel. Click its button rather than reimplementing it.
@@ -437,6 +553,37 @@
       if (current) leaveScreen();
     });
 
+    /* The dock is the other way in.
+     *
+     * openScreen() covers the menu, but #dockChat and friends are buttons a
+     * driver taps directly, and their own handlers live in app.part*.js. This
+     * catches the click on the way down -- capture, before those handlers run
+     * -- and turns it into the lock screen instead of the panel. Written
+     * against the registry rather than a hard-coded list of ids, so a
+     * destination that declares itself paid is covered the moment it registers.
+     */
+    document.addEventListener("click", function (event) {
+      if (!featuresLocked() || isAdmin()) return;
+      // Walked by id rather than matched by selector. The tap often lands on an
+      // icon inside the button, so it has to walk up -- and a compound CSS
+      // selector for "a dock button" would be one more thing to get subtly
+      // wrong here and in every double that stands in for the DOM.
+      var node = event.target || null;
+      var entry = null;
+      while (node && !entry) {
+        if (node.id) {
+          entry = registry.filter(function (item) {
+            return item.dock === node.id;
+          })[0] || null;
+        }
+        node = node.parentNode || null;
+      }
+      if (!entry || !entryIsLocked(entry)) return;
+      if (typeof event.preventDefault === "function") event.preventDefault();
+      if (typeof event.stopPropagation === "function") event.stopPropagation();
+      showLockScreen(entry.key, entry);
+    }, true);
+
     window.addEventListener("hashchange", syncFromHash);
   }
 
@@ -451,12 +598,13 @@
     register({
       key: "post", title: "Post", icon: "＋", group: "Network",
       subtitle: "Share what you see",
+      paid: true,
       render: function (body) { body.appendChild(emptyState("Post", "Nothing here yet.")); },
     });
-    register({ key: "chat", title: "Chat", icon: "✉", group: "Network", dock: "dockChat" });
+    register({ key: "chat", title: "Chat", icon: "✉", group: "Network", dock: "dockChat", paid: true });
 
-    register({ key: "leaderboard", title: "Leaderboard", icon: "⚑", group: "Driving", dock: "dockLeaderboard" });
-    register({ key: "games", title: "Games", icon: "❖", group: "Driving", dock: "dockGames" });
+    register({ key: "leaderboard", title: "Leaderboard", icon: "⚑", group: "Driving", dock: "dockLeaderboard", paid: true });
+    register({ key: "games", title: "Games", icon: "❖", group: "Driving", dock: "dockGames", paid: true });
     register({ key: "music", title: "Music", icon: "♪", group: "Driving", dock: "dockMusic" });
 
     register({ key: "colors", title: "Colours", icon: "◐", group: "Map", dock: "dockColors" });
@@ -506,6 +654,28 @@
   window.addEventListener("tlc:auth-state-changed", applyAdminChrome);
   window.addEventListener("tlc:auth-expired", applyAdminChrome);
 
+  /* Access can change while the app is open -- a subscription taken out from
+   * the lock panel, a preview running out -- so the menu's locks are repainted
+   * rather than decided once at mount. If the driver is standing on a
+   * destination that has just locked, they are shown the wall; if it has just
+   * unlocked, they are shown the real thing.
+   */
+  function onLockChanged() {
+    paintMenu();
+    if (!current) return;
+    var entry = find(current);
+    if (!entry) return;
+    if (!entryIsPaid(entry)) return;
+    var key = current;
+    // Leave first. A dock destination that has just unlocked opens by clicking
+    // its own button, which does nothing about the lock panel still sitting in
+    // the screen host on top of it.
+    leaveScreen({ silent: true });
+    openScreen(key, { pushHash: false });
+  }
+  window.addEventListener("tlc:feature-lock-changed", onLockChanged);
+  window.addEventListener("tlc:auth-state-changed", paintMenu);
+
   window.TeamJoseoShell = {
     register: register,
     open: openScreen,
@@ -514,6 +684,8 @@
     closeMenu: closeMenu,
     refreshChrome: applyAdminChrome,
     emptyState: emptyState,
+    isLocked: function (key) { return entryIsLocked(find(key)); },
+    lockedKeys: function () { return PAID_KEYS.slice(); },
     _registry: registry,
   };
 })();
