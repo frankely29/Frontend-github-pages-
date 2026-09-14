@@ -104,7 +104,7 @@ function makeNode(tag) {
   return node;
 }
 
-function buildDom() {
+function buildDom(opts = {}) {
   const byId = new Map();
   const make = (tag, id, attrs, cls) => {
     const n = makeNode(tag);
@@ -154,9 +154,23 @@ function buildDom() {
   landing.appendChild(form);
   byId.set('landing', landing);
 
+  // The overlay the landing lives inside. landing.js reads its `show` class to
+  // tell "the page is in front of someone" from "the page is off screen", and
+  // without it here that branch could not be exercised at all.
+  const overlay = makeNode('div');
+  overlay.id = 'lockedOverlay';
+  if (opts.overlayShown) overlay.classList.add('show');
+  byId.set('lockedOverlay', overlay);
+
+  // <html> carries the boot stage. tj-auth-pending means the app has not yet
+  // decided who this is; index.html clears it the moment setAuthUI does.
+  const documentElement = makeNode('html');
+  if (opts.pending !== false) documentElement.classList.add('tj-auth-pending');
+
   const document = {
     readyState: 'complete',
     body: landing,
+    documentElement,
     getElementById: (id) => byId.get(id) || null,
     createElement: (t) => makeNode(t),
     addEventListener: () => {},
@@ -173,9 +187,12 @@ function buildDom() {
     getItem(k) { return Object.prototype.hasOwnProperty.call(this._v, k) ? this._v[k] : null; },
     setItem(k, v) { this._v[k] = String(v); },
   };
+  // Seeded before the source runs, because mount() reads it.
+  if (opts.token) window.localStorage.setItem('community_token_v1', opts.token);
   const ctx = vm.createContext({ window, document, console });
   vm.runInContext(fs.readFileSync(JS_SOURCE, 'utf8'), ctx, { filename: 'landing.js' });
-  return { window, document, byId, landing, pitch, form, api: window.TeamJoseoLanding };
+  return { window, document, documentElement, overlay, byId, landing, pitch, form,
+    api: window.TeamJoseoLanding };
 }
 
 const tests = [];
@@ -531,6 +548,61 @@ test('hiding puts the landing back the way a signed-out visitor needs it', () =>
     'unlocking leaves the landing in its lapsed shape');
   const hide = PAYWALL_JS.slice(PAYWALL_JS.indexOf('function hide('));
   assert.ok(/lockDocument\(false\)/.test(hide), 'hide() no longer unlocks');
+});
+
+// ------------------------------------------- signing in has to be possible
+
+test('a page whose answer already arrived does not hide its own buttons', () => {
+  // landing.js is 35th in the script manifest; setAuthUI runs around 580ms
+  // against a mount nearer 700ms, so the answer often beats this script. When
+  // it did, mount() entered the resolving state anyway and hid every button
+  // with nothing left to unhide them: a driver with an expired token got a
+  // welcome page with no Sign in and no Create account. Caught in a browser by
+  // a click that failed because the button carried hidden="".
+  const dom = buildDom({ pending: false, token: 'stale-token-not-valid' });
+  assert.strictEqual(dom.api.isResolving(), false,
+    'the page went on waiting for an answer it already had');
+  const ghost = dom.landing.querySelectorAll('[data-landing-go="signin"]')
+    .filter((n) => n.classList.contains('landingGhostBtn'))[0];
+  const cta = dom.landing.querySelectorAll('[data-landing-cta="new"]')[0];
+  assert.strictEqual(ghost.hidden, false, 'no way to sign in');
+  assert.strictEqual(cta.hidden, false, 'no way to create an account either');
+});
+
+test('a page still waiting for its answer offers nothing to tap', () => {
+  // The other half of the same rule: while the question is genuinely open, a
+  // driver who may already be signed in must not be shown "Create account".
+  const dom = buildDom({ pending: true, token: 'stale-token-not-valid' });
+  assert.strictEqual(dom.api.isResolving(), true,
+    'the page stopped waiting while the answer was still unknown');
+});
+
+test('an expiry does not close the form someone is typing into', () => {
+  // A dead token is exactly what a driver has when they go to sign in again,
+  // and the app keeps polling with it, so a 401 lands at an arbitrary moment.
+  // This listener used to reset the pane unconditionally: measured in a
+  // browser as form at 4301ms, 401 on /frame/0, pitch at 5386ms -- two
+  // characters into the password. The polls repeat, so the form could never
+  // be finished.
+  const dom = buildDom({ overlayShown: true });
+  dom.api.goTo('signin');
+  assert.strictEqual(dom.form.hidden, false, 'the form never opened');
+  dom.window.dispatch('tlc:auth-expired', { detail: { status: 401 } });
+  assert.strictEqual(dom.form.hidden, false,
+    'an expiry threw the driver off the form they were using');
+  dom.window.dispatch('tlc:auth-expired', { detail: { status: 401 } });
+  assert.strictEqual(dom.form.hidden, false, 'a second poll finished the job');
+});
+
+test('an expiry still resets the pane when the page is not on screen', () => {
+  // The original point of the listener, which must survive the guard: coming
+  // back later should show the pitch, not a form abandoned mid-session.
+  const dom = buildDom({ overlayShown: false });
+  dom.api.goTo('signin');
+  assert.strictEqual(dom.form.hidden, false, 'the form never opened');
+  dom.window.dispatch('tlc:auth-expired', { detail: { status: 401 } });
+  assert.strictEqual(dom.form.hidden, true,
+    'a stale form is still waiting behind the overlay next time it opens');
 });
 
 test('the locked page still offers a way to sign in', () => {

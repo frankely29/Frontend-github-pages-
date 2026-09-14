@@ -201,7 +201,25 @@
     root.addEventListener("click", onClick);
     applyDoor("signup");
     show("pitch");
-    if (hasStoredToken()) setResolving();
+
+    /* Resolve only if nothing has answered yet.
+     *
+     * index.html clears tj-auth-pending the moment setAuthUI decides, and that
+     * can happen before this script exists -- it is 35th in the manifest, and
+     * setAuthUI runs around 580ms against a mount nearer 700ms. Whether the
+     * answer beats the mount is a race, and on the losing side this hid every
+     * button on the page with nothing left to come along and unhide them: a
+     * driver with an expired token got a welcome page with no way in at all,
+     * no Sign in and no Create account. Caught by a click that failed because
+     * the button it wanted carried hidden="".
+     *
+     * The class is the app's own record of whether the question is still open,
+     * so ask that rather than guessing from a token that may already have been
+     * cleared.
+     */
+    var html = (typeof document !== "undefined") ? document.documentElement : null;
+    var stillAsking = !!(html && html.classList.contains("tj-auth-pending"));
+    if (stillAsking && hasStoredToken()) setResolving();
   }
 
   if (document.readyState === "loading") {
@@ -210,10 +228,27 @@
     mount();
   }
 
-  // Coming back to the signed-out page should show the pitch, not the form
-  // someone was halfway through when their token expired.
+  /* Coming back to the signed-out page should show the pitch, not the form
+   * someone was halfway through when their token expired.
+   *
+   * "Coming back" is the whole of it, and this used to fire while they were
+   * still here. A dead token is exactly what a driver has when they go to sign
+   * in again, and the app keeps polling with it -- /frame, /timeline,
+   * /city_events -- so a 401 lands at some arbitrary moment and this threw
+   * whoever was typing their password back to the pitch. Measured: form at
+   * 4301ms, 401 on /frame/0, pitch at 5386ms, two characters into the
+   * password. The polls repeat, so there was no finishing the form at all.
+   *
+   * So: only when the page is not in front of them. If the welcome page is on
+   * screen with the form open, someone is using it, and an expiry they already
+   * know about is no reason to take it away.
+   */
   window.addEventListener("tlc:auth-expired", function () {
-    if (root) show("pitch");
+    if (!root) return;
+    var overlay = document.getElementById("lockedOverlay");
+    var onScreen = !!(overlay && overlay.classList.contains("show"));
+    if (onScreen && openPane === "form") return;
+    show("pitch");
   });
 
   /* Boot shows this page before anything knows which version of it to show.
