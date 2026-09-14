@@ -2978,6 +2978,23 @@ if (typeof window !== "undefined") {
   window.renderSubscriptionSettings = renderSubscriptionSettings;
 }
 
+/* Has the server actually said this driver's access is over?
+ *
+ * Only an explicit has_access === false counts. An absent subscription, or an
+ * absent field on it, means "not known yet" -- /me still in flight, a transient
+ * failure that left `me` untouched, or an older payload -- and treating any of
+ * those as lapsed would put a subscribe page in front of a paying driver. The
+ * cost of the two mistakes is not symmetric, so this errs toward letting them
+ * in; a genuinely lapsed account is still caught by the 402 path behind it.
+ *
+ * Admins are never walled, matching subscription.paywall.js.
+ */
+function subscriptionKnownLapsed() {
+  if (me?.is_admin) return false;
+  const sub = me?.subscription;
+  return !!sub && sub.has_access === false;
+}
+
 function setAuthUI(signedIn, note) {
   if (btnAuth) btnAuth.textContent = signedIn ? "Sign out" : "Sign in";
   if (communityNote) {
@@ -2986,17 +3003,25 @@ function setAuthUI(signedIn, note) {
       : "Community: sign in to see other drivers, report police, and record trips.";
   }
 
-  const showLock = !signedIn;
+  // Being signed in is not the same as being allowed in, and this used to
+  // treat them as the same thing: setAuthUI(true) opened the map for anyone
+  // holding a valid token, and a driver whose week had run out only got the
+  // subscribe page afterwards, when some request came back 402. So the map
+  // appeared first, every launch. /me has already answered this by the time
+  // this runs, so ask it here, where the overlay is decided.
+  const lapsed = signedIn && subscriptionKnownLapsed();
+  const showLock = !signedIn || lapsed;
   if (lockedOverlay) {
     // Which version of the signed-out page this is. No token means signed
     // out for real, so it gets the Create-account buttons; with a token still
-    // present the answer is not known yet -- /me may be in flight -- and
-    // showing those buttons to a lapsed driver is the flash of "the old sign
-    // in page" they reported. The landing keeps its hero and says nothing
-    // about what to do until the paywall or a real sign-out decides.
+    // present and no verdict yet, the landing keeps its hero and says nothing
+    // about what to do -- the answer is not known, and guessing is what put
+    // "Create account" in front of a driver who already had one.
     const landing = (typeof window !== "undefined") ? window.TeamJoseoLanding : null;
     if (showLock && landing) {
-      if (authHeaderOK()) {
+      if (lapsed) {
+        if (typeof landing.setLapsed === "function") landing.setLapsed(true);
+      } else if (authHeaderOK()) {
         if (typeof landing.setResolving === "function") landing.setResolving();
       } else if (typeof landing.setLapsed === "function") {
         landing.setLapsed(false);
