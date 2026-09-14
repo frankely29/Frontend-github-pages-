@@ -394,6 +394,13 @@
     var t = threadState(postId);
     t.open = !t.open;
     paintThread(postId, card);
+    /* Opening a thread adds a divider, the replies and a composer to the
+     * bottom of a card that was already the last thing above the dock, so the
+     * field you just asked for lands underneath the icons. This file does not
+     * own the sheet and should not reach for it -- it says what happened and
+     * feed-first.js decides what that means, the same way the shell and the
+     * drawer already announce themselves. */
+    if (t.open) fire("tlc:feed-thread-opened", { postId: postId });
     // Fetched on first open only. Re-fetching every time someone collapses and
     // expands a thread to re-read it is a request per glance.
     if (t.open && !t.loaded && !t.loading) loadThread(postId, card);

@@ -118,7 +118,57 @@ function makeNode(tag) {
   node.addEventListener = (t, fn) => { (node._listeners[t] = node._listeners[t] || []).push(fn); };
   node.dispatch = (t, e) => (node._listeners[t] || []).forEach((fn) => fn(e || { type: t }));
   node.click = () => { node.clicks += 1; node.dispatch('click', { type: 'click', target: node }); };
+  // Scrolling the composer up past the dock reads a box and writes scrollTop.
+  // A test giving a node no box would make revealComposer() return early and
+  // the assertion pass on nothing, which is how this double has lied before.
+  node.scrollTop = 0;
+  node.getBoundingClientRect = () => Object.assign(
+    { top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0 }, node._box || {});
+  node.querySelector = (sel) => selectAll(node, sel)[0] || null;
+  node.querySelectorAll = (sel) => selectAll(node, sel);
   return node;
+}
+
+/* A selector engine small enough to read and big enough to be honest.
+ *
+ * It handles what feed-first.js actually asks for: comma lists, descendant
+ * chains, #id, .class and [attr="value"]. The previous double understood one
+ * bare #id or .class, so "#shellScreens .shellScreenBody" matched nothing and
+ * returned null -- and a test written against it would have passed whether or
+ * not the code worked. */
+function matchesStep(node, step) {
+  const parts = String(step).match(/#[\w-]+|\.[\w-]+|\[[^\]]+\]/g) || [];
+  if (!parts.length) return false;
+  return parts.every((part) => {
+    if (part[0] === '#') return node.id === part.slice(1);
+    if (part[0] === '.') return !!(node.classList && node.classList.contains(part.slice(1)));
+    const m = part.match(/^\[([^=\]]+)(?:=["']?([^"'\]]*)["']?)?\]$/);
+    if (!m) return false;
+    const got = node.getAttribute ? node.getAttribute(m[1]) : null;
+    return m[2] === undefined ? got !== null : got === m[2];
+  });
+}
+
+function selectAll(root, sel) {
+  const out = [];
+  String(sel).split(',').forEach((one) => {
+    const steps = one.trim().split(/\s+/).filter(Boolean);
+    if (!steps.length) return;
+    let scope = [root];
+    steps.forEach((step) => {
+      const next = [];
+      scope.forEach((node) => {
+        const walk = (n) => {
+          if (n !== node && matchesStep(n, step) && next.indexOf(n) < 0) next.push(n);
+          (n.children || []).forEach(walk);
+        };
+        walk(node);
+      });
+      scope = next;
+    });
+    scope.forEach((n) => { if (out.indexOf(n) < 0) out.push(n); });
+  });
+  return out;
 }
 
 function build(options = {}) {
@@ -149,6 +199,37 @@ function build(options = {}) {
   drawer.appendChild(drawerClose);
   body.appendChild(drawer);
 
+  /* The feed's own screen, with one post card and the boxes a phone would
+   * report for them. The numbers are the ones measured off a 956pt screen:
+   * the dock's top edge is at 862 and the sheet's scroller runs to the bottom
+   * behind it, which is exactly why an opened composer can sit under the
+   * icons and still be inside its container. */
+  const dock = makeNode('div'); dock.id = 'dock';
+  dock._box = { top: 862, bottom: 936, height: 74 };
+  body.appendChild(dock); byId.set('dock', dock);
+
+  const screens = makeNode('div'); screens.id = 'shellScreens';
+  const screenBody = makeNode('div'); screenBody.className = 'shellScreenBody';
+  screenBody._box = { top: 616, bottom: 956, height: 340 };
+  const card = makeNode('article'); card.className = 'feedCard';
+  card.setAttribute('data-post-id', '1');
+  const replyRow = makeNode('div'); replyRow.className = 'feedReplyRow';
+  // A box inside a scroller moves when the scroller scrolls. Without that the
+  // three passes revealComposer() makes would each subtract the same overlap
+  // again and the test would demand a number no browser produces.
+  const replyBase = Object.assign({ top: 874, bottom: 930, height: 56 },
+    options.replyBox || {});
+  replyRow.getBoundingClientRect = () => ({
+    top: replyBase.top - screenBody.scrollTop,
+    bottom: replyBase.bottom - screenBody.scrollTop,
+    height: replyBase.height, left: 0, right: 0, width: 0,
+  });
+  card.appendChild(replyRow);
+  screenBody.appendChild(card);
+  screens.appendChild(screenBody);
+  body.appendChild(screens);
+  byId.set('shellScreens', screens);
+
   // A real getElementById walks the tree. The first cut of this double looked
   // only in a map of nodes built up front, so it could not find the two
   // buttons the file under test creates -- and every assertion about their
@@ -173,20 +254,8 @@ function build(options = {}) {
     // #driverProfileModalRoot, .adminPortal), so the double needs the one
     // lookup it never had. Without it every host reads as absent and the
     // assertions fail against code the browser runs correctly.
-    querySelector: (sel) => {
-      const want = String(sel).trim();
-      if (want.startsWith('#')) return findById(body, want.slice(1));
-      const cls = want.replace(/^\./, '');
-      const walk = (node) => {
-        if (node.classList && node.classList.contains(cls)) return node;
-        for (const child of node.children) {
-          const hit = walk(child);
-          if (hit) return hit;
-        }
-        return null;
-      };
-      return walk(body);
-    },
+    querySelector: (sel) => selectAll(body, sel)[0] || null,
+    querySelectorAll: (sel) => selectAll(body, sel),
     addEventListener: (t, fn) => { (document._l[t] = document._l[t] || []).push(fn); },
     _l: {},
   };
@@ -233,7 +302,10 @@ function build(options = {}) {
 
   return {
     window, document, body, byId, track, timers, resizes, opened, closed, store,
-    drawer,
+    drawer, dock, screenBody, replyRow,
+    openThread: (postId) => window.dispatch('tlc:feed-thread-opened',
+      { detail: { postId: postId === undefined ? 1 : postId } }),
+    runTimers: () => { const due = timers.splice(0); due.forEach((t) => t.fn()); },
     openDrawer: (key) => {
       drawer.classList.add('open');
       window.dispatch('tlc:drawer-changed', { detail: { key } });
@@ -537,6 +609,60 @@ test('dragging the feed holds while you are on it', () => {
   assert.strictEqual(dom.split(), EXP(), 'the feed cannot be pulled up');
   dom.window.dispatch('tlc:auth-state-changed', {});
   assert.strictEqual(dom.split(), EXP(), 'a refresh collapsed it again');
+});
+
+test('replying pulls the sheet up', () => {
+  /* Tapping Reply adds a divider, the replies and a composer to the bottom of
+   * a card that was already the last thing above the dock, so the field lands
+   * under the icons. Reported as "it expands down behind the icons".
+   *
+   * Moving the minimised detent far enough to fit a composer would cost half
+   * the map for something that lasts as long as one reply -- and would fail
+   * again on a thread with three of them. The expanded detent is what this is
+   * for. */
+  const dom = build({ open: 'feed' });
+  assert.strictEqual(dom.split(), MIN(), 'precondition: minimised');
+  dom.openThread(1);
+  assert.strictEqual(dom.split(), EXP(), 'the sheet stayed down over the composer');
+});
+
+test('the composer is scrolled out from under the dock', () => {
+  // The dock floats over the sheet, so the feed's own bottom edge is not the
+  // line that matters. The reply row's box ends at 930 and the dock's top edge
+  // is at 862, so 80px have to come off -- 68 of overlap and 12 of air.
+  const dom = build({ open: 'feed' });
+  dom.openThread(1);
+  dom.runTimers();
+  assert.strictEqual(dom.screenBody.scrollTop, 80,
+    `scrolled to ${dom.screenBody.scrollTop}, leaving the composer under the dock`);
+});
+
+test('a composer already in the clear is not yanked around', () => {
+  const dom = build({ open: 'feed', replyBox: { top: 700, bottom: 756, height: 56 } });
+  dom.openThread(1);
+  dom.runTimers();
+  assert.strictEqual(dom.screenBody.scrollTop, 0, 'it scrolled for nothing');
+});
+
+test('the thread that opened is the one that gets revealed', () => {
+  // With two threads open, the first .feedReplyRow in the document is not
+  // necessarily the one a driver just asked for.
+  const dom = build({ open: 'feed' });
+  const other = dom.document.createElement('article');
+  other.className = 'feedCard';
+  other.setAttribute('data-post-id', '2');
+  const row = dom.document.createElement('div');
+  row.className = 'feedReplyRow';
+  // Already clear of the dock, and LAST in the document -- so both "the first
+  // reply row on screen" and "the last one" pick it over the card the driver
+  // actually tapped, and either shortcut leaves the real composer buried.
+  row._box = { top: 644, bottom: 700, height: 56 };
+  other.appendChild(row);
+  dom.screenBody.appendChild(other);
+  dom.openThread(1);
+  dom.runTimers();
+  assert.strictEqual(dom.screenBody.scrollTop, 80,
+    'it revealed somebody else\'s thread');
 });
 
 test('a panel opens expanded, the feed opens minimised', () => {
