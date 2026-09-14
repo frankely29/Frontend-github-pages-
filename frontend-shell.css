@@ -2646,3 +2646,65 @@ body.night .subscriptionStatusValue {
    anything. Light ink on that is about 1.05:1, which is an invisible dock.
    If the dock surface is ever darkened, this is the rule to pair. */
 .dockIcon { color: #101622; }
+
+/* ---------------------------------------------------------------- map lock
+   The card an unpaid driver gets over the blurred map. Its container is styled
+   in the inline boot CSS in index.html so it can appear before any stylesheet
+   arrives; these are the parts that can wait for a stylesheet.
+
+   It sits on the map, not over the app: the dock and the menu stay reachable,
+   because the whole point is that they are still in the app. */
+.mapLockTitle {
+  font: 800 19px/1.2 system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  letter-spacing: -0.02em;
+}
+.mapLockWhy {
+  margin: 0;
+  font: 500 13px/1.5 system-ui, sans-serif;
+  color: rgba(255, 255, 255, 0.74);
+}
+.mapLockBtn {
+  min-height: 46px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0 14px;
+  border-radius: 13px;
+  border: 1px solid transparent;
+  font: 700 14px/1 system-ui, sans-serif;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+.mapLockBtnGo { background: #16b364; color: #fff; }
+.mapLockBtnGo:active { background: #109a54; }
+.mapLockBtnGhost {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.16);
+  color: #fff;
+}
+.mapLockRedeem { display: flex; flex-direction: column; gap: 6px; text-align: left; }
+.mapLockRedeemLabel {
+  font: 600 11px/1 system-ui, sans-serif;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.52);
+}
+.mapLockRedeemRow { display: flex; gap: 8px; }
+.mapLockRedeemRow .mapLockBtn { width: auto; flex: none; padding: 0 16px; }
+.mapLockRedeemInput {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 46px;
+  box-sizing: border-box;
+  padding: 0 12px;
+  border-radius: 13px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+  font: 600 13px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.06em;
+}
+.mapLockRedeemInput::placeholder { color: rgba(255, 255, 255, 0.34); }
+.mapLockRedeemStatus { font: 500 12px/1.4 system-ui, sans-serif; color: rgba(255, 255, 255, 0.7); }
+.mapLockRedeemStatus.isError { color: #ff8f8f; }
+.mapLockRedeemStatus.isOk { color: #6ee7a8; }

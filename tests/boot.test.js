@@ -238,30 +238,47 @@ test('the pending stage ends where auth is actually decided', () => {
 
 // ------------------------------- signed in is not the same as allowed in
 
-test('the overlay decision consults access, not just the token', () => {
-  // Before this, setAuthUI(true) opened the map for anyone holding a valid
-  // token. A driver whose week had run out got the map for ~4.9 seconds
-  // (1137ms to 6044ms, measured) before a 402 finally raised the subscribe
-  // page -- so the map still came before the welcome page, for exactly the
-  // people most likely to notice.
+test('an unpaid driver is let into the app, and loses the map', () => {
+  // This is the whole model. It used to be the opposite: setAuthUI treated a
+  // lapsed trial exactly like being signed out, so the driver got the landing
+  // page with a Subscribe button -- which reads as "your sign-in failed"
+  // however carefully it is worded.
   const i = PART10_RULES.indexOf('function setAuthUI');
-  const fn = PART10_RULES.slice(i, i + 2600);
-  assert.ok(/const showLock\s*=\s*!signedIn\s*\|\|\s*lapsed/.test(fn),
-    'the lock is still decided by the token alone');
+  const fn = PART10_RULES.slice(i, i + 3000);
+  assert.ok(/const showLock = !signedIn;/.test(fn),
+    'a lapsed driver is still shown the signed-out page instead of the app');
+  assert.ok(/applyMapLockState\(lapsed\)/.test(fn),
+    'nothing locks the map, so an unpaid driver keeps it');
   assert.ok(/subscriptionKnownLapsed\(\)/.test(fn),
-    'setAuthUI does not ask whether access has lapsed');
+    'setAuthUI no longer asks whether access has lapsed');
 });
 
-test('a lapsed driver is shown the subscribe page, not the resolving one', () => {
-  const i = PART10_RULES.indexOf('function setAuthUI');
-  const fn = PART10_RULES.slice(i, i + 2600);
-  const lapsedBranch = fn.indexOf('if (lapsed)');
-  const resolvingBranch = fn.indexOf('setResolving');
-  assert.ok(lapsedBranch >= 0, 'no branch handles a lapsed driver');
-  assert.ok(lapsedBranch < resolvingBranch,
-    'the resolving branch runs first, so a lapsed driver never gets Subscribe');
-  assert.ok(/setLapsed\(true\)/.test(fn.slice(lapsedBranch, resolvingBranch)),
-    'the lapsed branch does not put the landing into its subscribe state');
+test('the map lock is a class, so it holds before any script loads', () => {
+  const i = PART10_RULES.indexOf('function applyMapLockState');
+  assert.ok(i >= 0, 'applyMapLockState is gone');
+  const fn = PART10_RULES.slice(i, PART10_RULES.indexOf('\n}', i));
+  assert.ok(/classList\.toggle\("tj-map-locked"/.test(fn),
+    'the lock is not expressed as a class');
+  assert.ok(/html\.tj-map-locked\s+#map\b/.test(CRITICAL_RULES),
+    'the inline boot CSS does not act on the lock');
+});
+
+test('a 402 locks the map and never the whole app', () => {
+  // handlePaymentRequired called show() -- a full document lock -- on ANY 402
+  // from ANY endpoint. Under this model 402s are routine: the map is paid, the
+  // feed is not, and a driver reading the feed must not have the signed-out
+  // page slammed over them.
+  const paywall = stripComments(
+    fs.readFileSync(path.join(ROOT, 'subscription.paywall.js'), 'utf8'))
+    .replace(/\/\/[^\n]*/g, '');
+  const i = paywall.indexOf('function handlePaymentRequired');
+  assert.ok(i >= 0, 'handlePaymentRequired is gone');
+  const fn = paywall.slice(i, paywall.indexOf('\n  }', i));
+  assert.ok(/applyMapLockState\(true\)/.test(fn), 'a 402 no longer locks the map');
+  assert.ok(!/\bshow\(/.test(fn),
+    'a 402 still raises the document lock over the whole app');
+  assert.ok(!/lockDocument/.test(paywall),
+    'the document lock is back; it is what put the signed-out page over the feed');
 });
 
 test('only an explicit no from the server counts as lapsed', () => {
@@ -327,6 +344,69 @@ test('the welcome page\'s own script is loaded early, not last', () => {
     `landing.js is ${at + 1}th of ${items.length}; the first screen waits on it`);
   assert.strictEqual(items.filter((x) => x === './landing.js').length, 1,
     'landing.js is listed twice, so it would run twice');
+});
+
+// ------------------------------------------- the map lock, not an app lock
+
+test('the lock leaves the driver in the app', () => {
+  // The whole point. Hiding the dock here would be the old full-page wall
+  // wearing a different class name.
+  ['#dock', '\\.shellMenuBtn'].forEach((sel) => {
+    const re = new RegExp('html\\.tj-map-locked[^{]*' + sel);
+    assert.ok(!re.test(CRITICAL_RULES),
+      `${sel} is hidden by the map lock, which puts the driver back outside the app`);
+  });
+});
+
+test('the map is blurred, and the answer in words is hidden outright', () => {
+  // Blur alone leaks it: the pill says "Much busier, go to Red Hook, 91" and the
+  // tendency meter says the same as a number. Both are relocated into the shell
+  // menu, so they would survive a filter on #map.
+  assert.ok(/html\.tj-map-locked\s+#map[\s\S]{0,120}?filter:\s*blur/.test(CRITICAL_RULES),
+    'the map is not blurred when locked');
+  ['#mapAction', '#dayTendencyMeter', '\\.sliderWrap'].forEach((sel) => {
+    const re = new RegExp('html\\.tj-map-locked[^{]*' + sel + '[^{]*\\{[^}]*display:\\s*none');
+    assert.ok(re.test(CRITICAL_RULES), `${sel} is still readable behind the blur`);
+  });
+});
+
+test('locking clears what the preview already put on screen', () => {
+  const i = PART10_RULES.indexOf('function applyMapLockState');
+  const fn = PART10_RULES.slice(i, PART10_RULES.indexOf('\n}', i));
+  assert.ok(/TlcAssistantRecommendation = null/.test(fn),
+    'the last recommendation stays in the DOM behind the blur');
+  assert.ok(/TlcDayTendencyState/.test(fn),
+    'the last tendency reading stays in the DOM behind the blur');
+});
+
+test('the lock card offers both ways out, and exactly one redeem box', () => {
+  const card = INDEX.slice(INDEX.indexOf('id="mapLockCard"'),
+                           INDEX.indexOf('</div>', INDEX.indexOf('data-landing-portal')));
+  assert.ok(/data-landing-subscribe/.test(card), 'no way to subscribe');
+  assert.ok(/data-paywall-redeem-input/.test(card), 'no way to use an access code');
+  assert.ok(/data-landing-portal/.test(card), 'no way to manage an existing subscription');
+  // redeemCode() finds its input with a document-wide querySelector, so a second
+  // copy would silently win or lose on DOM order.
+  const inputs = (INDEX_NO_HTML_COMMENTS.match(/data-paywall-redeem-input/g) || []).length;
+  assert.strictEqual(inputs, 1, `${inputs} redeem inputs in the document`);
+});
+
+test('the card sits under the dock, not over it', () => {
+  const rule = CRITICAL_RULES.match(/html\.tj-map-locked\s+#mapLockCard\s*\{[^}]*\}/);
+  assert.ok(rule, 'the lock card has no rule');
+  const z = /z-index:\s*(\d+)/.exec(rule[0]);
+  assert.ok(z, 'the lock card has no z-index, so stacking is luck');
+  assert.ok(Number(z[1]) < 3000,
+    'the card is above the dock (3000), so it blocks the way out of the map');
+});
+
+test('the landing page no longer carries a lapsed state', () => {
+  // A driver whose trial ended never sees the landing page now; leaving the
+  // block there is how it comes back.
+  ['data-landing-cta="lapsed"', 'landingLocked', 'tj-locked'].forEach((token) => {
+    assert.ok(!INDEX_NO_HTML_COMMENTS.includes(token),
+      `${token} is still in index.html`);
+  });
 });
 
 // --------------------------------------------------- the old card is gone

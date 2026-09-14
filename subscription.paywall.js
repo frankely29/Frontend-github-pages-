@@ -76,50 +76,36 @@
     return trialCountdownEl;
   }
 
-  /* The approved entry flow has no subscribe screen in it: land, one form, the
-   * map. So a locked account is shown the landing page it already read -- same
-   * hero, same pitch, same "$8/week after the trial" -- with Subscribe as its
-   * button.
+  /* Locking now means the MAP, not the document.
    *
-   * Locking is a class on <html>, and that is the point. This used to ask for
-   * window.TeamJoseoLanding and fall back to a dark modal when it was missing.
-   * landing.js was 35th in the script manifest and did not exist for the first
-   * second or more, so a 402 arriving in that window got the modal -- a race
-   * dressed up as a fallback. The landing markup is in index.html from the
-   * first byte, so the class raises it with no script involved at all.
+   * This used to raise #lockedOverlay over the whole app: a driver whose trial
+   * ended lost the feed, the dock and every screen, and was shown the
+   * signed-out page with a Subscribe button -- which reads as "your sign-in
+   * failed" however carefully it is worded. They are in the app now. The map is
+   * what they cannot have.
    *
-   * setLapsed() is still called when landing.js is up, so the module's own
-   * state stays in step; it is now an extra, not a requirement.
+   * The state itself lives in applyMapLockState (app.part10.js) as one class on
+   * <html>, so the inline boot CSS can apply it before any script has loaded.
+   * show()/hide() stay as the module's public verbs because callers outside
+   * this file speak them.
    */
-  function lockDocument(on) {
+  function setMapLock(on) {
     const locked = !!on;
-    const html = (typeof document !== 'undefined') ? document.documentElement : null;
-    if (html) html.classList.toggle('tj-locked', locked);
-
-    const overlay = document.getElementById('lockedOverlay');
-    if (overlay) {
-      overlay.classList.toggle('show', locked);
-      overlay.setAttribute('aria-hidden', locked ? 'false' : 'true');
-    }
-
-    // Unlocking must leave the landing in its signed-out shape, or the next
-    // signed-out visitor finds a Subscribe button and no way to make an account.
-    const landing = (typeof window !== 'undefined') ? window.TeamJoseoLanding : null;
-    if (landing && typeof landing.setLapsed === 'function') landing.setLapsed(locked);
-
     visible = locked;
-    if (typeof window !== 'undefined') window.__paywallVisible = locked;
+    if (typeof window === 'undefined') return;
+    window.__paywallVisible = locked;
+    if (typeof window.applyMapLockState === 'function') window.applyMapLockState(locked);
   }
 
-  // `options.reason` is accepted and ignored: it used to write into the modal's
-  // message line, and the landing states the reason in its own words instead.
+  // `options.reason` is accepted and ignored: it used to write into a modal's
+  // message line, and the map lock card states the reason in its own words.
   // Kept in the signature because callers still pass it.
   function show(options = {}) {   // eslint-disable-line no-unused-vars
-    lockDocument(true);
+    setMapLock(true);
   }
 
   function hide() {
-    lockDocument(false);
+    setMapLock(false);
   }
 
   function isVisible() {
@@ -347,42 +333,50 @@
     el.classList.toggle('warning', daysRemaining > 2 && daysRemaining <= 4);
   }
 
+  /* A 402 locks the map. It used to lock the whole app.
+   *
+   * show() raises #lockedOverlay over everything, and this fired on ANY 402 from
+   * ANY endpoint -- so the first gated request after the trial ended slammed the
+   * signed-out page over a driver who was reading the feed. Under the current
+   * model 402s are routine and expected: the map is paid, the feed is not, and
+   * the response to one is to lock the map and leave the driver where they are.
+   */
   function handlePaymentRequired(event) {
-    const detail = event?.detail || {};
-    const reason = detail?.reason || detail?.detail?.reason || '';
     if (hasAccess()) return;
     const meObj = (typeof window !== 'undefined') ? window.me : null;
     if (meObj?.is_admin) return;
-    show({ reason });
+    if (typeof window !== 'undefined' && typeof window.applyMapLockState === 'function') {
+      window.applyMapLockState(true);
+      return;
+    }
+    // No app shell to lock into -- nothing to do but leave the page alone.
+    // Never fall back to the document lock: that is the bug this replaced.
   }
 
+  /* Lock or unlock the map from what the server said, rather than waiting to
+   * catch a 402.
+   *
+   * The lock used to be purely reactive: it appeared only if a gated request
+   * failed while this listener happened to be registered, so a request that
+   * fired earlier -- or one whose failure was swallowed by its caller -- left a
+   * driver looking at an app where nothing loaded and nothing explained why.
+   *
+   * Still requires an explicit has_access === false. A /me that has not loaded
+   * yet (no subscription block at all) must never lock a paid driver out of
+   * their own map.
+   */
   function handleAuthStateChanged() {
     renderTrialCountdown();
     const meObj = (typeof window !== 'undefined') ? window.me : null;
     const hasAnyAccess = !!(meObj?.is_admin) || hasAccess();
-
-    if (visible) {
-      if (hasAnyAccess) hide();
-      return;
-    }
-
-    // Show it proactively when the server has already said this account has no
-    // access, instead of waiting to catch a 402.
-    //
-    // The overlay was purely reactive: it appeared only if a gated request
-    // failed while the 'tlc:payment-required' listener happened to be
-    // registered. This module loads part-way through a sequential script chain,
-    // so a gated request that fires earlier -- or one whose failure is swallowed
-    // by a caller that doesn't re-dispatch -- leaves the driver looking at an app
-    // where nothing loads and nothing explains why.
-    //
-    // Deliberately requires an explicit has_access === false from the server, so
-    // a not-yet-loaded /me (subscription absent) can never flash a paywall at
-    // someone who is signed in and paid up.
     const sub = getSubscriptionFromMe();
     const serverSaysNoAccess = !!sub && sub.has_access === false;
-    if (serverSaysNoAccess && !meObj?.is_admin) {
-      show({ reason: '' });
+
+    if (typeof window === 'undefined' || typeof window.applyMapLockState !== 'function') return;
+    if (hasAnyAccess) {
+      window.applyMapLockState(false);
+    } else if (serverSaysNoAccess && !meObj?.is_admin) {
+      window.applyMapLockState(true);
     }
   }
 

@@ -144,27 +144,8 @@
     // so hiding it hid the whole affordance.
     var top = q("[data-landing-go='signin'].landingGhostBtn");
     if (top) top.hidden = false;
-    if (locked) nameTheAccount();
     lapsed = locked;
     if (locked) show("pitch");
-  }
-
-  /* Say whose account this is, when that is known.
-   *
-   * The markup ships "You're signed in." on its own, so the message holds even
-   * before this script runs or if /me never answered. Naming the account is
-   * what makes it land: a driver who has just typed a password wants to see
-   * that it was accepted, and their own name is the proof. Falls back to the
-   * email, then to the bare sentence -- never to a stray "as undefined".
-   */
-  function nameTheAccount() {
-    var el = q("[data-landing-locked-title]");
-    if (!el) return;
-    var me = (typeof window !== "undefined" && window.me) || null;
-    var who = me && (me.display_name || me.email);
-    el.textContent = who
-      ? "You're signed in as " + String(who).trim() + "."
-      : "You're signed in.";
   }
 
   /* Is this page actually in front of someone right now?
