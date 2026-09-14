@@ -95,7 +95,18 @@ html, body { height: 100%; margin: 0; padding: 0; background: #e5e5e5; }
     /* =========================================================
        NIGHT THEME
        ========================================================= */
-    body.night #map{
+    /* Night clears the map's filters -- unless the map is locked.
+     *
+     * This used to be plain `body.night #map`, which is (1,1,1) on specificity:
+     * exactly the same as `html.tj-map-locked #map` in the inline boot CSS. A
+     * tie goes to source order, and the boot CSS is in <head> while this file is
+     * injected after it, so THIS rule won and the blur lost. An unpaid driver
+     * at night got the lock card over a perfectly readable map -- the paywall
+     * open for half of every day, and invisible in daylight testing.
+     *
+     * :not() rather than a specificity bump on the lock, so the reason lives
+     * where the conflict is. */
+    html:not(.tj-map-locked) body.night #map{
       filter: none !important;
       opacity: 1 !important;
     }

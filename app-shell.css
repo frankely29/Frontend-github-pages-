@@ -273,6 +273,7 @@ body.shell-screen-open #dock,
 body.shell-screen-open .mapControlStack,
 body.shell-screen-open .sliderWrap,
 body.shell-screen-open #sliderWrap,
+body.shell-screen-open #mapFeedPeek,
 body.shell-screen-open .shellMenuBtn {
   display: none !important;
 }
