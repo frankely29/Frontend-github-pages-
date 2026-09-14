@@ -162,6 +162,49 @@
     return button;
   }
 
+  /* The dock, left to right, with Save in the middle.
+   *
+   * Asked for as: Save centred, Feed on its left, Chat on its right, Music
+   * right of Chat, Games left of Feed. The other five fall outside that group,
+   * the ones a driver reaches for least furthest from the thumb.
+   *
+   * Map is the odd one out -- it is Feed's pair, and Games now sits between
+   * them -- but Games left of Feed was the ask, so Map goes one further out.
+   *
+   * The order lives here rather than in index.html because two of these
+   * buttons do not exist until this file makes them: the markup's order plus
+   * an insertBefore is an order nobody can read in one place. */
+  var DOCK_ORDER = [
+    "dockColors", "dockModes", "dockMap", "dockGames", "dockFeed",
+    "pickupFab",
+    "dockChat", "dockMusic", "dockLeaderboard", "dockProfile", "dockAdmin",
+  ];
+
+  function orderDock() {
+    var track = byId("dockTrack");
+    if (!track || !track.children) return;
+    var current = Array.prototype.slice.call(track.children);
+    var named = [];
+    DOCK_ORDER.forEach(function (id) {
+      var node = byId(id);
+      if (node && node.parentNode === track) named.push(node);
+    });
+    if (!named.length) return;
+    // Anything this list has never heard of keeps its own order, after the
+    // named ones -- a button added later should move, not disappear.
+    var rest = current.filter(function (node) { return named.indexOf(node) < 0; });
+    var wanted = named.concat(rest);
+
+    // Moving nodes resets the dock's sideways scroll, and app.part6.js only
+    // re-centres on Save after ten idle seconds. So do nothing at all unless
+    // the order is actually wrong -- this runs on every settle pass.
+    var same = wanted.length === current.length && wanted.every(function (node, i) {
+      return current[i] === node;
+    });
+    if (same) return;
+    wanted.forEach(function (node) { track.appendChild(node); });
+  }
+
   function installDockButtons() {
     var track = byId("dockTrack");
     if (!track || byId("dockFeed")) return;
@@ -695,6 +738,7 @@
   function mount() {
     if (!document.body) return;
     installDockButtons();
+    orderDock();
     installHandle();
     installCardLock();
     apply();
@@ -771,12 +815,13 @@
     // DOMContentLoaded, and /me arrives later still; re-running is free.
     window.addEventListener("tlc:auth-state-changed", function () {
       installDockButtons();
+      orderDock();
       openHomeOnce();
       apply();
     });
     [300, 1200, 3000].forEach(function (ms) {
       window.setTimeout(function () {
-        installDockButtons(); linkHosts(); openHomeOnce(); apply();
+        installDockButtons(); orderDock(); linkHosts(); openHomeOnce(); apply();
       }, ms);
     });
   }
@@ -795,6 +840,8 @@
     keyboardInset: keyboardInset,
     viewportShift: viewportShift,
     installDockButtons: installDockButtons,
+    orderDock: orderDock,
+    dockOrder: DOCK_ORDER,
     installHandle: installHandle,
     setSplit: setSplit,
     toggle: toggle,
