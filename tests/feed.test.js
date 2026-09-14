@@ -1010,6 +1010,212 @@ test('line breaks a driver typed are kept', () => {
   assert.ok(/white-space:\s*pre-wrap/.test(CSS), 'post bodies collapse newlines');
 });
 
+// --------------------------------------------------------------------------
+// deleting a post
+// --------------------------------------------------------------------------
+
+test('only your own post offers a delete', async () => {
+  const dom = await withFeed([post({ id: 1, mine: false })]);
+  assert.ok(!dom.body.querySelector('[data-role="delete-post"]'),
+    'somebody else\'s post offered a delete that would 403');
+
+  const own = await withFeed([post({ id: 2, mine: true })]);
+  assert.ok(own.body.querySelector('[data-role="delete-post"]'), 'no delete on your own post');
+});
+
+test('a locked driver is not offered a delete that would 402', async () => {
+  // The server takes DELETE on require_user, so the button's only outcome
+  // would be a payment wall -- the same reason Like and Reply go quiet.
+  const dom = build({ locked: true, responses: [feedBody([post({ id: 1, mine: true })])] });
+  await dom.entry.onEnter();
+  await tick();
+  assert.ok(!dom.body.querySelector('[data-role="delete-post"]'));
+});
+
+test('deleting a post takes two taps', async () => {
+  /* A post cannot be undeleted and the control sits in the row with Like,
+   * which a thumb reaches for without looking. The first tap only arms it. */
+  const dom = await withFeed([post({ id: 1, mine: true })], [{ body: { ok: true } }]);
+  const button = dom.body.querySelector('[data-role="delete-post"]');
+  const before = dom.calls.length;
+
+  button.click();
+  await tick();
+  assert.strictEqual(dom.calls.length, before, 'one tap deleted it');
+  assert.ok(/sure/i.test(dom.body.querySelector('[data-role="delete-post"]').textContent),
+    'the armed button does not say it is armed');
+
+  dom.body.querySelector('[data-role="delete-post"]').click();
+  await tick(); await tick();
+  const sent = dom.calls[dom.calls.length - 1];
+  assert.strictEqual(sent.opts.method, 'DELETE');
+  assert.ok(/\/social\/posts\/1$/.test(sent.url), sent.url);
+  assert.strictEqual(dom.api._state.items.length, 0, 'the post is still in the list');
+});
+
+test('a tap anywhere else puts an armed delete back to sleep', async () => {
+  const dom = await withFeed([post({ id: 1, mine: true })]);
+  dom.body.querySelector('[data-role="delete-post"]').click();
+  await tick();
+  // Anything at all: the like on the same card will do.
+  dom.body.querySelector('[data-role="like"]').click();
+  await tick();
+  assert.ok(/delete/i.test(dom.body.querySelector('[data-role="delete-post"]').textContent),
+    'it stayed armed with a thumb still on the screen');
+});
+
+test('a refused delete says so and keeps the post', async () => {
+  const dom = await withFeed([post({ id: 1, mine: true })], [{ status: 403 }]);
+  dom.body.querySelector('[data-role="delete-post"]').click();
+  await tick();
+  dom.body.querySelector('[data-role="delete-post"]').click();
+  await tick(); await tick();
+  assert.strictEqual(dom.api._state.items.length, 1, 'the post went on a 403');
+  assert.ok(/isn't your post/i.test(dom.body.textContent), dom.body.textContent);
+});
+
+// --------------------------------------------------------------------------
+// replying to a reply
+// --------------------------------------------------------------------------
+
+test('every reply can be answered', async () => {
+  const dom = await withFeed([post({ id: 1, comment_count: 1 })], [T([comment(5)])]);
+  dom.body.querySelector('[data-role="replies"]').click();
+  await tick(); await tick();
+  assert.ok(dom.body.querySelector('[data-role="reply-to"]'), 'no way to answer a reply');
+});
+
+test('a locked driver is offered no reply-to either', async () => {
+  const dom = build({ locked: true,
+    responses: [feedBody([post({ id: 1, comment_count: 1 })]), T([comment(5)])] });
+  await dom.entry.onEnter();
+  await tick();
+  dom.body.querySelector('[data-role="replies"]').click();
+  await tick(); await tick();
+  assert.ok(!dom.body.querySelector('[data-role="reply-to"]'));
+});
+
+test('answering a reply aims the composer and sends the parent', async () => {
+  const dom = await withFeed([post({ id: 1, comment_count: 1 })], [
+    T([comment(5)]),
+    { body: { ok: true, comment: comment(6, { parent_id: 5 }), comment_count: 2 } },
+  ]);
+  dom.body.querySelector('[data-role="replies"]').click();
+  await tick(); await tick();
+
+  dom.body.querySelector('[data-role="reply-to"]').click();
+  await tick();
+  assert.ok(/replying to aisha/i.test(dom.body.textContent),
+    'nothing says which reply is being answered: ' + dom.body.textContent);
+
+  const input = dom.body.querySelector('[data-role="reply-input"]');
+  input.value = 'On my way.';
+  dom.body.querySelector('[data-role="send-reply"]').click();
+  await tick(); await tick();
+
+  const sent = dom.calls[dom.calls.length - 1];
+  assert.deepStrictEqual(JSON.parse(sent.opts.body), { body: 'On my way.', parent_id: 5 });
+});
+
+test('a reply to the post carries no parent', async () => {
+  const dom = await withFeed([post({ id: 1 })], [
+    T([]),
+    { body: { ok: true, comment: comment(6), comment_count: 1 } },
+  ]);
+  dom.body.querySelector('[data-role="replies"]').click();
+  await tick(); await tick();
+  dom.body.querySelector('[data-role="reply-input"]').value = 'First.';
+  dom.body.querySelector('[data-role="send-reply"]').click();
+  await tick(); await tick();
+  assert.deepStrictEqual(
+    JSON.parse(dom.calls[dom.calls.length - 1].opts.body), { body: 'First.' });
+});
+
+test('the aim can be taken back off', async () => {
+  const dom = await withFeed([post({ id: 1, comment_count: 1 })], [
+    T([comment(5)]),
+    { body: { ok: true, comment: comment(6), comment_count: 2 } },
+  ]);
+  dom.body.querySelector('[data-role="replies"]').click();
+  await tick(); await tick();
+  dom.body.querySelector('[data-role="reply-to"]').click();
+  await tick();
+  dom.body.querySelector('[data-role="clear-reply-to"]').click();
+  await tick();
+  dom.body.querySelector('[data-role="reply-input"]').value = 'Never mind.';
+  dom.body.querySelector('[data-role="send-reply"]').click();
+  await tick(); await tick();
+  assert.deepStrictEqual(
+    JSON.parse(dom.calls[dom.calls.length - 1].opts.body), { body: 'Never mind.' });
+});
+
+test('an aim at a reply that has since gone is dropped, not sent', async () => {
+  /* Someone else deleting the comment while a reply is being typed would
+   * otherwise send a parent_id the server 404s -- and a 404 here loses what
+   * they wrote. */
+  const dom = await withFeed([post({ id: 1, comment_count: 1 })], [
+    T([comment(5)]),
+    { body: { ok: true, comment: comment(6), comment_count: 1 } },
+  ]);
+  dom.body.querySelector('[data-role="replies"]').click();
+  await tick(); await tick();
+  dom.body.querySelector('[data-role="reply-to"]').click();
+  await tick();
+  dom.api._threads['1'].items = [];
+  dom.body.querySelector('[data-role="reply-input"]').value = 'Hello?';
+  dom.body.querySelector('[data-role="send-reply"]').click();
+  await tick(); await tick();
+  assert.deepStrictEqual(
+    JSON.parse(dom.calls[dom.calls.length - 1].opts.body), { body: 'Hello?' });
+});
+
+test('a reply to a reply is drawn one indent in, and no further', async () => {
+  /* The server stores what was actually answered, which can be three or four
+   * down. Drawn as written that would indent a phone off its own right edge,
+   * so everything below the first reply lands at the same one indent. */
+  const dom = await withFeed([post({ id: 1, comment_count: 3 })], [T([
+    comment(5, { body: 'top' }),
+    comment(6, { body: 'second', parent_id: 5,
+      reply_to: { user_id: 9, display_name: 'Aisha D.', handle: 'aisha' } }),
+    comment(7, { body: 'third', parent_id: 6,
+      reply_to: { user_id: 3, display_name: 'Marcus R.', handle: 'marcus' } }),
+  ])]);
+  dom.body.querySelector('[data-role="replies"]').click();
+  await tick(); await tick();
+
+  const rows = dom.body.querySelectorAll('[data-comment-id]');
+  assert.strictEqual(rows.length, 3);
+  const nested = (el) => el.className.includes('feedCommentNested');
+  assert.deepStrictEqual(rows.map(nested), [false, true, true],
+    'the third-level reply is not at the same indent as the second');
+});
+
+test('a nested reply says who it answered', async () => {
+  // At one indent a reply to a reply and a reply to the post look identical.
+  const dom = await withFeed([post({ id: 1, comment_count: 2 })], [T([
+    comment(5, { body: 'top' }),
+    comment(6, { body: 'second', parent_id: 5,
+      reply_to: { user_id: 9, display_name: 'Aisha D.', handle: 'aisha' } }),
+  ])]);
+  dom.body.querySelector('[data-role="replies"]').click();
+  await tick(); await tick();
+  assert.ok(dom.body.textContent.includes('@aisha'), dom.body.textContent);
+});
+
+test('a reply whose parent was deleted stands on its own', async () => {
+  // Rather than disappearing with it, or hanging off nothing.
+  const dom = await withFeed([post({ id: 1, comment_count: 1 })], [T([
+    comment(7, { body: 'orphan', parent_id: 999,
+      reply_to: { user_id: 9, display_name: 'Aisha D.', handle: 'aisha' } }),
+  ])]);
+  dom.body.querySelector('[data-role="replies"]').click();
+  await tick(); await tick();
+  const rows = dom.body.querySelectorAll('[data-comment-id]');
+  assert.strictEqual(rows.length, 1);
+  assert.ok(!rows[0].className.includes('feedCommentNested'), 'indented under nothing');
+  assert.ok(dom.body.textContent.includes('orphan'));
+});
+
 test('the feed has a night palette', () => {
   assert.ok(CSS.includes('body.night .feedCard'),
     'white cards at 3am is the whole reason the app has a night mode');

@@ -193,6 +193,24 @@
 .feedLike.on { background: rgba(226, 30, 74, 0.1); color: #c81e5a; }
 .feedLike:disabled { opacity: 0.6; }
 
+/* Pushed to the far end of the row, away from the Like a thumb aims for, and
+   quiet until it is armed: a post cannot be undeleted, so the only tap that
+   should be easy is the second one. */
+.feedPostDelete {
+  margin-left: auto;
+  border: 0;
+  border-radius: 999px;
+  padding: 7px 12px;
+  background: transparent;
+  color: #b3202c;
+  font-family: inherit; font-weight: 700; font-size: 13px; line-height: 1;
+  cursor: pointer;
+}
+.feedPostDelete.armed {
+  background: #b3202c;
+  color: #fff;
+}
+
 /* ------------------------------------------------------ notices and paging */
 
 .feedNotice {
@@ -325,6 +343,70 @@ body.night .feedMore {
   line-height: 1;
   cursor: pointer;
 }
+/* Same weight as the age, not as the name: it says who was answered, it is not
+   a heading. Left of Delete so the destructive one keeps the far edge. */
+.feedCommentReply {
+  flex: 0 0 auto;
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  padding: 2px 4px;
+  color: #3a465c;
+  font-family: inherit;
+  font-weight: 700;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+/* Delete keeps the far edge; when both are there Reply gives up the auto
+   margin so they sit together rather than at opposite ends. */
+.feedCommentReply + .feedCommentDelete { margin-left: 0; }
+.feedCommentAnswering {
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 1.2;
+}
+.feedCommentAnsweringName {
+  color: #2563eb;
+  font-weight: 700;
+  cursor: pointer;
+}
+/* One indent, and only one: the render flattens everything below the first
+   reply onto this line, so nothing here can ever nest twice. 39px lines the
+   nested body up under the parent's body -- a 30px avatar and the 9px gap. */
+.feedCommentNested { padding-left: 39px; }
+
+.feedReplyAim {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.2;
+  color: #3a465c;
+}
+.feedReplyAimLine {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.feedReplyAimClear {
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 999px;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  background: rgba(16, 22, 34, 0.08);
+  color: #3a465c;
+  font-family: inherit;
+  font-weight: 800;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
 .feedCommentBody {
   margin-top: 2px;
   font-size: 14px;
@@ -406,6 +488,15 @@ body.night .feedReplyInput {
 }
 body.night .feedReplySend { background: #eef2f8; color: #101622; }
 body.night .feedCommentDelete { color: #ff8fa6; }
+body.night .feedPostDelete { color: #ff8fa6; }
+body.night .feedPostDelete.armed { background: #ff8fa6; color: #101622; }
+body.night .feedCommentReply { color: #b8c3d4; }
+body.night .feedCommentAnsweringName { color: #8ab4ff; }
+body.night .feedReplyAim { color: #b8c3d4; }
+body.night .feedReplyAimClear {
+  background: rgba(255, 255, 255, 0.12);
+  color: #eef2f8;
+}
 
 /* --------------------------------------------------------- read-only feed
  *

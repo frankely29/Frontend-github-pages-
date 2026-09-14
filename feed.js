@@ -40,6 +40,8 @@
     loading: false,
     error: "",
     mounted: false,
+    // The post whose Delete has been tapped once. See paintPostDelete.
+    confirmDelete: null,
   };
 
   var nodes = {};
@@ -302,6 +304,19 @@
     replies.setAttribute("aria-expanded", "false");
     paintReplies(replies, post);
     actions.appendChild(replies);
+
+    /* Your own post, and only when the plan would let the server agree. The
+     * backend takes a delete on require_user, so offering it to a lapsed
+     * driver is a button whose only outcome is a 402 -- the same reason Like
+     * and Reply go quiet. */
+    if (post.mine && !locked()) {
+      var del = el("button", "feedPostDelete", "Delete");
+      del.type = "button";
+      del.setAttribute("data-role", "delete-post");
+      del.setAttribute("aria-label", "Delete this post");
+      paintPostDelete(del, post);
+      actions.appendChild(del);
+    }
     card.appendChild(actions);
 
     // Threads open in place. A separate screen per post would mean losing your
@@ -312,6 +327,67 @@
     card.appendChild(thread);
 
     return card;
+  }
+
+  /* Deleting a post is two taps, and no window.confirm().
+   *
+   * A post cannot be undeleted, and the control sits in a row with Like, which
+   * a thumb reaches for without looking. A native confirm() in a standalone
+   * web app is a system sheet with the site's hostname on it -- it reads like
+   * the browser interrupting, not like this app asking -- so the button asks
+   * for itself: "Delete" becomes "Sure?" and only the second tap is the one.
+   */
+  function paintPostDelete(button, post) {
+    var armed = String(state.confirmDelete || "") === String(post.id);
+    button.textContent = armed ? "Sure?" : "Delete";
+    button.classList.toggle("armed", armed);
+    button.setAttribute("aria-label", armed
+      ? "Tap again to delete this post"
+      : "Delete this post");
+  }
+
+  function disarmDelete() {
+    var armed = state.confirmDelete;
+    state.confirmDelete = null;
+    if (!armed || !nodes.list || !nodes.list.querySelector) return;
+    var card = nodes.list.querySelector('[data-post-id="' + armed + '"]');
+    var button = card && card.querySelector
+      ? card.querySelector('[data-role="delete-post"]') : null;
+    var post = findPost(armed);
+    if (button && post) paintPostDelete(button, post);
+  }
+
+  async function deletePost(postId, card) {
+    var post = findPost(postId);
+    if (!post || locked()) return;
+
+    // First tap arms, second deletes. Anything else that repaints the feed
+    // disarms it, so a post left armed and scrolled past does not go off
+    // under a thumb three minutes later.
+    if (String(state.confirmDelete || "") !== String(postId)) {
+      state.confirmDelete = String(postId);
+      var button = card.querySelector('[data-role="delete-post"]');
+      if (button) paintPostDelete(button, post);
+      return;
+    }
+    state.confirmDelete = null;
+
+    try {
+      await request("/social/posts/" + encodeURIComponent(postId), {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+      });
+      state.items = state.items.filter(function (p) {
+        return String(p.id) !== String(postId);
+      });
+      delete threads[String(postId)];
+      state.error = "";
+    } catch (err) {
+      state.error = err && err.status === 403
+        ? "That isn't your post."
+        : "Could not delete that post.";
+    }
+    paintList();
   }
 
   function paintReplies(button, post) {
@@ -381,7 +457,7 @@
     var key = String(postId);
     if (!threads[key]) {
       threads[key] = { open: false, loading: false, items: [], nextAfterId: null,
-        error: "", sending: false, loaded: false };
+        error: "", sending: false, loaded: false, replyTo: null };
     }
     return threads[key];
   }
@@ -438,6 +514,36 @@
     }
   }
 
+  function findComment(t, commentId) {
+    return t.items.filter(function (c) {
+      return String(c.id) === String(commentId);
+    })[0] || null;
+  }
+
+  /* Point the thread's one composer at a reply, or back at the post.
+   *
+   * The aim is held on the thread, not on the DOM, so it survives the repaints
+   * that a reply landing or a delete cause. It is dropped the moment the
+   * comment it names is gone -- paintThread re-checks, so an aim at something
+   * someone else deleted does not send a parent_id the server will 404.
+   */
+  function aimReply(postId, commentId, card) {
+    var t = threadState(postId);
+    var target = commentId ? findComment(t, commentId) : null;
+    if (!commentId || !target) {
+      t.replyTo = null;
+    } else {
+      var author = target.author || {};
+      t.replyTo = { id: target.id, name: author.display_name || "Driver" };
+    }
+    paintThread(postId, card);
+    var input = card.querySelector('[data-role="reply-input"]');
+    // The tap that aimed it is the gesture, so the keyboard is allowed up.
+    if (input && typeof input.focus === "function") {
+      try { input.focus(); } catch (_) {}
+    }
+  }
+
   async function sendReply(postId, card) {
     if (locked()) return;
     var t = threadState(postId);
@@ -450,12 +556,19 @@
     t.error = "";
     paintThread(postId, card);
     try {
+      // Re-read rather than trusting what was aimed a minute ago: the comment
+      // can have been deleted while the reply was being typed, and a parent_id
+      // pointing at nothing is a 404 that loses what they wrote.
+      var aimedAt = t.replyTo && findComment(t, t.replyTo.id) ? t.replyTo.id : null;
+      var payload = { body: text };
+      if (aimedAt) payload.parent_id = aimedAt;
       var data = await request("/social/posts/" + encodeURIComponent(postId) + "/comments", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ body: text }),
+        body: JSON.stringify(payload),
       });
       if (data && data.comment) t.items = t.items.concat([data.comment]);
+      t.replyTo = null;
       var post = findPost(postId);
       if (post && num(data && data.comment_count) !== null) {
         post.comment_count = num(data.comment_count);
@@ -474,6 +587,10 @@
       var button = card.querySelector('[data-role="replies"]');
       var post2 = findPost(postId);
       if (button && post2) paintReplies(button, post2);
+      // A reply landing pushes the composer down by its own height, so the
+      // field somebody is still typing in walks under the dock. Same signal as
+      // opening the thread, for the same reason.
+      if (t.open) fire("tlc:feed-thread-opened", { postId: postId });
     }
   }
 
@@ -498,9 +615,45 @@
     if (button && post2) paintReplies(button, post2);
   }
 
-  function buildComment(comment) {
+  /* Two levels, out of a tree of any depth.
+   *
+   * The server stores the comment that was actually answered, which can be
+   * three or four down. Drawing that as written would indent a phone off its
+   * own right edge, so every reply is drawn under its TOP-LEVEL ancestor and
+   * the "@name" says which of its neighbours it answered.
+   *
+   * Ancestors always arrive first -- ids ascend and a thread pages forwards --
+   * so walking up cannot run off the end of what is loaded. A reply whose
+   * parent was deleted has no ancestor at all and stands as a root, which is
+   * where it reads best anyway.
+   */
+  function threadRoots(items) {
+    var byId = {};
+    items.forEach(function (c) { byId[String(c.id)] = c; });
+
+    var roots = [];
+    var kids = {};
+    items.forEach(function (c) {
+      var walk = c;
+      var guard = 0;
+      // A cycle cannot happen through the API -- a parent is always older than
+      // its child -- but a loop here would hang the feed, so it is bounded.
+      while (walk && walk.parent_id != null && byId[String(walk.parent_id)] && guard < 64) {
+        walk = byId[String(walk.parent_id)];
+        guard += 1;
+      }
+      if (!walk || String(walk.id) === String(c.id)) { roots.push(c); return; }
+      (kids[String(walk.id)] = kids[String(walk.id)] || []).push(c);
+    });
+
+    return roots.map(function (root) {
+      return { comment: root, children: kids[String(root.id)] || [] };
+    });
+  }
+
+  function buildComment(comment, options) {
     var author = comment.author || {};
-    var row = el("div", "feedComment");
+    var row = el("div", "feedComment" + (options && options.nested ? " feedCommentNested" : ""));
     row.setAttribute("data-comment-id", String(comment.id));
 
     var avatar = el("div", "feedCommentAvatar", initials(author.display_name));
@@ -517,6 +670,13 @@
     head.appendChild(who);
     var age = ago(comment.created_at);
     if (age) head.appendChild(el("span", "feedCommentAge", age));
+    if (!locked()) {
+      var answer = el("button", "feedCommentReply", "Reply");
+      answer.type = "button";
+      answer.setAttribute("data-role", "reply-to");
+      answer.setAttribute("aria-label", "Reply to " + (author.display_name || "this driver"));
+      head.appendChild(answer);
+    }
     if (comment.can_delete) {
       var del = el("button", "feedCommentDelete", "Delete");
       del.type = "button";
@@ -525,6 +685,22 @@
       head.appendChild(del);
     }
     main.appendChild(head);
+    /* At one indent a reply to a reply and a reply to the post look identical,
+     * so the name of whoever was answered is the only thing that says which.
+     * It comes from the server rather than being parsed out of the text: a
+     * mention typed by hand is a string, this is the actual relation. */
+    var answered = comment.reply_to;
+    if (answered && answered.display_name) {
+      var at = el("div", "feedCommentAnswering");
+      var tag = el("span", "feedCommentAnsweringName",
+        "@" + (answered.handle || answered.display_name));
+      tag.setAttribute("data-role", "author");
+      if (num(answered.user_id) !== null) {
+        tag.setAttribute("data-user-id", String(answered.user_id));
+      }
+      at.appendChild(tag);
+      main.appendChild(at);
+    }
     main.appendChild(el("div", "feedCommentBody", comment.body || ""));
     row.appendChild(main);
     return row;
@@ -544,7 +720,12 @@
     if (t.loading && !t.items.length) {
       host.appendChild(el("div", "feedThreadNote", "Loading…"));
     }
-    t.items.forEach(function (comment) { host.appendChild(buildComment(comment)); });
+    threadRoots(t.items).forEach(function (branch) {
+      host.appendChild(buildComment(branch.comment));
+      branch.children.forEach(function (child) {
+        host.appendChild(buildComment(child, { nested: true }));
+      });
+    });
 
     if (t.nextAfterId) {
       var more = el("button", "feedThreadMore", t.loading ? "Loading…" : "Earlier replies");
@@ -573,11 +754,32 @@
       return;
     }
 
+    /* One composer per thread, aimed rather than one per comment.
+     *
+     * A field under every reply is a dozen fields on screen, a dozen drafts to
+     * keep, and on a phone it pushes the conversation off the bottom. Tapping
+     * Reply on a comment points the one composer at it and says so, and the
+     * line has its own X because the way out of a mis-tap has to be visible. */
+    var aimed = t.replyTo && findComment(t, t.replyTo.id) ? t.replyTo : null;
+    if (aimed) {
+      var aimRow = el("div", "feedReplyAim");
+      aimRow.appendChild(el("span", "feedReplyAimLine",
+        "Replying to " + (aimed.name || "that reply")));
+      var clear = el("button", "feedReplyAimClear", "\u00d7");
+      clear.type = "button";
+      clear.setAttribute("data-role", "clear-reply-to");
+      clear.setAttribute("aria-label", "Reply to the post instead");
+      aimRow.appendChild(clear);
+      host.appendChild(aimRow);
+    }
+
     var composer = el("div", "feedReplyRow");
     var input = el("input", "feedReplyInput");
     input.type = "text";
     input.setAttribute("data-role", "reply-input");
-    input.setAttribute("placeholder", "Reply…");
+    input.setAttribute("placeholder", aimed
+      ? "Reply to " + (aimed.name || "that reply") + "\u2026"
+      : "Reply\u2026");
     input.setAttribute("maxlength", "600");
     input.value = t.draft || "";
     input.disabled = t.sending;
@@ -610,6 +812,9 @@
 
   function paintList() {
     if (!nodes.list) return;
+    // A rebuilt list is a new list; nothing in it is still half way through a
+    // confirmation somebody started before it reloaded.
+    state.confirmDelete = null;
     nodes.list.textContent = "";
 
     if (state.error) {
@@ -722,6 +927,11 @@
     var target = event.target;
     if (!target || !target.closest) return;
 
+    // One tap anywhere else puts an armed Delete back to sleep.
+    if (state.confirmDelete && !target.closest('[data-role="delete-post"]')) {
+      disarmDelete();
+    }
+
     if (target.closest('[data-role="subscribe"]')) { subscribe(); return; }
 
     var scopeBtn = target.closest("[data-scope]");
@@ -762,6 +972,16 @@
       loadThread(postId, card, { append: true });
       return;
     }
+    if (target.closest('[data-role="delete-post"]')) { deletePost(postId, card); return; }
+
+    var replyTo = target.closest('[data-role="reply-to"]');
+    if (replyTo) {
+      var answering = replyTo.closest("[data-comment-id]");
+      if (answering) aimReply(postId, answering.getAttribute("data-comment-id"), card);
+      return;
+    }
+    if (target.closest('[data-role="clear-reply-to"]')) { aimReply(postId, null, card); return; }
+
     var del = target.closest('[data-role="delete-comment"]');
     if (del) {
       var row = del.closest("[data-comment-id]");
