@@ -411,64 +411,6 @@
     } catch (_) {}
   }
 
-  /* The readout.
-   *
-   * Three goes at this bar have each cost a round trip, because the one thing
-   * that would settle it -- what the phone actually reports -- is the one
-   * thing no browser here can produce. So when the window IS short, and only
-   * for an admin, the numbers that tell the hypotheses apart are put on the
-   * screen where they can be photographed:
-   *
-   *   w   window height / screen height
-   *   vv  visual viewport height + how far it is slid down
-   *   sy  document scroll
-   *   de  documentElement.clientHeight, which is a different number from
-   *       innerHeight if a containing block is involved rather than the window
-   *   dk  where the dock's bottom edge actually lands
-   *
-   * It is tappable, so it can be dismissed the moment it has been read.
-   */
-  var diagnosticOff = false;
-
-  function isAdmin() {
-    try {
-      var me = window.me;
-      var flag = me && me.is_admin;
-      return flag === true || flag === 1 || flag === "1" || flag === "true";
-    } catch (_) { return false; }
-  }
-
-  function paintDiagnostic() {
-    var node = byId("tjWindowReadout");
-    var show = !diagnosticOff && isAdmin() && !!windowIsShort()
-      && document.body && document.body.classList.contains("feed-first");
-    if (!show) {
-      if (node && node.parentNode) node.parentNode.removeChild(node);
-      return;
-    }
-    if (!node) {
-      node = document.createElement("button");
-      node.id = "tjWindowReadout";
-      node.type = "button";
-      node.setAttribute("aria-label", "Window measurements. Tap to dismiss.");
-      node.addEventListener("click", function () {
-        diagnosticOff = true;
-        paintDiagnostic();
-      });
-      document.body.appendChild(node);
-    }
-    var vv = window.visualViewport || {};
-    var dock = byId("dock");
-    var box = dock && dock.getBoundingClientRect ? dock.getBoundingClientRect() : null;
-    node.textContent = "w " + Math.round(window.innerHeight || 0)
-      + "/" + Math.round((window.screen && window.screen.height) || 0)
-      + " · vv " + Math.round(Number(vv.height) || 0)
-      + "+" + Math.round(Number(vv.offsetTop) || 0)
-      + " · sy " + Math.round(window.scrollY || 0)
-      + " · de " + Math.round((document.documentElement || {}).clientHeight || 0)
-      + " · dk " + (box ? Math.round(box.bottom) : "-");
-  }
-
   function paintViewport() {
     if (!document.body) return;
     var kb = keyboardInset();
@@ -482,7 +424,6 @@
     }
     // The keyboard has just gone. Give iOS a moment to put the window back on
     // its own, and only then ask.
-    paintDiagnostic();
     if (lastKeyboard > 0 && kb === 0) {
       window.setTimeout(askForTheWindowBack, 260);
       window.setTimeout(askForTheWindowBack, 900);
@@ -850,7 +791,6 @@
     apply: apply,
     paintViewport: paintViewport,
     windowIsShort: windowIsShort,
-    paintDiagnostic: paintDiagnostic,
     askForTheWindowBack: askForTheWindowBack,
     keyboardInset: keyboardInset,
     viewportShift: viewportShift,
