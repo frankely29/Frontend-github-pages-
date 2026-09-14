@@ -35,6 +35,12 @@ function makeNode(tag) {
     type: '', _classes: new Set(), _text: '', _html: '', _attrs: {}, _listeners: {},
     clicks: 0,
   };
+  // The file writes the split as a custom property. A plain object for `style`
+  // has no setProperty, and without it every split assertion would read
+  // undefined and pass on nothing.
+  node.style.setProperty = (k, v) => { node.style[k] = String(v); };
+  node.style.getPropertyValue = (k) => node.style[k] || '';
+  node.setPointerCapture = () => {};
   node.classList = {
     add: (...n) => n.forEach((x) => x && node._classes.add(x)),
     remove: (...n) => n.forEach((x) => node._classes.delete(x)),
@@ -136,6 +142,7 @@ function build(options = {}) {
       close: () => { closed.push(1); currentKey = null; window.dispatch('tlc:shell-screen-changed', {}); },
     },
     resizeMapToViewport: () => { resizes.push(1); },
+    innerHeight: 956,
     setTimeout: (fn, ms) => { timers.push({ fn, ms }); return timers.length; },
     addEventListener: (t, fn) => { (window._l[t] = window._l[t] || []).push(fn); },
     _l: {},
@@ -143,16 +150,36 @@ function build(options = {}) {
   };
   window.window = window;
 
+  const store = Object.assign({
+    community_token_v1: options.token === undefined ? 'a-token' : options.token,
+  }, options.storage || {});
+
   const ctx = vm.createContext({
     window, document, console,
-    localStorage: { getItem: () => (options.token === undefined ? 'a-token' : options.token) },
+    localStorage: {
+      getItem: (k) => (k in store ? store[k] : null),
+      setItem: (k, v) => { store[k] = String(v); },
+    },
     Object, Number, Math, Array, String, Date, JSON, Error, Boolean,
   });
   vm.runInContext(SRC, ctx, { filename: 'feed-first.js' });
 
   return {
-    window, document, body, byId, track, timers, resizes, opened, closed,
+    window, document, body, byId, track, timers, resizes, opened, closed, store,
     el: (id) => document.getElementById(id),
+    split: () => Number(String(body.style['--tj-split'] || '').replace('%', '')),
+    handle: () => document.getElementById('tjSheetHandle'),
+    drag: (dy) => {
+      const h = document.getElementById('tjSheetHandle');
+      h.dispatch('pointerdown', { button: 0, clientY: 400 });
+      h.dispatch('pointermove', { clientY: 400 + dy, preventDefault() {} });
+      h.dispatch('pointerup', { clientY: 400 + dy });
+    },
+    tap: () => {
+      const h = document.getElementById('tjSheetHandle');
+      h.dispatch('pointerdown', { button: 0, clientY: 400 });
+      h.dispatch('pointerup', { clientY: 400 });
+    },
     api: window.TeamJoseoFeedFirst,
     setOpen: (k) => { currentKey = k; window.dispatch('tlc:shell-screen-changed', {}); },
     ids: () => track.children.map((c) => c.id),
@@ -227,26 +254,6 @@ test('the two buttons go where they say', () => {
   assert.deepStrictEqual(dom.opened.slice(-1), ['feed']);
 });
 
-test('the map is re-measured when it changes size', () => {
-  // MapLibre measures its container, not the window. Without this the canvas
-  // keeps drawing at whichever size it was when the switch happened -- a 30%
-  // card rendered at full-screen, or the reverse.
-  const dom = build({ open: null });
-  const before = dom.resizes.length;
-  dom.setOpen('feed');
-  assert.ok(dom.resizes.length > before, 'nothing re-measured on the way into the card');
-  const mid = dom.resizes.length;
-  dom.setOpen(null);
-  assert.ok(dom.resizes.length > mid, 'nothing re-measured on the way back out');
-});
-
-test('re-measuring only happens when the layout actually changed', () => {
-  const dom = build({ open: 'feed' });
-  const before = dom.resizes.length;
-  dom.setOpen('feed');
-  assert.strictEqual(dom.resizes.length, before, 'it re-measures on every event');
-});
-
 test('a signed-in driver lands on the feed', () => {
   const dom = build({ open: null });
   assert.deepStrictEqual(dom.opened, ['feed']);
@@ -276,13 +283,115 @@ test('it survives the shell not being there', () => {
   assert.doesNotThrow(() => build({ noShell: true }));
 });
 
-test('the card has a way into the full map', () => {
+// --------------------------------------------------------------------------
+// the sheet
+// --------------------------------------------------------------------------
+
+test('it opens at the expanded detent', () => {
   const dom = build({ open: 'feed' });
-  const tap = dom.body.children.filter((c) => c.id === 'mapCardOpen')[0];
-  assert.ok(tap, 'the card is not tappable');
-  assert.ok(tap.getAttribute('aria-label'), 'it announces nothing');
-  tap.click();
-  assert.strictEqual(dom.closed.length, 1, 'tapping the card did nothing');
+  assert.strictEqual(dom.split(), 39,
+    'the sheet does not open where it was approved');
+});
+
+test('expanded is 15% shorter than what was drawn', () => {
+  // The approved drawing had the sheet starting at 28%, so 72% of the screen.
+  // 15% less than that is 61.2%, which starts at 38.8% -- 39.
+  const drawn = 100 - 28;
+  const asked = drawn * 0.85;
+  assert.ok(Math.abs((100 - build({ open: 'feed' }).split()) - asked) < 1.5,
+    `the sheet is ${100 - build({ open: 'feed' }).split()}% tall, not ${asked.toFixed(1)}%`);
+});
+
+test('dragging it down snaps it to minimised', () => {
+  const dom = build({ open: 'feed' });
+  dom.drag(260);
+  assert.strictEqual(dom.split(), 66, 'it did not snap to the minimised detent');
+  assert.ok(dom.body.classList.contains('tj-min'), 'nothing marks the minimised state');
+});
+
+test('a short drag falls back to where it started', () => {
+  // Snapping to the nearest detent, not to wherever the finger stopped.
+  const dom = build({ open: 'feed' });
+  dom.drag(40);
+  assert.strictEqual(dom.split(), 39, 'a nudge moved it to the wrong detent');
+});
+
+test('dragging it back up expands it again', () => {
+  const dom = build({ open: 'feed' });
+  dom.drag(260);
+  dom.drag(-260);
+  assert.strictEqual(dom.split(), 39);
+  assert.ok(!dom.body.classList.contains('tj-min'));
+});
+
+test('a tap toggles, a drag does not', () => {
+  // Four pixels of slop, so a tap that wobbles is still a tap.
+  const dom = build({ open: 'feed' });
+  dom.tap();
+  assert.strictEqual(dom.split(), 66, 'tapping the handle did nothing');
+  dom.tap();
+  assert.strictEqual(dom.split(), 39);
+});
+
+test('the arrow points where the sheet will go', () => {
+  // Down while the feed is up, up while it is down. The CSS rotates it off
+  // body.tj-min, so the class is the whole contract.
+  const dom = build({ open: 'feed' });
+  assert.ok(!dom.body.classList.contains('tj-min'), 'arrow would point up with the feed up');
+  dom.tap();
+  assert.ok(dom.body.classList.contains('tj-min'), 'arrow would point down with the feed down');
+  assert.ok(/body\.feed-first\.tj-min #tjSheetHandle \.tjArrow[^}]*rotate\(180deg\)/s.test(CSS),
+    'nothing flips the arrow');
+});
+
+test('the arrow nudges, with a shadow, until it has been used', () => {
+  const dom = build({ open: 'feed' });
+  assert.ok(dom.handle().classList.contains('tj-hint'), 'the arrow never nudges');
+  dom.tap(); dom.tap(); dom.tap();
+  assert.ok(!dom.handle().classList.contains('tj-hint'),
+    'a hint that never goes away has stopped being a hint');
+  assert.ok(/@keyframes tjNudge/.test(CSS), 'no nudge animation');
+  assert.ok(/\.tjArrow\s*\{[^}]*drop-shadow/s.test(CSS), 'the arrow has no shadow');
+});
+
+test('a driver who has used it before is not nudged again', () => {
+  const dom = build({ open: 'feed', storage: { tj_sheet_hints_v1: '3' } });
+  assert.ok(!dom.handle().classList.contains('tj-hint'));
+});
+
+test('where they left it is where it opens', () => {
+  const dom = build({ open: 'feed', storage: { tj_sheet_split_v1: '0.66' } });
+  assert.strictEqual(dom.split(), 66, 'it forgot the sheet was minimised');
+});
+
+test('the sheet cannot be dragged off either end', () => {
+  const dom = build({ open: 'feed' });
+  dom.handle().dispatch('pointerdown', { button: 0, clientY: 400 });
+  dom.handle().dispatch('pointermove', { clientY: 4000, preventDefault() {} });
+  assert.ok(dom.split() <= 92, `dragged to ${dom.split()}%`);
+  dom.handle().dispatch('pointermove', { clientY: -4000, preventDefault() {} });
+  assert.ok(dom.split() >= 16, `dragged to ${dom.split()}%`);
+  dom.handle().dispatch('pointerup', { clientY: -4000 });
+});
+
+test('the map is never resized', () => {
+  // It is full bleed in both states and the sheet slides over it. A card that
+  // grew and shrank would re-lay out and re-render the whole map on every
+  // frame of the drag.
+  const dom = build({ open: null });
+  dom.setOpen('feed');
+  dom.drag(260);
+  assert.strictEqual(dom.resizes.length, 0,
+    'something is resizing the map during a gesture');
+  assert.ok(!/resizeMapToViewport/.test(SRC), 'feed-first.js still resizes the map');
+});
+
+test('the keyboard does what the drag does', () => {
+  const dom = build({ open: 'feed' });
+  dom.handle().dispatch('keydown', { key: 'ArrowDown', preventDefault() {} });
+  assert.strictEqual(dom.split(), 66);
+  dom.handle().dispatch('keydown', { key: 'ArrowUp', preventDefault() {} });
+  assert.strictEqual(dom.split(), 39);
 });
 
 // --------------------------------------------------------------------------
@@ -320,12 +429,37 @@ test('Save keeps its gradient', () => {
   assert.ok(m, 'the opaque rule no longer excludes Save');
 });
 
-test('the card and the screen under it share one measurement', () => {
-  const vars = rule('body.feed-first');
-  assert.ok(/--tj-card-h/.test(vars), 'the card height is not a variable');
-  assert.ok(/var\(--tj-card-h\)/.test(rule('body.feed-first #map')), 'the card ignores it');
-  assert.ok(/var\(--tj-card-h\)/.test(rule('body.feed-first #shellScreens')),
-    'the feed does not start where the card ends');
+test('one surface: no card, no gutter, no page background', () => {
+  // This is the complaint the whole redesign answers. The map is already fixed
+  // to all four edges by frontend-shell.css, so the correct amount of map
+  // geometry in this file is none -- anything here would be putting the box
+  // back.
+  assert.ok(!/body\.feed-first #map\s*\{[^}]*(border-radius|height|top:)/s.test(CSS),
+    'the map is being boxed again');
+  assert.ok(!/#mapCardOpen/.test(CSS) && !/mapCardOpen/.test(SRC),
+    'the card tap target is still here');
+});
+
+test('the sheet is frosted and the words are not', () => {
+  // Body text over a blurred red zone is not readable and never will be, so
+  // the surface is translucent and everything carrying words is opaque.
+  assert.ok(/#shellScreens\s*\{[^}]*backdrop-filter:\s*blur/s.test(CSS), 'not frosted');
+  assert.ok(/\.feedCard[^{]*\{[^}]*background-color:\s*#ffffff/s.test(CSS),
+    'posts sit on the frosting');
+});
+
+test('the sheet content clears the handle', () => {
+  // The handle is 34px and fixed to the sheet's top edge. 16px of padding put
+  // the scope chips under the arrow -- caught in a screenshot.
+  const m = CSS.match(/body\.feed-first \.shellScreenBody\s*\{([^}]*)\}/s);
+  assert.ok(m, 'no padding rule for the sheet body');
+  const top = Number((m[1].match(/padding-top:\s*(\d+)px/) || [])[1]);
+  assert.ok(top >= 38, `padding-top ${top}px puts content under the handle`);
+});
+
+test('nothing transitions while a finger is on it', () => {
+  assert.ok(/body\.feed-first\.tj-dragging[^{]*\{[^}]*transition:\s*none/s.test(CSS),
+    'the sheet lags behind the drag on a rubber band');
 });
 
 test('the full lock card never lands on the feed', () => {

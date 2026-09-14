@@ -1,125 +1,160 @@
-/* feed-first.css — the feed is the screen, the map is a card on it.
+/* feed-first.css — one surface: the map is the screen, the feed slides over it.
  *
- * There is no second map. The card IS #map, repositioned: a MapLibre instance
- * is expensive and two of them would disagree about the camera, the night
- * palette and the zone layer within a second of each other. So this file moves
- * the one that exists into a rounded box at the top and hands the rest of the
- * screen to the Feed.
+ * The map is full bleed, edge to edge and under the status bar, and it never
+ * changes size. The feed is a frosted sheet that slides up and down over it,
+ * so there is no card, no gutter and no page background anywhere -- the three
+ * things that made the last version read as two widgets on a grey field.
  *
- * The dock is untouched on purpose. Same floating circles, same 70px Save,
- * same sideways slide and the same auto-recentre on Save that app.part6.js
- * already does -- the only change here is that it no longer disappears when a
- * destination opens, because under Feed First the destination IS the home
- * screen and the dock is how you leave it.
+ * That the map never resizes is the point, not an accident. A card that grows
+ * and shrinks makes MapLibre re-measure and re-render on every frame of a
+ * drag; a sheet sliding over a fixed map costs nothing and cannot tear.
+ *
+ * The dock is untouched: same floating circles, same 70px Save, same sideways
+ * slide and the same auto-recentre on Save that app.part6.js already does.
  */
 
 body.feed-first {
-  /* One number, defined once. The card height, the screen below it and the
-     recommendation pill inside it are all measured from this. */
-  --tj-card-top: calc(env(safe-area-inset-top, 0px) + 10px);
-  --tj-card-h: 30vh;
-  --tj-card-gap: 10px;
-}
-@supports (height: 30dvh) {
-  body.feed-first { --tj-card-h: 30dvh; }
+  /* Where the sheet's top edge is. feed-first.js writes it during a drag and
+     snaps it to one of the two detents on release. Everything that has to sit
+     on the seam -- the handle, the answer pill, the lock label -- reads it. */
+  --tj-split: 39%;
+  --tj-sheet: rgba(243, 245, 249, 0.82);
+  --tj-sheet-solid: #f3f5f9;
 }
 
-/* ------------------------------------------------------------- the card */
-body.feed-first #map {
-  top: var(--tj-card-top);
-  left: 10px;
-  right: 10px;
-  bottom: auto;
-  height: var(--tj-card-h);
-  border-radius: 16px;
-  overflow: hidden;
-  box-shadow: 0 6px 20px rgba(11, 16, 24, 0.22);
-  /* The card is a window, not a map you pan. #mapCardOpen sits over it and
-     takes the tap -- fighting MapLibre's own gesture handling for a single
-     tap target is a losing game. */
-  pointer-events: none;
-}
+/* ------------------------------------------------------------ the map */
+/* Full bleed. #map is already fixed and anchored to all four edges by
+   frontend-shell.css, so there is deliberately nothing to do here -- and
+   nothing to undo when the feed closes. */
 
-/* The weather canvas is sized in pixels from window.innerHeight by its own
-   script, so it cannot follow the card. It is atmosphere over a full-screen
-   map and has no job on a 30% one. */
 body.feed-first #wxCanvas { display: none !important; }
 
-/* The tap target over the card. Built by feed-first.js so the page has no
-   dead element when the script is absent. */
-#mapCardOpen { display: none; }
-body.feed-first #mapCardOpen {
-  display: block;
-  position: fixed;
-  top: var(--tj-card-top);
-  left: 10px;
-  right: 10px;
-  height: var(--tj-card-h);
-  z-index: 2500;
-  border: 0;
-  border-radius: 16px;
-  background: transparent;
-  padding: 0;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-}
-body.feed-first #mapCardOpen:active { transform: scale(0.995); }
-body.feed-first #mapCardOpen:focus-visible {
-  outline: 3px solid #0066ff;
-  outline-offset: 2px;
-}
-
-/* The answer, docked inside the card. It is the single most valuable line the
-   app produces and it should not be a screen away. */
-body.feed-first #mapAction {
-  bottom: auto !important;
-  top: calc(var(--tj-card-top) + var(--tj-card-h) - 52px) !important;
-  width: min(100vw - 44px, 400px) !important;
-  z-index: 2600 !important;
-}
-
-/* ------------------------------------------------------ the feed below it */
+/* ---------------------------------------------------------- the sheet */
 body.feed-first #shellScreens {
-  top: calc(var(--tj-card-top) + var(--tj-card-h) + var(--tj-card-gap));
-  border-radius: 18px 18px 0 0;
+  top: var(--tj-split);
+  border-radius: 22px 22px 0 0;
   overflow: hidden;
-  background: #f3f5f9;
+  /* Frosted, so the zone you are standing in tints the feed and there is no
+     line where the map stops. Posts sit on solid cards -- see below -- because
+     body text over a blurred red zone is not readable and never will be. */
+  background: var(--tj-sheet);
+  backdrop-filter: blur(16px) saturate(1.15);
+  -webkit-backdrop-filter: blur(16px) saturate(1.15);
+  box-shadow: 0 -10px 30px rgba(11, 16, 24, 0.18);
+  transition: top 0.26s cubic-bezier(0.32, 0.72, 0, 1);
 }
+/* While a finger is on the handle the sheet follows it exactly. A transition
+   here would make the drag feel like it is on a rubber band. */
+body.feed-first.tj-dragging #shellScreens,
+body.feed-first.tj-dragging #tjSheetHandle,
+body.feed-first.tj-dragging #mapAction,
+body.feed-first.tj-dragging #mapCardLocked { transition: none !important; }
 
-/* No back bar on the home screen. "< Map" above a map card that is already on
-   screen, with the dock saying where you are underneath, is three answers to
-   one question. */
+/* Anything carrying words gets an opaque ground. This is the whole contrast
+   answer for the frosting: the surface is translucent, the text is not. */
+body.feed-first .feedCard,
+body.feed-first .feedScope,
+body.feed-first .feedJoin,
+body.feed-first .shellEmpty,
+body.feed-first .feedNote { background-color: #ffffff; }
+body.feed-first .feedScope.on { background-color: #101622; }
+
 body.feed-first .shellScreenBar { display: none !important; }
-
-/* Content clears the floating dock rather than ending underneath it. */
 body.feed-first .shellScreenBody {
   padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 104px);
+  /* Clears the handle. It is 34px tall and fixed to the sheet's top edge, so
+     16px of padding put the scope chips under the arrow -- caught in a
+     screenshot, where the chevron was sitting on top of "My city". */
+  padding-top: 42px;
 }
 
-/* --------------------------------------------------------------- the dock
-   app-shell.css hides the dock whenever a destination is open, which is right
-   when the destination is a page you visit and wrong when it is home. Higher
-   specificity rather than a change over there, so the rule that governs every
-   other screen keeps governing them. */
-body.feed-first.shell-screen-open #dock { display: block !important; }
-
-/* ...and above it, not merely displayed.
+/* --------------------------------------------------------- the handle
  *
- * The dock sits at z-index 3000 and .shellScreen at 9200, so un-hiding it was
- * not enough: it rendered underneath the feed, present in the layout and
- * invisible on screen. Caught in a screenshot -- a probe that asks for display
- * and height says "shown" for an element buried under an opaque panel. */
+ * A grab bar and an arrow that nudges, with a shadow under it. The arrow is
+ * not decoration: a sheet that can be dragged and does not say so is a sheet
+ * nobody drags, and this one starts covering two thirds of the map. It points
+ * the way it will move -- down when the feed is up, up when it is down.
+ *
+ * It stops nudging once a driver has used it three times. A hint that never
+ * goes away has stopped being a hint. */
+#tjSheetHandle { display: none; }
+body.feed-first #tjSheetHandle {
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  top: var(--tj-split);
+  width: 96px;
+  height: 34px;
+  padding: 7px 0 0;
+  z-index: 9250;
+  border: 0;
+  background: transparent;
+  cursor: grab;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+  transition: top 0.26s cubic-bezier(0.32, 0.72, 0, 1);
+}
+body.feed-first.tj-dragging #tjSheetHandle { cursor: grabbing; }
+
+#tjSheetHandle .tjGrab {
+  width: 40px;
+  height: 4px;
+  border-radius: 99px;
+  background: rgba(16, 22, 34, 0.28);
+  display: block;
+}
+#tjSheetHandle .tjArrow {
+  display: block;
+  width: 15px;
+  height: 15px;
+  color: rgba(16, 22, 34, 0.55);
+  filter: drop-shadow(0 2px 3px rgba(11, 16, 24, 0.35));
+}
+/* Up when the sheet is down: the arrow always points where the sheet goes. */
+body.feed-first.tj-min #tjSheetHandle .tjArrow { transform: rotate(180deg); }
+
+@keyframes tjNudge {
+  0%, 62%, 100% { transform: translateY(0); opacity: 0.5; }
+  76% { transform: translateY(4px); opacity: 1; }
+  90% { transform: translateY(0); opacity: 0.8; }
+}
+@keyframes tjNudgeUp {
+  0%, 62%, 100% { transform: rotate(180deg) translateY(0); opacity: 0.5; }
+  76% { transform: rotate(180deg) translateY(4px); opacity: 1; }
+  90% { transform: rotate(180deg) translateY(0); opacity: 0.8; }
+}
+body.feed-first #tjSheetHandle.tj-hint .tjArrow {
+  animation: tjNudge 2.4s ease-in-out infinite;
+}
+body.feed-first.tj-min #tjSheetHandle.tj-hint .tjArrow {
+  animation: tjNudgeUp 2.4s ease-in-out infinite;
+}
+body.feed-first.tj-dragging #tjSheetHandle .tjArrow { animation: none; }
+
+#tjSheetHandle:focus-visible { outline: 3px solid #0066ff; outline-offset: 2px; }
+
+/* ------------------------------------------- things that ride the seam */
+body.feed-first #mapAction {
+  bottom: auto !important;
+  top: calc(var(--tj-split) - 54px) !important;
+  width: min(100vw - 28px, 420px) !important;
+  z-index: 2600 !important;
+  transition: top 0.26s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+/* --------------------------------------------------------------- dock
+   app-shell.css hides the dock whenever a destination is open, which is right
+   for a page you visit and wrong for one that is home. Higher specificity
+   rather than a change over there, and above the sheet -- it sits at z-index
+   3000 and .shellScreen at 9200, so merely un-hiding it left it buried. */
+body.feed-first.shell-screen-open #dock { display: block !important; }
 body.feed-first #dock { z-index: 9300 !important; }
 
-/* Opaque, and over a fade.
- *
- * The dock's faces are rgba(240,240,240,0.95), which is invisible as
- * translucency over a map and reads as a smear over a feed -- someone's post
- * shows through the circle sitting on it. Over text the buttons have to be
- * solid, and the text has to stop before it reaches them, so the dock also
- * carries a scrim that fades the last card out rather than letting it collide.
- * Save keeps its gradient: :not() rather than re-declaring it, because this
- * file loads last and a bare .dockBtn rule would win against it. */
+/* Solid over text, over a fade. rgba(240,240,240,0.95) is invisible as
+   translucency over a map and a smear over somebody's post. */
 body.feed-first .dockBtn:not(.dockBtnSave) { background: #ffffff; }
 body.night.feed-first .dockBtn:not(.dockBtnSave) { background: #1b2333; }
 body.night.feed-first .dockBtn:not(.dockBtnSave) .dockIcon { color: #eef2f8; }
@@ -127,10 +162,7 @@ body.night.feed-first .dockBtn:not(.dockBtnSave) .dockIcon { color: #eef2f8; }
 body.feed-first #dock::before {
   content: "";
   position: absolute;
-  left: -12px;
-  right: -12px;
-  top: -22px;
-  bottom: -60px;
+  left: -12px; right: -12px; top: -22px; bottom: -60px;
   z-index: -1;
   pointer-events: none;
   background: linear-gradient(to bottom,
@@ -145,28 +177,28 @@ body.night.feed-first #dock::before {
     rgba(13, 20, 32, 1) 68%);
 }
 
-/* The recentre and report pair belong to a map you can aim at. On a 30% card
-   they float over someone's post and point at nothing. They come back with the
-   full map. */
-body.feed-first #mapSegmented,
-body.feed-first .mapSegmented { display: none !important; }
-
-/* The menu button stays hidden. Under Feed First the dock is the navigation,
-   and the button would land on the map card anyway. */
-
-/* Feed and Map are the two the dock never had, because the dock never carried
-   navigation. Filled dark when you are on them -- the same ink as the answer
-   bar above, rather than a new colour. */
+/* Feed and Map, the two the dock never had because it never navigated. */
 #dockFeed.on, #dockMap.on { background: #101622; }
 #dockFeed.on .dockIcon, #dockMap.on .dockIcon { color: #ffffff; }
-
-body.night.feed-first #shellScreens { background: #0d1420; }
 body.night #dockFeed.on, body.night #dockMap.on { background: #eef2f8; }
 body.night #dockFeed.on .dockIcon, body.night #dockMap.on .dockIcon { color: #101622; }
 
-/* The map is a card, so the map's own full-screen furniture has nothing to sit
-   on. The slider, the control stack and the nav banner all belong to the map
-   screen and come back with it. */
+/* ------------------------------------------------------------- night */
+body.night.feed-first {
+  --tj-sheet: rgba(13, 20, 32, 0.82);
+  --tj-sheet-solid: #0d1420;
+}
+body.night.feed-first .feedCard,
+body.night.feed-first .feedScope,
+body.night.feed-first .shellEmpty,
+body.night.feed-first .feedNote { background-color: #141d2c; }
+body.night.feed-first #tjSheetHandle .tjGrab { background: rgba(238, 242, 248, 0.34); }
+body.night.feed-first #tjSheetHandle .tjArrow { color: rgba(238, 242, 248, 0.66); }
+
+/* -------------------------------------------------- the map's own chrome
+   The slider and the nav banner belong to a map you are looking at whole.
+   Recentre and report stay: the map is full size behind the sheet now and
+   genuinely usable, which is the point of this layout. */
 body.feed-first .sliderWrap,
 body.feed-first #sliderWrap,
 body.feed-first .mapControlStack,
@@ -174,16 +206,12 @@ body.feed-first #navQuickStack,
 body.feed-first #navActiveBanner,
 body.feed-first #mapFeedPeek { display: none !important; }
 
-/* ------------------------------------------------------------- the lock
+/* --------------------------------------------------------------- lock
  *
- * The blur follows the card for free -- html.tj-map-locked already targets
- * #map, wherever #map happens to be. The explanation does not: #mapLockCard is
- * fixed at 50%/50% with a Subscribe button, a redeem row and a Manage button,
- * which under Feed First lands in the middle of somebody's post and is taller
- * than the card it is explaining.
- *
- * So on this screen the card gets a one-line label instead, and the full lock
- * card stays where there is room for it -- the map screen, one tap away. */
+ * The blur follows the map for free. The explanation does not: #mapLockCard is
+ * Subscribe plus a redeem row plus Manage subscription, fixed at 50%/50%, and
+ * with the sheet up that lands behind it. So the seam gets a one-line label
+ * and the full card stays on the map screen, one tap away. */
 html.tj-map-locked body.feed-first #mapLockCard { display: none !important; }
 
 #mapCardLocked { display: none; }
@@ -191,11 +219,10 @@ html.tj-map-locked body.feed-first #mapCardLocked {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
   position: fixed;
-  left: 22px;
-  right: 22px;
-  top: calc(var(--tj-card-top) + var(--tj-card-h) - 54px);
+  left: 14px;
+  right: 14px;
+  top: calc(var(--tj-split) - 54px);
   z-index: 2600;
   padding: 10px 14px;
   border-radius: 12px;
@@ -205,6 +232,7 @@ html.tj-map-locked body.feed-first #mapCardLocked {
   font: 600 12.5px/1.2 system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
+  transition: top 0.26s cubic-bezier(0.32, 0.72, 0, 1);
 }
 html.tj-map-locked body.feed-first #mapCardLocked:focus-visible {
   outline: 3px solid #0066ff;
@@ -212,5 +240,10 @@ html.tj-map-locked body.feed-first #mapCardLocked:focus-visible {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  #mapCardOpen:active { transform: none; }
+  body.feed-first #shellScreens,
+  body.feed-first #tjSheetHandle,
+  body.feed-first #mapAction,
+  html.tj-map-locked body.feed-first #mapCardLocked { transition: none; }
+  body.feed-first #tjSheetHandle.tj-hint .tjArrow,
+  body.feed-first.tj-min #tjSheetHandle.tj-hint .tjArrow { animation: none; }
 }
