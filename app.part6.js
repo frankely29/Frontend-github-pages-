@@ -676,6 +676,29 @@
       scheduleDockAutoCenter();
     });
 
+    /* Buttons come and go from the track -- feed-first.js appends Feed and Map
+     * at boot, and moves the six the dock no longer shows out to #dockStash.
+     * Every listener above fires on a gesture, so none of them fire for that,
+     * and the hints kept the answer they had when eleven buttons were in the
+     * row: two red chevrons advertising a scroll the dock no longer has.
+     * Photographed at night, where they are the loudest things on the screen
+     * after Save.
+     *
+     * The track's width IS the thing the hints are computed from, so watching
+     * it is both the narrowest signal and the complete one -- it catches any
+     * future cause too, not just that one. */
+    const track = document.getElementById('dockTrack');
+    if (track && typeof ResizeObserver === 'function') {
+      try {
+        new ResizeObserver(() => {
+          scheduleHintUpdate();
+          scheduleDockAutoCenter();
+        }).observe(track);
+      } catch (_) {
+        // Cosmetic. A browser without it keeps the gesture-driven updates.
+      }
+    }
+
     leftHint?.addEventListener('click', () => scrollDockByStep(-1));
     rightHint?.addEventListener('click', () => scrollDockByStep(1));
 
