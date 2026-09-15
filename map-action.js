@@ -115,6 +115,10 @@
     // be fully transparent, or the pill stops being a badge on the map and
     // becomes a badge on an empty white slab.
     if (el.card) el.card.classList.toggle("open", expanded);
+    // Expanded, the card is the widest thing on the screen and its top-left
+    // corner is where the menu button lives. The class lets the shell get out
+    // of the way; nothing else reads it.
+    if (document.body) document.body.classList.toggle("map-answer-open", expanded);
   }
 
   function onPillClick() {
