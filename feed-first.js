@@ -29,11 +29,17 @@
    * caps and joins, currentColor so night mode works. The dock never needed
    * either of these because it never navigated. */
   var ICONS = {
+    /* A post, not a document. Three ruled lines in a box is the mark every
+       app uses for "article" or "list"; this one is a card with somebody's
+       face on it and something written under it, which is what the feed
+       actually holds. */
     dockFeed: '<svg viewBox="0 0 24 24" width="23" height="23" aria-hidden="true" focusable="false"'
       + ' style="display:block" fill="none" stroke="currentColor" stroke-width="1.75"'
       + ' stroke-linecap="round" stroke-linejoin="round">'
-      + '<rect x="3.4" y="4.8" width="17.2" height="14.4" rx="3.2"></rect>'
-      + '<path d="M7.2 9.6h9.6M7.2 12.6h9.6M7.2 15.6h5.8"></path></svg>',
+      + '<rect x="3.4" y="4.8" width="17.2" height="14.4" rx="3.4"></rect>'
+      + '<circle cx="8.3" cy="9.7" r="1.9"></circle>'
+      + '<path d="M12.4 9.7h4.3"></path>'
+      + '<path d="M6.5 14.4h11M6.5 16.9h6.9"></path></svg>',
     dockMap: '<svg viewBox="0 0 24 24" width="23" height="23" aria-hidden="true" focusable="false"'
       + ' style="display:block" fill="none" stroke="currentColor" stroke-width="1.75"'
       + ' stroke-linecap="round" stroke-linejoin="round">'

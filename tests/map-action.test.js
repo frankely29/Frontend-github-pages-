@@ -528,16 +528,61 @@ test('the verb and the zone are separated the way the artboard separates them', 
 });
 
 test('the dock icons are single-stroke line art, not illustrations', () => {
-  // The old set were multi-colour: a blue gear, a red-and-yellow gamepad, a
-  // drum-kit emoji. Next to the approved map they read as stickers.
+  /* The set before these WERE multi-colour illustrations: a blue gear, a
+   * red-and-yellow gamepad, a drum-kit emoji. Next to the approved map they
+   * read as stickers, and that is still the rule.
+   *
+   * What changed is where the colour comes from. Nine identical grey strokes
+   * on nine identical white circles left the dock unreadable -- "difficult to
+   * know what they are by just looking at them" -- so each destination now
+   * takes a hue of its own from CSS, through currentColor. One stroke, one
+   * weight, one hue: still not a painting, and the glyphs themselves stay
+   * colourless so night can invert them. */
   const APP = APPJS;
   const block = APP.slice(APP.indexOf('function applyDockIconModel'),
                           APP.indexOf('const pickupIconEl'));
-  assert.ok(!/fill="#(?!fff|ffffff)[0-9a-f]{3,6}"/i.test(block),
-    'a dock icon still carries a hardcoded colour fill');
+
+  // Colours is the sole exception, and it is the map's own scale rather than a
+  // picture: the three tones the zones and the answer pill are painted with.
+  const colours = block.slice(block.indexOf('setIcon(dockColors'),
+                              block.indexOf('setIcon(dockModes'));
+  const rest = block.replace(colours, '');
+  assert.ok(!/fill="#(?!fff|ffffff)[0-9a-f]{3,6}"/i.test(rest),
+    'a dock icon other than Colours carries a hardcoded colour fill');
+  ['#ef2f3c', '#f0a828', '#14b85f'].forEach((tone) => {
+    assert.ok(colours.includes(tone), `Colours is not drawn in the map tone ${tone}`);
+  });
   assert.ok(!/🥁|🎨|⚙️/.test(block), 'a dock icon is still an emoji');
   const strokes = block.split('stroke="currentColor"').length - 1;
-  assert.ok(strokes >= 8, `expected every dock icon to stroke with currentColor (found ${strokes})`);
+  assert.ok(strokes >= 7, `expected every dock icon to stroke with currentColor (found ${strokes})`);
+});
+
+test('every destination in the dock is a different colour', () => {
+  /* The hue IS the identity -- it is what lets a driver find Music without
+   * reading a glyph at 23px. Each one appears twice: on the stroke and, a
+   * tenth as strong, on the circle behind it. */
+  const CSS = fs.readFileSync(path.join(ROOT, 'feed-first.css'), 'utf8');
+  const wanted = ['dockFeed', 'dockChat', 'dockGames', 'dockMusic',
+    'dockLeaderboard', 'dockProfile', 'dockModes', 'dockAdmin'];
+  const hues = {};
+  wanted.forEach((id) => {
+    const day = CSS.match(new RegExp('#' + id + '\\s+\\.dockIcon\\s*\\{[^}]*color:\\s*(#[0-9a-f]{6})', 'i'));
+    assert.ok(day, `${id} has no colour`);
+    hues[id] = day[1].toLowerCase();
+    assert.ok(new RegExp('body\\.night #' + id + '\\s+\\.dockIcon\\s*\\{[^}]*color:', 'i').test(CSS),
+      `${id} keeps its day ink at night, where the button is dark`);
+    assert.ok(new RegExp('body\\.feed-first #' + id + '[^{]*\\{[^}]*background:', 'i').test(CSS),
+      `${id} has no tint behind it`);
+  });
+  const seen = Object.values(hues);
+  assert.strictEqual(new Set(seen).size, seen.length,
+    `two destinations share a colour: ${seen.join(' ')}`);
+
+  // Save is the one fully saturated, filled button and stays that way -- it
+  // is the only thing in the dock that acts on the world rather than
+  // navigating, so it has to outrank the row it sits in.
+  assert.ok(!/#pickupFab\s+\.dockIcon\s*\{[^}]*color:/.test(CSS),
+    'Save was pulled into the tint system');
 });
 
 test('the dock ink stays legible on the dock that actually exists', () => {

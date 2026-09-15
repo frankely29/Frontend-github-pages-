@@ -1713,8 +1713,17 @@ function applyDockIconModel() {
   // a blue gear, a red-and-yellow gamepad, a drum kit emoji -- which is what
   // made the dock read as a row of stickers next to a designed map. Stroke is
   // currentColor rather than the artboard's hardcoded ink so night mode works.
+  // The palette this replaces was a blob with three holes in it. At 23px the
+  // blob read as a circle and the holes read as noise -- reported as "the
+  // design of the logo inside them is not clear to what they are".
+  //
+  // This is the only icon in the dock that paints its own colours rather than
+  // taking the row's tint, and it has earned it: these are the MAP's three
+  // tones, the same #ef2f3c / #f0a828 / #14b85f the zones and the answer pill
+  // are painted with. The button changes the map's colour scheme, so the
+  // button is three colour swatches from that scheme.
   setIcon(dockColors, `
-    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" style="display:block" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.4a8.6 8.6 0 1 0 0 17.2c1.3 0 2-.8 2-1.8 0-1.4-1.4-1.6-1.4-2.8 0-.9.8-1.6 1.8-1.6h1.5a4.7 4.7 0 0 0 4.7-4.7c0-3.5-3.8-6.3-8.6-6.3z"></path><circle cx="8.2" cy="10.4" r="1.1" fill="currentColor" stroke="none"></circle><circle cx="12" cy="7.8" r="1.1" fill="currentColor" stroke="none"></circle><circle cx="15.8" cy="10.2" r="1.1" fill="currentColor" stroke="none"></circle></svg>
+    <svg viewBox="0 0 24 24" width="23" height="23" aria-hidden="true" focusable="false" style="display:block"><circle cx="8.8" cy="9.1" r="6" fill="#ef2f3c" opacity=".88"></circle><circle cx="15.2" cy="9.1" r="6" fill="#f0a828" opacity=".88"></circle><circle cx="12" cy="14.9" r="6" fill="#14b85f" opacity=".88"></circle></svg>
   `);
 
   setIcon(dockModes, `
@@ -1737,8 +1746,12 @@ function applyDockIconModel() {
     <svg viewBox="0 0 24 24" width="23" height="23" aria-hidden="true" focusable="false" style="display:block" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8.4" r="3.6"></circle><path d="M5 19.6a7 7 0 0 1 14 0"></path></svg>
   `);
 
+  // A podium, not a trophy. The trophy was five paths -- cup, two handles,
+  // stem, base -- and at 23px they collapsed into one blob with ears. Three
+  // bars and a floor line is the same idea in four strokes, and nothing else
+  // in the dock is shaped like it.
   setIcon(dockLeaderboard, `
-    <svg viewBox="0 0 24 24" width="23" height="23" aria-hidden="true" focusable="false" style="display:block" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M7.8 3.8h8.4v5.4a4.2 4.2 0 0 1-8.4 0z"></path><path d="M7.8 5.2H5v1.4a2.8 2.8 0 0 0 2.8 2.8"></path><path d="M16.2 5.2H19v1.4a2.8 2.8 0 0 1-2.8 2.8"></path><path d="M10.2 13.4h3.6l.6 3.4h-4.8z"></path><path d="M7.4 19.8h9.2"></path></svg>
+    <svg viewBox="0 0 24 24" width="23" height="23" aria-hidden="true" focusable="false" style="display:block" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20.6h16"></path><path d="M5.7 20.6v-5.7h3.9v5.7"></path><path d="M9.6 20.6V8.5h4.8v12.1"></path><path d="M14.4 20.6v-4h3.9v4"></path></svg>
   `);
 
   setIcon(dockAdmin, `
