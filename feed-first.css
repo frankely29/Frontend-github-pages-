@@ -532,6 +532,70 @@ body.night.feed-first #dock::before {
     rgba(13, 20, 32, 1) 68%);
 }
 
+/* ------------------------------------------------------- the dock in colour
+ *
+ * Nine white circles with the same thin grey line in each of them, and the
+ * only one you could name without thinking was Save -- because Save is the
+ * only one with a colour AND a word in it. Reported as "difficult to know what
+ * they are by just looking at them".
+ *
+ * So every destination gets a hue of its own, carried two ways: the glyph in
+ * the hue at full strength, the circle in the same hue at a tenth. Tint, not
+ * illustration. An earlier set WAS multi-colour -- a blue gear, a
+ * red-and-yellow gamepad, a drum-kit emoji -- and got replaced because a row
+ * of little paintings next to a designed map reads as stickers. One stroke,
+ * one weight, one hue each is a system; it can be scanned at a glance and it
+ * cannot turn into a sticker.
+ *
+ * Save stays the only fully saturated, filled button, so it keeps outranking
+ * everything beside it.
+ *
+ * ID selectors on purpose: #dockChat (1,0,0) clears app-shell's and this
+ * file's own class-based ink rules in one step, and loses to #dockFeed.on
+ * (1,1,0) below, which is what keeps the current button's icon white on ink.
+ * Colours is missing from this list deliberately -- it paints its own three
+ * map tones, see applyDockIconModel. */
+#dockMap    .dockIcon { color: #101622; }
+#dockFeed   .dockIcon { color: #d9601f; }
+#dockChat   .dockIcon { color: #1f6ae0; }
+#dockGames  .dockIcon { color: #7b4bd6; }
+#dockMusic  .dockIcon { color: #cf2f78; }
+#dockLeaderboard .dockIcon { color: #bd7a08; }
+#dockProfile .dockIcon { color: #0d8a8a; }
+#dockModes  .dockIcon { color: #56607a; }
+#dockAdmin  .dockIcon { color: #cf1622; }
+
+body.feed-first #dockFeed:not(.on)   { background: #fdf1ea; }
+body.feed-first #dockChat            { background: #eef3fd; }
+body.feed-first #dockGames           { background: #f4f0fd; }
+body.feed-first #dockMusic           { background: #fdeef5; }
+body.feed-first #dockLeaderboard     { background: #fdf5e6; }
+body.feed-first #dockProfile         { background: #e9f7f7; }
+body.feed-first #dockModes           { background: #f1f3f7; }
+body.feed-first #dockAdmin           { background: #fdedee; }
+
+/* Night keeps the hue and swaps which end of it does the work: the glyph
+   lightens so it reads on a dark button, the circle darkens so it is a tinted
+   shadow rather than a bright chip. */
+body.night #dockMap    .dockIcon { color: #eef2f8; }
+body.night #dockFeed   .dockIcon { color: #ff9a5c; }
+body.night #dockChat   .dockIcon { color: #6ea8ff; }
+body.night #dockGames  .dockIcon { color: #b494f5; }
+body.night #dockMusic  .dockIcon { color: #ff7fb6; }
+body.night #dockLeaderboard .dockIcon { color: #f5b544; }
+body.night #dockProfile .dockIcon { color: #45c9c9; }
+body.night #dockModes  .dockIcon { color: #a3adc2; }
+body.night #dockAdmin  .dockIcon { color: #ff6b76; }
+
+body.night.feed-first #dockFeed:not(.on) { background: #2a1f1a; }
+body.night.feed-first #dockChat          { background: #17233a; }
+body.night.feed-first #dockGames         { background: #221c36; }
+body.night.feed-first #dockMusic         { background: #2d1a27; }
+body.night.feed-first #dockLeaderboard   { background: #2b2415; }
+body.night.feed-first #dockProfile       { background: #12292e; }
+body.night.feed-first #dockModes         { background: #1b2333; }
+body.night.feed-first #dockAdmin         { background: #2e1a1d; }
+
 /* Feed and Map, the two the dock never had because it never navigated. */
 #dockFeed.on, #dockMap.on { background: #101622; }
 #dockFeed.on .dockIcon, #dockMap.on .dockIcon { color: #ffffff; }
