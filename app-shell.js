@@ -619,14 +619,14 @@
       paid: true,
       render: function (body) { body.appendChild(emptyState("Post", "Nothing here yet.")); },
     });
-    register({ key: "chat", title: "Chat", icon: "✉", group: "Network", dock: "dockChat", paid: true });
+    register({ key: "chat", title: "Chat", icon: "✉︎", group: "Network", dock: "dockChat", paid: true });
 
     register({ key: "leaderboard", title: "Leaderboard", icon: "⚑", group: "Driving", dock: "dockLeaderboard", paid: true });
     register({ key: "games", title: "Games", icon: "❖", group: "Driving", dock: "dockGames", paid: true });
     register({ key: "music", title: "Music", icon: "♪", group: "Driving", dock: "dockMusic" });
 
     register({ key: "colors", title: "Colours", icon: "◐", group: "Map", dock: "dockColors" });
-    register({ key: "modes", title: "Modes", icon: "⚙", group: "Map", dock: "dockModes" });
+    register({ key: "modes", title: "Modes", icon: "⚙︎", group: "Map", dock: "dockModes" });
 
     register({ key: "profile", title: "Profile", icon: "○", group: "You", dock: "dockProfile" });
     register({ key: "admin", title: "Admin", icon: "⛭", group: "You", dock: "dockAdmin", adminOnly: true });
