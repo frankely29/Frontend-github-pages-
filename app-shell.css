@@ -147,6 +147,11 @@ body.night .shellMenuBtn {
   color: #59616e;
   font-size: 17px;
   line-height: 1;
+  /* These are text glyphs, not emoji. A few of them -- U+2709 envelope,
+     U+2699 gear -- default to emoji presentation on Apple platforms, so they
+     came out as full-colour stickers next to ten monochrome marks. The glyphs
+     themselves carry U+FE0E for browsers that ignore this property. */
+  font-variant-emoji: text;
 }
 .shellItem.on .shellItemIcon { color: #101622; }
 

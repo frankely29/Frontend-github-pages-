@@ -483,6 +483,25 @@ test('the menu is destinations again, with no readings in it', () => {
     'the destination list cannot scroll');
 });
 
+test('the icons are eleven text glyphs, not nine glyphs and two stickers', () => {
+  /* U+2709 ENVELOPE and U+2699 GEAR default to EMOJI presentation on Apple
+   * platforms, so Chat and Modes rendered as full-colour stickers beside nine
+   * monochrome marks -- caught in a screenshot of the drawer. U+FE0E is the
+   * text presentation selector; font-variant-emoji covers browsers that honour
+   * the property instead. */
+  assert.ok(/icon:\s*"\u2709\ufe0e"/.test(SHELL_SRC),
+    'the envelope still asks for emoji presentation');
+  assert.ok(/icon:\s*"\u2699\ufe0e"/.test(SHELL_SRC),
+    'the gear still asks for emoji presentation');
+  assert.ok(/\.shellItemIcon\s*\{[^}]*font-variant-emoji:\s*text/s.test(SHELL_CSS),
+    'nothing tells the icon slot these are text');
+
+  // The other nine are text-default, so a stray selector on them would be
+  // noise -- and the padlock IS an emoji and must keep its colour.
+  assert.ok(!/icon:\s*"\ud83d\udd12/.test(SHELL_SRC), 'the padlock is not an icon field');
+  assert.ok(/shellItemLock", "\ud83d\udd12"/.test(SHELL_SRC), 'the padlock stopped being a padlock');
+});
+
 // --------------------------------------------------------------------------
 // locked destinations — free to read the feed, paid for everything else
 // --------------------------------------------------------------------------
