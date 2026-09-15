@@ -297,6 +297,12 @@ body.feed-first .adminPanelHeader { padding-top: 40px !important; }
 body.feed-first .driverProfileBody,
 body.feed-first .adminPanelBody { min-height: 0; }
 
+/* The menu button stays down for every occupant of the sheet.
+ *
+ * app-shell.css hides it on body.shell-screen-open, which is true for the feed
+ * and false for a dock panel -- so it reappeared the moment you opened Chat and
+ * vanished again when you went back. The sheet should look the same whatever is
+ * in it, and under Feed First the dock is the navigation. */
 /* ------------------------------------------------------------- the menu
  *
  * Hidden for as long as Feed First existed, which left the day tendency meter,
@@ -332,168 +338,39 @@ body.feed-first.map-answer-open .shellMenuBtn,
 body.feed-first.map-answer-open.shell-screen-open .shellMenuBtn {
   display: none !important;
 }
-/* And while the menu itself is down. The panel is translucent, so a button
-   left underneath it shows through as a ghost of itself. */
-body.feed-first.shell-menu-open .shellMenuBtn,
-body.feed-first.shell-menu-open.shell-screen-open .shellMenuBtn {
-  display: none !important;
-}
 
-/* ------------------------------------------------- the menu drops from the top
- *
- * It used to be a left drawer: a 306px slab with a hard vertical edge, cutting
- * the screen in two with a sliver of map showing past it, and eleven rows 100px
- * apart down a column with room for twenty. It read as a second app sliding in
- * over this one, which is the exact thing One Surface exists to prevent.
- *
- * Now it is the map half's own surface. It comes down from the top edge and
- * stops where the feed begins -- var(--tj-split), the same token the sheet is
- * positioned by -- so the two meet in a seam and the feed is never covered. If
- * the sheet is dragged while the menu is open the seam follows it, because both
- * edges are the same number.
- *
- * A short, wide box wants a grid, not a list, and the grid is what closes the
- * dead space: eleven tiles, four across, everything reachable without a scroll. */
+/* The drawer wears the sheet rather than being a white panel from the app this
+   replaced. Same frosting, same tokens, same night palette -- a second surface
+   that looks like a second app is the thing this whole design removed. */
 body.feed-first .shellMenu {
-  left: 0;
-  right: 0;
-  top: 0;
-  bottom: auto;
-  width: auto;
-  /* The seam. A fixed element resolves a percentage height against the
-     viewport, which is what --tj-split is a percentage of. */
-  height: var(--tj-split);
   background: var(--tj-sheet);
-  backdrop-filter: blur(18px) saturate(1.2);
-  -webkit-backdrop-filter: blur(18px) saturate(1.2);
-  border-right: 0;
-  border-bottom: 1px solid rgba(16, 22, 34, 0.07);
-  border-radius: 0 0 24px 24px;
-  box-shadow: 0 22px 54px rgba(10, 14, 22, 0.24);
-  transform: translateY(-100%);
-  padding-bottom: 0;
+  backdrop-filter: blur(16px) saturate(1.15);
+  -webkit-backdrop-filter: blur(16px) saturate(1.15);
+  border-right: 1px solid rgba(16, 22, 34, 0.06);
+  box-shadow: 20px 0 56px rgba(10, 14, 22, 0.22);
+  border-radius: 0 22px 22px 0;
 }
-body.feed-first .shellMenu.open { transform: translateY(0); }
-
-/* The header carries the name and the way out, and nothing else: the divider
-   under it was a second rule 40px above the conditions bar's own. */
-body.feed-first .shellMenuHeader {
-  padding: 8px 6px 6px 16px;
-  border-bottom: 0;
+/* Where you are now needs a firmer wash than app-shell's 0.05, because the
+   drawer's own ground is translucent here rather than flat white. */
+body.feed-first .shellMenu .shellItem.on { background: rgba(16, 22, 34, 0.07); }
+/* At night that wash is near-black on near-black and the current row vanished.
+   Same idea, opposite direction -- and it has to out-specify the rule above. */
+body.night.feed-first .shellMenu .shellItem.on { background: rgba(255, 255, 255, 0.09); }
+/* The HERE badge's outline is drawn in ink, which is invisible on a dark
+   drawer -- it read as three floating letters. */
+body.night.feed-first .shellMenu .shellItemHere {
+  border-color: rgba(255, 255, 255, 0.18);
+  color: #aeb6c4;
 }
 body.feed-first .shellConditions { background: transparent; }
 
-/* --------------------------------------------------------------- the tiles */
-body.feed-first .shellMenuBody {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 7px;
-  /* The tiles keep one size and the block sits in the middle of whatever the
-     seam leaves. Stretching the rows to fill instead turned them into 100x149
-     slabs at the minimised detent; hugging the top left 240px of empty glass
-     under them. Centred, the same grid reads deliberate at both detents. */
-  align-content: center;
-  padding: 10px 12px calc(12px + env(safe-area-inset-bottom, 0px));
-}
-/* Group headings are a list device. Among eleven labelled tiles they would
-   spend four of the twelve slots saying what the tiles already say; the order
-   they impose is kept, so Network still comes before Driving. */
-body.feed-first .shellMenuBody .shellGroup { display: none; }
-
-body.feed-first .shellMenuBody .shellItem {
-  position: relative;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  min-height: 0;
-  padding: 13px 4px 12px;
-  border-radius: 16px;
-  text-align: center;
-  background: rgba(255, 255, 255, 0.58);
-  border: 1px solid rgba(16, 22, 34, 0.05);
-}
-body.feed-first .shellMenuBody .shellItemIcon {
-  width: 30px;
-  height: 30px;
-  border-radius: 11px;
-  font-size: 15px;
-  background: rgba(16, 22, 34, 0.05);
-}
-body.feed-first .shellMenuBody .shellItemText {
-  flex: none;
-  align-items: center;
-  gap: 0;
-}
-body.feed-first .shellMenuBody .shellItemTitle { font-size: 11.5px; }
-/* The tile is 98px wide and its own name says it. */
-body.feed-first .shellMenuBody .shellItemSub { display: none; }
-
-/* Where you are is the filled tile, which is the language the dock already
-   speaks -- its current button is ink-filled too. */
-body.feed-first .shellMenuBody .shellItem.on {
-  background: #101622;
-  border-color: #101622;
-}
-body.feed-first .shellMenuBody .shellItem.on .shellItemTitle { color: #fff; }
-body.feed-first .shellMenuBody .shellItem.on .shellItemIcon {
-  background: rgba(255, 255, 255, 0.15);
-  color: #fff;
-}
-
-/* Both corner marks, out of the tile's own column so they cost it no height. */
-body.feed-first .shellMenuBody .shellItemHere {
-  position: absolute;
-  top: 5px;
-  right: 5px;
-  padding: 2px 5px;
-  font-size: 8px;
-  letter-spacing: 0.05em;
-}
-body.feed-first .shellMenuBody .shellItem.on .shellItemHere {
-  color: rgba(255, 255, 255, 0.75);
-  border-color: rgba(255, 255, 255, 0.3);
-}
-body.feed-first .shellMenuBody .shellItemLock {
-  position: absolute;
-  top: 5px;
-  right: 6px;
-  font-size: 10px;
-}
-
 body.night.feed-first .shellMenu {
   background: var(--tj-sheet);
-  border-bottom-color: rgba(255, 255, 255, 0.08);
+  border-right-color: rgba(255, 255, 255, 0.08);
 }
 body.night.feed-first .shellMenuBtn {
   background: rgba(18, 24, 36, 0.94);
   border-color: rgba(255, 255, 255, 0.1);
-}
-body.night.feed-first .shellMenuBody .shellItem {
-  background: rgba(255, 255, 255, 0.05);
-  border-color: rgba(255, 255, 255, 0.07);
-}
-body.night.feed-first .shellMenuBody .shellItemIcon { background: rgba(255, 255, 255, 0.08); }
-/* Inverted at night, so the filled tile is light on dark rather than the
-   near-black on near-black that made "you are here" disappear. */
-body.night.feed-first .shellMenuBody .shellItem.on {
-  background: #eef2f8;
-  border-color: #eef2f8;
-}
-body.night.feed-first .shellMenuBody .shellItem.on .shellItemTitle,
-body.night.feed-first .shellMenuBody .shellItem.on .shellItemIcon { color: #101622; }
-body.night.feed-first .shellMenuBody .shellItem.on .shellItemIcon {
-  background: rgba(16, 22, 34, 0.1);
-}
-body.night.feed-first .shellMenuBody .shellItem.on .shellItemHere {
-  color: rgba(16, 22, 34, 0.62);
-  border-color: rgba(16, 22, 34, 0.22);
-}
-/* The badge's outline is drawn in ink, invisible on a dark tile -- it read as
-   three floating letters. */
-body.night.feed-first .shellMenuBody .shellItemHere {
-  border-color: rgba(255, 255, 255, 0.18);
-  color: #aeb6c4;
 }
 body.feed-first .shellScreenBody {
   padding-bottom: calc(var(--tj-dock-clear) + 12px);
