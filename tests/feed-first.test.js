@@ -1183,12 +1183,15 @@ test('the answer sits at the top, and nothing sits on it', () => {
   assert.ok(/bottom:\s*auto/.test(pill[1]), 'it is still anchored to the bottom too');
   assert.ok(!/--tj-split/.test(pill[1]), 'it still rides the sheet');
 
-  assert.ok(/body\.feed-first[^{]*mapSegmented[^{]*\{[^}]*display:\s*none\s*!important/s.test(CSS),
-    'the pair at the top right is still there, under the pill');
-  // And nothing left behind: the original stack map-action.js replaced is
-  // hidden too, or removing the segmented control brings it back.
-  assert.ok(/body\.feed-first[^{]*\.mapControlStack[^{]*\{[^}]*display:\s*none/s.test(CSS),
-    'hiding the segmented control lets the old centre button reappear');
+  /* The pair used to be HIDDEN here. Hidden still ships: the markup is in the
+   * DOM, the script still wires it, it just is not painted -- which is exactly
+   * how the old interface came back once. They are deleted now, so this asks
+   * index.html whether they exist at all rather than asking the CSS whether
+   * they are covered up. */
+  assert.ok(!/mapSegmented|mapSegCenter|mapSegReport/.test(INDEX),
+    'the pair at the top right is back in the markup');
+  assert.ok(!/mapControlStack|id="btnCenter"/.test(INDEX),
+    'the old recentre button is back in the markup');
 });
 
 test('the sheet is not modal', () => {

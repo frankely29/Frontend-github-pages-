@@ -4109,7 +4109,12 @@ window.addEventListener("orientationchange", () => enforceSaveButtonTheme());
 /* =========================================================
    Auto-center
    ========================================================= */
-const btnCenter = document.getElementById("btnCenter");
+/* The auto-centre toggle is gone from the screen -- see index.html, where the
+ * control stack and the segmented pair that replaced it were both deleted.
+ * autoCenter stays true, so the map keeps following the driver; what has gone
+ * is the button that turned it off. Every reader below was already null-guarded
+ * for the case where the markup is absent, which is now the only case. */
+const btnCenter = null;
 let autoCenter = true;
 let inactivityTimer = null;
 const AUTO_FOCUS_INACTIVITY_MS = 20000;
@@ -4318,18 +4323,6 @@ function handleAutoFocusInactivityTimeout() {
 }
 
 syncCenterButton();
-
-if (btnCenter) {
-  btnCenter.addEventListener("pointerdown", (e) => e.stopPropagation());
-  btnCenter.addEventListener("touchstart", (e) => e.stopPropagation(), { passive: true });
-
-  btnCenter.addEventListener("click", (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    markUserActivity();
-    setAutoCenterEnabled(!autoCenter, "manual");
-  });
-}
 
 function disableAutoCenterBecauseUserIsExploring() {
   if (Date.now() < suppressAutoDisableUntil) return;

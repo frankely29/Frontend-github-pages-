@@ -242,80 +242,14 @@ body.night .mapActionWhy { color: #aeb6c2; }
 
 body.night .mapActionDetail { color: #eef2f8; }
 
-/* ------------------------------------------------- segmented map controls */
 
-.mapSegmented {
-  position: fixed;
-  right: 14px;
-  top: calc(env(safe-area-inset-top, 0px) + 14px);
-  z-index: 3200; /* same layer as the menu button it mirrors */
-  display: flex;
-  align-items: stretch;
-  /* 48px total, border included — the menu button opposite is 48px, and two
-     controls on the same line at different heights read as a mistake. */
-  box-sizing: border-box;
-  height: 48px;
-  border-radius: 15px;
-  overflow: hidden;
-  background: rgba(255, 255, 255, 0.97);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(16, 22, 34, 0.06);
-  box-shadow: 0 2px 6px rgba(16, 22, 34, 0.08), 0 12px 32px rgba(16, 22, 34, 0.16);
-}
-.mapSegmented[hidden] { display: none !important; }
+/* Signed out, there is no recommendation to show. The landing page hides the
+   rest of the map chrome the same way.
 
-.mapSegBtn {
-  width: 48px;
-  height: 100%;
-  border: 0;
-  padding: 0;
-  background: transparent;
-  color: #101622;
-  display: grid;
-  place-items: center;
-  cursor: pointer;
-}
-.mapSegBtn + .mapSegBtn { border-left: 1px solid rgba(16, 22, 34, 0.08); }
-.mapSegBtn svg { width: 21px; height: 21px; display: block; }
-.mapSegBtn:active { background: rgba(16, 22, 34, 0.06); }
-/* Off means auto-centre is not following; the glyph dims rather than vanishing,
-   so the control never changes width. */
-.mapSegBtn[aria-pressed="false"] { opacity: 0.4; }
-.mapSegBtn.mapSegDanger { color: #d21e2b; }
-
-/* Set by map-action.js only after the segmented control is wired. The old
-   bottom-left stack holds the same #btnCenter, so hiding it before then would
-   leave a driver with no way to recentre. */
-body.map-segmented-on .mapControlStack { display: none !important; }
-
-/* The top strip already held three things at +10px: the online badge left, the
-   weather badge right, the assistant card between them. A control in the
-   top-right corner lands on the weather badge (and the menu button was already
-   landing on the online badge). So the badge strip moves below the control row
-   rather than under it.
-
-   The assistant card follows without a rule here: updateAssistantDockLayout in
-   app.part17.js positions it from the badges' live rects, and now reads their
-   top instead of assuming +10px. Scoped to the class map-action.js sets, so
-   the whole shift exists exactly as long as the control causing it does. */
-body.map-segmented-on #onlineBadge,
-body.map-segmented-on #weatherBadge {
-  top: calc(env(safe-area-inset-top, 0px) + 72px);
-}
-
-body.night .mapSegmented {
-  background: rgba(18, 24, 36, 0.94);
-  border-color: rgba(255, 255, 255, 0.1);
-}
-body.night .mapSegBtn { color: #eef2f8; }
-body.night .mapSegBtn + .mapSegBtn { border-left-color: rgba(255, 255, 255, 0.12); }
-body.night .mapSegBtn.mapSegDanger { color: #ff6b73; }
-
-/* Signed out, there is no recommendation and nothing to recentre on. The
-   landing page hides the rest of the map chrome the same way. */
-#lockedOverlay.show ~ #mapAction,
-#lockedOverlay.show ~ .mapSegmented { display: none !important; }
+   The segmented control was on this line too and is deleted, along with the
+   whole block that moved the badge strip out from under it: with nothing in
+   that corner, the badges keep the line they always had. */
+#lockedOverlay.show ~ #mapAction { display: none !important; }
 
 @media (prefers-reduced-motion: reduce) {
   .mapActionPill,

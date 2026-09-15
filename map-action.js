@@ -1,5 +1,5 @@
 /**
- * map-action.js — the on-map action pill and the segmented map control.
+ * map-action.js — the on-map action pill.
  *
  * WHAT THIS FILE IS ALLOWED TO DECIDE: nothing.
  *
@@ -10,14 +10,12 @@
  * does not decide when a driver should leave — a second opinion on screen is
  * worse than no opinion, because the driver cannot tell which one to follow.
  *
- * The two seams into the rest of the app, both deliberate and both by id:
- *   - #btnCenter  — the existing auto-centre toggle. The segmented control's
- *                   left half clicks it and mirrors its "on" class.
- *   - #btnPolice  — the existing police report button in the modes panel. The
- *                   right half clicks it.
- * Delegating rather than rewiring means neither behaviour has two
- * implementations that can drift apart, and it means this file can be deleted
- * without taking a feature with it.
+ * It USED to own a segmented control at the top right as well -- recentre and
+ * report police, each half delegating to a button that already existed. Both
+ * are gone: the pair was asked to be removed, and then asked to be removed
+ * rather than hidden. Reporting police is still in the Modes panel in the dock,
+ * where that half only ever clicked; recentring has no control any more and
+ * auto-centre simply stays on.
  */
 (function () {
   "use strict";
@@ -124,64 +122,6 @@
     setExpanded(!expanded);
   }
 
-  /* ----------------------------------------------------- segmented control */
-
-  function mirrorCenterState() {
-    var source = byId("btnCenter");
-    if (!source || !el.segCenter) return;
-    // #btnCenter carries its state in an "on" class, which app.js toggles. Read
-    // it rather than tracking a parallel boolean that can fall out of step with
-    // the control that actually drives the map.
-    var on = source.classList.contains("on");
-    el.segCenter.setAttribute("aria-pressed", on ? "true" : "false");
-  }
-
-  function wireSegmented() {
-    var center = byId("btnCenter");
-    var police = byId("btnPolice");
-    if (!el.segmented) return;
-    // Only offer a half that has something to click. A dead button on the map
-    // is worse than a narrower control.
-    setHidden(el.segCenter, !center);
-    setHidden(el.segReport, !police);
-    if (!center && !police) return;
-
-    setHidden(el.segmented, false);
-
-    if (center && el.segCenter) {
-      el.segCenter.addEventListener("click", function () {
-        center.click();
-        // The class flips inside that handler; read it back on the next frame.
-        setTimeout(mirrorCenterState, 0);
-      });
-      mirrorCenterState();
-      // app.js also flips the class on its own (following the driver, losing
-      // the fix). Watch the attribute rather than guessing when that happens.
-      if (typeof MutationObserver === "function") {
-        new MutationObserver(mirrorCenterState)
-          .observe(center, { attributes: true, attributeFilter: ["class"] });
-      }
-    }
-
-    if (police && el.segReport) {
-      el.segReport.addEventListener("click", function () { police.click(); });
-    }
-
-    // Only now that the segmented control is real does the original stack go
-    // away. Hiding it first would leave a driver with no recentre button at all
-    // if anything above threw.
-    document.body.classList.add("map-segmented-on");
-
-    // That class also drops the badge strip below this control. The assistant
-    // card is positioned from the badges' live rects by app.part17.js, which
-    // recomputes on resize and on this event — and a badge that MOVES neither
-    // resizes nor fires anything, so without this the card stays on the old
-    // line and sits under the control. Ask for the recompute directly.
-    try {
-      window.dispatchEvent(new CustomEvent("tlc-top-badges-updated"));
-    } catch (_) {}
-  }
-
   /* ------------------------------------------------------------------ boot */
 
   function mount() {
@@ -198,12 +138,8 @@
     el.card = byId("mapActionCard");
     el.why = byId("mapActionWhy");
     el.meta = byId("mapActionMeta");
-    el.segmented = byId("mapSegmented");
-    el.segCenter = byId("mapSegCenter");
-    el.segReport = byId("mapSegReport");
 
     if (el.pill) el.pill.addEventListener("click", onPillClick);
-    wireSegmented();
 
     window.addEventListener("tlc:recommendation", function (event) {
       render((event && event.detail) || window.TlcAssistantRecommendation);

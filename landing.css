@@ -25,7 +25,6 @@
 
 #lockedOverlay.show ~ .shellMenuBtn,
 #lockedOverlay.show ~ #dock,
-#lockedOverlay.show ~ .mapControlStack,
 #lockedOverlay.show ~ .sliderWrap {
   display: none !important;
 }

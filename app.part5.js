@@ -141,8 +141,6 @@
     if (!root) return;
     const dock = document.getElementById('dock');
     const sliderWrap = document.getElementById('sliderWrap');
-    const mapControlStack = document.querySelector('.mapControlStack');
-    void mapControlStack;
 
     let bottomOffset = 16;
     if (dock) {
