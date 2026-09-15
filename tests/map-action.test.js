@@ -286,6 +286,31 @@ test('tapping the pill opens and closes the sheet', () => {
   assert.strictEqual(dom.byId.get('mapActionPill').getAttribute('aria-expanded'), 'false');
 });
 
+test('an open sheet tells the shell, so the menu button gets out of its way', () => {
+  /* Expanded, the card runs the full width of the screen and its first words
+   * start 14px in -- which is exactly where the top-left menu button sits. The
+   * class is the whole conversation between the two; feed-first.css reads it
+   * and nothing else does. */
+  const dom = buildDom();
+  publish(dom, LEAVE, { secondary: 'Better nearby.' });
+  assert.strictEqual(dom.body.classList.contains('map-answer-open'), false);
+  dom.byId.get('mapActionPill').click();
+  assert.strictEqual(dom.body.classList.contains('map-answer-open'), true);
+  dom.byId.get('mapActionPill').click();
+  assert.strictEqual(dom.body.classList.contains('map-answer-open'), false);
+});
+
+test('a card closed by the next tick clears the class it set', () => {
+  // setExpanded(false) runs from render() as well as from the tap, so the
+  // button cannot be left hidden by a recommendation that went quiet.
+  const dom = buildDom();
+  publish(dom, LEAVE, { secondary: 'Better nearby.' });
+  dom.byId.get('mapActionPill').click();
+  assert.strictEqual(dom.body.classList.contains('map-answer-open'), true);
+  publish(dom, STAY, { primary: '', secondary: '' });
+  assert.strictEqual(dom.body.classList.contains('map-answer-open'), false);
+});
+
 test('a pill with nothing behind it does not pretend to expand', () => {
   const dom = buildDom();
   publish(dom, STAY, { primary: '', secondary: '' });

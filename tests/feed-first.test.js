@@ -898,12 +898,27 @@ test('every panel wears the sheet, by one rule', () => {
   assert.ok(z < 9250, `z-index ${z} puts the panel over the handle that drags it`);
 });
 
-test('the sheet looks the same whatever is in it', () => {
-  // app-shell.css hides the menu button on body.shell-screen-open, which is
-  // true for the feed and false for a dock panel -- so it reappeared the moment
-  // you opened Chat and vanished again on the way back.
-  assert.ok(/body\.feed-first \.shellMenuBtn\s*\{[^}]*display:\s*none/s.test(CSS),
-    'the menu button comes and goes with the occupant');
+test('the menu button is there whatever is in the sheet', () => {
+  /* app-shell.css carries `body.shell-screen-open .shellMenuBtn {display:none}`,
+   * written when a destination meant a full-screen takeover of the map. Here
+   * the feed is the home screen AND a shell screen, so that rule hid the menu
+   * on the screen you spend all your time on and handed it back the moment you
+   * opened Chat. It was hidden outright for a while for exactly that reason;
+   * the fix is to pin it on, not to take it away. */
+  assert.ok(!/body\.feed-first \.shellMenuBtn\s*\{[^}]*display:\s*none/s.test(CSS),
+    'the menu button is hidden again');
+  const on = CSS.match(/body\.feed-first\.shell-screen-open \.shellMenuBtn[^{]*\{([^}]*)\}/s);
+  assert.ok(on, 'nothing beats the shell-screen-open hide');
+  assert.ok(/display:\s*grid\s*!important/.test(on[1]),
+    'the override does not restore the button');
+
+  // It yields to one thing: expanded, the answer card runs the full width and
+  // its first words start where the button sits.
+  const answer = CSS.match(/body\.feed-first\.map-answer-open[^{]*\{([^}]*)\}/s);
+  assert.ok(answer && /display:\s*none\s*!important/.test(answer[1]),
+    'the button sits on top of the opened recommendation');
+  assert.ok(/body\.feed-first\.map-answer-open\.shell-screen-open \.shellMenuBtn/.test(CSS),
+    'the yield loses to the shell-screen-open override, which is more specific');
 });
 
 test('the dock clearance is where a height:100% panel can see it', () => {

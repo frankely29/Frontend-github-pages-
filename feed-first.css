@@ -303,7 +303,75 @@ body.feed-first .adminPanelBody { min-height: 0; }
  * and false for a dock panel -- so it reappeared the moment you opened Chat and
  * vanished again when you went back. The sheet should look the same whatever is
  * in it, and under Feed First the dock is the navigation. */
-body.feed-first .shellMenuBtn { display: none !important; }
+/* ------------------------------------------------------------- the menu
+ *
+ * Hidden for as long as Feed First existed, which left the day tendency meter,
+ * the online driver count and the weather badge in the app with no way to open
+ * them -- relocateStatus() moves those three live nodes into this drawer.
+ *
+ * It earns its place twice over now: the dock carries eleven buttons and about
+ * six fit on a phone at once, so Colours, Modes and Map are off the left edge
+ * and Leaderboard, Profile and Admin off the right. This is where all of them
+ * are visible without scrolling, and it is the only way to reach Post at all.
+ *
+ * Top left, opposite where the answer pill sits. The pill's container spans
+ * the width but carries pointer-events: none and its words hug the centre, so
+ * the button has that corner to itself. */
+body.feed-first .shellMenuBtn {
+  background: rgba(255, 255, 255, 0.97);
+  border-color: rgba(16, 22, 34, 0.06);
+}
+/* app-shell.css hides this button while a destination is open, which was right
+   when a destination meant a full-screen takeover of the map. Here the feed IS
+   the home screen and it is a shell screen, so that rule hid the menu exactly
+   when it was needed and handed it back when you opened a dock panel -- a
+   button that blinks in and out is a button nobody trusts. It stays put. */
+body.feed-first .shellMenuBtn,
+body.feed-first.shell-screen-open .shellMenuBtn {
+  display: grid !important;
+}
+/* The one thing it yields to. Expanded, the answer card runs the full width of
+   the screen and its first words start 14px in -- exactly where the button is.
+   The recommendation is the reason the app exists; the menu can wait the two
+   seconds the card is open. */
+body.feed-first.map-answer-open .shellMenuBtn,
+body.feed-first.map-answer-open.shell-screen-open .shellMenuBtn {
+  display: none !important;
+}
+
+/* The drawer wears the sheet rather than being a white panel from the app this
+   replaced. Same frosting, same tokens, same night palette -- a second surface
+   that looks like a second app is the thing this whole design removed. */
+body.feed-first .shellMenu {
+  background: var(--tj-sheet);
+  backdrop-filter: blur(16px) saturate(1.15);
+  -webkit-backdrop-filter: blur(16px) saturate(1.15);
+  border-right: 1px solid rgba(16, 22, 34, 0.06);
+  box-shadow: 20px 0 56px rgba(10, 14, 22, 0.22);
+  border-radius: 0 22px 22px 0;
+}
+/* Where you are now needs a firmer wash than app-shell's 0.05, because the
+   drawer's own ground is translucent here rather than flat white. */
+body.feed-first .shellMenu .shellItem.on { background: rgba(16, 22, 34, 0.07); }
+/* At night that wash is near-black on near-black and the current row vanished.
+   Same idea, opposite direction -- and it has to out-specify the rule above. */
+body.night.feed-first .shellMenu .shellItem.on { background: rgba(255, 255, 255, 0.09); }
+/* The HERE badge's outline is drawn in ink, which is invisible on a dark
+   drawer -- it read as three floating letters. */
+body.night.feed-first .shellMenu .shellItemHere {
+  border-color: rgba(255, 255, 255, 0.18);
+  color: #aeb6c4;
+}
+body.feed-first .shellConditions { background: transparent; }
+
+body.night.feed-first .shellMenu {
+  background: var(--tj-sheet);
+  border-right-color: rgba(255, 255, 255, 0.08);
+}
+body.night.feed-first .shellMenuBtn {
+  background: rgba(18, 24, 36, 0.94);
+  border-color: rgba(255, 255, 255, 0.1);
+}
 body.feed-first .shellScreenBody {
   padding-bottom: calc(var(--tj-dock-clear) + 12px);
   /* Clears the handle. It is 34px tall and fixed to the sheet's top edge, so
