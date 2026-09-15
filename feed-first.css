@@ -407,8 +407,6 @@ body.feed-first #mapAction {
  *
  * !important because map-action.js un-hides this once it has wired it up, and
  * it is the attribute it removes, not a style. */
-body.feed-first #mapSegmented,
-body.feed-first .mapSegmented { display: none !important; }
 
 /* --------------------------------------------------------------- dock
    app-shell.css hides the dock whenever a destination is open, which is right
@@ -490,10 +488,8 @@ body.night.feed-first #tjSheetHandle .tjArrow { color: rgba(238, 242, 248, 0.66)
    genuinely usable, which is the point of this layout. */
 body.feed-first .sliderWrap,
 body.feed-first #sliderWrap,
-body.feed-first .mapControlStack,
 body.feed-first #navQuickStack,
 body.feed-first #navActiveBanner,
-body.feed-first #mapFeedPeek { display: none !important; }
 
 /* --------------------------------------------------------------- lock
  *

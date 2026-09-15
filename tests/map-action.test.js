@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * map-action.test.js — the on-map action pill and the segmented map control.
+ * map-action.test.js — the on-map action pill.
  *
  * The thing worth protecting here is not the pill's looks. It is that the pill
  * cannot say something different from the assistant card. app.part17.js owns
@@ -10,8 +10,8 @@
  * the fields the pill reads, since a rename there would silently blank the
  * pill rather than break anything loudly.
  *
- * They also pin the two delegation seams: recentre clicks #btnCenter, report
- * clicks #btnPolice. Reimplementing either is how two copies of one behaviour
+ * The segmented pair this file used to own is deleted; what is pinned now is
+ * that it stays deleted. Reimplementing a delegated control is how two copies
  * drift apart.
  */
 const assert = require('assert');
@@ -31,7 +31,7 @@ const JS_SOURCE = path.join(ROOT, 'map-action.js');
 const PILL_IDS = ['mapAction', 'mapActionPill', 'mapActionVerb', 'mapActionArrow',
   'mapActionDist', 'mapActionDot', 'mapActionZone', 'mapActionScore',
   'mapActionDetail', 'mapActionWhy', 'mapActionMeta',
-  'mapSegmented', 'mapSegCenter', 'mapSegReport'];
+];
 
 // --------------------------------------------------------------------------
 // a DOM just large enough for map-action.js
@@ -80,7 +80,6 @@ function buildDom(options = {}) {
   PILL_IDS.forEach((id) => make('div', id));
   byId.get('mapAction').hidden = true;
   byId.get('mapActionDetail').hidden = true;
-  byId.get('mapSegmented').hidden = true;
 
   // The two elements map-action.js delegates to, each optional so their absence
   // can be tested.
@@ -157,18 +156,6 @@ test('the pill ships hidden', () => {
   assert.ok(open > -1, 'pill markup present');
   const tag = INDEX.slice(open, INDEX.indexOf('>', open));
   assert.ok(/\bhidden\b/.test(tag), 'the pill container ships with hidden');
-});
-
-test('the segmented control ships hidden', () => {
-  const open = INDEX.indexOf('<div class="mapSegmented"');
-  const tag = INDEX.slice(open, INDEX.indexOf('>', open));
-  assert.ok(/\bhidden\b/.test(tag), 'segmented control ships with hidden');
-});
-
-test('the original recentre button is still in the markup', () => {
-  // The segmented control clicks it. Deleting it would leave both controls dead.
-  assert.ok(INDEX.includes('id="btnCenter"'), '#btnCenter still shipped');
-  assert.ok(INDEX.includes('id="btnPolice"'), '#btnPolice still shipped');
 });
 
 // --------------------------------------------------------------------------
@@ -325,65 +312,42 @@ test('the eta and the scoring source appear in the sheet meta', () => {
 });
 
 // --------------------------------------------------------------------------
-// the segmented control delegates, it does not reimplement
+// the segmented control is gone, not hidden
 // --------------------------------------------------------------------------
 
-test('recentre clicks the existing #btnCenter', () => {
-  const dom = buildDom();
-  dom.byId.get('mapSegCenter').click();
-  assert.strictEqual(dom.byId.get('btnCenter').clicks, 1);
+test('the segmented pair is deleted from the markup, not merely hidden', () => {
+  /* It was asked for as a deletion, and hidden still ships: the markup is in
+   * the DOM, this file still wired it, it just was not painted.
+   *
+   * Both halves only ever delegated -- recentre clicked #btnCenter, report
+   * clicked #btnPolice -- so nothing lost an implementation. Reporting police
+   * is still in the Modes panel where that half clicked; recentring has no
+   * control any more and auto-centre simply stays on. */
+  ['mapSegmented', 'mapSegCenter', 'mapSegReport', 'mapControlStack', 'btnCenter']
+    .forEach((id) => {
+      assert.ok(!INDEX.includes(id), `${id} is back in index.html`);
+    });
+  const src = fs.readFileSync(JS_SOURCE, 'utf8');
+  ['mapSegmented', 'mapSegCenter', 'mapSegReport', 'wireSegmented', 'map-segmented-on']
+    .forEach((name) => {
+      assert.ok(!src.includes(name), `${name} is back in map-action.js`);
+    });
+  assert.ok(!/\.mapSegmented|\.mapSegBtn/.test(CSS), 'the styles are back');
 });
 
-test('report clicks the existing #btnPolice', () => {
-  const dom = buildDom();
-  dom.byId.get('mapSegReport').click();
-  assert.strictEqual(dom.byId.get('btnPolice').clicks, 1);
+test('the police report it delegated to is still reachable', () => {
+  // In the Modes panel in the dock, which is where that half always clicked.
+  assert.ok(INDEX.includes('id="btnPolice"'),
+    'removing the pair took the police report with it');
 });
 
-test('recentre mirrors the state of the button it drives', () => {
-  const dom = buildDom();
-  const source = dom.byId.get('btnCenter');
-  assert.strictEqual(dom.byId.get('mapSegCenter').getAttribute('aria-pressed'), 'true');
-  source.classList.remove('on');
-  dom.byId.get('mapSegCenter').click();
-  assert.strictEqual(dom.byId.get('mapSegCenter').getAttribute('aria-pressed'), 'false');
-});
-
-test('map-action.js never sets the auto-centre class itself', () => {
-  // Mirroring is read-only. Writing "on" here would give the toggle two owners
-  // and let the map follow while the icon says it is not.
-  const src = fs.readFileSync(JS_SOURCE, 'utf8')
-    .split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
-  assert.ok(!/classList\.(add|remove|toggle)\(\s*["']on["']/.test(src),
-    'map-action.js writes the auto-centre class');
-});
-
-test('the old control stack is hidden only once the new one is wired', () => {
-  const dom = buildDom();
-  assert.ok(dom.body.classList.contains('map-segmented-on'));
-  assert.ok(CSS.includes('body.map-segmented-on .mapControlStack'),
-    'the hide rule is gated on that class');
-});
-
-test('with neither button present the segmented control stays hidden', () => {
-  const dom = buildDom({ btnCenter: false, btnPolice: false });
-  assert.strictEqual(dom.byId.get('mapSegmented').hidden, true);
-  assert.ok(!dom.body.classList.contains('map-segmented-on'),
-    'the recentre stack was hidden with nothing to replace it');
-});
-
-test('a missing report button hides that half, not the whole control', () => {
-  const dom = buildDom({ btnPolice: false });
-  assert.strictEqual(dom.byId.get('mapSegmented').hidden, false);
-  assert.strictEqual(dom.byId.get('mapSegReport').hidden, true);
-  assert.strictEqual(dom.byId.get('mapSegCenter').hidden, false);
-});
 
 test('a browser without MutationObserver still boots', () => {
+  // The observer was only ever used to mirror the deleted recentre button's
+  // class. Nothing here needs it now, and nothing here may throw without it.
   const dom = buildDom({ mutationObserver: false });
-  assert.strictEqual(dom.byId.get('mapSegmented').hidden, false);
-  dom.byId.get('mapSegCenter').click();
-  assert.strictEqual(dom.byId.get('btnCenter').clicks, 1);
+  publish(dom, STAY);
+  assert.strictEqual(dom.byId.get('mapAction').hidden, false);
 });
 
 // --------------------------------------------------------------------------
@@ -470,25 +434,13 @@ test('the whole card grows upward, so nothing lands where the dock is', () => {
 test('the hidden attribute actually hides, despite the flex display', () => {
   // display:flex on a container beats the hidden attribute's UA display:none.
   assert.ok(CSS.includes('#mapAction[hidden]'), 'the pill container');
-  assert.ok(CSS.includes('.mapSegmented[hidden]'), 'the segmented control');
   assert.ok(CSS.includes('.mapActionDetail[hidden]'), 'the detail sheet');
 });
 
-test('moving the badge strip asks the assistant card to reposition', () => {
-  // The card is placed from the badges' rects. A badge that moves neither
-  // resizes nor fires anything, so nothing would recompute and the card would
-  // stay on the old line, under the new control.
-  const dom = buildDom();
-  assert.ok((dom.window._fired || []).includes('tlc-top-badges-updated'),
-    'nothing asked for a recompute after the badge strip moved');
-});
-
-test('the badge strip moves out from under the control row', () => {
-  // Top-right already held the weather badge. Putting a control there without
-  // moving the badges stacks two things in one corner.
-  assert.ok(/body\.map-segmented-on\s+#onlineBadge/.test(CSS), 'online badge');
-  assert.ok(/body\.map-segmented-on\s+#weatherBadge/.test(CSS), 'weather badge');
-});
+/* Two tests stood here: the badge strip being moved out from under the
+ * segmented control, and the recompute that had to follow it. Both existed
+ * only because there was a control in that corner. There is not one now, so
+ * the badges keep the corner they always had and nothing has to be pushed. */
 
 test('the assistant card follows the badges rather than a hardcoded top', () => {
   // It is positioned inline by updateAssistantDockLayout, so a CSS nudge cannot
@@ -502,7 +454,7 @@ test('the assistant card follows the badges rather than a hardcoded top', () => 
 
 test('the map chrome is hidden while the signed-out page shows', () => {
   assert.ok(CSS.includes('#lockedOverlay.show ~ #mapAction'), 'pill');
-  assert.ok(CSS.includes('#lockedOverlay.show ~ .mapSegmented'), 'segmented control');
+  // The segmented control was on this line and is deleted, not hidden.
 });
 
 test('both new assets are registered in the manifest', () => {

@@ -418,7 +418,9 @@ test('the signed-out page sits above the map chrome', () => {
 
 test('the map chrome is hidden while the signed-out page shows', () => {
   // A menu button that does nothing is worse than no button.
-  ['.shellMenuBtn', '#dock', '.mapControlStack', '.sliderWrap'].forEach((sel) => {
+  // .mapControlStack was in this list and is deleted, not hidden -- there is
+  // no longer any markup for the signed-out page to cover.
+  ['.shellMenuBtn', '#dock', '.sliderWrap'].forEach((sel) => {
     assert.ok(CSS.includes(`#lockedOverlay.show ~ ${sel}`),
       `${sel} is not hidden behind the signed-out page`);
   });

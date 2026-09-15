@@ -252,21 +252,7 @@ html, body { height: 100%; margin: 0; padding: 0; background: #e5e5e5; }
     }
     .okBtn:active{ transform: scale(0.98); }
 
-    .mapControlStack{
-      position: fixed;
-      left: 10px;
-      bottom: calc(env(safe-area-inset-bottom, 0px) + 104px);
-      z-index: 9200;
-      display: inline-flex;
-      flex-direction: column;
-      gap: 8px;
-      align-items: flex-start;
-      pointer-events: none;
-    }
 
-    .mapControlStack > *{
-      pointer-events: auto;
-    }
 
     .pickupFabIcon{ line-height: 1; }
     .pickupFabText{ line-height: 1; }
@@ -2217,7 +2203,6 @@ html, body { height: 100%; margin: 0; padding: 0; background: #e5e5e5; }
 
     body.chatKeyboardMode #dock,
     body.chatKeyboardMode .sliderWrap,
-    body.chatKeyboardMode .mapControlStack,
     body.chatKeyboardMode .killFeed {
       opacity: 0 !important;
       pointer-events: none !important;

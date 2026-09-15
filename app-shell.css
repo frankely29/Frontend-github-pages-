@@ -270,10 +270,8 @@ body.night .shellBack {
 
 /* While a destination is open the map's own chrome must not float over it. */
 body.shell-screen-open #dock,
-body.shell-screen-open .mapControlStack,
 body.shell-screen-open .sliderWrap,
 body.shell-screen-open #sliderWrap,
-body.shell-screen-open #mapFeedPeek,
 body.shell-screen-open .shellMenuBtn {
   display: none !important;
 }

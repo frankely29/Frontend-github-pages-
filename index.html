@@ -51,10 +51,8 @@
     html.tj-auth-pending #lockedOverlay { display: flex !important; }
     html.tj-auth-pending .shellMenuBtn,
     html.tj-auth-pending #dock,
-    html.tj-auth-pending .mapControlStack,
     html.tj-auth-pending .sliderWrap,
     html.tj-auth-pending #mapAction,
-    html.tj-auth-pending .mapSegmented,
     html.tj-auth-pending #mapLoading { display: none !important; }
 
     /* A driver who is already signed in must never be asked to sign in.
@@ -95,8 +93,6 @@
       pointer-events: none !important;
     }
     html.tj-map-locked #mapAction,
-    html.tj-map-locked .mapSegmented,
-    html.tj-map-locked .mapControlStack,
     html.tj-map-locked .sliderWrap,
     html.tj-map-locked #sliderWrap,
     html.tj-map-locked #navQuickStack,
@@ -309,7 +305,6 @@
       "./feed.css",
       "./compose.css",
       "./profile.css",
-      "./map-feed-peek.css",
       // Last, so its map-card layout wins over the full-screen rules in
       // frontend-shell.css and app-shell.css by source order rather than by a
       // pile of !important.
@@ -366,7 +361,6 @@
       // After feed.js, which it borrows "3 minutes ago" from, and after
       // app-shell.js, whose open('feed') it calls. It falls back rather than
       // throwing if either is missing, but there is no reason to make it.
-      "./map-feed-peek.js",
       // After app-shell.js, whose open/close/current it drives, and after
       // app.part6.js, which owns the dock's sideways scrolling.
       "./feed-first.js"
@@ -457,24 +451,6 @@
     its input with a document-wide querySelector, so there must be exactly one
     in the document, and this is now the screen it belongs on.
   -->
-  <!--
-    The feed, on the map.
-
-    The top quarter of the screen shows the latest posts; tapping anywhere in it
-    opens the full Feed. One tap target and one destination on purpose -- rows
-    that each went somewhere different would make the big obvious gesture
-    ambiguous, and a list that scrolled would fight it.
-
-    In the markup rather than built by script, like the lock card above it, so
-    it cannot race the scripts around it. map-feed-peek.js fills .peekList and
-    binds the tap.
-  -->
-  <div id="mapFeedPeek" role="button" tabindex="0"
-       aria-label="Latest posts from drivers — open the feed" hidden>
-    <div class="peekHead">
-      <span class="peekTitle">From drivers</span>
-      <span class="peekAll">See all &rsaquo;</span>
-    </div>
     <div class="peekList"></div>
   </div>
 
@@ -743,7 +719,6 @@
     <h3 class="panelTitle">Modes</h3>
     <div id="recommendLine" class="recommendLine">Recommended: …</div>
 
-
     <div class="navRow" id="navRow">
       <button id="btnAuth" class="modeBtn" type="button">Sign in</button>
       <button id="btnChangePassword" class="modeBtn" type="button">Change Password</button>
@@ -838,43 +813,6 @@
     <span class="dockEdgeFade left" aria-hidden="true"></span>
     <span class="dockEdgeFade right" aria-hidden="true"></span>
     <button class="dockScrollHint right" id="dockScrollHintRight" type="button" aria-label="Scroll dock right"><svg class="dockScrollHintGlyph" viewBox="0 0 12 12" aria-hidden="true" focusable="false"><path d="M3 2.25 8.25 6 3 9.75"/></svg></button>
-  </div>
-
-  <div class="mapControlStack" aria-label="Map controls">
-    <button id="btnCenter" class="toggleBtnSmall on" type="button" aria-label="Auto Center">
-      <span class="centerGlyph" aria-hidden="true">
-        <svg viewBox="0 0 24 24" focusable="false">
-          <path d="M12 3.2 18.8 10 14 11.1 12.9 16 12 20.8 11.1 16 10 11.1 5.2 10 12 3.2Z" fill="currentColor"/>
-          <circle cx="12" cy="12" r="4.35" fill="rgba(255,255,255,0.96)"/>
-          <circle cx="12" cy="12" r="2.1" fill="currentColor"/>
-        </svg>
-      </span>
-    </button>
-  </div>
-
-  <!--
-    Segmented map control (top right). Recentre and report, joined, mirroring
-    the menu button opposite it.
-
-    Neither half reimplements anything: recentre clicks #btnCenter above and
-    mirrors its pressed state, report clicks #btnPolice in the modes panel.
-    map-action.js hides .mapControlStack only once it has wired this up, so if
-    that script fails to load the original control is still on screen.
-  -->
-  <div class="mapSegmented" id="mapSegmented" role="group" aria-label="Map controls" hidden>
-    <button id="mapSegCenter" class="mapSegBtn" type="button" aria-label="Recentre on me" aria-pressed="true">
-      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
-        <circle cx="12" cy="12" r="4" fill="currentColor"/>
-        <circle cx="12" cy="12" r="7.4" stroke="currentColor" stroke-width="1.7"/>
-        <path d="M12 1.6v3.2M12 19.2v3.2M22.4 12h-3.2M4.8 12H1.6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
-      </svg>
-    </button>
-    <button id="mapSegReport" class="mapSegBtn mapSegDanger" type="button" aria-label="Report police">
-      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
-        <path d="M12 2.6 20 5.6v6.1c0 4.7-3.3 8.2-8 9.7-4.7-1.5-8-5-8-9.7V5.6l8-3Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
-        <path d="M12 8.4v4.2M12 16.1h.01" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
-      </svg>
-    </button>
   </div>
 
   <!--
