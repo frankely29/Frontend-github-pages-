@@ -338,117 +338,36 @@ body.feed-first.map-answer-open .shellMenuBtn,
 body.feed-first.map-answer-open.shell-screen-open .shellMenuBtn {
   display: none !important;
 }
-/* And while the menu itself is down: the panel is translucent, so a button
-   left underneath it shows through as a ghost of itself. */
-body.feed-first.shell-menu-open .shellMenuBtn,
-body.feed-first.shell-menu-open.shell-screen-open .shellMenuBtn {
-  display: none !important;
-}
 
-/* ------------------------------------------------- the menu comes down to the
- *                                                    feed and stops there
- *
- * It was a left drawer: a 306px slab welded to three edges, with a sliver of
- * map showing past it. Now it drops from the top edge and its bottom edge is
- * var(--tj-split) -- the same number the sheet's top edge is positioned by --
- * so the two meet and the feed is never covered. Drag the sheet while the menu
- * is open and the seam follows, because neither side owns the number.
- *
- * What is in it changed at the same time, and that is what makes the geometry
- * work: the menu holds seven settings now, not eleven destinations, so it is a
- * short list rather than a grid trying to fill a wide box. */
+/* The drawer wears the sheet rather than being a white panel from the app this
+   replaced. Same frosting, same tokens, same night palette -- a second surface
+   that looks like a second app is the thing this whole design removed. */
 body.feed-first .shellMenu {
-  left: 0;
-  right: 0;
-  top: 0;
-  bottom: auto;
-  width: auto;
-  /* The seam. A fixed element resolves a percentage height against the
-     viewport, which is what --tj-split is a percentage of. */
-  height: var(--tj-split);
   background: var(--tj-sheet);
-  backdrop-filter: blur(18px) saturate(1.2);
-  -webkit-backdrop-filter: blur(18px) saturate(1.2);
-  border-right: 0;
-  border-bottom: 1px solid rgba(16, 22, 34, 0.07);
-  border-radius: 0 0 24px 24px;
-  box-shadow: 0 22px 54px rgba(10, 14, 22, 0.24);
-  transform: translateY(-100%);
-  padding-bottom: 0;
+  backdrop-filter: blur(16px) saturate(1.15);
+  -webkit-backdrop-filter: blur(16px) saturate(1.15);
+  border-right: 1px solid rgba(16, 22, 34, 0.06);
+  box-shadow: 20px 0 56px rgba(10, 14, 22, 0.22);
+  border-radius: 0 22px 22px 0;
 }
-body.feed-first .shellMenu.open { transform: translateY(0); }
-
-/* The header carries the name and the way out and nothing else; the conditions
-   bar under it already draws the only rule this panel needs. */
-body.feed-first .shellMenuHeader {
-  padding: 8px 6px 7px 16px;
-  border-bottom: 0;
-}
-body.feed-first .shellConditions { background: transparent; }
-
-/* ------------------------------------------------------------ settings rows
- *
- * Seven rows have to fit in 39% of a 956pt screen with the safe area, the
- * header and the conditions bar already spent -- about 230px. So the rows are
- * compact: 36px each, the subtitle dropped, and the body scrolls if a phone is
- * shorter than the arithmetic. */
-body.feed-first .shellMenuBody {
-  padding: 5px 9px calc(9px + env(safe-area-inset-bottom, 0px));
-  /* The panel is as tall as the seam, and the seam moves: 373px when the feed
-     is up, 574px when it is down. Seven rows fill the first and leave 200px of
-     empty glass under them in the second. Centred, the same list reads
-     deliberate at both -- and grid rather than flex because align-content
-     centres without making the overflow unreachable when a short phone cannot
-     fit all seven. */
-  display: grid;
-  align-content: center;
-  gap: 1px;
-}
-body.feed-first .shellMenuBody .shellItem {
-  min-height: 36px;
-  padding: 5px 9px;
-  gap: 11px;
-  border-radius: 10px;
-}
-body.feed-first .shellMenuBody .shellItemIcon {
-  width: 26px;
-  height: 26px;
-  border-radius: 8px;
-  font-size: 14px;
-  background: rgba(16, 22, 34, 0.05);
-}
-/* The artwork is the dock's, borrowed by app-shell.js, and it is drawn at the
-   dock's 23px. Here the slot is 26px, so it has to come down or it fills the
-   whole tile edge to edge. */
-body.feed-first .shellMenuBody .shellItemIcon svg { width: 15px; height: 15px; }
-body.feed-first .shellMenuBody .shellItemTitle { font-size: 13px; }
-/* No room for it, and every one of these seven says what it is in one word. */
-body.feed-first .shellMenuBody .shellItemSub { display: none; }
-/* The group headings go, and the measurement is why: with them the panel wants
-   415px at the 39% detent and has 373, so it scrolled -- seven settings behind
-   a scrollbar is worse than seven settings. Four headings for seven items was
-   never a good ratio anyway, and it got worse the moment the dock took the
-   other six destinations. The order they imposed is kept. */
-body.feed-first .shellMenuBody .shellGroup { display: none; }
-
 /* Where you are now needs a firmer wash than app-shell's 0.05, because the
-   panel's own ground is translucent here rather than flat white. */
+   drawer's own ground is translucent here rather than flat white. */
 body.feed-first .shellMenu .shellItem.on { background: rgba(16, 22, 34, 0.07); }
 /* At night that wash is near-black on near-black and the current row vanished.
    Same idea, opposite direction -- and it has to out-specify the rule above. */
 body.night.feed-first .shellMenu .shellItem.on { background: rgba(255, 255, 255, 0.09); }
 /* The HERE badge's outline is drawn in ink, which is invisible on a dark
-   panel -- it read as three floating letters. */
+   drawer -- it read as three floating letters. */
 body.night.feed-first .shellMenu .shellItemHere {
   border-color: rgba(255, 255, 255, 0.18);
   color: #aeb6c4;
 }
+body.feed-first .shellConditions { background: transparent; }
 
 body.night.feed-first .shellMenu {
   background: var(--tj-sheet);
-  border-bottom-color: rgba(255, 255, 255, 0.08);
+  border-right-color: rgba(255, 255, 255, 0.08);
 }
-body.night.feed-first .shellMenuBody .shellItemIcon { background: rgba(255, 255, 255, 0.08); }
 body.night.feed-first .shellMenuBtn {
   background: rgba(18, 24, 36, 0.94);
   border-color: rgba(255, 255, 255, 0.1);

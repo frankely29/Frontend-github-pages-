@@ -382,29 +382,14 @@ const EXP = () => Math.round(detents().expanded * 100);
 
 // --------------------------------------------------------------------------
 
-test('the dock keeps five and stashes the rest, losing none of them', () => {
-  /* The dock and the menu used to list the same eleven things. The dock now
-   * holds what you touch while driving; everything else belongs to the menu.
-   *
-   * Stashed, not deleted, and deliberately so: app-shell.js opens a dock-backed
-   * destination by calling .click() on its button, so the button IS the API.
-   * Deleting these nodes would make Colours, Modes, Games, Profile and Admin
-   * unreachable from the menu that now owns them. */
+test('Feed and Map join the dock without displacing anything', () => {
   const dom = build();
   const ids = dom.ids();
-  assert.deepStrictEqual(ids,
-    ['dockLeaderboard', 'dockFeed', 'pickupFab', 'dockChat', 'dockMusic'],
-    'the dock is not the five it was asked for');
-
-  const holder = dom.document.getElementById('dockStash');
-  assert.ok(holder, 'nothing was stashed');
-  const stashed = holder.children.map((c) => c.id);
-  ['dockColors', 'dockModes', 'dockMap', 'dockGames', 'dockProfile']
-    .forEach((id) => {
-      assert.ok(stashed.includes(id), `${id} was lost rather than stashed`);
-      assert.ok(dom.document.getElementById(id), `${id} is gone from the document`);
-    });
-  assert.strictEqual(holder.hidden, true, 'the stash is on screen');
+  ['dockColors', 'dockModes', 'dockChat', 'pickupFab', 'dockGames',
+    'dockLeaderboard', 'dockMusic', 'dockProfile'].forEach((id) => {
+    assert.ok(ids.includes(id), `the dock lost ${id}`);
+  });
+  assert.ok(ids.includes('dockFeed') && ids.includes('dockMap'), 'no navigation in the dock');
 });
 
 test('Feed sits next to Save, because the dock re-centres on Save', () => {
@@ -418,10 +403,7 @@ test('Feed sits next to Save, because the dock re-centres on Save', () => {
   const ids = build().ids();
   const save = ids.indexOf('pickupFab');
   assert.strictEqual(ids[save - 1], 'dockFeed', ids.join(','));
-  // Map is no longer beside it, or in the dock at all -- dragging the sheet
-  // down already goes to the map, so the button was a second way to do one
-  // thing. It lives in the menu now, and in the stash in the DOM.
-  assert.strictEqual(ids.indexOf('dockMap'), -1, 'Map is still in the dock: ' + ids.join(','));
+  assert.ok(ids.indexOf('dockMap') >= 0, 'Map fell out of the dock: ' + ids.join(','));
 });
 
 test('the dock keeps its own behaviour', () => {
@@ -939,42 +921,6 @@ test('the menu button is there whatever is in the sheet', () => {
     'the yield loses to the shell-screen-open override, which is more specific');
 });
 
-test('the menu comes down to the feed and stops on its top edge', () => {
-  /* It was a left drawer welded to three edges with a sliver of map showing
-   * past it. Now it drops from the top and its bottom edge is the same number
-   * the sheet's top edge is positioned by, so the two meet in a seam -- and if
-   * the sheet is dragged the seam follows it, because neither side owns the
-   * number. */
-  const menu = CSS.match(/body\.feed-first \.shellMenu\s*\{([^}]*)\}/s);
-  assert.ok(menu, 'no feed-first menu rule');
-  const rule = menu[1];
-  assert.ok(/height:\s*var\(--tj-split\)/.test(rule),
-    'the menu is not measured by the same token as the sheet');
-  assert.ok(/\btop:\s*0/.test(rule) && /bottom:\s*auto/.test(rule),
-    'app-shell pins the drawer top AND bottom; both have to be undone');
-  assert.ok(/\bleft:\s*0/.test(rule) && /right:\s*0/.test(rule) && /width:\s*auto/.test(rule),
-    'the drawer is still 306px wide');
-  assert.ok(/transform:\s*translateY\(-100%\)/.test(rule), 'it still slides in from the left');
-  const open = CSS.match(/body\.feed-first \.shellMenu\.open\s*\{([^}]*)\}/s);
-  assert.ok(open && /transform:\s*translateY\(0\)/.test(open[1]),
-    'the open state still resolves to app-shell translateX(0)');
-  assert.ok(/border-radius:\s*0 0 /.test(rule), 'the corners still round on the wrong edge');
-
-  // Seven settings rows have to fit in 39% of the screen once the safe area,
-  // the header and the conditions bar are spent. That is about 230px, so the
-  // rows are compact and the subtitles go.
-  const item = CSS.match(/body\.feed-first \.shellMenuBody \.shellItem\s*\{([^}]*)\}/s);
-  assert.ok(item, 'no compact row rule');
-  const min = Number((item[1].match(/min-height:\s*(\d+)px/) || [])[1]);
-  assert.ok(Number.isFinite(min) && min <= 38, `rows are ${min}px; seven will not fit`);
-  assert.ok(/body\.feed-first \.shellMenuBody \.shellItemSub\s*\{[^}]*display:\s*none/s.test(CSS),
-    'the subtitles still take a second line each');
-
-  // The button hides while the panel is down, or it ghosts through it.
-  assert.ok(/body\.feed-first\.shell-menu-open\.shell-screen-open \.shellMenuBtn/.test(CSS),
-    'the button stays under the open menu');
-});
-
 test('the dock clearance is where a height:100% panel can see it', () => {
   /* .chatPanelWrap, .gamesPanelWrap and .leaderboardPanelWrap are all
    * height: 100%, so they resolve against the drawer BODY's content box.
@@ -1195,8 +1141,9 @@ test('only one host is open at a time', () => {
 
 test('the dock is in the order it was asked for', () => {
   /* Save in the middle, Feed on its left, Chat on its right, Music right of
-   * Chat. Written as the relationships rather than as one expected array, so
-   * anything not specified can move without this test having an opinion. */
+   * Chat, Games left of Feed. Written as the relationships rather than as one
+   * expected array, so the five that were NOT specified can be moved around
+   * without this test having an opinion about them. */
   const ids = build({ open: 'feed' }).ids();
   const at = (id) => {
     const i = ids.indexOf(id);
@@ -1206,11 +1153,7 @@ test('the dock is in the order it was asked for', () => {
   assert.ok(at('dockFeed') < at('pickupFab'), 'Feed is not left of Save');
   assert.ok(at('dockChat') > at('pickupFab'), 'Chat is not right of Save');
   assert.ok(at('dockMusic') > at('dockChat'), 'Music is not right of Chat');
-  // Games was specified as left of Feed, back when it was in the dock. It is
-  // in the menu now, and Leaderboard takes the outside seat -- which is the
-  // only arrangement of the remaining five that satisfies everything above.
-  assert.strictEqual(ids.indexOf('dockGames'), -1, 'Games is back in the dock');
-  assert.ok(at('dockLeaderboard') < at('dockFeed'), 'Leaderboard is not on the outside');
+  assert.ok(at('dockGames') < at('dockFeed'), 'Games is not left of Feed');
   // Save centred is the dock's own job -- app.part6.js re-centres on it -- but
   // it cannot centre something that is not in the middle of the row.
   const left = at('pickupFab');
