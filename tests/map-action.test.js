@@ -562,7 +562,13 @@ test('every destination in the dock is a different colour', () => {
    * reading a glyph at 23px. Each one appears twice: on the stroke and, a
    * tenth as strong, on the circle behind it. */
   const CSS = fs.readFileSync(path.join(ROOT, 'feed-first.css'), 'utf8');
-  const wanted = ['dockFeed', 'dockChat', 'dockGames', 'dockMusic',
+  /* dockMusic is deliberately absent. It is a solid red circle with a white
+   * glyph, pinned with !important in frontend-shell.css, and it opts out of
+   * this system entirely -- see the note there. It was taken out of the dock
+   * once on my own judgment and put back when asked, so this test now records
+   * that it is the exception rather than quietly asserting a pink it does not
+   * get. */
+  const wanted = ['dockFeed', 'dockChat', 'dockGames',
     'dockLeaderboard', 'dockProfile', 'dockModes', 'dockAdmin'];
   const hues = {};
   wanted.forEach((id) => {
@@ -583,6 +589,19 @@ test('every destination in the dock is a different colour', () => {
   // navigating, so it has to outrank the row it sits in.
   assert.ok(!/#pickupFab\s+\.dockIcon\s*\{[^}]*color:/.test(CSS),
     'Save was pulled into the tint system');
+
+  // And Music keeps its own red, in both themes.
+  const SHELL = fs.readFileSync(path.join(ROOT, 'frontend-shell.css'), 'utf8');
+  assert.ok(/#dockMusic\.dockBtnMusic,\s*\n\s*body\.night #dockMusic\.dockBtnMusic\s*\{[^}]*background:\s*#e14b4b\s*!important/s.test(SHELL),
+    'the red Music button is gone again');
+  assert.ok(/#dockMusic \.dockIcon,\s*\n\s*body\.night #dockMusic \.dockIcon\s*\{[^}]*color:\s*#fff\s*!important/s.test(SHELL),
+    'Music lost its white glyph');
+  assert.ok(/\.dockBtnMusic \{ background: rgba\(235,60,60,0\.95\)/.test(SHELL),
+    'the base red ground is gone');
+
+  // The night rule that made the whole dock white-on-white stays gone.
+  assert.ok(!/body\.night #dock \.dockBtn:not\(#pickupFab\)\s*\{[^}]*background:\s*rgba\(255,255,255/s.test(SHELL),
+    'the night dock is light again, which is white glyphs on white buttons');
 });
 
 test('the dock ink stays legible on the dock that actually exists', () => {

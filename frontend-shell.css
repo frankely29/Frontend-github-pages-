@@ -777,8 +777,7 @@ html, body { height: 100%; margin: 0; padding: 0; background: #e5e5e5; }
       opacity: 1 !important;
       mix-blend-mode: normal !important;
     }
-    /* .dockBtnMusic's red ground went with the !important pair below -- Music
-       is tinted like every other destination now. */
+    .dockBtnMusic { background: rgba(235,60,60,0.95); color: white; }
     .dockBtnActive { outline: 2px solid rgba(0,0,0,0.15); }
     .dockIcon { font-size: 20px; }
     .dockBtnMain .dockIcon { font-size: 22px; }
@@ -2118,23 +2117,34 @@ html, body { height: 100%; margin: 0; padding: 0; background: #e5e5e5; }
       -webkit-filter: none !important;
     }
 
-    /* Three rules lived here and all three are gone. Keeping the note because
-       each one was load-bearing for something that is no longer true.
+    /* One rule that used to live here is still gone, on purpose:
 
-       1. `body.night #dock .dockBtn:not(#pickupFab)` forced the night dock
-          buttons to rgba(255,255,255,0.82) !important -- a LIGHT button at
-          night. feed-first.css meanwhile inks the night glyphs #eef2f8,
-          because it believes its own `background: #1b2333` won. It did not:
-          !important beats specificity. So the night dock was white glyphs on
-          white buttons, and you could not tell one from another. Photographed
-          before touching anything. Deleting this lets #1b2333 through, which
-          is what the light ink was always written for.
+       `body.night #dock .dockBtn:not(#pickupFab)` forced the night dock
+       buttons to rgba(255,255,255,0.82) !important -- a LIGHT button at night.
+       feed-first.css meanwhile inks the night glyphs #eef2f8, believing its
+       own `background: #1b2333` won. It did not: !important beats specificity.
+       So the night dock was white glyphs on white buttons and you could not
+       tell one from another. Photographed before anything was touched.
 
-       2 & 3. #dockMusic was pinned to a solid #e14b4b circle with a white
-          glyph, in BOTH themes. It was the only dock button with any colour
-          in it, and the colour said stop, not music. Every destination has
-          its own hue now (see feed-first.css), so Music takes pink with the
-          rest instead of being the one exception. */
+       Music's two rules below are NOT gone. They were removed with the same
+       edit, on my own judgment and without being asked, and putting them back
+       was asked for. Music is a solid red circle with a white glyph again, in
+       both themes, exactly as it was -- and it is the one dock button that
+       opts out of the per-destination tint system in feed-first.css, which is
+       what these !important flags buy. */
+    #dockMusic.dockBtnMusic,
+    body.night #dockMusic.dockBtnMusic {
+      background: #e14b4b !important;
+      color: #fff !important;
+    }
+
+    #dockMusic .dockIcon,
+    body.night #dockMusic .dockIcon {
+      color: #fff !important;
+      fill: #fff !important;
+      filter: none !important;
+      opacity: 1 !important;
+    }
 
     body.night #dock {
       position: fixed !important;
