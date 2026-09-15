@@ -128,44 +128,6 @@
    */
   var PAID_KEYS = ["post", "chat", "leaderboard", "games"];
 
-  /* Which dock button belongs to which destination.
-   *
-   * Two jobs. It answers "is the dock already showing this?", which is what
-   * keeps the menu from being a second copy of the row below it; and it is
-   * where the menu borrows its artwork from, so the two never drift apart.
-   *
-   * `entry.dock` says the same thing for most of these, but not for Feed: Feed
-   * opens through its own render() and must not take the dock branch of
-   * openScreen, while the dock still carries a Feed button.
-   *
-   * Here rather than as a field on the entry, for the same reason PAID_KEYS is:
-   * feed.js, compose.js and profile.js all re-register over app-shell.js's
-   * placeholders, and register() REPLACES the entry, so a field set on the
-   * placeholder is thrown away by the second registration -- silently, and Feed
-   * quietly reappears in the menu. Measured in the browser, which is how this
-   * comment exists. Post has no button at all and keeps its text glyph. */
-  var DOCK_BUTTON = {
-    feed: "dockFeed", chat: "dockChat", music: "dockMusic",
-    leaderboard: "dockLeaderboard", map: "dockMap", games: "dockGames",
-    colors: "dockColors", modes: "dockModes", profile: "dockProfile",
-    admin: "dockAdmin",
-  };
-
-  /* The dock's own icon for a destination, or "" if it has no button.
-   *
-   * Borrowed, not copied: applyDockIconModel() in app.js and ICONS in
-   * feed-first.js are where these are drawn, and a second set of the same paths
-   * here is a second set to keep in step. The menu inherits its own colour, so
-   * they arrive monochrome -- except Colours, whose three discs carry their own
-   * fills in both places, which is the point of them. */
-  function dockArt(entry) {
-    var id = (entry && (entry.dock || DOCK_BUTTON[entry.key])) || "";
-    if (!id) return "";
-    var button = byId(id);
-    var icon = button && button.querySelector && button.querySelector(".dockIcon");
-    return (icon && icon.innerHTML) || "";
-  }
-
   function featuresLocked() {
     try {
       return !!(window.isFeatureLocked && window.isFeatureLocked());
@@ -265,35 +227,13 @@
     return !!(menu && menu.classList.contains("open"));
   }
 
-  /* Does this destination belong in the menu, or does the dock already have it?
-   *
-   * The two used to list the same eleven things, so the menu was a longer copy
-   * of the row below it. The split is: the dock is what you touch while
-   * driving, the menu is what you set once and leave.
-   *
-   * Derived rather than listed. A second hard-coded list of dock keys here
-   * would drift away from feed-first.js's the first time either moved, so the
-   * question asked is the one that is actually true on screen: is this entry's
-   * button sitting in the dock's track right now? Buttons the dock no longer
-   * shows live in #dockStash, so they answer no and appear here instead.
-   */
-  function inMenu(entry) {
-    if (!entry) return true;
-    var id = entry.dock || DOCK_BUTTON[entry.key];
-    if (!id) return true;
-    var button = byId(id);
-    var track = byId("dockTrack");
-    if (!button || !track) return true;
-    return button.parentNode !== track;
-  }
-
   function paintMenu() {
     var body = byId(MENU_ID) && byId(MENU_ID).querySelector(".shellMenuBody");
     if (!body) return;
     body.textContent = "";
 
     var groups = [];
-    visibleEntries().filter(inMenu).forEach(function (entry) {
+    visibleEntries().forEach(function (entry) {
       var name = entry.group || "";
       var bucket = groups.filter(function (g) { return g.name === name; })[0];
       if (!bucket) {
@@ -313,9 +253,7 @@
 
         var icon = el("span", "shellItemIcon");
         icon.setAttribute("aria-hidden", "true");
-        var art = dockArt(entry);
-        if (art) icon.innerHTML = art;
-        else icon.textContent = entry.icon || "•";
+        icon.textContent = entry.icon || "•";
         item.appendChild(icon);
 
         var text = el("span", "shellItemText");
@@ -602,18 +540,6 @@
       var key = item.getAttribute("data-shell-key");
       if (!key) return;
       if (key === "map") {
-        /* The dock's Map button does the right thing -- it drops the sheet to
-         * its minimised detent and leaves the feed running underneath. This
-         * used to call leaveScreen() instead, which CLOSES the shell screen,
-         * and closing the shell screen is exactly how the old map-first
-         * interface came back. Now that Map is reachable only from here, that
-         * bug would have been the only way to hit it. Click the real button. */
-        var mapBtn = byId("dockMap");
-        if (mapBtn && typeof mapBtn.click === "function") {
-          closeMenu();
-          mapBtn.click();
-          return;
-        }
         leaveScreen();
         closeMenu();
         return;
