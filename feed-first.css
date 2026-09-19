@@ -338,36 +338,148 @@ body.feed-first.map-answer-open .shellMenuBtn,
 body.feed-first.map-answer-open.shell-screen-open .shellMenuBtn {
   display: none !important;
 }
+/* It used to hide while the menu was down, because the menu was a full-width
+   translucent panel that covered it and it ghosted through. The card starts at
+   safe-area + 72 and the button ends at safe-area + 62, so they no longer
+   overlap -- and the card is drawn hanging from the button, which only works
+   if the button is still there. It stays. */
 
-/* The drawer wears the sheet rather than being a white panel from the app this
-   replaced. Same frosting, same tokens, same night palette -- a second surface
-   that looks like a second app is the thing this whole design removed. */
+/* ------------------------------------------------------- the menu is a card
+ *
+ * Chosen from the drawings as "Segmented": a panel that hangs just under the
+ * button that opened it, with three tabs across the top and never more than
+ * four rows beneath them. It is not full width and it does not reach any edge,
+ * which is the difference between a panel and the slab the left drawer was.
+ *
+ * Height is its content's. The tabs are what keep that short -- seven settings
+ * split three ways is three, two and two -- so it never needs a scroll and
+ * never leaves a pane of empty glass under the last row, which is what went
+ * wrong with every full-height version of this. */
 body.feed-first .shellMenu {
-  background: var(--tj-sheet);
-  backdrop-filter: blur(16px) saturate(1.15);
-  -webkit-backdrop-filter: blur(16px) saturate(1.15);
-  border-right: 1px solid rgba(16, 22, 34, 0.06);
-  box-shadow: 20px 0 56px rgba(10, 14, 22, 0.22);
-  border-radius: 0 22px 22px 0;
+  left: 14px;
+  right: 14px;
+  top: calc(env(safe-area-inset-top, 0px) + 72px);
+  bottom: auto;
+  width: auto;
+  height: auto;
+  background: rgba(248, 249, 252, 0.97);
+  backdrop-filter: blur(22px) saturate(1.3);
+  -webkit-backdrop-filter: blur(22px) saturate(1.3);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  border-right: 0;
+  border-radius: 22px;
+  box-shadow: 0 2px 6px rgba(11, 16, 24, 0.1), 0 24px 56px rgba(11, 16, 24, 0.3);
+  /* It drops the short distance from under the button rather than sliding in
+     from an edge it no longer touches. */
+  transform: translateY(-10px) scale(0.97);
+  transform-origin: 30px -34px;
+  opacity: 0;
+  padding: 12px;
+  padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  gap: 10px;
 }
+body.feed-first .shellMenu.open {
+  transform: translateY(0) scale(1);
+  opacity: 1;
+}
+
+/* The picture has no title bar, so neither does this. Three ways out remain:
+   the scrim, which covers the whole screen; the button, which toggles; and
+   Escape. Say the word if you want the cross back. */
+body.feed-first .shellMenuHeader { display: none; }
+
+/* The readings are the last row, under the settings, as drawn. */
+body.feed-first .shellConditions {
+  order: 3;
+  background: transparent;
+  border-bottom: 0;
+  border-top: 1px solid rgba(16, 22, 34, 0.08);
+  padding: 10px 4px 2px;
+}
+
+/* ------------------------------------------------------------ the segments */
+body.feed-first .shellTabs {
+  flex: none;
+  display: flex;
+  gap: 3px;
+  padding: 3px;
+  border-radius: 12px;
+  background: rgba(118, 118, 128, 0.12);
+}
+body.feed-first .shellTab {
+  flex: 1;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  padding: 7px 0;
+  font: 600 13px/1 system-ui, -apple-system, sans-serif;
+  color: #3c4353;
+  cursor: pointer;
+}
+body.feed-first .shellTab.on {
+  background: #ffffff;
+  color: #101622;
+  box-shadow: 0 1px 3px rgba(16, 22, 34, 0.16);
+}
+
+/* -------------------------------------------------------------- the rows */
+body.feed-first .shellMenuBody {
+  flex: none;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+  overflow: visible;
+}
+body.feed-first .shellMenuBody .shellItem {
+  min-height: 42px;
+  padding: 6px 6px;
+  gap: 11px;
+  border-radius: 11px;
+}
+body.feed-first .shellMenuBody .shellItemIcon {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  font-size: 15px;
+  background: rgba(16, 22, 34, 0.055);
+}
+/* The artwork is the dock's, borrowed by app-shell.js, drawn at the dock's
+   23px. The slot here is 30px, so it comes down or it fills it edge to edge. */
+body.feed-first .shellMenuBody .shellItemIcon svg { width: 17px; height: 17px; }
+body.feed-first .shellMenuBody .shellItemTitle { font-size: 14px; }
+/* Three rows a tab, so the panel is short enough that a second line per row
+   would be the tallest thing in it for the least said. */
+body.feed-first .shellMenuBody .shellItemSub { display: none; }
+/* Tabs replaced them. */
+body.feed-first .shellMenuBody .shellGroup { display: none; }
+
 /* Where you are now needs a firmer wash than app-shell's 0.05, because the
-   drawer's own ground is translucent here rather than flat white. */
+   panel's own ground is translucent here rather than flat white. */
 body.feed-first .shellMenu .shellItem.on { background: rgba(16, 22, 34, 0.07); }
 /* At night that wash is near-black on near-black and the current row vanished.
    Same idea, opposite direction -- and it has to out-specify the rule above. */
 body.night.feed-first .shellMenu .shellItem.on { background: rgba(255, 255, 255, 0.09); }
 /* The HERE badge's outline is drawn in ink, which is invisible on a dark
-   drawer -- it read as three floating letters. */
+   panel -- it read as three floating letters. */
 body.night.feed-first .shellMenu .shellItemHere {
   border-color: rgba(255, 255, 255, 0.18);
   color: #aeb6c4;
 }
-body.feed-first .shellConditions { background: transparent; }
 
 body.night.feed-first .shellMenu {
-  background: var(--tj-sheet);
-  border-right-color: rgba(255, 255, 255, 0.08);
+  background: rgba(20, 27, 38, 0.97);
+  border-color: rgba(255, 255, 255, 0.1);
+  border-right: 0;
 }
+body.night.feed-first .shellMenuBody .shellItemIcon { background: rgba(255, 255, 255, 0.08); }
+body.night.feed-first .shellTabs { background: rgba(255, 255, 255, 0.08); }
+body.night.feed-first .shellTab { color: #aeb8c8; }
+body.night.feed-first .shellTab.on {
+  background: #eef2f8;
+  color: #101622;
+  box-shadow: none;
+}
+body.night.feed-first .shellConditions { border-top-color: rgba(255, 255, 255, 0.1); }
 body.night.feed-first .shellMenuBtn {
   background: rgba(18, 24, 36, 0.94);
   border-color: rgba(255, 255, 255, 0.1);

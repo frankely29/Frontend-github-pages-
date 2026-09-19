@@ -168,27 +168,68 @@
     return button;
   }
 
-  /* The dock, left to right, with Save in the middle.
+  /* The dock is five buttons, and the menu is everything else.
+   *
+   * They used to be the same eleven things twice over: every destination had a
+   * dock button AND a menu row, so the menu was a longer copy of the row below
+   * it and neither had a job of its own. Now the dock is what you touch while
+   * driving -- one thumb, no reading -- and the menu is what you set once and
+   * leave.
    *
    * Asked for as: Save centred, Feed on its left, Chat on its right, Music
-   * right of Chat, Games left of Feed. The other five fall outside that group,
-   * the ones a driver reaches for least furthest from the thumb.
+   * right of Chat. With the other six gone there is exactly one arrangement
+   * that satisfies all of it, and Leaderboard takes the outside seat.
    *
-   * Map is the odd one out -- it is Feed's pair, and Games now sits between
-   * them -- but Games left of Feed was the ask, so Map goes one further out.
+   * Five across a 390px phone fits with room to spare, so app.part6.js's
+   * scroll hints -- the two red chevrons at the ends -- stop showing
+   * themselves: it only reveals them when the track actually overflows.
    *
    * The order lives here rather than in index.html because two of these
-   * buttons do not exist until this file makes them: the markup's order plus
-   * an insertBefore is an order nobody can read in one place. */
+   * buttons do not exist until this file makes them. */
   var DOCK_ORDER = [
-    "dockColors", "dockModes", "dockMap", "dockGames", "dockFeed",
+    "dockLeaderboard", "dockFeed",
     "pickupFab",
-    "dockChat", "dockMusic", "dockLeaderboard", "dockProfile", "dockAdmin",
+    "dockChat", "dockMusic",
   ];
+
+  /* The six that left, and where they go.
+   *
+   * NOT deleted, and not display:none either. app-shell.js opens a dock-backed
+   * destination by finding its button and calling .click() on it -- the button
+   * IS the API -- so deleting these nodes would make Colours, Modes, Games,
+   * Profile and Admin unreachable from the menu that now owns them. They move
+   * to a hidden holder instead, where a programmatic click still fires every
+   * handler bound to them. */
+  var DOCK_STASH = [
+    "dockColors", "dockModes", "dockMap", "dockGames", "dockProfile", "dockAdmin",
+  ];
+
+  function stash() {
+    var holder = byId("dockStash");
+    if (holder) return holder;
+    var dock = byId("dock");
+    if (!dock || !document.createElement) return null;
+    holder = document.createElement("div");
+    holder.id = "dockStash";
+    holder.hidden = true;
+    holder.setAttribute("aria-hidden", "true");
+    dock.appendChild(holder);
+    return holder;
+  }
 
   function orderDock() {
     var track = byId("dockTrack");
     if (!track || !track.children) return;
+
+    // Out of the row first, so what is left can be counted honestly.
+    var holder = stash();
+    if (holder) {
+      DOCK_STASH.forEach(function (id) {
+        var node = byId(id);
+        if (node && node.parentNode === track) holder.appendChild(node);
+      });
+    }
+
     var current = Array.prototype.slice.call(track.children);
     var named = [];
     DOCK_ORDER.forEach(function (id) {
@@ -209,6 +250,10 @@
     });
     if (same) return;
     wanted.forEach(function (node) { track.appendChild(node); });
+    /* Nothing is told about this on purpose. app.part6.js owns the scroller and
+       watches the track's own size for changes -- see initDockScroller -- so
+       moving buttons in or out re-measures the scroll hints there rather than
+       here. This file appends buttons; it does not drive the dock. */
   }
 
   function installDockButtons() {
