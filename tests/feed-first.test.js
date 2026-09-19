@@ -382,14 +382,29 @@ const EXP = () => Math.round(detents().expanded * 100);
 
 // --------------------------------------------------------------------------
 
-test('Feed and Map join the dock without displacing anything', () => {
+test('the dock keeps five and stashes the rest, losing none of them', () => {
+  /* The dock and the menu used to list the same eleven things. The dock now
+   * holds what you touch while driving; everything else belongs to the menu.
+   *
+   * Stashed, not deleted, and deliberately so: app-shell.js opens a dock-backed
+   * destination by calling .click() on its button, so the button IS the API.
+   * Deleting these nodes would make Colours, Modes, Games, Profile and Admin
+   * unreachable from the menu that now owns them. */
   const dom = build();
   const ids = dom.ids();
-  ['dockColors', 'dockModes', 'dockChat', 'pickupFab', 'dockGames',
-    'dockLeaderboard', 'dockMusic', 'dockProfile'].forEach((id) => {
-    assert.ok(ids.includes(id), `the dock lost ${id}`);
-  });
-  assert.ok(ids.includes('dockFeed') && ids.includes('dockMap'), 'no navigation in the dock');
+  assert.deepStrictEqual(ids,
+    ['dockLeaderboard', 'dockFeed', 'pickupFab', 'dockChat', 'dockMusic'],
+    'the dock is not the five it was asked for');
+
+  const holder = dom.document.getElementById('dockStash');
+  assert.ok(holder, 'nothing was stashed');
+  const stashed = holder.children.map((c) => c.id);
+  ['dockColors', 'dockModes', 'dockMap', 'dockGames', 'dockProfile']
+    .forEach((id) => {
+      assert.ok(stashed.includes(id), `${id} was lost rather than stashed`);
+      assert.ok(dom.document.getElementById(id), `${id} is gone from the document`);
+    });
+  assert.strictEqual(holder.hidden, true, 'the stash is on screen');
 });
 
 test('Feed sits next to Save, because the dock re-centres on Save', () => {
@@ -403,7 +418,10 @@ test('Feed sits next to Save, because the dock re-centres on Save', () => {
   const ids = build().ids();
   const save = ids.indexOf('pickupFab');
   assert.strictEqual(ids[save - 1], 'dockFeed', ids.join(','));
-  assert.ok(ids.indexOf('dockMap') >= 0, 'Map fell out of the dock: ' + ids.join(','));
+  // Map is no longer beside it, or in the dock at all -- dragging the sheet
+  // down already goes to the map, so the button was a second way to do one
+  // thing. It lives in the menu now, and in the stash in the DOM.
+  assert.strictEqual(ids.indexOf('dockMap'), -1, 'Map is still in the dock: ' + ids.join(','));
 });
 
 test('the dock keeps its own behaviour', () => {
@@ -921,6 +939,64 @@ test('the menu button is there whatever is in the sheet', () => {
     'the yield loses to the shell-screen-open override, which is more specific');
 });
 
+test('the menu is a card under the button, not a slab on an edge', () => {
+  /* Chosen from the drawings as "Segmented". The left drawer was welded to
+   * three edges; the top sheet ran the full width and had to be exactly as
+   * tall as the seam. This one touches nothing: it hangs under the button that
+   * opened it and is as tall as what is in it. */
+  const menu = CSS.match(/body\.feed-first \.shellMenu\s*\{([^}]*)\}/s);
+  assert.ok(menu, 'no feed-first menu rule');
+  const rule = menu[1];
+  assert.ok(/height:\s*auto/.test(rule), 'the panel is still a fixed height');
+  assert.ok(/bottom:\s*auto/.test(rule), 'app-shell pins the drawer to the bottom edge');
+  const side = Number((rule.match(/left:\s*(\d+)px/) || [])[1]);
+  assert.ok(side >= 8, `the panel starts ${side}px from the edge, which is a slab`);
+  assert.ok(/right:\s*\d+px/.test(rule), 'it still runs to the right edge');
+  // Under the button: the button is 48px tall at safe-area + 14, so anything
+  // less than 62 overlaps it.
+  assert.ok(/top:\s*calc\(env\(safe-area-inset-top[^)]*\)\s*\+\s*(6[2-9]|[7-9]\d|\d{3})px\)/.test(rule),
+    'the panel does not clear the button it hangs from');
+  assert.ok(/border-radius:\s*22px/.test(rule), 'a card is round on all four corners');
+
+  const open = CSS.match(/body\.feed-first \.shellMenu\.open\s*\{([^}]*)\}/s);
+  assert.ok(open && /opacity:\s*1/.test(open[1]) && /scale\(1\)/.test(open[1]),
+    'it still slides rather than dropping open from under the button');
+});
+
+test('three tabs, and never a scroll under them', () => {
+  /* The tabs are what make a content-height card possible: seven settings
+   * split three, two and two. Without them the panel is seven rows tall and
+   * back to being a slab. */
+  assert.ok(/body\.feed-first \.shellTabs\s*\{[^}]*display:\s*flex/s.test(CSS),
+    'no segmented control');
+  assert.ok(/body\.feed-first \.shellTab\.on\s*\{[^}]*background:\s*#ffffff/s.test(CSS),
+    'the selected tab is not marked');
+  assert.ok(/body\.night\.feed-first \.shellTab\.on\s*\{[^}]*background:\s*#eef2f8/s.test(CSS),
+    'the selected tab is white on white at night');
+
+  const body = CSS.match(/body\.feed-first \.shellMenuBody\s*\{([^}]*)\}/s);
+  assert.ok(body, 'no menu body rule');
+  assert.ok(/overflow:\s*visible/.test(body[1]),
+    'the body still scrolls, which a content-height card should never need');
+  assert.ok(/flex:\s*none/.test(body[1]),
+    'the body still stretches, which only makes sense in a full-height panel');
+
+  // The readings are the last row, as drawn.
+  assert.ok(/body\.feed-first \.shellConditions\s*\{[^}]*order:\s*3/s.test(CSS),
+    'the conditions bar is not under the settings');
+  // And the title bar is gone, as drawn -- the scrim, the button and Escape
+  // are the ways out.
+  assert.ok(/body\.feed-first \.shellMenuHeader\s*\{[^}]*display:\s*none/s.test(CSS),
+    'the title bar is back');
+
+  /* The button stays visible while the card is open: the card hangs from it,
+   * which is only true if it is there to hang from. It used to hide, because
+   * the full-width panel it replaced covered it and it ghosted through the
+   * frosting -- that rule has to be gone, not just overridden. */
+  assert.ok(!/shell-menu-open[^{]*\.shellMenuBtn\s*\{[^}]*display:\s*none/s.test(CSS),
+    'the button still hides while the menu is open, so the card hangs from nothing');
+});
+
 test('the dock clearance is where a height:100% panel can see it', () => {
   /* .chatPanelWrap, .gamesPanelWrap and .leaderboardPanelWrap are all
    * height: 100%, so they resolve against the drawer BODY's content box.
@@ -1141,9 +1217,8 @@ test('only one host is open at a time', () => {
 
 test('the dock is in the order it was asked for', () => {
   /* Save in the middle, Feed on its left, Chat on its right, Music right of
-   * Chat, Games left of Feed. Written as the relationships rather than as one
-   * expected array, so the five that were NOT specified can be moved around
-   * without this test having an opinion about them. */
+   * Chat. Written as the relationships rather than as one expected array, so
+   * anything not specified can move without this test having an opinion. */
   const ids = build({ open: 'feed' }).ids();
   const at = (id) => {
     const i = ids.indexOf(id);
@@ -1153,7 +1228,11 @@ test('the dock is in the order it was asked for', () => {
   assert.ok(at('dockFeed') < at('pickupFab'), 'Feed is not left of Save');
   assert.ok(at('dockChat') > at('pickupFab'), 'Chat is not right of Save');
   assert.ok(at('dockMusic') > at('dockChat'), 'Music is not right of Chat');
-  assert.ok(at('dockGames') < at('dockFeed'), 'Games is not left of Feed');
+  // Games was specified as left of Feed, back when it was in the dock. It is
+  // in the menu now, and Leaderboard takes the outside seat -- which is the
+  // only arrangement of the remaining five that satisfies everything above.
+  assert.strictEqual(ids.indexOf('dockGames'), -1, 'Games is back in the dock');
+  assert.ok(at('dockLeaderboard') < at('dockFeed'), 'Leaderboard is not on the outside');
   // Save centred is the dock's own job -- app.part6.js re-centres on it -- but
   // it cannot centre something that is not in the middle of the row.
   const left = at('pickupFab');

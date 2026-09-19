@@ -128,6 +128,44 @@
    */
   var PAID_KEYS = ["post", "chat", "leaderboard", "games"];
 
+  /* Which dock button belongs to which destination.
+   *
+   * Two jobs. It answers "is the dock already showing this?", which is what
+   * keeps the menu from being a second copy of the row below it; and it is
+   * where the menu borrows its artwork from, so the two never drift apart.
+   *
+   * `entry.dock` says the same thing for most of these, but not for Feed: Feed
+   * opens through its own render() and must not take the dock branch of
+   * openScreen, while the dock still carries a Feed button.
+   *
+   * Here rather than as a field on the entry, for the same reason PAID_KEYS is:
+   * feed.js, compose.js and profile.js all re-register over app-shell.js's
+   * placeholders, and register() REPLACES the entry, so a field set on the
+   * placeholder is thrown away by the second registration -- silently, and Feed
+   * quietly reappears in the menu. Measured in the browser, which is how this
+   * comment exists. Post has no button at all and keeps its text glyph. */
+  var DOCK_BUTTON = {
+    feed: "dockFeed", chat: "dockChat", music: "dockMusic",
+    leaderboard: "dockLeaderboard", map: "dockMap", games: "dockGames",
+    colors: "dockColors", modes: "dockModes", profile: "dockProfile",
+    admin: "dockAdmin",
+  };
+
+  /* The dock's own icon for a destination, or "" if it has no button.
+   *
+   * Borrowed, not copied: applyDockIconModel() in app.js and ICONS in
+   * feed-first.js are where these are drawn, and a second set of the same paths
+   * here is a second set to keep in step. The menu inherits its own colour, so
+   * they arrive monochrome -- except Colours, whose three discs carry their own
+   * fills in both places, which is the point of them. */
+  function dockArt(entry) {
+    var id = (entry && (entry.dock || DOCK_BUTTON[entry.key])) || "";
+    if (!id) return "";
+    var button = byId(id);
+    var icon = button && button.querySelector && button.querySelector(".dockIcon");
+    return (icon && icon.innerHTML) || "";
+  }
+
   function featuresLocked() {
     try {
       return !!(window.isFeatureLocked && window.isFeatureLocked());
@@ -227,21 +265,106 @@
     return !!(menu && menu.classList.contains("open"));
   }
 
+  /* Does this destination belong in the menu, or does the dock already have it?
+   *
+   * The two used to list the same eleven things, so the menu was a longer copy
+   * of the row below it. The split is: the dock is what you touch while
+   * driving, the menu is what you set once and leave.
+   *
+   * Derived rather than listed. A second hard-coded list of dock keys here
+   * would drift away from feed-first.js's the first time either moved, so the
+   * question asked is the one that is actually true on screen: is this entry's
+   * button sitting in the dock's track right now? Buttons the dock no longer
+   * shows live in #dockStash, so they answer no and appear here instead.
+   */
+  function inMenu(entry) {
+    if (!entry) return true;
+    var id = entry.dock || DOCK_BUTTON[entry.key];
+    if (!id) return true;
+    var button = byId(id);
+    var track = byId("dockTrack");
+    if (!button || !track) return true;
+    return button.parentNode !== track;
+  }
+
+  /* Three tabs instead of four headings.
+   *
+   * The menu is settings now, and settings sort into map, account and the rest.
+   * Headings spent a third of a short panel saying so; tabs say it in one row
+   * and keep the panel the same height whatever is behind them -- which is the
+   * whole point of the chosen design: never more than four rows underneath.
+   *
+   * Listed rather than derived from entry.group because the groups were built
+   * for a list of eleven destinations and read oddly across three tabs: Post
+   * belongs with Profile under You, not under Network with a Chat that is now
+   * in the dock. Anything this list has not heard of lands in More, so a
+   * destination added later shows up somewhere rather than vanishing. */
+  var MENU_TABS = [
+    { id: "map", label: "Map", keys: ["map", "colors", "modes"] },
+    { id: "you", label: "You", keys: ["profile", "post"] },
+    { id: "more", label: "More", keys: ["games", "admin"] },
+  ];
+  var activeTab = MENU_TABS[0].id;
+
+  function tabFor(key) {
+    for (var i = 0; i < MENU_TABS.length; i += 1) {
+      if (MENU_TABS[i].keys.indexOf(key) >= 0) return MENU_TABS[i].id;
+    }
+    return MENU_TABS[MENU_TABS.length - 1].id;
+  }
+
+  function paintTabs(menu, counts) {
+    var bar = menu.querySelector(".shellTabs");
+    if (!bar) return;
+    bar.textContent = "";
+    MENU_TABS.forEach(function (tab) {
+      // A tab with nothing behind it is a dead third of the control. Admin is
+      // the usual cause: it is the only thing in More for a driver.
+      if (!counts[tab.id]) return;
+      var button = el("button", "shellTab", tab.label);
+      button.type = "button";
+      button.setAttribute("data-shell-tab", tab.id);
+      button.setAttribute("role", "tab");
+      var on = tab.id === activeTab;
+      button.setAttribute("aria-selected", on ? "true" : "false");
+      if (on) button.classList.add("on");
+      bar.appendChild(button);
+    });
+  }
+
   function paintMenu() {
-    var body = byId(MENU_ID) && byId(MENU_ID).querySelector(".shellMenuBody");
+    var menu = byId(MENU_ID);
+    var body = menu && menu.querySelector(".shellMenuBody");
     if (!body) return;
     body.textContent = "";
 
-    var groups = [];
-    visibleEntries().forEach(function (entry) {
-      var name = entry.group || "";
-      var bucket = groups.filter(function (g) { return g.name === name; })[0];
-      if (!bucket) {
-        bucket = { name: name, items: [] };
-        groups.push(bucket);
-      }
-      bucket.items.push(entry);
+    var listed = visibleEntries().filter(inMenu);
+    var counts = {};
+    listed.forEach(function (entry) {
+      var id = tabFor(entry.key);
+      counts[id] = (counts[id] || 0) + 1;
     });
+    // The remembered tab can empty out -- Admin leaving takes More with it --
+    // and an empty panel under a selected tab looks broken rather than empty.
+    if (!counts[activeTab]) {
+      activeTab = (MENU_TABS.filter(function (t) { return counts[t.id]; })[0]
+        || MENU_TABS[0]).id;
+    }
+    paintTabs(menu, counts);
+
+    /* Ordered by the tab's own key list rather than by registration, so the
+       order written above is the order on screen. Registration order put Post
+       above Profile under You because compose.js loads before profile.js,
+       which is not a reason for anything. */
+    var tab = MENU_TABS.filter(function (t) { return t.id === activeTab; })[0];
+    var order = (tab && tab.keys) || [];
+    var rank = function (entry) {
+      var at = order.indexOf(entry.key);
+      return at < 0 ? order.length : at;
+    };
+    var groups = [{ name: "", items: listed.filter(function (entry) {
+      return tabFor(entry.key) === activeTab;
+    }).sort(function (a, b) { return rank(a) - rank(b); }) }];
 
     groups.forEach(function (group) {
       if (group.name) body.appendChild(el("div", "shellGroup", group.name));
@@ -253,7 +376,9 @@
 
         var icon = el("span", "shellItemIcon");
         icon.setAttribute("aria-hidden", "true");
-        icon.textContent = entry.icon || "•";
+        var art = dockArt(entry);
+        if (art) icon.innerHTML = art;
+        else icon.textContent = entry.icon || "•";
         item.appendChild(icon);
 
         var text = el("span", "shellItemText");
@@ -517,6 +642,13 @@
     close.addEventListener("click", closeMenu);
     header.appendChild(close);
     menu.appendChild(header);
+
+    /* The segmented control. Built once and repainted by paintTabs, so the
+       element the click listener below delegates to is always the same one. */
+    var tabs = el("div", "shellTabs");
+    tabs.setAttribute("role", "tablist");
+    menu.appendChild(tabs);
+
     menu.appendChild(el("div", "shellMenuBody"));
 
     document.body.appendChild(menu);
@@ -533,13 +665,35 @@
     // One delegated listener rather than one per item, because the list is
     // repainted whenever a destination registers.
     menu.addEventListener("click", function (event) {
-      var item = event.target && event.target.closest
-        ? event.target.closest(".shellItem")
+      var target = event.target || null;
+      var tab = target && target.closest ? target.closest(".shellTab") : null;
+      if (tab) {
+        var id = tab.getAttribute("data-shell-tab");
+        // Repaint even when it has not changed: cheap, and it keeps the
+        // selected state honest if anything else repainted underneath.
+        if (id) activeTab = id;
+        paintMenu();
+        return;
+      }
+      var item = target && target.closest
+        ? target.closest(".shellItem")
         : null;
       if (!item) return;
       var key = item.getAttribute("data-shell-key");
       if (!key) return;
       if (key === "map") {
+        /* The dock's Map button does the right thing -- it drops the sheet to
+         * its minimised detent and leaves the feed running underneath. This
+         * used to call leaveScreen() instead, which CLOSES the shell screen,
+         * and closing the shell screen is exactly how the old map-first
+         * interface came back. Now that Map is reachable only from here, that
+         * bug would have been the only way to hit it. Click the real button. */
+        var mapBtn = byId("dockMap");
+        if (mapBtn && typeof mapBtn.click === "function") {
+          closeMenu();
+          mapBtn.click();
+          return;
+        }
         leaveScreen();
         closeMenu();
         return;

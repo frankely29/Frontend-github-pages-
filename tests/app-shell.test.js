@@ -117,7 +117,8 @@ function makeNode(tag) {
   return node;
 }
 
-function makeEnv({ admin = false, dockButtons = ['dockChat', 'dockGames'] } = {}) {
+function makeEnv({ admin = false, dockButtons = ['dockChat', 'dockGames'],
+                  inDock = [] } = {}) {
   const byId = new Map();
   const body = makeNode('body');
   const document = {
@@ -135,6 +136,21 @@ function makeEnv({ admin = false, dockButtons = ['dockChat', 'dockGames'] } = {}
     b.id = id;
     byId.set(id, b);
   });
+
+  /* The dock's own track. `inDock` are the buttons actually sitting in it --
+   * the five the dock keeps. Everything else is parentless here, standing in
+   * for the #dockStash the real page puts them in, which is what makes them
+   * the menu's rather than the dock's. */
+  if (inDock.length) {
+    const track = makeNode('div');
+    track.id = 'dockTrack';
+    byId.set('dockTrack', track);
+    inDock.forEach((id) => {
+      let b = byId.get(id);
+      if (!b) { b = makeNode('button'); b.id = id; byId.set(id, b); }
+      track.appendChild(b);
+    });
+  }
 
   // The shell appends its chrome to body; index it as the browser would.
   const realAppend = body.appendChild;
@@ -164,15 +180,46 @@ function makeEnv({ admin = false, dockButtons = ['dockChat', 'dockGames'] } = {}
   return { window, document, body, byId, shell: window.TeamJoseoShell };
 }
 
+/* The menu is three tabs now, and only the open one's rows are in the DOM, so
+ * "what can you reach from the menu" means walking all three. The behaviour
+ * these tests are about -- every destination reachable, each opening the right
+ * way -- is unchanged; only the path to a row is. */
+function tabIds(menu) {
+  return menu.querySelectorAll('.shellTab').map((t) => t.getAttribute('data-shell-tab'));
+}
+
+function openTab(menu, id) {
+  // Re-query every time: paintMenu rebuilds the bar, so a button held from
+  // before the last click is detached and clicking it does nothing.
+  const button = menu.querySelectorAll('.shellTab')
+    .filter((t) => t.getAttribute('data-shell-tab') === id)[0];
+  if (button) menu.dispatch('click', { target: button });
+}
+
+function keysOnTab(menu) {
+  return menu.querySelectorAll('.shellItem').map((i) => i.getAttribute('data-shell-key'));
+}
+
 function menuKeys(env) {
   const menu = env.byId.get('shellMenu');
-  return menu.querySelectorAll('.shellItem').map((i) => i.getAttribute('data-shell-key'));
+  const ids = tabIds(menu);
+  if (!ids.length) return keysOnTab(menu);
+  const seen = [];
+  ids.forEach((id) => {
+    openTab(menu, id);
+    keysOnTab(menu).forEach((k) => { if (seen.indexOf(k) < 0) seen.push(k); });
+  });
+  return seen;
 }
 
 function clickMenuItem(env, key) {
   const menu = env.byId.get('shellMenu');
-  const item = menu.querySelectorAll('.shellItem')
+  const find = () => menu.querySelectorAll('.shellItem')
     .filter((i) => i.getAttribute('data-shell-key') === key)[0];
+  let item = find();
+  if (!item) {
+    tabIds(menu).some((id) => { openTab(menu, id); item = find(); return !!item; });
+  }
   assert.ok(item, `menu has no item for "${key}"`);
   menu.dispatch('click', { target: item });
 }
@@ -483,6 +530,64 @@ test('the menu is destinations again, with no readings in it', () => {
     'the destination list cannot scroll');
 });
 
+test('the menu drops whatever the dock is already showing', () => {
+  /* The dock and the menu used to list the same eleven things, so the menu was
+   * a longer copy of the row below it and neither had a job of its own. The
+   * split is: the dock is what you touch while driving, the menu is what you
+   * set once and leave.
+   *
+   * Asked of the DOM rather than a second hard-coded list, because a list here
+   * would drift from feed-first.js's the first time either moved: is this
+   * entry's button in the dock's track right now? */
+  const env = makeEnv({ admin: true, inDock: ['dockChat', 'dockMusic', 'dockLeaderboard'] });
+  const keys = menuKeys(env);
+  ['chat', 'music', 'leaderboard'].forEach((k) => {
+    assert.ok(!keys.includes(k), `"${k}" is in the dock AND the menu: ${keys.join(', ')}`);
+  });
+  // And everything the dock does not show still is, including the one
+  // destination that has never had a button at all.
+  ['map', 'post', 'colors', 'modes', 'profile', 'admin', 'games'].forEach((k) => {
+    assert.ok(keys.includes(k), `"${k}" is reachable from nowhere: ${keys.join(', ')}`);
+  });
+});
+
+test('a stashed button still carries its destination', () => {
+  // Buttons the dock stopped showing are moved out of the track, not deleted,
+  // because openScreen() opens a dock panel by clicking its button. A parentless
+  // (stashed) button is exactly that case.
+  const env = makeEnv({ admin: true, dockButtons: ['dockGames', 'dockChat'],
+                        inDock: ['dockChat'] });
+  assert.ok(menuKeys(env).includes('games'), 'games left the menu as well as the dock');
+  clickMenuItem(env, 'games');
+  assert.strictEqual(env.byId.get('dockGames').clicks, 1,
+    'the stashed button was never clicked, so the panel never opened');
+});
+
+test('Map from the menu drops the sheet instead of closing the shell', () => {
+  /* leaveScreen() CLOSES the shell screen, and closing the shell screen is
+   * exactly how the old map-first interface came back -- reported as "when i
+   * click the icon for the menu the old interface comes up". The dock's Map
+   * button sets the sheet's detent instead and leaves the feed running. Now
+   * that Map is reachable only from the menu, this is the only path to it. */
+  const env = makeEnv({ dockButtons: ['dockMap'] });
+  env.shell.open('feed');
+  assert.ok(env.body.classList.contains('shell-screen-open'), 'the feed did not open');
+  clickMenuItem(env, 'map');
+  assert.strictEqual(env.byId.get('dockMap').clicks, 1, 'the dock button was not used');
+  assert.ok(env.body.classList.contains('shell-screen-open'),
+    'the shell screen was closed, which is the old interface coming back');
+});
+
+test('without a Map button it still falls back to closing the screen', () => {
+  // The button is created by feed-first.js. If that file is ever absent, Map
+  // must still do something rather than nothing.
+  const env = makeEnv({ dockButtons: [] });
+  env.shell.open('feed');
+  clickMenuItem(env, 'map');
+  assert.ok(!env.body.classList.contains('shell-screen-open'),
+    'Map did nothing at all');
+});
+
 test('the icons are eleven text glyphs, not nine glyphs and two stickers', () => {
   /* U+2709 ENVELOPE and U+2699 GEAR default to EMOJI presentation on Apple
    * platforms, so Chat and Modes rendered as full-colour stickers beside nine
@@ -513,8 +618,15 @@ function lock(env, on) {
 }
 
 function menuItem(env, key) {
-  return env.byId.get('shellMenu').querySelectorAll('.shellItem')
+  // Only the open tab's rows exist, so find the tab holding this one first.
+  const menu = env.byId.get('shellMenu');
+  const find = () => menu.querySelectorAll('.shellItem')
     .filter((i) => i.getAttribute('data-shell-key') === key)[0] || null;
+  let item = find();
+  if (!item) {
+    tabIds(menu).some((id) => { openTab(menu, id); item = find(); return !!item; });
+  }
+  return item;
 }
 
 function screenBody(env) {
