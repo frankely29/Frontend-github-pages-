@@ -735,6 +735,31 @@ body.feed-first #sliderWrap,
 body.feed-first #navQuickStack,
 body.feed-first #navActiveBanner,
 
+/* ----------------------------------------------- the floating chat messages
+ *
+ * .killFeed is the overlay that shows incoming chat as it arrives. It sits at
+ * z-index 6500 and 116px off the bottom, which was right when the bottom of
+ * the screen was map: it floated over it.
+ *
+ * Under Feed First the bottom of the screen is the sheet, at z-index 9200, and
+ * the dock is at 9300. So the messages were painting UNDERNEATH both of them
+ * and nobody had seen one since. Nothing was hiding it; it was behind the feed.
+ *
+ * Two changes, and the second is the one that matters: it goes above the sheet
+ * in the stack, and it moves off the bottom edge to just above the seam, so it
+ * floats over the map the way it always did rather than over somebody's post.
+ * It keeps pointer-events: none, so sitting above the dock costs no taps. */
+body.feed-first .killFeed {
+  bottom: calc(100% - var(--tj-split) + 12px);
+  z-index: 9400;
+}
+/* While the keyboard is up the sheet is the whole screen and the seam is
+   meaningless, so the messages go back to hugging the top of the sheet. */
+body.feed-first.tj-kb-up .killFeed {
+  bottom: auto;
+  top: calc(var(--tj-vtop) + 56px);
+}
+
 /* --------------------------------------------------------------- lock
  *
  * The blur follows the map for free. The explanation does not: #mapLockCard is

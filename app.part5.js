@@ -561,19 +561,34 @@
     const floorBottom = 240;
     const clearance = 28;
     const tops = [];
-    const pushTop = (sel) => {
-      const node = document.querySelector(sel);
-      if (!node || typeof node.getBoundingClientRect !== 'function') return;
+    /* A display:none element reports a rect of all zeros, and zero is a
+     * perfectly finite top. That is what broke this: #sliderWrap is the time
+     * machine, hidden from every driver by shell-no-scrubber and hidden again
+     * by feed-first, so it measured top 0, became the cluster's top, and the
+     * card was placed (viewport + 28) off the bottom -- which puts it entirely
+     * above the top of the screen. The Trip Saved card has been firing into
+     * empty space above the status bar ever since the shell landed.
+     *
+     * An unrendered node has no position to contribute, so it contributes
+     * none. Checked by size rather than by a display lookup because that is
+     * what actually distinguishes "not laid out" from "laid out at the top". */
+    const measure = (node) => {
+      if (!node || typeof node.getBoundingClientRect !== 'function') return null;
       const rect = node.getBoundingClientRect();
-      if (Number.isFinite(rect?.top)) tops.push(rect.top);
+      if (!rect || !Number.isFinite(rect.top)) return null;
+      if (!rect.width && !rect.height) return null;
+      return rect.top;
+    };
+    const pushTop = (sel) => {
+      const top = measure(document.querySelector(sel));
+      if (top != null) tops.push(top);
     };
     pushTop('#dock');
     pushTop('#sliderWrap');
     pushTop('#pickupFab');
     document.querySelectorAll('.dockDrawer.open,.dockDrawer[open],#dockDrawer.open,#dockDrawer[open]').forEach((node) => {
-      if (!node || typeof node.getBoundingClientRect !== 'function') return;
-      const rect = node.getBoundingClientRect();
-      if (Number.isFinite(rect?.top)) tops.push(rect.top);
+      const top = measure(node);
+      if (top != null) tops.push(top);
     });
     const clusterTop = tops.length ? Math.min(...tops) : null;
     let bottom = floorBottom;
