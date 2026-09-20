@@ -630,6 +630,38 @@
     scheduleDockAutoCenter();
   }
 
+  /* The row's contents changed, which is not the same as a driver scrolling it.
+   *
+   * Appending a node to the track resets the viewport's scrollLeft to 0, and
+   * index.html's dock is not in its final order -- feed-first.js appends Feed
+   * and Map and then sorts the whole row. So boot went: initDockScroller()
+   * centres on Save, feed-first.js reorders, the scroll is wiped, and nothing
+   * put it back until the ten second idle timer fired. Measured at 390x844:
+   * Save sat 128px right of centre for twelve seconds after the app opened,
+   * then slid into place on its own. Save is the one button pressed while
+   * driving, and it was the one not where it belongs.
+   *
+   * Immediate and without animation, because this is not movement -- it is
+   * restoring the position that moving the nodes destroyed. Animating it would
+   * show the driver a slide that never should have happened.
+   *
+   * It does NOT arm the auto-centre timer. That timer exists to undo a
+   * driver's own scrolling after they stop, and arming it from something the
+   * driver did not do is the bug a ResizeObserver caused here before. */
+  function dockRowChanged() {
+    updateDockScrollHints();
+    centerDockOnSave({ behavior: 'auto' });
+    // A second pass after layout settles: the buttons that were just appended
+    // may not have their final widths on this frame, and centring off a track
+    // that is still growing lands short.
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => {
+        centerDockOnSave({ behavior: 'auto' });
+        updateDockScrollHints();
+      });
+    }
+  }
+
   function initDockScroller() {
     const viewport = getDockViewport();
     const leftHint = document.getElementById('dockScrollHintLeft');
@@ -691,11 +723,10 @@
      * pushed the timer out forever, so the row never came back to Save at all.
      * Either way the dock stopped behaving the way it always had.
      *
-     * The hints are re-measured instead by the one thing that actually moves
-     * buttons: feed-first.js calls window.updateDockScrollHints() after it
-     * reorders the row. One explicit call at the moment the row changes,
-     * rather than a standing watch on the whole track -- it fixes the same
-     * hints and touches nothing else. */
+     * The row reports itself instead: feed-first.js calls
+     * window.dockRowChanged() at the one moment buttons actually move. One
+     * explicit call rather than a standing watch, and the decision about what
+     * to do with it stays in this file. */
 
     leftHint?.addEventListener('click', () => scrollDockByStep(-1));
     rightHint?.addEventListener('click', () => scrollDockByStep(1));
@@ -719,6 +750,7 @@
     resetMapIdentityLocalState,
     initDockScroller,
     updateDockScrollHints,
+    dockRowChanged,
     scrollDockByStep,
     safeMapAvatarUrl
   };
@@ -728,6 +760,7 @@
   window.resetMapIdentityLocalState = resetMapIdentityLocalState;
   window.initDockScroller = initDockScroller;
   window.updateDockScrollHints = updateDockScrollHints;
+  window.dockRowChanged = dockRowChanged;
   window.scrollDockByStep = scrollDockByStep;
 
   initDockScroller();
