@@ -25,6 +25,8 @@ const SRC = fs.readFileSync(SOURCE, 'utf8');
 const CSS = fs.readFileSync(path.join(ROOT, 'feed-first.css'), 'utf8');
 const SHELL_JS = fs.readFileSync(path.join(ROOT, 'app-shell.js'), 'utf8');
 const INDEX = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+// app.part6.js owns the dock scroller: the hints, and the auto-centre on Save.
+const PART6 = fs.readFileSync(path.join(ROOT, 'app.part6.js'), 'utf8');
 
 // --------------------------------------------------------------------------
 // The dock's offset and every clearance that has to match it come from two
@@ -433,8 +435,18 @@ test('the dock keeps its own behaviour', () => {
   // #dockViewport is the scroller; #dockTrack is only where the two buttons
   // are appended, which is the documented job and is asserted above. Naming
   // the track here made the test fail on the feature it exists to protect.
-  assert.ok(!/dockViewport|scrollLeft|scrollBy|centerDock|ScrollHint/.test(SRC),
+  //
+  // updateDockScrollHints is the one exception, and it is not a reach into the
+  // scroller: it measures the track's overflow and toggles two classes. It
+  // moves nothing and arms no timer. This file is the only thing that knows
+  // when buttons leave the row, so it is the only thing that can say so -- the
+  // alternative was a standing ResizeObserver over there, which also armed the
+  // auto-centre and had the dock sliding by itself. Everything that actually
+  // MOVES the dock is still app.part6.js's alone, and still barred here.
+  assert.ok(!/dockViewport|scrollLeft|scrollBy|centerDock/.test(SRC),
     'feed-first.js reaches into the dock scroller');
+  assert.ok(!/ScrollHint/.test(SRC.replace(/updateDockScrollHints/g, '')),
+    'feed-first.js touches the scroll hints by some other route');
   assert.ok(!/display\s*:\s*none[^}]*#dock\b/.test(CSS), 'the dock gets hidden somewhere');
   assert.ok(!/overflow-x\s*:\s*(hidden|visible)/.test(CSS),
     'the dock viewport overflow is being overridden');
@@ -1279,6 +1291,117 @@ test('reordering a dock already in order touches nothing', () => {
   const before = dom.track.children.slice();
   dom.api.orderDock();
   assert.deepStrictEqual(dom.track.children, before, 'it reshuffled an ordered dock');
+});
+
+// ------------------------------------------------- how the dock moves, and why
+//
+// The two red chevrons at the ends of the dock are computed from the track's
+// overflow. Pull six buttons out of an eleven button row and the five that are
+// left stop overflowing -- but every signal app.part6.js listens for is a
+// gesture, so nothing told it, and the chevrons went on advertising a scroll
+// the dock no longer had.
+//
+// That was caught for a while with a ResizeObserver on #dockTrack. It also
+// called scheduleDockAutoCenter(), and that is a ten second timer whose every
+// other caller is a gesture: it only ever ran because the driver had just
+// moved the dock themselves. Handed to an observer, a layout change nobody
+// made could arm it, and ten seconds later the row slid back onto Save on its
+// own while a driver was looking at the map.
+//
+// The row now reports itself, once, at the moment buttons actually move.
+
+/** orderDock with a spy in place of the scroller's two entry points. */
+function withScroller(dom) {
+  const calls = { hints: 0, centre: 0 };
+  dom.window.updateDockScrollHints = () => { calls.hints += 1; };
+  // Not a real export -- if orderDock ever reaches for something that moves
+  // the dock, this is what it would have to go through.
+  dom.window.centerDockOnSave = () => { calls.centre += 1; };
+  return calls;
+}
+
+test('pulling buttons out of the row re-measures the hints', () => {
+  const dom = build({ open: 'feed' });
+  const holder = dom.document.getElementById('dockStash');
+  // Put them back where index.html had them, then run the pass again.
+  holder.children.slice().forEach((node) => dom.track.appendChild(node));
+  const calls = withScroller(dom);
+  dom.api.orderDock();
+  assert.strictEqual(calls.hints, 1,
+    'the row lost six buttons and the chevrons were never told');
+});
+
+test('a stash-only pass still reports, though the order never changed', () => {
+  /* The common case, and the one that was wrong: the five that are left are
+   * already in the right order, so the reorder is a no-op while the stash is
+   * not. Reporting only the reorder leaves the hints stale in exactly the
+   * situation they are stale in. */
+  const dom = build({ open: 'feed' });
+  const holder = dom.document.getElementById('dockStash');
+  const stashed = holder.children.slice();
+  assert.ok(stashed.length, 'nothing was stashed, so there is nothing to test');
+  // Back into the track, but AFTER the five, so DOCK_ORDER is already satisfied.
+  stashed.forEach((node) => dom.track.appendChild(node));
+  const calls = withScroller(dom);
+  dom.api.orderDock();
+  assert.strictEqual(dom.ids().length, 5, 'the six were not pulled back out');
+  assert.strictEqual(calls.hints, 1, 'a stash-only pass said nothing');
+});
+
+test('an unchanged row says nothing at all', () => {
+  // It runs on every settle pass. Reporting each one would be noise.
+  const dom = build({ open: 'feed' });
+  const calls = withScroller(dom);
+  dom.api.orderDock();
+  assert.strictEqual(calls.hints, 0, 'it reported a row that did not change');
+});
+
+test('reordering the dock never moves the dock', () => {
+  const dom = build({ open: 'feed' });
+  const holder = dom.document.getElementById('dockStash');
+  holder.children.slice().forEach((node) => dom.track.appendChild(node));
+  const calls = withScroller(dom);
+  dom.api.orderDock();
+  assert.strictEqual(calls.centre, 0,
+    'reordering the row scrolls it, which is the driver\'s to do');
+  assert.ok(!/scheduleDockAutoCenter|centerDockOnSave/.test(SRC),
+    'feed-first.js reaches into the dock\'s scrolling');
+});
+
+test('nothing watches the track, so nothing arms the auto-centre behind a driver', () => {
+  // Code, not the comment that explains why the code is gone.
+  const init = PART6.slice(PART6.indexOf('function initDockScroller'))
+    .split('\n').filter((l) => !/^\s*(\*|\/\*|\/\/)/.test(l)).join('\n');
+  assert.ok(!/ResizeObserver/.test(init),
+    'the dock track is under a standing watch again');
+  assert.ok(!/\.observe\(/.test(init), 'something is observing the dock again');
+  /* Every remaining caller is something the driver did:
+   *
+   *   its own re-arm while a finger is still down
+   *   scrollDockByStep   -- a tap on a chevron
+   *   handleDockInteraction -- a scroll or a wheel
+   *   endDockDrag        -- letting go
+   *   the resize listener -- the window itself changed
+   *   initDockScroller   -- once, at boot
+   *
+   * Six. A seventh means something arms the dock's movement that a driver did
+   * not do, which is the bug; it has to be looked at rather than counted past. */
+  const code = PART6.split('\n')
+    .filter((l) => !/^\s*(\*|\/\*|\/\/)/.test(l))
+    .join('\n')
+    .replace(/function scheduleDockAutoCenter\(\)/, '');
+  const armed = [...code.matchAll(/scheduleDockAutoCenter\(\)/g)].length;
+  assert.strictEqual(armed, 6,
+    `scheduleDockAutoCenter is called ${armed} times; a caller was added or removed`);
+});
+
+test('the hints are still reachable from outside app.part6', () => {
+  // feed-first.js calls it by name off window. If that export goes, the row
+  // change is reported into nothing and the chevrons go stale again silently.
+  assert.ok(/window\.updateDockScrollHints\s*=\s*updateDockScrollHints/.test(PART6),
+    'updateDockScrollHints is no longer exported');
+  assert.ok(/window\.updateDockScrollHints/.test(SRC),
+    'feed-first.js no longer reports the row change');
 });
 
 test('the answer sits at the top, and nothing sits on it', () => {
