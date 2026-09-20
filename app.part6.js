@@ -676,28 +676,26 @@
       scheduleDockAutoCenter();
     });
 
-    /* Buttons come and go from the track -- feed-first.js appends Feed and Map
-     * at boot, and moves the six the dock no longer shows out to #dockStash.
-     * Every listener above fires on a gesture, so none of them fire for that,
-     * and the hints kept the answer they had when eleven buttons were in the
-     * row: two red chevrons advertising a scroll the dock no longer has.
-     * Photographed at night, where they are the loudest things on the screen
-     * after Save.
+    /* There was a ResizeObserver on #dockTrack here, watching for buttons
+     * coming and going so the scroll hints could be re-measured. It fixed the
+     * hints and it changed how the dock MOVES, which is not a trade anyone
+     * agreed to.
      *
-     * The track's width IS the thing the hints are computed from, so watching
-     * it is both the narrowest signal and the complete one -- it catches any
-     * future cause too, not just that one. */
-    const track = document.getElementById('dockTrack');
-    if (track && typeof ResizeObserver === 'function') {
-      try {
-        new ResizeObserver(() => {
-          scheduleHintUpdate();
-          scheduleDockAutoCenter();
-        }).observe(track);
-      } catch (_) {
-        // Cosmetic. A browser without it keeps the gesture-driven updates.
-      }
-    }
+     * scheduleDockAutoCenter() cancels and re-arms a ten second timer that
+     * ends by scrolling the row back onto Save. Every other caller is a
+     * gesture -- a drag, a wheel, a tap on a chevron -- so the timer only ever
+     * ran because the driver had just moved the dock themselves. Handing that
+     * same call to an observer meant a layout change nobody made could arm it,
+     * and ten seconds later the dock slid sideways on its own while a driver
+     * was looking at the map. A repeatedly resizing track did the opposite and
+     * pushed the timer out forever, so the row never came back to Save at all.
+     * Either way the dock stopped behaving the way it always had.
+     *
+     * The hints are re-measured instead by the one thing that actually moves
+     * buttons: feed-first.js calls window.updateDockScrollHints() after it
+     * reorders the row. One explicit call at the moment the row changes,
+     * rather than a standing watch on the whole track -- it fixes the same
+     * hints and touches nothing else. */
 
     leftHint?.addEventListener('click', () => scrollDockByStep(-1));
     rightHint?.addEventListener('click', () => scrollDockByStep(1));

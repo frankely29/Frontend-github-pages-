@@ -222,11 +222,15 @@
     if (!track || !track.children) return;
 
     // Out of the row first, so what is left can be counted honestly.
+    var pulled = 0;
     var holder = stash();
     if (holder) {
       DOCK_STASH.forEach(function (id) {
         var node = byId(id);
-        if (node && node.parentNode === track) holder.appendChild(node);
+        if (node && node.parentNode === track) {
+          holder.appendChild(node);
+          pulled += 1;
+        }
       });
     }
 
@@ -236,7 +240,10 @@
       var node = byId(id);
       if (node && node.parentNode === track) named.push(node);
     });
-    if (!named.length) return;
+    if (!named.length) {
+      if (pulled) noteDockRowChanged();
+      return;
+    }
     // Anything this list has never heard of keeps its own order, after the
     // named ones -- a button added later should move, not disappear.
     var rest = current.filter(function (node) { return named.indexOf(node) < 0; });
@@ -248,12 +255,33 @@
     var same = wanted.length === current.length && wanted.every(function (node, i) {
       return current[i] === node;
     });
-    if (same) return;
-    wanted.forEach(function (node) { track.appendChild(node); });
-    /* Nothing is told about this on purpose. app.part6.js owns the scroller and
-       watches the track's own size for changes -- see initDockScroller -- so
-       moving buttons in or out re-measures the scroll hints there rather than
-       here. This file appends buttons; it does not drive the dock. */
+    if (!same) wanted.forEach(function (node) { track.appendChild(node); });
+
+    /* Pulling six buttons out is a change to the row even when the five that
+     * are left were already in the right order, and that is the common case:
+     * the reorder is a no-op on almost every pass, the stash is not. Reporting
+     * only the reorder would have left the hints stale in exactly the
+     * situation they were wrong in. */
+    if (pulled || !same) noteDockRowChanged();
+  }
+
+  /* Tell the scroller the row changed, and tell it only that.
+   *
+   * The hints are the two red chevrons at the ends of the dock, and they are
+   * computed from the track's overflow. Take six buttons out of an eleven
+   * button row and the remaining five stop overflowing, but nothing
+   * app.part6.js listens for has happened -- every one of its signals is a
+   * gesture -- so the chevrons kept advertising a scroll the dock no longer
+   * has. At night they are the loudest things on the screen after Save.
+   *
+   * app.part6.js used to catch this with a ResizeObserver on the track. That
+   * also armed its ten second auto-centre, which until then only ever ran
+   * after the driver had moved the dock themselves, so the row started
+   * sliding back onto Save on its own. This is the same fix without that:
+   * one call, here, at the one moment buttons actually move. */
+  function noteDockRowChanged() {
+    if (typeof window.updateDockScrollHints !== "function") return;
+    try { window.updateDockScrollHints(); } catch (_) {}
   }
 
   function installDockButtons() {
