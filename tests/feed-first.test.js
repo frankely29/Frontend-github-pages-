@@ -1428,26 +1428,100 @@ test('reordering a dock already in order touches nothing', () => {
 
 /** orderDock with a spy in place of the scroller's two entry points. */
 function withScroller(dom) {
-  const calls = { hints: 0, centre: 0 };
+  const calls = { changed: 0, hints: 0, centre: 0 };
+  dom.window.dockRowChanged = () => { calls.changed += 1; };
   dom.window.updateDockScrollHints = () => { calls.hints += 1; };
-  // Not a real export -- if orderDock ever reaches for something that moves
-  // the dock, this is what it would have to go through.
+  // Not a real export -- if orderDock ever reaches past dockRowChanged for
+  // something that moves the dock itself, this is what it would go through.
   dom.window.centerDockOnSave = () => { calls.centre += 1; };
   return calls;
 }
 
-test('a row that changed re-measures the hints', () => {
+/** A button that was not in the row when the page was written. */
+function addLateButton(dom, id) {
+  const late = dom.document.createElement('button');
+  late.id = id;
+  dom.track.children.unshift(late);
+  late.parentNode = dom.track;
+  return late;
+}
+
+test('a row that changed reports itself once', () => {
   const dom = build({ open: 'feed' });
   // A button arriving late is the live case: feed-first.js appends Feed and
   // Map itself, and index.html's admin button only exists for some drivers.
-  const late = dom.document.createElement('button');
-  late.id = 'dockLateArrival';
-  dom.track.children.unshift(late);
-  late.parentNode = dom.track;
+  addLateButton(dom, 'dockLateArrival');
   const calls = withScroller(dom);
   dom.api.orderDock();
-  assert.strictEqual(calls.hints, 1,
-    'the row changed width and the chevrons were never told');
+  assert.strictEqual(calls.changed, 1,
+    'the row changed width and the dock was never told');
+});
+
+test('what to do about a changed row is the dock\'s call, not this file\'s', () => {
+  /* feed-first.js says the row changed. app.part6.js decides that means
+   * re-measure the chevrons and put Save back in the middle. Reaching past
+   * that to move the dock from here is how the two files started disagreeing
+   * about who owns the scroller. */
+  const dom = build({ open: 'feed' });
+  addLateButton(dom, 'dockLateArrival');
+  const calls = withScroller(dom);
+  dom.api.orderDock();
+  assert.strictEqual(calls.centre, 0, 'feed-first.js scrolled the dock itself');
+  assert.strictEqual(calls.hints, 0,
+    'it went round dockRowChanged straight to the hints');
+});
+
+test('an older bundle still gets its chevrons re-measured', () => {
+  // dockRowChanged is new. If app.part6.js has not loaded, or is the previous
+  // build, the hints alone still beat chevrons pointing at a scroll that is
+  // not there.
+  const dom = build({ open: 'feed' });
+  addLateButton(dom, 'dockLateArrival');
+  const calls = withScroller(dom);
+  delete dom.window.dockRowChanged;
+  dom.api.orderDock();
+  assert.strictEqual(calls.hints, 1, 'nothing at all was told');
+});
+
+// ------------------------------------------- Save, in the middle, from boot
+//
+// Appending a node to #dockTrack resets the viewport's scrollLeft to 0, and
+// index.html's dock is not in its final order: feed-first.js appends Feed and
+// Map and then sorts the whole row. So boot went -- initDockScroller() centres
+// on Save, this file reorders, the scroll is wiped, and nothing put it back
+// until the ten second idle timer fired.
+//
+// Measured at 390x844 before the fix: Save sat 128px right of centre for
+// twelve seconds after the app opened, then slid into place on its own. Save
+// is the one button pressed while driving.
+
+test('a changed row puts Save back in the middle', () => {
+  const centre = PART6.slice(PART6.indexOf('function dockRowChanged'),
+    PART6.indexOf('function initDockScroller'));
+  assert.ok(/centerDockOnSave\(\{\s*behavior:\s*'auto'\s*\}\)/.test(centre),
+    'a changed row no longer re-centres on Save');
+  assert.ok(!/behavior:\s*'smooth'/.test(centre),
+    'it animates a slide the driver never asked for');
+  assert.ok(/updateDockScrollHints\(\)/.test(centre),
+    'a changed row no longer re-measures the chevrons');
+});
+
+test('a changed row does not arm the idle timer', () => {
+  /* That timer exists to undo a driver's own scrolling once they stop. Arming
+   * it from something the driver did not do is the bug a ResizeObserver
+   * caused here before, and re-centring immediately already leaves the dock
+   * where it belongs -- there is nothing for it to come back to. */
+  const centre = PART6.slice(PART6.indexOf('function dockRowChanged'),
+    PART6.indexOf('function initDockScroller'));
+  assert.ok(!/scheduleDockAutoCenter/.test(codeOnly(centre)),
+    'a row change arms the ten second auto-centre');
+});
+
+test('dockRowChanged is reachable from the other file', () => {
+  assert.ok(/window\.dockRowChanged\s*=\s*dockRowChanged/.test(PART6),
+    'dockRowChanged is not exported, so the row change reports into nothing');
+  assert.ok(/window\.dockRowChanged/.test(codeOnly(SRC)),
+    'feed-first.js no longer reports the row change');
 });
 
 test('the stash mechanism is intact, and holding nothing', () => {

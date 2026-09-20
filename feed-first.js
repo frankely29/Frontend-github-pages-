@@ -291,8 +291,22 @@
    * also armed its ten second auto-centre, which until then only ever ran
    * after the driver had moved the dock themselves, so the row started
    * sliding back onto Save on its own. This is the same fix without that:
-   * one call, here, at the one moment buttons actually move. */
+   * one call, here, at the one moment buttons actually move.
+   *
+   * The other half of what it does is put Save back in the middle. Appending
+   * a node to the track wipes the viewport's scrollLeft, so the reorder below
+   * undid the centring app.part6.js had already done at boot -- and nothing
+   * put it back until the ten second idle timer. Save spent the first twelve
+   * seconds of every launch 128px right of centre.
+   *
+   * What to do about a changed row is app.part6.js's call, not this file's.
+   * This says the row changed; that file owns the dock. */
   function noteDockRowChanged() {
+    if (typeof window.dockRowChanged === "function") {
+      try { window.dockRowChanged(); return; } catch (_) {}
+    }
+    // Older bundle, or that file failed to load: the hints alone still beat
+    // chevrons pointing at a scroll that is not there.
     if (typeof window.updateDockScrollHints !== "function") return;
     try { window.updateDockScrollHints(); } catch (_) {}
   }
