@@ -434,6 +434,7 @@
   function renderRankBadgeIcon(rankIconKey, opts = {}) { return window.TlcDriverProfileModule?.renderRankBadgeIcon?.(rankIconKey, opts) || ''; }
   function ensurePickupProgressReward() { return window.TlcDriverProfileModule?.ensurePickupProgressReward?.(); }
   function renderPickupProgressReward(payload = {}) { return window.TlcDriverProfileModule?.renderPickupProgressReward?.(payload); }
+  function hidePickupProgressReward() { return window.TlcDriverProfileModule?.hidePickupProgressReward?.(); }
   async function syncMyProgression(opts = {}) { return await window.TlcDriverProfileModule?.syncMyProgression?.(opts); }
   function handlePickupProgressionDelta(payload = {}) { return window.TlcDriverProfileModule?.handlePickupProgressionDelta?.(payload); }
   async function syncLeaderboardBadgeRewards(opts = {}) { return await window.TlcDriverProfileModule?.syncLeaderboardBadgeRewards?.(opts); }
@@ -461,6 +462,7 @@
   window.renderRankBadgeIcon = renderRankBadgeIcon;
   window.ensurePickupProgressReward = ensurePickupProgressReward;
   window.renderPickupProgressReward = renderPickupProgressReward;
+  window.hidePickupProgressReward = hidePickupProgressReward;
   window.syncMyProgression = syncMyProgression;
   window.handlePickupProgressionDelta = handlePickupProgressionDelta;
   window.normalizeLeaderboardBadge = normalizeLeaderboardBadge;

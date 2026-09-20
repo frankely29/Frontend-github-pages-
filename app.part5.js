@@ -644,9 +644,17 @@
     ensurePickupProgressReward();
     ensureLeaderboardBadgeRewardOverlay();
     const level = Number(progression?.level);
-    const safeLevel = Number.isFinite(level) && level > 0 ? Math.floor(level) : 1;
+    const hasLevel = Number.isFinite(level) && level > 0;
+    const safeLevel = hasLevel ? Math.floor(level) : 1;
     const xpAwarded = Number(payload?.xp_awarded ?? progression?.xp_awarded);
-    const earnedLabel = `+${formatProgressNumber(Number.isFinite(xpAwarded) && xpAwarded > 0 ? xpAwarded : 0, { maxFractionDigits: 0 })} XP`;
+    const hasXp = Number.isFinite(xpAwarded) && xpAwarded > 0;
+    /* A response that carries no progression at all used to be drawn anyway,
+     * which meant a level 37 driver watching "Level 1 / Rookie / +0 XP" scroll
+     * up the screen after a save. The card is the only report a driver gets;
+     * inventing its numbers is worse than leaving the lines out. Below, every
+     * row that has no real value is hidden rather than filled with a default,
+     * so the card still says Trip Saved and says nothing it cannot back up. */
+    const earnedLabel = `+${formatProgressNumber(hasXp ? xpAwarded : 0, { maxFractionDigits: 0 })} XP`;
     const rankName = normalizeDriverTier(progression?.rank_name || progression?.title || 'Rookie');
     const xpToNext = Number(progression?.xp_to_next_level);
     const isMaxLevel = progression?.is_max_level === true
@@ -664,6 +672,7 @@
     const fillEl = document.getElementById('pickupProgressRewardFill');
     const footEl = document.getElementById('pickupProgressRewardFoot');
     if (!kickerEl || !iconEl || !xpEl || !levelEl || !rankEl || !fillEl || !footEl) return false;
+    const show = (node, on) => { node.style.display = on ? '' : 'none'; };
     kickerEl.textContent = 'Trip Saved';
     iconEl.innerHTML = renderRankBadgeIcon(progression?.rank_icon_key, { compact: false });
     xpEl.textContent = earnedLabel;
@@ -671,6 +680,12 @@
     rankEl.textContent = String(rankName || 'Rookie');
     fillEl.style.width = '0%';
     footEl.textContent = footer;
+    show(xpEl, hasXp);
+    show(levelEl, hasLevel);
+    show(rankEl, hasLevel);
+    show(iconEl, hasLevel);
+    show(fillEl.parentNode, hasLevel);
+    show(footEl, hasLevel);
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => {
         fillEl.style.width = `${Math.round(pct * 100)}%`;
@@ -679,9 +694,24 @@
     return true;
   }
 
+  /* The Save button has two possible answers -- "+25 XP" and "not this time" --
+   * and they are drawn by two different files. Whichever one speaks last has to
+   * silence the other, or a driver reads a refusal stacked on a reward. */
+  function hidePickupProgressReward() {
+    const el = document.getElementById('pickupProgressReward');
+    if (!el) return;
+    if (showPickupProgressReward._timer) {
+      window.clearTimeout(showPickupProgressReward._timer);
+      showPickupProgressReward._timer = null;
+    }
+    el.classList.remove('show');
+    el.setAttribute('aria-hidden', 'true');
+  }
+
   function showPickupProgressReward(payload = {}) {
     const rendered = renderPickupProgressReward(payload);
     if (!rendered) return;
+    try { window.PickupRecordingFeature?.hidePickupGuardNotice?.(); } catch (_) {}
     updatePickupRewardLayout();
     const el = ensurePickupProgressReward();
     el.classList.remove('show');
@@ -1627,6 +1657,7 @@
     renderRankBadgeIcon,
     ensurePickupProgressReward,
     renderPickupProgressReward,
+    hidePickupProgressReward,
     ensureLevelUpOverlay,
     updatePickupRewardLayout,
     scheduleDriverProfileDmPoll,
@@ -1641,6 +1672,7 @@
   window.handlePickupProgressionDelta = handlePickupProgressionDelta;
   window.syncLeaderboardBadgeRewards = syncLeaderboardBadgeRewards;
   window.ensurePickupProgressReward = ensurePickupProgressReward;
+  window.hidePickupProgressReward = hidePickupProgressReward;
 
   ensureDriverProfileUI();
   ensureLevelUpOverlay();

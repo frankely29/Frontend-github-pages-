@@ -162,19 +162,78 @@
     return payload || {};
   }
 
+  /* Where this notice sits is the whole reason a driver thought Save was dead.
+   *
+   * It used to be `bottom: 110px; z-index: 2500`. Both numbers were written for
+   * the old map-first screen, where the bottom of the phone held nothing but a
+   * dock. Under the one-surface shell the feed sheet is a frosted panel at
+   * z-index 9200 covering everything from its top edge down, and the dock sits
+   * at 9300 on top of that. A notice at 2500, 110px off the bottom, is painted
+   * *underneath* both -- present in the DOM, readable in the inspector, and
+   * visible on screen as nothing but a slightly darker patch of frosted glass.
+   *
+   * That is every refusal the Save button can give: "enable location",
+   * "cooling off", "drive a bit further". The cooldown one matters most,
+   * because a successful save arms it -- so the first save of a shift showed
+   * its card and every tap for the next few minutes vanished into the sheet.
+   * Tapping Save and getting absolutely nothing back is indistinguishable from
+   * a broken button.
+   *
+   * It now rides the same two numbers as the Trip Saved card: one z-layer
+   * below it, and the same --pickup-reward-bottom, which app.part5.js keeps
+   * pointed at the top of the bottom chrome and re-measures on every resize,
+   * rotation and keyboard. Same event, same place on screen, whichever answer
+   * it is. */
+  const GUARD_NOTICE_CSS = [
+    'position:fixed',
+    'left:50%',
+    'bottom:calc(env(safe-area-inset-bottom, 0px) + var(--pickup-reward-bottom, 240px))',
+    'transform:translateX(-50%)',
+    'z-index:9801',
+    // The same footprint as the Trip Saved card, because it lands in the same
+    // spot. Shrink-to-fit sized it to its own longest word and wrapped the
+    // title mid-phrase.
+    'width:min(320px,calc(100vw - 22px))',
+    'box-sizing:border-box',
+    'text-align:center',
+    'font-family:system-ui',
+    'display:none',
+  ].join(';');
+
   function ensurePickupGuardNotice() {
     let root = document.getElementById('pickupGuardNotice');
     if (!root) {
       root = document.createElement('div');
       root.id = 'pickupGuardNotice';
-      root.style.cssText = 'position:fixed;left:50%;bottom:110px;transform:translateX(-50%);z-index:2500;max-width:min(92vw,460px);font-family:system-ui;display:none';
+      root.style.cssText = GUARD_NOTICE_CSS;
       document.body.appendChild(root);
+    } else if (!/--pickup-reward-bottom/.test(root.style.bottom || '')) {
+      // An older notice left over from before this change is still parked
+      // behind the sheet. Re-seat it rather than leaving it buried.
+      root.style.cssText = GUARD_NOTICE_CSS;
     }
     return root;
   }
 
+  function hidePickupGuardNotice() {
+    const root = document.getElementById('pickupGuardNotice');
+    if (!root) return;
+    if (root._pickupTimer != null) {
+      window.clearTimeout(root._pickupTimer);
+      root._pickupTimer = null;
+    }
+    root.style.display = 'none';
+  }
+
   function showPickupGuardNotice({ title, message, tone } = {}) {
     const root = ensurePickupGuardNotice();
+    /* Re-measure before showing. The variable is refreshed on resize, but the
+     * dock and the sheet also move on their own -- a detent drag, the drawer
+     * opening -- and a notice placed off a stale measurement is exactly the
+     * bug this is fixing, one layer up. */
+    try { window.updatePickupRewardLayout?.(); } catch (_) {}
+    // One answer per tap: a refusal replaces a reward still on screen.
+    try { window.hidePickupProgressReward?.(); } catch (_) {}
     const palette = tone === 'danger'
       ? { bg: '#3b1010', border: 'rgba(255,120,120,.45)' }
       : tone === 'warning'
@@ -287,11 +346,29 @@
       if (cooldownUnix > 0) pickupSaveCooldownUntilMs = cooldownUnix * 1000;
 
       ctx.schedulePickupOverlayRefresh?.({ force: true });
+
+      /* The acceptance check used to run AFTER the reward card was fired, so a
+       * 200 that means "we are not counting this one" still raised Trip Saved
+       * over the map -- and with no progression in that body, the card fell
+       * back to its defaults and told a level 37 driver "Level 1 / Rookie /
+       * +0 XP". Read the answer first, then say what it actually was. */
+      const accepted = isPickupSaveAccepted(res);
+      if (!accepted) {
+        showPickupGuardNotice({
+          title: 'Trip not saved',
+          message: toSafeString(res?.message)
+            || toSafeString(res?.detail?.message)
+            || toSafeString(res?.reason)
+            || 'This one was not counted. Try again after driving a bit longer.',
+          tone: 'danger',
+        });
+        return res;
+      }
+
+      hidePickupGuardNotice();
       if (typeof window.handlePickupProgressionDelta === 'function') {
         window.handlePickupProgressionDelta(res || {});
       }
-      const accepted = isPickupSaveAccepted(res);
-      if (!accepted) return res;
 
       window.dispatchEvent(new CustomEvent('tlc-pickup-recorded', {
         detail: {
@@ -324,7 +401,15 @@
         return;
       }
 
-      alert(`Trip record failed: ${readable}`);
+      /* Used to be alert(). A modal dialog that steals the screen and waits for
+       * a tap is the wrong thing to put in front of someone driving, and it is
+       * the only failure that behaved differently from every other one. Same
+       * notice, same place, no blocking. */
+      showPickupGuardNotice({
+        title: 'Trip not saved',
+        message: readable,
+        tone: 'danger',
+      });
     } finally {
       pickupSaveInFlight = false;
     }
@@ -562,6 +647,7 @@
 
   FEATURE.sendPickupLog = sendPickupLog;
   FEATURE.showPickupGuardNotice = showPickupGuardNotice;
+  FEATURE.hidePickupGuardNotice = hidePickupGuardNotice;
   FEATURE.showPickupReward = showPickupReward;
   FEATURE.showPickupLevelUp = showPickupLevelUp;
   FEATURE.mountAdminPickupRecordingTests = mountAdminPickupRecordingTests;
