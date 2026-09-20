@@ -305,6 +305,7 @@
       "./feed.css",
       "./compose.css",
       "./profile.css",
+      "./notifications.css",
       // Last, so its map-card layout wins over the full-screen rules in
       // frontend-shell.css and app-shell.css by source order rather than by a
       // pile of !important.
@@ -357,6 +358,10 @@
       "./feed.js",
       "./compose.js",
       "./profile.js",
+      // After profile.js, whose open(userId) it calls to show whoever followed
+      // you, and after app-shell.js, which it registers a destination over. It
+      // falls back rather than throwing if either is missing.
+      "./notifications.js",
       "./map-route.js",
       // After feed.js, which it borrows "3 minutes ago" from, and after
       // app-shell.js, whose open('feed') it calls. It falls back rather than

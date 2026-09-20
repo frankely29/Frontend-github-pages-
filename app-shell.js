@@ -301,7 +301,7 @@
    * destination added later shows up somewhere rather than vanishing. */
   var MENU_TABS = [
     { id: "map", label: "Map", keys: ["map", "colors", "modes"] },
-    { id: "you", label: "You", keys: ["profile", "post"] },
+    { id: "you", label: "You", keys: ["notifications", "profile", "post"] },
     { id: "more", label: "More", keys: ["games", "admin"] },
   ];
   var activeTab = MENU_TABS[0].id;
