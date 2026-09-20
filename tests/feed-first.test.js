@@ -1095,6 +1095,8 @@ test('a keyboard at the bottom of the sheet is still a keyboard', () => {
    * the dock stayed on screen over the keyboard and the sheet's header was
    * left above the top of the window. */
   const dom = build({ open: 'feed', vv: { height: 536, offsetTop: 420 } });
+  // The reply field has focus -- that is why the keyboard is up at all.
+  dom.document.activeElement = dom.document.createElement('textarea');
   assert.strictEqual(dom.api.keyboardInset(), 420, 'the slide cancelled the keyboard out');
   assert.strictEqual(dom.api.viewportShift(), 420, 'the slide is not measured');
   dom.api.paintViewport();
@@ -1110,6 +1112,87 @@ test('no keyboard, no slide written', () => {
   assert.ok(!dom.body.classList.contains('tj-kb-up'));
   assert.strictEqual(dom.body.style['--tj-kb'], '0px');
   assert.strictEqual(dom.body.style['--tj-vtop'], '0px');
+});
+
+// ------------------------------------------- the dock disappearing on its own
+//
+// tj-kb-up carries `#dock { display: none !important }`. It was set from a
+// viewport measurement alone: layout height minus visual height, over 60px.
+//
+// The viewport shrinks for reasons that are not a keyboard -- Safari's
+// toolbars sliding back in on an upward scroll, an in-call or
+// screen-recording status bar, rotation settling. Any of those can clear 60px,
+// and when one did the entire dock vanished, leaving a band of empty frosting
+// where it had been, until the viewport settled back. Occasional, impossible
+// to reproduce on demand, and exactly what "there is an empty bar at the
+// bottom, but not always" looks like.
+//
+// iOS does not raise a keyboard with nothing focused. That is a fact about the
+// page, not a number to threshold.
+
+test('a shrunken viewport with nothing focused is not a keyboard', () => {
+  const dom = build({ open: 'feed', vv: { height: 830, offsetTop: 0 } });
+  assert.strictEqual(dom.document.activeElement, null, 'the double came focused');
+  assert.strictEqual(dom.api.keyboardInset(), 0,
+    '126px of toolbar was read as a keyboard');
+  dom.api.paintViewport();
+  assert.ok(!dom.body.classList.contains('tj-kb-up'),
+    'the dock is hidden because a toolbar came back');
+});
+
+test('the body is not a focused field', () => {
+  // document.activeElement falls back to <body>, never to null, in a browser.
+  const dom = build({ open: 'feed', vv: { height: 830, offsetTop: 0 } });
+  dom.document.activeElement = dom.body;
+  assert.strictEqual(dom.api.keyboardInset(), 0, 'body counted as somewhere to type');
+});
+
+test('a tapped button is not a focused field either', () => {
+  /* Tapping a dock button focuses it. If any focused element counted, the dock
+   * would hide itself the moment a driver used it and the viewport moved. */
+  const dom = build({ open: 'feed', vv: { height: 830, offsetTop: 0 } });
+  dom.document.activeElement = dom.document.createElement('button');
+  assert.strictEqual(dom.api.keyboardInset(), 0, 'a button counted as a text field');
+});
+
+['input', 'textarea', 'select'].forEach((tag) => {
+  test(`a focused <${tag}> still raises the keyboard`, () => {
+    const dom = build({ open: 'feed', vv: { height: 536, offsetTop: 0 } });
+    dom.document.activeElement = dom.document.createElement(tag);
+    assert.strictEqual(dom.api.keyboardInset(), 420,
+      'the guard swallowed a real keyboard');
+    dom.api.paintViewport();
+    assert.ok(dom.body.classList.contains('tj-kb-up'),
+      'the dock would sit on top of the keyboard');
+  });
+});
+
+test('contenteditable counts, because the composer is one', () => {
+  const dom = build({ open: 'feed', vv: { height: 536, offsetTop: 0 } });
+  const box = dom.document.createElement('div');
+  box.isContentEditable = true;
+  dom.document.activeElement = box;
+  assert.strictEqual(dom.api.keyboardInset(), 420, 'the composer lost its keyboard');
+
+  // Some of these are written as an attribute rather than the property.
+  const attr = dom.document.createElement('div');
+  attr.setAttribute('contenteditable', '');
+  dom.document.activeElement = attr;
+  assert.strictEqual(dom.api.keyboardInset(), 420,
+    'contenteditable="" is editable and was read as not');
+
+  const off = dom.document.createElement('div');
+  off.setAttribute('contenteditable', 'false');
+  dom.document.activeElement = off;
+  assert.strictEqual(dom.api.keyboardInset(), 0,
+    'contenteditable="false" was read as editable');
+});
+
+test('the 60px floor is still there underneath the guard', () => {
+  // A focused field does not make a 40px toolbar into a keyboard either.
+  const dom = build({ open: 'feed', vv: { height: 916, offsetTop: 0 } });
+  dom.document.activeElement = dom.document.createElement('input');
+  assert.strictEqual(dom.api.keyboardInset(), 0, 'the floor was dropped');
 });
 
 test('a window short of its screen is noticed, and only where it can be', () => {
@@ -1139,6 +1222,8 @@ test('the keyboard leaving asks for the window back', () => {
   // Only then: asking while somebody is typing would blur the field they are
   // typing in, which is a far worse bug than the one being fixed.
   const up = build({ open: 'feed', vv: { height: 536, offsetTop: 0 } });
+  // A keyboard means a focused field; without one there is no keyboard to leave.
+  up.document.activeElement = up.document.createElement('textarea');
   // mount() schedules its own; only the ones this call adds are interesting.
   const before = up.timers.length;
   up.api.paintViewport();
