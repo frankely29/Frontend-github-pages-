@@ -429,12 +429,43 @@
    * on screen over the keyboard and the sheet's own header was left above the
    * top of the window. That is the photo.
    */
+  /* A keyboard needs something to type into.
+   *
+   * Everything below is measured from the viewport, and the viewport shrinks
+   * for reasons that have nothing to do with a keyboard: Safari's toolbars
+   * sliding back in when you scroll up, an in-call or screen-recording status
+   * bar appearing, rotation settling. Any of those can clear 60px on their
+   * own, and when they did, tj-kb-up went on -- and tj-kb-up carries
+   * `#dock { display: none !important }`. The whole dock vanished, with a band
+   * of empty frosting where it had been, until the viewport settled back.
+   * Occasional, never reproducible on demand, and exactly what "there is an
+   * empty bar at the bottom, but not always" looks like.
+   *
+   * iOS does not raise a keyboard with nothing focused, so a focused editable
+   * element is a precondition, not a heuristic. Checking it turns a guess
+   * about a number into a fact about the page. */
+  function keyboardCouldBeUp() {
+    var el = null;
+    try { el = document.activeElement; } catch (_) { return true; }
+    if (!el || el === document.body || el === document.documentElement) return false;
+    var tag = String(el.tagName || "").toUpperCase();
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+    // contenteditable, which the composer and the reply row both use.
+    if (el.isContentEditable === true) return true;
+    try {
+      var attr = el.getAttribute && el.getAttribute("contenteditable");
+      if (attr != null && String(attr) !== "false") return true;
+    } catch (_) {}
+    return false;
+  }
+
   function keyboardInset() {
     var vv = window.visualViewport;
     if (!vv) return 0;
     var inset = Math.round((window.innerHeight || 0) - (Number(vv.height) || 0));
     // Under about 60px it is a toolbar or a rounding artefact, not a keyboard.
-    return inset > 60 ? inset : 0;
+    if (inset <= 60) return 0;
+    return keyboardCouldBeUp() ? inset : 0;
   }
 
   /** How far the window has been slid down inside the layout viewport. */
