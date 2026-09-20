@@ -997,6 +997,27 @@ test('three tabs, and never a scroll under them', () => {
     'the button still hides while the menu is open, so the card hangs from nothing');
 });
 
+test('the floating chat messages are above the sheet, not behind it', () => {
+  /* .killFeed shows incoming chat as it arrives. It ships at z-index 6500 and
+   * 116px off the bottom, which was right while the bottom of the screen was
+   * map. Under Feed First the bottom of the screen is the sheet at 9200 and
+   * the dock at 9300, so the messages painted underneath both and nobody had
+   * seen one since. Nothing was hiding it -- it was behind the feed. */
+  const rule = CSS.match(/body\.feed-first \.killFeed\s*\{([^}]*)\}/s);
+  assert.ok(rule, 'the kill feed is not re-homed for feed-first');
+  const z = Number((rule[1].match(/z-index:\s*(\d+)/) || [])[1]);
+  assert.ok(Number.isFinite(z) && z > 9300,
+    `the messages sit at ${z}, under the sheet (9200) or the dock (9300)`);
+  // And off the bottom edge: it belongs over the map, not over somebody's post.
+  assert.ok(/bottom:\s*calc\(100% - var\(--tj-split\)/.test(rule[1]),
+    'the messages still hug the bottom, which is where the feed is');
+
+  // With the keyboard up the sheet is the whole screen and the seam means
+  // nothing, so it has to be anchored the other way round.
+  assert.ok(/body\.feed-first\.tj-kb-up \.killFeed\s*\{[^}]*top:/s.test(CSS),
+    'with the keyboard up the messages are positioned against a seam that is gone');
+});
+
 test('the dock clearance is where a height:100% panel can see it', () => {
   /* .chatPanelWrap, .gamesPanelWrap and .leaderboardPanelWrap are all
    * height: 100%, so they resolve against the drawer BODY's content box.
