@@ -27,6 +27,13 @@ const SHELL_JS = fs.readFileSync(path.join(ROOT, 'app-shell.js'), 'utf8');
 const INDEX = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
 // app.part6.js owns the dock scroller: the hints, and the auto-centre on Save.
 const PART6 = fs.readFileSync(path.join(ROOT, 'app.part6.js'), 'utf8');
+// The dock's own sizes, which decide whether the row overflows a phone at all.
+const SHELL_CSS = fs.readFileSync(path.join(ROOT, 'frontend-shell.css'), 'utf8');
+
+/** Source with comments dropped -- for rules about what the code does. */
+function codeOnly(src) {
+  return src.split('\n').filter((l) => !/^\s*(\*|\/\*|\/\/)/.test(l)).join('\n');
+}
 
 // --------------------------------------------------------------------------
 // The dock's offset and every clearance that has to match it come from two
@@ -384,29 +391,52 @@ const EXP = () => Math.round(detents().expanded * 100);
 
 // --------------------------------------------------------------------------
 
-test('the dock keeps five and stashes the rest, losing none of them', () => {
-  /* The dock and the menu used to list the same eleven things. The dock now
-   * holds what you touch while driving; everything else belongs to the menu.
+test('the whole row is in the dock, which is what makes the dock a dock', () => {
+  /* Cut to five, the row is 326px wide -- 56 x 4 + 70 + four 8px gaps -- and
+   * .dockTrack is `width: max-content; min-width: 100%`, so it stretched to
+   * fill rather than overflowing. It fits inside every phone made. Nothing to
+   * scroll, nothing for the edge mask to fade, nowhere for app.part6.js to
+   * re-centre to: a strip of icons you swipe through became five buttons
+   * parked in the middle of a band.
    *
-   * Stashed, not deleted, and deliberately so: app-shell.js opens a dock-backed
-   * destination by calling .click() on its button, so the button IS the API.
-   * Deleting these nodes would make Colours, Modes, Games, Profile and Admin
-   * unreachable from the menu that now owns them. */
+   * Eleven is 710px, which runs off both ends of any phone. That is the
+   * floating, swipeable dock, and it is the behaviour that was asked for
+   * back. */
   const dom = build();
   const ids = dom.ids();
-  assert.deepStrictEqual(ids,
-    ['dockLeaderboard', 'dockFeed', 'pickupFab', 'dockChat', 'dockMusic'],
-    'the dock is not the five it was asked for');
+  ['dockLeaderboard', 'dockFeed', 'pickupFab', 'dockChat', 'dockMusic',
+    'dockColors', 'dockModes', 'dockMap', 'dockGames', 'dockProfile']
+    .forEach((id) => {
+      assert.ok(ids.includes(id), `${id} is not in the dock: ${ids.join(', ')}`);
+    });
 
   const holder = dom.document.getElementById('dockStash');
-  assert.ok(holder, 'nothing was stashed');
-  const stashed = holder.children.map((c) => c.id);
-  ['dockColors', 'dockModes', 'dockMap', 'dockGames', 'dockProfile']
-    .forEach((id) => {
-      assert.ok(stashed.includes(id), `${id} was lost rather than stashed`);
-      assert.ok(dom.document.getElementById(id), `${id} is gone from the document`);
-    });
-  assert.strictEqual(holder.hidden, true, 'the stash is on screen');
+  if (holder) {
+    assert.strictEqual(holder.children.length, 0,
+      'something is still being held out of the row: '
+      + holder.children.map((c) => c.id).join(', '));
+  }
+});
+
+test('the row is wide enough to overflow a phone', () => {
+  /* The point of the whole thing, in the one unit that decides it. Measured
+   * from the sizes frontend-shell.css actually declares, so shrinking a button
+   * later fails here rather than quietly taking the swipe away again. */
+  const size = (sel, prop) => {
+    const rule = SHELL_CSS.match(
+      new RegExp(`\\${sel}\\s*\\{[^}]*?\\b${prop}\\s*:\\s*(\\d+)px`, 's'));
+    assert.ok(rule, `no ${prop} declared for ${sel}`);
+    return Number(rule[1]);
+  };
+  const main = size('.dockBtnMain', 'width');
+  const save = size('.dockBtnSaveMain', 'width');
+  const gap = size('.dockTrack', 'gap');
+  const ids = build().ids();
+  const width = (ids.length - 1) * main + save + (ids.length - 1) * gap;
+  // 390px is the narrowest phone anyone is driving with; 430 is the widest.
+  assert.ok(width > 430,
+    `the row is ${width}px across ${ids.length} buttons, which fits on the phone `
+    + 'and so never scrolls');
 });
 
 test('Feed sits next to Save, because the dock re-centres on Save', () => {
@@ -420,10 +450,11 @@ test('Feed sits next to Save, because the dock re-centres on Save', () => {
   const ids = build().ids();
   const save = ids.indexOf('pickupFab');
   assert.strictEqual(ids[save - 1], 'dockFeed', ids.join(','));
-  // Map is no longer beside it, or in the dock at all -- dragging the sheet
-  // down already goes to the map, so the button was a second way to do one
-  // thing. It lives in the menu now, and in the stash in the DOM.
-  assert.strictEqual(ids.indexOf('dockMap'), -1, 'Map is still in the dock: ' + ids.join(','));
+  // Map is back in the row with everything else, one seat out on the other
+  // side. Beside Save is the scarcest real estate on the phone and Feed has
+  // the claim on it; Map is a second way to do what dragging the sheet down
+  // already does.
+  assert.ok(ids.indexOf('dockMap') > save, 'Map took a seat left of Save: ' + ids.join(','));
 });
 
 test('the dock keeps its own behaviour', () => {
@@ -443,9 +474,12 @@ test('the dock keeps its own behaviour', () => {
   // alternative was a standing ResizeObserver over there, which also armed the
   // auto-centre and had the dock sliding by itself. Everything that actually
   // MOVES the dock is still app.part6.js's alone, and still barred here.
-  assert.ok(!/dockViewport|scrollLeft|scrollBy|centerDock/.test(SRC),
+  // Code only. A comment explaining why the dock overflows is allowed to name
+  // the scroller; the rule is about what runs, not about what is written down.
+  const code = codeOnly(SRC);
+  assert.ok(!/dockViewport|scrollLeft|scrollBy|centerDock/.test(code),
     'feed-first.js reaches into the dock scroller');
-  assert.ok(!/ScrollHint/.test(SRC.replace(/updateDockScrollHints/g, '')),
+  assert.ok(!/ScrollHint/.test(code.replace(/updateDockScrollHints/g, '')),
     'feed-first.js touches the scroll hints by some other route');
   assert.ok(!/display\s*:\s*none[^}]*#dock\b/.test(CSS), 'the dock gets hidden somewhere');
   assert.ok(!/overflow-x\s*:\s*(hidden|visible)/.test(CSS),
@@ -1346,11 +1380,8 @@ test('the dock is in the order it was asked for', () => {
   assert.ok(at('dockFeed') < at('pickupFab'), 'Feed is not left of Save');
   assert.ok(at('dockChat') > at('pickupFab'), 'Chat is not right of Save');
   assert.ok(at('dockMusic') > at('dockChat'), 'Music is not right of Chat');
-  // Games was specified as left of Feed, back when it was in the dock. It is
-  // in the menu now, and Leaderboard takes the outside seat -- which is the
-  // only arrangement of the remaining five that satisfies everything above.
-  assert.strictEqual(ids.indexOf('dockGames'), -1, 'Games is back in the dock');
-  assert.ok(at('dockLeaderboard') < at('dockFeed'), 'Leaderboard is not on the outside');
+  assert.ok(at('dockGames') < at('dockFeed'), 'Games is not left of Feed');
+  assert.ok(at('dockLeaderboard') < at('dockGames'), 'Leaderboard is not on the outside');
   // Save centred is the dock's own job -- app.part6.js re-centres on it -- but
   // it cannot centre something that is not in the middle of the row.
   const left = at('pickupFab');
@@ -1405,32 +1436,30 @@ function withScroller(dom) {
   return calls;
 }
 
-test('pulling buttons out of the row re-measures the hints', () => {
+test('a row that changed re-measures the hints', () => {
   const dom = build({ open: 'feed' });
-  const holder = dom.document.getElementById('dockStash');
-  // Put them back where index.html had them, then run the pass again.
-  holder.children.slice().forEach((node) => dom.track.appendChild(node));
+  // A button arriving late is the live case: feed-first.js appends Feed and
+  // Map itself, and index.html's admin button only exists for some drivers.
+  const late = dom.document.createElement('button');
+  late.id = 'dockLateArrival';
+  dom.track.children.unshift(late);
+  late.parentNode = dom.track;
   const calls = withScroller(dom);
   dom.api.orderDock();
   assert.strictEqual(calls.hints, 1,
-    'the row lost six buttons and the chevrons were never told');
+    'the row changed width and the chevrons were never told');
 });
 
-test('a stash-only pass still reports, though the order never changed', () => {
-  /* The common case, and the one that was wrong: the five that are left are
-   * already in the right order, so the reorder is a no-op while the stash is
-   * not. Reporting only the reorder leaves the hints stale in exactly the
-   * situation they are stale in. */
-  const dom = build({ open: 'feed' });
-  const holder = dom.document.getElementById('dockStash');
-  const stashed = holder.children.slice();
-  assert.ok(stashed.length, 'nothing was stashed, so there is nothing to test');
-  // Back into the track, but AFTER the five, so DOCK_ORDER is already satisfied.
-  stashed.forEach((node) => dom.track.appendChild(node));
-  const calls = withScroller(dom);
-  dom.api.orderDock();
-  assert.strictEqual(dom.ids().length, 5, 'the six were not pulled back out');
-  assert.strictEqual(calls.hints, 1, 'a stash-only pass said nothing');
+test('the stash mechanism is intact, and holding nothing', () => {
+  /* Every button is in the row now, so nothing is held out -- but the holder
+   * and the code that fills it stay. app-shell.js opens a dock destination by
+   * calling .click() on its button, so a button that ever leaves the row again
+   * has to go somewhere a programmatic click still reaches. An empty list is
+   * not the same as a deleted mechanism, and this is the line that says so. */
+  assert.ok(/var DOCK_STASH = \[\s*\]/.test(SRC), 'DOCK_STASH is no longer empty');
+  assert.ok(/function stash\(\)/.test(SRC), 'the holder cannot be made any more');
+  assert.ok(/DOCK_STASH\.forEach/.test(codeOnly(SRC)),
+    'nothing would move a button out of the row even if the list had one');
 });
 
 test('an unchanged row says nothing at all', () => {

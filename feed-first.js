@@ -168,41 +168,54 @@
     return button;
   }
 
-  /* The dock is five buttons, and the menu is everything else.
+  /* The whole row is in the dock again, and the dock floats and swipes again.
    *
-   * They used to be the same eleven things twice over: every destination had a
-   * dock button AND a menu row, so the menu was a longer copy of the row below
-   * it and neither had a job of its own. Now the dock is what you touch while
-   * driving -- one thumb, no reading -- and the menu is what you set once and
-   * leave.
+   * It was cut to five -- Leaderboard, Feed, Save, Chat, Music -- with the
+   * other six moved to a hidden holder and reachable only from the menu. That
+   * is what took the dock's movement away, and the arithmetic says so plainly:
    *
-   * Asked for as: Save centred, Feed on its left, Chat on its right, Music
-   * right of Chat. With the other six gone there is exactly one arrangement
-   * that satisfies all of it, and Leaderboard takes the outside seat.
+   *   five buttons   56 x 4 + 70 + four 8px gaps  = 326px
+   *   eleven buttons 56 x 10 + 70 + ten 8px gaps  = 710px
    *
-   * Five across a 390px phone fits with room to spare, so app.part6.js's
-   * scroll hints -- the two red chevrons at the ends -- stop showing
-   * themselves: it only reveals them when the track actually overflows.
+   * .dockTrack is `width: max-content; min-width: 100%`, so it never squeezes
+   * anything -- it simply stretches to fill when the content is narrower than
+   * the viewport. At 326px it fits inside every phone made, so the track never
+   * overflowed, #dockViewport never had anything to scroll, the edge mask
+   * never faded anything at the ends, and app.part6.js's re-centre on Save had
+   * nowhere to travel to. A strip of icons you swipe through, floating over
+   * the map past both edges, became five buttons parked in the middle of a
+   * band. Reported as: the dock does not float and move sideways.
+   *
+   * At 710px it runs off both ends of any phone again, which is what makes it
+   * float: the mask fades it out at the edges instead of stopping it, and the
+   * row is longer than the window it is drawn in.
+   *
+   * Nothing is taken away from the menu to do this. The menu keeps every row
+   * it has -- Map, Colours, Modes, Profile, Post, Games, Admin -- so anything
+   * reachable this morning is still reachable, and now reachable two ways.
+   *
+   * The order is the one that was asked for: Save centred, Feed on its left,
+   * Games left of Feed, Chat on its right, Music right of Chat, Leaderboard
+   * out towards the edge. Five each side of Save so the re-centre lands it in
+   * the middle of the window.
    *
    * The order lives here rather than in index.html because two of these
    * buttons do not exist until this file makes them. */
   var DOCK_ORDER = [
-    "dockLeaderboard", "dockFeed",
+    "dockModes", "dockColors", "dockLeaderboard", "dockGames", "dockFeed",
     "pickupFab",
-    "dockChat", "dockMusic",
+    "dockChat", "dockMusic", "dockMap", "dockProfile", "dockAdmin",
   ];
 
-  /* The six that left, and where they go.
+  /* Nothing is stashed any more.
    *
-   * NOT deleted, and not display:none either. app-shell.js opens a dock-backed
-   * destination by finding its button and calling .click() on it -- the button
-   * IS the API -- so deleting these nodes would make Colours, Modes, Games,
-   * Profile and Admin unreachable from the menu that now owns them. They move
-   * to a hidden holder instead, where a programmatic click still fires every
-   * handler bound to them. */
-  var DOCK_STASH = [
-    "dockColors", "dockModes", "dockMap", "dockGames", "dockProfile", "dockAdmin",
-  ];
+   * The holder itself stays, and so does the code that fills it. app-shell.js
+   * opens a dock-backed destination by finding its button and calling .click()
+   * on it -- the button IS the API -- so if a button ever does leave the row
+   * again it has to go somewhere a programmatic click still reaches, not be
+   * deleted. An empty list means every button stays in the row; it does not
+   * mean the mechanism is gone. */
+  var DOCK_STASH = [];
 
   function stash() {
     var holder = byId("dockStash");
