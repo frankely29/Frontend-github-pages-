@@ -77,30 +77,66 @@
       .levelUpTitle{font-size:24px;font-weight:900;line-height:1.04;color:#fff}
       .levelUpSub{font-size:15px;font-weight:800;color:#c7d2fe}
       .levelUpXp{font-size:13px;font-weight:800;color:#93c5fd}
-      .pickupProgressReward{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom, 0px) + var(--pickup-reward-bottom, 240px));width:min(320px,calc(100vw - 22px));transform:translate(-50%,26px) scale(.9);opacity:0;z-index:9802;pointer-events:none;display:block;color:#e2e8f0;transition:opacity .42s ease,transform .42s cubic-bezier(.16,.82,.24,1.18);text-shadow:0 4px 20px rgba(2,6,23,.62),0 1px 1px rgba(2,6,23,.45)}
-      .pickupProgressRewardCard{position:relative;overflow:hidden;border-radius:22px;padding:14px 14px 13px;background:linear-gradient(160deg,rgba(2,6,23,.94) 0%,rgba(15,23,42,.92) 50%,rgba(30,64,175,.44) 100%);border:1px solid rgba(125,211,252,.34);box-shadow:0 20px 46px rgba(2,6,23,.56),0 0 34px rgba(56,189,248,.28),inset 0 1px 0 rgba(255,255,255,.1);display:flex;flex-direction:column;align-items:center;gap:7px}
-      .pickupProgressRewardCard::before{content:'';position:absolute;inset:-24% -12% auto -12%;height:86%;background:radial-gradient(circle at top,rgba(125,211,252,.28) 0%,rgba(56,189,248,0) 65%);opacity:.7;pointer-events:none}
+      /* The Trip Saved card. Same shape as it has always had -- kicker,
+         medallion, XP, level, rank, bar, footer -- rebuilt so the moment
+         lands.
+
+         THE FONT. Nothing in this app sets font-family on body: every other
+         surface declares its own font shorthand and this card never did.
+         So the one moment a driver is being congratulated rendered in the
+         browser's default serif -- Times on iOS -- while the feed six pixels
+         below it was in the system sans. That alone is most of why it read as
+         cheap. Declared here on the root so every child inherits it.
+
+         THE TRANSPARENCY. The old gradient's last stop was rgba(30,64,175,.44):
+         the bottom of the card was 56% see-through, so Level, rank and the
+         footer sat on a milky wash of whatever was behind -- usually the feed
+         sheet, since the card straddles its top edge. A reward you can see the
+         feed through is not an object, it is a smear. Opaque now, and the
+         numbers have a ground to sit on. */
+      .pickupProgressReward{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom, 0px) + var(--pickup-reward-bottom, 240px));width:min(320px,calc(100vw - 22px));transform:translate(-50%,26px) scale(.9);opacity:0;z-index:9802;pointer-events:none;display:block;color:#e2e8f0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;-webkit-font-smoothing:antialiased;transition:opacity .42s ease,transform .42s cubic-bezier(.16,.82,.24,1.18)}
+      .pickupProgressRewardCard{position:relative;overflow:hidden;border-radius:24px;padding:17px 16px 15px;background:linear-gradient(168deg,#111c33 0%,#0c1424 52%,#0a1a2e 100%);border:1px solid rgba(125,211,252,.30);box-shadow:0 26px 60px rgba(2,6,23,.62),0 0 0 1px rgba(2,6,23,.55),0 0 40px rgba(56,189,248,.20),inset 0 1px 0 rgba(255,255,255,.12);display:flex;flex-direction:column;align-items:center;gap:7px}
+      .pickupProgressRewardCard::before{content:'';position:absolute;inset:-24% -12% auto -12%;height:86%;background:radial-gradient(circle at top,rgba(125,211,252,.30) 0%,rgba(56,189,248,0) 65%);opacity:.75;pointer-events:none}
+      /* One pass of light across the card as it arrives. The cheapest thing
+         that reads as "something just happened" rather than "a panel opened". */
+      .pickupProgressRewardCard::after{content:'';position:absolute;top:0;bottom:0;left:-60%;width:45%;pointer-events:none;background:linear-gradient(100deg,rgba(255,255,255,0) 0%,rgba(255,255,255,.16) 50%,rgba(255,255,255,0) 100%);opacity:0}
+      .pickupProgressReward.show .pickupProgressRewardCard::after{animation:pickupProgressRewardSheen .9s cubic-bezier(.3,.7,.3,1) .18s both}
       .pickupProgressReward.show{opacity:1;transform:translate(-50%,0) scale(1)}
-      .pickupProgressRewardKicker,.pickupProgressRewardXp,.pickupProgressRewardLevel,.pickupProgressRewardRank,.pickupProgressRewardFoot{opacity:0;transform:translateY(7px);transition:opacity .24s ease,transform .24s ease}
+      .pickupProgressRewardKicker,.pickupProgressRewardLevel,.pickupProgressRewardRank,.pickupProgressRewardFoot{opacity:0;transform:translateY(7px);transition:opacity .24s ease,transform .24s ease}
       .pickupProgressReward.show .pickupProgressRewardKicker{opacity:1;transform:translateY(0);transition-delay:.05s}
-      .pickupProgressReward.show .pickupProgressRewardXp{opacity:1;transform:translateY(0);transition-delay:.11s}
       .pickupProgressReward.show .pickupProgressRewardLevel,.pickupProgressReward.show .pickupProgressRewardRank{opacity:1;transform:translateY(0);transition-delay:.18s}
       .pickupProgressReward.show .pickupProgressRewardFoot{opacity:1;transform:translateY(0);transition-delay:.25s}
-      .pickupProgressRewardKicker{font-size:12px;font-weight:900;letter-spacing:1px;text-transform:uppercase;color:#dbeafe}
-      .pickupProgressRewardXp{font-size:16px;font-weight:900;line-height:1;color:#67e8f9}
+      .pickupProgressRewardKicker{font-size:11px;font-weight:800;letter-spacing:1.6px;text-transform:uppercase;color:#7ce8b0}
+      /* The XP is the reward, so it is the biggest thing on the card and it
+         is the one element that moves on its own: it counts up from zero and
+         overshoots once. A number that is simply printed has already
+         happened; a number that climbs is happening. */
+      .pickupProgressRewardXp{font-size:38px;font-weight:900;line-height:1;letter-spacing:-.02em;color:#6fe8a8;opacity:0;font-variant-numeric:tabular-nums}
+      .pickupProgressReward.show .pickupProgressRewardXp{animation:pickupProgressRewardXpPop .52s cubic-bezier(.2,.9,.24,1.3) .1s both}
       .pickupProgressRewardIcon{position:relative;display:grid;place-items:center;opacity:0;transform:scale(.74)}
       .pickupProgressReward.show .pickupProgressRewardIcon{opacity:1;animation:pickupProgressRewardIconPop .62s cubic-bezier(.2,.8,.2,1) .1s both}
       .pickupProgressRewardIcon::before{content:'';position:absolute;inset:-13px;border-radius:999px;background:radial-gradient(circle,rgba(110,231,255,.5) 0%,rgba(56,189,248,.24) 46%,rgba(56,189,248,0) 72%);filter:blur(1px);opacity:0;transform:scale(.58)}
       .pickupProgressReward.show .pickupProgressRewardIcon::before{animation:pickupProgressRewardGlow .76s ease-out .14s both}
-      .pickupProgressReward .rankBadgeIconWrap{width:70px;height:70px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.44),0 0 0 1px rgba(15,23,42,.2),0 14px 30px rgba(2,6,23,.52),0 0 26px rgba(56,189,248,.35)}
-      .pickupProgressReward .rankBadgeIconWrap svg{width:40px;height:40px}
-      .pickupProgressRewardLevel{font-size:22px;font-weight:900;line-height:1.08;color:#fff}
-      .pickupProgressRewardRank{margin-top:-1px;font-size:16px;font-weight:800;line-height:1.18;color:#bfdbfe;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-      .pickupProgressRewardBar{width:min(248px,100%);height:9px;border-radius:999px;background:rgba(148,163,184,.3);box-shadow:0 0 0 1px rgba(148,163,184,.25),0 0 16px rgba(59,130,246,.3);overflow:hidden}
-      .pickupProgressRewardFill{height:100%;width:0;background:linear-gradient(90deg,#22d3ee 0%,#3b82f6 56%,#22c55e 100%);border-radius:999px;transition:width .62s cubic-bezier(.2,.84,.2,1);transition-delay:.2s}
-      .pickupProgressRewardFoot{font-size:12px;line-height:1.22;font-weight:800;color:#dbeafe;text-align:center}
+      /* The medallion was a grey disc with a grey ring, which is what a
+         disabled control looks like. Warm ring, warm rim light: an earned
+         thing rather than a switched-off one. */
+      .pickupProgressReward .rankBadgeIconWrap{width:64px;height:64px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.5),0 0 0 2px rgba(240,168,40,.55),0 0 0 6px rgba(240,168,40,.14),0 14px 30px rgba(2,6,23,.55),0 0 26px rgba(240,168,40,.22)}
+      .pickupProgressReward .rankBadgeIconWrap svg{width:36px;height:36px}
+      .pickupProgressRewardLevel{font-size:23px;font-weight:900;line-height:1.08;color:#fff;letter-spacing:-.01em}
+      .pickupProgressRewardRank{margin-top:-2px;font-size:14px;font-weight:700;line-height:1.18;color:#93a7c4;letter-spacing:.02em;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .pickupProgressRewardBar{position:relative;width:min(248px,100%);height:10px;border-radius:999px;background:rgba(148,163,184,.22);box-shadow:inset 0 0 0 1px rgba(148,163,184,.22);overflow:hidden;margin-top:3px}
+      /* Two fills, one behind the other. The back one is where the driver
+         already was; the front one is where this trip just put them, and it
+         is the only part that grows. The bar used to run 0 -> total, which
+         animates the whole level and shows the trip's contribution nowhere.
+         Now the gain is the thing that moves, and it is lit. */
+      .pickupProgressRewardBase{position:absolute;top:0;bottom:0;left:0;width:0;border-radius:999px;background:linear-gradient(90deg,#1d6fa8,#2a8fd0);opacity:.9}
+      .pickupProgressRewardFill{position:absolute;top:0;bottom:0;left:0;width:0;background:linear-gradient(90deg,#22d3ee 0%,#4ade80 100%);border-radius:999px;box-shadow:0 0 14px rgba(74,222,128,.6);transition:width .72s cubic-bezier(.2,.84,.2,1);transition-delay:.26s}
+      .pickupProgressRewardFoot{font-size:12px;line-height:1.22;font-weight:700;color:#8fa3c0;text-align:center}
       @keyframes pickupProgressRewardIconPop{0%{transform:scale(.68)}40%{transform:scale(1.18)}100%{transform:scale(1)}}
       @keyframes pickupProgressRewardGlow{0%{opacity:0;transform:scale(.5)}34%{opacity:1;transform:scale(1.04)}100%{opacity:0;transform:scale(1.3)}}
+      @keyframes pickupProgressRewardXpPop{0%{opacity:0;transform:scale(.6)}55%{opacity:1;transform:scale(1.14)}100%{opacity:1;transform:scale(1)}}
+      @keyframes pickupProgressRewardSheen{0%{opacity:0;transform:translateX(0) skewX(-14deg)}22%{opacity:1}100%{opacity:0;transform:translateX(420px) skewX(-14deg)}}
       @keyframes levelUpOverlayBurst{0%{opacity:0;transform:scale(.82)}38%{opacity:1;transform:scale(1.02)}100%{opacity:0;transform:scale(1.24)}}
       .driverProfileClose{border:0;background:#e5e7eb;color:#111827;border-radius:10px;padding:7px 9px;font-size:13px}
       .driverProfileScroll{overflow:auto;-webkit-overflow-scrolling:touch;padding:0 10px 6px;min-height:0}
@@ -615,12 +651,77 @@
       <div class="pickupProgressRewardXp" id="pickupProgressRewardXp"></div>
       <div class="pickupProgressRewardLevel" id="pickupProgressRewardLevel"></div>
       <div class="pickupProgressRewardRank" id="pickupProgressRewardRank"></div>
-      <div class="pickupProgressRewardBar"><div class="pickupProgressRewardFill" id="pickupProgressRewardFill"></div></div>
+      <div class="pickupProgressRewardBar"><div class="pickupProgressRewardBase" id="pickupProgressRewardBase"></div><div class="pickupProgressRewardFill" id="pickupProgressRewardFill"></div></div>
       <div class="pickupProgressRewardFoot" id="pickupProgressRewardFoot"></div>
     </div>`;
     document.body.appendChild(el);
     updatePickupRewardLayout();
     return el;
+  }
+
+  /* How far along the level the driver was BEFORE this trip.
+   *
+   * The bar used to run 0 -> total every time, which animates the whole level
+   * and shows the trip's own contribution precisely nowhere: a driver who
+   * earned 20 XP watched the same sweep as one who earned 200. The gain is
+   * the reward, so the gain is what should move. */
+  function computePreviousRatio(progression = {}, xpAwarded = 0) {
+    const now = computeProgressRatio(progression);
+    const gained = Number(xpAwarded);
+    const currentLevelXp = Number(progression?.current_level_xp);
+    const nextLevelXp = Number(progression?.next_level_xp);
+    if (!Number.isFinite(gained) || gained <= 0) return now;
+    if (!Number.isFinite(currentLevelXp) || !Number.isFinite(nextLevelXp)) return now;
+    const span = nextLevelXp - currentLevelXp;
+    if (!(span > 0)) return now;
+    // Clamped at zero: a trip that crossed a level leaves a negative
+    // difference, and the honest answer there is "you started this level
+    // empty", not a bar that runs backwards off the left edge.
+    return Math.max(0, Math.min(now, now - (gained / span)));
+  }
+
+  /* The number climbs instead of appearing. A printed number has already
+   * happened; a climbing one is happening, and that is most of the felt
+   * difference between a receipt and a reward. Short enough -- about half a
+   * second -- that nobody waiting to drive off is kept waiting. */
+  function countUpReward(el, to) {
+    if (!el) return;
+    const target = Number(to);
+    const finish = () => {
+      el.textContent = `+${formatProgressNumber(Number.isFinite(target) && target > 0 ? target : 0, { maxFractionDigits: 0 })} XP`;
+    };
+    if (countUpReward._raf && typeof window.cancelAnimationFrame === 'function') {
+      window.cancelAnimationFrame(countUpReward._raf);
+      countUpReward._raf = 0;
+    }
+    if (!Number.isFinite(target) || target <= 0
+      || typeof window.requestAnimationFrame !== 'function'
+      || typeof window.performance?.now !== 'function') {
+      finish();
+      return;
+    }
+    // Anyone who has asked the system not to animate gets the final number.
+    try {
+      if (window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) {
+        finish();
+        return;
+      }
+    } catch (_) {}
+    const DURATION = 520;
+    const started = window.performance.now();
+    const step = (now) => {
+      const t = Math.min(1, (now - started) / DURATION);
+      const eased = 1 - Math.pow(1 - t, 3);
+      el.textContent = `+${formatProgressNumber(Math.round(target * eased), { maxFractionDigits: 0 })} XP`;
+      if (t < 1) {
+        countUpReward._raf = window.requestAnimationFrame(step);
+        return;
+      }
+      countUpReward._raf = 0;
+      finish();
+    };
+    el.textContent = '+0 XP';
+    countUpReward._raf = window.requestAnimationFrame(step);
   }
 
   function computeProgressRatio(progression = {}) {
@@ -670,6 +771,7 @@
     const levelEl = document.getElementById('pickupProgressRewardLevel');
     const rankEl = document.getElementById('pickupProgressRewardRank');
     const fillEl = document.getElementById('pickupProgressRewardFill');
+    const baseEl = document.getElementById('pickupProgressRewardBase');
     const footEl = document.getElementById('pickupProgressRewardFoot');
     if (!kickerEl || !iconEl || !xpEl || !levelEl || !rankEl || !fillEl || !footEl) return false;
     const show = (node, on) => { node.style.display = on ? '' : 'none'; };
@@ -678,7 +780,6 @@
     xpEl.textContent = earnedLabel;
     levelEl.textContent = `Level ${safeLevel}`;
     rankEl.textContent = String(rankName || 'Rookie');
-    fillEl.style.width = '0%';
     footEl.textContent = footer;
     show(xpEl, hasXp);
     show(levelEl, hasLevel);
@@ -686,11 +787,20 @@
     show(iconEl, hasLevel);
     show(fillEl.parentNode, hasLevel);
     show(footEl, hasLevel);
+
+    /* The bar in two pieces: where the driver already was, drawn at once and
+     * still, and what this trip added, growing out of its right edge. */
+    const prevPct = computePreviousRatio(progression, hasXp ? xpAwarded : 0);
+    const startLeft = `${Math.round(prevPct * 100)}%`;
+    if (baseEl) baseEl.style.width = startLeft;
+    fillEl.style.left = startLeft;
+    fillEl.style.width = '0%';
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => {
-        fillEl.style.width = `${Math.round(pct * 100)}%`;
+        fillEl.style.width = `${Math.max(0, Math.round((pct - prevPct) * 100))}%`;
       });
     });
+    countUpReward(xpEl, hasXp ? xpAwarded : 0);
     return true;
   }
 
