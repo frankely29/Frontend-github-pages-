@@ -1,0 +1,179 @@
+#!/usr/bin/env node
+/**
+ * rank-badges.test.js — the 100-rank ladder.
+ *
+ * The badge system was always built for a hundred: the backend sends
+ * band_1..band_100 and the frontend splits that into ten frames by ten marks.
+ * What was wrong was the art. The colour came from
+ *
+ *     hue = ((band - 1) * 17) % 360
+ *
+ * a rainbow that cycles five times across the ladder, so band 90 was no more
+ * impressive than band 10 -- just a different hue. And every tier carried the
+ * same amount of stuff, so there was nothing to climb toward.
+ *
+ * Now each tier adds a PART and keeps everything below it: a bar, studs, a
+ * laurel, wings, a gem, spikes, a crown, rays, a halo. The tests that matter
+ * are the ones about that climb, because it is the thing a driver feels and
+ * the first thing a later edit would flatten without noticing.
+ */
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+const vm = require('vm');
+
+const SOURCE = fs.readFileSync(
+  path.join(__dirname, '..', 'app.part5.js'), 'utf8');
+
+/** The badge tables and their renderer, lifted out of the one big IIFE. */
+function load() {
+  const from = SOURCE.indexOf('var RANK_TIERS = [');
+  assert.ok(from > -1, 'the tier table is gone from app.part5.js');
+  const head = SOURCE.indexOf('function rankBadgeSvg(', from);
+  assert.ok(head > -1, 'the badge renderer is gone');
+  let depth = 0;
+  let i = SOURCE.indexOf('{', SOURCE.indexOf(')', head));
+  for (; i < SOURCE.length; i += 1) {
+    if (SOURCE[i] === '{') depth += 1;
+    else if (SOURCE[i] === '}') {
+      depth -= 1;
+      if (!depth) break;
+    }
+  }
+  const context = vm.createContext({ Math, Number, String });
+  vm.runInContext(`${SOURCE.slice(from, i + 1)}
+    globalThis.svg = rankBadgeSvg;
+    globalThis.tiers = RANK_TIERS;
+    globalThis.parts = PARTS;
+    globalThis.glyphs = RANK_GLYPHS;`, context, { filename: 'app.part5.js#badges' });
+  return context;
+}
+
+const tests = [];
+const test = (n, f) => tests.push([n, f]);
+
+test('there are a hundred of them, and no two are the same', () => {
+  const ctx = load();
+  const seen = new Map();
+  for (let band = 1; band <= 100; band += 1) {
+    const svg = ctx.svg(band, 68);
+    assert.ok(svg.startsWith('<svg'), `band ${band} did not render`);
+    // The gradient ids carry the band, so compare the drawing without them.
+    const shape = svg.replace(new RegExp(`rb${band}\\b`, 'g'), 'ID');
+    assert.ok(!seen.has(shape),
+      `band ${band} draws exactly the same badge as band ${seen.get(shape)}`);
+    seen.set(shape, band);
+  }
+  assert.strictEqual(seen.size, 100);
+});
+
+test('the ladder gains a part at every tier and never loses one', () => {
+  /* The whole ask was "higher levels should look better". Better here is not a
+   * hue -- it is more on the badge. Each tier's part list must contain every
+   * part of the tier below it, plus at least one more. */
+  const { tiers } = load();
+  assert.strictEqual(tiers.length, 10, 'there are no longer ten tiers');
+  for (let t = 1; t < tiers.length; t += 1) {
+    const below = tiers[t - 1].parts;
+    const here = tiers[t].parts;
+    below.forEach((p) => {
+      assert.ok(here.includes(p),
+        `${tiers[t].name} dropped "${p}", which ${tiers[t - 1].name} has`);
+    });
+    assert.ok(here.length > below.length,
+      `${tiers[t].name} adds nothing over ${tiers[t - 1].name}`);
+  }
+});
+
+test('every part a tier asks for is a part that exists', () => {
+  // A typo in a tier's list would silently draw nothing at all.
+  const { tiers, parts } = load();
+  tiers.forEach((tier) => {
+    tier.parts.forEach((p) => {
+      assert.ok(parts[p], `${tier.name} wants "${p}", which is not drawn`);
+    });
+  });
+});
+
+test('the light climbs too, and only the upper half has any', () => {
+  const { tiers } = load();
+  const lit = tiers.filter((t) => t.glow);
+  assert.ok(lit.length >= 5 && lit.length <= 6,
+    `${lit.length} tiers glow; the bottom of the ladder should not`);
+  tiers.slice(0, 4).forEach((t) => {
+    assert.strictEqual(t.glow, null, `${t.name} glows, and it is a low tier`);
+  });
+  for (let i = 1; i < lit.length; i += 1) {
+    assert.ok(lit[i].glowStop > lit[i - 1].glowStop,
+      `${lit[i].name} throws no more light than ${lit[i - 1].name}`);
+  }
+});
+
+test('the rainbow is gone', () => {
+  /* The old colour was ((band - 1) * 17) % 360 fed to hsl(), which is why a
+   * driver's rank colour meant nothing. Nothing should compute a hue from a
+   * band again. */
+  assert.ok(!/\(band - 1\) \* 17/.test(SOURCE), 'the cycling hue is back');
+  const from = SOURCE.indexOf('var RANK_TIERS = [');
+  const badges = SOURCE.slice(from, SOURCE.indexOf('function renderRankBadgeIcon'));
+  assert.ok(!/hsl\(/.test(badges), 'a badge colour is being computed, not chosen');
+});
+
+test('a tier is ten bands wide, and the mark cycles inside it', () => {
+  const ctx = load();
+  const markOf = (band) => {
+    const svg = ctx.svg(band, 68);
+    const m = svg.match(/scale\(\.42\) translate\(-24,-24\)"><path d="([^"]+)"/);
+    assert.ok(m, `band ${band} drew no mark`);
+    return m[1];
+  };
+  // Same position in two different tiers: same mark, different metal.
+  assert.strictEqual(markOf(3), markOf(93), 'the mark does not cycle');
+  assert.notStrictEqual(markOf(3), markOf(4), 'two bands in a tier share a mark');
+  const metal = (band) => ctx.svg(band, 68).match(/stop-color="(#[0-9a-f]{6})"/i)[1];
+  assert.notStrictEqual(metal(3), metal(93), 'two tiers share a metal');
+  assert.strictEqual(metal(3), metal(9), 'one tier uses two metals');
+});
+
+test('an out of range band still draws something', () => {
+  // rank_icon_key comes from the backend. A band of 0, 9999 or nonsense must
+  // not produce an empty medal on a driver's reward card.
+  const ctx = load();
+  [0, -4, 101, 9999, NaN, undefined].forEach((band) => {
+    const svg = ctx.svg(band, 68);
+    assert.ok(svg.startsWith('<svg') && svg.includes('<path'),
+      `band ${band} drew nothing`);
+  });
+});
+
+test('the wrapper every other screen looks for is unchanged', () => {
+  /* The reward card, the profile and the leaderboard all style
+   * .rankBadgeIconWrap and some read data-rank-band. The art changed; the
+   * handle it hangs on did not. */
+  const render = SOURCE.slice(SOURCE.indexOf('function renderRankBadgeIcon'));
+  assert.ok(/class="rankBadgeIconWrap \$\{toneClass\}/.test(render),
+    'the wrapper class or its tone is gone');
+  assert.ok(/data-rank-band="\$\{band\}"/.test(render), 'the band attribute is gone');
+  assert.ok(/compact \? 54 : 68/.test(render), 'the compact size is gone');
+});
+
+test('ten marks, and none of them repeat', () => {
+  const { glyphs } = load();
+  assert.strictEqual(glyphs.length, 10, 'there are no longer ten marks');
+  assert.strictEqual(new Set(glyphs).size, 10, 'two marks are the same path');
+});
+
+// --------------------------------------------------------------------------
+let failed = 0;
+tests.forEach(([name, fn]) => {
+  try {
+    fn();
+    console.log(`  ok   ${name}`);
+  } catch (err) {
+    failed += 1;
+    console.log(`  FAIL ${name}`);
+    console.log(`       ${err.message.split('\n')[0]}`);
+  }
+});
+console.log(failed ? `\n${failed} failed` : `\nall ${tests.length} passed`);
+process.exit(failed ? 1 : 0);

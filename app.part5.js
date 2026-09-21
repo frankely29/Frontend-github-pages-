@@ -119,7 +119,10 @@
          bottom, and a hard rim. renderRankBadgeIcon paints a tone class in
          here, so every colour it sets is overridden -- the medal is the
          medal whatever rank a driver holds. */
-      .pickupProgressReward .rankBadgeIconWrap{width:68px!important;height:68px!important;border-radius:999px;background:linear-gradient(180deg,#f0d49a 0%,#c39a4e 52%,#8f6c2c 100%)!important;color:#3a2a08!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.75),inset 0 -2px 3px rgba(74,52,10,.5),0 0 0 1px rgba(122,92,38,.9),0 10px 24px rgba(2,6,23,.55)!important}
+      /* The coin is struck in the driver's OWN metal. --rank-lo/mid/dk/ring come
+         off the badge markup, one set per tier, with gold as the fallback for
+         anything that renders this wrapper without them. */
+      .pickupProgressReward .rankBadgeIconWrap{width:68px!important;height:68px!important;border-radius:999px;background:linear-gradient(180deg,var(--rank-lo,#f0d49a) 0%,var(--rank-mid,#c39a4e) 52%,var(--rank-dk,#8f6c2c) 100%)!important;color:#3a2a08!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.55),inset 0 -2px 3px rgba(0,0,0,.35),0 0 0 1px var(--rank-ring,#7a5c26),0 10px 24px rgba(2,6,23,.55)!important}
       .pickupProgressReward .rankBadgeIconWrap svg{width:34px;height:34px}
       .pickupProgressRewardMeta{margin-top:18px;display:flex;align-items:baseline;justify-content:space-between;gap:12px}
       .pickupProgressRewardLevel{font-size:14px;font-weight:700;line-height:1;color:#e7ebf3;letter-spacing:0}
@@ -313,64 +316,197 @@
     return 'toneRecruit';
   }
 
-  function buildRankBadgeShell(shellIndex) {
-    const shells = [
-      '<path d="M24 4L42 12v12c0 12-8.4 18.8-18 22C14.4 42.8 6 36 6 24V12z" />',
-      '<path d="M24 4l16 10v12L24 44 8 26V14z" />',
-      '<path d="M24 3l17 8 4 17-11 14H14L3 28l4-17z" />',
-      '<circle cx="24" cy="24" r="18" />',
-      '<path d="M24 4l18 16-18 24L6 20z" />',
-      '<path d="M12 8h24l10 12-10 20H12L2 20z" />',
-      '<path d="M24 5c11 0 18 7 18 16 0 12-9 20-18 23C15 41 6 33 6 21 6 12 13 5 24 5z" />',
-      '<path d="M24 3l19 14-7 25H12L5 17z" />',
-      '<path d="M10 10h28l6 14-6 14H10L4 24z" />',
-      '<rect x="7" y="7" width="34" height="34" rx="11" ry="11" />',
-    ];
-    return shells[((shellIndex % shells.length) + shells.length) % shells.length];
+  /* The 100-rank badge ladder.
+   *
+   * band 1..100 -> tier = floor((band-1)/10)  (the metal and what is on it)
+   *             -> mark = (band-1)%10         (the mark inside it)
+   *
+   * The first cut escalated only in COLOUR: a bronze shield and a mythic star
+   * carried the same amount of stuff, so rank 95 was rank 5 in purple. A ladder
+   * has to accumulate. Each tier here adds a PART and keeps everything the tiers
+   * below it had -- wings at 5, a gem at 6, a crown at 8, rays at 9, the lot at
+   * 10 -- so the silhouette alone gets busier all the way up, before a single
+   * colour is read.
+   */
+  var RANK_TIERS = [
+    { name: 'Bronze',   lo: '#f0c49a', mid: '#b4753c', dk: '#5e3212', rim: '#ffe0c2', ring: '#8a5522',
+      body: 'shield', parts: [],                                       glow: null,      glowStop: 0 },
+    { name: 'Iron',     lo: '#e3e9f1', mid: '#8b96a5', dk: '#414a57', rim: '#f6f9fd', ring: '#6b7683',
+      body: 'shield', parts: ['bar'],                                  glow: null,      glowStop: 0 },
+    { name: 'Steel',    lo: '#dcefff', mid: '#7796b0', dk: '#33485c', rim: '#f0f9ff', ring: '#54708a',
+      body: 'shield', parts: ['bar', 'studs'],                         glow: null,      glowStop: 0 },
+    { name: 'Silver',   lo: '#ffffff', mid: '#c2ccda', dk: '#6e7885', rim: '#ffffff', ring: '#98a2b0',
+      body: 'shield', parts: ['bar', 'studs', 'laurel'],               glow: null,      glowStop: 0 },
+    { name: 'Gold',     lo: '#fff2c4', mid: '#dfa62b', dk: '#7d5409', rim: '#fffbe6', ring: '#b8861c',
+      body: 'shield', parts: ['bar', 'studs', 'laurel', 'wings'],      glow: '#ffd76a', glowStop: 0.26 },
+    { name: 'Platinum', lo: '#f2ffff', mid: '#9dcedd', dk: '#4a707f', rim: '#ffffff', ring: '#7fb2c4',
+      body: 'crest',  parts: ['bar', 'studs', 'laurel', 'wings', 'gem'], glow: '#8ee9ff', glowStop: 0.32 },
+    { name: 'Sapphire', lo: '#d6e8ff', mid: '#3f77d8', dk: '#122a6e', rim: '#eaf3ff', ring: '#2a55ad',
+      body: 'crest',  parts: ['bar', 'studs', 'laurel', 'wings', 'gem', 'spikes'], glow: '#6aa6ff', glowStop: 0.38 },
+    { name: 'Emerald',  lo: '#d2ffe6', mid: '#1ea45c', dk: '#074a2a', rim: '#e9fff3', ring: '#158a4c',
+      body: 'crest',  parts: ['bar', 'studs', 'laurel', 'wings', 'gem', 'spikes', 'crown'], glow: '#49f59a', glowStop: 0.45 },
+    { name: 'Crimson',  lo: '#ffd6c8', mid: '#d93c22', dk: '#6d1105', rim: '#ffe9e0', ring: '#a82a15',
+      body: 'crest',  parts: ['bar', 'studs', 'laurel', 'wings', 'gem', 'spikes', 'crown', 'rays'], glow: '#ff7a52', glowStop: 0.52 },
+    { name: 'Mythic',   lo: '#ffffff', mid: '#b06cf0', dk: '#2b1050', rim: '#ffffff', ring: '#7d3fd0',
+      body: 'crest',  parts: ['bar', 'studs', 'laurel', 'wings', 'gem', 'spikes', 'crown', 'rays', 'halo'], glow: '#d08bff', glowStop: 0.60 },
+  ];
+
+  /* Two bodies only. The parts do the escalating, so a third body would just be
+     one more silhouette to keep distinct from the other two at 34px. */
+  var BODIES = {
+    shield: 'M24 9l12 4.2v10c0 8-5.6 13.4-12 16.2-6.4-2.8-12-8.2-12-16.2v-10z',
+    crest:  'M24 8.5l12 4.2 1.8 10.2-4.6 11.2L24 40l-9.2-5.9-4.6-11.2L12 12.7z',
+  };
+
+  /* Drawn behind or in front of the body. Each is one path, so a tier's list
+     maps straight onto draw order with no z-index table to keep in step. */
+  var PARTS = {
+    halo:   'M24 2.6A21.4 21.4 0 1 1 2.6 24 21.4 21.4 0 0 1 24 2.6zm0 2.2A19.2 19.2 0 1 0 43.2 24 19.2 19.2 0 0 0 24 4.8z',
+    rays:   'M24 0l2 6.5h-4zM24 48l-2-6.5h4zM0 24l6.5-2v4zM48 24l-6.5 2v-4zM7 7l5.6 3.6-2.8 2.8zM41 41l-5.6-3.6 2.8-2.8zM41 7l-3.6 5.6-2.8-2.8zM7 41l3.6-5.6 2.8 2.8zM35.8 1.4l-1 6.8-3.4-1.6zM12.2 46.6l1-6.8 3.4 1.6zM46.6 35.8l-6.8-1 1.6-3.4zM1.4 12.2l6.8 1-1.6 3.4z',
+    wings:  'M12.5 19.5C8.5 16 5 14.6.8 15c2.9 1.7 4.2 3.8 4.4 6.1-2.1.3-3.8 1.2-5 2.5 3.3.2 5.8 1 7.7 2.4-1 .9-1.8 2-2.1 3.3 3-.8 5.3-1.9 7-3.4zM35.5 19.5C39.5 16 43 14.6 47.2 15c-2.9 1.7-4.2 3.8-4.4 6.1 2.1.3 3.8 1.2 5 2.5-3.3.2-5.8 1-7.7 2.4 1 .9 1.8 2 2.1 3.3-3-.8-5.3-1.9-7-3.4z',
+    laurel: 'M10.6 16.8c-3.4 5.4-2.6 12.8 1.8 17.2l1.8-2.6c-3.4-3.6-4-8.8-1.8-12.8zM37.4 16.8c3.4 5.4 2.6 12.8-1.8 17.2l-1.8-2.6c3.4-3.6 4-8.8 1.8-12.8z',
+    spikes: 'M24 1.6l1.7 5.2h-3.4zM44 12.6l-1.3 5.2-2.5-2.4zM4 12.6l1.3 5.2 2.5-2.4zM44 35.4l-5.2-1.5 1.9-2.1zM4 35.4l5.2-1.5-1.9-2.1z',
+    crown:  'M14.6 9.8l3.8 3.4L24 7l5.6 6.2 3.8-3.4-1.5 6.2H16.1z',
+    bar:    'M13.5 40.8h21v3H13.5z',
+    studs:  'M16 15.6a1.4 1.4 0 1 0 0 2.8 1.4 1.4 0 0 0 0-2.8zM32 15.6a1.4 1.4 0 1 0 0 2.8 1.4 1.4 0 0 0 0-2.8z',
+    gem:    'M24 9.6l2.8 2.9-2.8 2.9-2.8-2.9z',
+  };
+
+  /* Ten marks.
+   *
+   * Four of these started as animals -- eagle, lion, dragon, phoenix -- and all
+   * four collapsed into the same spiky blob at the size this actually renders
+   * inside the frame. The reference art everyone pictures is drawn for a 200px
+   * menu tile. So the two creature silhouettes that survive (wolf, bull) stay,
+   * and the rest are marks that cannot be mistaken for each other at any size.
+   * A mark a driver can name beats a portrait they cannot. */
+  var RANK_GLYPHS = [
+    // chevrons
+    'M24 11l11 8h-5.5L24 15l-5.5 4H13zM24 20l11 8h-5.5L24 24l-5.5 4H13zM24 29l11 8h-5.5L24 33l-5.5 4H13z',
+    // wolf
+    'M10 9l7.5 8h13L38 9l-1.5 12-3.5 3 2.5 6.5L24 41l-11.5-10.5L15 24l-3.5-3zM19 23.5l2.5 2.5-3.5 1zM29 23.5l-2.5 2.5 3.5 1zM24 30l3 4h-6z',
+    // wings
+    'M24 14l3 5v16l-3 4-3-4V19zM19 20c-5-4-10-5-16-4 4 2 6 5 6 8 3-1 7 0 10 2zM29 20c5-4 10-5 16-4-4 2-6 5-6 8-3-1-7 0-10 2zM19 29c-4-3-8-4-13-3 3 2 5 4 5 6 3-1 6-1 8 0zM29 29c4-3 8-4 13-3-3 2-5 4-5 6-3-1-6-1-8 0z',
+    // star
+    'M24 8l5 11 12 1.5-9 8 2.5 12-10.5-6-10.5 6L16 28.5l-9-8L19 19z',
+    // skull
+    'M24 9c7.5 0 11.5 5 11.5 11 0 3.8-1.6 6.6-4 8v4.5L29.5 35h-11L16 32.5V28c-2.4-1.4-4-4.2-4-8 0-6 4-11 12-11zM19 20.5a3.2 3.2 0 1 0 0 6.4 3.2 3.2 0 0 0 0-6.4zM29 20.5a3.2 3.2 0 1 0 0 6.4 3.2 3.2 0 0 0 0-6.4zM24 29l2.5 4h-5z',
+    // crossed blades
+    'M9 10l6-1.5 18 21.5 1.5 6-6-1.5L10.5 14.5zM39 10l-6-1.5-18 21.5-1.5 6 6-1.5 19.5-20.5z',
+    // flame
+    'M24 6c2 7 11 10 11 19 0 7-5 12-11 12s-11-5-11-12c0-5 3-8 5-12 1 3 3 4 4 3 1-3-1-6 2-10zM24 24c1 3 4 4 4 7 0 2.5-1.8 4.5-4 4.5s-4-2-4-4.5c0-3 3-4 4-7z',
+    // bull
+    'M8 13c5-2 8 1 9 4h14c1-3 4-6 9-4-4 1.5-5.5 4.5-5.5 8L30 26l1.5 7L24 39l-7.5-6 1.5-7-4.5-5c0-3.5-1.5-6.5-5.5-8zM20 24l2.5 2-3.5 1zM28 24l-2.5 2 3.5 1z',
+    // bolt
+    'M27 6L13 26h8l-4 16 18-22h-9l5-14z',
+    // crown
+    'M9 16l6.5 6.5L24 10l8.5 12.5L39 16l-3 17H12zM12 35h24v4H12z',
+  ];
+
+  var BEHIND = ['halo', 'rays', 'wings', 'laurel', 'spikes'];
+  var INFRONT = ['bar', 'crown', 'studs', 'gem'];
+
+  function rankBadgeSvg(band, size) {
+    var b = Math.max(1, Math.min(100, Number(band) || 1));
+    var t = Math.floor((b - 1) / 10);
+    var tier = RANK_TIERS[t];
+    var body = BODIES[tier.body];
+    var glyph = RANK_GLYPHS[(b - 1) % 10];
+    var id = 'rb' + b;
+    var px = size || 68;
+
+    function draw(names) {
+      var out = '';
+      for (var i = 0; i < names.length; i++) {
+        if (tier.parts.indexOf(names[i]) < 0) continue;
+        out += '<path d="' + PARTS[names[i]] + '" fill="url(#' + id + 'm)" stroke="'
+          + tier.ring + '" stroke-width=".6" stroke-linejoin="round"/>';
+      }
+      return out;
+    }
+
+    /* The glow is not one value for every tier that has one: it opens up as the
+       ladder climbs, so the last six are told apart by how much light they throw
+       as well as by their colour. */
+    var glow = tier.glow
+      ? '<circle cx="24" cy="24" r="23.5" fill="url(#' + id + 'g)"/>'
+      : '';
+    /* A RING of light around the badge, not a disc behind it. The first cut ran
+       transparent at the centre to solid at the rim, which filled the whole box
+       and read as a dull plate -- gold came out brown and mythic swallowed its
+       own crown. Brightest just outside the metal, gone by the edge. */
+    var glowDef = tier.glow
+      ? '<radialGradient id="' + id + 'g">'
+        + '<stop offset="52%" stop-color="' + tier.glow + '" stop-opacity="0"/>'
+        + '<stop offset="74%" stop-color="' + tier.glow + '" stop-opacity="' + tier.glowStop + '"/>'
+        + '<stop offset="100%" stop-color="' + tier.glow + '" stop-opacity="0"/>'
+        + '</radialGradient>'
+      : '';
+
+    /* Mythic alone is iridescent -- an extra hue through the middle of the metal,
+       so the top ten do something no other metal on the ladder does. */
+    var metal = t === 9
+      ? '<stop offset="0%" stop-color="#ffffff"/><stop offset="28%" stop-color="#8ee0ff"/>'
+        + '<stop offset="58%" stop-color="#b06cf0"/><stop offset="100%" stop-color="#2b1050"/>'
+      : '<stop offset="0%" stop-color="' + tier.lo + '"/>'
+        + '<stop offset="42%" stop-color="' + tier.mid + '"/>'
+        + '<stop offset="100%" stop-color="' + tier.dk + '"/>';
+
+    return '<svg viewBox="0 0 48 48" width="' + px + '" height="' + px
+      + '" role="presentation" focusable="false" aria-hidden="true">'
+      + '<defs>'
+      + '<linearGradient id="' + id + 'm" x1="0" y1="0" x2=".7" y2="1">' + metal + '</linearGradient>'
+      + '<linearGradient id="' + id + 'k" x1="0" y1="0" x2=".3" y2="1">'
+      + '<stop offset="0%" stop-color="' + tier.rim + '"/>'
+      + '<stop offset="70%" stop-color="' + tier.lo + '"/>'
+      + '<stop offset="100%" stop-color="' + tier.mid + '"/>'
+      + '</linearGradient>'
+      + '<linearGradient id="' + id + 'f" x1="0" y1="0" x2=".4" y2="1">'
+      + '<stop offset="0%" stop-color="' + tier.dk + '"/>'
+      + '<stop offset="100%" stop-color="#0a1020"/>'
+      + '</linearGradient>'
+      + glowDef
+      + '</defs>'
+      + glow
+      + draw(BEHIND)
+      /* The bevel is three copies of the same path rather than an SVG filter: a
+         filter per badge costs a render pass each, and at this size a light rim
+         over a dark outline reads as struck metal just as well. */
+      + '<path d="' + body + '" fill="' + tier.dk + '" opacity=".55" transform="translate(0,1.1)"/>'
+      + '<path d="' + body + '" fill="url(#' + id + 'm)" stroke="' + tier.ring + '" stroke-width="1.1" stroke-linejoin="round"/>'
+      + '<path d="' + body + '" fill="none" stroke="' + tier.rim + '" stroke-width=".8" stroke-opacity=".75" stroke-linejoin="round" transform="translate(0,-.5)"/>'
+      /* A recessed field between the body and the mark. Without it the mark is
+         light metal on light metal -- the silver row was unreadable -- and the
+         body's own silhouette crops it. Scaled from the centre off the SAME
+         path, so it fits inside either body without a shape of its own. */
+      + '<g transform="translate(24,24) scale(.60) translate(-24,-24)">'
+      + '<path d="' + body + '" fill="url(#' + id + 'f)" stroke="' + tier.ring + '" stroke-width="1.6" stroke-opacity=".8" stroke-linejoin="round"/>'
+      + '</g>'
+      + '<g transform="translate(24,24) scale(.42) translate(-24,-24)">'
+      + '<path d="' + glyph + '" fill="' + tier.dk + '" opacity=".55" transform="translate(0,1.6)"/>'
+      + '<path d="' + glyph + '" fill="url(#' + id + 'k)"/>'
+      + '</g>'
+      + draw(INFRONT)
+      + '</svg>';
   }
 
-  function buildRankBadgeGlyph(glyphIndex) {
-    const glyphs = [
-      '<path d="M24 13l3.8 7.8 8.6 1.2-6.2 6 1.5 8.8L24 32.5l-7.7 4.3 1.5-8.8-6.2-6 8.6-1.2z" />',
-      '<path d="M17 14h14v5H17zM14 23h20v5H14zM11 32h26v4H11z" />',
-      '<path d="M24 10l10 14-10 14-10-14z" />',
-      '<circle cx="24" cy="24" r="6" /><path d="M24 11v6M24 31v6M11 24h6M31 24h6" stroke="currentColor" stroke-width="3" stroke-linecap="round" fill="none"/>',
-      '<path d="M16 33V17l8-5 8 5v16l-8 5z" />',
-      '<path d="M14 33l10-18 10 18h-6l-4-7-4 7z" />',
-      '<path d="M14 18h20v4H14zM17 24h14v4H17zM20 30h8v4h-8z" />',
-      '<path d="M24 11l11 7v12l-11 7-11-7V18z" fill="none" stroke="currentColor" stroke-width="3"/><circle cx="24" cy="24" r="4" />',
-      '<path d="M18 12h12l4 9-10 15L14 21z" />',
-      '<path d="M24 12c5.5 0 10 4.5 10 10s-4.5 14-10 14-10-8.5-10-14 4.5-10 10-10z" /><path d="M18 24h12" stroke="currentColor" stroke-width="3" stroke-linecap="round" fill="none"/>',
-    ];
-    return glyphs[((glyphIndex % glyphs.length) + glyphs.length) % glyphs.length];
-  }
-
+  /* renderRankBadgeIcon keeps its signature and its wrapper element: every
+     caller -- the reward card, the profile, the leaderboard -- finds the same
+     .rankBadgeIconWrap with the same tone class and the same data-rank-band.
+     Only what is drawn inside it changed. */
   function renderRankBadgeIcon(rankIconKey, { compact = false } = {}) {
     const band = resolveRankIconBand(rankIconKey);
     const toneClass = resolveRankIconTone(rankIconKey);
-    const shellIndex = Math.floor((band - 1) / 10);
-    const glyphIndex = (band - 1) % 10;
-    const size = compact ? 54 : 68;
-    const hue = ((band - 1) * 17) % 360;
-    const accentHue = (hue + 42) % 360;
-    const shell = buildRankBadgeShell(shellIndex);
-    const glyph = buildRankBadgeGlyph(glyphIndex);
-    const gradientId = `rbg-${band}-${compact ? 'c' : 'f'}`;
-    return `<div class="rankBadgeIconWrap ${toneClass}${compact ? ' compact' : ''}" aria-hidden="true" data-rank-band="${band}">
-      <svg viewBox="0 0 48 48" width="${size}" height="${size}" role="presentation" focusable="false">
-        <defs>
-          <linearGradient id="${gradientId}" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stop-color="hsl(${hue} 88% 68%)"/>
-            <stop offset="55%" stop-color="hsl(${accentHue} 85% 58%)"/>
-            <stop offset="100%" stop-color="hsl(${(accentHue + 35) % 360} 72% 32%)"/>
-          </linearGradient>
-        </defs>
-        <circle cx="24" cy="24" r="22" fill="rgba(255,255,255,.22)"/>
-        <g fill="url(#${gradientId})" stroke="rgba(15,23,42,.26)" stroke-width="1.3">${shell}</g>
-        <g fill="rgba(255,255,255,.92)" stroke="rgba(15,23,42,.18)" stroke-width="0.8">${glyph}</g>
-        <circle cx="24" cy="24" r="20.6" fill="none" stroke="rgba(255,255,255,.28)" stroke-width="1"/>
-      </svg>
-    </div>`;
+    /* The tier's metal is handed out as custom properties so a surface that
+       frames this badge can wear it too. The Trip Saved card pins its medallion
+       to gold, which was right when the badge inside was a rainbow disc and
+       wrong the moment the badge got a metal of its own: a bronze rank on a
+       gold coin reads as a mistake, and a mythic one reads as a worse one. */
+    const tier = RANK_TIERS[Math.max(0, Math.min(9, Math.floor((Math.max(1, Math.min(100, band)) - 1) / 10)))];
+    const metal = `--rank-lo:${tier.lo};--rank-mid:${tier.mid};--rank-dk:${tier.dk};--rank-ring:${tier.ring}`;
+    return `<div class="rankBadgeIconWrap ${toneClass}${compact ? ' compact' : ''}" aria-hidden="true" data-rank-band="${band}" style="${metal}">`
+      + rankBadgeSvg(band, compact ? 54 : 68)
+      + `</div>`;
   }
 
   function renderDriverProgressionSection(progression) {
