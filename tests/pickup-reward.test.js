@@ -215,6 +215,88 @@ test('the number climbs, and stops climbing for anyone who asked it not to', () 
     'two saves in a row leave two counters running at once');
 });
 
+// ------------------------------------------------- design A, "Gold standard"
+//
+// Chosen from five treatments over a photograph of the real screen. Its
+// argument is that a reward does not have to shout, and every value below is
+// load-bearing for that -- changing one in isolation turns it back into a
+// scoreboard. These are here so the next person to touch it has to mean it.
+
+test('the medallion hangs off the top, and nothing clips it', () => {
+  // The overlapping medal IS the silhouette. A card that clips its own
+  // children cuts it in half, which is why there is no sheen on this one.
+  const icon = /\.pickupProgressRewardIcon\{([^}]*)\}/.exec(SOURCE);
+  assert.ok(icon, 'the medallion has no rule');
+  assert.ok(/position:absolute/.test(icon[1]), 'the medal is back in the flow');
+  assert.ok(/top:-\d+px/.test(icon[1]), 'the medal no longer breaks the top edge');
+
+  const card = /\.pickupProgressRewardCard\{([^}]*)\}/.exec(SOURCE);
+  assert.ok(/overflow:visible/.test(card[1]), 'the card clips its own medal');
+  assert.ok(!/pickupProgressRewardSheen/.test(SOURCE),
+    'a sweep is back, and it cannot be clipped to the card that carries it');
+});
+
+test('the numeral is light, which is the whole point of this one', () => {
+  /* At 900 it was a scoreboard; at 300 it is engraving. This renders as
+   * regular in a browser with no Light face for system-ui -- on iOS that is
+   * SF Pro, which has one. */
+  const xp = /\.pickupProgressRewardXp\{([^}]*)\}/.exec(SOURCE);
+  assert.ok(xp, 'the XP has no rule');
+  const weight = /font-weight:(\d+)/.exec(xp[1]);
+  assert.ok(weight, 'the XP declares no weight');
+  assert.ok(Number(weight[1]) <= 300,
+    `the numeral is back to weight ${weight[1]}`);
+});
+
+test('the unit is its own element, so counting cannot destroy it', () => {
+  /* countUpReward writes textContent every frame. Given the whole string it
+   * would blow the gold "XP" span away on the first one. */
+  assert.ok(/id="pickupProgressRewardXpNum"/.test(SOURCE),
+    'the figure has no element of its own');
+  assert.ok(/class="pickupProgressRewardXpUnit"/.test(SOURCE),
+    'the unit has no element of its own');
+  const body = lift('countUpReward');
+  assert.ok(!/XP`/.test(body), 'the counter writes the unit into the figure');
+});
+
+test('the gold is one hue at several strengths', () => {
+  /* Several golds read as a mistake; one hue at different lightnesses reads
+   * as a material. The coin needs three stops to look struck rather than
+   * printed, so the rule is not "one value" -- it is that every warm value on
+   * the card sits on the same hue. */
+  const block = SOURCE.slice(SOURCE.indexOf('.pickupProgressReward{'),
+    SOURCE.indexOf('@keyframes pickupProgressRewardIconPop'));
+  const hue = (r, g, b) => {
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    if (max === min) return null;
+    const d = max - min;
+    let h;
+    if (max === r) h = ((g - b) / d) % 6;
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h *= 60;
+    return h < 0 ? h + 360 : h;
+  };
+  const golds = [];
+  (block.match(/#[0-9a-f]{6}/gi) || []).forEach((h) => {
+    const r = parseInt(h.slice(1, 3), 16);
+    const g = parseInt(h.slice(3, 5), 16);
+    const b = parseInt(h.slice(5, 7), 16);
+    if (r > 120 && r > b + 40 && g > b) golds.push([h.toLowerCase(), hue(r, g, b)]);
+  });
+  (block.match(/rgba\((\d+),(\d+),(\d+)/g) || []).forEach((m) => {
+    const [r, g, b] = m.slice(5).split(',').map(Number);
+    if (r > 120 && r > b + 40 && g > b) golds.push([m, hue(r, g, b)]);
+  });
+  assert.ok(golds.length >= 4, 'the gold has gone from the card');
+  const hues = golds.map(([, h]) => h);
+  const spread = Math.max(...hues) - Math.min(...hues);
+  assert.ok(spread <= 6,
+    'the warm values no longer share a hue -- '
+    + golds.map(([v, h]) => `${v} at ${h.toFixed(1)}deg`).join(', '));
+});
+
 test('the guard is a size check, not a display lookup', () => {
   /* getComputedStyle is not available on every node this runs against and says
    * nothing about a node inside a collapsed parent. An empty rect is the thing
