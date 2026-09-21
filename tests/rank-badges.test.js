@@ -45,7 +45,8 @@ function load() {
     globalThis.svg = rankBadgeSvg;
     globalThis.tiers = RANK_TIERS;
     globalThis.parts = PARTS;
-    globalThis.glyphs = RANK_GLYPHS;`, context, { filename: 'app.part5.js#badges' });
+    globalThis.bodies = BODIES;
+    globalThis.emblems = EMBLEMS;`, context, { filename: 'app.part5.js#badges' });
   return context;
 }
 
@@ -123,7 +124,7 @@ test('a tier is ten bands wide, and the mark cycles inside it', () => {
   const ctx = load();
   const markOf = (band) => {
     const svg = ctx.svg(band, 68);
-    const m = svg.match(/scale\(\.42\) translate\(-24,-24\)"><path d="([^"]+)"/);
+    const m = svg.match(/translate\(-48,-48\)"><path d="([^"]+)"/);
     assert.ok(m, `band ${band} drew no mark`);
     return m[1];
   };
@@ -157,10 +158,40 @@ test('the wrapper every other screen looks for is unchanged', () => {
   assert.ok(/compact \? 54 : 68/.test(render), 'the compact size is gone');
 });
 
-test('ten marks, and none of them repeat', () => {
-  const { glyphs } = load();
-  assert.strictEqual(glyphs.length, 10, 'there are no longer ten marks');
-  assert.strictEqual(new Set(glyphs).size, 10, 'two marks are the same path');
+test('ten emblems, and none of them repeat', () => {
+  const { emblems } = load();
+  assert.strictEqual(emblems.length, 10, 'there are no longer ten emblems');
+  assert.strictEqual(new Set(emblems.map((e) => e.d)).size, 10,
+    'two emblems are the same path');
+  emblems.forEach((e) => {
+    assert.ok(e.name && e.d, `an emblem is missing its name or its path`);
+  });
+});
+
+test('every badge is struck, not drawn', () => {
+  /* The first two attempts were flat: one fill, one outline. A medal's effect
+   * is material -- a lit face, a shaded face, a rim light, a recessed field
+   * with its own gloss, and a shadow under the lot. Each of those is a layer
+   * here, and losing any one of them is what "too simple" looked like. */
+  const ctx = load();
+  const svg = ctx.svg(45, 240);
+  const { bodies } = ctx;
+  Object.keys(bodies).forEach((k) => {
+    ['out', 'lit', 'shade', 'inner', 'gloss'].forEach((face) => {
+      assert.ok(bodies[k][face], `the ${k} body has no ${face} face`);
+    });
+  });
+  assert.ok(/feDropShadow/.test(svg), 'the badge casts no shadow');
+  assert.ok(svg.includes(bodies.shield.lit), 'the lit face is not drawn');
+  assert.ok(svg.includes(bodies.shield.shade), 'the shaded face is not drawn');
+  assert.ok(svg.includes(bodies.shield.inner), 'there is no recessed field');
+  assert.ok(svg.includes(bodies.shield.gloss), 'the field has no gloss');
+  // Five stops in the metal: highlight, light, mid, shadow, deep. Fewer and it
+  // ramps instead of catching.
+  const metal = svg.match(/id="rb45m"[^>]*>((?:<stop[^>]*>)+)/);
+  assert.ok(metal, 'the metal gradient is gone');
+  assert.ok((metal[1].match(/<stop/g) || []).length >= 5,
+    'the metal has fewer than five stops, so it ramps instead of catching');
 });
 
 // --------------------------------------------------------------------------

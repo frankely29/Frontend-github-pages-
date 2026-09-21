@@ -316,184 +316,239 @@
     return 'toneRecruit';
   }
 
-  /* The 100-rank badge ladder.
+  /* The 100-rank badge ladder, struck rather than drawn.
    *
-   * band 1..100 -> tier = floor((band-1)/10)  (the metal and what is on it)
-   *             -> mark = (band-1)%10         (the mark inside it)
+   * band 1..100 -> tier = floor((band-1)/10)   the metal, the frame, the furniture
+   *             -> mark = (band-1)%10          the emblem inside it
    *
-   * The first cut escalated only in COLOUR: a bronze shield and a mythic star
-   * carried the same amount of stuff, so rank 95 was rank 5 in purple. A ladder
-   * has to accumulate. Each tier here adds a PART and keeps everything the tiers
-   * below it had -- wings at 5, a gem at 6, a crown at 8, rays at 9, the lot at
-   * 10 -- so the silhouette alone gets busier all the way up, before a single
-   * colour is read.
+   * The first two attempts were flat vector icons: one fill, one outline, one
+   * colour ramp. They read as app icons, not as medals, because a medal's whole
+   * effect comes from MATERIAL -- a lit top-left face, a shaded bottom-right
+   * one, a hard specular streak, a recessed enamel field with its own gloss, and
+   * a shadow under the whole thing. Every shape here is therefore assembled, not
+   * drawn:
+   *
+   *   drop shadow  -> base metal -> lit facet -> shaded facet -> rim light
+   *   -> recessed enamel -> gloss arc -> emblem (shadow, metal, highlight)
+   *
+   * On a 96 grid rather than 48, because the detail that sells it -- a 1px
+   * bevel, a 2px facet break -- has nowhere to live at 48. It renders at 68 CSS
+   * px on the reward card, which is about 200 device pixels on a phone, so the
+   * detail resolves.
    */
+
   var RANK_TIERS = [
-    { name: 'Bronze',   lo: '#f0c49a', mid: '#b4753c', dk: '#5e3212', rim: '#ffe0c2', ring: '#8a5522',
-      body: 'shield', parts: [],                                       glow: null,      glowStop: 0 },
-    { name: 'Iron',     lo: '#e3e9f1', mid: '#8b96a5', dk: '#414a57', rim: '#f6f9fd', ring: '#6b7683',
-      body: 'shield', parts: ['bar'],                                  glow: null,      glowStop: 0 },
-    { name: 'Steel',    lo: '#dcefff', mid: '#7796b0', dk: '#33485c', rim: '#f0f9ff', ring: '#54708a',
-      body: 'shield', parts: ['bar', 'studs'],                         glow: null,      glowStop: 0 },
-    { name: 'Silver',   lo: '#ffffff', mid: '#c2ccda', dk: '#6e7885', rim: '#ffffff', ring: '#98a2b0',
-      body: 'shield', parts: ['bar', 'studs', 'laurel'],               glow: null,      glowStop: 0 },
-    { name: 'Gold',     lo: '#fff2c4', mid: '#dfa62b', dk: '#7d5409', rim: '#fffbe6', ring: '#b8861c',
-      body: 'shield', parts: ['bar', 'studs', 'laurel', 'wings'],      glow: '#ffd76a', glowStop: 0.26 },
-    { name: 'Platinum', lo: '#f2ffff', mid: '#9dcedd', dk: '#4a707f', rim: '#ffffff', ring: '#7fb2c4',
-      body: 'crest',  parts: ['bar', 'studs', 'laurel', 'wings', 'gem'], glow: '#8ee9ff', glowStop: 0.32 },
-    { name: 'Sapphire', lo: '#d6e8ff', mid: '#3f77d8', dk: '#122a6e', rim: '#eaf3ff', ring: '#2a55ad',
-      body: 'crest',  parts: ['bar', 'studs', 'laurel', 'wings', 'gem', 'spikes'], glow: '#6aa6ff', glowStop: 0.38 },
-    { name: 'Emerald',  lo: '#d2ffe6', mid: '#1ea45c', dk: '#074a2a', rim: '#e9fff3', ring: '#158a4c',
-      body: 'crest',  parts: ['bar', 'studs', 'laurel', 'wings', 'gem', 'spikes', 'crown'], glow: '#49f59a', glowStop: 0.45 },
-    { name: 'Crimson',  lo: '#ffd6c8', mid: '#d93c22', dk: '#6d1105', rim: '#ffe9e0', ring: '#a82a15',
-      body: 'crest',  parts: ['bar', 'studs', 'laurel', 'wings', 'gem', 'spikes', 'crown', 'rays'], glow: '#ff7a52', glowStop: 0.52 },
-    { name: 'Mythic',   lo: '#ffffff', mid: '#b06cf0', dk: '#2b1050', rim: '#ffffff', ring: '#7d3fd0',
-      body: 'crest',  parts: ['bar', 'studs', 'laurel', 'wings', 'gem', 'spikes', 'crown', 'rays', 'halo'], glow: '#d08bff', glowStop: 0.60 },
+    { name: 'Bronze', hi: '#ffe4c4', lo: '#e3a870', mid: '#b4753c', dk: '#6b3d18', deep: '#37200c',
+      body: 'shield', enamel: '#3a2412', accent: '#e8b184',
+      parts: ['rivets'], glow: null, glowStop: 0 },
+    { name: 'Iron', hi: '#ffffff', lo: '#d3dae4', mid: '#8b96a5', dk: '#4a5462', deep: '#242b35',
+      body: 'shield', enamel: '#222a36', accent: '#c8d2de',
+      parts: ['rivets', 'banner'], glow: null, glowStop: 0 },
+    { name: 'Steel', hi: '#ffffff', lo: '#cfe4f5', mid: '#7796b0', dk: '#3b5468', deep: '#1c2c3a',
+      body: 'shield', enamel: '#1b2b39', accent: '#bcd8ef',
+      parts: ['rivets', 'banner', 'bolts'], glow: null, glowStop: 0 },
+    { name: 'Silver', hi: '#ffffff', lo: '#eef2f7', mid: '#bcc6d4', dk: '#78828f', deep: '#434b56',
+      body: 'shield', enamel: '#2a303a', accent: '#e6ecf4',
+      parts: ['rivets', 'banner', 'bolts', 'laurel'], glow: null, glowStop: 0 },
+    { name: 'Gold', hi: '#fffdf0', lo: '#ffdf8a', mid: '#dfa62b', dk: '#946009', deep: '#4d3104',
+      body: 'shield', enamel: '#3a2a06', accent: '#ffe9a8',
+      parts: ['rivets', 'banner', 'bolts', 'laurel', 'wings'], glow: '#ffd76a', glowStop: 0.26 },
+    { name: 'Platinum', hi: '#ffffff', lo: '#e2f7ff', mid: '#9dcedd', dk: '#557f90', deep: '#2b4550',
+      body: 'crest', enamel: '#13333d', accent: '#d8f4ff',
+      parts: ['rivets', 'banner', 'bolts', 'laurel', 'wings', 'gem'], glow: '#8ee9ff', glowStop: 0.32 },
+    { name: 'Sapphire', hi: '#ffffff', lo: '#b9d4ff', mid: '#3f77d8', dk: '#1c3f8e', deep: '#0d1f4e',
+      body: 'crest', enamel: '#0e1c44', accent: '#cfe0ff',
+      parts: ['rivets', 'banner', 'bolts', 'laurel', 'wings', 'gem', 'spikes'], glow: '#6aa6ff', glowStop: 0.38 },
+    { name: 'Emerald', hi: '#ffffff', lo: '#a9f7cd', mid: '#1ea45c', dk: '#0c6437', deep: '#04351d',
+      body: 'crest', enamel: '#06301c', accent: '#c6ffe1',
+      parts: ['rivets', 'banner', 'bolts', 'laurel', 'wings', 'gem', 'spikes', 'crown'], glow: '#49f59a', glowStop: 0.45 },
+    { name: 'Crimson', hi: '#fff3ee', lo: '#ffb69c', mid: '#d93c22', dk: '#8c1d0c', deep: '#470c03',
+      body: 'crest', enamel: '#3c0e06', accent: '#ffcbb8',
+      parts: ['rivets', 'banner', 'bolts', 'laurel', 'wings', 'gem', 'spikes', 'crown', 'rays'], glow: '#ff7a52', glowStop: 0.52 },
+    { name: 'Mythic', hi: '#ffffff', lo: '#d9c2ff', mid: '#a65cf0', dk: '#5a2299', deep: '#26094a',
+      body: 'crest', enamel: '#1d0940', accent: '#ecdcff',
+      parts: ['rivets', 'banner', 'bolts', 'laurel', 'wings', 'gem', 'spikes', 'crown', 'rays', 'halo'], glow: '#d08bff', glowStop: 0.60 },
   ];
 
-  /* Two bodies only. The parts do the escalating, so a third body would just be
-     one more silhouette to keep distinct from the other two at 34px. */
+  /* Each body carries its own facets. `lit` is the face the light falls on and
+     `shade` is the one turned away -- overlaid on the same silhouette at low
+     alpha, they are what turns a flat fill into a struck surface. `inner` is the
+     recessed field the emblem sits in. */
   var BODIES = {
-    shield: 'M24 9l12 4.2v10c0 8-5.6 13.4-12 16.2-6.4-2.8-12-8.2-12-16.2v-10z',
-    crest:  'M24 8.5l12 4.2 1.8 10.2-4.6 11.2L24 40l-9.2-5.9-4.6-11.2L12 12.7z',
+    shield: {
+      out:   'M48 16l26 9.5v23c0 16.5-10.8 28.5-26 34.5-15.2-6-26-18-26-34.5v-23z',
+      lit:   'M48 16L22 25.5v23c0 16.5 10.8 28.5 26 34.5z',
+      shade: 'M48 16l26 9.5v23c0 16.5-10.8 28.5-26 34.5z',
+      inner: 'M48 25l18 6.6v16c0 11.4-7.5 19.7-18 23.9-10.5-4.2-18-12.5-18-23.9v-16z',
+      gloss: 'M48 25l18 6.6v3.2c-5.6 2.6-11.6 3.9-18 3.9s-12.4-1.3-18-3.9v-3.2z',
+    },
+    crest: {
+      out:   'M48 15l26 9 3.5 21-9.5 23L48 82 28 68 18.5 45 22 24z',
+      lit:   'M48 15L22 24l-3.5 21L28 68l20 14z',
+      shade: 'M48 15l26 9 3.5 21-9.5 23L48 82z',
+      inner: 'M48 24l18 6.2 2.4 14.6-6.6 16L48 70.5 34.2 60.8l-6.6-16L30 30.2z',
+      gloss: 'M48 24l18 6.2.5 3.1c-5.9 2.7-12.2 4.1-18.5 4.1s-12.6-1.4-18.5-4.1l.5-3.1z',
+    },
   };
 
-  /* Drawn behind or in front of the body. Each is one path, so a tier's list
-     maps straight onto draw order with no z-index table to keep in step. */
+  /* Furniture, in draw order behind and in front. Each entry is a list of
+     [path, shadeFactor] so a part can sit back in the picture without needing a
+     colour of its own -- 1 is full metal, lower is further away. */
   var PARTS = {
-    halo:   'M24 2.6A21.4 21.4 0 1 1 2.6 24 21.4 21.4 0 0 1 24 2.6zm0 2.2A19.2 19.2 0 1 0 43.2 24 19.2 19.2 0 0 0 24 4.8z',
-    rays:   'M24 0l2 6.5h-4zM24 48l-2-6.5h4zM0 24l6.5-2v4zM48 24l-6.5 2v-4zM7 7l5.6 3.6-2.8 2.8zM41 41l-5.6-3.6 2.8-2.8zM41 7l-3.6 5.6-2.8-2.8zM7 41l3.6-5.6 2.8 2.8zM35.8 1.4l-1 6.8-3.4-1.6zM12.2 46.6l1-6.8 3.4 1.6zM46.6 35.8l-6.8-1 1.6-3.4zM1.4 12.2l6.8 1-1.6 3.4z',
-    wings:  'M12.5 19.5C8.5 16 5 14.6.8 15c2.9 1.7 4.2 3.8 4.4 6.1-2.1.3-3.8 1.2-5 2.5 3.3.2 5.8 1 7.7 2.4-1 .9-1.8 2-2.1 3.3 3-.8 5.3-1.9 7-3.4zM35.5 19.5C39.5 16 43 14.6 47.2 15c-2.9 1.7-4.2 3.8-4.4 6.1 2.1.3 3.8 1.2 5 2.5-3.3.2-5.8 1-7.7 2.4 1 .9 1.8 2 2.1 3.3-3-.8-5.3-1.9-7-3.4z',
-    laurel: 'M10.6 16.8c-3.4 5.4-2.6 12.8 1.8 17.2l1.8-2.6c-3.4-3.6-4-8.8-1.8-12.8zM37.4 16.8c3.4 5.4 2.6 12.8-1.8 17.2l-1.8-2.6c3.4-3.6 4-8.8 1.8-12.8z',
-    spikes: 'M24 1.6l1.7 5.2h-3.4zM44 12.6l-1.3 5.2-2.5-2.4zM4 12.6l1.3 5.2 2.5-2.4zM44 35.4l-5.2-1.5 1.9-2.1zM4 35.4l5.2-1.5-1.9-2.1z',
-    crown:  'M14.6 9.8l3.8 3.4L24 7l5.6 6.2 3.8-3.4-1.5 6.2H16.1z',
-    bar:    'M13.5 40.8h21v3H13.5z',
-    studs:  'M16 15.6a1.4 1.4 0 1 0 0 2.8 1.4 1.4 0 0 0 0-2.8zM32 15.6a1.4 1.4 0 1 0 0 2.8 1.4 1.4 0 0 0 0-2.8z',
-    gem:    'M24 9.6l2.8 2.9-2.8 2.9-2.8-2.9z',
+    halo: [['M48 5.5A42.5 42.5 0 1 1 5.5 48 42.5 42.5 0 0 1 48 5.5zm0 4.5A38 38 0 1 0 86 48 38 38 0 0 0 48 10z', 0.7]],
+    rays: [['M48 0l3.4 12h-6.8zM48 96l-3.4-12h6.8zM0 48l12-3.4v6.8zM96 48l-12 3.4v-6.8z'
+      + 'M14 14l10.6 6.6-4 4zM82 82l-10.6-6.6 4-4zM82 14l-6.6 10.6-4-4zM14 82l6.6-10.6 4 4z'
+      + 'M71.4 2.6l-2.4 12.4-6.2-2.8zM24.6 93.4l2.4-12.4 6.2 2.8zM93.4 71.4l-12.4-2.4 2.8-6.2zM2.6 24.6l12.4 2.4-2.8 6.2z', 0.55]],
+    wings: [['M25 38C18 31 11 27.5 2 28.5c5.4 3 7.8 6.8 8.2 11-4 .6-7.2 2.2-9.6 4.6 6.4.4 11.2 2 15 4.6-2 1.8-3.4 3.8-4 6.2 5.8-1.6 10.2-3.6 13.4-6.4zM71 38c7-7 14-10.5 23-9.5-5.4 3-7.8 6.8-8.2 11 4 .6 7.2 2.2 9.6 4.6-6.4.4-11.2 2-15 4.6 2 1.8 3.4 3.8 4 6.2-5.8-1.6-10.2-3.6-13.4-6.4z', 0.82]],
+    laurel: [['M13 32c-8 12-6 28 4 38l4-5.6c-7.6-8-9-19.4-4-28zM83 32c8 12 6 28-4 38l-4-5.6c7.6-8 9-19.4 4-28z', 0.88]],
+    spikes: [['M48 0l4 12h-8zM76.8 7.7l-2.2 12.5-6.9-4zM19.2 7.7l2.2 12.5 6.9-4zM93.6 33.4l-8.4 9.5-4.6-6.6zM2.4 33.4l8.4 9.5 4.6-6.6zM93.6 62.6l-11.6-5.2 3.2-7.4zM2.4 62.6l11.6-5.2-3.2-7.4zM76.8 88.3l-9.1-8.8 5.6-5.8zM19.2 88.3l9.1-8.8-5.6-5.8z', 0.72]],
+    crown: [['M27 6l8.4 7.8L48 -1l12.6 14.8L69 6l-3.4 15H30.4z', 1]],
+    banner: [['M22 78.5h52l-5 9.5H27z', 0.92]],
+    rivets: [['M32 30.5a2.6 2.6 0 1 0 0 5.2 2.6 2.6 0 0 0 0-5.2zM64 30.5a2.6 2.6 0 1 0 0 5.2 2.6 2.6 0 0 0 0-5.2z', 1]],
+    bolts: [['M31 62.5a2.2 2.2 0 1 0 0 4.4 2.2 2.2 0 0 0 0-4.4zM65 62.5a2.2 2.2 0 1 0 0 4.4 2.2 2.2 0 0 0 0-4.4z', 1]],
+    gem: [['M48 19.5l5 5.2-5 5.2-5-5.2z', 1]],
   };
 
-  /* Ten marks.
-   *
-   * Four of these started as animals -- eagle, lion, dragon, phoenix -- and all
-   * four collapsed into the same spiky blob at the size this actually renders
-   * inside the frame. The reference art everyone pictures is drawn for a 200px
-   * menu tile. So the two creature silhouettes that survive (wolf, bull) stay,
-   * and the rest are marks that cannot be mistaken for each other at any size.
-   * A mark a driver can name beats a portrait they cannot. */
-  var RANK_GLYPHS = [
-    // chevrons
-    'M24 11l11 8h-5.5L24 15l-5.5 4H13zM24 20l11 8h-5.5L24 24l-5.5 4H13zM24 29l11 8h-5.5L24 33l-5.5 4H13z',
-    // wolf
-    'M10 9l7.5 8h13L38 9l-1.5 12-3.5 3 2.5 6.5L24 41l-11.5-10.5L15 24l-3.5-3zM19 23.5l2.5 2.5-3.5 1zM29 23.5l-2.5 2.5 3.5 1zM24 30l3 4h-6z',
-    // wings
-    'M24 14l3 5v16l-3 4-3-4V19zM19 20c-5-4-10-5-16-4 4 2 6 5 6 8 3-1 7 0 10 2zM29 20c5-4 10-5 16-4-4 2-6 5-6 8-3-1-7 0-10 2zM19 29c-4-3-8-4-13-3 3 2 5 4 5 6 3-1 6-1 8 0zM29 29c4-3 8-4 13-3-3 2-5 4-5 6-3-1-6-1-8 0z',
-    // star
-    'M24 8l5 11 12 1.5-9 8 2.5 12-10.5-6-10.5 6L16 28.5l-9-8L19 19z',
-    // skull
-    'M24 9c7.5 0 11.5 5 11.5 11 0 3.8-1.6 6.6-4 8v4.5L29.5 35h-11L16 32.5V28c-2.4-1.4-4-4.2-4-8 0-6 4-11 12-11zM19 20.5a3.2 3.2 0 1 0 0 6.4 3.2 3.2 0 0 0 0-6.4zM29 20.5a3.2 3.2 0 1 0 0 6.4 3.2 3.2 0 0 0 0-6.4zM24 29l2.5 4h-5z',
-    // crossed blades
-    'M9 10l6-1.5 18 21.5 1.5 6-6-1.5L10.5 14.5zM39 10l-6-1.5-18 21.5-1.5 6 6-1.5 19.5-20.5z',
-    // flame
-    'M24 6c2 7 11 10 11 19 0 7-5 12-11 12s-11-5-11-12c0-5 3-8 5-12 1 3 3 4 4 3 1-3-1-6 2-10zM24 24c1 3 4 4 4 7 0 2.5-1.8 4.5-4 4.5s-4-2-4-4.5c0-3 3-4 4-7z',
-    // bull
-    'M8 13c5-2 8 1 9 4h14c1-3 4-6 9-4-4 1.5-5.5 4.5-5.5 8L30 26l1.5 7L24 39l-7.5-6 1.5-7-4.5-5c0-3.5-1.5-6.5-5.5-8zM20 24l2.5 2-3.5 1zM28 24l-2.5 2 3.5 1z',
-    // bolt
-    'M27 6L13 26h8l-4 16 18-22h-9l5-14z',
-    // crown
-    'M9 16l6.5 6.5L24 10l8.5 12.5L39 16l-3 17H12zM12 35h24v4H12z',
+  /* Ten emblems, on the same 96 grid. Each is a silhouette PLUS a `hi` path --
+     the planes of it that catch the light -- so the emblem is lit like the metal
+     around it instead of reading as a sticker on top. */
+  var EMBLEMS = [
+    { name: 'Chevrons',
+      d: 'M48 26l20 14h-10L48 33l-10 7H28zM48 42l20 14h-10L48 49l-10 7H28zM48 58l20 14h-10L48 65l-10 7H28z',
+      hi: 'M48 26l20 14h-4L48 29 32 40h-4zM48 42l20 14h-4L48 45 32 56h-4zM48 58l20 14h-4L48 61 32 72h-4z' },
+    { name: 'Wolf',
+      d: 'M26 20l12 12h20l12-12-2 20-6 5 4 10-18 17-18-17 4-10-6-5zM40 44l5 4-7 2zM56 44l-5 4 7 2zM48 56l6 8H42z',
+      hi: 'M26 20l12 12h10v-12L38 32zM48 32h10l12-12-2 20-6 5h-4z' },
+    { name: 'Wings',
+      d: 'M48 28l5 9v32l-5 8-5-8V37zM38 40c-9-8-19-10-31-8 8 4 12 10 12 16 6-2 13 0 19 4zM58 40c9-8 19-10 31-8-8 4-12 10-12 16-6-2-13 0-19 4zM38 58c-8-6-16-8-25-6 6 4 10 8 10 12 5-2 11-2 15 0zM58 58c8-6 16-8 25-6-6 4-10 8-10 12-5-2-11-2-15 0z',
+      hi: 'M48 28l5 9v10l-5 3-5-3V37zM38 40c-9-8-19-10-31-8 8 4 12 10 12 16z' },
+    { name: 'Star',
+      d: 'M48 20l9 20 22 3-16 15 4 22-19-11-19 11 4-22-16-15 22-3z',
+      hi: 'M48 20l9 20 22 3-16 15-15-38z' },
+    { name: 'Skull',
+      d: 'M48 20c15 0 23 10 23 22 0 7.6-3.2 13.2-8 16v9l-5 5H38l-5-5v-9c-4.8-2.8-8-8.4-8-16 0-12 8-22 23-22zM38 44a6.4 6.4 0 1 0 0 12.8A6.4 6.4 0 0 0 38 44zM58 44a6.4 6.4 0 1 0 0 12.8A6.4 6.4 0 0 0 58 44zM48 60l5 8h-10z',
+      hi: 'M48 20c15 0 23 10 23 22 0 3-.5 5.7-1.4 8C66 38 58 30 44 29c-8-.6-13 2-16 6 3-9 10-15 20-15z' },
+    { name: 'Blades',
+      d: 'M18 20l12-3 36 43 3 12-12-3-39-42zM78 20l-12-3-36 43-3 12 12-3 39-42z',
+      hi: 'M18 20l12-3 36 43-5 3zM78 20l-12-3-10 12 5 3z' },
+    { name: 'Flame',
+      d: 'M48 12c4 14 22 20 22 38 0 14-10 24-22 24s-22-10-22-24c0-10 6-16 10-24 2 6 6 8 8 6 2-6-2-12 4-20zM48 48c2 6 8 8 8 14 0 5-3.6 9-8 9s-8-4-8-9c0-6 6-8 8-14z',
+      hi: 'M48 12c4 14 22 20 22 38 0 6-2 11-5 15 2-18-8-28-17-35-2-7-2-12 0-18z' },
+    { name: 'Bull',
+      d: 'M16 26c10-4 16 2 18 8h28c2-6 8-12 18-8-8 3-11 9-11 16L60 52l3 14-15 12-15-12 3-14-9-10c0-7-3-13-11-16zM40 48l5 4-7 2zM56 48l-5 4 7 2z',
+      hi: 'M16 26c10-4 16 2 18 8h14v18l-9 4-9-10c0-7-3-13-11-16z' },
+    { name: 'Bolt',
+      d: 'M54 12L26 52h16l-8 32 36-44H52l10-28z',
+      hi: 'M54 12L26 52h8l24-40z' },
+    { name: 'Crown',
+      d: 'M18 32l13 13L48 20l17 25 13-13-6 34H24zM24 70h48v8H24z',
+      hi: 'M18 32l13 13L48 20v14l-10 12-14-8z' },
   ];
 
   var BEHIND = ['halo', 'rays', 'wings', 'laurel', 'spikes'];
-  var INFRONT = ['bar', 'crown', 'studs', 'gem'];
+  var INFRONT = ['banner', 'crown', 'rivets', 'bolts', 'gem'];
 
   function rankBadgeSvg(band, size) {
     var b = Math.max(1, Math.min(100, Number(band) || 1));
     var t = Math.floor((b - 1) / 10);
     var tier = RANK_TIERS[t];
-    var body = BODIES[tier.body];
-    var glyph = RANK_GLYPHS[(b - 1) % 10];
+    var shape = BODIES[tier.body];
+    var em = EMBLEMS[(b - 1) % 10];
     var id = 'rb' + b;
     var px = size || 68;
 
-    function draw(names) {
+    function part(names) {
       var out = '';
       for (var i = 0; i < names.length; i++) {
-        if (tier.parts.indexOf(names[i]) < 0) continue;
-        out += '<path d="' + PARTS[names[i]] + '" fill="url(#' + id + 'm)" stroke="'
-          + tier.ring + '" stroke-width=".6" stroke-linejoin="round"/>';
+        var spec = PARTS[names[i]];
+        if (!spec || tier.parts.indexOf(names[i]) < 0) continue;
+        for (var j = 0; j < spec.length; j++) {
+          // Shadow first, then the metal, then a rim light along the top edge:
+          // the same three passes the body gets, so furniture reads as part of
+          // the same casting rather than pasted on.
+          out += '<path d="' + spec[j][0] + '" fill="' + tier.deep + '" opacity=".6" transform="translate(0,1.6)"/>'
+            + '<path d="' + spec[j][0] + '" fill="url(#' + id + 'm)" opacity="' + spec[j][1] + '"/>'
+            + '<path d="' + spec[j][0] + '" fill="none" stroke="' + tier.hi + '" stroke-opacity=".38" stroke-width=".8" transform="translate(0,-.7)"/>';
+        }
       }
       return out;
     }
 
-    /* The glow is not one value for every tier that has one: it opens up as the
-       ladder climbs, so the last six are told apart by how much light they throw
-       as well as by their colour. */
-    var glow = tier.glow
-      ? '<circle cx="24" cy="24" r="23.5" fill="url(#' + id + 'g)"/>'
-      : '';
-    /* A RING of light around the badge, not a disc behind it. The first cut ran
-       transparent at the centre to solid at the rim, which filled the whole box
-       and read as a dull plate -- gold came out brown and mythic swallowed its
-       own crown. Brightest just outside the metal, gone by the edge. */
+    /* A ring of light around the badge, not a disc behind it: brightest just
+       outside the metal, gone by the edge of the box. Filling the box reads as a
+       dull plate -- gold came out brown that way and mythic lost its crown. */
     var glowDef = tier.glow
       ? '<radialGradient id="' + id + 'g">'
-        + '<stop offset="52%" stop-color="' + tier.glow + '" stop-opacity="0"/>'
-        + '<stop offset="74%" stop-color="' + tier.glow + '" stop-opacity="' + tier.glowStop + '"/>'
+        + '<stop offset="54%" stop-color="' + tier.glow + '" stop-opacity="0"/>'
+        + '<stop offset="76%" stop-color="' + tier.glow + '" stop-opacity="' + tier.glowStop + '"/>'
         + '<stop offset="100%" stop-color="' + tier.glow + '" stop-opacity="0"/>'
         + '</radialGradient>'
       : '';
 
-    /* Mythic alone is iridescent -- an extra hue through the middle of the metal,
-       so the top ten do something no other metal on the ladder does. */
-    var metal = t === 9
-      ? '<stop offset="0%" stop-color="#ffffff"/><stop offset="28%" stop-color="#8ee0ff"/>'
-        + '<stop offset="58%" stop-color="#b06cf0"/><stop offset="100%" stop-color="#2b1050"/>'
-      : '<stop offset="0%" stop-color="' + tier.lo + '"/>'
-        + '<stop offset="42%" stop-color="' + tier.mid + '"/>'
-        + '<stop offset="100%" stop-color="' + tier.dk + '"/>';
+    /* Mythic alone runs a second hue through the metal, so the top ten do
+       something no other metal on the ladder does. */
+    var metalStops = t === 9
+      ? '<stop offset="0%" stop-color="#ffffff"/><stop offset="22%" stop-color="#9fe8ff"/>'
+        + '<stop offset="48%" stop-color="#c98cff"/><stop offset="74%" stop-color="#6d2fb5"/>'
+        + '<stop offset="100%" stop-color="#26094a"/>'
+      : '<stop offset="0%" stop-color="' + tier.hi + '"/>'
+        + '<stop offset="20%" stop-color="' + tier.lo + '"/>'
+        + '<stop offset="52%" stop-color="' + tier.mid + '"/>'
+        + '<stop offset="82%" stop-color="' + tier.dk + '"/>'
+        + '<stop offset="100%" stop-color="' + tier.deep + '"/>';
 
-    return '<svg viewBox="0 0 48 48" width="' + px + '" height="' + px
+    return '<svg viewBox="0 0 96 96" width="' + px + '" height="' + px
       + '" role="presentation" focusable="false" aria-hidden="true">'
       + '<defs>'
-      + '<linearGradient id="' + id + 'm" x1="0" y1="0" x2=".7" y2="1">' + metal + '</linearGradient>'
-      + '<linearGradient id="' + id + 'k" x1="0" y1="0" x2=".3" y2="1">'
-      + '<stop offset="0%" stop-color="' + tier.rim + '"/>'
-      + '<stop offset="70%" stop-color="' + tier.lo + '"/>'
+      + '<linearGradient id="' + id + 'm" x1=".12" y1="0" x2=".82" y2="1">' + metalStops + '</linearGradient>'
+      + '<linearGradient id="' + id + 'e" x1=".2" y1="0" x2=".8" y2="1">'
+      + '<stop offset="0%" stop-color="' + tier.enamel + '"/>'
+      + '<stop offset="100%" stop-color="#05070e"/>'
+      + '</linearGradient>'
+      + '<linearGradient id="' + id + 'x" x1="0" y1="0" x2=".3" y2="1">'
+      + '<stop offset="0%" stop-color="' + tier.hi + '"/>'
+      + '<stop offset="46%" stop-color="' + tier.lo + '"/>'
       + '<stop offset="100%" stop-color="' + tier.mid + '"/>'
       + '</linearGradient>'
-      + '<linearGradient id="' + id + 'f" x1="0" y1="0" x2=".4" y2="1">'
-      + '<stop offset="0%" stop-color="' + tier.dk + '"/>'
-      + '<stop offset="100%" stop-color="#0a1020"/>'
+      + '<linearGradient id="' + id + 's" x1="0" y1="0" x2="0" y2="1">'
+      + '<stop offset="0%" stop-color="#ffffff" stop-opacity=".16"/>'
+      + '<stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>'
       + '</linearGradient>'
+      + '<filter id="' + id + 'd" x="-25%" y="-25%" width="150%" height="150%">'
+      + '<feDropShadow dx="0" dy="2.2" stdDeviation="2" flood-color="#04060d" flood-opacity=".65"/>'
+      + '</filter>'
       + glowDef
       + '</defs>'
-      + glow
-      + draw(BEHIND)
-      /* The bevel is three copies of the same path rather than an SVG filter: a
-         filter per badge costs a render pass each, and at this size a light rim
-         over a dark outline reads as struck metal just as well. */
-      + '<path d="' + body + '" fill="' + tier.dk + '" opacity=".55" transform="translate(0,1.1)"/>'
-      + '<path d="' + body + '" fill="url(#' + id + 'm)" stroke="' + tier.ring + '" stroke-width="1.1" stroke-linejoin="round"/>'
-      + '<path d="' + body + '" fill="none" stroke="' + tier.rim + '" stroke-width=".8" stroke-opacity=".75" stroke-linejoin="round" transform="translate(0,-.5)"/>'
-      /* A recessed field between the body and the mark. Without it the mark is
-         light metal on light metal -- the silver row was unreadable -- and the
-         body's own silhouette crops it. Scaled from the centre off the SAME
-         path, so it fits inside either body without a shape of its own. */
-      + '<g transform="translate(24,24) scale(.60) translate(-24,-24)">'
-      + '<path d="' + body + '" fill="url(#' + id + 'f)" stroke="' + tier.ring + '" stroke-width="1.6" stroke-opacity=".8" stroke-linejoin="round"/>'
+      + (tier.glow ? '<circle cx="48" cy="48" r="47" fill="url(#' + id + 'g)"/>' : '')
+      + part(BEHIND)
+      + '<g filter="url(#' + id + 'd)">'
+      // Base metal, then the two facets that make it a surface rather than a fill.
+      + '<path d="' + shape.out + '" fill="url(#' + id + 'm)"/>'
+      + '<path d="' + shape.lit + '" fill="' + tier.hi + '" opacity=".22"/>'
+      + '<path d="' + shape.shade + '" fill="' + tier.deep + '" opacity=".30"/>'
+      // Rim light on the top edge, dark line under it: a bevel, in two strokes.
+      + '<path d="' + shape.out + '" fill="none" stroke="' + tier.hi + '" stroke-opacity=".55" stroke-width="1.5" transform="translate(0,-.8)"/>'
+      + '<path d="' + shape.out + '" fill="none" stroke="' + tier.deep + '" stroke-opacity=".85" stroke-width="1.2"/>'
       + '</g>'
-      + '<g transform="translate(24,24) scale(.42) translate(-24,-24)">'
-      + '<path d="' + glyph + '" fill="' + tier.dk + '" opacity=".55" transform="translate(0,1.6)"/>'
-      + '<path d="' + glyph + '" fill="url(#' + id + 'k)"/>'
+      // The recessed field: dark enamel, its own inner shadow, its own gloss.
+      + '<path d="' + shape.inner + '" fill="url(#' + id + 'e)"/>'
+      + '<path d="' + shape.inner + '" fill="none" stroke="' + tier.deep + '" stroke-width="2.6" stroke-opacity=".8" transform="translate(0,-1)"/>'
+      + '<path d="' + shape.inner + '" fill="none" stroke="' + tier.accent + '" stroke-opacity=".45" stroke-width="1"/>'
+      + '<g transform="translate(48,50) scale(.58) translate(-48,-48)">'
+      + '<path d="' + em.d + '" fill="' + tier.deep + '" opacity=".9" transform="translate(0,2.6)"/>'
+      + '<path d="' + em.d + '" fill="url(#' + id + 'x)"/>'
+      /* A rim light along the emblem's top edge instead of a painted highlight
+         shape. The hand-drawn one landed as a white bubble on the skull and had
+         to be redrawn per emblem to sit right; a stroke follows whatever the
+         silhouette happens to be. */
+      + '<path d="' + em.d + '" fill="none" stroke="' + tier.hi + '" stroke-opacity=".7" stroke-width="1.6" transform="translate(0,-1.4)"/>'
+      + '<path d="' + em.d + '" fill="none" stroke="' + tier.deep + '" stroke-opacity=".5" stroke-width="1"/>'
       + '</g>'
-      + draw(INFRONT)
+      + '<path d="' + shape.gloss + '" fill="url(#' + id + 's)"/>'
+      + part(INFRONT)
       + '</svg>';
   }
 
-  /* renderRankBadgeIcon keeps its signature and its wrapper element: every
-     caller -- the reward card, the profile, the leaderboard -- finds the same
-     .rankBadgeIconWrap with the same tone class and the same data-rank-band.
-     Only what is drawn inside it changed. */
   function renderRankBadgeIcon(rankIconKey, { compact = false } = {}) {
     const band = resolveRankIconBand(rankIconKey);
     const toneClass = resolveRankIconTone(rankIconKey);
