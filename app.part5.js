@@ -122,7 +122,25 @@
       /* The coin is struck in the driver's OWN metal. --rank-lo/mid/dk/ring come
          off the badge markup, one set per tier, with gold as the fallback for
          anything that renders this wrapper without them. */
-      .pickupProgressReward .rankBadgeIconWrap{width:68px!important;height:68px!important;border-radius:999px;background:linear-gradient(180deg,var(--rank-lo,#f0d49a) 0%,var(--rank-mid,#c39a4e) 52%,var(--rank-dk,#8f6c2c) 100%)!important;color:#3a2a08!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.55),inset 0 -2px 3px rgba(0,0,0,.35),0 0 0 1px var(--rank-ring,#7a5c26),0 10px 24px rgba(2,6,23,.55)!important}
+      /* The painted frame IS the medal, so the three layers stack in one box:
+         the frame, the mark in its well, and the generated badge behind both
+         for when the file is not there. */
+      .rankBadgeIconWrap.rankBadgePainted{position:relative;display:grid;place-items:center;background:none!important;box-shadow:none!important;border-radius:0}
+      .rankBadgeIconWrap.rankBadgePainted > *{grid-area:1/1}
+      .rankBadgeFrame{width:100%;height:100%;object-fit:contain;display:block}
+      .rankBadgeMark{display:grid;place-items:center;pointer-events:none}
+      .rankBadgeVector{display:none}
+      /* Without a painted frame the wrapper goes back to what it always was,
+         and the generated badge is what shows. */
+      .rankBadgeIconWrap:not(.rankBadgePainted) .rankBadgeFrame,
+      .rankBadgeIconWrap:not(.rankBadgePainted) .rankBadgeMark{display:none}
+      .rankBadgeIconWrap:not(.rankBadgePainted) .rankBadgeVector{display:block}
+      .pickupProgressReward .rankBadgeIconWrap{width:72px!important;height:72px!important;border-radius:999px;background:linear-gradient(180deg,var(--rank-lo,#f0d49a) 0%,var(--rank-mid,#c39a4e) 52%,var(--rank-dk,#8f6c2c) 100%);color:#3a2a08;box-shadow:inset 0 1px 0 rgba(255,255,255,.55),inset 0 -2px 3px rgba(0,0,0,.35),0 0 0 1px var(--rank-ring,#7a5c26),0 10px 24px rgba(2,6,23,.55)}
+      /* The struck coin was a stand-in for a badge that could not carry the
+         moment on its own. The painted frame is the medal, so the coin behind
+         it stands down to a drop shadow rather than becoming a second medal
+         around the first. */
+      .pickupProgressReward .rankBadgeIconWrap.rankBadgePainted{background:none!important;box-shadow:none!important;filter:drop-shadow(0 8px 18px rgba(2,6,23,.6))}
       .pickupProgressReward .rankBadgeIconWrap svg{width:34px;height:34px}
       .pickupProgressRewardMeta{margin-top:18px;display:flex;align-items:baseline;justify-content:space-between;gap:12px}
       .pickupProgressRewardLevel{font-size:14px;font-weight:700;line-height:1;color:#e7ebf3;letter-spacing:0}
@@ -345,27 +363,31 @@
    * version of this one.
    */
 
+  /* Sampled straight out of the painted frames, so the emblem inside a
+     frame always wears that frame's metal. Written by hand before the art
+     existed, this table put a purple skull inside a black and gold medal.
+     Re-sample if the art is ever regenerated; do not hand-edit. */
   var RANK_TIERS = [
-    { name: 'Bronze', hi: '#ffe4c4', lo: '#e3a870', mid: '#b4753c', dk: '#6b3d18', deep: '#37200c',
-      enamel: '#3a2412', accent: '#e8b184', parts: ['rivets'], glow: null, glowStop: 0 },
-    { name: 'Iron', hi: '#ffffff', lo: '#d3dae4', mid: '#8b96a5', dk: '#4a5462', deep: '#242b35',
-      enamel: '#222a36', accent: '#c8d2de', parts: ['rivets', 'banner'], glow: null, glowStop: 0 },
-    { name: 'Steel', hi: '#ffffff', lo: '#cfe4f5', mid: '#7796b0', dk: '#3b5468', deep: '#1c2c3a',
-      enamel: '#1b2b39', accent: '#bcd8ef', parts: ['rivets', 'banner', 'bolts'], glow: null, glowStop: 0 },
-    { name: 'Silver', hi: '#ffffff', lo: '#eef2f7', mid: '#bcc6d4', dk: '#78828f', deep: '#434b56',
-      enamel: '#2a303a', accent: '#e6ecf4', parts: ['rivets', 'banner', 'bolts', 'laurel'], glow: null, glowStop: 0 },
-    { name: 'Gold', hi: '#fffdf0', lo: '#ffdf8a', mid: '#dfa62b', dk: '#946009', deep: '#4d3104',
-      enamel: '#3a2a06', accent: '#ffe9a8', parts: ['rivets', 'banner', 'bolts', 'laurel', 'wings'], glow: '#ffd76a', glowStop: 0.26 },
-    { name: 'Platinum', hi: '#ffffff', lo: '#e2f7ff', mid: '#9dcedd', dk: '#557f90', deep: '#2b4550',
-      enamel: '#13333d', accent: '#d8f4ff', parts: ['rivets', 'banner', 'bolts', 'laurel', 'wings', 'gem'], glow: '#8ee9ff', glowStop: 0.32 },
-    { name: 'Sapphire', hi: '#ffffff', lo: '#b9d4ff', mid: '#3f77d8', dk: '#1c3f8e', deep: '#0d1f4e',
-      enamel: '#0e1c44', accent: '#cfe0ff', parts: ['rivets', 'banner', 'bolts', 'laurel', 'wings', 'gem', 'spikes'], glow: '#6aa6ff', glowStop: 0.38 },
-    { name: 'Emerald', hi: '#ffffff', lo: '#a9f7cd', mid: '#1ea45c', dk: '#0c6437', deep: '#04351d',
-      enamel: '#06301c', accent: '#c6ffe1', parts: ['rivets', 'banner', 'bolts', 'laurel', 'wings', 'gem', 'spikes', 'crown'], glow: '#49f59a', glowStop: 0.45 },
-    { name: 'Crimson', hi: '#fff3ee', lo: '#ffb69c', mid: '#d93c22', dk: '#8c1d0c', deep: '#470c03',
-      enamel: '#3c0e06', accent: '#ffcbb8', parts: ['rivets', 'banner', 'bolts', 'laurel', 'wings', 'gem', 'spikes', 'crown', 'rays'], glow: '#ff7a52', glowStop: 0.52 },
-    { name: 'Mythic', hi: '#ffffff', lo: '#d9c2ff', mid: '#a65cf0', dk: '#5a2299', deep: '#26094a',
-      enamel: '#1d0940', accent: '#ecdcff', parts: ['rivets', 'banner', 'bolts', 'laurel', 'wings', 'gem', 'spikes', 'crown', 'rays', 'halo'], glow: '#d08bff', glowStop: 0.60 },
+  { name: 'Copper', hi: '#f2c3a1', lo: '#904d2b', mid: '#61341d', dk: '#3c2012', deep: '#1f1009',
+    enamel: '#111a27', accent: '#f2c3a1', parts: [], glow: null, glowStop: 0 },
+  { name: 'Silver', hi: '#f2f4f3', lo: '#9b999a', mid: '#696868', dk: '#414040', deep: '#222121',
+    enamel: '#111a27', accent: '#f2f4f3', parts: ['rivets'], glow: null, glowStop: 0 },
+  { name: 'Gold', hi: '#feefa7', lo: '#b5812e', mid: '#7b571f', dk: '#4c3613', deep: '#271c0a',
+    enamel: '#111a27', accent: '#feefa7', parts: ['rivets', 'banner'], glow: null, glowStop: 0 },
+  { name: 'Jade', hi: '#95e7e2', lo: '#1b887d', mid: '#125c55', dk: '#0b3934', deep: '#051d1b',
+    enamel: '#111a27', accent: '#95e7e2', parts: ['rivets', 'banner', 'bolts'], glow: null, glowStop: 0 },
+  { name: 'Sapphire', hi: '#86beff', lo: '#295e92', mid: '#1b3f63', dk: '#11273d', deep: '#091420',
+    enamel: '#111a27', accent: '#86beff', parts: ['rivets', 'banner', 'bolts', 'laurel'], glow: '#86beff', glowStop: 0.26 },
+  { name: 'Amethyst', hi: '#cd9ae9', lo: '#6b4886', mid: '#48305b', dk: '#2c1e38', deep: '#170f1d',
+    enamel: '#111a27', accent: '#cd9ae9', parts: ['rivets', 'banner', 'bolts', 'laurel', 'wings'], glow: '#cd9ae9', glowStop: 0.32 },
+  { name: 'Crimson', hi: '#aaaaaa', lo: '#811f20', mid: '#571515', dk: '#360d0d', deep: '#1c0607',
+    enamel: '#111a27', accent: '#aaaaaa', parts: ['rivets', 'banner', 'bolts', 'laurel', 'wings', 'gem'], glow: '#aaaaaa', glowStop: 0.38 },
+  { name: 'Rose', hi: '#fc8bcd', lo: '#ae2961', mid: '#761b41', dk: '#491128', deep: '#260915',
+    enamel: '#111a27', accent: '#fc8bcd', parts: ['rivets', 'banner', 'bolts', 'laurel', 'wings', 'gem', 'spikes'], glow: '#fc8bcd', glowStop: 0.45 },
+  { name: 'Frost', hi: '#a6ebf6', lo: '#177ebd', mid: '#0f5580', dk: '#09344f', deep: '#051b29',
+    enamel: '#111a27', accent: '#a6ebf6', parts: ['rivets', 'banner', 'bolts', 'laurel', 'wings', 'gem', 'spikes', 'crown'], glow: '#a6ebf6', glowStop: 0.52 },
+  { name: 'Obsidian', hi: '#eeca8e', lo: '#5c4f3c', mid: '#3e3528', dk: '#262119', deep: '#14110d',
+    enamel: '#111a27', accent: '#eeca8e', parts: ['rivets', 'banner', 'bolts', 'laurel', 'wings', 'gem', 'spikes', 'crown', 'rays', 'halo'], glow: '#eeca8e', glowStop: 0.6 },
   ];
 
   /* One frame per tier, in climbing order of complexity. `out` is the
@@ -470,6 +492,33 @@
 
   var BEHIND = ['halo', 'rays', 'wings', 'laurel', 'spikes'];
   var INFRONT = ['banner', 'crown', 'rivets', 'bolts', 'gem'];
+
+  /* The emblem alone, for sitting inside a painted frame.
+   
+     The generated frames are rings and crests with an empty well in the middle
+     -- that well is exactly what the emblem goes in, so the frame supplies the
+     metal and the mark stays vector. Ten painted files plus ten vector marks
+     is a hundred badges; a hundred painted files would have been a hundred
+     files to make, store and keep consistent. */
+  function rankBadgeMarkSvg(band, size) {
+    var b = Math.max(1, Math.min(100, Number(band) || 1));
+    var t = Math.floor((b - 1) / 10);
+    var tier = RANK_TIERS[t];
+    var em = EMBLEMS[(b - 1) % 10];
+    var id = 'rm' + b;
+    return '<svg viewBox="0 0 96 96" width="' + (size || 30) + '" height="' + (size || 30)
+      + '" role="presentation" focusable="false" aria-hidden="true">'
+      + '<defs><linearGradient id="' + id + 'x" x1="0" y1="0" x2=".3" y2="1">'
+      + '<stop offset="0%" stop-color="' + tier.hi + '"/>'
+      + '<stop offset="46%" stop-color="' + tier.lo + '"/>'
+      + '<stop offset="100%" stop-color="' + tier.mid + '"/>'
+      + '</linearGradient></defs>'
+      + '<path d="' + em.d + '" fill="#04060d" opacity=".75" transform="translate(0,2.6)"/>'
+      + '<path d="' + em.d + '" fill="url(#' + id + 'x)"/>'
+      + '<path d="' + em.cut + '" fill="' + tier.deep + '" opacity=".55"/>'
+      + '<path d="' + em.d + '" fill="none" stroke="' + tier.hi + '" stroke-opacity=".7" stroke-width="1.6" stroke-linejoin="round" transform="translate(0,-1.4)"/>'
+      + '</svg>';
+  }
 
   function rankBadgeSvg(band, size) {
     var b = Math.max(1, Math.min(100, Number(band) || 1));
@@ -595,8 +644,21 @@
        gold coin reads as a mistake, and a mythic one reads as a worse one. */
     const tier = RANK_TIERS[Math.max(0, Math.min(9, Math.floor((Math.max(1, Math.min(100, band)) - 1) / 10)))];
     const metal = `--rank-lo:${tier.lo};--rank-mid:${tier.mid};--rank-dk:${tier.dk};--rank-ring:${tier.ring}`;
-    return `<div class="rankBadgeIconWrap ${toneClass}${compact ? ' compact' : ''}" aria-hidden="true" data-rank-band="${band}" style="${metal}">`
-      + rankBadgeSvg(band, compact ? 54 : 68)
+    const size = compact ? 54 : 68;
+    const t = Math.max(1, Math.min(10, Math.floor((Math.max(1, Math.min(100, band)) - 1) / 10) + 1));
+    /* Painted frame, vector mark, vector badge underneath as the fallback.
+     *
+     * The fallback is not decoration. These files ship in the repo, so they
+     * are there -- until a driver is running a cached older build, or the tier
+     * is one whose art has not been drawn yet. onerror puts the class on the
+     * wrapper, CSS hides the image and shows the badge that is already in the
+     * markup, and nothing about the card moves. Adding tier 11 later means
+     * dropping in one file; forgetting to means the vector shows. */
+    return `<div class="rankBadgeIconWrap ${toneClass}${compact ? ' compact' : ''} rankBadgePainted" aria-hidden="true" data-rank-band="${band}" style="${metal};--rank-size:${size}px">`
+      + `<img class="rankBadgeFrame" src="./rank-frames/tier-${t}.webp" alt="" width="${size}" height="${size}" decoding="async"`
+      + ` onerror="this.closest('.rankBadgeIconWrap')?.classList.remove('rankBadgePainted')">`
+      + `<span class="rankBadgeMark">${rankBadgeMarkSvg(band, Math.round(size * 0.42))}</span>`
+      + `<span class="rankBadgeVector">${rankBadgeSvg(band, size)}</span>`
       + `</div>`;
   }
 

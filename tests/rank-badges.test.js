@@ -208,6 +208,64 @@ test('every badge is struck, not drawn', () => {
     'the metal has fewer than five stops, so it ramps instead of catching');
 });
 
+// ----------------------------------------------------- the painted frames
+//
+// Ten painted frames plus ten vector emblems is a hundred badges. A hundred
+// painted files would have been a hundred files to make, store and keep
+// consistent, and the frames have an empty well in the middle precisely so
+// the mark can stay generated.
+
+test('all ten painted frames ship', () => {
+  for (let t = 1; t <= 10; t += 1) {
+    const file = path.join(__dirname, '..', 'rank-frames', `tier-${t}.webp`);
+    assert.ok(fs.existsSync(file), `rank-frames/tier-${t}.webp is missing`);
+    const kb = fs.statSync(file).size / 1024;
+    assert.ok(kb < 40, `tier-${t}.webp is ${kb.toFixed(0)}KB; it draws at 68px`);
+  }
+});
+
+test('a band asks for its own tier\'s frame', () => {
+  const render = SOURCE.slice(SOURCE.indexOf('function renderRankBadgeIcon'));
+  assert.ok(/rank-frames\/tier-\$\{t\}\.webp/.test(render),
+    'the frame is no longer addressed by tier');
+  // band 1..10 -> tier 1, band 91..100 -> tier 10, and nothing off either end.
+  const tierOf = (band) => Math.max(1, Math.min(10,
+    Math.floor((Math.max(1, Math.min(100, band)) - 1) / 10) + 1));
+  assert.strictEqual(tierOf(1), 1);
+  assert.strictEqual(tierOf(10), 1);
+  assert.strictEqual(tierOf(11), 2);
+  assert.strictEqual(tierOf(95), 10);
+  assert.strictEqual(tierOf(100), 10);
+  assert.strictEqual(tierOf(0), 1);
+  assert.strictEqual(tierOf(9999), 10);
+});
+
+test('the vector badge is still in the markup, as the fallback', () => {
+  /* Not decoration. A driver on a cached older build, or a tier whose art has
+   * not been drawn yet, gets the generated badge instead of an empty box --
+   * and the swap is a class on the wrapper, so nothing about the card moves. */
+  const render = SOURCE.slice(SOURCE.indexOf('function renderRankBadgeIcon'));
+  assert.ok(/rankBadgeVector/.test(render), 'the fallback badge is gone');
+  assert.ok(/rankBadgeSvg\(band, size\)/.test(render),
+    'the fallback is no longer the real generated badge');
+  assert.ok(/onerror=/.test(render), 'a missing frame would leave an empty box');
+  assert.ok(/classList\.remove\('rankBadgePainted'\)/.test(render),
+    'the error path does not hand back to the vector');
+});
+
+test('the emblem wears its own frame\'s metal', () => {
+  /* The palette is sampled out of the art. Hand-written, it put a purple skull
+   * inside a black and gold medal. Every tier must differ from its neighbour,
+   * or the sampling has silently stopped happening. */
+  const { tiers } = load();
+  const his = tiers.map((t) => t.hi);
+  assert.strictEqual(new Set(his).size, 10, 'two tiers share a highlight');
+  const los = tiers.map((t) => t.lo);
+  assert.strictEqual(new Set(los).size, 10, 'two tiers share a metal');
+  assert.ok(/Re-sample if the art is ever regenerated/.test(SOURCE),
+    'the note saying not to hand-edit the sampled palette is gone');
+});
+
 // --------------------------------------------------------------------------
 let failed = 0;
 tests.forEach(([name, fn]) => {
