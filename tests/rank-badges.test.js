@@ -45,7 +45,7 @@ function load() {
     globalThis.svg = rankBadgeSvg;
     globalThis.tiers = RANK_TIERS;
     globalThis.parts = PARTS;
-    globalThis.bodies = BODIES;
+    globalThis.frames = FRAMES;
     globalThis.emblems = EMBLEMS;`, context, { filename: 'app.part5.js#badges' });
   return context;
 }
@@ -168,6 +168,17 @@ test('ten emblems, and none of them repeat', () => {
   });
 });
 
+test('every tier has a frame of its own', () => {
+  /* Five tiers wore one body and five wore the other, so the top half of the
+   * ladder was a single silhouette in five colours. However much furniture got
+   * bolted on, that is what kept it feeling repetitive. */
+  const { frames, tiers } = load();
+  assert.strictEqual(frames.length, tiers.length,
+    'there is no longer one frame per tier');
+  assert.strictEqual(new Set(frames.map((f) => f.out)).size, frames.length,
+    'two tiers share a silhouette');
+});
+
 test('every badge is struck, not drawn', () => {
   /* The first two attempts were flat: one fill, one outline. A medal's effect
    * is material -- a lit face, a shaded face, a rim light, a recessed field
@@ -175,17 +186,20 @@ test('every badge is struck, not drawn', () => {
    * here, and losing any one of them is what "too simple" looked like. */
   const ctx = load();
   const svg = ctx.svg(45, 240);
-  const { bodies } = ctx;
-  Object.keys(bodies).forEach((k) => {
-    ['out', 'lit', 'shade', 'inner', 'gloss'].forEach((face) => {
-      assert.ok(bodies[k][face], `the ${k} body has no ${face} face`);
+  const { frames } = ctx;
+  frames.forEach((f, i) => {
+    ['out', 'lit', 'inner'].forEach((face) => {
+      assert.ok(f[face], `frame ${i + 1} has no ${face}`);
     });
   });
   assert.ok(/feDropShadow/.test(svg), 'the badge casts no shadow');
-  assert.ok(svg.includes(bodies.shield.lit), 'the lit face is not drawn');
-  assert.ok(svg.includes(bodies.shield.shade), 'the shaded face is not drawn');
-  assert.ok(svg.includes(bodies.shield.inner), 'there is no recessed field');
-  assert.ok(svg.includes(bodies.shield.gloss), 'the field has no gloss');
+  assert.ok(/feTurbulence/.test(svg), 'the metal has no grain');
+  assert.ok(/baseFrequency="[\d.]+ [\d.]+"/.test(svg),
+    'the grain is isotropic noise, which is dirt rather than a brushed surface');
+  assert.ok(svg.includes(frames[4].lit), 'the lit face is not drawn');
+  assert.ok(svg.includes(frames[4].inner), 'there is no recessed field');
+  assert.ok(/clip-path="url\(#rb45c\)"/.test(svg),
+    'the surface is not painted inside the frame, so it has one plane again');
   // Five stops in the metal: highlight, light, mid, shadow, deep. Fewer and it
   // ramps instead of catching.
   const metal = svg.match(/id="rb45m"[^>]*>((?:<stop[^>]*>)+)/);
