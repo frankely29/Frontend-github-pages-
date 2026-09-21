@@ -2064,7 +2064,45 @@ window.getCurrentZoneShadowDebug = function getCurrentZoneShadowDebug(locationId
   return window.TlcScoreShadowModule?.getZoneShadowComparisonByLocationId?.(locationId) || null;
 };
 
+/* MapLibre comes from a third-party CDN, and initMap is called straight
+ * through from boot. When the library has not arrived, `new maplibregl.Map`
+ * throws a ReferenceError out of initMap, and everything after the call site
+ * -- startLocationWatch, the GPS priority timer, the startup fallbacks --
+ * never runs. One slow CDN takes the whole app down, not just the map.
+ *
+ * So wait for it instead. The script tag is still in the document; if it is
+ * simply late, this picks it up on the next frame and the boot sequence
+ * behind it carries on in the meantime. */
+const MAPLIBRE_WAIT_MS = 15000;
+
+function whenMapLibreReady(run) {
+  if (typeof maplibregl !== 'undefined' && maplibregl && maplibregl.Map) {
+    run();
+    return;
+  }
+  const startedAt = Date.now();
+  const tick = () => {
+    if (typeof maplibregl !== 'undefined' && maplibregl && maplibregl.Map) {
+      run();
+      return;
+    }
+    if (Date.now() - startedAt > MAPLIBRE_WAIT_MS) {
+      console.error('maplibre-gl did not load; the map cannot start');
+      if (typeof recordBlankMapWarning === 'function') {
+        recordBlankMapWarning('maplibre-gl never loaded');
+      }
+      return;
+    }
+    window.setTimeout(tick, 120);
+  };
+  tick();
+}
+
 function initMap() {
+  if (typeof maplibregl === 'undefined' || !maplibregl || !maplibregl.Map) {
+    whenMapLibreReady(initMap);
+    return;
+  }
   map = new maplibregl.Map({
     container: "map",
     style: {
@@ -2093,15 +2131,30 @@ function initMap() {
     },
     center: [-73.98, 40.73],
     zoom: STARTUP_INITIAL_USER_ZOOM,
-    // Constrain the camera to NY + NJ + PA so the basemap never fetches
-    // tiles for the rest of the US. All actual data (zones, hotspots,
-    // flags, presence) is already NYC-scoped; this bounds the visual
-    // basemap too. Coordinates are [west, south] → [east, north] with a
-    // small margin for inertial pan/zoom past the strict state edges.
-    //   NY:   -79.8 → -71.85, 40.5 → 45.0
-    //   NJ:   -75.6 → -73.9,  38.93 → 41.36
-    //   PA:   -80.5 → -74.7,  39.72 → 42.27
-    maxBounds: [[-80.7, 38.7], [-71.7, 45.2]],
+    /* The box that contains panning -- NOT the thing that sets the zoom
+     * floor, though it used to be.
+     *
+     * maxBounds clamps the camera so the visible area never leaves the box,
+     * which makes the real minimum zoom a function of the CONTAINER SIZE: a
+     * taller map needs a higher zoom for the same box to still cover it. The
+     * old box was the tri-state area, 0.0250 of the world across and 0.0243
+     * down, and on a phone the vertical term always bit first:
+     *
+     *     390x506 (map above the feed)   floor z6.35
+     *     390x844 (full bleed)           floor z7.08
+     *     430x932 (15 Pro Max)           floor z7.23
+     *
+     * So minZoom: 6 below never once applied on a phone, and as the map grew
+     * -- full-bleed behind the feed, then another 62px when the status-bar
+     * gap was closed -- the floor climbed with it and the map stopped
+     * zooming out. Nobody changed a zoom setting; the map got taller.
+     *
+     * This box is sized so the vertical term lands at exactly 6.0 for any
+     * container up to 500x1000, which puts minZoom back in charge of the
+     * zoom and leaves maxBounds doing the one job it is good at. Panning is
+     * looser than it was; the basemap is still kept off the rest of the
+     * country by minZoom, which is what was actually holding it there. */
+    maxBounds: [[-82.0, 33.0], [-70.0, 50.0]],
     // Don't let the user zoom out far enough to see neighboring states
     // outside the tri-state area. Below ~zoom 6 you start seeing the
     // full east coast.
