@@ -4354,7 +4354,21 @@ function refreshAutoCenterCamera({ forceZoom = false } = {}) {
   });
 }
 
-function setAutoCenterEnabled(next, reason = "manual") {
+/* forceZoom is for an explicit "take me back to me" -- a driver asking to be
+ * re-focused. It raises the zoom to AUTO_FOCUS_RETURN_ZOOM, which is a thing
+ * you only ever want when you asked for it.
+ *
+ * It used to default on here, and the inactivity timer is the only caller
+ * that turns auto-follow back on (there is no recentre button -- btnCenter is
+ * null). So the sequence was: a driver zooms out to see the city, keeps their
+ * hands off the phone because they are driving, and twenty seconds later the
+ * map decides they were idle and pulls the zoom back to 13. Reproduced in a
+ * browser: z9 held for 15s, started easing at 18s, sat at z13 from 20s on.
+ *
+ * A driver watching the road has not asked for anything. Auto-follow still
+ * comes back and the map still recentres on them -- it just arrives at the
+ * zoom they chose instead of the one it prefers. */
+function setAutoCenterEnabled(next, reason = "manual", { forceZoom = false } = {}) {
   const enabled = !!next;
   const changed = autoCenter !== enabled;
   autoCenter = enabled;
@@ -4367,9 +4381,8 @@ function setAutoCenterEnabled(next, reason = "manual") {
   }
 
   if (autoCenter && (changed || reason === "inactive-timeout")) {
-    const shouldForceZoom = changed || reason === "inactive-timeout";
-    if (shouldForceZoom) armAutoFocusZoomWindow();
-    refreshAutoCenterCamera({ forceZoom: shouldForceZoom });
+    if (forceZoom) armAutoFocusZoomWindow();
+    refreshAutoCenterCamera({ forceZoom });
   }
   if (changed && authHeaderOK()) {
     schedulePresencePoll({ immediate: true });
@@ -4381,8 +4394,11 @@ function handleAutoFocusInactivityTimeout() {
   if (!map || !mapReady) return;
   if (!getSelfCenterLngLat()) return;
   if (window.TlcNavigationTurnModule?.isActive?.()) return;
+  /* Recentre, do not re-zoom. Same reason as setAutoCenterEnabled above: the
+   * timer firing means the driver stopped touching the phone, which is what
+   * driving looks like -- not a request to be zoomed somewhere else. */
   if (autoCenter) {
-    refreshAutoCenterCamera({ forceZoom: true });
+    refreshAutoCenterCamera({ forceZoom: false });
     return;
   }
   setAutoCenterEnabled(true, "inactive-timeout");
