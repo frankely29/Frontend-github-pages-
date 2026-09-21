@@ -190,6 +190,74 @@ test('the tile hosts are opened before the map asks for a tile', () => {
   });
 });
 
+// ------------------------------------------------- the driver's chosen zoom
+
+/* THE ONE A DRIVER ACTUALLY FELT
+ *
+ * Reproduced in a browser against origin/main, with a moving GPS fix:
+ *
+ *     driver zooms out to z9:            z9
+ *      15s of driving, phone untouched:  z9
+ *      18s of driving, phone untouched:  z11.14   <- the ease starts
+ *      20s of driving, phone untouched:  z13      <- overridden
+ *
+ * Zooming out fires zoomstart and correctly disables auto-follow. But
+ * AUTO_FOCUS_INACTIVITY_MS (20s) then fires, and the only thing that ever
+ * turns auto-follow back on is that timer -- there is no recentre button,
+ * btnCenter is null. It called setAutoCenterEnabled(true, "inactive-timeout"),
+ * which forced the zoom, and forcing means Math.max(current, 13): a function
+ * that can only raise.
+ *
+ * A driver watching the road is "inactive" by that definition, so the map
+ * overruled them every twenty seconds.
+ */
+
+test('the inactivity timer recentres without touching the driver\'s zoom', () => {
+  const fn = APP.slice(APP.indexOf('function setAutoCenterEnabled'),
+                       APP.indexOf('function handleAutoFocusInactivityTimeout'));
+  assert.ok(/\{ forceZoom = false \} = \{\}/.test(fn),
+    'forceZoom no longer defaults to off in setAutoCenterEnabled');
+  assert.ok(!/shouldForceZoom/.test(fn),
+    'the old always-force branch is back');
+  // The zoom window makes every later recentre raise the zoom too, so it has
+  // to be behind the same gate rather than armed whenever follow resumes.
+  assert.ok(/if \(forceZoom\) armAutoFocusZoomWindow\(\);/.test(fn),
+    'the zoom window is armed without checking forceZoom');
+  // It must still recentre -- the fix is about zoom, not about dropping follow.
+  assert.ok(/refreshAutoCenterCamera\(\{ forceZoom \}\)/.test(fn),
+    'auto-follow no longer recentres at all');
+});
+
+test('the already-following idle path does not re-zoom either', () => {
+  const fn = APP.slice(APP.indexOf('function handleAutoFocusInactivityTimeout'),
+                       APP.indexOf('syncCenterButton();',
+                                   APP.indexOf('function handleAutoFocusInactivityTimeout')));
+  assert.ok(/refreshAutoCenterCamera\(\{ forceZoom: false \}\)/.test(fn),
+    'the idle refresh forces the zoom again');
+});
+
+test('forcing the zoom can still only ever raise it, so nothing may force it by default', () => {
+  /* getAutoFollowZoom is deliberately asymmetric -- Math.max(current, 13).
+   * That is fine for an explicit "take me back to me" and wrong for anything
+   * automatic, which is the whole bug. This pins the asymmetry so the
+   * default-off above keeps mattering. */
+  const fn = APP.slice(APP.indexOf('function getAutoFollowZoom'),
+                       APP.indexOf('function autoCenterAndAutoZoom'));
+  assert.ok(/Math\.max\(baseZoom, AUTO_FOCUS_RETURN_ZOOM\)/.test(fn),
+    'getAutoFollowZoom changed shape; re-check who can force a zoom');
+  assert.ok(/forceZoom \|\| isAutoFocusZoomWindowActive\(\)/.test(fn),
+    'the force condition changed shape');
+});
+
+test('nothing in the app forces the zoom automatically', () => {
+  /* The grep that would have caught this the first time. Any caller passing
+   * forceZoom: true is claiming a driver asked to be re-focused; today
+   * nothing can make that claim, because there is no recentre button. */
+  const forced = APP.match(/forceZoom:\s*true/g) || [];
+  assert.strictEqual(forced.length, 0,
+    `${forced.length} call site(s) still force the zoom automatically`);
+});
+
 // --------------------------------------------------------------------------
 let failed = 0;
 tests.forEach(([name, fn]) => {
