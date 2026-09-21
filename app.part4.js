@@ -767,7 +767,7 @@
         ${!state.loading && !rows.length ? '<div class="leaderboardEmpty">No drivers found.</div>' : rows.map((row) => `
           <button type="button" class="gamesUserRow ${selectedId === row.user_id ? 'selected' : ''}" data-games-user="${row.user_id}">
             <span class="gamesUserAvatar">${renderChallengeAvatar(row)}</span>
-            <span class="gamesUserMeta"><strong>${escapeHtml(row.display_name)}</strong><span>${row.level ? `Level ${escapeHtml(String(row.level))}` : 'Driver'} ${row.online ? '• Online' : ''}</span></span>
+            <span class="gamesUserMeta"><strong>${escapeHtml(row.display_name)}</strong><span>${escapeHtml(gamesUserRankLine(row))}${row.online ? ' • Online' : ''}</span></span>
             <span class="gamesUserRank">${row.rank_icon_key ? window.renderRankBadgeIcon(row.rank_icon_key, { compact: true }) : ''}</span>
           </button>`).join('')}
       </div>
@@ -1082,6 +1082,21 @@
       if (state?.boneyard_count == null && state?.stock_count == null) missing.push('boneyard_count');
     }
     return { ok: missing.length === 0, gameType: gameType || 'unknown', missing };
+  }
+
+  /* "Level 34" alone says nothing a driver can place. "Gold IV · Level 34"
+   * says which prestige they are in and how far through it, which is what the
+   * badge beside it is already showing. */
+  function gamesUserRankLine(row = {}) {
+    const level = Number(row?.level);
+    const hasLevel = Number.isFinite(level) && level > 0;
+    const api = window.TeamJoseoRank;
+    const key = row?.rank_icon_key || row?.rankIconKey;
+    if (api && key) {
+      const rank = api.fromKey(key);
+      return hasLevel ? `${rank.label} · Level ${Math.floor(level)}` : rank.label;
+    }
+    return hasLevel ? `Level ${Math.floor(level)}` : 'Driver';
   }
 
   function renderChallengeAvatar(row = {}) {

@@ -1034,6 +1034,52 @@ html, body { height: 100%; margin: 0; padding: 0; background: #e5e5e5; }
     .leaderboardLegend{ display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
     .myRankCard{ background:rgba(255,255,255,0.62); border:1px solid rgba(0,0,0,0.08); border-radius:12px; padding:8px; display:flex; flex-direction:column; gap:6px; }
     .myRankRow{ display:flex; justify-content:space-between; gap:8px; align-items:center; font: 800 11px/1.25 system-ui,-apple-system,Segoe UI,Roboto,Arial; }
+    /* The badge is a grid, so it takes a line of its own inside a plain span
+       and drops the rank name underneath it. The row's own children have to
+       be flex for the badge and its name to sit side by side. */
+    .myRankRow > span{ display:flex; align-items:center; gap:6px; min-width:0; }
+    .myRankRow.leaderboardRankSub{ font-weight:600; color:#64748b; letter-spacing:.02em; }
+
+    /* The rank ladder. Ten prestiges, the driver's own row opened.
+       These rows have been rendering with no rules at all -- the markup
+       existed and the stylesheet never did, so the ladder was a stack of
+       unstyled divs. */
+    .leaderboardRanksWrap{ display:flex; flex-direction:column; gap:10px; }
+    .leaderboardRankLadderList{ display:flex; flex-direction:column; gap:4px; }
+    .leaderboardRankLadderRow{
+      display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:10px;
+      padding:7px 9px; border-radius:11px; border:1px solid rgba(0,0,0,0.07);
+      background:rgba(255,255,255,0.5);
+    }
+    /* The driver's own prestige is the one row that has to be findable in a
+       scroll of ten, so it takes the only fill and the only ring on the list. */
+    .leaderboardRankLadderRow.current{
+      background:rgba(255,255,255,0.9); border-color:rgba(15,23,42,0.22);
+      box-shadow:0 2px 10px rgba(15,23,42,.10);
+    }
+    .leaderboardRankLadderIcon{ display:grid; place-items:center; width:34px; height:34px; }
+    .leaderboardRankLadderIcon .rankBadgeIconWrap{ width:34px!important; height:34px!important; }
+    .leaderboardRankLadderText{ min-width:0; display:flex; flex-direction:column; gap:2px; }
+    .leaderboardRankLadderTitle{
+      font:800 12px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial; color:#0f172a;
+      overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+    }
+    .leaderboardRankBeast{ font-weight:600; color:#94a3b8; letter-spacing:.06em; text-transform:uppercase; font-size:9px; }
+    .leaderboardRankLadderRange{ font:600 10px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial; color:#64748b; }
+    .leaderboardRankLadderChip{
+      font:800 11px/1 Georgia,"Times New Roman",serif; color:#0f172a;
+      border:1px solid rgba(15,23,42,0.28); border-radius:999px; padding:4px 8px; min-width:26px; text-align:center;
+    }
+    /* Ten pips, one per level in the prestige. At this size a numeral says
+       less than a row of filled marks -- the driver reads distance, not a
+       number. */
+    .leaderboardRankPips{ display:flex; gap:3px; margin-top:3px; }
+    .leaderboardRankPips i{ width:9px; height:3px; border-radius:2px; background:rgba(15,23,42,0.16); display:block; }
+    .leaderboardRankPips i.on{ background:rgba(15,23,42,0.68); }
+    .leaderboardTierLine{ display:flex; align-items:center; gap:5px; min-width:0; font:700 10px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial; color:#475569; }
+    .leaderboardTierLine .rankBadgeIconWrap{ flex:none; }
+    .leaderboardRankName{ font-weight:800; color:#0f172a; }
+    .leaderboardRankIconFallback{ font-size:13px; line-height:1; }
     .leaderboardStatus{ min-height:14px; font:800 10px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial; opacity:0.85; }
     .leaderboardStatus.ok{ color:#126b2f; }
     .leaderboardStatus.err{ color:#a12525; }

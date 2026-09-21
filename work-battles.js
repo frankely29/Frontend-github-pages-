@@ -260,13 +260,26 @@
     return `<div class="workBattlesCard workBattlesSelectedCard">${userRowInnerHtml(state.selectedUser, { compact: true })}</div>`;
   }
 
+  function rankChipHtml(user) {
+    const api = window.TeamJoseoRank;
+    if (user?.rankIcon && api) {
+      const rank = api.fromKey(user.rankIcon);
+      return `<span class="workBattlesRankBadge" title="Prestige ${rank.prestige}, level ${rank.level}">${escapeHtml(rank.label)}</span>`;
+    }
+    if (user?.rankIcon) {
+      return `<span class="workBattlesRankBadge" title="Rank">${escapeHtml(String(user.rankIcon).replace(/[_-]+/g, ' '))}</span>`;
+    }
+    return user?.level ? `<span class="workBattlesRankBadge">Lv ${escapeHtml(String(user.level))}</span>` : '';
+  }
+
   function renderAvatar(user, extraClass = '') {
     const name = user?.displayName || 'Driver';
     const avatarUrl = resolveImageUrl(user?.avatarUrl);
     const onlineDot = user?.online ? '<span class="workBattlesOnlineDot" aria-hidden="true"></span>' : '';
-    const rankHtml = user?.rankIcon
-      ? `<span class="workBattlesRankBadge" title="Rank icon">${escapeHtml(String(user.rankIcon).replace(/[_-]+/g, ' '))}</span>`
-      : (user?.level ? `<span class="workBattlesRankBadge">Lv ${escapeHtml(String(user.level))}</span>` : '');
+    /* This used to print the key with its underscores swapped for spaces, so
+     * a Gold IV driver wore a chip reading "band 34". The key is an address;
+     * the label is what a person reads. */
+    const rankHtml = rankChipHtml(user);
     const avatarBody = avatarUrl
       ? `<img src="${escapeHtml(avatarUrl)}" alt="${escapeHtml(name)} avatar" loading="lazy">`
       : `<span>${escapeHtml(initialsFor(name))}</span>`;

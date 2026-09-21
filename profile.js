@@ -362,8 +362,18 @@
     if (rep) {
       var level = num(rep.level);
       if (level !== null) {
+        /* A rank_name of "Band 034" is the ladder's internal address, not a
+         * label. Where the badge module is loaded it derives "Gold IV" from
+         * the same key the badge is drawn from, so the two always agree. */
+        var repRank = "";
+        try {
+          var api = window.TeamJoseoRank;
+          var rawName = String(rep.rank_name || "").trim();
+          if (rawName && !/^band[\s_-]*\d+$/i.test(rawName)) repRank = rawName;
+          else if (api && rep.rank_icon_key) repRank = api.fromKey(rep.rank_icon_key).label;
+        } catch (_) {}
         repRows.push([String(Math.round(level)),
-          rep.rank_name ? "Level · " + rep.rank_name : "Level"]);
+          repRank ? "Level · " + repRank : "Level"]);
       }
       var trips = num(rep.trips_logged);
       if (trips !== null) repRows.push([group(trips), "Trips logged"]);

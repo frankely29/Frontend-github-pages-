@@ -17,29 +17,39 @@
   }
 
   const RANK_BAND_SIZE = 10;
-  const RANK_LADDER_MAX_LEVEL = 1000;
-  const RANK_LADDER_BAND_TITLES = ['Recruit', 'Runner', 'Courier', 'Navigator', 'Pilot', 'Sentinel', 'Captain', 'Marshal', 'Commander', 'Legend'];
-  const RANK_LADDER_BAND_PREFIXES = ['Bronze', 'Copper', 'Iron', 'Steel', 'Silver', 'Gold', 'Platinum', 'Diamond', 'Obsidian', 'Celestial'];
+  const RANK_PRESTIGE_COUNT = 10;
 
-  function createRankLadderFallback() {
-    const rows = [];
-    const totalBands = Math.ceil(RANK_LADDER_MAX_LEVEL / RANK_BAND_SIZE);
-    for (let band = 1; band <= totalBands; band += 1) {
-      const startLevel = ((band - 1) * RANK_BAND_SIZE) + 1;
-      const endLevel = Math.min(RANK_LADDER_MAX_LEVEL, band * RANK_BAND_SIZE);
-      const familyIndex = (band - 1) % RANK_LADDER_BAND_TITLES.length;
-      const tierIndex = Math.floor((band - 1) / RANK_LADDER_BAND_TITLES.length) % RANK_LADDER_BAND_PREFIXES.length;
-      rows.push({
-        start_level: startLevel,
-        end_level: endLevel,
-        rank_name: `${RANK_LADDER_BAND_PREFIXES[tierIndex]} ${RANK_LADDER_BAND_TITLES[familyIndex]}`,
-        rank_icon_key: `band_${String(band).padStart(3, '0')}`,
-      });
-    }
-    return rows;
+  /* The ladder is ten prestiges of ten levels, which is the hundred bands the
+   * backend has always sent. The old fallback built a HUNDRED rows out of a
+   * thousand levels by cycling ten prefixes against ten titles, which produced
+   * "Bronze Recruit" at band 1 and again, differently coloured, at band 11 --
+   * a list nobody could read and a ladder that repeated itself ten times.
+   *
+   * The names come from the badge module so there is one roster, not two that
+   * drift. A build where app.part5 has not loaded still gets a usable list. */
+  const RANK_PRESTIGE_FALLBACK = [
+    'Iron', 'Bronze', 'Steel', 'Gold', 'Crimson',
+    'Emerald', 'Sapphire', 'Platinum', 'Flame', 'Obsidian',
+  ];
+
+  function rankApi() {
+    return window.TeamJoseoRank || null;
   }
 
-  const RANK_LADDER_FALLBACK = createRankLadderFallback();
+  function createRankLadderFallback() {
+    const api = rankApi();
+    const prestiges = api ? api.prestiges() : RANK_PRESTIGE_FALLBACK.map((name, i) => ({
+      prestige: i + 1, name, beast: '', startBand: i * 10 + 1, endBand: i * 10 + 10,
+    }));
+    return prestiges.map((p) => ({
+      start_level: p.startBand,
+      end_level: p.endBand,
+      rank_name: p.name,
+      beast: p.beast,
+      prestige: p.prestige,
+      rank_icon_key: `band_${p.startBand}`,
+    }));
+  }
 
   const state = {
     metric: 'miles',
@@ -161,8 +171,15 @@
     return metric === 'hours' ? `${n.toFixed(1)} h` : `${n.toFixed(1)} mi`;
   }
 
-  function safeRankName(title) {
-    return String(title || '').trim() || 'Recruit';
+  /* A name the backend sent, unless it sent the key back. "band_34" and
+   * "Band 034" are the ladder's internal address, not something to put in
+   * front of a driver, so both fall through to the derived "Gold IV". */
+  function safeRankName(title, rankIconKey) {
+    const raw = String(title || '').trim();
+    if (raw && !/^band[\s_-]*\d+$/i.test(raw)) return raw;
+    const api = rankApi();
+    if (api && rankIconKey) return api.fromKey(rankIconKey).label;
+    return raw || 'Iron I';
   }
 
   function fallbackRankIcon(rankIconKey) {
@@ -181,10 +198,14 @@
     return `<span class="leaderboardRankIconFallback" aria-hidden="true">${fallbackRankIcon(rankIconKey)}</span>`;
   }
 
+  /* In a leaderboard row the badge is 26px, where the numeral struck on its
+   * plate is a smudge. So the division is spelled out in the text instead --
+   * "Gold IV" beside the badge says the same thing the badge would say at
+   * medal size, and says it legibly at this one. */
   function levelTitleLine(level, title, rankIconKey) {
     const n = Number(level);
     const safeLevel = Number.isFinite(n) && n > 0 ? Math.floor(n) : 1;
-    const safeTitle = safeRankName(title);
+    const safeTitle = safeRankName(title, rankIconKey);
     return `<span class="leaderboardTierLine">${renderRankIcon(rankIconKey)}<span>Level ${safeLevel} <span class="leaderboardRankName">${esc(safeTitle)}</span></span></span>`;
   }
 
@@ -231,33 +252,55 @@
       const end = Number(row?.end_level);
       return Number.isFinite(start) && Number.isFinite(end) && safeLevel >= start && safeLevel <= end;
     }) || null;
+    const key = state.myRow?.rank_icon_key || matched?.rank_icon_key || 'recruit';
+    const api = rankApi();
+    const rank = api ? api.fromKey(key) : null;
     return {
       level: safeLevel,
-      rankName: safeRankName(state.myRow?.rank_name || state.myRow?.title || matched?.rank_name || 'Recruit'),
-      rankIconKey: state.myRow?.rank_icon_key || matched?.rank_icon_key || 'recruit',
+      rank,
+      rankName: safeRankName(state.myRow?.rank_name || state.myRow?.title || matched?.rank_name, key),
+      rankIconKey: key,
     };
   }
 
   function renderRankLadderView() {
     const ladder = Array.isArray(state.rankLadder) ? state.rankLadder : [];
     const mine = pickMyProgressionForLadder();
-    const rows = ladder.map((row) => {
-      const start = Number(row?.start_level);
-      const end = Number(row?.end_level);
-      const isCurrent = Number.isFinite(start) && Number.isFinite(end) && mine.level >= start && mine.level <= end;
+    const myPrestige = mine.rank ? mine.rank.prestige : 0;
+
+    /* Ten rows, one per prestige, and the driver's own row opens to show the
+     * ten levels inside it. A flat list of a hundred was unreadable and told
+     * a driver nothing about how far through their own prestige they were,
+     * which is the one thing they are actually climbing. */
+    const rows = ladder.map((row, index) => {
+      const prestige = Number(row?.prestige) || index + 1;
+      const isCurrent = prestige === myPrestige;
+      const beast = String(row?.beast || '').trim();
+      const pips = isCurrent && mine.rank
+        ? `<div class="leaderboardRankPips" aria-hidden="true">${
+            Array.from({ length: RANK_BAND_SIZE }, (_, i) =>
+              `<i class="${i < mine.rank.level ? 'on' : ''}"></i>`).join('')
+          }</div>`
+        : '';
       return `<div class="leaderboardRankLadderRow${isCurrent ? ' current' : ''}">
         <div class="leaderboardRankLadderIcon">${renderRankIcon(row?.rank_icon_key)}</div>
         <div class="leaderboardRankLadderText">
-          <div class="leaderboardRankLadderTitle">${esc(safeRankName(row?.rank_name || row?.title))}</div>
-          <div class="leaderboardRankLadderRange">${esc(renderLevelRange(row?.start_level, row?.end_level))}</div>
+          <div class="leaderboardRankLadderTitle">${esc(safeRankName(row?.rank_name || row?.title, row?.rank_icon_key))}${beast ? ` <span class="leaderboardRankBeast">${esc(beast)}</span>` : ''}</div>
+          <div class="leaderboardRankLadderRange">Prestige ${prestige} · ${esc(renderLevelRange(row?.start_level, row?.end_level))}</div>
+          ${pips}
         </div>
-        ${isCurrent ? '<span class="leaderboardRankLadderChip">You are here</span>' : ''}
+        ${isCurrent ? `<span class="leaderboardRankLadderChip">${esc(mine.rank ? mine.rank.roman : '')}</span>` : ''}
       </div>`;
     }).join('');
+
+    const mineSub = mine.rank
+      ? `Prestige ${mine.rank.prestige} of ${RANK_PRESTIGE_COUNT} · Level ${mine.rank.level} of ${RANK_BAND_SIZE}`
+      : `Level ${mine.level}`;
     return `<div class="leaderboardRanksWrap">
       <div class="myRankCard">
         <div class="leaderboardSectionTitle">My Progression</div>
         <div class="myRankRow"><span>${renderRankIcon(mine.rankIconKey)} ${esc(mine.rankName)}</span><span>Level ${mine.level}</span></div>
+        <div class="myRankRow leaderboardRankSub"><span>${esc(mineSub)}</span></div>
       </div>
       <div class="leaderboardRankLadderList">${rows || '<div class="leaderboardEmpty">Rank ladder unavailable.</div>'}</div>
     </div>`;
@@ -267,9 +310,9 @@
     try {
       const res = await getAuth('/leaderboard/ranks');
       const rows = Array.isArray(res?.rows) ? res.rows : null;
-      state.rankLadder = rows && rows.length ? rows : RANK_LADDER_FALLBACK.slice();
+      state.rankLadder = rows && rows.length ? rows : createRankLadderFallback();
     } catch (_) {
-      state.rankLadder = RANK_LADDER_FALLBACK.slice();
+      state.rankLadder = createRankLadderFallback();
     }
     state.rankLadderLoaded = true;
     return state.rankLadder;
@@ -364,7 +407,7 @@
       state.myRow = null;
       state.badges = [];
       state.overview = null;
-      state.rankLadder = RANK_LADDER_FALLBACK.slice();
+      state.rankLadder = createRankLadderFallback();
       state.rankLadderLoaded = true;
       state.status = 'Sign in to view leaderboard.';
       state.statusType = 'err';
@@ -382,7 +425,7 @@
       const boardPromise = getAuth(`/leaderboard?metric=${metric}&period=${period}`)
         .catch(() => getAuth(`/leaderboard?metric=${metric}&period=${period}&limit=10`));
       if (!state.rankLadderLoaded) {
-        await loadRankLadder().catch(() => RANK_LADDER_FALLBACK.slice());
+        await loadRankLadder().catch(() => createRankLadderFallback());
       }
       const [boardRes, meRes, badgesRes, overviewRes] = await Promise.all([
         boardPromise,
@@ -403,7 +446,7 @@
       state.badges = [];
       state.overview = null;
       if (!state.rankLadderLoaded) {
-        state.rankLadder = RANK_LADDER_FALLBACK.slice();
+        state.rankLadder = createRankLadderFallback();
         state.rankLadderLoaded = true;
       }
       state.status = `Unable to load leaderboard: ${String(err?.message || err)}`;
