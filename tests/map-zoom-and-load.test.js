@@ -173,21 +173,106 @@ test('only an exactly-versioned library URL is cached', () => {
     'the rule matches a host it should not');
 });
 
-test('the tile hosts are opened before the map asks for a tile', () => {
+test('the basemap host is opened before the map asks for a tile', () => {
   /* Nothing can request a tile until maplibre-gl has downloaded and parsed,
    * so without a hint the DNS lookup and TLS handshake happen after the map
    * exists and is waiting to draw -- which is exactly the window where it
-   * shows an upscaled parent tile. */
-  ['a', 'b', 'c'].forEach((h) => {
-    assert.ok(
-      HTML.includes(`rel="preconnect" href="https://${h}.basemaps.cartocdn.com"`),
-      `no preconnect for ${h}.basemaps.cartocdn.com`);
+   * shows an upscaled parent tile. The hint has to point at whichever
+   * basemap is actually primary, which is the part that just changed. */
+  assert.ok(HTML.includes('rel="preconnect" href="https://tiles.openfreemap.org"'),
+    'no preconnect for the primary basemap host');
+  assert.ok(APP.includes('https://tiles.openfreemap.org/styles/'),
+    'the app no longer uses the host it preconnects to');
+});
+
+// --------------------------------------------------------- the basemap key
+
+/* Photographed by the user: every tile stamped
+ *
+ *     API KEY REQUIRED — carto.com/basemaps/apikey
+ *
+ * CARTO now requires a key for their basemaps and the app requested them
+ * without one. That is a licence problem before it is a visual one, and it
+ * bites hardest on zoom-out, because a new zoom level discards every tile
+ * and asks for a fresh set that comes back watermarked or throttled -- so
+ * the map goes blank and the zoom looks like it did nothing.
+ */
+
+test('the primary basemap needs no API key', () => {
+  const fn = APP.slice(APP.indexOf('function initialBasemapStyle'),
+                       APP.indexOf('function initMap'));
+  assert.ok(/OPENFREEMAP_STYLE/.test(fn), 'the keyless basemap is not the default');
+  assert.ok(!/cartocdn/.test(fn), 'the default went back to the keyed provider');
+});
+
+test('an unkeyed CARTO URL is never the primary basemap', () => {
+  /* It may still exist as the fallback -- a watermarked map beats no map --
+   * but it must be reachable only through that path. */
+  const primary = APP.slice(APP.indexOf('const OPENFREEMAP_STYLE'),
+                            APP.indexOf('function cartoRasterStyle'));
+  assert.ok(!/cartocdn/.test(primary));
+  const carto = APP.slice(APP.indexOf('function cartoRasterStyle'),
+                          APP.indexOf('function initialBasemapStyle'));
+  assert.ok(/cartocdn/.test(carto), 'the fallback basemap is gone entirely');
+  assert.ok(!/apikey|api_key/i.test(carto),
+    'a key was pasted into the fallback URL; keys do not belong in the repo');
+});
+
+test('a basemap that never loads falls back instead of showing nothing', () => {
+  /* A basemap is the one asset a driver cannot work without.
+   *
+   * The first version of this guessed from error events -- any error without
+   * a sourceId whose message mentioned "style". Booted against a healthy
+   * vector style it fired anyway and dropped straight back to the
+   * watermarked raster, which is the exact thing being fixed. So the test
+   * pins the question actually being asked: did the style load. */
+  const at = APP.indexOf('BASEMAP_STYLE_TIMEOUT_MS);');
+  assert.ok(at > -1, 'the basemap fallback timer is gone');
+  const block = APP.slice(APP.indexOf('const fallbackTimer'), at + 400);
+  assert.ok(/map\.isStyleLoaded\(\)/.test(block),
+    'the fallback no longer checks whether the style loaded');
+  assert.ok(/setStyle\(cartoRasterStyle\(\)\)/.test(block), 'there is no fallback');
+  assert.ok(/map\.once\("style\.load"/.test(block),
+    'a slow style is never let off the hook, so it falls back for being slow');
+  assert.ok(!/sourceId/.test(block),
+    'the fallback is guessing from error events again');
+});
+
+test('night mode works on a vector basemap, not just a raster one', () => {
+  /* raster-brightness-* exist only on raster layers. On the vector basemap
+   * those calls are invalid, and the old code was saved from throwing only
+   * by its try/catch -- which would have left night mode silently dead. */
+  const fn = APP.slice(APP.indexOf('function applyNightBasemap'),
+                       APP.indexOf('function applyNightBasemap') + 2000);
+  assert.ok(/map\.getLayer\("carto-base"\)/.test(fn),
+    'the raster path no longer checks the layer exists');
+  assert.ok(/APP_OWNED_LAYER/.test(fn),
+    'the vector path would dim this app\'s own layers as well as the basemap');
+  assert.ok(/NIGHT_TINTED_LAYERS/.test(fn),
+    'nothing tracks which layers were dimmed, so day mode cannot undo it');
+});
+
+test('every label asks for a font the basemap actually serves', () => {
+  /* The symbol layers asked for "Open Sans Regular", which the previous
+   * glyph endpoint served and OpenFreeMap does not. A font stack is tried in
+   * order, so Noto Sans goes first and Open Sans stays behind it for the
+   * fallback basemap. A missing font is not a fallback -- the label simply
+   * does not draw. */
+  const files = ['long-trips-block.feature.js', 'app.part12.js',
+                 'strategic-points.feature.js'];
+  let found = 0;
+  files.forEach((f) => {
+    const src = fs.readFileSync(root(f), 'utf8');
+    const stacks = src.match(/"text-font":\s*\[[^\]]*\]/g) || [];
+    stacks.forEach((s) => {
+      found += 1;
+      assert.ok(/"Noto Sans Regular"/.test(s),
+        `${f} has a font stack without Noto Sans: ${s}`);
+      assert.ok(s.indexOf('Noto Sans Regular') < s.indexOf('Open Sans Regular'),
+        `${f} lists Open Sans before Noto Sans: ${s}`);
+    });
   });
-  // The style must still use the hosts that were preconnected.
-  ['a', 'b', 'c'].forEach((h) => {
-    assert.ok(APP.includes(`https://${h}.basemaps.cartocdn.com/rastertiles/voyager/`),
-      `the style no longer uses ${h}.basemaps.cartocdn.com`);
-  });
+  assert.ok(found >= 7, `only ${found} font stacks found; expected at least 7`);
 });
 
 // ------------------------------------------------- the driver's chosen zoom
