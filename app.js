@@ -6223,6 +6223,21 @@ setNavDestination(null);
   }, 6000);
   setTimeout(() => {
     maybeResolveStartupLoading("hard-safety-timeout");
+    // That call is not the safety net it reads as: it returns at `if
+    // (!mapReady) return`, and mapReady is only ever set inside map.on("load"),
+    // which MapLibre fires only once the first viewport's tiles have arrived.
+    // A tile host that is slow, rate-limited or unreachable therefore leaves
+    // the overlay up for good -- and #mapLoading is inset:0 at z-index 999 with
+    // pointer-events on, so it does not merely hide a slow map, it swallows
+    // every touch: no pan, no zoom, no zoom-out. Measured in the browser: with
+    // the style stalled, both fingers of a pinch land on div#mapLoading and the
+    // map never sees a touchstart.
+    //
+    // So this one is unconditional. A half-drawn map a driver can still use
+    // beats a dead screen that says "Loading map...". hideStartupLoadingOverlay
+    // is idempotent, so on every healthy boot -- where the line above already
+    // hid it seconds earlier -- this does nothing at all.
+    hideStartupLoadingOverlay("hard-safety-timeout");
   }, 12000);
 
   preventBrowserZoomUI();
