@@ -394,7 +394,7 @@
         layout: {
           "symbol-placement": "point",
           "text-field": ["coalesce", ["get", "label"], ""],
-          "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
+          "text-font": ["Noto Sans Regular", "Open Sans Regular", "Arial Unicode MS Regular"],
           "text-size": zoneLabelTextSizeExpr,
           "text-max-width": ["coalesce", ["get", "textMaxWidth"], 4],
           "text-letter-spacing": ["coalesce", ["get", "letterSpacing"], 0],

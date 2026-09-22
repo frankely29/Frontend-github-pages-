@@ -936,7 +936,7 @@
           filter: ["==", ["get", "prime"], true],
           layout: {
             "text-field": ["get", "name"],
-            "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
+            "text-font": ["Noto Sans Regular", "Open Sans Regular", "Arial Unicode MS Regular"],
             "text-size": ["interpolate", ["linear"], ["zoom"], 11, 6, 14, 8.5, 17, 12],
             "text-anchor": "top",
             "text-offset": [0, 0.5],
@@ -2031,7 +2031,7 @@
             // The building NAME (the icon already shows hospital vs hotel),
             // from a mid-borough zoom; collision keeps it legible.
             "text-field": ["get", "name"],
-            "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
+            "text-font": ["Noto Sans Regular", "Open Sans Regular", "Arial Unicode MS Regular"],
             "text-size": ["interpolate", ["linear"], ["zoom"], 11, 6, 14, 8.5, 17, 12],
             "text-anchor": "bottom", "text-offset": [0, -2.4],
             "text-letter-spacing": 0.02, "text-padding": 6,
@@ -2660,7 +2660,7 @@
           filter: primeFilter,
           layout: {
             "text-field": ["get", "label"],
-            "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
+            "text-font": ["Noto Sans Regular", "Open Sans Regular", "Arial Unicode MS Regular"],
             "text-size": ["interpolate", ["linear"], ["zoom"], 11, 6, 14, 8.5, 17, 12],
             "text-anchor": "top", "text-offset": [0, 0.6], "text-max-width": 9,
             "text-allow-overlap": false, "text-padding": 6, "text-optional": true,
@@ -3274,7 +3274,7 @@
           filter: letoutFilter,
           layout: {
             "text-field": ["get", "name"],
-            "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
+            "text-font": ["Noto Sans Regular", "Open Sans Regular", "Arial Unicode MS Regular"],
             "text-size": ["interpolate", ["linear"], ["zoom"], 11, 6, 14, 8.5, 17, 12],
             "text-anchor": "top", "text-offset": [0, 0.6], "text-max-width": 8,
             "text-allow-overlap": false, "text-padding": 6, "text-optional": true,

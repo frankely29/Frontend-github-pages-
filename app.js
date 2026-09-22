@@ -2098,6 +2098,64 @@ function whenMapLibreReady(run) {
   tick();
 }
 
+/* The basemap.
+ *
+ * It used to be CARTO's Voyager raster tiles requested with no API key.
+ * CARTO now requires one, so every tile came back stamped
+ * "API KEY REQUIRED — carto.com/basemaps/apikey" across the artwork. That is
+ * a licence problem before it is a visual one, and it is worst exactly when
+ * a driver zooms out, because a new zoom throws away every tile it has and
+ * asks for a fresh set.
+ *
+ * OpenFreeMap needs no key and is already trusted by this app --
+ * navigation.vectorbasemap.js renders the navigation view on it. It is also
+ * vector rather than raster, which fixes the softness on a high-density
+ * screen: raster tiles are pictures baked at whole zoom levels and get
+ * resampled in between, vector tiles are drawn by the phone at whatever zoom
+ * it is actually at.
+ *
+ * CARTO stays as the fallback rather than being deleted. A watermarked map
+ * is bad; no map at all is worse, and a basemap is the one asset a driver
+ * cannot work without. Set window.__TLC_BASEMAP__ to "carto" to force the
+ * old one back without a deploy. */
+const OPENFREEMAP_STYLE = "https://tiles.openfreemap.org/styles/liberty";
+/* Long enough that a slow phone on a bad connection is not dropped onto the
+ * fallback for being slow, short enough that nobody stares at nothing. */
+const BASEMAP_STYLE_TIMEOUT_MS = 9000;
+
+function cartoRasterStyle() {
+  return {
+    version: 8,
+    sources: {
+      "carto-raster": {
+        type: "raster",
+        tiles: [
+          "https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+          "https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+          "https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+        ],
+        tileSize: 256,
+      },
+    },
+    layers: [
+      {
+        id: "carto-base",
+        type: "raster",
+        source: "carto-raster",
+        paint: { "raster-opacity": 1 },
+      },
+    ],
+    glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
+    sprite: "",
+  };
+}
+
+function initialBasemapStyle() {
+  const forced = String(window.__TLC_BASEMAP__ || "").trim().toLowerCase();
+  if (forced === "carto") return cartoRasterStyle();
+  return OPENFREEMAP_STYLE;
+}
+
 function initMap() {
   if (typeof maplibregl === 'undefined' || !maplibregl || !maplibregl.Map) {
     whenMapLibreReady(initMap);
@@ -2105,30 +2163,7 @@ function initMap() {
   }
   map = new maplibregl.Map({
     container: "map",
-    style: {
-      version: 8,
-      sources: {
-        "carto-raster": {
-          type: "raster",
-          tiles: [
-            "https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
-            "https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
-            "https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
-          ],
-          tileSize: 256,
-        },
-      },
-      layers: [
-        {
-          id: "carto-base",
-          type: "raster",
-          source: "carto-raster",
-          paint: { "raster-opacity": 1 },
-        },
-      ],
-      glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
-      sprite: "",
-    },
+    style: initialBasemapStyle(),
     center: [-73.98, 40.73],
     zoom: STARTUP_INITIAL_USER_ZOOM,
     /* The box that contains panning -- NOT the thing that sets the zoom
@@ -2282,6 +2317,32 @@ function initMap() {
     if (authHeaderOK()) scheduleAdaptivePresenceRender();
   });
   map.on("error", (e) => console.error("MapLibre error:", e));
+
+  /* If the basemap style never arrives, fall back rather than leaving a
+   * driver with a blank screen -- a basemap is the one asset they cannot
+   * work without, and a watermarked map beats no map.
+   *
+   * This asks the only question that matters -- did the style load? -- and
+   * refuses to guess from error events. The first version did guess: it
+   * swapped the basemap on any error without a sourceId whose message
+   * mentioned "style", which fired on a perfectly healthy vector style and
+   * dropped it straight back to the watermarked raster. Tested and caught,
+   * which is the only reason it is not in the commit.
+   *
+   * Nothing to undo if the style is simply slow: once style.load fires the
+   * timer is cancelled. */
+  if (typeof initialBasemapStyle() === "string") {
+    const fallbackTimer = window.setTimeout(() => {
+      if (!map || map.isStyleLoaded()) return;
+      console.warn("basemap style did not load in time; using the fallback basemap");
+      try {
+        map.setStyle(cartoRasterStyle());
+      } catch (err) {
+        console.error("basemap fallback failed:", err);
+      }
+    }, BASEMAP_STYLE_TIMEOUT_MS);
+    map.once("style.load", () => window.clearTimeout(fallbackTimer));
+  }
 }
 
 function preventBrowserZoomUI() {
@@ -5069,17 +5130,53 @@ function setBodyTheme({ isNight, isSunny }) {
   enforceSaveButtonTheme();
 }
 
+/* Night mode, for either basemap.
+ *
+ * The raster path is the original: four raster-* paint properties on the one
+ * basemap layer. Those properties exist only on raster layers, so on the
+ * vector basemap they are not merely ineffective, they are invalid -- the
+ * old code was saved from throwing by its try/catch, which would have left
+ * night mode silently dead.
+ *
+ * The vector path dims the basemap's own fills and lines instead, and skips
+ * anything this app added. Zones, hotspots and routes carry their own
+ * night colours and must not be dimmed twice. */
+const NIGHT_TINTED_LAYERS = new Set();
+
 function applyNightBasemap(isNight) {
-  if (!map) return;
+  if (!map || typeof map.getLayer !== "function") return;
   try {
-    map.setPaintProperty("carto-base", "raster-brightness-max", isNight ? 0.55 : 1.0);
-    map.setPaintProperty("carto-base", "raster-brightness-min", isNight ? 0.12 : 0.0);
-    map.setPaintProperty("carto-base", "raster-contrast", isNight ? 0.25 : 0.0);
-    map.setPaintProperty("carto-base", "raster-saturation", isNight ? -0.25 : 0.0);
+    if (map.getLayer("carto-base")) {
+      map.setPaintProperty("carto-base", "raster-brightness-max", isNight ? 0.55 : 1.0);
+      map.setPaintProperty("carto-base", "raster-brightness-min", isNight ? 0.12 : 0.0);
+      map.setPaintProperty("carto-base", "raster-contrast", isNight ? 0.25 : 0.0);
+      map.setPaintProperty("carto-base", "raster-saturation", isNight ? -0.25 : 0.0);
+      return;
+    }
+    const style = map.getStyle && map.getStyle();
+    const layers = (style && style.layers) || [];
+    layers.forEach((layer) => {
+      // Only the basemap's own layers. Everything this app adds is named by
+      // us and has its own night treatment already.
+      if (!layer || !layer.id || APP_OWNED_LAYER.test(layer.id)) return;
+      if (layer.type !== "fill" && layer.type !== "background" && layer.type !== "line") return;
+      const prop = layer.type === "line" ? "line-opacity"
+        : (layer.type === "background" ? "background-opacity" : "fill-opacity");
+      if (isNight) {
+        if (!NIGHT_TINTED_LAYERS.has(layer.id)) NIGHT_TINTED_LAYERS.add(layer.id);
+        map.setPaintProperty(layer.id, prop, 0.62);
+      } else if (NIGHT_TINTED_LAYERS.has(layer.id)) {
+        map.setPaintProperty(layer.id, prop, 1);
+      }
+    });
+    if (!isNight) NIGHT_TINTED_LAYERS.clear();
   } catch (e) {
     console.warn("applyNightBasemap failed:", e);
   }
 }
+
+/* Layer ids this app adds on top of whatever basemap is underneath. */
+const APP_OWNED_LAYER = /^(zones?-|pickup-|community-|strategic-|ltb-|nav-|route-|driver-|presence-|hotspot)/;
 setInterval(() => {
   const {
     presencePollsAttempted,

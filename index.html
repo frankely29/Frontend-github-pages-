@@ -268,15 +268,14 @@
   <link rel="dns-prefetch" href="https://unpkg.com" />
   <link rel="preconnect" href="https://unpkg.com" crossorigin />
 
-  <!-- The basemap's three tile hosts. Nothing can ask for a tile until
-       maplibre-gl has downloaded and parsed, so without these the DNS lookup
-       and TLS handshake happen at the worst possible moment: after the map
-       exists and is waiting to draw. Opening them during that wait is why the
-       first tiles arrive sooner and the map spends less time showing an
-       upscaled parent tile. -->
-  <link rel="preconnect" href="https://a.basemaps.cartocdn.com" crossorigin />
-  <link rel="preconnect" href="https://b.basemaps.cartocdn.com" crossorigin />
-  <link rel="preconnect" href="https://c.basemaps.cartocdn.com" crossorigin />
+  <!-- The basemap host. Nothing can ask for a tile until maplibre-gl has
+       downloaded and parsed, so without this the DNS lookup and TLS handshake
+       happen at the worst possible moment: after the map exists and is waiting
+       to draw. Opening it during that wait is why the first tiles arrive
+       sooner and the map spends less time showing an upscaled parent tile.
+       CARTO is still listed because it remains the fallback basemap. -->
+  <link rel="preconnect" href="https://tiles.openfreemap.org" crossorigin />
+  <link rel="dns-prefetch" href="https://a.basemaps.cartocdn.com" />
 
   <!-- MapLibre GL JS (no Leaflet) -->
   <link
