@@ -334,6 +334,45 @@ test('forcing the zoom can still only ever raise it, so nothing may force it by 
     'the force condition changed shape');
 });
 
+// ------------------------------------------- the overlay that never lifted
+/* #mapLoading is inset:0 at z-index 999 over the map, with pointer-events on.
+ * It is hidden by maybeResolveStartupLoading, which returns early unless
+ * mapReady -- and mapReady is set in exactly one place, inside map.on("load").
+ * MapLibre fires `load` only once the style AND the first viewport's tiles
+ * have arrived, so a tile host that is slow, rate-limited or unreachable meant
+ * the overlay stayed up for good.
+ *
+ * That is not a cosmetic stall. Reproduced in a browser with the tiles stalled:
+ * both fingers of a pinch land on div#mapLoading and the map never receives a
+ * touchstart, so the map cannot be panned or zoomed at all. The 12s timer that
+ * looks like the safety net went through the same early return and did nothing.
+ */
+test('the startup overlay comes off even when the map never finishes loading', () => {
+  const i = APP.indexOf('hard-safety-timeout');
+  assert.ok(i > 0, 'the hard safety timeout is gone');
+  const block = APP.slice(i - 200, i + 1400);
+  assert.ok(/hideStartupLoadingOverlay\(["']hard-safety-timeout/.test(block),
+    'the 12s timeout only calls maybeResolveStartupLoading, which returns at ' +
+    '`if (!mapReady) return` -- so a map that never loads keeps an ' +
+    'untappable overlay over itself forever');
+});
+
+test('hiding the startup overlay stays idempotent', () => {
+  /* The unconditional call above is safe only because of this guard. */
+  const fn = APP.slice(APP.indexOf('function hideStartupLoadingOverlay'),
+                       APP.indexOf('function maybeResolveStartupLoading'));
+  assert.ok(/if \(startupLoadingForceHidden\) return;/.test(fn),
+    'hideStartupLoadingOverlay lost its guard, so the backstop call now ' +
+    're-runs its side effects on every healthy boot');
+});
+
+test('mapReady is still only set from the map load event', () => {
+  /* If this ever stops being true the reasoning above needs redoing. */
+  const sets = APP.match(/mapReady = true/g) || [];
+  assert.strictEqual(sets.length, 1,
+    `mapReady is assigned in ${sets.length} places now`);
+});
+
 test('nothing in the app forces the zoom automatically', () => {
   /* The grep that would have caught this the first time. Any caller passing
    * forceZoom: true is claiming a driver asked to be re-focused; today

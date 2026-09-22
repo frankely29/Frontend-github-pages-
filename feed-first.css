@@ -727,13 +727,39 @@ body.night.feed-first #tjSheetHandle .tjGrab { background: rgba(238, 242, 248, 0
 body.night.feed-first #tjSheetHandle .tjArrow { color: rgba(238, 242, 248, 0.66); }
 
 /* -------------------------------------------------- the map's own chrome
-   The slider and the nav banner belong to a map you are looking at whole.
-   Recentre and report stay: the map is full size behind the sheet now and
-   genuinely usable, which is the point of this layout. */
+ *
+ * This list used to end in
+ *
+ *     body.feed-first #mapFeedPeek { display: none !important; }
+ *
+ * and that last line was the whole declaration block. #1144 deleted
+ * #mapFeedPeek and deleted its line with it, which left the list ending on a
+ * comma. CSS does not care about the comment underneath: the parser read
+ * straight past it and joined these selectors to the .killFeed rule below, so
+ * they stopped being hidden and started inheriting .killFeed's bottom and
+ * z-index instead.
+ *
+ * What that did to #navQuickStack, measured in the browser on main: a fixed
+ * element with top:34px AND bottom:calc(100% - var(--tj-split) + 12px) is
+ * stretched between the two, so the Navigate button became a 72x460px column
+ * down the right edge of the map at z-index 9400 with pointer-events:auto.
+ *
+ * That is the "I can't zoom out unless I zoom in first" bug. A zoom-out is a
+ * spread: the fingers start wide, near the edges, and the right one lands on
+ * that column. MapLibre's _getMapTouches() keeps only the touches inside the
+ * canvas, so it sees one finger, and TwoFingersTouchHandler never latches --
+ * no zoomstart, nothing moves. A zoom-in is the opposite gesture: the fingers
+ * start together in the middle, both on the canvas, and it works. Zooming in
+ * first "fixed" zooming out because it left the fingers close together.
+ *
+ * They are NOT hidden again. Navigate has been on this screen since #1144 and
+ * it is a real feature; the time machine has its own hide rule for non-admins.
+ * bottom:auto is the whole fix -- with only top set, each one goes back to the
+ * size its own stylesheet gives it, and the map gets its right edge back. */
 body.feed-first .sliderWrap,
 body.feed-first #sliderWrap,
 body.feed-first #navQuickStack,
-body.feed-first #navActiveBanner,
+body.feed-first #navActiveBanner { bottom: auto; }
 
 /* ----------------------------------------------- the floating chat messages
  *
