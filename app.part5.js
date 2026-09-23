@@ -404,26 +404,38 @@
    * recoloured discs.
    *
    * Re-sample if the art is ever regenerated; do not hand-edit. */
+  /* `beast` is empty on purpose.
+   *
+   * It held a second creature per prestige, from when the names were
+   * materials and the badge needed something to say it was a wolf. The names
+   * are the creatures now, so that column either repeats itself -- Phoenix,
+   * Phoenix -- or contradicts: prestige 3 is Hydra and its old pairing was
+   * Bear, and the leaderboard would have printed "Hydra - Bear" at a driver.
+   *
+   * The field stays rather than being deleted because the ladder, the games
+   * list and TeamJoseoRank.prestiges() all read it, and every one of them
+   * already renders it only when it is non-empty. Give it a value again and
+   * the second label comes back everywhere at once. */
   var RANK_TIERS = [
-  { name: 'Initiate', beast: 'Wolf', hi: '#d8d4cf', lo: '#b9c0c8', mid: '#7e8388', dk: '#4e5154', deep: '#292a2c',
+  { name: 'Wyvern', beast: '', hi: '#d8d4cf', lo: '#b9c0c8', mid: '#7e8388', dk: '#4e5154', deep: '#292a2c',
     enamel: '#111a27', accent: '#b9c0c8', parts: [], glow: null, glowStop: 0 },
-  { name: 'Sentinel', beast: 'Bull', hi: '#dac9b4', lo: '#b0834e', mid: '#785935', dk: '#4a3721', deep: '#271d11',
+  { name: 'Chimera', beast: '', hi: '#dac9b4', lo: '#b0834e', mid: '#785935', dk: '#4a3721', deep: '#271d11',
     enamel: '#111a27', accent: '#b0834e', parts: ['rivets'], glow: null, glowStop: 0 },
-  { name: 'Vanguard', beast: 'Bear', hi: '#bdad9e', lo: '#9aa2ab', mid: '#696e74', dk: '#414448', deep: '#222426',
+  { name: 'Hydra', beast: '', hi: '#bdad9e', lo: '#9aa2ab', mid: '#696e74', dk: '#414448', deep: '#222426',
     enamel: '#111a27', accent: '#9aa2ab', parts: ['rivets', 'bolts'], glow: null, glowStop: 0 },
-  { name: 'Paragon', beast: 'Tiger', hi: '#e5ceae', lo: '#c9a24a', mid: '#896e32', dk: '#54441f', deep: '#2c2410',
+  { name: 'Kraken', beast: '', hi: '#e5ceae', lo: '#c9a24a', mid: '#896e32', dk: '#54441f', deep: '#2c2410',
     enamel: '#111a27', accent: '#c9a24a', parts: ['rivets', 'bolts', 'laurel'], glow: null, glowStop: 0 },
-  { name: 'Warlord', beast: 'Lion', hi: '#f2d4aa', lo: '#a8202f', mid: '#721620', dk: '#470d14', deep: '#25070a',
+  { name: 'Warlord', beast: '', hi: '#f2d4aa', lo: '#a8202f', mid: '#721620', dk: '#470d14', deep: '#25070a',
     enamel: '#111a27', accent: '#a8202f', parts: ['rivets', 'bolts', 'laurel', 'banner'], glow: '#a8202f', glowStop: 0.26 },
-  { name: 'Sovereign', beast: 'Hydra', hi: '#e6cfa6', lo: '#1f8a53', mid: '#155e38', dk: '#0d3a23', deep: '#071e12',
+  { name: 'Colossus', beast: '', hi: '#e6cfa6', lo: '#1f8a53', mid: '#155e38', dk: '#0d3a23', deep: '#071e12',
     enamel: '#111a27', accent: '#1f8a53', parts: ['rivets', 'bolts', 'laurel', 'banner', 'gem'], glow: '#1f8a53', glowStop: 0.32 },
-  { name: 'Titan', beast: 'Kraken', hi: '#cac6be', lo: '#2f63c0', mid: '#204383', dk: '#142a51', deep: '#0a162a',
+  { name: 'Titan', beast: '', hi: '#cac6be', lo: '#2f63c0', mid: '#204383', dk: '#142a51', deep: '#0a162a',
     enamel: '#111a27', accent: '#2f63c0', parts: ['rivets', 'bolts', 'laurel', 'banner', 'gem', 'wings'], glow: '#2f63c0', glowStop: 0.38 },
-  { name: 'Celestial', beast: 'Eagle', hi: '#e7e3df', lo: '#7ba6dd', mid: '#547196', dk: '#34465d', deep: '#1b2531',
+  { name: 'Celestial', beast: '', hi: '#e7e3df', lo: '#7ba6dd', mid: '#547196', dk: '#34465d', deep: '#1b2531',
     enamel: '#111a27', accent: '#7ba6dd', parts: ['rivets', 'bolts', 'laurel', 'banner', 'gem', 'wings', 'spikes'], glow: '#7ba6dd', glowStop: 0.45 },
-  { name: 'Eternal', beast: 'Phoenix', hi: '#fdd582', lo: '#ff7a1a', mid: '#ad5312', dk: '#6b330b', deep: '#381b06',
+  { name: 'Phoenix', beast: '', hi: '#fdd582', lo: '#ff7a1a', mid: '#ad5312', dk: '#6b330b', deep: '#381b06',
     enamel: '#111a27', accent: '#ff7a1a', parts: ['rivets', 'bolts', 'laurel', 'banner', 'gem', 'wings', 'spikes', 'crown'], glow: '#ff7a1a', glowStop: 0.52 },
-  { name: 'Master', beast: 'Dragon', hi: '#e2d6c2', lo: '#a78bfa', mid: '#725faa', dk: '#463a69', deep: '#251f37',
+  { name: 'Dragon', beast: '', hi: '#e2d6c2', lo: '#a78bfa', mid: '#725faa', dk: '#463a69', deep: '#251f37',
     enamel: '#111a27', accent: '#a78bfa', parts: ['rivets', 'bolts', 'laurel', 'banner', 'gem', 'wings', 'spikes', 'crown', 'rays', 'halo'], glow: '#a78bfa', glowStop: 0.6 },
   ];
 
@@ -459,8 +471,8 @@
    * sixth rank. band 1..50 is the rank and the backend sends nothing else, so
    * the pair is derived here exactly as leaderboard_service derives it:
    *
-   *   band  7  ->  prestige 2 (Sentinel, Bull), rank 2, "Sentinel II"
-   *   band 50  ->  prestige 10 (Master, Dragon), rank 5, the top of the ladder
+   *   band  7  ->  prestige 2 (Chimera), rank 2, "Chimera II"
+   *   band 50  ->  prestige 10 (Dragon), rank 5, the top of the ladder
    *
    * The frontend used to drop this structure on the floor and print the key
    * back out, which is where "Band 004" came from.

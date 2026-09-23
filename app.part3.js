@@ -43,8 +43,8 @@
   }
 
   const RANK_PRESTIGE_FALLBACK = [
-    'Initiate', 'Sentinel', 'Vanguard', 'Paragon', 'Warlord',
-    'Sovereign', 'Titan', 'Celestial', 'Eternal', 'Master',
+    'Wyvern', 'Chimera', 'Hydra', 'Kraken', 'Warlord',
+    'Colossus', 'Titan', 'Celestial', 'Phoenix', 'Dragon',
   ];
 
   function rankApi() {
@@ -192,13 +192,13 @@
 
   /* A name the backend sent, unless it sent the key back. "band_34" and
    * "Band 034" are the ladder's internal address, not something to put in
-   * front of a driver, so both fall through to the derived "Paragon IV". */
+   * front of a driver, so both fall through to the derived "Kraken IV". */
   function safeRankName(title, rankIconKey) {
     const raw = String(title || '').trim();
     if (raw && !/^band[\s_-]*\d+$/i.test(raw)) return raw;
     const api = rankApi();
     if (api && rankIconKey) return api.fromKey(rankIconKey).label;
-    return raw || 'Initiate I';
+    return raw || 'Wyvern I';
   }
 
   function fallbackRankIcon(rankIconKey) {
