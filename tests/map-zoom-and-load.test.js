@@ -205,23 +205,25 @@ test('the primary basemap needs no API key', () => {
   assert.ok(!/cartocdn/.test(fn), 'the default went back to the keyed provider');
 });
 
-test('an unkeyed CARTO URL is never the primary basemap', () => {
-  /* It may still exist as the fallback -- a watermarked map beats no map --
-   * but it must be reachable only through that path. */
-  const primary = APP.slice(APP.indexOf('const OPENFREEMAP_STYLE'),
-                            APP.indexOf('function cartoRasterStyle'));
-  assert.ok(!/cartocdn/.test(primary));
-  const carto = APP.slice(APP.indexOf('function cartoRasterStyle'),
-                          APP.indexOf('function initialBasemapStyle'));
-  assert.ok(/cartocdn/.test(carto), 'the fallback basemap is gone entirely');
-  assert.ok(!/apikey|api_key/i.test(carto),
-    'a key was pasted into the fallback URL; keys do not belong in the repo');
+test('no keyed map provider is requested anywhere', () => {
+  /* CARTO was kept for a while as the fallback, on the reasoning that a
+   * watermarked map beats no map. That reasoning does not survive the
+   * licence: unkeyed tiles cost nothing and are still not ours to serve. It
+   * is deleted, and this is the standing rule rather than a one-off cleanup
+   * -- no keyed basemap service, and no key in the repo to make one work. */
+  const sources = [['app.js', APP], ['sw.js', SW], ['index.html', HTML]];
+  sources.forEach(([name, text]) => {
+    assert.ok(!/cartocdn|carto-base|carto-raster|cartoRasterStyle/.test(text),
+      `${name} still reaches for CARTO`);
+  });
+  const key = /[?&](api_?key|access_?token|key)=(?!\{)[A-Za-z0-9_.-]{8,}/;
+  sources.forEach(([name, text]) => {
+    assert.ok(!key.test(text), `${name} has a map provider key pasted into a URL`);
+  });
 });
 
 test('a basemap that never loads falls back instead of showing nothing', () => {
-  /* A basemap is the one asset a driver cannot work without.
-   *
-   * The first version of this guessed from error events -- any error without
+  /* The first version of this guessed from error events -- any error without
    * a sourceId whose message mentioned "style". Booted against a healthy
    * vector style it fired anyway and dropped straight back to the
    * watermarked raster, which is the exact thing being fixed. So the test
@@ -231,21 +233,52 @@ test('a basemap that never loads falls back instead of showing nothing', () => {
   const block = APP.slice(APP.indexOf('const fallbackTimer'), at + 400);
   assert.ok(/map\.isStyleLoaded\(\)/.test(block),
     'the fallback no longer checks whether the style loaded');
-  assert.ok(/setStyle\(cartoRasterStyle\(\)\)/.test(block), 'there is no fallback');
+  assert.ok(/setStyle\(blankBasemapStyle\(\)\)/.test(block), 'there is no fallback');
   assert.ok(/map\.once\("style\.load"/.test(block),
     'a slow style is never let off the hook, so it falls back for being slow');
   assert.ok(!/sourceId/.test(block),
     'the fallback is guessing from error events again');
 });
 
-test('night mode works on a vector basemap, not just a raster one', () => {
-  /* raster-brightness-* exist only on raster layers. On the vector basemap
-   * those calls are invalid, and the old code was saved from throwing only
-   * by its try/catch -- which would have left night mode silently dead. */
+test('the fallback basemap makes no network request of its own', () => {
+  /* The whole point of it is that OpenFreeMap could not be reached. A
+   * fallback that needs a second supplier is a fallback that fails for the
+   * same reason -- or swaps one outage for another company's licence. */
+  const fn = APP.slice(APP.indexOf('function blankBasemapStyle'),
+                       APP.indexOf('function initialBasemapStyle'));
+  assert.ok(fn.length > 0, 'the fallback basemap is gone entirely');
+  assert.ok(/sources:\s*\{\s*\}/.test(fn),
+    'the fallback declares a tile source, so it needs a server to draw');
+  assert.ok(/type:\s*"background"/.test(fn),
+    'the fallback is not a plain ground colour any more');
+  assert.ok(!/https?:\/\/(?!tiles\.openfreemap\.org)/.test(fn),
+    'the fallback reaches a host other than the one that just failed');
+});
+
+test('the app keeps drawing its own layers on the fallback', () => {
+  /* The zones, scores, hotspots, route and driver position are what the
+   * driver actually needs. They are added by this app on top of whatever
+   * ground is underneath, so they must not be tied to the basemap. */
+  const fn = APP.slice(APP.indexOf('function blankBasemapStyle'),
+                       APP.indexOf('function initialBasemapStyle'));
+  assert.ok(/version:\s*8/.test(fn),
+    'the fallback is not a valid style, so setStyle would throw and the ' +
+    'app layers would go with it');
+  assert.ok(/glyphs:/.test(fn),
+    'no glyph source, so every label this app draws would silently not render');
+});
+
+test('night mode dims whatever ground is underneath', () => {
+  /* raster-brightness-* exist only on raster layers. With the raster basemap
+   * gone there is no raster layer left, and those calls would be invalid --
+   * the old code was saved from throwing only by its try/catch, which would
+   * have left night mode silently dead. */
   const fn = APP.slice(APP.indexOf('function applyNightBasemap'),
                        APP.indexOf('function applyNightBasemap') + 2000);
-  assert.ok(/map\.getLayer\("carto-base"\)/.test(fn),
-    'the raster path no longer checks the layer exists');
+  assert.ok(!/raster-brightness|raster-contrast|raster-saturation/.test(fn),
+    'raster paint properties are back, and nothing raster is left to take them');
+  assert.ok(/map\.getLayer\("blank-base"\)/.test(fn),
+    'the fallback ground is not dimmed, so it stays white at 3am');
   assert.ok(/APP_OWNED_LAYER/.test(fn),
     'the vector path would dim this app\'s own layers as well as the basemap');
   assert.ok(/NIGHT_TINTED_LAYERS/.test(fn),

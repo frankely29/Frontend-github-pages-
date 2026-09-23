@@ -2103,9 +2103,8 @@ function whenMapLibreReady(run) {
  * It used to be CARTO's Voyager raster tiles requested with no API key.
  * CARTO now requires one, so every tile came back stamped
  * "API KEY REQUIRED — carto.com/basemaps/apikey" across the artwork. That is
- * a licence problem before it is a visual one, and it is worst exactly when
- * a driver zooms out, because a new zoom throws away every tile it has and
- * asks for a fresh set.
+ * a licence problem before it is a visual one: unkeyed tiles cost nothing and
+ * are still not ours to serve.
  *
  * OpenFreeMap needs no key and is already trusted by this app --
  * navigation.vectorbasemap.js renders the navigation view on it. It is also
@@ -2114,45 +2113,50 @@ function whenMapLibreReady(run) {
  * resampled in between, vector tiles are drawn by the phone at whatever zoom
  * it is actually at.
  *
- * CARTO stays as the fallback rather than being deleted. A watermarked map
- * is bad; no map at all is worse, and a basemap is the one asset a driver
- * cannot work without. Set window.__TLC_BASEMAP__ to "carto" to force the
- * old one back without a deploy. */
+ * CARTO is gone rather than kept as a fallback. Unkeyed, it served tiles
+ * stamped with the watermark, and serving those is a licence violation
+ * whether or not anyone is charged for it. This app requests no keyed map
+ * service and none is to be added. */
 const OPENFREEMAP_STYLE = "https://tiles.openfreemap.org/styles/liberty";
 /* Long enough that a slow phone on a bad connection is not dropped onto the
  * fallback for being slow, short enough that nobody stares at nothing. */
 const BASEMAP_STYLE_TIMEOUT_MS = 9000;
 
-function cartoRasterStyle() {
+/* The fallback, for when OpenFreeMap cannot be reached at all.
+ *
+ * It draws no streets, because there is no second street supplier that needs
+ * no key, and a driver is not served by swapping one outage for another
+ * company's. What it does instead is get out of the way: a plain ground
+ * colour, valid as a style, carrying no source and no network request.
+ *
+ * That matters more than it sounds. The zones, the score colours, the
+ * hotspots, the strategic points, the route line and the driver's own
+ * position are all layers THIS app adds on top, and they are the product.
+ * On this style they still draw, still animate and still answer a tap --
+ * the driver keeps every recommendation, on a blank ground, instead of
+ * losing the screen because someone else's CDN is down.
+ *
+ * It also honours night mode, since a white rectangle at 3am is worse than
+ * no map. applyNightBasemap dims whatever ground it finds. */
+function blankBasemapStyle() {
   return {
     version: 8,
-    sources: {
-      "carto-raster": {
-        type: "raster",
-        tiles: [
-          "https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
-          "https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
-          "https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
-        ],
-        tileSize: 256,
-      },
-    },
+    sources: {},
     layers: [
       {
-        id: "carto-base",
-        type: "raster",
-        source: "carto-raster",
-        paint: { "raster-opacity": 1 },
+        id: "blank-base",
+        type: "background",
+        paint: { "background-color": "#e9edf2" },
       },
     ],
-    glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
+    glyphs: "https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf",
     sprite: "",
   };
 }
 
 function initialBasemapStyle() {
   const forced = String(window.__TLC_BASEMAP__ || "").trim().toLowerCase();
-  if (forced === "carto") return cartoRasterStyle();
+  if (forced === "blank") return blankBasemapStyle();
   return OPENFREEMAP_STYLE;
 }
 
@@ -2334,9 +2338,9 @@ function initMap() {
   if (typeof initialBasemapStyle() === "string") {
     const fallbackTimer = window.setTimeout(() => {
       if (!map || map.isStyleLoaded()) return;
-      console.warn("basemap style did not load in time; using the fallback basemap");
+      console.warn("basemap style did not load in time; using the blank ground");
       try {
-        map.setStyle(cartoRasterStyle());
+        map.setStyle(blankBasemapStyle());
       } catch (err) {
         console.error("basemap fallback failed:", err);
       }
@@ -5146,11 +5150,13 @@ const NIGHT_TINTED_LAYERS = new Set();
 function applyNightBasemap(isNight) {
   if (!map || typeof map.getLayer !== "function") return;
   try {
-    if (map.getLayer("carto-base")) {
-      map.setPaintProperty("carto-base", "raster-brightness-max", isNight ? 0.55 : 1.0);
-      map.setPaintProperty("carto-base", "raster-brightness-min", isNight ? 0.12 : 0.0);
-      map.setPaintProperty("carto-base", "raster-contrast", isNight ? 0.25 : 0.0);
-      map.setPaintProperty("carto-base", "raster-saturation", isNight ? -0.25 : 0.0);
+    // The blank ground, when OpenFreeMap could not be reached. Dimming a
+    // single flat colour by opacity would show the container through it, so
+    // this one swaps the colour outright -- a white rectangle at 3am is worse
+    // than no map at all.
+    if (map.getLayer("blank-base")) {
+      map.setPaintProperty("blank-base", "background-color",
+        isNight ? "#0d1420" : "#e9edf2");
       return;
     }
     const style = map.getStyle && map.getStyle();

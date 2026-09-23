@@ -27,7 +27,6 @@ const NO_CACHE_PATTERNS = [
   /router\.project-osrm\.org/,
   /nominatim\.openstreetmap\.org/,
   /tiles\.openfreemap\.org/,
-  /basemaps\.cartocdn\.com/,
   /demotiles\.maplibre\.org/
 ];
 
