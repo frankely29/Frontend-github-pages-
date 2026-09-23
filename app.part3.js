@@ -16,17 +16,32 @@
     return null;
   }
 
-  const RANK_BAND_SIZE = 10;
-  const RANK_PRESTIGE_COUNT = 10;
-
-  /* The ladder is ten prestiges of ten levels, which is the hundred bands the
-   * backend has always sent. The old fallback built a HUNDRED rows out of a
-   * thousand levels by cycling ten prefixes against ten titles, which produced
-   * "Bronze Recruit" at band 1 and again, differently coloured, at band 11 --
-   * a list nobody could read and a ladder that repeated itself ten times.
+  /* Ten prestiges of FIVE ranks: fifty bands, and a driver who finishes
+   * prestige 1 rank 5 rolls into prestige 2 rank 1. Both numbers come from the
+   * badge module when it has loaded, so there is one definition of the ladder's
+   * shape rather than two that drift -- these are only the floor for a build
+   * where app.part5 has not arrived yet.
+   *
+   * The old fallback built a HUNDRED rows out of a thousand levels by cycling
+   * ten prefixes against ten titles, which produced "Bronze Recruit" at band 1
+   * and again, differently coloured, at band 11 -- a list nobody could read and
+   * a ladder that repeated itself ten times.
    *
    * The names come from the badge module so there is one roster, not two that
    * drift. A build where app.part5 has not loaded still gets a usable list. */
+  const RANK_BAND_SIZE_FALLBACK = 5;
+  const RANK_PRESTIGE_COUNT_FALLBACK = 10;
+
+  function ranksPerPrestige() {
+    const api = rankApi();
+    return (api && api.ranksPerPrestige) ? api.ranksPerPrestige() : RANK_BAND_SIZE_FALLBACK;
+  }
+
+  function prestigeCount() {
+    const api = rankApi();
+    return (api && api.prestiges) ? api.prestiges().length : RANK_PRESTIGE_COUNT_FALLBACK;
+  }
+
   const RANK_PRESTIGE_FALLBACK = [
     'Iron', 'Bronze', 'Steel', 'Gold', 'Crimson',
     'Emerald', 'Sapphire', 'Platinum', 'Flame', 'Obsidian',
@@ -39,7 +54,11 @@
   function createRankLadderFallback() {
     const api = rankApi();
     const prestiges = api ? api.prestiges() : RANK_PRESTIGE_FALLBACK.map((name, i) => ({
-      prestige: i + 1, name, beast: '', startBand: i * 10 + 1, endBand: i * 10 + 10,
+      prestige: i + 1,
+      name,
+      beast: '',
+      startBand: i * RANK_BAND_SIZE_FALLBACK + 1,
+      endBand: (i + 1) * RANK_BAND_SIZE_FALLBACK,
     }));
     return prestiges.map((p) => ({
       start_level: p.startBand,
@@ -47,7 +66,7 @@
       rank_name: p.name,
       beast: p.beast,
       prestige: p.prestige,
-      rank_icon_key: `band_${p.startBand}`,
+      rank_icon_key: `band_${String(p.startBand).padStart(3, '0')}`,
     }));
   }
 
@@ -278,7 +297,7 @@
       const beast = String(row?.beast || '').trim();
       const pips = isCurrent && mine.rank
         ? `<div class="leaderboardRankPips" aria-hidden="true">${
-            Array.from({ length: RANK_BAND_SIZE }, (_, i) =>
+            Array.from({ length: ranksPerPrestige() }, (_, i) =>
               `<i class="${i < mine.rank.level ? 'on' : ''}"></i>`).join('')
           }</div>`
         : '';
@@ -294,7 +313,7 @@
     }).join('');
 
     const mineSub = mine.rank
-      ? `Prestige ${mine.rank.prestige} of ${RANK_PRESTIGE_COUNT} · Level ${mine.rank.level} of ${RANK_BAND_SIZE}`
+      ? `Prestige ${mine.rank.prestige} of ${prestigeCount()} · Rank ${mine.rank.level} of ${ranksPerPrestige()}`
       : `Level ${mine.level}`;
     return `<div class="leaderboardRanksWrap">
       <div class="myRankCard">

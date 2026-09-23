@@ -53,10 +53,10 @@ function load() {
 const tests = [];
 const test = (n, f) => tests.push([n, f]);
 
-test('there are a hundred of them, and no two are the same', () => {
+test('there are fifty of them, and no two are the same', () => {
   const ctx = load();
   const seen = new Map();
-  for (let band = 1; band <= 100; band += 1) {
+  for (let band = 1; band <= 50; band += 1) {
     const svg = ctx.svg(band, 68);
     assert.ok(svg.startsWith('<svg'), `band ${band} did not render`);
     // The gradient ids carry the band, so compare the drawing without them.
@@ -65,7 +65,7 @@ test('there are a hundred of them, and no two are the same', () => {
       `band ${band} draws exactly the same badge as band ${seen.get(shape)}`);
     seen.set(shape, band);
   }
-  assert.strictEqual(seen.size, 100);
+  assert.strictEqual(seen.size, 50);
 });
 
 test('the ladder gains a part at every tier and never loses one', () => {
@@ -120,7 +120,7 @@ test('the rainbow is gone', () => {
   assert.ok(!/hsl\(/.test(badges), 'a badge colour is being computed, not chosen');
 });
 
-test('a tier is ten bands wide, and the mark cycles inside it', () => {
+test('a prestige is five bands wide, and the mark cycles inside it', () => {
   const ctx = load();
   const markOf = (band) => {
     const svg = ctx.svg(band, 68);
@@ -128,12 +128,12 @@ test('a tier is ten bands wide, and the mark cycles inside it', () => {
     assert.ok(m, `band ${band} drew no mark`);
     return m[1];
   };
-  // Same position in two different tiers: same mark, different metal.
-  assert.strictEqual(markOf(3), markOf(93), 'the mark does not cycle');
-  assert.notStrictEqual(markOf(3), markOf(4), 'two bands in a tier share a mark');
+  // Rank 3 of prestige 1 and rank 3 of prestige 10: same mark, different metal.
+  assert.strictEqual(markOf(3), markOf(48), 'the mark does not cycle');
+  assert.notStrictEqual(markOf(3), markOf(4), 'two bands in a prestige share a mark');
   const metal = (band) => ctx.svg(band, 68).match(/stop-color="(#[0-9a-f]{6})"/i)[1];
-  assert.notStrictEqual(metal(3), metal(93), 'two tiers share a metal');
-  assert.strictEqual(metal(3), metal(9), 'one tier uses two metals');
+  assert.notStrictEqual(metal(3), metal(48), 'two prestiges share a metal');
+  assert.strictEqual(metal(3), metal(5), 'one prestige uses two metals');
 });
 
 test('an out of range band still draws something', () => {
@@ -185,7 +185,8 @@ test('every badge is struck, not drawn', () => {
    * with its own gloss, and a shadow under the lot. Each of those is a layer
    * here, and losing any one of them is what "too simple" looked like. */
   const ctx = load();
-  const svg = ctx.svg(45, 240);
+  const band = 23;                // prestige 5, rank 3 -- frames[4]
+  const svg = ctx.svg(band, 240);
   const { frames } = ctx;
   frames.forEach((f, i) => {
     ['out', 'lit', 'inner'].forEach((face) => {
@@ -198,11 +199,11 @@ test('every badge is struck, not drawn', () => {
     'the grain is isotropic noise, which is dirt rather than a brushed surface');
   assert.ok(svg.includes(frames[4].lit), 'the lit face is not drawn');
   assert.ok(svg.includes(frames[4].inner), 'there is no recessed field');
-  assert.ok(/clip-path="url\(#rb45c\)"/.test(svg),
+  assert.ok(svg.includes(`clip-path="url(#rb${band}c)"`),
     'the surface is not painted inside the frame, so it has one plane again');
   // Five stops in the metal: highlight, light, mid, shadow, deep. Fewer and it
   // ramps instead of catching.
-  const metal = svg.match(/id="rb45m"[^>]*>((?:<stop[^>]*>)+)/);
+  const metal = svg.match(new RegExp(`id="rb${band}m"[^>]*>((?:<stop[^>]*>)+)`));
   assert.ok(metal, 'the metal gradient is gone');
   assert.ok((metal[1].match(/<stop/g) || []).length >= 5,
     'the metal has fewer than five stops, so it ramps instead of catching');
@@ -224,20 +225,36 @@ test('all ten painted frames ship', () => {
   }
 });
 
-test('a band asks for its own tier\'s frame', () => {
+test('a band asks for its own band\'s artwork, then its prestige\'s', () => {
+  /* The badges live in the database now, one per band. Until a band's own art
+   * is uploaded it wears its prestige's painted file, so a driver never sees
+   * a gap while a set is landing a piece at a time. */
   const render = SOURCE.slice(SOURCE.indexOf('function renderRankBadgeIcon'));
-  assert.ok(/rank-frames\/tier-\$\{t\}\.webp/.test(render),
-    'the frame is no longer addressed by tier');
-  // band 1..10 -> tier 1, band 91..100 -> tier 10, and nothing off either end.
-  const tierOf = (band) => Math.max(1, Math.min(10,
-    Math.floor((Math.max(1, Math.min(100, band)) - 1) / 10) + 1));
-  assert.strictEqual(tierOf(1), 1);
-  assert.strictEqual(tierOf(10), 1);
-  assert.strictEqual(tierOf(11), 2);
-  assert.strictEqual(tierOf(95), 10);
-  assert.strictEqual(tierOf(100), 10);
-  assert.strictEqual(tierOf(0), 1);
-  assert.strictEqual(tierOf(9999), 10);
+  assert.ok(/rankBadgeSrc\(rank\.band\)/.test(render),
+    'the badge image is no longer addressed by band');
+  assert.ok(!/rank-frames\/tier-\$\{t\}/.test(render),
+    'the renderer still hardcodes the prestige file');
+
+  const src = SOURCE.slice(SOURCE.indexOf('function paintedBadgeSrc'),
+                           SOURCE.indexOf('function applyRankBadgeManifestToDom'));
+  assert.ok(/rank-frames\/tier-/.test(src),
+    'the painted prestige fallback is gone, so an un-uploaded band has nothing');
+  assert.ok(/RANK_BADGE_MANIFEST\[/.test(src),
+    'the uploaded badge is never preferred over the painted one');
+  assert.ok(/padStart\(3, '0'\)/.test(src),
+    'the manifest is keyed on an unpadded band; the backend sends band_007');
+});
+
+test('the badge manifest is fetched once and never blocks a render', () => {
+  /* A badge renders synchronously inside a feed row, so the manifest cannot
+   * be awaited. It upgrades what is already on screen when it lands. */
+  const src = SOURCE.slice(SOURCE.indexOf('function loadRankBadgeManifest'));
+  assert.ok(/rankBadgeManifestState !== 'idle'/.test(src),
+    'the manifest can be fetched more than once');
+  assert.ok(/applyRankBadgeManifestToDom\(\)/.test(src),
+    'badges already on screen are never upgraded to their uploaded artwork');
+  assert.ok(/\.catch\(/.test(src),
+    'a manifest that does not arrive is unhandled');
 });
 
 test('the vector badge is still in the markup, as the fallback', () => {

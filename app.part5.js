@@ -334,23 +334,26 @@
 
   function resolveRankIconBand(rankIconKey) {
     const key = String(rankIconKey || '').trim().toLowerCase();
-    /* Clamped to 100, not 1000. There are a hundred ranks -- ten prestiges of
-     * ten -- and band_250 from a bad payload has to land on the top badge
-     * rather than index past the end of the ladder. */
+    /* Clamped to RANK_BAND_COUNT, not 1000. There are fifty ranks -- ten
+     * prestiges of five -- and band_250 from a bad payload has to land on the
+     * top badge rather than index past the end of the ladder. */
     const match = key.match(/^band_(\d{1,4})$/);
     if (match) {
       const value = Number(match[1]);
-      return Math.max(1, Math.min(100, value));
+      return Math.max(1, Math.min(RANK_BAND_COUNT, value));
     }
-    return Math.max(1, Math.min(100, Number(LEGACY_RANK_ICON_BAND_MAP[key] || 1)));
+    return Math.max(1, Math.min(RANK_BAND_COUNT, Number(LEGACY_RANK_ICON_BAND_MAP[key] || 1)));
   }
 
   function resolveRankIconTone(rankIconKey) {
-    const band = resolveRankIconBand(rankIconKey);
-    if (band >= 91) return 'toneLegend';
-    if (band >= 71) return 'toneGeneral';
-    if (band >= 41) return 'toneOfficer';
-    if (band >= 11) return 'toneEnlisted';
+    /* By prestige rather than by band, so the five bands inside a prestige
+       always share a tone. Reading these off band numbers is what made them
+       drift when the ladder was reshaped. */
+    const prestige = rankFromBand(resolveRankIconBand(rankIconKey)).prestige;
+    if (prestige >= 10) return 'toneLegend';
+    if (prestige >= 8) return 'toneGeneral';
+    if (prestige >= 5) return 'toneOfficer';
+    if (prestige >= 2) return 'toneEnlisted';
     return 'toneRecruit';
   }
 
@@ -448,19 +451,31 @@
     [0.3438, 0.7656, 0.3001, 0.0540],
   ];
 
-  var RANK_ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
+  var RANK_ROMAN = ['I', 'II', 'III', 'IV', 'V'];
 
-  /* band 1..100 IS the rank. It always was -- the backend has been sending
-   * band_1..band_100 since the ladder existed, and ten bands of ten is exactly
-   * ten prestiges of ten levels. The frontend used to drop that structure on
-   * the floor and print the key back out, which is where "Band 004" came from.
+  /* The ladder: ten prestiges of FIVE ranks each, fifty in all.
    *
-   *   band 34  ->  prestige 4 (Gold, Tiger), level 4, "Gold IV"
-   */
+   * A driver finishing prestige 1 rank 5 rolls into prestige 2 rank 1, not a
+   * sixth rank. band 1..50 is the rank and the backend sends nothing else, so
+   * the pair is derived here exactly as leaderboard_service derives it:
+   *
+   *   band  7  ->  prestige 2 (Bronze, Bull), rank 2, "Bronze II"
+   *   band 50  ->  prestige 10 (Obsidian, Dragon), rank 5, the top of the ladder
+   *
+   * The frontend used to drop this structure on the floor and print the key
+   * back out, which is where "Band 004" came from.
+   *
+   * RANKS_PER_PRESTIGE is the only number to change if the shape moves again:
+   * every derived value below, the pips on the ladder and the clamp on the key
+   * all read from it rather than repeating 5. */
+  var PRESTIGE_COUNT = 10;
+  var RANKS_PER_PRESTIGE = 5;
+  var RANK_BAND_COUNT = PRESTIGE_COUNT * RANKS_PER_PRESTIGE;
+
   function rankFromBand(band) {
-    var b = Math.max(1, Math.min(100, Math.floor(Number(band) || 1)));
-    var index = Math.floor((b - 1) / 10);
-    var level = ((b - 1) % 10) + 1;
+    var b = Math.max(1, Math.min(RANK_BAND_COUNT, Math.floor(Number(band) || 1)));
+    var index = Math.floor((b - 1) / RANKS_PER_PRESTIGE);
+    var level = ((b - 1) % RANKS_PER_PRESTIGE) + 1;
     var tier = RANK_TIERS[index];
     return {
       band: b,
@@ -471,12 +486,102 @@
       name: tier.name,
       beast: tier.beast,
       label: tier.name + ' ' + RANK_ROMAN[level - 1],
-      isMax: b >= 100,
+      isMax: b >= RANK_BAND_COUNT,
     };
   }
 
   function rankFromKey(rankIconKey) {
     return rankFromBand(resolveRankIconBand(rankIconKey));
+  }
+
+  /* Where a band's artwork comes from.
+   *
+   * The badges live in the database, one image per band, and are served from
+   * /ranks/badge/<key>?v=<sha256 of the bytes>. That version is what makes
+   * them cacheable forever: artwork that has not changed is never fetched
+   * twice, and artwork that has gets a URL the cache has never seen.
+   *
+   * The manifest is one request for the whole set and it is fetched once. It
+   * cannot be awaited here, because a badge renders synchronously inside a
+   * feed row -- so rendering always emits a src that works immediately, and
+   * the manifest upgrades what is already on screen when it lands.
+   *
+   * THE FALLBACK IS THE PAINTED PRESTIGE
+   *
+   * Until a band's own artwork is uploaded, it wears its prestige's painted
+   * badge: all five ranks of prestige 4 show the Tiger. That is deliberate
+   * rather than a placeholder -- a driver never sees a gap, the ladder still
+   * reads as ten distinct tiers, and the numeral struck on the nameplate
+   * already says which of the five they are on. The vector badge beneath
+   * remains the last resort for a build with no art at all. */
+  var RANK_BADGE_MANIFEST = Object.create(null);
+  var rankBadgeManifestState = 'idle';
+
+  function rankBadgeApiBase() {
+    if (typeof window === 'undefined') return '';
+    var explicit = String(window.API_BASE || '').trim();
+    if (explicit) return explicit.replace(/\/+$/, '');
+    var configured = String(
+      (window.__TLC_RUNTIME_CONFIG__ && window.__TLC_RUNTIME_CONFIG__.apiBase) || '').trim();
+    if (configured) return configured.replace(/\/+$/, '');
+    return '';
+  }
+
+  /* The prestige's painted file, which ships in this repo. */
+  function paintedBadgeSrc(band) {
+    return './rank-frames/tier-' + rankFromBand(band).prestige + '.webp';
+  }
+
+  function rankBadgeSrc(band) {
+    var rank = rankFromBand(band);
+    return RANK_BADGE_MANIFEST['band_' + String(rank.band).padStart(3, '0')]
+      || paintedBadgeSrc(rank.band);
+  }
+
+  /* Point every badge already on screen at its uploaded artwork. Called once,
+     when the manifest lands. A badge whose band has no upload keeps the src it
+     was rendered with, so nothing flickers back to a placeholder. */
+  function applyRankBadgeManifestToDom() {
+    if (typeof document === 'undefined') return;
+    var wraps = document.querySelectorAll('.rankBadgeIconWrap[data-rank-band]');
+    Array.prototype.forEach.call(wraps, function (wrap) {
+      var img = wrap.querySelector('img.rankBadgeFrame');
+      if (!img) return;
+      var next = rankBadgeSrc(Number(wrap.getAttribute('data-rank-band')));
+      if (next && img.getAttribute('src') !== next) {
+        img.setAttribute('src', next);
+        /* It failed on the painted file and the class was stripped; uploaded
+           art deserves its own attempt at painting. */
+        wrap.classList.add('rankBadgePainted');
+      }
+    });
+  }
+
+  function loadRankBadgeManifest() {
+    if (rankBadgeManifestState !== 'idle') return;
+    if (typeof fetch !== 'function') return;
+    rankBadgeManifestState = 'loading';
+    var base = rankBadgeApiBase();
+    fetch(base + '/ranks/badges', { credentials: 'omit' })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (body) {
+        var items = (body && body.items) || [];
+        items.forEach(function (item) {
+          var key = String((item && item.rank_icon_key) || '');
+          var url = String((item && item.url) || '');
+          if (!key || !url) return;
+          RANK_BADGE_MANIFEST[key] = /^https?:\/\//i.test(url) ? url : base + url;
+        });
+        rankBadgeManifestState = 'ready';
+        applyRankBadgeManifestToDom();
+      })
+      .catch(function () {
+        /* Swallowed on purpose. Every badge already has a painted file to
+           show, so a manifest that does not arrive costs nothing a driver can
+           see -- and a rank badge is not worth a console error on every open
+           for someone running offline. */
+        rankBadgeManifestState = 'failed';
+      });
   }
 
   /* A backend rank_name is used when it is a name, and ignored when it is the
@@ -592,11 +697,18 @@
   var INFRONT = ['banner', 'crown', 'rivets', 'bolts', 'gem'];
 
   function rankBadgeSvg(band, size) {
-    var b = Math.max(1, Math.min(100, Number(band) || 1));
-    var t = Math.floor((b - 1) / 10);
+    var rank = rankFromBand(band);
+    var b = rank.band;
+    var t = rank.prestigeIndex;
     var tier = RANK_TIERS[t];
     var frame = FRAMES[t];
-    var em = EMBLEMS[(b - 1) % 10];
+    /* EMBLEMS still holds ten, authored in climbing order of complexity, and
+       a prestige now has five ranks. Taking the first five would give the top
+       rank of every prestige a mid-table emblem, so the five are spread across
+       the ten instead -- rank 1 gets the plainest and rank 5 the richest, the
+       way it read when there were ten of them. */
+    var emblemStep = Math.floor(EMBLEMS.length / RANKS_PER_PRESTIGE);
+    var em = EMBLEMS[Math.min(EMBLEMS.length - 1, (rank.level - 1) * emblemStep)];
     var id = 'rb' + b;
     var px = size || 68;
 
@@ -713,18 +825,17 @@
        to gold, which was right when the badge inside was a rainbow disc and
        wrong the moment the badge got a metal of its own: a bronze rank on a
        gold coin reads as a mistake, and a mythic one reads as a worse one. */
-    const tier = RANK_TIERS[Math.max(0, Math.min(9, Math.floor((Math.max(1, Math.min(100, band)) - 1) / 10)))];
+    const tier = RANK_TIERS[rankFromBand(band).prestigeIndex];
     const metal = `--rank-lo:${tier.lo};--rank-mid:${tier.mid};--rank-dk:${tier.dk};--rank-ring:${tier.ring}`;
     const size = compact ? 54 : 68;
-    const t = Math.max(1, Math.min(10, Math.floor((Math.max(1, Math.min(100, band)) - 1) / 10) + 1));
-    /* Painted frame, vector mark, vector badge underneath as the fallback.
+    /* Uploaded artwork, painted prestige, vector badge -- in that order.
      *
-     * The fallback is not decoration. These files ship in the repo, so they
-     * are there -- until a driver is running a cached older build, or the tier
-     * is one whose art has not been drawn yet. onerror puts the class on the
-     * wrapper, CSS hides the image and shows the badge that is already in the
-     * markup, and nothing about the card moves. Adding tier 11 later means
-     * dropping in one file; forgetting to means the vector shows. */
+     * None of these is decoration. The uploaded badge is the real one and
+     * comes from the database; until a band has one it wears its prestige's
+     * painted file, which ships in this repo; and if THAT fails -- a cached
+     * older build, a prestige whose art is being reworked -- onerror strips
+     * the class, CSS hides the image and shows the vector badge already in
+     * the markup. Nothing about the card moves in any of the three cases. */
     const rank = rankFromBand(band);
     /* The division is struck on the badge's own nameplate.
      *
@@ -744,7 +855,7 @@
       : '';
 
     return `<div class="rankBadgeIconWrap ${toneClass}${compact ? ' compact' : ''} rankBadgePainted" aria-hidden="true" data-rank-band="${band}" data-rank-label="${rank.label}" style="${metal};--rank-size:${size}px">`
-      + `<img class="rankBadgeFrame" src="./rank-frames/tier-${t}.webp" alt="" width="${size}" height="${size}" decoding="async"`
+      + `<img class="rankBadgeFrame" src="${rankBadgeSrc(rank.band)}" alt="" width="${size}" height="${size}" decoding="async"`
       + ` onerror="this.closest('.rankBadgeIconWrap')?.classList.remove('rankBadgePainted')">`
       + numeral
       + `<span class="rankBadgeVector">${rankBadgeSvg(band, size)}</span>`
@@ -2180,18 +2291,28 @@
    * The leaderboard, the games panel and work-battles all need to turn a band
    * into a name, and none of them has any business reaching into the driver
    * profile module to do it. One arithmetic, one place, four callers. */
+  /* One request for the whole set, started as soon as this module is up.
+     Nothing waits on it: every badge renders with its prestige's painted file
+     and is upgraded in place when the manifest lands. */
+  loadRankBadgeManifest();
+
   window.TeamJoseoRank = {
     fromBand: rankFromBand,
     fromKey: rankFromKey,
     displayName: rankDisplayName,
-    roman: (level) => RANK_ROMAN[Math.max(1, Math.min(10, Math.floor(Number(level) || 1))) - 1],
+    badgeSrc: rankBadgeSrc,
+    reloadBadges: () => { rankBadgeManifestState = 'idle'; loadRankBadgeManifest(); },
+    roman: (level) => RANK_ROMAN[
+      Math.max(1, Math.min(RANKS_PER_PRESTIGE, Math.floor(Number(level) || 1))) - 1],
+    ranksPerPrestige: () => RANKS_PER_PRESTIGE,
+    bandCount: () => RANK_BAND_COUNT,
     prestiges: () => RANK_TIERS.map((t, i) => ({
       prestige: i + 1,
       name: t.name,
       beast: t.beast,
       accent: t.accent,
-      startBand: i * 10 + 1,
-      endBand: i * 10 + 10,
+      startBand: i * RANKS_PER_PRESTIGE + 1,
+      endBand: (i + 1) * RANKS_PER_PRESTIGE,
     })),
   };
   window.openDriverProfileModal = openDriverProfileModal;

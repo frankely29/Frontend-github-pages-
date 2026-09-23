@@ -44,6 +44,16 @@ function lift(source, signature) {
 }
 
 /** The ladder arithmetic, with just enough of its table to run. */
+/* The numerals and the ladder's shape, lifted from the source rather than
+ * restated here. A test that hardcodes "five ranks" passes happily while the
+ * code says something else; this one cannot. */
+function shapeConstants(src) {
+  const from = src.indexOf('var RANK_ROMAN = [');
+  const to = src.indexOf('function rankFromBand(');
+  assert.ok(from > -1 && to > from, 'the ladder constants moved');
+  return src.slice(from, to);
+}
+
 function loadRank() {
   const from = PART5.indexOf('var RANK_TIERS = [');
   const to = PART5.indexOf('var RANK_PLATES = [');
@@ -51,10 +61,10 @@ function loadRank() {
   const context = vm.createContext({ Math, Number, String });
   vm.runInContext(
     `${PART5.slice(from, to)}
-     var RANK_ROMAN = ['I','II','III','IV','V','VI','VII','VIII','IX','X'];
+     ${shapeConstants(PART5)}
      function resolveRankIconBand(k){
        var m = String(k||'').match(/^band_(\\d{1,4})$/);
-       return m ? Math.max(1, Math.min(100, Number(m[1]))) : 1;
+       return m ? Math.max(1, Math.min(RANK_BAND_COUNT, Number(m[1]))) : 1;
      }
      ${lift(PART5, 'function rankFromBand(')}
      ${lift(PART5, 'function rankFromKey(')}
@@ -72,12 +82,15 @@ const test = (n, f) => tests.push([n, f]);
 
 // ------------------------------------------------------------ the arithmetic
 
-test('a band is a prestige and a level', () => {
+test('a band is a prestige and a rank', () => {
+  /* Ten prestiges of five. Band 5 is the last rank of prestige 1 and band 6
+     is the first of prestige 2 -- that roll-over is the shape of the ladder,
+     so it is the case worth pinning. */
   const { fromBand } = loadRank();
   const cases = [
-    [1, 1, 1, 'I'], [10, 1, 10, 'X'],
-    [11, 2, 1, 'I'], [34, 4, 4, 'IV'],
-    [50, 5, 10, 'X'], [91, 10, 1, 'I'], [100, 10, 10, 'X'],
+    [1, 1, 1, 'I'], [5, 1, 5, 'V'],
+    [6, 2, 1, 'I'], [7, 2, 2, 'II'],
+    [34, 7, 4, 'IV'], [46, 10, 1, 'I'], [50, 10, 5, 'V'],
   ];
   cases.forEach(([band, prestige, level, roman]) => {
     const r = fromBand(band);
@@ -87,22 +100,35 @@ test('a band is a prestige and a level', () => {
   });
 });
 
-test('every one of the hundred lands inside the ladder', () => {
+test('every one of the fifty lands inside the ladder', () => {
   const { fromBand, tiers } = loadRank();
   const labels = new Set();
-  for (let band = 1; band <= 100; band += 1) {
+  for (let band = 1; band <= 50; band += 1) {
     const r = fromBand(band);
     assert.ok(r.prestige >= 1 && r.prestige <= 10, `band ${band} left the ladder`);
-    assert.ok(r.level >= 1 && r.level <= 10, `band ${band} has level ${r.level}`);
+    assert.ok(r.level >= 1 && r.level <= 5, `band ${band} has rank ${r.level}`);
     assert.strictEqual(r.name, tiers[r.prestigeIndex].name);
     labels.add(r.label);
   }
-  assert.strictEqual(labels.size, 100, 'two bands share a label');
+  assert.strictEqual(labels.size, 50, 'two bands share a label');
+});
+
+test('the ladder covers every prestige exactly five times', () => {
+  const { fromBand } = loadRank();
+  const perPrestige = new Map();
+  for (let band = 1; band <= 50; band += 1) {
+    const p = fromBand(band).prestige;
+    perPrestige.set(p, (perPrestige.get(p) || 0) + 1);
+  }
+  assert.strictEqual(perPrestige.size, 10, 'not ten prestiges');
+  perPrestige.forEach((count, prestige) => {
+    assert.strictEqual(count, 5, `prestige ${prestige} has ${count} ranks`);
+  });
 });
 
 test('garbage lands on the ends rather than off them', () => {
   const { fromBand } = loadRank();
-  [[0, 1], [-5, 1], [101, 100], [99999, 100], [NaN, 1], ['', 1]].forEach(([input, band]) => {
+  [[0, 1], [-5, 1], [51, 50], [101, 50], [99999, 50], [NaN, 1], ['', 1]].forEach(([input, band]) => {
     assert.strictEqual(fromBand(input).band, band, `${String(input)} clamped wrong`);
   });
 });
@@ -110,9 +136,10 @@ test('garbage lands on the ends rather than off them', () => {
 test('band_250 clamps to the top badge, not past the end of the table', () => {
   /* resolveRankIconBand used to clamp at 1000, which is the old level ceiling
    * rather than the band ceiling. A payload of band_250 then indexed past
-   * RANK_TIERS and the badge threw. */
-  assert.ok(/Math\.min\(100, value\)/.test(PART5),
-    'the band clamp is not 100');
+   * RANK_TIERS and the badge threw. It is read from RANK_BAND_COUNT now, so
+   * reshaping the ladder cannot leave this behind. */
+  assert.ok(/Math\.min\(RANK_BAND_COUNT, value\)/.test(PART5),
+    'the band clamp is a literal again rather than RANK_BAND_COUNT');
   assert.ok(!/Math\.min\(1000,/.test(
     PART5.slice(PART5.indexOf('function resolveRankIconBand'),
                 PART5.indexOf('function resolveRankIconTone'))),
@@ -125,7 +152,7 @@ test('a rank_name that is really the key falls through to the label', () => {
   const { displayName } = loadRank();
   ['Band 034', 'band_34', 'BAND 4', 'band-34', '', '   '].forEach((raw) => {
     const out = displayName({ rank_name: raw, rank_icon_key: 'band_34' });
-    assert.strictEqual(out, 'Gold IV', `"${raw}" was shown to a driver as-is`);
+    assert.strictEqual(out, 'Sapphire IV', `"${raw}" was shown to a driver as-is`);
   });
 });
 
@@ -217,8 +244,10 @@ test('the driver\'s own prestige is findable in a list of ten', () => {
   const view = lift(PART3, 'function renderRankLadderView(');
   assert.ok(/isCurrent/.test(view), 'the current row is no longer marked');
   assert.ok(/leaderboardRankPips/.test(view), 'the level pips are gone');
-  assert.ok(/length: RANK_BAND_SIZE/.test(view),
-    'the pips are no longer one per level in the prestige');
+  assert.ok(/length: ranksPerPrestige\(\)/.test(view),
+    'the pips are no longer one per rank in the prestige');
+  assert.ok(!/RANK_BAND_SIZE\b/.test(view),
+    'the pip count is a hardcoded constant again rather than the ladder shape');
   assert.ok(/\.leaderboardRankLadderRow\.current/.test(CSS),
     'the current row has no style, so it is not findable');
 });
