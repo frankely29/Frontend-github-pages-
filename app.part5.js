@@ -463,7 +463,7 @@
     [0.3438, 0.7656, 0.3001, 0.0540],
   ];
 
-  var RANK_ROMAN = ['I', 'II', 'III', 'IV', 'V'];
+  var RANK_ROMAN = ['I', 'II', 'III'];
 
   /* The ladder: ten prestiges of FIVE ranks each, fifty in all.
    *
@@ -481,7 +481,7 @@
    * every derived value below, the pips on the ladder and the clamp on the key
    * all read from it rather than repeating 5. */
   var PRESTIGE_COUNT = 10;
-  var RANKS_PER_PRESTIGE = 5;
+  var RANKS_PER_PRESTIGE = 3;
   var RANK_BAND_COUNT = PRESTIGE_COUNT * RANKS_PER_PRESTIGE;
 
   function rankFromBand(band) {

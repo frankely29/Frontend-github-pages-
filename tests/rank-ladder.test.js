@@ -72,7 +72,10 @@ function loadRank() {
      globalThis.fromBand = rankFromBand;
      globalThis.fromKey = rankFromKey;
      globalThis.displayName = rankDisplayName;
-     globalThis.tiers = RANK_TIERS;`,
+     globalThis.tiers = RANK_TIERS;
+     globalThis.BANDS = RANK_BAND_COUNT;
+     globalThis.PER = RANKS_PER_PRESTIGE;
+     globalThis.PRESTIGES = PRESTIGE_COUNT;`,
     context, { filename: 'app.part5.js#rank' });
   return context;
 }
@@ -82,53 +85,67 @@ const test = (n, f) => tests.push([n, f]);
 
 // ------------------------------------------------------------ the arithmetic
 
-test('a band is a prestige and a rank', () => {
-  /* Ten prestiges of five. Band 5 is the last rank of prestige 1 and band 6
-     is the first of prestige 2 -- that roll-over is the shape of the ladder,
-     so it is the case worth pinning. */
-  const { fromBand } = loadRank();
-  const cases = [
-    [1, 1, 1, 'I'], [5, 1, 5, 'V'],
-    [6, 2, 1, 'I'], [7, 2, 2, 'II'],
-    [34, 7, 4, 'IV'], [46, 10, 1, 'I'], [50, 10, 5, 'V'],
-  ];
-  cases.forEach(([band, prestige, level, roman]) => {
-    const r = fromBand(band);
-    assert.strictEqual(r.prestige, prestige, `band ${band} prestige`);
-    assert.strictEqual(r.level, level, `band ${band} level`);
-    assert.strictEqual(r.roman, roman, `band ${band} numeral`);
-  });
+test('a band is a prestige and a rank, and the roll-over lands right', () => {
+  /* The shape has changed three times now -- a hundred bands of ten, fifty of
+     five, thirty of three -- so the cases are DERIVED from whatever the source
+     currently says rather than written out. What is being pinned is the
+     arithmetic, not the numbers it happens to produce today: the last rank of
+     a prestige is followed by the first rank of the next, never an extra rank
+     on the old one. */
+  const ctx = loadRank();
+  const { fromBand, PER, BANDS, PRESTIGES } = ctx;
+
+  assert.strictEqual(fromBand(1).prestige, 1);
+  assert.strictEqual(fromBand(1).level, 1);
+
+  // The end of prestige 1, and the roll-over into prestige 2.
+  assert.strictEqual(fromBand(PER).prestige, 1, 'band PER left prestige 1 early');
+  assert.strictEqual(fromBand(PER).level, PER, 'band PER is not the last rank');
+  assert.strictEqual(fromBand(PER + 1).prestige, 2, 'the roll-over does not happen');
+  assert.strictEqual(fromBand(PER + 1).level, 1, 'the roll-over does not reset the rank');
+
+  // And the very top.
+  assert.strictEqual(fromBand(BANDS).prestige, PRESTIGES);
+  assert.strictEqual(fromBand(BANDS).level, PER);
+  assert.ok(fromBand(BANDS).isMax, 'the last band is not flagged as the top');
 });
 
-test('every one of the fifty lands inside the ladder', () => {
-  const { fromBand, tiers } = loadRank();
+test('every band lands inside the ladder, and none shares a label', () => {
+  const { fromBand, tiers, BANDS, PER, PRESTIGES } = loadRank();
   const labels = new Set();
-  for (let band = 1; band <= 50; band += 1) {
+  for (let band = 1; band <= BANDS; band += 1) {
     const r = fromBand(band);
-    assert.ok(r.prestige >= 1 && r.prestige <= 10, `band ${band} left the ladder`);
-    assert.ok(r.level >= 1 && r.level <= 5, `band ${band} has rank ${r.level}`);
+    assert.ok(r.prestige >= 1 && r.prestige <= PRESTIGES, `band ${band} left the ladder`);
+    assert.ok(r.level >= 1 && r.level <= PER, `band ${band} has rank ${r.level}`);
     assert.strictEqual(r.name, tiers[r.prestigeIndex].name);
     labels.add(r.label);
   }
-  assert.strictEqual(labels.size, 50, 'two bands share a label');
+  assert.strictEqual(labels.size, BANDS, 'two bands share a label');
 });
 
-test('the ladder covers every prestige exactly five times', () => {
-  const { fromBand } = loadRank();
+test('every prestige gets the same number of ranks', () => {
+  const { fromBand, BANDS, PER, PRESTIGES } = loadRank();
   const perPrestige = new Map();
-  for (let band = 1; band <= 50; band += 1) {
+  for (let band = 1; band <= BANDS; band += 1) {
     const p = fromBand(band).prestige;
     perPrestige.set(p, (perPrestige.get(p) || 0) + 1);
   }
-  assert.strictEqual(perPrestige.size, 10, 'not ten prestiges');
+  assert.strictEqual(perPrestige.size, PRESTIGES, `not ${PRESTIGES} prestiges`);
   perPrestige.forEach((count, prestige) => {
-    assert.strictEqual(count, 5, `prestige ${prestige} has ${count} ranks`);
+    assert.strictEqual(count, PER, `prestige ${prestige} has ${count} ranks`);
   });
+  assert.strictEqual(BANDS, PRESTIGES * PER, 'the band count is not the product');
+  // There must be a numeral for every rank, or the top of each prestige
+  // renders with `undefined` struck on its nameplate.
+  assert.strictEqual(fromBand(PER).roman.length > 0, true, 'the last rank has no numeral');
 });
 
 test('garbage lands on the ends rather than off them', () => {
-  const { fromBand } = loadRank();
-  [[0, 1], [-5, 1], [51, 50], [101, 50], [99999, 50], [NaN, 1], ['', 1]].forEach(([input, band]) => {
+  const ctx = loadRank();
+  const { fromBand } = ctx;
+  const { BANDS } = ctx;
+  [[0, 1], [-5, 1], [BANDS + 1, BANDS], [101, BANDS], [99999, BANDS],
+   [NaN, 1], ['', 1]].forEach(([input, band]) => {
     assert.strictEqual(fromBand(input).band, band, `${String(input)} clamped wrong`);
   });
 });
@@ -152,7 +169,7 @@ test('a rank_name that is really the key falls through to the label', () => {
   const { displayName } = loadRank();
   ['Band 034', 'band_34', 'BAND 4', 'band-34', '', '   '].forEach((raw) => {
     const out = displayName({ rank_name: raw, rank_icon_key: 'band_34' });
-    assert.strictEqual(out, 'Titan IV', `"${raw}" was shown to a driver as-is`);
+    assert.strictEqual(out, 'Dragon III', `"${raw}" was shown to a driver as-is`);
   });
 });
 

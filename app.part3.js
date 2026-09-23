@@ -16,8 +16,8 @@
     return null;
   }
 
-  /* Ten prestiges of FIVE ranks: fifty bands, and a driver who finishes
-   * prestige 1 rank 5 rolls into prestige 2 rank 1. Both numbers come from the
+  /* Ten prestiges of THREE ranks: thirty bands, and a driver who finishes
+   * prestige 1 rank 3 rolls into prestige 2 rank 1. Both numbers come from the
    * badge module when it has loaded, so there is one definition of the ladder's
    * shape rather than two that drift -- these are only the floor for a build
    * where app.part5 has not arrived yet.
@@ -29,7 +29,7 @@
    *
    * The names come from the badge module so there is one roster, not two that
    * drift. A build where app.part5 has not loaded still gets a usable list. */
-  const RANK_BAND_SIZE_FALLBACK = 5;
+  const RANK_BAND_SIZE_FALLBACK = 3;
   const RANK_PRESTIGE_COUNT_FALLBACK = 10;
 
   function ranksPerPrestige() {

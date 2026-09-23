@@ -46,17 +46,19 @@ function load() {
     globalThis.tiers = RANK_TIERS;
     globalThis.parts = PARTS;
     globalThis.frames = FRAMES;
-    globalThis.emblems = EMBLEMS;`, context, { filename: 'app.part5.js#badges' });
+    globalThis.emblems = EMBLEMS;
+    globalThis.BANDS = RANK_BAND_COUNT;
+    globalThis.PER = RANKS_PER_PRESTIGE;`, context, { filename: 'app.part5.js#badges' });
   return context;
 }
 
 const tests = [];
 const test = (n, f) => tests.push([n, f]);
 
-test('there are fifty of them, and no two are the same', () => {
+test('every band draws a badge, and no two are the same', () => {
   const ctx = load();
   const seen = new Map();
-  for (let band = 1; band <= 50; band += 1) {
+  for (let band = 1; band <= ctx.BANDS; band += 1) {
     const svg = ctx.svg(band, 68);
     assert.ok(svg.startsWith('<svg'), `band ${band} did not render`);
     // The gradient ids carry the band, so compare the drawing without them.
@@ -65,7 +67,7 @@ test('there are fifty of them, and no two are the same', () => {
       `band ${band} draws exactly the same badge as band ${seen.get(shape)}`);
     seen.set(shape, band);
   }
-  assert.strictEqual(seen.size, 50);
+  assert.strictEqual(seen.size, ctx.BANDS);
 });
 
 test('the ladder gains a part at every tier and never loses one', () => {
@@ -120,20 +122,24 @@ test('the rainbow is gone', () => {
   assert.ok(!/hsl\(/.test(badges), 'a badge colour is being computed, not chosen');
 });
 
-test('a prestige is five bands wide, and the mark cycles inside it', () => {
+test('a prestige is PER bands wide, and the mark cycles inside it', () => {
   const ctx = load();
+  const { PER, BANDS } = ctx;
   const markOf = (band) => {
     const svg = ctx.svg(band, 68);
     const m = svg.match(/translate\(-48,-48\)"><path d="([^"]+)"/);
     assert.ok(m, `band ${band} drew no mark`);
     return m[1];
   };
-  // Rank 3 of prestige 1 and rank 3 of prestige 10: same mark, different metal.
-  assert.strictEqual(markOf(3), markOf(48), 'the mark does not cycle');
-  assert.notStrictEqual(markOf(3), markOf(4), 'two bands in a prestige share a mark');
+  /* Same rank in two different prestiges: same mark, different metal. Derived
+     rather than written out, because the ladder's shape has moved three times
+     and a hardcoded pair of band numbers silently stops testing what it says. */
+  const firstOfLast = BANDS - PER + 1;            // rank 1 of the top prestige
+  assert.strictEqual(markOf(1), markOf(firstOfLast), 'the mark does not cycle');
+  assert.notStrictEqual(markOf(1), markOf(2), 'two bands in a prestige share a mark');
   const metal = (band) => ctx.svg(band, 68).match(/stop-color="(#[0-9a-f]{6})"/i)[1];
-  assert.notStrictEqual(metal(3), metal(48), 'two prestiges share a metal');
-  assert.strictEqual(metal(3), metal(5), 'one prestige uses two metals');
+  assert.notStrictEqual(metal(1), metal(firstOfLast), 'two prestiges share a metal');
+  assert.strictEqual(metal(1), metal(PER), 'one prestige uses two metals');
 });
 
 test('an out of range band still draws something', () => {
@@ -185,7 +191,10 @@ test('every badge is struck, not drawn', () => {
    * with its own gloss, and a shadow under the lot. Each of those is a layer
    * here, and losing any one of them is what "too simple" looked like. */
   const ctx = load();
-  const band = 23;                // prestige 5, rank 3 -- frames[4]
+  /* Any band in the middle of the ladder; its frame is looked up rather than
+     assumed, since which prestige band 23 belongs to depends on the shape. */
+  const band = Math.ceil(ctx.BANDS / 2);
+  const frameIndex = Math.floor((band - 1) / ctx.PER);
   const svg = ctx.svg(band, 240);
   const { frames } = ctx;
   frames.forEach((f, i) => {
@@ -197,8 +206,8 @@ test('every badge is struck, not drawn', () => {
   assert.ok(/feTurbulence/.test(svg), 'the metal has no grain');
   assert.ok(/baseFrequency="[\d.]+ [\d.]+"/.test(svg),
     'the grain is isotropic noise, which is dirt rather than a brushed surface');
-  assert.ok(svg.includes(frames[4].lit), 'the lit face is not drawn');
-  assert.ok(svg.includes(frames[4].inner), 'there is no recessed field');
+  assert.ok(svg.includes(frames[frameIndex].lit), 'the lit face is not drawn');
+  assert.ok(svg.includes(frames[frameIndex].inner), 'there is no recessed field');
   assert.ok(svg.includes(`clip-path="url(#rb${band}c)"`),
     'the surface is not painted inside the frame, so it has one plane again');
   // Five stops in the metal: highlight, light, mid, shadow, deep. Fewer and it
