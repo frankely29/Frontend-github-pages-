@@ -2064,44 +2064,132 @@ window.getCurrentZoneShadowDebug = function getCurrentZoneShadowDebug(locationId
   return window.TlcScoreShadowModule?.getZoneShadowComparisonByLocationId?.(locationId) || null;
 };
 
+/* MapLibre comes from a third-party CDN, and initMap is called straight
+ * through from boot. When the library has not arrived, `new maplibregl.Map`
+ * throws a ReferenceError out of initMap, and everything after the call site
+ * -- startLocationWatch, the GPS priority timer, the startup fallbacks --
+ * never runs. One slow CDN takes the whole app down, not just the map.
+ *
+ * So wait for it instead. The script tag is still in the document; if it is
+ * simply late, this picks it up on the next frame and the boot sequence
+ * behind it carries on in the meantime. */
+const MAPLIBRE_WAIT_MS = 15000;
+
+function whenMapLibreReady(run) {
+  if (typeof maplibregl !== 'undefined' && maplibregl && maplibregl.Map) {
+    run();
+    return;
+  }
+  const startedAt = Date.now();
+  const tick = () => {
+    if (typeof maplibregl !== 'undefined' && maplibregl && maplibregl.Map) {
+      run();
+      return;
+    }
+    if (Date.now() - startedAt > MAPLIBRE_WAIT_MS) {
+      console.error('maplibre-gl did not load; the map cannot start');
+      if (typeof recordBlankMapWarning === 'function') {
+        recordBlankMapWarning('maplibre-gl never loaded');
+      }
+      return;
+    }
+    window.setTimeout(tick, 120);
+  };
+  tick();
+}
+
+/* The basemap.
+ *
+ * It used to be CARTO's Voyager raster tiles requested with no API key.
+ * CARTO now requires one, so every tile came back stamped
+ * "API KEY REQUIRED — carto.com/basemaps/apikey" across the artwork. That is
+ * a licence problem before it is a visual one, and it is worst exactly when
+ * a driver zooms out, because a new zoom throws away every tile it has and
+ * asks for a fresh set.
+ *
+ * OpenFreeMap needs no key and is already trusted by this app --
+ * navigation.vectorbasemap.js renders the navigation view on it. It is also
+ * vector rather than raster, which fixes the softness on a high-density
+ * screen: raster tiles are pictures baked at whole zoom levels and get
+ * resampled in between, vector tiles are drawn by the phone at whatever zoom
+ * it is actually at.
+ *
+ * CARTO stays as the fallback rather than being deleted. A watermarked map
+ * is bad; no map at all is worse, and a basemap is the one asset a driver
+ * cannot work without. Set window.__TLC_BASEMAP__ to "carto" to force the
+ * old one back without a deploy. */
+const OPENFREEMAP_STYLE = "https://tiles.openfreemap.org/styles/liberty";
+/* Long enough that a slow phone on a bad connection is not dropped onto the
+ * fallback for being slow, short enough that nobody stares at nothing. */
+const BASEMAP_STYLE_TIMEOUT_MS = 9000;
+
+function cartoRasterStyle() {
+  return {
+    version: 8,
+    sources: {
+      "carto-raster": {
+        type: "raster",
+        tiles: [
+          "https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+          "https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+          "https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+        ],
+        tileSize: 256,
+      },
+    },
+    layers: [
+      {
+        id: "carto-base",
+        type: "raster",
+        source: "carto-raster",
+        paint: { "raster-opacity": 1 },
+      },
+    ],
+    glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
+    sprite: "",
+  };
+}
+
+function initialBasemapStyle() {
+  const forced = String(window.__TLC_BASEMAP__ || "").trim().toLowerCase();
+  if (forced === "carto") return cartoRasterStyle();
+  return OPENFREEMAP_STYLE;
+}
+
 function initMap() {
+  if (typeof maplibregl === 'undefined' || !maplibregl || !maplibregl.Map) {
+    whenMapLibreReady(initMap);
+    return;
+  }
   map = new maplibregl.Map({
     container: "map",
-    style: {
-      version: 8,
-      sources: {
-        "carto-raster": {
-          type: "raster",
-          tiles: [
-            "https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
-            "https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
-            "https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
-          ],
-          tileSize: 256,
-        },
-      },
-      layers: [
-        {
-          id: "carto-base",
-          type: "raster",
-          source: "carto-raster",
-          paint: { "raster-opacity": 1 },
-        },
-      ],
-      glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
-      sprite: "",
-    },
+    style: initialBasemapStyle(),
     center: [-73.98, 40.73],
     zoom: STARTUP_INITIAL_USER_ZOOM,
-    // Constrain the camera to NY + NJ + PA so the basemap never fetches
-    // tiles for the rest of the US. All actual data (zones, hotspots,
-    // flags, presence) is already NYC-scoped; this bounds the visual
-    // basemap too. Coordinates are [west, south] → [east, north] with a
-    // small margin for inertial pan/zoom past the strict state edges.
-    //   NY:   -79.8 → -71.85, 40.5 → 45.0
-    //   NJ:   -75.6 → -73.9,  38.93 → 41.36
-    //   PA:   -80.5 → -74.7,  39.72 → 42.27
-    maxBounds: [[-80.7, 38.7], [-71.7, 45.2]],
+    /* The box that contains panning -- NOT the thing that sets the zoom
+     * floor, though it used to be.
+     *
+     * maxBounds clamps the camera so the visible area never leaves the box,
+     * which makes the real minimum zoom a function of the CONTAINER SIZE: a
+     * taller map needs a higher zoom for the same box to still cover it. The
+     * old box was the tri-state area, 0.0250 of the world across and 0.0243
+     * down, and on a phone the vertical term always bit first:
+     *
+     *     390x506 (map above the feed)   floor z6.35
+     *     390x844 (full bleed)           floor z7.08
+     *     430x932 (15 Pro Max)           floor z7.23
+     *
+     * So minZoom: 6 below never once applied on a phone, and as the map grew
+     * -- full-bleed behind the feed, then another 62px when the status-bar
+     * gap was closed -- the floor climbed with it and the map stopped
+     * zooming out. Nobody changed a zoom setting; the map got taller.
+     *
+     * This box is sized so the vertical term lands at exactly 6.0 for any
+     * container up to 500x1000, which puts minZoom back in charge of the
+     * zoom and leaves maxBounds doing the one job it is good at. Panning is
+     * looser than it was; the basemap is still kept off the rest of the
+     * country by minZoom, which is what was actually holding it there. */
+    maxBounds: [[-82.0, 33.0], [-70.0, 50.0]],
     // Don't let the user zoom out far enough to see neighboring states
     // outside the tri-state area. Below ~zoom 6 you start seeing the
     // full east coast.
@@ -2229,6 +2317,32 @@ function initMap() {
     if (authHeaderOK()) scheduleAdaptivePresenceRender();
   });
   map.on("error", (e) => console.error("MapLibre error:", e));
+
+  /* If the basemap style never arrives, fall back rather than leaving a
+   * driver with a blank screen -- a basemap is the one asset they cannot
+   * work without, and a watermarked map beats no map.
+   *
+   * This asks the only question that matters -- did the style load? -- and
+   * refuses to guess from error events. The first version did guess: it
+   * swapped the basemap on any error without a sourceId whose message
+   * mentioned "style", which fired on a perfectly healthy vector style and
+   * dropped it straight back to the watermarked raster. Tested and caught,
+   * which is the only reason it is not in the commit.
+   *
+   * Nothing to undo if the style is simply slow: once style.load fires the
+   * timer is cancelled. */
+  if (typeof initialBasemapStyle() === "string") {
+    const fallbackTimer = window.setTimeout(() => {
+      if (!map || map.isStyleLoaded()) return;
+      console.warn("basemap style did not load in time; using the fallback basemap");
+      try {
+        map.setStyle(cartoRasterStyle());
+      } catch (err) {
+        console.error("basemap fallback failed:", err);
+      }
+    }, BASEMAP_STYLE_TIMEOUT_MS);
+    map.once("style.load", () => window.clearTimeout(fallbackTimer));
+  }
 }
 
 function preventBrowserZoomUI() {
@@ -4301,7 +4415,21 @@ function refreshAutoCenterCamera({ forceZoom = false } = {}) {
   });
 }
 
-function setAutoCenterEnabled(next, reason = "manual") {
+/* forceZoom is for an explicit "take me back to me" -- a driver asking to be
+ * re-focused. It raises the zoom to AUTO_FOCUS_RETURN_ZOOM, which is a thing
+ * you only ever want when you asked for it.
+ *
+ * It used to default on here, and the inactivity timer is the only caller
+ * that turns auto-follow back on (there is no recentre button -- btnCenter is
+ * null). So the sequence was: a driver zooms out to see the city, keeps their
+ * hands off the phone because they are driving, and twenty seconds later the
+ * map decides they were idle and pulls the zoom back to 13. Reproduced in a
+ * browser: z9 held for 15s, started easing at 18s, sat at z13 from 20s on.
+ *
+ * A driver watching the road has not asked for anything. Auto-follow still
+ * comes back and the map still recentres on them -- it just arrives at the
+ * zoom they chose instead of the one it prefers. */
+function setAutoCenterEnabled(next, reason = "manual", { forceZoom = false } = {}) {
   const enabled = !!next;
   const changed = autoCenter !== enabled;
   autoCenter = enabled;
@@ -4314,9 +4442,8 @@ function setAutoCenterEnabled(next, reason = "manual") {
   }
 
   if (autoCenter && (changed || reason === "inactive-timeout")) {
-    const shouldForceZoom = changed || reason === "inactive-timeout";
-    if (shouldForceZoom) armAutoFocusZoomWindow();
-    refreshAutoCenterCamera({ forceZoom: shouldForceZoom });
+    if (forceZoom) armAutoFocusZoomWindow();
+    refreshAutoCenterCamera({ forceZoom });
   }
   if (changed && authHeaderOK()) {
     schedulePresencePoll({ immediate: true });
@@ -4328,8 +4455,11 @@ function handleAutoFocusInactivityTimeout() {
   if (!map || !mapReady) return;
   if (!getSelfCenterLngLat()) return;
   if (window.TlcNavigationTurnModule?.isActive?.()) return;
+  /* Recentre, do not re-zoom. Same reason as setAutoCenterEnabled above: the
+   * timer firing means the driver stopped touching the phone, which is what
+   * driving looks like -- not a request to be zoomed somewhere else. */
   if (autoCenter) {
-    refreshAutoCenterCamera({ forceZoom: true });
+    refreshAutoCenterCamera({ forceZoom: false });
     return;
   }
   setAutoCenterEnabled(true, "inactive-timeout");
@@ -5000,17 +5130,53 @@ function setBodyTheme({ isNight, isSunny }) {
   enforceSaveButtonTheme();
 }
 
+/* Night mode, for either basemap.
+ *
+ * The raster path is the original: four raster-* paint properties on the one
+ * basemap layer. Those properties exist only on raster layers, so on the
+ * vector basemap they are not merely ineffective, they are invalid -- the
+ * old code was saved from throwing by its try/catch, which would have left
+ * night mode silently dead.
+ *
+ * The vector path dims the basemap's own fills and lines instead, and skips
+ * anything this app added. Zones, hotspots and routes carry their own
+ * night colours and must not be dimmed twice. */
+const NIGHT_TINTED_LAYERS = new Set();
+
 function applyNightBasemap(isNight) {
-  if (!map) return;
+  if (!map || typeof map.getLayer !== "function") return;
   try {
-    map.setPaintProperty("carto-base", "raster-brightness-max", isNight ? 0.55 : 1.0);
-    map.setPaintProperty("carto-base", "raster-brightness-min", isNight ? 0.12 : 0.0);
-    map.setPaintProperty("carto-base", "raster-contrast", isNight ? 0.25 : 0.0);
-    map.setPaintProperty("carto-base", "raster-saturation", isNight ? -0.25 : 0.0);
+    if (map.getLayer("carto-base")) {
+      map.setPaintProperty("carto-base", "raster-brightness-max", isNight ? 0.55 : 1.0);
+      map.setPaintProperty("carto-base", "raster-brightness-min", isNight ? 0.12 : 0.0);
+      map.setPaintProperty("carto-base", "raster-contrast", isNight ? 0.25 : 0.0);
+      map.setPaintProperty("carto-base", "raster-saturation", isNight ? -0.25 : 0.0);
+      return;
+    }
+    const style = map.getStyle && map.getStyle();
+    const layers = (style && style.layers) || [];
+    layers.forEach((layer) => {
+      // Only the basemap's own layers. Everything this app adds is named by
+      // us and has its own night treatment already.
+      if (!layer || !layer.id || APP_OWNED_LAYER.test(layer.id)) return;
+      if (layer.type !== "fill" && layer.type !== "background" && layer.type !== "line") return;
+      const prop = layer.type === "line" ? "line-opacity"
+        : (layer.type === "background" ? "background-opacity" : "fill-opacity");
+      if (isNight) {
+        if (!NIGHT_TINTED_LAYERS.has(layer.id)) NIGHT_TINTED_LAYERS.add(layer.id);
+        map.setPaintProperty(layer.id, prop, 0.62);
+      } else if (NIGHT_TINTED_LAYERS.has(layer.id)) {
+        map.setPaintProperty(layer.id, prop, 1);
+      }
+    });
+    if (!isNight) NIGHT_TINTED_LAYERS.clear();
   } catch (e) {
     console.warn("applyNightBasemap failed:", e);
   }
 }
+
+/* Layer ids this app adds on top of whatever basemap is underneath. */
+const APP_OWNED_LAYER = /^(zones?-|pickup-|community-|strategic-|ltb-|nav-|route-|driver-|presence-|hotspot)/;
 setInterval(() => {
   const {
     presencePollsAttempted,
@@ -6057,6 +6223,21 @@ setNavDestination(null);
   }, 6000);
   setTimeout(() => {
     maybeResolveStartupLoading("hard-safety-timeout");
+    // That call is not the safety net it reads as: it returns at `if
+    // (!mapReady) return`, and mapReady is only ever set inside map.on("load"),
+    // which MapLibre fires only once the first viewport's tiles have arrived.
+    // A tile host that is slow, rate-limited or unreachable therefore leaves
+    // the overlay up for good -- and #mapLoading is inset:0 at z-index 999 with
+    // pointer-events on, so it does not merely hide a slow map, it swallows
+    // every touch: no pan, no zoom, no zoom-out. Measured in the browser: with
+    // the style stalled, both fingers of a pinch land on div#mapLoading and the
+    // map never sees a touchstart.
+    //
+    // So this one is unconditional. A half-drawn map a driver can still use
+    // beats a dead screen that says "Loading map...". hideStartupLoadingOverlay
+    // is idempotent, so on every healthy boot -- where the line above already
+    // hid it seconds earlier -- this does nothing at all.
+    hideStartupLoadingOverlay("hard-safety-timeout");
   }, 12000);
 
   preventBrowserZoomUI();

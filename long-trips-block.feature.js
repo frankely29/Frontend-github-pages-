@@ -1068,7 +1068,7 @@
               source: LTF_SOURCE_ID,
               layout: {
                 "text-field": FLAG_LINES.join("\n"),
-                "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
+                "text-font": ["Noto Sans Regular", "Open Sans Regular", "Arial Unicode MS Regular"],
                 "text-size": [
                   "interpolate", ["linear"], ["zoom"],
                   9, 9,
@@ -1241,7 +1241,7 @@
           source: LTF_SOURCE_ID,
           layout: {
             "text-field": FLAG_LINES.join("\n"),
-            "text-font": ["Open Sans Regular"],
+            "text-font": ["Noto Sans Regular", "Open Sans Regular"],
             "text-size": [
               "interpolate", ["linear"], ["zoom"],
               9, 9,
