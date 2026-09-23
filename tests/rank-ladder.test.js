@@ -152,7 +152,7 @@ test('a rank_name that is really the key falls through to the label', () => {
   const { displayName } = loadRank();
   ['Band 034', 'band_34', 'BAND 4', 'band-34', '', '   '].forEach((raw) => {
     const out = displayName({ rank_name: raw, rank_icon_key: 'band_34' });
-    assert.strictEqual(out, 'Sapphire IV', `"${raw}" was shown to a driver as-is`);
+    assert.strictEqual(out, 'Titan IV', `"${raw}" was shown to a driver as-is`);
   });
 });
 
@@ -226,8 +226,20 @@ test('the ladder is ten prestiges, not a hundred bands', () => {
     'the cycling prefix/title table is back');
   assert.ok(!/RANK_LADDER_MAX_LEVEL/.test(PART3),
     'the 1000-level ceiling is back');
-  const names = (PART3.match(/'Iron', 'Bronze', 'Steel', 'Gold', 'Crimson'/) || []).length;
-  assert.strictEqual(names, 1, 'the offline prestige roster is gone');
+  /* The offline roster exists, holds ten, and agrees with the badge module.
+     It deliberately does NOT assert the names themselves -- those are a taste
+     call that has already changed once, and a test that pins them turns a
+     rename into a failing build rather than a one-line edit. What must not
+     drift is the COUNT, and the fact that there is exactly one roster. */
+  const roster = PART3.match(/const RANK_PRESTIGE_FALLBACK = \[([\s\S]*?)\];/);
+  assert.ok(roster, 'the offline prestige roster is gone');
+  const offline = (roster[1].match(/'[^']+'/g) || []).map((s) => s.slice(1, -1));
+  assert.strictEqual(offline.length, 10, `the offline roster holds ${offline.length}`);
+  const live = (PART5.match(/\{ name: '([^']+)', beast:/g) || [])
+    .map((s) => s.match(/name: '([^']+)'/)[1]);
+  assert.deepStrictEqual(offline, live,
+    'the offline roster and the badge module name the prestiges differently, ' +
+    'so a driver sees one set of names online and another offline');
 });
 
 test('the fallback ladder is built lazily, after the badge module loads', () => {
