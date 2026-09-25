@@ -273,9 +273,8 @@
        happen at the worst possible moment: after the map exists and is waiting
        to draw. Opening it during that wait is why the first tiles arrive
        sooner and the map spends less time showing an upscaled parent tile.
-       CARTO is still listed because it remains the fallback basemap. -->
+       It is the only basemap host: there is no keyed fallback to open. -->
   <link rel="preconnect" href="https://tiles.openfreemap.org" crossorigin />
-  <link rel="dns-prefetch" href="https://a.basemaps.cartocdn.com" />
 
   <!-- MapLibre GL JS (no Leaflet) -->
   <link
