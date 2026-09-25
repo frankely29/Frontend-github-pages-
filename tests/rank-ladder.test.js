@@ -234,6 +234,42 @@ test('the numeral is sized from its own plate', () => {
     'the numeral box no longer takes the plate width');
 });
 
+// -------------------------------------------------- the retired vocabulary
+
+test('the old military rank keys are gone from the app', () => {
+  /* The ladder used to be seventeen military grades -- recruit, corporal,
+     sergeant, up to road_legend -- addressed by name. Nothing sends those keys
+     any more, and they do not map onto ten prestiges of three: a seventeen-step
+     ladder squeezed into thirty bands puts a driver on a rank nobody earned.
+     The table is deleted rather than left as a translation layer. */
+  [['app.part5.js', PART5], ['app.part3.js', PART3]].forEach(([name, src]) => {
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+    assert.ok(!/LEGACY_RANK_ICON_BAND_MAP/.test(code),
+      `${name} still carries the retired key table`);
+    ['road_legend', 'staff_sergeant', 'brigadier', "'recruit'"].forEach((k) => {
+      assert.ok(!code.includes(k), `${name} still speaks the retired key ${k}`);
+    });
+  });
+});
+
+test('an unrecognised key lands on the first rank, not an invented one', () => {
+  const { fromKey } = loadRank();
+  ['recruit', 'road_legend', 'sergeant', '', 'nonsense', 'tier-4'].forEach((key) => {
+    const r = fromKey(key);
+    assert.strictEqual(r.band, 1, `${key || '(empty)'} resolved to band ${r.band}`);
+    assert.strictEqual(r.prestige, 1);
+    assert.strictEqual(r.level, 1);
+  });
+});
+
+test('a band key still resolves to its own band', () => {
+  /* The clamp above must not have eaten the real keys with the junk. */
+  const { fromKey, BANDS } = loadRank();
+  assert.strictEqual(fromKey('band_001').band, 1);
+  assert.strictEqual(fromKey('band_007').band, 7);
+  assert.strictEqual(fromKey(`band_${String(BANDS).padStart(3, '0')}`).band, BANDS);
+});
+
 // ------------------------------------------------------------ the leaderboard
 
 test('the ladder is ten prestiges, not a hundred bands', () => {

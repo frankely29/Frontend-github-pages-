@@ -312,26 +312,6 @@
     return n.toLocaleString(undefined, { maximumFractionDigits: maxFractionDigits });
   }
 
-  const LEGACY_RANK_ICON_BAND_MAP = {
-    recruit: 1,
-    private: 2,
-    corporal: 3,
-    sergeant: 4,
-    staff_sergeant: 5,
-    sergeant_first_class: 6,
-    master_sergeant: 7,
-    lieutenant: 8,
-    captain: 9,
-    major: 10,
-    colonel: 11,
-    brigadier: 12,
-    major_general: 13,
-    lieutenant_general: 14,
-    general: 15,
-    commander: 16,
-    road_legend: 17,
-  };
-
   function resolveRankIconBand(rankIconKey) {
     const key = String(rankIconKey || '').trim().toLowerCase();
     /* Clamped to RANK_BAND_COUNT, not 1000. There are fifty ranks -- ten
@@ -342,7 +322,12 @@
       const value = Number(match[1]);
       return Math.max(1, Math.min(RANK_BAND_COUNT, value));
     }
-    return Math.max(1, Math.min(RANK_BAND_COUNT, Number(LEGACY_RANK_ICON_BAND_MAP[key] || 1)));
+    /* Anything that is not band_NNN is the retired vocabulary -- "recruit",
+       "sergeant", "road_legend" -- or junk. Both land on the first rank rather
+       than on a guess: the old keys were a seventeen-step military ladder that
+       no longer maps onto ten prestiges of three, and inventing a band for one
+       would put a driver on a rank they never earned. */
+    return 1;
   }
 
   function resolveRankIconTone(rankIconKey) {

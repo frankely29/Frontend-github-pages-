@@ -201,12 +201,12 @@
     return raw || 'Wyvern I';
   }
 
-  function fallbackRankIcon(rankIconKey) {
-    const key = String(rankIconKey || '').trim().toLowerCase();
-    if (/legend|mythic|immortal/.test(key)) return '🌟';
-    if (/general|brigadier/.test(key)) return '⭐';
-    if (/colonel|major|captain|lieutenant/.test(key)) return '🎖️';
-    if (/sergeant|corporal|private|recruit/.test(key)) return '🛡️';
+  /* Shown only if app.part5 has not loaded, so there is no painted badge and
+     no rank table to read. It used to pattern-match the retired military keys
+     -- sergeant, colonel, road_legend -- for a matching emoji; none of those
+     keys exist any more, so every one of those branches was dead and the
+     function always returned the medal. It says so now. */
+  function fallbackRankIcon() {
     return '🏅';
   }
 
@@ -214,7 +214,7 @@
     if (typeof window.renderRankBadgeIcon === 'function') {
       return window.renderRankBadgeIcon(rankIconKey, { compact: true });
     }
-    return `<span class="leaderboardRankIconFallback" aria-hidden="true">${fallbackRankIcon(rankIconKey)}</span>`;
+    return `<span class="leaderboardRankIconFallback" aria-hidden="true">${fallbackRankIcon()}</span>`;
   }
 
   /* In a leaderboard row the badge is 26px, where the numeral struck on its
@@ -271,7 +271,7 @@
       const end = Number(row?.end_level);
       return Number.isFinite(start) && Number.isFinite(end) && safeLevel >= start && safeLevel <= end;
     }) || null;
-    const key = state.myRow?.rank_icon_key || matched?.rank_icon_key || 'recruit';
+    const key = state.myRow?.rank_icon_key || matched?.rank_icon_key || 'band_001';
     const api = rankApi();
     const rank = api ? api.fromKey(key) : null;
     return {
