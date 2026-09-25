@@ -51,7 +51,12 @@
       .driverProfileBadgeChipWrap{display:inline-flex;align-items:center;gap:7px}.driverProfileBadgeLabel{font-size:11px;font-weight:700;color:#334155;letter-spacing:.15px}
       .driverProfileProgressWrap{background:#f8fafc;border:1px solid #e2e8f0;border-radius:11px;padding:5px;margin-bottom:6px}
       .driverProfileProgressHead{display:flex;align-items:center;justify-content:space-between;gap:5px;margin-bottom:3px}
+      /* Two lines of text on the left, the badge on the right. The head is a
+         space-between row, so the lines are wrapped rather than added as
+         siblings -- a third child would push the badge to the middle. */
+      .driverProfileProgressHeadText{min-width:0;display:flex;flex-direction:column;gap:2px}
       .driverProfileProgressLine{font-size:12px;font-weight:700;color:#0f172a;display:flex;align-items:center;gap:5px;min-width:0;flex-wrap:wrap}
+      .driverProfilePrestigeLine{font-size:10px;font-weight:600;color:#64748b;letter-spacing:.04em;line-height:1.2}
       .driverProfileProgressMeta{font-size:11px;color:#475569;line-height:1.3}
       .driverProfileProgressBar{height:7px;border-radius:999px;background:#e2e8f0;overflow:hidden;margin:2px 0 3px}
       .driverProfileProgressFill{height:100%;background:linear-gradient(90deg,#3b82f6,#22c55e);border-radius:999px;transition:width .2s ease-out}
@@ -119,7 +124,40 @@
          bottom, and a hard rim. renderRankBadgeIcon paints a tone class in
          here, so every colour it sets is overridden -- the medal is the
          medal whatever rank a driver holds. */
-      .pickupProgressReward .rankBadgeIconWrap{width:68px!important;height:68px!important;border-radius:999px;background:linear-gradient(180deg,#f0d49a 0%,#c39a4e 52%,#8f6c2c 100%)!important;color:#3a2a08!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.75),inset 0 -2px 3px rgba(74,52,10,.5),0 0 0 1px rgba(122,92,38,.9),0 10px 24px rgba(2,6,23,.55)!important}
+      /* The coin is struck in the driver's OWN metal. --rank-lo/mid/dk/ring come
+         off the badge markup, one set per tier, with gold as the fallback for
+         anything that renders this wrapper without them. */
+      /* The painted frame IS the medal, so the three layers stack in one box:
+         the frame, the mark in its well, and the generated badge behind both
+         for when the file is not there. */
+      .rankBadgeIconWrap.rankBadgePainted{position:relative;display:grid;place-items:center;background:none!important;box-shadow:none!important;border-radius:0}
+      .rankBadgeIconWrap.rankBadgePainted > .rankBadgeFrame,
+      .rankBadgeIconWrap.rankBadgePainted > .rankBadgeVector{grid-area:1/1}
+      .rankBadgeFrame{width:100%;height:100%;object-fit:contain;display:block}
+      /* The numeral is absolutely placed on the plate the pipeline measured,
+         so it is positioned against the wrapper rather than stacked in the
+         grid cell. Struck rather than printed: a dark sink one pixel under a
+         light face, which is how the rest of the badge is lit. */
+      .rankBadgeDivision{
+        position:absolute;display:grid;place-items:center;pointer-events:none;
+        font-family:Georgia,"Times New Roman",serif;font-weight:700;line-height:1;
+        color:#f0eada;text-shadow:0 1px 0 rgba(0,0,0,.55);
+        letter-spacing:.02em;white-space:nowrap;
+      }
+      .rankBadgeVector{display:none}
+      /* Without a painted frame the wrapper goes back to what it always was,
+         and the generated badge is what shows. The numeral goes with the
+         painted badge, because the vector one has no plate to strike it on --
+         there the emblem carries the division instead. */
+      .rankBadgeIconWrap:not(.rankBadgePainted) .rankBadgeFrame,
+      .rankBadgeIconWrap:not(.rankBadgePainted) .rankBadgeDivision{display:none}
+      .rankBadgeIconWrap:not(.rankBadgePainted) .rankBadgeVector{display:block}
+      .pickupProgressReward .rankBadgeIconWrap{width:72px!important;height:72px!important;border-radius:999px;background:linear-gradient(180deg,var(--rank-lo,#f0d49a) 0%,var(--rank-mid,#c39a4e) 52%,var(--rank-dk,#8f6c2c) 100%);color:#3a2a08;box-shadow:inset 0 1px 0 rgba(255,255,255,.55),inset 0 -2px 3px rgba(0,0,0,.35),0 0 0 1px var(--rank-ring,#7a5c26),0 10px 24px rgba(2,6,23,.55)}
+      /* The struck coin was a stand-in for a badge that could not carry the
+         moment on its own. The painted frame is the medal, so the coin behind
+         it stands down to a drop shadow rather than becoming a second medal
+         around the first. */
+      .pickupProgressReward .rankBadgeIconWrap.rankBadgePainted{background:none!important;box-shadow:none!important;filter:drop-shadow(0 8px 18px rgba(2,6,23,.6))}
       .pickupProgressReward .rankBadgeIconWrap svg{width:34px;height:34px}
       .pickupProgressRewardMeta{margin-top:18px;display:flex;align-items:baseline;justify-content:space-between;gap:12px}
       .pickupProgressRewardLevel{font-size:14px;font-weight:700;line-height:1;color:#e7ebf3;letter-spacing:0}
@@ -274,109 +312,558 @@
     return n.toLocaleString(undefined, { maximumFractionDigits: maxFractionDigits });
   }
 
-  const LEGACY_RANK_ICON_BAND_MAP = {
-    recruit: 1,
-    private: 2,
-    corporal: 3,
-    sergeant: 4,
-    staff_sergeant: 5,
-    sergeant_first_class: 6,
-    master_sergeant: 7,
-    lieutenant: 8,
-    captain: 9,
-    major: 10,
-    colonel: 11,
-    brigadier: 12,
-    major_general: 13,
-    lieutenant_general: 14,
-    general: 15,
-    commander: 16,
-    road_legend: 17,
-  };
-
   function resolveRankIconBand(rankIconKey) {
     const key = String(rankIconKey || '').trim().toLowerCase();
+    /* Clamped to RANK_BAND_COUNT, not 1000. There are fifty ranks -- ten
+     * prestiges of five -- and band_250 from a bad payload has to land on the
+     * top badge rather than index past the end of the ladder. */
     const match = key.match(/^band_(\d{1,4})$/);
     if (match) {
       const value = Number(match[1]);
-      return Math.max(1, Math.min(1000, value));
+      return Math.max(1, Math.min(RANK_BAND_COUNT, value));
     }
-    return Math.max(1, Math.min(1000, Number(LEGACY_RANK_ICON_BAND_MAP[key] || 1)));
+    /* Anything that is not band_NNN is the retired vocabulary -- "recruit",
+       "sergeant", "road_legend" -- or junk. Both land on the first rank rather
+       than on a guess: the old keys were a seventeen-step military ladder that
+       no longer maps onto ten prestiges of three, and inventing a band for one
+       would put a driver on a rank they never earned. */
+    return 1;
   }
 
   function resolveRankIconTone(rankIconKey) {
-    const band = resolveRankIconBand(rankIconKey);
-    if (band >= 91) return 'toneLegend';
-    if (band >= 71) return 'toneGeneral';
-    if (band >= 41) return 'toneOfficer';
-    if (band >= 11) return 'toneEnlisted';
+    /* By prestige rather than by band, so the five bands inside a prestige
+       always share a tone. Reading these off band numbers is what made them
+       drift when the ladder was reshaped. */
+    const prestige = rankFromBand(resolveRankIconBand(rankIconKey)).prestige;
+    if (prestige >= 10) return 'toneLegend';
+    if (prestige >= 8) return 'toneGeneral';
+    if (prestige >= 5) return 'toneOfficer';
+    if (prestige >= 2) return 'toneEnlisted';
     return 'toneRecruit';
   }
 
-  function buildRankBadgeShell(shellIndex) {
-    const shells = [
-      '<path d="M24 4L42 12v12c0 12-8.4 18.8-18 22C14.4 42.8 6 36 6 24V12z" />',
-      '<path d="M24 4l16 10v12L24 44 8 26V14z" />',
-      '<path d="M24 3l17 8 4 17-11 14H14L3 28l4-17z" />',
-      '<circle cx="24" cy="24" r="18" />',
-      '<path d="M24 4l18 16-18 24L6 20z" />',
-      '<path d="M12 8h24l10 12-10 20H12L2 20z" />',
-      '<path d="M24 5c11 0 18 7 18 16 0 12-9 20-18 23C15 41 6 33 6 21 6 12 13 5 24 5z" />',
-      '<path d="M24 3l19 14-7 25H12L5 17z" />',
-      '<path d="M10 10h28l6 14-6 14H10L4 24z" />',
-      '<rect x="7" y="7" width="34" height="34" rx="11" ry="11" />',
-    ];
-    return shells[((shellIndex % shells.length) + shells.length) % shells.length];
+  /* The 100-rank badge ladder. Ten tiers of ten, each one struck.
+   *
+   * band 1..100 -> tier = floor((band-1)/10)   its own frame, metal and furniture
+   *             -> mark = (band-1)%10          the emblem inside it
+   *
+   * WHAT CHANGED, AND WHY IT WAS THIN BEFORE
+   *
+   * Two shared bodies for ten tiers: five wore the shield, five wore the crest.
+   * So the top half of the ladder was one silhouette in five colours, which is
+   * most of why it still felt repetitive however much furniture got bolted on.
+   * Every tier has its own frame now.
+   *
+   * Two faces per body -- a lit half and a shaded half. Real struck metal shows
+   * five or six planes. Rather than author four quadrants for each of ten
+   * frames, each body is used ONCE as a clip path and everything after it is
+   * painted inside that clip: the two halves, a top sheen, a bottom vignette, a
+   * diagonal specular streak, and a brushed-metal texture. One authored path per
+   * frame, as many planes as the material needs.
+   *
+   * No texture at all -- the metal was a smooth ramp. feTurbulence with an
+   * anisotropic baseFrequency (high across, low down) is brushed metal, and it
+   * costs one filter on one rect rather than an asset per badge.
+   *
+   * All of it is still generated, so a hundred badges cost a hundred SVG strings
+   * and no files. This is the ceiling of what geometry can do; the reference art
+   * everyone pictures is painted, which is a different medium, not a harder
+   * version of this one.
+   */
+
+  /* The ten prestiges.
+   *
+   * `hi` is the metal, sampled off each painted badge's own brightest decile.
+   * Everything else is built from `accent`, which is the tier's IDENTITY
+   * colour -- the enamel field behind the animal, or for the bottom four,
+   * which have no field, the metal itself.
+   *
+   * Accent could not be sampled and is chosen. Every badge is mostly gold and
+   * silver, because that is the house style all ten share; the thing that
+   * makes one Sapphire and another Emerald is the minority colour, and no
+   * "most common colour" rule finds a minority. Sampling returned gold for
+   * seven of the ten before this was worked out.
+   *
+   * `parts`, `glow` and `glowStop` drive the VECTOR fallback only. They climb
+   * so that a driver on a stale build still sees a ladder rather than ten
+   * recoloured discs.
+   *
+   * Re-sample if the art is ever regenerated; do not hand-edit. */
+  /* `beast` is empty on purpose.
+   *
+   * It held a second creature per prestige, from when the names were
+   * materials and the badge needed something to say it was a wolf. The names
+   * are the creatures now, so that column either repeats itself -- Phoenix,
+   * Phoenix -- or contradicts: prestige 3 is Hydra and its old pairing was
+   * Bear, and the leaderboard would have printed "Hydra - Bear" at a driver.
+   *
+   * The field stays rather than being deleted because the ladder, the games
+   * list and TeamJoseoRank.prestiges() all read it, and every one of them
+   * already renders it only when it is non-empty. Give it a value again and
+   * the second label comes back everywhere at once. */
+  var RANK_TIERS = [
+  { name: 'Wyvern', beast: '', hi: '#d8d4cf', lo: '#b9c0c8', mid: '#7e8388', dk: '#4e5154', deep: '#292a2c',
+    enamel: '#111a27', accent: '#b9c0c8', parts: [], glow: null, glowStop: 0 },
+  { name: 'Chimera', beast: '', hi: '#dac9b4', lo: '#b0834e', mid: '#785935', dk: '#4a3721', deep: '#271d11',
+    enamel: '#111a27', accent: '#b0834e', parts: ['rivets'], glow: null, glowStop: 0 },
+  { name: 'Hydra', beast: '', hi: '#bdad9e', lo: '#9aa2ab', mid: '#696e74', dk: '#414448', deep: '#222426',
+    enamel: '#111a27', accent: '#9aa2ab', parts: ['rivets', 'bolts'], glow: null, glowStop: 0 },
+  { name: 'Kraken', beast: '', hi: '#e5ceae', lo: '#c9a24a', mid: '#896e32', dk: '#54441f', deep: '#2c2410',
+    enamel: '#111a27', accent: '#c9a24a', parts: ['rivets', 'bolts', 'laurel'], glow: null, glowStop: 0 },
+  { name: 'Warlord', beast: '', hi: '#f2d4aa', lo: '#a8202f', mid: '#721620', dk: '#470d14', deep: '#25070a',
+    enamel: '#111a27', accent: '#a8202f', parts: ['rivets', 'bolts', 'laurel', 'banner'], glow: '#a8202f', glowStop: 0.26 },
+  { name: 'Colossus', beast: '', hi: '#e6cfa6', lo: '#1f8a53', mid: '#155e38', dk: '#0d3a23', deep: '#071e12',
+    enamel: '#111a27', accent: '#1f8a53', parts: ['rivets', 'bolts', 'laurel', 'banner', 'gem'], glow: '#1f8a53', glowStop: 0.32 },
+  { name: 'Titan', beast: '', hi: '#cac6be', lo: '#2f63c0', mid: '#204383', dk: '#142a51', deep: '#0a162a',
+    enamel: '#111a27', accent: '#2f63c0', parts: ['rivets', 'bolts', 'laurel', 'banner', 'gem', 'wings'], glow: '#2f63c0', glowStop: 0.38 },
+  { name: 'Celestial', beast: '', hi: '#e7e3df', lo: '#7ba6dd', mid: '#547196', dk: '#34465d', deep: '#1b2531',
+    enamel: '#111a27', accent: '#7ba6dd', parts: ['rivets', 'bolts', 'laurel', 'banner', 'gem', 'wings', 'spikes'], glow: '#7ba6dd', glowStop: 0.45 },
+  { name: 'Phoenix', beast: '', hi: '#fdd582', lo: '#ff7a1a', mid: '#ad5312', dk: '#6b330b', deep: '#381b06',
+    enamel: '#111a27', accent: '#ff7a1a', parts: ['rivets', 'bolts', 'laurel', 'banner', 'gem', 'wings', 'spikes', 'crown'], glow: '#ff7a1a', glowStop: 0.52 },
+  { name: 'Dragon', beast: '', hi: '#e2d6c2', lo: '#a78bfa', mid: '#725faa', dk: '#463a69', deep: '#251f37',
+    enamel: '#111a27', accent: '#a78bfa', parts: ['rivets', 'bolts', 'laurel', 'banner', 'gem', 'wings', 'spikes', 'crown', 'rays', 'halo'], glow: '#a78bfa', glowStop: 0.6 },
+  ];
+
+  /* Where the division numeral is struck on each painted badge.
+   *
+   * [x, y, w, h] as fractions of the exported image. MEASURED, not chosen:
+   * the pipeline finds each plate as the widest low-detail slab inside the
+   * badge's lower third and writes these out. The ten came back between 0.236
+   * and 0.332 wide and 0.70 to 0.79 down, which is close enough to look
+   * deliberate and far enough apart that one hard-coded rectangle would sit
+   * off the plate on half the set.
+   *
+   * Regenerate alongside the art. A tier with no entry simply shows no
+   * numeral, which is what should happen while its art is being reworked. */
+  var RANK_PLATES = [
+    [0.3603, 0.7912, 0.2601, 0.0631],
+    [0.3571, 0.7915, 0.2849, 0.0640],
+    [0.3331, 0.7912, 0.3281, 0.0514],
+    [0.3421, 0.7029, 0.2356, 0.0615],
+    [0.3347, 0.7436, 0.3315, 0.0855],
+    [0.3347, 0.7442, 0.3307, 0.0853],
+    [0.3376, 0.7448, 0.3273, 0.0848],
+    [0.3529, 0.7059, 0.2879, 0.0740],
+    [0.3496, 0.7424, 0.3007, 0.0633],
+    [0.3438, 0.7656, 0.3001, 0.0540],
+  ];
+
+  var RANK_ROMAN = ['I', 'II', 'III'];
+
+  /* The ladder: ten prestiges of FIVE ranks each, fifty in all.
+   *
+   * A driver finishing prestige 1 rank 5 rolls into prestige 2 rank 1, not a
+   * sixth rank. band 1..50 is the rank and the backend sends nothing else, so
+   * the pair is derived here exactly as leaderboard_service derives it:
+   *
+   *   band  7  ->  prestige 2 (Chimera), rank 2, "Chimera II"
+   *   band 50  ->  prestige 10 (Dragon), rank 5, the top of the ladder
+   *
+   * The frontend used to drop this structure on the floor and print the key
+   * back out, which is where "Band 004" came from.
+   *
+   * RANKS_PER_PRESTIGE is the only number to change if the shape moves again:
+   * every derived value below, the pips on the ladder and the clamp on the key
+   * all read from it rather than repeating 5. */
+  var PRESTIGE_COUNT = 10;
+  var RANKS_PER_PRESTIGE = 3;
+  var RANK_BAND_COUNT = PRESTIGE_COUNT * RANKS_PER_PRESTIGE;
+
+  function rankFromBand(band) {
+    var b = Math.max(1, Math.min(RANK_BAND_COUNT, Math.floor(Number(band) || 1)));
+    var index = Math.floor((b - 1) / RANKS_PER_PRESTIGE);
+    var level = ((b - 1) % RANKS_PER_PRESTIGE) + 1;
+    var tier = RANK_TIERS[index];
+    return {
+      band: b,
+      prestige: index + 1,
+      prestigeIndex: index,
+      level: level,
+      roman: RANK_ROMAN[level - 1],
+      name: tier.name,
+      beast: tier.beast,
+      label: tier.name + ' ' + RANK_ROMAN[level - 1],
+      isMax: b >= RANK_BAND_COUNT,
+    };
   }
 
-  function buildRankBadgeGlyph(glyphIndex) {
-    const glyphs = [
-      '<path d="M24 13l3.8 7.8 8.6 1.2-6.2 6 1.5 8.8L24 32.5l-7.7 4.3 1.5-8.8-6.2-6 8.6-1.2z" />',
-      '<path d="M17 14h14v5H17zM14 23h20v5H14zM11 32h26v4H11z" />',
-      '<path d="M24 10l10 14-10 14-10-14z" />',
-      '<circle cx="24" cy="24" r="6" /><path d="M24 11v6M24 31v6M11 24h6M31 24h6" stroke="currentColor" stroke-width="3" stroke-linecap="round" fill="none"/>',
-      '<path d="M16 33V17l8-5 8 5v16l-8 5z" />',
-      '<path d="M14 33l10-18 10 18h-6l-4-7-4 7z" />',
-      '<path d="M14 18h20v4H14zM17 24h14v4H17zM20 30h8v4h-8z" />',
-      '<path d="M24 11l11 7v12l-11 7-11-7V18z" fill="none" stroke="currentColor" stroke-width="3"/><circle cx="24" cy="24" r="4" />',
-      '<path d="M18 12h12l4 9-10 15L14 21z" />',
-      '<path d="M24 12c5.5 0 10 4.5 10 10s-4.5 14-10 14-10-8.5-10-14 4.5-10 10-10z" /><path d="M18 24h12" stroke="currentColor" stroke-width="3" stroke-linecap="round" fill="none"/>',
-    ];
-    return glyphs[((glyphIndex % glyphs.length) + glyphs.length) % glyphs.length];
+  function rankFromKey(rankIconKey) {
+    return rankFromBand(resolveRankIconBand(rankIconKey));
   }
+
+  /* Where a band's artwork comes from.
+   *
+   * The badges live in the database, one image per band, and are served from
+   * /ranks/badge/<key>?v=<sha256 of the bytes>. That version is what makes
+   * them cacheable forever: artwork that has not changed is never fetched
+   * twice, and artwork that has gets a URL the cache has never seen.
+   *
+   * The manifest is one request for the whole set and it is fetched once. It
+   * cannot be awaited here, because a badge renders synchronously inside a
+   * feed row -- so rendering always emits a src that works immediately, and
+   * the manifest upgrades what is already on screen when it lands.
+   *
+   * THE FALLBACK IS THE PAINTED PRESTIGE
+   *
+   * Until a band's own artwork is uploaded, it wears its prestige's painted
+   * badge: all five ranks of prestige 4 show the Tiger. That is deliberate
+   * rather than a placeholder -- a driver never sees a gap, the ladder still
+   * reads as ten distinct tiers, and the numeral struck on the nameplate
+   * already says which of the five they are on. The vector badge beneath
+   * remains the last resort for a build with no art at all. */
+  var RANK_BADGE_MANIFEST = Object.create(null);
+  var rankBadgeManifestState = 'idle';
+
+  function rankBadgeApiBase() {
+    if (typeof window === 'undefined') return '';
+    var explicit = String(window.API_BASE || '').trim();
+    if (explicit) return explicit.replace(/\/+$/, '');
+    var configured = String(
+      (window.__TLC_RUNTIME_CONFIG__ && window.__TLC_RUNTIME_CONFIG__.apiBase) || '').trim();
+    if (configured) return configured.replace(/\/+$/, '');
+    return '';
+  }
+
+  /* The prestige's painted file, which ships in this repo. */
+  function paintedBadgeSrc(band) {
+    return './rank-frames/tier-' + rankFromBand(band).prestige + '.webp';
+  }
+
+  function rankBadgeSrc(band) {
+    var rank = rankFromBand(band);
+    return RANK_BADGE_MANIFEST['band_' + String(rank.band).padStart(3, '0')]
+      || paintedBadgeSrc(rank.band);
+  }
+
+  /* Point every badge already on screen at its uploaded artwork. Called once,
+     when the manifest lands. A badge whose band has no upload keeps the src it
+     was rendered with, so nothing flickers back to a placeholder. */
+  function applyRankBadgeManifestToDom() {
+    if (typeof document === 'undefined') return;
+    var wraps = document.querySelectorAll('.rankBadgeIconWrap[data-rank-band]');
+    Array.prototype.forEach.call(wraps, function (wrap) {
+      var img = wrap.querySelector('img.rankBadgeFrame');
+      if (!img) return;
+      var next = rankBadgeSrc(Number(wrap.getAttribute('data-rank-band')));
+      if (next && img.getAttribute('src') !== next) {
+        img.setAttribute('src', next);
+        /* It failed on the painted file and the class was stripped; uploaded
+           art deserves its own attempt at painting. */
+        wrap.classList.add('rankBadgePainted');
+      }
+    });
+  }
+
+  function loadRankBadgeManifest() {
+    if (rankBadgeManifestState !== 'idle') return;
+    if (typeof fetch !== 'function') return;
+    rankBadgeManifestState = 'loading';
+    var base = rankBadgeApiBase();
+    fetch(base + '/ranks/badges', { credentials: 'omit' })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (body) {
+        var items = (body && body.items) || [];
+        items.forEach(function (item) {
+          var key = String((item && item.rank_icon_key) || '');
+          var url = String((item && item.url) || '');
+          if (!key || !url) return;
+          RANK_BADGE_MANIFEST[key] = /^https?:\/\//i.test(url) ? url : base + url;
+        });
+        rankBadgeManifestState = 'ready';
+        applyRankBadgeManifestToDom();
+      })
+      .catch(function () {
+        /* Swallowed on purpose. Every badge already has a painted file to
+           show, so a manifest that does not arrive costs nothing a driver can
+           see -- and a rank badge is not worth a console error on every open
+           for someone running offline. */
+        rankBadgeManifestState = 'failed';
+      });
+  }
+
+  /* A backend rank_name is used when it is a name, and ignored when it is the
+   * key spelled out. "Band 004" is not something to show a driver, and neither
+   * is an empty string, so both fall through to the derived label. */
+  function rankDisplayName(source) {
+    var raw = String((source && (source.rank_name || source.title)) || '').trim();
+    if (raw && !/^band[\s_-]*\d+$/i.test(raw)) return raw;
+    return rankFromKey(source && source.rank_icon_key).label;
+  }
+
+  /* One frame per tier, in climbing order of complexity. `out` is the
+     silhouette, `lit` the half the light falls on, and `inner` the recessed
+     field the emblem sits in. Everything else about the surface is painted
+     inside `out` used as a clip, so these three are all a frame has to carry. */
+  var FRAMES = [
+    { // 1 bronze -- a plain heater shield, the simplest thing that is a badge
+      out: 'M48 16l26 9.5v23c0 16.5-10.8 28.5-26 34.5-15.2-6-26-18-26-34.5v-23z',
+      lit: 'M48 16L22 25.5v23c0 16.5 10.8 28.5 26 34.5z',
+      inner: 'M48 25l18 6.6v16c0 11.4-7.5 19.7-18 23.9-10.5-4.2-18-12.5-18-23.9v-16z' },
+    { // 2 iron -- a slab with the corners taken off, riveted
+      out: 'M30 16h36l8 10v30l-8 10H30l-8-10V26z',
+      lit: 'M30 16L22 26v30l8 10h18V16z',
+      inner: 'M34 25h28l5 7v22l-5 7H34l-5-7V32z' },
+    { // 3 steel -- a hexagon shoulder over a point
+      out: 'M48 12l25 11v22L48 82 23 45V23z',
+      lit: 'M48 12L23 23v22l25 37z',
+      inner: 'M48 24l16 7v15L48 68 32 46V31z' },
+    { // 4 silver -- a kite, the first shape with a point at the top
+      out: 'M48 12l28 18v20L48 84 20 50V30z',
+      lit: 'M48 12L20 30v20l28 34z',
+      inner: 'M48 24l19 12v13L48 70 29 49V36z' },
+    { // 5 gold -- a struck disc, the only round frame on the ladder
+      out: 'M48 13a31 31 0 1 1 0 62 31 31 0 0 1 0-62z',
+      lit: 'M48 13a31 31 0 0 0 0 62z',
+      inner: 'M48 25a19 19 0 1 1 0 38 19 19 0 0 1 0-38z' },
+    { // 6 platinum -- a cartouche, sides drawn in
+      out: 'M48 13c10 0 19 4 27 11-7 8-7 20 0 28-8 7-17 11-27 11s-19-4-27-11c7-8 7-20 0-28 8-7 17-11 27-11z',
+      lit: 'M48 13c-10 0-19 4-27 11 7 8 7 20 0 28 8 7 17 11 27 11z',
+      inner: 'M48 25c6.6 0 12.6 2.6 17.8 7-4.6 5.2-4.6 13 0 18.2C60.6 54.6 54.6 57 48 57s-12.6-2.4-17.8-6.8c4.6-5.2 4.6-13 0-18.2C35.4 27.6 41.4 25 48 25z' },
+    { // 7 sapphire -- a cut gem, table and pavilion
+      out: 'M30 16h36l16 20-34 44-34-44z',
+      lit: 'M30 16L14 36l34 44V16z',
+      inner: 'M35 27h26l10 11-23 29-23-29z' },
+    { // 8 emerald -- a trapezoid crest over a point
+      out: 'M30 14h36l10 14-6 10 4 12L48 82 22 50l4-12-6-10z',
+      lit: 'M30 14L20 28l6 10-4 12 26 32V14z',
+      inner: 'M35 25h26l6 9-4 7 3 8L48 68 30 49l3-8-4-7z' },
+    { // 9 crimson -- a star plate, cut back between the points
+      out: 'M48 10l12 10 16-2-2 16 10 12-10 12 2 16-16-2-12 10-12-10-16 2 2-16L12 46l10-12-2-16 16 2z',
+      lit: 'M48 10L36 20l-16-2 2 16-10 12 10 12-2 16 16-2 12 10z',
+      inner: 'M48 23l9 7 11-1-1 11 7 8-7 8 1 11-11-1-9 7-9-7-11 1 1-11-7-8 7-8-1-11 11 1z' },
+    { // 10 mythic -- a twelve point star medallion
+      out: 'M48 6l7 8 10-4 3 10 11 1-3 10 9 6-7 8 5 10-10 3-1 11-10-2-6 9-8-7-9 5-4-10-11-1 2-10-9-7 8-8-4-10 11-2 1-11 10 3z',
+      lit: 'M48 6L38 9l-1 11-11 2 4 10-8 8 9 7-2 10 11 1 4 10 9-5z',
+      inner: 'M48 22l6 6 8-3 2 8 9 1-2 8 7 5-6 6 4 8-8 2-1 9-8-2-5 7-6-6-7 4-3-8-9-1 2-8-7-5 6-6-3-8 9-2 1-9z' },
+  ];
+
+  /* Furniture, behind and in front. [path, depth] -- depth below 1 sits the
+     piece back in the picture without giving it a colour of its own. */
+  var PARTS = {
+    halo: [['M48 3.5A44.5 44.5 0 1 1 3.5 48 44.5 44.5 0 0 1 48 3.5zm0 4.5A40 40 0 1 0 88 48 40 40 0 0 0 48 8z', 0.7]],
+    rays: [['M48 0l3.4 11h-6.8zM48 96l-3.4-11h6.8zM0 48l11-3.4v6.8zM96 48l-11 3.4v-6.8z'
+      + 'M14 14l9.6 6-3.6 3.6zM82 82l-9.6-6 3.6-3.6zM82 14l-6 9.6-3.6-3.6zM14 82l6-9.6 3.6 3.6z'
+      + 'M71.4 2.6l-2.2 11.4-5.7-2.6zM24.6 93.4l2.2-11.4 5.7 2.6zM93.4 71.4l-11.4-2.2 2.6-5.7zM2.6 24.6l11.4 2.2-2.6 5.7z', 0.55]],
+    wings: [['M25 40C18 33 11 29.5 2 30.5c5.4 3 7.8 6.8 8.2 11-4 .6-7.2 2.2-9.6 4.6 6.4.4 11.2 2 15 4.6-2 1.8-3.4 3.8-4 6.2 5.8-1.6 10.2-3.6 13.4-6.4zM71 40c7-7 14-10.5 23-9.5-5.4 3-7.8 6.8-8.2 11 4 .6 7.2 2.2 9.6 4.6-6.4.4-11.2 2-15 4.6 2 1.8 3.4 3.8 4 6.2-5.8-1.6-10.2-3.6-13.4-6.4z', 0.82]],
+    laurel: [['M11 32c-8 12-6 28 4 38l4-5.6c-7.6-8-9-19.4-4-28zM85 32c8 12 6 28-4 38l-4-5.6c7.6-8 9-19.4 4-28z', 0.88]],
+    spikes: [['M48 0l4 12h-8zM76.8 7.7l-2.2 12.5-6.9-4zM19.2 7.7l2.2 12.5 6.9-4zM93.6 33.4l-8.4 9.5-4.6-6.6zM2.4 33.4l8.4 9.5 4.6-6.6zM93.6 62.6l-11.6-5.2 3.2-7.4zM2.4 62.6l11.6-5.2-3.2-7.4zM76.8 88.3l-9.1-8.8 5.6-5.8zM19.2 88.3l9.1-8.8-5.6-5.8z', 0.72]],
+    crown: [['M27 5l8.4 7.8L48 -2l12.6 14.8L69 5l-3.4 15H30.4z', 1]],
+    banner: [['M20 79h56l-5.5 10H25.5z', 0.92]],
+    rivets: [['M32 30.5a2.6 2.6 0 1 0 0 5.2 2.6 2.6 0 0 0 0-5.2zM64 30.5a2.6 2.6 0 1 0 0 5.2 2.6 2.6 0 0 0 0-5.2z', 1]],
+    bolts: [['M31 62.5a2.2 2.2 0 1 0 0 4.4 2.2 2.2 0 0 0 0-4.4zM65 62.5a2.2 2.2 0 1 0 0 4.4 2.2 2.2 0 0 0 0-4.4z', 1]],
+    gem: [['M48 18l5.5 5.8-5.5 5.8-5.5-5.8z', 1]],
+  };
+
+  /* Ten emblems. `d` is the silhouette; `cut` is the interior -- the lines a
+     die would leave, drawn back in dark so the emblem is modelled rather than
+     stamped flat. */
+  var EMBLEMS = [
+    { name: 'Chevrons',
+      d: 'M48 26l20 14h-10L48 33l-10 7H28zM48 42l20 14h-10L48 49l-10 7H28zM48 58l20 14h-10L48 65l-10 7H28z',
+      cut: 'M48 29.5l14 9.5h-2.6L48 31.4 36.6 39H34zM48 45.5l14 9.5h-2.6L48 47.4 36.6 55H34zM48 61.5l14 9.5h-2.6L48 63.4 36.6 71H34z' },
+    { name: 'Wolf',
+      d: 'M26 20l12 12h20l12-12-2 20-6 5 4 10-18 17-18-17 4-10-6-5zM40 44l5 4-7 2zM56 44l-5 4 7 2zM48 56l6 8H42z',
+      cut: 'M48 32v24h-1.6V32zM30 26l6 6-.8 1.2-6-6zM66 26l-6 6 .8 1.2 6-6zM38 62l10 9.5 10-9.5-1.4-1.4-8.6 8-8.6-8z' },
+    { name: 'Wings',
+      d: 'M48 28l5 9v32l-5 8-5-8V37zM38 40c-9-8-19-10-31-8 8 4 12 10 12 16 6-2 13 0 19 4zM58 40c9-8 19-10 31-8-8 4-12 10-12 16-6-2-13 0-19 4zM38 58c-8-6-16-8-25-6 6 4 10 8 10 12 5-2 11-2 15 0zM58 58c8-6 16-8 25-6-6 4-10 8-10 12-5-2-11-2-15 0z',
+      cut: 'M47 37h2v32h-2zM20 34c6 2 11 6 15 10l-1.4 1c-4-4-8.6-7.6-14-9.4zM76 34c-6 2-11 6-15 10l1.4 1c4-4 8.6-7.6 14-9.4z' },
+    { name: 'Star',
+      d: 'M48 20l9 20 22 3-16 15 4 22-19-11-19 11 4-22-16-15 22-3z',
+      cut: 'M48 20v59.9l-1.6-.9V21.6zM48 43.4l31-.4-1 1-30 .4zM48 43.4l-31-.4 1 1 30 .4z' },
+    { name: 'Skull',
+      d: 'M48 20c15 0 23 10 23 22 0 7.6-3.2 13.2-8 16v9l-5 5H38l-5-5v-9c-4.8-2.8-8-8.4-8-16 0-12 8-22 23-22zM38 44a6.4 6.4 0 1 0 0 12.8A6.4 6.4 0 0 0 38 44zM58 44a6.4 6.4 0 1 0 0 12.8A6.4 6.4 0 0 0 58 44zM48 60l5 8h-10z',
+      cut: 'M33 58h30v2H33zM42 62h2v10h-2zM52 62h2v10h-2zM47 62h2v10h-2z' },
+    { name: 'Blades',
+      d: 'M18 20l12-3 36 43 3 12-12-3-39-42zM78 20l-12-3-36 43-3 12 12-3 39-42z',
+      cut: 'M24 18.5l38 44.5-1.4 1.2-38-44.4zM72 18.5l-38 44.5 1.4 1.2 38-44.4z' },
+    { name: 'Flame',
+      d: 'M48 12c4 14 22 20 22 38 0 14-10 24-22 24s-22-10-22-24c0-10 6-16 10-24 2 6 6 8 8 6 2-6-2-12 4-20zM48 48c2 6 8 8 8 14 0 5-3.6 9-8 9s-8-4-8-9c0-6 6-8 8-14z',
+      cut: 'M48 12c-6 8-2 14-4 20-2 2-6 0-8-6l-1.4 2.8c2.6 6 7 8 10 5.6 3-2.4 1.4-9 3.4-16z' },
+    { name: 'Bull',
+      d: 'M16 26c10-4 16 2 18 8h28c2-6 8-12 18-8-8 3-11 9-11 16L60 52l3 14-15 12-15-12 3-14-9-10c0-7-3-13-11-16zM40 48l5 4-7 2zM56 48l-5 4 7 2z',
+      cut: 'M34 34h28v1.8H34zM48 60v18h-1.6V60zM36 52l-2 12 1.6.4 2-12zM60 52l2 12-1.6.4-2-12z' },
+    { name: 'Bolt',
+      d: 'M54 12L26 52h16l-8 32 36-44H52l10-28z',
+      cut: 'M42 52l12-15.6-1-.6-12.4 16z' },
+    { name: 'Crown',
+      d: 'M18 32l13 13L48 20l17 25 13-13-6 34H24zM24 70h48v8H24z',
+      cut: 'M24 60h48v2H24zM33 48.5l1.6-1L48 26l13.4 21.5 1.6 1L48 30z' },
+  ];
+
+  var BEHIND = ['halo', 'rays', 'wings', 'laurel', 'spikes'];
+  var INFRONT = ['banner', 'crown', 'rivets', 'bolts', 'gem'];
+
+  function rankBadgeSvg(band, size) {
+    var rank = rankFromBand(band);
+    var b = rank.band;
+    var t = rank.prestigeIndex;
+    var tier = RANK_TIERS[t];
+    var frame = FRAMES[t];
+    /* EMBLEMS still holds ten, authored in climbing order of complexity, and
+       a prestige now has five ranks. Taking the first five would give the top
+       rank of every prestige a mid-table emblem, so the five are spread across
+       the ten instead -- rank 1 gets the plainest and rank 5 the richest, the
+       way it read when there were ten of them. */
+    var emblemStep = Math.floor(EMBLEMS.length / RANKS_PER_PRESTIGE);
+    var em = EMBLEMS[Math.min(EMBLEMS.length - 1, (rank.level - 1) * emblemStep)];
+    var id = 'rb' + b;
+    var px = size || 68;
+
+    function furniture(names) {
+      var out = '';
+      for (var i = 0; i < names.length; i++) {
+        var spec = PARTS[names[i]];
+        if (!spec || tier.parts.indexOf(names[i]) < 0) continue;
+        for (var j = 0; j < spec.length; j++) {
+          out += '<path d="' + spec[j][0] + '" fill="' + tier.deep + '" opacity=".6" transform="translate(0,1.6)"/>'
+            + '<path d="' + spec[j][0] + '" fill="url(#' + id + 'm)" opacity="' + spec[j][1] + '"/>'
+            + '<path d="' + spec[j][0] + '" fill="none" stroke="' + tier.hi + '" stroke-opacity=".38" stroke-width=".8" transform="translate(0,-.7)"/>';
+        }
+      }
+      return out;
+    }
+
+    var glowDef = tier.glow
+      ? '<radialGradient id="' + id + 'g">'
+        + '<stop offset="54%" stop-color="' + tier.glow + '" stop-opacity="0"/>'
+        + '<stop offset="76%" stop-color="' + tier.glow + '" stop-opacity="' + tier.glowStop + '"/>'
+        + '<stop offset="100%" stop-color="' + tier.glow + '" stop-opacity="0"/>'
+        + '</radialGradient>'
+      : '';
+
+    var metalStops = t === 9
+      ? '<stop offset="0%" stop-color="#ffffff"/><stop offset="22%" stop-color="#9fe8ff"/>'
+        + '<stop offset="48%" stop-color="#c98cff"/><stop offset="74%" stop-color="#6d2fb5"/>'
+        + '<stop offset="100%" stop-color="#26094a"/>'
+      : '<stop offset="0%" stop-color="' + tier.hi + '"/>'
+        + '<stop offset="20%" stop-color="' + tier.lo + '"/>'
+        + '<stop offset="52%" stop-color="' + tier.mid + '"/>'
+        + '<stop offset="82%" stop-color="' + tier.dk + '"/>'
+        + '<stop offset="100%" stop-color="' + tier.deep + '"/>';
+
+    return '<svg viewBox="0 0 96 96" width="' + px + '" height="' + px
+      + '" role="presentation" focusable="false" aria-hidden="true">'
+      + '<defs>'
+      + '<linearGradient id="' + id + 'm" x1=".12" y1="0" x2=".82" y2="1">' + metalStops + '</linearGradient>'
+      + '<linearGradient id="' + id + 'e" x1=".2" y1="0" x2=".8" y2="1">'
+      + '<stop offset="0%" stop-color="' + tier.enamel + '"/><stop offset="100%" stop-color="#05070e"/>'
+      + '</linearGradient>'
+      + '<linearGradient id="' + id + 'x" x1="0" y1="0" x2=".3" y2="1">'
+      + '<stop offset="0%" stop-color="' + tier.hi + '"/><stop offset="46%" stop-color="' + tier.lo + '"/>'
+      + '<stop offset="100%" stop-color="' + tier.mid + '"/></linearGradient>'
+      // Top sheen and bottom vignette, painted inside the clip rather than
+      // authored as extra faces per frame.
+      + '<linearGradient id="' + id + 't" x1="0" y1="0" x2="0" y2="1">'
+      + '<stop offset="0%" stop-color="#ffffff" stop-opacity=".34"/>'
+      + '<stop offset="34%" stop-color="#ffffff" stop-opacity="0"/>'
+      + '<stop offset="72%" stop-color="#000000" stop-opacity="0"/>'
+      + '<stop offset="100%" stop-color="#000000" stop-opacity=".42"/>'
+      + '</linearGradient>'
+      // A hard diagonal streak: the one highlight that says "polished".
+      + '<linearGradient id="' + id + 'p" x1="0" y1="0" x2="1" y2="1">'
+      + '<stop offset="30%" stop-color="#ffffff" stop-opacity="0"/>'
+      + '<stop offset="44%" stop-color="#ffffff" stop-opacity=".38"/>'
+      + '<stop offset="50%" stop-color="#ffffff" stop-opacity="0"/>'
+      + '</linearGradient>'
+      /* Brushed metal. An anisotropic baseFrequency -- high across, almost
+         nothing down -- turns fractal noise into horizontal grain, which is what
+         a brushed surface is. Desaturated and dropped to a low alpha so it reads
+         as tooling rather than dirt. */
+      + '<filter id="' + id + 'n" x="0" y="0" width="100%" height="100%">'
+      + '<feTurbulence type="fractalNoise" baseFrequency="0.85 0.035" numOctaves="3" seed="' + b + '"/>'
+      + '<feColorMatrix type="saturate" values="0"/>'
+      + '<feComponentTransfer><feFuncA type="linear" slope=".22" intercept="0"/></feComponentTransfer>'
+      + '</filter>'
+      + '<filter id="' + id + 'd" x="-30%" y="-30%" width="160%" height="160%">'
+      + '<feDropShadow dx="0" dy="2.4" stdDeviation="2.2" flood-color="#04060d" flood-opacity=".7"/>'
+      + '</filter>'
+      + '<clipPath id="' + id + 'c"><path d="' + frame.out + '"/></clipPath>'
+      + '<clipPath id="' + id + 'i"><path d="' + frame.inner + '"/></clipPath>'
+      + glowDef
+      + '</defs>'
+      + (tier.glow ? '<circle cx="48" cy="48" r="47" fill="url(#' + id + 'g)"/>' : '')
+      + furniture(BEHIND)
+      + '<g filter="url(#' + id + 'd)">'
+      + '<g clip-path="url(#' + id + 'c)">'
+      + '<rect width="96" height="96" fill="url(#' + id + 'm)"/>'
+      + '<path d="' + frame.lit + '" fill="' + tier.hi + '" opacity=".20"/>'
+      + '<rect width="96" height="96" fill="url(#' + id + 't)"/>'
+      + '<rect width="96" height="96" filter="url(#' + id + 'n)" opacity=".55"/>'
+      + '<rect width="96" height="96" fill="url(#' + id + 'p)"/>'
+      + '</g>'
+      // Bevel: a rim light lifted off the top edge, a dark line on the true edge.
+      + '<path d="' + frame.out + '" fill="none" stroke="' + tier.hi + '" stroke-opacity=".6" stroke-width="1.6" stroke-linejoin="round" transform="translate(0,-.9)"/>'
+      + '<path d="' + frame.out + '" fill="none" stroke="' + tier.deep + '" stroke-opacity=".9" stroke-width="1.3" stroke-linejoin="round"/>'
+      + '</g>'
+      // The recessed field, with its own grain and its own inner shadow.
+      + '<g clip-path="url(#' + id + 'i)">'
+      + '<rect width="96" height="96" fill="url(#' + id + 'e)"/>'
+      + '<rect width="96" height="96" filter="url(#' + id + 'n)" opacity=".3"/>'
+      + '</g>'
+      + '<path d="' + frame.inner + '" fill="none" stroke="' + tier.deep + '" stroke-width="2.8" stroke-opacity=".85" stroke-linejoin="round" transform="translate(0,-1)"/>'
+      + '<path d="' + frame.inner + '" fill="none" stroke="' + tier.accent + '" stroke-opacity=".5" stroke-width="1.1" stroke-linejoin="round"/>'
+      + '<g transform="translate(48,50) scale(.54) translate(-48,-48)">'
+      + '<path d="' + em.d + '" fill="' + tier.deep + '" opacity=".9" transform="translate(0,2.6)"/>'
+      + '<path d="' + em.d + '" fill="url(#' + id + 'x)"/>'
+      + '<path d="' + em.cut + '" fill="' + tier.deep + '" opacity=".55"/>'
+      + '<path d="' + em.d + '" fill="none" stroke="' + tier.hi + '" stroke-opacity=".7" stroke-width="1.6" stroke-linejoin="round" transform="translate(0,-1.4)"/>'
+      + '<path d="' + em.d + '" fill="none" stroke="' + tier.deep + '" stroke-opacity=".5" stroke-width="1" stroke-linejoin="round"/>'
+      + '</g>'
+      + furniture(INFRONT)
+      + '</svg>';
+  }
+
 
   function renderRankBadgeIcon(rankIconKey, { compact = false } = {}) {
     const band = resolveRankIconBand(rankIconKey);
     const toneClass = resolveRankIconTone(rankIconKey);
-    const shellIndex = Math.floor((band - 1) / 10);
-    const glyphIndex = (band - 1) % 10;
+    /* The tier's metal is handed out as custom properties so a surface that
+       frames this badge can wear it too. The Trip Saved card pins its medallion
+       to gold, which was right when the badge inside was a rainbow disc and
+       wrong the moment the badge got a metal of its own: a bronze rank on a
+       gold coin reads as a mistake, and a mythic one reads as a worse one. */
+    const tier = RANK_TIERS[rankFromBand(band).prestigeIndex];
+    const metal = `--rank-lo:${tier.lo};--rank-mid:${tier.mid};--rank-dk:${tier.dk};--rank-ring:${tier.ring}`;
     const size = compact ? 54 : 68;
-    const hue = ((band - 1) * 17) % 360;
-    const accentHue = (hue + 42) % 360;
-    const shell = buildRankBadgeShell(shellIndex);
-    const glyph = buildRankBadgeGlyph(glyphIndex);
-    const gradientId = `rbg-${band}-${compact ? 'c' : 'f'}`;
-    return `<div class="rankBadgeIconWrap ${toneClass}${compact ? ' compact' : ''}" aria-hidden="true" data-rank-band="${band}">
-      <svg viewBox="0 0 48 48" width="${size}" height="${size}" role="presentation" focusable="false">
-        <defs>
-          <linearGradient id="${gradientId}" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stop-color="hsl(${hue} 88% 68%)"/>
-            <stop offset="55%" stop-color="hsl(${accentHue} 85% 58%)"/>
-            <stop offset="100%" stop-color="hsl(${(accentHue + 35) % 360} 72% 32%)"/>
-          </linearGradient>
-        </defs>
-        <circle cx="24" cy="24" r="22" fill="rgba(255,255,255,.22)"/>
-        <g fill="url(#${gradientId})" stroke="rgba(15,23,42,.26)" stroke-width="1.3">${shell}</g>
-        <g fill="rgba(255,255,255,.92)" stroke="rgba(15,23,42,.18)" stroke-width="0.8">${glyph}</g>
-        <circle cx="24" cy="24" r="20.6" fill="none" stroke="rgba(255,255,255,.28)" stroke-width="1"/>
-      </svg>
-    </div>`;
+    /* Uploaded artwork, painted prestige, vector badge -- in that order.
+     *
+     * None of these is decoration. The uploaded badge is the real one and
+     * comes from the database; until a band has one it wears its prestige's
+     * painted file, which ships in this repo; and if THAT fails -- a cached
+     * older build, a prestige whose art is being reworked -- onerror strips
+     * the class, CSS hides the image and shows the vector badge already in
+     * the markup. Nothing about the card moves in any of the three cases. */
+    const rank = rankFromBand(band);
+    /* The division is struck on the badge's own nameplate.
+     *
+     * It is positioned and sized from the measured plate rather than dropped
+     * at the foot: the plates differ by a third in width across the ten, and
+     * the numeral has to fit VIII as well as I. Below 60px it is left off --
+     * measured on the real art, a numeral on a 52px badge is a smudge, and a
+     * smudge on every badge reads as dirt rather than as information. The
+     * feed shows the division as text beside the driver's name instead. */
+    const plate = RANK_PLATES[rank.prestigeIndex];
+    const numeral = (plate && size >= 60)
+      ? `<span class="rankBadgeDivision" style="`
+        + `left:${(plate[0] * 100).toFixed(2)}%;top:${(plate[1] * 100).toFixed(2)}%;`
+        + `width:${(plate[2] * 100).toFixed(2)}%;height:${(plate[3] * 100).toFixed(2)}%;`
+        + `font-size:${Math.max(6, Math.round(plate[3] * size * 0.86))}px`
+        + `">${rank.roman}</span>`
+      : '';
+
+    return `<div class="rankBadgeIconWrap ${toneClass}${compact ? ' compact' : ''} rankBadgePainted" aria-hidden="true" data-rank-band="${band}" data-rank-label="${rank.label}" style="${metal};--rank-size:${size}px">`
+      + `<img class="rankBadgeFrame" src="${rankBadgeSrc(rank.band)}" alt="" width="${size}" height="${size}" decoding="async"`
+      + ` onerror="this.closest('.rankBadgeIconWrap')?.classList.remove('rankBadgePainted')">`
+      + numeral
+      + `<span class="rankBadgeVector">${rankBadgeSvg(band, size)}</span>`
+      + `</div>`;
   }
 
   function renderDriverProgressionSection(progression) {
     const level = Number(progression?.level);
     const safeLevel = Number.isFinite(level) && level > 0 ? Math.floor(level) : 1;
-    const title = normalizeDriverTier(progression?.rank_name || progression?.title);
+    const rank = rankFromKey(progression?.rank_icon_key);
+    const title = rankDisplayName(progression);
     const totalXp = Number(progression?.total_xp);
     const currentLevelXp = Number(progression?.current_level_xp);
     const nextLevelXp = Number(progression?.next_level_xp);
@@ -412,7 +899,10 @@
 
     return `<div class="driverProfileProgressWrap">
       <div class="driverProfileProgressHead">
-        <div class="driverProfileProgressLine">Level ${safeLevel} • <span class="driverProfileRankName">${escapeHtml(title)}</span></div>
+        <div class="driverProfileProgressHeadText">
+          <div class="driverProfileProgressLine">Level ${safeLevel} • <span class="driverProfileRankName">${escapeHtml(title)}</span></div>
+          <div class="driverProfilePrestigeLine">Prestige ${rank.prestige} of 10 • ${escapeHtml(rank.beast)}</div>
+        </div>
         ${renderRankBadgeIcon(progression?.rank_icon_key, { compact: true })}
       </div>
       <div class="driverProfileProgressMeta">Total XP: ${escapeHtml(formatProgressNumber(totalXp, { maxFractionDigits: 0 }))}</div>
@@ -769,7 +1259,7 @@
      * inventing its numbers is worse than leaving the lines out. Below, every
      * row that has no real value is hidden rather than filled with a default,
      * so the card still says Trip Saved and says nothing it cannot back up. */
-    const rankName = normalizeDriverTier(progression?.rank_name || progression?.title || 'Rookie');
+    const rankName = rankDisplayName(progression);
     const xpToNext = Number(progression?.xp_to_next_level);
     const isMaxLevel = progression?.is_max_level === true
       || progression?.max_level_reached === true
@@ -887,7 +1377,7 @@
     const transitionLabel = (safePrevLevel && safePrevLevel !== safeLevel)
       ? `Level ${safePrevLevel} → ${safeLevel}`
       : `Level ${safeLevel}`;
-    const rankName = normalizeDriverTier(payload?.rank_name || payload?.title || 'New Rank Reached');
+    const rankName = rankDisplayName(payload);
     const xpAwarded = Number(payload?.xp_awarded);
     const xpLine = Number.isFinite(xpAwarded) && xpAwarded > 0
       ? `<div class="levelUpXp">+${escapeHtml(formatProgressNumber(xpAwarded, { maxFractionDigits: 0 }))} XP</div>`
@@ -1781,6 +2271,9 @@
     syncLeaderboardBadgeRewards,
     formatProgressNumber,
     renderRankBadgeIcon,
+    rankFromBand,
+    rankFromKey,
+    rankDisplayName,
     ensurePickupProgressReward,
     renderPickupProgressReward,
     hidePickupProgressReward,
@@ -1789,6 +2282,35 @@
     scheduleDriverProfileDmPoll,
     maybeSyncProgressionOnSignInState,
     getState: () => driverProfileState,
+  };
+  /* The ladder as a standalone namespace.
+   *
+   * The leaderboard, the games panel and work-battles all need to turn a band
+   * into a name, and none of them has any business reaching into the driver
+   * profile module to do it. One arithmetic, one place, four callers. */
+  /* One request for the whole set, started as soon as this module is up.
+     Nothing waits on it: every badge renders with its prestige's painted file
+     and is upgraded in place when the manifest lands. */
+  loadRankBadgeManifest();
+
+  window.TeamJoseoRank = {
+    fromBand: rankFromBand,
+    fromKey: rankFromKey,
+    displayName: rankDisplayName,
+    badgeSrc: rankBadgeSrc,
+    reloadBadges: () => { rankBadgeManifestState = 'idle'; loadRankBadgeManifest(); },
+    roman: (level) => RANK_ROMAN[
+      Math.max(1, Math.min(RANKS_PER_PRESTIGE, Math.floor(Number(level) || 1))) - 1],
+    ranksPerPrestige: () => RANKS_PER_PRESTIGE,
+    bandCount: () => RANK_BAND_COUNT,
+    prestiges: () => RANK_TIERS.map((t, i) => ({
+      prestige: i + 1,
+      name: t.name,
+      beast: t.beast,
+      accent: t.accent,
+      startBand: i * RANKS_PER_PRESTIGE + 1,
+      endBand: (i + 1) * RANKS_PER_PRESTIGE,
+    })),
   };
   window.openDriverProfileModal = openDriverProfileModal;
   window.closeDriverProfileModal = closeDriverProfileModal;
