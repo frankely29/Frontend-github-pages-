@@ -116,6 +116,32 @@
   font-family: inherit; font-weight: 800; font-size: 10px; line-height: 1.4;
   letter-spacing: 0.04em;
 }
+/* The crest, beside whoever is talking.
+ *
+ * 22px: the artwork is a shield with a laurel and a nameplate, and this is a
+ * name row, not a trophy case -- it has to read as a mark next to a name
+ * rather than compete with the words. The badge renderer writes its own
+ * --rank-size inline, so the size is asserted over it the same way the
+ * leaderboard does.
+ *
+ * No plate, no ring, nothing behind it: the crests are keyed to clean
+ * transparency and already carry their own frame. */
+.feedRankCrest {
+  flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+}
+.feedRankCrest .rankBadgeIconWrap {
+  width: 22px !important;
+  height: 22px !important;
+  background: none !important;
+  box-shadow: none !important;
+}
+/* baseline alignment on the comment row would hang the crest off the text
+   baseline; it is a glyph-sized object and wants centring. */
+.feedCommentHead .feedRankCrest { align-self: center; }
 .feedMeta {
   margin-top: 2px;
   font-size: 13px;

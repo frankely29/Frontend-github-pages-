@@ -274,6 +274,20 @@
     return ` • Level ${api.fromKey(user.rankIcon).band}`;
   }
 
+  /* The crest, where a driver is listed.
+   *
+   * The name of a rank in a text chip says which rank; the artwork says it
+   * faster and is the thing a driver recognises. This list is where you pick
+   * someone to challenge, so it is exactly where knowing what you are up
+   * against matters. */
+  function rankCrestHtml(user) {
+    if (!user?.rankIcon) return '';
+    if (typeof window.renderRankBadgeIcon !== 'function') return '';
+    return `<span class="workBattlesRankCrest" aria-hidden="true">`
+      + window.renderRankBadgeIcon(user.rankIcon, { compact: true })
+      + `</span>`;
+  }
+
   function rankChipHtml(user) {
     const api = window.TeamJoseoRank;
     if (user?.rankIcon && api) {
@@ -305,7 +319,7 @@
     return `<div class="workBattlesUserIdentity${compact ? ' compact' : ''}">
       ${renderAvatar(user)}
       <span class="workBattlesUserMeta">
-        <span class="workBattlesUserName">${escapeHtml(user?.displayName || 'Driver')}</span>
+        <span class="workBattlesUserName">${escapeHtml(user?.displayName || 'Driver')}${rankCrestHtml(user)}</span>
         <span class="workBattlesUserSubline">${user?.online ? 'Online now' : 'Available'}${ladderLevelLabel(user)}${selected ? ' • Selected' : ''}</span>
       </span>
     </div>`;

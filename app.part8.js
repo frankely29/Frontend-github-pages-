@@ -4218,7 +4218,6 @@ function stopActiveVoiceRecording(scope) {
     const loser = String(payload?.loser_display_name || 'Driver').trim() || 'Driver';
     const game = String(payload?.game_type || 'battle').trim() || 'battle';
     const xp = Number(payload?.winner_xp_awarded || 0);
-    const level = Number(payload?.winner_new_level || payload?.new_level || 0);
     const textBits = [`🏁 ${winner} beat ${loser}`, `in ${game}`];
     if (xp > 0) {
       const xpText = typeof window.formatProgressNumber === 'function'
@@ -4226,9 +4225,27 @@ function stopActiveVoiceRecording(scope) {
         : String(Math.round(xp));
       textBits.push(`(+${xpText} XP)`);
     }
-    if (level > 0) textBits.push(`Lvl ${Math.floor(level)}`);
+    /* The winner's rank, off their key.
+     *
+     * This line read "Lvl 445", which is the XP engine's level out of a
+     * thousand -- a number that appears nowhere else a driver looks and does
+     * not match the rank on their own crest. The name of the rank says more
+     * in the same space, and it agrees with every other surface.
+     * No key on the payload and the line simply ends after the XP. */
+    const rankApi = window.TeamJoseoRank;
+    const winnerKey = payload?.winner_rank_icon_key;
+    if (rankApi && winnerKey) textBits.push(`· ${rankApi.fromKey(winnerKey).label}`);
     const div = document.createElement('div');
     div.className = 'killFeedMsg battleFeedMsg';
+    /* The crest itself, ahead of the words. It is the one mark that says who
+       won at a glance in a feed that scrolls past in seconds. */
+    if (winnerKey && typeof window.renderRankBadgeIcon === 'function') {
+      const crest = document.createElement('span');
+      crest.className = 'killFeedRankCrest';
+      crest.setAttribute('aria-hidden', 'true');
+      crest.innerHTML = window.renderRankBadgeIcon(winnerKey, { compact: true });
+      div.appendChild(crest);
+    }
     const text = document.createElement('span');
     text.className = 'killFeedText';
     text.textContent = textBits.join(' ');

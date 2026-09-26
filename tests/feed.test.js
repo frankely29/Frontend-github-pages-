@@ -94,7 +94,8 @@ function post(overrides = {}) {
   return Object.assign({
     id: 1,
     author: { user_id: 7, display_name: 'Marcus R.', handle: 'marcus',
-      city: 'New York', avatar_url: null, level: 24, platforms: ['fhv'] },
+      city: 'New York', avatar_url: null, level: 24,
+      rank_icon_key: 'band_005', platforms: ['fhv'] },
     body: "Lot's actually moving tonight.",
     image_url: null, image_thumb_url: null,
     city: 'Queens', lat: null, lng: null,
@@ -139,6 +140,25 @@ function build(options = {}) {
     // the browser would know it too -- setAuthUI runs long before the feed is
     // opened.
     isFeatureLocked: () => !!options.locked,
+    /* The badge module, as app.part5 exposes it. Ten prestiges of three, so
+       band_005 is Chimera II and the fifth level of thirty. */
+    TeamJoseoRank: options.noRank ? undefined : {
+      prestiges: () => new Array(10).fill(0).map((_, i) => ({ prestige: i + 1 })),
+      ranksPerPrestige: () => 3,
+      fromKey: (key) => {
+        const band = Number(String(key || '').replace(/^band_/, '')) || 1;
+        const names = ['Wyvern', 'Chimera', 'Hydra', 'Kraken', 'Warlord',
+          'Colossus', 'Titan', 'Celestial', 'Phoenix', 'Dragon'];
+        const roman = ['I', 'II', 'III'];
+        const prestige = Math.floor((band - 1) / 3) + 1;
+        const level = ((band - 1) % 3) + 1;
+        return { band, prestige, level, roman: roman[level - 1],
+          name: names[prestige - 1],
+          label: names[prestige - 1] + ' ' + roman[level - 1] };
+      },
+    },
+    renderRankBadgeIcon: (key) =>
+      '<div class="rankBadgeIconWrap" data-key="' + String(key) + '"></div>',
     TlcPaywallModule: { triggerCheckout: () => calls.push({ url: 'checkout' }) },
   };
   window.window = window;
@@ -265,20 +285,65 @@ test("a late response for a tab you left does not overwrite the tab you are on",
 // the card
 // --------------------------------------------------------------------------
 
-test('a card shows the name, level, handle, platform, age and city', () => {
+test('a card shows the name, rank, handle, platform, age and city', () => {
   const dom = build();
   const card = dom.api.buildCard(post());
   const text = card.textContent;
-  ['Marcus R.', 'LVL 24', '@marcus', 'FHV', '18m', 'Queens'].forEach((bit) => {
+  /* "Chimera II · 5" -- the rank the crest is showing, and where it sits on
+     the ladder of thirty. NOT "LVL 24", which was the XP engine's number and
+     matched nothing else a driver sees. */
+  ['Marcus R.', 'Chimera II · 5', '@marcus', 'FHV', '18m', 'Queens'].forEach((bit) => {
     assert.ok(text.includes(bit), `card is missing ${bit} — got: ${text}`);
   });
+  assert.ok(!/LVL\s*24/.test(text), `the engine's level is back on the card: ${text}`);
+});
+
+test('the author wears their crest', () => {
+  /* The artwork is the point of having painted thirty of them, and the feed
+     is the screen a driver spends the most time on. */
+  const dom = build();
+  const card = dom.api.buildCard(post());
+  const crest = card.querySelector('.feedRankCrest');
+  assert.ok(crest, 'the author has no crest beside their name');
+  assert.ok(/data-key="band_005"/.test(crest.innerHTML),
+    `the crest is drawn from the wrong key: ${crest.innerHTML}`);
+});
+
+test('a comment author wears one too', () => {
+  const dom = build();
+  const node = dom.api.buildComment(comment(1, {
+    author: { user_id: 7, display_name: 'Marcus R.', rank_icon_key: 'band_005' },
+  }), {});
+  assert.ok(node.querySelector('.feedRankCrest'),
+    'a comment author has no crest beside their name');
+});
+
+test('no rank key means no rank, not a made-up one', () => {
+  /* An older payload, or a progression cache that was cold when the page was
+     built. The name alone is honest; a number from the engine's scale is
+     not, and neither is a default crest nobody earned. */
+  const dom = build();
+  const card = dom.api.buildCard(post({
+    author: { user_id: 7, display_name: 'Marcus R.', level: 24, platforms: [] } }));
+  assert.ok(!card.querySelector('.feedRankCrest'), 'a crest was invented');
+  assert.ok(!/LVL|Level/.test(card.textContent),
+    `a level was invented: ${card.textContent}`);
+});
+
+test('no badge module means no rank either', () => {
+  /* app.part5 has not loaded. There is no ladder to consult, so there is
+     nothing true to say about the rank. */
+  const dom = build({ noRank: true });
+  const card = dom.api.buildCard(post());
+  assert.ok(!card.querySelector('.feedRankCrest'), 'a crest was drawn with no ladder loaded');
+  assert.ok(!/LVL/.test(card.textContent), card.textContent);
 });
 
 test('the card shows platform keys as words', () => {
   const dom = build();
   const card = dom.api.buildCard(post({
     author: { user_id: 7, display_name: 'A', handle: 'a', level: 1,
-      platforms: ['uber', 'black_car'] } }));
+      rank_icon_key: 'band_001', platforms: ['uber', 'black_car'] } }));
   assert.ok(card.textContent.includes('Uber Black car'), card.textContent);
 });
 
@@ -306,11 +371,16 @@ test('a driver with no level and no platform still gets a clean card', () => {
     'meta line starts or ends with a separator');
 });
 
-test('a level of 0 renders rather than vanishing', () => {
+test('the newest driver still wears their first rank', () => {
+  /* There is no level 0 on the ladder: everyone starts at Wyvern I, level 1
+     of thirty. The old card printed "LVL 0" from the engine's scale, which
+     reads as "this person has nothing" for someone who just signed up. */
   const dom = build();
   const card = dom.api.buildCard(post({
-    author: { user_id: 3, display_name: 'New Driver', level: 0, platforms: [] } }));
-  assert.ok(card.textContent.includes('LVL 0'), card.textContent);
+    author: { user_id: 3, display_name: 'New Driver', level: 0,
+      rank_icon_key: 'band_001', platforms: [] } }));
+  assert.ok(card.textContent.includes('Wyvern I · 1'), card.textContent);
+  assert.ok(!/LVL 0/.test(card.textContent), card.textContent);
 });
 
 test('the zone score uses the map legend bands', () => {

@@ -154,6 +154,26 @@
   line-height: 1.2;
 }
 
+/* The crest beside a driver's name in the challenge list -- who you are
+   about to take on, at a glance. 20px is a mark next to a name; the badge
+   renderer writes its own --rank-size inline, so it is asserted over.
+   Nothing behind it: the artwork carries its own frame and is keyed to
+   clean transparency. */
+.workBattlesRankCrest {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  vertical-align: -5px;
+  margin-left: 6px;
+}
+.workBattlesRankCrest .rankBadgeIconWrap {
+  width: 20px !important;
+  height: 20px !important;
+  background: none !important;
+  box-shadow: none !important;
+}
+
 .workBattlesUserSubline,
 .workBattlesCardMeta,
 .workBattlesStatus,

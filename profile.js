@@ -34,6 +34,19 @@
   // stops rather than the save failing on something already typed.
   var MAX_BIO = 200;
   var HANDLE_DEBOUNCE_MS = 350;
+  /* Ten prestiges of three. Read off the badge module where it has loaded so
+     there is one definition of the ladder's shape rather than two that drift
+     -- this is only the floor for a build that got here without it. */
+  var RANK_LADDER_LEVELS_FALLBACK = 30;
+  function ladderLevels() {
+    var api = window.TeamJoseoRank;
+    try {
+      if (api && api.prestiges && api.ranksPerPrestige) {
+        return api.prestiges().length * api.ranksPerPrestige();
+      }
+    } catch (_) {}
+    return RANK_LADDER_LEVELS_FALLBACK;
+  }
 
   var state = {
     target: null,      // user id, or null for "me"
@@ -360,19 +373,35 @@
     var rep = p.reputation || null;
     var repRows = [];
     if (rep) {
-      var level = num(rep.level);
-      if (level !== null) {
-        /* A rank_name of "Band 034" is the ladder's internal address, not a
-         * label. Where the badge module is loaded it derives "Gold IV" from
-         * the same key the badge is drawn from, so the two always agree. */
-        var repRank = "";
-        try {
-          var api = window.TeamJoseoRank;
-          var rawName = String(rep.rank_name || "").trim();
-          if (rawName && !/^band[\s_-]*\d+$/i.test(rawName)) repRank = rawName;
-          else if (api && rep.rank_icon_key) repRank = api.fromKey(rep.rank_icon_key).label;
-        } catch (_) {}
-        repRows.push([String(Math.round(level)),
+      /* The number here was the XP engine's level, out of a thousand -- so a
+       * driver on the second rank of ten prestiges read "37" in the box and
+       * "Wyvern II" under it, which are two answers to the same question and
+       * only one of them is a rank.
+       *
+       * It is the ladder position now: one of thirty, derived from the same
+       * key the name and the crest come from, so all three always agree. No
+       * key means no ladder to consult, and the row is left out rather than
+       * filled with a number from a scale the driver has never seen.
+       *
+       * A rank_name of "Band 034" is the ladder's internal address, not a
+       * label, so it is never shown even when the payload sends one. */
+      var repRank = "";
+      var repBand = null;
+      try {
+        var api = window.TeamJoseoRank;
+        var rawName = String(rep.rank_name || "").trim();
+        /* The server names the ranks -- that is deliberate, so the clients
+           cannot drift apart on what a rank is called. The key is only
+           consulted when the server sent nothing usable. */
+        if (rawName && !/^band[\s_-]*\d+$/i.test(rawName)) repRank = rawName;
+        if (api && rep.rank_icon_key) {
+          var resolved = api.fromKey(rep.rank_icon_key);
+          repBand = resolved.band;
+          if (!repRank) repRank = resolved.label;
+        }
+      } catch (_) {}
+      if (repBand !== null) {
+        repRows.push([String(repBand) + " / " + ladderLevels(),
           repRank ? "Level · " + repRank : "Level"]);
       }
       var trips = num(rep.trips_logged);
