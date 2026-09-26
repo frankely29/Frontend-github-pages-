@@ -1081,21 +1081,26 @@ html, body { height: 100%; margin: 0; padding: 0; background: #e5e5e5; }
 
     /* THE RANK YOU ARE WEARING
      *
-     * This replaced two lines of text -- the name and the level -- which were
-     * accurate and gave a driver no reason to care. A rank is meant to be worn,
-     * so the crest is the subject here at 96px, the name carries real weight,
-     * and underneath it the two things that turn standing somewhere into
-     * moving: the XP through this level, and the crest you are climbing toward.
+     * The crest is the subject here at 96px, the name carries real weight, and
+     * underneath it the two things that turn standing somewhere into moving:
+     * the XP through this level, and the crest you are climbing toward.
      *
-     * One gold (#d6b164) at several strengths on a dark ground, which is the
-     * same argument the Trip Saved card makes: a reward reads as expensive when
-     * it is restrained, and as a lottery ticket when it shouts. */
+     * NO CARD. This was a near-black panel with a gold border, and it was
+     * wrong twice over. It put a large dark box around a crest on a light
+     * translucent drawer -- the exact "background around the icon" this was
+     * asked not to have -- and it made the Ranks tab look like a different
+     * app from the panel it lives in. The crests are keyed to clean
+     * transparency and painted with their own frame, laurel and nameplate;
+     * they are already a finished object and do not need mounting on
+     * anything.
+     *
+     * So the hero is layout only: no fill, no border, no shadow. What
+     * separates it from the ladder below is space and a hairline, which is
+     * all it ever needed. */
     .rankHeroCard{
-      position:relative; isolation:isolate; display:flex; flex-direction:column; align-items:center;
-      text-align:center; gap:2px; padding:16px 14px 14px; border-radius:18px;
-      background:linear-gradient(168deg,rgba(9,13,24,.97),rgba(20,18,12,.95) 60%,rgba(74,54,18,.34) 100%);
-      border:1px solid rgba(214,177,100,.34); color:#e7ebf3;
-      box-shadow:0 12px 34px rgba(2,6,23,.3), inset 0 0 0 1px rgba(255,255,255,.04);
+      display:flex; flex-direction:column; align-items:center;
+      text-align:center; gap:2px; padding:4px 2px 12px;
+      background:none; border:0; box-shadow:none; color:#0f172a;
     }
     .rankHeroCrest{ display:grid; place-items:center; width:96px; height:96px; }
     /* !important for the same reason the ladder rows need it: the badge
@@ -1113,19 +1118,23 @@ html, body { height: 100%; margin: 0; padding: 0; background: #e5e5e5; }
        as a panel behind the crest rather than as light on it, and clipped
        into a hard square wherever an ancestor bounded it. The crests are
        keyed to clean transparency; nothing should be drawn around them. */
-    .rankHeroCrest .rankBadgeFrame{ filter:drop-shadow(0 5px 11px rgba(2,6,23,.55)); }
-    .rankHeroName{ margin-top:8px; font:900 21px/1.08 system-ui,-apple-system,Segoe UI,Roboto,Arial; color:#fff; letter-spacing:-.01em; }
-    .rankHeroSub{ font:700 10.5px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial; color:#a99a78; letter-spacing:.09em; text-transform:uppercase; margin-top:3px; }
-    .rankHeroLevel{ font:800 12px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial; color:#c9b489; margin-top:6px; }
+    /* A shadow cast onto the surface, not a glow around the crest -- offset,
+       dark, following the shield's alpha rather than its bounding box. On a
+       light panel it keeps the crest from looking pasted on. */
+    .rankHeroCrest .rankBadgeFrame{ filter:drop-shadow(0 4px 9px rgba(15,23,42,.28)); }
+    .rankHeroName{ margin-top:8px; font:900 21px/1.08 system-ui,-apple-system,Segoe UI,Roboto,Arial; color:#0f172a; letter-spacing:-.01em; }
+    .rankHeroSub{ font:700 10.5px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial; color:#7a5f22; letter-spacing:.09em; text-transform:uppercase; margin-top:3px; }
+    .rankHeroLevel{ font:800 12px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial; color:#475569; margin-top:6px; }
     /* A 5px rule, not a fat bar. It is reporting progress, not celebrating it. */
-    .rankHeroMeter{ width:100%; height:5px; border-radius:999px; background:rgba(214,177,100,.16); overflow:hidden; margin-top:8px; }
-    .rankHeroMeterFill{ height:100%; border-radius:999px; background:linear-gradient(90deg,#b9924a,#f0d49a); box-shadow:0 0 8px rgba(240,212,154,.5); transition:width .6s cubic-bezier(.2,.84,.2,1); }
-    .rankHeroXp{ font:700 10px/1.3 system-ui,-apple-system,Segoe UI,Roboto,Arial; color:#8f98b0; margin-top:5px; letter-spacing:.02em; }
+    .rankHeroMeter{ width:100%; height:5px; border-radius:999px; background:rgba(15,23,42,.10); overflow:hidden; margin-top:8px; }
+    .rankHeroMeterFill{ height:100%; border-radius:999px; background:linear-gradient(90deg,#c79a3f,#e8c274); transition:width .6s cubic-bezier(.2,.84,.2,1); }
+    .rankHeroXp{ font:700 10px/1.3 system-ui,-apple-system,Segoe UI,Roboto,Arial; color:#64748b; margin-top:5px; letter-spacing:.02em; }
     /* The goal, set apart by a hairline so it reads as a separate statement
-       from the rank above it rather than as more detail about it. */
+       from the rank above it rather than as more detail about it. A rule, not
+       a panel: nothing is filled in behind the crest it carries. */
     .rankHeroNext{
       display:flex; align-items:center; gap:10px; width:100%; margin-top:11px; padding-top:10px;
-      border-top:1px solid rgba(214,177,100,.2); text-align:left;
+      border-top:1px solid rgba(15,23,42,.10); text-align:left;
     }
     .rankHeroNext.topped{ justify-content:center; text-align:center; }
     .rankHeroNextIcon{ display:grid; place-items:center; width:46px; height:46px; flex:0 0 46px; }
@@ -1134,8 +1143,8 @@ html, body { height: 100%; margin: 0; padding: 0; background: #e5e5e5; }
        not yours yet, and showing it in full colour would say it was. */
     .rankHeroNextIcon .rankBadgeIconWrap{ filter:grayscale(.55) brightness(.82); }
     .rankHeroNextText{ min-width:0; }
-    .rankHeroNextTag{ font:800 9.5px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial; color:#d6b164; letter-spacing:.12em; text-transform:uppercase; }
-    .rankHeroNextName{ font:800 13px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial; color:#e7ebf3; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .rankHeroNextTag{ font:800 9.5px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial; color:#8a6b26; letter-spacing:.12em; text-transform:uppercase; }
+    .rankHeroNextName{ font:800 13px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial; color:#0f172a; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
     .leaderboardRankLadderList{ display:flex; flex-direction:column; gap:9px; }
 
@@ -1158,31 +1167,43 @@ html, body { height: 100%; margin: 0; padding: 0; background: #e5e5e5; }
     /* The creature you are on is named in gold; the ones behind you stay full
        strength because you took them. */
     .rankPrestigeGroup.here .rankPrestigeName{ color:#7a5f22; }
+    /* A row, not a card.
+     *
+     * Every one of these was a filled white pill with its own border, so
+     * scrolling the ladder meant scrolling thirty boxes each with a crest
+     * mounted inside it. The crests already carry a frame, a laurel and a
+     * nameplate -- they are finished objects, and framing a frame is what
+     * made the tab look cluttered. What separates one row from the next is a
+     * hairline. Nothing is filled in behind a crest. */
     .leaderboardRankLadderRow{
       display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:10px;
-      padding:7px 9px; border-radius:11px; border:1px solid rgba(0,0,0,0.07);
-      background:rgba(255,255,255,0.5);
+      padding:6px 8px; border:0; background:none;
+      border-bottom:1px solid rgba(15,23,42,.07);
     }
-    /* The driver's own prestige is the one row that has to be findable in a
-       scroll of ten, so it takes the only fill and the only ring on the list. */
+    .rankPrestigeGroup .leaderboardRankLadderRow:last-child{ border-bottom:0; }
+    /* The driver's own row has to be findable in a scroll of thirty, and it
+       gets there without a panel: a gold bar down its edge and its name in
+       gold. A mark beside the row, not a box around the crest.
+       The extra left padding clears the 3px bar so the crest keeps the same
+       gutter as every other row and the list edge stays straight. */
     .leaderboardRankLadderRow.current{
-      background:linear-gradient(120deg,rgba(255,255,255,.96),rgba(250,243,226,.96));
-      border-color:rgba(214,177,100,.6);
-      box-shadow:0 3px 14px rgba(122,95,34,.16), inset 0 0 0 1px rgba(255,255,255,.6);
+      box-shadow:inset 3px 0 0 0 #c79a3f; padding-left:11px;
     }
+    .leaderboardRankLadderRow.current .leaderboardRankLadderTitle{ color:#7a5f22; }
     /* EARNED, CURRENT, LOCKED
      *
      * Every row used to look the same, so the list could not answer either of
      * the two questions a driver actually has: what have I taken, and what is
-     * next. Three states answer both at a glance.
+     * next. Three states answer both at a glance -- and they are carried by
+     * the crest and the cell on the right, never by a fill behind them.
      *
      * Locked rows are dimmed, never hidden. A driver who can see the Dragon
      * waiting at the bottom of the list has a reason to climb; hiding it would
      * make the list tidier and the game emptier. 0.5 grayscale rather than 1 --
      * enough that it reads as not-yours, little enough that the creature is
      * still recognisable, which is the whole reason to show it. */
-    .leaderboardRankLadderRow.earned{ background:rgba(255,255,255,.62); border-color:rgba(22,163,74,.22); }
-    .leaderboardRankLadderRow.locked{ background:rgba(255,255,255,.3); border-color:rgba(0,0,0,.05); }
+    .leaderboardRankLadderRow.earned{ background:none; }
+    .leaderboardRankLadderRow.locked{ background:none; }
     .leaderboardRankLadderRow.locked .rankBadgeIconWrap{ filter:grayscale(.5) brightness(.9); opacity:.72; }
     .leaderboardRankLadderRow.locked .leaderboardRankLadderTitle{ color:#64748b; }
     .leaderboardRankLadderRow.locked .leaderboardRankLadderRange{ color:#94a3b8; }
