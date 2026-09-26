@@ -317,6 +317,54 @@ test('the driver\'s own prestige is findable in a list of ten', () => {
     'the current row has no style, so it is not findable');
 });
 
+test('the ladder never invents a prestige from a row\'s position', () => {
+  /* The bug a driver actually saw: "Warlord II · Prestige 14", and
+   * "Dragon III · Prestige 30". Thirty rows numbered 1..30 as if each were
+   * its own prestige, because the prestige was taken from the row's index
+   * when the payload's own field came back null.
+   *
+   * A position is an address in a list. It is not a prestige. */
+  const view = lift(PART3, 'function renderRankLadderView(');
+  /* Comments stripped first: the one above this code names the old
+   * `index + 1` to explain why it is gone, and a test that reads comments
+   * would fail on the explanation. */
+  const code = view.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+  assert.ok(!/index \+ 1|idx \+ 1|\bi \+ 1/.test(code),
+    'the prestige is being counted off the row position again');
+  assert.ok(/Number\(row\?\.prestige\)/.test(view),
+    'the row no longer reads the prestige the endpoint sent');
+  assert.ok(/fromKey \? fromKey\.prestige : 0/.test(view),
+    'there is no local fallback when the payload omits the prestige');
+  assert.ok(/Prestige \$\{prestige\} of \$\{prestigeCount\(\)\}/.test(view),
+    'the label no longer says which of how many');
+  /* And it says nothing rather than something wrong when neither source can
+   * answer -- a blank is a gap, a made-up number is a lie. */
+  assert.ok(/prestige \?/.test(view), 'a prestige of 0 still prints');
+});
+
+test('exactly one row is the driver\'s own', () => {
+  /* Three ranks share a prestige. Matching the prestige alone lit all three
+   * and struck the numeral chip on each. */
+  const view = lift(PART3, 'function renderRankLadderView(');
+  assert.ok(/prestige === myPrestige && rank === myRank/.test(view),
+    'the current row is matched on half the pair again');
+});
+
+test('the ladder badge is big enough to read', () => {
+  /* The artwork is a creature, a laurel, set stones and a struck nameplate.
+   * At the 34px this list used to draw, all of that is one smudge and thirty
+   * distinct crests look identical -- which is the whole reason they exist.
+   * The number may move; what must not come back is a size in the thirties. */
+  const rule = CSS.match(/\.leaderboardRankLadderIcon\{([^}]*)\}/);
+  assert.ok(rule, 'the ladder icon has no rule');
+  const px = Number((rule[1].match(/width:(\d+)px/) || [])[1]);
+  assert.ok(px >= 56, `the ladder badge is back down to ${px}px`);
+  /* The wrap carries its own inline size from the badge renderer, so the
+   * list's size only wins if it is asserted over it. */
+  assert.ok(/\.leaderboardRankLadderIcon \.rankBadgeIconWrap\{[^}]*width:\d+px!important/.test(CSS),
+    'the inline --rank-size is winning again, so the badge draws feed-sized');
+});
+
 test('the leaderboard ladder has styles at all', () => {
   /* The markup shipped without a stylesheet: every one of these classes was
    * rendering as an unstyled div. */
