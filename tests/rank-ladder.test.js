@@ -600,6 +600,8 @@ test('no surface anywhere prints the engine level at a driver', () => {
     ['the Trip Saved card', lift(PART5, 'function showPickupProgressReward(')],
     ['the XP milestone card', lift(PART5, 'function showLevelUpOverlay(')],
     ['the rank-up ceremony', lift(PART5, 'function showRankUpOverlay(')],
+    ['the battles list', lift(BATTLES, 'function ladderLevelLabel(')],
+    ['the battles rank chip', lift(BATTLES, 'function rankChipHtml(')],
   ];
   cases.forEach(([what, src]) => {
     const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
@@ -614,6 +616,14 @@ test('no surface anywhere prints the engine level at a driver', () => {
     .replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
   assert.ok(!/Promotion Unlocked/.test(milestone),
     'the XP step claims a promotion again');
+  /* The battles list took its level straight off the row, which is the
+     engine's. It reads the band off the rank key now, and says nothing at
+     all when there is no ladder loaded to read. */
+  [lift(BATTLES, 'function ladderLevelLabel('), lift(BATTLES, 'function rankChipHtml(')]
+    .forEach((src) => {
+      assert.ok(!/user\.level|user\?\.level/.test(src),
+        'the battles list prints the engine level again');
+    });
   assert.ok(/of \$\{RANK_BAND_COUNT\}/.test(milestone),
     'the XP step no longer states the level on the ladder scale');
 });
