@@ -367,6 +367,37 @@ test('the ladder badge is big enough to read', () => {
     'the inline --rank-size is winning again, so the badge draws feed-sized');
 });
 
+test('the Ranks tab puts no panel behind a crest', () => {
+  /* Reported twice. The first version of this screen mounted the hero crest
+     on a near-black card with a gold border, and every ladder row was a
+     filled white pill with its own border -- so scrolling the ladder meant
+     scrolling thirty boxes with a crest inside each one.
+     The crests already carry a frame, a laurel and a nameplate. They are
+     finished objects; framing a frame is what made the tab look cluttered.
+     Rows are separated by a hairline and nothing else. */
+  const rule = (sel) => {
+    const m = new RegExp(`\\${sel}\\{([^}]*)\\}`).exec(CSS);
+    assert.ok(m, `${sel} has no rule`);
+    return m[1];
+  };
+  const hero = rule('.rankHeroCard');
+  assert.ok(/background:none/.test(hero), 'the hero crest is mounted on a card again');
+  assert.ok(/border:0/.test(hero), 'the hero card has a border again');
+  assert.ok(/box-shadow:none/.test(hero), 'the hero card is lifted off the panel again');
+
+  const row = rule('.leaderboardRankLadderRow');
+  assert.ok(/background:none/.test(row), 'every ladder row is a filled pill again');
+  assert.ok(/border:0/.test(row), 'every ladder row is outlined again');
+  assert.ok(/border-bottom:1px/.test(row), 'the rows have nothing separating them');
+
+  /* And the marked row is marked WITHOUT a fill -- a bar beside it, not a
+     box around it. It still has to be findable; that is not in tension. */
+  const current = rule('.leaderboardRankLadderRow.current');
+  assert.ok(/inset 3px 0/.test(current), 'the current row lost its edge mark');
+  assert.ok(!/background:(?!none)/.test(current),
+    'the current row is filled in behind its crest again');
+});
+
 test('nothing is drawn around the hero crest either', () => {
   /* Same rule as the ceremony's: the artwork is keyed to clean transparency,
      so a zero-offset glow behind it is a panel, not light -- and it clips
