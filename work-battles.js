@@ -260,16 +260,30 @@
     return `<div class="workBattlesCard workBattlesSelectedCard">${userRowInnerHtml(state.selectedUser, { compact: true })}</div>`;
   }
 
+  /* The driver's level on the ladder -- one of thirty, ten prestiges of
+   * three -- taken from their rank key.
+   *
+   * The `level` field beside it belongs to the XP curve underneath, which is
+   * numbered to a thousand and is not a scale any driver has been shown.
+   * Printing it here put "Level 445" in a list next to crests that go up to
+   * thirty. Without the badge module there is no ladder to consult, so the
+   * level is left off rather than printed from the wrong scale. */
+  function ladderLevelLabel(user) {
+    const api = window.TeamJoseoRank;
+    if (!api || !user?.rankIcon) return '';
+    return ` • Level ${api.fromKey(user.rankIcon).band}`;
+  }
+
   function rankChipHtml(user) {
     const api = window.TeamJoseoRank;
     if (user?.rankIcon && api) {
       const rank = api.fromKey(user.rankIcon);
-      return `<span class="workBattlesRankBadge" title="Prestige ${rank.prestige}, level ${rank.level}">${escapeHtml(rank.label)}</span>`;
+      return `<span class="workBattlesRankBadge" title="Prestige ${rank.prestige}, rank ${rank.level}">${escapeHtml(rank.label)}</span>`;
     }
     if (user?.rankIcon) {
       return `<span class="workBattlesRankBadge" title="Rank">${escapeHtml(String(user.rankIcon).replace(/[_-]+/g, ' '))}</span>`;
     }
-    return user?.level ? `<span class="workBattlesRankBadge">Lv ${escapeHtml(String(user.level))}</span>` : '';
+    return '';
   }
 
   function renderAvatar(user, extraClass = '') {
@@ -292,7 +306,7 @@
       ${renderAvatar(user)}
       <span class="workBattlesUserMeta">
         <span class="workBattlesUserName">${escapeHtml(user?.displayName || 'Driver')}</span>
-        <span class="workBattlesUserSubline">${user?.online ? 'Online now' : 'Available'}${user?.level ? ` • Level ${escapeHtml(String(user.level))}` : ''}${selected ? ' • Selected' : ''}</span>
+        <span class="workBattlesUserSubline">${user?.online ? 'Online now' : 'Available'}${ladderLevelLabel(user)}${selected ? ' • Selected' : ''}</span>
       </span>
     </div>`;
   }
