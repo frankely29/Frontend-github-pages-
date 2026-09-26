@@ -469,14 +469,83 @@ test('every rank is earned, current or locked', () => {
   assert.ok(!/locked[\s\S]{0,40}display:none/.test(CSS), 'locked ranks are hidden instead of dimmed');
 });
 
-test('a locked row says how far away it is, not where it starts', () => {
-  /* The level a rank opens at is already the first number of the range on
-     the same line. The distance from where the driver is standing is the one
-     number nothing else on the screen can give them. */
+test('a locked row says how far away it is, in ladder levels', () => {
+  /* The distance from where the driver is standing is the one number nothing
+     else on the row can give them -- and it has to be counted in the
+     thirty-level ladder, not the engine's thousand. Wyvern III from Wyvern
+     II is +1, because it is the very next level. It used to read +33. */
   const view = lift(PART3, 'function renderRankLadderView(');
-  assert.ok(/Math\.floor\(opensAt\) - mine\.level/.test(view),
-    'the locked cell no longer measures distance from the driver');
-  assert.ok(/`\+\$\{away\}`|\+\$\{away\}/.test(view), 'the distance is not shown as a gain');
+  assert.ok(/item\.band - myBand/.test(view),
+    'the locked cell measures distance on the engine scale again');
+  assert.ok(!/opensAt/.test(view), 'the row is reading XP start levels again');
+  assert.ok(/\+\$\{away\}/.test(view), 'the distance is not shown as a gain');
+});
+
+test('the Ranks tab never prints a number from the engine scale', () => {
+  /* THE COMPLAINT, PINNED.
+   *
+   * The ladder is ten prestiges of three ranks: thirty levels, and a driver
+   * on the second one is on level 2. Underneath it there is an XP curve
+   * numbered to a thousand which decides when they advance -- an engine, not
+   * something to show anyone. It was leaking out everywhere: a rank labelled
+   * "Levels 34-66", a driver on rank 2 of 30 told they were level 37, and
+   * the rank directly above them described as "30 levels to go".
+   *
+   * Every level a driver reads on this tab is a band index out of thirty. */
+  const view = lift(PART3, 'function renderRankLadderView(');
+  const hero = lift(PART3, 'function renderRankHeroCard(');
+
+  assert.ok(/Level \$\{item\.band\} of \$\{ladderLevelCount\(\)\}/.test(view),
+    'a ladder row no longer states its level on the ladder scale');
+  assert.ok(/Level \$\{myBand\} of \$\{ladderLevelCount\(\)\}/.test(hero),
+    'the hero no longer states the driver\'s level on the ladder scale');
+
+  /* mine.level is the engine's level. Nothing rendered may print it. */
+  [['the ladder rows', view], ['the hero card', hero]].forEach(([what, src]) => {
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+    assert.ok(!/Level \$\{mine\.level\}|\$\{mine\.level \+ 1\}/.test(code),
+      `${what} print the engine's level again`);
+  });
+
+  /* And the formatter that only ever produced "Levels 34-66" is gone, not
+     merely unused -- left in place it is an invitation to put it back. */
+  assert.ok(!/function renderLevelRange\(/.test(PART3),
+    'renderLevelRange is back, which means the engine range can be printed again');
+  assert.ok(/renderLevelRange is gone/.test(PART3),
+    'the note saying why it was removed is gone, so it will come back');
+});
+
+test('the meter measures the rank, not an XP level', () => {
+  /* A rank spans many XP levels, so a bar showing the XP level sat nearly
+     full while the rank it was drawn under had barely started -- and its
+     label named a level from the engine's thousand ("119 XP to Level 38").
+     A percentage has no scale to leak, and naming the rank it counts toward
+     is the only label that says what filling the bar gets you. */
+  const hero = lift(PART3, 'function renderRankHeroCard(');
+  assert.ok(/myRankProgress\(/.test(hero), 'the meter is measuring an XP level again');
+  assert.ok(/% to \$\{esc\(nextName\)\}/.test(hero),
+    'the meter no longer names the rank it is counting toward');
+
+  /* The maths, exercised rather than read. */
+  const sandbox = { state: { myProgression: null, myRow: null } };
+  vm.createContext(sandbox);
+  vm.runInContext(lift(PART3, 'function myLevelXpProgress('), sandbox);
+  vm.runInContext(lift(PART3, 'function myRankProgress('), sandbox);
+  const row = { start_level: 34, end_level: 66 };
+  // Standing on the first XP level of the rank, with that level half spent:
+  // barely into a 33-level rank, however full the XP level looks.
+  sandbox.state.myProgression = {
+    level: 34, total_xp: 150, current_level_xp: 100, next_level_xp: 200,
+  };
+  const early = sandbox.myRankProgress(row);
+  assert.ok(early > 0 && early < 0.05, `a rank barely begun reads as ${early}`);
+  // Standing on its last XP level, nearly spent: nearly there.
+  sandbox.state.myProgression = {
+    level: 66, total_xp: 190, current_level_xp: 100, next_level_xp: 200,
+  };
+  const late = sandbox.myRankProgress(row);
+  assert.ok(late > 0.95, `a rank nearly finished reads as ${late}`);
+  assert.strictEqual(sandbox.myRankProgress({}), null, 'a row with no span still draws a bar');
 });
 
 test('nothing in a row is said twice', () => {
@@ -509,9 +578,44 @@ test('a leaderboard row spells the division out, because its badge is 26px', () 
 test('the games list names the prestige beside the level', () => {
   const fn = lift(PART4, 'function gamesUserRankLine(');
   assert.ok(/TeamJoseoRank/.test(fn), 'the games list no longer resolves a label');
-  assert.ok(/Level \$\{Math\.floor\(level\)\}/.test(fn), 'the level is gone');
-  assert.ok(/return hasLevel \? `Level/.test(fn),
-    'there is no fallback for a build without the badge module');
+  /* The ladder level, off the rank key -- not the row's `level`, which is the
+     XP engine's and put "Level 34" beside a rank that is second of thirty. */
+  assert.ok(/Level \$\{rank\.band\}/.test(fn), 'the level is gone');
+  assert.ok(!/Math\.floor\(level\)/.test(fn),
+    'the games list prints the engine level again');
+  /* Without the badge module there is no ladder to consult, so it says
+     "Driver" rather than a number from the wrong scale. */
+  assert.ok(/return 'Driver'/.test(fn),
+    'a build without the badge module invents a level again');
+});
+
+test('no surface anywhere prints the engine level at a driver', () => {
+  /* The complaint was about the Ranks tab, but the same thousand-point
+     number was on four other screens, and a profile reading "Level 37"
+     beside a Ranks tab reading "Level 2 of 30" is worse than either alone.
+     Each of these now derives its level from the rank key. */
+  const cases = [
+    ['the games list', lift(PART4, 'function gamesUserRankLine(')],
+    ['the driver profile', lift(PART5, 'function renderDriverProgressionSection(')],
+    ['the Trip Saved card', lift(PART5, 'function showPickupProgressReward(')],
+    ['the XP milestone card', lift(PART5, 'function showLevelUpOverlay(')],
+    ['the rank-up ceremony', lift(PART5, 'function showRankUpOverlay(')],
+  ];
+  cases.forEach(([what, src]) => {
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+    assert.ok(!/Level \$\{safeLevel \+ 1\}|Level \$\{safeLevel\}`|Next Level: \$\{safeLevel/.test(code),
+      `${what} prints the engine level again`);
+    assert.ok(!/Level \$\{safePrevLevel\}/.test(code),
+      `${what} prints an engine level transition again`);
+  });
+  /* And the XP-step card no longer claims a promotion: on a thirty-level
+     ladder a promotion is a rank change, which the ceremony owns. */
+  const milestone = lift(PART5, 'function showLevelUpOverlay(')
+    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+  assert.ok(!/Promotion Unlocked/.test(milestone),
+    'the XP step claims a promotion again');
+  assert.ok(/of \$\{RANK_BAND_COUNT\}/.test(milestone),
+    'the XP step no longer states the level on the ladder scale');
 });
 
 // --------------------------------------------------------------------------

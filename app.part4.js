@@ -1084,19 +1084,23 @@
     return { ok: missing.length === 0, gameType: gameType || 'unknown', missing };
   }
 
-  /* "Level 34" alone says nothing a driver can place. "Gold IV · Level 34"
-   * says which prestige they are in and how far through it, which is what the
-   * badge beside it is already showing. */
+  /* "Level 34" alone says nothing a driver can place. "Wyvern II · Level 2"
+   * says which prestige they are in and how far through the ladder, which is
+   * what the badge beside it is already showing.
+   *
+   * The level is the LADDER level, one of thirty, taken from the rank key.
+   * The row's own `level` field is the XP engine's, numbered to a thousand;
+   * printing it here put "Level 34" beside a rank that is second of thirty.
+   * Without the badge module there is no ladder to consult, so the level is
+   * left off rather than printed from the wrong scale. */
   function gamesUserRankLine(row = {}) {
-    const level = Number(row?.level);
-    const hasLevel = Number.isFinite(level) && level > 0;
     const api = window.TeamJoseoRank;
     const key = row?.rank_icon_key || row?.rankIconKey;
     if (api && key) {
       const rank = api.fromKey(key);
-      return hasLevel ? `${rank.label} · Level ${Math.floor(level)}` : rank.label;
+      return `${rank.label} · Level ${rank.band}`;
     }
-    return hasLevel ? `Level ${Math.floor(level)}` : 'Driver';
+    return 'Driver';
   }
 
   function renderChallengeAvatar(row = {}) {
