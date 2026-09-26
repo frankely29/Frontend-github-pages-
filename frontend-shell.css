@@ -1109,9 +1109,11 @@ html, body { height: 100%; margin: 0; padding: 0; background: #e5e5e5; }
      * shadow would draw a rectangle's halo behind a shield shape, while
      * drop-shadow follows the alpha and lights the crest itself. */
     .rankHeroCrest .rankBadgeIconWrap{ width:96px!important; height:96px!important; }
-    .rankHeroCrest .rankBadgeFrame{
-      filter:drop-shadow(0 6px 13px rgba(2,6,23,.6)) drop-shadow(0 0 13px rgba(214,177,100,.34));
-    }
+    /* One tight shadow and no halo. The gold glow that used to be here read
+       as a panel behind the crest rather than as light on it, and clipped
+       into a hard square wherever an ancestor bounded it. The crests are
+       keyed to clean transparency; nothing should be drawn around them. */
+    .rankHeroCrest .rankBadgeFrame{ filter:drop-shadow(0 5px 11px rgba(2,6,23,.55)); }
     .rankHeroName{ margin-top:8px; font:900 21px/1.08 system-ui,-apple-system,Segoe UI,Roboto,Arial; color:#fff; letter-spacing:-.01em; }
     .rankHeroSub{ font:700 10.5px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial; color:#a99a78; letter-spacing:.09em; text-transform:uppercase; margin-top:3px; }
     .rankHeroLevel{ font:800 12px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial; color:#c9b489; margin-top:6px; }
