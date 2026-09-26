@@ -78,6 +78,13 @@
     myRow: null,
     badges: [],
     overview: null,
+    /* The XP the Ranks screen needs to say how close you are.
+     *
+     * /leaderboard/me carries the level and the rank but no XP, so the ladder
+     * could only ever say which rank you are ON -- never how far through it
+     * you are, which is the part that makes a climb feel like a climb.
+     * /leaderboard/progression/me has the thresholds, so it is fetched too. */
+    myProgression: null,
     rankLadder: [],
     rankLadderLoaded: false,
     status: '',
@@ -263,7 +270,10 @@
   }
 
   function pickMyProgressionForLadder() {
-    const myLevel = Number(state.myRow?.level);
+    /* The progression endpoint's level wins over the leaderboard row's. They
+       should agree, but the row is scoped to a metric and a period and the
+       progression is the driver's actual standing in the game. */
+    const myLevel = Number(state.myProgression?.level ?? state.myRow?.level);
     const safeLevel = Number.isFinite(myLevel) && myLevel > 0 ? Math.floor(myLevel) : 1;
     const ladder = Array.isArray(state.rankLadder) ? state.rankLadder : [];
     const matched = ladder.find((row) => {
@@ -271,15 +281,69 @@
       const end = Number(row?.end_level);
       return Number.isFinite(start) && Number.isFinite(end) && safeLevel >= start && safeLevel <= end;
     }) || null;
-    const key = state.myRow?.rank_icon_key || matched?.rank_icon_key || 'band_001';
+    const key = state.myProgression?.rank_icon_key || state.myRow?.rank_icon_key || matched?.rank_icon_key || 'band_001';
     const api = rankApi();
     const rank = api ? api.fromKey(key) : null;
     return {
       level: safeLevel,
       rank,
-      rankName: safeRankName(state.myRow?.rank_name || state.myRow?.title || matched?.rank_name, key),
+      rankName: safeRankName(
+        state.myProgression?.rank_name || state.myRow?.rank_name || state.myRow?.title || matched?.rank_name,
+        key,
+      ),
       rankIconKey: key,
     };
+  }
+
+  /* A number a driver reads at a glance. 12,480 rather than 12480. */
+  function formatXp(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return '—';
+    return Math.max(0, Math.floor(n)).toLocaleString('en-US');
+  }
+
+  /* How far through the current LEVEL the driver is, from the XP thresholds.
+   *
+   * Returns null rather than a zero bar when the numbers are not there: an
+   * empty meter reads as "you have made no progress", which is a lie when the
+   * truth is "we could not load it". At max level it returns a full bar,
+   * because that is not missing data, that is the end of the climb. */
+  function myLevelXpProgress() {
+    const p = state.myProgression;
+    if (!p || typeof p !== 'object') return null;
+    const total = Number(p.total_xp);
+    const floor = Number(p.current_level_xp);
+    const ceil = Number(p.next_level_xp);
+    if (!Number.isFinite(total)) return null;
+    if (p.max_level_reached || !Number.isFinite(ceil)) {
+      return { pct: 100, maxed: true, into: 0, span: 0, remaining: 0, total };
+    }
+    if (!Number.isFinite(floor) || ceil <= floor) return null;
+    const into = Math.max(0, total - floor);
+    const span = ceil - floor;
+    return {
+      pct: Math.max(2, Math.min(100, (into / span) * 100)),
+      maxed: false,
+      into,
+      span,
+      remaining: Math.max(0, ceil - total),
+      total,
+    };
+  }
+
+  /* The band a ladder row sits on, 1..30.
+   *
+   * Derived from the prestige/rank pair rather than from the row's position,
+   * for the same reason the prestige label is: a position is an address in a
+   * list and says nothing true about the ladder. This is what sorts a row into
+   * earned, current or locked. */
+  function bandOfLadderRow(row, api) {
+    const fromKey = (api && row?.rank_icon_key) ? api.fromKey(row.rank_icon_key) : null;
+    if (fromKey) return fromKey.band;
+    const prestige = Number(row?.prestige);
+    const rank = Number(row?.rank);
+    if (!Number.isFinite(prestige) || !Number.isFinite(rank)) return 0;
+    return ((prestige - 1) * ranksPerPrestige()) + rank;
   }
 
   function renderRankLadderView() {
@@ -301,15 +365,45 @@
      * truth about anything and is not used. */
     const api = rankApi();
     const myRank = mine.rank ? mine.rank.level : 0;
-    const rows = ladder.map((row) => {
+    const myBand = mine.rank ? mine.rank.band : 0;
+
+    /* WHAT A ROW HAS TO SAY
+     *
+     * A flat list of thirty rows that all look alike tells a driver nothing
+     * about their own climb. It cannot answer the two questions they actually
+     * have -- what have I taken, and what is next -- so every row reads as
+     * reference material rather than as a record of anything.
+     *
+     * So a row is now in one of three states, and they are visibly different:
+     * EARNED (behind you, kept in full colour, marked), CURRENT (the one you
+     * are standing on), LOCKED (ahead of you, dimmed but never hidden). The
+     * locked ones are the point: a driver who can see the Dragon at the top of
+     * the list, greyed and waiting, has a reason to climb. Hiding them would
+     * make the list tidier and the game emptier.
+     */
+    const decorated = ladder.map((row) => {
       const fromKey = (api && row?.rank_icon_key) ? api.fromKey(row.rank_icon_key) : null;
       const prestige = Number(row?.prestige) || (fromKey ? fromKey.prestige : 0);
       const rank = Number(row?.rank) || (fromKey ? fromKey.level : 0);
+      const band = bandOfLadderRow(row, api);
       /* Both halves of the pair, so exactly one row lights up. Matching on
        * the prestige alone marked all three of its ranks as the driver's own
        * and struck the same numeral chip on each -- three "current" rows in a
        * list whose whole job is to show which single one you are standing on. */
       const isCurrent = prestige === myPrestige && rank === myRank;
+      const earned = !isCurrent && !!band && !!myBand && band < myBand;
+      const locked = !isCurrent && !earned;
+      return { row, prestige, rank, band, isCurrent, earned, locked };
+    });
+
+    /* Nothing in a row repeats anything else in it: the title carries the
+       rank ("Warlord II" IS rank 2), the heading above carries the prestige,
+       the line under the title carries the levels, and the cell on the right
+       carries the one thing none of them can -- how it stands relative to the
+       driver. An earlier draft said the rank in the title AND in the subtitle
+       AND in the pips, which is a row shouting one fact three times. */
+    const renderLadderRow = (item) => {
+      const { row, isCurrent, earned, locked } = item;
       const beast = String(row?.beast || '').trim();
       const pips = isCurrent && mine.rank
         ? `<div class="leaderboardRankPips" aria-hidden="true">${
@@ -317,27 +411,160 @@
               `<i class="${i < mine.rank.level ? 'on' : ''}"></i>`).join('')
           }</div>`
         : '';
-      return `<div class="leaderboardRankLadderRow${isCurrent ? ' current' : ''}">
+      /* The right-hand cell carries the state, and it has to carry something
+         the rest of the row does not already say. A tick for what is taken;
+         the numeral for where you stand; and for what is ahead, the DISTANCE
+         -- "+18" levels from where the driver is now.
+         The first draft printed the level the rank opens at, which the range
+         on the same line already begins with. Distance is the one number
+         nothing else on the screen can give, and it is the one that makes a
+         far-off rank feel reachable or not. */
+      let aside = '';
+      if (isCurrent) {
+        aside = `<span class="leaderboardRankLadderChip">${esc(mine.rank ? mine.rank.roman : '')}</span>`;
+      } else if (earned) {
+        aside = '<span class="leaderboardRankEarned" title="Earned">✓</span>';
+      } else {
+        const opensAt = Number(row?.start_level);
+        const away = Number.isFinite(opensAt) ? Math.max(0, Math.floor(opensAt) - mine.level) : null;
+        aside = away === null
+          ? ''
+          : `<span class="leaderboardRankLocked" title="${away} ${away === 1 ? 'level' : 'levels'} away">+${away}</span>`;
+      }
+      const cls = ['leaderboardRankLadderRow'];
+      if (isCurrent) cls.push('current');
+      if (earned) cls.push('earned');
+      if (locked) cls.push('locked');
+      return `<div class="${cls.join(' ')}">
         <div class="leaderboardRankLadderIcon">${renderRankIcon(row?.rank_icon_key)}</div>
         <div class="leaderboardRankLadderText">
           <div class="leaderboardRankLadderTitle">${esc(safeRankName(row?.rank_name || row?.title, row?.rank_icon_key))}${beast ? ` <span class="leaderboardRankBeast">${esc(beast)}</span>` : ''}</div>
-          <div class="leaderboardRankLadderRange">${prestige ? `Prestige ${prestige} of ${prestigeCount()} · ` : ''}${esc(renderLevelRange(row?.start_level, row?.end_level))}</div>
+          <div class="leaderboardRankLadderRange">${esc(renderLevelRange(row?.start_level, row?.end_level))}</div>
           ${pips}
         </div>
-        ${isCurrent ? `<span class="leaderboardRankLadderChip">${esc(mine.rank ? mine.rank.roman : '')}</span>` : ''}
+        ${aside}
       </div>`;
-    }).join('');
+    };
 
-    const mineSub = mine.rank
-      ? `Prestige ${mine.rank.prestige} of ${prestigeCount()} · Rank ${mine.rank.level} of ${ranksPerPrestige()}`
-      : `Level ${mine.level}`;
+    /* TEN GROUPS, NOT THIRTY ROWS
+     *
+     * Thirty rows in a column is a table. Ten named prestiges of three is the
+     * shape of the game, and a driver scrolling it should feel they are moving
+     * through creatures rather than through line items. Grouping is also the
+     * honest way to show "Prestige 5 of 10" -- once, as a heading over the
+     * three ranks it contains, instead of on all three of them. That is why
+     * the row above says "Rank 2 of 3" and not the prestige: under a heading
+     * that already reads PRESTIGE 5 OF 10, repeating it three times is the
+     * noise grouping exists to remove. */
+    const groups = [];
+    decorated.forEach((item) => {
+      const last = groups[groups.length - 1];
+      if (last && last.prestige === item.prestige) last.items.push(item);
+      else groups.push({ prestige: item.prestige, items: [item] });
+    });
+
+    const renderGroup = (group) => {
+      const first = group.items[0];
+      const name = first ? safeRankName(first.row?.rank_name || first.row?.title, first.row?.rank_icon_key) : '';
+      /* The prestige's name without its numeral: the heading is the creature,
+         the rows underneath are its three ranks. */
+      const creature = String(name).replace(/\s+[IVX]+$/, '');
+      const isHere = group.items.some((i) => i.isCurrent);
+      const allEarned = group.items.every((i) => i.earned);
+      const stateLabel = isHere ? 'You are here' : (allEarned ? 'Complete' : '');
+      const cls = ['rankPrestigeGroup'];
+      if (isHere) cls.push('here');
+      if (allEarned) cls.push('done');
+      return `<div class="${cls.join(' ')}">
+        <div class="rankPrestigeHead">
+          <span class="rankPrestigeName">${esc(creature)}</span>
+          ${group.prestige ? `<span class="rankPrestigeNo">Prestige ${group.prestige} of ${prestigeCount()}</span>` : ''}
+          ${stateLabel ? `<span class="rankPrestigeState">${esc(stateLabel)}</span>` : ''}
+        </div>
+        ${group.items.map(renderLadderRow).join('')}
+      </div>`;
+    };
+
     return `<div class="leaderboardRanksWrap">
-      <div class="myRankCard">
-        <div class="leaderboardSectionTitle">My Progression</div>
-        <div class="myRankRow"><span>${renderRankIcon(mine.rankIconKey)} ${esc(mine.rankName)}</span><span>Level ${mine.level}</span></div>
-        <div class="myRankRow leaderboardRankSub"><span>${esc(mineSub)}</span></div>
-      </div>
-      <div class="leaderboardRankLadderList">${rows || '<div class="leaderboardEmpty">Rank ladder unavailable.</div>'}</div>
+      ${renderRankHeroCard(mine, decorated)}
+      <div class="leaderboardRankLadderList">${
+        groups.length ? groups.map(renderGroup).join('') : '<div class="leaderboardEmpty">Rank ladder unavailable.</div>'
+      }</div>
+    </div>`;
+  }
+
+  /* THE CARD AT THE TOP OF THE RANKS SCREEN
+   *
+   * It used to be two lines of text: the rank name and the level. Accurate and
+   * completely flat -- it told a driver where they stood and gave them no
+   * reason to care. A rank is meant to be worn.
+   *
+   * So the crest is the subject, at a size where the artwork reads, and under
+   * it the two things that make standing somewhere feel like moving: how far
+   * through this level the XP has carried them, and the crest they are
+   * climbing toward with the number of levels left to reach it. "4 levels to
+   * Warlord III", with Warlord III's own artwork beside it, is a goal. "Level
+   * 431" is a fact.
+   */
+  function renderRankHeroCard(mine, decorated) {
+    const xp = myLevelXpProgress();
+    const total = prestigeCount();
+
+    /* The next rank is the next band up, read off the ladder rather than
+       computed -- the top band absorbs the remainder of the level range, so
+       arithmetic here would be wrong at exactly the place it matters most. */
+    const currentIndex = decorated.findIndex((i) => i.isCurrent);
+    const next = currentIndex > -1 ? decorated[currentIndex + 1] : null;
+    const atTop = currentIndex > -1 && !next;
+
+    const meter = xp
+      ? `<div class="rankHeroMeter" role="img" aria-label="${xp.maxed
+          ? 'Maximum level reached'
+          : `${Math.round(xp.pct)} percent through level ${mine.level}`}">
+          <div class="rankHeroMeterFill" style="width:${xp.pct.toFixed(1)}%"></div>
+        </div>
+        <div class="rankHeroXp">${xp.maxed
+          ? `${esc(formatXp(xp.total))} XP · every level earned`
+          : `${esc(formatXp(xp.into))} / ${esc(formatXp(xp.span))} XP · ${esc(formatXp(xp.remaining))} to Level ${mine.level + 1}`
+        }</div>`
+      : '';
+
+    let nextBlock = '';
+    if (next) {
+      const nextName = safeRankName(next.row?.rank_name || next.row?.title, next.row?.rank_icon_key);
+      const opensAt = Number(next.row?.start_level);
+      const toGo = Number.isFinite(opensAt) ? Math.max(0, Math.floor(opensAt) - mine.level) : null;
+      const stepLabel = toGo === null
+        ? 'Next rank'
+        : (toGo <= 0 ? 'Unlocked — next rank' : `${toGo} ${toGo === 1 ? 'level' : 'levels'} to go`);
+      nextBlock = `<div class="rankHeroNext">
+        <div class="rankHeroNextIcon">${renderRankIcon(next.row?.rank_icon_key)}</div>
+        <div class="rankHeroNextText">
+          <div class="rankHeroNextTag">${esc(stepLabel)}</div>
+          <div class="rankHeroNextName">${esc(nextName)}</div>
+        </div>
+      </div>`;
+    } else if (atTop) {
+      /* The end of the ladder is an achievement, not a missing card. */
+      nextBlock = `<div class="rankHeroNext topped">
+        <div class="rankHeroNextText">
+          <div class="rankHeroNextTag">Top of the ladder</div>
+          <div class="rankHeroNextName">Nothing above you</div>
+        </div>
+      </div>`;
+    }
+
+    const sub = mine.rank
+      ? `Prestige ${mine.rank.prestige} of ${total} · Rank ${mine.rank.level} of ${ranksPerPrestige()}`
+      : `Level ${mine.level}`;
+
+    return `<div class="rankHeroCard">
+      <div class="rankHeroCrest">${renderRankIcon(mine.rankIconKey)}</div>
+      <div class="rankHeroName">${esc(mine.rankName)}</div>
+      <div class="rankHeroSub">${esc(sub)}</div>
+      <div class="rankHeroLevel">Level ${mine.level}</div>
+      ${meter}
+      ${nextBlock}
     </div>`;
   }
 
@@ -363,9 +590,15 @@
       const name = row?.display_name || row?.name || row?.user_name || `Driver ${rank}`;
       const value = row?.metric_value;
       const badge = strictBadgeCode(row?.badge_code);
-      const rowClass = rank <= 3 && !options.compact ? ` leaderboardTop${rank}` : '';
+      const onPodium = rank <= 3 && !options.compact;
+      const rowClass = onPodium ? ` leaderboardTop${rank}` : '';
+      /* On the podium the position is struck into a medal, and a medal that
+         says "#1" wastes a third of its face on a character nobody needs:
+         inside a gold disc at the top of a leaderboard, the 1 is unambiguous.
+         Everywhere else the hash is what makes a bare number read as a
+         position rather than a count. */
       return `<div class="leaderboardRow${rowClass}">
-        <span class="leaderboardRank">#${rank}</span>
+        <span class="leaderboardRank">${onPodium ? rank : `#${rank}`}</span>
         <span class="leaderboardNameWrap">
           <span class="leaderboardName" title="${esc(name)}">${esc(name)}</span>
           ${levelTitleLine(row?.level, row?.rank_name || row?.title, row?.rank_icon_key)}
@@ -442,6 +675,7 @@
       state.myRow = null;
       state.badges = [];
       state.overview = null;
+      state.myProgression = null;
       state.rankLadder = createRankLadderFallback();
       state.rankLadderLoaded = true;
       state.status = 'Sign in to view leaderboard.';
@@ -462,17 +696,21 @@
       if (!state.rankLadderLoaded) {
         await loadRankLadder().catch(() => createRankLadderFallback());
       }
-      const [boardRes, meRes, badgesRes, overviewRes] = await Promise.all([
+      const [boardRes, meRes, badgesRes, overviewRes, progressionRes] = await Promise.all([
         boardPromise,
         getAuth(`/leaderboard/me?metric=${metric}&period=${period}`),
         getAuth('/leaderboard/badges/me').catch(() => ({ badges: [] })),
         getAuth('/leaderboard/overview/me').catch(() => null),
+        /* Swallowed rather than fatal: without it the ladder loses its
+           progress meter and keeps everything else. */
+        getAuth('/leaderboard/progression/me').catch(() => null),
       ]);
 
       state.rows = Array.isArray(boardRes?.rows) ? boardRes.rows : [];
       state.myRow = meRes?.row || null;
       state.badges = Array.isArray(badgesRes?.badges) ? badgesRes.badges : [];
       state.overview = overviewRes && typeof overviewRes === 'object' ? overviewRes : null;
+      state.myProgression = progressionRes?.progression || null;
       state.status = '';
       state.statusType = '';
     } catch (err) {
@@ -480,6 +718,7 @@
       state.myRow = null;
       state.badges = [];
       state.overview = null;
+      state.myProgression = null;
       if (!state.rankLadderLoaded) {
         state.rankLadder = createRankLadderFallback();
         state.rankLadderLoaded = true;

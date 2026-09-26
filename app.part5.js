@@ -82,6 +82,72 @@
       .levelUpTitle{font-size:24px;font-weight:900;line-height:1.04;color:#fff}
       .levelUpSub{font-size:15px;font-weight:800;color:#c7d2fe}
       .levelUpXp{font-size:13px;font-weight:800;color:#93c5fd}
+      /* THE RANK-UP CEREMONY
+       *
+       * A level-up happens up to a thousand times. A rank-up happens thirty
+       * times in a driver's whole career, and a prestige three times fewer
+       * than that. Until now both wore the same blue card that says
+       * "Promotion Unlocked", so the rarest thing in the game looked exactly
+       * like the most common one, and the crest that was just unlocked --
+       * painted artwork, one of only thirty -- went by at 74px in the corner
+       * of a horizontal card.
+       *
+       * So this is built to be structurally different, not just recoloured:
+       * the crest is centred and large because the crest IS the reward, the
+       * card is portrait rather than landscape, and the name you left is
+       * shown giving way to the name you earned. A driver who sees this knows
+       * without reading it that something rarer just happened.
+       *
+       * It follows the Trip Saved card's argument rather than a slot
+       * machine's: one gold (#d6b164) at several strengths, a hairline, a
+       * light-weight rule. Expensive, not loud. */
+      #rankUpOverlayRoot{position:fixed;inset:0;z-index:9846;display:none;pointer-events:none;align-items:center;justify-content:center;padding:20px;background:rgba(2,6,23,0);transition:background .5s ease}
+      #rankUpOverlayRoot.open{display:flex;background:rgba(2,6,23,.62)}
+      .rankUpOverlayCard{position:relative;isolation:isolate;width:min(330px,calc(100vw - 32px));background:linear-gradient(168deg,rgba(9,13,24,.98),rgba(20,18,12,.96) 58%,rgba(74,54,18,.42) 100%);border:1px solid rgba(214,177,100,.46);border-radius:26px;box-shadow:0 26px 70px rgba(2,6,23,.74),0 0 54px rgba(214,177,100,.20),inset 0 0 0 1px rgba(255,255,255,.05);padding:26px 22px 22px;color:#e7ebf3;display:flex;flex-direction:column;align-items:center;text-align:center;gap:3px;opacity:0;transform:translateY(20px) scale(.9);transition:opacity .36s ease,transform .52s cubic-bezier(.18,.85,.24,1.2)}
+      #rankUpOverlayRoot.open .rankUpOverlayCard{opacity:1;transform:translateY(0) scale(1)}
+      /* The rays sit behind the crest and turn once. A crest that arrives on
+         a still background arrives; one that arrives on a turning one is
+         presented. */
+      .rankUpRays{position:absolute;left:50%;top:0;width:210px;height:210px;margin-left:-105px;margin-top:2px;z-index:-1;opacity:0;background:conic-gradient(from 0deg,rgba(214,177,100,.34) 0deg,rgba(214,177,100,0) 18deg,rgba(214,177,100,.34) 36deg,rgba(214,177,100,0) 54deg,rgba(214,177,100,.34) 72deg,rgba(214,177,100,0) 90deg,rgba(214,177,100,.34) 108deg,rgba(214,177,100,0) 126deg,rgba(214,177,100,.34) 144deg,rgba(214,177,100,0) 162deg,rgba(214,177,100,.34) 180deg,rgba(214,177,100,0) 198deg,rgba(214,177,100,.34) 216deg,rgba(214,177,100,0) 234deg,rgba(214,177,100,.34) 252deg,rgba(214,177,100,0) 270deg,rgba(214,177,100,.34) 288deg,rgba(214,177,100,0) 306deg,rgba(214,177,100,.34) 324deg,rgba(214,177,100,0) 342deg,rgba(214,177,100,.34) 360deg);mask-image:radial-gradient(circle,rgba(0,0,0,0) 30%,rgba(0,0,0,.9) 52%,rgba(0,0,0,0) 76%);-webkit-mask-image:radial-gradient(circle,rgba(0,0,0,0) 30%,rgba(0,0,0,.9) 52%,rgba(0,0,0,0) 76%)}
+      #rankUpOverlayRoot.open .rankUpRays{animation:rankUpRays 2.6s cubic-bezier(.22,.7,.3,1) .12s both}
+      /* 132px. The badge renderer draws at 68 and scales from --rank-size, so
+         the numeral on the nameplate stays struck in the right place. This is
+         the one surface where the artwork is the subject rather than a mark
+         beside a name, so it gets the room. */
+      .rankUpOverlayCard .rankBadgeIconWrap{width:132px!important;height:132px!important;flex:0 0 132px}
+      /* A drop-shadow on the artwork, not a box-shadow on its wrap: a painted
+         badge carries .rankBadgePainted, which clears box-shadow with
+         !important, and the crest is a shield with transparency around it --
+         a box shadow haloes a rectangle, drop-shadow lights the shield. */
+      .rankUpOverlayCard .rankBadgeFrame{filter:drop-shadow(0 10px 22px rgba(2,6,23,.62)) drop-shadow(0 0 20px rgba(214,177,100,.42))}
+      #rankUpOverlayRoot.open .rankBadgeIconWrap{animation:rankUpCrest 1.05s cubic-bezier(.16,.84,.24,1.2) both}
+      .rankUpTag{margin-top:12px;font-size:11px;font-weight:900;letter-spacing:.17em;text-transform:uppercase;color:#d6b164}
+      .rankUpRule{width:44px;height:2px;border-radius:2px;background:linear-gradient(90deg,rgba(214,177,100,0),#d6b164,rgba(214,177,100,0));margin:7px 0 9px}
+      /* The name you earned, at the size it deserves. 27px fits "Celestial
+         III" on the narrowest phone this ships to; it wraps rather than
+         ellipsing, because a rank you just earned is not something to trim. */
+      .rankUpName{font-size:27px;font-weight:900;line-height:1.06;color:#fff;letter-spacing:-.01em}
+      .rankUpFrom{margin-top:6px;font-size:12.5px;font-weight:700;color:#8f98b0;letter-spacing:.02em}
+      .rankUpFrom b{color:#c9b489;font-weight:800}
+      .rankUpMeta{margin-top:9px;padding-top:9px;border-top:1px solid rgba(214,177,100,.22);width:100%;font-size:11.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#8f98b0}
+      /* Ten pips, one per prestige, so the driver sees the whole career in one
+         line -- how far in they are and how much is left. This is the only
+         place the full arc is shown at the moment it advances. */
+      .rankUpTrack{display:flex;gap:4px;justify-content:center;margin-top:10px}
+      .rankUpTrack i{width:12px;height:3px;border-radius:2px;background:rgba(214,177,100,.18);display:block}
+      .rankUpTrack i.on{background:rgba(214,177,100,.75)}
+      .rankUpTrack i.now{background:#f0d49a;box-shadow:0 0 8px rgba(240,212,154,.85)}
+      @keyframes rankUpRays{0%{opacity:0;transform:rotate(-26deg) scale(.82)}30%{opacity:1}100%{opacity:0;transform:rotate(30deg) scale(1.1)}}
+      @keyframes rankUpCrest{0%{transform:scale(.52) rotate(-9deg);opacity:0}54%{transform:scale(1.07) rotate(2deg);opacity:1}100%{transform:scale(1) rotate(0)}}
+      /* The ceremony still happens for a driver who asked for less motion --
+         they get the crest, the name and the gold, just held still. Turning
+         the whole overlay off would take the reward away, not the motion. */
+      @media (prefers-reduced-motion: reduce){
+        #rankUpOverlayRoot.open .rankUpRays{animation:none;opacity:.5;transform:none}
+        #rankUpOverlayRoot.open .rankBadgeIconWrap{animation:none}
+        .rankUpOverlayCard{transition:opacity .2s ease}
+        #rankUpOverlayRoot.open .rankUpOverlayCard{transform:none}
+      }
       /* The Trip Saved card: design A, "Gold standard".
        *
        * Chosen from five treatments over a photograph of the real screen. The
@@ -1049,6 +1115,7 @@
   let progressionSyncTimer = null;
   let progressionSyncInFlight = false;
   let levelUpOverlayHideTimer = null;
+  let rankUpOverlayHideTimer = null;
   let lastLevelUpPopupKey = '';
   let lastLevelUpPopupAt = 0;
   let leaderboardBadgeRewardHideTimer = null;
@@ -1079,6 +1146,41 @@
     if (!key.endsWith('_') && Number.isFinite(safeLevel) && safeLevel > 0) {
       try { localStorage.setItem(key, String(Math.floor(safeLevel))); } catch (_) {}
     }
+  }
+
+  /* THE RANK THE DRIVER WAS LAST SEEN WEARING
+   *
+   * Spotting a rank-up needs the rank they had before, and the level alone
+   * cannot give it: turning a level into a band means restating the ladder's
+   * arithmetic (thirty bands over a thousand levels, the last one absorbing
+   * the remainder) in the client, and every single time something in this
+   * system has restated a number the ladder owns, it has gone stale. The
+   * ladder has already been three different shapes.
+   *
+   * So the rank key the payload itself carries is what gets stored. The
+   * server says which rank a level is; the client only remembers what it was
+   * told last time and notices when the answer changes.
+   */
+  function progressionLastSeenRankStorageKey(userId) {
+    return `progression_last_seen_rank_v1_${String(userId || '').trim()}`;
+  }
+
+  function readStoredProgressionRankKey(userId) {
+    const key = progressionLastSeenRankStorageKey(userId);
+    if (key.endsWith('_')) return null;
+    try {
+      const raw = String(localStorage.getItem(key) || '').trim();
+      return raw || null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function writeStoredProgressionRankKey(userId, rankIconKey) {
+    const key = progressionLastSeenRankStorageKey(userId);
+    const safeRank = String(rankIconKey || '').trim();
+    if (key.endsWith('_') || !safeRank) return;
+    try { localStorage.setItem(key, safeRank); } catch (_) {}
   }
 
   function updatePickupRewardLayout() {
@@ -1399,6 +1501,105 @@
     }, 3900);
   }
 
+  function ensureRankUpOverlay() {
+    let root = document.getElementById('rankUpOverlayRoot');
+    if (root) return root;
+    root = document.createElement('div');
+    root.id = 'rankUpOverlayRoot';
+    root.setAttribute('aria-hidden', 'true');
+    root.innerHTML = '<div class="rankUpOverlayCard" id="rankUpOverlayCard"></div>';
+    document.body.appendChild(root);
+    return root;
+  }
+
+  /* A new rank, shown as the thing it is.
+   *
+   * Two events come through here and they are not the same size. Crossing
+   * into a new rank of the prestige you are already in ("Warlord I ->
+   * Warlord II") happens twenty times a career. Crossing into a new PRESTIGE
+   * ("Warlord III -> Colossus I") happens nine times, brings a creature the
+   * driver has never worn, and is the closest thing this game has to a
+   * milestone. The copy says which one it was; the ceremony is the same,
+   * because both deserve one and a second visual language would be noise.
+   *
+   * It holds for six seconds rather than the level-up's four. A driver should
+   * have time to actually look at the crest -- that is the whole point of
+   * having painted thirty of them.
+   */
+  function showRankUpOverlay(payload = {}) {
+    const root = ensureRankUpOverlay();
+    const card = document.getElementById('rankUpOverlayCard');
+    if (!card) return;
+
+    const rank = rankFromKey(payload?.rank_icon_key);
+    const fromRank = payload?.previous_rank_icon_key
+      ? rankFromKey(payload.previous_rank_icon_key)
+      : null;
+    const prestigeUp = !!fromRank && fromRank.prestige !== rank.prestige;
+    const total = PRESTIGE_COUNT;
+
+    /* The name they left, above the name they earned. Without it the card
+       says where you are and not what changed, and what changed is the
+       reward. */
+    const fromLine = fromRank
+      ? `<div class="rankUpFrom">${escapeHtml(fromRank.label)} &nbsp;→&nbsp; <b>${escapeHtml(rank.label)}</b></div>`
+      : '';
+    const level = Number(payload?.new_level ?? payload?.level);
+    const safeLevel = Number.isFinite(level) && level > 0 ? Math.floor(level) : null;
+    const meta = [
+      `Prestige ${rank.prestige} of ${total}`,
+      `Rank ${rank.level} of ${RANKS_PER_PRESTIGE}`,
+      safeLevel ? `Level ${safeLevel}` : '',
+    ].filter(Boolean).join(' · ');
+
+    /* One pip per prestige: filled for the ones behind, lit for the one just
+       entered, empty for what is still ahead. */
+    const track = Array.from({ length: total }, (_, i) => {
+      const n = i + 1;
+      if (n === rank.prestige) return '<i class="now"></i>';
+      return `<i class="${n < rank.prestige ? 'on' : ''}"></i>`;
+    }).join('');
+
+    card.innerHTML = `<div class="rankUpRays" aria-hidden="true"></div>
+      ${renderRankBadgeIcon(payload?.rank_icon_key, { compact: false })}
+      <div class="rankUpTag">${prestigeUp ? 'New Prestige' : 'Rank Up'}</div>
+      <div class="rankUpRule" aria-hidden="true"></div>
+      <div class="rankUpName">${escapeHtml(rank.label)}</div>
+      ${fromLine}
+      <div class="rankUpMeta">${escapeHtml(meta)}</div>
+      <div class="rankUpTrack" aria-hidden="true">${track}</div>`;
+
+    root.classList.add('open');
+    root.setAttribute('aria-hidden', 'false');
+    if (rankUpOverlayHideTimer) window.clearTimeout(rankUpOverlayHideTimer);
+    rankUpOverlayHideTimer = window.setTimeout(() => {
+      root.classList.remove('open');
+      root.setAttribute('aria-hidden', 'true');
+      rankUpOverlayHideTimer = null;
+    }, 6000);
+  }
+
+  /* Which celebration a progression change has earned, if any.
+   *
+   * The rank-up supersedes the level-up rather than stacking with it: a driver
+   * who crosses into Colossus I also gained a level, and showing both means
+   * the small card lands on top of the big one and the milestone is the thing
+   * that gets covered up.
+   */
+  function progressionRewardKind(before, after) {
+    const prevLevel = Number(before?.level);
+    const nextLevel = Number(after?.level);
+    const leveled = Number.isFinite(prevLevel) && Number.isFinite(nextLevel) && nextLevel > prevLevel;
+    if (!leveled) return 'none';
+    const prevKey = String(before?.rank_icon_key || '').trim();
+    const nextKey = String(after?.rank_icon_key || '').trim();
+    /* No stored key means this is the first sync since the feature shipped.
+       A level-up is still honest -- the level really did go up -- but claiming
+       a rank-up would be inventing one, so it does not. */
+    if (!prevKey || !nextKey) return 'level';
+    return prevKey === nextKey ? 'level' : 'rank';
+  }
+
   function ensureLeaderboardBadgeRewardOverlay() {
     let root = document.getElementById('leaderboardBadgeRewardRoot');
     if (root) return root;
@@ -1606,19 +1807,36 @@
       const safeLevel = Number.isFinite(level) && level > 0 ? Math.floor(level) : null;
       if (!Number.isFinite(userId) || !safeLevel) return progression;
       const prev = readStoredProgressionLevel(userId);
+      const prevRankKey = readStoredProgressionRankKey(userId);
+      const nextRankKey = String(progression?.rank_icon_key || '').trim();
       const firstSeen = prev === null;
       if (firstSeen) {
         writeStoredProgressionLevel(userId, safeLevel);
       }
       if (!firstSeen && (forcePopupCheck || prev !== null) && safeLevel > prev) {
-        showLevelUpOverlay({
-          ...progression,
-          previous_level: prev,
-          new_level: safeLevel,
-          leveled_up: true,
-        });
+        /* A rank-up or a level-up, never both -- see progressionRewardKind. */
+        const kind = progressionRewardKind(
+          { level: prev, rank_icon_key: prevRankKey },
+          { level: safeLevel, rank_icon_key: nextRankKey },
+        );
+        if (kind === 'rank') {
+          showRankUpOverlay({
+            ...progression,
+            previous_level: prev,
+            new_level: safeLevel,
+            previous_rank_icon_key: prevRankKey,
+          });
+        } else if (kind === 'level') {
+          showLevelUpOverlay({
+            ...progression,
+            previous_level: prev,
+            new_level: safeLevel,
+            leveled_up: true,
+          });
+        }
       }
       writeStoredProgressionLevel(userId, safeLevel);
+      writeStoredProgressionRankKey(userId, nextRankKey);
       await syncLeaderboardBadgeRewards({ suppressInitialPopup: false });
       return progression;
     } catch (err) {
@@ -1660,17 +1878,33 @@
     }
     const meId = Number(window?.me?.id);
     const nextLevel = Number(progressionPayload?.level);
+    /* Read before the write below overwrites it: this is the rank the driver
+       was wearing when the trip started, and it is the only way to tell a
+       rank-up from an ordinary level-up. */
+    const prevRankKey = Number.isFinite(meId) ? readStoredProgressionRankKey(meId) : null;
+    const nextRankKey = String(progressionPayload?.rank_icon_key || '').trim();
     if (Number.isFinite(meId) && Number.isFinite(nextLevel) && nextLevel > 0) {
       writeStoredProgressionLevel(meId, Math.floor(nextLevel));
+      writeStoredProgressionRankKey(meId, nextRankKey);
     }
     if (leveledUp) {
-      showLevelUpOverlay({
-        ...progressionPayload,
-        previous_level: Number(payload?.previous_level),
-        new_level: Number(payload?.new_level ?? progressionPayload?.level),
-        xp_awarded: payload?.xp_awarded ?? progressionPayload?.xp_awarded,
-        leveled_up: true,
-      });
+      const crossedRank = !!prevRankKey && !!nextRankKey && prevRankKey !== nextRankKey;
+      if (crossedRank) {
+        showRankUpOverlay({
+          ...progressionPayload,
+          previous_level: Number(payload?.previous_level),
+          new_level: Number(payload?.new_level ?? progressionPayload?.level),
+          previous_rank_icon_key: prevRankKey,
+        });
+      } else {
+        showLevelUpOverlay({
+          ...progressionPayload,
+          previous_level: Number(payload?.previous_level),
+          new_level: Number(payload?.new_level ?? progressionPayload?.level),
+          xp_awarded: payload?.xp_awarded ?? progressionPayload?.xp_awarded,
+          leveled_up: true,
+        });
+      }
     }
     syncLeaderboardBadgeRewards({ suppressInitialPopup: false });
   }
@@ -2266,6 +2500,7 @@
     openPrivateChatWithUser,
     updateDriverProfileLayout,
     showLevelUpOverlay,
+    showRankUpOverlay,
     syncMyProgression,
     handlePickupProgressionDelta,
     syncLeaderboardBadgeRewards,
@@ -2316,6 +2551,7 @@
   window.closeDriverProfileModal = closeDriverProfileModal;
   window.renderDriverProfileModal = renderDriverProfileModal;
   window.showLevelUpOverlay = showLevelUpOverlay;
+  window.showRankUpOverlay = showRankUpOverlay;
   window.syncMyProgression = syncMyProgression;
   window.handlePickupProgressionDelta = handlePickupProgressionDelta;
   window.syncLeaderboardBadgeRewards = syncLeaderboardBadgeRewards;

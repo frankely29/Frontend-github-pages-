@@ -1009,9 +1009,42 @@ html, body { height: 100%; margin: 0; padding: 0; background: #e5e5e5; }
     .leaderboardTabs{ display:flex; gap:6px; flex-wrap:wrap; }
     .leaderboardList{ display:flex; flex-direction:column; gap:6px; margin-top:4px; }
     .leaderboardRow{ display:grid; grid-template-columns: 30px 1fr auto auto; gap:8px; align-items:center; font: 800 11px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial; }
+    /* THE PODIUM
+     *
+     * Finishing first is the most rewarding thing on this screen and it used to
+     * be worth a slightly browner shade of text. Three rows deep, the top of a
+     * leaderboard should look like a podium: the position becomes a struck
+     * medal rather than a number, and the row itself carries the metal.
+     *
+     * Only the first three, and only in the Top 10 list -- in the full roster
+     * every row is compact and a podium there would be decoration on a
+     * spreadsheet. Fourth place keeps a plain number, which is what makes the
+     * first three mean anything. */
     .leaderboardTop1 .leaderboardName,.leaderboardTop1 .leaderboardRank{ color:#5f4200; }
     .leaderboardTop2 .leaderboardName,.leaderboardTop2 .leaderboardRank{ color:#37424d; }
     .leaderboardTop3 .leaderboardName,.leaderboardTop3 .leaderboardRank{ color:#5a351f; }
+    .leaderboardTop1,.leaderboardTop2,.leaderboardTop3{
+      border-radius:10px; padding:4px 7px; margin:0 -3px;
+      border:1px solid transparent;
+    }
+    .leaderboardTop1{ background:linear-gradient(103deg,rgba(247,223,160,.42),rgba(214,177,100,.16)); border-color:rgba(190,150,60,.4); }
+    .leaderboardTop2{ background:linear-gradient(103deg,rgba(226,232,240,.6),rgba(148,163,184,.14)); border-color:rgba(120,136,156,.34); }
+    .leaderboardTop3{ background:linear-gradient(103deg,rgba(236,206,178,.42),rgba(180,127,86,.14)); border-color:rgba(166,114,72,.32); }
+    /* The medal. A disc with a metal rim, the number struck into it. */
+    .leaderboardTop1 .leaderboardRank,
+    .leaderboardTop2 .leaderboardRank,
+    .leaderboardTop3 .leaderboardRank{
+      display:inline-grid; place-items:center; width:23px; height:23px; border-radius:999px;
+      font-size:10px; letter-spacing:-.02em; opacity:1;
+      box-shadow:inset 0 0 0 1px rgba(255,255,255,.55), 0 1px 3px rgba(15,23,42,.22);
+    }
+    .leaderboardTop1 .leaderboardRank{ background:linear-gradient(160deg,#f7dfa0,#c99a3c); }
+    .leaderboardTop2 .leaderboardRank{ background:linear-gradient(160deg,#eef2f7,#9aa8b8); }
+    .leaderboardTop3 .leaderboardRank{ background:linear-gradient(160deg,#ecceb2,#b07f56); }
+    /* First place gets the extra half-step of weight. Second and third do not:
+       three identical treatments in different colours is a colour swatch, not
+       a podium. */
+    .leaderboardTop1 .leaderboardName{ font-weight:950; }
     .leaderboardRank{ font-weight:950; opacity:0.9; }
     .leaderboardName{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .leaderboardValue{ font-weight:900; }
@@ -1045,7 +1078,84 @@ html, body { height: 100%; margin: 0; padding: 0; background: #e5e5e5; }
        existed and the stylesheet never did, so the ladder was a stack of
        unstyled divs. */
     .leaderboardRanksWrap{ display:flex; flex-direction:column; gap:10px; }
-    .leaderboardRankLadderList{ display:flex; flex-direction:column; gap:4px; }
+
+    /* THE RANK YOU ARE WEARING
+     *
+     * This replaced two lines of text -- the name and the level -- which were
+     * accurate and gave a driver no reason to care. A rank is meant to be worn,
+     * so the crest is the subject here at 96px, the name carries real weight,
+     * and underneath it the two things that turn standing somewhere into
+     * moving: the XP through this level, and the crest you are climbing toward.
+     *
+     * One gold (#d6b164) at several strengths on a dark ground, which is the
+     * same argument the Trip Saved card makes: a reward reads as expensive when
+     * it is restrained, and as a lottery ticket when it shouts. */
+    .rankHeroCard{
+      position:relative; isolation:isolate; display:flex; flex-direction:column; align-items:center;
+      text-align:center; gap:2px; padding:16px 14px 14px; border-radius:18px;
+      background:linear-gradient(168deg,rgba(9,13,24,.97),rgba(20,18,12,.95) 60%,rgba(74,54,18,.34) 100%);
+      border:1px solid rgba(214,177,100,.34); color:#e7ebf3;
+      box-shadow:0 12px 34px rgba(2,6,23,.3), inset 0 0 0 1px rgba(255,255,255,.04);
+    }
+    .rankHeroCrest{ display:grid; place-items:center; width:96px; height:96px; }
+    /* !important for the same reason the ladder rows need it: the badge
+       renderer writes its own --rank-size inline, and the card's size only
+       wins if it is asserted over it.
+     *
+     * The glow is a drop-shadow on the crest, not a box-shadow on its wrap,
+     * for two reasons. A painted badge carries .rankBadgePainted, which clears
+     * box-shadow with !important, so a box-shadow here would simply never
+     * appear. And the artwork is a shield with transparency around it -- a box
+     * shadow would draw a rectangle's halo behind a shield shape, while
+     * drop-shadow follows the alpha and lights the crest itself. */
+    .rankHeroCrest .rankBadgeIconWrap{ width:96px!important; height:96px!important; }
+    .rankHeroCrest .rankBadgeFrame{
+      filter:drop-shadow(0 6px 13px rgba(2,6,23,.6)) drop-shadow(0 0 13px rgba(214,177,100,.34));
+    }
+    .rankHeroName{ margin-top:8px; font:900 21px/1.08 system-ui,-apple-system,Segoe UI,Roboto,Arial; color:#fff; letter-spacing:-.01em; }
+    .rankHeroSub{ font:700 10.5px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial; color:#a99a78; letter-spacing:.09em; text-transform:uppercase; margin-top:3px; }
+    .rankHeroLevel{ font:800 12px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial; color:#c9b489; margin-top:6px; }
+    /* A 5px rule, not a fat bar. It is reporting progress, not celebrating it. */
+    .rankHeroMeter{ width:100%; height:5px; border-radius:999px; background:rgba(214,177,100,.16); overflow:hidden; margin-top:8px; }
+    .rankHeroMeterFill{ height:100%; border-radius:999px; background:linear-gradient(90deg,#b9924a,#f0d49a); box-shadow:0 0 8px rgba(240,212,154,.5); transition:width .6s cubic-bezier(.2,.84,.2,1); }
+    .rankHeroXp{ font:700 10px/1.3 system-ui,-apple-system,Segoe UI,Roboto,Arial; color:#8f98b0; margin-top:5px; letter-spacing:.02em; }
+    /* The goal, set apart by a hairline so it reads as a separate statement
+       from the rank above it rather than as more detail about it. */
+    .rankHeroNext{
+      display:flex; align-items:center; gap:10px; width:100%; margin-top:11px; padding-top:10px;
+      border-top:1px solid rgba(214,177,100,.2); text-align:left;
+    }
+    .rankHeroNext.topped{ justify-content:center; text-align:center; }
+    .rankHeroNextIcon{ display:grid; place-items:center; width:46px; height:46px; flex:0 0 46px; }
+    .rankHeroNextIcon .rankBadgeIconWrap{ width:46px!important; height:46px!important; }
+    /* The next crest is dimmed for the same reason the locked rows are: it is
+       not yours yet, and showing it in full colour would say it was. */
+    .rankHeroNextIcon .rankBadgeIconWrap{ filter:grayscale(.55) brightness(.82); }
+    .rankHeroNextText{ min-width:0; }
+    .rankHeroNextTag{ font:800 9.5px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial; color:#d6b164; letter-spacing:.12em; text-transform:uppercase; }
+    .rankHeroNextName{ font:800 13px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial; color:#e7ebf3; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+    .leaderboardRankLadderList{ display:flex; flex-direction:column; gap:9px; }
+
+    /* TEN GROUPS, NOT THIRTY ROWS
+     *
+     * Thirty rows in a column is a table. Ten named creatures of three ranks
+     * each is the shape of the game, and it is also the honest place for
+     * "Prestige 5 of 10" -- once, over the three ranks it covers, rather than
+     * repeated on every row. */
+    .rankPrestigeGroup{ display:flex; flex-direction:column; gap:4px; }
+    .rankPrestigeHead{ display:flex; align-items:baseline; gap:7px; padding:0 2px 1px; flex-wrap:wrap; }
+    .rankPrestigeName{ font:900 12px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial; color:#0f172a; letter-spacing:.06em; text-transform:uppercase; }
+    .rankPrestigeNo{ font:700 9.5px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Arial; color:#94a3b8; letter-spacing:.06em; text-transform:uppercase; }
+    .rankPrestigeState{
+      font:800 9px/1 system-ui,-apple-system,Segoe UI,Roboto,Arial; letter-spacing:.09em; text-transform:uppercase;
+      border-radius:999px; padding:3px 7px; margin-left:auto;
+    }
+    .rankPrestigeGroup.here .rankPrestigeState{ background:rgba(214,177,100,.18); color:#7a5f22; border:1px solid rgba(214,177,100,.45); }
+    .rankPrestigeGroup.done .rankPrestigeState{ background:rgba(22,163,74,.1); color:#166534; border:1px solid rgba(22,163,74,.28); }
+    /* The creature you are on is named in gold; the ones behind you stay full
+       strength because you took them. */
+    .rankPrestigeGroup.here .rankPrestigeName{ color:#7a5f22; }
     .leaderboardRankLadderRow{
       display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:10px;
       padding:7px 9px; border-radius:11px; border:1px solid rgba(0,0,0,0.07);
@@ -1054,8 +1164,35 @@ html, body { height: 100%; margin: 0; padding: 0; background: #e5e5e5; }
     /* The driver's own prestige is the one row that has to be findable in a
        scroll of ten, so it takes the only fill and the only ring on the list. */
     .leaderboardRankLadderRow.current{
-      background:rgba(255,255,255,0.9); border-color:rgba(15,23,42,0.22);
-      box-shadow:0 2px 10px rgba(15,23,42,.10);
+      background:linear-gradient(120deg,rgba(255,255,255,.96),rgba(250,243,226,.96));
+      border-color:rgba(214,177,100,.6);
+      box-shadow:0 3px 14px rgba(122,95,34,.16), inset 0 0 0 1px rgba(255,255,255,.6);
+    }
+    /* EARNED, CURRENT, LOCKED
+     *
+     * Every row used to look the same, so the list could not answer either of
+     * the two questions a driver actually has: what have I taken, and what is
+     * next. Three states answer both at a glance.
+     *
+     * Locked rows are dimmed, never hidden. A driver who can see the Dragon
+     * waiting at the bottom of the list has a reason to climb; hiding it would
+     * make the list tidier and the game emptier. 0.5 grayscale rather than 1 --
+     * enough that it reads as not-yours, little enough that the creature is
+     * still recognisable, which is the whole reason to show it. */
+    .leaderboardRankLadderRow.earned{ background:rgba(255,255,255,.62); border-color:rgba(22,163,74,.22); }
+    .leaderboardRankLadderRow.locked{ background:rgba(255,255,255,.3); border-color:rgba(0,0,0,.05); }
+    .leaderboardRankLadderRow.locked .rankBadgeIconWrap{ filter:grayscale(.5) brightness(.9); opacity:.72; }
+    .leaderboardRankLadderRow.locked .leaderboardRankLadderTitle{ color:#64748b; }
+    .leaderboardRankLadderRow.locked .leaderboardRankLadderRange{ color:#94a3b8; }
+    .leaderboardRankEarned{
+      font:900 12px/1 system-ui,-apple-system,Segoe UI,Roboto,Arial; color:#16a34a;
+      width:26px; text-align:center;
+    }
+    /* The level it opens at: the single most useful thing a row you have not
+       reached can tell you. */
+    .leaderboardRankLocked{
+      font:800 9.5px/1 system-ui,-apple-system,Segoe UI,Roboto,Arial; color:#94a3b8;
+      letter-spacing:.04em; white-space:nowrap;
     }
     /* 64px, not 34.
      *

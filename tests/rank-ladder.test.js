@@ -335,11 +335,13 @@ test('the ladder never invents a prestige from a row\'s position', () => {
     'the row no longer reads the prestige the endpoint sent');
   assert.ok(/fromKey \? fromKey\.prestige : 0/.test(view),
     'there is no local fallback when the payload omits the prestige');
-  assert.ok(/Prestige \$\{prestige\} of \$\{prestigeCount\(\)\}/.test(view),
-    'the label no longer says which of how many');
+  /* The prestige is stated once, on the group heading over its three ranks --
+   * not on each row, which is the repetition grouping exists to remove. */
+  assert.ok(/Prestige \$\{group\.prestige\} of \$\{prestigeCount\(\)\}/.test(view),
+    'the heading no longer says which prestige, of how many');
   /* And it says nothing rather than something wrong when neither source can
    * answer -- a blank is a gap, a made-up number is a lie. */
-  assert.ok(/prestige \?/.test(view), 'a prestige of 0 still prints');
+  assert.ok(/group\.prestige \?/.test(view), 'a prestige of 0 still prints');
 });
 
 test('exactly one row is the driver\'s own', () => {
@@ -363,6 +365,85 @@ test('the ladder badge is big enough to read', () => {
    * list's size only wins if it is asserted over it. */
   assert.ok(/\.leaderboardRankLadderIcon \.rankBadgeIconWrap\{[^}]*width:\d+px!important/.test(CSS),
     'the inline --rank-size is winning again, so the badge draws feed-sized');
+});
+
+test('the ladder shows the climb, not just the position', () => {
+  /* The card at the top used to be the rank name and the level: accurate,
+     flat, and no reason to care. What makes standing somewhere feel like
+     moving is how far through you are and what is next. */
+  const hero = lift(PART3, 'function renderRankHeroCard(');
+  assert.ok(/rankHeroMeter/.test(hero), 'the XP meter is gone');
+  assert.ok(/rankHeroNext/.test(hero), 'the next rank is no longer shown');
+  assert.ok(/levels to go|level' : 'levels'/.test(hero),
+    'the distance to the next rank is gone');
+  /* The next rank comes off the ladder, not off arithmetic: the top band
+     absorbs the level remainder, so a computed "start + 33" is wrong at
+     exactly the rank that matters most. */
+  assert.ok(/decorated\[currentIndex \+ 1\]/.test(hero),
+    'the next rank is being computed rather than read off the ladder');
+  /* And the end of the ladder is an achievement, not a missing card. */
+  assert.ok(/atTop/.test(hero), 'a driver at the top rank gets a blank where the goal was');
+});
+
+test('a missing XP payload shows no meter rather than an empty one', () => {
+  /* An empty bar reads as "you have made no progress". That is a lie when
+     the truth is "we could not load it". */
+  const fn = lift(PART3, 'function myLevelXpProgress(');
+  const sandbox = { state: { myProgression: null } };
+  vm.createContext(sandbox);
+  vm.runInContext(fn, sandbox);
+  assert.strictEqual(sandbox.myLevelXpProgress(), null, 'a missing payload still draws a bar');
+  /* A payload that arrived but carries no XP -- a different branch from a
+     payload that never arrived, and the one a partial response produces. */
+  sandbox.state.myProgression = {};
+  assert.strictEqual(sandbox.myLevelXpProgress(), null, 'a payload with no XP still draws a bar');
+  sandbox.state.myProgression = { total_xp: 'soon', current_level_xp: 0, next_level_xp: 100 };
+  assert.strictEqual(sandbox.myLevelXpProgress(), null, 'an unreadable total still draws a bar');
+  sandbox.state.myProgression = { total_xp: 500, current_level_xp: 400, next_level_xp: 400 };
+  assert.strictEqual(sandbox.myLevelXpProgress(), null, 'a zero-width level still draws a bar');
+  sandbox.state.myProgression = { total_xp: 9, current_level_xp: 0, next_level_xp: 100 };
+  const p = sandbox.myLevelXpProgress();
+  assert.strictEqual(Math.round(p.pct), 9);
+  assert.strictEqual(p.remaining, 91);
+  /* Max level is the end of the climb, not missing data: a full bar. */
+  sandbox.state.myProgression = { total_xp: 999, current_level_xp: 900, max_level_reached: true };
+  assert.strictEqual(sandbox.myLevelXpProgress().pct, 100);
+});
+
+test('every rank is earned, current or locked', () => {
+  /* One list of thirty identical rows cannot answer either question a driver
+     has -- what have I taken, and what is next. */
+  const view = lift(PART3, 'function renderRankLadderView(');
+  ['earned', 'locked', 'isCurrent'].forEach((s) => {
+    assert.ok(new RegExp(`\\b${s}\\b`).test(view), `the ${s} state is gone`);
+  });
+  assert.ok(/band < myBand/.test(view), 'earned is no longer decided by the band');
+  /* Locked ranks are dimmed, never dropped: the Dragon waiting at the bottom
+     of the list is the reason to climb. */
+  assert.ok(/\.leaderboardRankLadderRow\.locked[^{]*\{[^}]*\}/.test(CSS) &&
+    /\.leaderboardRankLadderRow\.locked \.rankBadgeIconWrap\{[^}]*filter:grayscale/.test(CSS),
+    'locked rows have no dimmed state');
+  assert.ok(!/locked[\s\S]{0,40}display:none/.test(CSS), 'locked ranks are hidden instead of dimmed');
+});
+
+test('a locked row says how far away it is, not where it starts', () => {
+  /* The level a rank opens at is already the first number of the range on
+     the same line. The distance from where the driver is standing is the one
+     number nothing else on the screen can give them. */
+  const view = lift(PART3, 'function renderRankLadderView(');
+  assert.ok(/Math\.floor\(opensAt\) - mine\.level/.test(view),
+    'the locked cell no longer measures distance from the driver');
+  assert.ok(/`\+\$\{away\}`|\+\$\{away\}/.test(view), 'the distance is not shown as a gain');
+});
+
+test('nothing in a row is said twice', () => {
+  /* "Warlord II" already IS rank 2 of the Warlord prestige, and the heading
+     above already says which prestige. An earlier draft printed the rank in
+     the title, again in the subtitle and again as pips. */
+  const view = lift(PART3, 'function renderRankLadderView(');
+  const rowFn = view.slice(view.indexOf('const renderLadderRow'), view.indexOf('const groups'));
+  assert.ok(!/Prestige \$\{/.test(rowFn), 'the row repeats the prestige its heading already gives');
+  assert.ok(!/Rank \$\{rank\} of/.test(rowFn), 'the row repeats the rank its own title already gives');
 });
 
 test('the leaderboard ladder has styles at all', () => {
