@@ -161,6 +161,8 @@ function build(options = {}) {
           label: names[prestige - 1] + ' ' + roman[level - 1] };
       },
     },
+    renderRankBadgeIcon: (key) =>
+      '<div class="rankBadgeIconWrap" data-key="' + String(key) + '"></div>',
   };
   window.window = window;
 
@@ -180,6 +182,12 @@ function build(options = {}) {
       const next = responses.shift();
       if (!next) throw new Error(`no canned response for ${url}`);
       if (next.throws) throw new Error('network down');
+      /* Responses came back strictly in call order, which means a slow one
+         could never overtake a fast one -- and the ordering guard in
+         profile.js was untestable: the last write won either way. */
+      for (let i = 0; i < (next.delayTicks || 0); i += 1) {
+        await new Promise((r) => setImmediate(r));
+      }
       return {
         ok: next.status === undefined || (next.status >= 200 && next.status < 300),
         status: next.status === undefined ? 200 : next.status,
@@ -975,6 +983,153 @@ test('both assets are registered in the manifest', () => {
 test('profile has a night palette', () => {
   assert.ok(CSS.includes('body.night .profileScreen'), 'no night mode');
 });
+
+// --------------------------------------------------------------------------
+// finding people
+//
+// A network you cannot search is one you can only reach through whoever
+// happens to post. Handles were linkable and there was no way to find one
+// without already knowing it.
+// --------------------------------------------------------------------------
+
+const S = (items, query) => ({ body: { ok: true, query, items } });
+const driver = (id, name, over = {}) => Object.assign({
+  user_id: id, display_name: name, handle: name.toLowerCase().replace(/\W/g, ''),
+  city: 'Queens', avatar_url: null, rank_icon_key: 'band_005', rank_name: 'Chimera II',
+}, over);
+
+test('a short query asks for nothing at all', async () => {
+  /* One letter matches most of the network: that is a list, not a search,
+     and it is the expensive query to serve. */
+  const dom = build({ responses: [] });
+  dom.api.runSearch('m');
+  dom.flush();
+  await tick();
+  assert.strictEqual(dom.calls.filter((c) => /search/.test(c.url)).length, 0,
+    'a one-letter query hit the network');
+});
+
+test('typing searches, debounced, with the query escaped', async () => {
+  const dom = build({ responses: [S([driver(7, 'Marcus Reyes')], 'marcus r')] });
+  dom.api.runSearch('marcus r');
+  assert.strictEqual(dom.calls.filter((c) => /search/.test(c.url)).length, 0,
+    'a request went out before the debounce elapsed');
+  dom.flush();
+  await tick();
+  const call = dom.calls.filter((c) => /search/.test(c.url)).pop();
+  assert.ok(call, 'the debounced search never fired');
+  assert.ok(call.url.includes('q=marcus%20r'), call.url);
+});
+
+test('typing again cancels the request that was about to go out', async () => {
+  /* What the debounce is for: one request per pause, not one per keystroke.
+     The harness's setTimeout ignores the delay, so this asserts the
+     behaviour -- the pending timer is cancelled -- rather than the number. */
+  const dom = build({ responses: [S([driver(7, 'Marcus Reyes')], 'marcus')] });
+  dom.api.runSearch('mar');
+  dom.api.runSearch('marc');
+  dom.api.runSearch('marcus');
+  dom.flush();
+  await tick();
+  assert.strictEqual(dom.calls.filter((c) => /search/.test(c.url)).length, 1,
+    'every keystroke fired its own request');
+});
+
+test('a result that arrives late never overwrites a newer one', async () => {
+  /* THE BUG THIS GUARDS. Typing is faster than the network, so the response
+     for "mar" can land after the one for "marcus" -- and the driver watches
+     their results go backwards while they are still reading them. */
+  const dom = build({ responses: [
+    // The first request is the SLOW one, so it comes back after the second.
+    Object.assign(S([driver(1, 'Stale Hit')], 'mar'), { delayTicks: 6 }),
+    S([driver(2, 'Fresh Hit')], 'marcus'),
+  ] });
+  /* Both have to be IN FLIGHT. Typing "mar" then "marcus" inside the debounce
+     window cancels the first timer and only one request goes out -- which is
+     the debounce working, not the race. The race needs the first request to
+     have left before the second is typed. */
+  dom.api.runSearch('mar');
+  dom.flush();
+  dom.api.runSearch('marcus');
+  dom.flush();
+  for (let i = 0; i < 12; i += 1) await tick();
+  assert.strictEqual(dom.calls.filter((c) => /search/.test(c.url)).length, 2,
+    'the two requests were not both in flight, so nothing raced');
+  const names = dom.api._search.items.map((d) => d.display_name);
+  assert.deepStrictEqual(names, ['Fresh Hit'],
+    `the slow "mar" response overwrote the newer "marcus" one: ${names}`);
+});
+
+test('a result row carries the name, handle and crest', async () => {
+  const dom = build({ responses: [S([driver(7, 'Marcus Reyes')], 'marcus')] });
+  dom.api.runSearch('marcus');
+  dom.flush();
+  await tick();
+  const row = dom.body.querySelector('.profileSearchRow');
+  assert.ok(row, 'no result row rendered');
+  assert.ok(row.textContent.includes('Marcus Reyes'), row.textContent);
+  assert.ok(row.textContent.includes('@marcusreyes'), row.textContent);
+  const crest = row.querySelector('.profileSearchCrest');
+  assert.ok(crest && /band_005/.test(crest.innerHTML), 'the row has no crest');
+  assert.strictEqual(row.getAttribute('data-user-id'), '7');
+});
+
+test('a driver with no rank gets no crest rather than a borrowed one', async () => {
+  const dom = build({ responses: [S([driver(7, 'No Rank', { rank_icon_key: null })], 'no rank')] });
+  dom.api.runSearch('no rank');
+  dom.flush();
+  await tick();
+  const row = dom.body.querySelector('.profileSearchRow');
+  assert.ok(row, 'no result row rendered');
+  assert.strictEqual(row.querySelector('.profileSearchCrest'), null,
+    'a crest nobody earned was drawn');
+});
+
+test('no matches says so rather than showing an empty screen', async () => {
+  const dom = build({ responses: [S([], 'nobody')] });
+  dom.api.runSearch('nobody');
+  dom.flush();
+  await tick();
+  const note = dom.body.querySelector('.profileSearchNote');
+  assert.ok(note && /No drivers match/.test(note.textContent), note && note.textContent);
+});
+
+test('a failed search says so rather than looking like no matches', async () => {
+  const dom = build({ responses: [{ throws: true }] });
+  dom.api.runSearch('marcus');
+  dom.flush();
+  await tick(); await tick();
+  const note = dom.body.querySelector('.profileSearchNote');
+  assert.ok(note && /Could not search/.test(note.textContent),
+    `a network failure read as "no matches": ${note && note.textContent}`);
+});
+
+test('clearing puts the profile back', async () => {
+  const dom = build({ responses: [S([driver(7, 'Marcus Reyes')], 'marcus')] });
+  dom.api.runSearch('marcus');
+  dom.flush();
+  await tick();
+  assert.ok(dom.body.querySelector('.profileSearchRow'), 'precondition: results showing');
+
+  dom.api.clearSearch();
+  assert.strictEqual(dom.body.querySelector('.profileSearchRow'), null, 'results survived the clear');
+  assert.strictEqual(dom.api._search.q, '');
+  const head = dom.body.querySelector('.profileHead');
+  assert.ok(head && !String(head.className).includes('profileHidden'), 'the profile stayed hidden');
+});
+
+test('opening a driver from a result changes whose profile it is', async () => {
+  const dom = build({ responses: [S([driver(42, 'Marcus Reyes')], 'marcus')] });
+  dom.api.runSearch('marcus');
+  dom.flush();
+  await tick();
+  assert.ok(dom.body.querySelector('.profileSearchRow'), 'no result row to tap');
+  dom.api.open(42);
+  assert.strictEqual(dom.api._state.target, 42,
+    'opening a result did not change whose profile it is');
+});
+
+
 
 // --------------------------------------------------------------------------
 

@@ -21,6 +21,139 @@
   gap: 10px;
 }
 
+/* --------------------------------------------------------------- search
+ *
+ * Above the profile rather than on a screen of its own: "find a driver" and
+ * "look at a driver" are the same errand, and a separate destination would
+ * need its own dock slot for something you only do on the way to here.
+ */
+
+.profileHidden { display: none !important; }
+
+.profileSearchBar {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.profileSearchInput {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 34px 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(16, 22, 34, 0.14);
+  background: rgba(255, 255, 255, 0.9);
+  font-family: inherit; font-weight: 600; font-size: 14px; line-height: 1.2;
+  color: #101622;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.profileSearchInput:focus {
+  outline: none;
+  border-color: rgba(37, 99, 235, 0.55);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+/* iOS draws its own clear affordance on type=search and it collides with
+   ours; ours is kept because it also cancels the in-flight request. */
+.profileSearchInput::-webkit-search-decoration,
+.profileSearchInput::-webkit-search-cancel-button { -webkit-appearance: none; }
+.profileSearchClear {
+  position: absolute;
+  right: 6px;
+  display: none;
+  border: 0;
+  background: transparent;
+  color: #64748b;
+  font-family: inherit; font-weight: 700; font-size: 14px; line-height: 1;
+  padding: 6px 8px;
+  cursor: pointer;
+}
+.profileSearchClear.on { display: block; }
+
+.profileSearchResults { display: none; flex-direction: column; gap: 2px; }
+.profileSearchResults.on { display: flex; }
+
+.profileSearchRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 6px;
+  border: 0;
+  background: none;
+  border-bottom: 1px solid rgba(16, 22, 34, 0.07);
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+.profileSearchRow:last-child { border-bottom: 0; }
+.profileSearchAvatar {
+  position: relative;
+  overflow: hidden;
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  font-family: inherit; font-weight: 800; font-size: 13px; line-height: 1;
+  color: #fff;
+}
+.profileSearchAvatarImg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.profileSearchText { min-width: 0; }
+.profileSearchNameRow { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.profileSearchName {
+  font-family: inherit; font-weight: 800; font-size: 14px; line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 20px, sized over the renderer's inline --rank-size, and nothing behind it:
+   the artwork is keyed to clean transparency and carries its own frame. */
+.profileSearchCrest {
+  flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+}
+.profileSearchCrest .rankBadgeIconWrap {
+  width: 20px !important;
+  height: 20px !important;
+  background: none !important;
+  box-shadow: none !important;
+}
+.profileSearchMeta {
+  font-family: inherit; font-weight: 600; font-size: 11.5px; line-height: 1.3;
+  color: #64748b;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.profileSearchNote {
+  font-family: inherit; font-weight: 600; font-size: 12.5px; line-height: 1.4;
+  color: #64748b;
+  padding: 10px 6px;
+}
+
+body.night .profileSearchInput {
+  background: rgba(20, 24, 33, 0.85);
+  border-color: rgba(255, 255, 255, 0.16);
+  color: #eef2f8;
+}
+body.night .profileSearchName { color: #eef2f8; }
+body.night .profileSearchRow { border-bottom-color: rgba(255, 255, 255, 0.09); }
+body.night .profileSearchMeta,
+body.night .profileSearchNote,
+body.night .profileSearchClear { color: #9aa7b8; }
+
 /* ------------------------------------------------------- avatar and counts */
 
 .profileTop {
