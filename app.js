@@ -4665,6 +4665,140 @@ function getSelfMapCenter() {
   }
   return null;
 }
+/* KEEP THE DRIVER ON SCREEN WHEN A PANEL COVERS THE MAP
+ *
+ * Opening a tab drops a sheet over the map, and on a phone the Leaderboard
+ * and Games sheets take most of the screen. The camera did not know that, so
+ * it kept the driver's marker in the middle of the WINDOW -- which by then
+ * was underneath the sheet. A driver opened a panel and their own dot
+ * vanished.
+ *
+ * MapLibre solves this properly with camera padding: it centres on the
+ * middle of the padded box rather than the middle of the canvas. So the
+ * fix is to tell the map how much of itself is covered, and re-centre once
+ * so the marker lands in the strip that is still visible.
+ *
+ * The padding is measured rather than assumed. These panels do not share a
+ * geometry -- Music and Modes slide in from the left as a narrow column,
+ * Leaderboard and Games rise from the bottom as a wide sheet -- and a
+ * hardcoded "bottom: 500" would be wrong for half of them and wrong again
+ * the next time one is restyled.
+ */
+const DRAWER_MAP_EASE_MS = 420;
+/* The drawer slides for 220ms. Measured mid-slide, the rect is wherever the
+ * animation happens to be, so the padding comes out too small and the marker
+ * still lands under the sheet. */
+const DRAWER_MAP_SETTLE_MS = 260;
+/* However much a panel covers, the map keeps a usable strip. The alternative
+ * is padding that swallows the viewport, which leaves the camera nothing to
+ * aim at and MapLibre nowhere to put the centre. */
+const DRAWER_MAP_MIN_VISIBLE_PX = 120;
+let drawerMapSyncTimer = null;
+
+function viewportSizeForMap() {
+  const vv = window.visualViewport;
+  return {
+    w: Math.round(Number(vv?.width) || window.innerWidth || document.documentElement.clientWidth || 0),
+    h: Math.round(Number(vv?.height) || window.innerHeight || document.documentElement.clientHeight || 0),
+  };
+}
+
+/* How much of the map the open panel is sitting on, as camera padding.
+ *
+ * Padding one edge, not four: padding every side a panel overlaps collapses
+ * the box the camera aims at to nothing. The question is only WHICH edge,
+ * and the panels disagree -- in feed-first the drawer is a full-width sheet
+ * from 39% down, so the free map is the strip ABOVE it (pad the bottom);
+ * as a floating column it is pinned left with map either side of it.
+ *
+ * Choosing by "whichever edge the panel is nearest" was the first attempt
+ * and it is wrong for the sheet: that sheet touches left, right AND bottom
+ * at zero, so it padded the left by the whole width and aimed the camera at
+ * a box with no width in it. The marker moved sideways and stayed hidden.
+ *
+ * What actually matters is how much map an edge LEAVES. So every edge is
+ * costed, the ones leaving too little to aim at are dropped, and among what
+ * survives the panel's own anchor edge wins. For the sheet only "bottom"
+ * survives, which is the answer.
+ */
+function drawerOccludedPadding() {
+  const none = { top: 0, bottom: 0, left: 0, right: 0 };
+  if (!dockDrawer || !dockDrawer.classList.contains("open")) return none;
+  const r = dockDrawer.getBoundingClientRect();
+  if (!(r.width > 0) || !(r.height > 0)) return none;
+  const { w, h } = viewportSizeForMap();
+  if (!(w > 0) || !(h > 0)) return none;
+
+  const candidates = [
+    { side: "left", pad: r.right, gap: r.left, span: w },
+    { side: "right", pad: w - r.left, gap: w - r.right, span: w },
+    { side: "top", pad: r.bottom, gap: r.top, span: h },
+    { side: "bottom", pad: h - r.top, gap: h - r.bottom, span: h },
+  ]
+    .map((c) => {
+      const pad = Math.max(0, Math.round(c.pad));
+      return { ...c, pad, free: c.span - pad };
+    })
+    .filter((c) => c.pad > 0);
+  if (!candidates.length) return none;
+
+  const roomy = candidates.filter((c) => c.free >= DRAWER_MAP_MIN_VISIBLE_PX);
+  let pick;
+  if (roomy.length) {
+    /* Among the edges that leave a usable strip, the one the panel is
+       actually anchored to -- it is the strip a driver reads as "the map". */
+    roomy.sort((a, b) => a.gap - b.gap);
+    pick = roomy[0];
+  } else {
+    /* A panel covering nearly everything: take the edge leaving the most and
+       hold back the minimum strip, so there is somewhere to put the marker. */
+    const best = candidates.slice().sort((a, b) => b.free - a.free)[0];
+    pick = { ...best, pad: Math.max(0, best.span - DRAWER_MAP_MIN_VISIBLE_PX) };
+  }
+  if (!(pick.pad > 0)) return none;
+  return { ...none, [pick.side]: pick.pad };
+}
+
+/* Re-aim the camera for whatever the drawer is currently covering.
+ *
+ * The padding sticks to the map, so the auto-follow easeTo calls that run
+ * afterwards keep respecting it without knowing it exists -- and closing the
+ * drawer puts it back to zero.
+ */
+function syncMapPaddingToDrawer() {
+  if (!map || !mapReady || typeof map.easeTo !== "function") return;
+  const padding = drawerOccludedPadding();
+  const opts = { padding, duration: DRAWER_MAP_EASE_MS, essential: true };
+  /* Turn-by-turn owns the camera while it is running: it re-aims every fix,
+     and a centre from here would be overwritten a moment later anyway. It
+     still gets the padding, which its own easeTo calls will honour. */
+  if (!window.TlcNavigationTurnModule?.isActive?.()) {
+    const c = getSelfMapCenter();
+    if (c) opts.center = [c.lng, c.lat];
+  }
+  /* Our own camera move must not be mistaken for the driver panning away,
+     which is what switches auto-follow off. */
+  suppressAutoDisableFor(DRAWER_MAP_EASE_MS + 200, () => map.easeTo(opts));
+}
+
+function scheduleDrawerMapSync() {
+  if (drawerMapSyncTimer) clearTimeout(drawerMapSyncTimer);
+  drawerMapSyncTimer = setTimeout(() => {
+    drawerMapSyncTimer = null;
+    syncMapPaddingToDrawer();
+  }, DRAWER_MAP_SETTLE_MS);
+}
+
+window.addEventListener("tlc:drawer-changed", scheduleDrawerMapSync);
+/* A panel that is already open changes shape when the keyboard opens or the
+   phone turns, and the padding has to follow it. */
+window.addEventListener("resize", () => {
+  if (dockDrawer?.classList.contains("open")) scheduleDrawerMapSync();
+});
+window.visualViewport?.addEventListener("resize", () => {
+  if (dockDrawer?.classList.contains("open")) scheduleDrawerMapSync();
+});
+
 function maybeRotateMapTo(deg) {
   if (!ROTATE_ENABLED) return;
   if (!map || !mapReady) return;
