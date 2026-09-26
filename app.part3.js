@@ -42,6 +42,25 @@
     return (api && api.prestiges) ? api.prestiges().length : RANK_PRESTIGE_COUNT_FALLBACK;
   }
 
+  /* THE LADDER IS THIRTY LEVELS. NOT A THOUSAND.
+   *
+   * Ten prestiges of three ranks, and a driver counts their level 1..30 --
+   * Wyvern I is level 1, Wyvern II is level 2, Dragon III is level 30.
+   *
+   * There is a second, much longer scale underneath: XP thresholds numbered
+   * to 1000, which is what actually decides when a driver advances. That is
+   * an engine, not a thing to show anyone, and it had been leaking onto this
+   * screen everywhere -- a rank reading "Levels 34-66", a driver on the
+   * second rank of ten being told they were level 37, and Wyvern III, which
+   * is literally the next rank up, described as "30 levels to go".
+   *
+   * So the two are separated. The engine keeps its thousand; the Ranks tab
+   * never prints a number from it. Every "level" a driver reads here is a
+   * band index out of thirty. */
+  function ladderLevelCount() {
+    return prestigeCount() * ranksPerPrestige();
+  }
+
   const RANK_PRESTIGE_FALLBACK = [
     'Wyvern', 'Chimera', 'Hydra', 'Kraken', 'Warlord',
     'Colossus', 'Titan', 'Celestial', 'Phoenix', 'Dragon',
@@ -227,12 +246,24 @@
   /* In a leaderboard row the badge is 26px, where the numeral struck on its
    * plate is a smudge. So the division is spelled out in the text instead --
    * "Gold IV" beside the badge says the same thing the badge would say at
-   * medal size, and says it legibly at this one. */
+   * medal size, and says it legibly at this one.
+   *
+   * The level beside it is the LADDER level, 1..30, read off the driver's
+   * rank key. The XP level the row carries belongs to the engine's scale of
+   * a thousand, and printing it here put "Level 445" next to a rank that is
+   * fifth of ten -- two different numbers for the same thing, one of which
+   * the driver has no way to interpret.
+   *
+   * The key is the source because it is the one field that always agrees
+   * with the name shown beside it; without the badge module loaded there is
+   * no ladder to consult and the level is simply left off, which is better
+   * than printing one from the wrong scale. */
   function levelTitleLine(level, title, rankIconKey) {
-    const n = Number(level);
-    const safeLevel = Number.isFinite(n) && n > 0 ? Math.floor(n) : 1;
+    const api = rankApi();
+    const band = (api && rankIconKey) ? api.fromKey(rankIconKey).band : 0;
     const safeTitle = safeRankName(title, rankIconKey);
-    return `<span class="leaderboardTierLine">${renderRankIcon(rankIconKey)}<span>Level ${safeLevel} <span class="leaderboardRankName">${esc(safeTitle)}</span></span></span>`;
+    const levelText = band ? `Level ${band} ` : '';
+    return `<span class="leaderboardTierLine">${renderRankIcon(rankIconKey)}<span>${levelText}<span class="leaderboardRankName">${esc(safeTitle)}</span></span></span>`;
   }
 
   function selectedMyBadge() {
@@ -259,15 +290,13 @@
       </div>`;
   }
 
-  function renderLevelRange(startLevel, endLevel) {
-    const start = Number(startLevel);
-    const end = Number(endLevel);
-    if (!Number.isFinite(start) && !Number.isFinite(end)) return 'Levels —';
-    if (Number.isFinite(start) && Number.isFinite(end) && Math.floor(start) === Math.floor(end)) return `Level ${Math.floor(start)}`;
-    if (!Number.isFinite(start)) return `Up to Level ${Math.floor(end)}`;
-    if (!Number.isFinite(end)) return `Level ${Math.floor(start)}+`;
-    return `Levels ${Math.floor(start)}–${Math.floor(end)}`;
-  }
+  /* renderLevelRange is gone.
+   *
+   * It existed to print a band's span on the engine's scale -- "Levels
+   * 34-66" under a rank that is the second of thirty. That string was the
+   * old system showing through, and with nothing on this screen using that
+   * scale any more there is nothing left for the function to format. Left
+   * in place it would be an invitation to put the range back. */
 
   function pickMyProgressionForLadder() {
     /* The progression endpoint's level wins over the leaderboard row's. They
@@ -329,6 +358,34 @@
       remaining: Math.max(0, ceil - total),
       total,
     };
+  }
+
+  /* How far through the current RANK the driver is, as a fraction.
+   *
+   * This is what the meter should show, and it is not the same thing as
+   * progress through an XP level. A rank spans many XP levels, so a driver
+   * who has just filled one XP level of a rank is nowhere near the next
+   * rank, and a bar that showed the XP level looked nearly full while the
+   * rank it claimed to be measuring had barely started.
+   *
+   * Composed of the two pieces that are actually available here: how many of
+   * the rank's XP levels are behind the driver, plus the fraction of the one
+   * they are standing in. The engine's numbers are used to compute it and
+   * never printed -- what comes out is a percentage, which has no scale to
+   * leak.
+   */
+  function myRankProgress(row) {
+    const start = Number(row?.start_level);
+    const end = Number(row?.end_level);
+    const level = Number(state.myProgression?.level ?? state.myRow?.level);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || !Number.isFinite(level)) return null;
+    const span = Math.floor(end) - Math.floor(start) + 1;
+    if (span <= 0) return null;
+    const withinLevel = myLevelXpProgress();
+    if (withinLevel && withinLevel.maxed) return 1;
+    const frac = withinLevel ? withinLevel.pct / 100 : 0;
+    const done = (Math.floor(level) - Math.floor(start)) + frac;
+    return Math.max(0, Math.min(1, done / span));
   }
 
   /* The band a ladder row sits on, 1..30.
@@ -414,19 +471,18 @@
       /* The right-hand cell carries the state, and it has to carry something
          the rest of the row does not already say. A tick for what is taken;
          the numeral for where you stand; and for what is ahead, the DISTANCE
-         -- "+18" levels from where the driver is now.
-         The first draft printed the level the rank opens at, which the range
-         on the same line already begins with. Distance is the one number
-         nothing else on the screen can give, and it is the one that makes a
-         far-off rank feel reachable or not. */
+         in ladder levels -- Wyvern III from Wyvern II is +1, because it is
+         the very next level of thirty.
+         It used to subtract the engine's XP levels, which made the next rank
+         up read "+33" and the last one "+513". Those are numbers from a
+         scale the driver has never been shown and does not have. */
       let aside = '';
       if (isCurrent) {
         aside = `<span class="leaderboardRankLadderChip">${esc(mine.rank ? mine.rank.roman : '')}</span>`;
       } else if (earned) {
         aside = '<span class="leaderboardRankEarned" title="Earned">✓</span>';
       } else {
-        const opensAt = Number(row?.start_level);
-        const away = Number.isFinite(opensAt) ? Math.max(0, Math.floor(opensAt) - mine.level) : null;
+        const away = (item.band && myBand) ? Math.max(0, item.band - myBand) : null;
         aside = away === null
           ? ''
           : `<span class="leaderboardRankLocked" title="${away} ${away === 1 ? 'level' : 'levels'} away">+${away}</span>`;
@@ -439,7 +495,7 @@
         <div class="leaderboardRankLadderIcon">${renderRankIcon(row?.rank_icon_key)}</div>
         <div class="leaderboardRankLadderText">
           <div class="leaderboardRankLadderTitle">${esc(safeRankName(row?.rank_name || row?.title, row?.rank_icon_key))}${beast ? ` <span class="leaderboardRankBeast">${esc(beast)}</span>` : ''}</div>
-          <div class="leaderboardRankLadderRange">${esc(renderLevelRange(row?.start_level, row?.end_level))}</div>
+          <div class="leaderboardRankLadderRange">${item.band ? `Level ${item.band} of ${ladderLevelCount()}` : ''}</div>
           ${pips}
         </div>
         ${aside}
@@ -501,42 +557,59 @@
    *
    * So the crest is the subject, at a size where the artwork reads, and under
    * it the two things that make standing somewhere feel like moving: how far
-   * through this level the XP has carried them, and the crest they are
-   * climbing toward with the number of levels left to reach it. "4 levels to
-   * Warlord III", with Warlord III's own artwork beside it, is a goal. "Level
-   * 431" is a fact.
+   * through this RANK the driver has come, and the crest they are climbing
+   * toward. Every number here is on the ladder's own scale -- level 2 of 30,
+   * not level 37 of a thousand nobody has been shown.
    */
   function renderRankHeroCard(mine, decorated) {
-    const xp = myLevelXpProgress();
     const total = prestigeCount();
 
     /* The next rank is the next band up, read off the ladder rather than
        computed -- the top band absorbs the remainder of the level range, so
        arithmetic here would be wrong at exactly the place it matters most. */
     const currentIndex = decorated.findIndex((i) => i.isCurrent);
+    const current = currentIndex > -1 ? decorated[currentIndex] : null;
     const next = currentIndex > -1 ? decorated[currentIndex + 1] : null;
     const atTop = currentIndex > -1 && !next;
 
-    const meter = xp
-      ? `<div class="rankHeroMeter" role="img" aria-label="${xp.maxed
-          ? 'Maximum level reached'
-          : `${Math.round(xp.pct)} percent through level ${mine.level}`}">
-          <div class="rankHeroMeterFill" style="width:${xp.pct.toFixed(1)}%"></div>
-        </div>
-        <div class="rankHeroXp">${xp.maxed
-          ? `${esc(formatXp(xp.total))} XP · every level earned`
-          : `${esc(formatXp(xp.into))} / ${esc(formatXp(xp.span))} XP · ${esc(formatXp(xp.remaining))} to Level ${mine.level + 1}`
-        }</div>`
+    /* Progress through the RANK, not through an XP level.
+     *
+     * The bar used to measure an XP level, so it sat nearly full while the
+     * rank it was drawn under had barely begun -- and its label named a
+     * level from the engine's thousand ("119 XP to Level 38"), which is the
+     * scale this screen does not use. A percentage has no scale to leak, and
+     * naming the rank it is counting toward is the only label that tells a
+     * driver what filling the bar actually gets them. */
+    const xp = myLevelXpProgress();
+    const through = current ? myRankProgress(current.row) : null;
+    const maxed = !!(xp && xp.maxed) || atTop;
+    const nextName = next
+      ? safeRankName(next.row?.rank_name || next.row?.title, next.row?.rank_icon_key)
       : '';
+    let meter = '';
+    if (through !== null || maxed) {
+      const pct = maxed ? 100 : Math.max(2, Math.min(100, through * 100));
+      const lifetime = xp ? `${esc(formatXp(xp.total))} XP · ` : '';
+      meter = `<div class="rankHeroMeter" role="img" aria-label="${maxed
+          ? 'Top of the ladder'
+          : `${Math.round(pct)} percent of the way to ${esc(nextName)}`}">
+          <div class="rankHeroMeterFill" style="width:${pct.toFixed(1)}%"></div>
+        </div>
+        <div class="rankHeroXp">${maxed
+          ? `${lifetime}every rank earned`
+          : `${lifetime}${Math.round(pct)}% to ${esc(nextName)}`
+        }</div>`;
+    }
 
     let nextBlock = '';
     if (next) {
-      const nextName = safeRankName(next.row?.rank_name || next.row?.title, next.row?.rank_icon_key);
-      const opensAt = Number(next.row?.start_level);
-      const toGo = Number.isFinite(opensAt) ? Math.max(0, Math.floor(opensAt) - mine.level) : null;
-      const stepLabel = toGo === null
-        ? 'Next rank'
-        : (toGo <= 0 ? 'Unlocked — next rank' : `${toGo} ${toGo === 1 ? 'level' : 'levels'} to go`);
+      /* Always the very next level of thirty. It used to subtract the
+         engine's XP levels and tell a driver the rank directly above them
+         was "30 levels to go". */
+      const away = (next.band && current && current.band)
+        ? Math.max(1, next.band - current.band)
+        : 1;
+      const stepLabel = away === 1 ? 'Next level' : `${away} levels to go`;
       nextBlock = `<div class="rankHeroNext">
         <div class="rankHeroNextIcon">${renderRankIcon(next.row?.rank_icon_key)}</div>
         <div class="rankHeroNextText">
@@ -556,13 +629,18 @@
 
     const sub = mine.rank
       ? `Prestige ${mine.rank.prestige} of ${total} · Rank ${mine.rank.level} of ${ranksPerPrestige()}`
-      : `Level ${mine.level}`;
+      : '';
+
+    /* The driver's level on the ladder's own scale: the band they stand on,
+       out of thirty. This printed the engine's XP level, so a driver on the
+       second rank of ten prestiges was told they were level 37. */
+    const myBand = mine.rank ? mine.rank.band : 0;
 
     return `<div class="rankHeroCard">
       <div class="rankHeroCrest">${renderRankIcon(mine.rankIconKey)}</div>
       <div class="rankHeroName">${esc(mine.rankName)}</div>
-      <div class="rankHeroSub">${esc(sub)}</div>
-      <div class="rankHeroLevel">Level ${mine.level}</div>
+      ${sub ? `<div class="rankHeroSub">${esc(sub)}</div>` : ''}
+      ${myBand ? `<div class="rankHeroLevel">Level ${myBand} of ${ladderLevelCount()}</div>` : ''}
       ${meter}
       ${nextBlock}
     </div>`;

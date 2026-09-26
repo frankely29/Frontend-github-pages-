@@ -971,18 +971,24 @@
     }
     const clampedPct = Math.max(0, Math.min(1, progressPct));
 
+    /* The ladder is thirty levels -- ten prestiges of three -- and that is
+       the only scale a driver is shown. The XP curve underneath is numbered
+       to a thousand; it decides when someone advances and is never printed.
+       These labels used to name it ("Next Level: 38 at 1,794 XP") beside a
+       rank that is second of thirty. They name the XP and the rank instead,
+       both of which are real to the person reading them. */
     const nextLevelLabel = maxLevelReached
       ? 'MAX LEVEL'
-      : `Next Level: ${safeLevel + 1} at ${formatProgressNumber(nextLevelXp, { maxFractionDigits: 0 })} XP`;
+      : `Next rank at ${formatProgressNumber(nextLevelXp, { maxFractionDigits: 0 })} XP`;
     const xpToNextLabel = maxLevelReached
       ? ''
-      : `<div class="driverProfileProgressMeta">XP to Next Level: ${escapeHtml(formatProgressNumber(xpToNextLevel, { maxFractionDigits: 0 }))}</div>`;
+      : `<div class="driverProfileProgressMeta">XP to go: ${escapeHtml(formatProgressNumber(xpToNextLevel, { maxFractionDigits: 0 }))}</div>`;
 
     return `<div class="driverProfileProgressWrap">
       <div class="driverProfileProgressHead">
         <div class="driverProfileProgressHeadText">
-          <div class="driverProfileProgressLine">Level ${safeLevel} • <span class="driverProfileRankName">${escapeHtml(title)}</span></div>
-          <div class="driverProfilePrestigeLine">Prestige ${rank.prestige} of 10 • ${escapeHtml(rank.beast)}</div>
+          <div class="driverProfileProgressLine">Level ${rank.band} of ${RANK_BAND_COUNT} • <span class="driverProfileRankName">${escapeHtml(title)}</span></div>
+          <div class="driverProfilePrestigeLine">Prestige ${rank.prestige} of ${PRESTIGE_COUNT} • ${escapeHtml(rank.beast)}</div>
         </div>
         ${renderRankBadgeIcon(progression?.rank_icon_key, { compact: true })}
       </div>
@@ -1365,9 +1371,15 @@
     if (!progression || typeof progression !== 'object') return false;
     ensurePickupProgressReward();
     ensureLeaderboardBadgeRewardOverlay();
-    const level = Number(progression?.level);
-    const hasLevel = Number.isFinite(level) && level > 0;
-    const safeLevel = hasLevel ? Math.floor(level) : 1;
+    /* The LADDER level, one of thirty, off the rank key -- not the XP
+       engine's level, which is numbered to a thousand and is not a scale any
+       driver has been shown. A crest that says Wyvern II beside the words
+       "Level 37" is two answers to the same question. */
+    const ladderBand = progression?.rank_icon_key
+      ? rankFromKey(progression.rank_icon_key).band
+      : 0;
+    const hasLevel = ladderBand > 0;
+    const safeLevel = hasLevel ? ladderBand : 1;
     const xpAwarded = Number(payload?.xp_awarded ?? progression?.xp_awarded);
     const hasXp = Number.isFinite(xpAwarded) && xpAwarded > 0;
     /* A response that carries no progression at all used to be drawn anyway,
@@ -1383,7 +1395,7 @@
       || (Number.isFinite(xpToNext) && xpToNext <= 0);
     const footer = isMaxLevel
       ? 'MAX LEVEL'
-      : `${formatProgressNumber(Number.isFinite(xpToNext) && xpToNext > 0 ? xpToNext : 0, { maxFractionDigits: 0 })} XP to Level ${safeLevel + 1}`;
+      : `${formatProgressNumber(Number.isFinite(xpToNext) && xpToNext > 0 ? xpToNext : 0, { maxFractionDigits: 0 })} XP to go`;
     const pct = computeProgressRatio(progression);
     const kickerEl = document.getElementById('pickupProgressRewardKicker');
     const iconEl = document.getElementById('pickupProgressRewardIcon');
@@ -1399,7 +1411,7 @@
     const show = (node, on) => { node.style.display = on ? '' : 'none'; };
     kickerEl.textContent = 'Trip Saved';
     iconEl.innerHTML = renderRankBadgeIcon(progression?.rank_icon_key, { compact: false });
-    levelEl.textContent = `Level ${safeLevel}`;
+    levelEl.textContent = `Level ${safeLevel} of ${RANK_BAND_COUNT}`;
     rankEl.textContent = String(rankName || 'Rookie');
     footEl.textContent = footer;
     show(xpEl, hasXp);
@@ -1487,23 +1499,33 @@
     const root = ensureLevelUpOverlay();
     const card = document.getElementById('levelUpOverlayCard');
     if (!card) return;
-    const level = Number(payload?.new_level ?? payload?.level);
-    const previousLevel = Number(payload?.previous_level);
-    const safeLevel = Number.isFinite(level) && level > 0 ? Math.floor(level) : 1;
-    const safePrevLevel = Number.isFinite(previousLevel) && previousLevel > 0 ? Math.floor(previousLevel) : null;
-    const transitionLabel = (safePrevLevel && safePrevLevel !== safeLevel)
-      ? `Level ${safePrevLevel} → ${safeLevel}`
-      : `Level ${safeLevel}`;
+    /* THIS IS NOT A LEVEL UP ANY MORE
+     *
+     * The ladder is thirty levels: ten prestiges of three. Gaining one of
+     * those IS a rank-up, and the ceremony in showRankUpOverlay handles it.
+     *
+     * What fires this card is a step on the XP curve underneath -- the
+     * engine's thousand-point scale, which a driver crosses about thirty-
+     * three times per rank. So it used to announce "Promotion Unlocked,
+     * Wyvern II • Level 36 → 37" when nothing had been promoted and there
+     * is no level 36 or 37 on the ladder at all.
+     *
+     * The card stays, because a driver crossing an XP step has earned
+     * something and should see it. It just stops claiming a promotion and
+     * stops naming a number from a scale nobody has been shown: it reports
+     * the XP, and how much of the current rank is behind them. */
     const rankName = rankDisplayName(payload);
+    const rank = rankFromKey(payload?.rank_icon_key);
     const xpAwarded = Number(payload?.xp_awarded);
     const xpLine = Number.isFinite(xpAwarded) && xpAwarded > 0
       ? `<div class="levelUpXp">+${escapeHtml(formatProgressNumber(xpAwarded, { maxFractionDigits: 0 }))} XP</div>`
       : '';
+    const subLabel = `${rankName} • Level ${rank.band} of ${RANK_BAND_COUNT}`;
     card.innerHTML = `${renderRankBadgeIcon(payload?.rank_icon_key, { compact: false })}
       <div class="levelUpOverlayText">
-        <div class="levelUpTag">Level Up</div>
-        <div class="levelUpTitle">Promotion Unlocked</div>
-        <div class="levelUpSub">${escapeHtml(rankName)} • ${escapeHtml(transitionLabel)}</div>
+        <div class="levelUpTag">Progress</div>
+        <div class="levelUpTitle">XP Milestone</div>
+        <div class="levelUpSub">${escapeHtml(subLabel)}</div>
         ${xpLine}
       </div>`;
     root.classList.add('open');
@@ -1559,13 +1581,15 @@
     const fromLine = fromRank
       ? `<div class="rankUpFrom">${escapeHtml(fromRank.label)} &nbsp;→&nbsp; <b>${escapeHtml(rank.label)}</b></div>`
       : '';
-    const level = Number(payload?.new_level ?? payload?.level);
-    const safeLevel = Number.isFinite(level) && level > 0 ? Math.floor(level) : null;
+    /* All three numbers on the ladder's own scale. This line used to end
+       with the XP engine's level -- "Level 496" under a rank that is the
+       sixteenth of thirty -- which is the one scale a driver has never been
+       shown and cannot place. */
     const meta = [
       `Prestige ${rank.prestige} of ${total}`,
       `Rank ${rank.level} of ${RANKS_PER_PRESTIGE}`,
-      safeLevel ? `Level ${safeLevel}` : '',
-    ].filter(Boolean).join(' · ');
+      `Level ${rank.band} of ${RANK_BAND_COUNT}`,
+    ].join(' · ');
 
     /* One pip per prestige: filled for the ones behind, lit for the one just
        entered, empty for what is still ahead. */
