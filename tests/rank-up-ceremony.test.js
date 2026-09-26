@@ -153,19 +153,36 @@ test('a new prestige says so', () => {
     'the two are no longer named differently');
 });
 
-test('the crest glow follows the artwork, not its box', () => {
-  /* Two reasons, and either one alone is enough. A painted badge carries
-     .rankBadgePainted, which clears box-shadow with !important -- so a
-     box-shadow here would silently never render. And the crest is a shield
-     with transparency around it: a box-shadow haloes a rectangle behind a
-     shield, which looks like a bug. drop-shadow follows the alpha. */
+test('nothing is drawn around the crest', () => {
+  /* The crests are keyed to clean transparency, and anything painted behind
+     one throws that away. A zero-offset drop-shadow is a HALO, not light: at
+     any real radius it reads as a panel the shield is sitting on, and the
+     moment an ancestor bounds it -- a card with overflow hidden, a capture
+     at the wrap's edge -- it cuts into a hard square and the crest looks
+     like it shipped with its backdrop attached. That is exactly what was
+     reported.
+     A shadow is allowed; it must be offset and it must be dark. */
   const css = injectedCss();
-  assert.ok(/\.rankUpOverlayCard \.rankBadgeFrame\{[^}]*drop-shadow/.test(css),
-    'the ceremony crest has no drop-shadow');
+  const rule = /\.rankUpOverlayCard \.rankBadgeFrame\{([^}]*)\}/.exec(css);
+  assert.ok(rule, 'the ceremony crest rule is gone');
+  const filter = rule[1];
+  assert.ok(/drop-shadow/.test(filter), 'the crest has no shadow at all');
+  assert.ok(!/drop-shadow\(\s*0\s+0\s/.test(filter),
+    'a zero-offset halo is back behind the crest');
+  assert.ok(!/drop-shadow\([^)]*rgba\(2\s*1\s*4/.test(filter.replace(/,/g, ' ')),
+    'the gold halo is back behind the crest');
+
+  /* And it stays a drop-shadow on the artwork rather than a box-shadow on
+     its wrap: .rankBadgePainted clears box-shadow with !important so one
+     would silently never render, and a box-shadow outlines the bounding
+     RECTANGLE -- the square being removed here. */
   assert.ok(!/\.rankUpOverlayCard \.rankBadgeIconWrap\{[^}]*box-shadow/.test(css),
-    'the glow is a box-shadow again, which .rankBadgePainted throws away');
+    'the shadow is a box-shadow again, which .rankBadgePainted throws away');
   assert.ok(/\.rankBadgeIconWrap\.rankBadgePainted\{[^}]*box-shadow:none!important/.test(css),
-    'the rule this depends on is gone -- recheck the glow');
+    'the rule this depends on is gone -- recheck the shadow');
+  assert.ok(/\.rankBadgeIconWrap\.rankBadgePainted\{[^}]*background:none!important/.test(css),
+    'a painted crest can carry its tone plate again, which is a coloured disc '
+    + 'behind artwork that already has its own frame');
 });
 
 test('a driver who asked for less motion still gets the reward', () => {

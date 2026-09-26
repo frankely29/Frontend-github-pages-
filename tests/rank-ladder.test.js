@@ -367,6 +367,18 @@ test('the ladder badge is big enough to read', () => {
     'the inline --rank-size is winning again, so the badge draws feed-sized');
 });
 
+test('nothing is drawn around the hero crest either', () => {
+  /* Same rule as the ceremony's: the artwork is keyed to clean transparency,
+     so a zero-offset glow behind it is a panel, not light -- and it clips
+     into a hard square the moment anything bounds it. */
+  const rule = /\.rankHeroCrest \.rankBadgeFrame\{([^}]*)\}/.exec(CSS);
+  assert.ok(rule, 'the hero crest has no shadow rule');
+  assert.ok(!/drop-shadow\(\s*0\s+0\s/.test(rule[1]),
+    'a zero-offset halo is back behind the hero crest');
+  assert.ok(!/\.rankHeroCrest \.rankBadgeIconWrap\{[^}]*box-shadow/.test(CSS),
+    'the hero crest wears a box-shadow, which haloes its bounding rectangle');
+});
+
 test('the ladder shows the climb, not just the position', () => {
   /* The card at the top used to be the rank name and the level: accurate,
      flat, and no reason to care. What makes standing somewhere feel like

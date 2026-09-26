@@ -115,11 +115,26 @@
          the one surface where the artwork is the subject rather than a mark
          beside a name, so it gets the room. */
       .rankUpOverlayCard .rankBadgeIconWrap{width:132px!important;height:132px!important;flex:0 0 132px}
-      /* A drop-shadow on the artwork, not a box-shadow on its wrap: a painted
-         badge carries .rankBadgePainted, which clears box-shadow with
-         !important, and the crest is a shield with transparency around it --
-         a box shadow haloes a rectangle, drop-shadow lights the shield. */
-      .rankUpOverlayCard .rankBadgeFrame{filter:drop-shadow(0 10px 22px rgba(2,6,23,.62)) drop-shadow(0 0 20px rgba(214,177,100,.42))}
+      /* NOTHING AROUND THE CREST
+       *
+       * This carried a gold halo -- drop-shadow(0 0 20px gold) -- meant to
+       * light the crest. It did the opposite. A 20px glow around a shield
+       * reads as a panel the shield is sitting on rather than as light, and
+       * the moment anything in the ancestry clips (a card with overflow
+       * hidden, a screenshot at the wrap's bounds) it cuts into a hard-edged
+       * square and the crest looks like it shipped with its backdrop still
+       * attached. The artwork is keyed to clean transparency; putting a halo
+       * behind it throws that away.
+       *
+       * What is left is one tight shadow, dark and offset downward, which is
+       * the crest casting onto the card rather than anything drawn around it.
+       *
+       * It stays a drop-shadow rather than a box-shadow for two reasons: a
+       * painted badge carries .rankBadgePainted, which clears box-shadow with
+       * !important so one would silently never render, and drop-shadow
+       * follows the shield's alpha where a box-shadow would outline its
+       * bounding rectangle -- which is the very square being removed here. */
+      .rankUpOverlayCard .rankBadgeFrame{filter:drop-shadow(0 6px 12px rgba(2,6,23,.55))}
       #rankUpOverlayRoot.open .rankBadgeIconWrap{animation:rankUpCrest 1.05s cubic-bezier(.16,.84,.24,1.2) both}
       .rankUpTag{margin-top:12px;font-size:11px;font-weight:900;letter-spacing:.17em;text-transform:uppercase;color:#d6b164}
       .rankUpRule{width:44px;height:2px;border-radius:2px;background:linear-gradient(90deg,rgba(214,177,100,0),#d6b164,rgba(214,177,100,0));margin:7px 0 9px}
