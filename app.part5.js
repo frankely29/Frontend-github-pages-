@@ -955,10 +955,17 @@
     const lifetimeMiles = Number(progression?.lifetime_miles);
     const lifetimeHours = Number(progression?.lifetime_hours);
     const lifetimePickups = Number(progression?.lifetime_pickups_recorded);
+    /* Where the XP came from. Saved trips pay the most per action, then
+       posting, then replying, then liking -- so the breakdown is ordered the
+       way the economy is, biggest earner first, rather than alphabetically.
+       Social sources default to 0 for a payload from before they existed. */
     const milesXp = Number(progression?.xp_breakdown?.miles_xp);
     const hoursXp = Number(progression?.xp_breakdown?.hours_xp);
     const reportXp = Number(progression?.xp_breakdown?.report_xp);
     const gameXp = Number(progression?.xp_breakdown?.game_xp);
+    const postXp = Number(progression?.xp_breakdown?.post_xp) || 0;
+    const commentXp = Number(progression?.xp_breakdown?.comment_xp) || 0;
+    const likeXp = Number(progression?.xp_breakdown?.like_xp) || 0;
 
     let progressPct = 1;
     if (!maxLevelReached) {
@@ -1002,7 +1009,10 @@
         <div class="driverProfileProgressMeta">Reported Trips: ${escapeHtml(formatProgressNumber(lifetimePickups, { maxFractionDigits: 0 }))}</div>
         <div class="driverProfileProgressMeta">Miles XP: ${escapeHtml(formatProgressNumber(milesXp, { maxFractionDigits: 0 }))}</div>
         <div class="driverProfileProgressMeta">Hours XP: ${escapeHtml(formatProgressNumber(hoursXp, { maxFractionDigits: 0 }))}</div>
-        <div class="driverProfileProgressMeta">Report XP: ${escapeHtml(formatProgressNumber(reportXp, { maxFractionDigits: 0 }))}</div>
+        <div class="driverProfileProgressMeta">Saved Trip XP: ${escapeHtml(formatProgressNumber(reportXp, { maxFractionDigits: 0 }))}</div>
+        <div class="driverProfileProgressMeta">Post XP: ${escapeHtml(formatProgressNumber(postXp, { maxFractionDigits: 0 }))}</div>
+        <div class="driverProfileProgressMeta">Reply XP: ${escapeHtml(formatProgressNumber(commentXp, { maxFractionDigits: 0 }))}</div>
+        <div class="driverProfileProgressMeta">Like XP: ${escapeHtml(formatProgressNumber(likeXp, { maxFractionDigits: 0 }))}</div>
         <div class="driverProfileProgressMeta">Game XP: ${escapeHtml(formatProgressNumber(gameXp, { maxFractionDigits: 0 }))}</div>
       </div>
     </div>`;
