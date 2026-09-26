@@ -101,7 +101,8 @@ function profile(over = {}) {
     avatar_url: null, bio: 'Nights out of Queens since 2019.',
     platforms: ['Uber', 'Lyft'], vehicle_type: 'Toyota Sienna',
     driving_since_year: 2019,
-    reputation: { level: 24, rank_name: 'Night Owl', title: 'Airport regular',
+    reputation: { level: 24, rank_icon_key: 'band_008', rank_name: 'Night Owl',
+      title: 'Airport regular',
       badge_code: 'airport', lifetime_miles: 91234, lifetime_hours: 3100,
       trips_logged: 4106 },
     post_count: 312, follower_count: 1847, following_count: null,
@@ -144,6 +145,22 @@ function build(options = {}) {
       open: (key) => window._opened.push(key),
     },
     isFeatureLocked: () => !!options.locked,
+    /* The badge module. The reputation card's level is the LADDER position
+       now, so without this there is no ladder to read one from. */
+    TeamJoseoRank: options.noRank ? undefined : {
+      prestiges: () => new Array(10).fill(0).map((_, i) => ({ prestige: i + 1 })),
+      ranksPerPrestige: () => 3,
+      fromKey: (key) => {
+        const band = Number(String(key || '').replace(/^band_/, '')) || 1;
+        const names = ['Wyvern', 'Chimera', 'Hydra', 'Kraken', 'Warlord',
+          'Colossus', 'Titan', 'Celestial', 'Phoenix', 'Dragon'];
+        const roman = ['I', 'II', 'III'];
+        const prestige = Math.floor((band - 1) / 3) + 1;
+        const level = ((band - 1) % 3) + 1;
+        return { band, prestige, level,
+          label: names[prestige - 1] + ' ' + roman[level - 1] };
+      },
+    },
   };
   window.window = window;
 
@@ -327,7 +344,7 @@ test('a driver with no handle gets their name in the title, not a blank', async 
   assert.strictEqual(dom.titleNode.textContent, 'Marcus R.');
 });
 
-test('the reputation card shows level, rank and trips', async () => {
+test('the reputation card shows the ladder level, rank and trips', async () => {
   const dom = build({ responses: [P(profile()), G([])] });
   dom.api._state.target = 7;
   await dom.entry.onEnter();
@@ -335,9 +352,28 @@ test('the reputation card shows level, rank and trips', async () => {
   const card = dom.body.querySelector('.profileRep');
   assert.ok(card, 'no reputation card');
   const text = card.textContent;
-  assert.ok(text.includes('24'), text);
+  /* band_008 is the eighth of thirty. The card used to print 24 here, which
+     is the XP engine's level -- so the box said 24 and the label under it
+     said a rank that is eighth of thirty. */
+  assert.ok(text.includes('8 / 30'), text);
+  assert.ok(!/\b24\b/.test(text), `the engine's level is back on the card: ${text}`);
   assert.ok(text.includes('Night Owl'), text);
   assert.ok(text.includes('4,106'), text);
+});
+
+test('no rank key means no level row, not a made-up one', async () => {
+  /* A payload from before the key was sent, or a cold progression cache.
+     The trips and miles still stand on their own. */
+  const dom = build({ responses: [P(profile({
+    reputation: { level: 24, rank_name: 'Night Owl', trips_logged: 4106 } })), G([])] });
+  dom.api._state.target = 7;
+  await dom.entry.onEnter();
+  await tick(); await tick();
+  const card = dom.body.querySelector('.profileRep');
+  assert.ok(card, 'the rest of the reputation went with it');
+  assert.ok(!/\b24\b/.test(card.textContent),
+    `an engine level was shown with no ladder to place it: ${card.textContent}`);
+  assert.ok(card.textContent.includes('4,106'), card.textContent);
 });
 
 test('a driver with no reputation at all gets no empty card', async () => {
@@ -350,24 +386,27 @@ test('a driver with no reputation at all gets no empty card', async () => {
   assert.strictEqual(dom.body.querySelector('.profileRep'), null);
 });
 
-test('a reputation with only a level still renders', async () => {
+test('a reputation with only a rank still renders', async () => {
   const dom = build({ responses: [
-    P(profile({ reputation: { level: 3, rank_name: null, trips_logged: null,
+    P(profile({ reputation: { level: 3, rank_icon_key: 'band_003',
+      rank_name: null, trips_logged: null,
       lifetime_miles: null, title: null } })), G([])] });
   dom.api._state.target = 7;
   await dom.entry.onEnter();
   await tick(); await tick();
   const card = dom.body.querySelector('.profileRep');
-  assert.ok(card && card.textContent.includes('3'), 'a partial reputation was dropped');
+  assert.ok(card && card.textContent.includes('3 / 30'), 'a partial reputation was dropped');
 });
 
-test('a level of 0 is not mistaken for no level', async () => {
+test('the first rank is not mistaken for no rank', async () => {
+  /* There is no level 0 on the ladder -- everyone starts at Wyvern I. */
   const dom = build({ responses: [
-    P(profile({ reputation: { level: 0, rank_name: 'Rookie', trips_logged: 0 } })), G([])] });
+    P(profile({ reputation: { level: 0, rank_icon_key: 'band_001',
+      rank_name: 'Rookie', trips_logged: 0 } })), G([])] });
   dom.api._state.target = 7;
   await dom.entry.onEnter();
   await tick(); await tick();
-  assert.ok(dom.body.querySelector('.profileRep'), 'level 0 dropped the whole card');
+  assert.ok(dom.body.querySelector('.profileRep'), 'the first rank dropped the whole card');
 });
 
 test('counts are grouped for reading', () => {

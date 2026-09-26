@@ -2566,6 +2566,27 @@ html, body { height: 100%; margin: 0; padding: 0; background: #e5e5e5; }
       text-align: center;
     }
 
+    /* The winner's crest in the battle feed.
+     *
+     * The row is centred text, so the crest rides inline with it rather than
+     * being floated: a 20px mark in front of the sentence. .killFeedMsg
+     * clips its overflow, which would cut a crest sitting on the edge, so it
+     * is small enough to stay inside the padding. */
+    .killFeedRankCrest {
+      display: inline-grid;
+      place-items: center;
+      width: 20px;
+      height: 20px;
+      vertical-align: -5px;
+      margin-right: 4px;
+    }
+    .killFeedRankCrest .rankBadgeIconWrap {
+      width: 20px !important;
+      height: 20px !important;
+      background: none !important;
+      box-shadow: none !important;
+    }
+
     /* Position the chat button relative so it can host a badge */
     #dockChat {
       position: relative;

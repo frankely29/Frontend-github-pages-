@@ -110,6 +110,36 @@
     return node;
   }
 
+  /* The crest and the rank, beside whoever is talking.
+   *
+   * This line used to read "LVL 445" and nothing else. Two things wrong with
+   * that on a driver network. The number is the XP engine's, out of a
+   * thousand, while the rank a driver actually has is one of thirty -- so the
+   * feed and the Ranks tab disagreed about the same person. And the crest,
+   * which is the whole point of having painted thirty of them, was nowhere on
+   * the screen a driver spends the most time looking at.
+   *
+   * The key is the source for both, so the crest and the words can never
+   * disagree. No key -- an older payload, a cold progression cache -- and the
+   * line is just the name, which is the honest thing to show rather than a
+   * number from a scale nobody has been given.
+   */
+  function appendRankTo(row, person) {
+    var key = person && person.rank_icon_key;
+    var api = window.TeamJoseoRank;
+    if (!key || !api) return;
+    var rank = api.fromKey(key);
+    if (typeof window.renderRankBadgeIcon === "function") {
+      var crest = el("span", "feedRankCrest");
+      crest.innerHTML = window.renderRankBadgeIcon(key, { compact: true });
+      crest.setAttribute("aria-hidden", "true");
+      row.appendChild(crest);
+    }
+    /* "Wyvern II · 2" -- the name the badge is showing, and where that sits
+       on the ladder of thirty. */
+    row.appendChild(el("span", "feedLevel", rank.label + " · " + rank.band));
+  }
+
   async function getAuth(path) {
     var runtime = window.FrontendRuntime;
     if (runtime && typeof runtime.getJSONAuth === "function") return runtime.getJSONAuth(path, token());
@@ -247,8 +277,7 @@
     }
     var line1 = el("div", "feedNameRow");
     line1.appendChild(el("span", "feedName", author.display_name || "Driver"));
-    var level = num(author.level);
-    if (level !== null) line1.appendChild(el("span", "feedLevel", "LVL " + Math.round(level)));
+    appendRankTo(line1, author);
     who.appendChild(line1);
 
     // Handle, platform, age, city — whichever of them exist. Joined here rather
@@ -668,6 +697,9 @@
     who.setAttribute("data-role", "author");
     if (num(author.user_id) !== null) who.setAttribute("data-user-id", String(author.user_id));
     head.appendChild(who);
+    /* A comment is smaller than a post but it is still someone talking, and
+       the crest is the fastest way to know who is worth listening to. */
+    appendRankTo(head, author);
     var age = ago(comment.created_at);
     if (age) head.appendChild(el("span", "feedCommentAge", age));
     if (!locked()) {
@@ -1088,6 +1120,7 @@
     setScope: setScope,
     load: load,
     buildCard: buildCard,
+    buildComment: buildComment,
     _threads: threads,
     threadState: threadState,
     toggleThread: toggleThread,
