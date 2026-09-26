@@ -65,6 +65,21 @@
   };
 
   var nodes = {};
+  /* Finding people.
+   *
+   * A network you cannot search is one you can only reach through whoever
+   * happens to post: handles were linkable and there was no way to find one
+   * without already knowing it.
+   *
+   * `seq` is the reason this is not three lines. Typing is faster than the
+   * network, so the response for "mar" can land after the one for "marcus"
+   * and overwrite it -- the driver watches their results go backwards. Every
+   * request carries the number it was issued with and a stale one is dropped
+   * on arrival. The server echoes the query back for the same reason. */
+  var search = { q: "", items: [], busy: false, error: "", seq: 0 };
+  var searchTimer = null;
+  var SEARCH_MIN = 2;
+  var SEARCH_DEBOUNCE_MS = 250;
 
   /* ----------------------------------------------------------------- utils */
 
@@ -190,6 +205,7 @@
     state.error = "";
     state.profile = null;
     state.posts = [];
+    clearSearch();
     state.nextBeforeId = null;
     paint();
 
@@ -906,11 +922,170 @@
       return;
     }
 
+    if (target.closest('[data-role="search-clear"]')) { clearSearch(); return; }
+
+    var hit = target.closest('[data-role="search-hit"]');
+    if (hit) {
+      var hitId = num(hit.getAttribute("data-user-id"));
+      if (hitId !== null) {
+        /* Clear first: coming back to this screen later should show the
+           profile, not the results that led to it. */
+        clearSearch();
+        open(hitId);
+      }
+      return;
+    }
+
     if (target.closest('[data-role="more"]')) { loadMore(); }
+  }
+
+  function runSearch(raw) {
+    var q = String(raw == null ? "" : raw).trim();
+    search.q = q;
+    if (searchTimer) { try { clearTimeout(searchTimer); } catch (_) {} searchTimer = null; }
+    if (q.length < SEARCH_MIN) {
+      /* Below two characters there is nothing to show -- and nothing is
+         asked for either, because one letter matches most of the network. */
+      search.items = [];
+      search.busy = false;
+      search.error = "";
+      paintSearch();
+      return;
+    }
+    search.busy = true;
+    search.error = "";
+    paintSearch();
+    var mine = ++search.seq;
+    searchTimer = setTimeout(function () {
+      searchTimer = null;
+      request("/social/search/drivers?q=" + encodeURIComponent(q) + "&limit=20")
+        .then(function (res) {
+          if (mine !== search.seq) return;            // a newer keystroke won
+          search.items = (res && res.items) || [];
+          search.busy = false;
+          paintSearch();
+        })
+        .catch(function (err) {
+          if (mine !== search.seq) return;
+          search.items = [];
+          search.busy = false;
+          search.error = (err && err.message) ? "Could not search right now." : "";
+          paintSearch();
+        });
+    }, SEARCH_DEBOUNCE_MS);
+  }
+
+  function clearSearch() {
+    if (searchTimer) { try { clearTimeout(searchTimer); } catch (_) {} searchTimer = null; }
+    search.q = "";
+    search.items = [];
+    search.busy = false;
+    search.error = "";
+    search.seq += 1;                                   // orphan anything in flight
+    if (nodes.searchInput) nodes.searchInput.value = "";
+    paintSearch();
+  }
+
+  function searchRow(driver) {
+    var row = el("button", "profileSearchRow");
+    row.type = "button";
+    row.setAttribute("data-role", "search-hit");
+    row.setAttribute("data-user-id", String(driver.user_id));
+
+    var avatar = el("div", "profileSearchAvatar", initials(driver.display_name));
+    avatar.style.background = avatarColor(driver.user_id);
+    if (driver.avatar_url) {
+      var img = el("img", "profileSearchAvatarImg");
+      img.src = apiBase() + driver.avatar_url;
+      img.alt = "";
+      img.loading = "lazy";
+      img.addEventListener("error", function () { img.remove(); });
+      avatar.appendChild(img);
+    }
+    row.appendChild(avatar);
+
+    var text = el("div", "profileSearchText");
+    var nameRow = el("div", "profileSearchNameRow");
+    nameRow.appendChild(el("span", "profileSearchName", driver.display_name || "Driver"));
+    /* The crest, for the same reason it is in the feed: a name says who, a
+       crest says who they are. No key means no crest rather than a default
+       one nobody earned. */
+    var api = window.TeamJoseoRank;
+    if (driver.rank_icon_key && api && typeof window.renderRankBadgeIcon === "function") {
+      var crest = el("span", "profileSearchCrest");
+      crest.setAttribute("aria-hidden", "true");
+      crest.innerHTML = window.renderRankBadgeIcon(driver.rank_icon_key, { compact: true });
+      nameRow.appendChild(crest);
+    }
+    text.appendChild(nameRow);
+
+    var meta = [];
+    if (driver.handle) meta.push("@" + driver.handle);
+    if (driver.rank_icon_key && api) {
+      var rank = api.fromKey(driver.rank_icon_key);
+      meta.push(rank.label + " \u00b7 " + rank.band);
+    }
+    if (driver.city) meta.push(driver.city);
+    if (meta.length) text.appendChild(el("div", "profileSearchMeta", meta.join(" \u00b7 ")));
+    row.appendChild(text);
+    return row;
+  }
+
+  function paintSearch() {
+    var host = nodes.searchResults;
+    if (!host) return;
+    host.textContent = "";
+    var showing = search.q.length >= SEARCH_MIN;
+    host.classList.toggle("on", showing);
+    if (nodes.searchClear) nodes.searchClear.classList.toggle("on", !!search.q);
+    /* The profile underneath is hidden while results are up, so the screen
+       is one thing at a time rather than a list floating over a face. */
+    if (nodes.head) nodes.head.classList.toggle("profileHidden", showing);
+    if (nodes.grid) nodes.grid.classList.toggle("profileHidden", showing);
+    if (!showing) return;
+
+    if (search.error) {
+      host.appendChild(el("div", "profileSearchNote", search.error));
+      return;
+    }
+    if (search.busy && !search.items.length) {
+      host.appendChild(el("div", "profileSearchNote", "Searching\u2026"));
+      return;
+    }
+    if (!search.items.length) {
+      host.appendChild(el("div", "profileSearchNote", "No drivers match \u201c" + search.q + "\u201d."));
+      return;
+    }
+    search.items.forEach(function (driver) { host.appendChild(searchRow(driver)); });
   }
 
   function render(body) {
     var wrap = el("div", "profileScreen");
+
+    /* Search sits above the profile rather than on a screen of its own:
+       "find a driver" and "look at a driver" are the same errand, and a
+       separate destination would need its own place in the dock for
+       something you do on the way to here. */
+    var bar = el("div", "profileSearchBar");
+    var input = el("input", "profileSearchInput");
+    input.type = "search";
+    input.placeholder = "Search drivers by name or @handle";
+    input.setAttribute("aria-label", "Search drivers");
+    input.autocomplete = "off";
+    input.addEventListener("input", function () { runSearch(input.value); });
+    bar.appendChild(input);
+    var clear = el("button", "profileSearchClear", "\u2715");
+    clear.type = "button";
+    clear.setAttribute("aria-label", "Clear search");
+    clear.setAttribute("data-role", "search-clear");
+    bar.appendChild(clear);
+    wrap.appendChild(bar);
+    var results = el("div", "profileSearchResults");
+    wrap.appendChild(results);
+    nodes.searchInput = input;
+    nodes.searchClear = clear;
+    nodes.searchResults = results;
+
     var head = el("div", "profileHead");
     wrap.appendChild(head);
     var grid = el("div", "profileGrid");
@@ -923,6 +1098,7 @@
     nodes.title = document.querySelector(".shellScreenTitle");
     wrap.addEventListener("click", onClick);
     paint();
+    paintSearch();
   }
 
   function onEnter() {
@@ -986,6 +1162,10 @@
     _state: state,
     _nodes: nodes,
     open: open,
+    _search: search,
+    runSearch: runSearch,
+    clearSearch: clearSearch,
+    paintSearch: paintSearch,
     load: load,
     loadMore: loadMore,
     toggleFollow: toggleFollow,
