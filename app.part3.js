@@ -287,13 +287,29 @@
     const mine = pickMyProgressionForLadder();
     const myPrestige = mine.rank ? mine.rank.prestige : 0;
 
-    /* Ten rows, one per prestige, and the driver's own row opens to show the
-     * ten levels inside it. A flat list of a hundred was unreadable and told
-     * a driver nothing about how far through their own prestige they were,
-     * which is the one thing they are actually climbing. */
-    const rows = ladder.map((row, index) => {
-      const prestige = Number(row?.prestige) || index + 1;
-      const isCurrent = prestige === myPrestige;
+    /* One row per rank -- thirty of them -- because every rank now has its own
+     * painted crest and a driver wants to see the whole climb. What they must
+     * not see is thirty PRESTIGES: it is ten prestiges of three.
+     *
+     * The prestige number is never the row's position. It came from
+     * `index + 1` as a fallback, the endpoint was returning prestige: null
+     * because the response model did not declare the field, and every driver
+     * was shown "Warlord II - Prestige 14" when Warlord II is prestige 5.
+     *
+     * So: the payload first, then the rank key decoded locally, and only a
+     * blank if neither can answer. The row's position is not a source of
+     * truth about anything and is not used. */
+    const api = rankApi();
+    const myRank = mine.rank ? mine.rank.level : 0;
+    const rows = ladder.map((row) => {
+      const fromKey = (api && row?.rank_icon_key) ? api.fromKey(row.rank_icon_key) : null;
+      const prestige = Number(row?.prestige) || (fromKey ? fromKey.prestige : 0);
+      const rank = Number(row?.rank) || (fromKey ? fromKey.level : 0);
+      /* Both halves of the pair, so exactly one row lights up. Matching on
+       * the prestige alone marked all three of its ranks as the driver's own
+       * and struck the same numeral chip on each -- three "current" rows in a
+       * list whose whole job is to show which single one you are standing on. */
+      const isCurrent = prestige === myPrestige && rank === myRank;
       const beast = String(row?.beast || '').trim();
       const pips = isCurrent && mine.rank
         ? `<div class="leaderboardRankPips" aria-hidden="true">${
@@ -305,7 +321,7 @@
         <div class="leaderboardRankLadderIcon">${renderRankIcon(row?.rank_icon_key)}</div>
         <div class="leaderboardRankLadderText">
           <div class="leaderboardRankLadderTitle">${esc(safeRankName(row?.rank_name || row?.title, row?.rank_icon_key))}${beast ? ` <span class="leaderboardRankBeast">${esc(beast)}</span>` : ''}</div>
-          <div class="leaderboardRankLadderRange">Prestige ${prestige} · ${esc(renderLevelRange(row?.start_level, row?.end_level))}</div>
+          <div class="leaderboardRankLadderRange">${prestige ? `Prestige ${prestige} of ${prestigeCount()} · ` : ''}${esc(renderLevelRange(row?.start_level, row?.end_level))}</div>
           ${pips}
         </div>
         ${isCurrent ? `<span class="leaderboardRankLadderChip">${esc(mine.rank ? mine.rank.roman : '')}</span>` : ''}
